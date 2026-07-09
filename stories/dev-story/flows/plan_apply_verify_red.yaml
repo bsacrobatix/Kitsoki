@@ -21,7 +21,8 @@
 test_kind: flow
 app: ../app.yaml
 initial_state: landing
-initial_world: {}
+initial_world:
+  origin_repo: "acme/project"
 
 # The verify script's probe replays from the INCOMPLETE cassette (1 issue) so the
 # REAL script computes ok: false. No host.starlark.run stub — the gate runs.
@@ -65,7 +66,7 @@ turns:
     expect_world:
       verify_ok: false
       captured: 0
-      last_error: "Verify failed: Migration incomplete: GitHub lists 1 issue(s) for bsacrobatix/Kitsoki (< 3 expected)."
+      last_error: "Verify failed: Migration incomplete: GitHub lists 1 issue(s) for acme/project (< 3 expected)."
       landing_note:
         summary: "Attempted the issue migration."
         details: "Held read-only pending a write-mode grant; only 1 issue created."

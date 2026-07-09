@@ -9,9 +9,9 @@ free-form workbench [`landing`](#the-free-form-workbench-landing), which
 replaced the former `main` catalog.
 
 This app does **not** bind providers. Concrete bindings happen at the
-INSTANCE level: `.kitsoki/stories/kitsoki-dev/` (Wave 3) for local-file
-providers; importing dev-story instances for Jira /
-Bitbucket / Jenkins.
+instance level: a generated `.kitsoki/` wrapper or an importing project app
+selects local files, GitHub/Jira tickets, git/workspace providers, and CI
+providers for the target repository.
 
 Standalone:
 
@@ -104,27 +104,26 @@ dev-story's composition. The walk is exercised by
 
 ## Doc profile — targeting an external project
 
-The PRD → Design walk above publishes into kitsoki's own `docs/` by
-default, but the *document shape* and *placement* are a **profile** an
-instance app can override — no engine or room change needed. An instance
+The PRD -> Design walk above publishes into the default project docs paths,
+but the *document shape* and *placement* are a **profile** an instance app can
+override - no engine or room change needed. An instance
 points the same hub at another repository or at a project-specific docs tree
 purely by setting world keys: different templates, fixed filenames, local file
 tickets, GitHub issues, or no follow-up ticket at all. External targets live in
 their **own** repo as a zero-config `stories/<name>/` instance, discovered by
 the default `./stories` walk, importing this base via `@kitsoki/dev-story` from
-the binary's embedded story library — see
+the binary's embedded story library - see
 [`docs/web/tour.md`](../../docs/web/tour.md) for the broader
 kitsoki-as-a-dependency story (shipped; the design proposal was retired).
 
 The profile is the "External-target profile" world block in
 [`app.yaml`](./app.yaml) (search `External-target profile`). Every key has
-a default that reproduces kitsoki's own behaviour — **overriding them is
-the profile**:
+a shared default - **overriding them is the profile**:
 
 Project-onboarding generated instances override these shared defaults for
 generic repositories: PRDs go to `.context/prd`, design documents go to
 `.context/designs`, `design_template_dir` is empty, and no feature ticket is
-minted unless the local profile opts in. Dogfood profiles can still keep
+minted unless the local profile opts in. Project profiles can still keep
 repo-native docs paths such as `docs/prd` and `docs/proposals`.
 
 | World key | Default | Effect |
@@ -136,7 +135,7 @@ repo-native docs paths such as `docs/prd` and `docs/proposals`.
 | `design_durable_path` | `docs/proposals` | DESIGN publish home (relative to `workdir`). |
 | `design_doc_filename` | `""` | fixed DESIGN filename (e.g. `DESIGN` → `DESIGN.md`); `""` ⇒ slug-named |
 | `design_ticket_dir` | `issues/features` | where the linking feature ticket is minted; `""` ⇒ **skip** minting (an external target tracks work elsewhere, e.g. GitHub issues) |
-| `ticket_repo` | `""` | `owner/repo` for GitHub-issue tickets; **non-empty ⇒ the feature publish mints a GitHub feature issue** (labels `target:<repo-name>` + `comp:proposal`, body links the proposal) instead of a local file — takes precedence over `design_ticket_dir`. `kitsoki-dev` defaults this to the symbolic `origin` (resolved against `git remote get-url origin`). See [hosts.md → host.gh.ticket](../../docs/architecture/hosts.md#hostghticket--github-issues-backed-tracker). |
+| `ticket_repo` | `""` | `owner/repo` for GitHub-issue tickets; **non-empty ⇒ the feature publish mints a GitHub feature issue** (labels `target:<repo-name>` + `comp:proposal`, body links the proposal) instead of a local file — takes precedence over `design_ticket_dir`. Generated project wrappers can default this to the symbolic `origin` (resolved against `git remote get-url origin`). See [hosts.md → host.gh.ticket](../../docs/architecture/hosts.md#hostghticket--github-issues-backed-tracker). |
 
 How the keys reach the glue: the `prd` import's `world_in` projects
 `publish_durable_path` + `prd_doc_filename` into the prd child;
@@ -176,8 +175,8 @@ coded `echo` commands. dev-story (this app) strips those:
 | `world.jira_results` | `world.ticket_results` |
 | `host.run` (echo) | `iface.ticket.search` / `iface.ticket.list_mine` |
 
-An importing project flavour can rebind `iface.ticket` to `host.jira`; kitsoki-
-dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
+A project instance can rebind `iface.ticket` to GitHub, Jira, local markdown
+files, or another provider. Same YAML, provider-specific bindings.
 
 ## Rooms
 
@@ -396,13 +395,13 @@ the landing is its first real client (the `agent-write-mode-opt-in` slice).
 `ExternalSideEffect=false`, which is what keeps the static and runtime
 postures in agreement.
 
-The agent turn fires on the **`landing_capture`** intent (slot `request`) —
+The agent turn fires on the **`landing_capture`** intent (slot `request`) -
 named to match `workbench:`'s fixed `<room>_capture` synthesis, not the macro's
 plain synthesized arc: `landing_capture`'s `on:` transition is hand-authored so
 it can carry the onboarding-command escape hatch and thread continuity
 (preserving the prior note/plan across the re-dispatch) that the macro does not
 (and should not) auto-generate. It captures the operator's utterance, clears
-the prior note to re-arm, and self-targets so `on_enter` dispatches
+the prior note to re-arm, and loops back so `on_enter` dispatches
 `host.agent.task` (`agent: landing_agent`, `acceptance.schema:
 schemas/landing-note.json` — a minimal, permissive close-out note: the engine
 requires *a* schema on `task`, so "free output" is expressed as a one-field
@@ -414,8 +413,8 @@ every other non-conversational room falls back to it via
 ([`semantic-routing.md` §1.6](../../docs/architecture/semantic-routing.md)) — an
 instance importing dev-story under an alias (e.g. `core`) must declare that
 block explicitly instead, since the auto-detect's own heuristic only ever
-matches the un-aliased bare name (see `stories/pets-dev/app.yaml`,
-`stories/slidey-dev/app.yaml`, `.kitsoki/stories/kitsoki-dev/app.yaml`). Free
+matches the un-aliased bare name (see `stories/pets-dev/app.yaml` and
+`stories/slidey-dev/app.yaml`). Free
 text the router can't map to an action is answered in place by the read-only
 **agent off-ramp** (`workbench.off_ramp_agent: agent_qa`) — the same floor
 `main` declared. The `world.captured` counter (rendered read-only here) is the
@@ -553,9 +552,8 @@ $ kitsoki run stories/dev-story/app.yaml
 > pr__accept               # pr @exit:merged → landing (status="merged")
 ```
 
-In Wave 3 the kitsoki-dev instance rebinds the providers and the same
-20-turn walk-through writes real diffs / opens a real PR / merges
-on github.com.
+With provider bindings configured, the same 20-turn walk-through writes real
+diffs, opens a real PR, and merges on the configured forge.
 
 The walkthrough above picks a **bug** and types `go_bugfix`. For a
 **feature** ticket (e.g. one filed by the design pipeline), type
@@ -568,12 +566,13 @@ straight into impl.
 
 ## Demo video: PRD → Design (conversation-driven development)
 
-The dev-story hub's PRD → Design walk is recorded as a **deterministic, no-LLM
-tour video** — the golden example for conversation-driven development (the
+The dev-story hub's PRD -> Design walk is recorded as a **deterministic, no-LLM
+tour video** - the golden example for conversation-driven development (the
 [`conversation-driven-development`](../../docs/proposals/conversation-driven-development.md)
 epic). The same walk can be retargeted by an importing project instance — see
-the [Doc profile](#doc-profile--targeting-an-external-project) section above;
-this one is kitsoki's self-targeting parallel — **"kitsoki on kitsoki"**.
+the [Doc profile](#doc-profile--targeting-an-external-project) section above.
+The default fixture uses neutral project-local docs and local feature-ticket
+files so it can run without a real ticket provider.
 
 - **Flow fixture (no-LLM):**
   [`flows/prd_to_design_full.yaml`](./flows/prd_to_design_full.yaml) — the
@@ -582,8 +581,8 @@ this one is kitsoki's self-targeting parallel — **"kitsoki on kitsoki"**.
   → `design_refine` (conversational brief refinement) → `design_draft`
   (publish + mint feature ticket) → `main`. Importing instances can reuse the
   same structure with a different doc tree, template directory, fixed filenames,
-  or ticket policy. This one uses the dev-story **defaults** — slug-named docs
-  in kitsoki's own tree and a feature ticket on publish.
+  or ticket policy. This one uses the dev-story **defaults** - slug-named docs
+  and a local feature ticket on publish.
 
 - **IDE-driven variant (VS Code extension demo):**
   [`flows/prd_to_design_demo.yaml`](./flows/prd_to_design_demo.yaml) — the PRD
@@ -630,18 +629,18 @@ this one is kitsoki's self-targeting parallel — **"kitsoki on kitsoki"**.
    proposal. The ticket can be picked up by the impl pipeline immediately (the
    [`design_to_implementation.yaml`](./flows/design_to_implementation.yaml) bridge).
 
-This single-session closure — from idea to PRD to design to a filed ticket, all
-driven by conversation — is kitsoki's own development model. It proves the system
-can improve itself using its own machinery.
+This single-session closure - from idea to PRD to design to a filed ticket, all
+driven by conversation - is the reusable development model that project
+wrappers inherit.
 
 See [`docs/skills/kitsoki-ui-demo/SKILL.md`](../../docs/skills/kitsoki-ui-demo/SKILL.md)
 for the golden-example pointer and binary-render instructions (slice 2 on).
 
 ## Demo: PRD → Design (judge_mode=human)
 
-The [PRD → Design walk](#prd--design-walk) replayed by hand. With the
-standalone defaults (or via the `kitsoki-dev` instance, which rebinds
-providers to local files):
+The [PRD -> Design walk](#prd--design-walk) replayed by hand. With the
+standalone defaults or a generated project wrapper that binds providers to
+local files:
 
 ```
 $ kitsoki run stories/dev-story/app.yaml

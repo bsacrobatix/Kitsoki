@@ -1,4 +1,4 @@
-# init_slidey_dogfood -- dogfood project onboarding against the Slidey
+# init_slidey_project -- project onboarding against the Slidey
 # checkout shape without calling an LLM or touching the real checkout.
 
 test_kind: flow

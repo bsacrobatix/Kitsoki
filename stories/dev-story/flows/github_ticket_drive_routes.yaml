@@ -14,8 +14,8 @@
 #        the local↔issue identity visible. The pick binds ticket_title
 #        from the same get; the legacy_id round-trips on the row.
 #
-# host_bindings rebinds iface.ticket → host.gh.ticket (the kitsoki-dev
-# instance binding), and the stub returns the SHAPE the real provider now
+# host_bindings rebinds iface.ticket → host.gh.ticket, and the stub returns
+# the SHAPE the real provider now
 # emits: search rows with `type` + `source`, and a get carrying legacy_id.
 # (Flows use stubs only — the classifier itself is unit-tested against the
 # real provider in internal/host/github_test.go, no `gh` / network.)

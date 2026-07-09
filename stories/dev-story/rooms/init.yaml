@@ -25,6 +25,8 @@ states:
       - init_repo_vcs
       - init_repo_default_branch
       - init_repo_remote
+      - init_ticket_provider
+      - init_ticket_repo
       - init_story_pack
       - init_story_pack_title
       - init_story_pack_summary
@@ -100,6 +102,8 @@ states:
           init_repo_remote:   "stdout_json.repo_remote"
           init_conventions:   "stdout_json.conventions"
           init_tracker:       "stdout_json.tracker"
+          init_ticket_provider: "stdout_json.tracker"
+          init_ticket_repo:   "stdout_json.ticket_repo"
           init_story_pack:    "stdout_json.story_pack"
           init_story_pack_title: "stdout_json.story_pack_title"
           init_story_pack_summary: "stdout_json.story_pack_summary"
@@ -187,8 +191,10 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
-                init_story_pack: "focused-engineering"
-                init_story_pack_title: "Focused engineering starter"
+                init_ticket_provider: "local"
+                init_ticket_repo: ""
+                init_story_pack: "core-engineering"
+                init_story_pack_title: "Core engineering starter"
                 init_story_pack_summary: ""
                 init_story_packs: []
                 init_starter_stories: []
@@ -223,6 +229,8 @@ states:
       - init_repo_vcs
       - init_repo_default_branch
       - init_repo_remote
+      - init_ticket_provider
+      - init_ticket_repo
       - init_conventions
       - init_tracker
       - init_story_pack
@@ -270,6 +278,8 @@ states:
           pairs:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
+            Ticket provider: "{% if world.init_ticket_provider == 'github' %}GitHub Issues ({{ world.init_ticket_repo|default:'repo not detected' }}){% else %}local markdown / pasted reports{% endif %}"
+            Capability: "{% if world.init_ticket_provider == 'github' && world.init_ticket_repo != '' %}full{% else %}good{% endif %}"
             Transcripts: "{{ world.init_transcript_count|default:0 }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
             Mode:        "{{ world.init_profile_mode }}"
@@ -277,7 +287,7 @@ states:
         when: "len(world.init_starter_stories) > 0"
       - kv:
           pairs:
-            Pack: "{{ world.init_story_pack_title|default:'Focused engineering starter' }} ({{ world.init_story_pack|default:'focused-engineering' }})"
+            Pack: "{{ world.init_story_pack_title|default:'Core engineering starter' }} ({{ world.init_story_pack|default:'core-engineering' }})"
             Normal command: "kitsoki project-profile story-packs add <pack>"
         when: "len(world.init_starter_stories) > 0"
       - code: |
@@ -324,6 +334,10 @@ states:
             - label:  "story packs"
               hint:   "choose the starter pack for first-run adoption"
               intent: review_story_pack
+            - label:  "ticket provider"
+              hint:   "choose local/copy-paste ticket intake or GitHub Issues"
+              intent: select_ticket_provider
+              slots:  { provider: "review" }
             - label:  "revise"
               hint:   "record feedback for the next profile draft"
               intent: revise_init
@@ -371,6 +385,11 @@ states:
           effects:
             - set:
                 last_error: ""
+      select_ticket_provider:
+        - target: init_ticket_provider
+          effects:
+            - set:
+                last_error: ""
       revise_init:
         - target: .
           effects:
@@ -408,8 +427,10 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
-                init_story_pack: "focused-engineering"
-                init_story_pack_title: "Focused engineering starter"
+                init_ticket_provider: "local"
+                init_ticket_repo: ""
+                init_story_pack: "core-engineering"
+                init_story_pack_title: "Core engineering starter"
                 init_story_pack_summary: ""
                 init_story_packs: []
                 init_starter_stories: []
@@ -451,7 +472,7 @@ states:
           pairs:
             Target:   "{{ world.init_target_path|default:world.repo_root|default:world.workdir|default:'.' }}"
             Project:  "{{ world.init_project_title|default:'(not yet inferred)' }}"
-            Selected: "{{ world.init_story_pack_title|default:'Focused engineering starter' }} ({{ world.init_story_pack|default:'focused-engineering' }})"
+            Selected: "{{ world.init_story_pack_title|default:'Core engineering starter' }} ({{ world.init_story_pack|default:'core-engineering' }})"
       - code: |
           {% for pack in world.init_story_packs %}- {{ pack.id }}: {{ pack.title }} - {{ pack.summary }}
             stories: {{ pack.stories }}
@@ -461,10 +482,10 @@ states:
           mode: single
           prompt: "Story packs"
           items:
-            - label:  "focused engineering"
-              hint:   "setup, bugfixing, repo-history capsules, PRs, git ops"
+            - label:  "core engineering"
+              hint:   "setup, bug fixing, repo-history capsules, PRs, git ops"
               intent: select_story_pack
-              slots:  { pack: "focused-engineering" }
+              slots:  { pack: "core-engineering" }
             - label:  "core setup"
               hint:   "setup and git ops"
               intent: select_story_pack
@@ -489,31 +510,31 @@ states:
               intent: look
     on:
       select_story_pack:
-        - when: "slots.pack == 'focused-engineering'"
+        - when: "slots.pack == 'core-engineering' || slots.pack == 'focused-engineering' || slots.pack == 'cyber-repo'"
           target: init
           effects:
             - set:
-                init_story_pack: "focused-engineering"
-                init_story_pack_title: "Focused engineering starter"
-                init_story_pack_summary: "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations."
+                init_story_pack: "core-engineering"
+                init_story_pack_title: "Core engineering starter"
+                init_story_pack_summary: "Focused first-run set for ordinary software repositories: setup, bug fixing, repo-history capsules, PR refinement, and git operations."
                 init_starter_stories:
-                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
                   - { id: "repo-bakeoff", title: "Repo-history capsules", source_story: "repo-bakeoff", status: "enabled", summary: "Turn historical bug fixes into capsule records, prove RED/GREEN arming, and render live-cell commands.", expansion: "Use once the repo has 3-10 isolated historical bugs with regression tests or PR-proven oracles." }
                   - { id: "pr-refinement", title: "PR refinement", source_story: "pr-refinement", status: "enabled", summary: "Open or attach to a PR, monitor CI/review feedback, respond, and merge when accepted.", expansion: "Add provider-specific PR policy after the base loop is proven on real pull requests." }
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                 init_profile_status: "draft"
                 last_error: ""
-            - say: "Selected the focused-engineering starter pack."
+            - say: "Selected the core engineering starter pack."
         - when: "slots.pack == 'core-setup'"
           target: init
           effects:
             - set:
                 init_story_pack: "core-setup"
                 init_story_pack_title: "Core setup"
-                init_story_pack_summary: "Bring a project under Kitsoki management with setup and guarded git operations only."
+                init_story_pack_summary: "Bring a project under project-local Kitsoki tooling with setup and guarded git operations only."
                 init_starter_stories:
-                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                 init_profile_status: "draft"
                 last_error: ""
@@ -526,7 +547,7 @@ states:
                 init_story_pack_title: "Planning and delivery"
                 init_story_pack_summary: "Add PRD/design and implementation loops on top of setup and git operations."
                 init_starter_stories:
-                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                   - { id: "prd", title: "Prd", source_story: "prd", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
                   - { id: "implementation", title: "Implementation", source_story: "implementation", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
@@ -542,7 +563,7 @@ states:
                 init_story_pack_title: "Review and quality"
                 init_story_pack_summary: "Emphasize bug fixing, test repair, code review, docs review, and git operations."
                 init_starter_stories:
-                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                   - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
                   - { id: "fix-tests", title: "Fix Tests", source_story: "fix-tests", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
@@ -560,7 +581,7 @@ states:
                 init_story_pack_title: "Full dev-story"
                 init_story_pack_summary: "Expose the full day-level dev-story catalog after the team is ready for broader adoption."
                 init_starter_stories:
-                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
+                  - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                   - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
                   - { id: "fix-tests", title: "Fix Tests", source_story: "fix-tests", status: "enabled", summary: "Project-selected Kitsoki story. Confirm it loads and has project-ready fixtures before treating it as a default path.", expansion: "Promote this story after adding project readiness evidence." }
@@ -581,6 +602,96 @@ states:
           effects:
             - set:
                 last_error: "Unknown story pack."
+      quit:
+        - target: init
+          effects:
+            - set:
+                init_profile_status: "draft"
+                last_error: ""
+      look:
+        - target: .
+
+  init_ticket_provider:
+    description: "Choose the ticket provider before onboarding writes the project profile."
+    relevant_world:
+      - init_target_path
+      - init_project_title
+      - init_tracker
+      - init_ticket_provider
+      - init_ticket_repo
+      - init_repo_remote
+      - init_profile_status
+    view:
+      - banner:
+          text:     "PROJECT ONBOARDING"
+          subtitle: "choose ticket provider"
+          color:    "#14B8A6"
+      - kv:
+          pairs:
+            Target:   "{{ world.init_target_path|default:world.repo_root|default:world.workdir|default:'.' }}"
+            Project:  "{{ world.init_project_title|default:'(not yet inferred)' }}"
+            Detected: "{% if world.init_tracker == 'github' %}GitHub Issues{% else %}no remote provider detected{% endif %}"
+            Repository: "{{ world.init_ticket_repo|default:'(none)' }}"
+            Selected: "{% if world.init_ticket_provider == 'github' %}GitHub Issues{% else %}local markdown / pasted reports{% endif %}"
+      - prose: "Good capability is available without a provider: paste bug reports or keep local markdown tickets. Full ticket capability uses a configured provider for search, issue-body fetch, comments, and status transitions."
+      - choice:
+          mode: single
+          prompt: "Ticket provider"
+          items:
+            - label:  "local reports"
+              hint:   "good capability; no remote credentials required"
+              intent: select_ticket_provider
+              slots:  { provider: "local" }
+            - label:  "GitHub detected"
+              hint:   "full capability using the detected owner/repo"
+              intent: select_ticket_provider
+              slots:  { provider: "github" }
+              when:   "world.init_ticket_repo != ''"
+            - label:  "GitHub repo"
+              hint:   "full capability with an owner/repo slug"
+              intent: select_ticket_provider
+              param:
+                slot:        repo
+                type:        string
+                placeholder: "owner/repo"
+                required:    true
+            - label:  "back"
+              hint:   "return to profile review"
+              intent: quit
+            - label:  "look"
+              hint:   "re-render"
+              intent: look
+    on:
+      select_ticket_provider:
+        - when: "slots.provider == 'local'"
+          target: init
+          effects:
+            - set:
+                init_ticket_provider: "local"
+                init_ticket_repo: ""
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected local ticket intake."
+        - when: "slots.provider == 'github' && world.init_ticket_repo != ''"
+          target: init
+          effects:
+            - set:
+                init_ticket_provider: "github"
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected GitHub Issues for {{ world.init_ticket_repo }}."
+        - when: "slots.repo != nil && slots.repo != ''"
+          target: init
+          effects:
+            - set:
+                init_ticket_provider: "github"
+                init_ticket_repo: "{{ slots.repo }}"
+                init_profile_status: "draft"
+                last_error: ""
+            - say: "Selected GitHub Issues for {{ slots.repo }}."
+        - default: true
+          target: .
+          guard_hint: "Choose local reports or provide a GitHub owner/repo slug."
       quit:
         - target: init
           effects:
@@ -864,11 +975,12 @@ states:
             - "{{ world.init_test_command }}"
             - "{{ world.init_build_command }}"
             - "{{ world.init_conventions }}"
-            - "{{ world.init_tracker }}"
+            - "{{ world.init_ticket_provider == 'github' ? 'github' : 'none' }}"
             - "{{ world.init_profile_json }}"
             - "{{ world.init_mining_recommendation }}"
             - "{{ world.init_starter_stories }}"
             - "{{ world.init_story_pack }}"
+            - "{{ world.init_ticket_repo }}"
           fail_on_error: true
         bind:
           init_apply_ok: "ok"

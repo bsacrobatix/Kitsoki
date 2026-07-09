@@ -35,8 +35,8 @@ states:
         once: true
         with:
           id: "{{ world.ticket_id }}"
-          # repo pins host.gh.ticket to the configured GitHub issue repo
-          # (external onboarded repos + kitsoki-dev); local_files ignores it.
+          # repo pins host.gh.ticket to the configured GitHub issue repo;
+          # local_files ignores it.
           repo: "{{ world.ticket_repo }}"
           root: "{{ world.repo_root }}"
           thread: "{{ world.thread }}"

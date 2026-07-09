@@ -6,8 +6,8 @@
 #
 # Deliberately sits at stories/dev-story/kit.yaml — beside dev-story's
 # existing app.yaml, not inside a new nested stories/dev-story/ directory —
-# because Phase A is "dogfood the kit resolver with zero distribution risk";
-# the real repo-split move (git-subtree, its own remote, a git+ kits.lock
+# because Phase A exercises the kit resolver with zero distribution risk; the
+# real repo-split move (git-subtree, its own remote, a git+ kits.lock
 # source) is Phase B and explicitly out of scope here. provides.story_dirs
 # below is the escape hatch that makes that possible: it points the
 # "dev-story" story at "." (this directory) instead of the generic kit
@@ -23,7 +23,7 @@ summary: |
   The engineer's-day hub story: bugfix, PR-refinement, implementation,
   epic-delivery, and cypilot pipelines behind one free-form workbench
   landing room. Today's default (and, in v1, the only) root kit — the
-  hub every kitsoki-dev/gears-rust style instance imports as its root
+  hub generated and hand-written project instances import as their root
   (see docs/stories/imports.md "The blank root that grows" and D6 in
   .context/kits-implementation-plan.md).
 
@@ -56,7 +56,7 @@ root:
   # Mirrors the old synthesizedRootHosts() list byte-for-byte
   # (internal/app/synthesis.go) — the fixed host allow-list the synthesized
   # root declares (hosts: declared) so dev-story's subtree has the same
-  # fail-fast host surface a hand-written instance (kitsoki-dev) does.
+  # fail-fast host surface a hand-written or generated project instance does.
   hosts:
     - host.local_files.ticket
     - host.gh.ticket

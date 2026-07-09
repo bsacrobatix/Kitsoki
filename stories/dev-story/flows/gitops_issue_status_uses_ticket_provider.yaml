@@ -1,7 +1,7 @@
 # gitops_issue_status_uses_ticket_provider — issue lookups in the git-ops hub
 # go through iface.ticket, not ad-hoc `gh` shell commands.
 #
-# In kitsoki-dev the parent binds the ticket interface to host.gh.ticket. This
+# A parent project wrapper can bind the ticket interface to host.gh.ticket. This
 # flow stubs that provider and proves the nested dev-story -> gitops import can
 # fetch issue state from the story surface.
 

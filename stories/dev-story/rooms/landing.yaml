@@ -359,7 +359,7 @@ states:
       # 2. The agent turn — synthesized by the `workbench:` block above (host
       #    .agent.task with the full-tool landing_agent; working_dir is
       #    world.workdir, empty ⇒ the subprocess inherits the repo root, the
-      #    dogfood default; once: keyed off its bind (landing_note) so
+      #    standalone default; once: keyed off its bind (landing_note) so
       #    returning from a pipeline / a `look` re-renders the stored note
       #    instead of re-dispatching; the landing_capture arc below clears
       #    landing_note to re-arm; guarded on a non-empty landing_request so
@@ -379,7 +379,7 @@ states:
     on:
       # Free-form work — the operator describes what they want. Captures the
       # request, clears the prior note to re-arm the on_enter agent task,
-      # and self-targets so on_enter dispatches the landing_agent on the
+      # and loops back so on_enter dispatches the landing_agent on the
       # fresh request. `request` is required so the semantic router falls
       # through to the LLM router and captures the whole utterance.
       #
@@ -428,6 +428,8 @@ states:
                 init_run_ok:         false
                 init_run_output:     ""
                 init_discovery_error: ""
+                init_ticket_provider: ""
+                init_ticket_repo:     ""
                 init_apply_result:   {}
                 init_apply_ok:       false
                 init_apply_output:   ""
@@ -679,6 +681,33 @@ states:
                   Suggestions:
                   - `tickets` — search and pick a ticket
                   - `workspaces` — resume an in-progress workspace
+      bugfix_report:
+        - target: bf
+          effects:
+            - set:
+                ticket_id: ""
+                ticket_title: "{{ slots.title ?? 'Free-form bug report' }}"
+                ticket_url: ""
+                ticket_body: "{{ slots.complaint }}"
+                ticket_type: "bug"
+                ticket_source_mode: "freeform"
+                ticket_source_ref: "operator complaint"
+                thread: ""
+                last_error: ""
+      bugfix_link:
+        - target: bf
+          effects:
+            - set:
+                ticket_id: "linked-bug"
+                ticket_title: "{{ slots.title ?? 'Remote bug link' }}"
+                ticket_url: "{{ slots.url }}"
+                ticket_body: |
+                  {{ world.ticket_repo == '' ? 'Remote issue link: ' + slots.url + '\n\nConfigure the matching ticket provider for full issue body fetch; paste the issue body instead when provider access is unavailable.' : '' }}
+                ticket_type: "bug"
+                ticket_source_mode: "remote"
+                ticket_source_ref: "{{ slots.url }}"
+                thread: "{{ slots.url }}"
+                last_error: ""
       bugfix_open_pr:
         - when: "world.ticket_id != ''"
           target: bf
@@ -853,7 +882,7 @@ states:
           effects:
             - set: { last_error: "" }
 
-      # go_main / go_back / look now self-target the workbench floor.
+      # go_main / go_back / look now loop back to the workbench floor.
       go_main:
         - target: landing
       go_back:

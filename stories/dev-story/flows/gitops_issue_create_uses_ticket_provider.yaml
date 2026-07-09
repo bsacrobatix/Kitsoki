@@ -1,7 +1,7 @@
 # gitops_issue_create_uses_ticket_provider — issue creation in the git-ops hub
 # goes through iface.ticket, not ad-hoc `gh` shell commands.
 #
-# In kitsoki-dev the parent binds the ticket interface to host.gh.ticket. This
+# A parent project wrapper can bind the ticket interface to host.gh.ticket. This
 # flow stubs that provider and proves the nested dev-story -> gitops import can
 # create an issue from the story surface.
 

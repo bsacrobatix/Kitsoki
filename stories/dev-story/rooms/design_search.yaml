@@ -138,11 +138,10 @@ states:
     relevant_world: [design_idea, design_existing_state, design_existing_path, design_overlap_decision, design_change_target]
     on_enter:
       # 0. Resolve the design workspace's durable root to a writable location
-      #    BEFORE any scan, folder mint, or publish. dev-story's default
-      #    (docs/proposals) is Kitsoki's own dogfood convention, but Kitsoki's
-      #    primary checkout keeps docs/proposals/ intentionally read-only (see
-      #    AGENTS.md), and any other checkout can have its configured durable
-      #    path locked down too. Rebinding design_durable_path here means every
+      #    BEFORE any scan, folder mint, or publish. dev-story's fallback
+      #    convention is docs/proposals, but any checkout can have its
+      #    configured durable path locked down. Rebinding design_durable_path
+      #    here means every
       #    downstream step — workspace minting (design_workspace.star /
       #    design_amend_workspace.star), the scratch artifact writes, and the
       #    final publish (design_draft.yaml) — sees the SAME resolved,
