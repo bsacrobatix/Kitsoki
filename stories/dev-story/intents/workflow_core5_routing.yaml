@@ -87,7 +87,10 @@ fixtures:
 
   # ── Fix a bug ──────────────────────────────────────────────────────────
   - id: fixbug-explicit
-    intent: { name: go_bugfix }
+    # Bare "fix bug" is intentionally owned by landing_capture now: making it a
+    # semantic example causes the stem-subset tier to steal richer inline reports
+    # like "fix this bug <complaint>" and exact ids like "fix bug TKT-404".
+    defers_to_interpreter: true
     inputs:
       - "fix bug"
   - id: fixbug-noun

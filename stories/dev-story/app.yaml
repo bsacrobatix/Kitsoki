@@ -464,6 +464,10 @@ world:
   ticket_legacy_id:    { type: string, default: "" }
   ticket_source_mode:  { type: string, default: "local" } # local | remote | freeform
   ticket_source_ref:   { type: string, default: "" }      # local path, GitHub URL, or inline complaint marker
+  bugfix_ref_input:    { type: string, default: "" }      # exact raw ID/URL captured before provider lookup
+  bugfix_link_input:   { type: string, default: "" }      # exact raw issue link captured before provider lookup
+  bugfix_intake_title: { type: string, default: "" }      # fallback title while provider metadata loads
+  bugfix_intake_loaded: { type: string, default: "" }     # provider-returned id once metadata has bound
   # The main room calls iface.ticket.list_mine on enter and stashes
   # the result here so the view can render a "tickets in your queue"
   # block without the operator having to type `tickets`.
@@ -1360,11 +1364,17 @@ intents:
         description: "Optional ticket-type override (bug / feature / epic). Wins over the row-lookup derivation; useful for fixtures + operators who already know the routing target."
   bugfix_report:
     title: "Fix Pasted Bug Report"
-    description: "Start bugfix from an inline or pasted bug report when no ticket has been filed."
-    examples: ["fix this bug report", "debug this pasted bug", "pasted bug report"]
+    description: "Start bugfix from an inline or pasted bug report when no ticket has been filed. Use this for natural-language complaints like `fix this bug ...`, not for explicit ticket IDs."
+    examples: []
     synonyms:
-      - "fix bug report {complaint}"
-      - "debug bug {complaint}"
+      - "fix this bug {complaint}"
+      - "debug this bug {complaint}"
+      - "investigate this bug {complaint}"
+      - "fix the bug where {complaint}"
+      - "debug the bug where {complaint}"
+      - "fix this bug report {complaint}"
+      - "debug this bug report {complaint}"
+      - "pasted bug report {complaint}"
       - "bug report {complaint}"
       - "user complaint {complaint}"
       - "work complaint {complaint}"
@@ -1372,16 +1382,18 @@ intents:
     slots:
       complaint: { type: string, required: true, description: "The pasted bug report or complaint text." }
       title: { type: string, required: false, description: "Optional short title for the report." }
+  bugfix_ref:
+    title: "Fix Referenced Bug"
+    description: "Fetch a local or remote bug/ticket by explicit ID, issue number, or issue URL and start bugfix with provider metadata loaded."
+    examples: []
+    priority: 90
+    slots:
+      id: { type: string, required: true, description: "Provider ticket ID, local bug id, issue number, #number, or GitHub issue URL." }
+      title: { type: string, required: false, description: "Optional fallback title while provider metadata loads." }
   bugfix_link:
     title: "Fix Bug Link"
-    description: "Start bugfix from a remote issue link. Full remote capability requires the matching ticket provider to be configured."
-    examples: ["fix this github issue", "debug this issue link", "fix bug link"]
-    synonyms:
-      - "fix issue {url}"
-      - "debug issue {url}"
-      - "fix bug link {url}"
-      - "work issue {url}"
-      - "fix github issue {url}"
+    description: "Start bugfix from a remote issue link and fetch provider metadata when the ticket provider can resolve it."
+    examples: []
     priority: 89
     slots:
       url: { type: string, required: true, description: "Remote issue URL or provider issue reference." }
@@ -1433,7 +1445,7 @@ intents:
   go_bugfix:
     title: "Fix Bug"
     description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room will ask them to pick one first."
-    examples: ["bugfix", "fix bug", "i want to fix a bug", "work on selected bug", "fix selected bug", "fix bugs from the queue", "i want to work on some bugs"]
+    examples: ["bugfix", "i want to fix a bug", "work on selected bug", "fix selected bug", "fix bugs from the queue", "i want to work on some bugs"]
     priority: 55
   bugfix_open_pr:
     title: "Fix Bug and Open PR"
@@ -1853,6 +1865,9 @@ exports:
     - go_incident
     - go_docs
     - go_bugfix
+    - bugfix_report
+    - bugfix_ref
+    - bugfix_link
     - go_pr_refinement
     - go_implementation
     - go_deliver

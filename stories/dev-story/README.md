@@ -563,6 +563,8 @@ slot `request`), `go_main` / `go_back` (now self-loop the `landing`
 floor), `go_inbox`, `go_agent`, `go_ticket_search`,
 `go_workspace_manager`, `go_standup`, `go_code_review`, `go_deploy`,
 `go_observability`, `go_incident`, `go_docs`, `go_bugfix`,
+`bugfix_report` (inline free-text bug complaint), `bugfix_ref` (local/remote
+ticket id lookup), `bugfix_link` (explicit issue-link lookup),
 `go_pr_refinement`, `search_tickets`, `pick_ticket`, `ask_question`,
 `summarize_day`, `proceed`, `quit`, `look`. The incident loop adds
 `report_incident` (slot `alert`), `mitigate`, `escalate`, `watch`, and
@@ -584,6 +586,13 @@ rooms; the post-bind guarded emit auto-routes on the agent's verdict).
 | `landing_write_mode_opt_in.yaml` | The `landing_capture` intent captures a (mutating) request and re-arms the on_enter `landing_agent` task (stubbed); the workbench stays put as the read-only floor. The gate's decision spine (mutating-step classify, grant scopes, headless deny, recorded event) is unit-tested end-to-end in `internal/host/write_mode_gate_test.go` (a flow stub bypasses the in-subprocess gate, per AGENTS.md). |
 | `pickup_to_bugfix.yaml` | landing → ticket_search → pick → dispatch into the bf import (lands in bf.idle with world_in: projections firing). |
 | `github_ticket_drive_routes.yaml` | `iface.ticket` rebound to `host.gh.ticket`: a GitHub-Issue-sourced bug carries a provider-classified `ticket_type` (from its `bug` label), so a row pick (`n=`) lands `ticket_type=bug` and the headline `drive` routes into bf — no silent self-loop. The get also surfaces `source=github` + the lifted `legacy_id`, so the local↔issue identity shows in the ticket view. Regression for the two `host.gh.ticket` provider bugs. |
+| `bugfix_pasted_report_intake.yaml` | `bugfix_report` starts the bugfix child from an inline complaint, projecting it as `ticket_body` with `ticket_source_mode=freeform`. |
+| `bugfix_bare_command_pick_ticket_guard.yaml` | Bare `fix bug` is handled by `landing_capture` at runtime and prompts for a picked ticket, avoiding a broad semantic example that would steal inline reports. |
+| `bugfix_ref_local_intake.yaml` | `bugfix_ref` resolves a local ticket id through `iface.ticket.get` before entering the bugfix child, preserving the local artifact path as `thread`. |
+| `bugfix_ref_raw_capture_intake.yaml` | `landing_capture` preserves a raw `fix bug <id>` phrase and resolves the exact local id before entering the bugfix child. |
+| `bugfix_ref_remote_intake.yaml` | `bugfix_ref` resolves a remote issue number through the configured ticket provider before entering the bugfix child, so triage sees the provider body/title/url. |
+| `bugfix_link_provider_intake.yaml` | `bugfix_link` resolves an explicit issue URL through the configured ticket provider before entering the bugfix child. |
+| `bugfix_link_raw_capture_intake.yaml` | `landing_capture` preserves a raw `fix issue link <url>` phrase and resolves the exact issue URL before entering the bugfix child. |
 | `bugfix_to_pr.yaml` | The full closed-loop walk: landing → bf.idle → walk every bf room to @exit:done → handoff into pr → walk pr to @exit:merged → land back in `landing` with status="merged" and last_pr_url populated. |
 | `fix_tests_autonomous.yaml` | `go_fix_tests` enters the imported make-test-green loop, drains quick/full deterministic gates plus review, and projects the report/review back to landing. |
 | `fix_tests_resets_stale_child_world.yaml` | Seeds stale `tests__*` child state before `go_fix_tests`; proves the quick action starts a fresh cycle-0 review instead of inheriting old failure/review state. |

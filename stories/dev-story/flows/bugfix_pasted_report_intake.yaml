@@ -36,5 +36,9 @@ turns:
       bf__ticket_source_mode: "freeform"
       bf__ticket_source_ref: "operator complaint"
       bf__ticket_body: "After cleanup, the run list still shows deleted runs until the app is restarted."
+    expect_events:
+      - kind: machine.say
+        effect:
+          text: "Bug report captured; entering bugfix with the inline complaint."
 
 expect_no_errors: true

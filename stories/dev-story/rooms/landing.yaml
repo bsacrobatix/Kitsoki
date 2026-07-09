@@ -253,6 +253,9 @@ states:
             - label:  "tickets"
               hint:   "search and pick a ticket"
               intent: go_ticket_search
+            - label:  "fix bug"
+              hint:   "enter bugfix for the selected ticket"
+              intent: go_bugfix
             - label:  "drive"
               hint:   "push the picked ticket through its pipeline"
               intent: drive
@@ -450,6 +453,158 @@ states:
                 init_feedback:       ""
                 last_error:          ""
                 prev_state:          "landing"
+        # Raw-preserving bug references. The semantic slot router tokenizes
+        # punctuation in string slots, which is fine for prose but wrong for
+        # provider IDs and URLs (`TKT-404`, `#77`, GitHub links). Let the
+        # default-intent capture keep the original text, strip only the fixed
+        # lowercase command prefix, and enter the provider intake state with the
+        # exact tail. These guards are case-sensitive by design: the split
+        # delimiter must match the guarded prefix so we never index a missing
+        # split tail.
+        - when: "trim(slots.request) == 'fix bug' && world.ticket_id != ''"
+          target: bf
+          effects:
+            - set:
+                last_error: ""
+        - when: "trim(slots.request) == 'fix bug'"
+          target: landing
+          guard_hint: "Pick a ticket first — type tickets."
+          effects:
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the bugfix pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - `fix this bug ...` — paste an inline bug report
+        - when: "hasPrefix(trim(slots.request), 'fix issue link ')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(split(slots.request, 'fix issue link ')[1]) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug issue link ')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(split(slots.request, 'debug issue link ')[1]) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix bug link ')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(split(slots.request, 'fix bug link ')[1]) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug bug link ')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(split(slots.request, 'debug bug link ')[1]) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix github issue link ')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(split(slots.request, 'fix github issue link ')[1]) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug github issue link ')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(split(slots.request, 'debug github issue link ')[1]) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix bug ') && len(split(trim(slots.request), ' ')) == 3"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'fix bug ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix bug id ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'fix bug id ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug bug id ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'debug bug id ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'investigate bug id ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'investigate bug id ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix local bug ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'fix local bug ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug local bug ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'debug local bug ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix issue ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'fix issue ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug issue ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'debug issue ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'fix github issue ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'fix github issue ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'debug github issue ')"
+          target: bugfix_ref_intake
+          effects:
+            - set:
+                bugfix_ref_input: "{{ trim(split(slots.request, 'debug github issue ')[1]) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "Referenced bug"
+                last_error: ""
         - target: landing
           effects:
             # Preserve the prior note BEFORE clearing landing_note so the
@@ -708,19 +863,22 @@ states:
                 ticket_source_ref: "operator complaint"
                 thread: ""
                 last_error: ""
-      bugfix_link:
-        - target: bf
+            - say: "Bug report captured; entering bugfix with the inline complaint."
+      bugfix_ref:
+        - target: bugfix_ref_intake
           effects:
             - set:
-                ticket_id: "linked-bug"
-                ticket_title: "{{ slots.title ?? 'Remote bug link' }}"
-                ticket_url: "{{ slots.url }}"
-                ticket_body: |
-                  {{ world.ticket_repo == '' ? 'Remote issue link: ' + slots.url + '\n\nConfigure the matching ticket provider for full issue body fetch; paste the issue body instead when provider access is unavailable.' : '' }}
-                ticket_type: "bug"
-                ticket_source_mode: "remote"
-                ticket_source_ref: "{{ slots.url }}"
-                thread: "{{ slots.url }}"
+                bugfix_ref_input: "{{ trim(slots.id) }}"
+                bugfix_link_input: ""
+                bugfix_intake_title: "{{ slots.title ?? 'Referenced bug' }}"
+                last_error: ""
+      bugfix_link:
+        - target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(slots.url) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "{{ slots.title ?? 'Remote bug link' }}"
                 last_error: ""
       bugfix_open_pr:
         - when: "world.ticket_id != ''"
@@ -908,5 +1066,131 @@ states:
         - target: landing
       go_back:
         - target: landing
+      look:
+        - target: .
+
+  bugfix_ref_intake:
+    description: "Resolve a raw bug reference before entering the bugfix child story."
+    relevant_world: [bugfix_ref_input, bugfix_intake_title, ticket_id, ticket_title, ticket_url, ticket_body, ticket_type, ticket_repo, ticket_github_repo, ticket_source, ticket_source_mode, ticket_source_ref, thread]
+    intents:
+      bugfix_ref_intake_done:
+        title: "Bug reference resolved"
+        description: "Internal completion signal after bug reference metadata is loaded."
+        examples: []
+    view:
+      - banner:
+          text: "BUGFIX"
+          subtitle: "resolving {{ world.bugfix_ref_input }}"
+          color: "#EF4444"
+    on_enter:
+      - set:
+          ticket_id: "{{ trim(world.bugfix_ref_input) }}"
+          ticket_title: "{{ world.bugfix_intake_title != '' ? world.bugfix_intake_title : 'Referenced bug' }}"
+          ticket_url: ""
+          ticket_body: ""
+          ticket_type: "bug"
+          gate_command: ""
+          ticket_source: ""
+          ticket_legacy_id: ""
+          ticket_source_mode: "local"
+          ticket_source_ref: "{{ trim(world.bugfix_ref_input) }}"
+          thread: "{{ trim(world.bugfix_ref_input) }}"
+          bugfix_intake_loaded: ""
+          last_error: ""
+      - invoke: iface.ticket.get
+        with:
+          id: "{{ trim(world.bugfix_ref_input) }}"
+          repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
+          root: "{{ world.repo_root }}"
+        bind:
+          ticket_id: id
+          ticket_title: title
+          ticket_url: url
+          ticket_body: body
+          ticket_type: type
+          gate_command: repro_command
+          ticket_source: source
+          ticket_legacy_id: legacy_id
+          ticket_source_ref: url
+          thread: url
+          bugfix_intake_loaded: id
+        on_error: landing
+      - when: "world.bugfix_intake_loaded != ''"
+        emit_intent: bugfix_ref_intake_done
+    on:
+      bugfix_ref_intake_done:
+        - target: bf
+          effects:
+            - set:
+                ticket_type: "{{ world.ticket_type != '' ? world.ticket_type : 'bug' }}"
+                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : (world.ticket_source == 'local' ? 'local' : (world.ticket_repo != '' ? 'remote' : 'local')) }}"
+                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : (world.ticket_source == 'local' ? '' : world.ticket_repo) }}"
+                ticket_source_ref: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_source_ref }}"
+                thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+                last_error: ""
+            - say: "Bug reference {{ world.ticket_id }} resolved; entering bugfix with provider metadata."
+      look:
+        - target: .
+
+  bugfix_link_intake:
+    description: "Resolve a raw bug link before entering the bugfix child story."
+    relevant_world: [bugfix_link_input, bugfix_intake_title, ticket_id, ticket_title, ticket_url, ticket_body, ticket_type, ticket_repo, ticket_github_repo, ticket_source, ticket_source_mode, ticket_source_ref, thread]
+    intents:
+      bugfix_link_intake_done:
+        title: "Bug link resolved"
+        description: "Internal completion signal after bug link metadata is loaded."
+        examples: []
+    view:
+      - banner:
+          text: "BUGFIX"
+          subtitle: "resolving {{ world.bugfix_link_input }}"
+          color: "#EF4444"
+    on_enter:
+      - set:
+          ticket_id: "{{ trim(world.bugfix_link_input) }}"
+          ticket_title: "{{ world.bugfix_intake_title != '' ? world.bugfix_intake_title : 'Remote bug link' }}"
+          ticket_url: "{{ trim(world.bugfix_link_input) }}"
+          ticket_body: ""
+          ticket_type: "bug"
+          gate_command: ""
+          ticket_source: ""
+          ticket_legacy_id: ""
+          ticket_source_mode: "local"
+          ticket_source_ref: "{{ trim(world.bugfix_link_input) }}"
+          thread: "{{ trim(world.bugfix_link_input) }}"
+          bugfix_intake_loaded: ""
+          last_error: ""
+      - invoke: iface.ticket.get
+        with:
+          id: "{{ trim(world.bugfix_link_input) }}"
+          repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
+          root: "{{ world.repo_root }}"
+        bind:
+          ticket_id: id
+          ticket_title: title
+          ticket_url: url
+          ticket_body: body
+          ticket_type: type
+          gate_command: repro_command
+          ticket_source: source
+          ticket_legacy_id: legacy_id
+          ticket_source_ref: url
+          thread: url
+          bugfix_intake_loaded: id
+        on_error: landing
+      - when: "world.bugfix_intake_loaded != ''"
+        emit_intent: bugfix_link_intake_done
+    on:
+      bugfix_link_intake_done:
+        - target: bf
+          effects:
+            - set:
+                ticket_type: "{{ world.ticket_type != '' ? world.ticket_type : 'bug' }}"
+                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : (world.ticket_source == 'local' ? 'local' : (world.ticket_repo != '' ? 'remote' : 'local')) }}"
+                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : (world.ticket_source == 'local' ? '' : world.ticket_repo) }}"
+                ticket_source_ref: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_source_ref }}"
+                thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+                last_error: ""
+            - say: "Bug link {{ world.ticket_url }} resolved; entering bugfix with provider metadata."
       look:
         - target: .
