@@ -730,7 +730,7 @@ fetch-llama-server:
 #                   embedded into the binary)
 #   features-index  emit the site/QA contract to .artifacts/features/
 OBJECT_GRAPH_CATALOG := docs/proposals/project-object-graph/seed-objects.yaml
-.PHONY: features features-check features-index media-check media-check-promo demo-feature feature-qa
+.PHONY: features features-check features-index media-check media-check-promo demo-feature demo-feature-rrweb feature-qa
 features:
 	go run ./cmd/kitsoki graph render-features $(OBJECT_GRAPH_CATALOG) features
 	$(call runstatus_pnpm_install,--silent)
@@ -840,6 +840,20 @@ demo-feature: build-bin
 	video=$$(printf '%s' "$$demo" | cut -f3); \
 	(cd $(RUNSTATUS_DIR) && pnpm exec playwright test "$$spec" --project=chromium); \
 	.agents/skills/kitsoki-ui-demo/scripts/render.sh "$$video"
+
+# demo-feature-rrweb records ONE feature's rrweb tour capture and bundles a
+# self-contained Slidey HTML viewer. It skips the MP4 replay-render step.
+# Usage: make demo-feature-rrweb FEATURE=web-inbox
+demo-feature-rrweb: build-bin
+	@test -n "$(FEATURE)" || { echo "usage: make demo-feature-rrweb FEATURE=<id>" >&2; exit 1; }
+	$(call runstatus_pnpm_install,--silent)
+	@set -e; \
+	demo=$$(cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/generate.ts --print-demo-rrweb $(FEATURE)); \
+	spec=$$(printf '%s' "$$demo" | cut -f1); \
+	rrweb=$$(printf '%s' "$$demo" | cut -f3); \
+	viewer=$$(printf '%s' "$$demo" | cut -f4); \
+	(cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=1 pnpm exec playwright test "$$spec" --project=chromium); \
+	bash scripts/build-rrweb-viewer.sh "$$rrweb" "$$viewer"
 
 # feature-qa records the feature's demo then runs the vision QA gate against it
 # with the catalog-generated feature spec + scenarios. GATED: drives the real
@@ -969,6 +983,7 @@ render-help:
 	@echo "  make render                     record every demo video (incremental)"
 	@echo "  make render FORCE=1             re-record every demo video"
 	@echo "  make render-video FEATURE=<id>  one feature: video + GIF + contact sheet"
+	@echo "  make demo-feature-rrweb FEATURE=<id>  one feature: rrweb + HTML viewer"
 	@echo "  make render-tour                stitch the per-section videos into the master tour"
 	@echo "  make render-docs                build the promo site + help docs"
 	@echo "  make render-all                 videos + tour + docs"

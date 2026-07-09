@@ -25,6 +25,7 @@ interface Media {
   posterUrl: string | null;
   chaptersUrl: string | null;
   videoAvailable: boolean;
+  embedKind?: "deck" | "rrweb" | null;
   embedUrl: string | null;
 }
 
@@ -58,6 +59,16 @@ const embedded = computed(() => theme.value.siteVariant === "embedded");
 const text = computed(() => theme.value.siteText?.labels ?? {});
 const showVideo = computed(() => !embedded.value && props.media.videoAvailable);
 const showEmbed = computed(() => !embedded.value && !showVideo.value && !!props.media.embedUrl);
+const embedHint = computed(() =>
+  props.media.embedKind === "rrweb"
+    ? (text.value.rrwebEmbedHint ?? "An interactive rrweb replay — generated directly from the DOM session log, no MP4 render.")
+    : (text.value.deckEmbedHint ?? "An interactive clip from the kitsoki story deck — replayed from a real run, no LLM.")
+);
+const embedTitle = computed(() =>
+  props.media.embedKind === "rrweb"
+    ? (text.value.rrwebEmbedTitle ?? "interactive replay")
+    : (text.value.deckEmbedTitle ?? "interactive deck clip")
+);
 const watchOnlineUrl = computed(() =>
   props.featureId
     ? `${theme.value.sitePublicUrl}${theme.value.siteLocale === "en" ? "" : `/${theme.value.siteLocale}`}/features/${props.featureId}.html`
@@ -143,11 +154,11 @@ defineExpose({ seekToStep, hasChapters: () => chapters.value.length > 0 });
         class="kv__embed"
         :src="withBase(media.embedUrl!)"
         sandbox="allow-scripts allow-same-origin"
-        :title="`${title} — ${text.deckEmbedTitle ?? 'interactive deck clip'}`"
+        :title="`${title} — ${embedTitle}`"
         loading="lazy"
       />
       <p class="kv__badge">
-        {{ text.deckEmbedHint ?? "An interactive clip from the kitsoki story deck — replayed from a real run, no LLM." }}
+        {{ embedHint }}
         <a :href="withBase(media.embedUrl!)" target="_blank" rel="noopener">{{ text.deckEmbedOpen ?? "Open full-screen" }} →</a>
       </p>
     </template>

@@ -53,10 +53,19 @@ export const TourStepSchema = z.strictObject({
 export const DemoSchema = z.strictObject({
   /** Recording backend. Playwright is the default; binary uses `kitsoki tour`. */
   renderer: z.enum(["playwright", "binary"]).optional(),
+  /**
+   * Primary product-site media artifact. mp4 is the historical default; rrweb
+   * stages `<videoBase>.rrweb.json` plus a Slidey-bundled `<videoBase>.html`
+   * viewer instead of rendering an MP4.
+   */
+  format: z.enum(["mp4", "rrweb"]).optional(),
   /** Playwright spec path, relative to tools/runstatus. Optional ONLY for a
    *  product-tour, whose video is stitched from its sections, not recorded by a
    *  spec (enforced in FeatureSchema's superRefine). */
   spec: z.string().min(1).optional(),
+  /** Playwright capture spec for rrweb-first demos, relative to tools/runstatus.
+   *  When omitted, rrweb recording uses `spec`. */
+  rrwebSpec: z.string().min(1).optional(),
   /** Subdirectory of .artifacts/ the spec records into. */
   artifactDir: z.string().min(1),
   /** Base name passed to saveVideoAsMp4 → <artifactDir>/<videoBase>.mp4. */
@@ -191,6 +200,9 @@ export const FeatureSchema = FeatureObjectSchema.superRefine((f, ctx) => {
     if (f.demo && !f.demo.spec && !f.sections && f.demo.renderer !== "binary") {
       ctx.addIssue({ code: "custom", message: `feature "${f.id}" demo needs a spec unless renderer is binary (only a sectioned product-tour stitches without one)` });
     }
+    if (f.demo?.format === "rrweb" && !f.demo.rrwebSpec && !f.demo.spec) {
+      ctx.addIssue({ code: "custom", message: `feature "${f.id}" rrweb demo needs demo.rrwebSpec or demo.spec` });
+    }
     const secIds = new Set<string>();
     for (const s of f.sections ?? []) {
       if (secIds.has(s.id)) {
@@ -245,7 +257,7 @@ export const FeatureSchema = FeatureObjectSchema.superRefine((f, ctx) => {
     // poster frame (a step id, validated above). Without one the feature page
     // and grid card fall back to a black first frame. Tourless demos
     // (harness-picker, meta-mode) and stitched product-tours are exempt.
-    const recordable = f.demo && f.demo.spec && !f.demo.external && !f.sections;
+    const recordable = f.demo && (f.demo.spec || f.demo.rrwebSpec) && !f.demo.external && !f.sections;
     if (recordable && f.tour && !f.demo!.posterStep) {
       ctx.addIssue({
         code: "custom",
@@ -408,6 +420,7 @@ export function validateCatalog(
     for (const d of f.docs ?? []) mustExist.push(["docs", d]);
     if (f.demo) {
       if (f.demo.spec) mustExist.push(["demo.spec", path.join("tools/runstatus", f.demo.spec)]);
+      if (f.demo.rrwebSpec) mustExist.push(["demo.rrwebSpec", path.join("tools/runstatus", f.demo.rrwebSpec)]);
       if (!f.demo.external) {
         if (f.demo.story) mustExist.push(["demo.story", f.demo.story]);
         if (f.demo.flow) mustExist.push(["demo.flow", f.demo.flow]);

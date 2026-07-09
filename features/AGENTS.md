@@ -54,7 +54,10 @@ file-based — see `schema.ts`):
 - `promo`: present ⇒ the feature appears on the promo landing page, sorted by
   `order` (lower first); `highlight: true` marks featured slots.
 - `demo`: binds the feature to its Playwright recording spec. `artifactDir` /
-  `videoBase` must match the spec's `ARTIFACT_DIR` / `saveVideoAsMp4` values.
+  `videoBase` must match the spec's `ARTIFACT_DIR` / `saveVideoAsMp4` values
+  for MP4 demos, or `<videoBase>.rrweb.json` plus `<videoBase>.html` for
+  `demo.format: rrweb`. Use `demo.rrwebSpec` when the real capture spec differs
+  from the catalog/bijection anchor `demo.spec`.
   `external: true` marks demos that depend on paths outside this repo — they
   are excluded from recording and path validation.
 - `demo.embed`: presents a rrweb-native story-demo (its video spec is a

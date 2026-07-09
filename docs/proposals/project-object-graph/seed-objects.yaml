@@ -7129,11 +7129,13 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
+    rrwebSpec: tests/playwright/web-inbox-rrweb-capture.spec.ts
     producers:
       - tests/playwright/web-inbox-video.spec.ts
     artifacts:
       - artifactDir: web-inbox
-        videoBase: web-inbox-demo
+        videoBase: web-inbox
         posterStep: wi-intro-home
       - story: stories/inbox-demo
         flow: stories/inbox-demo/flows/background_notifies.yaml

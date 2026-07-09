@@ -12,6 +12,9 @@
  *                     qa/<id>.scenarios.yaml (default D=.artifacts/features).
  *   --print-demo ID   print "<specName>\t<artifactDir>\t<videoPath>" for make
  *                     recipes that resolve demo paths from the catalog.
+ *   --print-demo-rrweb ID
+ *                     print "<specName>\t<artifactDir>\t<rrwebPath>\t<htmlPath>"
+ *                     for rrweb-first demo generation.
  *
  * Emission is deterministic (no timestamps, fixed field order, JSON.stringify
  * strings) so --check is a trivial byte comparison and diffs stay reviewable.
@@ -226,6 +229,7 @@ function profileSuffix(profile: string): string {
 function buildDemoIndex(d: NonNullable<Feature["demo"]>) {
   const dir = path.join(".artifacts", d.artifactDir);
   const profiles = d.profiles ?? ["desktop"];
+  const format = d.format ?? "mp4";
   const variantFor = (p: string) => {
     const s = profileSuffix(p);
     return {
@@ -240,10 +244,16 @@ function buildDemoIndex(d: NonNullable<Feature["demo"]>) {
   return {
     spec: d.spec ? path.join("tools/runstatus", d.spec) : null,
     specName: d.spec ? specName(d.spec) : null,
+    rrwebSpec: d.rrwebSpec ? path.join("tools/runstatus", d.rrwebSpec) : null,
+    rrwebSpecName: d.rrwebSpec ? specName(d.rrwebSpec) : null,
     renderer: d.renderer ?? "playwright",
+    format,
     artifactDir: dir,
     video: primary.video,
     chapters: primary.chapters,
+    rrweb: path.join(dir, `${d.videoBase}.rrweb.json`),
+    rrwebChapters: path.join(dir, `${d.videoBase}.rrweb.json.chapters.json`),
+    rrwebViewer: path.join(dir, `${d.videoBase}.html`),
     profiles,
     variants,
     posterStep: d.posterStep ?? null,
@@ -393,9 +403,25 @@ function modePrintDemo(catalog: Loaded[], id: string): void {
   if (!l) fail([`no feature "${id}" in the catalog`]);
   const d = l.feature.demo;
   if (!d) fail([`feature "${id}" has no demo binding`]);
+  if ((d.format ?? "mp4") === "rrweb") {
+    fail([`feature "${id}" is rrweb-first — use: make demo-feature-rrweb FEATURE=${id}`]);
+  }
   if (!d.spec) fail([`feature "${id}" is stitched, not recorded — use: make render-tour`]);
   const dir = path.join(".artifacts", d.artifactDir);
   process.stdout.write(`${specName(d.spec)}\t${dir}\t${path.join(dir, `${d.videoBase}.mp4`)}\n`);
+}
+
+function modePrintDemoRrweb(catalog: Loaded[], id: string): void {
+  const l = catalog.find((c) => c.feature.id === id);
+  if (!l) fail([`no feature "${id}" in the catalog`]);
+  const d = l.feature.demo;
+  if (!d) fail([`feature "${id}" has no demo binding`]);
+  const rrwebSpec = d.rrwebSpec ?? d.spec;
+  if (!rrwebSpec) fail([`feature "${id}" has no rrweb demo spec`]);
+  const dir = path.join(".artifacts", d.artifactDir);
+  process.stdout.write(
+    `${specName(rrwebSpec)}\t${dir}\t${path.join(dir, `${d.videoBase}.rrweb.json`)}\t${path.join(dir, `${d.videoBase}.html`)}\n`,
+  );
 }
 
 const args = process.argv.slice(2);
@@ -409,6 +435,9 @@ if (args[0] === "--check") {
 } else if (args[0] === "--print-demo") {
   if (!args[1]) fail([`--print-demo needs a feature id`]);
   modePrintDemo(catalog, args[1]);
+} else if (args[0] === "--print-demo-rrweb") {
+  if (!args[1]) fail([`--print-demo-rrweb needs a feature id`]);
+  modePrintDemoRrweb(catalog, args[1]);
 } else if (args.length === 0) {
   modeWrite(catalog);
 } else {

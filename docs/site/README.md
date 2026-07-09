@@ -51,9 +51,17 @@ specs' title assertions.
 (`WEB_CHAT_PACE=1`), deterministically (no LLM — `--flow`/`--host-cassette`).
 Incremental by per-demo content stamps (feature YAML + spec + story inputs +
 binary) in `.artifacts/<dir>/.stamp`; `make demos-force` ignores them. One
-demo: `make demo-feature FEATURE=<id>`. Videos are **never committed**.
-Each spec also emits a `<video>.mp4.chapters.json` sidecar (one chapter per
+MP4 demo: `make demo-feature FEATURE=<id>`. One rrweb-first demo:
+`make demo-feature-rrweb FEATURE=<id>`. Generated media is **never committed**.
+MP4 specs also emit a `<video>.mp4.chapters.json` sidecar (one chapter per
 tour step) the site uses for its clickable chapter rail.
+
+For `demo.format: rrweb`, the capture spec writes `<videoBase>.rrweb.json` and
+step screenshots; `scripts/build-rrweb-viewer.sh` then calls Slidey
+(`KITSOKI_SLIDEY_CMD`, `SLIDEY_HOME`, a sibling checkout, or `slidey` on PATH)
+to bundle `<videoBase>.html`. The product site stages that HTML as
+`/media/<feature>/demo.html` and embeds it directly, avoiding the rrweb
+seek-rasterize-to-MP4 render step during iteration.
 
 Every recording context comes from one device-profile registry
 (`tests/playwright/_helpers/camera.ts`): `cameraContext()` sources the viewport,

@@ -4,6 +4,8 @@
  * src/public/media/<featureId>/ tree:
  *
  *   demo.mp4            the recorded demo (full variant only)
+ *   demo.rrweb.json     the rrweb recording, for rrweb-first demos
+ *   demo.html           the bundled Slidey replay viewer, for rrweb-first demos
  *   chapters.json       the <video>.mp4.chapters.json sidecar, when present
  *   poster.png          the feature's posterStep screenshot (else first shot)
  *   steps/NN-<id>.png   every per-step screenshot (full variant only)
@@ -77,6 +79,7 @@ function stageDeckViewers() {
 }
 
 let videos = 0;
+let replays = 0;
 let embeds = 0;
 const deckViewers = stageDeckViewers();
 const missing = [];
@@ -105,8 +108,12 @@ for (const f of index.features) {
   const srcDir = path.join(repoRoot, f.demo.artifactDir);
   const out = path.join(mediaDir, f.id);
 
-  const shots = fs.existsSync(srcDir)
-    ? fs.readdirSync(srcDir).filter((n) => /^\d+-.+\.png$/.test(n)).sort()
+  const shotDir =
+    fs.existsSync(srcDir) && fs.readdirSync(srcDir).some((n) => /^\d+-.+\.png$/.test(n))
+      ? srcDir
+      : path.join(srcDir, "baseline-frames");
+  const shots = fs.existsSync(shotDir)
+    ? fs.readdirSync(shotDir).filter((n) => /^\d+-.+\.png$/.test(n)).sort()
     : [];
   const posterShot = f.demo.posterStep
     ? shots.find((n) => n.endsWith(`-${f.demo.posterStep}.png`)) ?? shots[0]
@@ -114,7 +121,7 @@ for (const f of index.features) {
 
   if (posterShot) {
     fs.mkdirSync(out, { recursive: true });
-    copyStagedFile(path.join(srcDir, posterShot), path.join(out, "poster.png"));
+    copyStagedFile(path.join(shotDir, posterShot), path.join(out, "poster.png"));
   }
 
   if (embedded) {
@@ -124,7 +131,24 @@ for (const f of index.features) {
 
   if (shots.length > 0) {
     fs.mkdirSync(path.join(out, "steps"), { recursive: true });
-    for (const n of shots) copyStagedFile(path.join(srcDir, n), path.join(out, "steps", n));
+    for (const n of shots) copyStagedFile(path.join(shotDir, n), path.join(out, "steps", n));
+  }
+
+  if ((f.demo.format ?? "mp4") === "rrweb") {
+    const rrweb = path.join(repoRoot, f.demo.rrweb);
+    const viewer = path.join(repoRoot, f.demo.rrwebViewer);
+    if (fs.existsSync(rrweb) && fs.existsSync(viewer)) {
+      fs.mkdirSync(out, { recursive: true });
+      copyStagedFile(rrweb, path.join(out, "demo.rrweb.json"));
+      copyStagedFile(viewer, path.join(out, "demo.html"));
+      replays++;
+      const chapters = path.join(repoRoot, f.demo.rrwebChapters);
+      if (fs.existsSync(chapters)) copyStagedFile(chapters, path.join(out, "chapters.json"));
+    } else {
+      if (!fs.existsSync(rrweb)) missing.push(`${f.id}: ${f.demo.rrweb} (record with: make demo-feature-rrweb FEATURE=${f.id})`);
+      if (!fs.existsSync(viewer)) missing.push(`${f.id}: ${f.demo.rrwebViewer} (bundle with: make demo-feature-rrweb FEATURE=${f.id})`);
+    }
+    continue;
   }
 
   const video = path.join(repoRoot, f.demo.video);
@@ -140,6 +164,6 @@ for (const f of index.features) {
 }
 
 console.log(
-  `stage-media: staged ${videos} video(s), ${embeds} feature deck embed(s), ${deckViewers} deck viewer(s)${embedded ? " [embedded: posters only]" : ""} -> ${path.relative(repoRoot, mediaDir)}`,
+  `stage-media: staged ${videos} video(s), ${replays} rrweb replay(s), ${embeds} feature deck embed(s), ${deckViewers} deck viewer(s)${embedded ? " [embedded: posters only]" : ""} -> ${path.relative(repoRoot, mediaDir)}`,
 );
 for (const m of missing) console.warn(`stage-media: missing ${m}`);

@@ -50,16 +50,18 @@ type Promo struct {
 // Demo is derived entirely from the site-page's has_media evidence node —
 // never stored on the site-page itself, so it can't drift from its source.
 type Demo struct {
-	Renderer     string   `yaml:"renderer,omitempty"`
-	Spec         string   `yaml:"spec,omitempty"`
-	ArtifactDir  string   `yaml:"artifactDir,omitempty"`
-	VideoBase    string   `yaml:"videoBase,omitempty"`
-	PosterStep   string   `yaml:"posterStep,omitempty"`
-	Story        string   `yaml:"story,omitempty"`
-	Flow         string   `yaml:"flow,omitempty"`
-	HostCassette string   `yaml:"hostCassette,omitempty"`
-	External     bool     `yaml:"external,omitempty"`
-	Profiles     []string `yaml:"profiles,omitempty"`
+	Renderer     string     `yaml:"renderer,omitempty"`
+	Format       string     `yaml:"format,omitempty"`
+	Spec         string     `yaml:"spec,omitempty"`
+	RrwebSpec    string     `yaml:"rrwebSpec,omitempty"`
+	ArtifactDir  string     `yaml:"artifactDir,omitempty"`
+	VideoBase    string     `yaml:"videoBase,omitempty"`
+	PosterStep   string     `yaml:"posterStep,omitempty"`
+	Story        string     `yaml:"story,omitempty"`
+	Flow         string     `yaml:"flow,omitempty"`
+	HostCassette string     `yaml:"hostCassette,omitempty"`
+	External     bool       `yaml:"external,omitempty"`
+	Profiles     []string   `yaml:"profiles,omitempty"`
 	Embed        *DemoEmbed `yaml:"embed,omitempty"`
 }
 
@@ -199,9 +201,11 @@ func joinOne(cat *graph.Catalog, node *graph.Node, edgeField graph.EdgeField) (*
 func demoFromEvidence(evidence *graph.Node) *Demo {
 	d := &Demo{
 		Renderer: stringField(evidence.Fields, "renderer", ""),
+		Format:   stringField(evidence.Fields, "format", ""),
 		External: boolField(evidence.Fields, "external"),
 		Profiles: stringSliceField(evidence.Fields, "profiles"),
 	}
+	d.RrwebSpec = stringField(evidence.Fields, "rrwebSpec", "")
 	if embed, ok := evidence.Fields["embed"].(map[string]any); ok {
 		d.Embed = &DemoEmbed{
 			Deck:  stringField(embed, "deck", ""),
