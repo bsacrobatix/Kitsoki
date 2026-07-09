@@ -58,6 +58,15 @@ implemented or the bug being fixed** — drive the specific room/intent/state th
 bug/plan names, not a generic onboarding tour. Evidence that doesn't touch the
 changed behaviour will be flagged `unsupported` by the review above.
 
+When the evidence claims coverage of a product-journey scenario or transport,
+the product-journey run bundle is part of the evidence. Prefer [[scenario-qa]]
+for a single scenario/transport check. If you are handed a standalone MP4,
+rrweb log, or screenshot set, first verify that it was produced from
+`tools/product-journey/run.py --emit-run --transport ...`, consumed
+`driver-plan.json` capture routes, and attached the artifacts back to the same
+run. A bridge-local video with private cases or paths is incomplete scenario
+evidence even if the pixels look plausible.
+
 > This is an **LLM-driven review tool by design** (it needs vision). It is *not*
 > a no-LLM flow test and must never be wired into the automated test suite
 > (CLAUDE.md, [[feedback_no_llm_tests]]). It uses the first available local
@@ -434,11 +443,15 @@ viewport.
   `window.__dump()` gives exact-text readback of the *visible viewport* (not
   the full scrollback — buffer-API based, no vision needed) when a structural
   check is all a step requires. Keep the spawned command deterministic and
-  no-LLM (`--harness replay --recording ...`, or `--exec` pointed at a fixture
-  binary) — never a live model, the same discipline `tools/mcp-demo` follows
-  for the cassette-replay path above.
-  - **Avoid readiness races.** The player retries the websocket until the first
-    successful connection, so it is okay for Playwright to open the page before
+	  no-LLM (`--harness replay --recording ...`, or `--exec` pointed at a fixture
+	  binary) — never a live model, the same discipline `tools/mcp-demo` follows
+	  for the cassette-replay path above.
+	  If this bridge evidence is for a product-journey scenario, the bridge must
+	  consume the scenario run bundle and attach its video/frame artifacts back to
+	  that run; otherwise QA should classify the video as bridge-local evidence,
+	  not completed scenario coverage.
+	  - **Avoid readiness races.** The player retries the websocket until the first
+	    successful connection, so it is okay for Playwright to open the page before
     `tui-serve` is listening. Still wait for both `window.__status() ===
     "connected"` and the expected visible text in `window.__dump()` before
     taking the first screenshot; a connected socket can arrive before the app's

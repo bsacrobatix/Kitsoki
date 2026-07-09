@@ -442,6 +442,11 @@ rendering instead of `{% if %}` inside a `view: |` string.
 - [ ] The intent name IS the label — no backticks, no paraphrase.
 - [ ] `look` needs no hint. `quit` always reads `"abandon the pipeline"`
       or similar.
+- [ ] If this room, flow, or demo is being claimed as product-journey scenario
+      coverage, update `tools/product-journey/scenarios.json` and
+      `stories/scenario-qa` fixtures so the universal scenario run owns the case
+      list, transport contract, and evidence routes. A bespoke recorder is only a
+      capture adapter.
 
 ### Action-menu availability — two standard shapes
 
@@ -700,6 +705,12 @@ of hand-rolling retry caps.
 Every non-trivial room deserves at least one flow fixture under
 `flows/`. They run intent-only (no LLM, no harness) — fast, hermetic,
 checkable in CI.
+
+If the story path is part of a product-journey scenario or scenario-QA proof,
+also add/update the scenario catalog entry and a `stories/scenario-qa/flows/*`
+fixture. The flow should prove the scenario wrapper can plan, drive, judge, and
+report the leg without relying on a Playwright/xterm/rrweb recorder as the
+source of truth.
 
 ```yaml
 test_kind: flow
