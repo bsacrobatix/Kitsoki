@@ -11,6 +11,7 @@ import {
   makeShot,
   prepareVideoDir,
   saveVideoAsMp4,
+  shiftChapters,
   writeChapters,
 } from "./_helpers/recording.js";
 
@@ -27,6 +28,9 @@ const CASE_HOLD_MS = 3_200;
 const EXCEPTION_HOLD_MS = 4_000;
 const REPORT_HOLD_MS = 5_000;
 const READABLE_CHAPTER_MIN_MS = 3_000;
+const START_FRAME_SETTLE_MS = 500;
+const INTRO_HOLD_MS = 2_000;
+const MAX_USEFUL_PREROLL_MS = 3_500;
 const CASE_IDS = [
   "constructorfabric/Kitsoki#66",
   "constructorfabric/Kitsoki#65",
@@ -151,15 +155,17 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
 
   prepareVideoDir(VIDEO_DIR);
   const shot = makeShot(ARTIFACT_DIR);
-  const chapters = new ChapterRecorder();
   const port = await freePort();
   const addr = `127.0.0.1:${port}`;
   const bridge = startBridge(addr);
 
   const context = await browser.newContext(cameraContext({ recordVideoDir: VIDEO_DIR }));
   const page = await context.newPage();
+  const chapters = new ChapterRecorder();
   let videoPath: string | null = null;
   let chapterPacingFailures: string[] = [];
+  let videoTrimStartMs = 0;
+  let firstChapterStartAfterTrimMs = 0;
   try {
     await page.goto(`/player/?ws=ws://${addr}/pty`);
     await page.waitForFunction(() => (window as any).__ready === true);
@@ -167,7 +173,10 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
       .poll(() => page.evaluate(() => (window as any).__status()), { timeout: 60_000 })
       .toBe("connected");
     await waitForScreen(page, "free-form workbench", 60_000);
+    await dwell(page, START_FRAME_SETTLE_MS);
+    videoTrimStartMs = chapters.elapsedMs();
     await shot(page, "connected-kitsoki-dev");
+    await dwell(page, INTRO_HOLD_MS);
 
     chapters.open("kitsoki-dev-request", "Request the dogfood marathon from kitsoki-dev", RECORDING);
     await focusChat(page);
@@ -224,10 +233,13 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     await shot(page, "done-report");
     await dwell(page, REPORT_HOLD_MS);
   } finally {
-    const chapterList = chapters.list();
+    const chapterList = shiftChapters(chapters.list(), videoTrimStartMs);
+    firstChapterStartAfterTrimMs = chapterList[0]?.start_ms ?? 0;
     const video = page.video();
     await context.close();
-    videoPath = await saveVideoAsMp4(video, ARTIFACT_DIR, "dogfood-marathon-real-tui");
+    videoPath = await saveVideoAsMp4(video, ARTIFACT_DIR, "dogfood-marathon-real-tui", {
+      trimStartMs: videoTrimStartMs,
+    });
     writeChapters(videoPath, chapterList);
     if (PACE !== 0) {
       chapterPacingFailures = chapterList
@@ -236,5 +248,6 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     }
     stopBridge(bridge);
   }
+  expect(firstChapterStartAfterTrimMs).toBeLessThanOrEqual(MAX_USEFUL_PREROLL_MS);
   expect(chapterPacingFailures).toEqual([]);
 });

@@ -53,13 +53,27 @@ export function videoDurationSeconds(file: string): number | null {
   return Number.isFinite(s) ? s : null;
 }
 
-export async function saveVideoAsMp4(video: Video | null, artifactDir: string, name: string): Promise<string | null> {
+export interface SaveVideoOptions {
+  trimStartMs?: number;
+}
+
+function ffmpegSeconds(ms: number): string {
+  return (Math.max(0, ms) / 1000).toFixed(3);
+}
+
+export async function saveVideoAsMp4(
+  video: Video | null,
+  artifactDir: string,
+  name: string,
+  opts: SaveVideoOptions = {},
+): Promise<string | null> {
   if (!video) return null;
   const gate = PACE === 0;
   const outName = gate ? `${name}.fast` : name;
   const raw = path.join(artifactDir, `${outName}-raw.webm`);
   const mp4 = path.join(artifactDir, `${outName}.mp4`);
   await video.saveAs(raw);
+  const trimArgs = opts.trimStartMs && opts.trimStartMs > 0 ? ["-ss", ffmpegSeconds(opts.trimStartMs)] : [];
   const r = spawnSync(
     "ffmpeg",
     [
@@ -68,6 +82,7 @@ export async function saveVideoAsMp4(video: Video | null, artifactDir: string, n
       "error",
       "-i",
       raw,
+      ...trimArgs,
       "-vf",
       "fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2",
       "-c:v",
@@ -116,9 +131,13 @@ export class ChapterRecorder {
   private readonly chapters: Chapter[] = [];
   private open_: { id: string; label: string; specPath: string; startMs: number } | null = null;
 
+  elapsedMs(): number {
+    return Date.now() - this.t0;
+  }
+
   open(stepId: string, label: string, specPath: string): void {
     this.close();
-    this.open_ = { id: stepId, label, specPath, startMs: Date.now() - this.t0 };
+    this.open_ = { id: stepId, label, specPath, startMs: this.elapsedMs() };
   }
 
   close(): void {
@@ -129,7 +148,7 @@ export class ChapterRecorder {
       id: o.id,
       label: o.label,
       start_ms: o.startMs,
-      end_ms: Date.now() - this.t0,
+      end_ms: this.elapsedMs(),
       source_ref: { kind: "tour", spec_path: o.specPath, step_id: o.id },
     });
     this.open_ = null;
@@ -139,6 +158,16 @@ export class ChapterRecorder {
     this.close();
     return this.chapters;
   }
+}
+
+export function shiftChapters(chapters: Chapter[], offsetMs: number): Chapter[] {
+  const offset = Math.max(0, Math.round(offsetMs));
+  return chapters.map((chapter, index) => ({
+    ...chapter,
+    index,
+    start_ms: Math.max(0, chapter.start_ms - offset),
+    end_ms: Math.max(0, chapter.end_ms - offset),
+  }));
 }
 
 export function writeChapters(videoPath: string | null, chapters: Chapter[]): string | null {
