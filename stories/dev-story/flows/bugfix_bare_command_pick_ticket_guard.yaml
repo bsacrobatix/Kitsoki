@@ -18,6 +18,7 @@ turns:
 
         Suggestions:
         - `tickets` — search and pick a ticket
+        - paste a GitHub issue URL
         - `fix this bug ...` — paste an inline bug report
 
 expect_no_errors: true

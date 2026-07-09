@@ -526,6 +526,42 @@ states:
         # exact tail. These guards are case-sensitive by design: the split
         # delimiter must match the guarded prefix so we never index a missing
         # split tail.
+        - when: "hasPrefix(trim(slots.request), 'https://github.com/') || hasPrefix(trim(slots.request), 'http://github.com/')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(slots.request) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+        - when: "hasPrefix(trim(slots.request), 'bugfix brief ')"
+          target: bf
+          effects:
+            - set:
+                ticket_id: ""
+                ticket_title: "Free-form bug report"
+                ticket_url: ""
+                ticket_body: "{{ trim(split(slots.request, 'bugfix brief ')[1]) }}"
+                ticket_type: "bug"
+                ticket_source_mode: "freeform"
+                ticket_source_ref: "operator brief"
+                thread: ""
+                last_error: ""
+            - say: "Bug brief captured; entering bugfix with the inline brief."
+        - when: "hasPrefix(trim(slots.request), 'fix bug brief ')"
+          target: bf
+          effects:
+            - set:
+                ticket_id: ""
+                ticket_title: "Free-form bug report"
+                ticket_url: ""
+                ticket_body: "{{ trim(split(slots.request, 'fix bug brief ')[1]) }}"
+                ticket_type: "bug"
+                ticket_source_mode: "freeform"
+                ticket_source_ref: "operator brief"
+                thread: ""
+                last_error: ""
+            - say: "Bug brief captured; entering bugfix with the inline brief."
         - when: "trim(slots.request) == 'fix bug' && world.ticket_id != ''"
           target: bf
           effects:
@@ -541,6 +577,7 @@ states:
 
                   Suggestions:
                   - `tickets` — search and pick a ticket
+                  - paste a GitHub issue URL
                   - `fix this bug ...` — paste an inline bug report
         - when: "hasPrefix(trim(slots.request), 'fix issue link ')"
           target: bugfix_link_intake
@@ -914,6 +951,8 @@ states:
 
                   Suggestions:
                   - `tickets` — search and pick a ticket
+                  - paste a GitHub issue URL
+                  - `fix this bug ...` — paste an inline bug report
                   - `workspaces` — resume an in-progress workspace
       bugfix_report:
         - target: bf
