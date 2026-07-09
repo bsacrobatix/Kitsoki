@@ -129,6 +129,17 @@ def run_default() -> int:
     checks.check("paired-task CodeAct driver gate", paired_task_codeact_test.returncode, 0)
     if paired_task_codeact_test.returncode:
         checks.failures.append((paired_task_codeact_test.stdout + paired_task_codeact_test.stderr).strip())
+    cli_ux_test = subprocess.run(
+        [sys.executable, str(HERE / "test_arena_cli_ux.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("arena CLI UX gate", cli_ux_test.returncode, 0)
+    if cli_ux_test.returncode:
+        checks.failures.append((cli_ux_test.stdout + cli_ux_test.stderr).strip())
     report_test = subprocess.run(
         [sys.executable, str(HERE / "test_glm52_bugswarm_report.py")],
         cwd=REPO_ROOT,

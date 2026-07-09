@@ -739,7 +739,8 @@ fetch-llama-server:
 #                   embedded into the binary)
 #   features-index  emit the site/QA contract to .artifacts/features/
 OBJECT_GRAPH_CATALOG := docs/proposals/project-object-graph/seed-objects.yaml
-.PHONY: features features-check features-index media-check media-check-promo demo-feature demo-feature-rrweb feature-qa
+.PHONY: features features-check features-index media-check media-check-promo demo-feature demo-feature-rrweb feature-qa \
+	arena-treatments arena-showdown-plan arena-showdown-run arena-showdown-live arena-showdown-demo-fast arena-showdown-demo arena-showdown-qa
 features:
 	go run ./cmd/kitsoki graph render-features $(OBJECT_GRAPH_CATALOG) features
 	$(call runstatus_pnpm_install,--silent)
@@ -778,6 +779,46 @@ usable-kitsoki-gate-check:
 	# WS-G G1 — completion-state check_type discriminator + arena check-suite
 	# plumbing (the schema every gate cell reports through).
 	python3 tools/arena/tests/test_check_types.py
+
+# ── Arena treatment UX + CodeAct-vs-Codex showdown demo ─────────────────────
+ARENA_SHOWDOWN_SPEC ?= tools/arena/specs/codex-codeact-action-surface.yaml
+ARENA_SHOWDOWN_OUT ?= .artifacts/arena/codeact-showdown
+
+arena-treatments:
+	python3 tools/arena/arena.py treatments --aliases
+
+arena-showdown-plan:
+	python3 tools/arena/arena.py validate --spec $(ARENA_SHOWDOWN_SPEC)
+	python3 tools/arena/arena.py treatments
+	python3 tools/arena/arena.py plan --spec $(ARENA_SHOWDOWN_SPEC)
+
+# No-LLM/default arena run. This still needs Docker because arena cells run in
+# containers, but it does not call a model.
+arena-showdown-run:
+	python3 tools/arena/arena.py validate --spec $(ARENA_SHOWDOWN_SPEC)
+	python3 tools/arena/arena.py run --spec $(ARENA_SHOWDOWN_SPEC) --out $(ARENA_SHOWDOWN_OUT)
+
+# Paid live path: intentionally gated by both validate --live and arena --live.
+arena-showdown-live:
+	python3 tools/arena/arena.py validate --spec $(ARENA_SHOWDOWN_SPEC) --live
+	python3 tools/arena/arena.py doctor --spec $(ARENA_SHOWDOWN_SPEC) --live
+	python3 tools/arena/arena.py run --spec $(ARENA_SHOWDOWN_SPEC) --out $(ARENA_SHOWDOWN_OUT) --live
+
+arena-showdown-demo-fast:
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && ARENA_SHOWDOWN_RUN_DIR="$(abspath $(ARENA_SHOWDOWN_OUT))" WEB_CHAT_PACE=0 pnpm exec playwright test arena-showdown-demo --project=chromium
+
+arena-showdown-demo:
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && ARENA_SHOWDOWN_RUN_DIR="$(abspath $(ARENA_SHOWDOWN_OUT))" pnpm exec playwright test arena-showdown-demo --project=chromium
+
+# GATED: drives the local vision reviewer through kitsoki-ui-qa.
+arena-showdown-qa:
+	.agents/skills/kitsoki-ui-qa/scripts/qa.sh .artifacts/arena-showdown-demo/arena-showdown-demo.mp4 \
+		--frames .artifacts/arena-showdown-demo \
+		--feature .artifacts/arena-showdown-demo/qa-feature.md \
+		--scenarios .artifacts/arena-showdown-demo/qa-scenarios.yaml \
+		--strict
 
 # dev-workflow-matrix regenerates the 5-workflow x 4-surface x 2-repo
 # support matrix (docs/testing/dev-workflow-matrix.md) from its hand-edited

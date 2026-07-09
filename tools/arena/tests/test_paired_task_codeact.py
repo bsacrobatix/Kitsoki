@@ -140,11 +140,21 @@ json.loads(argv[argv.index("--capability-presets-json") + 1])
 
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
+    backend="codex",
     agent="",
     capability_preset="repo_patch",
     capability_presets_json="",
 )
 require("missing agent validation", "requires variant.agent" in runner.validate_driver_args(missing_agent))
+
+wrong_agent = argparse.Namespace(
+    treatment="codex-codeact",
+    backend="codex",
+    agent="kitsoki-mcp-driver",
+    capability_preset="repo_patch",
+    capability_presets_json="",
+)
+require("wrong agent validation", "kitsoki-codeact-driver" in runner.validate_driver_args(wrong_agent))
 
 if failures:
     print("FAIL: paired-task CodeAct")

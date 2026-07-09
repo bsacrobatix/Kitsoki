@@ -20,6 +20,7 @@ from .registry import (
     resolve_treatment_driver,
     treatment_catalog,
     validate_driver_args,
+    validate_driver_errors,
 )
 
 __all__ = [
@@ -43,4 +44,5 @@ __all__ = [
     "resolve_treatment_driver",
     "treatment_catalog",
     "validate_driver_args",
+    "validate_driver_errors",
 ]

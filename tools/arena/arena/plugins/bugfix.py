@@ -54,7 +54,8 @@ COMPLETION_STATE_DIR = ".artifacts/arena/completion-state"
 # Infra signals — a harness failure is not a model verdict. Kept ONLY as the
 # fallback for a missing completion-state file (see module docstring).
 _INFRA_RE = re.compile(
-    r"no such tool|worker.never.ran|host[_-]error|connection refused|provider 5\d\d",
+    r"no such tool|worker.never.ran|host[_-]error|connection refused|provider 5\d\d|"
+    r"docker endpoint|docker daemon|context .*not found|error during connect|command not found",
     re.I,
 )
 

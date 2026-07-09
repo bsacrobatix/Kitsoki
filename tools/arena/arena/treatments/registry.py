@@ -100,20 +100,45 @@ def resolve_treatment_driver(treatment: str) -> TreatmentDriver | None:
     return TREATMENT_DRIVERS.get(treatment)
 
 
-def validate_driver_args(args: argparse.Namespace) -> str:
+def validate_driver_errors(args: argparse.Namespace) -> list[str]:
+    """Return actionable treatment configuration errors for runner/CLI use."""
+    errors: list[str] = []
     treatment = canonical_treatment(args.treatment)
+    if treatment not in _DRIVERS_BY_CANONICAL:
+        errors.append(f"unknown paired-task treatment {args.treatment!r}; known: {', '.join(known_treatments())}")
+        return errors
     if treatment == "codex-codeact":
-        if not (args.agent or "").strip():
-            return f"codex-codeact requires variant.agent, expected {DEFAULT_CODEACT_AGENT}"
+        if getattr(args, "backend", "") and args.backend != "codex":
+            errors.append(f"codex-codeact requires backend 'codex', got {args.backend!r}")
+        agent = (args.agent or "").strip()
+        if not agent:
+            errors.append(f"codex-codeact requires variant.agent={DEFAULT_CODEACT_AGENT!r}")
+        elif agent != DEFAULT_CODEACT_AGENT:
+            errors.append(f"codex-codeact requires variant.agent={DEFAULT_CODEACT_AGENT!r}, got {agent!r}")
         preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
         try:
             capability_preset_json(args, preset_name)
         except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
-            return str(exc)
+            errors.append(str(exc))
     if treatment == "kitsoki-mcp-codeact":
+        if getattr(args, "backend", "") and args.backend != "codex":
+            errors.append(f"kitsoki-mcp-codeact requires backend 'codex', got {args.backend!r}")
+        mode = (getattr(args, "implementation_mode", "") or "").strip()
+        if mode and mode != "codeact":
+            errors.append(f"kitsoki-mcp-codeact requires implementation_mode 'codeact', got {mode!r}")
         preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
         try:
             capability_preset_json(args, preset_name)
         except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
-            return str(exc)
+            errors.append(str(exc))
+    if treatment == "kitsoki-mcp":
+        if getattr(args, "backend", "") and args.backend != "codex":
+            errors.append(f"kitsoki-mcp requires backend 'codex', got {args.backend!r}")
+    return errors
+
+
+def validate_driver_args(args: argparse.Namespace) -> str:
+    errors = validate_driver_errors(args)
+    if errors:
+        return "; ".join(errors)
     return ""

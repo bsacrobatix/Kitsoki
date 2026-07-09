@@ -2,6 +2,9 @@
 """arena — CLI front door for the generalized comparison-job runner.
 
 Subcommands:
+  treatments                 list reusable action-surface treatment drivers
+  validate --spec S          validate a job spec (no Docker, no LLM)
+  doctor [--spec S]          validate local prerequisites such as Docker
   plan   --spec S            enumerate cells for a job spec (no execution)
   run    --spec S --out D    run the sweep in containers, write per-cell results + rollup
                              (no-LLM arming by default; --live to spend)
@@ -16,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +28,7 @@ from arena.model import Cell, JobSpec
 from arena.placement import run_sweep
 from arena.plugins import base as plugins
 from arena.rollup import write_rollup
+from arena.treatments import treatment_catalog, validate_driver_errors
 
 # Default mounts: the kitsoki checkout (carrying the bakeoff harness + bench.py)
 # read-write into the container at the path the plugins expect.
@@ -108,6 +113,67 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_treatments(args: argparse.Namespace) -> int:
+    rows = treatment_catalog(include_aliases=args.aliases)
+    if args.json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+        return 0
+    columns = [
+        ("id", "Treatment"),
+        ("action_surface", "Surface"),
+        ("driver", "Driver"),
+        ("required_variant_fields", "Requires"),
+        ("option_fields", "Options"),
+        ("aliases", "Aliases"),
+        ("summary", "Summary"),
+    ]
+    table = []
+    for row in rows:
+        table.append({
+            "id": row.get("id", ""),
+            "action_surface": row.get("action_surface", ""),
+            "driver": row.get("driver", ""),
+            "required_variant_fields": ", ".join(row.get("required_variant_fields", []) or []),
+            "option_fields": ", ".join(row.get("option_fields", []) or []),
+            "aliases": ", ".join(row.get("aliases", []) or ([f"alias for {row['alias_for']}"] if row.get("alias_for") else [])),
+            "summary": row.get("summary", ""),
+        })
+    print(_format_table(table, columns))
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    errors, warnings = validate_spec(args.spec, live=args.live)
+    for warning in warnings:
+        print(f"WARN: {warning}")
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    print(f"OK: {args.spec}")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    errors, warnings = validate_spec(args.spec, live=args.live) if args.spec else ([], [])
+    print("Arena doctor", flush=True)
+    if args.spec:
+        print(f"- spec: {args.spec}", flush=True)
+    docker = _check_docker()
+    if docker:
+        errors.append(docker)
+    else:
+        print("- docker: OK", flush=True)
+    for warning in warnings:
+        print(f"WARN: {warning}", flush=True)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+    print("OK: arena is ready")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     spec = JobSpec.load(args.spec)
     backend = DockerBackend()
@@ -156,6 +222,100 @@ def cmd_plugins(_args: argparse.Namespace) -> int:
     return 0
 
 
+def validate_spec(spec_path: str, *, live: bool = False) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    try:
+        spec = JobSpec.load(spec_path)
+    except Exception as exc:  # noqa: BLE001 - CLI preflight must surface parse errors plainly.
+        return [f"could not load spec {spec_path}: {exc}"], warnings
+    try:
+        plugins.get(spec.job_type)
+    except KeyError as exc:
+        errors.append(str(exc))
+    cells = spec.cells()
+    if not cells:
+        errors.append("spec enumerates zero cells")
+    if spec.job_type == "paired-task":
+        presets = spec.options.get("capability_presets")
+        presets_json = json.dumps(presets, sort_keys=True) if isinstance(presets, dict) else ""
+        for variant in spec.variants:
+            treatment = str(variant.meta.get("treatment") or variant.id)
+            ns = argparse.Namespace(
+                treatment=treatment,
+                backend=variant.backend,
+                agent=str(variant.meta.get("agent") or ""),
+                worker_profile=str(variant.meta.get("worker_profile") or ""),
+                implementation_mode=str(variant.meta.get("implementation_mode") or ""),
+                capability_preset=str(variant.meta.get("capability_preset") or ""),
+                capability_presets_json=presets_json,
+            )
+            for error in validate_driver_errors(ns):
+                errors.append(f"variant {variant.id}: {error}")
+        gate = str(spec.options.get("live_gate_env") or "ARENA_PAIRED_TASK_ENABLE_CODEX")
+        if live and os.environ.get(gate) != "1":
+            errors.append(f"live paired-task dispatch is gated; set {gate}=1 to spend")
+        elif not live:
+            warnings.append(f"live paired-task dispatch remains disabled unless {gate}=1 and arena run --live are both set")
+    return errors, warnings
+
+
+def _check_docker() -> str:
+    try:
+        proc = subprocess.run(["docker", "version"], text=True, capture_output=True, timeout=10)
+    except FileNotFoundError:
+        return "docker CLI not found on PATH"
+    except subprocess.TimeoutExpired:
+        return "docker version timed out after 10s"
+    if proc.returncode == 0:
+        return ""
+    detail = _first_nonempty_line(proc.stderr) or _first_nonempty_line(proc.stdout) or f"exit {proc.returncode}"
+    context_hint = _docker_context_hint()
+    if context_hint:
+        detail = f"{detail}; {context_hint}"
+    return f"docker unavailable: {detail}"
+
+
+def _docker_context_hint() -> str:
+    try:
+        proc = subprocess.run(["docker", "context", "ls"], text=True, capture_output=True, timeout=5)
+    except Exception:  # noqa: BLE001 - best-effort hint only.
+        return ""
+    if proc.returncode != 0:
+        return ""
+    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return ""
+    current = [line for line in lines[1:] if "*" in line.split()[:2]]
+    available = [line.split()[0] for line in lines[1:] if "context not found" not in line.lower()]
+    if current and "context not found" in current[0].lower() and available:
+        return f"active Docker context appears stale; try DOCKER_CONTEXT={available[0]}"
+    return ""
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            return line[:240]
+    return ""
+
+
+def _format_table(rows: list[dict[str, object]], columns: list[tuple[str, str]]) -> str:
+    if not rows:
+        return "(none)"
+    widths = []
+    for key, title in columns:
+        widths.append(max(len(title), *(len(str(row.get(key, ""))) for row in rows)))
+    header = "  ".join(title.ljust(widths[idx]) for idx, (_key, title) in enumerate(columns))
+    rule = "  ".join("-" * widths[idx] for idx in range(len(columns)))
+    body = [
+        "  ".join(str(row.get(key, "")).ljust(widths[idx]) for idx, (key, _title) in enumerate(columns))
+        for row in rows
+    ]
+    return "\n".join([header, rule, *body])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="arena", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -163,6 +323,21 @@ def main(argv: list[str] | None = None) -> int:
     p_plan = sub.add_parser("plan", help="enumerate cells without executing")
     p_plan.add_argument("--spec", required=True)
     p_plan.set_defaults(func=cmd_plan)
+
+    p_treatments = sub.add_parser("treatments", help="list reusable treatment drivers")
+    p_treatments.add_argument("--aliases", action="store_true", help="include alias rows")
+    p_treatments.add_argument("--json", action="store_true", help="emit machine-readable catalog JSON")
+    p_treatments.set_defaults(func=cmd_treatments)
+
+    p_validate = sub.add_parser("validate", help="validate a job spec without docker or LLM calls")
+    p_validate.add_argument("--spec", required=True)
+    p_validate.add_argument("--live", action="store_true", help="also enforce live-run gates")
+    p_validate.set_defaults(func=cmd_validate)
+
+    p_doctor = sub.add_parser("doctor", help="check local arena prerequisites")
+    p_doctor.add_argument("--spec", default="", help="optionally validate a job spec too")
+    p_doctor.add_argument("--live", action="store_true", help="also enforce live-run gates")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     p_run = sub.add_parser("run", help="run the sweep in containers")
     p_run.add_argument("--spec", required=True)

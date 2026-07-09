@@ -135,7 +135,8 @@ Contract rules:
 | `arena/executor.py` | `CellExecutor` + `ContainerBackend` seam (`DockerBackend` \| `FakeBackend`) |
 | `arena/placement.py` | sweep scheduler (concurrency, INFRA-vs-MODEL retry) |
 | `arena/rollup.py` | job-agnostic leaderboard → `rollup.json` + `rollup.md` |
-| `arena.py` | CLI: `plan` · `run` · `plugins` |
+| `arena.py` | CLI: `plan` · `validate` · `doctor` · `treatments` · `run` · `plugins` |
+| `scripts/render_showdown_demo.py` | deterministic static demo page + QA scenario generator from an arena run directory |
 | `specs/*.yaml` | example job specs |
 | `tests/test_*.py` | no-LLM, no-docker end-to-end (FakeBackend) |
 
@@ -183,6 +184,15 @@ parsing contract (pure file parsing, no docker/LLM).
 ## Usage
 
 ```bash
+# inspect reusable treatment surfaces
+python3 tools/arena/arena.py treatments --aliases
+
+# validate a spec without Docker or LLM calls
+python3 tools/arena/arena.py validate --spec tools/arena/specs/bugfix-query-string.yaml
+
+# validate the spec and local Docker readiness
+python3 tools/arena/arena.py doctor --spec tools/arena/specs/bugfix-query-string.yaml
+
 # enumerate cells (no execution)
 python3 tools/arena/arena.py plan --spec tools/arena/specs/bugfix-query-string.yaml
 
@@ -191,8 +201,13 @@ python3 tools/arena/arena.py run --spec tools/arena/specs/bugfix-query-string.ya
     --out .artifacts/arena/qs-skeleton
 
 # the paid path (explicit opt-in to spend on real agent drives)
-python3 tools/arena/arena.py run --spec … --out … --live
+ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec … --out … --live
 ```
+
+`doctor` is intentionally stricter than `validate`: it checks the active Docker
+daemon/context because arena cells run in containers even on the no-LLM arming
+path. Docker startup failures roll up as `blocked` / `infra:harness`, not as a
+model loss.
 
 WB.2 paired-task gate:
 
@@ -237,6 +252,26 @@ The runner always performs a dry-run `kitsoki agent launch` before a live
 surface, records the capability hash, and marks the cell `blocked`
 (`infra:harness`) if the permission proof fails. Live execution still requires
 both `arena run --live` and the configured gate environment variable.
+
+Operator runbook for the CodeAct-vs-Codex action-surface matrix:
+
+```bash
+make arena-showdown-plan
+make arena-showdown-run       # no-LLM arming run, containerized
+make arena-showdown-demo      # records .artifacts/arena-showdown-demo/arena-showdown-demo.mp4
+make arena-showdown-qa        # gated visual QA over the recorded video
+```
+
+The live spend path is separate and still double-gated:
+
+```bash
+ARENA_PAIRED_TASK_ENABLE_CODEX=1 make arena-showdown-live
+```
+
+`arena-showdown-demo` records a tour over the actual arena output directory
+(`ARENA_SHOWDOWN_OUT`, default `.artifacts/arena/codeact-showdown`) and writes
+the generated HTML, QA feature, QA scenarios, MP4, chapters, and labeled PNG
+frames under `.artifacts/arena-showdown-demo/`.
 
 New treatments should be added to `arena/treatments/registry.py`, documented in
 the package README and `docs/research/arena-treatments.md`, and covered by a
