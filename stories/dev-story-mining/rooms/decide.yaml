@@ -14,15 +14,15 @@ states:
     view:
       - banner:
           text:     "DECIDE"
-          subtitle: "Phase 4 / 6  ·  rank by usage, mechanicalness, adoption leverage"
+          subtitle: "Phase 4 / 6  -  rank by usage, mechanicalness, adoption leverage"
           color:    "#8B5CF6"
-      - prose: "{{ world.job }} · cycle {{ world.cycle }} · judge {{ world.judge_mode }}"
+      - prose: "{{ world.job }} - judge {{ world.judge_mode }}"
       - kv:
           pairs:
             Selected: '{{ world.selected_theme|default:"(pending)" }}'
             Kind:     '{{ world.selected_artifact_kind|default:"(pending)" }}'
       - heading: "Decision"
-      - code: '{{ world.decide_artifact.summary_markdown|default:"(pending — ranker has not returned yet)" }}'
+      - template: '{{ world.decide_artifact.summary_markdown|default:"(pending - ranker has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
@@ -87,7 +87,7 @@ states:
       accept:
         - target: author
           effects:
-            - say: "Selected '{{ world.selected_theme }}' ({{ world.selected_artifact_kind }}) — authoring the improvement + no-LLM coverage."
+            - say: "Selected '{{ world.selected_theme }}' ({{ world.selected_artifact_kind }}). Authoring the improvement, diff, and no-LLM coverage now."
             - set: { refine_feedback: "" }
       refine:
         - when: "world.decide_cycle >= world.decide_budget"
@@ -104,7 +104,7 @@ states:
                 selected_theme:  ""
                 selected_artifact_kind: ""
       restart_from:
-        - target: map
+        - target: mapping
           effects:
             - set: { refine_feedback: "", decide_cycle: 0, map_artifact: {}, decide_artifact: {}, selected_theme: "", selected_artifact_kind: "" }
       quit:

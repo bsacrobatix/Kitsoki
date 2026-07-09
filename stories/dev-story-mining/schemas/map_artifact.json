@@ -3,7 +3,15 @@
   "title":   "map_artifact",
   "description": "Cross-reference of the brief's in-scope automation opportunities against the target Kitsoki story/script/hook inventory.",
   "type":    "object",
-  "required": ["opportunities", "summary_markdown"],
+  "required": [
+    "opportunities",
+    "map_path",
+    "opportunity_count_display",
+    "actionable_display",
+    "limited_display",
+    "already_modeled_display",
+    "summary_markdown"
+  ],
   "properties": {
     "opportunities": {
       "type": "array",
@@ -28,6 +36,11 @@
       }
     },
     "themes": { "type": "array", "description": "Backward-compatible alias for older flows; new producers should emit opportunities." },
+    "map_path": { "type": "string", "description": "Path to the emitted opportunity-map markdown file, when one was written." },
+    "opportunity_count_display": { "type": "string", "description": "Human-facing count of in-scope opportunities." },
+    "actionable_display": { "type": "string", "description": "Human-facing count of ACTIONABLE opportunities." },
+    "limited_display": { "type": "string", "description": "Human-facing count of LIMITED opportunities." },
+    "already_modeled_display": { "type": "string", "description": "Human-facing count of ALREADY-MODELED opportunities." },
     "summary_markdown": { "type": "string", "minLength": 40, "description": "Human-readable map delivered to the transport." }
   },
   "additionalProperties": true

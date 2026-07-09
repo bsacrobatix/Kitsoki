@@ -8,6 +8,7 @@ import type { AnnotationAnchor, MediaKind } from "../lib/annotationAnchor.js";
 import { serializeAnchor } from "../lib/annotationAnchor.js";
 import { renderMarkdownDocument } from "../lib/markdown.js";
 import MarkdownModal from "./MarkdownModal.vue";
+import DiffModal from "./DiffModal.vue";
 import ArtifactAnnotator from "./ArtifactAnnotator.vue";
 import { useRunStore } from "../stores/run.js";
 import { getActivePinia } from "pinia";
@@ -497,9 +498,15 @@ const renderedTemplateMarkdown = computed(() =>
 
 /** Path currently open in the markdown modal (null = closed). */
 const openedPath = ref<string | null>(null);
+/** Path currently open in the diff modal (null = closed). */
+const openedDiffPath = ref<string | null>(null);
 
 function isMarkdownPath(value: string): boolean {
   return /\S+\.md$/.test(value.trim());
+}
+
+function isDiffPath(value: string): boolean {
+  return /\S+\.(diff|patch)$/.test(value.trim());
 }
 
 interface KVInlineLink {
@@ -642,6 +649,11 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
           class="ve-kv-file-link"
           @click="openedPath = pair.Value.trim()"
         >{{ pair.Value }}</button>
+        <button
+          v-else-if="isDiffPath(pair.Value)"
+          class="ve-kv-file-link"
+          @click="openedDiffPath = pair.Value.trim()"
+        >{{ pair.Value }}</button>
         <template v-else>{{ pair.Value }}</template>
       </dd>
     </template>
@@ -651,6 +663,11 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
     v-if="openedPath !== null"
     :path="openedPath"
     @close="openedPath = null"
+  />
+  <DiffModal
+    v-if="openedDiffPath !== null"
+    :path="openedDiffPath"
+    @close="openedDiffPath = null"
   />
 
   <div
