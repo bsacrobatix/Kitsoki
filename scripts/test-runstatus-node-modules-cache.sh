@@ -60,4 +60,31 @@ fi
 (cd "$repo" && "$cache_script" prepare-install)
 [ ! -e "$repo/tools/runstatus/node_modules" ] || fail "prepare-install did not remove stale cache symlink"
 
+protected_repo="$tmp/protected-repo"
+mkdir -p "$protected_repo/tools/runstatus/node_modules/.bin"
+git -C "$tmp" init --quiet protected-repo
+cp "$repo/tools/runstatus/package.json" "$protected_repo/tools/runstatus/package.json"
+cat >"$protected_repo/tools/runstatus/pnpm-lock.yaml" <<'YAML'
+lockfileVersion: '9.0'
+YAML
+cat >"$protected_repo/tools/runstatus/node_modules/.modules.yaml" <<'YAML'
+layoutVersion: 5
+YAML
+printf '#!/usr/bin/env sh\nexit 0\n' >"$protected_repo/tools/runstatus/node_modules/.bin/tsx"
+chmod +x "$protected_repo/tools/runstatus/node_modules/.bin/tsx"
+cat >"$protected_repo/.kitsoki-dev-workspace.json" <<JSON
+{"root":"$protected_repo/.capsules/workspaces"}
+JSON
+chmod u-w "$protected_repo"
+(cd "$protected_repo" && "$cache_script" save) >/tmp/kitsoki-runstatus-cache-protected-save.log
+[ -d "$protected_repo/.capsules/cache/runstatus-node-modules" ] || fail "protected save did not create .capsules cache"
+protected_mode="$(python3 - "$protected_repo" <<'PY'
+import os
+import stat
+import sys
+print("w" if os.stat(sys.argv[1]).st_mode & stat.S_IWUSR else "-")
+PY
+)"
+[ "$protected_mode" = "-" ] || fail "protected save did not relock repo root"
+
 echo "runstatus node_modules cache tests passed"
