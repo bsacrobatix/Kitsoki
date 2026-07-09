@@ -1,13 +1,15 @@
-# kitsoki-dev — the dogfood instance.
+# kitsoki-dev — the self-hosted dev-story instance.
 #
-# The dogfood default: kitsoki works on kitsoki through its own UI, with local
-# artifact bug files as both tickets and conversation logs. GitHub Issues are
-# shown beside those local artifacts for user-submitted issues and coordination
-# work, without making local developer picks close/comment on GitHub.
+# This is the golden project-owned wrapper for @kitsoki/dev-story. It imports
+# the shared hub under `core`, declares strict hosts at the parent level, and
+# projects only project defaults through world_in. Local artifact bug files stay
+# the default ticket/conversation log, while GitHub Issues appear beside them
+# for user-submitted issues and coordination without making local developer
+# picks close/comment on GitHub.
 #
 # Composition is one import edge: dev-story (general-purpose hub) is
-# imported under alias `core` with concrete host bindings to the
-# local-files providers. The bf → pr chain — and every day-level room
+# imported under alias `core` with concrete host bindings. The bf → pr chain —
+# and every day-level room
 # (main, ticket_search, inbox, agent, …) — is reachable via the
 # `core` compound.
 #
@@ -157,7 +159,7 @@ imports:
     # (and transitively by bf / pr). These rebind the dev-story
     # defaults to the local-files / git providers.
     #
-    # The append_to_file transport is the dogfood-specific choice:
+    # The append_to_file transport is the project-specific choice:
     # checkpoint posts go INTO the bug file (the `thread:` arg on
     # iface.transport.post carries the file path), so the local file
     # is the comment thread.
@@ -209,12 +211,12 @@ world:
   # ticket is remote. ticket_github_repo feeds the selector's GitHub section.
   ticket_repo:  { type: string, default: "" }
   ticket_github_repo: { type: string, default: "origin" }
-  # Default self-hosting destination: land fixes into the local base branch
+  # Default local destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.
   bugfix_destination: { type: string, default: "local-merge" }
 
-  # The dogfood test-fix loop uses the same project-level command an operator
+  # The self-hosted test-fix loop uses the same project-level command an operator
   # would run locally. dev-story's imported fix-tests loop falls back to
   # `make test` when this is empty; keeping it explicit here documents the
   # self-instance contract.

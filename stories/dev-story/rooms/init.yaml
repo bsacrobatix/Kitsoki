@@ -510,7 +510,7 @@ states:
               intent: look
     on:
       select_story_pack:
-        - when: "slots.pack == 'core-engineering' || slots.pack == 'focused-engineering' || slots.pack == 'cyber-repo'"
+        - when: "slots.pack == 'core-engineering' || slots.pack == 'focused-engineering'"
           target: init
           effects:
             - set:

@@ -1,14 +1,14 @@
-# kitsoki-dev — the dogfood instance
+# kitsoki-dev — the self-hosted dev-story instance
 
-The dogfood instance described in the
-[bug-fix case study](../../../docs/case-studies/bug-fix.md).
-This is the PoC milestone (★): **kitsoki working on kitsoki through
-its own UI**. Local artifact bug files stay the default developer loop, and
-GitHub Issues appear beside them for user-submitted issues and coordination.
+This is the project-owned wrapper for running `@kitsoki/dev-story` against the
+Kitsoki checkout. It is the golden example for reusable dev-story instances:
+the app imports the shared story under `core`, keeps project defaults in
+`world:`, and binds provider interfaces without forking shared rooms. Local
+artifact bug files stay the default developer loop, and GitHub Issues appear
+beside them for user-submitted issues and coordination.
 
-The whole app is ~25 lines of YAML that imports `stories/dev-story/`
-under the alias `core` and binds five `host_interfaces:` to concrete
-providers:
+The app imports `stories/dev-story/` under the alias `core` and binds five
+`host_interfaces:` to concrete providers:
 
 | iface       | binding                  | what it does                                                     |
 |-------------|--------------------------|------------------------------------------------------------------|
@@ -110,7 +110,7 @@ canned closed-loop tests:
 
 | Fixture                                  | What it proves                                                                  |
 |------------------------------------------|---------------------------------------------------------------------------------|
-| `flows/dogfood_smoke.yaml`               | the app loads; `iface.ticket.list_mine` resolves; navigation lifts work          |
+| `flows/self_host_smoke.yaml`             | the app loads; `iface.ticket.list_mine` resolves; navigation lifts work          |
 | `flows/fix_tests_autonomous.yaml`        | `core__go_fix_tests` runs quick/full make-test gates plus review and returns to landing |
 | `flows/idea_uses_context_workspace.yaml` | the idea/proposal room writes workspaces under `.context/designs`, not protected `docs/proposals/.workspace` |
 | `flows/pickup_self_bug_supervised.yaml`  | 18-turn supervised walk: ticket pick → bf 8-room → @exit:done → pr → @exit:merged → main |
@@ -154,9 +154,9 @@ symbolic `ticket_github_repo: origin`.
 
 ## Manual walkthrough (the on-disk smoke)
 
-This is the loop that proves the dogfood acceptance per the
+This is the loop that proves the self-hosted acceptance path per the
 [bug-fix case study](../../../docs/case-studies/bug-fix.md):
-a kitsoki bug filed in one session is fixed via the dogfood
+a Kitsoki bug filed in one session is fixed via this
 instance in a second session, the diff lands as a real commit, the
 file's `status:` is `resolved`.
 
@@ -181,7 +181,7 @@ The first command writes a markdown file under `$KITSOKI_REPO/issues/bugs/`
 with the frontmatter schema documented in
 [`docs/stories/bugs.md`](../../../docs/stories/bugs.md) (and mirrored in
 [`../../../issues/README.md`](../../../issues/README.md)). The second command
-boots the dogfood instance, whose composite ticket provider shows that local
+boots this instance, whose composite ticket provider shows that local
 artifact under the Local section and GitHub issues under the GitHub section.
 
 Two pre-seeded examples ship in `issues/bugs/` for the Phase 3
@@ -353,7 +353,7 @@ caveats:
    `/meta kitsoki bug` writes to `$KITSOKI_REPO/issues/bugs/`;
    `/meta story bug` writes to `<app-dir>/issues/bugs/`. Both use the
    same on-disk format documented in [`docs/stories/bugs.md`](../../../docs/stories/bugs.md).
-   The dogfood loop reads + transitions the file the producer wrote;
+   The self-hosted loop reads + transitions the file the producer wrote;
    the loop is now closed end-to-end.
 
 A fourth latent issue we surfaced while building this phase:
@@ -395,14 +395,14 @@ A fifth concession the flow fixtures take:
 
 ```
 .kitsoki/stories/kitsoki-dev/
-├── app.yaml                      — the ~50-line dogfood instance
+├── app.yaml                      — the self-hosted dev-story wrapper
 ├── README.md                     — this file
 ├── scenarios/                    — boot-time warp bases
 │   ├── pickup_self_bug.yaml
 │   ├── pickup_story_bug.yaml
 │   └── autonomous_ready.yaml
 └── flows/                        — deterministic flow fixtures
-    ├── dogfood_smoke.yaml
+    ├── self_host_smoke.yaml
     ├── pickup_self_bug_supervised.yaml
     ├── pickup_story_bug_supervised.yaml
     └── pickup_autonomous_then_bail.yaml
@@ -418,7 +418,7 @@ needed.
 ## See also
 
 - [`../../../docs/case-studies/bug-fix.md`](../../../docs/case-studies/bug-fix.md)
-  — the dogfood case study (kitsoki-dev shape, closed-loop
+  — the self-hosted case study (kitsoki-dev shape, closed-loop
   walkthrough, acceptance).
 - [`../../../docs/proposals/notes/dev-story-implementation-contract.md`](../../../docs/proposals/notes/dev-story-implementation-contract.md)
   Wave 2 / Phase 3 appendix.

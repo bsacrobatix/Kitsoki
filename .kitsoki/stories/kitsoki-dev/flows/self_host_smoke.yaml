@@ -1,4 +1,4 @@
-# dogfood_smoke — boot, land in core.landing, verify iface.ticket.search
+# self_host_smoke — boot, land in core.landing, verify iface.ticket.search
 # resolves through host.local_github.ticket and returns local + GitHub rows.
 #
 # Smallest possible flow proving:

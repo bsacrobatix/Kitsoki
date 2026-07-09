@@ -8,9 +8,8 @@
 # emit_intent gate closes on `judge_mode == 'human'`.
 #
 # Proves the autonomous loop bails cleanly to human in mid-stream
-# without restart, replay, or state reload — the same exact mechanism
-# kitsoki-dev uses when the autonomous variant of the dogfood loop
-# from proposal §5.4 hits an uncertain verdict and needs a human ack.
+# without restart, replay, or state reload — the same mechanism this
+# self-hosted instance uses when an uncertain verdict needs a human ack.
 #
 # Story shape borrowed from stories/bugfix/flows/mixed_judge_swap.yaml
 # (where it pins the bare bugfix story) and re-expressed through the
@@ -95,7 +94,7 @@ host_handlers:
         # resolves bare emit names through the state's IntentAliases
         # map, so a live LLM-judge producing the bare `accept` works
         # end-to-end (covered by .kitsoki/stories/kitsoki-dev/flows/
-        # dogfood_autonomous_smoke.yaml). This fixture keeps the
+        # self_host_autonomous_smoke.yaml). This fixture keeps the
         # fully-prefixed spelling as regression coverage that
         # already-prefixed names ALSO dispatch correctly.
         intent:     "core__bf__accept"

@@ -10,8 +10,13 @@ replaced the former `main` catalog.
 
 This app does **not** bind providers. Concrete bindings happen at the
 instance level: a generated `.kitsoki/` wrapper or an importing project app
-selects local files, GitHub/Jira tickets, git/workspace providers, and CI
-providers for the target repository.
+selects ticket, git/workspace, CI, and transport providers for the target
+repository. The canonical shape is a small project-owned wrapper that
+imports `@kitsoki/dev-story` under `core`, declares the full strict host
+allow-list, binds `ticket` / `vcs` / `ci` / `workspace` / `transport`, and
+projects project defaults through `world_in`. Project onboarding writes that
+wrapper under `.kitsoki/stories/<project>-dev/`; `.kitsoki/stories/kitsoki-dev/`
+is the self-hosted golden example of the same contract.
 
 Standalone:
 
@@ -131,11 +136,13 @@ repo-native docs paths such as `docs/prd` and `docs/proposals`.
 | `repo_root` | `""` | external checkout root; threaded into every `iface.ticket.*` call as the `root` arg, so `host.local_files.ticket` scans `<repo_root>/issues/...` (`""` ⇒ cwd). `host.gh.ticket` ignores it (its source is `ticket_repo`). |
 | `publish_durable_path` | `docs/prd` | PRD publish home (relative to `workdir`); projected into the `prd` import via `world_in`. |
 | `prd_doc_filename` | `""` | fixed PRD filename (e.g. `PRD` → `PRD.md`); `""` ⇒ slug-named (`<slug>.md`) |
+| `prd_mockup_path` | `""` | optional project-local HTML mockup embedded into the PRD published read-out; project demos set this, ordinary repos leave it empty. |
 | `design_template_dir` | `docs/proposals/templates` | dir the design author reads its doc templates from |
 | `design_durable_path` | `docs/proposals` | DESIGN publish home (relative to `workdir`). |
 | `design_doc_filename` | `""` | fixed DESIGN filename (e.g. `DESIGN` → `DESIGN.md`); `""` ⇒ slug-named |
 | `design_ticket_dir` | `issues/features` | where the linking feature ticket is minted; `""` ⇒ **skip** minting (an external target tracks work elsewhere, e.g. GitHub issues) |
-| `ticket_repo` | `""` | `owner/repo` for GitHub-issue tickets; **non-empty ⇒ the feature publish mints a GitHub feature issue** (labels `target:<repo-name>` + `comp:proposal`, body links the proposal) instead of a local file — takes precedence over `design_ticket_dir`. Generated project wrappers can default this to the symbolic `origin` (resolved against `git remote get-url origin`). See [hosts.md → host.gh.ticket](../../docs/architecture/hosts.md#hostghticket--github-issues-backed-tracker). |
+| `ticket_repo` | `""` | active selected GitHub issue repo. Generated wrappers keep this empty at rest so local/pasted reports stay local; `ticket_search` fills it after a GitHub row is picked. Non-empty during design publish mints a GitHub feature issue instead of a local file. |
+| `ticket_github_repo` | `""` | GitHub issue source shown beside local artifact tickets when the wrapper binds `ticket` to `host.local_github.ticket`; usually an `owner/repo` slug or a resolvable remote name. |
 
 How the keys reach the glue: the `prd` import's `world_in` projects
 `publish_durable_path` + `prd_doc_filename` into the prd child;
@@ -163,7 +170,36 @@ layering is: community/shared patterns live in dev-story, organization or
 project conventions live in the importing instance's profile, and local
 exceptions are explicit world defaults in that instance.
 
-## Provider neutrality
+## Import Wrapper Contract
+
+Generated project wrappers and the self-hosted `kitsoki-dev` wrapper use this
+shape:
+
+- `routing.free_form_fallback` points `core.*` rooms back to
+  `core.landing` through `core__landing_capture`, so free text works from
+  menu-shaped rooms after import aliasing.
+- `hosts:` declares the full strict surface used by dev-story and its child
+  imports, including ticket providers, agent verbs, IDE/diff helpers, chat,
+  Starlark, and local command hosts. Strict parents should prefer this superset
+  over hand-pruning; unused entries are harmless, missing entries break loads.
+- `host_bindings.ticket` is `host.local_files.ticket` for good local capability
+  and `host.local_github.ticket` when a GitHub source is configured. The latter
+  searches local artifacts and GitHub issues side by side while routing selected
+  close-out by source.
+- `world_in` always projects `workdir`, `repo_root`, judge settings, document
+  placement, `prd_mockup_path`, `ticket_repo`, `ticket_github_repo`,
+  `bugfix_destination`, and project build/test commands.
+- At rest, `ticket_repo` is empty and `ticket_github_repo` carries the configured
+  GitHub source. This is the key distinction that lets a project have full
+  GitHub search/fetch/close-out for remote issues without making pasted or local
+  bug reports mutate GitHub.
+
+The renderer for onboarding-generated wrappers lives in
+[`scripts/init_apply.py`](./scripts/init_apply.py). Keep new import-surface
+requirements there first, then mirror only deliberate project-specific defaults
+in examples such as `stories/slidey-dev/`.
+
+## Provider Neutrality
 
 The legacy `testdata/apps/dev-story/` stub had Jira-flavoured world
 keys (`jira_query`, `jira_results`) and called `host.run` with hard-
@@ -175,8 +211,9 @@ coded `echo` commands. dev-story (this app) strips those:
 | `world.jira_results` | `world.ticket_results` |
 | `host.run` (echo) | `iface.ticket.search` / `iface.ticket.list_mine` |
 
-A project instance can rebind `iface.ticket` to GitHub, Jira, local markdown
-files, or another provider. Same YAML, provider-specific bindings.
+An importing project can bind `iface.ticket` to local files, a composite
+local+GitHub provider, or another provider that implements the same interface.
+Same room YAML, different provider.
 
 ## Rooms
 

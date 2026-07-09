@@ -128,18 +128,14 @@ STARTER_STORY_ALIASES = {
 }
 
 STORY_PACK_ALIASES = {
-    "cyber": "core-engineering",
-    "cyberrepo": "core-engineering",
-    "cyber-repo": "core-engineering",
-    "cyber_repo": "core-engineering",
+    "engineering": "core-engineering",
+    "core-engineering": "core-engineering",
     "focusedengineering": "core-engineering",
     "focused_engineering": "core-engineering",
     "focused": "core-engineering",
     "focused-engineering": "core-engineering",
     "targeted": "core-engineering",
     "targeted-engineering": "core-engineering",
-    "core-engineering": "core-engineering",
-    "engineering": "core-engineering",
     "core": "core-setup",
     "setup": "core-setup",
     "minimal": "core-setup",
