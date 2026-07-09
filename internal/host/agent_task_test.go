@@ -108,6 +108,121 @@ func TestAgentTask_InlineAgentContract(t *testing.T) {
 	}
 }
 
+func TestAgentTask_SlideyMCPOnlyContract(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "ok.schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`), 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	var captured []string
+	var mcpConfigs []string
+	runner := func(_ context.Context, args []string, _, _ string) (host.ClaudeRun, error) {
+		captured = append([]string(nil), args...)
+		for i, a := range args {
+			if a == "--mcp-config" && i+1 < len(args) {
+				if data, rerr := os.ReadFile(args[i+1]); rerr == nil {
+					mcpConfigs = append(mcpConfigs, string(data))
+				}
+			}
+		}
+		if outputPath := host.ParseMCPConfigSubmitOutput(args); outputPath != "" {
+			_ = os.WriteFile(outputPath, []byte(`{"ok":true}`), 0o600)
+		}
+		return host.ClaudeRun{Stdout: `{"ok":true}`}, nil
+	}
+
+	ctx := host.WithClaudeRunner(
+		host.WithAgents(context.Background(), map[string]host.Agent{
+			"slidey_editor": {
+				SystemPrompt: "edit slidey",
+				Model:        "claude-sonnet-4-6",
+				MCPTools: []string{
+					"mcp__slidey__workspace_tree",
+					"mcp__slidey__read_spec",
+					"mcp__slidey__write_spec",
+					"mcp__slidey__patch_spec",
+					"mcp__slidey__validate",
+				},
+				MCPServers: map[string]any{
+					"slidey": map[string]any{"command": "slidey-mcp", "args": []any{"--root", "."}},
+				},
+				Permissions: host.AgentPermissions{
+					Mode: "ask",
+					DisallowedTools: []string{
+						"Read", "Grep", "Glob", "Write", "Edit", "Bash", "WebFetch", "WebSearch",
+					},
+				},
+			},
+		}),
+		runner,
+	)
+
+	res, err := host.AgentTaskHandler(ctx, map[string]any{
+		"agent":       "slidey_editor",
+		"working_dir": dir,
+		"context":     map[string]any{"prompt": "write a deck"},
+		"acceptance":  map[string]any{"schema": schemaPath, "max_retries": 1},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected Result.Error: %s", res.Error)
+	}
+
+	if got, ok := hostTestFlagValue(captured, "--permission-mode"); !ok || got != "default" {
+		t.Fatalf("slidey MCP-only contract must enforce default permission mode, got %q args=%v", got, captured)
+	}
+	allowed, ok := hostTestFlagValue(captured, "--allowedTools")
+	if !ok {
+		t.Fatalf("expected --allowedTools for slidey MCP contract; args=%v", captured)
+	}
+	for _, want := range []string{
+		"mcp__slidey__workspace_tree",
+		"mcp__slidey__read_spec",
+		"mcp__slidey__write_spec",
+		"mcp__slidey__patch_spec",
+		"mcp__slidey__validate",
+		"mcp__validator__submit",
+	} {
+		if !strings.Contains(allowed, want) {
+			t.Fatalf("--allowedTools missing %q; got %q", want, allowed)
+		}
+	}
+	for _, notWant := range []string{"host.Read", "host.Write", "host.Edit", "host.Bash", "Read", "Write", "Edit", "Bash"} {
+		if strings.Contains(allowed, notWant) {
+			t.Fatalf("generic workspace tool %q leaked into --allowedTools %q", notWant, allowed)
+		}
+	}
+	denied, ok := hostTestFlagValue(captured, "--disallowedTools")
+	if !ok {
+		t.Fatalf("expected --disallowedTools for generic workspace denials; args=%v", captured)
+	}
+	for _, want := range []string{"Read", "Grep", "Glob", "Write", "Edit", "Bash", "WebFetch", "WebSearch", "AskUserQuestion"} {
+		if !strings.Contains(denied, want) {
+			t.Fatalf("--disallowedTools missing %q; got %q", want, denied)
+		}
+	}
+
+	var slideyAttached, validatorAttached bool
+	for _, cfg := range mcpConfigs {
+		if strings.Contains(cfg, `"slidey"`) && strings.Contains(cfg, `"slidey-mcp"`) {
+			slideyAttached = true
+		}
+		if strings.Contains(cfg, `"validator"`) {
+			validatorAttached = true
+		}
+	}
+	if !slideyAttached {
+		t.Fatalf("slidey MCP server was not attached; args=%v configs=%v", captured, mcpConfigs)
+	}
+	if !validatorAttached {
+		t.Fatalf("validator MCP server must remain attached; configs=%v", mcpConfigs)
+	}
+}
+
 // ── Missing acceptance.schema ─────────────────────────────────────────────
 
 // TestAgentTask_MissingSchema verifies that the handler rejects calls without

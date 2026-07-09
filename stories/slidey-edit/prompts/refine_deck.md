@@ -7,11 +7,19 @@ The relevant slidey editing contract is provided here. Do not look for or
 invoke skills, SKILL.md files, `.agents/skills`, or `.claude/skills`; this
 dispatched task is intentionally self-contained.
 
+Do not use shell commands or generic filesystem tools. The only allowed deck
+IO is the Slidey MCP. Read the deck with `slidey_read_spec`, apply the focused
+change with `slidey_patch_spec` or `slidey_write_spec`, and call
+`slidey_validate` before submitting.
+
 {% block spec_project_context %}{% endblock %}
 
 ## Workspace
 
-`{{ args.workspace }}` — write only under this directory.
+Repository workspace: `{{ args.workspace }}`
+
+The Slidey MCP root is this workspace. When calling Slidey MCP tools, use the
+workspace-relative path, not the repository path joined onto the workspace.
 
 ## Deck
 
@@ -20,9 +28,7 @@ Workspace-relative path: `{{ args.deck.workspace_spec_path|default:args.deck.spe
 
 {{ args.deck.summary }}
 
-You are running from the workspace directory. Read and write the
-workspace-relative path above, not the repository path joined onto the workspace
-again.
+Read and write the workspace-relative path above through the Slidey MCP.
 
 ## The slide you are editing (edit ONLY this one)
 
@@ -92,5 +98,6 @@ separate `id`, `heading`, or `elements` wrappers.
 ## What to produce
 
 Apply the instruction to the resolved scene element only. Submit the deck
-object: `spec_path`, a one-line `summary` of what you changed, and the `edited`
-element refs you touched (the opaque `<scene>/<el>` form, e.g. `1/card_0`).
+object: the repository-render `spec_path`, a one-line `summary` of what you
+changed, and the `edited` element refs you touched (the opaque `<scene>/<el>`
+form, e.g. `1/card_0`).
