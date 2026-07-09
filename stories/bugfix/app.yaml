@@ -2,7 +2,7 @@
 #
 # Wave 1 / Slice α (see docs/proposals/notes/dev-story-implementation-contract.md):
 # the 7 visible rooms (idle → reproducing → proposing → implementing → testing
-# → reviewing → validating → done) collapse the cyber-repo's 14-phase pipeline
+# → reviewing → validating → done) collapse the focused-engineering's 14-phase pipeline
 # into one state machine. Each room has an `_executing` substate that drives
 # the LLM call producing the artifact, and (for checkpointed rooms) an
 # `_awaiting_reply` substate that posts the artifact, mirrors it to the local
@@ -337,7 +337,7 @@ host_interfaces:
 
   # 2.5 transport — out-of-band channel for checkpoint artifacts. For
   # kitsoki-dev this is `host.append_to_file` (appends a comment block to the
-  # local bug file); cyber-repo's parent story will rebind to
+  # local bug file); focused-engineering's parent story will rebind to
   # `host.jira_comment`. host.stdout (no-op) is available for tests that
   # don't care about the side effect.
   transport:
@@ -555,7 +555,7 @@ world:
 
   # ── L2 cycle budgets — per-checkpoint refine counters + budgets ──────
   #
-  # Wave 3 / Phase 4 — port of the cyber-repo bugfix's L2 cycle-budget
+  # Wave 3 / Phase 4 — port of the focused-engineering bugfix's L2 cycle-budget
   # pattern (HALLY-MIGRATION §2.6). Each checkpointed room maintains its
   # own `<phase>_cycle` counter; when `refine` fires the counter increments
   # and the room re-executes. When the counter hits `<phase>_budget` the
@@ -563,7 +563,7 @@ world:
   # <phase>_cycle_budget_exhausted` — the operator gets one bail-out
   # instead of an infinite loop.
   #
-  # Budgets default to 3 (matches cyber-repo's L2 retry caps); operators
+  # Budgets default to 3 (matches focused-engineering's L2 retry caps); operators
   # can override per-session by setting `<phase>_budget` in initial_world.
   # `cycle_budget` is the documented global default — kept here for parity
   # with the proposal §4.2 vocabulary but not currently used directly by

@@ -7761,7 +7761,7 @@ nodes:
     visibility: internal
     proposal_kind: epic
     path: docs/proposals/auto-advance-states-proposal.md
-    status_line: Not implemented. Motivated by the cyber-repo bugfix
+    status_line: Not implemented. Motivated by the focused-engineering bugfix
     index_blurb: 'auto-fire `done` after `on_enter` chains complete, with `wait: true` to opt out. Nothing implemented yet.'
     sources:
       - source-auto-advance-states-proposal-proposal

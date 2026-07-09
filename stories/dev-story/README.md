@@ -10,7 +10,7 @@ replaced the former `main` catalog.
 
 This app does **not** bind providers. Concrete bindings happen at the
 INSTANCE level: `.kitsoki/stories/kitsoki-dev/` (Wave 3) for local-file
-providers; `cyber-repo/stories/devstory/` (Phase 7) for Jira /
+providers; importing dev-story instances for Jira /
 Bitbucket / Jenkins.
 
 Standalone:
@@ -176,7 +176,7 @@ coded `echo` commands. dev-story (this app) strips those:
 | `world.jira_results` | `world.ticket_results` |
 | `host.run` (echo) | `iface.ticket.search` / `iface.ticket.list_mine` |
 
-The cyber-repo flavour rebinds `iface.ticket` to `host.jira`; kitsoki-
+An importing project flavour can rebind `iface.ticket` to `host.jira`; kitsoki-
 dev rebinds to `host.local_files.ticket`. Same YAML, two providers.
 
 ## Rooms

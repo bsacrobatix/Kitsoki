@@ -50,29 +50,29 @@ print(app_yaml({
 	}
 }
 
-func TestOnboardingDiscoveryUsesCyberRepoProjectMetadata(t *testing.T) {
+func TestOnboardingDiscoveryUsesMetaRepoProjectMetadata(t *testing.T) {
 	root := t.TempDir()
-	target := filepath.Join(root, "src", "cyberstack", "platform-presentation")
+	target := filepath.Join(root, "services", "example-service")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatalf("mkdir target: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "projects", "platform-presentation"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "projects", "example-service"), 0o755); err != nil {
 		t.Fatalf("mkdir project metadata: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "projects", "platform-presentation", "project.toml"), []byte(`
+	if err := os.WriteFile(filepath.Join(root, "projects", "example-service", "project.toml"), []byte(`
 schema_version = 1
-title = "Platform Presentation"
-description = "Platform Presentation Service workspace."
+title = "Example Service"
+description = "Example service workspace."
 
 [[repos]]
-submodule    = "src/cyberstack/platform-presentation"
+submodule    = "services/example-service"
 role         = "primary"
-description  = "Go service that composes platform API responses."
+description  = "Go service that composes API responses."
 test_command = "go test ./..."
 
 [repos.local_run]
-build = "go build -o ./bin/presentation-service ./cmd/presentation-service"
-start = "./bin/presentation-service --config configs/presentation-service.example.yml"
+build = "go build -o ./bin/example-service ./cmd/example-service"
+start = "./bin/example-service --config configs/example-service.example.yml"
 `), 0o644); err != nil {
 		t.Fatalf("write project metadata: %v", err)
 	}
@@ -85,12 +85,12 @@ start = "./bin/presentation-service --config configs/presentation-service.exampl
 	}
 	text := string(discovered)
 	for _, want := range []string{
-		`"project_id": "platform-presentation"`,
-		`"project_title": "Platform Presentation"`,
+		`"project_id": "example-service"`,
+		`"project_title": "Example Service"`,
 		`"stack": "go project"`,
 		`"test_command": "go test ./..."`,
-		`"build_command": "go build -o ./bin/presentation-service ./cmd/presentation-service"`,
-		`"dev_command": "./bin/presentation-service --config configs/presentation-service.example.yml"`,
+		`"build_command": "go build -o ./bin/example-service ./cmd/example-service"`,
+		`"dev_command": "./bin/example-service --config configs/example-service.example.yml"`,
 		`"conventions": "project"`,
 	} {
 		if !strings.Contains(text, want) {

@@ -20,9 +20,9 @@ type projectProfileStoryPack struct {
 
 var projectProfileStoryPacks = []projectProfileStoryPack{
 	{
-		ID:      "cyber-repo",
-		Title:   "Cyber repo starter",
-		Summary: "Focused first-run set for cyber-repo: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
+		ID:      "focused-engineering",
+		Title:   "Focused engineering starter",
+		Summary: "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
 		Stories: []string{"setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"},
 	},
 	{
@@ -177,8 +177,8 @@ func normalizeProjectProfileStoryPackID(raw string) string {
 	id = strings.ReplaceAll(id, "_", "-")
 	id = strings.Trim(id, "'\"`")
 	switch id {
-	case "cyber", "cyberrepo", "focused", "focused-engineering", "targeted", "targeted-engineering":
-		return "cyber-repo"
+	case "focusedengineering", "focused", "focused-engineering", "targeted", "targeted-engineering":
+		return "focused-engineering"
 	case "core", "setup", "minimal", "essentials":
 		return "core-setup"
 	case "planning", "delivery", "prd":

@@ -76,7 +76,7 @@ states:
     relevant_world: [ticket_id, ticket_title, ticket_body, task_summary_artifact, cycle]
     on_enter:
       # Fetch the ticket. The default host.local_files.ticket binding
-      # is the prefix-fallback handler; cyber-repo's parent rebinds
+      # is the prefix-fallback handler; focused-engineering's parent rebinds
       # iface.ticket → host.jira. We bind the body so the LLM has
       # something to chew on.
       - invoke: iface.ticket.get

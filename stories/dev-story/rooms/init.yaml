@@ -187,8 +187,8 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
-                init_story_pack: "cyber-repo"
-                init_story_pack_title: "Cyber repo starter"
+                init_story_pack: "focused-engineering"
+                init_story_pack_title: "Focused engineering starter"
                 init_story_pack_summary: ""
                 init_story_packs: []
                 init_starter_stories: []
@@ -277,7 +277,7 @@ states:
         when: "len(world.init_starter_stories) > 0"
       - kv:
           pairs:
-            Pack: "{{ world.init_story_pack_title|default:'Cyber repo starter' }} ({{ world.init_story_pack|default:'cyber-repo' }})"
+            Pack: "{{ world.init_story_pack_title|default:'Focused engineering starter' }} ({{ world.init_story_pack|default:'focused-engineering' }})"
             Normal command: "kitsoki project-profile story-packs add <pack>"
         when: "len(world.init_starter_stories) > 0"
       - code: |
@@ -408,8 +408,8 @@ states:
                 init_repo_vcs: "none"
                 init_repo_default_branch: ""
                 init_repo_remote: ""
-                init_story_pack: "cyber-repo"
-                init_story_pack_title: "Cyber repo starter"
+                init_story_pack: "focused-engineering"
+                init_story_pack_title: "Focused engineering starter"
                 init_story_pack_summary: ""
                 init_story_packs: []
                 init_starter_stories: []
@@ -451,7 +451,7 @@ states:
           pairs:
             Target:   "{{ world.init_target_path|default:world.repo_root|default:world.workdir|default:'.' }}"
             Project:  "{{ world.init_project_title|default:'(not yet inferred)' }}"
-            Selected: "{{ world.init_story_pack_title|default:'Cyber repo starter' }} ({{ world.init_story_pack|default:'cyber-repo' }})"
+            Selected: "{{ world.init_story_pack_title|default:'Focused engineering starter' }} ({{ world.init_story_pack|default:'focused-engineering' }})"
       - code: |
           {% for pack in world.init_story_packs %}- {{ pack.id }}: {{ pack.title }} - {{ pack.summary }}
             stories: {{ pack.stories }}
@@ -461,10 +461,10 @@ states:
           mode: single
           prompt: "Story packs"
           items:
-            - label:  "cyber repo"
+            - label:  "focused engineering"
               hint:   "setup, bugfixing, repo-history capsules, PRs, git ops"
               intent: select_story_pack
-              slots:  { pack: "cyber-repo" }
+              slots:  { pack: "focused-engineering" }
             - label:  "core setup"
               hint:   "setup and git ops"
               intent: select_story_pack
@@ -489,13 +489,13 @@ states:
               intent: look
     on:
       select_story_pack:
-        - when: "slots.pack == 'cyber-repo'"
+        - when: "slots.pack == 'focused-engineering'"
           target: init
           effects:
             - set:
-                init_story_pack: "cyber-repo"
-                init_story_pack_title: "Cyber repo starter"
-                init_story_pack_summary: "Focused first-run set for cyber-repo: setup, bugfixing, repo-history capsules, PR refinement, and git operations."
+                init_story_pack: "focused-engineering"
+                init_story_pack_title: "Focused engineering starter"
+                init_story_pack_summary: "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations."
                 init_starter_stories:
                   - { id: "setup", title: "Project setup", source_story: "dev-story:onboarding", status: "enabled", summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.", expansion: "Keep this enabled as the team's bootstrap and refresh path." }
                   - { id: "bugfix", title: "Bug fixing", source_story: "bugfix", status: "enabled", summary: "Drive a picked bug through reproduce, fix, test, review, and validation gates.", expansion: "Add narrower project bug policies through profile customizations or prompt overlays." }
@@ -504,7 +504,7 @@ states:
                   - { id: "git-ops", title: "Git operations", source_story: "git-ops", status: "enabled", summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration.", expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable." }
                 init_profile_status: "draft"
                 last_error: ""
-            - say: "Selected the cyber-repo starter pack."
+            - say: "Selected the focused-engineering starter pack."
         - when: "slots.pack == 'core-setup'"
           target: init
           effects:

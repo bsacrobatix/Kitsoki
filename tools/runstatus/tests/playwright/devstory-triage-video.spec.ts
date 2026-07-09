@@ -65,9 +65,9 @@ const CHAPTER_SOURCE = "tools/runstatus/tests/playwright/_fixtures/devstory-tria
 // 7762 — the stage-1 port (matches the cassette-validation server). Distinct
 // from every other spec's port so parallel runs never race on the same bind.
 const ADDR = demoAddr(7762);
-// The devstory app lives in the cyber-repo worktree, not this kitsoki repo.
-const CYBER_STORIES = "/home/cloud-user/code/cyber-repo/.worktrees/pr-refinement/stories";
-const STORY_DIR = path.join(CYBER_STORIES, "devstory");
+// The devstory app lives in an external worktree, not this kitsoki repo.
+const EXTERNAL_STORIES = process.env.DEVSTORY_TRIAGE_STORIES ?? "/path/to/external-devstory/stories";
+const STORY_DIR = path.join(EXTERNAL_STORIES, "devstory");
 const FLOW = path.join(STORY_DIR, "flows", "tour_triage_to_bugfix.yaml");
 const HOST_CASSETTE = path.join(STORY_DIR, "cassettes", "triage-handoff.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "devstory-triage");

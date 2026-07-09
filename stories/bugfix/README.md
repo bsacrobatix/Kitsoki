@@ -3,7 +3,7 @@
 A reusable kitsoki story implementing the bug-fix pipeline described in
 the [bug-fix case study](../../docs/case-studies/bug-fix.md). The seven visible
 rooms (`idle → reproducing → proposing → implementing → testing →
-reviewing → validating → done`) collapse the cyber-repo's 14-phase
+reviewing → validating → done`) collapse the focused-engineering's 14-phase
 autonomous pipeline into one state machine while keeping every
 checkpoint shape identical across `human` / `llm` / `llm_then_human`
 judge modes.
@@ -266,7 +266,7 @@ files / git); parent stories rebind via `imports.<alias>.host_bindings`.
 | `inbox.add` | — | always-on bare host call, NOT an iface (per contract §2.6) |
 
 Rebinding from an importer is straightforward — see proposal §5.1–5.3
-worked examples. The cyber-repo flavor will rebind to
+worked examples. The focused-engineering flavor will rebind to
 `{ticket: host.jira, vcs: host.bitbucket, ci: host.jenkins,
 workspace: host.workspace_manager, transport: host.jira_comment}`.
 
@@ -332,7 +332,7 @@ is `world.judge_mode`:
 |---|---|
 | `human` | Post + inbox-mirror; wait for an explicit reply intent. (No LLM call.) |
 | `llm` | Post + inbox-mirror + run `host.agent.decide` with the `judge` persona. The verdict lands in `world.llm_verdict`; when the verdict's `verdict`/`intent` are not "uncertain" AND `confidence >= judge_confidence_threshold` (defaults to 0.8), the `emit_intent:` effect at step 4 auto-fires the verdict's intent in the same turn. An uncertain or low-confidence verdict holds the state for an operator. |
-| `llm_then_human` | Same as `llm` for the auto-fire path; the mode flag exists so cyber-repo-flavour parent stories can declare "always also notify a human", which Wave 2 layers above this base contract. |
+| `llm_then_human` | Same as `llm` for the auto-fire path; the mode flag exists so focused-engineering-flavour parent stories can declare "always also notify a human", which Wave 2 layers above this base contract. |
 
 The judge polymorphism is a single `host.agent.decide` call per
 checkpoint, gated by `when:` — **not** a fork in the state graph. The seven
@@ -355,7 +355,7 @@ boundary" and `resolveEmittedIntentName` for the mechanism.
 
 ## Cycle budgets and shortcuts (Wave 3 / Phase 4)
 
-The L2 cycle-budget pattern from cyber-repo's 14-phase bugfix is wired
+The L2 cycle-budget pattern from focused-engineering's 14-phase bugfix is wired
 into every checkpointed `_awaiting_reply` room. Per-phase counters
 (`<phase>_cycle`) and per-phase budgets (`<phase>_budget`, default 3)
 together gate `refine`: when the counter hits the budget the next

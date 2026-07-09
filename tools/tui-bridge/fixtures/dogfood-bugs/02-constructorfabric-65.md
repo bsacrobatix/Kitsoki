@@ -8,8 +8,8 @@ baseline: main
 repro_command: go test ./internal/tui/...
 ---
 
-# TUI bug report from cyber-repo init discovery
+# TUI bug report from focused-engineering init discovery
 
-Filed from the TUI with captured context around the `cyber-repo`
+Filed from the TUI with captured context around the `focused-engineering`
 `root.init_discover_failed` state. The demo preserves the issue identity while
 replaying the agent outcome.

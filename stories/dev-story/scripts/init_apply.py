@@ -106,12 +106,12 @@ def starter_story_focus(data: dict) -> list[dict]:
 
 
 def selected_story_pack(data: dict) -> dict:
-    pack_id = normalize_story_pack_id(str(data.get("story_pack") or "cyber-repo"))
+    pack_id = normalize_story_pack_id(str(data.get("story_pack") or "focused-engineering"))
     known = story_pack(pack_id)
     if pack_id == "custom" or known["id"] == pack_id:
         return known
     story_ids = starter_story_ids(data)
-    for candidate in ["cyber-repo", "core-setup", "planning-delivery", "review-quality", "full-dev-story"]:
+    for candidate in ["focused-engineering", "core-setup", "planning-delivery", "review-quality", "full-dev-story"]:
         if story_ids == [str(item) for item in story_pack(candidate).get("stories", [])]:
             return story_pack(candidate)
     return story_pack("custom")
@@ -1838,7 +1838,7 @@ def main() -> int:
         "conventions": sys.argv[8],
         "tracker": sys.argv[9] if len(sys.argv) > 9 else "none",
         "starter_stories": starter_story_entries(),
-        "story_pack": "cyber-repo",
+        "story_pack": "focused-engineering",
     }
     # Validate + enrich the target BEFORE draft-profile defaulting so the
     # detected repo shape (remote → ticket_repo, toolchain files) seeds the
