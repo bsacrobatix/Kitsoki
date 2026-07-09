@@ -606,7 +606,7 @@ cmd_merge() {
   else
     target_base="main"
   fi
-  git -C "$path" fetch source "refs/heads/$target_base:refs/remotes/source/$target_base"
+  git -C "$path" fetch source "+refs/heads/$target_base:refs/remotes/source/$target_base"
   git -C "$path" rebase "source/$target_base"
   if [ -n "$gate" ]; then
     (cd "$path" && sh -c "$gate")
