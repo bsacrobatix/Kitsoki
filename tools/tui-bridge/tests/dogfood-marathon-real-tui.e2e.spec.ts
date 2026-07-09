@@ -30,6 +30,7 @@ const REPORT_HOLD_MS = 5_000;
 const READABLE_CHAPTER_MIN_MS = 3_000;
 const START_FRAME_SETTLE_MS = 500;
 const INTRO_HOLD_MS = 2_000;
+const PICKER_HOLD_MS = 1_300;
 const MAX_USEFUL_PREROLL_MS = 3_500;
 const CASE_IDS = [
   "constructorfabric/Kitsoki#66",
@@ -117,8 +118,12 @@ async function scrollLines(page: Page, lines: number): Promise<void> {
   await page.evaluate((n) => (window as any).__scrollLines(n), lines);
 }
 
-async function focusChat(page: Page): Promise<void> {
+async function focusTerminal(page: Page): Promise<void> {
   await page.click("#term");
+}
+
+async function focusChat(page: Page): Promise<void> {
+  await focusTerminal(page);
   await page.keyboard.press("Tab");
   await dwell(page, 300);
 }
@@ -150,6 +155,50 @@ async function typeLine(
   await page.keyboard.press("Enter");
 }
 
+async function pickerCursorLine(page: Page): Promise<string> {
+  const screen = await page.evaluate(() => (window as any).__dump());
+  return String(screen)
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.includes("▸")) ?? "";
+}
+
+async function waitForPickerCursor(page: Page): Promise<string> {
+  await expect.poll(() => pickerCursorLine(page), { timeout: 10_000 }).not.toBe("");
+  return pickerCursorLine(page);
+}
+
+async function pressPickerKeyForCursorChange(
+  page: Page,
+  key: "ArrowDown" | "ArrowUp",
+  before: string,
+): Promise<string> {
+  await page.keyboard.press(key);
+  await expect.poll(() => pickerCursorLine(page), { timeout: 10_000 }).not.toBe(before);
+  return pickerCursorLine(page);
+}
+
+async function exerciseArrowPicker(
+  page: Page,
+  shot: (page: Page, label: string) => Promise<string>,
+): Promise<void> {
+  await focusTerminal(page);
+  await waitForScreen(page, "[↑/↓ move");
+  const initial = await waitForPickerCursor(page);
+  await shot(page, "quick-action-picker-initial");
+  await dwell(page, PICKER_HOLD_MS);
+
+  const down = await pressPickerKeyForCursorChange(page, "ArrowDown", initial);
+  expect(down).not.toEqual(initial);
+  await shot(page, "quick-action-picker-arrow-down");
+  await dwell(page, PICKER_HOLD_MS);
+
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => pickerCursorLine(page), { timeout: 10_000 }).toBe(initial);
+  await shot(page, "quick-action-picker-arrow-up");
+  await dwell(page, PICKER_HOLD_MS);
+}
+
 test("records one continuous real Kitsoki TUI dogfood marathon session", async ({ browser }) => {
   test.setTimeout(240_000);
 
@@ -177,6 +226,9 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     videoTrimStartMs = chapters.elapsedMs();
     await shot(page, "connected-kitsoki-dev");
     await dwell(page, INTRO_HOLD_MS);
+
+    chapters.open("landing-arrow-picker", "Move the active TUI quick-action picker with arrow keys", RECORDING);
+    await exerciseArrowPicker(page, shot);
 
     chapters.open("kitsoki-dev-request", "Request the dogfood marathon from kitsoki-dev", RECORDING);
     await focusChat(page);
