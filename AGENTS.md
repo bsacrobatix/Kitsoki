@@ -4,16 +4,16 @@ run raw `git worktree`, `git clone`, rebase, merge, or teardown commands for
 normal development. Delegate the lifecycle to:
 
 ```
-scripts/dev-workspace.sh create --id <id> --branch <branch> --base main --target staging/local --bootstrap
+scripts/dev-workspace.sh create --id <id> --branch <branch> --bootstrap
 scripts/dev-workspace.sh status <id>
 scripts/dev-workspace.sh commit <id> --message "<message>"
-scripts/dev-workspace.sh merge <id> --target staging/local --gate "<focused validation>" --teardown
+scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown
 ```
 
 The script creates workspaces under `.capsules/workspaces`, writes the Kitsoki
-capsule/clone sentinels, runs the bootstrap target when requested, imports
-completed local work into the local stabilization branch (`staging/local` by
-default), and removes the workspace on `--teardown`. If the target branch
+capsule/clone sentinels, bases normal development on `staging/local`, runs the
+bootstrap target when requested, imports completed local work back into
+`staging/local`, and removes the workspace on `--teardown`. If the target branch
 advanced, the script rebases the workspace onto the current target; rerun
 focused validation before retrying a failed/conflicted merge. Do not manually
 chmod the primary checkout except to repair the guard itself.
@@ -35,11 +35,11 @@ explicit final promotion. It is acceptable for tests to fail temporarily inside
 a managed workspace while implementation is in progress. When the task is
 complete, stabilize in that workspace, run focused validation, commit only your
 work, and merge to `staging/local` through
-`scripts/dev-workspace.sh merge <id> --target staging/local --gate "<focused validation>" --teardown`.
+`scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown`.
 Do not stop at a workspace commit for completed implementation work unless the
 user explicitly asks you not to merge. Do not land local iterative work directly
-to `main`; use `--target main` only when the user explicitly asks for final
-local promotion after the stabilization gate. Open or retarget a GitHub PR only
+to `main`; final local promotion uses the staging capsule flow below after the
+stabilization gate. Open or retarget a GitHub PR only
 after the local branch is stabilized; WIP/draft PRs that are not ready for main
 CI should use a non-main base prefix such as `agent/*`, `integration/*`, or
 `staging/*`.

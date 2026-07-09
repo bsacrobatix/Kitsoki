@@ -76,17 +76,24 @@ printf 'one\n' >"$source_repo/README.md"
 printf 'harness_profiles:\n  local:\n    backend: codex\n' >"$source_repo/.kitsoki.local.yaml"
 gitc "$source_repo" add -A
 gitc "$source_repo" commit --quiet -m initial
+gitc "$source_repo" switch -q -c staging/local
+printf 'staged baseline\n' >"$source_repo/staged-baseline.txt"
+gitc "$source_repo" add staged-baseline.txt
+gitc "$source_repo" commit --quiet -m 'staged baseline'
+gitc "$source_repo" switch -q main
 
 root="$tmp/workspaces"
-create_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-1 --branch agent/case-1 --base main --json)"
+create_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-1 --branch agent/case-1 --json)"
 workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$create_json")"
 [ -d "$workspace/.git" ] || fail "create did not produce a git workspace"
 [ -f "$workspace/.kitsoki-capsule" ] || fail "missing capsule sentinel"
 [ -f "$workspace/capsule-manifest.json" ] || fail "missing capsule manifest"
 [ -f "$workspace/.kitsoki-clone" ] || fail "missing clone sentinel"
 [ "$(git -C "$workspace" branch --show-current)" = "agent/case-1" ] || fail "workspace branch mismatch"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"])' <"$workspace/.kitsoki-dev-workspace.json")" = "staging/local" ] || fail "default base was not recorded as staging/local"
+[ "$(cat "$workspace/staged-baseline.txt")" = "staged baseline" ] || fail "default create did not start from staging/local"
 
-"$dev_workspace" create --repo "$source_repo" --root "$root" --id local-config --branch agent/local-config --base main --bootstrap >/dev/null
+"$dev_workspace" create --repo "$source_repo" --root "$root" --id local-config --branch agent/local-config --bootstrap >/dev/null
 local_config_workspace="$root/local-config"
 [ -f "$local_config_workspace/.kitsoki.local.yaml" ] || fail "bootstrap did not copy .kitsoki.local.yaml"
 cmp "$source_repo/.kitsoki.local.yaml" "$local_config_workspace/.kitsoki.local.yaml" >/dev/null || fail "bootstrap copied the wrong .kitsoki.local.yaml content"
@@ -99,16 +106,18 @@ printf 'two\n' >"$workspace/feature.txt"
 [ ! -e "$workspace" ] || fail "merge --teardown left workspace behind"
 [ ! -e "$source_repo/feature.txt" ] || fail "default merge should not modify primary main working tree"
 [ "$(git -C "$source_repo" show staging/local:feature.txt)" = "two" ] || fail "merge did not fast-forward staging/local"
+[ "$(git -C "$source_repo" show staging/local:staged-baseline.txt)" = "staged baseline" ] || fail "merge dropped existing staging baseline"
 [ "$(git -C "$source_repo" branch --show-current)" = "main" ] || fail "default merge moved primary checkout off main"
 rm "$source_repo/untracked-primary.txt"
 
-from_staging_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id from-staging --branch agent/from-staging --base staging/local --json)"
+from_staging_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id from-staging --branch agent/from-staging --json)"
 from_staging_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$from_staging_json")"
-[ "$(cat "$from_staging_workspace/feature.txt")" = "two" ] || fail "create --base staging/local did not start from staging branch"
+[ "$(cat "$from_staging_workspace/feature.txt")" = "two" ] || fail "default create did not start from staging branch"
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$from_staging_workspace" >/dev/null
 
-second_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-2 --branch agent/case-2 --base main --json)"
+second_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-2 --branch agent/case-2 --json)"
 second_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$second_json")"
+[ "$(cat "$second_workspace/feature.txt")" = "two" ] || fail "second default create did not include current staging content"
 printf 'three\n' >"$second_workspace/feature2.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$second_workspace" --message 'add second feature' >/dev/null
 "$dev_workspace" merge --repo "$source_repo" --root "$root" "$second_workspace" --teardown >/dev/null
@@ -125,7 +134,7 @@ printf 'main landing\n' >"$main_workspace/main-feature.txt"
 [ ! -e "$main_workspace" ] || fail "merge --target main --teardown left workspace behind"
 [ "$(cat "$source_repo/main-feature.txt")" = "main landing" ] || fail "explicit main merge did not update primary checkout"
 
-unrelated_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id unrelated-dirty --branch agent/unrelated-dirty --base main --json)"
+unrelated_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id unrelated-dirty --branch agent/unrelated-dirty --json)"
 unrelated_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$unrelated_json")"
 printf 'branch\n' >"$unrelated_workspace/branch-only.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$unrelated_workspace" --message 'add branch-only file' >/dev/null
@@ -146,7 +155,7 @@ fi
 grep -Fq "conflict.txt" /tmp/kitsoki-dev-workspace-overlap.log || fail "overlap failure did not name conflicting file"
 "$dev_workspace" close --repo "$source_repo" --root "$root" --force "$overlap_workspace" >/dev/null
 
-dirty_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id dirty --branch agent/dirty --base main --json)"
+dirty_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id dirty --branch agent/dirty --json)"
 dirty_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$dirty_json")"
 printf 'dirty\n' >"$dirty_workspace/untracked.txt"
 if "$dev_workspace" close --repo "$source_repo" --root "$root" "$dirty_workspace" >/tmp/kitsoki-dev-workspace-close.log 2>&1; then
