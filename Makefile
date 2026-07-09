@@ -46,7 +46,9 @@ VSCODE_DIR    := tools/vscode-kitsoki
 EMBED_INDEX   := internal/runstatus/web/assets/index.html
 TEMP_DIR      := .temp
 RUNSTATUS_TEMP_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspath $(TEMP_DIR))"
-KITSOKI_GOCACHE ?= $(shell if [ -d /private/tmp ]; then printf '%s' /private/tmp/kitsoki-gocache; else printf '%s' /tmp/kitsoki-gocache; fi)
+# Default to the Go toolchain's own shared build cache so bootstrap warms the
+# same cache plain `go run` / `go test` will use in the workspace.
+KITSOKI_GOCACHE ?= $(shell go env GOCACHE 2>/dev/null || { if [ -d /private/tmp ]; then printf '%s' /private/tmp/kitsoki-gocache; else printf '%s' /tmp/kitsoki-gocache; fi; })
 RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
 RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
 RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
@@ -264,6 +266,14 @@ web: $(EMBED_INDEX)
 runstatus-deps:
 	$(call runstatus_pnpm_install,)
 
+.PHONY: runstatus-deps-if-needed
+runstatus-deps-if-needed:
+	@if [ ! -f "$(RUNSTATUS_MODULES)" ] || [ "$(RUNSTATUS_LOCKFILE)" -nt "$(RUNSTATUS_MODULES)" ]; then \
+		$(MAKE) --no-print-directory runstatus-deps; \
+	else \
+		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
+	fi
+
 .PHONY: runstatus-playwright-deps
 runstatus-playwright-deps: runstatus-deps
 	cd $(RUNSTATUS_DIR) && pnpm exec playwright install chromium
@@ -275,11 +285,7 @@ $(EMBED_INDEX): $(SPA_SOURCES)
 		exit 1; }
 	@mkdir -p $(TEMP_DIR)
 	@chmod u+rwx $(TEMP_DIR)
-	@if [ ! -f "$(RUNSTATUS_MODULES)" ] || [ "$(RUNSTATUS_LOCKFILE)" -nt "$(RUNSTATUS_MODULES)" ]; then \
-		$(MAKE) --no-print-directory runstatus-deps; \
-	else \
-		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
-	fi
+	@$(MAKE) --no-print-directory runstatus-deps-if-needed
 	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/generate.ts --check && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/tsx scripts/features/lint-demos.ts
 	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) ./node_modules/.bin/vite --configLoader runner build
 	@mkdir -p $(dir $(EMBED_INDEX))
@@ -304,7 +310,7 @@ web-clean:
 # this once from inside a new dev workspace before `go run ./cmd/kitsoki` or any
 # Playwright spec.
 bootstrap-workspace: embed-stories web
-	$(call runstatus_pnpm_install,--silent)
+	@$(MAKE) --no-print-directory runstatus-deps-if-needed
 	@echo "bootstrap-workspace: warming shared Go build cache at $(KITSOKI_GOCACHE) (first compile is slow)…"
 	@GOCACHE="$(KITSOKI_GOCACHE)" go run $(PKG) --help >/dev/null
 	@echo "workspace bootstrapped — go run/Playwright specs should work now"

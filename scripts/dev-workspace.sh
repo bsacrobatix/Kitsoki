@@ -411,7 +411,10 @@ cmd_create() {
   mkdir -p "$root"
   local source_commit
   source_commit="$(git -C "$repo" rev-parse "${base:-HEAD}")"
-  git -C "$repo" clone --no-local --origin source "$repo" "$path"
+  # The source is always a local repo path. Use local clone mode so existing
+  # objects are hardlinked instead of copied while refs/worktree state stay
+  # isolated inside the managed capsule clone.
+  git -C "$repo" clone --local --origin source "$repo" "$path"
   write_git_excludes "$path"
   local base_ref="$base"
   if [ -n "$base" ] && ! git -C "$path" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then

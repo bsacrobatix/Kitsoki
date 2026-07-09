@@ -42,9 +42,10 @@ By default, workspaces live under:
 <repo>/.capsules/workspaces/<id>
 ```
 
-Each workspace is a normal Git clone of the local source checkout with the
-remote named `source`. The script writes these unmanaged-by-Git metadata files
-inside the clone:
+Each workspace is a local Git clone of the source checkout with the remote named
+`source`. Git objects are hardlinked from the source checkout when possible, but
+refs, the index, and the working tree are isolated inside the managed capsule
+clone. The script writes these unmanaged-by-Git metadata files inside the clone:
 
 | File | Purpose |
 |---|---|
