@@ -55,6 +55,7 @@ turns:
           args:
             - tools/product-journey/run.py
             - --emit-run
+            - --scenario-qa-workspace
             - --project
             - gears-rust
             - --persona
