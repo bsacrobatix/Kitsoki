@@ -99,6 +99,23 @@ git -C "$local_repo" merge-base --is-ancestor main staging/local ||
 cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
   fail "refresh did not copy .kitsoki.local.yaml into staging capsule"
 
+printf 'default_profile: updated\n' >"$local_repo/.kitsoki.local.yaml"
+chmod u-w "$local_repo/.capsules/staging/local/.kitsoki.local.yaml"
+(
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$local_out" 2>&1
+cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
+  fail "refresh did not overwrite read-only .kitsoki.local.yaml in staging capsule"
+config_mode="$(python3 - "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" <<'PY'
+import os
+import stat
+import sys
+print("w" if os.stat(sys.argv[1]).st_mode & stat.S_IWUSR else "-")
+PY
+)"
+[ "$config_mode" = "-" ] || fail "refresh did not restore read-only mode on .kitsoki.local.yaml"
+
 printf 'scratch\n' >"$local_repo/.capsules/staging/local/scratch.txt"
 dirty_out="$tmp/dirty-capsule.out"
 set +e

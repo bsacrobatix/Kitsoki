@@ -78,6 +78,16 @@ print(os.path.abspath(sys.argv[1]))
 PY
 }
 
+user_write_bit() {
+  python3 - "$1" <<'PY'
+import os
+import stat
+import sys
+
+print("1" if os.stat(sys.argv[1]).st_mode & stat.S_IWUSR else "0")
+PY
+}
+
 source_dirty() {
   local dir="$1"
   git -C "$dir" status --porcelain --untracked-files=all |
@@ -275,8 +285,21 @@ ensure_managed_capsule() {
 copy_local_config() {
   local src="$repo_root/$LOCAL_CONFIG"
   local dst="$staging_capsule/$LOCAL_CONFIG"
+  local relock_file=0
   [ -f "$src" ] || return 0
-  cp -p "$src" "$dst"
+  if [ -e "$dst" ] && [ "$(user_write_bit "$dst")" = "0" ]; then
+    chmod u+w "$dst"
+    relock_file=1
+  fi
+  if ! cp -p "$src" "$dst"; then
+    if [ "$relock_file" = 1 ]; then
+      chmod u-w "$dst" 2>/dev/null || true
+    fi
+    return 1
+  fi
+  if [ "$relock_file" = 1 ]; then
+    chmod u-w "$dst" 2>/dev/null || true
+  fi
   echo "refresh-staging-local: copied $LOCAL_CONFIG into staging capsule" >&2
 }
 
