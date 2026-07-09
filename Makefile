@@ -338,6 +338,7 @@ WEB_LOG_KEEP := 10
 STAGING_BRANCH  ?= staging/local
 STAGING_CAPSULE ?= .capsules/staging/local
 STAGING_REFRESH_GATE ?= git diff --check
+STAGING_GIT_ENV := GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true GIT_MERGE_AUTOEDIT=no GIT_PAGER=cat
 
 .PHONY: ensure-staging-capsule refresh-staging staging-ready test-staging web-dev-staging install-staging site-dev-staging
 ensure-staging-capsule:
@@ -361,25 +362,25 @@ ensure-staging-capsule:
 
 refresh-staging:
 	@if [ -n "$(strip $(STAGING_REFRESH_GATE))" ]; then \
-		scripts/refresh-staging-local.sh --staging-branch "$(STAGING_BRANCH)" --staging-capsule "$(STAGING_CAPSULE)" --gate "$(STAGING_REFRESH_GATE)"; \
+		$(STAGING_GIT_ENV) scripts/refresh-staging-local.sh --staging-branch "$(STAGING_BRANCH)" --staging-capsule "$(STAGING_CAPSULE)" --gate "$(STAGING_REFRESH_GATE)"; \
 	else \
-		scripts/refresh-staging-local.sh --staging-branch "$(STAGING_BRANCH)" --staging-capsule "$(STAGING_CAPSULE)"; \
+		$(STAGING_GIT_ENV) scripts/refresh-staging-local.sh --staging-branch "$(STAGING_BRANCH)" --staging-capsule "$(STAGING_CAPSULE)"; \
 	fi
 
 staging-ready: refresh-staging
 	@$(MAKE) --no-print-directory ensure-staging-capsule STAGING_BRANCH="$(STAGING_BRANCH)" STAGING_CAPSULE="$(STAGING_CAPSULE)"
 
 test-staging: staging-ready
-	$(MAKE) -C "$(STAGING_CAPSULE)" test
+	$(STAGING_GIT_ENV) $(MAKE) -C "$(STAGING_CAPSULE)" test
 
 web-dev-staging: staging-ready
-	$(MAKE) -C "$(STAGING_CAPSULE)" web-dev
+	$(STAGING_GIT_ENV) $(MAKE) -C "$(STAGING_CAPSULE)" web-dev
 
 install-staging: staging-ready
-	$(MAKE) -C "$(STAGING_CAPSULE)" install
+	$(STAGING_GIT_ENV) $(MAKE) -C "$(STAGING_CAPSULE)" install
 
 site-dev-staging: staging-ready
-	$(MAKE) -C "$(STAGING_CAPSULE)" site-dev
+	$(STAGING_GIT_ENV) $(MAKE) -C "$(STAGING_CAPSULE)" site-dev
 
 web-dev:
 	@command -v pnpm >/dev/null 2>&1 || { echo "error: pnpm not found" >&2; exit 1; }
