@@ -20,20 +20,31 @@ states:
             Status: "{{ world.status }}"
       - prose: "{{ world.last_error }}"
         when: "world.last_error != ''"
-      - prose: "Check a scenario by catalog id (scenario=bugfix) or a free-text description (description=\"...\"), on one or more transports (transport=tui|web|vscode|cli|all, default all)."
+      - prose: "Preview or check a scenario by catalog id, or ask for a free-text scenario with \"check whether ...\". Use all, tui, web, vscode, cli, or a comma list for the transport."
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label: "check scenario=... transport=..."
-              hint: "check a catalog scenario across the requested transport(s)"
+            - label: "check bugfix across all transports for core-maintainer on gears-rust"
+              hint: "create the run bundle and drive the first transport leg"
               intent: check
-            - label: 'check description="..." transport=...'
+              slots:
+                scenario: bugfix
+                transport: all
+                persona: core-maintainer
+                target: gears-rust
+            - label: "check whether the onboarding tour first step renders on web"
               hint: "draft an ad-hoc scenario from a free-text description and check it"
               intent: check
-            - label: "preview scenario=... transport=..."
+              slots:
+                description: "the onboarding tour first step renders"
+                transport: web
+            - label: "preview bugfix across all transports"
               hint: "show deterministic transport legs without creating a run bundle"
               intent: preview
+              slots:
+                scenario: bugfix
+                transport: all
             - label: "report"
               hint: "(re)build report.md for the last run, if any"
               intent: report
@@ -57,15 +68,15 @@ states:
           target: .
           effects:
             - set:
-                last_error: "check needs scenario=<catalog-id> or description=\"<free text>\"."
+                last_error: "check needs a scenario id or a free-text description."
         - target: plan
           effects:
             - set:
-                scenario_ref: "{{ slots.scenario ?? '' }}"
+                scenario_ref: "{{ join(split((slots.scenario ?? ''), ' '), '-') }}"
                 scenario_description: "{{ slots.description ?? '' }}"
                 transport_arg: "{{ slots.transport ?? world.transport_arg }}"
-                persona: "{{ slots.persona ?? world.persona }}"
-                target: "{{ slots.target ?? world.target }}"
+                persona: "{{ join(split((slots.persona ?? world.persona), ' '), '-') }}"
+                target: "{{ join(split((slots.target ?? world.target), ' '), '-') }}"
                 seed: "{{ slots.seed ?? world.seed }}"
                 live_profile: "{{ slots.profile ?? world.live_profile }}"
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
@@ -89,11 +100,11 @@ states:
           target: .
           effects:
             - set:
-                last_error: "preview needs scenario=<catalog-id>."
+                last_error: "preview needs a scenario id."
         - target: .
           effects:
             - set:
-                scenario_ref: "{{ slots.scenario ?? world.scenario_ref }}"
+                scenario_ref: "{{ join(split((slots.scenario ?? world.scenario_ref), ' '), '-') }}"
                 transport_arg: "{{ slots.transport ?? world.transport_arg }}"
                 suite_status: ""
                 suite_leg_count: 0
@@ -109,7 +120,7 @@ states:
                   - tools/product-journey/run.py
                   - --transport-suite
                   - --scenarios
-                  - "{{ slots.scenario ?? world.scenario_ref }}"
+                  - "{{ join(split((slots.scenario ?? world.scenario_ref), ' '), '-') }}"
                   - --transport
                   - "{{ slots.transport ?? world.transport_arg }}"
                   - --json-output

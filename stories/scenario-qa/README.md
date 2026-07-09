@@ -8,13 +8,13 @@ setup contract.
 kitsoki run @kitsoki/scenario-qa
 ```
 
-Useful intents:
+Useful prompts:
 
-- `preview scenario=bugfix transport=all` shows the scenario x transport suite
+- `preview bugfix across all transports` shows the scenario x transport suite
   without creating a run bundle, launching capture, or calling an LLM.
-- `check scenario=bugfix transport=all persona=core-maintainer target=gears-rust`
+- `check bugfix across all transports for core-maintainer on gears-rust`
   creates the run bundle and drives the first transport leg.
-- `next_leg` advances through the remaining transport legs one at a time.
+- `next leg` advances through the remaining transport legs one at a time.
 - `report` rebuilds `report.md` and `deck.slidey.json` for the current run.
 
 The story writes run artifacts under `.artifacts/product-journey/<run-id>/`.

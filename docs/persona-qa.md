@@ -7,12 +7,12 @@ hunt for under `tools/`. The canonical surface is:
 kitsoki run @kitsoki/scenario-qa
 ```
 
-From the story, use:
+From the story, use natural prompts:
 
 ```text
-preview scenario=bugfix transport=all
-check scenario=bugfix transport=all persona=core-maintainer target=gears-rust
-next_leg
+preview bugfix across all transports
+check bugfix across all transports for core-maintainer on gears-rust
+next leg
 report
 ```
 
@@ -22,7 +22,8 @@ does not create a run bundle, launch capture, or call an LLM.
 
 `check` creates the run bundle under `.artifacts/product-journey/<run-id>/`,
 then drives one transport-pinned leg at a time. Multi-transport checks pause
-after each leg so the operator can inspect evidence before typing `next_leg`.
+after each leg so the operator can inspect evidence before continuing with
+`next leg`.
 `report` folds the recorded driver and judge outcomes into:
 
 - `report.md` for the per-transport verdict table.
