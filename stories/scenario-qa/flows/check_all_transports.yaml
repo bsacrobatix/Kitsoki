@@ -188,7 +188,7 @@ turns:
         args: { call: build_report }
       - handler: host.run
         args: { call: build_scenario_qa_deck }
-    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*3 / 4 transport legs passed, 1 degraded-evidence[\\s\\S]*vscode / bugfix[\\s\\S]*driver=degraded-evidence verdict=degraded-evidence[\\s\\S]*\\[bridge-level\\][\\s\\S]*cli / bugfix[\\s\\S]*\\[terminal-level\\]"
+    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*3 / 4 transport legs passed, 1 degraded-evidence[\\s\\S]*vscode / bugfix \\[bridge-level\\][\\s\\S]*driver=degraded-evidence verdict=degraded-evidence[\\s\\S]*cli / bugfix \\[terminal-level\\]"
 
   - intent: { name: report, slots: {} }
     expect_state: report

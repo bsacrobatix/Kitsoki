@@ -31,7 +31,7 @@ states:
       - heading: "Per-transport verdicts"
       - code: |
           {% for leg in world.leg_results.items %}
-          - {{ leg.transport }} / {{ leg.scenario }}: driver={{ leg.driver_status }} verdict={{ leg.verdict }} — {{ leg.verdict_summary }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}]
+          - {{ leg.transport }} / {{ leg.scenario }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}]: driver={{ leg.driver_status }} verdict={{ leg.verdict }} — {{ leg.verdict_summary }}
           {% endfor %}
       - choice:
           mode: single
