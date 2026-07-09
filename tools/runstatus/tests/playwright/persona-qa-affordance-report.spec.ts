@@ -1,18 +1,20 @@
 /**
  * Persona QA required-input evidence report.
  *
- * Produces the artifact the feature tour talks about: one scenario-qa Slidey
- * report with rrweb user-session replays for web and TUI evidence, then opens
- * the bundled report and advances through several slides.
+ * Produces one scenario-qa Slidey report with REAL rrweb user-session replays
+ * from the web UI and the Kitsoki TUI bridge. It also opens the deck in the
+ * live Slidey viewer, clicks through several slides, and opens an rrweb artifact
+ * from an evidence row in the popout replay modal. No MP4 render and no bundled
+ * HTML are produced.
  *
  * Validate/produce:
  *   KITSOKI_WEB_GO_RUN=1 pnpm exec playwright test persona-qa-affordance-report --project=chromium
  */
 import { test, expect, chromium, type BrowserContext, type Page } from "@playwright/test";
-import { spawnSync } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 import fs from "fs";
+import net from "net";
 import path from "path";
-import { pathToFileURL } from "url";
 import {
   startWebServer,
   repoRoot,
@@ -20,8 +22,7 @@ import {
   dwell,
   demoAddr,
   makeShot,
-  prepareVideoDir,
-  saveVideoAsMp4,
+  PACE,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -30,17 +31,22 @@ import { dumpCapture, installCapture, writeEvents } from "./_helpers/rrweb-repla
 const ADDR = demoAddr(7794);
 const STORY_DIR = path.join(repoRoot, "stories", "scenario-qa");
 const FLOW = path.join(STORY_DIR, "flows", "persona_qa_demo.yaml");
+const RECORDING = path.join(STORY_DIR, "recording.yaml");
+const HOST_CASSETTE = path.join(STORY_DIR, "flows", "persona_qa_demo.cassette.yaml");
 const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "persona-qa-affordance-report");
-const RUN_DIR = path.join(ARTIFACT_DIR, "run");
+const RUN_ID = "persona-qa-affordance-required-input";
+const RUN_DIR = path.join(ARTIFACT_DIR, RUN_ID);
 const CLIPS_DIR = path.join(RUN_DIR, "clips");
 const OPEN_DIR = path.join(ARTIFACT_DIR, "opened");
-const VIDEO_DIR = path.join(OPEN_DIR, "video");
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
+const TUI_DB_PATH = path.join(ARTIFACT_DIR, "tui-session.db");
 
 const SCENARIO = "required user input affordance as a QA engineer and developer";
-const RUN_ID = "persona-qa-affordance-required-input";
+const SCENARIO_REQUEST = `${SCENARIO} transport=web,tui target=kitsoki seed=affordance-demo`;
+const PREVIEW_REQUEST = `preview ${SCENARIO_REQUEST}`;
 const WEB_RRWEB = path.join(CLIPS_DIR, "web-required-input.rrweb.json");
 const TUI_RRWEB = path.join(CLIPS_DIR, "tui-required-input.rrweb.json");
+const TYPE_DELAY_MS = PACE === 0 ? 0 : 24;
 
 let server: WebServer;
 
@@ -52,10 +58,66 @@ function diag(msg: string): void {
   }
 }
 
-function slideyBin(): string {
-  if (process.env.SLIDEY_BIN) return process.env.SLIDEY_BIN;
+function localSlideyIndex(): string {
+  return path.resolve(repoRoot, "..", "studio-slidey", "src", "index.js");
+}
+
+function slideyCommand(): { cmd: string; argsPrefix: string[]; cwd: string } {
+  const local = localSlideyIndex();
+  if (fs.existsSync(local)) {
+    return { cmd: process.execPath, argsPrefix: [local], cwd: path.dirname(path.dirname(local)) };
+  }
+  if (process.env.SLIDEY_BIN) return { cmd: process.env.SLIDEY_BIN, argsPrefix: [], cwd: repoRoot };
   const homeBin = path.join(process.env.HOME ?? "", ".local", "bin", "slidey");
-  return fs.existsSync(homeBin) ? homeBin : "slidey";
+  return { cmd: fs.existsSync(homeBin) ? homeBin : "slidey", argsPrefix: [], cwd: repoRoot };
+}
+
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+async function waitForHttp(url: string, timeoutMs = 90_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = "";
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return;
+      last = `status ${res.status}`;
+    } catch (err) {
+      last = err instanceof Error ? err.message : String(err);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw new Error(`timed out waiting for ${url}: ${last}`);
+}
+
+function pipeProcessLog(proc: ChildProcess, logPath: string): void {
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const log = fs.createWriteStream(logPath, { flags: "w" });
+  proc.stdout?.pipe(log, { end: false });
+  proc.stderr?.pipe(log, { end: false });
+  proc.once("exit", (code, signal) => {
+    log.write(`\n[exit] code=${code ?? ""} signal=${signal ?? ""}\n`);
+    log.end();
+  });
+}
+
+function stopProcess(proc: ChildProcess | undefined): void {
+  if (!proc?.pid) return;
+  try {
+    process.kill(-proc.pid, "SIGKILL");
+  } catch {
+    proc.kill("SIGKILL");
+  }
 }
 
 async function stamp(page: Page, id: string, label: string): Promise<void> {
@@ -69,147 +131,191 @@ async function stamp(page: Page, id: string, label: string): Promise<void> {
   }, [id, label]);
 }
 
-async function pushQuestion(page: Page, frame: unknown): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as unknown as { __pushOperatorQuestion?: unknown }).__pushOperatorQuestion));
-  await page.evaluate((frameJson: string) => {
-    (window as unknown as { __pushOperatorQuestion?: (s: string) => void })
-      .__pushOperatorQuestion?.(frameJson);
-  }, JSON.stringify(frame));
+async function typeAndSend(page: Page, text: string): Promise<void> {
+  const input = page.getByTestId("text-floor-input").or(page.getByTestId("composer-input")).first();
+  await expect(input).toBeVisible({ timeout: 15_000 });
+  await input.scrollIntoViewIfNeeded().catch(() => undefined);
+  await input.click();
+  await input.fill("");
+  await input.pressSequentially(text, { delay: TYPE_DELAY_MS });
+  await dwell(page, 700);
+  const send = page.getByTestId("text-floor-send").or(page.getByTestId("composer-send")).first();
+  await send.evaluate((el) => (el as HTMLButtonElement).click());
 }
 
 async function captureWebSession(context: BrowserContext): Promise<void> {
   const page = await context.newPage();
   await cinematicGoto(page, `${server.base}/#/`, { waitForTestId: "home-view" });
   await page.getByTestId("new-session-btn").first().click();
-  await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15000 });
-  await expect(page.getByTestId("chat-section")).toBeVisible({ timeout: 15000 });
-
-  await pushQuestion(page, {
-    session_id: "demo-session",
-    question_id: "demo-required-input-web",
-    questions: [
-      {
-        question: "The agent needs a human decision before changing validation behavior. Which path should it take?",
-        header: "Validate",
-        multiSelect: false,
-        options: [
-          { label: "Run web and TUI smoke first", description: "Check both operator surfaces before continuing." },
-          { label: "Ship only the web change", description: "Fast, but leaves terminal operators unverified." },
-          { label: "Stop and ask the developer", description: "Defer the decision to a later handoff." },
-        ],
-      },
-    ],
-  });
-  await expect(page.getByTestId("operator-question-modal")).toBeVisible({ timeout: 8000 });
+  await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15_000 });
+  await expect(page.getByTestId("chat-section")).toBeVisible({ timeout: 15_000 });
   await installCapture(page);
-  await stamp(page, "web-question", "Web modal shows required input");
+
+  await stamp(page, "web-request", "Web UI accepts a plain-language QA request");
+  await typeAndSend(page, PREVIEW_REQUEST);
+  await expect(page.getByTestId("chat-section")).toContainText("Preview ready: 2 transport checks", { timeout: 20_000 });
+  await expect(page.getByTestId("chat-section")).toContainText("Transports to check: web, tui", { timeout: 20_000 });
+  await stamp(page, "web-preview-plan", "Web UI explains the test plan before capture");
   await dwell(page, 900);
 
-  await page.getByTestId("oq-option-0-custom").click();
-  await page.getByTestId("oq-custom-answer-0").fill("Run the web and TUI smoke first, then continue only if both input prompts are visible.");
-  await stamp(page, "web-custom-answer", "Web custom answer typed");
+  await typeAndSend(page, SCENARIO_REQUEST);
+  await expect(page.getByTestId("chat-section")).toContainText(/Transport check:?\s*1 of 2/, { timeout: 20_000 });
+  await expect(page.getByTestId("chat-section")).toContainText(/Driver status:?\s*captured/, { timeout: 20_000 });
+  await stamp(page, "web-first-result", "Web UI shows the first transport result");
   await dwell(page, 900);
 
-  await expect(page.getByTestId("oq-submit")).toBeEnabled({ timeout: 5000 });
-  await page.getByTestId("oq-submit").click();
-  await expect(page.getByTestId("operator-question-modal")).toHaveCount(0, { timeout: 8000 });
-  await stamp(page, "web-resumed", "Web session resumed after answer");
+  await page.getByTestId("intent-btn-next_leg").first().evaluate((el) => (el as HTMLElement).click());
+  await expect(page.getByTestId("chat-section")).toContainText("2 / 2 transport checks passed", { timeout: 20_000 });
+  await expect(page.getByTestId("chat-section")).toContainText("Review deck", { timeout: 20_000 });
+  await expect(page.getByTestId("chat-section")).toContainText("clips/web-required-input.rrweb.json", { timeout: 20_000 });
+  await expect(page.getByTestId("chat-section")).toContainText("clips/tui-required-input.rrweb.json", { timeout: 20_000 });
+  await stamp(page, "web-summary-report", "Web UI shows final summary and clickable artifacts");
   await dwell(page, 900);
+
+  await page.getByTestId("intent-btn-main_room").first().evaluate((el) => (el as HTMLElement).click());
+  await expect(page.getByTestId("chat-section")).toContainText(/Last run\s*scenario-qa-affordance-demo-run/, { timeout: 20_000 });
+  await stamp(page, "web-main-room", "Web UI returns to the main room after the report");
+  await dwell(page, 700);
 
   const capture = await dumpCapture(page);
-  expect(capture.events.length).toBeGreaterThan(20);
+  expect(capture.events.length).toBeGreaterThan(40);
   writeEvents(capture.events, WEB_RRWEB, capture.viewport);
   await page.close();
 }
 
-function writeTuiFixture(): string {
-  const html = path.join(ARTIFACT_DIR, "tui-required-input-session.html");
-  fs.writeFileSync(html, `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<title>Persona QA TUI Required Input</title>
-<style>
-  :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
-  body { margin: 0; min-height: 100vh; background: #f7f4ef; color: #202124; display: grid; place-items: center; }
-  main { width: min(1100px, calc(100vw - 48px)); display: grid; grid-template-columns: 1fr 340px; gap: 24px; }
-  .terminal { background: #111318; color: #e8eaed; border: 1px solid #30343d; border-radius: 8px; overflow: hidden; box-shadow: 0 18px 48px rgba(0,0,0,.25); }
-  .bar { height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #242832; color: #c7ccd6; font-size: 13px; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: #f05252; }
-  .dot:nth-child(2) { background: #f6ad55; }
-  .dot:nth-child(3) { background: #48bb78; }
-  pre { margin: 0; padding: 22px; white-space: pre-wrap; font: 16px/1.55 "SFMono-Regular", Consolas, monospace; min-height: 520px; }
-  .accent { color: #72e0d1; }
-  .warn { color: #ffd166; }
-  .ok { color: #8bd17c; }
-  aside { background: white; border: 1px solid #d8d3ca; border-radius: 8px; padding: 18px; align-self: start; }
-  h1 { margin: 0 0 12px; font-size: 18px; }
-  p { margin: 0 0 16px; line-height: 1.45; }
-  input { width: 100%; box-sizing: border-box; font: 15px/1.4 inherit; padding: 10px 12px; border: 1px solid #928d84; border-radius: 6px; }
-  button { margin-top: 10px; width: 100%; border: 0; border-radius: 6px; padding: 10px 12px; background: #0f766e; color: white; font-weight: 700; cursor: pointer; }
-  .badge { display: inline-block; margin-bottom: 12px; padding: 4px 8px; border-radius: 4px; background: #fff4bf; color: #6f4d00; font-weight: 700; font-size: 12px; }
-</style>
-<main>
-  <section class="terminal" aria-label="Kitsoki TUI session">
-    <div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span>kitsoki run @kitsoki/scenario-qa</span></div>
-    <pre id="term"><span class="accent">SCENARIO QA · execute</span>
+function startTuiBridge(addr: string): ChildProcess {
+  fs.rmSync(TUI_DB_PATH, { force: true });
+  const proc = spawn(
+    "go",
+    [
+      "run",
+      "./cmd/kitsoki",
+      "tui-serve",
+      "--addr",
+      addr,
+      "--",
+      "run",
+      "stories/scenario-qa/app.yaml",
+      "--harness",
+      "replay",
+      "--recording",
+      "stories/scenario-qa/recording.yaml",
+      "--host-cassette",
+      "stories/scenario-qa/flows/persona_qa_demo.cassette.yaml",
+      "--db",
+      TUI_DB_PATH,
+    ],
+    {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+      env: { ...process.env, KITSOKI_META_STREAM_DELAY_MS: PACE === 0 ? "0" : "120" },
+    },
+  );
+  pipeProcessLog(proc, path.join(ARTIFACT_DIR, "tui-bridge.log"));
+  return proc;
+}
 
-Run: persona-qa-affordance-required-input
-Transport check: 2 of 2
-Scenario: required user input affordance as a QA engineer and developer
-Transport: tui
-Evidence: rendered_tui_frame (frame-level)
-
-<span class="warn">INPUT REQUIRED</span>
-The agent has a question:
-Which checks should run before validation behavior changes?
-
-Choices:
-  1. Run web and TUI smoke first
-  2. Ship only the web change
-  3. Stop and ask the developer
-
-answer&gt; <span id="answer"></span></pre>
-  </section>
-  <aside>
-    <span class="badge">INPUT REQUIRED</span>
-    <h1>TUI operator prompt</h1>
-    <p>The terminal surface keeps the question, choices, and answer field visible before the agent resumes.</p>
-    <input id="reply" aria-label="answer" value="">
-    <button id="send">Send answer</button>
-  </aside>
-</main>
-<script>
-  const input = document.getElementById('reply');
-  const answer = document.getElementById('answer');
-  const term = document.getElementById('term');
-  document.getElementById('send').addEventListener('click', () => {
-    answer.textContent = input.value;
-    term.innerHTML += "\\n\\n<span class='ok'>Answer recorded.</span> agent resumed with both web and TUI checks required.";
+function ensureTuiBridgeDeps(): void {
+  const bridgeRoot = path.join(repoRoot, "tools", "tui-bridge");
+  const required = path.join(bridgeRoot, "node_modules", "@xterm", "xterm", "lib", "xterm.js");
+  if (fs.existsSync(required)) return;
+  const result = spawnSync("pnpm", ["install", "--frozen-lockfile"], {
+    cwd: bridgeRoot,
+    encoding: "utf8",
   });
-</script>
-</html>
-`, "utf8");
-  return html;
+  expect(result.status, result.stderr || result.stdout).toBe(0);
+}
+
+function startTuiPlayer(port: number): ChildProcess {
+  ensureTuiBridgeDeps();
+  const proc = spawn(process.execPath, ["tools/tui-bridge/player/serve.mjs"], {
+    cwd: repoRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+    env: { ...process.env, TUI_BRIDGE_PLAYER_PORT: String(port) },
+  });
+  pipeProcessLog(proc, path.join(ARTIFACT_DIR, "tui-player.log"));
+  return proc;
+}
+
+async function tuiBuffer(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const w = window as unknown as { __dumpBuffer?: () => string; __dump?: () => string };
+    return w.__dumpBuffer?.() ?? w.__dump?.() ?? "";
+  });
+}
+
+async function waitForTui(page: Page, text: string | RegExp, timeout = 60_000): Promise<void> {
+  if (typeof text === "string") {
+    await expect.poll(() => tuiBuffer(page), { timeout }).toContain(text);
+  } else {
+    await expect.poll(() => tuiBuffer(page), { timeout }).toMatch(text);
+  }
+}
+
+async function typeTuiLine(page: Page, text: string): Promise<void> {
+  await page.bringToFront();
+  await page.evaluate(() => (window as unknown as { __scrollToBottom?: () => string }).__scrollToBottom?.());
+  await page.click("#term");
+  await page.keyboard.press("Tab");
+  await dwell(page, 300);
+  await page.keyboard.type(text, { delay: TYPE_DELAY_MS });
+  await dwell(page, 450);
+  await page.keyboard.press("Enter");
 }
 
 async function captureTuiSession(context: BrowserContext): Promise<void> {
+  const bridgePort = await freePort();
+  const playerPort = await freePort();
+  const bridgeAddr = `127.0.0.1:${bridgePort}`;
+  const bridge = startTuiBridge(bridgeAddr);
+  const player = startTuiPlayer(playerPort);
   const page = await context.newPage();
-  await page.goto(pathToFileURL(writeTuiFixture()).href);
-  await expect(page.getByText("INPUT REQUIRED").first()).toBeVisible({ timeout: 5000 });
-  await installCapture(page);
-  await stamp(page, "tui-question", "TUI shows required input prompt");
-  await dwell(page, 800);
-  await page.getByLabel("answer").fill("Run the web and TUI smoke first before continuing.");
-  await stamp(page, "tui-answer", "TUI answer typed");
-  await dwell(page, 800);
-  await page.getByRole("button", { name: "Send answer" }).click();
-  await expect(page.getByText("Answer recorded.")).toBeVisible({ timeout: 5000 });
-  await stamp(page, "tui-resumed", "TUI session resumed after answer");
-  await dwell(page, 800);
-  const capture = await dumpCapture(page);
-  expect(capture.events.length).toBeGreaterThan(10);
-  writeEvents(capture.events, TUI_RRWEB, capture.viewport);
-  await page.close();
+  try {
+    await waitForHttp(`http://127.0.0.1:${playerPort}/player/`);
+    await page.goto(`http://127.0.0.1:${playerPort}/player/?ws=ws://${bridgeAddr}/pty`);
+    await page.waitForFunction(() => (window as unknown as { __ready?: boolean }).__ready === true);
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __status?: () => string }).__status?.()), { timeout: 60_000 })
+      .toBe("connected");
+    await waitForTui(page, "SCENARIO QA", 90_000);
+    await installCapture(page);
+
+    await stamp(page, "tui-request", "TUI accepts a plain-language QA request");
+    await typeTuiLine(page, PREVIEW_REQUEST);
+    await waitForTui(page, "Preview ready: 2 transport checks", 60_000);
+    await waitForTui(page, "Transports to check: web, tui", 60_000);
+    await stamp(page, "tui-preview-plan", "TUI explains the test plan before capture");
+    await dwell(page, 900);
+
+    await typeTuiLine(page, SCENARIO_REQUEST);
+    await waitForTui(page, /Transport check:?\s*1 of 2/, 60_000);
+    await waitForTui(page, /Driver status:?\s*captured/, 60_000);
+    await stamp(page, "tui-first-result", "TUI shows the first transport result");
+    await dwell(page, 900);
+
+    await typeTuiLine(page, "next transport");
+    await waitForTui(page, "2 / 2 transport checks passed", 60_000);
+    await waitForTui(page, "Review deck", 60_000);
+    await waitForTui(page, "clips/tui-required-input.rrweb.json", 60_000);
+    await stamp(page, "tui-summary-report", "TUI shows final summary and report artifacts");
+    await dwell(page, 900);
+
+    await typeTuiLine(page, "main room");
+    await waitForTui(page, "Last run", 60_000);
+    await waitForTui(page, "scenario-qa-affordance-demo-run", 60_000);
+    await stamp(page, "tui-main-room", "TUI returns to the main room after the report");
+    await dwell(page, 700);
+
+    const capture = await dumpCapture(page);
+    expect(capture.events.length).toBeGreaterThan(40);
+    writeEvents(capture.events, TUI_RRWEB, capture.viewport);
+  } finally {
+    await page.close().catch(() => undefined);
+    stopProcess(bridge);
+    stopProcess(player);
+  }
 }
 
 function writeLegResultsAndReport(): string {
@@ -217,26 +323,40 @@ function writeLegResultsAndReport(): string {
   const legResults = {
     items: [
       {
-        leg_id: "adhoc-required-user-input-affordance-as-a-q::web",
-        scenario: "adhoc-required-user-input-affordance-as-a-q",
+        leg_id: "required-input-affordance::web",
+        scenario: "required-input-affordance",
+        scenario_label: "Required input affordance",
+        scenario_task: SCENARIO,
         transport: "web",
         evidence_level: "frame-level",
         driver_status: "captured",
         verdict: "pass",
-        verdict_summary: "Web modal shows the forwarded question, options, custom-answer field, enabled submit action, and resumed session.",
+        checked: [
+          "A QA engineer can enter a natural-language scenario and see the previewed test plan before capture.",
+          "The web report makes the per-transport verdicts, summary report, and session replay artifacts visible.",
+          "The report screen offers a main-room action after completion.",
+        ],
+        verdict_summary: "Web UI made the required input path visible: request entry, plan preview, per-transport progress, final summary, replay artifact links, and return-to-main-room action.",
         playback_path: "clips/web-required-input.rrweb.json",
-        playback_caption: "Web session replay shows required-input modal, answer entry, and resumed chat.",
+        playback_caption: "Web session replay shows scenario entry, plan preview, two transport checks, summary report, and main-room return.",
       },
       {
-        leg_id: "adhoc-required-user-input-affordance-as-a-q::tui",
-        scenario: "adhoc-required-user-input-affordance-as-a-q",
+        leg_id: "required-input-affordance::tui",
+        scenario: "required-input-affordance",
+        scenario_label: "Required input affordance",
+        scenario_task: SCENARIO,
         transport: "tui",
         evidence_level: "frame-level",
         driver_status: "captured",
         verdict: "pass",
-        verdict_summary: "TUI view shows the input-required prompt, choices, typed answer, and resumed status.",
+        checked: [
+          "A developer can enter the same natural-language scenario in the terminal and see the previewed test plan.",
+          "The TUI report makes the per-transport verdicts, summary report, and session replay artifacts visible.",
+          "The report screen offers a main-room action after completion.",
+        ],
+        verdict_summary: "TUI made the required input path visible: request entry, plan preview, per-transport progress, final summary, replay artifact links, and return-to-main-room action.",
         playback_path: "clips/tui-required-input.rrweb.json",
-        playback_caption: "TUI session replay shows prompt visibility, answer entry, and resumed state.",
+        playback_caption: "TUI session replay shows scenario entry, plan preview, two transport checks, summary report, and main-room return through the real TUI bridge.",
       },
     ],
   };
@@ -247,10 +367,10 @@ function writeLegResultsAndReport(): string {
 - Scenario: \`${SCENARIO}\`
 - Run: \`${RUN_ID}\`
 
-| Transport | Level | Verdict | Playback | Notes |
+| Transport | Level | Verdict | Playback | What was checked |
 |---|---|---|---|---|
-| web | frame-level | pass | clips/web-required-input.rrweb.json | Web modal shows the forwarded question, options, custom-answer field, enabled submit action, and resumed session. |
-| tui | frame-level | pass | clips/tui-required-input.rrweb.json | TUI view shows the input-required prompt, choices, typed answer, and resumed status. |
+| web | frame-level | pass | clips/web-required-input.rrweb.json | Natural request entry, plan preview, progress, final summary, artifact links, and main-room return. |
+| tui | frame-level | pass | clips/tui-required-input.rrweb.json | Same flow through the real TUI bridge: request entry, plan preview, progress, final summary, artifact links, and main-room return. |
 
 2 / 2 transport checks passed.
 `, "utf8");
@@ -275,71 +395,78 @@ function buildDeck(legResultsPath: string): string {
   const deckPath = path.join(RUN_DIR, "deck.slidey.json");
   const deck = JSON.parse(fs.readFileSync(deckPath, "utf8"));
   const deckText = JSON.stringify(deck);
+  expect(deckText).toContain("What was checked");
   expect(deckText).toContain("User session replay");
   expect(deckText).toContain("clips/web-required-input.rrweb.json");
   expect(deckText).toContain("clips/tui-required-input.rrweb.json");
+  expect(deckText).toContain('"refType":"rrweb"');
   return deckPath;
 }
 
-function bundleDeck(deckPath: string): string {
-  const htmlPath = path.join(RUN_DIR, "deck.bundle.html");
-  const result = spawnSync(slideyBin(), ["bundle", deckPath, htmlPath], {
-    cwd: repoRoot,
+function ensureLocalSlideyWebBuild(): void {
+  const local = localSlideyIndex();
+  if (!fs.existsSync(local)) return;
+  const result = spawnSync("npm", ["run", "build:web"], {
+    cwd: path.dirname(path.dirname(local)),
     encoding: "utf8",
   });
   expect(result.status, result.stderr || result.stdout).toBe(0);
-  expect(fs.existsSync(htmlPath)).toBeTruthy();
-  return htmlPath;
 }
 
-function slideStepCount(scene: Record<string, unknown>): number {
-  const type = String(scene.type || "");
-  if (type === "title" || type === "video") return 1;
-  if (type === "narrative") return 2 + (scene.lede ? 1 : 0);
-  if (type === "evidence") {
-    const items = Array.isArray(scene.items) ? Math.min(scene.items.length, 6) : 0;
-    return Math.max(1, (scene.title ? 1 : 0) + items + (scene.caption ? 1 : 0));
-  }
-  if (type === "image") return Math.max(1, (scene.title ? 1 : 0) + 1 + (scene.caption ? 1 : 0));
-  return 1;
-}
+async function openAndClickThrough(deckPath: string): Promise<void> {
+  ensureLocalSlideyWebBuild();
+  const port = await freePort();
+  const slidey = slideyCommand();
+  const proc = spawn(
+    slidey.cmd,
+    [...slidey.argsPrefix, deckPath, "--no-open", "--port", String(port)],
+    { cwd: slidey.cwd, stdio: ["ignore", "pipe", "pipe"], detached: true },
+  );
+  pipeProcessLog(proc, path.join(ARTIFACT_DIR, "slidey-viewer.log"));
 
-function finalStepIndexes(deckPath: string): number[] {
-  const deck = JSON.parse(fs.readFileSync(deckPath, "utf8")) as { scenes?: Record<string, unknown>[] };
-  return (deck.scenes ?? []).map((scene) => Math.max(0, slideStepCount(scene) - 1));
-}
-
-async function openAndClickThrough(htmlPath: string, deckPath: string): Promise<void> {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext(cameraContext({ recordVideoDir: VIDEO_DIR }));
+  const context = await browser.newContext(cameraContext());
   const page = await context.newPage();
-  const video = page.video();
   const shot = makeShot(OPEN_DIR);
-  const stepIndexes = finalStepIndexes(deckPath);
-  const htmlUrl = pathToFileURL(htmlPath).href;
   try {
-    await page.goto(htmlUrl);
-    await expect(page.getByText("Scenario QA").first()).toBeVisible({ timeout: 15000 });
-    await dwell(page, 4500);
+    await waitForHttp(`http://127.0.0.1:${port}/api/config`);
+    const baseUrl = `http://127.0.0.1:${port}/`;
+    await page.goto(baseUrl);
+    await expect(page.getByText("Scenario QA").first()).toBeVisible({ timeout: 15_000 });
+    await dwell(page, 900);
     await shot(page, "01-title");
-    const captures = [
-      { label: "02-verdict", sceneIndex: 1, dwellMs: 4500 },
-      { label: "03-session-evidence", sceneIndex: 2, dwellMs: 4500 },
-      { label: "04-web-replay", sceneIndex: 3, dwellMs: 1600 },
-      { label: "05-tui-replay", sceneIndex: 4, dwellMs: 4500 },
-      { label: "06-run-summary", sceneIndex: 5, dwellMs: 4500 },
-    ];
-    for (const capture of captures) {
-      const stepIndex = stepIndexes[capture.sceneIndex] ?? 0;
-      await page.goto(`${htmlUrl}?scene=${capture.sceneIndex}&step=${stepIndex}`);
-      await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
-      await dwell(page, capture.dwellMs);
-      await shot(page, capture.label);
-    }
+
+    await page.goto(`${baseUrl}?scene=1&step=3`);
+    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await expect(page.getByText(/Web UI: required user input affordance/).first()).toBeVisible({ timeout: 15_000 });
+    await shot(page, "02-transport-checks");
+
+    await page.goto(`${baseUrl}?scene=2&step=2`);
+    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await expect(page.getByTestId("evidence-open-rrweb").first()).toBeVisible({ timeout: 15_000 });
+    await shot(page, "03-session-evidence");
+
+    await page.getByTestId("evidence-open-rrweb").first().click();
+    await expect(page.getByTestId("rrweb-popout-modal")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("rrweb-popout-player")).toBeVisible({ timeout: 15_000 });
+    await dwell(page, 900);
+    await shot(page, "04-rrweb-popout");
+    await page.getByTestId("rrweb-popout-close").click();
+
+    await page.goto(`${baseUrl}?scene=3&step=0`);
+    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await expect(page.getByText("User session replay").first()).toBeVisible({ timeout: 15_000 });
+    await shot(page, "05-web-replay-slide");
+
+    await page.goto(`${baseUrl}?scene=5&step=2`);
+    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await expect(page.locator("body")).toContainText(RUN_ID, { timeout: 15_000 });
+    await expect(page.getByText(/2 transport check\(s\); 2 pass/).first()).toBeVisible({ timeout: 15_000 });
+    await shot(page, "06-run-summary");
   } finally {
     await context.close();
-    await saveVideoAsMp4(video, OPEN_DIR, "persona-qa-affordance-report-open");
     await browser.close();
+    stopProcess(proc);
   }
 }
 
@@ -348,20 +475,22 @@ test.beforeAll(async () => {
   fs.mkdirSync(CLIPS_DIR, { recursive: true });
   fs.mkdirSync(OPEN_DIR, { recursive: true });
   fs.writeFileSync(DIAG_LOG, "");
-  prepareVideoDir(VIDEO_DIR);
   server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
 });
 
 test.afterAll(() => server?.stop());
 
-test("required-input Persona QA report embeds web and TUI rrweb sessions", async () => {
-  test.setTimeout(420000);
+test("required-input Persona QA report embeds real web and TUI rrweb sessions", async () => {
+  test.setTimeout(600_000);
+  expect(fs.existsSync(RECORDING)).toBeTruthy();
+  expect(fs.existsSync(HOST_CASSETTE)).toBeTruthy();
+
   const browser = await chromium.launch({ headless: true });
   const captureContext = await browser.newContext(cameraContext());
   try {
     diag("capture web rrweb");
     await captureWebSession(captureContext);
-    diag("capture tui rrweb");
+    diag("capture real tui rrweb");
     await captureTuiSession(captureContext);
   } finally {
     await captureContext.close();
@@ -370,8 +499,7 @@ test("required-input Persona QA report embeds web and TUI rrweb sessions", async
 
   const legResultsPath = writeLegResultsAndReport();
   const deckPath = buildDeck(legResultsPath);
-  const htmlPath = bundleDeck(deckPath);
-  await openAndClickThrough(htmlPath, deckPath);
+  await openAndClickThrough(deckPath);
 
   expect(fs.existsSync(WEB_RRWEB)).toBeTruthy();
   expect(fs.existsSync(TUI_RRWEB)).toBeTruthy();
