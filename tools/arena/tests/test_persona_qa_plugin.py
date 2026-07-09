@@ -54,19 +54,19 @@ cell = spec.cells()[0]
 
 argv = plugin.drive_command(cell, live=False)
 check("non-live runner is python3", argv[0], "python3")
-check("non-live path targets run.py", argv[1].endswith("tools/product-journey/run.py"), True)
-check("non-live uses driver-replay-smoke", "--driver-replay-smoke" in argv, True)
+check("non-live path targets kit.py", argv[1].endswith("tools/persona_qa/kit.py"), True)
+check("non-live uses replay-smoke", "replay-smoke" in argv, True)
 check("project threaded", argv[argv.index("--project") + 1], "vscode")
-check("persona threaded", argv[argv.index("--smoke-persona") + 1], "core-maintainer")
-check("scenario threaded", argv[argv.index("--smoke-scenario") + 1], "project-onboarding")
+check("persona threaded", argv[argv.index("--persona") + 1], "core-maintainer")
+check("scenario threaded", argv[argv.index("--scenario") + 1], "project-onboarding")
 check("json-output requested", "--json-output" in argv, True)
 check("non-live never mentions claude dispatch", "claude" in " ".join(argv), False)
 
 live_argv = plugin.drive_command(cell, live=True)
 live_cmd = " ".join(live_argv)
-check("live path emits a run bundle first", "--emit-run" in live_cmd, True)
+check("live path emits a run bundle first", "emit-run" in live_cmd, True)
 check("live path dispatches the product-journey-qa-driver agent", "product-journey-qa-driver" in live_cmd, True)
-check("live path reviews the bundle afterward", "--review-run" in live_cmd, True)
+check("live path reviews the bundle afterward", " review " in live_cmd, True)
 
 # ---- 3. score() reads a REAL run bundle's review.json via the bridge -------
 #

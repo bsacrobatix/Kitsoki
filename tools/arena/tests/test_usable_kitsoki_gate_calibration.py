@@ -24,9 +24,10 @@ driven through a real `kitsoki test flows` replay
 flow`, pure state-machine + host_cassette replay) against each target's own
 real app (stories/dev-story/app.yaml, stories/pets-dev/app.yaml,
 stories/slidey-dev/app.yaml), per AGENTS.md's "Automated testing should
-never use a real LLM" rule. It does invoke `go run ./cmd/kitsoki` as a
-subprocess 162 times (18 scenarios x 3 surfaces x 3 targets) -- this is the
-one test in this suite that is not instant; budget ~30-60s.
+never use a real LLM" rule. Under `make test` it reuses the prebuilt
+KITSOKI_TEST_KITSOKI_BINARY flow runner; standalone runs fall back to
+`go run ./cmd/kitsoki`. This is the one test in this suite that is not
+instant; budget ~30-60s with the shared binary.
 """
 
 from __future__ import annotations
