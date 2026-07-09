@@ -153,7 +153,7 @@ func TestCLI_PersonaQAHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persona-qa --help: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Persona QA compatibility adapter", "kitsoki run @kitsoki/scenario-qa", "preview scenario=", "check scenario=", "transports", "emit-run", "deck", "complete"} {
+	for _, want := range []string{"Persona QA compatibility adapter", "kitsoki run @kitsoki/scenario-qa", "preview project-onboarding across all transports", "check project-onboarding across all transports", "transports", "emit-run", "deck", "complete"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("persona-qa help missing %q:\n%s", want, out)
 		}

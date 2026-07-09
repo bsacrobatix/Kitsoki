@@ -15,12 +15,12 @@ Use `stories/scenario-qa` for project-facing Persona QA work:
 kitsoki run @kitsoki/scenario-qa
 ```
 
-Then drive the story with:
+Then drive the story with natural prompts:
 
 ```text
-preview scenario=project-onboarding transport=all
-check scenario=project-onboarding transport=all persona=core-maintainer target=gears-rust
-next_leg
+preview project-onboarding across all transports
+check project-onboarding across all transports for core-maintainer on gears-rust
+next leg
 report
 ```
 

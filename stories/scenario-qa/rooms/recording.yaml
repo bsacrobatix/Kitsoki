@@ -1,7 +1,7 @@
 # recording — append the current leg's driver+judge outcome to
 # world.leg_results (scripts/record_leg_result.star), then either drain to
 # report (auto, when this was the last leg) or PAUSE here for an explicit
-# "next_leg" (mirrors stories/dogfood-marathon's processing checkpoint: one
+# "next leg" (mirrors stories/dogfood-marathon's processing checkpoint: one
 # leg per operator/flow turn keeps each turn's internal emit chain
 # (legs_ready → leg_driven → leg_judged → ...) safely under the engine's
 # EmitIntentMaxDepth no matter how many transports were requested — a whole
@@ -27,13 +27,13 @@ states:
       - prose: "Recorded this leg's driver + judge outcome."
       - prose: "A dispatch along the way failed and was recorded honestly rather than silently retried: {{ world.last_error }}"
         when: "world.last_error != ''"
-      - prose: "More transport legs remain — `next_leg` to drive the next one."
+      - prose: "More transport legs remain. Use \"next leg\" to drive the next one."
         when: "world.leg_index + 1 < world.leg_count"
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label: "next_leg"
+            - label: "next leg"
               hint: "drive the next transport leg"
               intent: next_leg
               when: "world.leg_index + 1 < world.leg_count"

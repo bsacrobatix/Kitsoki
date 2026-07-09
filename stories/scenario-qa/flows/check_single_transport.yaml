@@ -2,7 +2,7 @@
 # report, all within ONE turn: a single-transport check (transport=tui)
 # resolves to exactly ONE leg, so the internal emit chain (legs_ready →
 # leg_driven → leg_judged → legs_drained) auto-drains straight to report
-# without needing an operator-paced "next_leg" — see check_all_transports.yaml
+# without needing an operator-paced "next leg" — see check_all_transports.yaml
 # for the multi-leg pacing gate.
 #
 # Every host call is stubbed by invoke id (no real run.py / LLM / ctx.fs call

@@ -20,7 +20,7 @@
 #
 #   idle → plan → resolve → execute → judge → recording → report
 #                               ^________________|
-#             (recording pauses here; "next_leg" repeats the loop for the
+#             (recording pauses here; "next leg" repeats the loop for the
 #              next transport leg — ONE leg per operator/flow turn, so the
 #              internal emit chain never approaches EmitIntentMaxDepth no
 #              matter how many transports were requested)
@@ -48,7 +48,7 @@
 #              kitsoki-ui-qa posture: read-only, cites concrete frames, never
 #              a bare "looks good"). This is the grade, not the driver's word.
 #   recording  accumulate this leg's driver+judge outcome; drained → auto
-#              advance to report; otherwise pause for the next "next_leg".
+#              advance to report; otherwise pause for the next "next leg".
 #   report     fold every leg's outcome into report.md AND deck.slidey.json
 #              under the run dir — the ONE per-transport verdict table.
 
@@ -175,11 +175,17 @@ world:
 intents:
   check:
     description: "Check a scenario (a catalog scenario id, or a free-text description) across one or more transports."
-    examples:
-      - "check this scenario in the tui"
-      - "check bugfix on web"
-      - "check scenario=bugfix transport=all"
-      - 'check description="open the onboarding tour and confirm the first step renders" transport=web,vscode'
+    synonyms:
+      - "check {scenario} across {transport} transports for {persona} on {target}"
+      - "check {scenario} across {transport} transports for {persona} against {target}"
+      - "check {scenario} across {transport} transports"
+      - "check {scenario} on {transport} for {persona} on {target}"
+      - "check {scenario} on {transport}"
+      - "check {scenario} in {transport}"
+      - "check whether {description} on {transport}"
+      - "check whether {description} across {transport} transports"
+      - "check scenario {scenario} transport {transport} persona {persona} target {target}"
+      - "check scenario {scenario} transport {transport}"
     priority: 90
     slots:
       scenario:     { type: string, required: false }
@@ -192,10 +198,11 @@ intents:
       live_budget_minutes: { type: int, required: false }  # override run.py's default per-scenario live budget (20 min)
   preview:
     description: "Preview the deterministic scenario x transport suite without creating a run bundle or launching capture."
-    examples:
-      - "preview scenario=bugfix transport=all"
-      - "preview bugfix on web"
-      - "preview scenario=prd-design transport=tui,web"
+    synonyms:
+      - "preview {scenario} across {transport} transports"
+      - "preview {scenario} on {transport}"
+      - "preview {scenario} in {transport}"
+      - "preview scenario {scenario} transport {transport}"
     priority: 75
     slots:
       scenario:  { type: string, required: false }
@@ -221,8 +228,9 @@ intents:
     priority: 1
   # ── operator-paced loop control ───────────────────────────────────────────
   next_leg:
+    title: "next leg"
     description: "Advance to and drive the next transport leg (one leg per turn keeps the internal emit chain bounded)."
-    examples: ["next leg", "next transport", "continue", "drive the next one"]
+    examples: ["next leg", "next transport", "continue", "drive the next one", "continue to the next transport"]
     priority: 60
   report:
     description: "(Re)build report.md from the current run's per-leg driver and judge outcomes."

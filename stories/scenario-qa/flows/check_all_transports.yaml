@@ -1,7 +1,7 @@
 # check_all_transports — a transport=all check resolves to FOUR legs, so the
 # per-leg loop must PAUSE at recording after each leg (one leg per turn keeps
 # the internal emit chain under EmitIntentMaxDepth) and require an explicit
-# "next_leg" to continue, draining to report only after the fourth leg.
+# "next leg" to continue, draining to report only after the fourth leg.
 #
 # host.starlark.run's pick_leg / record_leg_result stubs are static per call
 # id (the flow harness stubs by invoke id, not by loop iteration — same
@@ -157,7 +157,7 @@ turns:
         args: { call: judge_leg }
       - handler: host.starlark.run
         args: { call: record_leg_result }
-    expect_view_matches: "recording[\\s\\S]*next_leg"
+    expect_view_matches: "recording[\\s\\S]*next leg"
 
   # `next_leg` drives the SECOND leg (web), pauses again (2 legs remain).
   - intent: { name: next_leg, slots: {} }

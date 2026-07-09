@@ -37,9 +37,14 @@ states:
           mode: single
           prompt: "Actions"
           items:
-            - label: "check scenario=... transport=..."
+            - label: "check bugfix across all transports for core-maintainer on gears-rust"
               hint: "start a new scenario-qa check"
               intent: check
+              slots:
+                scenario: bugfix
+                transport: all
+                persona: core-maintainer
+                target: gears-rust
             - label: "report"
               hint: "rebuild report.md"
               intent: report
@@ -97,15 +102,15 @@ states:
           target: .
           effects:
             - set:
-                last_error: "check needs scenario=<catalog-id> or description=\"<free text>\"."
+                last_error: "check needs a scenario id or a free-text description."
         - target: plan
           effects:
             - set:
-                scenario_ref: "{{ slots.scenario ?? '' }}"
+                scenario_ref: "{{ join(split((slots.scenario ?? ''), ' '), '-') }}"
                 scenario_description: "{{ slots.description ?? '' }}"
                 transport_arg: "{{ slots.transport ?? world.transport_arg }}"
-                persona: "{{ slots.persona ?? world.persona }}"
-                target: "{{ slots.target ?? world.target }}"
+                persona: "{{ join(split((slots.persona ?? world.persona), ' '), '-') }}"
+                target: "{{ join(split((slots.target ?? world.target), ' '), '-') }}"
                 seed: "{{ slots.seed ?? world.seed }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
