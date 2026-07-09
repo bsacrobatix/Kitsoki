@@ -1533,6 +1533,7 @@ export interface BugStatusResult {
 /** Result of runstatus.setup.status. */
 export interface SetupStatusResult {
   warnings: SetupWarning[];
+  project_onboarded?: boolean;
 }
 
 export interface SetupWarning {

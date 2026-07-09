@@ -308,6 +308,19 @@ func projectUpgradeNoticeForRoot(root string) string {
 	return fmt.Sprintf("(kitsoki: project files may need refresh: %s - run `kitsoki project-tools upgrade --target .`, then add `--apply` to refresh the toolkit)", strings.Join(problems, ", "))
 }
 
+func projectOnboardedForRoot(root string) bool {
+	configPath := filepath.Join(root, webconfig.DefaultConfigFile)
+	cfg, err := webconfig.Load(configPath)
+	if err != nil {
+		return false
+	}
+	profilePath := resolveProjectProfilePath(configPath, cfg.ProjectProfile)
+	if _, err := os.Stat(profilePath); err != nil {
+		return false
+	}
+	return true
+}
+
 func printProjectUpgradeReport(cmd *cobra.Command, rep projectUpgradeReport) {
 	status := "current"
 	if rep.NeedsUpgrade {
