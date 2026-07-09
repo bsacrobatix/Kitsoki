@@ -1,6 +1,6 @@
 ---
 name: kitsoki-ui-demo
-description: 'Produce a deterministic, no-LLM rrweb demo / tour replay of the kitsoki web UI, with per-scene screenshots and a self-contained Slidey HTML viewer, by driving a real `kitsoki web` server through Playwright. Use when asked to make, capture, refresh, or author a product-site replay, feature-spotlight tour, walkthrough demo, or screen-capture of the kitsoki browser UI — whether a tour of one feature, the generic onboarding tour, or a full-product walkthrough. MP4 is a legacy fallback only for surfaces rrweb cannot reconstruct (`<canvas>`, `<video>`, WebGL) or when a rendered video export is explicitly requested. Also covers turning a REAL LLM-driven dogfood session into a deterministic demo by generating the no-LLM flow fixture + host cassette from a recorded trace via `kitsoki trace to-flow` (no hand-authoring, no LLM re-interpretation).'
+description: 'Produce deterministic rrweb demos for Kitsoki web UI and real xterm.js TUI surfaces. Use when asked to make, capture, refresh, or author a product-site replay, feature-spotlight tour, walkthrough demo, terminal/TUI screen-capture, project onboarding run, or complete-product walkthrough. For browser UI, drive a real `kitsoki web` server through Playwright. For terminal/TUI demos, drive `tools/tui-bridge` and capture the live pty-over-xterm.js page with `KITSOKI_RRWEB_OUT`; never substitute `kitsoki record`, static flow frames, or GIF tooling for TUI proof. MP4 is a legacy fallback only for canvas, video, WebGL, or other surfaces rrweb cannot reconstruct, or when a rendered video export is explicitly requested. Also covers turning a REAL LLM-driven dogfood session into a deterministic demo by generating the no-LLM flow fixture + host cassette from a recorded trace via `kitsoki trace to-flow` (no hand-authoring, no LLM re-interpretation).'
 ---
 
 # Kitsoki UI rrweb demos
@@ -14,6 +14,15 @@ human-watchable pace, and writes `.artifacts/<demo>/<videoBase>.rrweb.json`,
 `.artifacts/<demo>/<videoBase>.html`, and per-scene screenshots. The HTML viewer
 is a self-contained Slidey bundle over the raw rrweb log, so product-site
 iteration avoids the MP4 render step entirely.
+
+For **real terminal/TUI demos**, use `tools/tui-bridge`: a Playwright spec opens
+the xterm.js player, the bridge spawns a real pty-backed `kitsoki` TUI process,
+and `KITSOKI_RRWEB_OUT` records the browser DOM session as rrweb plus PNG
+checkpoints and a capture sidecar. This is the only proof-grade path for TUI
+behavior because it captures live keyboard input, the pty byte stream, and
+xterm rendering. Do not use `kitsoki record`, static flow-frame renderers,
+terminal GIF tools, or post-produced contact sheets as substitutes for a TUI
+demo.
 
 Use MP4 only as a fallback for surfaces rrweb cannot reconstruct (`<canvas>`,
 `<video>`, WebGL) or when a rendered video export is the explicit deliverable.
@@ -47,6 +56,12 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 >   the stub spec remain; re-catalog it before capture). See
 >   **[Dev-story PRD → Design](#dev-story-prd--design-golden-conversation-driven-example)**.
 > - **The generic onboarding tour** → `tour-video.spec.ts` + `src/tour/manifest.ts`.
+> - **A real terminal/TUI demo or project onboarding proof** →
+>   `tools/tui-bridge`, `KITSOKI_RRWEB_OUT`, and a `*-real-tui.e2e.spec.ts`
+>   Playwright drive. Worked reference:
+>   `tools/tui-bridge/tests/presentation-onboarding-real-tui.e2e.spec.ts`.
+>   The artifact is `.rrweb.json` plus `.rrweb.capture.json`, chapters, PNGs,
+>   bridge logs, and any session DB evidence the scenario produces.
 > - **A full-product walkthrough** (home → new session → drive/observe → reload →
 >   active sessions) → `multi-story.spec.ts`. The single-purpose chat drive lives
 >   there too.
@@ -528,16 +543,12 @@ page's recording regardless of what else is in the dir.
    (the spec transcodes the raw webm away — never ship the webm) and numbered
    `NN-<scene>.png` screenshots.
 
-4. **(Optional) Render GIF + contact sheet.** The MP4 is already the shareable
-   deliverable; only run this if you also want a looping GIF or a storyboard.
-   All write to `.artifacts/`, never committed ([[feedback_artifacts_dir]]):
-   ```bash
-   S=.agents/skills/kitsoki-ui-demo/scripts
-   $S/render.sh .artifacts/<name>/<name>-demo.mp4    # gif + contact sheet (mp4 already made)
-   # …or individually:
-   $S/webm-to-gif.sh   .artifacts/<name>/<name>-demo.mp4 --width 900 # looping GIF for PRs/docs
-   $S/contact-sheet.sh .artifacts/<name>/                            # NN-*.png → one contact sheet
-   ```
+4. **Legacy post-production extras.** The MP4 is already the shareable
+   deliverable. GIF/contact-sheet helpers are legacy convenience tools and must
+   not be used for new rrweb or TUI proof. Prefer the rrweb log and its PNG
+   checkpoints; if a downstream markdown target explicitly requires a GIF, keep
+   the output in `.artifacts/` and do not treat it as the canonical demo.
+   Track removal/deprecation work under `.artifacts/issues/bugs/`.
 
 5. **Verify the frames.** Open a couple of the `NN-*.png` (or the contact sheet)
    and confirm each scene renders correctly. The kitsoki rule holds in video too
@@ -551,9 +562,9 @@ these are post-production extras, not part of the critical path.
 
 | Script | Does | Notes |
 |---|---|---|
-| `render.sh <demo.(mp4\|webm)>` | One-shot: GIF + contact sheet (the sibling `NN-*.png` from the video's dir); transcodes to MP4 first only if handed a legacy webm | Convenience wrapper over the two below |
+| `render.sh <demo.(mp4\|webm)>` | Legacy one-shot: GIF + contact sheet (the sibling `NN-*.png` from the video's dir); transcodes to MP4 first only if handed a legacy webm | Pending removal/quarantine; do not use for new rrweb or TUI proof |
 | `webm-to-mp4.sh <in.webm> [out.mp4] [--fps N] [--width W]` | H.264 + `yuv420p` + `+faststart` — the universally-playable share format | Only needed to convert a stray/legacy `.webm`; specs already emit MP4 |
-| `webm-to-gif.sh <in.(mp4\|webm)> [out.gif] [--fps N] [--width W]` | Two-pass palettegen/paletteuse high-quality looping GIF | For embedding in PRs / markdown; keep `--width ≤ 900` |
+| `webm-to-gif.sh <in.(mp4\|webm)> [out.gif] [--fps N] [--width W]` | Legacy two-pass palettegen/paletteuse looping GIF | Pending removal/quarantine; only for explicitly requested legacy markdown embeds |
 | `contact-sheet.sh <dir> [out.png] [--cols N] [--tile-width W]` | Tiles the numbered scene screenshots into one image | A storyboard for quick review / PR description |
 
 All require `ffmpeg` on PATH (Playwright's browser install or a system ffmpeg).
@@ -608,9 +619,6 @@ cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test agent-actions-vi
 
 # 3. Record at watch-speed → .artifacts/agent-actions/agent-actions-demo.mp4
 cd tools/runstatus && pnpm exec playwright test agent-actions-video --project=chromium
-
-# 4. (optional) GIF + contact sheet from the MP4
-.agents/skills/kitsoki-ui-demo/scripts/render.sh .artifacts/agent-actions/agent-actions-demo.mp4
 ```
 
 **To make a legacy fallback for a NEW feature:** copy
@@ -795,7 +803,7 @@ step — a drift guard baked into the recording. It drives all 13 tour steps in
 Oregon Trail no-LLM mode, submits one intent during the input-bar step so the
 trace lights up, and captures a labeled `NN-<step-id>.png` per step.
 
-**One-liner record** (legacy MP4/GIF/contact-sheet export):
+**One-liner record** (legacy MP4 export):
 
 ```bash
 make demo-tour
@@ -822,13 +830,12 @@ cd tools/runstatus && WEB_CHAT_PACE=0 pnpm exec playwright test tour-video --pro
 # 2. Record at watch-speed
 cd tools/runstatus && pnpm exec playwright test tour-video --project=chromium
 
-# 3. (optional) GIF + contact sheet — the MP4 is already produced by step 2
-S=.agents/skills/kitsoki-ui-demo/scripts
-$S/render.sh .artifacts/tour-video/tour-video-demo.mp4
+# 3. Do not render GIF/contact-sheet output unless a legacy downstream target
+#    explicitly asks for it; the MP4 is already produced by step 2.
 ```
 
-Output lands in `.artifacts/tour-video/`: the canonical `tour-video-demo.mp4`,
-an optional `.gif` + contact sheet, and numbered `NN-<step-id>.png` screenshots.
+Output lands in `.artifacts/tour-video/`: the canonical `tour-video-demo.mp4`
+and numbered `NN-<step-id>.png` screenshots.
 
 To QA the recording against the tour scenarios:
 
@@ -1174,6 +1181,11 @@ make mcp-qa           # vision QA gate (GATED: local claude CLI)
   `rrweb-replay-viewport-assert.spec.ts` (viewport-match guard). Canvas/video
   surfaces stay on the legacy MP4 export path only when rrweb cannot reconstruct
   the actual user-visible content.
+- **Real xterm.js TUI capture:** `tools/tui-bridge`, especially
+  `tools/tui-bridge/tests/presentation-onboarding-real-tui.e2e.spec.ts` and
+  `tools/tui-bridge/README.md`'s project-onboarding rrweb runbook. Use this for
+  onboarding demos and other terminal proof; do not route these through
+  `kitsoki record` or GIF tooling.
 - Sibling feature tour: `trace-features-video.spec.ts` + `src/tour/trace-manifest.ts`
 - Sibling feature tour (cassette slow-play streaming): `chat-stream-video.spec.ts` +
   `src/tour/chat-stream-manifest.ts` — films the live turn-stream in the MAIN

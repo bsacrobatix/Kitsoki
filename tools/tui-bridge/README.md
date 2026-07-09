@@ -128,6 +128,39 @@ chapter sidecar is shifted to the trimmed video clock. Use
 `WEB_CHAT_PACE=0 pnpm run validate:dogfood` only for fast assertions; it writes a
 `.fast.mp4` and is not a user-facing demo.
 
+## Project onboarding rrweb capture
+
+TUI proof recordings should use xterm.js plus rrweb, not `kitsoki record`.
+`kitsoki record` renders static flow frames and is not evidence of a live PTY,
+real keyboard input, or xterm rendering.
+
+Set `KITSOKI_RRWEB_OUT` to enable native rrweb capture. In this mode the helper
+disables Playwright's video recorder and writes:
+
+- `<name>.rrweb.json` — canonical rrweb event stream.
+- `<name>.rrweb.capture.json` — viewport and event-count sidecar.
+- `<name>.rrweb.json.chapters.json` — tour chapter sidecar when the spec uses
+  `ChapterRecorder`.
+- PNG checkpoints and bridge logs beside the rrweb artifact.
+
+The presentation-service onboarding demo is driven by the real TUI bridge and a
+disposable copy of the target checkout:
+
+```bash
+cd tools/tui-bridge
+KITSOKI_RRWEB_OUT=/Users/Brad.Smith/code/cyber-repo/src/cyberstack/platform-presentation/.artifacts/kitsoki-onboarding-demo/presentation-onboarding-real-tui.rrweb.json \
+  KITSOKI_PRESENTATION_TARGET=/Users/Brad.Smith/code/cyber-repo/src/cyberstack/platform-presentation \
+  pnpm run record:presentation-onboarding
+```
+
+The fast gate form is:
+
+```bash
+KITSOKI_RRWEB_OUT=/tmp/presentation-onboarding.rrweb.json \
+  KITSOKI_PRESENTATION_TARGET=/path/to/platform-presentation \
+  pnpm run validate:presentation-onboarding
+```
+
 ## Driving it from claude-in-chrome
 
 No special wiring needed — it's a plain page, so the standard
@@ -173,6 +206,10 @@ viewport text after scrolling.
   a PNG-sequence manifest, attached scenario evidence, and a driver journal
   event under `.artifacts/product-journey/<run-id>/` with a pointer at
   `.artifacts/tui-bridge/dogfood-marathon-real-tui/latest-run.json`.
+- `tools/tui-bridge/tests/presentation-onboarding-real-tui.e2e.spec.ts` —
+  copies a presentation-service checkout to a disposable fresh target, drives
+  project onboarding through the real xterm.js TUI, and writes rrweb/PNG/trace
+  evidence to the target's `.artifacts/kitsoki-onboarding-demo/` directory.
 
 Neither test path spawns a real kitsoki session or an LLM — per repo policy,
 that only happens when explicitly requested (point `-- run ...` or `--exec`

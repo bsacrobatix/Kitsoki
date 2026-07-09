@@ -5,7 +5,7 @@ description: Organize, review, document, or validate Kitsoki media artifacts, es
 
 # Kitsoki Media
 
-Use this skill for the media organization layer around Kitsoki demos and decks. Prefer rrweb replays for product-site and Slidey demo media; MP4 is a legacy fallback for surfaces rrweb cannot reconstruct or for explicit QA/share exports. For actually capturing a web/VS Code/terminal demo, use `kitsoki-ui-demo`. For gated vision review of an existing video or screenshot, use `kitsoki-ui-qa`. This skill decides where artifacts belong, how they are indexed, and which no-LLM checks should gate them.
+Use this skill for the media organization layer around Kitsoki demos and decks. Prefer rrweb replays for product-site, Slidey, and real TUI demo media; MP4 is a legacy fallback for surfaces rrweb cannot reconstruct or for explicit QA/share exports. For actually capturing a web/VS Code/terminal demo, use `kitsoki-ui-demo`; for terminal/TUI proof, use its `tools/tui-bridge` + `KITSOKI_RRWEB_OUT` path rather than GIF or static recording tools. For gated vision review of an existing video or screenshot, use `kitsoki-ui-qa`. This skill decides where artifacts belong, how they are indexed, and which no-LLM checks should gate them.
 
 ## First Reads
 
@@ -22,7 +22,7 @@ Only read `kitsoki-ui-demo` or `kitsoki-ui-qa` when the task requires capture or
 
 Classify every media path before editing:
 
-- Source contracts: `features/*.yaml`, `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts`, existing `*-video.spec.ts` specs running in `KITSOKI_RRWEB_OUT` mode, committed tour manifests generated from features, and intentionally committed deck-local rrweb clips.
+- Source contracts: `features/*.yaml`, `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts`, existing `*-video.spec.ts` specs running in `KITSOKI_RRWEB_OUT` mode, `tools/tui-bridge/tests/*-real-tui.e2e.spec.ts` for real xterm.js TUI captures, committed tour manifests generated from features, and intentionally committed deck-local rrweb clips.
 - Generated review artifacts: `.artifacts/**`. Do not commit these unless the user explicitly asks for a source fixture and the path is clearly appropriate.
 - Site staging: `tools/site/src/public/media/<feature>/`. Treat as generated from `.artifacts` by the site pipeline, not as source.
 - Built site output: `tools/site/.vitepress/dist/**`. Never treat as source.
