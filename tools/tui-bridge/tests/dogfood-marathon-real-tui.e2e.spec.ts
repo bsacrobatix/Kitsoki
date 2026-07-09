@@ -151,6 +151,20 @@ async function waitForScreenPattern(page: Page, pattern: RegExp, timeout = 30_00
   await expect.poll(() => bottom(page), { timeout }).toMatch(pattern);
 }
 
+async function setWarpOverlay(page: Page, visible: boolean): Promise<void> {
+  await page.evaluate((state) => {
+    return (window as any).__setWarpOverlay(state);
+  }, {
+    visible,
+    label: "FAST FORWARD",
+    detail: "cassette replay · autonomous 15-case loop",
+  });
+  await expect.poll(() => page.evaluate(() => (window as any).__warpOverlayState())).toMatchObject({
+    visible,
+    label: "FAST FORWARD",
+  });
+}
+
 async function waitForBuffer(page: Page, text: string, timeout = 30_000): Promise<void> {
   await expect.poll(() => fullBuffer(page), { timeout }).toContain(text);
 }
@@ -160,12 +174,16 @@ async function typeLine(
   text: string,
   shot?: (page: Page, label: string) => Promise<string>,
   shotLabel?: string,
+  beforeEnter?: () => Promise<void>,
 ): Promise<void> {
   await page.click("#term");
   await page.keyboard.type(text, { delay: TYPE_DELAY_MS });
   await dwell(page, COMMAND_HOLD_MS);
   if (shot && shotLabel) {
     await shot(page, shotLabel);
+  }
+  if (beforeEnter) {
+    await beforeEnter();
   }
   await page.keyboard.press("Enter");
 }
@@ -258,6 +276,9 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
   try {
     await page.goto(`/player/?ws=ws://${addr}/pty`);
     await page.waitForFunction(() => (window as any).__ready === true);
+    await expect.poll(() => page.evaluate(() => (window as any).__warpOverlayState())).toMatchObject({
+      visible: false,
+    });
     await expect
       .poll(() => page.evaluate(() => (window as any).__status()), { timeout: 60_000 })
       .toBe("connected");
@@ -286,7 +307,9 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
 
     chapters.open("start", "Start autonomous 15-bug dogfood marathon", RECORDING);
     await focusChat(page);
-    await typeLine(page, "start the marathon", shot, "typed-start-marathon");
+    await typeLine(page, "start the marathon", shot, "typed-start-marathon", async () => {
+      await setWarpOverlay(page, true);
+    });
     if (PACE === 0) {
       await waitForBuffer(page, CASES[0].id, 60_000);
     } else {
@@ -300,6 +323,10 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
       const { id: caseId, title } = CASES[i - 1];
       chapters.open(`bug-${String(i).padStart(2, "0")}`, `Process ${caseId}: ${title}`, RECORDING);
       await waitForBuffer(page, caseId, 90_000);
+      await expect.poll(() => page.evaluate(() => (window as any).__warpOverlayState())).toMatchObject({
+        visible: true,
+        label: "FAST FORWARD",
+      });
       if (i === 5) {
         await waitForScreen(page, "core.dogfood.exception_review");
         await waitForBuffer(page, "! SERIOUS EXCEPTION");
