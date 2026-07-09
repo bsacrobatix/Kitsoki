@@ -12,9 +12,10 @@ From the story, use natural prompts or explicit `key=value` qualifiers:
 ```text
 preview <catalog-scenario-id> across all transports
 check scenario=<catalog-scenario-id> transport=tui,web persona=<persona-id> target=<project-id>
-check whether the settings form keeps validation errors transport=web target=<project-id>
-next leg
+check whether settings validation persists transport=web target=<project-id>
+next transport
 report
+main room
 ```
 
 The resting room also accepts unmatched prose as a `check_request`, so an
@@ -24,28 +25,33 @@ otherwise the remaining prose becomes an ad-hoc scenario description. Supported
 transport values are `all`, `tui`, `web`, `vscode`, `cli`, or a comma list.
 
 `preview` is side-effect-free for catalog scenarios: it asks the deterministic
-product-journey runner for the scenario x transport suite, binds the leg count
-into story state, and does not create a run bundle, launch capture, or call an
-LLM.
+product-journey runner for a scenario goal plus per-transport evidence plan,
+binds the planned transport-check count into story state, and does not create a
+run bundle, launch capture, or call an LLM.
 
 `check` creates the run bundle under `.artifacts/product-journey/<run-id>/`,
-then drives one transport-pinned leg at a time. Multi-transport checks pause
-after each leg so the operator can inspect evidence before continuing with
-`next leg`.
+then drives one transport-pinned check at a time. Multi-transport checks pause
+after each transport so the operator can inspect evidence before continuing
+with `next transport`.
 `report` folds the recorded driver and judge outcomes into:
 
 - `report.md` for the per-transport verdict table.
 - `deck.slidey.json` for the deterministic Slidey deck.
+
+The closeout report keeps the result counts at the top, exposes `report.md` as
+the primary clickable summary artifact in the web/TUI `kv` renderer, and offers
+`main room` to return to the Scenario QA start screen without discarding the
+last run.
 
 ## Transport Contract
 
 One scenario can drive any transport it declares without a custom harness path.
 The story passes `transport=tui`, `web`, `vscode`, `cli`, a comma list, or
 `all` into `tools/product-journey/run.py`. The runner expands each applicable
-scenario into scenario x transport legs and writes the stable route into
+scenario into scenario x transport checks and writes the stable route into
 `driver-plan.json`.
 
-Each leg carries:
+Each transport check carries:
 
 - `leg_id`, `scenario`, `transport`, and `visual_surface`.
 - The primary story and natural task prompt.
@@ -55,9 +61,9 @@ Each leg carries:
 - A no-substitution policy: demo, placeholder, synthetic, or unrelated media
   cannot satisfy proof.
 
-VS Code legs are bridge-level proof unless a future native editor integration
-raises the contract. CLI legs are terminal-level proof: command transcript,
-exit code, cwd, and trace references, not visual state. TUI and web legs are
+VS Code checks are bridge-level proof unless a future native editor integration
+raises the contract. CLI checks are terminal-level proof: command transcript,
+exit code, cwd, and trace references, not visual state. TUI and web checks are
 frame-level proof by default.
 
 ## Evidence And Decks

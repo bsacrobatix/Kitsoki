@@ -5,7 +5,7 @@
 # prompts/drive_leg.md's "session.new harness=live profile={{ args.live_profile
 # }}" instruction gets its value from. A confirmation rerun of `check
 # scenario=prd-design transport=all ... profile=claude-native` found every
-# transport leg falling back to harness:replay (missing-cassette blocker on
+# transport check falling back to harness:replay (missing-cassette blocker on
 # the nested dev-story's host.agent.converse) because nothing asserted this
 # specific pass-through — expect_host_calls previously only checked the
 # `call:` id, never the rendered `context.args` payload. This flow closes that
@@ -46,7 +46,7 @@ host_handlers:
             pass_count: 1
             fail_count: 0
             degraded_count: 0
-            summary: "1 / 1 transport legs passed."
+            summary: "1 / 1 transport checks passed."
 
   host.starlark.run:
     by_call:
@@ -100,7 +100,7 @@ host_handlers:
       build_report:
         data:
           report_path: ".artifacts/product-journey/scenario-qa-profile-run-1/report.md"
-          report_summary: "1 / 1 transport legs passed."
+          report_summary: "1 / 1 transport checks passed."
 
   host.agent.task:
     by_call:

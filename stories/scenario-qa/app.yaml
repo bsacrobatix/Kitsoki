@@ -133,6 +133,8 @@ world:
   suite_status:          { type: string, default: "" }
   suite_leg_count:       { type: int, default: 0 }
   suite_skipped_count:   { type: int, default: 0 }
+  suite_summary:         { type: string, default: "" }
+  suite_plan:            { type: string, default: "" }
   run_id:               { type: string, default: "" }
   run_dir:              { type: string, default: "" }    # absolute — for the driver's own tools and display
   run_dir_rel:          { type: string, default: "" }    # repo-relative — for this story's own ctx.fs reads/writes
@@ -178,7 +180,7 @@ intents:
     title: "check a scenario request"
     description: "Check an arbitrary scenario request. The request may be plain prose, a catalog id, or prose plus key=value qualifiers."
     examples:
-      - "settings form keeps validation errors transport=web"
+      - "settings validation persists transport=web"
       - "scenario=prd-design transport=tui,web persona=core-maintainer target=gears-rust"
       - "check whether the onboarding tour renders on web"
     priority: 95
@@ -245,14 +247,19 @@ intents:
     priority: 1
   # ── operator-paced loop control ───────────────────────────────────────────
   next_leg:
-    title: "next leg"
-    description: "Advance to and drive the next transport leg (one leg per turn keeps the internal emit chain bounded)."
-    examples: ["next leg", "next transport", "continue", "drive the next one", "continue to the next transport"]
+    title: "next transport"
+    description: "Advance to and drive the next transport check (one transport per turn keeps the internal emit chain bounded)."
+    examples: ["next transport", "next leg", "continue", "drive the next one", "continue to the next transport"]
     priority: 60
   report:
     description: "(Re)build report.md from the current run's per-leg driver and judge outcomes."
     examples: ["report", "build the report", "show the verdict table"]
     priority: 55
+  main_room:
+    title: "main room"
+    description: "Return to the Scenario QA main room without discarding the last run."
+    examples: ["main room", "back to main", "home", "start over"]
+    priority: 50
   status:
     description: "Show current scenario-qa progress: plan, per-leg outcomes, and report state."
     examples: ["status", "show me", "where are we", "progress"]

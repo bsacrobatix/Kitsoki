@@ -98,7 +98,7 @@ def main(ctx):
         for line in natural_lines:
             lines.append(line + "\n")
 
-    summary = _str(passes) + " / " + _str(len(items)) + " transport legs passed"
+    summary = _str(passes) + " / " + _str(len(items)) + " transport checks passed"
     if fails > 0:
         summary += ", " + _str(fails) + " failed"
     if degraded > 0:

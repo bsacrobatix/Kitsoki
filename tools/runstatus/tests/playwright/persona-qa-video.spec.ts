@@ -5,8 +5,8 @@
  * deterministic no-LLM posture. The flow fixture stubs host calls so the
  * browser still exercises the story surface end to end:
  *
- *   home -> new session -> type preview -> type check -> next leg -> next leg
- *   -> next leg -> report
+ *   home -> new session -> type preview -> type check -> next transport
+ *   -> next transport -> next transport -> report -> main room
  *
  * Validate fast:
  *   WEB_CHAT_PACE=0 pnpm exec playwright test persona-qa-video --project=chromium
@@ -105,33 +105,44 @@ async function waitForScenarioQASettle(page: Page, step: TourStep): Promise<void
   }
   if (step.id === "pqa-preview") {
     await waitForState(page, "idle", 15000);
-    await expect(page.getByTestId("chat-section")).toContainText("ready; legs=4, skipped=0", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("Preview ready: 4 transport checks", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("PRD and design workflow", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("Goal: Turn an under-specified improvement idea", { timeout: 15000 });
     await expect(page.getByTestId("chat-section")).toContainText(/Last run\s*\(none yet\)/, { timeout: 15000 });
     return;
   }
   if (step.id === "pqa-check") {
     await waitForState(page, "recording", 15000);
-    await expect(page.getByTestId("chat-section")).toContainText(/Leg\s*0 \/ 4/, { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText(/Transport check\s*1 of 4/, { timeout: 15000 });
     await expect(page.getByTestId("chat-section")).toContainText(/Driver status\s*captured/, { timeout: 15000 });
-    await expect(page.getByTestId("chat-section")).toContainText("settings form keeps validation errors", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("settings validation persists", { timeout: 15000 });
     return;
   }
   if (step.id === "pqa-next-web") {
     await waitForState(page, "recording", 15000);
-    await expect(page.getByTestId("chat-section")).toContainText(/Leg\s*1 \/ 4/, { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText(/Transport check\s*2 of 4/, { timeout: 15000 });
     return;
   }
   if (step.id === "pqa-next-vscode") {
     await waitForState(page, "recording", 15000);
-    await expect(page.getByTestId("chat-section")).toContainText(/Leg\s*2 \/ 4/, { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText(/Transport check\s*3 of 4/, { timeout: 15000 });
     await expect(page.getByTestId("chat-section")).toContainText(/Degraded\s*1/, { timeout: 15000 });
     return;
   }
   if (step.id === "pqa-next-cli") {
     await waitForState(page, "report", 15000);
-    await expect(page.getByTestId("chat-section")).toContainText("3 / 4 transport legs passed, 1 degraded-evidence", { timeout: 15000 });
-    await expect(page.getByTestId("chat-section")).toContainText("adhoc-settings-form-keeps-validation-errors", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("3 / 4 transport checks passed, 1 degraded-evidence", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("Summary report", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("settings validation persists", { timeout: 15000 });
     await expect(page.getByTestId("chat-section")).toContainText("deck.slidey.json", { timeout: 15000 });
+    await expect(page.getByTestId("intent-btn-main_room")).toBeVisible({ timeout: 15000 });
+    return;
+  }
+  if (step.id === "pqa-main-room") {
+    await waitForState(page, "idle", 15000);
+    await expect(page.getByTestId("chat-section")).toContainText("SCENARIO QA", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText(/Last run\s*scenario-qa-demo-run/, { timeout: 15000 });
+    await expect(page.getByTestId("intent-btn-report")).toBeVisible({ timeout: 15000 });
   }
 }
 

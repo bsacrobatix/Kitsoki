@@ -15,12 +15,14 @@ Useful prompts:
   an LLM.
 - `check scenario=<catalog-scenario-id> transport=tui,web persona=<persona-id>
   target=<project-id>` creates the run bundle and drives the first transport
-  leg for a catalog scenario.
-- `check whether the settings form keeps validation errors transport=web`
+  check for a catalog scenario.
+- `check whether settings validation persists transport=web`
   drafts an ad-hoc scenario from prose and checks it on the requested
   transport.
-- `next leg` advances through the remaining transport legs one at a time.
+- `next transport` advances through the remaining transport checks one at a time.
 - `report` rebuilds `report.md` and `deck.slidey.json` for the current run.
+- `main room` returns from the closeout report to the Scenario QA start screen
+  while keeping the last run available.
 
 The idle and report rooms also expose a `check_request` free-text input. Treat
 the prose as the scenario description, and add `scenario=<id>` only when you
@@ -31,7 +33,10 @@ The two review entrypoints are:
 
 - `report.md` for the per-transport verdict table.
 - `deck.slidey.json` for the deterministic Slidey deck folded from the recorded
-  leg results and any captured playback evidence.
+  transport-check results and any captured playback evidence.
+
+The report room shows result counts first and keeps `report.md` in a `kv` row
+so web and TUI render it as an openable markdown artifact.
 
 The story owns the product workflow. Python modules under `tools/` remain
 implementation adapters for deterministic planning, schema validation,

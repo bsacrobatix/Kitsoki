@@ -50,7 +50,7 @@ host_handlers:
             pass_count: 1
             fail_count: 0
             degraded_count: 0
-            summary: "1 / 1 transport legs passed."
+            summary: "1 / 1 transport checks passed."
 
   host.starlark.run:
     by_call:
@@ -107,7 +107,7 @@ host_handlers:
       build_report:
         data:
           report_path: ".artifacts/product-journey/scenario-qa-reuse-run/report.md"
-          report_summary: "1 / 1 transport legs passed."
+          report_summary: "1 / 1 transport checks passed."
 
   host.agent.task:
     by_call:
@@ -146,7 +146,7 @@ turns:
 
   # The regression: a second `check` from `report` must resolve the same
   # single leg again (report -> plan -> execute -> ... -> report), NOT bounce
-  # straight back to idle with "No transport legs resolved" because of stale
+  # straight back to idle with "No transport checks resolved" because of stale
   # plan_status left over from the first check.
   - intent:
       name: check

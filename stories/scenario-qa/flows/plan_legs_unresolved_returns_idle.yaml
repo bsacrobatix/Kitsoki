@@ -47,13 +47,13 @@ turns:
     expect_world:
       status: "idle"
       leg_count: 0
-      last_error: "No transport legs resolved for this scenario/transport combination — check scenario/transport values."
+      last_error: "No transport checks resolved for this scenario/transport combination — check scenario/transport values."
     expect_host_calls:
       - handler: host.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
     expect_no_host_calls: [host.agent.task]
-    expect_view_matches: "No transport legs resolved"
+    expect_view_matches: "No transport checks resolved"
 
 expect_no_errors: true

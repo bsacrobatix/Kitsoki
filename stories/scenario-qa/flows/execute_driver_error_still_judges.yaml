@@ -37,7 +37,7 @@ host_handlers:
             pass_count: 0
             fail_count: 0
             degraded_count: 1
-            summary: "0 / 1 transport legs passed (1 degraded)."
+            summary: "0 / 1 transport checks passed (1 degraded)."
 
   host.starlark.run:
     by_call:
@@ -88,7 +88,7 @@ host_handlers:
       build_report:
         data:
           report_path: ".artifacts/product-journey/scenario-qa-run-driver-error/report.md"
-          report_summary: "0 / 1 transport legs passed (1 degraded)."
+          report_summary: "0 / 1 transport checks passed (1 degraded)."
 
   host.agent.task:
     by_call:
@@ -136,6 +136,6 @@ turns:
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-    expect_view_matches: "driver session abandoned without successful submit[\\s\\S]*tui / bugfix[\\s\\S]*driver=unattempted verdict=degraded-evidence"
+    expect_view_matches: "Scenario:[\\s\\S]*bugfix[\\s\\S]*driver session abandoned without successful submit[\\s\\S]*tui \\[\\] verdict=degraded-evidence driver=unattempted"
 
 expect_no_errors: true

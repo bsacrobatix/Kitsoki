@@ -34,7 +34,7 @@ entries:
     majority_of: 1
 
   - state: recording
-    input: "next leg"
+    input: "next transport"
     intent:
       name: next_leg
       slots: {}

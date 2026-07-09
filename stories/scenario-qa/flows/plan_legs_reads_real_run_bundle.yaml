@@ -95,6 +95,6 @@ turns:
         args: { call: judge_leg }
       - handler: host.starlark.run
         args: { call: record_leg_result }
-    expect_view_matches: "recording[\\s\\S]*next leg"
+    expect_view_matches: "recording[\\s\\S]*next transport"
 
 expect_no_errors: true

@@ -3253,6 +3253,8 @@ def build_transport_suite(
             "scenario": scenario["id"],
             "label": scenario.get("label", scenario["id"]),
             "stage": scenario.get("stage", ""),
+            "task": scenario.get("task", ""),
+            "success_criteria": scenario.get("success_criteria", []),
             "primary_story": scenario.get("primary_story", ""),
             "allowed_transports": allowed,
             "required_transports": required,
@@ -3295,7 +3297,7 @@ def render_transport_suite(suite: dict) -> str:
         "",
         f"- Scenarios: {summary.get('scenario_count', 0)}",
         f"- Requested transports: {', '.join(summary.get('requested_transports', []))}",
-        f"- Planned legs: {summary.get('leg_count', 0)}",
+        f"- Planned transport checks: {summary.get('leg_count', 0)}",
         f"- Driver: {suite.get('driver', {}).get('id', '')}",
         "",
         "## Transport Profiles",
@@ -3307,7 +3309,7 @@ def render_transport_suite(suite: dict) -> str:
             f"{profile.get('level', '')} via {profile.get('primary_tool', '')} "
             f"-> `{profile.get('evidence_kind', '')}`"
         )
-    lines.extend(["", "## Scenario Legs", ""])
+    lines.extend(["", "## Scenario Transport Checks", ""])
     if not suite.get("legs"):
         lines.append("No legs resolved for this scenario/transport selection.")
         return "\n".join(lines) + "\n"
@@ -3316,6 +3318,7 @@ def render_transport_suite(suite: dict) -> str:
             f"### {scenario.get('scenario', '')}: {scenario.get('label', '')}",
             "",
             f"- Primary story: `{scenario.get('primary_story', '')}`",
+            f"- Goal: {scenario.get('task', '') or '(not described)'}",
             f"- Allowed: {', '.join(scenario.get('allowed_transports', [])) or '(none)'}",
             f"- Applicable: {', '.join(scenario.get('applicable_transports', [])) or '(none)'}",
         ])
@@ -4961,7 +4964,7 @@ def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
     final_gates = driver_plan.get("final_gates", [])
     missing_proof_evidence = handoff.get("missing_proof_evidence", [])
     has_transport_axis = any(scenario.get("transport") for scenario in driver_scenarios)
-    unit_label = "transport legs" if has_transport_axis else "scenarios"
+    unit_label = "transport checks" if has_transport_axis else "scenarios"
     seen = set()
     ordered_ids = []
     for scenario in driver_scenarios:
@@ -11911,7 +11914,7 @@ def scenario_qa_leg_counts(items: list[dict]) -> dict:
 
 
 def scenario_qa_report_summary(name: str, counts: dict) -> str:
-    summary = f"{counts['pass']} / {counts['total']} transport legs passed"
+    summary = f"{counts['pass']} / {counts['total']} transport checks passed"
     if counts["fail"] > 0:
         summary += f", {counts['fail']} failed"
     if counts["degraded"] > 0:
@@ -11978,14 +11981,14 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
             "type": "title",
             "title": "Scenario QA",
             "subtitle": name,
-            "narration": "This deck folds every transport leg's independently-judged verdict into one per-scenario view.",
+            "narration": "This deck folds every transport check's independently-judged verdict into one per-scenario view.",
         },
         {
             "type": "narrative",
             "eyebrow": "Verdict",
             "title": scenario_qa_report_summary(name, counts),
-            "body": "\n".join(f"- {row}" for row in rows) or "(no transport legs recorded yet)",
-            "narration": "Each row is one transport leg: an independently-driven and independently-judged capture, never the driver's own self-report.",
+            "body": "\n".join(f"- {row}" for row in rows) or "(no transport checks recorded yet)",
+            "narration": "Each row is one transport check: an independently-driven and independently-judged capture, never the driver's own self-report.",
         },
     ]
     if natural_prompt_lines:
@@ -12000,7 +12003,7 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
         "type": "narrative",
         "eyebrow": "Run",
         "title": run_id,
-        "body": f"{counts['total']} transport leg(s); {counts['pass']} pass, {counts['fail']} fail, {counts['degraded']} degraded-evidence.",
+        "body": f"{counts['total']} transport check(s); {counts['pass']} pass, {counts['fail']} fail, {counts['degraded']} degraded-evidence.",
         "narration": "vscode legs are always bridge-level proof (the IDE bridge stub/recording path) -- never mistake them for editor-level coverage.",
     })
     return {
@@ -12020,33 +12023,33 @@ def render_scenario_qa_review(name: str, run_id: str, items: list[dict], counts:
         checks.append({
             "id": "scenario-qa-legs",
             "status": "warn",
-            "summary": "No transport legs have been recorded for this scenario-qa report.",
+            "summary": "No transport checks have been recorded for this scenario-qa report.",
         })
         status = "not_reviewed"
-        summary = "Run has no recorded transport legs yet."
+        summary = "Run has no recorded transport checks yet."
     else:
         checks.append({
             "id": "scenario-qa-legs",
             "status": "pass",
-            "summary": f"{counts['total']} transport leg(s) recorded.",
+            "summary": f"{counts['total']} transport check(s) recorded.",
         })
         if counts["fail"] > 0:
             checks.append({
                 "id": "scenario-qa-verdicts",
                 "status": "fail",
-                "summary": f"{counts['fail']} transport leg(s) failed.",
+                "summary": f"{counts['fail']} transport check(s) failed.",
             })
         elif counts["degraded"] > 0:
             checks.append({
                 "id": "scenario-qa-verdicts",
                 "status": "warn",
-                "summary": f"{counts['degraded']} transport leg(s) reported degraded evidence.",
+                "summary": f"{counts['degraded']} transport check(s) reported degraded evidence.",
             })
         else:
             checks.append({
                 "id": "scenario-qa-verdicts",
                 "status": "pass",
-                "summary": "Every recorded transport leg passed.",
+                "summary": "Every recorded transport check passed.",
             })
         status = "ready" if counts["fail"] == 0 and counts["degraded"] == 0 else "needs_evidence"
         summary = scenario_qa_report_summary(name, counts)
@@ -13094,11 +13097,11 @@ def main() -> None:
         default="",
         help=(
             "Comma-separated transport ids (tui,web,vscode,cli) or 'all' to expand --emit-run's "
-            "execution-plan/driver-plan into scenario x transport legs. Omit to keep today's "
+            "execution-plan/driver-plan into scenario x transport checks. Omit to keep today's "
             "single-surface-per-scenario output."
         ),
     )
-    parser.add_argument("--transport-suite", action="store_true", help="Preview scenario x transport legs without creating a run bundle")
+    parser.add_argument("--transport-suite", action="store_true", help="Preview scenario x transport checks without creating a run bundle")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
@@ -13184,9 +13187,9 @@ def main() -> None:
         choices=["file", "dry-run"],
         help="Value-style alias for --dry-run so story slots can select the mode (--filing-mode dry-run)",
     )
-    parser.add_argument("--scenario-qa-report", action="store_true", help="Fold stories/scenario-qa's recorded per-transport leg results into <run-dir>/deck.slidey.json")
+    parser.add_argument("--scenario-qa-report", action="store_true", help="Fold stories/scenario-qa's recorded per-transport check results into <run-dir>/deck.slidey.json")
     parser.add_argument("--scenario-description", default="", help="Free-text ad-hoc scenario name for --scenario-qa-report when no --scenario id was used")
-    parser.add_argument("--leg-results-json", default="", help="JSON object (or @path to a JSON file) with {items:[...]} per-transport leg driver+judge outcomes, for --scenario-qa-report")
+    parser.add_argument("--leg-results-json", default="", help="JSON object (or @path to a JSON file) with {items:[...]} per-transport check driver+judge outcomes, for --scenario-qa-report")
     parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
     parser.add_argument("--driver-handoff", action="store_true", help="Refresh and print the product-journey QA driver handoff artifact")
     parser.add_argument("--summarize-run", action="store_true", help="Print the story-load summary for an existing run bundle")
