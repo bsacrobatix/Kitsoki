@@ -113,6 +113,11 @@ async function bottom(page: Page): Promise<string> {
   return page.evaluate(() => (window as any).__scrollToBottom());
 }
 
+async function focusTerminal(page: Page): Promise<void> {
+  await page.click("#term");
+  await page.evaluate(() => (window as any).__focusTerm?.());
+}
+
 async function top(page: Page): Promise<string> {
   return page.evaluate(() => (window as any).__scrollToTop());
 }
@@ -140,7 +145,7 @@ async function typeLine(
   opts: { chat?: boolean } = {},
 ): Promise<void> {
   await bottom(page);
-  await page.click("#term");
+  await focusTerminal(page);
   if (opts.chat) {
     await page.keyboard.press("Tab");
     await dwell(page, 300);
@@ -168,7 +173,7 @@ async function chooseDefaultAction(
   expectedCursorText: string,
 ): Promise<void> {
   await bottom(page);
-  await page.click("#term");
+  await focusTerminal(page);
   await expect.poll(() => choiceCursorLine(page), { timeout: 10_000 }).toContain(expectedCursorText);
   await dwell(page, STEP_HOLD_MS);
   await shot(page, label);
@@ -182,7 +187,7 @@ async function chooseActionByLabel(
   expectedCursorText: string,
 ): Promise<void> {
   await bottom(page);
-  await page.click("#term");
+  await focusTerminal(page);
   for (let i = 0; i < 24; i += 1) {
     const line = await choiceCursorLine(page);
     if (line.includes(expectedCursorText)) {
@@ -192,7 +197,8 @@ async function chooseActionByLabel(
       return;
     }
     await page.keyboard.press("ArrowDown");
-    await dwell(page, 120);
+    await expect.poll(() => choiceCursorLine(page), { timeout: 2_000 }).not.toBe(line);
+    await dwell(page, 60);
   }
   throw new Error(`choice cursor did not reach ${expectedCursorText}`);
 }
