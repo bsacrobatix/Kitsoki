@@ -12,19 +12,19 @@
 states:
 
   execute:
-    description: "Dispatching the reusable driver for the current transport leg."
+    description: "Dispatching the reusable driver for the current transport check."
     relevant_world: [run_id, run_dir, leg_index, leg_count, current_leg, drive_result, status]
     view:
       - heading: "Scenario QA · execute"
       - kv:
           pairs:
             Run: "{{ world.run_id }}"
-            Leg: "{{ world.leg_index }} / {{ world.leg_count }}"
+            Transport check: "{{ world.leg_index + 1 }} of {{ world.leg_count }}"
             Scenario: "{{ world.current_leg.scenario }}"
             Transport: "{{ world.current_leg.transport }}"
             Visual surface: "{{ world.current_leg.visual_surface }}"
             Evidence dir: "{{ world.current_leg.evidence_dir }}"
-      - prose: "Dispatching product-journey-qa-driver for this leg, pinned to `{{ world.current_leg.transport }}` — this OVERRIDES the driver's usual cheapest-surface heuristic. A missing or JSON-degraded visual surface is reported as a blocker, never fabricated."
+      - prose: "Dispatching product-journey-qa-driver for `{{ world.current_leg.transport }}`. This transport pin overrides the driver's usual cheapest-surface heuristic. A missing or JSON-degraded visual surface is reported as a blocker, never fabricated."
     on_enter:
       - invoke: host.starlark.run
         id: pick_leg

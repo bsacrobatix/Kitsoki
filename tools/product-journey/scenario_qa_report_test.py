@@ -4,7 +4,7 @@
 
 stories/scenario-qa owns report.md itself (folded in Starlark,
 scripts/build_report.star) and dispatches the driver/judge agents per
-transport leg; this subcommand only owns deck.slidey.json -- the one derived
+transport check; this subcommand only owns deck.slidey.json -- the one derived
 artifact that most benefits from this module's existing Slidey-deck-shape
 validation. Covers:
   - scenario_qa_leg_counts()/scenario_qa_leg_level() over a mixed
@@ -101,7 +101,7 @@ def _test_leg_counts():
     _check("mixed counts fail excludes unjudged/empty verdicts", mixed_counts["fail"] == 1)
 
     summary = run.scenario_qa_report_summary("bugfix", counts)
-    _check("summary names the pass/total ratio", "2 / 3 transport legs passed" in summary)
+    _check("summary names the pass/total ratio", "2 / 3 transport checks passed" in summary)
     _check("summary names the degraded count", "1 degraded-evidence" in summary)
     _check("summary omits a failed clause when there are no failures", "failed" not in summary)
 
@@ -183,7 +183,7 @@ def _test_render_deck():
     _check("the deck labels the vscode leg bridge-level", "bridge-level" in body_text)
     _check("the deck labels the tui leg frame-level", "frame-level" in body_text)
     _check("the deck carries the run id", "scenario-qa-run-all" in body_text)
-    _check("the deck's summary scene names the pass/total ratio", "2 / 3 transport legs passed" in body_text)
+    _check("the deck's summary scene names the pass/total ratio", "2 / 3 transport checks passed" in body_text)
     _check("the deck includes a natural prompt scene", "Natural prompts" in body_text)
     _check("the deck labels transcript-derived wording", "Transcript-derived scenario wording" in body_text)
     _check("the deck carries the natural prompt count", "2 transcript-derived prompt" in body_text)

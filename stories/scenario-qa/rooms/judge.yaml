@@ -11,13 +11,13 @@
 states:
 
   judge:
-    description: "Judging the current transport leg's captured evidence against the scenario's success criteria."
+    description: "Judging the current transport check's captured evidence against the scenario's success criteria."
     relevant_world: [run_id, leg_index, leg_count, current_leg, drive_result, judge_result, status]
     view:
       - heading: "Scenario QA · judge"
       - kv:
           pairs:
-            Leg: "{{ world.leg_index }} / {{ world.leg_count }}"
+            Transport check: "{{ world.leg_index + 1 }} of {{ world.leg_count }}"
             Transport: "{{ world.current_leg.transport }}"
             Driver status: '{{ world.drive_result.status|default:"(no report)" }}'
             Verdict: '{{ world.judge_result.verdict|default:"(judging…)" }}'

@@ -34,7 +34,7 @@ host_handlers:
             pass_count: 1
             fail_count: 0
             degraded_count: 0
-            summary: "1 / 1 transport legs passed."
+            summary: "1 / 1 transport checks passed."
 
   host.starlark.run:
     by_call:
@@ -78,7 +78,7 @@ host_handlers:
       build_report:
         data:
           report_path: ".artifacts/product-journey/scenario-qa-run-adhoc/report.md"
-          report_summary: "1 / 1 transport legs passed."
+          report_summary: "1 / 1 transport checks passed."
 
   host.agent.task:
     by_call:
@@ -109,7 +109,7 @@ turns:
       run_id: scenario-qa-run-adhoc
       leg_count: 1
       pass_count: 1
-      report_summary: "1 / 1 transport legs passed."
+      report_summary: "1 / 1 transport checks passed."
       deck_path: "/repo/.artifacts/product-journey/scenario-qa-run-adhoc/deck.slidey.json"
     expect_host_calls:
       - handler: host.run
@@ -124,6 +124,6 @@ turns:
         args: { call: build_report }
       - handler: host.run
         args: { call: build_scenario_qa_deck }
-    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport legs passed[\\s\\S]*adhoc-open-the-onboarding-tour"
+    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport checks passed[\\s\\S]*Scenario:[\\s\\S]*open the onboarding tour[\\s\\S]*Summary report:[\\s\\S]*report.md[\\s\\S]*tui[\\s\\S]*verdict=pass driver=captured"
 
 expect_no_errors: true

@@ -46,7 +46,7 @@ turns:
         profile: claude-native
     expect_state: idle
     expect_world:
-      last_error: "No transport legs resolved for this scenario/transport combination — check scenario/transport values."
+      last_error: "No transport checks resolved for this scenario/transport combination — check scenario/transport values."
     expect_host_calls:
       - handler: host.run
         args:

@@ -46,7 +46,7 @@ turns:
       persona: core-maintainer
       target: gears-rust
       run_id: scenario-qa-natural-id-run
-      last_error: "No transport legs resolved for this scenario/transport combination — check scenario/transport values."
+      last_error: "No transport checks resolved for this scenario/transport combination — check scenario/transport values."
       status: idle
     expect_host_calls:
       - handler: host.run

@@ -2,7 +2,7 @@ states:
 
   idle:
     description: "Waiting to check a scenario across one or more transports."
-    relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, suite_status, suite_leg_count, suite_skipped_count, run_id, run_dir, last_error, status]
+    relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, suite_status, suite_leg_count, suite_skipped_count, suite_summary, suite_plan, run_id, run_dir, last_error, status]
     default_intent: check_request
     view:
       - banner:
@@ -16,12 +16,16 @@ states:
             Transport: "{{ world.transport_arg }}"
             Persona: '{{ world.persona|default:"(default)" }}'
             Target: '{{ world.target|default:"(default)" }}'
-            Transport suite: '{{ world.suite_status|default:"(not previewed)" }}; legs={{ world.suite_leg_count }}, skipped={{ world.suite_skipped_count }}'
+            Preview: '{{ world.suite_summary|default:"(not previewed)" }}'
             Last run: '{{ world.run_id|default:"(none yet)" }}'
             Status: "{{ world.status }}"
+      - heading: "Previewed transport checks"
+        when: "world.suite_plan != ''"
+      - code: "{{ world.suite_plan }}"
+        when: "world.suite_plan != ''"
       - prose: "{{ world.last_error }}"
         when: "world.last_error != ''"
-      - prose: "Describe any behavior to check, or provide a catalog scenario id. Optional qualifiers: scenario=<id>, transport=all|tui|web|vscode|cli, persona=<id>, target=<project>, seed=<id>, profile=<profile>."
+      - prose: "Describe the behavior to check. Add qualifiers such as transport=all|tui|web|vscode|cli, persona=<id>, target=<project>, seed=<id>, or profile=<profile>. Use scenario=<id> only when you want a catalog scenario instead of an ad-hoc behavior check."
       - choice:
           mode: single
           prompt: "Actions"
@@ -32,10 +36,10 @@ states:
               param:
                 slot: request
                 type: string
-                placeholder: "e.g. settings form keeps validation errors transport=web"
+                placeholder: "e.g. settings validation persists transport=web"
                 required: true
-            - label: "preview catalog scenario"
-              hint: "show transport legs without creating a run bundle"
+            - label: "preview transport checks"
+              hint: "dry-run which transports and evidence would be used; no run created"
               intent: preview
               slots:
                 transport: all
@@ -72,6 +76,8 @@ states:
           effects:
             - set:
                 last_error: ""
+                suite_summary: ""
+                suite_plan: ""
                 status: "parsing_request"
             - invoke: host.starlark.run
               id: parse_check_request
@@ -130,6 +136,8 @@ states:
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
+                suite_summary: ""
+                suite_plan: ""
                 status: "planning"
                 leg_index: 0
                 leg_count: 0
@@ -157,6 +165,8 @@ states:
                 suite_status: ""
                 suite_leg_count: 0
                 suite_skipped_count: 0
+                suite_summary: ""
+                suite_plan: ""
                 transport_suite: {}
                 last_error: ""
                 status: "previewing"
@@ -180,6 +190,18 @@ states:
                 suite_status: "stdout_json.status"
                 suite_leg_count: "stdout_json.summary.leg_count"
                 suite_skipped_count: "stdout_json.summary.skipped_count"
+              on_error: idle
+            - invoke: host.starlark.run
+              id: summarize_transport_suite
+              with:
+                script: scripts/summarize_transport_suite.star
+                inputs:
+                  suite: "{{ world.transport_suite }}"
+                  scenario_ref: "{{ world.scenario_ref }}"
+                  transport: "{{ world.transport_arg }}"
+              bind:
+                suite_summary: suite_summary
+                suite_plan: suite_plan
               on_error: idle
             - set:
                 status: "preview_ready"

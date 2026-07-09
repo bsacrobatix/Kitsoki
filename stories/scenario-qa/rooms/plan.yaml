@@ -42,7 +42,7 @@
 states:
 
   plan:
-    description: "Building the run bundle and resolving it into per-transport legs."
+    description: "Building the run bundle and resolving it into per-transport checks."
     relevant_world: [mode, scenario_ref, scenario_description, transport_arg, persona, target, seed, run_id, run_dir, leg_count, status]
     view:
       - heading: "Scenario QA · plan"
@@ -52,7 +52,7 @@ states:
             Scenario: "{{ world.scenario_ref }}"
             Transport: "{{ world.transport_arg }}"
             Run: '{{ world.run_id|default:"(building…)" }}'
-            Legs: "{{ world.leg_count }}"
+            Transport checks: "{{ world.leg_count }}"
         when: "world.mode != 'adhoc'"
       - kv:
           pairs:
@@ -60,9 +60,9 @@ states:
             Description: "{{ world.scenario_description }}"
             Transport: "{{ world.transport_arg }}"
             Run: '{{ world.run_id|default:"(building…)" }}'
-            Legs: "{{ world.leg_count }}"
+            Transport checks: "{{ world.leg_count }}"
         when: "world.mode == 'adhoc'"
-      - prose: "Building the scenario-qa run bundle and resolving it into per-transport legs."
+      - prose: "Building the scenario-qa run bundle and resolving the requested transport checks."
     on_enter:
       - invoke: host.run
         id: emit_scenario_qa_run
@@ -130,7 +130,7 @@ states:
         - target: idle
           effects:
             - set:
-                last_error: "No transport legs resolved for this scenario/transport combination — check scenario/transport values."
+                last_error: "No transport checks resolved for this scenario/transport combination — check scenario/transport values."
                 status: "idle"
       status:
         - target: .

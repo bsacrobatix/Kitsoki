@@ -45,7 +45,7 @@ host_handlers:
             pass_count: 1
             fail_count: 0
             degraded_count: 0
-            summary: "1 / 1 transport legs passed."
+            summary: "1 / 1 transport checks passed."
 
   host.starlark.run:
     by_call:
@@ -104,7 +104,7 @@ host_handlers:
       build_report:
         data:
           report_path: ".artifacts/product-journey/scenario-qa-contract-run-1/report.md"
-          report_summary: "1 / 1 transport legs passed."
+          report_summary: "1 / 1 transport checks passed."
 
   host.agent.task:
     by_call:

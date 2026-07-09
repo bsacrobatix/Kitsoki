@@ -2,7 +2,7 @@
 # report, all within ONE turn: a single-transport check (transport=tui)
 # resolves to exactly ONE leg, so the internal emit chain (legs_ready →
 # leg_driven → leg_judged → legs_drained) auto-drains straight to report
-# without needing an operator-paced "next leg" — see check_all_transports.yaml
+# without needing an operator-paced "next transport" — see check_all_transports.yaml
 # for the multi-leg pacing gate.
 #
 # Every host call is stubbed by invoke id (no real run.py / LLM / ctx.fs call
@@ -37,7 +37,7 @@ host_handlers:
             pass_count: 1
             fail_count: 0
             degraded_count: 0
-            summary: "1 / 1 transport legs passed."
+            summary: "1 / 1 transport checks passed."
 
   host.starlark.run:
     by_call:
@@ -108,7 +108,7 @@ host_handlers:
       build_report:
         data:
           report_path: ".artifacts/product-journey/scenario-qa-run-1/report.md"
-          report_summary: "1 / 1 transport legs passed."
+          report_summary: "1 / 1 transport checks passed."
 
   host.agent.task:
     by_call:
@@ -149,7 +149,7 @@ turns:
       fail_count: 0
       degraded_count: 0
       report_path: ".artifacts/product-journey/scenario-qa-run-1/report.md"
-      report_summary: "1 / 1 transport legs passed."
+      report_summary: "1 / 1 transport checks passed."
       deck_path: "/repo/.artifacts/product-journey/scenario-qa-run-1/deck.slidey.json"
       leg_results:
         items:
@@ -185,7 +185,7 @@ turns:
         args: { call: build_report }
       - handler: host.run
         args: { call: build_scenario_qa_deck }
-    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport legs passed[\\s\\S]*tui / bugfix \\[frame-level; natural_prompts=2\\][\\s\\S]*driver=captured verdict=pass"
+    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport checks passed[\\s\\S]*Summary report:[\\s\\S]*report.md[\\s\\S]*tui \\[frame-level; natural_prompts=2\\] verdict=pass driver=captured"
 
   - intent: { name: status, slots: {} }
     expect_state: report
