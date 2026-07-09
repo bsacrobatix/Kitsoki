@@ -3,6 +3,8 @@
 How to write a kitsoki application. The companion documents:
 
 - [`state-machine.md`](state-machine.md) — the conceptual model.
+- [`story-style.md`](story-style.md) — typed views, action menus, and user
+  messaging standards.
 - `kitsoki docs app-schema` — the authoritative YAML reference.
 - [`testing.md`](../tracing/testing.md) — flow and intent fixtures.
 - [`hosts.md`](../architecture/hosts.md) — every built-in host handler.
@@ -80,8 +82,10 @@ kitsoki viz tiny.yaml                    # writes tiny-viz.dot
 
 The loop most authors settle into:
 
-1. **Sketch the graph in YAML.** Start with rooms and intents. Use
-   placeholder views.
+1. **Sketch the graph in YAML.** Start with rooms and intents. Define the
+   first visible user messaging for captures, routers, handoffs, and long host
+   calls while the graph is still small; see
+   [`story-style.md` §3.4](story-style.md#34-user-messaging).
 2. **`kitsoki inspect`** or **`kitsoki turn`** to probe. `kitsoki turn` is
    especially useful — one stateless turn, no DB, JSON output.
 3. **Add a flow fixture** under `flows/`. Use `intent:` blocks (no LLM
@@ -130,6 +134,16 @@ Genuine multi-choice checkpoints are **not** ceremony — an `accept` / `refine`
 `abandon` review gate, a router hub with many actions, or a deliberate
 review-before-a-costly-action pause all earn their turn. The standard `look`
 re-render and `quit`/`abort` escape hatches are exempt.
+
+### 3.2 Start with the user-visible contract
+
+Before wiring a free-form capture, contextual router, import handoff, or
+long-running `invoke:`, decide what the operator will see before work starts.
+At minimum, the view or `say:` acknowledgement should name the interpreted
+request, selected path, mode/consequence, and next action. Do not ask for
+confirmation unless the operator must choose, supply missing data, or approve a
+real side effect. The canonical rules and examples live in
+[`story-style.md` §3.4](story-style.md#34-user-messaging).
 
 ---
 
