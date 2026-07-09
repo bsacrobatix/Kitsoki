@@ -48,8 +48,8 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "allowed": { "type": "array", "items": { "type": "string", "enum": ["tui", "web", "vscode"] } },
-        "required": { "type": "array", "items": { "type": "string", "enum": ["tui", "web", "vscode"] } },
+        "allowed": { "type": "array", "items": { "type": "string", "enum": ["tui", "web", "vscode", "cli"] } },
+        "required": { "type": "array", "items": { "type": "string", "enum": ["tui", "web", "vscode", "cli"] } },
         "overrides": { "type": "object", "additionalProperties": true }
       }
     }

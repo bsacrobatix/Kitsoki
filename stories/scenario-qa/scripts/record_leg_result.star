@@ -71,6 +71,8 @@ def _evidence_level(leg):
     transport = leg.get("transport", "")
     if transport == "vscode":
         return "bridge-level"
+    if transport == "cli":
+        return "terminal-level"
     if transport == "tui" or transport == "web":
         return "frame-level"
     return ""

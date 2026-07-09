@@ -53,7 +53,7 @@
     "scenario_required": ["scenario", "label", "primary_story", "harness", "visual_surface", "live_budget", "required_mcp", "resolved_mcp_tools", "evidence", "success_criteria", "quality_gate", "driver_actions", "capture_routes", "persona_lens", "attach_commands", "record_finding_command", "record_blocker_command", "journal_command"],
     "driver_action_required": ["id", "goal", "tools", "resolved_tools", "evidence", "record"],
     "driver_action_ids": ["open_surface", "read_current_frame", "act_as_persona", "capture_required_evidence", "journal_attempt"],
-    "capture_route_required": ["route_id", "scenario", "evidence_kind", "primary_story", "visual_surface", "harness", "dispatch_mode_arg", "live_profile_arg", "evidence_dir", "artifact_path_template", "setup_entrypoint", "open", "observe", "act", "recording", "commands"],
+    "capture_route_required": ["route_id", "scenario", "evidence_kind", "primary_story", "transport", "transport_profile", "transport_evidence_contract", "visual_surface", "harness", "dispatch_mode_arg", "live_profile_arg", "evidence_dir", "artifact_path_template", "setup_entrypoint", "open", "observe", "act", "recording", "commands"],
     "persona_lens_required": ["starting_surface", "first_question", "evidence_emphasis", "escalation_trigger", "finding_bias"],
     "quality_gate_required": ["minimum_evidence", "done_when", "block_if"]
   },
@@ -91,7 +91,7 @@
   },
   "transports": {
     "comment": "Transport is the surface a scenario is driven and judged on. The `transports` field on a scenario is optional -- scenarios that omit it (today, the mined scenarios) get an implicit contract derived from required_mcp by run.py's default_scenario_transports(), so existing scenarios keep behaving exactly as before this field existed.",
-    "allowed_values": ["tui", "web", "vscode"],
+    "allowed_values": ["tui", "web", "vscode", "cli"],
     "field_shape": {
       "allowed": "subset of allowed_values this scenario can be driven on",
       "required": "subset of allowed that must pass for the scenario to count as covered; defaults to allowed when omitted",
@@ -100,7 +100,8 @@
     "evidence_contract_by_transport": {
       "tui": {"primary_tool": "render.tui_png", "evidence_kind": "rendered_tui_frame", "level": "frame-level"},
       "web": {"primary_tool": "visual.snapshot", "evidence_kind": "browser_screenshot", "level": "frame-level"},
-      "vscode": {"primary_tool": "visual.open (kind=vscode)", "evidence_kind": "screenshot_or_tui_png", "level": "bridge-level"}
+      "vscode": {"primary_tool": "visual.open (kind=vscode)", "evidence_kind": "screenshot_or_tui_png", "level": "bridge-level"},
+      "cli": {"primary_tool": "command transcript", "evidence_kind": "command_output", "level": "terminal-level"}
     }
   },
   "persona": {

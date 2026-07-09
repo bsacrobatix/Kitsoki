@@ -7,7 +7,7 @@
   "additionalProperties": true,
   "properties": {
     "scenario": { "type": "string" },
-    "transport": { "type": "string", "enum": ["tui", "web", "vscode"] },
+    "transport": { "type": "string", "enum": ["tui", "web", "vscode", "cli"] },
     "driver_status": { "type": "string" },
     "verdict": { "type": "string", "enum": ["pass", "fail", "degraded-evidence", "blocked", "unjudged"] },
     "verdict_summary": { "type": "string" },

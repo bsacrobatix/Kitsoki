@@ -74,7 +74,7 @@ def _test_scenario_transport_contracts():
     _check("declared scenario keeps its required set", contract["required"] == ["tui"])
     legs = run.scenario_transport_legs(product_discovery, list(run.TRANSPORT_IDS))
     leg_transports = [leg["transport"] for leg in legs]
-    _check("vscode is not allowed for product-discovery", "vscode" not in leg_transports)
+    _check("non-product-site transports are not allowed for product-discovery", "vscode" not in leg_transports and "cli" not in leg_transports)
     _check("tui and web legs are both produced", leg_transports == ["tui", "web"])
     web_leg = legs[1]
     _check(
@@ -154,6 +154,10 @@ def _test_emit_run_transport_axis():
         _check("capture route pins the scenario id and primary story",
                base_route["scenario"] == base_driver["scenarios"][0]["scenario"]
                and base_route["primary_story"] == base_driver["scenarios"][0]["primary_story"])
+        _check("capture route carries the inferred transport profile",
+               base_route["transport"] == "tui"
+               and base_route["transport_profile"]["id"] == "tui"
+               and base_route["transport_evidence_contract"] == run.TRANSPORT_EVIDENCE_CONTRACTS["tui"])
         _check("capture route owns stable setup and recording entrypoints",
                base_route["setup_entrypoint"]["story_load_intent"].startswith("load run_dir=")
                and "session.new app=" in base_route["setup_entrypoint"]["primary_session"]
@@ -175,8 +179,8 @@ def _test_emit_run_transport_axis():
         _check("tui-only axis steps are all tui legs", all(step["transport"] == "tui" for step in tui_execution["steps"]))
         _check("tui-only leg_ids are well-formed", {step["leg_id"] for step in tui_execution["steps"]} == {f"{s['id']}::tui" for s in scenarios})
 
-        # transport=all: product-discovery allows tui+web (no vscode);
-        # project-onboarding allows tui+web+vscode -- 2 + 3 = 5 legs.
+        # transport=all: product-discovery allows tui+web (no vscode/cli);
+        # project-onboarding allows tui+web+vscode+cli -- 2 + 4 = 6 legs.
         all_dir, all_json = run.build_run_bundle(
             catalog, github_targets, personas, scenarios,
             "gears-rust", "core-maintainer", "all-transports-axis", "dry-run", None,
@@ -184,10 +188,10 @@ def _test_emit_run_transport_axis():
         )
         all_execution = run.read_json(all_dir / "execution-plan.json")
         all_driver = run.read_json(all_dir / "driver-plan.json")
-        _check("transport=all expands product-discovery to 2 legs and project-onboarding to 3", len(all_execution["steps"]) == 5)
-        _check("transport=all execution-plan summary reports leg_count", all_execution["summary"]["leg_count"] == 5)
-        _check("transport=all never produces a vscode leg for product-discovery", not any(
-            step["scenario"] == "product-discovery" and step["transport"] == "vscode" for step in all_execution["steps"]
+        _check("transport=all expands product-discovery to 2 legs and project-onboarding to 4", len(all_execution["steps"]) == 6)
+        _check("transport=all execution-plan summary reports leg_count", all_execution["summary"]["leg_count"] == 6)
+        _check("transport=all never produces unsupported product-discovery legs", not any(
+            step["scenario"] == "product-discovery" and step["transport"] in {"vscode", "cli"} for step in all_execution["steps"]
         ))
         vscode_step = next(step for step in all_driver["scenarios"] if step["transport"] == "vscode")
         _check("vscode leg is labeled bridge-level", vscode_step["transport_evidence_contract"]["level"] == "bridge-level")
@@ -196,7 +200,19 @@ def _test_emit_run_transport_axis():
         _check("vscode capture route carries the leg id and bridge visual surface",
                vscode_route["leg_id"] == vscode_step["leg_id"]
                and vscode_route["visual_surface"] == "vscode"
+               and vscode_route["transport_profile"]["id"] == "vscode"
                and vscode_route["transport_evidence_contract"]["level"] == "bridge-level")
+        cli_step = next(step for step in all_driver["scenarios"] if step["scenario"] == "project-onboarding" and step["transport"] == "cli")
+        cli_evidence = [item["kind"] for item in cli_step["evidence"]]
+        _check("cli leg uses command-output evidence override",
+               "command_output" in cli_evidence and "rendered_tui_frame" not in cli_evidence)
+        cli_route = next(route for route in cli_step["capture_routes"] if route["evidence_kind"] == "command_output")
+        _check("cli capture route is terminal-level and profile-backed",
+               cli_step["transport_profile"]["id"] == "cli"
+               and cli_step["transport_evidence_contract"]["level"] == "terminal-level"
+               and cli_route["transport"] == "cli"
+               and cli_route["transport_profile"]["id"] == "cli"
+               and "session.trace" in cli_route["observe"]["capabilities"])
         web_step = next(step for step in all_driver["scenarios"] if step["scenario"] == "product-discovery" and step["transport"] == "web")
         _check(
             "web leg's driver_actions reflect the per-transport required_mcp override",
@@ -204,10 +220,13 @@ def _test_emit_run_transport_axis():
         )
 
         all_review = run.render_execution_plan(all_execution)
-        _check("execution-plan.md names the transport axis", "Transports: tui, web, vscode" in all_review)
-        _check("execution-plan.md labels legs with their transport", "(tui)" in all_review and "(web)" in all_review and "(vscode)" in all_review)
+        _check("execution-plan.md names the transport axis", "Transports: tui, web, vscode, cli" in all_review)
+        _check("execution-plan.md labels legs with their transport", "(tui)" in all_review and "(web)" in all_review and "(vscode)" in all_review and "(cli)" in all_review)
         all_driver_md = run.render_driver_plan(all_driver)
         _check("driver-plan.md marks the vscode leg's evidence contract as bridge-level", "bridge-level" in all_driver_md)
+        run.review_run_bundle(all_dir, None)
+        validation = run.validate_run_bundle(all_dir)
+        _check("reviewed transport-axis bundle validates", validation["status"] == "valid")
 
         # Scenario QA consumes driver-plan.json's transport-expanded scenarios
         # as leg payloads. Core scenarios must keep transcript-derived natural

@@ -15,11 +15,13 @@ Leg:
 
 Follow `.agents/agents/product-journey-qa-driver.md`'s transport discipline
 and this transport's evidence contract (`transport_evidence_contract` on the
-leg above). Before capturing, PREFLIGHT this transport's visual tools (e.g.
+leg above). Before capturing, PREFLIGHT this transport's tools (e.g.
 `visual.open`/`visual.observe` for web/vscode, `render.tui`/`render.tui_png`
-for tui). If a visual tool comes back JSON-degraded rather than a genuine
-frame, STOP and report `status: "degraded-evidence"` with the exact blocker
-— do not fabricate a screenshot or pass a stub frame off as real evidence.
+for tui, command transcript with exit code/stdout/stderr for cli). If a visual
+tool comes back JSON-degraded rather than a genuine frame, or a CLI command
+entrypoint cannot produce a persisted transcript, STOP and report `status:
+"degraded-evidence"` with the exact blocker — do not fabricate a screenshot or
+pass a stub frame/command off as real evidence.
 
 **Live drive authorization.** This is a live scenario check: cost-bearing
 live/model work IS authorized for this leg, within the leg's
@@ -61,6 +63,11 @@ AND key states — `render.tui_png` output files, `visual.snapshot` images)
 into the leg's `evidence_dir` and attach it with the leg's attach command
 under the matching evidence kind. The judge can only cite files that exist
 in the run dir.
+
+For `cli` legs, persist command transcripts instead of visual frames: command
+line, cwd, exit code, stdout/stderr, and trace refs. Attach them under
+`command_output` and any other evidence kind named by the leg's
+`quality_gate.minimum_evidence`.
 
 **vscode legs: capture the bridge TWICE, not once.** The preflight
 `visual.open kind=vscode` proves the bridge is *reachable* before you drive

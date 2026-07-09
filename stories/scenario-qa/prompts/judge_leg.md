@@ -25,6 +25,10 @@ leg proves the scenario's success criteria (see the leg's
 your verdict is `"degraded-evidence"` — do not paper over a missing
 capture with a hopeful pass.
 
+For `cli` legs, citable evidence is a persisted command transcript with command
+line, cwd, exit code, stdout/stderr, and trace refs. A prose summary of terminal
+activity without that transcript is unsupported.
+
 The leg's `quality_gate.minimum_evidence` names the concrete artifact/
 evidence kinds this scenario requires (e.g. a PRD/design scenario requires
 `prd_artifact`, `design_artifact`, `review_notes`, not just a screenshot of
