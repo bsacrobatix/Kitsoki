@@ -2,7 +2,9 @@
 
 `scenario-qa` is the operator-facing Persona QA surface. Use it when one
 scenario should drive one or more Kitsoki transports with the same deterministic
-setup contract.
+setup contract. `check` runs automatically create or reuse a managed
+clone-backed capsule workspace through `scripts/dev-workspace.sh`; preview runs
+stay side-effect-free and do not create a workspace.
 
 ```sh
 kitsoki run @kitsoki/scenario-qa
@@ -28,7 +30,9 @@ The idle and report rooms also expose a `check_request` free-text input. Treat
 the prose as the scenario description, and add `scenario=<id>` only when you
 want a catalog scenario instead of an ad-hoc behavior check.
 
-The story writes run artifacts under `.artifacts/product-journey/<run-id>/`.
+The story writes run artifacts under
+`.capsules/workspaces/scenario-qa/.artifacts/product-journey/<run-id>/` by
+default, or under the workspace named by `KITSOKI_SCENARIO_QA_WORKSPACE_ID`.
 The two review entrypoints are:
 
 - `report.md` for the per-transport verdict table.

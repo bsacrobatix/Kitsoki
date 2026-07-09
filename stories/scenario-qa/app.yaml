@@ -138,6 +138,9 @@ world:
   run_id:               { type: string, default: "" }
   run_dir:              { type: string, default: "" }    # absolute — for the driver's own tools and display
   run_dir_rel:          { type: string, default: "" }    # repo-relative — for this story's own ctx.fs reads/writes
+  scenario_workspace:   { type: object, default: {} }    # managed capsule workspace used for the current check run
+  scenario_workspace_root: { type: string, default: "" }
+  scenario_workspace_id: { type: string, default: "" }
   driver_plan_path:     { type: string, default: "" }
   execution_plan_path:  { type: string, default: "" }
   agent_brief_path:     { type: string, default: "" }

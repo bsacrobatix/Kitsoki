@@ -18,6 +18,7 @@ states:
             Target: '{{ world.target|default:"(default)" }}'
             Preview: '{{ world.suite_summary|default:"(not previewed)" }}'
             Last run: '{{ world.run_id|default:"(none yet)" }}'
+            Capsule workspace: '{{ world.scenario_workspace_root|default:"(none yet)" }}'
             Status: "{{ world.status }}"
       - heading: "Previewed transport checks"
         when: "world.suite_plan != ''"
@@ -118,6 +119,9 @@ states:
                 drive_result: {}
                 judge_result: {}
                 leg_results: { items: [] }
+                scenario_workspace: {}
+                scenario_workspace_root: ""
+                scenario_workspace_id: ""
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
@@ -152,6 +156,9 @@ states:
                 drive_result: {}
                 judge_result: {}
                 leg_results: { items: [] }
+                scenario_workspace: {}
+                scenario_workspace_root: ""
+                scenario_workspace_id: ""
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0

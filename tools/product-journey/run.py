@@ -269,6 +269,149 @@ def shell(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def in_managed_dev_workspace(root: Path = ROOT) -> bool:
+    return (root / ".kitsoki-dev-workspace.json").is_file() and (
+        (root / ".kitsoki-capsule").is_file() or (root / ".kitsoki-clone").is_file()
+    )
+
+
+def scenario_qa_workspace_id(value: str) -> str:
+    raw = (value or os.environ.get("KITSOKI_SCENARIO_QA_WORKSPACE_ID") or "scenario-qa").strip()
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip(".-")
+    return safe or "scenario-qa"
+
+
+def scenario_qa_workspace_branch(workspace_id: str) -> str:
+    return "agent/" + re.sub(r"[^A-Za-z0-9._/-]+", "-", workspace_id)
+
+
+def parse_final_json_object(text: str) -> dict:
+    stripped = text.strip()
+    if not stripped:
+        raise json.JSONDecodeError("empty output", text, 0)
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.rfind("\n{")
+        if start >= 0:
+            parsed = json.loads(stripped[start + 1 :])
+        else:
+            start = stripped.rfind("{")
+            if start < 0:
+                raise
+            parsed = json.loads(stripped[start:])
+    if not isinstance(parsed, dict):
+        raise json.JSONDecodeError("final JSON value is not an object", text, 0)
+    return parsed
+
+
+def ensure_scenario_qa_workspace(workspace_id: str) -> dict:
+    script = ROOT / "scripts" / "dev-workspace.sh"
+    if not script.is_file():
+        raise SystemExit(f"scenario-qa workspace helper missing: {script}")
+    common = ["--repo", str(ROOT), "--json"]
+    status = subprocess.run(
+        [str(script), "status", workspace_id, *common],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if status.returncode == 0:
+        return parse_final_json_object(status.stdout)
+
+    create = subprocess.run(
+        [
+            str(script),
+            "create",
+            "--id",
+            workspace_id,
+            "--branch",
+            scenario_qa_workspace_branch(workspace_id),
+            "--bootstrap",
+            *common,
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if create.returncode != 0:
+        detail = (create.stderr or create.stdout or "").strip()
+        raise SystemExit(f"scenario-qa workspace create failed: {detail}")
+    return parse_final_json_object(create.stdout)
+
+
+def strip_scenario_qa_workspace_args(argv: list[str]) -> list[str]:
+    stripped: list[str] = []
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--scenario-qa-workspace":
+            continue
+        if arg == "--scenario-qa-workspace-id":
+            skip_next = True
+            continue
+        if arg.startswith("--scenario-qa-workspace-id="):
+            continue
+        stripped.append(arg)
+    return stripped
+
+
+def rerun_scenario_qa_in_workspace(args: argparse.Namespace) -> bool:
+    if not getattr(args, "scenario_qa_workspace", False):
+        return False
+    if os.environ.get("KITSOKI_SCENARIO_QA_WORKSPACE_ACTIVE") == "1" or in_managed_dev_workspace():
+        return False
+
+    workspace_id = scenario_qa_workspace_id(getattr(args, "scenario_qa_workspace_id", ""))
+    workspace = ensure_scenario_qa_workspace(workspace_id)
+    workspace_root = Path(workspace["path"])
+    child_argv = strip_scenario_qa_workspace_args(sys.argv[1:])
+    cmd = [sys.executable, str(workspace_root / "tools" / "product-journey" / "run.py"), *child_argv]
+    env = os.environ.copy()
+    env["KITSOKI_SCENARIO_QA_WORKSPACE_ACTIVE"] = "1"
+    env["KITSOKI_SCENARIO_QA_WORKSPACE_ID"] = workspace_id
+    proc = subprocess.run(
+        cmd,
+        cwd=workspace_root,
+        text=True,
+        capture_output=True,
+        env=env,
+        check=False,
+    )
+    if proc.returncode != 0:
+        if proc.stdout:
+            print(proc.stdout, end="")
+        if proc.stderr:
+            print(proc.stderr, end="", file=sys.stderr)
+        raise SystemExit(proc.returncode)
+
+    if args.json_output:
+        try:
+            payload = parse_final_json_object(proc.stdout)
+        except json.JSONDecodeError:
+            if proc.stdout:
+                print(proc.stdout, end="")
+            raise
+        payload["scenario_qa_workspace"] = {
+            "id": workspace_id,
+            "root": str(workspace_root),
+            "branch": workspace.get("branch", ""),
+            "reused": bool(workspace.get("reused", False)),
+        }
+        print(json.dumps(payload, sort_keys=True))
+    else:
+        if proc.stdout:
+            print(proc.stdout, end="")
+        print(f"Scenario QA workspace: {workspace_root}")
+    if proc.stderr:
+        print(proc.stderr, end="", file=sys.stderr)
+    return True
+
+
 def command_output_text(value) -> str:
     if value is None:
         return ""
@@ -4559,6 +4702,8 @@ def run_dir_from_arg(value: str) -> Path:
 
 def run_dir_cli_arg(run_id: str) -> str:
     path = ARTIFACT_ROOT / run_id
+    if os.environ.get("KITSOKI_SCENARIO_QA_WORKSPACE_ACTIVE") == "1":
+        return str(path)
     for base in [PROJECT_ROOT, ROOT]:
         try:
             return path.relative_to(base).as_posix()
@@ -12490,6 +12635,46 @@ def render_scenario_qa_review(name: str, run_id: str, items: list[dict], counts:
     }
 
 
+def scenario_qa_markdown_cell(value) -> str:
+    return str(value if value is not None else "").replace("|", "\\|").replace("\n", "<br>")
+
+
+def render_scenario_qa_markdown(name: str, run_id: str, items: list[dict], counts: dict) -> str:
+    lines = [
+        "# Scenario QA report",
+        "",
+        f"- Scenario: `{name}`",
+        f"- Run: `{run_id}`",
+        "",
+        "| Transport | Scenario | Level | Natural prompts | Driver | Verdict | Playback | Notes |",
+        "|---|---|---|---:|---|---|---|---|",
+    ]
+    for item in items:
+        lines.append(
+            "| "
+            + " | ".join(
+                scenario_qa_markdown_cell(value)
+                for value in [
+                    item.get("transport", ""),
+                    item.get("scenario", ""),
+                    item.get("evidence_level", ""),
+                    item.get("natural_utterance_count", 0),
+                    item.get("driver_status", ""),
+                    item.get("verdict", ""),
+                    item.get("playback_path", ""),
+                    item.get("verdict_summary", ""),
+                ]
+            )
+            + " |"
+        )
+    natural_lines = scenario_qa_natural_prompt_lines(items)
+    if natural_lines:
+        lines.extend(["", "## Natural Prompt Coverage", ""])
+        lines.extend(f"- {line}" for line in natural_lines)
+    lines.extend(["", scenario_qa_report_summary(name, counts), ""])
+    return "\n".join(lines)
+
+
 def build_driver_replay_smoke(
     catalog: dict,
     github_targets: dict,
@@ -13595,6 +13780,16 @@ def main() -> None:
         help="Value-style alias for --dry-run so story slots can select the mode (--filing-mode dry-run)",
     )
     parser.add_argument("--scenario-qa-report", action="store_true", help="Fold stories/scenario-qa's recorded per-transport check results into <run-dir>/deck.slidey.json")
+    parser.add_argument(
+        "--scenario-qa-workspace",
+        action="store_true",
+        help="For scenario-qa --emit-run calls, create/reuse a managed dev workspace and emit the run bundle there",
+    )
+    parser.add_argument(
+        "--scenario-qa-workspace-id",
+        default="",
+        help="Managed dev workspace id for --scenario-qa-workspace (default: $KITSOKI_SCENARIO_QA_WORKSPACE_ID or scenario-qa)",
+    )
     parser.add_argument("--scenario-description", default="", help="Free-text ad-hoc scenario name for --scenario-qa-report when no --scenario id was used")
     parser.add_argument("--leg-results-json", default="", help="JSON object (or @path to a JSON file) with {items:[...]} per-transport check driver+judge outcomes, for --scenario-qa-report")
     parser.add_argument("--review-run", action="store_true", help="Review an existing run bundle for readiness")
@@ -13679,6 +13874,9 @@ def main() -> None:
     parser.add_argument("--keep", type=int, default=10, help="Number of newest non-final run dirs to keep with --prune-runs")
     parser.add_argument("--apply", action="store_true", help="With --prune-runs, actually delete (default is dry-run)")
     args = parser.parse_args()
+
+    if rerun_scenario_qa_in_workspace(args):
+        return
 
     apply_persona_qa_config(args.config)
     catalog = load_catalog(CATALOG)
@@ -14175,6 +14373,8 @@ def main() -> None:
         validate_slidey_deck_shape(deck, {"items": []}, deck_issues)
         if deck_issues:
             raise SystemExit(f"scenario-qa deck validation failed: {validation_issue_summary(deck_issues)}")
+        report_path = run_dir / "report.md"
+        report_path.write_text(render_scenario_qa_markdown(name, run_dir.name, items, counts), encoding="utf-8")
         deck_path = run_dir / "deck.slidey.json"
         write_json(deck_path, deck)
         review = render_scenario_qa_review(name, run_dir.name, items, counts)
@@ -14185,6 +14385,7 @@ def main() -> None:
             print(json.dumps({
                 "status": "scenario_qa_deck_built",
                 "run_dir": str(run_dir),
+                "report_path": str(report_path),
                 "deck_path": str(deck_path),
                 "review_path": str(review_path),
                 "review_status": review["status"],
@@ -14192,6 +14393,7 @@ def main() -> None:
                 "pass_count": counts["pass"],
                 "fail_count": counts["fail"],
                 "degraded_count": counts["degraded"],
+                "report_summary": summary,
                 "summary": summary,
             }, sort_keys=True))
             append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
@@ -14845,13 +15047,16 @@ def main() -> None:
             driver_manifest,
         )
         if args.json_output:
+            driver_plan = read_json(run_dir / "driver-plan.json")
             result = {
                 "status": "created",
                 "run_id": run_json["run_id"],
                 "run_dir": str(run_dir),
+                "run_dir_rel": run_dir_cli_arg(run_json["run_id"]),
                 "deck_path": str(run_dir / "deck.slidey.json"),
                 "execution_plan_path": str(run_dir / "execution-plan.md"),
                 "driver_plan_path": str(run_dir / "driver-plan.md"),
+                "driver_plan": driver_plan,
                 "driver_journal_path": str(run_dir / "driver-journal.md"),
                 "agent_brief_path": str(run_dir / "agent-brief.md"),
                 "driver_handoff_path": str(run_dir / "driver-handoff.md"),
@@ -14859,6 +15064,13 @@ def main() -> None:
                 "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
                 "published_deck_path": str(publish_deck) if publish_deck is not None else "",
             }
+            if os.environ.get("KITSOKI_SCENARIO_QA_WORKSPACE_ACTIVE") == "1":
+                result["scenario_qa_workspace"] = {
+                    "id": scenario_qa_workspace_id(""),
+                    "root": str(ROOT),
+                    "branch": "",
+                    "reused": True,
+                }
             result.update(run_story_summary(run_dir))
             print(json.dumps(result, sort_keys=True))
             append_log(f"Emitted dry-run bundle {run_json['run_id']}")
