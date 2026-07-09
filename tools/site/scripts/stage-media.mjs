@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 /**
- * Stage recorded demo media from .artifacts/ into the site's gitignored
+ * Stage captured demo media from .artifacts/ into the site's gitignored
  * src/public/media/<featureId>/ tree:
  *
- *   demo.mp4            the recorded demo (full variant only)
- *   demo.rrweb.json     the rrweb recording, for rrweb-first demos
+ *   demo.rrweb.json     the rrweb replay, for rrweb-first demos
  *   demo.html           the bundled Slidey replay viewer, for rrweb-first demos
+ *   demo.mp4            the legacy fallback video (full variant only)
  *   chapters.json       the <video>.mp4.chapters.json sidecar, when present
  *   poster.png          the feature's posterStep screenshot (else first shot)
  *   steps/NN-<id>.png   every per-step screenshot (full variant only)
  *
- * Videos are NEVER committed — record them with `make demos` (or
- * `make demo-feature FEATURE=<id>`) first. Missing media is a WARNING, never a
- * failure: the site builds docs-only with poster/placeholder fallbacks.
+ * Generated media is NEVER committed — capture it with `make demos` or
+ * `make demo-feature-rrweb FEATURE=<id>` first. Missing media is a WARNING,
+ * never a failure: the site builds docs-only with poster/placeholder fallbacks.
  *
  * A rrweb-native story-demo (`demo.embed` in features/*.yaml) has no mp4 at
  * all — its committed, pre-bundled Slidey deck html (docs/decks/bundled/) is
@@ -20,11 +20,11 @@
  * (several features can point at the same bundled deck, each at its own
  * `?scene=` index — see .vitepress/data/features.ts). Unlike mp4s this asset
  * IS committed source, so a missing one is a broken reference, not "not yet
- * recorded" — see check-media.mjs's stricter check for that file.
+ * captured" — see check-media.mjs's stricter check for that file.
  *
  * --variant embedded  stage posters only (the binary-embedded help build —
- *                     no MP4s or deck embeds in the binary; pages link out to
- *                     the hosted site).
+ *                     no large replay viewers, MP4s, or deck embeds in the
+ *                     binary; pages link out to the hosted site).
  */
 import * as fs from "fs";
 import * as path from "path";
@@ -91,7 +91,7 @@ for (const f of index.features) {
   // self-contained Slidey deck html (docs/decks/bundled/) instead of an mp4.
   // Staged once, shared, under src/public/deck-viewers/ — several features can point
   // at the same bundled deck at different `?scene=` indices. Excluded from the
-  // embedded (binary /help/) variant, same as mp4s — it's a ~17MB asset and
+  // embedded (binary /help/) variant, same as large media exports — it's a ~17MB asset and
   // the binary build stays posters-only; the embedded build's placeholder
   // links out to the hosted site instead.
   if (f.demo.embed) {
@@ -145,7 +145,7 @@ for (const f of index.features) {
       const chapters = path.join(repoRoot, f.demo.rrwebChapters);
       if (fs.existsSync(chapters)) copyStagedFile(chapters, path.join(out, "chapters.json"));
     } else {
-      if (!fs.existsSync(rrweb)) missing.push(`${f.id}: ${f.demo.rrweb} (record with: make demo-feature-rrweb FEATURE=${f.id})`);
+      if (!fs.existsSync(rrweb)) missing.push(`${f.id}: ${f.demo.rrweb} (capture with: make demo-feature-rrweb FEATURE=${f.id})`);
       if (!fs.existsSync(viewer)) missing.push(`${f.id}: ${f.demo.rrwebViewer} (bundle with: make demo-feature-rrweb FEATURE=${f.id})`);
     }
     continue;
@@ -159,11 +159,11 @@ for (const f of index.features) {
     const chapters = path.join(repoRoot, f.demo.chapters);
     if (fs.existsSync(chapters)) copyStagedFile(chapters, path.join(out, "chapters.json"));
   } else {
-    missing.push(`${f.id}: ${f.demo.video} (record with: make demo-feature FEATURE=${f.id})`);
+    missing.push(`${f.id}: ${f.demo.video} (legacy capture with: make demo-feature FEATURE=${f.id})`);
   }
 }
 
 console.log(
-  `stage-media: staged ${videos} video(s), ${replays} rrweb replay(s), ${embeds} feature deck embed(s), ${deckViewers} deck viewer(s)${embedded ? " [embedded: posters only]" : ""} -> ${path.relative(repoRoot, mediaDir)}`,
+  `stage-media: staged ${replays} rrweb replay(s), ${videos} fallback video(s), ${embeds} feature deck embed(s), ${deckViewers} deck viewer(s)${embedded ? " [embedded: posters only]" : ""} -> ${path.relative(repoRoot, mediaDir)}`,
 );
 for (const m of missing) console.warn(`stage-media: missing ${m}`);

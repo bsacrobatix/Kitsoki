@@ -7,13 +7,13 @@ flowchart LR
     feature["features/&lt;id&gt;.yaml"]
     tour["tools/runstatus/src/tour/generated/&lt;id&gt;.ts<br/>(committed)"]
     overlay["live tour overlay<br/>(web UI)"]
-    spec["Playwright *-video.spec.ts"]
-    artifacts[".artifacts/&lt;dir&gt;/<br/>demo MP4 + step PNGs + chapters.json"]
-    stitch["stitch-tour.mjs<br/>(product-tour sections)"]
-    master["complete-product-tour.mp4<br/>+ merged rail"]
+    spec["Playwright rrweb capture spec<br/>(fallback *-video.spec.ts)"]
+    artifacts[".artifacts/&lt;dir&gt;/<br/>rrweb JSON + HTML viewer + step PNGs"]
+    stitch["legacy stitch-tour.mjs<br/>(MP4 product-tour sections)"]
+    master["legacy complete-product-tour.mp4<br/>+ merged rail"]
     index["features-index.json<br/>+ qa/&lt;id&gt; scenarios and feature docs"]
     site["tools/site<br/>(VitePress)"]
-    pages["GitHub Pages<br/>base /Kitsoki/, full videos"]
+    pages["GitHub Pages<br/>base /Kitsoki/, replay viewers"]
     help["internal/helpdocs go:embed<br/>kitsoki web /help/, posters only"]
 
     feature -->|"codegen"| tour
@@ -33,28 +33,29 @@ flowchart LR
 ## The feature catalog (`features/`)
 
 One YAML per feature: title/tagline/summary (promo + docs copy), the tour
-steps (drive both the live overlay and the recorded demo), the demo's
-recording binding, optional gated ui-qa scenarios, doc links. Authoring guide:
+steps (drive both the live overlay and the captured demo), the demo's
+capture binding, optional gated ui-qa scenarios, doc links. Authoring guide:
 [`features/CLAUDE.md`](../../features/CLAUDE.md). The committed manifests under
 `tools/runstatus/src/tour/generated/` are code-generated — `make features`
 regenerates, `make features-check` (inside `make build` and `make test`) fails
 on stale output, schema violations, or spec↔feature drift. Chained into it,
-`pnpm demos:lint` (`scripts/features/lint-demos.ts`) fails any demo spec that
-bypasses the camera helper, omits its chapter sidecar, or drives a live model —
-the no-LLM invariant, in CI. The chain
-YAML → generated TS → live popover is closed end-to-end by the existing video
-specs' title assertions.
+`pnpm demos:lint` (`scripts/features/lint-demos.ts`) fails any legacy video
+spec that bypasses the camera helper, omits its chapter sidecar, or drives a
+live model — the no-LLM invariant, in CI. The chain YAML → generated TS → live
+popover is closed end-to-end by the capture specs' title assertions.
 
-## Demo recording (`make demos`)
+## Demo Capture (`make demos`)
 
-`scripts/record-demos.sh` records every recordable demo at watch-speed
+`scripts/record-demos.sh` captures every recordable demo at watch-speed
 (`WEB_CHAT_PACE=1`), deterministically (no LLM — `--flow`/`--host-cassette`).
 Incremental by per-demo content stamps (feature YAML + spec + story inputs +
 binary) in `.artifacts/<dir>/.stamp`; `make demos-force` ignores them. One
-MP4 demo: `make demo-feature FEATURE=<id>`. One rrweb-first demo:
-`make demo-feature-rrweb FEATURE=<id>`. Generated media is **never committed**.
-MP4 specs also emit a `<video>.mp4.chapters.json` sidecar (one chapter per
-tour step) the site uses for its clickable chapter rail.
+rrweb demo: `make demo-feature-rrweb FEATURE=<id>`. New product-site demos
+should set `demo.format: rrweb`; `make demo-feature FEATURE=<id>` is the legacy
+MP4 fallback for surfaces rrweb cannot reconstruct or for explicit video-export
+requests. Generated media is **never committed**. Legacy MP4 specs also emit a
+`<video>.mp4.chapters.json` sidecar (one chapter per tour step) the site uses
+for its clickable chapter rail.
 
 For `demo.format: rrweb`, the capture spec writes `<videoBase>.rrweb.json` and
 step screenshots; `scripts/build-rrweb-viewer.sh` then calls Slidey
@@ -63,28 +64,31 @@ to bundle `<videoBase>.html`. The product site stages that HTML as
 `/media/<feature>/demo.html` and embeds it directly, avoiding the rrweb
 seek-rasterize-to-MP4 render step during iteration.
 
-Every recording context comes from one device-profile registry
+Every capture context comes from one device-profile registry
 (`tests/playwright/_helpers/camera.ts`): `cameraContext()` sources the viewport,
-scale, and `recordVideo.size`, so every section shares the 1600×900 canvas the
-stitch composes on (drift there silently letterboxes the master). `demo.profiles`
-(default `[desktop]`) is the device-matrix dimension — `desktop` is the only
-enabled profile until a demo's UI is responsive; `mobile`/`tablet` are a
-per-demo opt-in, recorded under `KITSOKI_DEMO_PROFILE` with a `--<profile>`
-filename suffix (desktop stays `<base>.mp4`, so its whole pipeline is unchanged).
+scale, and fallback `recordVideo.size`, so every capture uses the same
+1600×900 canvas. `demo.profiles` (default `[desktop]`) is the device-matrix
+dimension — `desktop` is the only enabled profile until a demo's UI is
+responsive; `mobile`/`tablet` are a per-demo opt-in, captured under
+`KITSOKI_DEMO_PROFILE` with a `--<profile>` filename suffix.
 Ports come from `demoAddr(basePort)`: `basePort + KITSOKI_DEMO_PORT_BASE`
 (a concurrent session/worktree sets the env to claim a free range) plus the
 profile's offset — so concurrent sessions and parallel profile passes never
-collide on a port. (The matrix is threaded through record + index today; the
+collide on a port. (The matrix is threaded through capture + index today; the
 site-side variant serving — per-profile `stage-media` outputs + `ChapteredVideo`
 runtime switching on viewport — lands when the first demo actually goes
 responsive, so nothing ships a shrunken-desktop "mobile" cut in the meantime.)
 
 ## The master product tour (`make render-tour`)
 
+This is a legacy MP4 stitch path. Do not use it as the model for new demo
+work; new multi-act work should be a Slidey deck with rrweb scenes or an rrweb
+feature replay.
+
 `features/complete-product-tour.yaml` (`kind: product-tour`) is **stitched, not
-recorded**: it declares ordered `sections`, each with `clips` referencing a
+directly captured**: it declares ordered `sections`, each with `clips` referencing a
 demo-bound feature (optionally trimmed to a `[startChapterId, endChapterId]`
-window of that feature's sidecar). Because its video is composed, the master's
+window of that feature's sidecar). Because its legacy video is composed, the master's
 `demo` has no `spec` (`demo.spec` is optional only for a sectioned product-tour;
 record-demos skips it). `scripts/features/stitch-tour.mjs` resolves each clip's
 per-profile MP4 + sidecar, ffmpeg-trims to the window, renders a title card per
@@ -94,7 +98,7 @@ per-section sidecars into one master rail — section-prefixed ids, a
 probed for exact duration), and a preserved `source_ref` for deep-linking.
 `ChapteredVideo.vue` renders that into one collapsible block per section (the
 8-group rail); a plain per-feature sidecar still renders flat. `make render-tour`
-records any stale sources then stitches; the stitch is incremental (skips when
+captures any stale sources then stitches; the stitch is incremental (skips when
 the master is newer than every input — `KITSOKI_STITCH_FORCE=1` rebuilds) and
 pure no-LLM post-processing.
 
@@ -104,8 +108,9 @@ pure no-LLM post-processing.
   `<FeatureGrid/>` over the same data/components as the docs pages — zero
   duplicated content.
 - **Feature pages** are dynamic routes (`src/features/[id].md` +
-  `[id].paths.ts`) over the generated `features-index.json`: chaptered video,
-  step cards (click → seek), narrative markdown, doc links.
+  `[id].paths.ts`) over the generated `features-index.json`: embedded rrweb
+  replays when `demo.format: rrweb`, chaptered fallback video when a legacy MP4
+  demo is the only available media, step cards, narrative markdown, doc links.
 - **Slidey deck pages** are dynamic routes (`src/decks/[id].md` +
   `[id].paths.ts`) over top-level `docs/decks/*.json` files: `/decks/` renders
   title-slide gallery cards, and each deck page keeps the VitePress site chrome
@@ -135,7 +140,7 @@ pure no-LLM post-processing.
   [`docs/media/README.md`](../media/README.md) and checked by `make media-check`
   (also part of `make test` when Node/pnpm dependencies are installed). It
   verifies feature demo paths, staged `public/media/<feature>/` shape, and
-  Slidey deck/gallery embeds without recording videos or invoking an LLM.
+  Slidey deck/gallery embeds without capturing media or invoking an LLM.
 
 Targets: `make site` (build, base `/Kitsoki/`, output `.temp/site/dist`),
 `make site-dev` (prepare and serve `.temp/site`; rerun after source changes),
@@ -143,20 +148,20 @@ Targets: `make site` (build, base `/Kitsoki/`, output `.temp/site/dist`),
 
 ## Publishing
 
-- **GitHub Pages**: `.github/workflows/site.yml` builds the binary, records
+- **GitHub Pages**: `.github/workflows/site.yml` builds the binary, captures
   stale demos (two-level cache: `actions/cache` over `.artifacts` + the
-  per-demo stamps), stitches the master product tour, builds, deploys. Docs-only pushes deploy in minutes with 0
-  recordings; a cold run records every recordable feature in the catalog
-  (30–50 min). Recording (`Record demos`) and stitching
+  per-demo stamps), stitches the legacy master product tour, builds, deploys.
+  Docs-only pushes deploy in minutes with 0 captures; a cold run captures every
+  recordable feature in the catalog. Capture (`Record demos`) and stitching
   (`Stitch master product tour`) are `continue-on-error` — cached media from a
   prior run can ship if either fails — but a subsequent hard gate
   (`make media-check-promo`, no `continue-on-error`) fails the build if any
   promo-grid feature ends up with no staged media at all, so silent all-stale
-  ships can't happen. Any recording failures are also written to the job's
+  ships can't happen. Any capture failures are also written to the job's
   step summary. `scripts/check-download-links.mjs` HEAD-checks download.md's
   `releases/latest/download/...` links (temporarily non-blocking until the
   v0.1.0 release assets publish — see the TODO in site.yml). Manual dispatch
-  has a `rerecord` input. One-time setup: repo Settings → Pages → Source:
+  has a `rerecord` input for cache-busting existing workflow inputs. One-time setup: repo Settings → Pages → Source:
   GitHub Actions.
 - **In the binary**: `make site-embed` builds the embedded variant
   (base `/help/`, posters only — never MP4s, ~5MB) into
@@ -166,10 +171,12 @@ Targets: `make site` (build, base `/Kitsoki/`, output `.temp/site/dist`),
 
 ## QA (gated — real LLM, never automatic)
 
-`make feature-qa FEATURE=<id>` records the demo then judges it against the
-catalog-generated scenarios + feature spec
+`make feature-qa FEATURE=<id>` records a legacy MP4 demo then judges it against
+the catalog-generated scenarios + feature spec
 (`.artifacts/features/qa/<id>.{scenarios.yaml,feature.md}`) via the
-[kitsoki-ui-qa](../../.agents/skills/kitsoki-ui-qa/SKILL.md) pipeline. `make demo-tour-qa`
-is the onboarding-tour instance of the same flow. For the stitched master (which
-has no recording spec), `make tour-qa` renders it via `render-tour` then judges
-the master video against its generated scenarios the same way.
+[kitsoki-ui-qa](../../.agents/skills/kitsoki-ui-qa/SKILL.md) pipeline. For
+rrweb-first demos, use the captured step PNGs or make an explicit rendered-video
+export before running the same gated QA path. `make demo-tour-qa` is the
+onboarding-tour instance of the same flow. For the stitched master (which has no
+direct capture spec), `make tour-qa` renders it via `render-tour` then judges the
+master video against its generated scenarios the same way.

@@ -3,7 +3,7 @@
  *
  * The catalog is the single source of truth for every kitsoki feature: its
  * promo/docs metadata, its tour steps (from which src/tour/generated/*.ts are
- * code-generated), its demo recording binding, and its gated ui-qa scenarios.
+ * code-generated), its demo capture binding, and its gated ui-qa scenarios.
  * generate.ts consumes this module; tests/unit/features-catalog.test.ts runs
  * every YAML file through it on each `pnpm test`.
  */
@@ -51,24 +51,24 @@ export const TourStepSchema = z.strictObject({
 });
 
 export const DemoSchema = z.strictObject({
-  /** Recording backend. Playwright is the default; binary uses `kitsoki tour`. */
+  /** Capture backend. Playwright is the default; binary uses legacy `kitsoki tour`. */
   renderer: z.enum(["playwright", "binary"]).optional(),
   /**
-   * Primary product-site media artifact. mp4 is the historical default; rrweb
-   * stages `<videoBase>.rrweb.json` plus a Slidey-bundled `<videoBase>.html`
-   * viewer instead of rendering an MP4.
+   * Primary product-site media artifact. Use rrweb for new demos; mp4 remains
+   * the backwards-compatible fallback for surfaces rrweb cannot reconstruct or
+   * explicit rendered-video exports.
    */
   format: z.enum(["mp4", "rrweb"]).optional(),
   /** Playwright spec path, relative to tools/runstatus. Optional ONLY for a
-   *  product-tour, whose video is stitched from its sections, not recorded by a
-   *  spec (enforced in FeatureSchema's superRefine). */
+   *  product-tour whose legacy video is stitched from sections, not captured by
+   *  a single spec (enforced in FeatureSchema's superRefine). */
   spec: z.string().min(1).optional(),
   /** Playwright capture spec for rrweb-first demos, relative to tools/runstatus.
-   *  When omitted, rrweb recording uses `spec`. */
+   *  When omitted, rrweb capture uses `spec`. */
   rrwebSpec: z.string().min(1).optional(),
-  /** Subdirectory of .artifacts/ the spec records into. */
+  /** Subdirectory of .artifacts/ the spec captures into. */
   artifactDir: z.string().min(1),
-  /** Base name passed to saveVideoAsMp4 → <artifactDir>/<videoBase>.mp4. */
+  /** Base artifact name: `<videoBase>.rrweb.json`/`.html`, or legacy `.mp4`. */
   videoBase: z.string().min(1),
   /** Step id whose NN-<id>.png screenshot is the poster frame. */
   posterStep: z.string().min(1).optional(),
@@ -82,10 +82,10 @@ export const DemoSchema = z.strictObject({
    */
   external: z.boolean().optional(),
   /**
-   * Device profiles this demo records under (the camera registry ids). Defaults
+   * Device profiles this demo captures under (the camera registry ids). Defaults
    * to ["desktop"] — the canonical and ONLY enabled profile until a demo's UI is
    * responsive (mobile/tablet are a deliberate per-demo opt-in once breakpoints
-   * land; recording a non-responsive demo at a narrow profile just yields a
+   * land; capturing a non-responsive demo at a narrow profile just yields a
    * shrunken desktop). Keep these ids in lockstep with PROFILES in
    * tests/playwright/_helpers/camera.ts.
    */
@@ -120,10 +120,10 @@ export const QaScenarioSchema = z.strictObject({
   steps: z.array(z.string().min(1)).min(1),
 });
 
-/** One source clip in a product-tour section: a cataloged feature's recording,
+/** One source clip in a legacy product-tour section: a cataloged feature's video,
  *  optionally trimmed to a [startChapterId, endChapterId] window of its chapter
- *  sidecar (inclusive; omit = whole video). Chapter ids are validated against
- *  the recorded sidecar at STITCH time — the sidecar is a build artifact, not a
+ *  sidecar (inclusive; omit = whole legacy video). Chapter ids are validated against
+ *  the captured sidecar at STITCH time — the sidecar is a build artifact, not a
  *  catalog fact, so a catalog-time check would be a lie. */
 export const SectionClipSchema = z.strictObject({
   source: z.string().min(1),
@@ -192,8 +192,8 @@ export const FeatureSchema = FeatureObjectSchema.superRefine((f, ctx) => {
       ctx.addIssue({ code: "custom", message: `feature "${f.id}" has a tour but no demo binding` });
     }
     // sections are a product-tour-only composition (most product-tours are still
-    // single recordings — only a STITCHED one carries sections). A demo without
-    // a recording spec is legal ONLY when its video is stitched from sections.
+    // single captures — only a STITCHED one carries sections). A demo without
+    // a capture spec is legal ONLY when its legacy video is stitched from sections.
     if (f.sections && f.kind !== "product-tour") {
       ctx.addIssue({ code: "custom", message: `feature "${f.id}" declares sections but kind is not product-tour` });
     }
@@ -245,23 +245,23 @@ export const FeatureSchema = FeatureObjectSchema.superRefine((f, ctx) => {
         message: `feature "${f.id}" posterStep "${f.demo.posterStep}" is not a declared step id`,
       });
     }
-    // Completeness: a promoted feature's grid card renders its demo recording —
+    // Completeness: a promoted feature's grid card renders its demo media —
     // a promo entry with no demo binding ships an empty card.
     if (f.promo && !f.demo) {
       ctx.addIssue({
         code: "custom",
-        message: `feature "${f.id}" is promoted (promo:) but has no demo binding — the promo card needs a recording`,
+        message: `feature "${f.id}" is promoted (promo:) but has no demo binding — the promo card needs captured media`,
       });
     }
-    // Completeness: a recordable, tour-bearing demo must name a deterministic
+    // Completeness: a capturable, tour-bearing demo must name a deterministic
     // poster frame (a step id, validated above). Without one the feature page
     // and grid card fall back to a black first frame. Tourless demos
     // (harness-picker, meta-mode) and stitched product-tours are exempt.
-    const recordable = f.demo && (f.demo.spec || f.demo.rrwebSpec) && !f.demo.external && !f.sections;
-    if (recordable && f.tour && !f.demo!.posterStep) {
+    const capturable = f.demo && (f.demo.spec || f.demo.rrwebSpec) && !f.demo.external && !f.sections;
+    if (capturable && f.tour && !f.demo!.posterStep) {
       ctx.addIssue({
         code: "custom",
-        message: `feature "${f.id}" has a recordable tour demo but no demo.posterStep — pick a step id for the poster frame`,
+        message: `feature "${f.id}" has a capturable tour demo but no demo.posterStep — pick a step id for the poster frame`,
       });
     }
 });

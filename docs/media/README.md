@@ -2,14 +2,16 @@
 
 Kitsoki has two long-lived media families:
 
-- **Product-site demos**: tour-driven MP4s or rrweb replays generated from the
-  feature catalog and deterministic no-LLM runs.
+- **Product-site demos**: tour-driven rrweb replays generated from the feature
+  catalog and deterministic no-LLM runs. Use MP4 only as a legacy fallback for
+  surfaces rrweb cannot reconstruct, such as `<canvas>`, `<video>`, or WebGL,
+  or as an explicitly requested QA/share export.
 - **Slidey decks with embedded clips**: Slidey JSON decks that may embed rrweb
   captures as replayable video scenes.
 
 Generated media belongs in `.artifacts/` or the `.temp/site` VitePress
 workspace. Committed media should be a source artifact: a catalog entry, a
-recording spec, an rrweb clip intentionally embedded by a deck, a small static
+capture spec, an rrweb clip intentionally embedded by a deck, a small static
 image that a deck/site needs to render, or a self-contained Slidey HTML bundle
 under `docs/decks/bundled/` that the static product site serves without running
 the Slidey CLI.
@@ -22,14 +24,16 @@ Source of truth:
   optional QA scenarios.
 - `tools/runstatus/src/tour/generated/<id>.ts` is generated from the feature
   YAML by `make features`.
-- `tools/runstatus/tests/playwright/*-video.spec.ts` or `kitsoki tour` records
-  the feature, always with deterministic flows/cassettes and no live LLM.
+- `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts` captures the
+  feature replay, always with deterministic flows/cassettes and no live LLM.
+  Existing `*-video.spec.ts` specs are the fallback path for demos that cannot
+  be captured as rrweb yet.
 
 Generated outputs:
 
-- `.artifacts/<demo>/` contains the canonical `<videoBase>.mp4` plus
-  `<videoBase>.mp4.chapters.json`, or `<videoBase>.rrweb.json` plus the
-  Slidey-bundled `<videoBase>.html` replay viewer. Numbered
+- `.artifacts/<demo>/` contains the canonical `<videoBase>.rrweb.json` plus the
+  Slidey-bundled `<videoBase>.html` replay viewer. Legacy fallback demos contain
+  `<videoBase>.mp4` plus `<videoBase>.mp4.chapters.json`. Numbered
   `NN-<stepId>.png` screenshots provide poster/step stills for both formats.
 - `.temp/site/src/public/media/<feature>/` is staged from `.artifacts/` by
   `make site` / `make site-dev`. It is not the source of truth.
@@ -38,13 +42,15 @@ Generated outputs:
 Commands:
 
 ```bash
-make demo-feature FEATURE=agent-actions  # one feature
 make demo-feature-rrweb FEATURE=web-inbox # one rrweb replay + HTML viewer
-make demos                               # every stale feature demo
-make render-tour                         # stitched complete-product-tour
-make site                                # stage media and build the site
-make media-check                         # no-LLM media contract check
+make demos                                # every stale feature demo
+make site                                 # stage media and build the site
+make media-check                          # no-LLM media contract check
 ```
+
+`make demo-feature FEATURE=<id>` and `make render-tour` are legacy MP4 paths.
+Use them only for demos that cannot be rrweb-captured yet or when a rendered
+video export is the explicit deliverable.
 
 Vision QA is gated and never part of automated tests:
 
@@ -77,7 +83,7 @@ The feature catalog currently stages these demo ids when their artifacts exist:
 `diagram-showcase`, `harness-picker`, `meta-mode`, `mockup-video`,
 `multi-story`, `onboarding-tour`, `operator-ask`, `review`, `story-editor`,
 `trace-features`, `trace-introspection`, `weather-report`, and `web-inbox`.
-`complete-product-tour` is stitched from section clips instead of recorded by a
+`complete-product-tour` is stitched from section clips instead of directly captured by a
 single spec.
 
 ## Slidey Deck Gallery and Clips
@@ -117,7 +123,7 @@ Use this rule:
 
 `tools/site/scripts/stage-media.mjs` stages committed bundles to
 `.temp/site/src/public/deck-viewers/` for the full site build. The embedded
-binary help variant skips them like it skips MP4s.
+binary help variant skips large replay/viewer assets and keeps posters only.
 
 ### Deck embeds on the product site (`demo.embed`)
 
@@ -136,8 +142,8 @@ embedded deck clip instead of a video:
   `?scene=N`.
 - `make features-check` validates the binding (deck exists, rrweb scene
   resolves, bundled html present); `make media-check` re-checks the index side.
-  The embedded (binary `/help/`) variant excludes deck bundles like it excludes
-  MP4s.
+  The embedded (binary `/help/`) variant excludes deck bundles and rendered
+  media exports.
 
 Current `demo.embed` features: `slidey-dev-prd-design`,
 `slidey-architect-design`, `slidey-decomposition`, `slidey-bugfix`, and

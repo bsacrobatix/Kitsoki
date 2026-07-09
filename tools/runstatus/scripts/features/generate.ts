@@ -10,8 +10,8 @@
  *                     bijection checks. Writes nothing; exit 1 on any problem.
  *   --index [--out D] emit the site/QA contract: features-index.json plus
  *                     qa/<id>.scenarios.yaml (default D=.artifacts/features).
- *   --print-demo ID   print "<specName>\t<artifactDir>\t<videoPath>" for make
- *                     recipes that resolve demo paths from the catalog.
+ *   --print-demo ID   print "<specName>\t<artifactDir>\t<videoPath>" for
+ *                     legacy MP4 recipes that resolve paths from the catalog.
  *   --print-demo-rrweb ID
  *                     print "<specName>\t<artifactDir>\t<rrwebPath>\t<htmlPath>"
  *                     for rrweb-first demo generation.
@@ -221,10 +221,10 @@ function profileSuffix(profile: string): string {
 }
 
 /**
- * The index demo entry. The video/chapters PATHS are derived here (never
- * authored in YAML) so the catalog owns the contract. Each declared profile gets
- * a `variants` entry at its suffixed path; `video`/`chapters` stay the desktop
- * primary for every existing consumer (stage-media, the site data join).
+ * The index demo entry. rrweb and legacy video/chapter PATHS are derived here
+ * (never authored in YAML) so the catalog owns the contract. Each declared
+ * profile gets a `variants` entry at its suffixed path; `video`/`chapters` stay
+ * the desktop primary for existing legacy consumers.
  */
 function buildDemoIndex(d: NonNullable<Feature["demo"]>) {
   const dir = path.join(".artifacts", d.artifactDir);
@@ -322,7 +322,7 @@ function renderFeatureMd(f: Feature): string {
     ``,
   ];
   if (f.tour) {
-    lines.push(`## What the demo video walks through`, ``);
+    lines.push(`## What the demo walks through`, ``);
     for (const s of f.tour.steps) lines.push(`- **${s.title}** — ${s.body}`);
     lines.push(``);
   }
@@ -406,7 +406,7 @@ function modePrintDemo(catalog: Loaded[], id: string): void {
   if ((d.format ?? "mp4") === "rrweb") {
     fail([`feature "${id}" is rrweb-first — use: make demo-feature-rrweb FEATURE=${id}`]);
   }
-  if (!d.spec) fail([`feature "${id}" is stitched, not recorded — use: make render-tour`]);
+  if (!d.spec) fail([`feature "${id}" is stitched, not directly captured — use: make render-tour`]);
   const dir = path.join(".artifacts", d.artifactDir);
   process.stdout.write(`${specName(d.spec)}\t${dir}\t${path.join(dir, `${d.videoBase}.mp4`)}\n`);
 }
