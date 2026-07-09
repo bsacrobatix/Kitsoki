@@ -131,6 +131,7 @@ Contract rules:
 | `arena/plugins/base.py` | `JobTypePlugin` protocol + registry |
 | `arena/plugins/bugfix.py` | bugfix plugin — wraps `bench.py` oracle (verify / drive), scores from the completion-state file |
 | `arena/plugins/paired_task.py` | paired-task plugin — one task through multiple treatments with shared oracle JSON |
+| `arena/treatments/` | reusable treatment library: registry/catalog, action-surface drivers, CodeAct capability presets |
 | `arena/executor.py` | `CellExecutor` + `ContainerBackend` seam (`DockerBackend` \| `FakeBackend`) |
 | `arena/placement.py` | sweep scheduler (concurrency, INFRA-vs-MODEL retry) |
 | `arena/rollup.py` | job-agnostic leaderboard → `rollup.json` + `rollup.md` |
@@ -201,10 +202,12 @@ python3 tools/arena/tests/run_no_llm.py
 
 ## Paired-Task CodeAct Treatments
 
-`paired-task` treatments are explicit driver names. Existing specs keep working:
-`kitsoki` is an alias for `kitsoki-mcp`, and `single-briefed` /
-`single-naive` are aliases for the raw one-shot prompt driver. CodeAct specs can
-now compare the same frozen task through four action surfaces:
+Arena treatments are documented in `docs/research/arena-treatments.md` and
+implemented as a reusable library under `arena/treatments/`. `paired-task`
+treatments are explicit driver names. Existing specs keep working: `kitsoki` is
+an alias for `kitsoki-mcp`, and `single-briefed` / `single-naive` are aliases
+for the raw one-shot prompt driver. CodeAct specs can now compare the same
+frozen task through four action surfaces:
 
 | treatment | Driver surface |
 |---|---|
@@ -234,6 +237,10 @@ The runner always performs a dry-run `kitsoki agent launch` before a live
 surface, records the capability hash, and marks the cell `blocked`
 (`infra:harness`) if the permission proof fails. Live execution still requires
 both `arena run --live` and the configured gate environment variable.
+
+New treatments should be added to `arena/treatments/registry.py`, documented in
+the package README and `docs/research/arena-treatments.md`, and covered by a
+no-LLM test that imports `arena.treatments` directly.
 
 Every arena run now writes an offline review bundle in the output directory:
 
