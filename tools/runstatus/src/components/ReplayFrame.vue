@@ -121,7 +121,7 @@ async function mountPlayer(): Promise<void> {
     // Wait a tick for rrweb to build the iframe DOM, then size + scale.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
     scaleReplayToFit();
-    replayRoot.value = player.iframe.contentDocument;
+    await refreshReplayRoot();
     ready.value = true;
   } catch {
     player = null;
@@ -157,6 +157,39 @@ function destroyPlayer(): void {
   replayRoot.value = null;
 }
 
+async function refreshReplayRoot(): Promise<void> {
+  const doc = player?.iframe.contentDocument ?? null;
+  if (!doc) {
+    replayRoot.value = null;
+    return;
+  }
+  await waitForReplaySelectors(doc);
+  // Force Vue to recompute selector-enriched semantic maps even when the same
+  // iframe Document object is reused after rrweb finishes applying the snapshot.
+  replayRoot.value = null;
+  await Promise.resolve();
+  replayRoot.value = doc;
+}
+
+async function waitForReplaySelectors(doc: Document): Promise<void> {
+  const selectors = (props.semanticMap?.elements ?? [])
+    .map((el) => el.selector)
+    .filter((selector): selector is string => Boolean(selector));
+  if (selectors.length === 0) return;
+  for (let i = 0; i < 20; i++) {
+    if (selectors.some((selector) => selectorMatches(doc, selector))) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+function selectorMatches(doc: Document, selector: string): boolean {
+  try {
+    return Boolean(doc.querySelector(selector));
+  } catch {
+    return false;
+  }
+}
+
 onMounted(mountPlayer);
 onBeforeUnmount(destroyPlayer);
 
@@ -167,6 +200,14 @@ watch(
     destroyPlayer();
     await Promise.resolve();
     await mountPlayer();
+  }
+);
+
+watch(
+  () => props.semanticMap,
+  async () => {
+    if (!ready.value) return;
+    await refreshReplayRoot();
   }
 );
 </script>
