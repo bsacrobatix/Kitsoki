@@ -475,6 +475,7 @@ states:
                 landing_request:       "{{ slots.request }}"
                 landing_note:          {}
                 last_error:            ""
+            - say: "Workbench request captured; dispatching the read-only landing agent for: {{ slots.request }}"
 
       # On-path bail (B). Fired by the "→ on-path" choice item when the
       # workbench agent set landing_note.route. Projects the suggested

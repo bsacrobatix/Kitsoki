@@ -198,7 +198,10 @@ The room runs with `write_mode: read_only`, so the story author can
 draft edits while mutating tools still go through the normal operator
 write-mode grant. The task acceptance schema is a built-in schema
 reference; stories do not need to carry a generated schema file just
-to use the default room. Declaration wins: if a story declares
+to use the default room. The generated room also renders the captured
+proposal, loaded story root, return state, write-mode posture, and last
+authoring result so the operator can see what was interpreted before
+and after the authoring agent runs. Declaration wins: if a story declares
 `story_authoring`, `author_story`, or any of the supporting names
 itself, the loader preserves that authored definition and only fills
 missing pieces around it.

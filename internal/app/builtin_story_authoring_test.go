@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,7 @@ states:
 	}, room.Menu)
 	require.NotNil(t, room.AgentOffRamp)
 	require.Equal(t, agents.NameStoryExplainer, room.AgentOffRamp.Agent)
+	requireStoryAuthoringViewExplainsIntake(t, room)
 
 	require.Len(t, room.OnEnter, 1)
 	task := room.OnEnter[0]
@@ -53,6 +55,10 @@ states:
 	require.True(t, ok)
 	require.Equal(t, storyauthoring.SchemaRef, acceptance["schema"])
 	require.Equal(t, map[string]string{storyauthoring.NoteWorld: "submitted"}, task.Bind)
+	capture := room.On[storyauthoring.CaptureIntent]
+	require.Len(t, capture, 1)
+	require.Len(t, capture[0].Effects, 2)
+	require.Contains(t, capture[0].Effects[1].Say, "Story-authoring proposal captured")
 
 	start := def.States["start"]
 	require.NotNil(t, start)
@@ -61,10 +67,38 @@ states:
 	require.Equal(t, storyauthoring.RoomState, enter[0].Target)
 	require.NotNil(t, enter[0].PushHistory)
 	require.False(t, *enter[0].PushHistory)
-	require.Len(t, enter[0].Effects, 1)
+	require.Len(t, enter[0].Effects, 2)
 	set := enter[0].Effects[0].Set
 	require.Equal(t, "{{ slots.proposal ?? '' }}", set[storyauthoring.RequestWorld])
 	require.Equal(t, "start", set[storyauthoring.ReturnStateWorld])
+	require.Equal(t, "Story-authoring intake accepted; return state is start.", enter[0].Effects[1].Say)
+}
+
+func requireStoryAuthoringViewExplainsIntake(t *testing.T, room *State) {
+	t.Helper()
+
+	var hasProposalCode, hasStoryRoot, hasWriteMode bool
+	for _, el := range room.View.Elements {
+		if el.Kind == "code" && strings.Contains(el.Source, storyauthoring.RequestWorld) {
+			hasProposalCode = true
+		}
+		if el.Kind != "kv" {
+			continue
+		}
+		for _, p := range el.Pairs {
+			key, _ := p.Key.(string)
+			value, _ := p.Value.(string)
+			switch key {
+			case "Story root":
+				hasStoryRoot = value != ""
+			case "Write mode":
+				hasWriteMode = strings.Contains(value, "read-only")
+			}
+		}
+	}
+	require.True(t, hasProposalCode, "story-authoring view should show the captured proposal")
+	require.True(t, hasStoryRoot, "story-authoring view should show which story root is being edited")
+	require.True(t, hasWriteMode, "story-authoring view should surface write-mode behavior")
 }
 
 func TestLoadBytes_StoryAuthoringExtendsExistingHostAllowlist(t *testing.T) {

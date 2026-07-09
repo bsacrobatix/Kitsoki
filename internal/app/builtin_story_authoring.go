@@ -3,6 +3,8 @@ package app
 import (
 	"strings"
 
+	goyaml "github.com/goccy/go-yaml"
+
 	"kitsoki/internal/agents"
 	"kitsoki/internal/storyauthoring"
 )
@@ -131,9 +133,37 @@ func storyAuthoringState(baseDir string) *State {
 		View: View{
 			Elements: []ViewElement{
 				{Kind: "heading", Source: "Story authoring"},
-				{Kind: "prose", Source: `Current proposal: {{ world.story_authoring_request|default:"(none)" }}`},
-				{Kind: "prose", Source: `Last result: {{ world.story_authoring_note.summary|default:"(none)" }}`},
-				{Kind: "prose", Source: `Return: {{ world.story_authoring_return_state|default:"(story root)" }}`},
+				{
+					Kind:   "prose",
+					Source: "Captured a story-authoring proposal. The story author will work inside the loaded story root shown below and return to the saved state when you choose `return_to_story`.",
+					When:   "world.story_authoring_request != ''",
+				},
+				{
+					Kind:   "prose",
+					Source: "No story-authoring proposal is captured yet. Type the change you want, or return to the story.",
+					When:   "world.story_authoring_request == ''",
+				},
+				{
+					Kind: "kv",
+					Pairs: goyaml.MapSlice{
+						{Key: "Story root", Value: workingDir},
+						{Key: "Return state", Value: `{{ world.story_authoring_return_state|default:"(story root)" }}`},
+						{Key: "Write mode", Value: "read-only until an edit is approved"},
+					},
+				},
+				{Kind: "heading", Source: "Captured proposal", When: "world.story_authoring_request != ''"},
+				{Kind: "code", Source: `{{ world.story_authoring_request }}`, When: "world.story_authoring_request != ''"},
+				{Kind: "heading", Source: "Last result", When: "(world.story_authoring_note.summary ?? '') != ''"},
+				{
+					Kind: "kv",
+					Pairs: goyaml.MapSlice{
+						{Key: "Summary", Value: `{{ world.story_authoring_note.summary|default:"(none)" }}`},
+						{Key: "Validation", Value: `{{ world.story_authoring_note.validation|default:"(not reported)" }}`},
+						{Key: "Remaining", Value: `{{ world.story_authoring_note.remaining_work|default:"(none)" }}`},
+					},
+					When: "(world.story_authoring_note.summary ?? '') != ''",
+				},
+				{Kind: "code", Source: `{{ world.story_authoring_note.details|default:"" }}`, When: "(world.story_authoring_note.details ?? '') != ''"},
 			},
 		},
 		OnEnter: []Effect{{
@@ -158,21 +188,27 @@ func storyAuthoringState(baseDir string) *State {
 		On: map[string][]Transition{
 			storyauthoring.CaptureIntent: {{
 				Target: storyauthoring.RoomState,
-				Effects: []Effect{{
-					Set: map[string]any{
-						storyauthoring.RequestWorld: "{{ slots.request }}",
-						storyauthoring.NoteWorld:    map[string]any{},
+				Effects: []Effect{
+					{
+						Set: map[string]any{
+							storyauthoring.RequestWorld: "{{ slots.request }}",
+							storyauthoring.NoteWorld:    map[string]any{},
+						},
 					},
-				}},
+					{Say: "Story-authoring proposal captured for {{ world.story_authoring_return_state|default:'the story root' }}."},
+				},
 			}},
 			storyauthoring.ClearIntent: {{
 				Target: storyauthoring.RoomState,
-				Effects: []Effect{{
-					Set: map[string]any{
-						storyauthoring.RequestWorld: "",
-						storyauthoring.NoteWorld:    map[string]any{},
+				Effects: []Effect{
+					{
+						Set: map[string]any{
+							storyauthoring.RequestWorld: "",
+							storyauthoring.NoteWorld:    map[string]any{},
+						},
 					},
-				}},
+					{Say: "Story-authoring proposal cleared."},
+				},
 			}},
 			storyauthoring.ReturnIntent: {{
 				When:   "world.story_authoring_return_state != ''",
@@ -201,13 +237,16 @@ func injectStoryAuthoringEntryArcs(prefix string, states map[string]*State) {
 				s.On[storyauthoring.EnterIntent] = []Transition{{
 					Target:      storyauthoring.RoomState,
 					PushHistory: &pushHistory,
-					Effects: []Effect{{
-						Set: map[string]any{
-							storyauthoring.RequestWorld:     "{{ slots.proposal ?? '' }}",
-							storyauthoring.NoteWorld:        map[string]any{},
-							storyauthoring.ReturnStateWorld: statePath,
+					Effects: []Effect{
+						{
+							Set: map[string]any{
+								storyauthoring.RequestWorld:     "{{ slots.proposal ?? '' }}",
+								storyauthoring.NoteWorld:        map[string]any{},
+								storyauthoring.ReturnStateWorld: statePath,
+							},
 						},
-					}},
+						{Say: "Story-authoring intake accepted; return state is " + statePath + "."},
+					},
 				}}
 			}
 		}

@@ -193,7 +193,22 @@ func normalizeStoryAuthoringPaths(def *AppDef) {
 		return
 	}
 	s := def.States[storyauthoring.RoomState]
-	if s == nil || len(s.OnEnter) == 0 || s.OnEnter[0].With == nil {
+	if s == nil {
+		return
+	}
+	for i := range s.View.Elements {
+		el := &s.View.Elements[i]
+		if el.Kind != "kv" {
+			continue
+		}
+		for j := range el.Pairs {
+			key, _ := el.Pairs[j].Key.(string)
+			if key == "Story root" {
+				el.Pairs[j].Value = "<story-dir>"
+			}
+		}
+	}
+	if len(s.OnEnter) == 0 || s.OnEnter[0].With == nil {
 		return
 	}
 	s.OnEnter[0].With["working_dir"] = "<story-dir>"
