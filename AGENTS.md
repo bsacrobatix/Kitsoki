@@ -126,6 +126,16 @@ When we do an implementation based on a proposal, the goal is to complete the pr
 
 use the `.context` folder for transient markdown files like proposals, summaries, etc... and use the `.artifacts` folder (with subfolders as necessary) for any generated artifact for review that shouldn't be committed.  following these guidelines will help to avoid bot pollution and cruft in the repo.
 
+Slidey is a sister project to Kitsoki. Use Slidey decks wherever possible and
+reasonable for narrative, visual, temporal, comparative, or evidence-rich
+outputs: demos, QA/readiness reports, bug evidence, workflow walkthroughs,
+comparison studies, and product review artifacts. JSON stays the canonical
+machine artifact and markdown stays useful for quick audit/review, but the
+preferred human presentation surface is a Slidey deck when it adds clarity
+instead of ceremony. Put generated deck renders and throwaway review artifacts
+under `.artifacts`; commit source decks/bundles only when they are intended to
+live under `docs/decks/` per `docs/media/README.md`.
+
 Automated testing should never use a real LLM or incur costs - mock agents via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
 
 Use hermetic capsules for reusable repository/workspace fixtures. Prefer `capsules/<name>/capsule.yaml` plus `internal/capsuletest.Open(t, "<name>")` over ad hoc `git init` setup in tests, story fixtures, and agent validation. Only keep bespoke temp repos when the behavior under test is the repository creation/bootstrap process itself or the exact git command sequence. When adding or migrating these fixtures, use the `.agents/skills/capsules/SKILL.md` project skill.
