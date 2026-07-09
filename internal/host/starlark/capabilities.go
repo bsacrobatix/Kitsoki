@@ -559,21 +559,39 @@ type capabilityHTTPClient struct {
 }
 
 func (c capabilityHTTPClient) Do(ctx context.Context, method, rawURL string, headers map[string]string, body []byte) (*HTTPResponse, error) {
+	if err := c.check(method, rawURL); err != nil {
+		return nil, err
+	}
+	return c.base.Do(ctx, strings.ToUpper(method), rawURL, headers, body)
+}
+
+func (c capabilityHTTPClient) DoAuth(ctx context.Context, method, rawURL string, headers map[string]string, body []byte, auth []string) (*HTTPResponse, error) {
+	if err := c.check(method, rawURL); err != nil {
+		return nil, err
+	}
+	authClient, ok := c.base.(AuthHTTPClient)
+	if !ok {
+		return nil, fmt.Errorf("ctx.http.%s: auth=%v requested but no auth-aware HTTP client is configured", strings.ToLower(method), auth)
+	}
+	return authClient.DoAuth(ctx, strings.ToUpper(method), rawURL, headers, body, auth)
+}
+
+func (c capabilityHTTPClient) check(method, rawURL string) error {
 	method = strings.ToUpper(method)
 	if len(c.cap.Methods) > 0 && !stringIn(method, c.cap.Methods) {
-		return nil, fmt.Errorf("ctx.http.%s: method %s is not granted (allowed: %s)", strings.ToLower(method), method, strings.Join(c.cap.Methods, ", "))
+		return fmt.Errorf("ctx.http.%s: method %s is not granted (allowed: %s)", strings.ToLower(method), method, strings.Join(c.cap.Methods, ", "))
 	}
 	if len(c.cap.Hosts) > 0 {
 		u, err := url.Parse(rawURL)
 		if err != nil {
-			return nil, fmt.Errorf("ctx.http.%s: parse URL %q: %w", strings.ToLower(method), rawURL, err)
+			return fmt.Errorf("ctx.http.%s: parse URL %q: %w", strings.ToLower(method), rawURL, err)
 		}
 		host := strings.ToLower(u.Hostname())
 		if !hostAllowed(host, c.cap.Hosts) {
-			return nil, fmt.Errorf("ctx.http.%s: host %q is not granted (allowed: %s)", strings.ToLower(method), host, strings.Join(c.cap.Hosts, ", "))
+			return fmt.Errorf("ctx.http.%s: host %q is not granted (allowed: %s)", strings.ToLower(method), host, strings.Join(c.cap.Hosts, ", "))
 		}
 	}
-	return c.base.Do(ctx, method, rawURL, headers, body)
+	return nil
 }
 
 func hostAllowed(host string, allowed []string) bool {

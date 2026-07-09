@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.starlark.net/lib/math"
 	"go.starlark.net/starlark"
@@ -105,6 +106,22 @@ func AsDomainError(err error) (string, bool) {
 // The HTTPClient is resolved from ictx (WithHTTP). When none is injected, any
 // ctx.http call fails — the sandbox never reaches the network by default.
 func Run(ictx context.Context, p Params) (*Result, error) {
+	return runFunction(ictx, p, mainFuncName)
+}
+
+// RunFunction evaluates a Starlark script and calls the named function with the
+// same ctx object Run passes to main(ctx). It is for provider-style modules
+// whose public interface is a set of pure functions (for example search(ctx),
+// get(ctx), comment(ctx)) rather than one main(ctx) glue entry point.
+func RunFunction(ictx context.Context, p Params, function string) (*Result, error) {
+	function = strings.TrimSpace(function)
+	if function == "" {
+		return nil, &DomainError{msg: "starlark: function name is required"}
+	}
+	return runFunction(ictx, p, function)
+}
+
+func runFunction(ictx context.Context, p Params, function string) (*Result, error) {
 	cap := normalizeRunCapabilities(p.Capabilities)
 	ictx = ApplyCapabilityPolicy(ictx, cap)
 
@@ -166,14 +183,14 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 		return nil, &DomainError{msg: fmt.Sprintf("starlark: load %s: %v", scriptLabel(p), err)}
 	}
 
-	// 3. Resolve main and verify it is callable.
-	mainVal, ok := globals[mainFuncName]
+	// 3. Resolve the requested function and verify it is callable.
+	mainVal, ok := globals[function]
 	if !ok {
-		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s does not define %s(ctx)", scriptLabel(p), mainFuncName)}
+		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s does not define %s(ctx)", scriptLabel(p), function)}
 	}
 	mainFn, ok := mainVal.(starlark.Callable)
 	if !ok {
-		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s defines %s but it is not callable (it is a %s)", scriptLabel(p), mainFuncName, mainVal.Type())}
+		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s defines %s but it is not callable (it is a %s)", scriptLabel(p), function, mainVal.Type())}
 	}
 
 	// 4. Build ctx and call main(ctx).
@@ -185,13 +202,13 @@ func Run(ictx context.Context, p Params) (*Result, error) {
 
 	retVal, err := starlark.Call(thread, mainFn, starlark.Tuple{ctxVal}, nil)
 	if err != nil {
-		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s(ctx): %v", mainFuncName, err)}
+		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s(ctx): %v", function, err)}
 	}
 
 	// 5. main must return a dict of named outputs.
 	retDict, ok := retVal.(*starlark.Dict)
 	if !ok {
-		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s must return a dict, got %s", mainFuncName, retVal.Type())}
+		return nil, &DomainError{msg: fmt.Sprintf("starlark: %s must return a dict, got %s", function, retVal.Type())}
 	}
 	outAny, err := starlarkToGo(retDict)
 	if err != nil {
@@ -263,6 +280,8 @@ func exchangesFromClient(c HTTPClient) []HTTPExchange {
 		return x.Exchanges()
 	case capabilityHTTPClient:
 		return exchangesFromClient(x.base)
+	case interface{ Exchanges() []HTTPExchange }:
+		return x.Exchanges()
 	default:
 		return nil
 	}

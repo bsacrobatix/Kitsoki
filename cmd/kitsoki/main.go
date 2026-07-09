@@ -183,6 +183,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(workflowCmd())
 	root.AddCommand(capsuleCmd())
 	root.AddCommand(gitopsCmd())
+	root.AddCommand(ticketProviderCmd())
 	root.AddCommand(doctorCmd())
 	root.AddCommand(graphCmd())
 	root.AddCommand(pogCmd())

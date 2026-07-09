@@ -238,6 +238,32 @@ kitsoki:
       ticket: .kitsoki/providers/meta_jira_ticket.star
 ```
 
+The provider script is a `ticket_provider/v1` module: it defines pure Starlark
+functions named after the ticket interface operations (`search(ctx)`, `get(ctx)`,
+`comment(ctx)`, `transition(ctx)`, `list_mine(ctx)`, plus optional extended
+ops). It does **not** define `main(ctx)`. The sidecar beside the script owns HTTP
+capability and symbolic auth policy:
+
+```yaml
+kind: ticket_provider/v1
+http:
+  methods: [GET, POST]
+  hosts: [tickets.example.internal]
+auth:
+  jira:
+    env: JIRA_API_TOKEN
+    header: Authorization
+    prefix: "Bearer "
+    missing_code: missing_jira_token
+```
+
+The script calls `ctx.http.get/post(..., auth="jira")`; the Go HTTP transport
+reads the env/secret source and injects the request header after Starlark has
+built the request, so token values are never Starlark values. Provider functions
+may return structured failures with `{"ok": False, "error": {"code": "...",
+"message": "..."}}`, which lets an instance distinguish cases such as an
+expired access token versus a missing forge PAT.
+
 The generated child profile stores the inherited provider metadata, rebases
 the `.star` binding path relative to the child checkout, and adds the readiness
 command to `.kitsoki/check-readiness.py` when declared. `ticket_repo` remains
