@@ -114,6 +114,7 @@ def _test_leg_counts():
     _check("summary names the pass/total ratio", "2 / 3 transport checks passed" in summary)
     _check("summary names the degraded count", "1 degraded-evidence" in summary)
     _check("summary omits a failed clause when there are no failures", "failed" not in summary)
+    _check("slide title is compact", run.scenario_qa_report_title(counts) == "Transport checks: 2 / 3 passed · 1 degraded")
 
 
 def _test_leg_level():
@@ -203,7 +204,7 @@ def _test_render_deck():
     _check("the deck labels the vscode leg bridge-level", "bridge-level" in body_text)
     _check("the deck labels the tui leg frame-level", "frame-level" in body_text)
     _check("the deck carries the run id", "scenario-qa-run-all" in body_text)
-    _check("the deck's summary scene names the pass/total ratio", "2 / 3 transport checks passed" in body_text)
+    _check("the deck's transport scene names the pass/total ratio", "Transport checks: 2 / 3 passed" in body_text)
     _check("the deck includes a natural prompt scene", "Natural prompts" in body_text)
     _check("the deck includes a session evidence scene", "Session evidence" in body_text)
     _check("the deck includes user session replay scenes", "User session replay" in body_text)
@@ -214,6 +215,15 @@ def _test_render_deck():
     _check("the deck carries the natural prompt count", "2 transcript-derived prompt" in body_text)
     _check("the deck carries the natural prompt example", "resolve the red gate test" in body_text)
     _check("the deck carries natural prompt source refs", "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001" in body_text)
+
+    transport_scene = deck["scenes"][1]
+    labels = [item.get("label", "") for item in transport_scene["items"]]
+    details = [item.get("detail", "") for item in transport_scene["items"]]
+    _check("transport-check slide uses short transport labels", labels == ["TUI", "Web UI", "VS Code bridge"])
+    _check("transport-check slide title stays short", transport_scene["title"] == "Transport checks: 2 / 3 passed · 1 degraded")
+    _check("transport-check slide summarizes check tags", "input path" in details[0] and "summary report" in details[0])
+    _check("transport-check slide details stay readable", all(len(detail) <= 180 for detail in details))
+    _check("transport-check slide does not inline long verdict prose", "Browser screenshot confirms the fix." not in json.dumps(transport_scene))
 
     empty_deck = run.render_scenario_qa_deck("adhoc-thing", "run-empty", [], run.scenario_qa_leg_counts([]))
     empty_issues: list[dict] = []

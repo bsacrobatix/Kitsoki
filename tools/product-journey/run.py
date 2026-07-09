@@ -11980,10 +11980,49 @@ def scenario_qa_leg_label(item: dict, fallback: str) -> str:
             "vscode": "VS Code bridge",
             "cli": "CLI",
         }.get(transport, transport or "Transport")
-    task = scenario_qa_leg_task(item, fallback)
-    if len(task) > 72:
-        task = task[:69].rstrip() + "..."
-    return f"{label}: {task}"
+    return label
+
+
+def scenario_qa_check_tags(lines: list[str]) -> list[str]:
+    tags: list[str] = []
+
+    def add(tag: str) -> None:
+        if tag and tag not in tags:
+            tags.append(tag)
+
+    for raw in lines:
+        line = str(raw or "").strip()
+        lower = line.lower()
+        if any(word in lower for word in ["input", "enter", "request", "prompt", "question"]):
+            add("input path")
+        if any(word in lower for word in ["preview", "plan", "before capture", "dry-run"]):
+            add("plan preview")
+        if any(word in lower for word in ["progress", "status", "per-transport", "verdict", "result"]):
+            add("progress/results")
+        if any(word in lower for word in ["summary", "report", "conclusion"]):
+            add("summary report")
+        if any(word in lower for word in ["artifact", "replay", "rrweb", "link", "playback"]):
+            add("replay/artifact links")
+        if any(word in lower for word in ["return", "main-room", "main room", "back", "exit"]):
+            add("return path")
+        if any(word in lower for word in ["evidence", "capture", "judge", "inspect"]):
+            add("evidence capture")
+        if any(word in lower for word in ["transport", "web", "tui", "vscode", "cli"]):
+            add("transport behavior")
+        if len(tags) >= 5:
+            break
+
+    if tags:
+        return tags[:5]
+
+    fallback_tags = []
+    for line in lines[:3]:
+        text = " ".join(str(line).strip().split())
+        if len(text) > 36:
+            text = text[:33].rstrip() + "..."
+        if text and text not in fallback_tags:
+            fallback_tags.append(text)
+    return fallback_tags
 
 
 def scenario_qa_leg_detail(item: dict, playback_refs: list[dict]) -> str:
@@ -11996,17 +12035,27 @@ def scenario_qa_leg_detail(item: dict, playback_refs: list[dict]) -> str:
     if not tool:
         tool = str(item.get("primary_tool", "") or item.get("evidence_tool", "") or "").strip()
 
-    checked = "; ".join(scenario_qa_leg_checked_lines(item))
-    evidence = f"{level} {transport} evidence"
+    tags = scenario_qa_check_tags(scenario_qa_leg_checked_lines(item))
+    checked = ", ".join(tags) if tags else "transport behavior"
+    evidence = f"{level} {transport}"
     if tool:
         evidence += f" via {tool}"
     if playback_refs:
-        evidence += f"; replay {playback_refs[0]['path']}"
+        evidence += "; rrweb replay"
     verdict = str(item.get("verdict", "") or "unjudged")
-    summary = str(item.get("verdict_summary", "") or "").strip()
-    if summary:
-        return f"Checked: {checked}. Evidence: {evidence}. Judge: {verdict} - {summary}"
     return f"Checked: {checked}. Evidence: {evidence}. Judge: {verdict}."
+
+
+def scenario_qa_report_title(counts: dict) -> str:
+    title = f"Transport checks: {counts['pass']} / {counts['total']} passed"
+    extras = []
+    if counts["fail"] > 0:
+        extras.append(f"{counts['fail']} failed")
+    if counts["degraded"] > 0:
+        extras.append(f"{counts['degraded']} degraded")
+    if extras:
+        title += " · " + " · ".join(extras)
+    return title
 
 
 def scenario_qa_report_summary(name: str, counts: dict) -> str:
@@ -12148,7 +12197,14 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
             "detail": scenario_qa_leg_detail(item, playback_refs),
             "refType": ref_type,
             "ref": ref,
-            "note": f"Scenario: {item.get('scenario', '') or name}; persona: {scenario_qa_leg_persona(item)}; driver={item.get('driver_status', '')}",
+            "note": " · ".join(
+                part
+                for part in [
+                    scenario_qa_leg_level(item),
+                    str(item.get("driver_status", "") or "recorded"),
+                ]
+                if part
+            ),
         })
     scenes = [
         {
@@ -12159,14 +12215,14 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
         },
         {
             "type": "evidence",
-            "title": "What was checked: " + scenario_qa_report_summary(name, counts),
+            "title": scenario_qa_report_title(counts),
             "items": verdict_items or [{
                 "label": "No transport checks recorded",
                 "status": "pending",
                 "detail": "Run the scenario across one or more transports before reviewing this report.",
             }],
             "caption": f"Scenario: {name}",
-            "narration": "Each row states the real task, operator persona, transport, evidence source, and independent judge verdict.",
+            "narration": "Each row summarizes the transport, checked behavior, evidence level, replay source, and independent judge verdict.",
         },
     ]
     if playback_items:
