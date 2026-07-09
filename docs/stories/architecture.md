@@ -764,19 +764,21 @@ edits to the right file. Edits land by **direct file edit** (the
 controller diffs the story tree before/after and triggers an
 orchestrator reload); there is no propose/review step anymore.
 
-Kitsoki injects six builtin meta modes every app gets for free
+Kitsoki injects eight builtin meta modes every app gets for free
 (`internal/app/builtin_meta_modes.go`), grouped `group.verb`:
 
 | Mode | Agent | Surface |
 |---|---|---|
 | `story.edit` (default for bare `/meta story`) | `story-author` | full Claude toolset, edits the running story |
 | `story.ask` | `story-explainer` | read-only (`Read`/`Glob`/`Grep`), backed by `host.agent.ask` |
+| `story.improve` | `story-improver` | read-only introspection report for prompt/tool/script/flow-test improvements |
 | `story.bug` | `story-bug-reporter` | files a story bug via `kitsoki bug create` |
 | `kitsoki.edit` | `kitsoki-engineer` | edits the kitsoki repo (`${KITSOKI_REPO}`) |
 | `kitsoki.ask` | `kitsoki-explainer` | read-only Q&A about kitsoki source |
+| `kitsoki.improve` | `kitsoki-improver` | read-only introspection report for reusable engine improvements |
 | `kitsoki.bug` | `kitsoki-bug-reporter` | files a kitsoki bug |
 
-Bare verbs (`/meta ask`, `/meta bug`) resolve to the **story** group;
+Bare verbs (`/meta ask`, `/meta improve`, `/meta bug`) resolve to the **story** group;
 the whole `kitsoki.*` group is omitted when `${KITSOKI_REPO}` is unset.
 The mapping that ties meta back to the agent verbs: read-only metas use
 `host.agent.ask` (loader enforces the read-only tool surface);

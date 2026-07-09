@@ -60,7 +60,7 @@ export type ConnectionState = "connected" | "reconnecting";
 
 /** One selectable mode in the meta dropdown. */
 export interface MetaModeInfo {
-  key: string; // "story.edit" | "story.ask" | "kitsoki.ask" | …
+  key: string; // "story.edit" | "story.ask" | "story.improve" | "kitsoki.ask" | …
   label: string;
   banner: string;
   agent: string;
