@@ -40,6 +40,12 @@ spec that bypasses the camera helper, omits its chapter sidecar, or drives a
 live model — the no-LLM invariant, in CI. The chain YAML → generated TS → live
 popover is closed end-to-end by the capture specs' title assertions.
 
+The continuous-improvement loop is a promoted catalog feature:
+`features/meta-improvement.yaml` owns the `/features/meta-improvement.html`
+page, its rrweb replay (`make demo-feature-rrweb FEATURE=meta-improvement`),
+and the gated QA scenarios proving the completed-run reminder,
+`story.improve` turn, and evidence-backed report.
+
 ## Demo Capture (`make demos`)
 
 `scripts/record-demos.sh` captures every recordable demo at watch-speed

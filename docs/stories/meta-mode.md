@@ -262,6 +262,29 @@ their one confirmed side effect. The web completion affordance then
 uses the same evidence/posting contract for `runstatus.meta.improve.report`
 that Report Bug uses for `runstatus.bug.report`.
 
+**Product-site proof.** Continuous improvement is cataloged as its own
+public feature, not only as a row in the meta-mode table:
+`features/meta-improvement.yaml` generates the
+`/features/meta-improvement.html` page and the
+`META_IMPROVEMENT_TOUR_STEPS` manifest. Its deterministic tour spec
+(`tools/runstatus/tests/playwright/meta-improve-video.spec.ts`) drives
+a no-LLM Cloak session to completion, shows the improvement reminder
+and auto-run toggle, opens `story.improve`, waits for the
+introspection report, and checks that the report mentions evidence
+and posting. Capture the product-site replay with:
+
+```bash
+make demo-feature-rrweb FEATURE=meta-improvement
+```
+
+The generated review artifacts stay under
+`.artifacts/meta-improvement/`: `meta-improvement-demo.rrweb.json`,
+`meta-improvement-demo.html`, chapter metadata, and one
+`NN-<step>.png` frame per tour beat. The catalog QA scenarios assert
+the same end-to-end claims the feature page advertises: terminal-run
+reminder, `story.improve` streaming, and evidence-backed local or
+remote report posting.
+
 ### 3.2 Builtin meta_modes
 
 The loader injects eight meta_modes that every app gets without

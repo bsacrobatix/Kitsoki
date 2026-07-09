@@ -65,6 +65,11 @@ const DEMO_BRIEFS: Record<string, { question: string; watch: string; proof: stri
     watch: "The agent parks, the operator answers a blocking modal, and the run resumes.",
     proof: "Kitsoki refuses silent default answers at human decision points.",
   },
+  "meta-improvement": {
+    question: "Can a run make the next run better?",
+    watch: "A completed session, the improve reminder, story.improve streaming, and the evidence-backed report.",
+    proof: "The improvement loop is trace-backed, read-only, and fileable locally, to GitHub, or to a private ticket provider.",
+  },
   "dev-story-bugfix": {
     question: "Can this structure drive a real repo workflow end to end?",
     watch: "Triage, reproduce, propose, implement, test, review, validate, and PR handoff.",
