@@ -36,16 +36,20 @@ def main():
         "project-onboarding",
         "tui-slash-commands",
         "bugfix",
+        "docs-to-mcp-first-run",
+        "agent-launch-experience",
+        "remote-worker-campaign",
+        "campaign-rollup-review",
         "prd-design",
         "feature-implementation",
         "evidence-backed-product-bug",
         "dogfood-marathon-tui",
     }
 
-    _check("full persona corpus keeps draft backlog", len(personas) == 11)
-    _check("full scenario corpus keeps mined backlog", len(scenarios) == 26)
-    _check("active persona corpus is runnable", len(active_personas) == 5)
-    _check("active scenario corpus is runnable", len(active_scenarios) == 8)
+    _check("full persona corpus keeps draft backlog", len(personas) == 14)
+    _check("full scenario corpus keeps mined backlog", len(scenarios) == 30)
+    _check("active persona corpus is runnable", len(active_personas) == 8)
+    _check("active scenario corpus is runnable", len(active_scenarios) == 12)
     _check("active scenarios are the natural-use contract", {item["id"] for item in active_scenarios} == expected_active_scenarios)
     _check("mined scenarios are draft only", not any(item["id"].startswith("mined-scn-") for item in active_scenarios))
     _check("active scenarios carry natural-language prompts", all(len(item["task"].split()) >= 12 for item in active_scenarios))
@@ -59,10 +63,10 @@ def main():
     result = run.validate_journey_corpus(personas, scenarios, github_targets)
     _check("full corpus validation passes with draft warnings", result["status"] == "valid")
     _check("full corpus validation has no errors", result["errors"] == 0)
-    _check("validation reports active personas", result["personas"] == 5)
-    _check("validation reports active scenarios", result["scenarios"] == 8)
-    _check("validation reports all personas", result["all_personas"] == 11)
-    _check("validation reports all scenarios", result["all_scenarios"] == 26)
+    _check("validation reports active personas", result["personas"] == 8)
+    _check("validation reports active scenarios", result["scenarios"] == 12)
+    _check("validation reports all personas", result["all_personas"] == 14)
+    _check("validation reports all scenarios", result["all_scenarios"] == 30)
     _check("validation reports draft personas", result["draft_personas"] == 6)
     _check("validation reports draft scenarios", result["draft_scenarios"] == 18)
     _check("validation includes draft warnings", {"draft-personas", "draft-scenarios"} <= {issue["id"] for issue in result["issues"]})
