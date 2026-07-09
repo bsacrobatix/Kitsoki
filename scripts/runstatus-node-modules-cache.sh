@@ -21,7 +21,16 @@ abs_path() {
   python3 - "$1" <<'PY'
 import os
 import sys
-print(os.path.abspath(sys.argv[1]))
+print(os.path.realpath(sys.argv[1]))
+PY
+}
+
+user_write_bit() {
+  python3 - "$1" <<'PY'
+import os
+import stat
+import sys
+print("1" if os.stat(sys.argv[1]).st_mode & stat.S_IWUSR else "0")
 PY
 }
 
@@ -120,6 +129,44 @@ copy_modules() {
   cp -R -p -P "$source" "$dest"
 }
 
+link_modules() {
+  local source="$1"
+  local dest="$2"
+  remove_path "$dest"
+  ln -s "$source" "$dest"
+}
+
+ensure_cache_base() {
+  local repo="$1"
+  local cache_base="$2"
+  local relock_repo=0
+
+  if [ -d "$cache_base" ]; then
+    return 0
+  fi
+
+  case "$cache_base" in
+    "$repo"/.capsules/*)
+      if [ ! -d "$repo/.capsules" ]; then
+        if [ "$(user_write_bit "$repo")" = "0" ]; then
+          chmod u+w "$repo"
+          relock_repo=1
+        fi
+      fi
+      if ! mkdir -p "$cache_base"; then
+        if [ "$relock_repo" = 1 ]; then
+          chmod u-w "$repo" 2>/dev/null || true
+        fi
+        return 1
+      fi
+      if [ "$relock_repo" = 1 ]; then chmod u-w "$repo" 2>/dev/null || true; fi
+      ;;
+    *)
+      mkdir -p "$cache_base"
+      ;;
+  esac
+}
+
 acquire_lock() {
   local lock="$1"
   local i
@@ -165,9 +212,7 @@ main() {
         echo "runstatus deps cache miss for $lockfile"
         return 1
       fi
-      remove_path "$modules"
-      copy_modules "$cache_modules" "$modules"
-      chmod -R u+rwX "$modules" 2>/dev/null || true
+      link_modules "$cache_modules" "$modules"
       echo "restored runstatus deps from $cache_modules"
       ;;
     prepare-install)
@@ -178,9 +223,10 @@ main() {
     save)
       [ -d "$modules" ] || die "cannot cache missing $modules"
       [ ! -L "$modules" ] || return 0
-      mkdir -p "$cache_base"
+      ensure_cache_base "$repo" "$cache_base"
       printf '%s\n' "$key" >"$modules/.kitsoki-cache-key"
       if valid_modules "$cache_modules" "$key"; then
+        link_modules "$cache_modules" "$modules"
         echo "using existing runstatus deps cache at $cache_modules"
         return 0
       fi
@@ -202,7 +248,10 @@ main() {
         chmod -R a-w "$tmp/node_modules" 2>/dev/null || true
         mv "$tmp" "$cache_dir"
         tmp=""
+        link_modules "$cache_modules" "$modules"
         echo "saved runstatus deps cache at $cache_modules"
+      else
+        link_modules "$cache_modules" "$modules"
       fi
       trap - EXIT INT TERM
       cleanup
