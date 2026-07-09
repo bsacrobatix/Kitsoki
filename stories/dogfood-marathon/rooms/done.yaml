@@ -6,7 +6,7 @@ states:
     description: "The marathon finished — the slidey report is rendered."
     relevant_world: [report_handle, deck_spec, rollup, results, last_result, findings, exceptions, journal_path]
     view:
-      - heading: "Dogfood marathon · done"
+      - heading: "Marathon · done"
       - kv:
           pairs:
             Cases:    '{{ world.results.items|length }}'

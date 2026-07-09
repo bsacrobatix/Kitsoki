@@ -4,8 +4,7 @@
 # background job, so each case completion is a later synthetic turn instead of a
 # single recursive emit chain.
 #
-# Loop shape (mirrors stories/bugfix's guarded-emit gate + stories/slidey-edit's
-# cycle/budget cap):
+# Loop shape: guarded emit checkpoint plus a cycle/budget cap:
 #
 #   on entry (checkpoint): show the tally; autonomous runs emit `next_case`.
 #   next_case:
@@ -25,7 +24,7 @@ states:
     description: "Per-case checkpoint — advance to the next case or drain to the report."
     relevant_world: [backlog, case_index, case_budget, cases_processed, current_case, results, last_result, exceptions, journal_path, journal_status, autonomous]
     view:
-      - heading: "Dogfood marathon · queue checkpoint"
+      - heading: "Marathon · queue checkpoint"
       - kv:
           pairs:
             Backlog:   '{{ world.backlog.items|length }}'
@@ -51,7 +50,7 @@ states:
             Time:   '{{ world.last_result.wall_s_display|default:"0" }}s'
             Trace:  '{{ world.last_result.trace|default:"—" }}'
         when: "world.last_result.case_id"
-      - prose: "Walking the backlog one case at a time: triage → drive the inner pipeline → independently verify → record. Autonomous mode starts the next case automatically and parks only for a serious exception."
+      - prose: "Walking the queue one case at a time: triage → drive the configured inner workflow → independently verify → record. Autonomous mode starts the next case automatically and parks only for a serious exception."
       - choice:
           mode: single
           prompt: "Actions"
