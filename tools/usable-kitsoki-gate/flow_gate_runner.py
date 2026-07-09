@@ -67,6 +67,7 @@ runs are, today, the same run.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -118,10 +119,9 @@ def target_app_path(target: str | None) -> Path:
     app_rel = WORKBENCH_TARGETS[target]["app_rel"]
     return (DEFAULT_CORPUS / "flows" / app_rel).resolve()
 
-# `kitsoki test flows` is invoked via `go run` (never a pre-built binary --
-# AGENTS.md: "avoid generating a binary of kitsoki for testing"). A single
-# invocation is ~1-1.5s warm; a calibration sweep bounds concurrency (see
-# run_calibration_gate.py) rather than firing all cells at once.
+# `kitsoki test flows` reuses the caller-provided test binary when
+# KITSOKI_TEST_KITSOKI_BINARY is set (make test builds one for flow-heavy
+# suites). Standalone invocations fall back to `go run`.
 FLOW_TIMEOUT_SECONDS = 120
 
 
@@ -176,9 +176,14 @@ def run_scenario_flow(
 
     with tempfile.TemporaryDirectory() as tmp:
         trace_out = Path(tmp) / f"{scenario_id}.trace.jsonl"
+        kitsoki_bin = os.environ.get("KITSOKI_TEST_KITSOKI_BINARY", "").strip()
+        cmd = (
+            [kitsoki_bin, "test", "flows"]
+            if kitsoki_bin
+            else ["go", "run", "./cmd/kitsoki", "test", "flows"]
+        )
         proc = subprocess.run(
-            [
-                "go", "run", "./cmd/kitsoki", "test", "flows",
+            cmd + [
                 str(app_path),
                 "--flows", str(flow_path),
                 "--trace-out", str(trace_out),

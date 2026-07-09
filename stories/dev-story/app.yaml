@@ -1363,7 +1363,7 @@ intents:
     description: "Start bugfix from an inline or pasted bug report when no ticket has been filed."
     examples: ["fix this bug report", "debug this pasted bug", "pasted bug report"]
     synonyms:
-      - "fix bug {complaint}"
+      - "fix bug report {complaint}"
       - "debug bug {complaint}"
       - "bug report {complaint}"
       - "user complaint {complaint}"
@@ -1433,7 +1433,7 @@ intents:
   go_bugfix:
     title: "Fix Bug"
     description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room will ask them to pick one first."
-    examples: ["bugfix", "work on selected bug", "fix selected bug", "fix bugs from the queue", "i want to work on some bugs"]
+    examples: ["bugfix", "fix bug", "i want to fix a bug", "work on selected bug", "fix selected bug", "fix bugs from the queue", "i want to work on some bugs"]
     priority: 55
   bugfix_open_pr:
     title: "Fix Bug and Open PR"
