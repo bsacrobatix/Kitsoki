@@ -42,13 +42,14 @@ states:
         when: "world.render_error_repairable && world.render_retries < world.render_retry_budget"
         with:
           agent: reviser
-          working_dir: "{{ world.workspace }}"
+          working_dir: "{{ hasPrefix(world.workspace, '/') ? world.workspace : (world.workdir != '' ? world.workdir + '/' + world.workspace : world.workspace) }}"
           acceptance:
             schema: schemas/deck.json
           context:
             prompt: prompts/fix_render.md
             args:
               workspace:  "{{ world.workspace }}"
+              workdir:    "{{ world.workdir }}"
               deck:       "{{ world.deck }}"
               last_error: "{{ world.last_error }}"
         bind:

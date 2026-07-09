@@ -40,11 +40,21 @@ func TestSlideyEditKitsokiPitchAnnotationRefineCapsule(t *testing.T) {
 	var renderCount, artifactCount, refineAgentCalls int
 	reg := host.NewRegistry()
 	host.RegisterBuiltins(reg)
+	reg.Replace("host.git_worktree", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		require.Equal(t, "create", args["op"])
+		require.NotEmpty(t, args["id"])
+		require.NotEmpty(t, args["name"])
+		require.Equal(t, "staging/local", args["base"])
+		return host.Result{Data: map[string]any{
+			"ok":   true,
+			"path": repoRoot,
+		}}, nil
+	})
 	reg.Replace("host.slidey.render", func(ctx context.Context, args map[string]any) (host.Result, error) {
 		renderCount++
 		specPath, _ := args["spec_path"].(string)
-		require.Equal(t, "docs/decks/kitsoki-pitch.slidey.json", specPath)
-		require.FileExists(t, filepath.Join(repoRoot, specPath))
+		require.Equal(t, filepath.Join(repoRoot, "docs", "decks", "kitsoki-pitch.slidey.json"), specPath)
+		require.FileExists(t, specPath)
 
 		artifactDir := filepath.Join(repoRoot, ".artifacts", "slidey-edit-test")
 		require.NoError(t, os.MkdirAll(artifactDir, 0o755))
@@ -69,9 +79,11 @@ func TestSlideyEditKitsokiPitchAnnotationRefineCapsule(t *testing.T) {
 	})
 	reg.Replace("host.agent.task", func(ctx context.Context, args map[string]any) (host.Result, error) {
 		refineAgentCalls++
-		require.Equal(t, "docs/decks", args["working_dir"])
+		require.Equal(t, filepath.Join(repoRoot, "docs", "decks"), args["working_dir"])
 
 		contextArgs := requireMap(t, requireMap(t, args, "context"), "args")
+		require.Equal(t, repoRoot, contextArgs["workdir"])
+		require.Equal(t, "docs/decks", contextArgs["workspace"])
 		deckArg := requireMap(t, contextArgs, "deck")
 		require.Equal(t, "docs/decks/kitsoki-pitch.slidey.json", deckArg["spec_path"])
 		require.Equal(t, "kitsoki-pitch.slidey.json", deckArg["workspace_spec_path"])

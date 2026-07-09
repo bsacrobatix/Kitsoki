@@ -14,11 +14,17 @@ IO is the Slidey MCP:
 - `slidey_schema`, `slidey_layout_gallery`, and `slidey_validate` for authoring
   help and validation
 
+If you are running in Codex and one of these tools is not immediately visible,
+call `tool_search` for the exact Slidey tool name, then use the returned tool.
+Do not report the Slidey MCP as unavailable until `tool_search` has failed for
+the needed `slidey_*` tool and for `submit`.
+
 {% block spec_project_context %}{% endblock %}
 
 ## Workspace
 
 Repository workspace: `{{ args.workspace }}`
+Managed workdir: `{{ args.workdir|default:"(current checkout)" }}`
 
 The Slidey MCP root is this workspace. When calling Slidey MCP tools, use the
 workspace-relative path, not the repository path joined onto the workspace.
@@ -56,10 +62,10 @@ If you create a new deck, prefer a filename ending in `.slidey.json` unless you
 are replacing an existing `.json` deck.
 
 Before submitting, call `slidey_validate` on the workspace-relative path you
-wrote. In the submitted object, `spec_path` must be the repository-render path:
-use the provided repository path when editing/replacing it, or join the
-repository workspace with the new workspace-relative filename when creating a
-new sibling.
+wrote. In the submitted object, `spec_path` must be the repository-render path,
+not an absolute filesystem path: use the provided repository path when
+editing/replacing it, or join the repository workspace with the new
+workspace-relative filename when creating a new sibling.
 
 Write a tight slidey deck JSON spec with this shape:
 
