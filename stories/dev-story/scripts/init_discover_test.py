@@ -161,6 +161,35 @@ prof = mod.discover(gl_repo)
 check("gitlab tracker", prof["tracker"], "none")
 check("gitlab ticket_repo", prof["ticket_repo"], "")
 
+# 9d. A child project under a parent meta-repo inherits the parent's private
+# ticket provider metadata without treating it as GitHub ticket_repo state.
+meta_repo = _mkrepo({
+    ".kitsoki/project-profile.yaml": """schema: project-profile/v1
+tracker:
+  provider: meta-jira
+  repo: PLATFORM
+  setup_command: ./scripts/dev-env jira
+  readiness_command: ./scripts/dev-env jira --check
+  required_env: [JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN]
+kitsoki:
+  instance:
+    bindings:
+      ticket: .kitsoki/providers/meta_jira_ticket.star
+""",
+    ".kitsoki/providers/meta_jira_ticket.star": "def main(ctx):\n    return {'tickets': []}\n",
+    "src/platform-presentation/go.mod": "module platform-presentation\ngo 1.22\n",
+})
+child_project = meta_repo / "src" / "platform-presentation"
+prof = mod.discover(child_project)
+check("meta tracker", prof["tracker"], "meta-jira")
+check("meta ticket_repo stays empty", prof["ticket_repo"], "")
+check("meta inherited flag", prof["ticket_provider_inherited"], True)
+check("meta parent profile", prof["ticket_provider_parent_profile"], "../../.kitsoki/project-profile.yaml")
+check("meta parent root", prof["ticket_provider_parent_root"], "../..")
+check("meta binding", prof["ticket_binding"], "../../.kitsoki/providers/meta_jira_ticket.star")
+check("meta setup metadata", prof["ticket_provider_metadata"]["setup_command"], "./scripts/dev-env jira")
+check("meta required env", prof["ticket_provider_metadata"]["required_env"], ["JIRA_URL", "JIRA_USERNAME", "JIRA_API_TOKEN"])
+
 # 10. Associated Claude/Codex transcript history is detected without running
 # the mining pipeline or touching the real home directory.
 home = _mkrepo({})

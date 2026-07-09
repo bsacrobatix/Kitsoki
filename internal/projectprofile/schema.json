@@ -284,7 +284,7 @@
             "path": { "type": "string", "description": "Where the generated instance app.yaml is written, e.g. .kitsoki/stories/<id>-dev/app.yaml." },
             "bindings": {
               "type": "object",
-              "description": "Concrete host bindings for the root story's declared host_interfaces (dev-story's default set: ticket/vcs/ci/workspace/transport -- see kitsoki.story). Each value is a host id, e.g. host.git, host.local_files.ticket. Which keys are actually required is root-kit-dependent and checked semantically (internal/projectprofile.validateSemantic), not fixed here, since a non-default root kit may declare different interface names.",
+              "description": "Concrete host bindings for the root story's declared host_interfaces (dev-story's default set: ticket/vcs/ci/workspace/transport -- see kitsoki.story). Each value is a host id, e.g. host.git or host.local_files.ticket, or a .star script path resolved from the project root. Which keys are actually required is root-kit-dependent and checked semantically (internal/projectprofile.validateSemantic), not fixed here, since a non-default root kit may declare different interface names.",
               "additionalProperties": { "type": "string" }
             }
           }

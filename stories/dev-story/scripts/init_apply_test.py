@@ -40,6 +40,38 @@ def mkgitrepo() -> Path:
     return root
 
 
+def mkmeta_child_repo() -> Path:
+    parent = Path(tempfile.mkdtemp(prefix="kitsoki-meta-"))
+    profile_dir = parent / ".kitsoki"
+    provider_dir = profile_dir / "providers"
+    provider_dir.mkdir(parents=True)
+    (provider_dir / "meta_jira_ticket.star").write_text("def main(ctx):\n    return {'tickets': []}\n", encoding="utf-8")
+    (provider_dir / "meta_jira_ticket.star.yaml").write_text(
+        "inputs:\n  op: { type: string, required: false }\noutputs:\n  tickets: { type: list }\n",
+        encoding="utf-8",
+    )
+    (profile_dir / "project-profile.yaml").write_text(
+        """schema: project-profile/v1
+tracker:
+  provider: meta-jira
+  repo: PLATFORM
+  setup_command: ./scripts/dev-env jira
+  readiness_command: ./scripts/dev-env jira --check
+  required_env: [JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN]
+kitsoki:
+  instance:
+    bindings:
+      ticket: .kitsoki/providers/meta_jira_ticket.star
+""",
+        encoding="utf-8",
+    )
+    child = parent / "src" / "platform-presentation"
+    child.mkdir(parents=True)
+    (child / "go.mod").write_text("module platform-presentation\ngo 1.22\n", encoding="utf-8")
+    (child / "AGENTS.md").write_text("# Agent rules\n", encoding="utf-8")
+    return child
+
+
 def mkpyrepo() -> Path:
     root = Path(tempfile.mkdtemp(prefix="kitsoki-apply-py-"))
     (root / "pyproject.toml").write_text('[project]\nname = "acme-py"\n', encoding="utf-8")
@@ -232,7 +264,7 @@ if readme_path.exists():
     check("valid readme no arg run", "kitsoki run\n```" in readme_text)
     check("valid readme explicit wrapper optional", "Use the materialized wrapper explicitly only after editing it" in readme_text)
     check("valid readme starter pack", "Starter story pack: `core-engineering`" in readme_text)
-    check("valid readme local ticket provider", "Ticket provider: local markdown / pasted reports" in readme_text)
+    check("valid readme local ticket provider", "- source: local files" in readme_text)
     check("valid readme story pack command", "kitsoki project-profile story-packs add <pack>" in readme_text)
     check("valid readme git-ops", "`git-ops`" in readme_text)
     check("valid readme readiness command", "python3 .kitsoki/check-readiness.py --json" in readme_text)
@@ -504,10 +536,11 @@ if app_path.exists():
     check("gh tracker github source pin", 'ticket_github_repo:         { type: string, default: "example/acme" }' in app_text)
     check("gh tracker instance hosts", "- host.gh.ticket.transition" in app_text)
     check("gh tracker instance local github host", "- host.local_github.ticket" in app_text)
+    check("gh tracker current host surface", "- host.agent.codeact" in app_text and "- host.chat.transcript" in app_text and "- host.ide.get_diagnostics" in app_text)
 readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
 if readme_path.exists():
     readme_text = readme_path.read_text(encoding="utf-8")
-    check("gh tracker readme provider", "Ticket provider: GitHub issues from `example/acme` plus local markdown / pasted reports" in readme_text)
+    check("gh tracker readme provider", "- source: GitHub Issues `example/acme`" in readme_text)
 
 # 9b. GitHub tracker WITHOUT a parseable GitHub remote degrades honestly to
 # local-file tickets (no guessed slug, no gh binding).
@@ -530,6 +563,35 @@ app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
 if app_path.exists():
     app_text = app_path.read_text(encoding="utf-8")
     check("none tracker local binding", "ticket:    host.local_files.ticket" in app_text)
+
+# 9d. A projects-folder child inherits a parent meta-repo ticket provider. The
+# generated child profile carries generic tracker metadata, leaves ticket_repo
+# empty, and rewrites the parent-owned script path for the materialized app.
+repo = mkmeta_child_repo()
+proc = run_apply_with(repo, fake_kitsoki(True), "platform-presentation", "Platform Presentation", "go project", "", "go test ./...", "go build ./...", tracker="meta-jira")
+check("meta tracker exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("meta provider", "provider: \"meta-jira\"" in profile_text)
+    check("meta repo", "repo: \"PLATFORM\"" in profile_text)
+    check("meta inherited profile", "inherited_from: \"../../.kitsoki/project-profile.yaml\"" in profile_text)
+    check("meta inherited root", "inherited_root: \"../..\"" in profile_text)
+    check("meta binding profile", "ticket: ../../.kitsoki/providers/meta_jira_ticket.star" in profile_text)
+    check("meta docs ticket_repo empty", "ticket_repo: \"\"" in profile_text)
+    check("meta customization", "id: \"inherited-ticket-source\"" in profile_text)
+    check("meta readiness command", "command: \"cd ../.. && ./scripts/dev-env jira --check\"" in profile_text)
+app_path = repo / ".kitsoki" / "stories" / "platform-presentation-dev" / "app.yaml"
+check("meta app write", app_path.exists())
+if app_path.exists():
+    app_text = app_path.read_text(encoding="utf-8")
+    check("meta app binding", "ticket:    ../../../../../.kitsoki/providers/meta_jira_ticket.star" in app_text)
+    check("meta app empty ticket repo", 'ticket_repo:                { type: string, default: "" }' in app_text)
+readiness_path = repo / ".kitsoki" / "check-readiness.py"
+if readiness_path.exists():
+    readiness_text = readiness_path.read_text(encoding="utf-8")
+    check("meta readiness check scripted", '"id": "ticket-provider"' in readiness_text)
+    check("meta readiness check cwd", '"command": "cd ../.. && ./scripts/dev-env jira --check"' in readiness_text)
 
 if failures:
     print("FAIL: init_apply regression")

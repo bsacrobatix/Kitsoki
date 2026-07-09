@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"kitsoki/internal/kit"
 )
@@ -72,7 +73,8 @@ type RootSpec struct {
 	// Import is the base story name (v1: only "dev-story"). Empty ⇒ dev-story.
 	Import string
 	// Bindings rebinds named dev-story host_interfaces onto concrete handler
-	// names. Folded into imports.<root>.host_bindings. Keyed by iface name.
+	// names or .star script paths. Folded into imports.<root>.host_bindings.
+	// Keyed by iface name.
 	Bindings map[string]string
 	// World holds instance-level world defaults projected into the import via
 	// world_in: (and set as top-level world: defaults). Keyed by world key.
@@ -219,7 +221,7 @@ func applyRootOverrides(def *AppDef, imp *ImportDef, spec *RootSpec) {
 	if len(spec.Bindings) > 0 {
 		imp.HostBindings = make(map[string]HostBindingSpec, len(spec.Bindings))
 		for k, v := range spec.Bindings {
-			imp.HostBindings[k] = HostBindingSpec{Handler: v}
+			imp.HostBindings[k] = hostBindingSpecFromString(v)
 		}
 	}
 	if len(spec.World) > 0 {
@@ -248,6 +250,14 @@ func applyRootOverrides(def *AppDef, imp *ImportDef, spec *RootSpec) {
 			def.Intents[name] = in
 		}
 	}
+}
+
+func hostBindingSpecFromString(raw string) HostBindingSpec {
+	v := strings.TrimSpace(raw)
+	if strings.HasSuffix(v, ".star") {
+		return HostBindingSpec{Script: v}
+	}
+	return HostBindingSpec{Handler: v}
 }
 
 // inferVarType picks a world VarDef type from an override value's Go kind. The
@@ -472,7 +482,7 @@ func applyKitOverrides(def *AppDef, imp *ImportDef, spec *KitImportSpec) {
 	if len(spec.Bindings) > 0 {
 		imp.HostBindings = make(map[string]HostBindingSpec, len(spec.Bindings))
 		for k, v := range spec.Bindings {
-			imp.HostBindings[k] = HostBindingSpec{Handler: v}
+			imp.HostBindings[k] = hostBindingSpecFromString(v)
 		}
 	}
 	if len(spec.Parameters) > 0 {

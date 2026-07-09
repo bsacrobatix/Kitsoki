@@ -215,6 +215,35 @@ An importing project can bind `iface.ticket` to local files, a composite
 local+GitHub provider, or another provider that implements the same interface.
 Same room YAML, different provider.
 
+### Parent meta-repo ticket providers
+
+Project onboarding supports the common meta-repo / monorepo layout where a
+parent checkout owns shared auth and MCP setup while child projects live under
+`projects/` or `src/`. If the child has no GitHub `ticket_repo`, discovery
+walks ancestor directories for `.kitsoki/project-profile.yaml` and inherits a
+non-GitHub `tracker.provider` plus `kitsoki.instance.bindings.ticket`.
+
+Example parent profile shape:
+
+```yaml
+tracker:
+  provider: meta-jira
+  repo: PLATFORM
+  setup_command: ./scripts/dev-env jira
+  readiness_command: ./scripts/dev-env jira --check
+  required_env: [JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN]
+kitsoki:
+  instance:
+    bindings:
+      ticket: .kitsoki/providers/meta_jira_ticket.star
+```
+
+The generated child profile stores the inherited provider metadata, rebases
+the `.star` binding path relative to the child checkout, and adds the readiness
+command to `.kitsoki/check-readiness.py` when declared. `ticket_repo` remains
+GitHub-only; private providers bind through `iface.ticket` and keep
+`ticket_repo: ""` so GitHub-specific publish/closeout paths do not run.
+
 ## Rooms
 
 | Room | Status | Notes |

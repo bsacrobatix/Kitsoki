@@ -243,8 +243,8 @@ type RootConfig struct {
 // RootOverrides are the rung-1 fold inputs. Each is optional.
 type RootOverrides struct {
 	// Bindings rebinds dev-story host_interfaces (ticket/vcs/ci/workspace/
-	// transport) onto concrete handlers. Folded into the import's
-	// host_bindings. An unknown iface is a Load error.
+	// transport) onto concrete handlers or .star script paths. Folded into the
+	// import's host_bindings. An unknown iface is a Load error.
 	Bindings map[string]string `yaml:"bindings,omitempty"`
 	// World sets instance-level world defaults projected into dev-story via
 	// world_in:. An unknown dev-story world key is a Load error.

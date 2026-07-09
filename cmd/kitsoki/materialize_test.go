@@ -85,18 +85,15 @@ func TestMaterializeRoundTrip(t *testing.T) {
 	}
 
 	// Emit, write under the repo worktree so @kitsoki/dev-story resolves, reload.
-	yamlBytes, err := emitRootYAML(spec, "materialize-roundtrip")
+	slug := "materialize-roundtrip"
+	yamlBytes, err := emitRootYAML(spec, slug, root)
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
-	// Write under the repo root but OUTSIDE stories/ so findRepoRoot still
-	// resolves @kitsoki/dev-story while cross-package stories/ walkers (which
-	// copy stories/ in parallel) never race on this transient dir.
-	outDir, err := os.MkdirTemp(root, "mat-rt-")
-	if err != nil {
-		t.Fatalf("mkdtemp under repo: %v", err)
+	outDir := filepath.Join(root, ".kitsoki", "stories", slug)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir materialized dir: %v", err)
 	}
-	defer os.RemoveAll(outDir)
 	outPath := filepath.Join(outDir, "app.yaml")
 	if err := os.WriteFile(outPath, yamlBytes, 0o644); err != nil {
 		t.Fatalf("write emitted: %v", err)
@@ -116,8 +113,55 @@ func TestMaterializeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMaterializeRoundTripScriptBinding(t *testing.T) {
+	root := writableRepoRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, ".kitsoki", "providers"), 0o755); err != nil {
+		t.Fatalf("mkdir providers: %v", err)
+	}
+	script := filepath.Join(root, ".kitsoki", "providers", "ticket.star")
+	if err := os.WriteFile(script, []byte(`def main(ctx):
+    return {"tickets": []}
+`), 0o644); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	if err := os.WriteFile(script+".yaml", []byte(`inputs:
+  op: { type: string, required: false }
+outputs:
+  tickets:
+    type: list
+`), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+
+	slug := "script-binding"
+	spec := &app.RootSpec{Bindings: map[string]string{"ticket": ".kitsoki/providers/ticket.star"}}
+	yamlBytes, err := emitRootYAML(spec, slug, root)
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	if body := string(yamlBytes); !strings.Contains(body, "ticket: ../../providers/ticket.star") {
+		t.Fatalf("expected script binding rewritten relative to materialized app dir:\n%s", body)
+	}
+
+	outDir := filepath.Join(root, ".kitsoki", "stories", slug)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatalf("mkdir materialized dir: %v", err)
+	}
+	outPath := filepath.Join(outDir, "app.yaml")
+	if err := os.WriteFile(outPath, yamlBytes, 0o644); err != nil {
+		t.Fatalf("write emitted: %v", err)
+	}
+	def, err := app.Load(outPath)
+	if err != nil {
+		t.Fatalf("reload emitted app.yaml: %v\n---\n%s", err, string(yamlBytes))
+	}
+	if len(def.StarlarkHostBindings) != 1 {
+		t.Fatalf("expected one starlark binding, got %+v", def.StarlarkHostBindings)
+	}
+}
+
 func TestMaterializeEmitHasProvenanceHeaderAndDevStorySource(t *testing.T) {
-	b, err := emitRootYAML(nil, "provtest")
+	b, err := emitRootYAML(nil, "provtest", testRepoRoot(t))
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
