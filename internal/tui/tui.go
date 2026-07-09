@@ -2113,14 +2113,19 @@ func operationDriveOutcomeSummary(drive *orchestrator.OperationDriveOutcome) str
 }
 
 func operationDriveIntentLabel(intent string) string {
-	intent = strings.TrimSpace(intent)
-	if intent == "" {
+	return humanIntentLabel(intent)
+}
+
+func humanIntentLabel(intent string) string {
+	label := strings.TrimSpace(intent)
+	if label == "" {
 		return ""
 	}
-	if i := strings.LastIndex(intent, "__"); i >= 0 {
-		intent = intent[i+2:]
+	if i := strings.LastIndex(label, "__"); i >= 0 {
+		label = label[i+2:]
 	}
-	return strings.ReplaceAll(intent, "_", " ")
+	label = strings.ReplaceAll(label, "_", " ")
+	return strings.Join(strings.Fields(label), " ")
 }
 
 func operationDriveStopLabel(reason string) string {
@@ -4683,9 +4688,12 @@ func (m *RootModel) refreshPromptPlaceholder() {
 		m.prompt.Placeholder = "describe what you want, or /help"
 		return
 	}
-	label := def.Intent
-	if def.Display != "" {
-		label = def.Display
+	label := strings.TrimSpace(def.Display)
+	if label == "" {
+		label = def.Intent
+	}
+	if label == def.Intent || strings.Contains(label, "__") {
+		label = humanIntentLabel(label)
 	}
 	m.prompt.Placeholder = "↵ " + label + " · describe what you want, or /help"
 }

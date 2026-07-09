@@ -19,8 +19,8 @@ kitsoki run stories/dogfood-marathon/app.yaml
 
 ```
 idle ──start──▶ intake ──▶ processing ⇄ (picking_case → triaging → driving → recording)
-                (load      (per-case        per case, then next_case re-enters
-                 backlog)   checkpoint)      the checkpoint
+                (load      (per-case        autonomous mode re-enters the
+                 backlog)   checkpoint)      checkpoint unless a serious exception parks
                                 │
                                 │ backlog drained / budget hit
                                 ▼
@@ -33,10 +33,10 @@ idle ──start──▶ intake ──▶ processing ⇄ (picking_case → tria
 |---|---|---|
 | `idle` | deterministic | Confirm the inner pipeline, backlog source, baseline policy, maker profile; `start`. |
 | `intake` | deterministic | `host.starlark.run` (`load_backlog`) loads the backlog into `{items:[{id,title,baseline,repro_command}]}`. Idempotent: a pre-seeded backlog passes through. |
-| `processing` | deterministic | The **per-case dispatcher + checkpoint**. `next_case` enters `picking_case`, or aggregates when drained. **One case per turn** (operator-paced, and it keeps each turn's internal emit chain under the engine's emit-depth cap). |
+| `processing` | deterministic | The **per-case dispatcher + checkpoint**. In autonomous mode it emits `next_case` on entry, enters `picking_case`, or aggregates when drained. The long `driving` step is a background job, so the loop advances without operator prodding while keeping each turn's emit chain under the engine cap. |
 | `picking_case` | deterministic | `host.starlark.run` (`pick_case`) selects `backlog.items[case_index]` before agent rooms read `current_case_json`. |
 | `triaging` | interpretive (delegated) | ONE `host.agent.task` (`triager`) — read-only verdict `ALREADY-FIXED \| STILL-LIVE \| PARTIAL \| UNCLEAR`. `ALREADY-FIXED` cases are dropped (degenerate baseline). |
-| `driving` | interpretive (delegated) | The inner pipeline driven LIVE over the case — modeled as ONE `host.agent.task` (`driver`) that a real marathon dispatches through **kitsoki-mcp-driver** (fresh per-case worktree, baseline SHA, explicit trace, scoped test_cmd). Returns the exit + worktree + trace; **does not self-grade**. |
+| `driving` | interpretive (delegated) | The inner pipeline driven LIVE over the case — modeled as ONE background `host.agent.task` (`driver`) that a real marathon dispatches through **kitsoki-mcp-driver** (fresh per-case worktree, baseline SHA, explicit trace, scoped test_cmd). Returns the exit + worktree + trace; **does not self-grade**. |
 | `recording` | deterministic | Runs INDEPENDENT verify (`verify_case`), appends the per-case record (`record_case`), persists the durable journal, and advances the loop. |
 | `aggregating` | deterministic | `host.starlark.run` (`aggregate_run`) rolls up counts, cost/token/time totals, what-worked / what-didn't, the honest headline. |
 | `reporting` | deterministic | `host.starlark.run` (`build_deck`) returns the report deck `{spec_path, summary}` built from the journaled run data. |

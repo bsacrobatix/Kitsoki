@@ -187,6 +187,16 @@
       return lines.join("\n");
     }
 
+    function dumpBuffer() {
+      const buf = term.buffer.active;
+      const lines = [];
+      for (let i = 0; i < buf.length; i++) {
+        const line = buf.getLine(i);
+        lines.push(line ? line.translateToString(true) : "");
+      }
+      return lines.join("\n");
+    }
+
     function cellAttrs(row, col) {
       const buf = term.buffer.active;
       const line = buf.getLine(buf.viewportY + Number(row || 0));
@@ -227,6 +237,7 @@
     }
 
     window.__dump = dumpVisible;
+    window.__dumpBuffer = dumpBuffer;
     window.__cellAttrs = cellAttrs;
     window.__textAttrs = textAttrs;
     window.__scrollLines = (n) => { term.scrollLines(Number(n) || 0); return dumpVisible(); };

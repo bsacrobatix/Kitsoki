@@ -5,7 +5,7 @@ states:
 
   idle:
     description: "Dogfood marathon. Pick the inner pipeline + backlog, then process every case and report the run."
-    relevant_world: [inner_pipeline, backlog_sources, baseline_policy, profile, model, backlog_limit, run_id, journal_path]
+    relevant_world: [inner_pipeline, backlog_sources, baseline_policy, profile, model, backlog_limit, run_id, journal_path, autonomous]
     view:
       - heading: "Dogfood marathon"
       - prose: "Drive a backlog of cases through an inner kitsoki pipeline (bugfix / delivery-tail / ship-it), independently verify every deliverable, capture friction as findings, and bake the run into a slidey report. This wraps the dogfood-marathon skill — improve the pipeline WITHOUT overfitting to the cases."
@@ -17,13 +17,14 @@ states:
             Maker profile:   '{{ world.profile }}'
             Model:           '{{ world.model }}'
             Backlog limit:   '{{ world.backlog_limit }}'
+            Mode:            '{% if world.autonomous %}autonomous{% else %}operator-paced{% endif %}'
             Run id:          '{{ world.run_id }}'
             Journal:         '{{ world.journal_path|default:"(derived at intake)" }}'
       - heading: "Actions"
       - list:
           items:
             - label: "start"
-              hint:  "create a fresh durable journal and start processing"
+              hint:  "create a fresh durable journal and process autonomously"
             - label: "start backlog_sources=… run_id=… profile=codex-native model=gpt-5.5"
               hint:  "override sources / run id / maker profile"
             - label: "resume"
@@ -46,14 +47,81 @@ states:
                 journal_path:    "{{ slots.journal_path ?? world.journal_path }}"
                 profile:         "{{ slots.profile ?? world.profile }}"
                 model:           "{{ slots.model ?? world.model }}"
+                autonomous:      true
                 resume_from_journal: false
                 # fresh run — reset the loop counters
+                backlog: { items: [] }
                 case_index: 0
                 cases_processed: 0
+                current_case: {}
+                current_case_id: ""
+                current_case_json: "{}"
                 results: { items: [] }
                 findings: { items: [] }
                 exceptions: { items: [] }
                 last_result: {}
+                rollup: {}
+                deck_spec: {}
+                deck_path: ""
+                report_handle: ""
+                intake_job_id: ""
+                pick_job_id: ""
+                triage_job_id: ""
+                drive_job_id: ""
+                verify_job_id: ""
+                record_job_id: ""
+                journal_job_id: ""
+                aggregate_job_id: ""
+                deck_job_id: ""
+                render_job_id: ""
+                publish_job_id: ""
+                record_status: ""
+                exception_pending: ""
+                exception_summary: ""
+                loaded_journal: false
+                journal_status: ""
+                journal_summary: ""
+                last_checkpoint: "start"
+      start_marathon:
+        - target: intake
+          effects:
+            - set:
+                backlog_source:  "{{ slots.backlog_source ?? world.backlog_source }}"
+                backlog_sources: "{{ slots.backlog_sources ?? slots.backlog_source ?? world.backlog_sources }}"
+                inner_pipeline:  "{{ slots.inner_pipeline ?? world.inner_pipeline }}"
+                backlog_limit:   "{{ slots.backlog_limit ?? world.backlog_limit }}"
+                run_id:          "{{ slots.run_id ?? world.run_id }}"
+                journal_path:    "{{ slots.journal_path ?? world.journal_path }}"
+                profile:         "{{ slots.profile ?? world.profile }}"
+                model:           "{{ slots.model ?? world.model }}"
+                autonomous:      true
+                resume_from_journal: false
+                # fresh run — reset the loop counters
+                backlog: { items: [] }
+                case_index: 0
+                cases_processed: 0
+                current_case: {}
+                current_case_id: ""
+                current_case_json: "{}"
+                results: { items: [] }
+                findings: { items: [] }
+                exceptions: { items: [] }
+                last_result: {}
+                rollup: {}
+                deck_spec: {}
+                deck_path: ""
+                report_handle: ""
+                intake_job_id: ""
+                pick_job_id: ""
+                triage_job_id: ""
+                drive_job_id: ""
+                verify_job_id: ""
+                record_job_id: ""
+                journal_job_id: ""
+                aggregate_job_id: ""
+                deck_job_id: ""
+                render_job_id: ""
+                publish_job_id: ""
                 record_status: ""
                 exception_pending: ""
                 exception_summary: ""
@@ -71,7 +139,23 @@ states:
                 journal_path:    "{{ slots.journal_path ?? world.journal_path }}"
                 profile:         "{{ slots.profile ?? world.profile }}"
                 model:           "{{ slots.model ?? world.model }}"
+                autonomous:      true
                 resume_from_journal: true
+                backlog: { items: [] }
+                current_case: {}
+                current_case_id: ""
+                current_case_json: "{}"
+                intake_job_id: ""
+                pick_job_id: ""
+                triage_job_id: ""
+                drive_job_id: ""
+                verify_job_id: ""
+                record_job_id: ""
+                journal_job_id: ""
+                aggregate_job_id: ""
+                deck_job_id: ""
+                render_job_id: ""
+                publish_job_id: ""
                 record_status: ""
                 exception_pending: ""
                 exception_summary: ""

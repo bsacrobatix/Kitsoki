@@ -29,12 +29,12 @@
 #
 #   idle         deterministic: confirm/seed the backlog source + inner pipeline + baseline policy
 #   intake       deterministic: load the backlog of cases (host.starlark.run loads tickets/bugs)
-#   processing   the per-case DISPATCHER — a sub-state that re-enters until the
-#                backlog is drained (case_index >= |backlog|) OR the case budget is
-#                hit. Per case it walks: picking_case → triaging → driving → recording,
-#                then `next_case` re-enters processing. (study stories/bugfix's
-#                regression-gate loop + stories/slidey-edit's cycle/budget refine
-#                loop — same guarded-emit / budget-cap shape.)
+#   processing   the per-case DISPATCHER — a checkpoint that auto-starts the next
+#                case when autonomous=true, until the backlog is drained
+#                (case_index >= |backlog|) OR the case budget is hit. Per case it
+#                walks: picking_case → triaging → driving(background) → recording,
+#                then re-enters processing. The background drive breaks the
+#                per-case chain so the story stays under the engine's emit-depth cap.
 #     triaging   cheap read-only verdict (ALREADY-FIXED|STILL-LIVE|PARTIAL|UNCLEAR);
 #                ALREADY-FIXED cases are dropped (degenerate baseline) — recorded skipped
 #     driving    drive the inner pipeline LIVE on the case (tracked: trace/cost/time)
@@ -114,6 +114,13 @@ world:
   profile:          { type: string, default: "codex-native" }     # maker profile; local config maps this to gpt-5.5
   model:            { type: string, default: "gpt-5.5" }
   exception_policy: { type: string, default: "ask-serious" }      # ask-serious | journal-only
+  autonomous:       { type: bool,   default: true }               # auto-start the next case unless a serious exception parks the run
+  intake_job_id:    { type: string, default: "" }
+  pick_job_id:      { type: string, default: "" }
+  triage_job_id:    { type: string, default: "" }
+  verify_job_id:    { type: string, default: "" }
+  record_job_id:    { type: string, default: "" }
+  journal_job_id:   { type: string, default: "" }
   # drop_already_fixed — skip cases whose triage verdict is ALREADY-FIXED (a
   # degenerate baseline: a test/lint layered on an already-merged behavioural fix
   # → baseline GREEN → nothing to reproduce). SKILL.md step 2 / gotcha #2.
@@ -132,6 +139,7 @@ world:
   current_case_json: { type: string, default: "{}" }             # JSON form for agent prompt args (a raw object renders as a Go map string)
   triage_verdict:   { type: object, default: {} }                # this case's triage verdict (read-only)
   drive_result:     { type: object, default: {} }                # inner-pipeline drive output {exit,worktree,branch,trace,cost_usd,tokens,wall_s}
+  drive_job_id:     { type: string, default: "" }                # background job id while the inner drive is running
   verify_result:    { type: object, default: {} }                # INDEPENDENT oracle outcome {status:solved|partial|failed,how}
   record_status:    { type: string, default: "" }                # set by record_case after post-bind settle
   last_result:      { type: object, default: {} }                # latest recorded case, shown at the processing checkpoint
@@ -156,6 +164,10 @@ world:
   exceptions:       { type: object, default: { items: [] } }
 
   # ── Report render outputs ──────────────────────────────────────────────────
+  aggregate_job_id: { type: string, default: "" }
+  deck_job_id:      { type: string, default: "" }
+  render_job_id:    { type: string, default: "" }
+  publish_job_id:   { type: string, default: "" }
   deck_spec:        { type: object, default: {} }                # {spec_path,summary} — the built deck JSON
   deck_path:        { type: string, default: "" }                # rendered static-HTML deck path
   report_handle:    { type: string, default: "" }                # media handle for the rendered report
@@ -170,6 +182,19 @@ intents:
     description: "Begin the marathon: load the backlog and start processing cases."
     examples: ["start", "begin", "run the marathon", "process the backlog", "start backlog_sources=github:constructorfabric/Kitsoki,github:bsacrobatix/Kitsoki,local:.artifacts/issues/bugs run_id=bug15 profile=codex-native"]
     priority: 90
+    slots:
+      backlog_source:  { type: string, required: false }
+      backlog_sources: { type: string, required: false }
+      inner_pipeline:  { type: string, required: false }
+      backlog_limit:   { type: int, required: false }
+      run_id:          { type: string, required: false }
+      journal_path:    { type: string, required: false }
+      profile:         { type: string, required: false }
+      model:           { type: string, required: false }
+  start_marathon:
+    description: "Begin the marathon from an imported dogfood room without colliding with parent start intents."
+    examples: ["start the marathon"]
+    priority: 91
     slots:
       backlog_source:  { type: string, required: false }
       backlog_sources: { type: string, required: false }
@@ -232,7 +257,7 @@ intents:
     priority: 1
   ack_exception:
     description: "Acknowledge the serious exception and continue the marathon."
-    examples: ["ack_exception", "continue anyway"]
+    examples: ["ack_exception", "acknowledge and continue", "continue anyway"]
     priority: 70
   answer_exception:
     description: "Record operator guidance for the serious exception, then continue."
@@ -256,6 +281,12 @@ exits:
     requires: [report_handle]
   abandoned:
     description: "The operator bailed."
+
+exports:
+  intents:
+    - start_marathon
+    - ack_exception
+    - answer_exception
 
 root: idle
 

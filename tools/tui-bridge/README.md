@@ -82,18 +82,20 @@ pnpm run record:dogfood
 ```
 
 The browser connects to a real `kitsoki` TUI process and sends real xterm
-keystrokes through the PTY bridge. The story's free-text routing and
-LLM-bearing host outcomes are replayed from `tools/tui-bridge/fixtures/`, so the
-recording is deterministic and does not spend LLM tokens. The fixture preserves
-real issue titles/URLs for the 15-case demo, but it is not evidence that a paid
-GPT-5.5 marathon fixed those bugs.
+keystrokes through the PTY bridge. The recording starts from the `kitsoki-dev`
+landing room, types `I want to do a dogfood marathon`, shows the dogfood room's
+full pre-start message, then types the clean `start the marathon` command. The
+story's free-text routing and LLM-bearing host outcomes are replayed from
+`tools/tui-bridge/fixtures/`, so the recording is deterministic and does not
+spend LLM tokens. The fixture preserves real issue titles/URLs for the 15-case
+demo, but it is not evidence that a paid GPT-5.5 marathon fixed those bugs.
 
-The default recording is intentionally paced for review: commands are typed
-visibly, each submitted command holds briefly before Enter, every processed bug
-settles on a checkpoint that names the latest case, and the spec fails a
-watch-speed recording if any chapter is shorter than the readable floor. Use
-`WEB_CHAT_PACE=0 pnpm run validate:dogfood` only for fast assertions; it writes a
-`.fast.mp4` and is not a user-facing demo.
+The default recording is intentionally paced for review: the two user commands
+are typed visibly, each submitted command holds briefly before Enter, every
+processed bug settles on a visible autonomous running/report state that names the
+latest case, and the spec fails a watch-speed recording if any chapter is shorter
+than the readable floor. Use `WEB_CHAT_PACE=0 pnpm run validate:dogfood` only for
+fast assertions; it writes a `.fast.mp4` and is not a user-facing demo.
 
 ## Driving it from claude-in-chrome
 
