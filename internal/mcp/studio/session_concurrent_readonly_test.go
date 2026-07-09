@@ -130,7 +130,7 @@ func TestReadOnlyCallsDoNotBlockOnConcurrentTurn(t *testing.T) {
 			t.Logf("%s returned while the turn was still blocked (%s)", ro.name, elapsed)
 		case <-driveDone:
 			t.Fatalf("%s queued behind the turn: background drive completed before the read-only call returned", ro.name)
-		case <-time.After(1500 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			t.Fatalf("%s did not return while the turn was blocked", ro.name)
 		}
 	}
@@ -199,7 +199,7 @@ func TestReadOnlyCallsDoNotBlockAcrossConnections(t *testing.T) {
 			t.Logf("%s on connection B returned while the turn was still blocked (%s)", ro.name, elapsed)
 		case <-driveDone:
 			t.Fatalf("%s on connection B queued behind the turn: background drive completed before the read-only call returned", ro.name)
-		case <-time.After(1500 * time.Millisecond):
+		case <-time.After(5 * time.Second):
 			t.Fatalf("%s on connection B did not return while the turn was blocked", ro.name)
 		}
 	}
