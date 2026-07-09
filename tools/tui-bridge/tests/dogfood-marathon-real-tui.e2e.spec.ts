@@ -215,7 +215,7 @@ async function exerciseChoiceWidget(
   await dwell(page, CHOICE_HOLD_MS);
 }
 
-async function acknowledgeExceptionWithChoice(
+async function parkExceptionWithChoice(
   page: Page,
   shot: (page: Page, label: string) => Promise<string>,
 ): Promise<void> {
@@ -223,7 +223,7 @@ async function acknowledgeExceptionWithChoice(
   await waitForBuffer(page, "! SERIOUS EXCEPTION");
   await waitForScreen(page, "[↑/↓ move");
   const initial = await waitForChoiceCursor(page);
-  expect(initial).toContain("acknowledge and continue");
+  expect(initial).toContain("park case and continue");
   await shot(page, "exception-choice-initial");
   await dwell(page, CHOICE_HOLD_MS);
 
@@ -234,7 +234,7 @@ async function acknowledgeExceptionWithChoice(
 
   await page.keyboard.press("ArrowUp");
   await expect.poll(() => choiceCursorLine(page), { timeout: 10_000 }).toBe(initial);
-  await shot(page, "exception-choice-acknowledge");
+  await shot(page, "exception-choice-park");
   await dwell(page, CHOICE_HOLD_MS);
   await page.keyboard.press("Enter");
 }
@@ -304,18 +304,23 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
         await waitForScreen(page, "core.dogfood.exception_review");
         await waitForBuffer(page, "! SERIOUS EXCEPTION");
         await waitForBuffer(page, caseId);
+        await waitForBuffer(page, "Should this marathon leave");
+        await waitForBuffer(page, "Answer decides whether");
+        await waitForBuffer(page, "Issue:");
+        await waitForBuffer(page, "Kitsoku Issue #61");
+        await waitForBuffer(page, "case-05 trace");
         await scrollUpUntilVisible(page, "! SERIOUS EXCEPTION");
         await dwell(page, COMMAND_HOLD_MS);
         await shot(page, "exception-review");
         await dwell(page, EXCEPTION_HOLD_MS);
-        chapters.open("operator-exception", "Acknowledge the serious exception through the choice widget", RECORDING);
+        chapters.open("operator-exception", "Park the serious exception through the choice widget", RECORDING);
         await bottom(page);
-        await acknowledgeExceptionWithChoice(page, shot);
+        await parkExceptionWithChoice(page, shot);
       }
       if (i === CASES.length) {
         await waitForBuffer(page, "15 case(s)", 60_000);
       }
-      await shot(page, i === 5 ? "exception-acknowledged" : `processed-${String(i).padStart(2, "0")}`);
+      await shot(page, i === 5 ? "exception-parked" : `processed-${String(i).padStart(2, "0")}`);
       await dwell(page, CASE_HOLD_MS);
     }
 

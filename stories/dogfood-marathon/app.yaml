@@ -256,9 +256,9 @@ intents:
     description: "(internal) the report rendered → show the gallery."
     priority: 1
   ack_exception:
-    title: "acknowledge and continue"
-    description: "Acknowledge the serious exception and continue the marathon."
-    examples: ["ack_exception", "acknowledge and continue", "continue anyway"]
+    title: "park case and continue"
+    description: "Keep the serious question parked as needs-human and continue the marathon."
+    examples: ["ack_exception", "park case and continue", "continue with the next case"]
     priority: 80
   answer_exception:
     title: "answer with guidance"

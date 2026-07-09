@@ -18,7 +18,9 @@
     "fix_ref":             { "type": "string", "description": "Branch/commit/PR ref when available." },
     "requires_operator":   { "type": "boolean", "description": "True when a serious operator decision is needed." },
     "operator_question":   { "type": "string", "description": "Serious question to surface through the story operator channel." },
+    "operator_impact":     { "type": "string", "description": "What the operator decision changes, distinct from the question." },
     "exception_severity":  { "type": "string", "description": "Severity of the operator exception (serious, critical, high, etc.)." },
+    "trace_label":         { "type": "string", "description": "Short human label for the trace link when shown in operator surfaces." },
     "findings":            { "type": "array", "items": { "type": "object" }, "description": "Friction captured during the drive." }
   },
   "additionalProperties": true

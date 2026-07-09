@@ -1,4 +1,4 @@
-# resolve_exception.star — mark a serious exception as answered/acknowledged.
+# resolve_exception.star — mark a serious exception as answered or parked.
 
 def _str(v):
     if v == None:
@@ -18,7 +18,7 @@ def _items(v):
 def main(ctx):
     exceptions = _dict(ctx.inputs.get("exceptions")) or {"items": []}
     case_id = _str(ctx.inputs.get("case_id")).strip()
-    status = _str(ctx.inputs.get("status")).strip() or "acknowledged"
+    status = _str(ctx.inputs.get("status")).strip() or "parked"
     answer = _str(ctx.inputs.get("answer")).strip()
 
     out = []
