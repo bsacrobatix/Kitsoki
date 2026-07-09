@@ -40,6 +40,9 @@ def _strip_prefix(text):
     s = _collapse_ws(text)
     lower = s.lower()
     prefixes = [
+        "preview whether",
+        "preview that",
+        "preview",
         "scenario qa check whether",
         "scenario qa check",
         "check whether",

@@ -186,6 +186,20 @@ intents:
     priority: 95
     slots:
       request: { type: string, required: true }
+  preview_request:
+    title: "preview a scenario request"
+    description: "Dry-run an arbitrary scenario request. The request may be plain prose, a catalog id, or prose plus key=value qualifiers."
+    synonyms:
+      - "preview {request}"
+      - "dry run {request}"
+      - "show plan for {request}"
+    examples:
+      - "preview required user input affordance transport=web,tui target=kitsoki"
+      - "dry run onboarding tour renders transport=web"
+      - "preview scenario=bugfix transport=all"
+    priority: 98
+    slots:
+      request: { type: string, required: true }
   check:
     description: "Check a scenario (a catalog scenario id, or a free-text description) across one or more transports."
     synonyms:

@@ -100,6 +100,27 @@ def _natural_utterance_summary(leg):
     }
 
 
+def _playback_path(leg, drive):
+    for source in [leg, drive]:
+        for key in ["playback_path", "playback_ref", "rrweb_path", "video_path"]:
+            value = source.get(key, "")
+            if value != "":
+                return value
+    refs = drive.get("evidence_refs", [])
+    if type(refs) != "list":
+        return ""
+    for ref in refs:
+        if type(ref) == "dict":
+            value = ref.get("path", ref.get("ref", ""))
+        else:
+            value = ref
+        text = str(value)
+        lower = text.lower()
+        if lower.endswith(".rrweb.json") or lower.endswith(".mp4") or lower.endswith(".webm") or lower.endswith(".mov"):
+            return text
+    return ""
+
+
 def main(ctx):
     leg = _d(ctx.inputs.get("leg"))
     drive = _d(ctx.inputs.get("drive_result"))
@@ -135,6 +156,8 @@ def main(ctx):
         "driver_status":           drive.get("status", "unattempted"),
         "evidence_refs":           drive.get("evidence_refs", []),
         "post_drive_evidence_ref": drive.get("post_drive_evidence_ref", ""),
+        "playback_path":           _playback_path(leg, drive),
+        "playback_caption":        leg.get("playback_caption", drive.get("playback_caption", "")),
         "verdict":                 verdict,
         "verdict_summary":         judge.get("summary", ""),
         "frames_dir":              judge.get("frames_dir", drive.get("frames_dir", "")),

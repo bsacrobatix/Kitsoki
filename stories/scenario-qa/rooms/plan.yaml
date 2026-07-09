@@ -106,6 +106,7 @@ states:
             run_id: "{{ world.run_id }}"
             description: "{{ world.scenario_description }}"
             primary_story: "{{ world.target }}"
+            last_result: "{{ world.last_result }}"
         bind:
           legs: legs
           leg_count: leg_count

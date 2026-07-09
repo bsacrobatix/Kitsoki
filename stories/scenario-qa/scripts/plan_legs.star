@@ -24,9 +24,14 @@
 # in the calling room computing the same string would bake in a stale value
 # instead (see plan.yaml's header comment).
 #
+# Flow fixtures and replay cassettes may provide an inline driver_plan object on
+# the emit-run result. Prefer it when present; production still reads the
+# canonical driver-plan.json from the run directory.
+#
 # Interface (authoritative in plan_legs.star.yaml):
 #   inputs:  mode (string: catalog|adhoc), run_id (string),
-#            description (string), primary_story (string)
+#            description (string), primary_story (string),
+#            last_result (object, optional)
 #   outputs: legs (object {items:[...]}), leg_count (int),
 #            driver_agent (string), run_dir_rel (string, repo-relative)
 
@@ -81,8 +86,13 @@ def main(ctx):
     # header comment).
     run_dir_rel = ".artifacts/product-journey/" + run_id
 
-    content = ctx.fs.read(run_dir_rel + "/driver-plan.json")
-    plan = json.decode(content)
+    last_result = ctx.inputs.get("last_result", {})
+    if type(last_result) != "dict":
+        last_result = {}
+    plan = last_result.get("driver_plan", {})
+    if type(plan) != "dict" or len(plan) == 0:
+        content = ctx.fs.read(run_dir_rel + "/driver-plan.json")
+        plan = json.decode(content)
     carrier_legs = plan.get("scenarios", [])
     driver_agent = plan.get("driver_agent", ".agents/agents/product-journey-qa-driver.md")
 

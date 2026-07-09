@@ -48,6 +48,7 @@ def _row(item):
         " | " + _escape_cell(item.get("natural_utterance_count", 0)) +
         " | " + _escape_cell(item.get("driver_status", "")) +
         " | " + _escape_cell(item.get("verdict", "")) +
+        " | " + _escape_cell(item.get("playback_path", "")) +
         " | " + _escape_cell(item.get("verdict_summary", "")) +
         " |\n"
     )
@@ -79,8 +80,8 @@ def main(ctx):
     lines.append("# Scenario QA report\n\n")
     lines.append("- Scenario: `" + name + "`\n")
     lines.append("- Run: `" + run_id + "`\n\n")
-    lines.append("| Transport | Scenario | Level | Natural prompts | Driver | Verdict | Notes |\n")
-    lines.append("|---|---|---|---:|---|---|---|\n")
+    lines.append("| Transport | Scenario | Level | Natural prompts | Driver | Verdict | Playback | Notes |\n")
+    lines.append("|---|---|---|---:|---|---|---|---|\n")
     for item in items:
         lines.append(_row(item))
     natural_lines = []

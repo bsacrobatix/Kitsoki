@@ -10,7 +10,8 @@ kitsoki run @kitsoki/scenario-qa
 From the story, use natural prompts or explicit `key=value` qualifiers:
 
 ```text
-preview <catalog-scenario-id> across all transports
+preview required user input affordance transport=web,tui target=<project-id>
+preview scenario=<catalog-scenario-id> transport=all
 check scenario=<catalog-scenario-id> transport=tui,web persona=<persona-id> target=<project-id>
 check whether settings validation persists transport=web target=<project-id>
 next transport
@@ -24,9 +25,10 @@ catalog. Use `scenario=<id>` when the request should bind to a catalog scenario;
 otherwise the remaining prose becomes an ad-hoc scenario description. Supported
 transport values are `all`, `tui`, `web`, `vscode`, `cli`, or a comma list.
 
-`preview` is side-effect-free for catalog scenarios: it asks the deterministic
-product-journey runner for a scenario goal plus per-transport evidence plan,
-binds the planned transport-check count into story state, and does not create a
+`preview` is side-effect-free for both ad-hoc and catalog requests. For an
+ad-hoc request it parses the same plain prose and qualifiers as `check`, uses a
+generic transport carrier only to resolve the requested evidence contracts, then
+renders the operator's requested behavior in the preview. It does not create a
 run bundle, launch capture, or call an LLM.
 
 `check` creates the run bundle under `.artifacts/product-journey/<run-id>/`,
@@ -73,10 +75,12 @@ it can, then a read-only judge grades the captured evidence. Missing, degraded,
 or fake media becomes `degraded-evidence` or a blocker, not a pass.
 
 `deck.slidey.json` is generated from existing run artifacts. The same run
-bundle and flags produce stable JSON bytes. Playback scenes are derived from
-`media-manifest.json`; only proof-grade local, retained, external, or cassette
-items become video scenes. Demo or placeholder media remains visible as blocked
-evidence.
+bundle and flags produce stable JSON bytes. Scenario QA report decks derive
+session replay scenes from recorded leg results (`playback_path`, `rrweb_path`,
+`video_path`, or playback-looking `evidence_refs`). Matrix and retained-run
+decks still derive playback scenes from `media-manifest.json`. Demo or
+placeholder media remains visible as blocked evidence rather than being treated
+as proof.
 
 Committed examples:
 
