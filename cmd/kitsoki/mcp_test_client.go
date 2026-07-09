@@ -404,7 +404,7 @@ func decodeMCPToolResult(name string, res *mcpsdk.CallToolResult) (map[string]in
 
 func assertMCPExpectations(name string, result map[string]interface{}, expect map[string]any) error {
 	for path, want := range expect {
-		got, ok := lookupDotPath(result, path)
+		got, ok := lookupMCPExpectationPath(result, path)
 		if !ok {
 			return fmt.Errorf("mcp-test: %s expectation %q missing", name, path)
 		}
@@ -417,7 +417,7 @@ func assertMCPExpectations(name string, result map[string]interface{}, expect ma
 
 func assertMCPContainsExpectations(name string, result map[string]interface{}, expect map[string]string) error {
 	for path, want := range expect {
-		got, ok := lookupDotPath(result, path)
+		got, ok := lookupMCPExpectationPath(result, path)
 		if !ok {
 			return fmt.Errorf("mcp-test: %s contains expectation %q missing", name, path)
 		}
@@ -437,11 +437,25 @@ func assertMCPExistsExpectations(name string, result map[string]interface{}, pat
 		if path == "" {
 			return fmt.Errorf("mcp-test: %s exists expectation path is empty", name)
 		}
-		if _, ok := lookupDotPath(result, path); !ok {
+		if _, ok := lookupMCPExpectationPath(result, path); !ok {
 			return fmt.Errorf("mcp-test: %s exists expectation %q missing", name, path)
 		}
 	}
 	return nil
+}
+
+func lookupMCPExpectationPath(result map[string]interface{}, path string) (any, bool) {
+	if got, ok := lookupDotPath(result, path); ok {
+		return got, true
+	}
+	if strings.HasPrefix(path, "structuredContent.") || path == "structuredContent" {
+		return nil, false
+	}
+	structured, ok := result["structuredContent"]
+	if !ok {
+		return nil, false
+	}
+	return lookupDotPath(structured, path)
 }
 
 func lookupDotPath(root any, path string) (any, bool) {
