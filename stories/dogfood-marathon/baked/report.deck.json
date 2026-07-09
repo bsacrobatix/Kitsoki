@@ -12,7 +12,7 @@
       "eyebrow": "Dogfood marathon",
       "title": "Backlog → pipeline → report",
       "subtitle": "Before / after · result status · evidence · cost",
-      "narration": "A backlog of cases is driven through the inner pipeline, independently verified, then reported with scan-friendly before-after and result affordances."
+      "narration": "A queue of cases is driven through the configured inner workflow, independently verified, then reported with scan-friendly before-after and result affordances."
     },
     {
       "type": "objectives",

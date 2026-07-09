@@ -14,7 +14,7 @@ states:
     description: "Rolling up all case results (deterministic)."
     relevant_world: [results, rollup, findings, exceptions, journal_path, aggregate_job_id]
     view:
-      - heading: "Dogfood marathon · aggregating"
+      - heading: "Marathon · aggregating"
       - kv:
           pairs:
             Cases:    '{{ world.results.items|length }}'
@@ -54,7 +54,7 @@ states:
     description: "Persisting the aggregate checkpoint."
     relevant_world: [results, rollup, findings, exceptions, journal_path, journal_job_id]
     view:
-      - heading: "Dogfood marathon · aggregate checkpoint"
+      - heading: "Marathon · aggregate checkpoint"
       - kv:
           pairs:
             Cases:   '{{ world.results.items|length }}'

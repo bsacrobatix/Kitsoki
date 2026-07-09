@@ -1,18 +1,18 @@
-# idle — confirm the run config (inner pipeline, backlog source, baseline policy)
+# idle — confirm the run config (inner workflow, queue source, baseline policy)
 # and start the marathon. Deterministic, no LLM.
 
 states:
 
   idle:
-    description: "Dogfood marathon. Pick the inner pipeline + backlog, then process every case and report the run."
+    description: "Marathon room. Pick the inner workflow + queue, then process each case and report the run."
     relevant_world: [inner_pipeline, backlog_sources, baseline_policy, profile, model, backlog_limit, run_id, journal_path, autonomous, plan_revision, plan_feedback]
     view:
-      - heading: "Dogfood marathon"
-      - prose: "Drive a backlog of cases through an inner kitsoki pipeline (bugfix / delivery-tail / ship-it), independently verify every deliverable, capture friction as findings, and bake the run into a slidey report. This wraps the dogfood-marathon skill — improve the pipeline WITHOUT overfitting to the cases."
+      - heading: "Marathon"
+      - prose: "Work down a queue of cases through a configured inner workflow, independently verify every deliverable, capture friction as findings, and bake the run into a slidey report. Use this as a generic queue marathon; dogfood is just one configuration."
       - kv:
           pairs:
-            Inner pipeline:  '{{ world.inner_pipeline }}'
-            Backlog sources: '{{ world.backlog_sources }}'
+            Inner workflow:  '{{ world.inner_pipeline }}'
+            Queue sources:   '{{ world.backlog_sources }}'
             Baseline policy: '{{ world.baseline_policy }}'
             Maker profile:   '{{ world.profile }}'
             Model:           '{{ world.model }}'
@@ -22,7 +22,7 @@ states:
             Journal:         '{{ world.journal_path|default:"(derived at intake)" }}'
             "Plan revision": '{{ world.plan_revision }}'
       - heading: "Plan"
-      - prose: "Start will load up to {{ world.backlog_limit }} case(s) from {{ world.backlog_sources }}, run {{ world.inner_pipeline }} with {{ world.profile }} / {{ world.model }}, keep a durable journal under the run id, independently verify each deliverable, park serious exceptions for the operator, and produce one slidey deck per case plus an aggregate deck."
+      - prose: "Start will load up to {{ world.backlog_limit }} queue case(s) from {{ world.backlog_sources }}, run {{ world.inner_pipeline }} with {{ world.profile }} / {{ world.model }}, keep a durable journal under the run id, independently verify each deliverable, park serious exceptions for the operator, and produce one report deck per case plus an aggregate deck."
       - prose: "Last refinement: {{ world.plan_feedback }}"
         when: "world.plan_feedback != ''"
       - prose: "Default start is intentionally clean: `start the marathon` uses this configured plan and a fresh durable journal. Use `refine plan` before start when the source, limit, model, or run id needs to change."
@@ -34,7 +34,7 @@ states:
               hint:  "fresh durable journal; autonomous until a serious exception"
               intent: start_marathon
             - label: "refine plan"
-              hint:  "edit sources, limit, model, or run id before starting"
+              hint:  "edit queue sources, limit, workflow, model, or run id before starting"
               intent: refine_plan
               param:
                 slot:        feedback
@@ -163,7 +163,7 @@ states:
                 resume_from_journal: false
                 plan_revision:   "{{ world.plan_revision + 1 }}"
                 plan_feedback:   "{{ slots.feedback ?? 'plan reviewed without extra notes' }}"
-            - say: "Dogfood marathon plan updated. Review the plan, then start the marathon or refine again."
+            - say: "Marathon plan updated. Review the plan, then start the marathon or refine again."
       resume:
         - target: intake
           effects:

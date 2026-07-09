@@ -302,8 +302,8 @@ states:
             - label:  "fix tests"
               hint:   "run the test command, fix failures, and review for no regressions"
               intent: go_fix_tests
-            - label:  "dogfood"
-              hint:   "run the 15-case local + GitHub dogfood marathon"
+            - label:  "marathon"
+              hint:   "work down a configured queue with durable reporting"
               intent: go_dogfood_marathon
             - label:  "cypilot"
               hint:   "drive the picked epic through the SDLC waterfall"
@@ -462,11 +462,10 @@ states:
       # synthesizes an arc for this intent name if one isn't already present,
       # so this hand-authored version is what actually runs.
       landing_capture:
-        # Dogfood marathon escape hatch. This must route deterministically from
-        # the kitsoki-dev landing floor: the operator's first natural utterance
-        # is the request, then the dogfood room presents its own clean
-        # `start the marathon` prompt.
-        - when: "hasPrefix(lower(trim(slots.request)), 'i want to do a dogfood marathon') || hasPrefix(lower(trim(slots.request)), 'dogfood marathon') || hasPrefix(lower(trim(slots.request)), 'run a dogfood marathon')"
+        # Marathon escape hatch. This must route deterministically from the
+        # landing floor: the operator's first natural utterance is the request,
+        # then the marathon room presents its own clean `start the marathon` prompt.
+        - when: "hasPrefix(lower(trim(slots.request)), 'queue marathon') || hasPrefix(lower(trim(slots.request)), 'run a marathon') || hasPrefix(lower(trim(slots.request)), 'i want to do a dogfood marathon') || hasPrefix(lower(trim(slots.request)), 'dogfood marathon') || hasPrefix(lower(trim(slots.request)), 'run a dogfood marathon')"
           target: dogfood
           effects:
             - set:

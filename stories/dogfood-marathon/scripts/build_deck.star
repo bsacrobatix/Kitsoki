@@ -438,7 +438,7 @@ def _case_deck(record, run_id):
         "scenes": [
             {
                 "type": "title",
-                "eyebrow": "Dogfood marathon · " + run_id,
+                "eyebrow": "Marathon · " + run_id,
                 "title": case_id,
                 "subtitle": _verify_badge(record) + " · " + title,
                 "narration": "Bug " + case_id + " ended " + _verify_badge(record) + ".",
@@ -626,7 +626,7 @@ def _aggregate_deck(run_id, rollup, results, findings, exceptions, case_decks):
             "eyebrow": "Dogfood marathon",
             "title": run_id,
             "subtitle": _str(rollup.get("headline", "")),
-            "narration": "A dogfood marathon over local and GitHub bugs, with clear before-after and result affordances.",
+            "narration": "A queue marathon over configured cases, with clear before-after and result affordances.",
         },
         {
             "type": "objectives",

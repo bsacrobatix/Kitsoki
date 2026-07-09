@@ -81,7 +81,7 @@ def main(ctx):
     if counts["solved"] > 0:
         worked.append(str(counts["solved"]) + " case(s) independently verified solved")
     if counts["shipped"] > 0:
-        worked.append(str(counts["shipped"]) + " fix(es) shipped through the inner pipeline")
+        worked.append(str(counts["shipped"]) + " case(s) completed through the inner workflow")
     if counts["github"] > 0 or counts["local"] > 0:
         worked.append("backlog mixed " + str(counts["github"]) + " GitHub and " + str(counts["local"]) + " local case(s)")
     if counts["needs_human"] > 0:

@@ -5,10 +5,10 @@
   "type": "object",
   "required": ["exit", "deliverable_present"],
   "properties": {
-    "exit":                { "type": "string", "description": "The inner pipeline's terminal exit (shipped | needs-human | not-reproducible | abandoned)." },
-    "worktree":            { "type": "string", "description": "The fresh per-case worktree path." },
+    "exit":                { "type": "string", "description": "The inner workflow's terminal exit (shipped | needs-human | not-reproducible | abandoned)." },
+    "worktree":            { "type": "string", "description": "The fresh per-case workspace path." },
     "branch":              { "type": "string", "description": "The feature branch." },
-    "deliverable_present": { "type": "boolean", "description": "Are the fix files + key edit actually on the worktree? (false is honest when the maker produced nothing.)" },
+    "deliverable_present": { "type": "boolean", "description": "Is the claimed deliverable actually present in the workspace? (false is honest when the maker produced nothing.)" },
     "oracle_pass":         { "type": "boolean", "description": "Optional: did the operator's oracle pass? The verify room re-checks regardless." },
     "trace":               { "type": "string", "description": "Path to the drive's trace (cost/token evidence)." },
     "cost_usd":            { "type": "number", "description": "Summed trace cost (USD)." },
