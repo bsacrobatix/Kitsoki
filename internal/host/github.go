@@ -2,7 +2,7 @@
 //
 // Implements the `ticket` host_interface (see docs/architecture/hosts.md)
 // against GitHub Issues. Mirrors the localfiles_ticket.go surface so a parent
-// story (kitsoki-dev, cyber-repo's devstory flavour) can rebind
+// story (kitsoki-dev, focused-engineering's devstory flavour) can rebind
 // `iface.ticket -> host.gh.ticket` without touching room YAML.
 //
 // Why a separate handler?  GitHub Issues is the obvious "next provider after

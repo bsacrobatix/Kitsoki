@@ -60,14 +60,14 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 The request can also preselect a named first-run story pack:
 
 ```text
-onboard ~/code/cyber-repo --pack cyber-repo
+onboard ~/code/my-monorepo --pack focused-engineering
 ```
 
 Discovery emits the pack catalog and the selected pack into
 `init_story_packs`, `init_story_pack`, and `init_starter_stories`. The review
 room exposes a `story packs` menu before writes happen; selecting a pack updates
-the starter set in memory. The current cyber-repo rollout pack is
-`cyber-repo`: `setup`, `bugfix`, `repo-bakeoff` (repo-history capsules),
+the starter set in memory. The default focused-engineering starter pack is
+`focused-engineering`: `setup`, `bugfix`, `repo-bakeoff` (repo-history capsules),
 `pr-refinement`, and `git-ops`.
 
 For one-off custom scopes, discovery still accepts

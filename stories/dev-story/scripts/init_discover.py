@@ -57,9 +57,9 @@ STARTER_STORY_CATALOG = {
 }
 
 STORY_PACKS = {
-    "cyber-repo": {
-        "title": "Cyber repo starter",
-        "summary": "Focused first-run set for cyber-repo: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
+    "focused-engineering": {
+        "title": "Focused engineering starter",
+        "summary": "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
         "stories": ["setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"],
     },
     "core-setup": {
@@ -98,7 +98,7 @@ STORY_PACKS = {
     },
 }
 
-DEFAULT_STORY_PACK_ID = "cyber-repo"
+DEFAULT_STORY_PACK_ID = "focused-engineering"
 DEFAULT_STARTER_STORY_IDS = STORY_PACKS[DEFAULT_STORY_PACK_ID]["stories"]
 
 STARTER_STORY_ALIASES = {
@@ -128,14 +128,12 @@ STARTER_STORY_ALIASES = {
 }
 
 STORY_PACK_ALIASES = {
-    "cyber": "cyber-repo",
-    "cyberrepo": "cyber-repo",
-    "cyber-repo": "cyber-repo",
-    "cyber_repo": "cyber-repo",
-    "focused": "cyber-repo",
-    "focused-engineering": "cyber-repo",
-    "targeted": "cyber-repo",
-    "targeted-engineering": "cyber-repo",
+    "focusedengineering": "focused-engineering",
+    "focused-engineering": "focused-engineering",
+    "focused_engineering": "focused-engineering",
+    "focused": "focused-engineering",
+    "targeted": "focused-engineering",
+    "targeted-engineering": "focused-engineering",
     "core": "core-setup",
     "setup": "core-setup",
     "minimal": "core-setup",
@@ -538,7 +536,7 @@ def normalized_rel(path: str) -> str:
 
 
 def project_metadata_for_target(path: Path) -> dict:
-    """Find cyber-repo style projects/<id>/project.toml metadata for a target."""
+    """Find meta-repo style projects/<id>/project.toml metadata for a target."""
     for root in [path, *path.parents]:
         projects_dir = root / "projects"
         if not projects_dir.is_dir():

@@ -6,7 +6,7 @@
 # day-level rooms (main, inbox, ticket_search, workspace_manager,
 # standup, code_review, agent, …). It does NOT bind providers —
 # concrete bindings happen at the INSTANCE level (kitsoki-dev,
-# cyber-repo/devstory). The `default:` values in `host_interfaces:`
+# importing dev-story instances). The `default:` values in `host_interfaces:`
 # are the fallback for standalone runs.
 #
 # Provider-neutral world: no `jira_*` keys. `ticket_query` /
@@ -672,8 +672,8 @@ world:
   init_repo_remote:      { type: string, default: "" }
   init_conventions:      { type: string, default: "hybrid" }
   init_tracker:          { type: string, default: "none" }
-  init_story_pack:       { type: string, default: "cyber-repo" }
-  init_story_pack_title: { type: string, default: "Cyber repo starter" }
+  init_story_pack:       { type: string, default: "focused-engineering" }
+  init_story_pack_title: { type: string, default: "Focused engineering starter" }
   init_story_pack_summary: { type: string, default: "" }
   init_story_packs:      { type: list, default: [] }
   init_starter_stories:  { type: list, default: [] }
@@ -971,7 +971,7 @@ intents:
   select_story_pack:
     title: "Select Story Pack"
     description: "Select one named onboarding story pack."
-    examples: ["select cyber repo", "use core setup", "full dev-story pack"]
+    examples: ["select focused engineering", "use core setup", "full dev-story pack"]
     priority: 31
     slots:
       pack: { type: string, required: true, description: "Story pack id." }

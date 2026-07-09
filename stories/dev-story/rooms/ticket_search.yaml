@@ -3,7 +3,7 @@
 #
 # Search dispatches via iface.ticket.search; in standalone runs the
 # default binding (host.local_files.ticket) scans the configured
-# ticket globs. The cyber-repo flavour rebinds iface.ticket to
+# ticket globs. Project-specific flavours can rebind iface.ticket to
 # host.jira via the parent instance's host_bindings.
 #
 # After picking a ticket, the operator transitions into the bf import

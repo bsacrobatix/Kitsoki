@@ -1,6 +1,6 @@
 # workspace_manager — list / create / switch workspaces. Dispatches
 # via iface.workspace.{list,create,sync}. Wave 2 ships a minimal
-# surface; cyber-repo's `workspace-manager` CLI rebinds the iface to
+# surface; an importing project's workspace-manager CLI can rebind the iface to
 # `host.workspace_manager` for the full feature set.
 
 states:

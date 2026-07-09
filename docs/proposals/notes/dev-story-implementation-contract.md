@@ -505,7 +505,7 @@ vcs:
 The default `host.git` handler backs it through the registry's
 prefix-fallback (one stub returning `{ok, sha}` satisfies the call in
 flow fixtures). A `host.github` rebind in Wave 3 will shell out to
-`gh pr merge --<strategy>`. A `host.bitbucket` rebind in cyber-repo
+`gh pr merge --<strategy>`. A `host.bitbucket` rebind in focused-engineering
 hits the merge endpoint.
 
 The op is **PR-refinement-owned**: per proposal §10 question 6
@@ -1129,7 +1129,7 @@ The provider issues commands in the proposal §6.4 idealised form:
 --parent`, `cpt analyze --target --mode`, `cpt plan --task`.
 
 Today's actual `cpt` CLI (per
-`cyber-repo/cypilot/.core/workflows/*.md`) uses different surface
+`focused-engineering/cypilot/.core/workflows/*.md`) uses different surface
 shapes:
 
 - `--json` is a TOP-LEVEL flag (`cpt --json validate ...`) rather
@@ -1158,7 +1158,7 @@ Explicit non-goals for Phase 5 (deferred to later phases):
 - **Per-feature code rooms.** Proposal §3 has one code room per
   feature phase; v1 has one final code room.
 - **Cycle budgets / `validation_failed` exit consumer.** Wave 4
-  ports the L2 cycle-budget pattern from cyber-repo bugfix; until
+  ports the L2 cycle-budget pattern from focused-engineering bugfix; until
   then the exit is declared but no in-flow path produces it.
 - **Real `gh` authentication.** `host.gh.ticket` shells to a
   pre-authenticated `gh` (`gh auth login` already run). Wrapping
@@ -1191,7 +1191,7 @@ mock the `gh` / `cpt` CLIs via the shared `cliExec` seam from
 
 Wave 1 shipped `stories/bugfix/` with `refine` / `accept` /
 `restart_from` as intent stubs and a single global `world.cycle`.
-Wave 3 / Phase 4 (this section) ports the cyber-repo L2 cycle-budget
+Wave 3 / Phase 4 (this section) ports the focused-engineering L2 cycle-budget
 pattern and the full Phase 4 vocabulary from proposal §4.2 onto the
 provider-neutral story. Strictly additive — every Wave 1–3 contract
 clause still holds.
@@ -1351,7 +1351,7 @@ exports:
 Importing parent stories' `imports.bugfix.intents.import: [...]`
 clauses pick the subset they want to surface bare in the parent's
 intent table. Most parents (dev-story, kitsoki-dev) import the full
-list; cyber-repo's devstory will likely add Jira-specific intents
+list; focused-engineering's devstory will likely add Jira-specific intents
 on top and import all of the above.
 
 ## W4.7 — Flow fixtures (acceptance)
@@ -1383,14 +1383,14 @@ Final flow count: **42/42 passing** (was 10/10 at Wave 2).
 
 Explicit non-goals (deferred to later phases or out of scope):
 
-- **Per-cycle-arc budget counters.** Cyber-repo's L2 has counters
+- **Per-cycle-arc budget counters.** The legacy L2 flow has counters
   keyed on the arc that fired (e.g. `cycle__phase_9_7__on_validation_fail`
   vs `cycle__phase_9_7__on_validation_fail_short`). Phase 4 ships
   only a single per-phase counter — refine is the only arc that
   triggers it. If future arcs need separate budgets, extend with
   `<phase>_<arc>_cycle` keys following the same pattern.
 - **Free-form `jump_to.phase` slot.** Only the well-known aliases
-  are supported (matches cyber-repo's v1 contract). A
+  are supported (matches focused-engineering's v1 contract). A
   `slots.stage`-templated target would require runtime templating in
   `target:` strings — out of scope.
 - **Automatic restart-from on judge=`refine` with stage hint.**
@@ -1757,5 +1757,4 @@ types `impl__start` / `rev__start` to boot each story.
 | `stories/oregon-trail/flows/*.yaml` | 28 / 28 | regression (imports demo) |
 
 Full `go test ./...` clean. No runtime patches required.
-
 

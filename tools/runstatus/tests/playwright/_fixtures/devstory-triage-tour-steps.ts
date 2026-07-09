@@ -2,7 +2,7 @@
 // scripts/features/generate.ts) from features/devstory-triage.yaml.
 //
 // devstory-triage was de-listed from the feature catalog: it's an external
-// stub (its story lives in a cyber-repo checkout outside this repo, never
+// stub (its story lives in an external checkout outside this repo, never
 // recordable here) that features/AGENTS.md's completeness rules can no longer
 // justify keeping cataloged. devstory-triage-video.spec.ts is kept intact per
 // the de-listing decision, so this array is frozen here (no longer regenerated

@@ -113,17 +113,17 @@ func TestProjectProfileStoryPacksListSetAndAdd(t *testing.T) {
 	}
 	profilePath := filepath.Join(profileDir, "project-profile.yaml")
 	initial := []byte(`schema: project-profile/v1
-id: cyber-repo
-title: Cyber Repo
+id: focused-engineering
+title: Focused Engineering
 repo: { root: ".", vcs: git }
 stack: { kind: go }
 kitsoki:
   story: dev-story
-  story_pack: cyber-repo
+  story_pack: focused-engineering
   enabled_stories: [setup, bugfix, pr-refinement, git-ops]
   instance:
-    id: cyber-repo-dev
-    path: .kitsoki/stories/cyber-repo-dev/app.yaml
+    id: focused-engineering-dev
+    path: .kitsoki/stories/focused-engineering-dev/app.yaml
     bindings:
       ticket: host.local_files.ticket
       vcs: host.git
@@ -131,7 +131,7 @@ kitsoki:
       workspace: host.git_worktree
       transport: host.append_to_file
 onboarding:
-  story_pack: cyber-repo
+  story_pack: focused-engineering
   starter_stories:
     - id: setup
       status: enabled
@@ -145,7 +145,7 @@ onboarding:
 	if err != nil {
 		t.Fatalf("story-packs list: %v\n%s", err, out)
 	}
-	for _, want := range []string{"cyber-repo", "core-setup", "stories: setup, bugfix, repo-bakeoff, pr-refinement, git-ops", "enabled_stories: setup, bugfix, pr-refinement, git-ops"} {
+	for _, want := range []string{"focused-engineering", "core-setup", "stories: setup, bugfix, repo-bakeoff, pr-refinement, git-ops", "enabled_stories: setup, bugfix, pr-refinement, git-ops"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("list output missing %q:\n%s", want, out)
 		}
