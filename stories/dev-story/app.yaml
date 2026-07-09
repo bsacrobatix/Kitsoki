@@ -829,12 +829,12 @@ world:
   fix_tests_report_path: { type: string, default: "" }
   fix_tests_review:     { type: object, default: {} }
 
-  # ── Dogfood marathon (imported `dogfood`, stories/dogfood-marathon/) ───
-  # Self-dogfood backlog runner: local + GitHub bug sources, durable journal,
-  # serious-exception stop, and slidey reports. The child defaults to
-  # backlog_limit=15 and autonomous=true; these parent keys bind only the
-  # kitsoki-dev source/model posture.
-  dogfood_backlog_sources: { type: string, default: "github:constructorfabric/Kitsoki,github:bsacrobatix/Kitsoki,local:.artifacts/issues/bugs" }
+  # ── Marathon room (imported `dogfood`, stories/dogfood-marathon/) ─────
+  # Generic queue runner: source queue cases, keep a durable journal, stop for
+  # serious exceptions, and emit slidey reports. The child defaults to
+  # backlog_limit=15 and autonomous=true; these parent keys bind only this
+  # instance's default queue/model posture.
+  dogfood_backlog_sources: { type: string, default: "local:.artifacts/issues/bugs" }
   dogfood_run_id:          { type: string, default: "dogfood-marathon" }
   dogfood_profile:         { type: string, default: "codex-native" }
   dogfood_model:           { type: string, default: "gpt-5.5" }
@@ -1532,9 +1532,9 @@ intents:
         required: false
         description: "Optional timeout for the full acceptance command."
   go_dogfood_marathon:
-    title: "Dogfood Marathon"
-    description: "Run the autonomous dogfood-marathon story over local and GitHub bug sources, journaling progress and producing slidey reports."
-    examples: ["dogfood marathon", "I want to do a dogfood marathon", "run a dogfood marathon", "process a bug marathon"]
+    title: "Queue Marathon"
+    description: "Run the generic marathon room over a configured queue, journaling progress and producing slidey reports."
+    examples: ["queue marathon", "run a marathon", "dogfood marathon", "I want to do a dogfood marathon", "work down this queue"]
     priority: 54
   go_code_review_story:
     title: "Review PR"
@@ -2242,8 +2242,8 @@ imports:
           fix_tests_review:      "{{ world.tests__review_artifact }}"
           human_review_reason:   "Test-fix loop needs human attention: {{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
 
-  # Dogfood marathon — autonomous backlog runner. The operator reaches it from
-  # landing by saying "I want to do a dogfood marathon" or choosing the dogfood
+  # Marathon room — autonomous queue runner. The operator reaches it from
+  # landing by saying "queue marathon" / "dogfood marathon" or choosing the
   # quick action. The child room owns the start/resume prompt so the clean
   # command remains just "start the marathon".
   dogfood:

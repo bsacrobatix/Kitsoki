@@ -1,14 +1,14 @@
 # triaging — cheap read-only triage of the current case before spending maker
-# budget. Mirrors the inner bugfix story's triage-only mode: emit a standardized
-# verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL | UNCLEAR) citing code evidence.
+# budget. Emits a standardized verdict (ALREADY-FIXED | STILL-LIVE | PARTIAL |
+# UNCLEAR) citing concrete evidence.
 #
 # DELEGATION: under a live drive this is ONE host.agent.task (triager persona) —
-# read-only, no worktree, no fix. Under flow/no-LLM tests the call is stubbed by
+# read-only, no workspace mutation, no fix. Under flow/no-LLM tests the call is stubbed by
 # id. The room NEVER fabricates a verdict; it journals whatever the task returned.
 #
 # Routing:
 #   ALREADY-FIXED  + drop_already_fixed → skip_case (degenerate baseline)
-#   else (STILL-LIVE | PARTIAL | UNCLEAR) → drive the inner pipeline
+#   else (STILL-LIVE | PARTIAL | UNCLEAR) → drive the configured inner workflow
 
 states:
 
@@ -28,7 +28,7 @@ states:
             Evidence: '{{ world.triage_verdict.evidence|default:"(pending)" }}'
             Job:     '{{ world.triage_job_id|default:"(starting)" }}'
       - prose: '{{ world.current_case.body_excerpt|default:"Checking whether this case is still live before spending maker budget." }}'
-      - prose: "Read-only triage — does the bug still exist at the baseline? ALREADY-FIXED cases are dropped (degenerate baseline); STILL-LIVE / PARTIAL run the full inner pipeline."
+      - prose: "Read-only triage — is the case still actionable at the baseline? ALREADY-FIXED cases are dropped (degenerate baseline); STILL-LIVE / PARTIAL run the configured inner workflow."
     on_enter:
       - invoke: host.agent.task
         id: triage_case

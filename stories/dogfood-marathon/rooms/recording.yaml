@@ -25,7 +25,7 @@ states:
             How:      '{{ world.verify_result.how|default:"(pending)" }}'
             Recorded: '{{ world.results.items|length }}'
             Job:      '{{ world.verify_job_id|default:"(starting)" }}'
-      - prose: "Running the operator's independent oracle against the inner pipeline result. This is the grade; the driver does not self-grade."
+      - prose: "Running the operator's independent oracle against the inner workflow result. This is the grade; the driver does not self-grade."
     on_enter:
       - invoke: host.starlark.run
         id: verify_case

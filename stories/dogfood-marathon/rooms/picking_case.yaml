@@ -12,7 +12,7 @@ states:
     description: "Selecting the next backlog case."
     relevant_world: [backlog, case_index, cases_processed, case_budget, current_case, current_case_json, pick_job_id]
     view:
-      - heading: "Dogfood marathon · picking case"
+      - heading: "Marathon · picking case"
       - kv:
           pairs:
             Backlog:   '{{ world.backlog.items|length }}'

@@ -11,7 +11,7 @@ states:
     description: "Building the slidey report deck spec from the run data (deterministic)."
     relevant_world: [results, rollup, findings, exceptions, deck_spec, run_dir, journal_path, deck_job_id]
     view:
-      - heading: "Dogfood marathon · reporting"
+      - heading: "Marathon · reporting"
       - kv:
           pairs:
             Cases: '{{ world.results.items|length }}'
@@ -56,7 +56,7 @@ states:
     description: "Persisting the reported deck checkpoint."
     relevant_world: [deck_spec, results, rollup, journal_path, journal_job_id]
     view:
-      - heading: "Dogfood marathon · report checkpoint"
+      - heading: "Marathon · report checkpoint"
       - kv:
           pairs:
             Cases:   '{{ world.results.items|length }}'

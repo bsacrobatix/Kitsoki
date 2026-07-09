@@ -1,17 +1,17 @@
-# intake — load the backlog of cases from the configured source. Deterministic.
+# intake — load queue cases from the configured source. Deterministic.
 #
-# host.starlark.run (load_backlog.star) reads the backlog source (a dir of
-# tickets / bugs) and projects a normalized {items:[{id,title,baseline,
-# repro_command}]}. The load and journal checkpoint are separate background
+# host.starlark.run (load_backlog.star) reads queue sources and projects a
+# normalized {items:[{id,title,baseline,repro_command}]}. The load and journal
+# checkpoint are separate background
 # completions so the per-case dispatcher always sees the committed backlog.
 
 states:
 
   intake:
-    description: "Loading the backlog of cases to process (deterministic)."
+    description: "Loading the queue of cases to process (deterministic)."
     relevant_world: [backlog_sources, backlog, backlog_limit, inner_pipeline, run_id, journal_path, loaded_journal, intake_job_id]
     view:
-      - heading: "Dogfood marathon · intake"
+      - heading: "Marathon · intake"
       - kv:
           pairs:
             Sources: '{{ world.backlog_sources }}'
@@ -21,7 +21,7 @@ states:
             Journal: '{{ world.journal_path|default:"(pending)" }}'
             Resume:  '{{ world.loaded_journal }}'
             Job:     '{{ world.intake_job_id|default:"(starting)" }}'
-      - prose: "Loading the backlog. Each case carries its id, title, baseline (the buggy state the inner pipeline reproduces against), and any repro_command."
+      - prose: "Loading the queue. Each case carries its id, title, baseline, and any repro_command or acceptance probe."
     on_enter:
       - invoke: host.starlark.run
         id: load_backlog
@@ -75,7 +75,7 @@ states:
     description: "Persisting the intake checkpoint."
     relevant_world: [backlog, run_id, journal_path, loaded_journal, journal_job_id]
     view:
-      - heading: "Dogfood marathon · intake checkpoint"
+      - heading: "Marathon · intake checkpoint"
       - kv:
           pairs:
             Loaded:  '{{ world.backlog.items|length }}'

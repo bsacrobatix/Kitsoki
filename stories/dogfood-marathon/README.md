@@ -1,15 +1,11 @@
-# dogfood-marathon — process a backlog through an inner pipeline, report the run
+# dogfood-marathon — process a queue through an inner workflow, report the run
 
-A kitsoki story that drives a **backlog of cases** (tickets / bugs) through an
-**inner pipeline** (`bugfix` / `delivery-tail` / `ship-it`), independently
+A kitsoki story that drives a **queue of cases** (tickets, bugs, tasks, scenarios,
+or other reviewable units) through a configured **inner workflow**, independently
 verifies every deliverable, captures friction as findings, and bakes the run into
 a **slidey report** — outcomes · effectiveness · time · cost · what was fixed ·
-what worked · what didn't.
-
-It is the drivable wrapper around the **`dogfood-marathon` agent skill**
-(`.agents/skills/dogfood-marathon/SKILL.md`) and the method recorded in
-`.context/bakeoff-learnings.md`. The skill is the by-hand runbook; this story
-journals the per-case data into a typed world and renders the deck.
+what worked · what didn't. Dogfood is one default use of this room; the room
+itself is a generic marathon for working down queues.
 
 ```
 kitsoki run stories/dogfood-marathon/app.yaml
@@ -31,12 +27,12 @@ idle ──start──▶ intake ──▶ processing ⇄ (picking_case → tria
 
 | Room | Split | What it does |
 |---|---|---|
-| `idle` | deterministic | Confirm the inner pipeline, backlog source, baseline policy, maker profile; `start`. |
+| `idle` | deterministic | Confirm the inner workflow, queue source, baseline policy, maker profile; `start`. |
 | `intake` | deterministic | `host.starlark.run` (`load_backlog`) loads the backlog into `{items:[{id,title,baseline,repro_command}]}`. Idempotent: a pre-seeded backlog passes through. |
 | `processing` | deterministic | The **per-case dispatcher + checkpoint**. In autonomous mode it emits `next_case` on entry, enters `picking_case`, or aggregates when drained. The long `driving` step is a background job, so the loop advances without operator prodding while keeping each turn's emit chain under the engine cap. |
 | `picking_case` | deterministic | `host.starlark.run` (`pick_case`) selects `backlog.items[case_index]` before agent rooms read `current_case_json`. |
 | `triaging` | interpretive (delegated) | ONE `host.agent.task` (`triager`) — read-only verdict `ALREADY-FIXED \| STILL-LIVE \| PARTIAL \| UNCLEAR`. `ALREADY-FIXED` cases are dropped (degenerate baseline). |
-| `driving` | interpretive (delegated) | The inner pipeline driven LIVE over the case — modeled as ONE background `host.agent.task` (`driver`) that a real marathon dispatches through **kitsoki-mcp-driver** (fresh per-case worktree, baseline SHA, explicit trace, scoped test_cmd). Returns the exit + worktree + trace; **does not self-grade**. |
+| `driving` | interpretive (delegated) | The configured inner workflow driven LIVE over the case — modeled as ONE background `host.agent.task` (`driver`) that a live marathon dispatches through the selected driver with isolated per-case state, baseline, explicit trace, and scoped verification command. Returns the exit + workspace + trace; **does not self-grade**. |
 | `recording` | deterministic | Runs INDEPENDENT verify (`verify_case`), appends the per-case record (`record_case`), persists the durable journal, and advances the loop. |
 | `aggregating` | deterministic | `host.starlark.run` (`aggregate_run`) rolls up counts, cost/token/time totals, what-worked / what-didn't, the honest headline. |
 | `reporting` | deterministic | `host.starlark.run` (`build_deck`) returns the report deck `{spec_path, summary}` built from the journaled run data. |
@@ -56,8 +52,8 @@ the deck JSON itself).
 ## Honesty posture — keep the rooms honest
 
 The triage / drive / verify steps are **thin orchestration stubs** that delegate to
-the live **kitsoki-mcp-driver** agent + the operator's own oracle when driven for
-real. They **never fabricate an outcome**:
+the configured live driver + the operator's own oracle when driven for real. They
+**never fabricate an outcome**:
 
 - **Independent verify, oracle-gated.** `recording` runs `verify_case.star` before
   appending the result and grades on the produced
@@ -66,7 +62,7 @@ real. They **never fabricate an outcome**:
   `deliverable_present:false` is required of the driver when the maker produced
   nothing (no lookalike substitution).
 - **`needs-human` parks are expected, not failures.** An un-instrumented ticket
-  (no `repro_command`) parks at `needs-human` under the inner pipeline's RED→GREEN
+  (no `repro_command`) parks at `needs-human` under the configured workflow's RED→GREEN
   discipline; the maker still produces the fix, a human verifies + merges.
 - Where a room delegates rather than computes, the YAML says so in a comment.
 
@@ -75,7 +71,7 @@ See `stories/AGENTS.md` (never paper over runtime issues) and the skill's
 
 ## Improve WITHOUT overfitting
 
-The point of a marathon is to **harden the inner pipeline for the general class** —
+The point of a marathon is to **harden the inner workflow for the general class** —
 never to paper over one case. Every finding feeds a generic prompt/room/gate change
 (the worked example: a blind-implementer failure on one bug drove a generic
 hardening across the bugfix prompts — commit `d210ea67` — naming no case). Run the
@@ -109,9 +105,9 @@ kitsoki test flows stories/dogfood-marathon/app.yaml
   real frontmatter parsing + `<fix>^` resolution.
 - **Live deck authoring.** A live drive must overwrite `baked/report.deck.json`
   from the journaled `results`/`rollup` (a script can't write — `ctx.fs` is
-  read-only). Wire the kitsoki-mcp-driver / a write-capable host call to
-  materialize the per-run deck (richer per-case scenes, cost/time charts) instead
-  of rendering the static baked scaffold.
+  read-only). Wire a write-capable host call to materialize the per-run deck
+  (richer per-case scenes, cost/time charts) instead of rendering the static
+  baked scaffold.
 - **Findings → tickets.** `record_case.star` carries per-case findings into
   `world.findings`, but the story does not yet file them via `issue_create`. Add a
   findings room (or a `done` action) that files the consequential ones in the
@@ -124,10 +120,10 @@ kitsoki test flows stories/dogfood-marathon/app.yaml
   (verify `partial`); a `failed`-oracle case (deliverable absent); a budget-hit
   drain; and a `quit_at_processing` abandon. Each must stay cassette-stubbed.
 - **`external_side_effect` warning.** The `driver` agent declares
-  `external_side_effect: true` (correct — it drives a worktree-mutating pipeline),
+  `external_side_effect: true` (correct — it drives a workspace-mutating workflow),
   which the loader's WebFetch-only inference flags with a cosmetic WARN. Harmless;
   revisit if the inference heuristic is broadened to Edit/Write/Bash.
 - **Cost/token rollup fidelity.** Totals are summed from per-case `drive_result`
   fields; wire the authoritative per-call `payload.meta.cost_usd` extraction from
-  the drive's trace (the skill's gotcha #5/#6) rather than trusting the driver's
+  the drive's trace rather than trusting the driver's
   reported numbers.
