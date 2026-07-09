@@ -127,11 +127,13 @@ arena, and UIs can score a run without scraping stdout.
 
 Scenarios may declare `transports.allowed`, `transports.required`, and
 per-transport evidence overrides. `--transport all` expands one scenario into
-the applicable TUI, web, and VS Code bridge legs.
+the applicable TUI, web, VS Code bridge, and CLI legs.
 
 VS Code legs are always `bridge-level`: they prove the bridge/stub surface, not
-a native editor integration. TUI and web legs are `frame-level` unless their
-driver manifest defines stronger evidence.
+a native editor integration. CLI legs are `terminal-level`: they prove command
+transcripts, exit codes, cwd, and trace references rather than visual state. TUI
+and web legs are `frame-level` unless their driver manifest defines stronger
+evidence.
 
 ## Story And Arena
 

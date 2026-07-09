@@ -120,6 +120,10 @@ def _test_leg_level():
         run.scenario_qa_leg_level({"transport": "web"}) == "frame-level",
     )
     _check(
+        "cli leg with no explicit level falls back to terminal-level",
+        run.scenario_qa_leg_level({"transport": "cli"}) == "terminal-level",
+    )
+    _check(
         "an unknown transport with no contract has no level",
         run.scenario_qa_leg_level({"transport": "holodeck"}) == "",
     )

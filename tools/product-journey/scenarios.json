@@ -205,8 +205,14 @@
         }
       ],
       "transports": {
-        "allowed": ["tui", "web", "vscode"],
-        "required": ["tui"]
+        "allowed": ["tui", "web", "vscode", "cli"],
+        "required": ["tui"],
+        "overrides": {
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "generated_config_diff", "onboarding_smoke_result", "flow-fixture"]
+          }
+        }
       }
     },
     {
@@ -273,8 +279,14 @@
         }
       ],
       "transports": {
-        "allowed": ["tui", "web", "vscode"],
-        "required": ["tui"]
+        "allowed": ["tui", "web", "vscode", "cli"],
+        "required": ["tui"],
+        "overrides": {
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "candidate_diff", "oracle_result", "full_suite_result", "trace-replay"]
+          }
+        }
       }
     },
     {
@@ -341,8 +353,14 @@
         }
       ],
       "transports": {
-        "allowed": ["tui", "web", "vscode"],
-        "required": ["tui"]
+        "allowed": ["tui", "web", "vscode", "cli"],
+        "required": ["tui"],
+        "overrides": {
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "prd_artifact", "design_artifact", "review_notes", "flow-fixture"]
+          }
+        }
       }
     },
     {
@@ -409,8 +427,14 @@
         }
       ],
       "transports": {
-        "allowed": ["tui", "web", "vscode"],
-        "required": ["tui"]
+        "allowed": ["tui", "web", "vscode", "cli"],
+        "required": ["tui"],
+        "overrides": {
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "implementation_diff", "targeted_test_result", "review_summary", "flow-fixture"]
+          }
+        }
       }
     },
     {
@@ -477,8 +501,14 @@
         }
       ],
       "transports": {
-        "allowed": ["tui", "web", "vscode"],
-        "required": ["tui"]
+        "allowed": ["tui", "web", "vscode", "cli"],
+        "required": ["tui"],
+        "overrides": {
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["bug_report_markdown", "command_output", "trace_reference", "reproduction_steps", "trace-replay"]
+          }
+        }
       }
     },
     {

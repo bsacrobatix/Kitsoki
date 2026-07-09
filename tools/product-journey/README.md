@@ -49,8 +49,8 @@ Emit a repeatable no-LLM dry-run bundle and Slidey deck:
 python3 tools/product-journey/run.py --emit-run --project gears-rust --persona core-maintainer --seed demo
 ```
 
-Emit the same bundle scoped to specific transports (`tui`, `web`, `vscode`, or
-`all`) so `execution-plan.md`/`driver-plan.json` enumerate scenario x
+Emit the same bundle scoped to specific transports (`tui`, `web`, `vscode`,
+`cli`, or `all`) so `execution-plan.md`/`driver-plan.json` enumerate scenario x
 transport legs instead of one entry per scenario:
 
 ```sh
@@ -62,14 +62,15 @@ Each leg carries its own `required_mcp`/`evidence` (from the scenario's
 `transports.overrides`, when declared) and a `transport_evidence_contract`
 naming the capture tool, evidence kind, and proof level for that transport
 (`tui` -> `render.tui_png` frames, `web` -> `visual.snapshot`/rrweb, `vscode`
--> `visual.open kind=vscode`, always labeled bridge-level). A scenario that
+-> `visual.open kind=vscode`, always labeled bridge-level, `cli` -> command
+transcript, labeled terminal-level). A scenario that
 doesn't allow a requested transport is skipped for it rather than erroring.
 Omitting `--transport` keeps today's one-entry-per-scenario output unchanged.
 Every execution step and driver-plan scenario also carries deterministic
 `capture_routes`. A route is generated from the run id, scenario id, primary
-story, transport/visual surface, evidence kind, and driver manifest. It names
-the story load intent, the primary `session.new` shape, resolved open/observe/
-act tools, recording start/stop policy, artifact path template, and exact
+story, transport profile, evidence kind, and driver manifest. It names the
+story load intent, the primary `session.new` shape, resolved open/observe/act
+tools, recording start/stop policy, artifact path template, and exact
 attach/blocker/journal commands. Drivers should follow the route for setup and
 recording instead of choosing ad hoc entrypoints.
 

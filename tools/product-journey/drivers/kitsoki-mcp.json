@@ -18,7 +18,8 @@
   "evidence_contract": {
     "tui": {"primary_tool": "render.tui_png", "evidence_kind": "rendered_tui_frame", "level": "frame-level"},
     "web": {"primary_tool": "visual.snapshot", "evidence_kind": "browser_screenshot", "level": "frame-level"},
-    "vscode": {"primary_tool": "visual.open (kind=vscode)", "evidence_kind": "screenshot_or_tui_png", "level": "bridge-level"}
+    "vscode": {"primary_tool": "visual.open (kind=vscode)", "evidence_kind": "screenshot_or_tui_png", "level": "bridge-level"},
+    "cli": {"primary_tool": "command transcript", "evidence_kind": "command_output", "level": "terminal-level"}
   },
   "oracles": []
 }

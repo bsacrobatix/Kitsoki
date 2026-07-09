@@ -8,7 +8,7 @@
 #
 # Ad-hoc mode (a free-text description, no catalog scenario): run.py was
 # still invoked (against a generic carrier scenario, "bugfix", which allows
-# all three transports) purely to get real project/persona resolution and a
+# the reusable transport set) purely to get real project/persona resolution and a
 # transport-shaped leg skeleton. This drafts the actual scenario (id/label/
 # task/success_criteria) from the description and splices it onto those
 # carrier legs, replacing every carrier-specific field but keeping the

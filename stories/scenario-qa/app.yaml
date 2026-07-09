@@ -1,11 +1,12 @@
-# scenario-qa — "check this scenario in the TUI / on web / on all transports"
+# scenario-qa — "check this scenario in the TUI / on web / on CLI / on all transports"
 # as one drivable pipeline: plan a run bundle scoped to the requested
 # transport(s), drive the reusable product-journey-qa-driver PER TRANSPORT LEG
 # (transport-pinned, overriding its usual cheapest-surface heuristic), judge
 # each leg's captured evidence independently (kitsoki-ui-qa posture — never
 # trust the driver's own report), then fold every leg's outcome into ONE
 # per-transport verdict table -- report.md (Starlark) and deck.slidey.json
-# (run.py --scenario-qa-report) -- with VS Code legs labeled "bridge-level".
+# (run.py --scenario-qa-report) -- with VS Code legs labeled "bridge-level"
+# and CLI legs labeled "terminal-level".
 #
 # This story is a THIN wrapper over the public Persona QA Kit surface:
 # tools/persona_qa/kit.py emit-run owns scenario/persona/transport resolution
@@ -118,7 +119,7 @@ world:
   # ── request ────────────────────────────────────────────────────────────
   scenario_ref:         { type: string, default: "" }   # catalog scenario id, e.g. "bugfix"
   scenario_description: { type: string, default: "" }   # free-text ad-hoc scenario, if no scenario_ref
-  transport_arg:        { type: string, default: "tui" } # raw --transport value: tui|web|vscode, comma list, or "all"
+  transport_arg:        { type: string, default: "tui" } # raw --transport value: tui|web|vscode|cli, comma list, or "all"
   persona:              { type: string, default: "" }
   target:               { type: string, default: "" }   # --project, or primary_story override for an ad-hoc scenario
   seed:                 { type: string, default: "scenario-qa" }

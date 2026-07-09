@@ -88,6 +88,7 @@ EVIDENCE_FILE_EXTENSIONS = {
     "review_summary": "md",
     "bug_report_markdown": "md",
     "reproduction_steps": "md",
+    "command_output": "txt",
     "page_url": "txt",
 }
 SCENARIO_ALIASES = {
@@ -103,7 +104,6 @@ STAGES = [
     "file_product_issue",
     "score_and_report",
 ]
-TRANSPORT_IDS = ["tui", "web", "vscode"]
 CANONICAL_DRIVER_CAPABILITIES = [
     "visual.open",
     "visual.observe",
@@ -116,38 +116,88 @@ CANONICAL_DRIVER_CAPABILITIES = [
     "session.trace",
     "render.tui",
 ]
-# Evidence contract per transport leg: which MCP-visible tool primarily backs
-# the leg's evidence, the evidence kind that names it, and how strong the
-# proof is. vscode is always bridge-level -- the IDE bridge stub/recording
-# path, never a genuine editor -- so a driver/report never mistakes it for
-# editor-level coverage (see docs/persona-qa.md).
-TRANSPORT_EVIDENCE_CONTRACTS = {
+# Single source of truth for every transport the deterministic harness can
+# plan, drive, and judge. Scenarios select these ids; capture routes derive
+# their stable open/observe/act capabilities and proof rules from the profile
+# instead of scattering transport-specific conditionals through the runner.
+TRANSPORT_PROFILES = {
     "tui": {
-        "primary_tool": "render.tui_png",
-        "evidence_kind": "rendered_tui_frame",
-        "level": "frame-level",
-        "capture_hint": "Capture render.tui_png frames before and after the interaction under test.",
+        "id": "tui",
+        "label": "TUI",
+        "visual_surface": "tui",
+        "open_capabilities": ["session.open"],
+        "observe_capabilities": ["render.tui", "session.trace", "session.inspect"],
+        "act_capabilities": ["session.submit", "session.drive", "session.trace"],
+        "preflight": "Call render.tui_png or render.tui before the first action and confirm the frame is real.",
+        "recording_rule": "Persist pre-action and post-action TUI frames under the leg evidence directory.",
+        "evidence_contract": {
+            "primary_tool": "render.tui_png",
+            "evidence_kind": "rendered_tui_frame",
+            "level": "frame-level",
+            "capture_hint": "Capture render.tui_png frames before and after the interaction under test.",
+        },
     },
     "web": {
-        "primary_tool": "visual.snapshot",
-        "evidence_kind": "browser_screenshot",
-        "level": "frame-level",
-        "capture_hint": "Capture a visual.snapshot or rrweb recording of the browser surface.",
+        "id": "web",
+        "label": "Web UI",
+        "visual_surface": "web",
+        "open_capabilities": ["session.open", "visual.open"],
+        "observe_capabilities": ["visual.observe", "session.trace", "session.inspect"],
+        "act_capabilities": ["visual.act", "session.submit", "session.drive", "session.trace"],
+        "preflight": "Call visual.open and visual.observe before the first action and confirm the browser frame is real.",
+        "recording_rule": "Persist screenshots or rrweb clips that show the browser state before and after the interaction.",
+        "evidence_contract": {
+            "primary_tool": "visual.snapshot",
+            "evidence_kind": "browser_screenshot",
+            "level": "frame-level",
+            "capture_hint": "Capture a visual.snapshot or rrweb recording of the browser surface.",
+        },
     },
     "vscode": {
-        "primary_tool": "visual.open (kind=vscode)",
-        "evidence_kind": "screenshot_or_tui_png",
-        "level": "bridge-level",
-        "capture_hint": (
-            "Open the VS Code bridge surface with visual.open kind=vscode; label "
-            "this evidence bridge-level, not editor-level. A preflight capture "
-            "alone is NOT sufficient: after driving the live session forward to "
-            "its target state, capture visual.open kind=vscode again against the "
-            "SAME session handle (a distinct post-drive capture, never reusing "
-            "the preflight file/slot) before the leg can be scored anything "
-            "other than degraded-evidence."
-        ),
+        "id": "vscode",
+        "label": "VS Code bridge",
+        "visual_surface": "vscode",
+        "open_capabilities": ["session.open", "visual.open"],
+        "observe_capabilities": ["visual.observe", "session.trace", "session.inspect"],
+        "act_capabilities": ["session.submit", "session.drive", "visual.act", "session.trace"],
+        "preflight": "Call visual.open kind=vscode and visual.observe before driving, then capture the bridge again after the scenario reaches its target state.",
+        "recording_rule": "Persist distinct preflight and post-drive VS Code bridge captures; never reuse the preflight as outcome proof.",
+        "evidence_contract": {
+            "primary_tool": "visual.open (kind=vscode)",
+            "evidence_kind": "screenshot_or_tui_png",
+            "level": "bridge-level",
+            "capture_hint": (
+                "Open the VS Code bridge surface with visual.open kind=vscode; label "
+                "this evidence bridge-level, not editor-level. A preflight capture "
+                "alone is NOT sufficient: after driving the live session forward to "
+                "its target state, capture visual.open kind=vscode again against the "
+                "SAME session handle (a distinct post-drive capture, never reusing "
+                "the preflight file/slot) before the leg can be scored anything "
+                "other than degraded-evidence."
+            ),
+        },
     },
+    "cli": {
+        "id": "cli",
+        "label": "CLI",
+        "visual_surface": "cli",
+        "open_capabilities": ["session.open"],
+        "observe_capabilities": ["session.status", "session.trace", "session.inspect"],
+        "act_capabilities": ["session.submit", "session.drive", "session.trace"],
+        "preflight": "Run the declared deterministic CLI/session entrypoint once and capture exit code plus stdout/stderr before treating command output as proof.",
+        "recording_rule": "Persist command transcript, exit code, cwd, and relevant trace references under the leg evidence directory.",
+        "evidence_contract": {
+            "primary_tool": "command transcript",
+            "evidence_kind": "command_output",
+            "level": "terminal-level",
+            "capture_hint": "Capture deterministic CLI stdout/stderr with exit code, cwd, and command line.",
+        },
+    },
+}
+TRANSPORT_IDS = list(TRANSPORT_PROFILES)
+TRANSPORT_EVIDENCE_CONTRACTS = {
+    transport: profile["evidence_contract"]
+    for transport, profile in TRANSPORT_PROFILES.items()
 }
 
 
@@ -1656,6 +1706,30 @@ def scenario_quality_gate(scenario_id: str) -> dict:
     })
 
 
+def leg_quality_gate(scenario_id: str, evidence_kinds: list[str], transport: str = "") -> dict:
+    gate = dict(scenario_quality_gate(scenario_id))
+    gate["block_if"] = list(gate.get("block_if", []))
+    if not evidence_kinds:
+        return gate
+    evidence_set = set(evidence_kinds)
+    minimum = [
+        kind for kind in gate.get("minimum_evidence", [])
+        if kind in evidence_set
+    ]
+    for kind in ["command_output", "trace-replay", "flow-fixture", "png-sequence", "rrweb"]:
+        if kind in evidence_set and kind not in minimum:
+            minimum.append(kind)
+    if not minimum:
+        minimum = list(evidence_kinds[: min(3, len(evidence_kinds))])
+    gate["minimum_evidence"] = minimum
+    if transport == "cli":
+        gate["done_when"] = (
+            gate.get("done_when", "")
+            + " For CLI legs, command_output must include the command line, cwd, exit code, stdout/stderr, and any trace reference needed to replay the result."
+        ).strip()
+    return gate
+
+
 def format_case_variants(case_variants: list[dict]) -> str:
     if not case_variants:
         return ""
@@ -2158,7 +2232,7 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     persona_required = ["id", "label", "description", "surface_preference", "risk_focus"]
     scenario_required = ["id", "label", "stage", "task", "primary_story", "required_mcp", "evidence", "success_criteria"]
     target_required = ["id", "label", "repo", "stack", "license_spdx", "bug_query", "open_bug_floor", "status", "notes"]
-    allowed_mcp = {"visual.open", "visual.observe", "visual.act", "session.open", "session.inspect", "render.tui"}
+    allowed_mcp = set(CANONICAL_DRIVER_CAPABILITIES)
     required_scenarios = {
         "product-discovery",
         "project-onboarding",
@@ -2179,6 +2253,28 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         "case_variant_required",
         ["id", "utterance", "setup", "success_focus"],
     )
+    schema_transport_ids = set(schema.get("transports", {}).get("allowed_values", []))
+    if schema_transport_ids != set(TRANSPORT_IDS):
+        add_corpus_issue(
+            issues,
+            "error",
+            "transport-schema-drift",
+            "schema.json transport allowed_values must match run.py TRANSPORT_PROFILES",
+            f"schema={', '.join(sorted(schema_transport_ids))}; runner={', '.join(TRANSPORT_IDS)}",
+        )
+    schema_contracts = schema.get("transports", {}).get("evidence_contract_by_transport", {})
+    for transport, profile in TRANSPORT_PROFILES.items():
+        expected_contract = profile.get("evidence_contract", {})
+        declared_contract = schema_contracts.get(transport, {})
+        for key in ["primary_tool", "evidence_kind", "level"]:
+            if declared_contract.get(key) != expected_contract.get(key):
+                add_corpus_issue(
+                    issues,
+                    "error",
+                    "transport-schema-contract-drift",
+                    "schema.json transport evidence contract must match run.py TRANSPORT_PROFILES",
+                    f"{transport}/{key}: schema={declared_contract.get(key, '')!r}; runner={expected_contract.get(key, '')!r}",
+                )
     # The four workflow personas WS-F wires across every natural-use scenario
     # (surface_preference names each persona's primary surface: TUI, web,
     # docs, VS Code). Product-journey's generic run/agent-brief/driver-plan
@@ -2471,6 +2567,37 @@ def driver_visual_surface(primary_story: str, required_mcp: list[str]) -> str:
     return "artifact"
 
 
+def transport_profile(transport: str) -> dict:
+    profile = TRANSPORT_PROFILES.get(transport)
+    if profile is None:
+        raise SystemExit(f"unknown transport profile: {transport}")
+    return profile
+
+
+def compact_transport_profile(profile: dict) -> dict:
+    contract = profile.get("evidence_contract", {})
+    return {
+        "id": profile.get("id", ""),
+        "label": profile.get("label", ""),
+        "visual_surface": profile.get("visual_surface", ""),
+        "primary_tool": contract.get("primary_tool", ""),
+        "evidence_kind": contract.get("evidence_kind", ""),
+        "level": contract.get("level", ""),
+        "preflight": profile.get("preflight", ""),
+        "recording_rule": profile.get("recording_rule", ""),
+    }
+
+
+def transport_for_visual_surface(visual_surface: str, required_mcp: list[str]) -> str:
+    if visual_surface in TRANSPORT_PROFILES:
+        return visual_surface
+    if visual_surface == "web-or-tui":
+        return "web" if "visual.observe" in required_mcp and "render.tui" not in required_mcp else "tui"
+    if visual_surface == "artifact":
+        return "cli" if any(tool in required_mcp for tool in ["session.trace", "session.inspect", "session.status"]) else "tui"
+    return "tui"
+
+
 def default_scenario_transports(scenario: dict) -> dict:
     """Derive an implicit transports contract from a scenario's required_mcp.
 
@@ -2488,6 +2615,8 @@ def default_scenario_transports(scenario: dict) -> dict:
         allowed = ["tui"]
     elif surface == "web-or-tui":
         allowed = ["tui", "web"]
+    elif surface == "artifact":
+        allowed = ["cli"] if "session.trace" in scenario.get("required_mcp", []) else []
     else:
         allowed = []
     return {"allowed": allowed, "required": list(allowed), "overrides": {}}
@@ -2511,13 +2640,16 @@ def scenario_transport_leg(scenario: dict, transport: str) -> dict:
     falling back to the scenario's base lists, and attaches the transport's
     evidence contract (capture tool, evidence kind, proof level).
     """
+    profile = transport_profile(transport)
     contract = resolve_scenario_transports(scenario)
     override = contract.get("overrides", {}).get(transport, {})
     leg = dict(scenario)
     leg["required_mcp"] = list(override.get("required_mcp", scenario.get("required_mcp", [])))
     leg["evidence"] = list(override.get("evidence", scenario.get("evidence", [])))
     leg["transport"] = transport
-    leg["transport_evidence_contract"] = TRANSPORT_EVIDENCE_CONTRACTS[transport]
+    leg["visual_surface"] = profile["visual_surface"]
+    leg["transport_profile"] = compact_transport_profile(profile)
+    leg["transport_evidence_contract"] = profile["evidence_contract"]
     leg["leg_id"] = f"{scenario['id']}::{transport}"
     return leg
 
@@ -3103,14 +3235,39 @@ def evidence_artifact_path_template(evidence_dir: str, scenario_id: str, evidenc
     return f"{evidence_dir}/{scenario_id}-{evidence_kind}.{ext}"
 
 
-def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, evidence_kind: str) -> list[str]:
+def capture_phase_capabilities(profile: dict, phase: str, required_mcp: list[str]) -> list[str]:
     capabilities: list[str] = []
+    for capability in profile.get(f"{phase}_capabilities", []):
+        if capability not in capabilities:
+            capabilities.append(capability)
+    phase_extras = {
+        "open": ["session.open", "visual.open"],
+        "observe": ["render.tui", "visual.observe", "session.trace", "session.inspect", "session.status"],
+        "act": ["visual.act", "session.submit", "session.drive", "session.trace"],
+    }
+    for capability in phase_extras.get(phase, []):
+        if capability in required_mcp and capability not in capabilities:
+            capabilities.append(capability)
+    return capabilities
+
+
+def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, evidence_kind: str, profile: Optional[dict] = None) -> list[str]:
+    capabilities: list[str] = []
+    if profile is not None:
+        capabilities.extend(capture_phase_capabilities(profile, "observe", required_mcp))
     if evidence_kind in {"rendered_tui_frame", "png-sequence"} or visual_surface == "tui":
-        capabilities.append("render.tui")
+        if "render.tui" not in capabilities:
+            capabilities.append("render.tui")
     if evidence_kind in {"browser_screenshot", "screenshot_or_tui_png", "key_interaction_video", "rrweb"} or visual_surface in {"web", "vscode", "web-or-tui"}:
-        capabilities.append("visual.observe")
+        if "visual.observe" not in capabilities:
+            capabilities.append("visual.observe")
+    if evidence_kind == "command_output" or visual_surface == "cli":
+        for capability in ["session.status", "session.trace"]:
+            if capability not in capabilities:
+                capabilities.append(capability)
     if evidence_kind in {"session_trace", "trace_reference", "trace-replay", "flow-fixture", "navigation_trace"}:
-        capabilities.append("session.trace")
+        if "session.trace" not in capabilities:
+            capabilities.append("session.trace")
     for capability in ["render.tui", "visual.observe", "session.trace", "session.inspect"]:
         if capability in required_mcp and capability not in capabilities:
             capabilities.append(capability)
@@ -3128,28 +3285,26 @@ def capture_route_for_slot(
     leg: Optional[dict] = None,
 ) -> dict:
     scenario_id = scenario["id"]
-    transport = (leg or {}).get("transport", "")
-    route_surface = transport or visual_surface or driver_visual_surface(scenario.get("primary_story", ""), required_mcp)
+    leg_transport = (leg or {}).get("transport", "")
+    inferred_surface = visual_surface or driver_visual_surface(scenario.get("primary_story", ""), required_mcp)
+    route_transport = leg_transport or transport_for_visual_surface(inferred_surface, required_mcp)
+    profile = transport_profile(route_transport)
+    route_surface = profile.get("visual_surface", route_transport)
     evidence_dir = scenario.get(
         "evidence_dir",
         f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}",
     )
-    open_capabilities = [
-        capability for capability in ["session.open", "visual.open"]
-        if capability in required_mcp
-    ] or ["session.status"]
-    observe_capabilities = capture_observe_capabilities(required_mcp, route_surface, evidence_kind)
-    act_capabilities = [
-        capability for capability in ["session.submit", "session.drive", "visual.act", "session.trace"]
-        if capability in {"session.submit", "session.trace"} or capability in required_mcp
-    ]
+    open_capabilities = capture_phase_capabilities(profile, "open", required_mcp) or ["session.status"]
+    observe_capabilities = capture_observe_capabilities(required_mcp, route_surface, evidence_kind, profile)
+    act_capabilities = capture_phase_capabilities(profile, "act", required_mcp) or ["session.trace"]
     artifact_template = evidence_artifact_path_template(evidence_dir, scenario_id, evidence_kind)
     route = {
         "route_id": f"{scenario_id}::{route_surface or 'default'}::{evidence_kind}",
         "scenario": scenario_id,
         "evidence_kind": evidence_kind,
         "primary_story": scenario["primary_story"],
-        "transport": transport,
+        "transport": route_transport,
+        "transport_profile": compact_transport_profile(profile),
         "visual_surface": route_surface,
         "harness": driver_harness(scenario["primary_story"]),
         "dispatch_mode_arg": "<replay|record|live>",
@@ -3162,7 +3317,10 @@ def capture_route_for_slot(
                 f"session.new app={scenario['primary_story']} "
                 "harness=<replay|record|live> profile=<explicit-live-profile-if-record-or-live>"
             ),
-            "preflight": "capture_preflight must pass before record/live dispatch; replay uses cassette/local fixtures only.",
+            "preflight": profile.get(
+                "preflight",
+                "capture_preflight must pass before record/live dispatch; replay uses cassette/local fixtures only.",
+            ),
         },
         "open": {
             "capabilities": open_capabilities,
@@ -3180,6 +3338,7 @@ def capture_route_for_slot(
             "start": "Start recording before the first persona action from this route.",
             "stop": "Stop recording immediately after the target evidence slot and final frame are captured.",
             "path_template": artifact_template,
+            "transport_rule": profile.get("recording_rule", ""),
             "proof_source_required": "retained|external|local|cassette",
             "no_substitution": "Do not attach demo, placeholder, synthetic, or unrelated media for this route.",
         },
@@ -3192,6 +3351,8 @@ def capture_route_for_slot(
     if leg is not None:
         route["leg_id"] = leg.get("leg_id", "")
         route["transport_evidence_contract"] = leg.get("transport_evidence_contract", {})
+    else:
+        route["transport_evidence_contract"] = profile.get("evidence_contract", {})
     return route
 
 
@@ -3236,7 +3397,12 @@ def _execution_plan_step(
         for item in evidence_view
     ]
     blocker_command = record_blocker_command(run_dir_arg, scenario["id"])
-    visual_surface = leg["transport"] if leg is not None else driver_visual_surface(scenario["primary_story"], required_mcp)
+    visual_surface = leg.get("visual_surface", leg["transport"]) if leg is not None else driver_visual_surface(scenario["primary_story"], required_mcp)
+    evidence_kinds = [item["kind"] for item in evidence_view if item.get("kind")]
+    quality_gate = (
+        leg_quality_gate(scenario["id"], evidence_kinds, leg.get("transport", ""))
+        if leg is not None else scenario_quality_gate(scenario["id"])
+    )
     step = {
         "order": order,
         "scenario": scenario["id"],
@@ -3256,7 +3422,7 @@ def _execution_plan_step(
         ],
         "evidence": evidence_view,
         "success_criteria": scenario["success_criteria"],
-        "quality_gate": scenario_quality_gate(scenario["id"]),
+        "quality_gate": quality_gate,
         "attach_commands": attach_commands,
         "record_blocker_command": blocker_command,
         "capture_routes": capture_routes_for_evidence(
@@ -3273,6 +3439,7 @@ def _execution_plan_step(
     if leg is not None:
         step["transport"] = leg["transport"]
         step["leg_id"] = leg["leg_id"]
+        step["transport_profile"] = leg["transport_profile"]
         step["transport_evidence_contract"] = leg["transport_evidence_contract"]
     return step
 
@@ -3400,7 +3567,11 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict, driv
                 "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
                 "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
                 "capture_routes": step.get("capture_routes", []),
-                **({"transport": step["transport"], "leg_id": step["leg_id"]} if "transport" in step else {}),
+                **({
+                    "transport": step["transport"],
+                    "leg_id": step["leg_id"],
+                    "transport_profile": step.get("transport_profile", {}),
+                } if "transport" in step else {}),
             }
             for step in execution_plan.get("steps", [])
         ],
@@ -3473,7 +3644,14 @@ def _driver_plan_entry(
         "persona_lens": lens,
         "evidence": evidence_view,
         "success_criteria": scenario["success_criteria"],
-        "quality_gate": scenario_quality_gate(scenario_id),
+        "quality_gate": (
+            leg_quality_gate(
+                scenario_id,
+                [item["kind"] for item in evidence_view if item.get("kind")],
+                leg.get("transport", ""),
+            )
+            if leg is not None else scenario_quality_gate(scenario_id)
+        ),
         "attach_commands": step.get("attach_commands", []),
         "record_finding_command": (
             "python3 tools/product-journey/run.py --record-finding "
@@ -3490,6 +3668,7 @@ def _driver_plan_entry(
     if leg is not None:
         entry["transport"] = leg["transport"]
         entry["leg_id"] = leg["leg_id"]
+        entry["transport_profile"] = leg["transport_profile"]
         entry["transport_evidence_contract"] = leg["transport_evidence_contract"]
     return entry
 
@@ -3538,7 +3717,7 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
                 leg["required_mcp"], evidence_view,
                 driver_action_scenario=leg,
                 driver_action_evidence=evidence_view,
-                visual_surface=leg["transport"],
+                visual_surface=leg.get("visual_surface", leg["transport"]),
                 driver_manifest=driver_manifest,
                 leg=leg,
             ))
@@ -3612,11 +3791,19 @@ def render_driver_plan(plan: dict) -> str:
             f"- Evidence dir: `{scenario['evidence_dir']}`",
         ])
         contract = scenario.get("transport_evidence_contract")
+        profile = scenario.get("transport_profile", {})
+        if profile:
+            lines.append(
+                f"- Transport profile: `{profile.get('id', '')}` ({profile.get('label', '')}; "
+                f"{profile.get('level', '')})"
+            )
         if contract:
             lines.append(
                 f"- Transport evidence contract: `{scenario['transport']}` via {contract['primary_tool']} "
                 f"-> `{contract['evidence_kind']}` ({contract['level']})"
             )
+        if profile.get("preflight"):
+            lines.append(f"- Preflight: {profile.get('preflight')}")
         lines.extend([
             "",
             scenario["task_prompt"],
@@ -3628,7 +3815,7 @@ def render_driver_plan(plan: dict) -> str:
             for route in capture_routes[:8]:
                 lines.append(
                     f"- `{route.get('route_id', '')}`: `{route.get('primary_story', '')}` "
-                    f"via `{route.get('visual_surface', '')}` -> "
+                    f"via `{route.get('transport', '')}`/`{route.get('visual_surface', '')}` -> "
                     f"`{route.get('artifact_path_template', '')}`"
                 )
             if len(capture_routes) > 8:
@@ -4708,15 +4895,22 @@ def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
     driver_scenarios = driver_plan.get("scenarios", [])
     final_gates = driver_plan.get("final_gates", [])
     missing_proof_evidence = handoff.get("missing_proof_evidence", [])
+    has_transport_axis = any(scenario.get("transport") for scenario in driver_scenarios)
+    unit_label = "transport legs" if has_transport_axis else "scenarios"
+    seen = set()
+    ordered_ids = []
+    for scenario in driver_scenarios:
+        scenario_id = scenario.get("scenario", "")
+        if scenario_id and scenario_id not in seen:
+            seen.add(scenario_id)
+            ordered_ids.append(scenario_id)
     scenario_ids = ", ".join(
-        scenario.get("scenario", "")
-        for scenario in driver_scenarios[:5]
-        if scenario.get("scenario", "")
+        ordered_ids[:5]
     )
-    if len(driver_scenarios) > 5:
-        scenario_ids = f"{scenario_ids}, +{len(driver_scenarios) - 5} more"
+    if len(ordered_ids) > 5:
+        scenario_ids = f"{scenario_ids}, +{len(ordered_ids) - 5} more"
     return (
-        f"Driver contract: {len(driver_scenarios)} scenarios"
+        f"Driver contract: {len(driver_scenarios)} {unit_label}"
         f"{f' ({scenario_ids})' if scenario_ids else ''}; "
         f"{len(missing_proof_evidence)} missing-proof rows; "
         f"{len(final_gates)} final gates. Inspect last_result.driver_scenarios, "
@@ -8657,6 +8851,37 @@ def add_validation_issue(issues: list[dict], severity: str, check_id: str, messa
     })
 
 
+def route_profile_validation_errors(route: dict, context: str, expected_transport: str = "") -> list[str]:
+    errors = []
+    route_transport = route.get("transport", "")
+    if not route_transport:
+        errors.append(f"{context}: missing transport")
+        return errors
+    if route_transport not in TRANSPORT_PROFILES:
+        errors.append(f"{context}: unknown transport={route_transport}")
+        return errors
+    if expected_transport and route_transport != expected_transport:
+        errors.append(f"{context}: route transport={route_transport}, expected={expected_transport}")
+    expected_profile = compact_transport_profile(transport_profile(route_transport))
+    actual_profile = route.get("transport_profile", {})
+    if actual_profile != expected_profile:
+        errors.append(f"{context}: transport_profile mismatch for {route_transport}")
+    expected_surface = expected_profile.get("visual_surface", route_transport)
+    if route.get("visual_surface") != expected_surface:
+        errors.append(f"{context}: visual_surface={route.get('visual_surface', '')}, expected={expected_surface}")
+    expected_contract = TRANSPORT_EVIDENCE_CONTRACTS[route_transport]
+    actual_contract = route.get("transport_evidence_contract", {})
+    if not actual_contract:
+        errors.append(f"{context}: missing transport_evidence_contract")
+    elif actual_contract != expected_contract:
+        errors.append(f"{context}: transport_evidence_contract mismatch for {route_transport}")
+    if route.get("setup_entrypoint", {}).get("preflight") != expected_profile.get("preflight", ""):
+        errors.append(f"{context}: preflight does not match transport profile")
+    if route.get("recording", {}).get("transport_rule") != expected_profile.get("recording_rule", ""):
+        errors.append(f"{context}: recording rule does not match transport profile")
+    return errors
+
+
 def validation_issue_summary(issues: list[dict], limit: int = 4) -> str:
     if not issues:
         return ""
@@ -8913,13 +9138,17 @@ def validate_run_bundle(run_dir: Path) -> dict:
             "scenario-outcomes.json item count does not match run.json scenarios",
             f"outcomes={len(outcome_items)}, scenarios={len(scenarios)}",
         )
-    if execution_plan and len(execution_steps) != len(scenarios):
+    transport_axis_enabled = bool((run_json or {}).get("transports"))
+    expected_plan_entries = len(scenarios)
+    if transport_axis_enabled and execution_plan:
+        expected_plan_entries = int(execution_plan.get("summary", {}).get("leg_count", len(execution_steps)) or len(execution_steps))
+    if execution_plan and len(execution_steps) != expected_plan_entries:
         add_validation_issue(
             issues,
             "error",
             "execution-plan-count",
-            "execution-plan.json step count does not match run.json scenarios",
-            f"steps={len(execution_steps)}, scenarios={len(scenarios)}",
+            "execution-plan.json step count does not match the run's scenario/transport contract",
+            f"steps={len(execution_steps)}, expected={expected_plan_entries}",
         )
     if execution_plan:
         validate_final_commands(
@@ -8975,17 +9204,24 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 route_attach = route.get("commands", {}).get("attach", "")
                 if route_attach != matching[0]:
                     invalid_step_routes.append(f"{scenario_id}/{evidence_kind}: route attach command mismatch")
+                invalid_step_routes.extend(
+                    route_profile_validation_errors(
+                        route,
+                        f"{scenario_id}/{evidence_kind}",
+                        step.get("transport", ""),
+                    )
+                )
         if stale_attach_commands:
             add_validation_issue(issues, "error", "execution-plan-attach-commands", "execution-plan.json attach commands do not cover the evidence contract", "; ".join(stale_attach_commands))
         if invalid_step_routes:
             add_validation_issue(issues, "error", "execution-plan-capture-routes", "execution-plan.json capture routes do not cover deterministic evidence entrypoints", "; ".join(invalid_step_routes))
-    if driver_plan and len(driver_scenarios) != len(scenarios):
+    if driver_plan and len(driver_scenarios) != expected_plan_entries:
         add_validation_issue(
             issues,
             "error",
             "driver-plan-count",
-            "driver-plan.json scenario count does not match run.json scenarios",
-            f"scenarios={len(driver_scenarios)}, run.json={len(scenarios)}",
+            "driver-plan.json scenario/leg count does not match the run's scenario/transport contract",
+            f"scenarios={len(driver_scenarios)}, expected={expected_plan_entries}",
         )
     if driver_plan:
         validate_final_commands(
@@ -9035,13 +9271,13 @@ def validate_run_bundle(run_dir: Path) -> dict:
         if missing_gate_keys:
             add_validation_issue(issues, "error", "driver-plan-quality-gate", "driver-plan.json quality gates are missing required keys", ", ".join(missing_gate_keys))
         invalid_gate_evidence = []
-        declared_by_scenario = {
-            scenario.get("id", ""): set(scenario.get("evidence", []))
-            for scenario in scenarios
-        }
         for scenario in driver_scenarios:
             scenario_id = scenario.get("scenario", "")
-            declared = declared_by_scenario.get(scenario_id, set())
+            declared = {
+                item.get("kind", "")
+                for item in scenario.get("evidence", [])
+                if item.get("kind", "")
+            }
             minimum = set(scenario.get("quality_gate", {}).get("minimum_evidence", []))
             extra = sorted(minimum - declared)
             if extra:
@@ -9116,6 +9352,17 @@ def validate_run_bundle(run_dir: Path) -> dict:
         invalid_driver_routes = []
         for index, scenario in enumerate(driver_scenarios, start=1):
             scenario_id = scenario.get("scenario", f"driver-scenario-{index}")
+            scenario_transport = scenario.get("transport", "")
+            if scenario_transport:
+                expected_profile = compact_transport_profile(transport_profile(scenario_transport)) if scenario_transport in TRANSPORT_PROFILES else {}
+                if scenario_transport not in TRANSPORT_PROFILES:
+                    invalid_driver_routes.append(f"{scenario_id}: unknown transport={scenario_transport}")
+                elif scenario.get("transport_profile", {}) != expected_profile:
+                    invalid_driver_routes.append(f"{scenario_id}: transport_profile mismatch for {scenario_transport}")
+                elif scenario.get("visual_surface", "") != expected_profile.get("visual_surface", ""):
+                    invalid_driver_routes.append(
+                        f"{scenario_id}: visual_surface={scenario.get('visual_surface', '')}, expected={expected_profile.get('visual_surface', '')}"
+                    )
             evidence_kinds = [item.get("kind", "") for item in scenario.get("evidence", []) if item.get("kind", "")]
             commands = scenario.get("attach_commands", [])
             routes = scenario.get("capture_routes", [])
@@ -9159,6 +9406,13 @@ def validate_run_bundle(run_dir: Path) -> dict:
                     invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route journal command mismatch")
                 if not route.get("recording", {}).get("path_template", ""):
                     invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: missing recording path_template")
+                invalid_driver_routes.extend(
+                    route_profile_validation_errors(
+                        route,
+                        f"{scenario_id}/{evidence_kind}",
+                        scenario_transport,
+                    )
+                )
         if stale_driver_attach_commands:
             add_validation_issue(issues, "error", "driver-plan-attach-commands", "driver-plan.json attach commands do not cover the scenario evidence slots", "; ".join(stale_driver_attach_commands))
         if invalid_driver_routes:
@@ -9220,13 +9474,13 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "driver-journal.json captured evidence refs are not attached in evidence.json",
                 ", ".join(unattached_refs),
             )
-    if agent_brief and len(brief_scenarios) != len(scenarios):
+    if agent_brief and len(brief_scenarios) != expected_plan_entries:
         add_validation_issue(
             issues,
             "error",
             "agent-brief-count",
-            "agent-brief.json scenario order count does not match run.json scenarios",
-            f"scenario_order={len(brief_scenarios)}, scenarios={len(scenarios)}",
+            "agent-brief.json scenario order count does not match the run's scenario/transport contract",
+            f"scenario_order={len(brief_scenarios)}, expected={expected_plan_entries}",
         )
     if agent_brief:
         validate_final_commands(
@@ -9356,6 +9610,9 @@ def validate_run_bundle(run_dir: Path) -> dict:
                         missing_slot_details.append(f"{scenario_id}/{kind}: route missing primary_session")
                     if not route.get("recording", {}).get("path_template", ""):
                         missing_slot_details.append(f"{scenario_id}/{kind}: route missing recording path_template")
+                    missing_slot_details.extend(
+                        route_profile_validation_errors(route, f"{scenario_id}/{kind}")
+                    )
         if stale_proof_rows:
             add_validation_issue(issues, "error", "driver-handoff-proof-gap-detail", "driver-handoff.json missing proof evidence details are stale", "; ".join(stale_proof_rows))
         if missing_slot_details:
@@ -11559,8 +11816,8 @@ def scenario_qa_leg_items(leg_results: Optional[dict]) -> list[dict]:
 def scenario_qa_leg_level(item: dict) -> str:
     """The evidence level for one recorded leg -- 'bridge-level' for vscode
     (the IDE bridge stub/recording path, never a genuine editor -- see
-    TRANSPORT_EVIDENCE_CONTRACTS and docs/persona-qa.md), 'frame-level' for
-    tui/web. Prefers the leg's own recorded
+    TRANSPORT_EVIDENCE_CONTRACTS and docs/persona-qa.md), 'terminal-level'
+    for cli, and 'frame-level' for tui/web. Prefers the leg's own recorded
     `evidence_level`/`transport_evidence_contract` (present once
     scripts/record_leg_result.star has run for real); falls back to the
     transport-id lookup so a leg_results row that only carries a bare

@@ -6,7 +6,7 @@ states:
     view:
       - banner:
           text: "SCENARIO QA"
-          subtitle: "Check a scenario across TUI / web / VS Code transports."
+          subtitle: "Check a scenario across TUI / web / VS Code / CLI transports."
           color: "#0EA5E9"
       - kv:
           pairs:
@@ -19,7 +19,7 @@ states:
             Status: "{{ world.status }}"
       - prose: "{{ world.last_error }}"
         when: "world.last_error != ''"
-      - prose: "Check a scenario by catalog id (scenario=bugfix) or a free-text description (description=\"...\"), on one or more transports (transport=tui|web|vscode|all, default tui)."
+      - prose: "Check a scenario by catalog id (scenario=bugfix) or a free-text description (description=\"...\"), on one or more transports (transport=tui|web|vscode|cli|all, default tui)."
       - choice:
           mode: single
           prompt: "Actions"

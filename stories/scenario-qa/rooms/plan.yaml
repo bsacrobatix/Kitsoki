@@ -9,7 +9,7 @@
 #
 # Ad-hoc mode (a free-text `description`, no catalog scenario) has no catalog
 # entry to resolve, so run.py is still invoked — against a generic carrier
-# scenario ("bugfix", which already allows all three transports) purely to
+# scenario ("bugfix", which already allows the reusable transport set) purely to
 # get real project/persona resolution and the transport leg skeleton (one leg
 # per requested transport, already MCP/evidence-contract-shaped). plan_legs
 # then DRAFTS the actual scenario (id/label/task/success_criteria) from the
