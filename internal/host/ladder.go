@@ -1004,6 +1004,9 @@ func looksInfraError(s string) bool {
 		return true
 	}
 	ls := strings.ToLower(s)
+	if strings.Contains(ls, "without successful submit") && strings.Contains(ls, "0 attempt(s)") {
+		return true
+	}
 	for _, sig := range []string{
 		"timeout", "timed out", "deadline exceeded",
 		"model_not_found", "model not found",

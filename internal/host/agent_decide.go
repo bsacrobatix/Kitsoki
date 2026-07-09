@@ -826,11 +826,18 @@ func runDecideWithValidatorRetryLoop(ctx context.Context, p decideLoopParams) Re
 			msg = fmt.Sprintf("validator: session abandoned without successful submit after %d outer iteration(s), %d attempt(s)", maxOuter, attempts)
 		}
 	}
-	// The model ran to completion for every outer iteration but never
+	// If the validator never saw even one submit attempt, the active harness did
+	// not expose or honor the submit tool. More effort on the same lane will
+	// usually repeat the protocol failure, so let the ladder rotate lanes.
+	failureKind := FailureCapability
+	if attempts == 0 && strings.Contains(msg, "without successful submit") {
+		failureKind = FailureInfra
+	}
+	// Otherwise, the model ran to completion for every outer iteration but never
 	// produced an accepted verdict — a capability failure the ladder can
 	// escalate (higher effort, then a stronger model), not an infra one.
 	res := buildDecideResult(lastStdout, lastExitCode, lastStderr, p.ValidatorOutputPath, sessionID, msg)
-	res.FailureKind = FailureCapability
+	res.FailureKind = failureKind
 	return res
 }
 

@@ -67,7 +67,7 @@ states:
         with:
           cmd: bash
           args:
-            - "-lc"
+            - "-c"
             - |
               set -eu
               script_name="$0"
@@ -450,7 +450,7 @@ states:
         with:
           cmd: bash
           args:
-            - "-lc"
+            - "-c"
             - |
               set -eu
               script_name="$0"

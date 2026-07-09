@@ -235,6 +235,9 @@ func TestAgentDecide_ValidatorBlock_Abandoned(t *testing.T) {
 	if !strings.Contains(res.Error, "abandoned") && !strings.Contains(res.Error, "session abandoned") {
 		t.Fatalf("expected abandonment message in error; got %q", res.Error)
 	}
+	if res.FailureKind != host.FailureInfra {
+		t.Fatalf("expected zero-submit abandonment to be infra, got %v", res.FailureKind)
+	}
 }
 
 // ── 3. Validator sandbox: mutating validator rejected ─────────────────────────

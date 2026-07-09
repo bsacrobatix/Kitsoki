@@ -418,6 +418,24 @@ func TestRunLadder_TextHeuristicFallback(t *testing.T) {
 			t.Fatalf("expected effort sweep (3) + modelB (1) = 4 attempts, got %d", len(summary.Attempts))
 		}
 	})
+
+	t.Run("zero-submit validator abandonment rotates lane", func(t *testing.T) {
+		cfg := twoModelConfig(t)
+		once := func(ctx context.Context, _ map[string]any) (host.Result, error) {
+			rung, _ := host.LadderRungFromContext(ctx)
+			if rung.Model == "modelA" {
+				return host.Result{Error: "validator: session abandoned without successful submit after 3 outer iteration(s), 0 attempt(s)"}, nil // no FailureKind set
+			}
+			return host.Result{}, nil
+		}
+		_, _, summary := host.RunLadder(context.Background(), cfg, nil, once)
+		if summary.Attempts[0].Failure != host.FailureInfra {
+			t.Fatalf("expected zero-submit abandonment to classify as infra, got %v", summary.Attempts[0].Failure)
+		}
+		if len(summary.Attempts) != 2 {
+			t.Fatalf("expected infra classification to rotate to modelB after 1 attempt, got %d attempts", len(summary.Attempts))
+		}
+	})
 }
 
 // TestExpandLadder_ModelOuterEffortInner verifies the reference grid ordering:

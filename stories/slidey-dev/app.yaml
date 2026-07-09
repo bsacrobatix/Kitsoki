@@ -57,6 +57,7 @@ hosts:
   - host.chat.resolve
   - host.chat.transcript
   - host.artifacts_dir
+  - host.slidey.render
   - host.fs.writable_dir
   - host.ide.get_diagnostics
   - host.ide.open_file

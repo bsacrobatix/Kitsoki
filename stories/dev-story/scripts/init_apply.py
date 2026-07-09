@@ -376,6 +376,7 @@ DEV_STORY_INSTANCE_HOSTS = [
     "host.chat.resolve",
     "host.chat.transcript",
     "host.artifacts_dir",
+    "host.slidey.render",
     "host.fs.writable_dir",
     "host.ide.get_diagnostics",
     "host.ide.open_file",
@@ -822,12 +823,6 @@ def onboarding_profile(data: dict) -> dict:
         "story_pack_summary": pack["summary"],
         "starter_stories": starter_story_focus(data),
         "expansion_policy": expansion_policy(data),
-        "capability": "full" if data.get("ticket_repo") else "good",
-        "capability_reason": (
-            f"Full ticket capability is enabled through GitHub Issues on `{data['ticket_repo']}`."
-            if data.get("ticket_repo")
-            else "Good local capability is enabled without remote ticket setup; use pasted reports or local markdown tickets until a provider is configured."
-        ),
         "repo_patterns": patterns,
         "story_customizations": customizations,
         "recording_policy": "no-llm-only",
