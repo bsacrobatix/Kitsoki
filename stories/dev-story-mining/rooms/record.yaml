@@ -1,4 +1,4 @@
-# record — phase 5/5. Climb the determinism ladder where the data supports it.
+# record — phase 6/6. Climb the determinism ladder where the data supports it.
 #
 # The `recorder` persona reviews recorded decisions at existing gates and
 # reports any that one branch dominates enough to drop a rung (L2→L3→L4).
@@ -9,11 +9,11 @@
 states:
 
   record:
-    description: "Review recorded decisions; propose any determinism-ladder moves."
+    description: "Review recorded decisions; propose any progressive-determinism moves."
     view:
       - banner:
           text:     "RECORD"
-          subtitle: "Phase 5 / 5  ·  can a gate drop a rung? (L2→L3→L4)"
+          subtitle: "Phase 6 / 6  ·  can a gate drop a rung? (L2→L3→L4)"
           color:    "#10B981"
       - prose: "{{ world.job }} · cycle {{ world.cycle }} · judge {{ world.judge_mode }}"
       - heading: "Ladder review"
@@ -35,7 +35,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [job, stories_dir, judge_mode, judge_confidence_threshold, author_artifact, record_artifact, llm_verdict, refine_feedback, cycle]
+    relevant_world: [job, stories_dir, source_plan_artifact, selected_theme, selected_artifact_kind, judge_mode, judge_confidence_threshold, author_artifact, record_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: host.agent.ask
         once: true
@@ -45,6 +45,9 @@ states:
           prompt: prompts/record_executing.md
           args:
             stories_dir:     "{{ world.stories_dir }}"
+            source_plan:     "{{ world.source_plan_artifact }}"
+            selected_theme:  "{{ world.selected_theme }}"
+            selected_artifact_kind: "{{ world.selected_artifact_kind }}"
             author_summary:  "{{ world.author_artifact.summary_markdown }}"
         bind:
           record_artifact: submitted
@@ -75,7 +78,7 @@ states:
       accept:
         - target: "@exit:done"
           effects:
-            - say: "Loop complete — gate installed; ladder review recorded."
+            - say: "Loop complete — improvement installed; ladder review recorded."
             - set: { status: "authored", refine_feedback: "" }
       refine:
         - when: "world.record_cycle >= world.record_budget"

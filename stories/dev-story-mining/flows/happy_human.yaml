@@ -1,10 +1,10 @@
-# happy_human — judge_mode=human, accept at every checkpoint → done.
+# happy_human — judge_mode=human, accept at every checkpoint -> done.
 #
-# Hermetic and LLM-free: every room's on_enter producer is `once: true`
-# keyed off its artifact bind, so seeding those artifacts in initial_world
-# makes the agent calls short-circuit on entry. The only live host call is
-# iface.transport.post, bound here to host.stdout (a no-op channel). We
-# assert the phase transitions and the status side-effects.
+# Hermetic and LLM-free: the prepare phase stubs the host.starlark.run planner
+# envelope by call id, then every LLM-producing room's on_enter producer is
+# `once: true` keyed off seeded artifact binds. The checked-in script is
+# statically validated by starcheck; this flow asserts phase transitions,
+# source-plan side effects, and status side effects.
 
 test_kind: flow
 app: ../app.yaml
@@ -12,53 +12,82 @@ initial_state: idle
 initial_world:
   job:           "intents-20260615"
   project_dir:   ""
+  codex_sessions_dir: "~/.codex/sessions"
+  transcript_sources: "claude,codex"
   stories_dir:   "stories"
+  target_artifacts: "stories,rooms,starlark,hub-routes,skills,hooks"
   judge_mode:    "human"
   judge_confidence_threshold: 0.8
-  selected_theme: "Pre-existing failure vs regression"
-  # Seed each phase artifact so `once:` skips the producer agent call.
+  selected_theme: "Promote transcript-source planning into deterministic Starlark"
+  selected_artifact_kind: "STARLARK-SCRIPT"
+  # Seed LLM-producing phase artifacts so `once:` skips the producer agent calls.
   mine_artifact:
     brief_path:   ".artifacts/session-mining/intents-20260615/BRIEF.md"
-    intent_count: 154
-    deterministic: 84
-    agent_gated:  66
-    irreducible:   4
-    summary_markdown: "154 intents · 144 clusters · 98% grounded. Top recurring shapes: explore-codebase, verify-by-running, write-docs, implement-from-spec."
+    source_counts: { claude: { traces: 120, intents: 154 }, codex: { traces: 38, intents: 49, unavailable: ["costs"] } }
+    tool_gaps: ["Codex cost sidecar unavailable", "Codex raw lexical satisfaction weaker than Claude"]
+    intent_count: 203
+    deterministic: 111
+    agent_gated:  87
+    irreducible:   5
+    summary_markdown: "203 intents across Claude and Codex. Top missed Kitsoki usage: mining source setup, choosing verification mode, and turning repeated shell glue into Starlark."
   map_artifact:
-    themes:
-      - { theme: "Pre-existing failure vs regression", intents: 8, home_room: "stories/bugfix/rooms/validating.yaml", status: "ENRICH", decider: "default-rule", validator: "isolated HEAD/clean-main worktree reproduces failure identically" }
-      - { theme: "Fan-out partition disjointness", intents: 6, home_room: "stories/dev-story/rooms/fanout_plan.yaml", status: "GAP", decider: "default-rule", validator: "slices pairwise path-disjoint and each builds alone" }
-    summary_markdown: "10 in-scope themes. 3 ENRICH, 2 GAP, 5 ALREADY-MODELED. Top: pre-existing-vs-regression (ENRICH, 8 intents)."
+    opportunities:
+      - { theme: "Promote transcript-source planning into deterministic Starlark", intents: 11, artifact_kind: "STARLARK-SCRIPT", status: "ACTIONABLE", target_path: "stories/dev-story-mining/scripts/plan_sources.star", home_room: "stories/dev-story-mining/rooms/prepare.yaml", decider: "default-rule", validator: "real Starlark planner runs in happy_human flow without agent calls", determinism_rung: "L2", kitsoki_usage_policy: "Every mining run starts by recording Claude/Codex source policy before agents run." }
+      - { theme: "Codex cannot be hard-intercepted pre-model", intents: 7, artifact_kind: "ENFORCEMENT-LIMIT", status: "LIMITED", target_path: "cmd/kitsoki/hook.go", decider: "human", validator: "hook install --agent codex reports no pre-model hook", determinism_rung: "L1", kitsoki_usage_policy: "Use honest guidance, launchers, and mining feedback loops rather than claiming forced interception." }
+    summary_markdown: "9 in-scope opportunities. 4 ACTIONABLE, 1 LIMITED, 4 ALREADY-MODELED. Top actionable: source-policy Starlark planner."
   decide_artifact:
     selected:
-      - { theme: "Pre-existing failure vs regression", room: "stories/bugfix/rooms/validating.yaml", gate: "default-rule gate that reproduces the failure on a baseline worktree before the LLM judge classifies" }
-    rationale: "Highest #intents × mechanicalness; ENRICH with a deterministic validator beats the GAP rooms."
-    summary_markdown: "Selected: pre-existing-vs-regression triage into bugfix/validating. Runners-up: fan-out partition (GAP), reconcile claims (ENRICH)."
+      - { theme: "Promote transcript-source planning into deterministic Starlark", artifact_kind: "STARLARK-SCRIPT", target_path: "stories/dev-story-mining/scripts/plan_sources.star", room: "stories/dev-story-mining/rooms/prepare.yaml", gate: "build the Claude/Codex source matrix and progressive-determinism policy before mining", determinism_from: "L1", determinism_to: "L2", acceptance_gate: "kitsoki test flows stories/dev-story-mining/app.yaml" }
+    rationale: "Highest leverage and fully mechanical: one Starlark script prevents source-policy drift before any mining agent runs."
+    summary_markdown: "Selected: Starlark source planner for dev-story-mining. Runners-up: Codex enforcement-limit note, hub route for improve-my-work."
   author_artifact:
-    files_changed: ["stories/bugfix/rooms/validating.yaml", "stories/bugfix/flows/preexisting_vs_regression.yaml"]
+    artifact_kind: "STARLARK-SCRIPT"
+    files_changed: ["stories/dev-story-mining/rooms/prepare.yaml", "stories/dev-story-mining/scripts/plan_sources.star", "stories/dev-story-mining/scripts/plan_sources.star.yaml", "stories/dev-story-mining/flows/happy_human.yaml"]
+    applied_improvements: ["Added deterministic Claude/Codex source matrix before mining", "Recorded Codex pre-model hook limitation as an explicit policy caveat", "Pinned progressive determinism ladder into the story flow"]
     flows_green:   true
-    flow_files:    ["stories/bugfix/flows/preexisting_vs_regression.yaml"]
-    summary_markdown: "Added the baseline-reproduce gate to validating; flow fixture covers pre-existing vs regression branches. `kitsoki test flows` green."
+    validation: "kitsoki test flows stories/dev-story-mining/app.yaml"
+    flow_files:    ["stories/dev-story-mining/flows/happy_human.yaml"]
+    summary_markdown: "Added prepare.yaml plus plan_sources.star. The happy_human flow covers the planner envelope with a by-call stub and then accepts seeded no-LLM mining artifacts. `kitsoki test flows` green."
   record_artifact:
-    ladder_moves: []
-    summary_markdown: "No ladder moves yet — the new gate has no recorded decisions; re-review after a few runs."
+    ladder_moves:
+      - { gate: "source-policy preparation", from: "L1", to: "L2", evidence: "Prompt-only source policy became a deterministic Starlark script plus a flow fixture." }
+    summary_markdown: "The source-policy step climbed L1->L2: a documented/prompted checklist became a deterministic story room and Starlark script."
+
+host_handlers:
+  host.starlark.run:
+    by_call:
+      plan_sources:
+        data:
+          source_plan:
+            schema: "dev-story-mining-source-plan/v1"
+            sources: [{ id: "claude" }, { id: "codex" }]
+            artifact_classes: [{ kind: "STARLARK-SCRIPT" }]
+          summary_markdown: "Codex cannot be pre-model intercepted; Claude can use the Kitsoki hook. Start new automation at L2."
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: mine
+    expect_state: prepare
     expect_world:
       mining_started: true
+    expect_view_matches: "Codex cannot be pre-model intercepted"
+
+  - intent: { name: accept, slots: {} }
+    expect_state: mine
+    expect_view_matches: "203 intents across Claude and Codex"
 
   - intent: { name: accept, slots: {} }
     expect_state: map
+    expect_view_matches: "source-policy Starlark planner"
 
   - intent: { name: accept, slots: {} }
     expect_state: decide
     expect_world:
       status: "mapped"
+      selected_artifact_kind: "STARLARK-SCRIPT"
 
   - intent: { name: accept, slots: {} }
     expect_state: author
+    expect_view_matches: "Validation gate: GREEN"
 
   - intent: { name: accept, slots: {} }
     expect_state: record

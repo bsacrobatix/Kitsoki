@@ -1,36 +1,36 @@
-# map — phase 2/5. Cross-reference the brief's gates vs dev-story's inventory.
+# map — phase 3/6. Cross-reference the brief vs Kitsoki's story/script inventory.
 #
 # The `mapper` persona regenerates the existing-gate inventory (greps
 # host.agent.decide / .task across the target rooms — never from memory),
 # clusters the brief's in-scope gates into themes, and classifies each
-# ALREADY-MODELED / ENRICH / GAP. This is the previously-implicit step ②
-# made first-class.
+# opportunity classes such as ENRICH-STORY, NEW-STORY, STARLARK-SCRIPT,
+# HUB-ROUTE, SKILL-ONLY, and ENFORCEMENT-LIMIT.
 
 states:
 
   map:
-    description: "Map the brief's decision themes against dev-story's existing gates."
+    description: "Map automation opportunities against Kitsoki's existing inventory."
     view:
       - banner:
           text:     "MAP"
-          subtitle: "Phase 2 / 5  ·  classify each theme ALREADY / ENRICH / GAP"
+          subtitle: "Phase 3 / 6  ·  classify story/script/route opportunities"
           color:    "#0EA5E9"
       - prose: "{{ world.job }} · cycle {{ world.cycle }} · judge {{ world.judge_mode }} · tree {{ world.stories_dir }}"
-      - heading: "Enrichment map"
-      - code: '{{ world.map_artifact.summary_markdown|default:"(pending — mapper has not returned yet)" }}'
+      - heading: "Opportunity map"
+      - prose: '{{ world.map_artifact.summary_markdown|default:"(pending — mapper has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
           items:
             - label:  "continue"
-              hint:   "accept the map and decide what to ticket"
+              hint:   "accept the map and decide what to apply"
               intent: accept
             - label:  "refine"
               hint:   "re-map with feedback (e.g. wrong home room)"
               intent: refine
               param: { slot: feedback, type: string, placeholder: "what to redo", required: false }
             - label:  "restart"
-              hint:   "go back and re-mine"
+              hint:   "go back and re-plan/re-mine"
               intent: restart_from
               slots:  { stage: mine }
             - label:  "quit"
@@ -39,7 +39,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [job, stories_dir, judge_mode, judge_confidence_threshold, mine_artifact, map_artifact, llm_verdict, refine_feedback, cycle]
+    relevant_world: [job, stories_dir, target_artifacts, source_plan_artifact, judge_mode, judge_confidence_threshold, mine_artifact, map_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       - invoke: host.agent.task
         once: true
@@ -51,7 +51,9 @@ states:
             prompt: prompts/map_executing.md
             args:
               brief_path:      "{{ world.mine_artifact.brief_path }}"
+              source_plan:     "{{ world.source_plan_artifact }}"
               stories_dir:     "{{ world.stories_dir }}"
+              target_artifacts: "{{ world.target_artifacts }}"
               refine_feedback: "{{ world.refine_feedback }}"
         bind:
           map_artifact: submitted
@@ -66,7 +68,7 @@ states:
             phase:          "map"
             artifact_title: "enrichment map for {{ world.stories_dir }}"
             artifact_body:  "{{ world.map_artifact.summary_markdown }}"
-            criterion:      "Every in-scope theme is classified with a home_room file path and a validator; statuses are defensible against the actual gate inventory."
+            criterion:      "Every in-scope opportunity is classified with an artifact kind, target path, validator, and determinism rung; Codex/Claude enforcement limits are represented honestly."
             threshold:      "{{ world.judge_confidence_threshold }}"
         bind:
           llm_verdict: submitted
@@ -82,7 +84,7 @@ states:
       accept:
         - target: decide
           effects:
-            - say: "Map accepted — ranking ENRICH/GAP items to ticket."
+            - say: "Map accepted — ranking actionable Kitsoki improvements."
             - set: { refine_feedback: "", status: "mapped" }
       refine:
         - when: "world.map_cycle >= world.map_budget"
@@ -97,9 +99,9 @@ states:
                 cycle:           "{{ world.cycle + 1 }}"
                 map_artifact:    {}
       restart_from:
-        - target: mine
+        - target: prepare
           effects:
-            - set: { refine_feedback: "", map_cycle: 0, mine_artifact: {}, map_artifact: {} }
+            - set: { refine_feedback: "", map_cycle: 0, prepare_cycle: 0, source_plan_artifact: {}, source_summary_markdown: "", mine_artifact: {}, map_artifact: {} }
       quit:
         - target: "@exit:abandoned"
           effects:
