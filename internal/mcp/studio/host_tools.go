@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -161,6 +162,7 @@ func (srv *Server) handleHostRun(
 
 	exitCode, _ := res.Data["exit_code"].(int)
 	stdout, _ := res.Data["stdout"].(string)
+	stdout = collapseTerminalProgress(stdout)
 
 	limit := args.TruncateOutput
 	if limit == 0 {
@@ -186,6 +188,31 @@ func (srv *Server) handleHostRun(
 		out.Stdout = marker + stdout[len(stdout)-limit:]
 	}
 	return nil, out, nil
+}
+
+func collapseTerminalProgress(stdout string) string {
+	if !strings.Contains(stdout, "\r") {
+		return stdout
+	}
+	stdout = strings.ReplaceAll(stdout, "\r\n", "\n")
+	var out strings.Builder
+	var line strings.Builder
+	for _, r := range stdout {
+		switch r {
+		case '\r':
+			line.Reset()
+		case '\n':
+			out.WriteString(line.String())
+			out.WriteByte('\n')
+			line.Reset()
+		default:
+			line.WriteRune(r)
+		}
+	}
+	if line.Len() > 0 {
+		out.WriteString(line.String())
+	}
+	return out.String()
 }
 
 // writeHostRunOutput spills a command's full combined output to a sidecar file
