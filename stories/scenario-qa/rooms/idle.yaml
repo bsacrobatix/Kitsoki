@@ -3,6 +3,7 @@ states:
   idle:
     description: "Waiting to check a scenario across one or more transports."
     relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, suite_status, suite_leg_count, suite_skipped_count, run_id, run_dir, last_error, status]
+    default_intent: check_request
     view:
       - banner:
           text: "SCENARIO QA"
@@ -20,31 +21,29 @@ states:
             Status: "{{ world.status }}"
       - prose: "{{ world.last_error }}"
         when: "world.last_error != ''"
-      - prose: "Preview or check a scenario by catalog id, or ask for a free-text scenario with \"check whether ...\". Use all, tui, web, vscode, cli, or a comma list for the transport."
+      - prose: "Describe any behavior to check, or provide a catalog scenario id. Optional qualifiers: scenario=<id>, transport=all|tui|web|vscode|cli, persona=<id>, target=<project>, seed=<id>, profile=<profile>."
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label: "check bugfix across all transports for core-maintainer on gears-rust"
-              hint: "create the run bundle and drive the first transport leg"
-              intent: check
-              slots:
-                scenario: bugfix
-                transport: all
-                persona: core-maintainer
-                target: gears-rust
-            - label: "check whether the onboarding tour first step renders on web"
-              hint: "draft an ad-hoc scenario from a free-text description and check it"
-              intent: check
-              slots:
-                description: "the onboarding tour first step renders"
-                transport: web
-            - label: "preview bugfix across all transports"
-              hint: "show deterministic transport legs without creating a run bundle"
+            - label: "check a scenario request"
+              hint: "plain prose or key=value qualifiers"
+              intent: check_request
+              param:
+                slot: request
+                type: string
+                placeholder: "e.g. settings form keeps validation errors transport=web"
+                required: true
+            - label: "preview catalog scenario"
+              hint: "show transport legs without creating a run bundle"
               intent: preview
               slots:
-                scenario: bugfix
                 transport: all
+              param:
+                slot: scenario
+                type: string
+                placeholder: "scenario id, e.g. prd-design"
+                required: true
             - label: "report"
               hint: "(re)build report.md for the last run, if any"
               intent: report
@@ -63,6 +62,55 @@ states:
           last_error: "Bounced back to idle from '{{ world.status }}' — check the trace for the host-call error, then try again."
           status: "idle"
     on:
+      check_request:
+        - when: "(slots.request ?? '') == ''"
+          target: .
+          effects:
+            - set:
+                last_error: "check needs a scenario request."
+        - target: plan
+          effects:
+            - set:
+                last_error: ""
+                status: "parsing_request"
+            - invoke: host.starlark.run
+              id: parse_check_request
+              with:
+                script: scripts/parse_request.star
+                inputs:
+                  request: "{{ slots.request }}"
+                  default_transport: "{{ world.transport_arg }}"
+                  default_persona: "{{ world.persona }}"
+                  default_target: "{{ world.target }}"
+                  default_seed: "{{ world.seed }}"
+                  default_profile: "{{ world.live_profile }}"
+                  default_live_budget_minutes: "{{ world.live_budget_minutes }}"
+              bind:
+                scenario_ref: scenario_ref
+                scenario_description: scenario_description
+                transport_arg: transport_arg
+                persona: persona
+                target: target
+                seed: seed
+                live_profile: live_profile
+                live_budget_minutes: live_budget_minutes
+                mode: mode
+                request_status: request_status
+              on_error: idle
+            - set:
+                status: "planning"
+                leg_index: 0
+                leg_count: 0
+                legs: {}
+                plan_status: {}
+                current_leg: {}
+                current_leg_id: ""
+                drive_result: {}
+                judge_result: {}
+                leg_results: { items: [] }
+                pass_count: 0
+                fail_count: 0
+                degraded_count: 0
       check:
         - when: "(slots.scenario ?? '') == '' && (slots.description ?? '') == ''"
           target: .

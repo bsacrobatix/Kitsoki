@@ -12,6 +12,7 @@ states:
   report:
     description: "Folded the per-transport verdict table into report.md."
     relevant_world: [run_id, run_dir, scenario_ref, scenario_description, leg_results, pass_count, fail_count, degraded_count, report_path, report_summary, deck_path, last_error, status]
+    default_intent: check_request
     view:
       - banner:
           text: "SCENARIO QA REPORT"
@@ -31,20 +32,22 @@ states:
       - heading: "Per-transport verdicts"
       - code: |
           {% for leg in world.leg_results.items %}
-          - {{ leg.transport }} / {{ leg.scenario }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}]: driver={{ leg.driver_status }} verdict={{ leg.verdict }} — {{ leg.verdict_summary }}
+          - {{ leg.transport }} / {{ leg.scenario }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}]
+            driver={{ leg.driver_status }} verdict={{ leg.verdict }}
+            {{ leg.verdict_summary }}
           {% endfor %}
       - choice:
           mode: single
           prompt: "Actions"
           items:
-            - label: "check bugfix across all transports for core-maintainer on gears-rust"
-              hint: "start a new scenario-qa check"
-              intent: check
-              slots:
-                scenario: bugfix
-                transport: all
-                persona: core-maintainer
-                target: gears-rust
+            - label: "check another scenario request"
+              hint: "plain prose or key=value qualifiers"
+              intent: check_request
+              param:
+                slot: request
+                type: string
+                placeholder: "e.g. scenario=feature-implementation transport=tui,web"
+                required: true
             - label: "report"
               hint: "rebuild report.md"
               intent: report
@@ -97,6 +100,55 @@ states:
           deck_path: "stdout_json.deck_path"
         on_error: .
     on:
+      check_request:
+        - when: "(slots.request ?? '') == ''"
+          target: .
+          effects:
+            - set:
+                last_error: "check needs a scenario request."
+        - target: plan
+          effects:
+            - set:
+                last_error: ""
+                status: "parsing_request"
+            - invoke: host.starlark.run
+              id: parse_check_request
+              with:
+                script: scripts/parse_request.star
+                inputs:
+                  request: "{{ slots.request }}"
+                  default_transport: "{{ world.transport_arg }}"
+                  default_persona: "{{ world.persona }}"
+                  default_target: "{{ world.target }}"
+                  default_seed: "{{ world.seed }}"
+                  default_profile: "{{ world.live_profile }}"
+                  default_live_budget_minutes: "{{ world.live_budget_minutes }}"
+              bind:
+                scenario_ref: scenario_ref
+                scenario_description: scenario_description
+                transport_arg: transport_arg
+                persona: persona
+                target: target
+                seed: seed
+                live_profile: live_profile
+                live_budget_minutes: live_budget_minutes
+                mode: mode
+                request_status: request_status
+              on_error: idle
+            - set:
+                status: "planning"
+                leg_index: 0
+                leg_count: 0
+                legs: {}
+                plan_status: {}
+                current_leg: {}
+                current_leg_id: ""
+                drive_result: {}
+                judge_result: {}
+                leg_results: { items: [] }
+                pass_count: 0
+                fail_count: 0
+                degraded_count: 0
       check:
         - when: "(slots.scenario ?? '') == '' && (slots.description ?? '') == ''"
           target: .
@@ -112,6 +164,8 @@ states:
                 persona: "{{ join(split((slots.persona ?? world.persona), ' '), '-') }}"
                 target: "{{ join(split((slots.target ?? world.target), ' '), '-') }}"
                 seed: "{{ slots.seed ?? world.seed }}"
+                live_profile: "{{ slots.profile ?? world.live_profile }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
                 status: "planning"

@@ -126,6 +126,7 @@ world:
   live_profile:         { type: string, default: "" }   # harness profile the driver passes to nested live session.new calls
   live_budget_minutes:  { type: int, default: 0 }   # caller override for run.py --live-budget-minutes; 0 = run.py's own default (20)
   mode:                 { type: string, default: "catalog" } # catalog | adhoc
+  request_status:       { type: object, default: {} }
 
   # ── run bundle ─────────────────────────────────────────────────────────
   transport_suite:       { type: object, default: {} }   # side-effect-free preview from run.py --transport-suite
@@ -173,6 +174,16 @@ world:
   status:               { type: string, default: "idle" }
 
 intents:
+  check_request:
+    title: "check a scenario request"
+    description: "Check an arbitrary scenario request. The request may be plain prose, a catalog id, or prose plus key=value qualifiers."
+    examples:
+      - "settings form keeps validation errors transport=web"
+      - "scenario=prd-design transport=tui,web persona=core-maintainer target=gears-rust"
+      - "check whether the onboarding tour renders on web"
+    priority: 95
+    slots:
+      request: { type: string, required: true }
   check:
     description: "Check a scenario (a catalog scenario id, or a free-text description) across one or more transports."
     synonyms:
@@ -184,6 +195,10 @@ intents:
       - "check {scenario} in {transport}"
       - "check whether {description} on {transport}"
       - "check whether {description} across {transport} transports"
+      - "verify {scenario} on {transport}"
+      - "verify whether {description} on {transport}"
+      - "test {scenario} on {transport}"
+      - "test whether {description} on {transport}"
       - "check scenario {scenario} transport {transport} persona {persona} target {target}"
       - "check scenario {scenario} transport {transport}"
     priority: 90
@@ -203,6 +218,8 @@ intents:
       - "preview {scenario} on {transport}"
       - "preview {scenario} in {transport}"
       - "preview scenario {scenario} transport {transport}"
+      - "dry run {scenario} across {transport} transports"
+      - "show transport plan for {scenario} on {transport}"
     priority: 75
     slots:
       scenario:  { type: string, required: false }

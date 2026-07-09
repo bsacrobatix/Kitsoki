@@ -26,13 +26,13 @@ qa:
       title: Preview resolves the transport suite without creating a run
       steps:
         - The tour opens on the Scenario QA story in the home library
-        - The preview action is selected from the Scenario QA session
+        - A preview request is typed for an arbitrary catalog scenario id
         - The UI shows status ready with four transport legs and no run id
     - id: check-first-leg
       required: true
       title: Check creates a run bundle and records the first transport leg
       steps:
-        - The check action is selected for bugfix across all transports
+        - A free-text check request is typed with transport, persona, target, and seed qualifiers
         - The session reaches the recording state
         - The recording view shows four total legs and a recorded driver plus judge outcome
     - id: operator-paced-loop
@@ -85,14 +85,17 @@ tour:
       dwellMs: 3200
     - id: pqa-preview
       route: interactive
-      target: intent-btn-preview
-      title: Preview the suite
-      body: "Preview asks the runner for the scenario x transport plan. It is side-effect-free: no run bundle, no capture, and no model call."
+      target: text-floor-input
+      title: Type a preview
+      body: "Preview takes a catalog scenario id and a transport selector. Here the operator types a request instead of picking a canned scenario."
       placement: right
-      kind: action
-      advance: click-target
-      waitForTarget: intent-btn-preview
+      kind: explain
+      advance: next
+      waitForTarget: text-floor-input
       dwellMs: 4200
+      drive:
+        - type: type-and-send
+          text: "preview prd-design across all transports"
     - id: pqa-preview-result
       route: interactive
       target: chat-section
@@ -105,14 +108,17 @@ tour:
       dwellMs: 5200
     - id: pqa-check
       route: interactive
-      target: intent-btn-check
-      title: Start the check
-      body: "Check creates the product-journey run bundle and drives the first transport-pinned leg. The driver captures; the judge grades the captured evidence."
+      target: text-floor-input
+      title: Type a check request
+      body: "The same input can be plain prose plus qualifiers: transport, persona, target, seed, profile, or a catalog scenario id. Without scenario=, the prose becomes an ad-hoc scenario."
       placement: right
-      kind: action
-      advance: click-target
-      waitForTarget: intent-btn-check
+      kind: explain
+      advance: next
+      waitForTarget: text-floor-input
       dwellMs: 4300
+      drive:
+        - type: type-and-send
+          text: "settings form keeps validation errors transport=all persona=core-maintainer target=gears-rust seed=story-flow-demo"
     - id: pqa-recording
       route: interactive
       target: chat-section
@@ -126,7 +132,7 @@ tour:
     - id: pqa-next-web
       route: interactive
       target: intent-btn-next_leg
-      title: Advance to web
+      title: Advance one leg
       body: "Next leg advances exactly one transport. The same scenario contract is reused, but the transport evidence contract changes."
       placement: right
       kind: action
@@ -146,7 +152,7 @@ tour:
     - id: pqa-next-vscode
       route: interactive
       target: intent-btn-next_leg
-      title: Advance to VS Code
+      title: Continue through transports
       body: "VS Code is bridge-level proof today. Persona QA labels that honestly instead of pretending it has native editor-level evidence."
       placement: right
       kind: action
@@ -166,7 +172,7 @@ tour:
     - id: pqa-next-cli
       route: interactive
       target: intent-btn-next_leg
-      title: Advance to CLI
+      title: Finish the transport set
       body: "The final leg uses terminal-level proof: command transcript, exit code, working directory, and trace references."
       placement: right
       kind: action
@@ -177,7 +183,7 @@ tour:
       route: interactive
       target: chat-section
       title: One report and one deck
-      body: "After the final leg, the story folds report.md and deck.slidey.json from the accumulated driver and judge outcomes."
+      body: "After the final leg, the story folds report.md and deck.slidey.json from the accumulated driver and judge outcomes for the ad-hoc scenario."
       placement: right
       kind: explain
       advance: next
@@ -186,7 +192,7 @@ tour:
     - id: pqa-done
       route: interactive
       title: Persona QA is closed out
-      body: "The run ends with per-transport verdicts, honest evidence levels, and a deterministic deck path ready for review."
+      body: "The run ends with per-transport verdicts, honest evidence levels, and a deterministic deck path ready for review. The scenario came from operator input, not a fixed button."
       placement: center
       kind: explain
       advance: next

@@ -7,18 +7,26 @@ hunt for under `tools/`. The canonical surface is:
 kitsoki run @kitsoki/scenario-qa
 ```
 
-From the story, use natural prompts:
+From the story, use natural prompts or explicit `key=value` qualifiers:
 
 ```text
-preview bugfix across all transports
-check bugfix across all transports for core-maintainer on gears-rust
+preview <catalog-scenario-id> across all transports
+check scenario=<catalog-scenario-id> transport=tui,web persona=<persona-id> target=<project-id>
+check whether the settings form keeps validation errors transport=web target=<project-id>
 next leg
 report
 ```
 
-`preview` is side-effect-free: it asks the deterministic product-journey runner
-for the scenario x transport suite, binds the leg count into story state, and
-does not create a run bundle, launch capture, or call an LLM.
+The resting room also accepts unmatched prose as a `check_request`, so an
+operator can type the behavior they want checked without first adding it to the
+catalog. Use `scenario=<id>` when the request should bind to a catalog scenario;
+otherwise the remaining prose becomes an ad-hoc scenario description. Supported
+transport values are `all`, `tui`, `web`, `vscode`, `cli`, or a comma list.
+
+`preview` is side-effect-free for catalog scenarios: it asks the deterministic
+product-journey runner for the scenario x transport suite, binds the leg count
+into story state, and does not create a run bundle, launch capture, or call an
+LLM.
 
 `check` creates the run bundle under `.artifacts/product-journey/<run-id>/`,
 then drives one transport-pinned leg at a time. Multi-transport checks pause
