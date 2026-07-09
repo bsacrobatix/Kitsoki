@@ -1,0 +1,193 @@
+# yaml-language-server: $schema=feature.schema.json
+id: persona-qa
+kind: feature
+title: Persona QA
+tagline: Check one scenario across every operator transport with persona-shaped evidence.
+summary: "Persona QA is the scenario-qa story workflow: preview a scenario by transport, create a run bundle, drive one transport-pinned leg at a time, judge captured evidence, then fold report.md and deck.slidey.json from the recorded outcomes."
+promo:
+  order: 58
+docs:
+  - docs/persona-qa.md
+related:
+  - dynamic-workflows
+  - review
+demo:
+  format: rrweb
+  spec: tests/playwright/persona-qa-video.spec.ts
+  artifactDir: persona-qa
+  videoBase: persona-qa-demo
+  posterStep: pqa-home
+  story: stories/scenario-qa
+  flow: stories/scenario-qa/flows/persona_qa_demo.yaml
+qa:
+  scenarios:
+    - id: preview-suite
+      required: true
+      title: Preview resolves the transport suite without creating a run
+      steps:
+        - The tour opens on the Scenario QA story in the home library
+        - The preview action is selected from the Scenario QA session
+        - The UI shows status ready with four transport legs and no run id
+    - id: check-first-leg
+      required: true
+      title: Check creates a run bundle and records the first transport leg
+      steps:
+        - The check action is selected for bugfix across all transports
+        - The session reaches the recording state
+        - The recording view shows four total legs and a recorded driver plus judge outcome
+    - id: operator-paced-loop
+      required: true
+      title: Next leg advances one transport at a time
+      steps:
+        - A next leg action is visible while more transport legs remain
+        - The leg index changes after next leg is selected
+        - The UI continues to show pass, fail, and degraded counters during the loop
+    - id: report-and-deck
+      required: true
+      title: Report closes out the run with transport verdicts and deck path
+      steps:
+        - The final state is a Scenario QA report
+        - The report summary says three of four transport legs passed with one degraded-evidence leg
+        - The per-transport verdict table shows vscode as bridge-level and cli as terminal-level
+        - A deck.slidey.json path is visible in the report
+tour:
+  export: PERSONA_QA_TOUR_STEPS
+  steps:
+    - id: pqa-home
+      route: home
+      title: Start at Persona QA
+      body: "Persona QA is a story workflow. The operator starts from the story library, then drives scenario QA like any other Kitsoki run."
+      placement: center
+      kind: explain
+      advance: next
+      waitForTarget: home-view
+      dwellMs: 4200
+    - id: pqa-story-card
+      route: home
+      target: story-card
+      title: The scenario-qa story
+      body: "The scenario-qa story is the product surface. It wraps the deterministic product-journey transport planner and the per-leg driver and judge loop."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: story-card
+      dwellMs: 4400
+    - id: pqa-start
+      route: home
+      target: new-session-btn
+      title: Open a session
+      body: "Create a fresh session. The fixture is no-LLM: host calls are replayed from the flow, while the browser still drives the real web UI."
+      placement: right
+      kind: action
+      advance: route-match
+      advanceRoute: interactive
+      waitForTarget: new-session-btn
+      dwellMs: 3200
+    - id: pqa-preview
+      route: interactive
+      target: intent-btn-preview
+      title: Preview the suite
+      body: "Preview asks the runner for the scenario x transport plan. It is side-effect-free: no run bundle, no capture, and no model call."
+      placement: right
+      kind: action
+      advance: click-target
+      waitForTarget: intent-btn-preview
+      dwellMs: 4200
+    - id: pqa-preview-result
+      route: interactive
+      target: chat-section
+      title: Four transport legs, no run
+      body: "The idle view now shows status ready, four legs, zero skipped, and no run id. This is the operator's dry-run check before spending capture time."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 5200
+    - id: pqa-check
+      route: interactive
+      target: intent-btn-check
+      title: Start the check
+      body: "Check creates the product-journey run bundle and drives the first transport-pinned leg. The driver captures; the judge grades the captured evidence."
+      placement: right
+      kind: action
+      advance: click-target
+      waitForTarget: intent-btn-check
+      dwellMs: 4300
+    - id: pqa-recording
+      route: interactive
+      target: chat-section
+      title: First leg recorded
+      body: "The story pauses in recording after one leg. That pacing keeps multi-transport checks inspectable and avoids a long internal auto-cascade."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 5200
+    - id: pqa-next-web
+      route: interactive
+      target: intent-btn-next_leg
+      title: Advance to web
+      body: "Next leg advances exactly one transport. The same scenario contract is reused, but the transport evidence contract changes."
+      placement: right
+      kind: action
+      advance: click-target
+      waitForTarget: intent-btn-next_leg
+      dwellMs: 3600
+    - id: pqa-second-leg
+      route: interactive
+      target: chat-section
+      title: Counters update
+      body: "Recording shows the current leg, recorded outcomes, and pass/fail/degraded counters while more legs remain."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 4500
+    - id: pqa-next-vscode
+      route: interactive
+      target: intent-btn-next_leg
+      title: Advance to VS Code
+      body: "VS Code is bridge-level proof today. Persona QA labels that honestly instead of pretending it has native editor-level evidence."
+      placement: right
+      kind: action
+      advance: click-target
+      waitForTarget: intent-btn-next_leg
+      dwellMs: 3600
+    - id: pqa-third-leg
+      route: interactive
+      target: chat-section
+      title: Degraded evidence stays visible
+      body: "A degraded transport leg is recorded as degraded-evidence and carried into the final report. Missing or fake media never becomes a pass."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 5000
+    - id: pqa-next-cli
+      route: interactive
+      target: intent-btn-next_leg
+      title: Advance to CLI
+      body: "The final leg uses terminal-level proof: command transcript, exit code, working directory, and trace references."
+      placement: right
+      kind: action
+      advance: click-target
+      waitForTarget: intent-btn-next_leg
+      dwellMs: 3600
+    - id: pqa-report
+      route: interactive
+      target: chat-section
+      title: One report and one deck
+      body: "After the final leg, the story folds report.md and deck.slidey.json from the accumulated driver and judge outcomes."
+      placement: right
+      kind: explain
+      advance: next
+      waitForTarget: chat-section
+      dwellMs: 5600
+    - id: pqa-done
+      route: interactive
+      title: Persona QA is closed out
+      body: "The run ends with per-transport verdicts, honest evidence levels, and a deterministic deck path ready for review."
+      placement: center
+      kind: explain
+      advance: next
+      dwellMs: 4200

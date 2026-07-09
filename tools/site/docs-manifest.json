@@ -113,6 +113,7 @@
     {
       "title": "Testing and replay",
       "items": [
+        { "from": "docs/persona-qa.md", "to": "guide/testing/persona-qa.md", "title": "Persona QA" },
         { "from": "docs/tracing/*.md", "to": "guide/tracing/" },
         { "from": "docs/testing/*.md", "to": "guide/testing/" }
       ]
