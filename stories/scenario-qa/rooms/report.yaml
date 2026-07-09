@@ -47,7 +47,7 @@ states:
       - heading: "Transport verdicts"
       - code: |
           {% for leg in world.leg_results.items %}
-          - {{ leg.transport }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}] verdict={{ leg.verdict }} driver={{ leg.driver_status }}
+          - {{ leg.transport }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}] verdict={{ leg.verdict }} driver={{ leg.driver_status }}{% if leg.playback_path %} playback={{ leg.playback_path }}{% endif %}
           {% endfor %}
       - choice:
           mode: single

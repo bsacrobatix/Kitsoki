@@ -2,8 +2,8 @@
 id: persona-qa
 kind: feature
 title: Persona QA
-tagline: Check one scenario across every operator transport with persona-shaped evidence.
-summary: "Persona QA is the scenario-qa story workflow: preview a scenario by transport, create a run bundle, drive one transport-pinned check at a time, judge captured evidence, then fold report.md and deck.slidey.json from the recorded outcomes."
+tagline: Preview a real QA request, run it across transports, and review one evidence-backed report.
+summary: "Persona QA is the scenario-qa story workflow: preview a plain-language QA request by transport, create a run bundle, drive one transport-pinned check at a time, judge captured evidence, then fold report.md and deck.slidey.json from the recorded outcomes and replay evidence."
 promo:
   order: 58
 docs:
@@ -21,36 +21,38 @@ demo:
   flow: stories/scenario-qa/flows/persona_qa_demo.yaml
 qa:
   scenarios:
-    - id: preview-suite
+    - id: preview-freeform-request
       required: true
-      title: Preview resolves the transport plan without creating a run
+      title: Preview resolves a real QA request without creating a run
       steps:
         - The tour opens on the Scenario QA story in the home library
-        - A preview request is typed for an arbitrary catalog scenario id
-        - The UI shows status ready with four transport checks and no run id
+        - A preview request is typed for required-input affordances on web and TUI
+        - The UI shows status ready with two transport checks and no run id
+        - The preview explains the behavior being checked, not an unrelated catalog scenario
     - id: check-first-leg
       required: true
-      title: Check creates a run bundle and records the first transport check
+      title: Check creates a run bundle and records the web transport check
       steps:
-        - A free-text check request is typed with transport, persona, target, and seed qualifiers
+        - A free-text check request is typed with transport, target, and seed qualifiers
         - The session reaches the recording state
-        - The recording view shows four total transport checks and a recorded driver plus judge outcome
-    - id: operator-paced-loop
+        - The recording view shows two total transport checks and a recorded driver plus judge outcome
+        - Pass, fail, and degraded counters are visible while the second transport remains
+    - id: next-leg-report
       required: true
-      title: Next transport advances one transport at a time
+      title: Next transport advances to TUI and produces the report
       steps:
         - A next transport action is visible while more transport checks remain
-        - The transport check count changes after next transport is selected
-        - The UI continues to show pass, fail, and degraded counters during the loop
+        - Selecting next transport drives the TUI check
+        - The final report shows two of two transport checks passed
     - id: report-and-deck
       required: true
-      title: Report closes out the run with transport verdicts and deck path
+      title: Report closes out the run with clickable artifacts and replay paths
       steps:
         - The final state is a Scenario QA report
-        - The report summary says three of four transport checks passed with one degraded-evidence check
+        - The report summary says two of two transport checks passed
         - The summary report path is visible as the primary report artifact
-        - The per-transport verdict table shows vscode as bridge-level and cli as terminal-level
         - A deck.slidey.json path is visible in the report
+        - Web and TUI replay paths are visible in the per-transport verdict list
         - A main room action is available from the closeout report
 tour:
   export: PERSONA_QA_TOUR_STEPS
@@ -88,8 +90,8 @@ tour:
     - id: pqa-preview
       route: interactive
       target: text-floor-input
-      title: Type a preview
-      body: "Preview takes a catalog scenario id and a transport selector, then explains the scenario goal and evidence expected for each transport before a run exists."
+      title: Preview the QA request
+      body: "The operator describes the real behavior they want checked: required user-input affordances for a QA engineer/developer, scoped to web and TUI."
       placement: right
       kind: explain
       advance: next
@@ -97,12 +99,12 @@ tour:
       dwellMs: 4200
       drive:
         - type: type-and-send
-          text: "preview prd-design across all transports"
+          text: "preview required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo"
     - id: pqa-preview-result
       route: interactive
       target: chat-section
-      title: Four transport checks, no run
-      body: "The idle view now shows a readable scenario goal, four planned transport checks, and no run id. This is the operator's dry-run check before spending capture time."
+      title: Two transport checks, no run
+      body: "The preview names the requested behavior, lists web and TUI evidence contracts, and keeps the run id empty because no capture has started."
       placement: right
       kind: explain
       advance: next
@@ -112,7 +114,7 @@ tour:
       route: interactive
       target: text-floor-input
       title: Type a check request
-      body: "The same input can be plain prose plus qualifiers: transport, persona, target, seed, profile, or a catalog scenario id. Without scenario=, the prose becomes an ad-hoc scenario."
+      body: "The check uses the same plain-language request without the preview prefix. Without scenario=, the prose becomes an ad-hoc scenario."
       placement: right
       kind: explain
       advance: next
@@ -120,62 +122,22 @@ tour:
       dwellMs: 4300
       drive:
         - type: type-and-send
-          text: "settings validation persists transport=all target=gears-rust seed=demo"
+          text: "required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo"
     - id: pqa-recording
       route: interactive
       target: chat-section
-      title: First transport recorded
-      body: "The story pauses in recording after one transport check. That pacing keeps multi-transport runs inspectable and avoids a long internal auto-cascade."
+      title: Web transport recorded
+      body: "The story pauses after the first transport check with driver status, judge verdict, and counters visible before TUI runs."
       placement: right
       kind: explain
       advance: next
       waitForTarget: chat-section
       dwellMs: 5200
-    - id: pqa-next-web
+    - id: pqa-next-tui
       route: interactive
       target: intent-btn-next_leg
-      title: Advance one transport
-      body: "Next transport advances exactly one transport check. The same scenario contract is reused, but the transport evidence contract changes."
-      placement: right
-      kind: action
-      advance: click-target
-      waitForTarget: intent-btn-next_leg
-      dwellMs: 3600
-    - id: pqa-second-leg
-      route: interactive
-      target: chat-section
-      title: Counters update
-      body: "Recording shows the current transport check, recorded outcomes, and pass/fail/degraded counters while more transports remain."
-      placement: right
-      kind: explain
-      advance: next
-      waitForTarget: chat-section
-      dwellMs: 4500
-    - id: pqa-next-vscode
-      route: interactive
-      target: intent-btn-next_leg
-      title: Continue through transports
-      body: "VS Code is bridge-level proof today. Persona QA labels that honestly instead of pretending it has native editor-level evidence."
-      placement: right
-      kind: action
-      advance: click-target
-      waitForTarget: intent-btn-next_leg
-      dwellMs: 3600
-    - id: pqa-third-leg
-      route: interactive
-      target: chat-section
-      title: Degraded evidence stays visible
-      body: "A degraded transport check is recorded as degraded-evidence and carried into the final report. Missing or fake media never becomes a pass."
-      placement: right
-      kind: explain
-      advance: next
-      waitForTarget: chat-section
-      dwellMs: 5000
-    - id: pqa-next-cli
-      route: interactive
-      target: intent-btn-next_leg
-      title: Finish the transport set
-      body: "The final transport uses terminal-level proof: command transcript, exit code, working directory, and trace references."
+      title: Drive the TUI check
+      body: "Next transport advances exactly one transport check. The same scenario contract is reused, but the evidence contract changes to a rendered TUI frame."
       placement: right
       kind: action
       advance: click-target
@@ -185,7 +147,7 @@ tour:
       route: interactive
       target: chat-section
       title: One report and one deck
-      body: "After the final transport check, the closeout view shows the result counts first, then a clickable summary report and the review deck path."
+      body: "After the TUI check, the closeout view shows the two-pass result first, then the summary report, review deck, and replay paths."
       placement: right
       kind: explain
       advance: next
@@ -204,7 +166,7 @@ tour:
     - id: pqa-done
       route: interactive
       title: Persona QA is closed out
-      body: "The run ends with per-transport verdicts, honest evidence levels, a summary report, and a clear route back to the main room. The scenario came from operator input, not a fixed button."
+      body: "The run ends with per-transport verdicts, replay evidence, a summary report, and a clear route back to the main room. The scenario came from operator input, not a fixed button."
       placement: center
       kind: explain
       advance: next

@@ -3,6 +3,7 @@ inputs:
   run_id:        { type: string, required: true }
   description:   { type: string, required: false }
   primary_story: { type: string, required: false }
+  last_result:   { type: object, required: false }
 
 outputs:
   legs:          { type: object }

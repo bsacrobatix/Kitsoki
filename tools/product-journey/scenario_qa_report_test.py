@@ -62,6 +62,8 @@ _LEG_RESULTS = {
             "driver_status": "captured",
             "verdict": "pass",
             "verdict_summary": "TUI frame confirms the fix.",
+            "playback_path": "clips/tui-required-input.rrweb.json",
+            "playback_caption": "TUI replay shows the input-required prompt and answer path.",
             "natural_utterance_count": 2,
             "natural_utterance_example": "resolve the red gate test that's already written but not committed",
             "natural_utterance_sources": [
@@ -69,7 +71,15 @@ _LEG_RESULTS = {
                 "mined-scn-c4d281a2-30e4-4002-9152-59d28d824abc-0001",
             ],
         },
-        {"leg_id": "bugfix::web", "scenario": "bugfix", "transport": "web", "driver_status": "captured", "verdict": "pass", "verdict_summary": "Browser screenshot confirms the fix."},
+        {
+            "leg_id": "bugfix::web",
+            "scenario": "bugfix",
+            "transport": "web",
+            "driver_status": "captured",
+            "verdict": "pass",
+            "verdict_summary": "Browser screenshot confirms the fix.",
+            "evidence_refs": [{"path": "clips/web-required-input.rrweb.json", "caption": "Web replay shows the forwarded question modal."}],
+        },
         {"leg_id": "bugfix::vscode", "scenario": "bugfix", "transport": "vscode", "driver_status": "degraded-evidence", "verdict": "degraded-evidence", "verdict_summary": "IDE bridge came back JSON-degraded."},
     ]
 }
@@ -148,6 +158,16 @@ def _test_natural_prompt_lines():
     _check("natural prompt line carries source refs", "mined-scn-1b4ace86-f192-43b0-ab86-16142fec0079-0001" in line)
 
 
+def _test_playback_items():
+    items = run.scenario_qa_leg_items(_LEG_RESULTS)
+    playback = run.scenario_qa_playback_items(items)
+    _check("playback items include explicit playback_path and rrweb evidence refs", len(playback) == 2)
+    paths = {item["path"] for item in playback}
+    _check("playback items include the TUI rrweb path", "clips/tui-required-input.rrweb.json" in paths)
+    _check("playback items include the web rrweb path", "clips/web-required-input.rrweb.json" in paths)
+    _check("playback items are rendered as video media", all(item["media_kind"] == "video" for item in playback))
+
+
 def _test_parse_leg_results(tmp: Path):
     _check("empty raw returns an empty items list", run.parse_scenario_qa_leg_results("") == {"items": []})
     inline = json.dumps({"items": [{"transport": "tui"}]})
@@ -185,6 +205,11 @@ def _test_render_deck():
     _check("the deck carries the run id", "scenario-qa-run-all" in body_text)
     _check("the deck's summary scene names the pass/total ratio", "2 / 3 transport checks passed" in body_text)
     _check("the deck includes a natural prompt scene", "Natural prompts" in body_text)
+    _check("the deck includes a session evidence scene", "Session evidence" in body_text)
+    _check("the deck includes user session replay scenes", "User session replay" in body_text)
+    _check("the deck carries the TUI rrweb path", "clips/tui-required-input.rrweb.json" in body_text)
+    _check("the deck carries the web rrweb path", "clips/web-required-input.rrweb.json" in body_text)
+    _check("the deck emits rrweb scene keys", "\"rrweb\"" in body_text)
     _check("the deck labels transcript-derived wording", "Transcript-derived scenario wording" in body_text)
     _check("the deck carries the natural prompt count", "2 transcript-derived prompt" in body_text)
     _check("the deck carries the natural prompt example", "resolve the red gate test" in body_text)
@@ -259,6 +284,8 @@ def _test_cli(tmp: Path):
     _check("the written deck names the scenario", written["scenes"][0]["subtitle"] == "bugfix")
     written_text = json.dumps(written)
     _check("the written deck includes natural prompt coverage", "Transcript-derived scenario wording" in written_text)
+    _check("the written deck embeds playback coverage", "User session replay" in written_text)
+    _check("the written deck preserves rrweb replay paths", "clips/web-required-input.rrweb.json" in written_text)
     _check("the written deck preserves the mined example", "resolve the red gate test" in written_text)
     review_path = Path(payload["review_path"])
     _check("CLI writes review.json into the run dir", review_path == run_dir / "review.json")
@@ -300,6 +327,7 @@ def main():
     _test_leg_counts()
     _test_leg_level()
     _test_natural_prompt_lines()
+    _test_playback_items()
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         _test_parse_leg_results(tmp)

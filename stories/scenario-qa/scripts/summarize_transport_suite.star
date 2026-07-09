@@ -87,6 +87,8 @@ def _transport_name(leg):
 def main(ctx):
     suite = _dict(ctx.inputs.get("suite", {}))
     scenario_ref = _str(ctx.inputs.get("scenario_ref", ""))
+    scenario_description = _str(ctx.inputs.get("scenario_description", ""))
+    mode = _str(ctx.inputs.get("mode", "catalog"))
     summary = _dict(suite.get("summary", {}))
     scenarios = _list(suite.get("scenarios", []))
     legs = _list(suite.get("legs", []))
@@ -94,7 +96,9 @@ def main(ctx):
     leg_count = int(summary.get("leg_count", len(legs)) or 0)
     skipped_count = int(summary.get("skipped_count", 0) or 0)
     scenario_name = "the requested scenario"
-    if len(scenarios) > 0:
+    if mode == "adhoc" and scenario_description != "":
+        scenario_name = scenario_description
+    elif len(scenarios) > 0:
         scenario_name = _scenario_name(_dict(scenarios[0]), scenario_ref)
     elif scenario_ref != "":
         scenario_name = "`" + scenario_ref + "`"
@@ -117,7 +121,14 @@ def main(ctx):
         )
 
     lines = []
-    if len(scenarios) > 0:
+    if mode == "adhoc" and scenario_description != "":
+        lines.append("Scenario: " + scenario_description)
+        lines.append("Goal: Check that the requested behavior is usable in the selected transports: " + scenario_description)
+        requested = _join(_list(summary.get("requested_transports", [])), ", ")
+        if requested != "":
+            lines.append("Transports to check: " + requested)
+        lines.append("")
+    elif len(scenarios) > 0:
         for scenario in scenarios:
             scenario = _dict(scenario)
             lines.append("Scenario: " + _scenario_name(scenario, scenario_ref))

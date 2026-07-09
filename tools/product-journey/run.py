@@ -2905,21 +2905,19 @@ def playback_scene_for_item(item: dict) -> Optional[dict]:
             "caption": caption,
             "chapters": "auto",
             "narration": f"Playback evidence for {title}.",
-            "product_journey_media": item,
         }
         if suffix == ".json" or path.endswith(".rrweb.json"):
             scene["rrweb"] = path
         else:
-            scene["video"] = path
+            scene["src"] = path
         return scene
     if item.get("media_kind") == "image":
         return {
-            "type": "narrative",
+            "type": "image",
             "eyebrow": "Playback evidence",
             "title": title,
-            "body": caption,
-            "image": path,
-            "product_journey_media": item,
+            "src": path,
+            "caption": caption,
             "narration": f"Screenshot evidence for {title}.",
         }
     return None
@@ -9036,6 +9034,8 @@ def validate_slidey_deck_shape(deck: dict, media_manifest: dict, issues: list[di
     for key in ["title", "mode", "phase", "resolution"]:
         if key not in meta:
             add_validation_issue(issues, "error", "deck-meta", "deck.slidey.json meta is missing required keys", key)
+    if meta.get("mode") not in {"api", "pitch"}:
+        add_validation_issue(issues, "error", "deck-meta-mode", "deck.slidey.json meta.mode must be api or pitch", str(meta.get("mode", "")))
     resolution = meta.get("resolution", {})
     if not isinstance(resolution, dict) or not resolution.get("width") or not resolution.get("height"):
         add_validation_issue(issues, "error", "deck-resolution", "deck.slidey.json meta.resolution must include width and height")
@@ -9044,7 +9044,7 @@ def validate_slidey_deck_shape(deck: dict, media_manifest: dict, issues: list[di
     if not isinstance(scenes, list) or not scenes:
         add_validation_issue(issues, "error", "deck-scenes", "deck.slidey.json scenes must be a non-empty list")
         return
-    allowed_scene_types = {"title", "narrative", "video", "cards", "quote", "table"}
+    allowed_scene_types = {"title", "narrative", "video", "cards", "quote", "table", "image", "evidence"}
     missing_scene_keys = []
     invalid_scene_types = []
     malformed_media = []
@@ -9054,9 +9054,9 @@ def validate_slidey_deck_shape(deck: dict, media_manifest: dict, issues: list[di
             continue
         if scene.get("type", "") not in allowed_scene_types:
             invalid_scene_types.append(f"{index}:{scene.get('type', '')}")
-        if not scene.get("title"):
+        if scene.get("type") == "title" and not scene.get("title"):
             missing_scene_keys.append(f"{index}/title")
-        if scene.get("type") != "title" and "body" not in scene and "media" not in scene and "video" not in scene and "image" not in scene and "cards" not in scene:
+        if scene.get("type") != "title" and "body" not in scene and "media" not in scene and "video" not in scene and "image" not in scene and "cards" not in scene and "items" not in scene and "rrweb" not in scene and "src" not in scene and "lede" not in scene:
             missing_scene_keys.append(f"{index}/content")
         if "media" in scene:
             if not isinstance(scene.get("media"), list):
@@ -9087,7 +9087,7 @@ def validate_slidey_deck_shape(deck: dict, media_manifest: dict, issues: list[di
         if isinstance(media, dict) and media.get("path")
     }
     standalone_playback_paths = {
-        scene.get("video") or scene.get("image") or scene.get("rrweb") or ""
+        scene.get("src") or scene.get("video") or scene.get("image") or scene.get("rrweb") or ""
         for scene in scenes
         if isinstance(scene, dict) and scene.get("eyebrow") == "Playback evidence"
     }
@@ -10706,7 +10706,7 @@ def render_matrix_deck(matrix: dict) -> dict:
             task_lines.append(f"{assignment['target']['label']} / {assignment['persona']['label']}: {first_task.get('task_prompt', '')}")
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Product Journey GitHub Matrix",
             "phase": "planning",
             "resolution": {"width": 1920, "height": 1080},
@@ -11343,7 +11343,7 @@ def render_rollup_deck(rollup: dict) -> dict:
     ]
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Product Journey Matrix Rollup",
             "phase": "rollup",
             "resolution": {"width": 1920, "height": 1080},
@@ -11523,7 +11523,7 @@ def render_dogfood_smoke_deck(report: dict) -> dict:
     ])
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Product Journey Dogfood Smoke",
             "phase": "dogfood-smoke",
             "resolution": {"width": 1920, "height": 1080},
@@ -11647,7 +11647,7 @@ def render_driver_replay_smoke_deck(report: dict) -> dict:
     ]
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Product Journey Driver Replay Smoke",
             "phase": "driver-replay-smoke",
             "resolution": {"width": 1920, "height": 1080},
@@ -11728,7 +11728,7 @@ def render_driver_replay_sweep_deck(report: dict) -> dict:
     ]
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Product Journey Driver Replay Sweep",
             "phase": "driver-replay-sweep",
             "resolution": {"width": 1920, "height": 1080},
@@ -11945,6 +11945,74 @@ def scenario_qa_natural_prompt_lines(items: list[dict]) -> list[str]:
     return lines
 
 
+def scenario_qa_playback_refs(item: dict) -> list[dict]:
+    """Return playback references carried by a recorded scenario-qa leg.
+
+    The story records whatever the driver/judge actually produced. Newer driver
+    results can carry an explicit playback_path/playback_ref; older rows may
+    only have evidence_refs. Treat only obvious playback media as deck scenes.
+    """
+    refs: list[dict] = []
+
+    def add_ref(raw, label: str = "") -> None:
+        if isinstance(raw, dict):
+            path = str(raw.get("path") or raw.get("ref") or raw.get("href") or "")
+            notes = str(raw.get("notes") or raw.get("summary") or raw.get("caption") or label)
+        else:
+            path = str(raw or "")
+            notes = label
+        path = path.strip()
+        if not path:
+            return
+        lower = path.lower()
+        if not (lower.endswith(".rrweb.json") or lower.endswith(".mp4") or lower.endswith(".webm") or lower.endswith(".mov")):
+            return
+        if any(existing.get("path") == path for existing in refs):
+            return
+        refs.append({"path": path, "notes": notes})
+
+    for key in ["playback_path", "playback_ref", "rrweb_path", "video_path"]:
+        add_ref(item.get(key), str(item.get("playback_caption") or item.get("verdict_summary") or ""))
+
+    evidence_refs = item.get("evidence_refs", [])
+    if isinstance(evidence_refs, list):
+        for ref in evidence_refs:
+            add_ref(ref, str(item.get("verdict_summary") or ""))
+
+    return refs
+
+
+def scenario_qa_playback_items(items: list[dict]) -> list[dict]:
+    playback = []
+    for item in items:
+        refs = scenario_qa_playback_refs(item)
+        for ref in refs:
+            path = ref["path"]
+            playback.append({
+                "scenario": item.get("scenario", ""),
+                "transport": item.get("transport", ""),
+                "evidence_kind": item.get("playback_kind") or "session_replay",
+                "media_kind": "video",
+                "path": path,
+                "status": "captured",
+                "source": item.get("playback_source") or "local",
+                "notes": ref.get("notes") or item.get("verdict_summary", ""),
+                "playback": True,
+            })
+    return playback
+
+
+def scenario_qa_deck_status(verdict: str) -> str:
+    normalized = (verdict or "").strip().lower()
+    if normalized == "pass":
+        return "validated"
+    if normalized in {"fail", "failed"}:
+        return "issue"
+    if "degraded" in normalized:
+        return "skipped"
+    return "pending"
+
+
 def parse_scenario_qa_leg_results(raw: str) -> dict:
     """Accepts an inline JSON object (the common case -- a story's `host.run`
     invoke templates world.leg_results, a map, directly into this flag and the
@@ -11969,13 +12037,23 @@ def parse_scenario_qa_leg_results(raw: str) -> dict:
 
 
 def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: dict) -> dict:
-    rows = [
-        f"{item.get('transport', '')} ({scenario_qa_leg_level(item)}) / {item.get('scenario', '')}: "
-        f"driver={item.get('driver_status', '')} verdict={item.get('verdict', '')} "
-        f"- {item.get('verdict_summary', '')}"
-        for item in items
-    ]
     natural_prompt_lines = scenario_qa_natural_prompt_lines(items)
+    playback_items = scenario_qa_playback_items(items)
+    verdict_items = []
+    for item in items[:6]:
+        playback_refs = scenario_qa_playback_refs(item)
+        ref = playback_refs[0]["path"] if playback_refs else item.get("leg_id", "")
+        verdict_items.append({
+            "label": f"{item.get('transport', '')} / {scenario_qa_leg_level(item)}",
+            "status": scenario_qa_deck_status(str(item.get("verdict", ""))),
+            "detail": (
+                f"{item.get('verdict_summary', '')} "
+                f"(driver={item.get('driver_status', '')}, verdict={item.get('verdict', '')})"
+            ).strip(),
+            "refType": "artifact" if playback_refs else "log",
+            "ref": ref,
+            "note": item.get("scenario", ""),
+        })
     scenes = [
         {
             "type": "title",
@@ -11984,31 +12062,56 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
             "narration": "This deck folds every transport check's independently-judged verdict into one per-scenario view.",
         },
         {
-            "type": "narrative",
-            "eyebrow": "Verdict",
+            "type": "evidence",
             "title": scenario_qa_report_summary(name, counts),
-            "body": "\n".join(f"- {row}" for row in rows) or "(no transport checks recorded yet)",
+            "items": verdict_items or [{
+                "label": "No transport checks recorded",
+                "status": "pending",
+                "detail": "Run the scenario across one or more transports before reviewing this report.",
+            }],
             "narration": "Each row is one transport check: an independently-driven and independently-judged capture, never the driver's own self-report.",
         },
     ]
+    if playback_items:
+        scenes.append({
+            "type": "evidence",
+            "title": f"Session evidence: {len(playback_items)} user session replay(s) embedded",
+            "items": [
+                {
+                    "label": f"{item.get('transport', '')} user session",
+                    "status": "done",
+                    "detail": item.get("notes", "") or "Recorded user-session playback.",
+                    "refType": "artifact",
+                    "ref": item.get("path", ""),
+                    "note": item.get("scenario", ""),
+                }
+                for item in playback_items
+            ][:6],
+            "narration": "The report embeds the recorded user sessions for the transports that produced playback evidence.",
+        })
+        for playback in playback_items:
+            scene = playback_scene_for_item(playback)
+            if scene is not None:
+                scene["eyebrow"] = "User session replay"
+                scenes.append(scene)
     if natural_prompt_lines:
         scenes.append({
             "type": "narrative",
             "eyebrow": "Natural prompts",
-            "title": "Transcript-derived scenario wording",
+            "lede": "Transcript-derived scenario wording",
             "body": "\n".join(f"- {line}" for line in natural_prompt_lines),
             "narration": "Scenario QA preserves the mined human wording that the driver used for natural persona actions.",
         })
     scenes.append({
         "type": "narrative",
         "eyebrow": "Run",
-        "title": run_id,
+        "lede": run_id,
         "body": f"{counts['total']} transport check(s); {counts['pass']} pass, {counts['fail']} fail, {counts['degraded']} degraded-evidence.",
         "narration": "vscode legs are always bridge-level proof (the IDE bridge stub/recording path) -- never mistake them for editor-level coverage.",
     })
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Scenario QA",
             "phase": "scenario-qa-report",
             "resolution": {"width": 1920, "height": 1080},
@@ -12792,7 +12895,7 @@ def render_deck(
     ])
     return {
         "meta": {
-            "mode": "report",
+            "mode": "pitch",
             "title": "Product Journey QA",
             "phase": "dry-run",
             "resolution": {"width": 1920, "height": 1080},
