@@ -7,6 +7,8 @@ produce or run a concrete backend command.
 
 ## Launching
 
+- [`mcp.md`](mcp.md) — use Kitsoki through Studio MCP from Codex/Claude, including
+  story driving, dynamic workflows, CodeAct, and agent launch patterns.
 - [`launch.md`](launch.md) — `kitsoki agent launch` use cases, dry-runs,
   interactive Codex sessions, CodeAct mode, and safety behavior.
 - [`launch-policy.md`](launch-policy.md) — local preflight policy that keeps
