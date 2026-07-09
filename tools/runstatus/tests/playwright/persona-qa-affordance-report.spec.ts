@@ -565,7 +565,9 @@ function buildDeck(legResultsPath: string): string {
   const deckPath = path.join(RUN_DIR, "deck.slidey.json");
   const deck = JSON.parse(fs.readFileSync(deckPath, "utf8"));
   const deckText = JSON.stringify(deck);
-  expect(deckText).toContain("What was checked");
+  expect(deckText).toContain("Transport checks");
+  expect(deckText).toContain("input path");
+  expect(deckText).toContain("plan preview");
   expect(deckText).toContain("User session replay");
   expect(deckText).toContain("clips/web-required-input.rrweb.json");
   expect(deckText).toContain("clips/tui-required-input.rrweb.json");
@@ -581,6 +583,46 @@ function ensureLocalSlideyWebBuild(): void {
     encoding: "utf8",
   });
   expect(result.status, result.stderr || result.stdout).toBe(0);
+}
+
+async function settleSlidey(page: Page): Promise<void> {
+  await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.()).catch(() => undefined);
+}
+
+function contentMatches(content: string, text: string | RegExp): boolean {
+  return typeof text === "string" ? content.includes(text) : text.test(content);
+}
+
+async function advanceUntilText(page: Page, text: string | RegExp, maxSteps = 18): Promise<void> {
+  const body = page.locator("body");
+  for (let i = 0; i <= maxSteps; i++) {
+    const content = await body.textContent({ timeout: 2_000 }).catch(() => "");
+    if (contentMatches(content, text)) return;
+    await page.keyboard.press("ArrowRight");
+    await settleSlidey(page);
+    await dwell(page, 180);
+  }
+  await expect(body).toContainText(text, { timeout: 1_000 });
+}
+
+async function advanceSteps(page: Page, count: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await page.keyboard.press("ArrowRight");
+    await settleSlidey(page);
+    await dwell(page, 180);
+  }
+}
+
+async function gotoSlide(page: Page, baseUrl: string, scene: number, step: number, expectedText: string | RegExp): Promise<void> {
+  const url = `${baseUrl}?scene=${scene}&step=${step}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await settleSlidey(page);
+    await dwell(page, 300);
+    const content = await page.locator("body").textContent({ timeout: 2_000 }).catch(() => "");
+    if (content.trim() !== "Not found" && contentMatches(content, expectedText)) return;
+  }
+  await expect(page.locator("body")).toContainText(expectedText, { timeout: 15_000 });
 }
 
 async function openAndClickThrough(deckPath: string): Promise<void> {
@@ -606,14 +648,18 @@ async function openAndClickThrough(deckPath: string): Promise<void> {
     await dwell(page, 900);
     await shot(page, "01-title");
 
-    await page.goto(`${baseUrl}?scene=1&step=3`);
-    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
-    await expect(page.getByText(/Web UI: required user input affordance/).first()).toBeVisible({ timeout: 15_000 });
+    await advanceUntilText(page, "Transport checks: 2 / 2 passed");
+    await advanceSteps(page, 3);
+    await expect(page.locator("body")).toContainText("Transport checks: 2 / 2 passed", { timeout: 15_000 });
+    await expect(page.getByText("Web UI").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("input path, plan preview").first()).toBeVisible({ timeout: 15_000 });
+    await dwell(page, 900);
     await shot(page, "02-transport-checks");
 
-    await page.goto(`${baseUrl}?scene=2&step=2`);
-    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await advanceUntilText(page, "Session evidence: 2 user session replay(s) embedded");
+    await advanceSteps(page, 2);
     await expect(page.getByTestId("evidence-open-rrweb").first()).toBeVisible({ timeout: 15_000 });
+    await dwell(page, 900);
     await shot(page, "03-session-evidence");
 
     await page.getByTestId("evidence-open-rrweb").first().click();
@@ -624,8 +670,7 @@ async function openAndClickThrough(deckPath: string): Promise<void> {
     await page.getByTestId("rrweb-popout-close").click();
     await expect(page.getByTestId("rrweb-popout-modal")).toHaveCount(0, { timeout: 15_000 });
 
-    await page.goto(`${baseUrl}?scene=2&step=2`);
-    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await gotoSlide(page, baseUrl, 2, 2, "Session evidence: 2 user session replay(s) embedded");
     await expect(page.getByTestId("evidence-open-rrweb")).toHaveCount(2, { timeout: 15_000 });
     await page.getByTestId("evidence-open-rrweb").nth(1).evaluate((el) => (el as HTMLElement).click());
     await expect(page.getByTestId("rrweb-popout-modal")).toBeVisible({ timeout: 15_000 });
@@ -634,13 +679,11 @@ async function openAndClickThrough(deckPath: string): Promise<void> {
     await shot(page, "04b-tui-rrweb-popout");
     await page.getByTestId("rrweb-popout-close").click();
 
-    await page.goto(`${baseUrl}?scene=3&step=0`);
-    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await gotoSlide(page, baseUrl, 3, 0, "User session replay");
     await expect(page.getByText("User session replay").first()).toBeVisible({ timeout: 15_000 });
     await shot(page, "05-web-replay-slide");
 
-    await page.goto(`${baseUrl}?scene=5&step=2`);
-    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await gotoSlide(page, baseUrl, 5, 2, /2 transport check\(s\); 2 pass/);
     await expect(page.locator("body")).toContainText(RUN_ID, { timeout: 15_000 });
     await expect(page.getByText(/2 transport check\(s\); 2 pass/).first()).toBeVisible({ timeout: 15_000 });
     await shot(page, "06-run-summary");
