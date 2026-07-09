@@ -5,7 +5,7 @@
  * deterministic no-LLM posture. The flow fixture stubs host calls so the
  * browser still exercises the story surface end to end:
  *
- *   home -> new session -> preview -> check -> next leg -> next leg
+ *   home -> new session -> type preview -> type check -> next leg -> next leg
  *   -> next leg -> report
  *
  * Validate fast:
@@ -29,6 +29,7 @@ import {
   writeChapters,
   demoAddr,
   SETTLE_MS,
+  PACE,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
@@ -72,6 +73,22 @@ function resolveTarget(page: Page, step: TourStep): Locator {
   return page.getByTestId(step.target!).first();
 }
 
+async function typeAndSend(page: Page, text: string, beforeSend?: () => Promise<void>): Promise<void> {
+  const input = page.getByTestId("text-floor-input").or(page.getByTestId("composer-input")).first();
+  await expect(input).toBeVisible({ timeout: 15000 });
+  await input.scrollIntoViewIfNeeded().catch(() => undefined);
+  await input.click();
+  await input.fill("");
+  await input.pressSequentially(text, { delay: Math.round(24 * PACE) });
+  await dwell(page, 1200);
+  if (beforeSend) {
+    await beforeSend();
+    await dwell(page, 500);
+  }
+  const send = page.getByTestId("text-floor-send").or(page.getByTestId("composer-send")).first();
+  await send.evaluate((el) => (el as HTMLButtonElement).click());
+}
+
 async function injectTour(page: Page): Promise<void> {
   await page.evaluate((stepsJson: string) => {
     (window as unknown as { __startTourWithSteps?: (s: string) => void })
@@ -96,6 +113,7 @@ async function waitForScenarioQASettle(page: Page, step: TourStep): Promise<void
     await waitForState(page, "recording", 15000);
     await expect(page.getByTestId("chat-section")).toContainText(/Leg\s*0 \/ 4/, { timeout: 15000 });
     await expect(page.getByTestId("chat-section")).toContainText(/Driver status\s*captured/, { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("settings form keeps validation errors", { timeout: 15000 });
     return;
   }
   if (step.id === "pqa-next-web") {
@@ -112,7 +130,26 @@ async function waitForScenarioQASettle(page: Page, step: TourStep): Promise<void
   if (step.id === "pqa-next-cli") {
     await waitForState(page, "report", 15000);
     await expect(page.getByTestId("chat-section")).toContainText("3 / 4 transport legs passed, 1 degraded-evidence", { timeout: 15000 });
+    await expect(page.getByTestId("chat-section")).toContainText("adhoc-settings-form-keeps-validation-errors", { timeout: 15000 });
     await expect(page.getByTestId("chat-section")).toContainText("deck.slidey.json", { timeout: 15000 });
+  }
+}
+
+async function runStepDrive(page: Page, step: TourStep, shot?: (page: Page, label: string) => Promise<string>): Promise<void> {
+  for (const action of step.drive ?? []) {
+    if (action.type === "type-and-send") {
+      await typeAndSend(page, action.text, shot ? () => shot(page, `${step.id}-typed`) : undefined);
+    } else if (action.type === "click-intent") {
+      await page.getByTestId(`intent-btn-${action.intent}`).first().evaluate((el) => (el as HTMLElement).click());
+    } else if (action.type === "wait-state") {
+      await waitForState(page, action.state, 15000);
+    } else if (action.type === "dwell-ms") {
+      await dwell(page, action.ms);
+    }
+  }
+  if ((step.drive ?? []).length > 0) {
+    await waitForScenarioQASettle(page, step);
+    await dwell(page, SETTLE_MS);
   }
 }
 
@@ -164,6 +201,7 @@ test("persona qa end-to-end tour video", async () => {
       await shot(page, step.id);
 
       if (step.kind === "explain") {
+        await runStepDrive(page, step, shot);
         await page.getByTestId("tour-next").click();
         await dwell(page, 700);
       } else {

@@ -1,7 +1,8 @@
 # persona_qa_demo — no-LLM fixture for the Persona QA feature tour.
 #
-# It combines the side-effect-free preview and the all-transports check into one
-# deterministic run so the web demo can show the complete operator workflow:
+# It combines a typed side-effect-free preview and a generalized free-text
+# all-transports check into one deterministic run so the web demo can show the
+# complete operator workflow:
 # preview -> check -> next leg -> next leg -> next leg -> report.
 
 test_kind: flow
@@ -25,10 +26,10 @@ host_handlers:
               leg_count: 4
               skipped_count: 0
             legs:
-              - { leg_id: "bugfix::tui", scenario: bugfix, transport: tui }
-              - { leg_id: "bugfix::web", scenario: bugfix, transport: web }
-              - { leg_id: "bugfix::vscode", scenario: bugfix, transport: vscode }
-              - { leg_id: "bugfix::cli", scenario: bugfix, transport: cli }
+              - { leg_id: "prd-design::tui", scenario: prd-design, transport: tui }
+              - { leg_id: "prd-design::web", scenario: prd-design, transport: web }
+              - { leg_id: "prd-design::vscode", scenario: prd-design, transport: vscode }
+              - { leg_id: "prd-design::cli", scenario: prd-design, transport: cli }
       emit_scenario_qa_run:
         data:
           ok: true
@@ -55,42 +56,58 @@ host_handlers:
 
   host.starlark.run:
     by_call:
+      parse_check_request:
+        data:
+          scenario_ref: ""
+          scenario_description: "settings form keeps validation errors"
+          transport_arg: all
+          persona: core-maintainer
+          target: gears-rust
+          seed: story-flow-demo
+          live_profile: ""
+          live_budget_minutes: 0
+          mode: adhoc
+          request_status: { parsed: true, source: request }
       plan_legs:
         data:
           legs:
             items:
-              - leg_id: "bugfix::tui"
-                scenario: "bugfix"
+              - leg_id: "adhoc-settings-form-keeps-validation-errors::tui"
+                scenario: "adhoc-settings-form-keeps-validation-errors"
+                label: "settings form keeps validation errors"
                 transport: "tui"
                 visual_surface: "tui"
-                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                evidence_dir: "evidence/adhoc-settings-form-keeps-validation-errors/tui"
                 transport_evidence_contract:
                   primary_tool: "render.tui_png"
                   evidence_kind: "rendered_tui_frame"
                   level: "frame-level"
-              - leg_id: "bugfix::web"
-                scenario: "bugfix"
+              - leg_id: "adhoc-settings-form-keeps-validation-errors::web"
+                scenario: "adhoc-settings-form-keeps-validation-errors"
+                label: "settings form keeps validation errors"
                 transport: "web"
                 visual_surface: "web"
-                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                evidence_dir: "evidence/adhoc-settings-form-keeps-validation-errors/web"
                 transport_evidence_contract:
                   primary_tool: "visual.snapshot"
                   evidence_kind: "browser_screenshot"
                   level: "frame-level"
-              - leg_id: "bugfix::vscode"
-                scenario: "bugfix"
+              - leg_id: "adhoc-settings-form-keeps-validation-errors::vscode"
+                scenario: "adhoc-settings-form-keeps-validation-errors"
+                label: "settings form keeps validation errors"
                 transport: "vscode"
                 visual_surface: "vscode"
-                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                evidence_dir: "evidence/adhoc-settings-form-keeps-validation-errors/vscode"
                 transport_evidence_contract:
                   primary_tool: "visual.open (kind=vscode)"
                   evidence_kind: "screenshot_or_tui_png"
                   level: "bridge-level"
-              - leg_id: "bugfix::cli"
-                scenario: "bugfix"
+              - leg_id: "adhoc-settings-form-keeps-validation-errors::cli"
+                scenario: "adhoc-settings-form-keeps-validation-errors"
+                label: "settings form keeps validation errors"
                 transport: "cli"
                 visual_surface: "cli"
-                evidence_dir: "evidence/gears-rust--core-maintainer/bugfix"
+                evidence_dir: "evidence/adhoc-settings-form-keeps-validation-errors/cli"
                 transport_evidence_contract:
                   primary_tool: "command transcript"
                   evidence_kind: "command_output"
@@ -102,20 +119,20 @@ host_handlers:
       pick_leg:
         data:
           current_leg:
-            leg_id: "bugfix::tui"
-            scenario: "bugfix"
+            leg_id: "adhoc-settings-form-keeps-validation-errors::tui"
+            scenario: "adhoc-settings-form-keeps-validation-errors"
             transport: "tui"
             visual_surface: "tui"
-          current_leg_id: "bugfix::tui"
-          current_leg_json: '{"leg_id":"bugfix::tui","scenario":"bugfix","transport":"tui","visual_surface":"tui"}'
+          current_leg_id: "adhoc-settings-form-keeps-validation-errors::tui"
+          current_leg_json: '{"leg_id":"adhoc-settings-form-keeps-validation-errors::tui","scenario":"adhoc-settings-form-keeps-validation-errors","transport":"tui","visual_surface":"tui"}'
       record_leg_result:
         data:
           leg_results:
             items:
-              - { leg_id: "bugfix::tui", scenario: "bugfix", transport: "tui", evidence_level: "frame-level", driver_status: "captured", verdict: "pass", verdict_summary: "TUI frame confirms the fix." }
-              - { leg_id: "bugfix::web", scenario: "bugfix", transport: "web", evidence_level: "frame-level", driver_status: "captured", verdict: "pass", verdict_summary: "Browser screenshot confirms the fix." }
-              - { leg_id: "bugfix::vscode", scenario: "bugfix", transport: "vscode", evidence_level: "bridge-level", driver_status: "degraded-evidence", verdict: "degraded-evidence", verdict_summary: "VS Code bridge returned degraded JSON evidence." }
-              - { leg_id: "bugfix::cli", scenario: "bugfix", transport: "cli", evidence_level: "terminal-level", driver_status: "captured", verdict: "pass", verdict_summary: "Command transcript captured." }
+              - { leg_id: "adhoc-settings-form-keeps-validation-errors::tui", scenario: "adhoc-settings-form-keeps-validation-errors", transport: "tui", evidence_level: "frame-level", driver_status: "captured", verdict: "pass", verdict_summary: "TUI frame confirms the validation state." }
+              - { leg_id: "adhoc-settings-form-keeps-validation-errors::web", scenario: "adhoc-settings-form-keeps-validation-errors", transport: "web", evidence_level: "frame-level", driver_status: "captured", verdict: "pass", verdict_summary: "Browser screenshot confirms the validation state." }
+              - { leg_id: "adhoc-settings-form-keeps-validation-errors::vscode", scenario: "adhoc-settings-form-keeps-validation-errors", transport: "vscode", evidence_level: "bridge-level", driver_status: "degraded-evidence", verdict: "degraded-evidence", verdict_summary: "VS Code bridge returned degraded JSON evidence." }
+              - { leg_id: "adhoc-settings-form-keeps-validation-errors::cli", scenario: "adhoc-settings-form-keeps-validation-errors", transport: "cli", evidence_level: "terminal-level", driver_status: "captured", verdict: "pass", verdict_summary: "Command transcript captured." }
           pass_count: 3
           fail_count: 0
           degraded_count: 1
@@ -132,7 +149,7 @@ host_handlers:
           submitted:
             status: "captured"
             evidence_refs: ["evidence-1"]
-            frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
+            frames_dir: "evidence/adhoc-settings-form-keeps-validation-errors"
             summary: "Captured evidence for this transport leg."
       judge_leg:
         data:
@@ -146,11 +163,11 @@ turns:
   - intent:
       name: preview
       slots:
-        scenario: bugfix
+        scenario: prd-design
         transport: all
     expect_state: idle
     expect_world:
-      scenario_ref: bugfix
+      scenario_ref: prd-design
       transport_arg: all
       suite_status: ready
       suite_leg_count: 4
@@ -164,20 +181,19 @@ turns:
     expect_view_matches: "Transport suite:[\\s\\S]*ready; legs=4, skipped=0"
 
   - intent:
-      name: check
+      name: check_request
       slots:
-        scenario: bugfix
-        transport: all
-        persona: core-maintainer
-        target: gears-rust
-        seed: story-flow-demo
+        request: "settings form keeps validation errors transport=all persona=core-maintainer target=gears-rust seed=story-flow-demo"
     expect_state: recording
     expect_world:
-      mode: catalog
+      mode: adhoc
+      scenario_description: "settings form keeps validation errors"
       run_id: scenario-qa-demo-run
       leg_count: 4
       leg_index: 0
     expect_host_calls:
+      - handler: host.starlark.run
+        args: { call: parse_check_request }
       - handler: host.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
@@ -215,6 +231,6 @@ turns:
         args: { call: build_report }
       - handler: host.run
         args: { call: build_scenario_qa_deck }
-    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*3 / 4 transport legs passed, 1 degraded-evidence[\\s\\S]*vscode / bugfix[\\s\\S]*\\[bridge-level\\][\\s\\S]*cli / bugfix[\\s\\S]*\\[terminal-level\\]"
+    expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*3 / 4 transport legs passed, 1 degraded-evidence[\\s\\S]*vscode / adhoc-settings-form-keeps-validation-errors[\\s\\S]*\\[bridge-level\\][\\s\\S]*cli / adhoc-settings-form-keeps-validation-errors[\\s\\S]*\\[terminal-level\\]"
 
 expect_no_errors: true
