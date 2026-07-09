@@ -2229,7 +2229,7 @@ imports:
       autonomous:      true
 
     intents:
-      import: [start_marathon, ack_exception, answer_exception]
+      import: [start_marathon, refine_plan, ack_exception, answer_exception]
 
     exits:
       done:
