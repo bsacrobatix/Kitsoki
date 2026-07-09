@@ -37,6 +37,7 @@ func cleanSetupWarnings(in []SetupWarning) []SetupWarning {
 
 func (s *Server) setupStatus() any {
 	return map[string]any{
-		"warnings": append([]SetupWarning(nil), s.setupWarnings...),
+		"warnings":          append([]SetupWarning(nil), s.setupWarnings...),
+		"project_onboarded": s.projectOnboarded,
 	}
 }

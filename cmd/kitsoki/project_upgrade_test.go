@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,6 +38,19 @@ func TestProjectToolsUpgradeDetectsOldDevStoryCapsule(t *testing.T) {
 	notice := projectUpgradeNoticeForRoot(root)
 	require.Contains(t, notice, "project files may need refresh")
 	require.Contains(t, notice, "project-instance")
+}
+
+func TestProjectOnboardedForRootRequiresConfigAndProfile(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	require.False(t, projectOnboardedForRoot(root))
+
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".kitsoki.yaml"), []byte("project_profile: .kitsoki/project-profile.yaml\n"), 0o644))
+	require.False(t, projectOnboardedForRoot(root))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(root, ".kitsoki"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), []byte("schema: project-profile/v1\n"), 0o644))
+	require.True(t, projectOnboardedForRoot(root))
 }
 
 func projectUpgradeCheckStatus(rep projectUpgradeReport, id string) string {

@@ -172,6 +172,20 @@ func TestSetupWarningsFromRuntimeConfigWarnsWhenBugPrivacyRequired(t *testing.T)
 }
 
 func TestSetupWarningsFromRuntimeConfigSuppressesBugPrivacyWhenCheckerAvailable(t *testing.T) {
+	withDefaultProfile := setupWarningsFromRuntimeConfig(webconfig.WebConfig{
+		DefaultProfile: "codex-native",
+		HarnessProfiles: map[string]webconfig.HarnessProfile{
+			"codex-native": {
+				Backend: "codex",
+				Model:   "gpt-5.5",
+				Models:  []string{"gpt-5.5"},
+			},
+		},
+	}, "linux", bugPrivacyRuntimeConfig{}, true)
+	if len(withDefaultProfile) != 0 {
+		t.Fatalf("configured default profile should suppress bug privacy warning, got %#v", withDefaultProfile)
+	}
+
 	withActiveBackend := setupWarningsFromRuntimeConfig(webconfig.WebConfig{}, "linux", bugPrivacyRuntimeConfig{
 		AgentBackend: "codex",
 	}, true)

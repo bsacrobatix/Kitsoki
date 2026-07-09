@@ -278,6 +278,10 @@ type Server struct {
 	// setupWarnings are session-independent first-start setup warnings the web
 	// home screen renders before an operator starts a story.
 	setupWarnings []SetupWarning
+
+	// projectOnboarded says the served checkout already has project-local
+	// Kitsoki onboarding markers.
+	projectOnboarded bool
 }
 
 // activeTurn is one in-flight streamed turn's cancel handle. Stored by pointer
@@ -321,6 +325,7 @@ type serverConfig struct {
 	workflowRoot              string
 	kits                      *kitendpoint.Dispatcher
 	setupWarnings             []SetupWarning
+	projectOnboarded          bool
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -408,6 +413,13 @@ func WithKits(d *kitendpoint.Dispatcher) Option {
 // config and never include secrets.
 func WithSetupWarnings(warnings []SetupWarning) Option {
 	return func(c *serverConfig) { c.setupWarnings = cleanSetupWarnings(warnings) }
+}
+
+// WithProjectOnboarded marks the served checkout as already project-onboarded.
+// The web shell uses this to suppress automatic first-run tour prompts while
+// keeping the manual tour button available.
+func WithProjectOnboarded(onboarded bool) Option {
+	return func(c *serverConfig) { c.projectOnboarded = onboarded }
 }
 
 // WithPollInterval overrides the SSE trace-poll interval.
@@ -502,6 +514,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		activeTurns:               make(map[string]*activeTurn),
 		kits:                      cfg.kits,
 		setupWarnings:             append([]SetupWarning(nil), cfg.setupWarnings...),
+		projectOnboarded:          cfg.projectOnboarded,
 	}
 }
 
