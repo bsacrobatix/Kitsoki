@@ -100,6 +100,7 @@ hosts:
   - host.agent.task
   - host.agent.search
   - host.artifacts_dir
+  - host.slidey.render
   - host.ide.open_file
   - host.ide.open_diff
   # design_search.on_enter resolves design_durable_path to a writable location
@@ -817,6 +818,16 @@ world:
   fix_tests_report_path: { type: string, default: "" }
   fix_tests_review:     { type: object, default: {} }
 
+  # ── Dogfood marathon (imported `dogfood`, stories/dogfood-marathon/) ───
+  # Self-dogfood backlog runner: local + GitHub bug sources, durable journal,
+  # serious-exception stop, and slidey reports. The child defaults to
+  # backlog_limit=15 and autonomous=true; these parent keys bind only the
+  # kitsoki-dev source/model posture.
+  dogfood_backlog_sources: { type: string, default: "github:constructorfabric/Kitsoki,github:bsacrobatix/Kitsoki,local:.artifacts/issues/bugs" }
+  dogfood_run_id:          { type: string, default: "dogfood-marathon" }
+  dogfood_profile:         { type: string, default: "codex-native" }
+  dogfood_model:           { type: string, default: "gpt-5.5" }
+
   # ── Carry-fields for the bf → pr handoff projection ───────────────
   # bf's @exit:done writes done_artifact via `set:` (per the
   # `requires: [done_artifact]` enforcement). The dev-story `bf` import
@@ -1496,6 +1507,11 @@ intents:
         type: int
         required: false
         description: "Optional timeout for the full acceptance command."
+  go_dogfood_marathon:
+    title: "Dogfood Marathon"
+    description: "Run the autonomous dogfood-marathon story over local and GitHub bug sources, journaling progress and producing slidey reports."
+    examples: ["dogfood marathon", "I want to do a dogfood marathon", "run a dogfood marathon", "process a bug marathon"]
+    priority: 54
   go_code_review_story:
     title: "Review PR"
     description: "Hand off to the code-review sub-story (teammate PR review)."
@@ -1841,6 +1857,7 @@ exports:
     - go_implementation
     - go_deliver
     - go_fix_tests
+    - go_dogfood_marathon
     - go_code_review_story
 
 # exits: dev-story is a perpetual workbench by design (every sub-import's
@@ -2195,6 +2212,34 @@ imports:
           fix_tests_report_path: "{{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
           fix_tests_review:      "{{ world.tests__review_artifact }}"
           human_review_reason:   "Test-fix loop needs human attention: {{ world.tests__report_path != '' ? world.tests__report_path : '.artifacts/fix-tests/report-' + world.tests__outcome + '.md' }}"
+
+  # Dogfood marathon — autonomous backlog runner. The operator reaches it from
+  # landing by saying "I want to do a dogfood marathon" or choosing the dogfood
+  # quick action. The child room owns the start/resume prompt so the clean
+  # command remains just "start the marathon".
+  dogfood:
+    source: ../dogfood-marathon
+    entry: idle
+
+    world_in:
+      backlog_sources: "{{ world.dogfood_backlog_sources }}"
+      run_id:          "{{ world.dogfood_run_id }}"
+      profile:         "{{ world.dogfood_profile }}"
+      model:           "{{ world.dogfood_model }}"
+      autonomous:      true
+
+    intents:
+      import: [start_marathon, ack_exception, answer_exception]
+
+    exits:
+      done:
+        to: landing
+        set:
+          status: "dogfood-complete"
+      abandoned:
+        to: landing
+        set:
+          status: "abandoned"
 
   # Wave 4 — cypilot SDLC waterfall for epic-track tickets. Routed
   # from main when the picked ticket's type is "epic". cypilot is

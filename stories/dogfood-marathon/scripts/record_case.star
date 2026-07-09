@@ -74,7 +74,7 @@ def main(ctx):
     verify = _dict(ctx.inputs.get("verify_result"))
     exception_policy = _str(_get(ctx.inputs, "exception_policy", _get(ctx.world, "exception_policy", "ask-serious"))).strip() or "ask-serious"
 
-    results = _dict(ctx.world.get("results")) or {"items": []}
+    results = _dict(_get(ctx.inputs, "results", ctx.world.get("results"))) or {"items": []}
     result_items = list(_items(results.get("items", [])))
 
     source_url = _str(case.get("source_url", "")).strip()
@@ -111,12 +111,12 @@ def main(ctx):
     }
     result_items.append(record)
 
-    findings = _dict(ctx.world.get("findings")) or {"items": []}
+    findings = _dict(_get(ctx.inputs, "findings", ctx.world.get("findings"))) or {"items": []}
     finding_items = list(_items(findings.get("items", [])))
     for f in _items(drive.get("findings", [])):
         finding_items.append(f)
 
-    exceptions = _dict(ctx.world.get("exceptions")) or {"items": []}
+    exceptions = _dict(_get(ctx.inputs, "exceptions", ctx.world.get("exceptions"))) or {"items": []}
     exception_items = list(_items(exceptions.get("items", [])))
     severity = _severity(drive, verify)
     pending = ""

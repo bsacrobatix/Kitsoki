@@ -231,7 +231,11 @@ func (p routingPipeline) renderResolved() string {
 	}
 	line := "  " + glyphHit + " routed via " + via
 	if p.intent != "" {
-		line += " → " + p.intent
+		intentLabel := p.intent
+		if strings.Contains(intentLabel, "__") {
+			intentLabel = humanIntentLabel(intentLabel)
+		}
+		line += " → " + intentLabel
 	}
 	if p.showConf {
 		line += fmt.Sprintf("  (%.2f)", p.confidence)

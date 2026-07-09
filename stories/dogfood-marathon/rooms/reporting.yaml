@@ -9,7 +9,7 @@ states:
 
   reporting:
     description: "Building the slidey report deck spec from the run data (deterministic)."
-    relevant_world: [results, rollup, findings, exceptions, deck_spec, run_dir, journal_path]
+    relevant_world: [results, rollup, findings, exceptions, deck_spec, run_dir, journal_path, deck_job_id]
     view:
       - heading: "Dogfood marathon · reporting"
       - kv:
@@ -17,11 +17,14 @@ states:
             Cases: '{{ world.results.items|length }}'
             Spec:  '{{ world.deck_spec.spec_path|default:"(building…)" }}'
             Run dir: '{{ world.run_dir|default:"(derived)" }}'
+            Job:   '{{ world.deck_job_id|default:"(starting)" }}'
       - prose: "Composing the marathon-report deck: outcomes · effectiveness · time · cost · what-was-fixed · what-worked · what-didn't. The spec is rendered next."
     on_enter:
       - invoke: host.starlark.run
         id: build_deck
+        when: "world.deck_job_id == '' && (world.deck_spec.spec_path ?? '') == ''"
         once: true
+        background: true
         with:
           script: scripts/build_deck.star
           capabilities:
@@ -36,10 +39,36 @@ states:
             run_dir:    "{{ world.run_dir }}"
             out_path:   "{{ world.run_dir }}/decks/aggregate.slidey.json"
         bind:
-          deck_spec: deck_spec
+          deck_job_id: job_id
+        on_complete:
+          - set:
+              deck_spec:   "{{ world.last_job_result.deck_spec }}"
+              deck_job_id: ""
+          - target: report_checkpointing
         on_error: reporting
+    on:
+      reported:
+        - target: slideshow
+      look:
+        - target: .
+
+  report_checkpointing:
+    description: "Persisting the reported deck checkpoint."
+    relevant_world: [deck_spec, results, rollup, journal_path, journal_job_id]
+    view:
+      - heading: "Dogfood marathon · report checkpoint"
+      - kv:
+          pairs:
+            Cases:   '{{ world.results.items|length }}'
+            Spec:    '{{ world.deck_spec.spec_path|default:"(pending)" }}'
+            Journal: '{{ world.journal_path|default:"(pending)" }}'
+            Job:     '{{ world.journal_job_id|default:"(starting)" }}'
+      - prose: "Persisting the deck spec before rendering it."
+    on_enter:
       - invoke: host.starlark.run
         id: persist_journal
+        when: "world.journal_job_id == ''"
+        background: true
         with:
           script: scripts/persist_journal.star
           capabilities:
@@ -60,14 +89,15 @@ states:
             case_index:            "{{ world.case_index }}"
             cases_processed:       "{{ world.cases_processed }}"
         bind:
-          journal_status:        journal_status
-          journal_summary:       journal_summary
-          last_checkpoint:       last_checkpoint
+          journal_job_id: job_id
+        on_complete:
+          - set:
+              journal_status:  "{{ world.last_job_result.journal_status }}"
+              journal_summary: "{{ world.last_job_result.journal_summary }}"
+              last_checkpoint: "{{ world.last_job_result.last_checkpoint }}"
+              journal_job_id:  ""
+          - target: slideshow
         on_error: reporting
-      - when: "world.deck_spec.spec_path != ''"
-        emit_intent: reported
     on:
-      reported:
-        - target: slideshow
       look:
         - target: .

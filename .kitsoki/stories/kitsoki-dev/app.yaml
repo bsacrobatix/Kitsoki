@@ -118,6 +118,7 @@ hosts:
   # Required under `hosts: declared`.
   - host.agent.search
   - host.artifacts_dir
+  - host.slidey.render
   - host.ide.open_file
   # design_search resolves design_durable_path to a writable location
   # (falling back to .context/designs) before minting any workspace folder

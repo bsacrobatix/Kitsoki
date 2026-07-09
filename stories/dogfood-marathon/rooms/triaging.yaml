@@ -14,7 +14,7 @@ states:
 
   triaging:
     description: "Triaging the current case (read-only verdict, no fix)."
-    relevant_world: [current_case, triage_verdict, drop_already_fixed]
+    relevant_world: [current_case, triage_verdict, drop_already_fixed, triage_job_id]
     view:
       - heading: "Dogfood marathon · triaging"
       - kv:
@@ -22,10 +22,13 @@ states:
             Case:    '{{ world.current_case.id|default:"(none)" }}'
             Title:   '{{ world.current_case.title|default:"—" }}'
             Verdict: '{{ world.triage_verdict.verdict|default:"(triaging…)" }}'
+            Job:     '{{ world.triage_job_id|default:"(starting)" }}'
       - prose: "Read-only triage — does the bug still exist at the baseline? ALREADY-FIXED cases are dropped (degenerate baseline); STILL-LIVE / PARTIAL run the full inner pipeline."
     on_enter:
       - invoke: host.agent.task
         id: triage_case
+        when: "world.triage_job_id == '' && (world.triage_verdict.verdict ?? '') == ''"
+        background: true
         with:
           agent: triager
           acceptance:
@@ -37,13 +40,20 @@ states:
               case_json:      "{{ world.current_case_json }}"
               inner_pipeline: "{{ world.inner_pipeline }}"
         bind:
-          triage_verdict: submitted
+          triage_job_id: job_id
+        on_complete:
+          - set:
+              triage_verdict: "{{ world.last_job_result.submitted }}"
+              triage_job_id:  ""
+          - when: "world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED'"
+            set:
+              verify_result: { status: "skipped", how: "triage verdict ALREADY-FIXED — degenerate baseline (dropped)" }
+              drive_result:  { exit: "skipped" }
+          - when: "world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED'"
+            target: recording
+          - when: "(world.triage_verdict.verdict ?? '') != '' && !(world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED')"
+            target: driving
         on_error: driving   # triage is advisory — a failed triage still drives
-      # Drop degenerate (already-fixed) cases when configured.
-      - when: "world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED'"
-        emit_intent: skip_case
-      - when: "(world.triage_verdict.verdict ?? '') != '' && !(world.drop_already_fixed && world.triage_verdict.verdict == 'ALREADY-FIXED')"
-        emit_intent: triage_done
     on:
       triage_done:
         - target: driving

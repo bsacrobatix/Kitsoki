@@ -39,10 +39,16 @@ states:
                 current_case:      {}
                 current_case_id:   ""
                 current_case_json: "{}"
+                pick_job_id:       ""
                 triage_verdict:    {}
+                triage_job_id:     ""
                 drive_result:      {}
+                drive_job_id:      ""
                 verify_result:     {}
+                verify_job_id:     ""
                 record_status:     ""
+                record_job_id:     ""
+                journal_job_id:    ""
                 exception_pending: ""
                 exception_summary: ""
             - invoke: host.starlark.run
@@ -79,10 +85,16 @@ states:
                 current_case:      {}
                 current_case_id:   ""
                 current_case_json: "{}"
+                pick_job_id:       ""
                 triage_verdict:    {}
+                triage_job_id:     ""
                 drive_result:      {}
+                drive_job_id:      ""
                 verify_result:     {}
+                verify_job_id:     ""
                 record_status:     ""
+                record_job_id:     ""
+                journal_job_id:    ""
                 exception_pending: ""
                 exception_summary: ""
             - invoke: host.starlark.run

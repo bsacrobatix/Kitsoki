@@ -61,6 +61,20 @@ host_handlers:
           exception_pending: "case-blocked"
           exception_summary: "choose a reproduction baseline"
           record_status: "recorded"
+      aggregate_run:
+        data:
+          rollup:
+            counts: { processed: 1, solved: 0, partial: 1, failed: 0, skipped: 0, shipped: 0, needs_human: 1 }
+            totals: { cost_usd: 1.25, tokens: 12000, wall_s: 90 }
+            worked: []
+            didnt: ["1 case needed operator guidance"]
+            headline: "Processed 1 case: 0 solved, 1 partial."
+      build_deck:
+        data:
+          deck_spec:
+            spec_path: "stories/dogfood-marathon/baked/report.deck.json"
+            summary: "Dogfood marathon report — 1 case, 0 solved."
+            case_decks: []
 
   host.agent.task:
     by_call:
@@ -84,24 +98,38 @@ host_handlers:
             tokens: 12000
             wall_s: 90
             findings: []
+        delay: "20ms"
+
+  host.slidey.render:
+    by_call:
+      render_report:
+        data:
+          ok: true
+          path: "stories/dogfood-marathon/baked/report.deck.json"
+
+  host.artifacts_dir:
+    by_call:
+      emit_report:
+        data:
+          ok: true
+          handle: { id: "dogfood-marathon#exception", kind: "slideshow", mime: "text/html" }
+          path: "stories/dogfood-marathon/baked/report.deck.json"
 
 turns:
   - intent: { name: start, slots: {} }
-    expect_state: processing
-    expect_world:
-      cases_processed: 0
-
-  - intent: { name: next_case, slots: {} }
+    advance_clock: "2s"
     expect_state: exception_review
     expect_world:
       exception_pending: "case-blocked"
       cases_processed: 0
 
   - intent: { name: ack_exception, slots: {} }
-    expect_state: processing
+    advance_clock: "500ms"
+    expect_state: done
     expect_world:
       exception_pending: ""
       cases_processed: 1
+      report_handle: "dogfood-marathon#exception"
 
 expect_terminal: false
 expect_no_errors: true

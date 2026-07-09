@@ -4,7 +4,7 @@ states:
 
   done:
     description: "The marathon finished — the slidey report is rendered."
-    relevant_world: [report_handle, deck_spec, rollup, results, findings, exceptions, journal_path]
+    relevant_world: [report_handle, deck_spec, rollup, results, last_result, findings, exceptions, journal_path]
     view:
       - heading: "Dogfood marathon · done"
       - kv:
@@ -16,6 +16,19 @@ states:
             Headline: '{{ world.rollup.headline|default:"—" }}'
             Journal:  '{{ world.journal_path|default:"(pending)" }}'
             Per-bug decks: '{{ world.deck_spec.case_decks|length|default:"0" }}'
+      - heading: "Last recorded"
+        when: "world.last_result.case_id"
+      - kv:
+          pairs:
+            Case:   '{{ world.last_result.case_id|default:"—" }}'
+            Title:  '{{ world.last_result.title|default:"—" }}'
+            Source: '{{ world.last_result.source_url|default:"—" }}'
+            Exit:   '{{ world.last_result.exit|default:"—" }}'
+            Verify: '{{ world.last_result.verify_status|default:"—" }}'
+            Tokens: '{{ world.last_result.tokens_display|default:"0" }}'
+            Time:   '{{ world.last_result.wall_s_display|default:"0" }}s'
+            Trace:  '{{ world.last_result.trace|default:"—" }}'
+        when: "world.last_result.case_id"
       - heading: "Marathon report"
       - media:
           handle:  "{{ world.report_handle }}"

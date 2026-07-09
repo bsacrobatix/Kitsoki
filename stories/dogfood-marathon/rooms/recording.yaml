@@ -1,16 +1,52 @@
-# recording — independently verify, append the current case result, and persist.
+# verifying / recording / checkpointing — independently verify, append the
+# current case result, and persist.
 #
-# The verify and journal writes intentionally happen in this room. Keeping them
-# in separate auto-emitted states made one bug exceed the orchestrator's
-# post-bind settlement cap (pick → triage → drive → verify → record →
-# checkpoint). This room still performs the independent verify before recording;
-# it just avoids extra state hops for deterministic bookkeeping.
+# These steps intentionally run as sequential background completions. A single
+# on_enter block dispatches all host calls before any bind is committed, so
+# record_case would otherwise read verify_result={} and persist_journal would
+# read results=[]. The background-job boundary gives each dependent call a
+# committed world and keeps the long autonomous marathon restartable.
 
 states:
 
+  verifying:
+    description: "Independently verifying the current case's outcome."
+    relevant_world: [current_case, drive_result, verify_result, verify_job_id, results, exceptions]
+    view:
+      - heading: "Dogfood marathon · verifying"
+      - kv:
+          pairs:
+            Case:     '{{ world.current_case.id }}'
+            Exit:     '{{ world.drive_result.exit|default:"—" }}'
+            Verify:   '{{ world.verify_result.status|default:"(running…)" }}'
+            Recorded: '{{ world.results.items|length }}'
+            Job:      '{{ world.verify_job_id|default:"(starting)" }}'
+      - prose: "Running the operator's independent oracle against the inner pipeline result. This is the grade; the driver does not self-grade."
+    on_enter:
+      - invoke: host.starlark.run
+        id: verify_case
+        when: "world.verify_job_id == '' && (world.verify_result.status ?? '') == ''"
+        background: true
+        with:
+          script: scripts/verify_case.star
+          inputs:
+            case:         "{{ world.current_case }}"
+            drive_result: "{{ world.drive_result }}"
+        bind:
+          verify_job_id: job_id
+        on_complete:
+          - set:
+              verify_result: "{{ world.last_job_result.verify_result }}"
+              verify_job_id: ""
+          - target: recording
+        on_error: exception_review
+    on:
+      look:
+        - target: .
+
   recording:
     description: "Verifying and recording the current case's outcome."
-    relevant_world: [current_case, triage_verdict, drive_result, verify_result, results, last_result, exceptions, record_status]
+    relevant_world: [current_case, triage_verdict, drive_result, verify_result, record_job_id, results, last_result, exceptions, record_status]
     view:
       - heading: "Dogfood marathon · recording"
       - kv:
@@ -22,20 +58,13 @@ states:
             Recorded:   '{{ world.results.items|length }}'
             Exceptions: '{{ world.exceptions.items|length }}'
             Status:     '{{ world.record_status|default:"(recording…)" }}'
+            Job:        '{{ world.record_job_id|default:"(starting)" }}'
       - prose: "Appending the case outcome before the durable checkpoint is written."
     on_enter:
       - invoke: host.starlark.run
-        id: verify_case
-        with:
-          script: scripts/verify_case.star
-          inputs:
-            case:         "{{ world.current_case }}"
-            drive_result: "{{ world.drive_result }}"
-        bind:
-          verify_result: verify_result
-        on_error: exception_review
-      - invoke: host.starlark.run
         id: record_case
+        when: "world.record_job_id == '' && world.record_status == ''"
+        background: true
         with:
           script: scripts/record_case.star
           inputs:
@@ -44,17 +73,46 @@ states:
             drive_result:     "{{ world.drive_result }}"
             verify_result:    "{{ world.verify_result }}"
             exception_policy: "{{ world.exception_policy }}"
+            results:          "{{ world.results }}"
+            findings:         "{{ world.findings }}"
+            exceptions:       "{{ world.exceptions }}"
         bind:
-          results:           results
-          last_result:       last_result
-          findings:          findings
-          exceptions:        exceptions
-          exception_pending: exception_pending
-          exception_summary: exception_summary
-          record_status:     record_status
+          record_job_id: job_id
+        on_complete:
+          - set:
+              results:           "{{ world.last_job_result.results }}"
+              last_result:       "{{ world.last_job_result.last_result }}"
+              findings:          "{{ world.last_job_result.findings }}"
+              exceptions:        "{{ world.last_job_result.exceptions }}"
+              exception_pending: "{{ world.last_job_result.exception_pending }}"
+              exception_summary: "{{ world.last_job_result.exception_summary }}"
+              record_status:     "{{ world.last_job_result.record_status }}"
+              record_job_id:     ""
+          - target: checkpointing
         on_error: exception_review
+    on:
+      look:
+        - target: .
+
+  checkpointing:
+    description: "Persisting the current case checkpoint."
+    relevant_world: [current_case, results, last_result, exceptions, record_status, journal_job_id, journal_path, journal_status]
+    view:
+      - heading: "Dogfood marathon · checkpointing"
+      - kv:
+          pairs:
+            Case:       '{{ world.current_case.id }}'
+            Recorded:   '{{ world.results.items|length }}'
+            Exceptions: '{{ world.exceptions.items|length }}'
+            Status:     '{{ world.record_status|default:"—" }}'
+            Journal:    '{{ world.journal_path|default:"(pending)" }}'
+            Job:        '{{ world.journal_job_id|default:"(starting)" }}'
+      - prose: "Writing the durable journal checkpoint before the marathon advances."
+    on_enter:
       - invoke: host.starlark.run
         id: persist_journal
+        when: "world.journal_job_id == ''"
+        background: true
         with:
           script: scripts/persist_journal.star
           capabilities:
@@ -74,36 +132,42 @@ states:
             case_index:            "{{ world.case_index }}"
             cases_processed:       "{{ world.cases_processed }}"
         bind:
-          run_id:                run_id
-          run_dir:               run_dir
-          journal_path:          journal_path
-          journal_markdown_path: journal_markdown_path
-          journal_status:        journal_status
-          journal_summary:       journal_summary
-          last_checkpoint:       last_checkpoint
+          journal_job_id: job_id
+        on_complete:
+          - set:
+              run_id:                "{{ world.last_job_result.run_id }}"
+              run_dir:               "{{ world.last_job_result.run_dir }}"
+              journal_path:          "{{ world.last_job_result.journal_path }}"
+              journal_markdown_path: "{{ world.last_job_result.journal_markdown_path }}"
+              journal_status:        "{{ world.last_job_result.journal_status }}"
+              journal_summary:       "{{ world.last_job_result.journal_summary }}"
+              last_checkpoint:       "{{ world.last_job_result.last_checkpoint }}"
+              journal_job_id:        ""
+          - when: "world.exception_pending != '' && world.exception_policy == 'ask-serious'"
+            target: exception_review
+          - when: "world.exception_pending == '' || world.exception_policy != 'ask-serious'"
+            set:
+              case_index:        "{{ world.case_index + 1 }}"
+              cases_processed:   "{{ world.cases_processed + 1 }}"
+              current_case:      {}
+              current_case_id:   ""
+              current_case_json: "{}"
+              pick_job_id:       ""
+              triage_verdict:    {}
+              triage_job_id:     ""
+              drive_result:      {}
+              drive_job_id:      ""
+              verify_result:     {}
+              verify_job_id:     ""
+              record_status:     ""
+              record_job_id:     ""
+              journal_job_id:    ""
+              exception_pending: ""
+              exception_summary: ""
+              exception_answer:  ""
+          - when: "world.exception_pending == '' || world.exception_policy != 'ask-serious'"
+            target: processing
         on_error: exception_review
-      - emit_intent: exception_raised
-        when: "world.last_checkpoint == 'recorded' && world.record_status == 'recorded' && world.exception_pending != '' && world.exception_policy == 'ask-serious'"
-      - emit_intent: record_done
-        when: "world.last_checkpoint == 'recorded' && world.record_status == 'recorded' && (world.exception_pending == '' || world.exception_policy != 'ask-serious')"
     on:
-      exception_raised:
-        - target: exception_review
-      record_done:
-        - target: processing
-          effects:
-            - set:
-                case_index:        "{{ world.case_index + 1 }}"
-                cases_processed:   "{{ world.cases_processed + 1 }}"
-                current_case:      {}
-                current_case_id:   ""
-                current_case_json: "{}"
-                triage_verdict:    {}
-                drive_result:      {}
-                verify_result:     {}
-                record_status:     ""
-                exception_pending: ""
-                exception_summary: ""
-                exception_answer:  ""
       look:
         - target: .

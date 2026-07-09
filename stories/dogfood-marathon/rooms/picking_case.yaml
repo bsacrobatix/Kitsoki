@@ -1,15 +1,16 @@
 # picking_case — select backlog.items[case_index] before agent rooms read it.
 #
-# This is intentionally its own state. A transition-effect invoke that both
-# picks a case and targets triaging can race the target room's on_enter; the
-# agent prompt then sees the default "{}" case_json. Keeping selection in
-# on_enter lets the bind settle before `case_picked` enters triaging.
+# This is intentionally its own state and runs as a background completion. The
+# autonomous loop often enters this state from another background on_complete
+# target; that path does not re-run emit_intent after synchronous host binds.
+# A background completion gives current_case_json a committed boundary before
+# triaging reads it.
 
 states:
 
   picking_case:
     description: "Selecting the next backlog case."
-    relevant_world: [backlog, case_index, cases_processed, case_budget, current_case, current_case_json]
+    relevant_world: [backlog, case_index, cases_processed, case_budget, current_case, current_case_json, pick_job_id]
     view:
       - heading: "Dogfood marathon · picking case"
       - kv:
@@ -18,10 +19,13 @@ states:
             At case:   '{{ world.case_index }}'
             Processed: '{{ world.cases_processed }}'
             Selected:  '{{ world.current_case_id|default:"(selecting…)" }}'
+            Job:       '{{ world.pick_job_id|default:"(starting)" }}'
       - prose: "Selecting the case record that will be triaged and driven next."
     on_enter:
       - invoke: host.starlark.run
         id: pick_case
+        when: "world.pick_job_id == '' && world.current_case_id == ''"
+        background: true
         with:
           script: scripts/pick_case.star
           inputs:
@@ -30,12 +34,16 @@ states:
             cases_processed: "{{ world.cases_processed }}"
             case_budget:     "{{ world.case_budget }}"
         bind:
-          current_case:      current_case
-          current_case_id:   current_case_id
-          current_case_json: current_case_json
+          pick_job_id: job_id
+        on_complete:
+          - set:
+              current_case:      "{{ world.last_job_result.current_case }}"
+              current_case_id:   "{{ world.last_job_result.current_case_id }}"
+              current_case_json: "{{ world.last_job_result.current_case_json }}"
+              pick_job_id:      ""
+          - when: "world.current_case_id != '' && world.current_case_json != '' && world.current_case_json != '{}'"
+            target: triaging
         on_error: processing
-      - emit_intent: case_picked
-        when: "world.current_case_id != '' && world.current_case_json != '' && world.current_case_json != '{}'"
     on:
       case_picked:
         - target: triaging
