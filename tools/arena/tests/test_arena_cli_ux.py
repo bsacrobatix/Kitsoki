@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -92,6 +93,52 @@ result = plugins.get("paired-task").score(
 )
 check("docker context verdict", result.verdict, "blocked")
 check("docker context health", result.health, "infra:harness")
+
+result = plugins.get("paired-task").score(
+    cell,
+    exit_code=1,
+    stdout="",
+    stderr=(
+        "docker: Error response from daemon: Sign in to continue using Docker Desktop. "
+        "Membership in the [acronis] organization is required."
+    ),
+)
+check("docker desktop sign-in verdict", result.verdict, "blocked")
+check("docker desktop sign-in health", result.health, "infra:harness")
+
+spec_mod = importlib.util.spec_from_file_location("arena_cli", ARENA)
+assert spec_mod and spec_mod.loader
+arena_cli = importlib.util.module_from_spec(spec_mod)
+spec_mod.loader.exec_module(arena_cli)
+
+
+def fake_docker_run(cmd, *, text, capture_output, timeout):  # noqa: ANN001 - mirrors subprocess.run.
+    del text, capture_output, timeout
+    if cmd[:2] == ["docker", "version"]:
+        return subprocess.CompletedProcess(cmd, 0, stdout="Docker version ok\n", stderr="")
+    if cmd[:2] == ["docker", "ps"]:
+        return subprocess.CompletedProcess(
+            cmd,
+            1,
+            stdout="",
+            stderr=(
+                "Error response from daemon: Sign in to continue using Docker Desktop. "
+                "Membership in the [acronis] organization is required."
+            ),
+        )
+    if cmd[:3] == ["docker", "context", "ls"]:
+        return subprocess.CompletedProcess(cmd, 0, stdout="NAME DESCRIPTION DOCKER ENDPOINT\n", stderr="")
+    raise AssertionError(f"unexpected docker probe: {cmd}")
+
+
+old_run = arena_cli.subprocess.run
+try:
+    arena_cli.subprocess.run = fake_docker_run
+    doctor_error = arena_cli._check_docker()
+finally:
+    arena_cli.subprocess.run = old_run
+require("doctor probes docker ps", "docker container API failed" in doctor_error)
+require("doctor surfaces Docker Desktop sign-in", "Sign in to continue using Docker Desktop" in doctor_error)
 
 if failures:
     print("FAIL: arena CLI UX")

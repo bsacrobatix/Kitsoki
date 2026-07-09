@@ -19,7 +19,10 @@ KITSOKI_MNT = "/workspace/kitsoki"
 RUNNER = f"{KITSOKI_MNT}/tools/arena/lib/paired_task_runner.py"
 _INFRA_RE = re.compile(
     r"no such tool|worker.never.ran|host[_-]error|connection refused|provider 5\d\d|"
-    r"docker endpoint|docker daemon|context .*not found|error during connect|command not found",
+    r"docker endpoint|docker daemon|docker desktop|context .*not found|error during connect|"
+    r"error response from daemon|sign in to continue using docker|membership in the .* organization is required|"
+    r"failed to initialize: .*docker|permission denied.*docker|is the docker daemon running|"
+    r"command not found",
     re.I,
 )
 
