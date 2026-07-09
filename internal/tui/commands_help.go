@@ -27,6 +27,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 	sections := []section{
 		{"chat blocks", []row{
 			{"/help", "this list"},
+			{"/stories", "open the story selector and launch another story"},
 			{"/bug [description]", "file a bug report with scrubbed TUI transcript evidence"},
 			{"/route up|down", "record a thumbs up/down verdict on the last routed turn"},
 			{"/ideas <text>", "jot an idea to ideas.md without interrupting the conversation"},

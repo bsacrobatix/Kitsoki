@@ -1870,6 +1870,7 @@ func fallbackTerminalBBox(frame tui.Frame, idx int) VisualBBox {
 func tuiSlashCandidates() []string {
 	return []string{
 		"/help",
+		"/stories",
 		"/intents",
 		"/work --all",
 		"/chat show <id>",
