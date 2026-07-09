@@ -1,0 +1,979 @@
+{
+  "meta": {
+    "mode": "pitch",
+    "title": "Kitsoki Roadmap",
+    "resolution": {
+      "width": 1920,
+      "height": 1080
+    },
+    "theme": {
+      "name": "rose-pine-moon",
+      "background": "#17120d",
+      "fontFamily": "'Inter', 'Avenir Next', 'Segoe UI', sans-serif",
+      "colors": {
+        "base": "#17120d",
+        "surface": "#241811",
+        "overlay": "#342016",
+        "muted": "#8a725d",
+        "subtle": "#c9ad8e",
+        "text": "#f6ecda",
+        "love": "#d9684a",
+        "gold": "#f0bf62",
+        "rose": "#b94a35",
+        "pine": "#56a88c",
+        "foam": "#9dd8c8",
+        "iris": "#9aa7ff",
+        "highlightLow": "#2b1c13",
+        "highlightMuted": "#452819",
+        "highlightHigh": "#6b3325"
+      },
+      "css": "#root.theme-rose-pine-moon #title-card-rule,#root.theme-rose-pine-moon #narrative-rule,#root.theme-rose-pine-moon .slidey-bar-fill{background:linear-gradient(90deg,var(--slidey-gold),var(--slidey-pine));}#root.theme-rose-pine-moon [id$=\"-title\"],#root.theme-rose-pine-moon #narrative-eyebrow,#root.theme-rose-pine-moon #cta-wordmark,#root.theme-rose-pine-moon #cta-tagline,#root.theme-rose-pine-moon #cta-url{color:var(--slidey-gold);}#root.theme-rose-pine-moon .cards-card.cards-style-primary,#root.theme-rose-pine-moon .cards-col.accent-blue,#root.theme-rose-pine-moon .table-crown{color:var(--slidey-gold);border-color:var(--slidey-rose);}#root.theme-rose-pine-moon .dsvg-node.dsvg-style-primary rect{fill:var(--slidey-highlight-muted);stroke:var(--slidey-rose);}#root.theme-rose-pine-moon .dsvg-node.dsvg-style-secondary rect{fill:var(--slidey-highlight-low);stroke:var(--slidey-pine);}#root.theme-rose-pine-moon .dsvg-edge line:not(.dsvg-gate-bar),#root.theme-rose-pine-moon .dsvg-edge path{stroke:var(--slidey-gold);fill:none;}#root.theme-rose-pine-moon .dsvg-arrow path{stroke:var(--slidey-gold);fill:var(--slidey-gold);}#narrative-region{max-width:1580px;}#narrative-body{font-size:64px;line-height:1.18;max-width:1420px;}#narrative-lede{font-size:34px;line-height:1.42;max-width:1400px;}"
+    },
+    "narration": {
+      "voice": "en-AU-NatashaNeural",
+      "rate": "+0%",
+      "pronunciations": {
+        "Kitsoki": "kit so key",
+        "Slidey": "slide ee",
+        "rrweb": "R R web",
+        "MCP": "M C P",
+        "CodeAct": "code act",
+        "Starlark": "star lark"
+      }
+    }
+  },
+  "scenes": [
+    {
+      "id": "title",
+      "type": "title",
+      "section": "frame",
+      "tags": [
+        "roadmap",
+        "golden"
+      ],
+      "title": "Kitsoki Roadmap",
+      "subtitle": "What ships now, what is moving, what waits on explicit gates",
+      "narration": "Kitsoki roadmap: what ships now, what is moving, and what waits on explicit gates."
+    },
+    {
+      "id": "roadmap-lens",
+      "type": "narrative",
+      "section": "frame",
+      "eyebrow": "Roadmap lens",
+      "lede": "This is a product roadmap, not a promise pile.",
+      "body": "The useful split is have now, recently shipped, working now, coming up, and waiting on explicit gates. Every claim should point back to a feature catalog entry, proposal status line, committed deck, trace, or deterministic test.",
+      "narration": "This deck treats the roadmap as evidence inventory. Have now, recently shipped, working now, coming up, and waiting on explicit gates. Every claim points back to a source."
+    },
+    {
+      "id": "lanes",
+      "type": "diagram-svg",
+      "section": "frame",
+      "title": "Four lanes define the roadmap",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1500 760",
+          "nodes": [
+            {
+              "id": "runtime",
+              "label": "Runtime control",
+              "sub": "workflow owns state",
+              "lines": [
+                "guards",
+                "operator gates",
+                "bounded calls"
+              ],
+              "x": 70,
+              "y": 120,
+              "w": 330,
+              "h": 180,
+              "style": "primary"
+            },
+            {
+              "id": "proof",
+              "label": "Proof surfaces",
+              "sub": "audit and replay",
+              "lines": [
+                "trace",
+                "rrweb demos",
+                "Slidey decks"
+              ],
+              "x": 420,
+              "y": 120,
+              "w": 330,
+              "h": 180
+            },
+            {
+              "id": "work",
+              "label": "Real work",
+              "sub": "stories and agents",
+              "lines": [
+                "dev-story",
+                "bugfix",
+                "PR flow"
+              ],
+              "x": 770,
+              "y": 120,
+              "w": 330,
+              "h": 180
+            },
+            {
+              "id": "learn",
+              "label": "Learning loop",
+              "sub": "improve with use",
+              "lines": [
+                "meta mode",
+                "Persona QA",
+                "arena"
+              ],
+              "x": 1120,
+              "y": 120,
+              "w": 330,
+              "h": 180,
+              "style": "secondary"
+            },
+            {
+              "id": "catalog",
+              "label": "Feature catalog",
+              "sub": "source of truth",
+              "lines": [
+                "34 entries",
+                "site demos",
+                "QA scenarios"
+              ],
+              "x": 250,
+              "y": 500,
+              "w": 430,
+              "h": 170,
+              "style": "secondary"
+            },
+            {
+              "id": "queue",
+              "label": "Proposal queue",
+              "sub": "what remains",
+              "lines": [
+                "trim shipped",
+                "focus drafts",
+                "delete done"
+              ],
+              "x": 820,
+              "y": 500,
+              "w": 430,
+              "h": 170,
+              "style": "primary"
+            }
+          ],
+          "edges": [
+            {
+              "from": "runtime",
+              "to": "proof"
+            },
+            {
+              "from": "proof",
+              "to": "work"
+            },
+            {
+              "from": "work",
+              "to": "learn"
+            },
+            {
+              "from": "catalog",
+              "to": "proof"
+            },
+            {
+              "from": "queue",
+              "to": "learn"
+            }
+          ]
+        }
+      ],
+      "caption": "Roadmap items are promoted only when the runtime, proof surface, real workflow, and learning loop all have a clear owner.",
+      "narration": "The roadmap has four product lanes: runtime control, proof surfaces, real work, and the learning loop. The feature catalog and proposal queue keep those lanes honest."
+    },
+    {
+      "id": "what-ships-now",
+      "type": "evidence",
+      "section": "have-now",
+      "title": "What ships now: the product-site proof path",
+      "items": [
+        {
+          "label": "Runtime control",
+          "status": "validated",
+          "detail": "agent-action transcripts show tool streams, guardrail rejection, nudge, resubmission, and accepted bounded calls",
+          "refType": "path",
+          "ref": "features/agent-actions.yaml"
+        },
+        {
+          "label": "Operator handoff",
+          "status": "validated",
+          "detail": "agent questions become blocking operator prompts instead of silent empty answers",
+          "refType": "path",
+          "ref": "features/operator-ask.yaml"
+        },
+        {
+          "label": "Trace and replay",
+          "status": "validated",
+          "detail": "tree, timeline, graph, decision detail, confidence, alternatives, annotation, and replay are visible from the recorded trace",
+          "refType": "path",
+          "ref": "features/trace-features.yaml"
+        },
+        {
+          "label": "Self-improvement",
+          "status": "validated",
+          "detail": "completed runs can file trace-backed improvement reports through the same meta surface",
+          "refType": "path",
+          "ref": "features/meta-improvement.yaml"
+        },
+        {
+          "label": "Real repo work",
+          "status": "validated",
+          "detail": "dev-story and Slidey case studies show triage, bugfix, refinement, PR, and merge-shaped workflows",
+          "refType": "doc",
+          "ref": "tools/site/src/proof.md"
+        },
+        {
+          "label": "Local evaluation",
+          "status": "validated",
+          "detail": "stranger install and kitsoki doctor make the first local run inspectable instead of a silent stub",
+          "refType": "path",
+          "ref": "features/stranger-install.yaml"
+        }
+      ],
+      "caption": "This is the public proof path today: control, handoff, trace, improvement, real work, and local trial.",
+      "narration": "The product proof path is already public: runtime control, operator handoff, trace replay, self improvement, real repo work, and local evaluation."
+    },
+    {
+      "id": "feature-catalog-map",
+      "type": "table",
+      "section": "have-now",
+      "title": "Feature catalog by evaluator question",
+      "columns": [
+        "Question",
+        "Catalog entries",
+        "Roadmap meaning"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "Can the runtime control the agent?",
+            "agent-actions, operator-ask, trace-introspection, trace-features",
+            "The model is a callee with traceable boundaries."
+          ]
+        },
+        {
+          "cells": [
+            "Can I try it in my repo?",
+            "stranger-install, kitsoki-doctor, first-run-message, get-started-actions, harness-picker, onboarding-tour",
+            "First-run truthfulness and onboarding are product surfaces, not setup notes."
+          ]
+        },
+        {
+          "cells": [
+            "Can I author workflows safely?",
+            "meta-improvement, meta-mode, story-editor, dynamic-workflows, punch-list, goal-seeker",
+            "Stories are editable, testable, and improvable through the product."
+          ]
+        },
+        {
+          "cells": [
+            "Can I operate long runs?",
+            "chat-stream, web-inbox, session-media-workbench, diagram-showcase, review, multi-story",
+            "The run stays observable across time, routes, artifacts, and stories."
+          ]
+        },
+        {
+          "cells": [
+            "Can it do real work?",
+            "dev-story-bugfix, slidey-bugfix, slidey-open-pr, PRD/design/decomposition, weather-report",
+            "Case studies are deterministic demos over real workflow shapes."
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "The site groups features by the questions a skeptical developer asks first.",
+      "narration": "The feature catalog is organized by evaluator questions. Runtime control, local trial, authoring safety, operation, and real work each have committed entries."
+    },
+    {
+      "id": "recently-done",
+      "type": "evidence",
+      "section": "recent",
+      "title": "Recently done: the current development pulse",
+      "items": [
+        {
+          "label": "Meta improvement promoted",
+          "status": "done",
+          "detail": "improvement reports moved into the product site, feature catalog, docs, server, and web surfaces",
+          "refType": "log",
+          "ref": "d6e925e5, ea10d5f2, cab403b0"
+        },
+        {
+          "label": "Persona QA productized",
+          "status": "done",
+          "detail": "scenario QA now has natural requests, transport suites, evidence levels, report closeout, and rrweb proof",
+          "refType": "path",
+          "ref": "docs/persona-qa.md"
+        },
+        {
+          "label": "Arena treatments extracted",
+          "status": "done",
+          "detail": "raw Codex, direct CodeAct, Studio MCP, and Studio MCP plus CodeAct are distinct action surfaces with no-LLM validation",
+          "refType": "path",
+          "ref": "docs/research/arena-treatments.md"
+        },
+        {
+          "label": "Slidey editing hardened",
+          "status": "done",
+          "detail": "deck editing agents are restricted to Slidey MCP and workspace isolation was fixed",
+          "refType": "log",
+          "ref": "4ce9f7aa, b014ebd3"
+        },
+        {
+          "label": "Dev-story mining started",
+          "status": "done",
+          "detail": "a dev-story transcript mining story now exists with rooms, schemas, prompts, and flows",
+          "refType": "path",
+          "ref": "stories/dev-story-mining/README.md"
+        },
+        {
+          "label": "Media and workspace discipline tightened",
+          "status": "done",
+          "detail": "rrweb-first media defaults, staging capsule flow, TUI selector, and Studio MCP friction fixes landed together",
+          "refType": "doc",
+          "ref": "docs/media/README.md"
+        }
+      ],
+      "caption": "Recent work is mostly about making evidence, demos, and operator loops durable rather than adding isolated UI buttons.",
+      "narration": "Recent work clusters around durable evidence: meta improvement, Persona QA, arena treatments, Slidey editing, dev-story mining, media, and workspace reliability."
+    },
+    {
+      "id": "generalized-usage",
+      "type": "objectives",
+      "section": "have-now",
+      "title": "Generalized usage: shipped and live",
+      "items": [
+        {
+          "label": "Goal-seeker loop",
+          "status": "done",
+          "detail": "Kitsoki can evaluate a decomposed goal, dispatch workers, integrate green work, and re-evaluate instead of trusting self-report."
+        },
+        {
+          "label": "Stranger install",
+          "status": "done",
+          "detail": "A released binary can run inside a foreign repo, profile it, install toolkit wiring, and avoid a source checkout dependency."
+        },
+        {
+          "label": "Truthful first run",
+          "status": "done",
+          "detail": "Missing providers and unavailable actions render explicit setup guidance instead of pretending the workflow is live."
+        },
+        {
+          "label": "kitsoki doctor",
+          "status": "done",
+          "detail": "One command checks provider, toolkit, and MCP readiness before a session fails mid-run."
+        },
+        {
+          "label": "Story editor",
+          "status": "done",
+          "detail": "Rooms, hooks, domain model, and Agent Workbench are inspectable without going on a YAML expedition."
+        }
+      ],
+      "caption": "These are already product surfaces with deterministic checks behind them.",
+      "narration": "Generalized usage is not a future theme. Goal seeker, stranger install, truthful first run, doctor, and the story editor are live surfaces."
+    },
+    {
+      "id": "trace-observability",
+      "type": "evidence",
+      "section": "have-now",
+      "title": "Trace and run observability",
+      "items": [
+        {
+          "label": "Agent action transcripts",
+          "status": "validated",
+          "detail": "per-call sidecars preserve reasoning and tool use; rollups make the full run scanable",
+          "refType": "path",
+          "ref": "features/agent-actions.yaml"
+        },
+        {
+          "label": "Decision-first trace detail",
+          "status": "validated",
+          "detail": "verdict, confidence, alternatives, and evidence drawers put the decision edge before raw prompt text",
+          "refType": "path",
+          "ref": "features/trace-introspection.yaml"
+        },
+        {
+          "label": "Live trace features",
+          "status": "validated",
+          "detail": "view modes, waterfall, observation category chips, annotation, and replay are part of the live observer story",
+          "refType": "path",
+          "ref": "features/trace-features.yaml"
+        },
+        {
+          "label": "Operation handles and inbox",
+          "status": "validated",
+          "detail": "long-running work gets visible handles, notifications, and jump-back affordances",
+          "refType": "path",
+          "ref": "features/operation-handles.yaml"
+        },
+        {
+          "label": "Session media workbench",
+          "status": "validated",
+          "detail": "artifacts stay pinned while chat and devtools keep moving, which makes review workflows possible",
+          "refType": "path",
+          "ref": "features/session-media-workbench.yaml"
+        }
+      ],
+      "caption": "The operator can inspect the run while it is live, after it is complete, and while reviewing media artifacts.",
+      "narration": "Observability is a product lane: transcripts, decision detail, live trace views, operation handles, the inbox, and the session media workbench."
+    },
+    {
+      "id": "authoring-loop",
+      "type": "evidence",
+      "section": "have-now",
+      "title": "Authoring and self-improvement",
+      "items": [
+        {
+          "label": "Meta mode",
+          "status": "validated",
+          "detail": "a running state machine can pause into a persistent side conversation that edits and hot-reloads the story",
+          "refType": "doc",
+          "ref": "docs/stories/meta-mode.md"
+        },
+        {
+          "label": "Improvement reports",
+          "status": "validated",
+          "detail": "surprising runs become evidence-backed reports with prompt, tool, script, and permission lessons",
+          "refType": "path",
+          "ref": "features/meta-improvement.yaml"
+        },
+        {
+          "label": "Story editor",
+          "status": "validated",
+          "detail": "the web UI exposes the room map, hook/domain-model detail, and Agent Workbench cassette browser",
+          "refType": "path",
+          "ref": "features/story-editor.yaml"
+        },
+        {
+          "label": "Dynamic workflows",
+          "status": "progress",
+          "detail": "proposal-shaped goals can become validated workflow drafts, live sessions, and exportable starter bases",
+          "refType": "path",
+          "ref": "features/dynamic-workflows.yaml"
+        },
+        {
+          "label": "Punch-list and goal-seeker",
+          "status": "validated",
+          "detail": "YAML worklists and bounded goal loops turn backlog work into replayable story execution",
+          "refType": "path",
+          "ref": "features/punch-list.yaml"
+        }
+      ],
+      "caption": "The story is not static configuration. The product includes the surfaces for inspecting, editing, improving, and validating it.",
+      "narration": "Authoring is now part of the product: meta mode, improvement reports, story editor, dynamic workflows, punch-list, and goal seeker."
+    },
+    {
+      "id": "evaluation-proof",
+      "type": "evidence",
+      "section": "have-now",
+      "title": "Evaluation and proof substrate",
+      "items": [
+        {
+          "label": "Persona QA story",
+          "status": "validated",
+          "detail": "preview, check, transport-pinned legs, independent judge outcomes, report.md, and deck.slidey.json are the public flow",
+          "refType": "doc",
+          "ref": "docs/persona-qa.md"
+        },
+        {
+          "label": "Product-site demos",
+          "status": "validated",
+          "detail": "feature YAML drives live tour overlays, rrweb captures, step screenshots, site pages, and QA scenarios",
+          "refType": "doc",
+          "ref": "docs/site/README.md"
+        },
+        {
+          "label": "Arena comparisons",
+          "status": "progress",
+          "detail": "treatments are explicit action surfaces; spec validation is no-LLM and live spend is gated",
+          "refType": "doc",
+          "ref": "docs/research/arena-treatments.md"
+        },
+        {
+          "label": "Slidey decks",
+          "status": "implemented",
+          "detail": "committed decks under docs/decks can publish through the product-site gallery and embed rrweb clips",
+          "refType": "doc",
+          "ref": "docs/media/README.md"
+        },
+        {
+          "label": "UI demo and UI QA loop",
+          "status": "validated",
+          "detail": "deterministic replay and skeptical frame review turn demos into product gates, not marketing afterthoughts",
+          "refType": "path",
+          "ref": ".agents/skills/kitsoki-ui-demo"
+        }
+      ],
+      "caption": "Kitsoki's proof layer is a chain: feature catalog, deterministic replay, review artifacts, and Slidey presentation.",
+      "narration": "The proof substrate ties together Persona QA, product-site demos, arena comparisons, Slidey decks, and UI demo or QA gates."
+    },
+    {
+      "id": "case-studies",
+      "type": "evidence",
+      "section": "have-now",
+      "title": "Real workflow case studies",
+      "items": [
+        {
+          "label": "Dev-story bugfix",
+          "status": "validated",
+          "detail": "triage a ticket, hand it to the bugfix pipeline, then watch reproduce, propose, implement, test, review, validate, and PR-ready states",
+          "refType": "path",
+          "ref": "features/dev-story-bugfix.yaml"
+        },
+        {
+          "label": "Slidey developer arc",
+          "status": "validated",
+          "detail": "PM idea, architect design, decomposition, bugfix, spatial refine, and PR scenes are committed as a deck-local rrweb story arc",
+          "refType": "path",
+          "ref": "docs/decks/dev-story-hybrid.slidey.json"
+        },
+        {
+          "label": "Bugfix bakeoff",
+          "status": "progress",
+          "detail": "methodology is validated, first cells are scored, and blocked/pending cells remain explicit instead of hidden",
+          "refType": "path",
+          "ref": "docs/decks/bugfix-bakeoff.slidey.json"
+        },
+        {
+          "label": "Weather Starlark host",
+          "status": "validated",
+          "detail": "deterministic HTTP glue runs through host.starlark.run with cassettes and trace-visible calls",
+          "refType": "path",
+          "ref": "features/weather-report.yaml"
+        },
+        {
+          "label": "Mockup and design workflows",
+          "status": "validated",
+          "detail": "PRD, design, mockup video, and anchored Slidey refine flows prove non-bugfix domains share the same engine",
+          "refType": "path",
+          "ref": "features/design-walkthrough.yaml"
+        }
+      ],
+      "caption": "The case studies matter because they are different workflow shapes running on the same story/runtime substrate.",
+      "narration": "Real workflow evidence now spans bugfix, Slidey development, bakeoffs, Starlark HTTP glue, and design or mockup workflows."
+    },
+    {
+      "id": "working-now",
+      "type": "evidence",
+      "section": "working",
+      "title": "Working now: product hardening and integration",
+      "items": [
+        {
+          "label": "Onboarding surfaces",
+          "status": "progress",
+          "detail": "TUI onboarding is proven; web, VS Code, GitHub-originated starts, and deeper repo analysis still need the same setup flow",
+          "refType": "path",
+          "ref": "stories/dev-story/rooms/init.yaml"
+        },
+        {
+          "label": "GitHub agent and reports",
+          "status": "progress",
+          "detail": "issue ingress and bugfix dispatch are real for issues, while PR autopilot and web operator viewer remain in the proposal queue",
+          "refType": "doc",
+          "ref": "docs/proposals/kitsoki-github-agent.md"
+        },
+        {
+          "label": "Artifact-driven stories",
+          "status": "progress",
+          "detail": "local artifact-job registry and rebuildable run/artifact index exist; unified instances, publish lifecycle, adoption, and console remain open",
+          "refType": "doc",
+          "ref": "docs/proposals/artifact-driven-stories.md"
+        },
+        {
+          "label": "Contextual routing polish",
+          "status": "progress",
+          "detail": "runtime slices shipped; switch-route ergonomics, TUI receipt/rewind parity, and extra fixtures remain",
+          "refType": "doc",
+          "ref": "docs/proposals/contextual-room-routing.md"
+        },
+        {
+          "label": "Typed view readability",
+          "status": "progress",
+          "detail": "typed views are widely wired, but legacy templates, direct TUI rendering, trace/web typed recording, and a proofing command remain",
+          "refType": "doc",
+          "ref": "docs/proposals/view-rendering-readability.md"
+        },
+        {
+          "label": "Arena live path",
+          "status": "progress",
+          "detail": "no-LLM treatment validation is strong; VM pools, plugin breadth, completion polling, and old command retirement remain",
+          "refType": "doc",
+          "ref": "docs/proposals/arena-comparison-runner.md"
+        }
+      ],
+      "caption": "This bucket is partially real work, not greenfield ideas. The proposal files name the remaining cuts.",
+      "narration": "Working now means partially real work with explicit gaps: onboarding, GitHub agent, artifacts, contextual routing, typed views, and arena live path."
+    },
+    {
+      "id": "proposal-map",
+      "type": "table",
+      "section": "working",
+      "title": "Proposal queue map",
+      "columns": [
+        "Epic",
+        "Current state",
+        "Already real",
+        "Still to land"
+      ],
+      "rows": [
+        {
+          "cells": [
+            "Project object graph",
+            "draft, partial substrate",
+            "seed objects, grouping taxonomy, graph diff pieces",
+            "initiative views, area inbox, roadmap deltas, CLI advisory checks"
+          ]
+        },
+        {
+          "cells": [
+            "Human action workflows",
+            "draft",
+            "roadmap taxonomy proposal set",
+            "host.human verbs, GitHub backend, tracing, assistance rooms, decomposition adoption"
+          ]
+        },
+        {
+          "cells": [
+            "GitHub agent",
+            "draft v2, first slices real",
+            "ingress substrate and issue dispatch to bugfix",
+            "PR autopilot, operator web viewer, durable run service, demo composite"
+          ]
+        },
+        {
+          "cells": [
+            "Artifact-driven stories",
+            "in progress",
+            "local artifact-job registry and index",
+            "instances, publish lifecycle, dev-story adoption, TUI/web console"
+          ]
+        },
+        {
+          "cells": [
+            "Feedback SDK",
+            "draft",
+            "Kitsoki bug reports, rrweb, spatial oracle, Slidey reports as precedents",
+            "framework-neutral SDK, privacy manifest, generic sink"
+          ]
+        },
+        {
+          "cells": [
+            "Session mining backend",
+            "partial",
+            "initial corpus and trace-pattern substrate in internal/mining",
+            "source registry, route feedback mining, backend-normal analysis drivers"
+          ]
+        },
+        {
+          "cells": [
+            "Stories as trainable models",
+            "draft",
+            "session-mining and story-hardening patterns",
+            "reward function, credit assignment, optimizer/training gate"
+          ]
+        },
+        {
+          "cells": [
+            "LINE customer channel",
+            "draft",
+            "engine, external keys, operator-ask ingredients",
+            "webhook session factory, LINE transport, commerce stories, console"
+          ]
+        }
+      ],
+      "variant": "data",
+      "caption": "The queue clusters into durable project memory, external collaboration, artifact jobs, feedback capture, mining/training, and customer channels.",
+      "narration": "The proposal queue is not random. It clusters around project memory, external collaboration, artifact jobs, feedback capture, mining and training, and customer channels."
+    },
+    {
+      "id": "coming-up",
+      "type": "evidence",
+      "section": "next",
+      "title": "Coming up: next bets",
+      "items": [
+        {
+          "label": "Capability sandbox",
+          "status": "next",
+          "detail": "finish the secure boundary below toolboxes and effect classes so write and external agents have enforceable confinement",
+          "refType": "doc",
+          "ref": "docs/proposals/agent-capability-model.md"
+        },
+        {
+          "label": "Portable feedback SDK",
+          "status": "next",
+          "detail": "turn the current browser bug-report and Slidey report flow into a privacy-first framework-neutral feedback SDK",
+          "refType": "doc",
+          "ref": "docs/proposals/generic-feedback-sdk-slidey-reports.md"
+        },
+        {
+          "label": "Project graph and roadmap deltas",
+          "status": "next",
+          "detail": "make features, proposals, plans, tests, evidence, and roadmap changes typed graph objects instead of scattered prose",
+          "refType": "doc",
+          "ref": "docs/proposals/project-object-graph.md"
+        },
+        {
+          "label": "Human action workflows",
+          "status": "next",
+          "detail": "put human-owned tasks beside agent-owned work with host.human verbs, GitHub Issue backend, and mixed decomposition",
+          "refType": "doc",
+          "ref": "docs/proposals/human-action-workflows.md"
+        },
+        {
+          "label": "Trainable stories",
+          "status": "next",
+          "detail": "convert traces, failures, credit assignment, and validation gates into a repeatable optimizer step for story changes",
+          "refType": "doc",
+          "ref": "docs/proposals/stories-as-trainable-models.md"
+        },
+        {
+          "label": "Customer channels",
+          "status": "next",
+          "detail": "LINE ingress, transport, commerce stories, and operator handoff would prove Kitsoki outside developer tooling",
+          "refType": "doc",
+          "ref": "docs/proposals/line-messenger-channel.md"
+        }
+      ],
+      "caption": "The next bets extend the same engine outward: safer agents, portable feedback, durable project memory, human tasks, training loops, and customer channels.",
+      "narration": "Next bets extend the same engine outward: safer agents, portable feedback, durable project memory, human tasks, trainable stories, and customer channels."
+    },
+    {
+      "id": "waiting-on",
+      "type": "evidence",
+      "section": "blocked",
+      "title": "Waiting on: explicit gates and dependencies",
+      "items": [
+        {
+          "label": "Live LLM and vision spend",
+          "status": "blocked",
+          "detail": "automated tests stay no-LLM; live model and vision review only run when an operator explicitly chooses that gate",
+          "refType": "doc",
+          "ref": "AGENTS.md"
+        },
+        {
+          "label": "Provider quota and cost walls",
+          "status": "blocked",
+          "detail": "bakeoff and arena cells may be quota-blocked or pending; blocked cells remain first-class evidence, not zeroes",
+          "refType": "path",
+          "ref": "docs/decks/bugfix-bakeoff.slidey.json"
+        },
+        {
+          "label": "Free-text demo recordings",
+          "status": "blocked",
+          "detail": "conversational product demos need replay recordings or cassettes for slot extraction; nil-harness flow driving is insufficient",
+          "refType": "log",
+          "ref": ".context/demo-progress.md"
+        },
+        {
+          "label": "Hosted artifact decisions",
+          "status": "blocked",
+          "detail": "durable artifact jobs need storage, auth, locking, publish/archive, and run identity decisions before hosted workflows are complete",
+          "refType": "doc",
+          "ref": "docs/proposals/artifact-driven-stories.md"
+        },
+        {
+          "label": "Secure confinement backend",
+          "status": "blocked",
+          "detail": "write/external agents need a selected sandbox runtime ladder before capability enforcement is complete",
+          "refType": "doc",
+          "ref": "docs/proposals/task-fs-sandbox.md"
+        },
+        {
+          "label": "Responsive media variants",
+          "status": "blocked",
+          "detail": "mobile and tablet demo captures wait until each feature is genuinely responsive, not a scaled desktop replay",
+          "refType": "doc",
+          "ref": "docs/site/README.md"
+        }
+      ],
+      "caption": "Waiting is acceptable when it is named: spend, quota, recording, hosting, sandbox, and responsive media all have explicit gates.",
+      "narration": "The waiting list is explicit: live spend, provider quota, free-text recordings, hosted artifacts, sandbox backend, and responsive media variants."
+    },
+    {
+      "id": "dependency-graph",
+      "type": "diagram-svg",
+      "section": "next",
+      "title": "Roadmap dependency graph",
+      "panels": [
+        {
+          "label": "",
+          "viewBox": "0 0 1600 820",
+          "nodes": [
+            {
+              "id": "proof",
+              "label": "Proof substrate",
+              "sub": "catalog + trace + decks",
+              "lines": [
+                "feature YAML",
+                "rrweb",
+                "Slidey"
+              ],
+              "x": 70,
+              "y": 110,
+              "w": 360,
+              "h": 170,
+              "style": "primary"
+            },
+            {
+              "id": "quality",
+              "label": "Quality gates",
+              "sub": "no self-report",
+              "lines": [
+                "Persona QA",
+                "arena",
+                "UI QA"
+              ],
+              "x": 620,
+              "y": 110,
+              "w": 360,
+              "h": 170
+            },
+            {
+              "id": "memory",
+              "label": "Project memory",
+              "sub": "object graph",
+              "lines": [
+                "features",
+                "evidence",
+                "deltas"
+              ],
+              "x": 1170,
+              "y": 110,
+              "w": 360,
+              "h": 170,
+              "style": "secondary"
+            },
+            {
+              "id": "work",
+              "label": "Durable work",
+              "sub": "artifact jobs",
+              "lines": [
+                "instances",
+                "publish",
+                "resume"
+              ],
+              "x": 250,
+              "y": 500,
+              "w": 360,
+              "h": 170
+            },
+            {
+              "id": "collab",
+              "label": "External collaboration",
+              "sub": "GitHub + human tasks",
+              "lines": [
+                "issues",
+                "PRs",
+                "operator drive"
+              ],
+              "x": 620,
+              "y": 500,
+              "w": 360,
+              "h": 170,
+              "style": "primary"
+            },
+            {
+              "id": "channels",
+              "label": "Customer channels",
+              "sub": "LINE and beyond",
+              "lines": [
+                "session factory",
+                "transport",
+                "handoff"
+              ],
+              "x": 990,
+              "y": 500,
+              "w": 360,
+              "h": 170
+            }
+          ],
+          "edges": [
+            {
+              "from": "proof",
+              "to": "quality"
+            },
+            {
+              "from": "quality",
+              "to": "memory"
+            },
+            {
+              "from": "proof",
+              "to": "work"
+            },
+            {
+              "from": "work",
+              "to": "collab"
+            },
+            {
+              "from": "memory",
+              "to": "collab"
+            },
+            {
+              "from": "collab",
+              "to": "channels"
+            }
+          ]
+        }
+      ],
+      "caption": "The dependency order is proof first, then gates, then project memory and durable work, then external collaboration and customer channels.",
+      "narration": "The dependency graph runs from proof to quality gates, into project memory and durable work, then external collaboration and customer channels."
+    },
+    {
+      "id": "deck-quality-bar",
+      "type": "objectives",
+      "section": "golden",
+      "title": "Quality bar for this golden deck",
+      "items": [
+        {
+          "label": "Source-backed",
+          "status": "done",
+          "detail": "The deck is grounded in git history, product-site pages, feature YAML, proposal statuses, docs, and .context notes."
+        },
+        {
+          "label": "Status vocabulary reused",
+          "status": "done",
+          "detail": "It uses the existing evidence/objectives status format: done, validated, progress, next, blocked, implemented."
+        },
+        {
+          "label": "Roadmap oriented",
+          "status": "done",
+          "detail": "It separates have now, recently done, working now, coming up, and waiting on explicit gates."
+        },
+        {
+          "label": "No fake proof",
+          "status": "done",
+          "detail": "Blocked or pending work is named as blocked or pending rather than presented as shipped."
+        },
+        {
+          "label": "Slidey MCP path",
+          "status": "done",
+          "detail": "The spec was written and validated through the Slidey MCP surface."
+        },
+        {
+          "label": "Publish-ready source",
+          "status": "next",
+          "detail": "Bundle to docs/decks/bundled/kitsoki-roadmap.html when this deck should appear on the product-site deck gallery."
+        }
+      ],
+      "caption": "A golden deck should be a source-backed operating artifact, not a prettier backlog dump.",
+      "narration": "A golden deck should be source backed, reuse the project status vocabulary, stay roadmap oriented, avoid fake proof, validate through Slidey, and be ready to bundle for the site."
+    },
+    {
+      "id": "cta",
+      "type": "cta",
+      "section": "close",
+      "wordmark": "Kitsoki",
+      "tagline": "Roadmap as evidence, not vibes",
+      "url": "docs/decks/kitsoki-roadmap.slidey.json",
+      "narration": "Kitsoki roadmap as evidence, not vibes."
+    }
+  ]
+}
