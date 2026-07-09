@@ -27,6 +27,7 @@ const props = defineProps<{
       posterUrl: string | null;
       chaptersUrl: string | null;
       videoAvailable: boolean;
+      embedKind?: "deck" | "rrweb" | null;
       embedUrl: string | null;
     };
     steps: Array<{ id: string; title: string; body: string; shotUrl: string | null }>;

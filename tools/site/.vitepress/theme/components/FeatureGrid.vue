@@ -26,7 +26,7 @@ interface GridFeature {
   title: string;
   tagline: string;
   promo: { order: number; highlight?: boolean } | null;
-  media: { posterUrl: string | null; videoAvailable?: boolean; embedUrl?: string | null };
+  media: { posterUrl: string | null; videoAvailable?: boolean; embedUrl?: string | null; embedKind?: "deck" | "rrweb" | null };
 }
 
 const { theme } = useData();
@@ -54,6 +54,7 @@ function kindLabel(kind: string): string {
 
 function mediaLabel(f: GridFeature): string {
   if (f.media.videoAvailable) return "video";
+  if (f.media.embedKind === "rrweb") return "replay";
   if (f.media.embedUrl) return "deck";
   return "text";
 }

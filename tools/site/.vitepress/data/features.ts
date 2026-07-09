@@ -30,9 +30,11 @@ export interface FeatureMedia {
   posterUrl: string | null;
   chaptersUrl: string | null;
   videoAvailable: boolean;
+  embedKind: "deck" | "rrweb" | null;
   /** A rrweb-native story-demo: an embedded Slidey deck clip (see
    *  demo.embed in features/*.yaml), opened at its scene via `?scene=N`.
-   *  Null unless the bundled deck html is staged under src/public/deck-viewers/. */
+   *  A rrweb-first demo uses the per-feature staged `/media/<id>/demo.html`.
+   *  Null unless the viewer html is staged. */
   embedUrl: string | null;
 }
 
@@ -117,6 +119,7 @@ export function loadFeatures(locale: LocaleCode = "en"): SiteFeature[] {
     const stepTranslations = new Map((t.steps ?? []).map((s) => [s.id, s]));
     const staged = path.join(mediaRoot, f.id);
     const hasVideo = fs.existsSync(path.join(staged, "demo.mp4"));
+    const hasRrwebViewer = fs.existsSync(path.join(staged, "demo.html"));
     const hasPoster = fs.existsSync(path.join(staged, "poster.png"));
     const hasChapters = fs.existsSync(path.join(staged, "chapters.json"));
     const stepsDir = path.join(staged, "steps");
@@ -126,6 +129,9 @@ export function loadFeatures(locale: LocaleCode = "en"): SiteFeature[] {
     // media/<id>/ — several features can point at the same bundled deck).
     const embedRel = f.demo?.embed ? path.join("deck-viewers", path.basename(f.demo.embed.deckHtml)) : null;
     const hasEmbed = !!embedRel && fs.existsSync(path.join(siteDir, "src", "public", embedRel));
+    const rrwebEmbedUrl = hasRrwebViewer ? `/media/${f.id}/demo.html` : null;
+    const deckEmbedUrl = hasEmbed ? `/${embedRel}?scene=${f.demo.embed.sceneIndex}` : null;
+    const embedUrl = deckEmbedUrl ?? rrwebEmbedUrl;
 
     const steps: SiteFeatureStep[] = (f.tour?.steps ?? []).map((s: Record<string, string>) => {
       const shot = shots.find((n) => n.endsWith(`-${s.id}.png`));
@@ -156,7 +162,8 @@ export function loadFeatures(locale: LocaleCode = "en"): SiteFeature[] {
         posterUrl: hasPoster ? `/media/${f.id}/poster.png` : null,
         chaptersUrl: hasChapters ? `/media/${f.id}/chapters.json` : null,
         videoAvailable: hasVideo,
-        embedUrl: hasEmbed ? `/${embedRel}?scene=${f.demo.embed.sceneIndex}` : null,
+        embedKind: deckEmbedUrl ? "deck" : rrwebEmbedUrl ? "rrweb" : null,
+        embedUrl,
       },
       steps,
       demoSpec: f.demo?.spec ?? null,

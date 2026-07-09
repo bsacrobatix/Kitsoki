@@ -2,8 +2,8 @@
 
 Kitsoki has two long-lived media families:
 
-- **Product-site demo videos**: tour-driven MP4s generated from the feature
-  catalog and deterministic no-LLM runs.
+- **Product-site demos**: tour-driven MP4s or rrweb replays generated from the
+  feature catalog and deterministic no-LLM runs.
 - **Slidey decks with embedded clips**: Slidey JSON decks that may embed rrweb
   captures as replayable video scenes.
 
@@ -14,7 +14,7 @@ image that a deck/site needs to render, or a self-contained Slidey HTML bundle
 under `docs/decks/bundled/` that the static product site serves without running
 the Slidey CLI.
 
-## Product Demo Videos
+## Product Demo Media
 
 Source of truth:
 
@@ -27,9 +27,10 @@ Source of truth:
 
 Generated outputs:
 
-- `.artifacts/<demo>/` contains the canonical `<videoBase>.mp4`, the
-  `<videoBase>.mp4.chapters.json` sidecar, and numbered `NN-<stepId>.png`
-  screenshots.
+- `.artifacts/<demo>/` contains the canonical `<videoBase>.mp4` plus
+  `<videoBase>.mp4.chapters.json`, or `<videoBase>.rrweb.json` plus the
+  Slidey-bundled `<videoBase>.html` replay viewer. Numbered
+  `NN-<stepId>.png` screenshots provide poster/step stills for both formats.
 - `.temp/site/src/public/media/<feature>/` is staged from `.artifacts/` by
   `make site` / `make site-dev`. It is not the source of truth.
 - `.temp/site/dist/media/<feature>/` is built site output.
@@ -38,6 +39,7 @@ Commands:
 
 ```bash
 make demo-feature FEATURE=agent-actions  # one feature
+make demo-feature-rrweb FEATURE=web-inbox # one rrweb replay + HTML viewer
 make demos                               # every stale feature demo
 make render-tour                         # stitched complete-product-tour
 make site                                # stage media and build the site

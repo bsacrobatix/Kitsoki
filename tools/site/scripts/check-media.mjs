@@ -69,8 +69,15 @@ const RENDERER_MEDIA = {
  * loosely — any staged file besides poster.png counts). */
 function expectedMediaFile(f) {
   if (f.demo?.mediaKind) return f.demo.mediaKind;
+  if ((f.demo?.format ?? "mp4") === "rrweb") return "demo.html";
   const renderer = f.demo?.renderer ?? "playwright";
   return Object.prototype.hasOwnProperty.call(RENDERER_MEDIA, renderer) ? RENDERER_MEDIA[renderer] : null;
+}
+
+function recordCommand(f) {
+  return (f.demo?.format ?? "mp4") === "rrweb"
+    ? `make demo-feature-rrweb FEATURE=${f.id}`
+    : `make demo-feature FEATURE=${f.id}`;
 }
 
 function rel(p) {
@@ -136,33 +143,57 @@ function checkFeatureDemos() {
       problems.push(`${f.id}: demo.artifactDir must live under .artifacts, got ${f.demo.artifactDir}`);
     }
 
-    if (f.demo.video && !f.demo.video.endsWith(".mp4")) {
-      problems.push(`${f.id}: demo.video must be an mp4, got ${f.demo.video}`);
-    }
-    if (f.demo.video && !inside(path.resolve(repoRoot, f.demo.video), artifactDir)) {
-      problems.push(`${f.id}: demo.video must live inside demo.artifactDir (${f.demo.video})`);
-    }
-    if (f.demo.chapters !== `${f.demo.video}.chapters.json`) {
-      problems.push(`${f.id}: demo.chapters must be demo.video + .chapters.json`);
+    const format = f.demo.format ?? "mp4";
+    if (format === "rrweb") {
+      if (!f.demo.rrweb?.endsWith(".rrweb.json")) {
+        problems.push(`${f.id}: demo.rrweb must be a .rrweb.json path, got ${f.demo.rrweb}`);
+      }
+      if (f.demo.rrweb && !inside(path.resolve(repoRoot, f.demo.rrweb), artifactDir)) {
+        problems.push(`${f.id}: demo.rrweb must live inside demo.artifactDir (${f.demo.rrweb})`);
+      }
+      if (!f.demo.rrwebViewer?.endsWith(".html")) {
+        problems.push(`${f.id}: demo.rrwebViewer must be an html path, got ${f.demo.rrwebViewer}`);
+      }
+      if (f.demo.rrwebViewer && !inside(path.resolve(repoRoot, f.demo.rrwebViewer), artifactDir)) {
+        problems.push(`${f.id}: demo.rrwebViewer must live inside demo.artifactDir (${f.demo.rrwebViewer})`);
+      }
+      if (f.demo.rrwebChapters !== `${f.demo.rrweb}.chapters.json`) {
+        problems.push(`${f.id}: demo.rrwebChapters must be demo.rrweb + .chapters.json`);
+      }
+    } else {
+      if (f.demo.video && !f.demo.video.endsWith(".mp4")) {
+        problems.push(`${f.id}: demo.video must be an mp4, got ${f.demo.video}`);
+      }
+      if (f.demo.video && !inside(path.resolve(repoRoot, f.demo.video), artifactDir)) {
+        problems.push(`${f.id}: demo.video must live inside demo.artifactDir (${f.demo.video})`);
+      }
+      if (f.demo.chapters !== `${f.demo.video}.chapters.json`) {
+        problems.push(`${f.id}: demo.chapters must be demo.video + .chapters.json`);
+      }
     }
     if (f.demo.screenshotPattern !== "NN-<stepId>.png") {
       problems.push(`${f.id}: screenshotPattern must stay NN-<stepId>.png`);
     }
 
-    for (const [profile, variant] of Object.entries(f.demo.variants ?? {})) {
-      if (!variant.video.endsWith(".mp4")) {
-        problems.push(`${f.id}[${profile}]: variant video must be an mp4`);
-      }
-      if (variant.chapters !== `${variant.video}.chapters.json`) {
-        problems.push(`${f.id}[${profile}]: variant chapters must be variant.video + .chapters.json`);
-      }
-      if (!inside(path.resolve(repoRoot, variant.video), artifactDir)) {
-        problems.push(`${f.id}[${profile}]: variant video must live inside demo.artifactDir`);
+    if (format !== "rrweb") {
+      for (const [profile, variant] of Object.entries(f.demo.variants ?? {})) {
+        if (!variant.video.endsWith(".mp4")) {
+          problems.push(`${f.id}[${profile}]: variant video must be an mp4`);
+        }
+        if (variant.chapters !== `${variant.video}.chapters.json`) {
+          problems.push(`${f.id}[${profile}]: variant chapters must be variant.video + .chapters.json`);
+        }
+        if (!inside(path.resolve(repoRoot, variant.video), artifactDir)) {
+          problems.push(`${f.id}[${profile}]: variant video must live inside demo.artifactDir`);
+        }
       }
     }
 
     if (f.demo.renderer === "playwright" && f.demo.spec && !fs.existsSync(path.resolve(repoRoot, f.demo.spec))) {
       problems.push(`${f.id}: demo spec path does not exist: ${f.demo.spec}`);
+    }
+    if (f.demo.rrwebSpec && !fs.existsSync(path.resolve(repoRoot, f.demo.rrwebSpec))) {
+      problems.push(`${f.id}: demo rrweb spec path does not exist: ${f.demo.rrwebSpec}`);
     }
   }
 
@@ -207,7 +238,7 @@ function checkPromoMedia(index) {
     if (isPromo) {
       problems.push(
         `promo feature ${f.id}: missing staged ${missing.join(" + ")} under ${rel(dir)} ` +
-          `(record with: make demo-feature FEATURE=${f.id}, then make site)`,
+          `(record with: ${recordCommand(f)}, then make site)`,
       );
     } else {
       nonPromoMissing.push(`${f.id} (missing ${missing.join(" + ")})`);
@@ -241,13 +272,18 @@ function checkStagedMedia(idsWithMedia) {
     }
     for (const file of fs.readdirSync(dir)) {
       const p = path.join(dir, file);
-      if (file === "demo.mp4" || file === "chapters.json" || file === "poster.png" || file === "steps") continue;
+      if (file === "demo.mp4" || file === "demo.rrweb.json" || file === "demo.html" || file === "chapters.json" || file === "poster.png" || file === "steps") continue;
       problems.push(`unexpected staged media file: ${rel(p)}`);
     }
     const demo = path.join(dir, "demo.mp4");
     const chapters = path.join(dir, "chapters.json");
     if (fs.existsSync(demo) && !fs.existsSync(chapters)) {
       problems.push(`${rel(dir)}: demo.mp4 is staged without chapters.json`);
+    }
+    const replay = path.join(dir, "demo.rrweb.json");
+    const viewer = path.join(dir, "demo.html");
+    if (fs.existsSync(viewer) && !fs.existsSync(replay)) {
+      problems.push(`${rel(dir)}: demo.html is staged without demo.rrweb.json`);
     }
     const steps = path.join(dir, "steps");
     if (fs.existsSync(steps)) {
