@@ -17,6 +17,11 @@
 // Native operations use an injectable HTTP client. Auth and transport failures
 // return clean Result.Error values rather than crashing, so authors can route
 // YAML `on_error:` arcs.
+//
+// TODO(ticket-provider): migrate this built-in GitHub provider onto the common
+// ticketprovider/Starlark runner, or wrap it behind the same provider boundary,
+// so GitHub and meta-repo/monorepo-defined providers share one auth,
+// structured-error, CLI, and MCP reuse path.
 package host
 
 import (
