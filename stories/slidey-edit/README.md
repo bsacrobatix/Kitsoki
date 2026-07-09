@@ -20,24 +20,26 @@ kitsoki run stories/slidey-edit/app.yaml
 ## Rooms
 
 ```
-idle ──start──▶ drafting ──accept──▶ rendering ──(auto)──▶ reviewing
-│              (agent writes/edits deck)          (slidey → static HTML  media(deck)
-│                                                 + .semantic sidecar)    annotation + checkpoint
-└──edit_existing/edit <deck>──▶ loading_existing ──accept──▶ rendering
-                                (resolve deck path)
-                                                                  │                   revise
-        ┌─────────────────────────────────────────────────────────┤                      │
-        │ accept→done · rerender→rendering · quit→@exit:abandoned   │                      ▼
-        │                                                           │             drafting (deck-wide edit)
-        │                                                           ▼
-        └──────────── rendering ◀──(re-render before/after)──── refining
-                                                          (agent edits the scene the
-                                                           anchor points at)
+idle ──start/edit──▶ preparing_workspace ──accept──▶ drafting ──accept──▶ rendering ──(auto)──▶ reviewing
+                    (managed capsule clone)         (agent writes/edits deck)       (slidey → static HTML
+                                                                                     + .semantic sidecar)
+          │
+          └──edit_existing/edit <deck>──▶ loading_existing ──accept──▶ rendering
+                                          (resolve deck path)
+                                                                                               │        revise
+        ┌──────────────────────────────────────────────────────────────────────────────────────┤           │
+        │ accept→done · rerender→rendering · quit→@exit:abandoned                                │           ▼
+        │                                                                                        │   drafting (deck-wide edit)
+        │                                                                                        ▼
+        └──────────────────────────── rendering ◀──(re-render before/after)──────────────── refining
+                                                                                 (agent edits the scene the
+                                                                                  anchor points at)
 ```
 
 | Room | Split | What it does |
 |---|---|---|
 | `idle` | deterministic | Choose a fresh draft with `start`, or pass an existing slidey JSON spec with `edit_existing spec_path=...`. |
+| `preparing_workspace` | deterministic | Creates or reuses a session-scoped managed clone-backed capsule workspace through `iface.workspace.create`. Story state keeps repo-relative deck paths, while file-touching hosts receive the concrete `workdir` path. |
 | `loading_existing` | deterministic | Resolves a bare deck name or path via `resolve_deck` before rendering. This keeps `edit kitsoki-pitch` deterministic while ensuring `host.slidey.render` receives the resolved spec path, not the baked sample. |
 | `drafting` | interpretive | ONE `host.agent.task` (`drafter`) authors/edits the deck JSON. Existing input lives in `world.source_deck`; `world.deck` is the output/cache. Workspace-jailed, `once:`. |
 | `rendering` | deterministic | `host.slidey.render` (`format: html`, `slidey bundle`) → a self-contained **static HTML deck** and, when available, a `.semantic.json` sidecar. Render failures stop in a visible troubleshooting checkpoint before any repair agent runs; deck-shaped failures can be repaired one explicit `troubleshoot` turn at a time, while external renderer/toolchain failures surface directly. `host.artifacts_dir` emits the deck handle and co-locates any sidecar/poster companions. Auto-advances on success. |

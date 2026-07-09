@@ -39,7 +39,7 @@ states:
         # go straight to the spatial-oracle review. NO authoring agent runs —
         # there is nothing to author until the operator gives feedback.
         - when: "hasPrefix(lower(trim(slots.feedback ?? '')), 'edit') || hasPrefix(lower(trim(slots.feedback ?? '')), 'revise ') || hasPrefix(lower(trim(slots.feedback ?? '')), 'open ')"
-          target: loading_existing
+          target: preparing_workspace
           effects:
             - set:
                 pending_deck_spec_path: "{{ slots.feedback }}"
@@ -55,7 +55,7 @@ states:
         # from scratch through the drafter. Promote source_deck → deck and skip
         # drafting straight to rendering.
         - when: "(world.source_deck.spec_path ?? '') != ''"
-          target: loading_existing
+          target: preparing_workspace
           effects:
             - set:
                 pending_deck_spec_path: "{{ world.source_deck.spec_path }}"
@@ -65,10 +65,13 @@ states:
                 render_error_repairable: false
                 render_error_kind: ""
                 render_error_summary: ""
-        - target: drafting
+        - target: preparing_workspace
           effects:
             - set:
                 draft_feedback: "{{ slots.feedback ?? '' }}"
+                pending_deck_spec_path: ""
+                pending_deck_summary: ""
+                workspace: "{{ world.decks_dir }}"
                 # Clear the deck so drafting's once: author pass runs fresh
                 # (the baked default seeds idle's view; start re-authors).
                 deck: {}
@@ -81,7 +84,7 @@ states:
         # An existing deck renders IN PLACE and goes straight to review — no
         # authoring agent. The deck already exists and works in the web viewer;
         # loading it must not re-author 36 scenes or strip its assets.
-        - target: loading_existing
+        - target: preparing_workspace
           effects:
             - set:
                 pending_deck_spec_path: "{{ slots.spec_path }}"

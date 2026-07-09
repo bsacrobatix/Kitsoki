@@ -64,13 +64,14 @@ states:
         once: true
         with:
           agent: reviser
-          working_dir: "{{ world.workspace }}"
+          working_dir: "{{ hasPrefix(world.workspace, '/') ? world.workspace : (world.workdir != '' ? world.workdir + '/' + world.workspace : world.workspace) }}"
           acceptance:
             schema: schemas/deck.json
           context:
             prompt: prompts/refine_deck.md
             args:
               workspace:       "{{ world.workspace }}"
+              workdir:         "{{ world.workdir }}"
               deck:            "{{ world.deck }}"
               annotation:      "{{ world.annotation }}"
               refine_feedback: "{{ world.refine_feedback }}"

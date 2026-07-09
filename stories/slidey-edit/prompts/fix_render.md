@@ -7,11 +7,17 @@ IO is the Slidey MCP. Read the deck with `slidey_read_spec`, apply the smallest
 fix with `slidey_patch_spec` or `slidey_write_spec`, and call `slidey_validate`
 before submitting unless the failure is clearly outside the deck content.
 
+If you are running in Codex and one of these tools is not immediately visible,
+call `tool_search` for the exact Slidey tool name, then use the returned tool.
+Do not report the Slidey MCP as unavailable until `tool_search` has failed for
+the needed `slidey_*` tool and for `submit`.
+
 {% block spec_project_context %}{% endblock %}
 
 ## Workspace
 
 Repository workspace: `{{ args.workspace }}`
+Managed workdir: `{{ args.workdir|default:"(current checkout)" }}`
 
 The Slidey MCP root is this workspace. When calling Slidey MCP tools, use the
 workspace-relative path, not the repository path joined onto the workspace.
@@ -49,6 +55,7 @@ The renderer reported:
 
 ## What to produce
 
-Submit the deck object: the same repository-render `spec_path`, and a one-line
-`summary` of what you changed to fix the render (or a note that the deck was
-already correct and the failure is external).
+Submit the deck object: the same repository-render `spec_path` (repo-relative,
+not an absolute filesystem path), and a one-line `summary` of what you changed
+to fix the render (or a note that the deck was already correct and the failure
+is external).

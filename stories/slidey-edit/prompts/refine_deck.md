@@ -12,11 +12,17 @@ IO is the Slidey MCP. Read the deck with `slidey_read_spec`, apply the focused
 change with `slidey_patch_spec` or `slidey_write_spec`, and call
 `slidey_validate` before submitting.
 
+If you are running in Codex and one of these tools is not immediately visible,
+call `tool_search` for the exact Slidey tool name, then use the returned tool.
+Do not report the Slidey MCP as unavailable until `tool_search` has failed for
+the needed `slidey_*` tool and for `submit`.
+
 {% block spec_project_context %}{% endblock %}
 
 ## Workspace
 
 Repository workspace: `{{ args.workspace }}`
+Managed workdir: `{{ args.workdir|default:"(current checkout)" }}`
 
 The Slidey MCP root is this workspace. When calling Slidey MCP tools, use the
 workspace-relative path, not the repository path joined onto the workspace.
@@ -98,6 +104,6 @@ separate `id`, `heading`, or `elements` wrappers.
 ## What to produce
 
 Apply the instruction to the resolved scene element only. Submit the deck
-object: the repository-render `spec_path`, a one-line `summary` of what you
-changed, and the `edited` element refs you touched (the opaque `<scene>/<el>`
-form, e.g. `1/card_0`).
+object: the repository-render `spec_path` (repo-relative, not an absolute
+filesystem path), a one-line `summary` of what you changed, and the `edited`
+element refs you touched (the opaque `<scene>/<el>` form, e.g. `1/card_0`).
