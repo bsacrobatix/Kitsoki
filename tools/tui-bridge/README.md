@@ -148,8 +148,8 @@ disposable copy of the target checkout:
 
 ```bash
 cd tools/tui-bridge
-KITSOKI_RRWEB_OUT=/Users/Brad.Smith/code/cyber-repo/src/cyberstack/platform-presentation/.artifacts/kitsoki-onboarding-demo/presentation-onboarding-real-tui.rrweb.json \
-  KITSOKI_PRESENTATION_TARGET=/Users/Brad.Smith/code/cyber-repo/src/cyberstack/platform-presentation \
+KITSOKI_RRWEB_OUT=/path/to/platform-presentation/.artifacts/kitsoki-onboarding-demo/presentation-onboarding-real-tui.rrweb.json \
+  KITSOKI_PRESENTATION_TARGET=/path/to/platform-presentation \
   pnpm run record:presentation-onboarding
 ```
 
