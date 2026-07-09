@@ -45,7 +45,11 @@ By default, workspaces live under:
 Each workspace is a local Git clone of the source checkout with the remote named
 `source`. Git objects are hardlinked from the source checkout when possible, but
 refs, the index, and the working tree are isolated inside the managed capsule
-clone. The script writes these unmanaged-by-Git metadata files inside the clone:
+clone. Bootstrap also reuses a shared runstatus `node_modules` cache under
+`.capsules/cache`, keyed by `tools/runstatus/pnpm-lock.yaml`, package metadata,
+Node ABI, and pnpm version, then symlinks the matching cached tree into the
+workspace. The script writes these unmanaged-by-Git metadata files inside the
+clone:
 
 | File | Purpose |
 |---|---|

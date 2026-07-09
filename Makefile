@@ -49,8 +49,6 @@ RUNSTATUS_TEMP_ENV := TMPDIR="$(abspath $(TEMP_DIR))" KITSOKI_TEMP_ROOT="$(abspa
 # Default to the Go toolchain's own shared build cache so bootstrap warms the
 # same cache plain `go run` / `go test` will use in the workspace.
 KITSOKI_GOCACHE ?= $(shell go env GOCACHE 2>/dev/null || { if [ -d /private/tmp ]; then printf '%s' /private/tmp/kitsoki-gocache; else printf '%s' /tmp/kitsoki-gocache; fi; })
-RUNSTATUS_LOCKFILE := $(RUNSTATUS_DIR)/pnpm-lock.yaml
-RUNSTATUS_MODULES  := $(RUNSTATUS_DIR)/node_modules/.modules.yaml
 RUNSTATUS_DIST     := $(TEMP_DIR)/runstatus/dist
 RUNSTATUS_ABS      := $(abspath $(RUNSTATUS_DIR))
 VSCODE_INSTALL_ROOT          := $(TEMP_DIR)/vi
@@ -68,13 +66,20 @@ define runstatus_pnpm_install
 	@set -e; \
 	relock_root=0; relock_modules=0; \
 	if [ -d "$(RUNSTATUS_ABS)" ] && [ ! -w "$(RUNSTATUS_ABS)" ]; then chmod u+w "$(RUNSTATUS_ABS)"; relock_root=1; fi; \
-	if [ -d "$(RUNSTATUS_ABS)/node_modules" ] && [ ! -w "$(RUNSTATUS_ABS)/node_modules" ]; then chmod -R u+w "$(RUNSTATUS_ABS)/node_modules"; relock_modules=1; fi; \
+	if [ -d "$(RUNSTATUS_ABS)/node_modules" ] && [ ! -L "$(RUNSTATUS_ABS)/node_modules" ] && [ ! -w "$(RUNSTATUS_ABS)/node_modules" ]; then chmod -R u+w "$(RUNSTATUS_ABS)/node_modules"; relock_modules=1; fi; \
 	restore_runstatus_guard() { \
-		if [ "$$relock_modules" = 1 ] || [ "$$relock_root" = 1 ]; then [ ! -e "$(RUNSTATUS_ABS)/node_modules" ] || chmod -R a-w "$(RUNSTATUS_ABS)/node_modules" 2>/dev/null || true; fi; \
+		if [ "$$relock_modules" = 1 ] || [ "$$relock_root" = 1 ]; then [ ! -e "$(RUNSTATUS_ABS)/node_modules" ] || [ -L "$(RUNSTATUS_ABS)/node_modules" ] || chmod -R a-w "$(RUNSTATUS_ABS)/node_modules" 2>/dev/null || true; fi; \
 		if [ "$$relock_root" = 1 ]; then chmod a-w "$(RUNSTATUS_ABS)" 2>/dev/null || true; fi; \
 	}; \
 	trap restore_runstatus_guard EXIT INT TERM; \
-	cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile $(1); \
+	if scripts/runstatus-node-modules-cache.sh restore; then \
+		restore_runstatus_guard; \
+		trap - EXIT INT TERM; \
+		exit 0; \
+	fi; \
+	scripts/runstatus-node-modules-cache.sh prepare-install; \
+	(cd $(RUNSTATUS_DIR) && $(RUNSTATUS_TEMP_ENV) pnpm install --frozen-lockfile $(1)); \
+	scripts/runstatus-node-modules-cache.sh save; \
 	restore_runstatus_guard; \
 	trap - EXIT INT TERM
 endef
@@ -268,11 +273,7 @@ runstatus-deps:
 
 .PHONY: runstatus-deps-if-needed
 runstatus-deps-if-needed:
-	@if [ ! -f "$(RUNSTATUS_MODULES)" ] || [ "$(RUNSTATUS_LOCKFILE)" -nt "$(RUNSTATUS_MODULES)" ]; then \
-		$(MAKE) --no-print-directory runstatus-deps; \
-	else \
-		echo "runstatus deps already installed for $(RUNSTATUS_LOCKFILE)"; \
-	fi
+	$(call runstatus_pnpm_install,--silent)
 
 .PHONY: runstatus-playwright-deps
 runstatus-playwright-deps: runstatus-deps
@@ -305,9 +306,10 @@ web-clean:
 # bootstrap-workspace is the one-shot setup for a FRESH clone/capsule checkout:
 # stories/ and the runstatus SPA start as empty .gitkeep placeholders
 # (embed-only dirs, staged by embed-stories/web but gitignored once staged),
-# tools/runstatus/node_modules is gitignored, and the first `go run` in a new
-# workspace compiles cold (slow enough to blow past short test timeouts). Run
-# this once from inside a new dev workspace before `go run ./cmd/kitsoki` or any
+# tools/runstatus/node_modules is gitignored and restored from the shared
+# capsule cache when possible, and the first `go run` in a new workspace
+# compiles cold (slow enough to blow past short test timeouts). Run this once
+# from inside a new dev workspace before `go run ./cmd/kitsoki` or any
 # Playwright spec.
 bootstrap-workspace: embed-stories web
 	@$(MAKE) --no-print-directory runstatus-deps-if-needed
