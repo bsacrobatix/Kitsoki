@@ -833,8 +833,9 @@ media-check: features-index
 media-check-promo: features-index
 	$(SITE_ENV) node $(SITE_DIR)/scripts/check-media.mjs --index .artifacts/features/features-index.json --require-promo-media
 
-# demo-feature records ONE feature's demo video at watch-speed and renders the
-# GIF + contact sheet. Spec + artifact paths come from the feature catalog.
+# demo-feature is the legacy MP4 fallback for one feature. Prefer
+# demo-feature-rrweb unless the surface cannot be captured as rrweb or the
+# explicit deliverable is a rendered video export.
 # Usage: make demo-feature FEATURE=agent-actions
 FEATURE ?=
 demo-feature: build-bin
@@ -847,7 +848,7 @@ demo-feature: build-bin
 	(cd $(RUNSTATUS_DIR) && pnpm exec playwright test "$$spec" --project=chromium); \
 	.agents/skills/kitsoki-ui-demo/scripts/render.sh "$$video"
 
-# demo-feature-rrweb records ONE feature's rrweb tour capture and bundles a
+# demo-feature-rrweb captures ONE feature's rrweb tour and bundles a
 # self-contained Slidey HTML viewer. It skips the MP4 replay-render step.
 # Usage: make demo-feature-rrweb FEATURE=web-inbox
 demo-feature-rrweb: build-bin
@@ -861,9 +862,10 @@ demo-feature-rrweb: build-bin
 	(cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=1 pnpm exec playwright test "$$spec" --project=chromium); \
 	bash scripts/build-rrweb-viewer.sh "$$rrweb" "$$viewer"
 
-# feature-qa records the feature's demo then runs the vision QA gate against it
-# with the catalog-generated feature spec + scenarios. GATED: drives the real
-# `claude` CLI — never run automatically (CLAUDE.md LLM-test policy).
+# feature-qa is the legacy MP4 visual-QA path. For rrweb-first demos, use
+# captured step PNGs or an explicit rendered-video export with kitsoki-ui-qa.
+# GATED: drives the real `claude` CLI — never run automatically
+# (CLAUDE.md LLM-test policy).
 # Usage: make feature-qa FEATURE=agent-actions
 feature-qa: demo-feature features-index
 	@set -e; \
@@ -876,8 +878,8 @@ feature-qa: demo-feature features-index
 		--scenarios .artifacts/features/qa/$(FEATURE).scenarios.yaml
 
 # tour-qa renders the stitched master then runs the gated vision-QA against it.
-# The master is stitched (no recording spec), so it can't go through feature-qa;
-# this drives qa.sh on the master video + its generated scenarios instead.
+# The master is stitched (no direct capture spec), so it can't go through
+# feature-qa; this drives qa.sh on the legacy master video + generated scenarios.
 # GATED: drives the real `claude` CLI — never run automatically (CLAUDE.md).
 .PHONY: tour-qa
 TOUR ?= complete-product-tour
@@ -945,9 +947,9 @@ tui-bridge-deps:
 tui-bridge-test: tui-bridge-deps
 	cd $(TUI_BRIDGE_DIR) && pnpm exec playwright test
 
-# demos records every recordable feature demo at watch-speed, incrementally:
+# demos captures every recordable feature demo at watch-speed, incrementally:
 # per-demo content stamps (feature YAML + spec + story inputs + binary) skip
-# anything unchanged. demos-force re-records everything. See
+# anything unchanged. demos-force recaptures everything. See
 # scripts/record-demos.sh for the stamp design.
 .PHONY: demos demos-force site-full
 demos: build-bin features-index
@@ -958,74 +960,75 @@ demos-force: build-bin features-index
 	$(call runstatus_pnpm_install,--silent)
 	./scripts/record-demos.sh --force
 
-# site-full is the everything path: record any stale demos, then build the
+# site-full is the everything path: capture any stale demos, then build the
 # Pages site from them. (What the CI deploy effectively runs.)
 site-full: demos site
 
 # ── render: one friendly, extensible front door for local artifacts ─────────
 # The rendering machinery already exists (demos / demo-feature / site), but
 # under names you have to know. `make render` is the discoverable entrypoint
-# for "generate the things people watch and read, locally": today the full set
-# of demo videos, tomorrow docs and a stitched product-tour master.
+# for "generate the things people watch and read, locally": demo media, docs,
+# and the legacy stitched product-tour master.
 #
 # It is reuse-first — every render-* target delegates to the underlying target
-# so there is exactly one implementation each. The video path stays incremental
+# so there is exactly one implementation each. The media path stays incremental
 # (per-demo content stamps skip anything unchanged — see scripts/record-demos.sh),
-# so re-running `make render` after a docs-only edit records nothing.
+# so re-running `make render` after a docs-only edit captures nothing.
 #
 # To grow it: add a render-<kind> target below and list it in `make render-help`
-# (next up: `render-tour` — stitch the per-section videos into one master with
+# (`render-tour` is the legacy MP4 stitch path for per-section videos with
 # .agents/skills/kitsoki-ui-demo/scripts/concat-videos.sh).
 .PHONY: render render-help render-videos render-video render-docs render-tour render-all
 FORCE ?=
 
 render: render-videos
 	@echo
-	@echo "rendered demo videos -> .artifacts/<id>/*.mp4"
+	@echo "rendered demo media -> .artifacts/<id>/"
 	@echo "more: 'make render-help' (single feature, docs, everything)"
 
 render-help:
 	@echo "render targets:"
-	@echo "  make render                     record every demo video (incremental)"
-	@echo "  make render FORCE=1             re-record every demo video"
-	@echo "  make render-video FEATURE=<id>  one feature: video + GIF + contact sheet"
+	@echo "  make render                     capture every stale demo media artifact"
+	@echo "  make render FORCE=1             recapture every stale demo media artifact"
 	@echo "  make demo-feature-rrweb FEATURE=<id>  one feature: rrweb + HTML viewer"
-	@echo "  make render-tour                stitch the per-section videos into the master tour"
+	@echo "  make render-video FEATURE=<id>  legacy fallback: MP4 + GIF + contact sheet"
+	@echo "  make render-tour                legacy fallback: stitch MP4 sections into the master tour"
 	@echo "  make render-docs                build the promo site + help docs"
-	@echo "  make render-all                 videos + tour + docs"
+	@echo "  make render-all                 demo media + tour + docs"
 
 # render-videos delegates to the incremental demos pipeline (FORCE=1 -> force).
 render-videos:
 	@$(MAKE) $(if $(FORCE),demos-force,demos)
 
-# render-video records ONE feature's video and renders its GIF + contact sheet.
+# render-video captures ONE feature's legacy fallback video and renders its GIF +
+# contact sheet.
 render-video:
 	@$(MAKE) demo-feature FEATURE=$(FEATURE)
 
-# render-tour stitches the per-section recordings into the complete-product-tour
+# render-tour stitches per-section legacy videos into the complete-product-tour
 # master (one video + a merged 8-group chapter rail). Depends on `demos` so each
-# section source is recorded/fresh first (incremental — unchanged demos skip);
+# section source is captured/fresh first (incremental — unchanged demos skip);
 # the stitch itself is pure no-LLM post-processing (scripts/features/stitch-tour.mjs).
 render-tour: demos
 	@cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/stitch-tour.mjs complete-product-tour
 
-# render-docs builds the VitePress promo site + help docs from whatever demos
-# have been recorded (a missing video degrades to a poster, never a failure).
+# render-docs builds the VitePress promo site + help docs from whatever demo
+# media has been captured (missing media degrades to a poster, never a failure).
 render-docs:
 	@$(MAKE) site
 
-# render-all is the everything path: refresh the videos, stitch the master tour,
+# render-all is the everything path: refresh demo media, stitch the master tour,
 # then build the site.
 render-all:
 	@$(MAKE) render-tour
 	@$(MAKE) site
 
 # ── Promo site + help docs (tools/site, VitePress) ──────────────────────────
-# One source tree, two variants: the GitHub Pages site (full videos, base
-# $(SITE_BASE)) and the binary-embedded /help/ copy (posters only — built by
-# site-embed in a later phase). Videos are NEVER committed: `make demos`
-# records them into .artifacts/ and `site` stages whatever exists — a missing
-# video degrades to a poster + placeholder, never a build failure.
+# One source tree, two variants: the GitHub Pages site (full replay viewers and
+# fallback videos, base $(SITE_BASE)) and the binary-embedded /help/ copy (posters only — built by
+# site-embed in a later phase). Generated media is NEVER committed: `make demos`
+# captures it into .artifacts/ and `site` stages whatever exists — missing media
+# degrades to a poster + placeholder, never a build failure.
 SITE_DIR  := tools/site
 SITE_BASE ?= /Kitsoki/
 SITE_ABS  := $(abspath $(SITE_DIR))

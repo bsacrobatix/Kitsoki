@@ -2,7 +2,7 @@
 /**
  * Fast, no-LLM media contract check for the product site and Slidey deck embeds.
  *
- * This does not require demo videos to exist and never records anything. It
+ * This does not require demo media to exist and never captures anything. It
  * validates the contracts that keep generated media organized:
  *   - feature demos derive their source paths from the feature catalog index;
  *   - staged site media uses only the generated public/media/<feature>/ shape;
@@ -12,12 +12,12 @@
  *     Slidey deck html under docs/decks/bundled/ with a valid scene index.
  *
  * --require-promo-media additionally turns this into a PRESENCE gate (run
- * AFTER recording + staging, never behind continue-on-error): every
+ * AFTER capture + staging, never behind continue-on-error): every
  * promo-grid feature (`promo:` block in its features/<id>.yaml — the
  * FeatureGrid/HeroDemo landing-page set) must have its declared media staged
  * under src/public/media/<id>/, or the check fails. Non-promo features
  * missing media only warn — plenty of features are demo-less by design.
- * Without the flag, this script never fails on missing media (0 mp4s passes),
+ * Without the flag, this script never fails on missing media (0 demos passes),
  * which keeps docs-only local iteration and `make media-check` unchanged.
  */
 import * as fs from "fs";
@@ -51,13 +51,11 @@ const problems = [];
 const warnings = [];
 
 /**
- * Known demo.renderer -> primary staged media filename. `stage-media.mjs`
- * currently normalizes every recorded video to `demo.mp4` regardless of
- * renderer, so both known renderers map there today. Extend this table (or
- * set an explicit `demo.mediaKind` in the feature YAML, checked first below)
- * when a new renderer/embed kind ships its own staged-media shape — e.g. the
- * slidey-* deck/rrweb conversion — rather than hardcoding "demo.mp4" at each
- * call site.
+ * Known legacy demo.renderer -> primary staged media filename. rrweb-first
+ * demos use `demo.html`; fallback video renderers still normalize to
+ * `demo.mp4`. Extend this table (or set an explicit `demo.mediaKind` in the
+ * feature YAML, checked first below) when a new renderer/embed kind ships its
+ * own staged-media shape.
  */
 const RENDERER_MEDIA = {
   playwright: "demo.mp4",
@@ -74,7 +72,7 @@ function expectedMediaFile(f) {
   return Object.prototype.hasOwnProperty.call(RENDERER_MEDIA, renderer) ? RENDERER_MEDIA[renderer] : null;
 }
 
-function recordCommand(f) {
+function captureCommand(f) {
   return (f.demo?.format ?? "mp4") === "rrweb"
     ? `make demo-feature-rrweb FEATURE=${f.id}`
     : `make demo-feature FEATURE=${f.id}`;
@@ -115,8 +113,8 @@ function checkFeatureDemos() {
 
     // demo.embed: a rrweb-native story-demo, permanently mp4-less. Its
     // pre-bundled deck html is COMMITTED source (docs/decks/bundled/, unlike
-    // an mp4 that's a live recording), so a missing one is a broken reference,
-    // not "not yet recorded" — it's checked here, not warned about in
+    // an mp4 that's a live capture), so a missing one is a broken reference,
+    // not "not yet captured" — it's checked here, not warned about in
     // stage-media. It's staged into the shared src/public/deck-viewers/ tree, not
     // media/<id>/, so it's exempt from idsWithMedia / checkStagedMedia below.
     if (f.demo.embed) {
@@ -238,7 +236,7 @@ function checkPromoMedia(index) {
     if (isPromo) {
       problems.push(
         `promo feature ${f.id}: missing staged ${missing.join(" + ")} under ${rel(dir)} ` +
-          `(record with: ${recordCommand(f)}, then make site)`,
+          `(capture with: ${captureCommand(f)}, then make site)`,
       );
     } else {
       nonPromoMissing.push(`${f.id} (missing ${missing.join(" + ")})`);

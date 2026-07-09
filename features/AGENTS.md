@@ -35,7 +35,7 @@ file-based — see `schema.ts`):
 
 - **promo ⇒ demo** — a feature with `promo:` must bind a `demo:`, or its grid
   card ships empty.
-- **recordable tour demo ⇒ posterStep** — a non-external demo that has a `spec`
+- **capturable tour demo ⇒ posterStep** — a non-external demo that has a `spec`
   (and is not a stitched product-tour) *and* a `tour:` must name a
   `demo.posterStep`, so the card/hero has a deterministic poster frame instead
   of a black first frame. Tourless demos and stitched tours are exempt.
@@ -53,13 +53,16 @@ file-based — see `schema.ts`):
   authored story).
 - `promo`: present ⇒ the feature appears on the promo landing page, sorted by
   `order` (lower first); `highlight: true` marks featured slots.
-- `demo`: binds the feature to its Playwright recording spec. `artifactDir` /
-  `videoBase` must match the spec's `ARTIFACT_DIR` / `saveVideoAsMp4` values
-  for MP4 demos, or `<videoBase>.rrweb.json` plus `<videoBase>.html` for
-  `demo.format: rrweb`. Use `demo.rrwebSpec` when the real capture spec differs
-  from the catalog/bijection anchor `demo.spec`.
+- `demo`: binds the feature to its deterministic capture spec. Prefer
+  `demo.format: rrweb` for new product-site demos; that produces
+  `<videoBase>.rrweb.json` plus a Slidey-bundled `<videoBase>.html` viewer.
+  Use `demo.rrwebSpec` when the real capture spec differs from the
+  catalog/bijection anchor `demo.spec`. MP4 demos are the legacy fallback for
+  surfaces rrweb cannot reconstruct (`<canvas>`, `<video>`, WebGL) or an
+  explicitly requested video export; for those, `artifactDir` / `videoBase`
+  must match the spec's `ARTIFACT_DIR` / `saveVideoAsMp4` values.
   `external: true` marks demos that depend on paths outside this repo — they
-  are excluded from recording and path validation.
+  are excluded from capture and path validation.
 - `demo.embed`: presents a rrweb-native story-demo (its video spec is a
   permanent stub) as an embedded Slidey deck clip instead of an mp4 — set
   `{ deck, rrweb }` to the source deck JSON and the clip's `rrweb` path as

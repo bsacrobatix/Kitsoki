@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 #
-# record-demos.sh — record every recordable feature demo at watch-speed,
+# record-demos.sh — capture every recordable feature demo at watch-speed,
 # incrementally.
 #
 # The demo list comes from the feature catalog contract
 # (.artifacts/features/features-index.json — `make features-index`). Each demo
 # carries a content stamp: sha256 over its spec file, its features/<id>.yaml,
 # its flow/cassette/app.yaml inputs, and the bin/kitsoki binary. A fresh stamp
-# (and an existing MP4) skips the recording — so a docs-only change re-records
-# nothing, while touching a feature's YAML, spec, story input, or the binary
-# re-records exactly the affected demos. `--force` re-records everything.
+# (and an existing target artifact) skips the capture — so a docs-only change
+# recaptures nothing, while touching a feature's YAML, spec, story input, or the binary
+# recaptures exactly the affected demos. `--force` recaptures everything.
 #
-# Recording posture: WEB_CHAT_PACE=1 (watch-speed; the camera default), one
+# Capture posture: WEB_CHAT_PACE=1 (watch-speed; the camera default), one
 # retry per spec, previous good artifacts are never deleted on failure.
 # Demos marked `external: true` in the catalog are skipped (their stories live
-# outside this repo). Exit nonzero if any recording ultimately failed.
+# outside this repo). Exit nonzero if any capture ultimately failed.
 #
 # Used by `make demos` / `make demos-force`; CI runs it behind an actions/cache
 # over .artifacts so unchanged demos cost nothing. CI also runs this step with
-# `continue-on-error: true` — a stale cached video may ship on failure — so a
+# `continue-on-error: true` — stale cached media may ship on failure — so a
 # failure list is written to $GITHUB_STEP_SUMMARY (when set) in addition to
 # stderr, and a separate hard gate (`make media-check-promo`) fails the build
 # outright if a promo-grid feature ends up with no staged media at all.
@@ -88,7 +88,7 @@ while IFS=$'\t' read -r id profile format renderer specName artifactDir target y
 		continue
 	fi
 
-	echo "record-demos: recording $label ($specName)…"
+	echo "record-demos: capturing $label ($specName)…"
 	ok=0
 	for attempt in 1 2; do
 		if [ "$format" = "rrweb" ]; then
@@ -146,7 +146,7 @@ for _failed in "${FAILED[@]+"${FAILED[@]}"}"; do
 	fail_count=$((fail_count + 1))
 done
 
-echo "record-demos: $recorded recorded, $skipped fresh (skipped), $fail_count failed"
+echo "record-demos: $recorded captured, $skipped fresh (skipped), $fail_count failed"
 if [ "$fail_count" -gt 0 ]; then
 	printf 'record-demos: FAILED: %s\n' "${FAILED[*]}" >&2
 	if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -157,7 +157,7 @@ if [ "$fail_count" -gt 0 ]; then
 				echo "- \`$f\`"
 			done
 			echo
-			echo "This step is \`continue-on-error\` — a stale cached video may have shipped instead. The subsequent promo-media presence gate fails the build outright if a promo-grid feature ends up with no staged media at all."
+			echo "This step is \`continue-on-error\` — stale cached media may have shipped instead. The subsequent promo-media presence gate fails the build outright if a promo-grid feature ends up with no staged media at all."
 		} >>"$GITHUB_STEP_SUMMARY"
 	fi
 	exit 1
