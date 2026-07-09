@@ -8,30 +8,63 @@ states:
 
   exception_review:
     description: "A serious exception needs operator review before continuing."
-    relevant_world: [current_case, exception_pending, exception_summary, exception_answer, exceptions, journal_path, last_error]
+    relevant_world: [current_case, last_result, exception_pending, exception_summary, exception_answer, exceptions, journal_path, last_error]
     view:
-      - heading: "Dogfood marathon · exception review"
+      - banner:
+          text:     "! SERIOUS EXCEPTION"
+          subtitle: "operator decision required before the autonomous loop continues"
+          color:    "#F59E0B"
+      - heading: "Case {{ world.case_index + 1 }} / {{ world.backlog.items|length }} · exception review · {{ world.exception_pending|default:world.current_case.id }}"
       - kv:
           pairs:
             Case:       '{{ world.exception_pending|default:world.current_case.id }}'
-            Title:      '{{ world.current_case.title|default:"—" }}'
-            Summary:    '{{ world.exception_summary|default:world.last_error|default:"—" }}'
+            Title:      '{{ world.current_case.title|default:world.last_result.title|default:"—" }}'
+            Severity:   'serious'
+            Question:   '{{ world.last_result.operator_question|default:world.exception_summary|default:world.last_error|default:"—" }}'
+            Impact:     '{{ world.exception_summary|default:"the case is recorded and parked until an operator decision is durable" }}'
+            Source:     '{{ world.current_case.source_url|default:world.current_case.source_path|default:world.last_result.source_url|default:"—" }}'
+            Trace:      '{{ world.last_result.trace|default:world.drive_result.trace|default:"—" }}'
+            Last exit:  '{{ world.last_result.exit|default:world.drive_result.exit|default:"—" }}'
+            Verify:     '{{ world.last_result.verify_status|default:world.verify_result.status|default:"—" }}'
             Exceptions: '{{ world.exceptions.items|length }}'
             Journal:    '{{ world.journal_path|default:"(pending)" }}'
-      - prose: "A serious blocker or question was recorded. Answer with guidance, or acknowledge it and continue if the journal has enough information."
-      - heading: "Actions"
-      - list:
+      - prose: "The autonomous run is paused because this case needs an explicit operator decision. Answer if you can give safe scope; otherwise acknowledge to keep the case journaled as needs-human and continue with the next case."
+      - choice:
+          mode: single
+          prompt: "Resolve this exception"
           items:
-            - label: "answer_exception answer=…"
-              hint:  "record guidance and continue"
-            - label: "ack_exception"
-              hint:  "acknowledge the exception and continue"
+            - label: "acknowledge and continue"
+              hint:  "leave this case journaled as needs-human and move on"
+              intent: ack_exception
+            - label: "answer with guidance"
+              hint:  "write the operator decision into the durable journal"
+              intent: answer_exception
+              param:
+                slot:        answer
+                type:        string
+                placeholder: "guidance for this case"
+                required:    true
             - label: "look"
+              hint:  "re-render the warning"
+              intent: look
             - label: "quit"
+              hint:  "abandon the marathon"
+              intent: quit
     on:
       answer_exception:
         - target: processing
           effects:
+            - invoke: host.starlark.run
+              id: resolve_exception
+              with:
+                script: scripts/resolve_exception.star
+                inputs:
+                  exceptions: "{{ world.exceptions }}"
+                  case_id:    "{{ world.exception_pending != '' ? world.exception_pending : world.current_case.id }}"
+                  status:     "answered"
+                  answer:     "{{ slots.answer ?? '' }}"
+              bind:
+                exceptions: exceptions
             - set:
                 exception_answer:  "{{ slots.answer ?? '' }}"
                 case_index:        "{{ world.case_index + 1 }}"
@@ -78,6 +111,17 @@ states:
       ack_exception:
         - target: processing
           effects:
+            - invoke: host.starlark.run
+              id: resolve_exception
+              with:
+                script: scripts/resolve_exception.star
+                inputs:
+                  exceptions: "{{ world.exceptions }}"
+                  case_id:    "{{ world.exception_pending != '' ? world.exception_pending : world.current_case.id }}"
+                  status:     "acknowledged"
+                  answer:     "acknowledged"
+              bind:
+                exceptions: exceptions
             - set:
                 exception_answer:  "acknowledged"
                 case_index:        "{{ world.case_index + 1 }}"

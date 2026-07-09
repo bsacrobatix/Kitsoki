@@ -394,12 +394,15 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 	// orchestrator.
 	if postJourney, jerr := o.loadJourney(sid); jerr == nil {
 		allowedNames := allowedNamesFromMachine(o.machine, postJourney.State, postJourney.World)
-		view, rerr := o.machine.RenderState(postJourney.State, postJourney.World)
+		view, typedView, renderEnv, renderer, rerr := o.machine.RenderStateTyped(postJourney.State, postJourney.World)
 		if rerr != nil {
 			// Non-fatal: still surface the outcome with whatever view we have.
 			o.logger.Warn("handleJobTerminal: RenderState",
 				slog.String("err", rerr.Error()),
 			)
+			if fallback, ferr := o.machine.RenderState(postJourney.State, postJourney.World); ferr == nil {
+				view = fallback
+			}
 		}
 		mode := ModeTransitioned
 		if st := lookupStateByPath(o.def, postJourney.State); st != nil && st.Terminal {
@@ -408,6 +411,9 @@ func (o *Orchestrator) handleJobTerminal(ctx context.Context, sid app.SessionID,
 		outcomeForObservers = &TurnOutcome{
 			Mode:           mode,
 			View:           view,
+			TypedView:      typedView,
+			RenderEnv:      renderEnv,
+			Renderer:       renderer,
 			NewState:       postJourney.State,
 			AllowedIntents: allowedNames,
 			TurnNumber:     turnNum,

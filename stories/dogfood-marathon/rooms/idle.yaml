@@ -20,20 +20,23 @@ states:
             Mode:            '{% if world.autonomous %}autonomous{% else %}operator-paced{% endif %}'
             Run id:          '{{ world.run_id }}'
             Journal:         '{{ world.journal_path|default:"(derived at intake)" }}'
-      - heading: "Actions"
-      - list:
+      - prose: "Default start is intentionally clean: `start the marathon` uses the configured 15-case backlog, codex-native / gpt-5.5, and a fresh durable journal. Type free-form only when you need to override the run."
+      - choice:
+          mode: single
+          prompt: "Actions"
           items:
-            - label: "start"
-              hint:  "create a fresh durable journal and process autonomously"
-            - label: "start backlog_sources=… run_id=… profile=codex-native model=gpt-5.5"
-              hint:  "override sources / run id / maker profile"
-            - label: "resume"
+            - label: "start the marathon"
+              hint:  "fresh durable journal; autonomous until a serious exception"
+              intent: start_marathon
+            - label: "resume the marathon"
               hint:  "load the durable journal and continue from the next case"
-            - label: "resume journal_path=…"
-              hint:  "resume a specific journal file"
+              intent: resume
             - label: "quit"
               hint:  "abandon"
+              intent: quit
             - label: "look"
+              hint:  "re-render"
+              intent: look
     on:
       start:
         - target: intake

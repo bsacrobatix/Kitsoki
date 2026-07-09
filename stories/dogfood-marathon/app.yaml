@@ -256,13 +256,15 @@ intents:
     description: "(internal) the report rendered → show the gallery."
     priority: 1
   ack_exception:
+    title: "acknowledge and continue"
     description: "Acknowledge the serious exception and continue the marathon."
     examples: ["ack_exception", "acknowledge and continue", "continue anyway"]
-    priority: 70
+    priority: 80
   answer_exception:
+    title: "answer with guidance"
     description: "Record operator guidance for the serious exception, then continue."
     examples: ["answer_exception answer=use the existing repro only", "answer with guidance"]
-    priority: 75
+    priority: 70
     slots:
       answer: { type: string, required: false }
   # ── shared ─────────────────────────────────────────────────────────────────

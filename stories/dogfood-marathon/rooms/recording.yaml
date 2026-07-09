@@ -13,12 +13,16 @@ states:
     description: "Independently verifying the current case's outcome."
     relevant_world: [current_case, drive_result, verify_result, verify_job_id, results, exceptions]
     view:
-      - heading: "Dogfood marathon · verifying"
+      - heading: "Case {{ world.case_index + 1 }} / {{ world.backlog.items|length }} · independent verify · {{ world.current_case.id }}"
       - kv:
           pairs:
             Case:     '{{ world.current_case.id }}'
+            Title:    '{{ world.current_case.title|default:"—" }}'
             Exit:     '{{ world.drive_result.exit|default:"—" }}'
+            Fix ref:  '{{ world.drive_result.fix_ref|default:world.drive_result.branch|default:"—" }}'
+            Trace:    '{{ world.drive_result.trace|default:"—" }}'
             Verify:   '{{ world.verify_result.status|default:"(running…)" }}'
+            How:      '{{ world.verify_result.how|default:"(pending)" }}'
             Recorded: '{{ world.results.items|length }}'
             Job:      '{{ world.verify_job_id|default:"(starting)" }}'
       - prose: "Running the operator's independent oracle against the inner pipeline result. This is the grade; the driver does not self-grade."
@@ -48,13 +52,18 @@ states:
     description: "Verifying and recording the current case's outcome."
     relevant_world: [current_case, triage_verdict, drive_result, verify_result, record_job_id, results, last_result, exceptions, record_status]
     view:
-      - heading: "Dogfood marathon · recording"
+      - heading: "Case {{ world.case_index + 1 }} / {{ world.backlog.items|length }} · record outcome · {{ world.current_case.id }}"
       - kv:
           pairs:
             Case:       '{{ world.current_case.id }}'
+            Title:      '{{ world.current_case.title|default:"—" }}'
             Verdict:    '{{ world.triage_verdict.verdict|default:"—" }}'
             Exit:       '{{ world.drive_result.exit|default:"—" }}'
             Verify:     '{{ world.verify_result.status|default:"—" }}'
+            Cost:       '${{ world.drive_result.cost_usd|default:"0" }}'
+            Tokens:     '{{ world.drive_result.tokens|default:"0" }}'
+            Time:       '{{ world.drive_result.wall_s|default:"0" }}s'
+            Summary:    '{{ world.drive_result.summary|default:world.verify_result.how|default:"—" }}'
             Recorded:   '{{ world.results.items|length }}'
             Exceptions: '{{ world.exceptions.items|length }}'
             Status:     '{{ world.record_status|default:"(recording…)" }}'
@@ -98,10 +107,16 @@ states:
     description: "Persisting the current case checkpoint."
     relevant_world: [current_case, results, last_result, exceptions, record_status, journal_job_id, journal_path, journal_status]
     view:
-      - heading: "Dogfood marathon · checkpointing"
+      - heading: "Case {{ world.case_index + 1 }} / {{ world.backlog.items|length }} · checkpoint · {{ world.current_case.id }}"
       - kv:
           pairs:
             Case:       '{{ world.current_case.id }}'
+            Title:      '{{ world.current_case.title|default:"—" }}'
+            Exit:       '{{ world.last_result.exit|default:world.drive_result.exit|default:"—" }}'
+            Verify:     '{{ world.last_result.verify_status|default:world.verify_result.status|default:"—" }}'
+            Cost:       '${{ world.last_result.cost_display|default:world.drive_result.cost_usd|default:"0" }}'
+            Tokens:     '{{ world.last_result.tokens_display|default:world.drive_result.tokens|default:"0" }}'
+            Time:       '{{ world.last_result.wall_s_display|default:world.drive_result.wall_s|default:"0" }}s'
             Recorded:   '{{ world.results.items|length }}'
             Exceptions: '{{ world.exceptions.items|length }}'
             Status:     '{{ world.record_status|default:"—" }}'

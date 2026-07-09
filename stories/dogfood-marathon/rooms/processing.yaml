@@ -25,11 +25,12 @@ states:
     description: "Per-case checkpoint — advance to the next case or drain to the report."
     relevant_world: [backlog, case_index, case_budget, cases_processed, current_case, results, last_result, exceptions, journal_path, journal_status, autonomous]
     view:
-      - heading: "Dogfood marathon · processing"
+      - heading: "Dogfood marathon · queue checkpoint"
       - kv:
           pairs:
             Backlog:   '{{ world.backlog.items|length }}'
-            At case:   '{{ world.case_index }}'
+            Progress:  '{{ world.cases_processed }} / {{ world.backlog.items|length }} complete'
+            Queue index: '{{ world.case_index }}'
             Processed: '{{ world.cases_processed }}'
             Recorded:  '{{ world.results.items|length }}'
             Exceptions: '{{ world.exceptions.items|length }}'
@@ -43,7 +44,7 @@ states:
           pairs:
             Case:   '{{ world.last_result.case_id|default:"—" }}'
             Title:  '{{ world.last_result.title|default:"—" }}'
-            Source: '{{ world.last_result.source_url|default:"—" }}'
+            Source: '{{ world.last_result.source_url|default:world.last_result.source_path|default:world.last_result.source_repo|default:"—" }}'
             Exit:   '{{ world.last_result.exit|default:"—" }}'
             Verify: '{{ world.last_result.verify_status|default:"—" }}'
             Tokens: '{{ world.last_result.tokens_display|default:"0" }}'
@@ -51,15 +52,19 @@ states:
             Trace:  '{{ world.last_result.trace|default:"—" }}'
         when: "world.last_result.case_id"
       - prose: "Walking the backlog one case at a time: triage → drive the inner pipeline → independently verify → record. Autonomous mode starts the next case automatically and parks only for a serious exception."
-      - heading: "Actions"
-      - list:
+      - choice:
+          mode: single
+          prompt: "Actions"
           items:
-            - label: "next_case"
+            - label: "process next case"
               hint:  "manual advance when autonomous mode is disabled"
+              intent: next_case
             - label: "look"
               hint:  "re-render the tally"
+              intent: look
             - label: "quit"
               hint:  "abandon the marathon"
+              intent: quit
     on_enter:
       - emit_intent: next_case
         when: "world.autonomous && world.exception_pending == ''"
