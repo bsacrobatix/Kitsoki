@@ -171,29 +171,37 @@ def main(ctx):
     ]
 
     lines = []
-    lines.append("## Source plan")
+    lines.append("## Prepared source plan")
     lines.append("")
     lines.append("Goal: %s" % ctx.inputs["automation_goal"])
     lines.append("")
-    lines.append("| Source | Transcript root | Job dir | Notes |")
-    lines.append("|---|---|---|---|")
     for src in planned_sources:
-        note = _join(src["limitations"], "; ") if src["limitations"] else "full local intent-mining support"
-        lines.append("| %s | `%s` | `%s` | %s |" % (src["id"], src["transcript_root"], src["job_dir"], note))
-    lines.append("")
-    lines.append("## Artifact classes")
+        lines.append("### %s" % src["id"])
+        lines.append("")
+        lines.append("- Root: `%s`" % src["transcript_root"])
+        lines.append("- Job dir: `%s`" % src["job_dir"])
+        lines.append("- Prep: `%s`" % src["prep_command"])
+        lines.append("- Outcomes: `%s`" % src["outcomes_command"])
+        if src["limitations"]:
+            lines.append("- Missing signals: %s" % _join(src["limitations"], "; "))
+        else:
+            lines.append("- Missing signals: none known for the local mining path")
+        lines.append("")
+    lines.append("## Kitsoki targets")
     lines.append("")
     for cls in classes:
-        lines.append("- **%s** - %s" % (cls["kind"], cls["description"]))
+        lines.append("- **%s**: %s" % (cls["kind"], cls["description"]))
     lines.append("")
     lines.append("## Progressive determinism")
     lines.append("")
-    lines.append("Start new automation at L2 when a deterministic skeleton plus named gates is possible; climb toward L3/L4 only from recorded gate decisions.")
+    lines.append("- Start new automation at L2 when a deterministic story/script skeleton plus named recorded gates is possible.")
+    lines.append("- Move toward L3 only when recorded decisions show a strong default rule.")
+    lines.append("- Move to L4 only when the rule no longer needs a model or human gate.")
     lines.append("")
-    lines.append("## Enforcement limits")
+    lines.append("## Enforcement boundary")
     lines.append("")
-    lines.append("- Claude Code can be intercepted before the model through the Kitsoki hook.")
-    lines.append("- Codex cannot be pre-model intercepted today; use honest routing, MCP/workflow launchers, and mining feedback loops instead.")
+    lines.append("- Claude Code: pre-model hook available through `kitsoki hook install --agent claude --write`.")
+    lines.append("- Codex: no hard pre-model interception hook today; use Kitsoki launchers, Studio MCP workflows, guidance, and transcript-mining feedback.")
     if ctx.inputs["refine_feedback"]:
         lines.append("")
         lines.append("Refine feedback: %s" % ctx.inputs["refine_feedback"])

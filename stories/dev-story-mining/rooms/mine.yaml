@@ -14,16 +14,20 @@ states:
     view:
       - banner:
           text:     "MINE"
-          subtitle: "Phase 2 / 6  ·  intent/idea mining over prepared sources"
+          subtitle: "Phase 2 / 6  -  intent/idea mining over prepared sources"
           color:    "#06B6D4"
-      - prose: "{{ world.job }} · cycle {{ world.cycle }} · judge {{ world.judge_mode }} · sources {{ world.transcript_sources }}"
+      - prose: "{{ world.job }} - judge {{ world.judge_mode }} - sources {{ world.transcript_sources }}"
       - kv:
           pairs:
-            Brief:    '{{ world.mine_artifact.brief_path|default:"(pending)" }}'
-            Intents:  '{{ world.mine_artifact.intent_count|default:"(pending)" }}'
-            Split:    '🟢 {{ world.mine_artifact.deterministic|default:"–" }} · 🟡 {{ world.mine_artifact.agent_gated|default:"–" }} · 🔴 {{ world.mine_artifact.irreducible|default:"–" }}'
+            Brief: '{{ world.mine_artifact.brief_path|default:"(pending)" }}'
+            "Claude Code": '{{ world.mine_artifact.claude_breakdown_display|default:"(pending)" }}'
+            Codex: '{{ world.mine_artifact.codex_breakdown_display|default:"(pending)" }}'
+            "Total reviewed": '{{ world.mine_artifact.total_reviewed_display|default:"(pending)" }}'
+            "Green - deterministic / defaultable": '{{ world.mine_artifact.green_split_display|default:"(pending)" }}'
+            "Yellow - agent-gated": '{{ world.mine_artifact.yellow_split_display|default:"(pending)" }}'
+            "Red - irreducible": '{{ world.mine_artifact.red_split_display|default:"(pending)" }}'
       - heading: "Brief"
-      - code: '{{ world.mine_artifact.summary_markdown|default:"(pending — miner has not returned yet)" }}'
+      - template: '{{ world.mine_artifact.summary_markdown|default:"(pending - miner has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
@@ -86,9 +90,9 @@ states:
           feedback: "{{ world.llm_verdict.reason }}"
     on:
       accept:
-        - target: map
+        - target: mapping
           effects:
-            - say: "Brief accepted ({{ world.mine_artifact.intent_count }} intents) — mapping opportunities against {{ world.stories_dir }}."
+            - say: "Brief accepted. Mapping opportunities against story rooms, Starlark scripts, hub routes, skills, and enforcement limits now."
             - set: { refine_feedback: "", cycle: 0 }
       refine:
         - when: "world.mine_cycle >= world.mine_budget"

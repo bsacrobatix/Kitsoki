@@ -24,7 +24,14 @@ Report:
 - `brief_path`
 - `source_counts` keyed by `claude` / `codex`
 - `intent_count`
+- display strings for `conversation_count_display`, `message_count_display`, `token_count_display`, and `intent_count_display`
+- compact per-harness display strings: `claude_breakdown_display`, `codex_breakdown_display`, and `total_reviewed_display`
 - determinism split (`deterministic` / `agent_gated` / `irreducible`)
+- display strings for `deterministic_display`, `agent_gated_display`, and `irreducible_display`
+- compact split display strings: `green_split_display`, `yellow_split_display`, and `red_split_display`, each explaining what the color means
+- `source_breakdown_markdown`, a compact table with one row per harness plus a total row: conversations, messages, tokens reviewed, and intents mined
 - `tool_gaps` for missing signals, especially Codex lexical satisfaction and costs when unavailable
+
+The display strings are required because transports may render raw numeric JSON as floats. They must be derived from the report values, must not include `.000000`, and must mark unavailable token/cost data honestly instead of estimating.
 
 `summary_markdown` should give the recurring intent-shape clusters, the in-scope action-tag distribution, and the concrete missed opportunities to use Kitsoki stories, rooms, Starlark scripts, hub routes, or skills.

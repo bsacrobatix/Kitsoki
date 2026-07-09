@@ -7,18 +7,18 @@ and honest enforcement-limit records. The repeatable process from
 is made first-class and runnable as a Kitsoki story.
 
 A meta / dogfood story: Kitsoki improving the very state machines it uses for
-its own development. The mechanical skeleton (prepare sources -> mine -> map
-inventory -> author -> test) is automated; the few real judgements are named
+its own development. The mechanical skeleton (prepare sources -> mine -> write
+the map -> review inventory -> author -> test) is automated; the few real judgements are named
 checkpoint gates with a recorded decision at each - the same shape mining is
 built to find.
 
 ## The pipeline
 
 ```
-idle ──start──▶ prepare ──▶ mine ──▶ map ──▶ decide ──▶ author ──▶ record ──▶ @exit:done
-                    │         │        │        │          │           │
-                    └ refine ─┴ refine ┴ refine ┴ refine ──┴ refine ───┴ refine (budgeted)
-                                                            │
+idle ──start──▶ prepare ──▶ mine ──▶ mapping ──▶ map ──▶ decide ──▶ author ──▶ record ──▶ @exit:done
+                    │         │          │          │        │          │           │
+                    └ refine ─┴ refine ─┴ refine ──┴ refine ┴ refine ─┴ refine ───┴ refine (budgeted)
+                                                                   │
    any room: quit / budget-exhausted ──────────────▶ @exit:abandoned
 ```
 
@@ -26,15 +26,16 @@ idle ──start──▶ prepare ──▶ mine ──▶ map ──▶ decide 
 |---|---|---|
 | **prepare** | `host.starlark.run` (`scripts/plan_sources.star`) | Which transcript sources, artifact classes, enforcement limits, and L0-L4 ladder apply before any agent mines. |
 | **mine** | `miner` (`host.agent.task`) | Is the brief fresh & large enough (>= `min_intents`) across the prepared Claude/Codex sources, with unavailable signals called out? |
-| **map** | `mapper` (`host.agent.task`) | Each opportunity classified `EXISTING-STORY` / `ENRICH-STORY` / `NEW-STORY` / `STARLARK-SCRIPT` / `HUB-ROUTE` / `SKILL-ONLY` / `ENFORCEMENT-LIMIT` / `OUT-OF-SCOPE` against regenerated inventory - never from memory. |
+| **mapping** | `mapper` (`host.agent.task`) | Announce mapping before MAP review, classify each opportunity against regenerated inventory, then write `OPPORTUNITY_MAP.md`. |
+| **map** | existing `map_artifact` | Review the linked opportunity map and decide whether the classifications are acceptable. |
 | **decide** | `ranker` (`host.agent.ask`) | Which actionable item to apply next (rank by #intents x mechanicalness x Kitsoki-adoption leverage). |
-| **author** | `author` (`host.agent.task`) | Improvement + no-LLM coverage authored; **accept is refused while `flows_green` is false**. |
-| **record** | `recorder` (`host.agent.ask`) | Can an existing gate drop a determinism rung (L2->L3->L4)? Empty result is valid. |
+| **author** | `author` (`host.agent.task`) | Improvement + no-LLM coverage authored, with a real unified diff artifact; **accept is refused while `flows_green` is false**. |
+| **record** | `recorder` (`host.agent.task`) | Writes `FINAL_REPORT.md` and checks whether an existing gate can drop a determinism rung (L2->L3->L4). Empty ladder moves are valid. |
 
-Each phase produces a schema-validated artifact in its `on_enter` (idempotent
+Each producer phase emits a schema-validated artifact in `on_enter` (idempotent
 via `once:` — reload-safe; the refine/restart arms clear the bind to force a
-fresh run). The view renders the artifact; the operator (or the LLM judge)
-accepts / refines / restarts / quits.
+fresh run). Review phases render those artifacts; the operator (or the LLM
+judge) accepts / refines / restarts / quits.
 
 ## Judge polymorphism
 
@@ -103,6 +104,8 @@ uses seeded artifacts for later LLM-producing phases, so it remains LLM-free;
 
 The `miner` / `author` personas describe the real kit and authoring loop in
 their prompts, but this story does not yet ship cassettes for a recorded
-end-to-end run against a live agent. The next step is to record a real run that
-applies one improvement, convert its trace with `kitsoki trace to-flow`, and use
-that trace-derived fixture for demos.
+end-to-end run against a live agent. The deterministic demo fixture includes
+reviewable markdown and diff artifacts under `demo-artifacts/`; the next step is
+to record a real run that applies one improvement, convert its trace with
+`kitsoki trace to-flow`, and replace the demo fixture with that trace-derived
+bundle.

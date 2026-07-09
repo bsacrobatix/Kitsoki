@@ -22,15 +22,41 @@ initial_world:
   selected_artifact_kind: "STARLARK-SCRIPT"
   # Seed LLM-producing phase artifacts so `once:` skips the producer agent calls.
   mine_artifact:
-    brief_path:   ".artifacts/session-mining/intents-20260615/BRIEF.md"
-    source_counts: { claude: { traces: 120, intents: 154 }, codex: { traces: 38, intents: 49, unavailable: ["costs"] } }
-    tool_gaps: ["Codex cost sidecar unavailable", "Codex raw lexical satisfaction weaker than Claude"]
+    brief_path:   "stories/dev-story-mining/demo-artifacts/brief.md"
+    source_counts:
+      claude: { conversations: 120, messages: 4860, tokens_reviewed: 612000, intents: 154 }
+      codex: { conversations: 38, messages: 1120, tokens_reviewed: null, intents: 49, unavailable: ["tokens", "costs"] }
+    tool_gaps: ["Codex token/cost sidecar unavailable", "Codex raw lexical satisfaction weaker than Claude"]
     intent_count: 203
+    intent_count_display: "203"
+    conversation_count_display: "158"
+    message_count_display: "5,980"
+    token_count_display: "612,000 known; Codex tokens unavailable"
+    claude_breakdown_display: "120 conversations; 4,860 messages; 612,000 tokens; 154 intents"
+    codex_breakdown_display: "38 conversations; 1,120 messages; tokens unavailable; 49 intents"
+    total_reviewed_display: "158 conversations; 5,980 messages; 612,000 known tokens; 203 intents"
     deterministic: 111
+    deterministic_display: "111"
+    green_split_display: "111 intents; rule, script, or story can own the common case"
     agent_gated:  87
+    agent_gated_display: "87"
+    yellow_split_display: "87 intents; LLM or human still handles edge cases"
     irreducible:   5
-    summary_markdown: "203 intents across Claude and Codex. Top missed Kitsoki usage: mining source setup, choosing verification mode, and turning repeated shell glue into Starlark."
+    irreducible_display: "5"
+    red_split_display: "5 intents; leave as human/LLM judgment"
+    source_breakdown_markdown: |
+      | Harness | Conversations | Messages | Tokens reviewed | Intents mined |
+      |---|---:|---:|---:|---:|
+      | Claude Code | 120 | 4,860 | 612,000 | 154 |
+      | Codex | 38 | 1,120 | unavailable | 49 |
+      | Total | 158 | 5,980 | 612,000 known | 203 |
+    summary_markdown: "203 intents across Claude and Codex. Top missed Kitsoki usage: mining source setup, report links, reviewable diffs, and turning repeated shell glue into Starlark."
   map_artifact:
+    map_path: "stories/dev-story-mining/demo-artifacts/opportunity-map.md"
+    opportunity_count_display: "9"
+    actionable_display: "4"
+    limited_display: "1"
+    already_modeled_display: "4"
     opportunities:
       - { theme: "Promote transcript-source planning into deterministic Starlark", intents: 11, artifact_kind: "STARLARK-SCRIPT", status: "ACTIONABLE", target_path: "stories/dev-story-mining/scripts/plan_sources.star", home_room: "stories/dev-story-mining/rooms/prepare.yaml", decider: "default-rule", validator: "real Starlark planner runs in happy_human flow without agent calls", determinism_rung: "L2", kitsoki_usage_policy: "Every mining run starts by recording Claude/Codex source policy before agents run." }
       - { theme: "Codex cannot be hard-intercepted pre-model", intents: 7, artifact_kind: "ENFORCEMENT-LIMIT", status: "LIMITED", target_path: "cmd/kitsoki/hook.go", decider: "human", validator: "hook install --agent codex reports no pre-model hook", determinism_rung: "L1", kitsoki_usage_policy: "Use honest guidance, launchers, and mining feedback loops rather than claiming forced interception." }
@@ -43,15 +69,19 @@ initial_world:
   author_artifact:
     artifact_kind: "STARLARK-SCRIPT"
     files_changed: ["stories/dev-story-mining/rooms/prepare.yaml", "stories/dev-story-mining/scripts/plan_sources.star", "stories/dev-story-mining/scripts/plan_sources.star.yaml", "stories/dev-story-mining/flows/happy_human.yaml"]
+    files_changed_display: "4 files: prepare room, Starlark planner, sidecar, happy_human flow"
+    diff_path: "stories/dev-story-mining/demo-artifacts/author.diff"
     applied_improvements: ["Added deterministic Claude/Codex source matrix before mining", "Recorded Codex pre-model hook limitation as an explicit policy caveat", "Pinned progressive determinism ladder into the story flow"]
     flows_green:   true
     validation: "kitsoki test flows stories/dev-story-mining/app.yaml"
     flow_files:    ["stories/dev-story-mining/flows/happy_human.yaml"]
-    summary_markdown: "Added prepare.yaml plus plan_sources.star. The happy_human flow covers the planner envelope with a by-call stub and then accepts seeded no-LLM mining artifacts. `kitsoki test flows` green."
+    summary_markdown: "Added prepare.yaml plus plan_sources.star, then exposed the authored change through a diff artifact. The happy_human flow covers the planner envelope with a by-call stub and then accepts seeded no-LLM mining artifacts. `kitsoki test flows` green."
   record_artifact:
+    final_report_path: "stories/dev-story-mining/demo-artifacts/final-report.md"
     ladder_moves:
       - { gate: "source-policy preparation", from: "L1", to: "L2", evidence: "Prompt-only source policy became a deterministic Starlark script plus a flow fixture." }
-    summary_markdown: "The source-policy step climbed L1->L2: a documented/prompted checklist became a deterministic story room and Starlark script."
+    summary_markdown: "Final report written. Found 203 mined intents across 158 conversations; applied readable phase summaries, markdown artifact links, and a diff viewer path for authored changes."
+    ladder_summary_markdown: "The source-policy step climbed L1->L2: a documented/prompted checklist became a deterministic story room and Starlark script. No L3/L4 move was claimed without more recorded decisions."
 
 host_handlers:
   host.starlark.run:
@@ -62,7 +92,27 @@ host_handlers:
             schema: "dev-story-mining-source-plan/v1"
             sources: [{ id: "claude" }, { id: "codex" }]
             artifact_classes: [{ kind: "STARLARK-SCRIPT" }]
-          summary_markdown: "Codex cannot be pre-model intercepted; Claude can use the Kitsoki hook. Start new automation at L2."
+          summary_markdown: |
+            ## Prepared source plan
+
+            ### claude
+
+            - Root: `~/.claude/projects/<current-repo-slug>`
+            - Missing signals: none known for the local mining path
+
+            ### codex
+
+            - Root: `~/.codex/sessions`
+            - Missing signals: token/cost sidecars are not wired yet; no pre-model interception hook
+
+            ## Progressive determinism
+
+            - Start new automation at L2 when a deterministic story/script skeleton plus named recorded gates is possible.
+
+            ## Enforcement boundary
+
+            - Claude Code: pre-model hook available through `kitsoki hook install --agent claude --write`.
+            - Codex cannot be pre-model intercepted today; use honest routing, MCP/workflow launchers, and mining feedback loops instead.
 
 turns:
   - intent: { name: start, slots: {} }
@@ -73,7 +123,11 @@ turns:
 
   - intent: { name: accept, slots: {} }
     expect_state: mine
-    expect_view_matches: "203 intents across Claude and Codex"
+    expect_view_matches: "Total reviewed"
+
+  - intent: { name: accept, slots: {} }
+    expect_state: mapping
+    expect_view_matches: "Mapping opportunities against story rooms"
 
   - intent: { name: accept, slots: {} }
     expect_state: map
@@ -87,12 +141,13 @@ turns:
 
   - intent: { name: accept, slots: {} }
     expect_state: author
-    expect_view_matches: "Validation gate: GREEN"
+    expect_view_matches: "stories/dev-story-mining/demo-artifacts/author.diff"
 
   - intent: { name: accept, slots: {} }
     expect_state: record
     expect_world:
       status: "authored"
+    expect_view_matches: "Final report written"
 
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done

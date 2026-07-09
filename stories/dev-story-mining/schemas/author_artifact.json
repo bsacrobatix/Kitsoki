@@ -3,9 +3,11 @@
   "title":   "author_artifact",
   "description": "Result of authoring the selected Kitsoki improvement plus no-LLM coverage, with the validation verdict.",
   "type":    "object",
-  "required": ["files_changed", "flows_green", "summary_markdown"],
+  "required": ["files_changed", "files_changed_display", "diff_path", "flows_green", "summary_markdown"],
   "properties": {
     "files_changed": { "type": "array", "items": { "type": "string" }, "minItems": 1, "description": "Room YAML + flow fixture (and any schema/prompt) that were written." },
+    "files_changed_display": { "type": "string", "description": "Human-facing file-change summary, formatted for compact room display." },
+    "diff_path": { "type": "string", "description": "Path to a unified diff file for the authored changes, when available." },
     "flows_green":   { "type": "boolean", "description": "True only if `kitsoki test flows` passed for the edited story with the new fixture." },
     "artifact_kind": { "type": "string", "description": "Kind produced: ENRICH-STORY, NEW-STORY, STARLARK-SCRIPT, HUB-ROUTE, SKILL-ONLY, or ENFORCEMENT-LIMIT." },
     "applied_improvements": { "type": "array", "items": { "type": "string" }, "description": "Concrete improvements applied or durable local tickets/proposals filed." },

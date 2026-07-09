@@ -1,5 +1,6 @@
 Cross-reference the mined automation brief against the existing Kitsoki story/script/hook inventory, and classify each opportunity.
 
+Job: `{{ args.job }}`
 Brief: `{{ args.brief_path }}`
 Prepared source plan (JSON): {{ args.source_plan }}
 Target story tree: `{{ args.stories_dir }}`
@@ -24,7 +25,8 @@ Process:
    - `determinism_rung`: current/starting rung (usually L2 for story/script skeletons, L1 for skills, LIMITED for hard platform gaps explained as `ENFORCEMENT-LIMIT` with an L1/L2 mitigation).
    - `kitsoki_usage_policy`: how this routes work into Kitsoki; for Codex, be explicit that hard pre-model interception is unavailable today.
 4. **Cluster** duplicate opportunities and count distinct mined intents per cluster.
+5. **Write the review artifact** under `.artifacts/session-mining/{{ args.job }}/OPPORTUNITY_MAP.md`. The markdown file must contain the summary table, status counts, concrete target paths, and validators. Do not write source files in this room.
 
 {% block spec_project_context %}{% endblock %}
 
-Return the `opportunities` array and a `summary_markdown` table. Be concrete; cite file paths.
+Return the `opportunities` array, `map_path`, display strings for `opportunity_count_display`, `actionable_display`, `limited_display`, and `already_modeled_display`, plus a `summary_markdown` table. Be concrete; cite file paths.

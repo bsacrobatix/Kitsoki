@@ -13,19 +13,20 @@ states:
     view:
       - banner:
           text:     "AUTHOR"
-          subtitle: "Phase 5 / 6  ·  improvement + no-LLM coverage, must be green"
+          subtitle: "Phase 5 / 6  -  improvement + no-LLM coverage, must be green"
           color:    "#F59E0B"
-      - prose: "{{ world.job }} · cycle {{ world.cycle }} · judge {{ world.judge_mode }} · {{ world.selected_artifact_kind }} · {{ world.selected_theme }}"
+      - prose: "{{ world.job }} - judge {{ world.judge_mode }} - {{ world.selected_artifact_kind }} - {{ world.selected_theme }}"
       - kv:
           pairs:
             "Flows green": '{{ world.author_artifact.flows_green|default:"(pending)" }}'
-            Files:         '{{ world.author_artifact.files_changed|default:"(pending)" }}'
-      - prose: "Validation gate: GREEN — {{ world.author_artifact.validation|default:\"focused flow validation passed\" }}"
+            "Files changed": '{{ world.author_artifact.files_changed_display|default:"(pending)" }}'
+            Diff: '{{ world.author_artifact.diff_path|default:"(pending)" }}'
+      - prose: "Validation gate: GREEN - {{ world.author_artifact.validation|default:\"focused flow validation passed\" }}"
         when: "world.author_artifact.flows_green == true"
-      - prose: "Validation gate: NOT GREEN — {{ world.author_artifact.validation|default:\"focused flow validation has not passed yet\" }}"
+      - prose: "Validation gate: NOT GREEN - {{ world.author_artifact.validation|default:\"focused flow validation has not passed yet\" }}"
         when: "world.author_artifact.flows_green != true"
       - heading: "Author summary"
-      - code: '{{ world.author_artifact.summary_markdown|default:"(pending — author has not returned yet)" }}'
+      - template: '{{ world.author_artifact.summary_markdown|default:"(pending - author has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
@@ -98,7 +99,7 @@ states:
             - say: "Validation is not green yet — refine the improvement/fixture before accepting."
         - target: record
           effects:
-            - say: "Improvement authored and validation green — reviewing the determinism ladder."
+            - say: "Improvement authored and validation green. Recording the final summary report and determinism-ladder review now."
             - set: { refine_feedback: "", status: "authored" }
       refine:
         - when: "world.author_cycle >= world.author_budget"

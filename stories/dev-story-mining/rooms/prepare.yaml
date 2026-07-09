@@ -14,17 +14,19 @@ states:
     view:
       - banner:
           text:     "PREPARE"
-          subtitle: "Phase 1 / 6  ·  source matrix + L0-L4 ladder"
+          subtitle: "Phase 1 / 6  -  source matrix + L0-L4 ladder"
           color:    "#14B8A6"
-      - prose: "{{ world.job }} · cycle {{ world.cycle }} · sources {{ world.transcript_sources }}"
+      - prose: "{{ world.job }} - sources {{ world.transcript_sources }} - target {{ world.stories_dir }}"
       - kv:
           pairs:
             Sources: "{{ world.transcript_sources }}"
             Targets: "{{ world.target_artifacts }}"
             "Claude transcripts": '{{ world.project_dir|default:"(current repo slug)" }}'
             "Codex transcripts": "{{ world.codex_sessions_dir }}"
+            "Next turn": "mine Claude Code and Codex before rendering the brief"
+            "Progressive determinism": "start new automation at L2, climb only from recorded gate evidence"
       - heading: "Plan"
-      - code: '{{ world.source_summary_markdown|default:"(pending — source planner has not returned yet)" }}'
+      - template: '{{ world.source_summary_markdown|default:"(pending - source planner has not returned yet)" }}'
       - choice:
           mode: single
           prompt: "Actions"
@@ -47,7 +49,7 @@ states:
       accept:
         - target: mine
           effects:
-            - say: "Source plan accepted — mining {{ world.transcript_sources }} transcripts for Kitsoki improvements."
+            - say: "Source plan accepted. Mining Claude Code and Codex now; the next view is the mined BRIEF.md report."
             - set: { refine_feedback: "", cycle: 0 }
       refine:
         - when: "world.prepare_cycle >= world.prepare_budget"

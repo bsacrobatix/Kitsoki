@@ -6,10 +6,11 @@
 #
 #   prepare → build the transcript-source and determinism plan      (host.starlark.run)
 #   mine    → run intent/idea mining over planned sources           (host.agent.task: miner)
-#   map     → map opportunities to stories/rooms/scripts/routes     (host.agent.task: mapper)
+#   mapping → announce + write OPPORTUNITY_MAP.md before MAP review (host.agent.task: mapper)
+#   map     → review mapped opportunities and linked OPPORTUNITY_MAP.md
 #   decide  → rank ENRICH/GAP items, select what to apply           (host.agent.ask: ranker + judge gate)
 #   author  → author the selected improvement; verify flows green   (host.agent.task: author)
-#   record  → check whether recorded decisions let a gate climb a   (host.agent.ask: recorder)
+#   record  → write FINAL_REPORT.md and review ladder moves         (host.agent.task: recorder)
 #             determinism rung (L2→L3→L4)
 #
 # Each room produces a schema-validated artifact in its on_enter (idempotent
@@ -38,8 +39,8 @@ app:
 hosts:
   - host.starlark.run   # deterministic source/determinism planning
   - host.run            # mining pipeline, gate-inventory scan, `kitsoki test flows`
-  - host.agent.task    # agentic producers (miner, mapper, author)
-  - host.agent.ask     # read-only producers (ranker, recorder)
+  - host.agent.task    # agentic producers (miner, mapper, author, recorder)
+  - host.agent.ask     # read-only producer (ranker)
   - host.agent.decide  # the checkpoint judge
 
 # Personas — one class of LLM work each. The verb at every call site matches
@@ -53,9 +54,9 @@ agents:
     bash_profile: read-only
     external_side_effect: false
   mapper:
-    system_prompt: "You cross-reference mined automation opportunities against the existing Kitsoki story/script/hook inventory. Regenerate the inventory from the repository, cluster in-scope opportunities, and classify each as EXISTING-STORY, ENRICH-STORY, NEW-STORY, STARLARK-SCRIPT, HUB-ROUTE, SKILL-ONLY, ENFORCEMENT-LIMIT, or OUT-OF-SCOPE with concrete file paths and validators."
+    system_prompt: "You cross-reference mined automation opportunities against the existing Kitsoki story/script/hook inventory. Regenerate the inventory from the repository, cluster in-scope opportunities, and classify each as EXISTING-STORY, ENRICH-STORY, NEW-STORY, STARLARK-SCRIPT, HUB-ROUTE, SKILL-ONLY, ENFORCEMENT-LIMIT, or OUT-OF-SCOPE with concrete file paths and validators. You may write only the markdown opportunity map artifact under .artifacts/session-mining/<job>/."
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob, Bash]
+    tools: [Read, Grep, Glob, Write, Bash]
     bash_profile: read-only
     external_side_effect: false
   ranker:
@@ -70,10 +71,11 @@ agents:
     bash_profile: read-only
     external_side_effect: false
   recorder:
-    system_prompt: "You read the recorded decisions at an existing gate and judge whether one branch dominates enough to drop a determinism rung (LLM → default-rule). You report ladder moves; you do not change code."
+    system_prompt: "You read the recorded decisions at an existing gate and judge whether one branch dominates enough to drop a determinism rung (LLM to default-rule). You write the final markdown report under .artifacts/session-mining/<job>/ and return its path. You do not change source code."
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob]
+    tools: [Read, Grep, Glob, Write]
     bash_profile: read-only
+    external_side_effect: false
   judge:
     system_prompt: "You are a quality gate. Evaluate the provided artifact against the stated criteria and emit a structured verdict: accept, refine, or uncertain."
     model: claude-sonnet-4-6
@@ -127,11 +129,11 @@ world:
   # ── Per-room artifacts ─────────────────────────────────────────────────
   source_plan_artifact: { type: object, default: {} }   # deterministic source + ladder plan
   source_summary_markdown: { type: string, default: "" }
-  mine_artifact:   { type: object, default: {} }   # { brief_path, source_counts, intent_count, deterministic, agent_gated, irreducible, summary_markdown }
-  map_artifact:    { type: object, default: {} }   # { opportunities:[{theme,intents,artifact_kind,status,target_path,validator}], summary_markdown }
+  mine_artifact:   { type: object, default: {} }   # { brief_path, source_counts, display counts, intent_count, deterministic, agent_gated, irreducible, summary_markdown }
+  map_artifact:    { type: object, default: {} }   # { map_path, opportunities:[{theme,intents,artifact_kind,status,target_path,validator}], summary_markdown }
   decide_artifact: { type: object, default: {} }   # { selected:[{theme,room,gate}], rationale, summary_markdown }
-  author_artifact: { type: object, default: {} }   # { files_changed, flows_green, summary_markdown }
-  record_artifact: { type: object, default: {} }   # { ladder_moves, summary_markdown }
+  author_artifact: { type: object, default: {} }   # { files_changed, diff_path, flows_green, summary_markdown }
+  record_artifact: { type: object, default: {} }   # { final_report_path, ladder_moves, summary_markdown }
   last_error:       { type: string, default: "" }
 
 intents:
