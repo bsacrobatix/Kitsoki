@@ -17,9 +17,7 @@ import {
 } from "./_helpers/recording.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..", "..", "..");
-const SOURCE_TARGET =
-  process.env.KITSOKI_PRESENTATION_TARGET ??
-  "/Users/Brad.Smith/code/cyber-repo/src/cyberstack/platform-presentation";
+const SOURCE_TARGET = process.env.KITSOKI_PRESENTATION_TARGET ?? "";
 const ARTIFACT_DIR =
   process.env.KITSOKI_PRESENTATION_ARTIFACT_DIR ??
   path.join(SOURCE_TARGET, ".artifacts", "kitsoki-onboarding-demo");
@@ -235,6 +233,8 @@ function validateSessionDb(): { turn_count: number; terminal_state: string; inpu
 
 test("records project onboarding for platform-presentation through the real xterm TUI", async ({ browser }) => {
   test.setTimeout(240_000);
+  test.skip(!SOURCE_TARGET, "set KITSOKI_PRESENTATION_TARGET to a platform-presentation checkout");
+  test.skip(!fs.existsSync(SOURCE_TARGET), `KITSOKI_PRESENTATION_TARGET does not exist: ${SOURCE_TARGET}`);
 
   prepareVideoDir(VIDEO_DIR);
   if (process.env.KITSOKI_RRWEB_OUT) {
