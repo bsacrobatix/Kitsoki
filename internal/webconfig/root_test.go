@@ -164,6 +164,43 @@ dev_story_profile:
 	}
 }
 
+func TestLoadRoot_ProjectProfileScriptBinding(t *testing.T) {
+	root := writableRepoRoot(t)
+	dir, err := os.MkdirTemp(root, "wc-profile-script-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".kitsoki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".kitsoki.yaml")
+	if err := os.WriteFile(path, []byte("project_profile: .kitsoki/project-profile.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	profile := `schema: project-profile/v1
+kitsoki:
+  instance:
+    bindings:
+      ticket: .kitsoki/providers/ticket.star
+      vcs: host.git
+      ci: host.local
+      workspace: host.git_worktree
+      transport: host.append_to_file
+`
+	if err := os.WriteFile(filepath.Join(dir, ".kitsoki", "project-profile.yaml"), []byte(profile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load profile root: %v", err)
+	}
+	spec := cfg.Root.RootSpec()
+	if spec.Bindings["ticket"] != ".kitsoki/providers/ticket.star" {
+		t.Fatalf("profile script binding not carried into RootSpec: %+v", spec.Bindings)
+	}
+}
+
 func TestLoadRoot_ProjectProfileExplicitRootWins(t *testing.T) {
 	root := writableRepoRoot(t)
 	dir, err := os.MkdirTemp(root, "wc-profile-override-")

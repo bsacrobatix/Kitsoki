@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from init_discover import (  # noqa: E402
     github_repo_slug,
+    inherited_ticket_provider,
+    is_script_binding,
     normalize_story_pack_id,
+    rebase_script_binding,
     starter_story_entries,
     story_pack,
 )
@@ -77,6 +81,48 @@ def yaml_dump(value, indent: int = 0) -> str:
     return pad + yaml_scalar(value)
 
 
+def binding_yaml(value: str) -> str:
+    value = value or ""
+    if re.match(r"^[A-Za-z0-9_./-]+$", value):
+        return value
+    return q(value)
+
+
+def ticket_binding_for_profile(data: dict) -> str:
+    if data.get("ticket_binding"):
+        return str(data["ticket_binding"])
+    return ticket_binding(data)
+
+
+def ticket_binding_for_app(data: dict) -> str:
+    binding = ticket_binding_for_profile(data)
+    if not is_script_binding(binding):
+        return binding
+    root = Path(data["target_path"])
+    app_dir = root / ".kitsoki" / "stories" / f"{data['project_id']}-dev"
+    return rebase_script_binding(binding, root, app_dir)
+
+
+def tracker_profile(data: dict) -> dict:
+    meta = data.get("tracker_metadata") if isinstance(data.get("tracker_metadata"), dict) else {}
+    tracker = dict(meta)
+    tracker["provider"] = data.get("tracker", "none")
+    tracker["repo"] = data.get("ticket_repo") or str(tracker.get("repo") or "")
+    if data.get("ticket_provider_inherited"):
+        tracker["inherited_from"] = data.get("ticket_provider_parent_profile", "")
+        tracker["inherited_root"] = data.get("ticket_provider_parent_root", "")
+        tracker["binding"] = ticket_binding_for_profile(data)
+        if tracker.get("setup_command") and data.get("ticket_provider_parent_root"):
+            tracker.setdefault("setup_cwd", data["ticket_provider_parent_root"])
+        if tracker.get("readiness_command") and data.get("ticket_provider_parent_root"):
+            tracker.setdefault("readiness_cwd", data["ticket_provider_parent_root"])
+    return tracker
+
+
+def tracker_profile_yaml(data: dict, indent: int = 0) -> str:
+    return yaml_dump(tracker_profile(data), indent)
+
+
 def profile_yaml_from_draft(profile: dict) -> str:
     return yaml_dump(profile).rstrip() + "\n"
 
@@ -130,12 +176,39 @@ def expansion_policy(data: dict) -> str:
 
 
 def ensure_draft_profile_defaults(profile: dict, data: dict) -> None:
+    tracker = profile.setdefault("tracker", {})
+    if not isinstance(tracker, dict):
+        tracker = {}
+        profile["tracker"] = tracker
+    for key, value in tracker_profile(data).items():
+        tracker.setdefault(key, value)
+
     kitsoki = profile.setdefault("kitsoki", {})
     if not isinstance(kitsoki, dict):
         kitsoki = {}
         profile["kitsoki"] = kitsoki
     kitsoki.setdefault("story_pack", selected_story_pack(data)["id"])
     kitsoki.setdefault("enabled_stories", starter_story_ids(data))
+    instance = kitsoki.setdefault("instance", {})
+    if not isinstance(instance, dict):
+        instance = {}
+        kitsoki["instance"] = instance
+    bindings = instance.setdefault("bindings", {})
+    if not isinstance(bindings, dict):
+        bindings = {}
+        instance["bindings"] = bindings
+    default_bindings = {
+        "ticket": ticket_binding_for_profile(data),
+        "vcs": "host.git",
+        "ci": "host.local",
+        "workspace": "host.git_worktree",
+        "transport": "host.append_to_file",
+    }
+    for key, value in default_bindings.items():
+        if key == "ticket" and (data.get("ticket_repo") or data.get("ticket_provider_inherited")):
+            bindings[key] = value
+        else:
+            bindings.setdefault(key, value)
 
     dev_story_profile = profile.setdefault("dev_story_profile", {})
     if not isinstance(dev_story_profile, dict):
@@ -337,6 +410,8 @@ def ticket_github_repo_default(data: dict) -> str:
 
 
 def ticket_provider_summary(data: dict) -> str:
+    if data.get("ticket_provider_inherited"):
+        return f"inherited `{data.get('tracker')}` provider from `{data.get('ticket_provider_parent_profile')}`"
     repo = data.get("ticket_repo") or ""
     if repo:
         return f"GitHub issues from `{repo}` plus local markdown / pasted reports"
@@ -347,7 +422,11 @@ def app_yaml(data: dict) -> str:
     project_id = data["project_id"]
     title = data["project_title"]
     docs = dev_story_docs_profile(data)
-    binding = ticket_binding(data)
+    # Ticket source passthrough: GitHub binds to the built-in gh adapter pinned
+    # on world.ticket_repo. Parent meta-repo providers bind through their
+    # inherited handler/script while keeping ticket_repo empty so GitHub-only
+    # rooms do not treat them as GitHub Issues.
+    binding = ticket_binding_for_app(data)
     return f"""app:
   id: {project_id}-dev
   version: 0.1.0
@@ -371,7 +450,7 @@ imports:
     entry: landing
     hosts: declared
     host_bindings:
-      ticket:    {binding}
+      ticket:    {binding_yaml(binding)}
       vcs:       host.git
       ci:        host.local
       workspace: host.git_worktree
@@ -458,9 +537,24 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     # generated instance pins `iface.ticket -> host.gh.ticket` on the selected
     # slug. Discovery can prefill that slug from origin, but an explicit
     # onboarding choice wins. Any other tracker, or an unparseable remote,
-    # degrades honestly to local-file/copy-paste tickets.
+    # can inherit a parent meta-repo provider or degrade honestly to
+    # local-file/copy-paste tickets.
     selected_ticket_repo = str(data.get("ticket_repo") or github_repo_slug(repo["remote"]) or "")
     data["ticket_repo"] = selected_ticket_repo if data.get("tracker") == "github" else ""
+    data["ticket_binding"] = ""
+    data["ticket_provider_inherited"] = False
+    data["ticket_provider_parent_profile"] = ""
+    data["ticket_provider_parent_root"] = ""
+    data["tracker_metadata"] = {}
+    if not data["ticket_repo"]:
+        inherited = inherited_ticket_provider(root)
+        if inherited:
+            data["tracker"] = inherited["provider"]
+            data["ticket_binding"] = inherited["ticket_binding"]
+            data["ticket_provider_inherited"] = True
+            data["ticket_provider_parent_profile"] = inherited.get("profile_relpath", "")
+            data["ticket_provider_parent_root"] = inherited.get("profile_root_relpath", "")
+            data["tracker_metadata"] = inherited.get("tracker") if isinstance(inherited.get("tracker"), dict) else {}
     data["has_makefile"] = (root / "Makefile").exists()
     cargo = root / "Cargo.toml"
     data["has_cargo"] = cargo.exists()
@@ -633,6 +727,13 @@ def onboarding_profile(data: dict) -> dict:
             "evidence": f"VCS `{data.get('repo_vcs', 'none')}`, default branch `{data.get('repo_default_branch', '')}`, remote `{data.get('repo_remote', '')}`.",
             "recommendation": "Use local VCS metadata for worktree and handoff defaults; no network lookup is required during onboarding.",
         })
+    if data.get("ticket_provider_inherited"):
+        patterns.append({
+            "id": "parent-ticket-provider",
+            "source": "parent-project-profile",
+            "evidence": f"Inherited `{data.get('tracker')}` ticket provider from `{data.get('ticket_provider_parent_profile')}`.",
+            "recommendation": "Keep private tracker setup/auth scripts in the parent meta-repo profile; child projects inherit only the generic binding metadata.",
+        })
     rules_files = data.get("rules_files") if isinstance(data.get("rules_files"), list) else []
     if rules_files:
         patterns.append({
@@ -667,7 +768,7 @@ def onboarding_profile(data: dict) -> dict:
             "id": "ticket-intake",
             "status": "applied",
             "summary": f"Ticket intake starts with {ticket_provider_summary(data)}.",
-            "evidence": f"binding={ticket_binding(data)}; github_source={ticket_github_repo_default(data)}",
+            "evidence": f"binding={ticket_binding_for_profile(data)}; github_source={ticket_github_repo_default(data)}",
         },
     ]
     if data.get("build_command") or data.get("test_command"):
@@ -683,6 +784,13 @@ def onboarding_profile(data: dict) -> dict:
             "status": "applied",
             "summary": f"Ticket search includes GitHub issues from `{data['ticket_repo']}` through the composite local+GitHub provider; selected GitHub rows carry the remote repo into child stories.",
             "evidence": f"remote={data.get('repo_remote', '')}",
+        })
+    elif data.get("ticket_provider_inherited"):
+        customizations.append({
+            "id": "inherited-ticket-source",
+            "status": "applied",
+            "summary": f"Tickets bind to inherited `{data.get('tracker')}` through `iface.ticket` using parent profile metadata.",
+            "evidence": ticket_binding_for_profile(data),
         })
     else:
         customizations.append({
@@ -730,6 +838,22 @@ def onboarding_profile_yaml(data: dict, indent: int = 2) -> str:
     return yaml_dump(onboarding_profile(data), indent)
 
 
+def ticket_provider_readiness_check(data: dict) -> dict | None:
+    meta = data.get("tracker_metadata") if isinstance(data.get("tracker_metadata"), dict) else {}
+    command = str(meta.get("readiness_command") or "").strip()
+    if not command:
+        return None
+    cwd = str(data.get("ticket_provider_parent_root") or "").strip()
+    if cwd and cwd != ".":
+        command = f"cd {shlex.quote(cwd)} && {command}"
+    return {
+        "id": "ticket-provider",
+        "kind": "readiness",
+        "command": command,
+        "gate": "recommended",
+    }
+
+
 def generic_verifications(data: dict) -> list[dict]:
     project_id = data["project_id"]
     verifications = [
@@ -740,6 +864,9 @@ def generic_verifications(data: dict) -> list[dict]:
             "gate": "required",
         },
     ]
+    ticket_check = ticket_provider_readiness_check(data)
+    if ticket_check is not None:
+        verifications.append(ticket_check)
     if data.get("build_command"):
         verifications.append({
             "id": "build",
@@ -941,8 +1068,7 @@ conventions:
       - ".worktrees/"
 
 tracker:
-  provider: {q(data.get("tracker", "none"))}
-  repo: {q(data.get("ticket_repo", ""))}
+{tracker_profile_yaml(data, 2)}
 
 kitsoki:
   story: dev-story
@@ -953,7 +1079,7 @@ kitsoki:
     id: {data["project_id"]}-dev
     path: .kitsoki/stories/{data["project_id"]}-dev/app.yaml
     bindings:
-      ticket: {ticket_binding(data)}
+      ticket: {binding_yaml(ticket_binding_for_profile(data))}
       vcs: host.git
       ci: host.local
       workspace: host.git_worktree
@@ -1776,22 +1902,52 @@ def readme(data: dict, profile_path: str) -> str:
         commands.append(("build", data["build_command"]))
     command_block = "\n".join(cmd for _, cmd in commands) or "# No project commands were inferred during onboarding."
     command_notes = "\n".join(f"- `{name}`: `{cmd}`" for name, cmd in commands) or "- No project commands were inferred; update `.kitsoki/project-profile.yaml` and this README after choosing them."
+    if data.get("ticket_provider_inherited"):
+        meta = data.get("tracker_metadata") if isinstance(data.get("tracker_metadata"), dict) else {}
+        setup = str(meta.get("setup_command") or "").strip()
+        readiness = str(meta.get("readiness_command") or "").strip()
+        ticket_note = f"""Ticket provider:
+
+- source: inherited `{data.get("tracker")}` from `{data.get("ticket_provider_parent_profile")}`
+- binding: `{ticket_binding_for_profile(data)}`
+- setup command: `{setup or "(not declared)"}`
+- readiness command: `{readiness or "(not declared)"}`
+"""
+    elif data.get("ticket_repo"):
+        ticket_note = f"""Ticket provider:
+
+- source: GitHub Issues `{data["ticket_repo"]}`
+- binding: `host.gh.ticket`
+"""
+    else:
+        ticket_note = """Ticket provider:
+
+- source: local files
+- binding: `host.local_files.ticket`
+"""
     flow_note = (
         "No deterministic flow fixtures are generated for this project instance yet. "
         "Use the imported dev-story fixtures in the Kitsoki checkout for hub coverage, "
         "and add project-local flows when this repo needs its own story-specific assertions."
     )
-    provider_note = ticket_provider_summary(data)
-    provider_detail = (
-        "Full ticket capability is enabled: GitHub issues appear beside local "
-        "markdown tickets and pasted reports. Local/pasted reports stay local; "
-        "a selected GitHub row carries the remote repo into bugfix close-out."
-        if data.get("ticket_repo")
-        else "Good local capability is enabled without remote setup: paste a "
-        "bug report into the bugfix path or keep markdown tickets under "
-        "`issues/bugs/`. Configure a provider later when you want remote search, "
-        "issue-body fetch, comments, and transitions."
-    )
+    if data.get("ticket_provider_inherited"):
+        provider_detail = (
+            "The parent meta-repo owns tracker setup/auth; this child project "
+            "inherits only the generic binding metadata and readiness command."
+        )
+    elif data.get("ticket_repo"):
+        provider_detail = (
+            "Full ticket capability is enabled: GitHub issues appear beside local "
+            "markdown tickets and pasted reports. Local/pasted reports stay local; "
+            "a selected GitHub row carries the remote repo into bugfix close-out."
+        )
+    else:
+        provider_detail = (
+            "Good local capability is enabled without remote setup: paste a "
+            "bug report into the bugfix path or keep markdown tickets under "
+            "`issues/bugs/`. Configure a provider later when you want remote search, "
+            "issue-body fetch, comments, and transitions."
+        )
     mining_note = ""
     if mining_seed_enabled(data):
         mining_note = f"""
@@ -1835,8 +1991,7 @@ Project profile: `{Path(profile_path).relative_to(Path(data["target_path"]))}`
 Readiness verifier: `.kitsoki/check-readiness.py`
 Session mining promotion helper: `.kitsoki/promote-session-mining.py`
 
-Ticket provider: {provider_note}
-
+{ticket_note}
 {provider_detail}
 
 Starter story pack: `{pack["id"]}` - {pack["title"]}

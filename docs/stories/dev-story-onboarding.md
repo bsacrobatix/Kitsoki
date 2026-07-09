@@ -178,10 +178,12 @@ override if git tracks it.
 The generated `.kitsoki/stories/<id>-dev/app.yaml` imports
 `@kitsoki/dev-story` from the binary's embedded story library and rebinds the
 providers to project-selected implementations. Local mode uses
-`host.local_files.ticket`; full GitHub mode uses `host.gh.ticket` with the
-selected `owner/repo`. The other defaults (`host.git`, `host.local`,
-`host.git_worktree`, `host.append_to_file`) let the instance run standalone
-with only the `kitsoki` binary present.
+`host.local_files.ticket`; full GitHub mode uses the composite
+`host.local_github.ticket` with the selected `owner/repo`; and a child checkout
+under a parent meta-repo can inherit a parent-declared non-GitHub ticket
+provider. The other defaults (`host.git`, `host.local`, `host.git_worktree`,
+`host.append_to_file`) let the instance run standalone with only the `kitsoki`
+binary present.
 
 When deterministic discovery finds associated Claude/Codex transcript history,
 apply also writes `.context/kitsoki-session-mining-seed.md` and records a
@@ -205,6 +207,22 @@ Repo metadata is inferred locally as well. Git checkouts keep their current or
 origin default branch and origin remote in `repo.default_branch` /
 `repo.remote`; non-git directories are recorded as `repo.vcs: none` with empty
 branch and remote fields.
+
+### Parent meta-repo providers
+
+For meta-repos or monorepos with child projects under `projects/` or `src/`,
+discovery walks ancestors for `.kitsoki/project-profile.yaml`. If the child
+does not have a GitHub `ticket_repo`, onboarding can inherit a non-GitHub
+`tracker.provider` and `kitsoki.instance.bindings.ticket` from the nearest
+parent profile. Relative `.star` bindings are rebased into the child profile and
+again into the generated `.kitsoki/stories/<id>-dev/app.yaml`.
+
+Parent tracker metadata is copied into the child's `tracker:` block. When the
+parent declares `setup_command`, `readiness_command`, or `required_env`, those
+remain generic profile metadata; a declared `readiness_command` is added to the
+generated `.kitsoki/check-readiness.py` checks and runs from the parent root.
+`ticket_repo` stays GitHub-only, so private providers use the `iface.ticket`
+binding without triggering GitHub-specific publish or closeout behavior.
 
 The generated `.kitsoki/check-readiness.py` is the explicit post-apply verifier.
 It mirrors `setup_plan.verifications`, supports `--list` for review, and writes

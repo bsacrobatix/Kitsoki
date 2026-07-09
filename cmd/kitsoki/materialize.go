@@ -98,7 +98,7 @@ func runMaterialize(repoRoot, configPath, nameFlag string) (string, error) {
 		return "", fmt.Errorf("%s already exists; this root is already materialized — edit it directly", outPath)
 	}
 
-	yamlBytes, err := emitRootYAML(rootSpec, slug)
+	yamlBytes, err := emitRootYAML(rootSpec, slug, repoRoot)
 	if err != nil {
 		return "", fmt.Errorf("emit app.yaml: %w", err)
 	}
@@ -174,25 +174,24 @@ type rootYAMLIntent struct {
 // the kitsoki-dev instance shape, prefixed with a provenance header. It reuses
 // app.BuildRootImporter so the emitted file is byte-faithful to what the loader
 // synthesizes — app.Load(emit(spec)) deep-equals app.SynthesizeRoot(spec).
-func emitRootYAML(spec *app.RootSpec, slug string) ([]byte, error) {
-	// repoRoot is irrelevant to the emitted text (the source is the portable
-	// @kitsoki/dev-story form); pass "." just to satisfy BuildRootImporter's
-	// validation of the spec (import / binding ifaces).
-	imp, _, err := app.BuildRootImporter(spec, ".")
+func emitRootYAML(spec *app.RootSpec, slug, repoRoot string) ([]byte, error) {
+	imp, absRoot, err := app.BuildRootImporter(spec, repoRoot)
 	if err != nil {
 		return nil, err
 	}
 
 	importDef := imp.Imports[app.RootAlias]
 
-	// Root-spec bindings are always plain handler names (never scripts —
-	// see RootSpec.Bindings), so this is a lossless flatten back to the
-	// YAML-authoring shape for re-emission.
 	var hostBindings map[string]string
 	if len(importDef.HostBindings) > 0 {
 		hostBindings = make(map[string]string, len(importDef.HostBindings))
 		for k, v := range importDef.HostBindings {
-			hostBindings[k] = v.Handler
+			switch {
+			case v.Script != "":
+				hostBindings[k] = materializedScriptPath(v.Script, absRoot, slug)
+			default:
+				hostBindings[k] = v.Handler
+			}
 		}
 	}
 
@@ -241,4 +240,17 @@ func emitRootYAML(spec *app.RootSpec, slug string) ([]byte, error) {
 		"# docs/stories/imports.md \"The blank root that grows\".\n",
 		time.Now().UTC().Format(time.RFC3339))
 	return append([]byte(header), body...), nil
+}
+
+func materializedScriptPath(script, repoRoot, slug string) string {
+	if filepath.IsAbs(script) {
+		return filepath.Clean(script)
+	}
+	absScript := filepath.Join(repoRoot, script)
+	appDir := filepath.Join(repoRoot, ".kitsoki", "stories", slug)
+	rel, err := filepath.Rel(appDir, absScript)
+	if err != nil {
+		return filepath.Clean(script)
+	}
+	return filepath.Clean(rel)
 }

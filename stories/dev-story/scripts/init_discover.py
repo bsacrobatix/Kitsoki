@@ -656,6 +656,186 @@ def github_repo_slug(remote: str) -> str:
     return f"{owner}/{repo}"
 
 
+def _strip_yaml_comment(value: str) -> str:
+    in_single = False
+    in_double = False
+    escaped = False
+    for index, ch in enumerate(value):
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\" and in_double:
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if ch == "#" and not in_single and not in_double and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value.rstrip()
+
+
+def _split_inline_list(value: str) -> list[str]:
+    body = value.strip()[1:-1].strip()
+    if not body:
+        return []
+    out: list[str] = []
+    current = ""
+    in_single = False
+    in_double = False
+    escaped = False
+    for ch in body:
+        if escaped:
+            current += ch
+            escaped = False
+            continue
+        if ch == "\\" and in_double:
+            current += ch
+            escaped = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            current += ch
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            current += ch
+            continue
+        if ch == "," and not in_single and not in_double:
+            out.append(str(_parse_yaml_scalar(current)))
+            current = ""
+            continue
+        current += ch
+    if current.strip():
+        out.append(str(_parse_yaml_scalar(current)))
+    return out
+
+
+def _parse_yaml_scalar(raw: str):
+    value = _strip_yaml_comment(raw).strip()
+    if value in {"", "null", "Null", "NULL", "~"}:
+        return ""
+    if value.startswith("[") and value.endswith("]"):
+        return _split_inline_list(value)
+    if value in {"true", "True", "TRUE"}:
+        return True
+    if value in {"false", "False", "FALSE"}:
+        return False
+    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        if value.startswith('"'):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value[1:-1]
+        return value[1:-1].replace("''", "'")
+    return value
+
+
+def _profile_root(profile_path: Path) -> Path:
+    # .kitsoki/project-profile.yaml -> project root. If a caller supplies a
+    # differently named file, fall back to its parent.
+    return profile_path.parent.parent if profile_path.parent.name == ".kitsoki" else profile_path.parent
+
+
+def find_parent_project_profile(path: Path) -> Path | None:
+    current = path.resolve()
+    for parent in current.parents:
+        profile = parent / ".kitsoki" / "project-profile.yaml"
+        if profile.exists():
+            return profile
+    return None
+
+
+def read_project_profile_ticket_subset(profile_path: Path) -> dict:
+    try:
+        lines = profile_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    stack: list[tuple[int, str]] = []
+    tracker: dict = {}
+    ticket_binding = ""
+    docs_ticket_repo = ""
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        if stripped.startswith("- "):
+            path_tuple = tuple(item[1] for item in stack)
+            if len(path_tuple) == 2 and path_tuple[0] == "tracker":
+                tracker.setdefault(path_tuple[1], []).append(_parse_yaml_scalar(stripped[2:]))
+            continue
+        if ":" not in stripped:
+            continue
+        key, raw = stripped.split(":", 1)
+        key = key.strip()
+        path_tuple = tuple([item[1] for item in stack] + [key])
+        raw = raw.strip()
+        if raw == "":
+            stack.append((indent, key))
+            continue
+        value = _parse_yaml_scalar(raw)
+        if path_tuple == ("kitsoki", "instance", "bindings", "ticket"):
+            ticket_binding = str(value)
+        elif len(path_tuple) == 2 and path_tuple[0] == "tracker":
+            tracker[path_tuple[1]] = value
+        elif path_tuple == ("dev_story_profile", "docs", "ticket_repo"):
+            docs_ticket_repo = str(value)
+    return {
+        "profile_path": profile_path,
+        "root": _profile_root(profile_path),
+        "tracker": tracker,
+        "ticket_binding": ticket_binding,
+        "ticket_repo": docs_ticket_repo,
+    }
+
+
+def is_script_binding(value: str) -> bool:
+    return (value or "").strip().endswith(".star")
+
+
+def rebase_script_binding(value: str, source_root: Path, target_root: Path) -> str:
+    binding = (value or "").strip()
+    if not is_script_binding(binding):
+        return binding
+    path = Path(binding).expanduser()
+    if not path.is_absolute():
+        path = source_root / path
+    try:
+        return os.path.relpath(path.resolve(), target_root.resolve())
+    except OSError:
+        return os.path.relpath(path, target_root)
+
+
+def inherited_ticket_provider(path: Path) -> dict:
+    child_root = path.resolve()
+    parent_profile = find_parent_project_profile(child_root)
+    if parent_profile is None:
+        return {}
+    subset = read_project_profile_ticket_subset(parent_profile)
+    tracker = subset.get("tracker") if isinstance(subset.get("tracker"), dict) else {}
+    provider = str(tracker.get("provider") or "").strip()
+    ticket_binding = str(subset.get("ticket_binding") or "").strip()
+    if not provider or provider in {"none", "github"} or not ticket_binding:
+        return {}
+    root = subset["root"]
+    return {
+        "provider": provider,
+        "repo": str(tracker.get("repo") or subset.get("ticket_repo") or ""),
+        "profile_path": str(parent_profile),
+        "profile_root": str(root),
+        "profile_root_relpath": os.path.relpath(root, child_root),
+        "profile_relpath": os.path.relpath(parent_profile, child_root),
+        "ticket_binding": rebase_script_binding(ticket_binding, root, child_root),
+        "tracker": dict(tracker),
+    }
+
+
 def git_info(path: Path) -> dict:
     inside = git_output(path, "rev-parse", "--is-inside-work-tree")
     if inside != "true":
@@ -702,6 +882,11 @@ def invalid_discovery(
         "story_pack_title": pack["title"],
         "story_pack_summary": pack["summary"],
         "story_packs": story_pack_catalog(),
+        "ticket_binding": "",
+        "ticket_provider_inherited": False,
+        "ticket_provider_parent_profile": "",
+        "ticket_provider_parent_root": "",
+        "ticket_provider_metadata": {},
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
@@ -830,6 +1015,9 @@ def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str
     # the profile-draft step) can override tracker back to "none" to keep
     # local-file tickets.
     ticket_repo = github_repo_slug(repo["remote"])
+    inherited_ticket = inherited_ticket_provider(path) if not ticket_repo else {}
+    tracker = "github" if ticket_repo else str(inherited_ticket.get("provider") or "none")
+    tracker_metadata = inherited_ticket.get("tracker") if isinstance(inherited_ticket.get("tracker"), dict) else {}
     return {
         "target_path": str(path),
         "project_id": project_id,
@@ -843,13 +1031,18 @@ def discover(path: Path, starter_stories: list[dict] | None = None, pack_id: str
         "repo_default_branch": repo["default_branch"],
         "repo_remote": repo["remote"],
         "conventions": "project" if project_metadata else ("hybrid" if project_id == "slidey" or (path / "AGENTS.md").exists() or (path / "CLAUDE.md").exists() else "local defaults"),
-        "tracker": "github" if ticket_repo else "none",
+        "tracker": tracker,
         "ticket_repo": ticket_repo,
         "starter_stories": starter_stories,
         "story_pack": pack["id"],
         "story_pack_title": pack["title"],
         "story_pack_summary": pack["summary"],
         "story_packs": story_pack_catalog(),
+        "ticket_binding": inherited_ticket.get("ticket_binding", ""),
+        "ticket_provider_inherited": bool(inherited_ticket),
+        "ticket_provider_parent_profile": inherited_ticket.get("profile_relpath", ""),
+        "ticket_provider_parent_root": inherited_ticket.get("profile_root_relpath", ""),
+        "ticket_provider_metadata": tracker_metadata,
         "transcript_slug": transcripts["slug"],
         "transcript_count": transcripts["count"],
         "transcript_sources": transcripts["sources"],
