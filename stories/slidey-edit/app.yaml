@@ -37,15 +37,34 @@ hosts:
 
 agents:
   drafter:
-    system_prompt: "You author a slidey deck JSON spec using only the schema and scene contract in the task prompt. Skills and slash commands are disabled for this dispatched agent; do not inspect or mention SKILL.md, .agents/skills, or .claude/skills. Only read an existing input deck when one is provided, and only write under the given workspace directory. Keep the deck tight; one idea per scene."
+    system_prompt: "You author a slidey deck JSON spec using only the Slidey MCP tools and the schema/scene contract in the task prompt. Skills, slash commands, shell access, and generic filesystem tools are disabled for this dispatched agent; do not inspect or mention SKILL.md, .agents/skills, or .claude/skills. Use slidey_workspace_tree only to discover editable deck specs under the MCP root, slidey_read_spec to inspect a supplied deck, slidey_write_spec or slidey_patch_spec to write the deck, and slidey_validate before submitting. Keep the deck tight; one idea per scene."
     model: claude-sonnet-4-6
-    tools: [Read, Write, Edit]
-    external_side_effect: false
+    tools: []
+    mcp: &slidey_mcp
+      servers:
+        slidey:
+          command: slidey-mcp
+          args: ["--root", "."]
+      tools:
+        - mcp__slidey__workspace_tree
+        - mcp__slidey__read_spec
+        - mcp__slidey__layout_gallery
+        - mcp__slidey__schema
+        - mcp__slidey__validate
+        - mcp__slidey__write_spec
+        - mcp__slidey__patch_spec
+        - mcp__slidey__remove_slide
+    permissions: &slidey_permissions
+      mode: ask
+      disallowed_tools: [Read, Grep, Glob, LS, NotebookRead, TodoRead, TodoWrite, Write, Edit, MultiEdit, NotebookEdit, Bash, WebFetch, WebSearch]
+    effect: write
   reviser:
-    system_prompt: "You edit the slidey deck behind a LOCATION-TIED annotation using only the schema and scene contract in the task prompt. Skills and slash commands are disabled for this dispatched agent; do not inspect or mention SKILL.md, .agents/skills, or .claude/skills. Resolve the anchor to the scene/element it targets and apply the instruction there. Comply with the directive; never silently drop it. Only write under the given workspace directory."
+    system_prompt: "You edit the slidey deck behind a LOCATION-TIED annotation using only the Slidey MCP tools and the schema/scene contract in the task prompt. Skills, slash commands, shell access, and generic filesystem tools are disabled for this dispatched agent; do not inspect or mention SKILL.md, .agents/skills, or .claude/skills. Resolve the anchor to the scene/element it targets, apply the instruction there with slidey_patch_spec or slidey_write_spec, and validate before submitting. Comply with the directive; never silently drop it."
     model: claude-sonnet-4-6
-    tools: [Read, Write, Edit]
-    external_side_effect: false
+    tools: []
+    mcp: *slidey_mcp
+    permissions: *slidey_permissions
+    effect: write
 
 world:
   # ── session / config ───────────────────────────────────────────────────────
@@ -59,7 +78,7 @@ world:
   # ── deck source ─────────────────────────────────────────────────────────────
   # spec_path is baked at the pre-rendered deck so `kitsoki tour`/web can drive
   # the loop without authoring (tour-needs-baked-world lesson).
-  deck:             { type: object, default: { spec_path: "stories/slidey-edit/baked/deck.json", summary: "Spatial-annotation explainer deck (3 scenes)." } }
+  deck:             { type: object, default: { spec_path: "stories/slidey-edit/baked/deck.json", workspace_spec_path: "deck.json", summary: "Spatial-annotation explainer deck (3 scenes)." } }
   source_deck:      { type: object, default: {} }   # existing deck passed into drafting; deck remains the draft output/cache
   draft_feedback:   { type: string, default: "" }
   pending_deck_spec_path: { type: string, default: "" }

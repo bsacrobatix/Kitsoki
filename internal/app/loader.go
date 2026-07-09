@@ -814,14 +814,15 @@ func resolveAgentEffect(name string, decl *AgentDecl) string {
 		return fmt.Sprintf("agent %q: declares both effect: and the deprecated external_side_effect: — remove external_side_effect (use effect: only)", name)
 	}
 
-	joined := effect.FromTools(decl.Tools)
+	toolSurface := agentToolSurface(decl)
+	joined := effect.FromTools(toolSurface)
 
 	var declared effect.Effect
 	switch {
 	case decl.Effect != "":
 		declared = decl.Effect
 	case decl.ExternalSideEffect != nil:
-		declared = effect.FromLegacyBool(*decl.ExternalSideEffect, decl.Tools)
+		declared = effect.FromLegacyBool(*decl.ExternalSideEffect, toolSurface)
 		slog.Warn("agent external_side_effect: is deprecated; use effect: instead",
 			"agent", name)
 	}
@@ -832,7 +833,7 @@ func resolveAgentEffect(name string, decl *AgentDecl) string {
 				"agent %q: declares effect %q but its tool surface %v joins to %q (includes a write/external-tier tool) — "+
 					"these contradict each other; an agent with that tool surface cannot be %s. "+
 					"Remove the declaration or the tool.",
-				name, declared, decl.Tools, joined, declared)
+				name, declared, toolSurface, joined, declared)
 		}
 		if declared != joined {
 			slog.Warn("agent effect declaration disagrees with inferred value from tool surface",
@@ -846,6 +847,17 @@ func resolveAgentEffect(name string, decl *AgentDecl) string {
 	mirrored := decl.Effect == effect.External
 	decl.ExternalSideEffect = &mirrored
 	return ""
+}
+
+func agentToolSurface(decl *AgentDecl) []string {
+	if decl == nil {
+		return nil
+	}
+	out := append([]string(nil), decl.Tools...)
+	if decl.MCP != nil {
+		out = append(out, decl.MCP.Tools...)
+	}
+	return out
 }
 
 // collectAskDecideAgents walks the full effect graph and returns the set of

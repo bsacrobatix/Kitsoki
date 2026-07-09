@@ -62,6 +62,53 @@ agents:
 	require.Contains(t, a.MCP.Servers, "fs")
 	require.Equal(t, "ask", a.Permissions.Mode)
 	require.Equal(t, []string{"WebFetch"}, a.Permissions.DisallowedTools)
+	require.Equal(t, "external", string(a.Effect), "unknown MCP tools fail closed in the effect taxonomy")
+}
+
+func TestAgents_SlideyMCPToolSurface(t *testing.T) {
+	dir := t.TempDir()
+	yaml := `app:
+  id: slidey-contract
+  version: 0.1.0
+root: start
+states:
+  start: { view: Start }
+agents:
+  editor:
+    system_prompt: edit slidey
+    model: claude-sonnet-4-6
+    tools: []
+    mcp:
+      servers:
+        slidey:
+          command: slidey-mcp
+          args: ["--root", "."]
+      tools:
+        - mcp__slidey__workspace_tree
+        - mcp__slidey__read_spec
+        - mcp__slidey__write_spec
+        - mcp__slidey__patch_spec
+        - mcp__slidey__validate
+    permissions:
+      mode: ask
+      disallowed_tools: [Read, Grep, Glob, Write, Edit, Bash, WebFetch, WebSearch]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.yaml"), []byte(yaml), 0o644))
+	def, err := Load(filepath.Join(dir, "app.yaml"))
+	require.NoError(t, err)
+	a := def.Agents["editor"]
+	require.Empty(t, a.Tools)
+	require.Equal(t, []string{
+		"mcp__slidey__workspace_tree",
+		"mcp__slidey__read_spec",
+		"mcp__slidey__write_spec",
+		"mcp__slidey__patch_spec",
+		"mcp__slidey__validate",
+	}, a.MCP.Tools)
+	require.Contains(t, a.MCP.Servers, "slidey")
+	require.Equal(t, "write", string(a.Effect))
+	require.Equal(t, "ask", a.Permissions.Mode)
+	require.Contains(t, a.Permissions.DisallowedTools, "Bash")
 }
 
 func TestAgents_ToolboxResolution(t *testing.T) {

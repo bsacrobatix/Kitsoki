@@ -79,6 +79,18 @@ var mcpToolClass = map[string]Effect{
 	"mcp__validator__submit":  Pure,
 	"mcp__operator__ask":      Pure,
 	"mcp__kitsoki-bash__Bash": Write,
+
+	"mcp__slidey__workspace_tree": Read,
+	"mcp__slidey__read_spec":      Read,
+	"mcp__slidey__layout_gallery": Read,
+	"mcp__slidey__schema":         Read,
+	"mcp__slidey__validate":       Read,
+	"mcp__slidey__docs":           Read,
+	"mcp__slidey__write_spec":     Write,
+	"mcp__slidey__patch_spec":     Write,
+	"mcp__slidey__remove_slide":   Write,
+	"mcp__slidey__meme_search":    External,
+	"mcp__slidey__add_meme":       External,
 }
 
 // builtinToolClass classifies a built-in Claude Code tool by its lower-cased,
