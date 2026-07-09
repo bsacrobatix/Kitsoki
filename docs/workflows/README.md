@@ -9,6 +9,7 @@ doesn't support it yet.
 |---|---|
 | Onboard a project | [`../getting-started.md`](../getting-started.md) |
 | Write a PRD, then a design/proposal | [`prd-and-design.md`](prd-and-design.md) |
+| Track roadmap progress and coverage | [`roadmap-ledger.md`](roadmap-ledger.md) |
 | Decompose an epic → implement the briefs | [`decompose-and-implement.md`](decompose-and-implement.md) |
 | File a bug | [`file-a-bug.md`](file-a-bug.md) |
 | Fix a bug | [`fix-a-bug.md`](fix-a-bug.md) |

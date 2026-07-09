@@ -759,6 +759,8 @@ world:
   design_diff_verdict:   { type: string, default: "" }   # accepted|rejected from the in-editor diff gate
   design_file:           { type: string, default: "" }   # final published path docs/proposals/<slug>.md
   design_ticket_path:    { type: string, default: "" }   # feature ticket minted at publish, links back to design_file
+  roadmap_ledger_path:   { type: string, default: ".artifacts/roadmap/progress.yaml" } # local YAML progress ledger for roadmap/proposal/docs/site/demo coverage
+  roadmap_ledger_result: { type: object, default: {} }    # stdout_json from `kitsoki roadmap ledger event`
 
   # ── deliver handoff (lifted from `deliver` import's exits) ────────
   # decompose-vs-direct alternative to the impl import: go_deliver drives the

@@ -74,6 +74,17 @@ host_handlers:
             ticket_id:     "F-2026-06-11T120000Z-tamagotchi-pet-ui"
             ticket_path:   "issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md"
             ticket_title:  "Tamagotchi pet UI"
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-tamagotchi","item_id":"proposal/tamagotchi-pet-ui","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-tamagotchi"
+            item_id: "proposal/tamagotchi-pet-ui"
+            changed: true
 
 turns:
   - intent: { name: discuss, slots: { message: "I want to add tamagotchi-style virtual pets to the session UI" } }

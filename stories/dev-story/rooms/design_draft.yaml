@@ -167,6 +167,54 @@ states:
               on_error: design_draft
             - set:
                 ticket_type: "feature"
+            - invoke: host.run
+              id: roadmap_ledger_proposal_published
+              with:
+                cmd: bash
+                args:
+                  - "-c"
+                  - |
+                    if [ -d ./cmd/kitsoki ]; then
+                      exec go run ./cmd/kitsoki roadmap ledger event "$@"
+                    fi
+                    exec kitsoki roadmap ledger event "$@"
+                  - "kitsoki-roadmap-ledger"
+                  - "--ledger"
+                  - "{{ world.roadmap_ledger_path }}"
+                  - "--event"
+                  - "proposal_published"
+                  - "--item-id"
+                  - "proposal/{{ world.design_slug }}"
+                  - "--kind"
+                  - "proposal"
+                  - "--title"
+                  - "{{ world.design_artifact.title }}"
+                  - "--status"
+                  - "{{ world.design_change_target != '' ? 'in_progress' : 'proposed' }}"
+                  - "--horizon"
+                  - "next"
+                  - "--proposal"
+                  - "{{ world.design_file }}"
+                  - "--ref"
+                  - "{{ world.design_ticket_path }}"
+                  - "--check"
+                  - "proposal=done"
+                  - "--check"
+                  - "docs=pending"
+                  - "--check"
+                  - "feature_yaml=pending"
+                  - "--check"
+                  - "product_site=pending"
+                  - "--check"
+                  - "rrweb_demo=pending"
+                  - "--source"
+                  - "story:dev-story/design_draft"
+                  - "--note"
+                  - "{{ world.design_existing_state.roadmap_fit ?? '' }}"
+                  - "--json"
+              bind:
+                roadmap_ledger_result: stdout_json
+              on_error: design_done
 
       accept_no_ticket:
         - target: design_done
@@ -197,6 +245,54 @@ states:
               on_error: design_draft
             - set:
                 ticket_type: ""
+            - invoke: host.run
+              id: roadmap_ledger_proposal_published
+              with:
+                cmd: bash
+                args:
+                  - "-c"
+                  - |
+                    if [ -d ./cmd/kitsoki ]; then
+                      exec go run ./cmd/kitsoki roadmap ledger event "$@"
+                    fi
+                    exec kitsoki roadmap ledger event "$@"
+                  - "kitsoki-roadmap-ledger"
+                  - "--ledger"
+                  - "{{ world.roadmap_ledger_path }}"
+                  - "--event"
+                  - "proposal_published"
+                  - "--item-id"
+                  - "proposal/{{ world.design_slug }}"
+                  - "--kind"
+                  - "proposal"
+                  - "--title"
+                  - "{{ world.design_artifact.title }}"
+                  - "--status"
+                  - "{{ world.design_change_target != '' ? 'in_progress' : 'proposed' }}"
+                  - "--horizon"
+                  - "next"
+                  - "--proposal"
+                  - "{{ world.design_file }}"
+                  - "--ref"
+                  - "{{ world.design_ticket_path }}"
+                  - "--check"
+                  - "proposal=done"
+                  - "--check"
+                  - "docs=pending"
+                  - "--check"
+                  - "feature_yaml=pending"
+                  - "--check"
+                  - "product_site=pending"
+                  - "--check"
+                  - "rrweb_demo=pending"
+                  - "--source"
+                  - "story:dev-story/design_draft"
+                  - "--note"
+                  - "{{ world.design_existing_state.roadmap_fit ?? '' }}"
+                  - "--json"
+              bind:
+                roadmap_ledger_result: stdout_json
+              on_error: design_done
 
       # Same inputs, revise the prose. Budget gate → main.
       refine:
@@ -315,6 +411,8 @@ states:
           pairs:
             Title: '{{ world.design_artifact.title|default:"(n/a)" }}'
             Kind:  '{{ world.design_artifact.kind|default:"(n/a)" }}'
+            "Roadmap ledger": '{{ world.roadmap_ledger_path }}'
+            "Roadmap event":  '{{ world.roadmap_ledger_result.event_id|default:"(not recorded)" }}'
       - kv:
           pairs:
             Ticket: '{{ world.ticket_id }} — {{ world.design_ticket_path }}'
@@ -342,7 +440,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [design_workspace, design_slug, design_change_target, design_artifact, design_file, design_ticket_path, ticket_id, ticket_title, ticket_type]
+    relevant_world: [design_workspace, design_slug, design_change_target, design_artifact, design_file, design_ticket_path, roadmap_ledger_path, roadmap_ledger_result, ticket_id, ticket_title, ticket_type]
     on:
       # The accept arc already pinned ticket_id / ticket_type=feature /
       # ticket_url / thread, so impl's world_in: projection has everything it

@@ -50,6 +50,17 @@ host_handlers:
             ticket_path: ""
             ticket_title: ""
             ticket_url: "docs/proposals/routing-tuning.md"
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-routing-tuning","item_id":"proposal/routing-tuning","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-routing-tuning"
+            item_id: "proposal/routing-tuning"
+            changed: true
 
 turns:
   - intent: { name: accept_no_ticket, slots: {} }
@@ -59,9 +70,17 @@ turns:
       ticket_id: ""
       ticket_type: ""
       design_ticket_path: ""
+      roadmap_ledger_result:
+        ok: true
+        ledger: ".artifacts/roadmap/progress.yaml"
+        event_id: "evt-routing-tuning"
+        item_id: "proposal/routing-tuning"
+        changed: true
     expect_host_calls:
       - handler: host.run
         args: { call: "publish" }
-    expect_view_matches: "Published without filing a feature ticket\\."
+      - handler: host.run
+        args: { call: "roadmap_ledger_proposal_published" }
+    expect_view_matches: "Roadmap ledger[\\s\\S]*Published without filing a feature ticket\\."
 
 expect_no_errors: true
