@@ -54,9 +54,9 @@ export const DemoSchema = z.strictObject({
   /** Capture backend. Playwright is the default; binary uses legacy `kitsoki tour`. */
   renderer: z.enum(["playwright", "binary"]).optional(),
   /**
-   * Primary product-site media artifact. Use rrweb for new demos; mp4 remains
-   * the backwards-compatible fallback for surfaces rrweb cannot reconstruct or
-   * explicit rendered-video exports.
+   * Primary product-site media artifact. Defaults to rrweb; mp4 is an explicit
+   * legacy fallback for surfaces rrweb cannot reconstruct or rendered-video
+   * exports requested outside the normal catalog path.
    */
   format: z.enum(["mp4", "rrweb"]).optional(),
   /** Playwright spec path, relative to tools/runstatus. Optional ONLY for a

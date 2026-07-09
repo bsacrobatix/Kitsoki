@@ -27,7 +27,7 @@ model.
 
 ## Inspect and operate runs
 
-<FeatureGrid :ids="['chat-stream', 'web-inbox', 'session-media-workbench', 'diagram-showcase', 'review', 'complete-product-tour', 'multi-story']" />
+<FeatureGrid :ids="['chat-stream', 'web-inbox', 'session-media-workbench', 'diagram-showcase', 'review', 'multi-story']" />
 
 ## Real workflow case studies
 

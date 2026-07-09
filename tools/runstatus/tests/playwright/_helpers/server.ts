@@ -16,7 +16,7 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import net from "net";
-import { expect, type Page, type Video, type Locator } from "@playwright/test";
+import { expect, type BrowserContext, type Page, type Video, type Locator } from "@playwright/test";
 import { profileSuffix, activeProfile } from "./camera.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -61,6 +61,102 @@ export const GO_RUN =
 
 /** Global pacing knob: 0 for fast assertion runs, 1 (default) for the camera. */
 export const PACE = Number(process.env.WEB_CHAT_PACE ?? "1");
+
+interface AutoRrwebState {
+  events: unknown[];
+  viewport: { width: number; height: number; deviceScaleFactor: number } | null;
+  exposed: boolean;
+  patched: boolean;
+}
+
+const autoRrwebByContext = new WeakMap<BrowserContext, AutoRrwebState>();
+
+export function rrwebCaptureOutPath(): string | null {
+  const out = process.env.KITSOKI_RRWEB_OUT;
+  if (!out) return null;
+  return path.resolve(repoRoot, out);
+}
+
+/**
+ * When KITSOKI_RRWEB_OUT is set, install a Node-backed rrweb recorder on the
+ * page and patch context.close() so existing tour specs emit rrweb without
+ * adding a parallel capture spec. The Node accumulator survives hard reloads:
+ * a later maybeInstallAutoRrwebCapture() call starts a fresh rrweb recorder in
+ * the new document and appends into the same event stream.
+ */
+export async function maybeInstallAutoRrwebCapture(page: Page): Promise<void> {
+  const out = rrwebCaptureOutPath();
+  if (!out || page.isClosed()) return;
+
+  const context = page.context();
+  let state = autoRrwebByContext.get(context);
+  if (!state) {
+    state = { events: [], viewport: null, exposed: false, patched: false };
+    autoRrwebByContext.set(context, state);
+  }
+
+  if (!state.exposed) {
+    await context.exposeFunction("__kitsokiAutoRrwebEmit", (event: unknown) => {
+      state!.events.push(event);
+    });
+    state.exposed = true;
+  }
+
+  if (!state.patched) {
+    const originalClose = context.close.bind(context);
+    context.close = (async (...args: Parameters<BrowserContext["close"]>) => {
+      await writeAutoRrwebCapture(context).catch((err) => {
+        console.warn(`[rrweb] failed to write ${out}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+      return originalClose(...args);
+    }) as BrowserContext["close"];
+    state.patched = true;
+  }
+
+  const alreadyRecording = await page
+    .evaluate(() => Boolean((window as unknown as { __kitsokiAutoRrwebRecording?: boolean }).__kitsokiAutoRrwebRecording))
+    .catch(() => false);
+  if (alreadyRecording) return;
+
+  const { RRWEB_BUNDLE } = await import("./rrweb-replay.js");
+  await page.addScriptTag({ path: RRWEB_BUNDLE });
+  const viewport = await page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+    deviceScaleFactor: window.devicePixelRatio || 1,
+  }));
+  if (!state.viewport) state.viewport = viewport;
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      rrweb?: { record: (o: unknown) => (() => void) | undefined };
+      __kitsokiAutoRrwebRecording?: boolean;
+      __kitsokiAutoRrwebStop?: () => void;
+      __kitsokiAutoRrwebEmit?: (event: unknown) => void;
+    };
+    if (w.__kitsokiAutoRrwebRecording) return;
+    if (!w.rrweb || typeof w.rrweb.record !== "function") {
+      throw new Error("rrweb global missing record()");
+    }
+    const stop = w.rrweb.record({
+      emit: (event: unknown) => w.__kitsokiAutoRrwebEmit?.(event),
+      maskAllText: false,
+      maskAllInputs: false,
+      recordCanvas: false,
+    });
+    w.__kitsokiAutoRrwebStop = stop ?? (() => undefined);
+    w.__kitsokiAutoRrwebRecording = true;
+  });
+}
+
+async function writeAutoRrwebCapture(context: BrowserContext): Promise<void> {
+  const out = rrwebCaptureOutPath();
+  if (!out) return;
+  const state = autoRrwebByContext.get(context);
+  if (!state || state.events.length === 0) return;
+  const { writeEvents } = await import("./rrweb-replay.js");
+  writeEvents(state.events as Record<string, unknown>[], out, state.viewport ?? undefined);
+  console.log(`[rrweb] ${out} (${state.events.length} events)`);
+}
 
 /**
  * Default "settle" beat (ms, before PACE-scaling) after a surface change.
@@ -157,6 +253,7 @@ export async function cinematicGoto(
   if (opts.waitForTestId) {
     await expect(page.getByTestId(opts.waitForTestId).first()).toBeVisible({ timeout: 15000 });
   }
+  await maybeInstallAutoRrwebCapture(page);
   await dwell(page, opts.settleMs ?? SETTLE_MS);
 }
 
@@ -611,6 +708,11 @@ export async function saveVideoAsMp4(
   artifactDir: string,
   name: string,
 ): Promise<string | null> {
+  const rrwebOut = rrwebCaptureOutPath();
+  if (rrwebOut) {
+    console.log(`[rrweb] video export disabled; using ${rrwebOut} for chapter sidecar`);
+    return rrwebOut;
+  }
   if (!video) return null;
   // The active camera profile suffixes the base filename so multi-profile passes
   // sit side by side; desktop's suffix is empty, so its artifact is unchanged.

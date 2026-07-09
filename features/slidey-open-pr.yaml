@@ -11,6 +11,7 @@ docs:
 related:
   - slidey-bugfix
 demo:
+  format: rrweb
   spec: tests/playwright/slidey-open-pr-video.spec.ts
   artifactDir: slidey-open-pr
   videoBase: slidey-open-pr-demo

@@ -229,7 +229,7 @@ function profileSuffix(profile: string): string {
 function buildDemoIndex(d: NonNullable<Feature["demo"]>) {
   const dir = path.join(".artifacts", d.artifactDir);
   const profiles = d.profiles ?? ["desktop"];
-  const format = d.format ?? "mp4";
+  const format = d.format ?? "rrweb";
   const variantFor = (p: string) => {
     const s = profileSuffix(p);
     return {
@@ -403,7 +403,7 @@ function modePrintDemo(catalog: Loaded[], id: string): void {
   if (!l) fail([`no feature "${id}" in the catalog`]);
   const d = l.feature.demo;
   if (!d) fail([`feature "${id}" has no demo binding`]);
-  if ((d.format ?? "mp4") === "rrweb") {
+  if ((d.format ?? "rrweb") === "rrweb") {
     fail([`feature "${id}" is rrweb-first — use: make demo-feature-rrweb FEATURE=${id}`]);
   }
   if (!d.spec) fail([`feature "${id}" is stitched, not directly captured — use: make render-tour`]);

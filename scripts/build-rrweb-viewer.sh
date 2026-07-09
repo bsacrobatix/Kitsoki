@@ -35,10 +35,16 @@ elif [ -f "$ROOT/../../../../studio-slidey/src/index.js" ]; then
 	SLIDEY=(node "$ROOT/../../../../studio-slidey/src/index.js")
 elif [ -f "$ROOT/../../../../slidey/src/index.js" ]; then
 	SLIDEY=(node "$ROOT/../../../../slidey/src/index.js")
-else
+elif command -v slidey >/dev/null 2>&1; then
 	SLIDEY=(slidey)
+else
+	SLIDEY=()
 fi
 
 mkdir -p "$(dirname "$OUT")"
-"${SLIDEY[@]}" bundle "$RRWEB" "$OUT"
+if [ "${#SLIDEY[@]}" -gt 0 ]; then
+	"${SLIDEY[@]}" bundle "$RRWEB" "$OUT"
+else
+	node tools/runstatus/scripts/rrweb-viewer-bundle.mjs "$RRWEB" "$OUT"
+fi
 echo "build-rrweb-viewer: wrote $OUT"

@@ -9,6 +9,7 @@ promo:
 docs:
   - docs/architecture/operator-ask.md
 demo:
+  format: rrweb
   spec: tests/playwright/operator-ask-video.spec.ts
   artifactDir: operator-ask
   videoBase: operator-ask-demo

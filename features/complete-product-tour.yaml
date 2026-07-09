@@ -5,16 +5,9 @@ title: The complete product tour
 tagline: One continuous walkthrough — eight independently-releasable sections.
 summary: A ~10-minute walkthrough that takes a first-time evaluator from the thesis, through a real run, into the audit surfaces that PROVE (not assert) determinism, into live self-authoring, and out across breadth — closing on the punchline that the film itself is a passing deterministic test. Stitched from eight chaptered sections; the master and each section are generated from this one catalog, so they can never diverge.
 narrative: 'Every beat exists to defeat one dismissal — "this is just structured output with ceremony." The throughline is control inversion, proven: the runtime is a YAML state machine, the LLM is a callee at named traceable decision points, and everything on screen is the consequence of that one choice — shown, never asserted. The whole cut is no-LLM and byte-deterministic (flow + cassette per section), so the promo can never drift from the product — which is itself the closing argument.'
-promo:
-  order: 5
 docs:
   - docs/evaluate-kitsoki.md
   - docs/site/README.md
-demo:
-  artifactDir: complete-product-tour
-  videoBase: complete-product-tour
-  profiles:
-    - desktop
 sections:
   - body: Most tools record what their model did once. kitsoki proves what the model was never allowed to do — starting with a turn the model was never even consulted on.
     clips:

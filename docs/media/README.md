@@ -24,16 +24,17 @@ Source of truth:
   optional QA scenarios.
 - `tools/runstatus/src/tour/generated/<id>.ts` is generated from the feature
   YAML by `make features`.
-- `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts` captures the
-  feature replay, always with deterministic flows/cassettes and no live LLM.
-  Existing `*-video.spec.ts` specs are the fallback path for demos that cannot
-  be captured as rrweb yet.
+- `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts` or existing
+  `*-video.spec.ts` specs capture the feature replay, always with deterministic
+  flows/cassettes and no live LLM. In rrweb mode the shared camera/server
+  helpers suppress Playwright video recording and write the rrweb log instead,
+  so catalog demos can reuse the richer tour specs without rendering MP4.
 
 Generated outputs:
 
 - `.artifacts/<demo>/` contains the canonical `<videoBase>.rrweb.json` plus the
-  Slidey-bundled `<videoBase>.html` replay viewer. Legacy fallback demos contain
-  `<videoBase>.mp4` plus `<videoBase>.mp4.chapters.json`. Numbered
+  self-contained `<videoBase>.html` replay viewer. Legacy fallback exports
+  contain `<videoBase>.mp4` plus `<videoBase>.mp4.chapters.json`. Numbered
   `NN-<stepId>.png` screenshots provide poster/step stills for both formats.
 - `.temp/site/src/public/media/<feature>/` is staged from `.artifacts/` by
   `make site` / `make site-dev`. It is not the source of truth.
@@ -78,13 +79,19 @@ only normalizes an already-produced verdict artifact.
 
 ## Current Product-Site Inventory
 
-The feature catalog currently stages these demo ids when their artifacts exist:
-`agent-actions`, `chat-stream`, `design-walkthrough`, `dev-story-bugfix`,
-`diagram-showcase`, `harness-picker`, `meta-mode`, `mockup-video`,
-`multi-story`, `onboarding-tour`, `operator-ask`, `review`, `story-editor`,
+The feature catalog currently stages direct rrweb replay viewers for these demo
+ids when their artifacts exist: `agent-actions`, `chat-stream`,
+`design-walkthrough`, `dev-story-bugfix`, `diagram-showcase`,
+`dynamic-workflows`, `harness-picker`, `meta-mode`, `mockup-video`,
+`multi-story`, `onboarding-tour`, `operation-handles`, `operator-ask`,
+`punch-list`, `review`, `session-media-workbench`, `story-editor`,
 `trace-features`, `trace-introspection`, `weather-report`, and `web-inbox`.
-`complete-product-tour` is stitched from section clips instead of directly captured by a
-single spec.
+
+The catalog also stages embedded Slidey rrweb deck scenes for
+`slidey-dev-prd-design`, `slidey-architect-design`, `slidey-decomposition`,
+`slidey-bugfix`, and `slidey-open-pr`. `complete-product-tour` remains catalog
+metadata only; it is not published as a normal demo artifact and the old stitched
+MP4 path is a manual legacy export.
 
 ## Slidey Deck Gallery and Clips
 

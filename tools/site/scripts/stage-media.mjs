@@ -134,7 +134,7 @@ for (const f of index.features) {
     for (const n of shots) copyStagedFile(path.join(shotDir, n), path.join(out, "steps", n));
   }
 
-  if ((f.demo.format ?? "mp4") === "rrweb") {
+  if ((f.demo.format ?? "rrweb") === "rrweb") {
     const rrweb = path.join(repoRoot, f.demo.rrweb);
     const viewer = path.join(repoRoot, f.demo.rrwebViewer);
     if (fs.existsSync(rrweb) && fs.existsSync(viewer)) {
