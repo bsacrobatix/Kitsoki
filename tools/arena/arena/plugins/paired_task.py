@@ -45,6 +45,14 @@ class PairedTaskPlugin:
             _append_if(argv, "--backend", cell.variant.backend)
             _append_if(argv, "--model", cell.variant.model)
             _append_if(argv, "--effort", cell.variant.effort)
+            _append_if(argv, "--agent", str(cell.variant.meta.get("agent") or ""))
+            _append_if(argv, "--worker-profile", str(cell.variant.meta.get("worker_profile") or ""))
+            _append_if(argv, "--implementation-mode", str(cell.variant.meta.get("implementation_mode") or ""))
+            _append_if(argv, "--capability-preset", str(cell.variant.meta.get("capability_preset") or ""))
+            presets = (cell.options or {}).get("capability_presets")
+            if isinstance(presets, dict):
+                argv.extend(["--capability-presets-json", json.dumps(presets, sort_keys=True)])
+            _append_if(argv, "--live-gate-env", str((cell.options or {}).get("live_gate_env") or ""))
         else:
             argv.append("--arm-only")
         return argv
@@ -122,6 +130,9 @@ def _normalize_verdict(verdict: str) -> str:
 
 def _metrics(payload: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
+    nested = payload.get("metrics")
+    if isinstance(nested, dict):
+        out.update(nested)
     for key in ("cost_usd", "tokens", "wall_s"):
         value = payload.get(key)
         if isinstance(value, (int, float)):

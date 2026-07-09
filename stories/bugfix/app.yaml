@@ -394,6 +394,11 @@ world:
 
   # ── Pipeline control ──────────────────────────────────────────────────
   bugfix_mode:      { type: string, default: "full" }            # full | quick
+  # Implementation action surface. agent_task is the existing open coding-agent
+  # path; codeact swaps only the mutating implementing-room step to
+  # host.agent.codeact so benchmark runners can isolate the action surface.
+  implementation_mode: { type: string, default: "agent_task" }    # agent_task | codeact
+  codeact_implement_steps: { type: list, default: [] }
   # Autostart pre-flight triage (default ON). Before spending the maker
   # pipeline on an autostarted ticket, run the read-only triager once against
   # the freshly-cut worktree: ALREADY-FIXED short-circuits to @exit:triaged

@@ -121,6 +121,18 @@ sessions. Interactive freestanding launch currently supports Codex only.
 `--agent` or `--agent-file`; the mode replaces the launched tool surface with
 the standalone `kitsoki mcp-codeact` server.
 
+Keep the two committed Codex profiles separate:
+
+| Profile | Intended MCP surface |
+|---|---|
+| `kitsoki-mcp-driver` | Kitsoki Studio MCP (`kitsoki mcp`) for story/session orchestration. |
+| `kitsoki-codeact-driver` | Kitsoki CodeAct MCP (`kitsoki mcp-codeact`) for direct repository edits through `codeact_eval`. |
+
+`kitsoki-mcp-driver` proves the orchestrator stayed inside Kitsoki Studio MCP;
+it does not prove the implementation worker used CodeAct. For direct
+limited-permission benchmark cells, launch `kitsoki-codeact-driver` with
+`--mode codeact`.
+
 CodeAct mode is for agents that should edit code without receiving Bash,
 Python, Node, a shell, or direct editor tools. The launched model supplies
 Starlark snippets to `codeact_eval`; the server enforces the capability ceiling

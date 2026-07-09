@@ -10,6 +10,7 @@ only calls a live CLI when ARENA_PAIRED_TASK_ENABLE_CODEX=1 is set.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -19,6 +20,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +58,396 @@ SUBSCRIPTION_RAW_CLAUDE_MODELS = {
     "hf:zai-org/glm-5.2",
 }
 
+DEFAULT_LIVE_GATE_ENV = "ARENA_PAIRED_TASK_ENABLE_CODEX"
+DEFAULT_CODEACT_AGENT = "kitsoki-codeact-driver"
+CODEACT_MCP_SERVER = "kitsoki-codeact"
+CODEACT_MCP_TOOL = "mcp__kitsoki-codeact__codeact_eval"
+CODEACT_CAPABILITY_PRESET = "repo_patch"
+DEFAULT_CAPABILITY_PRESETS: dict[str, dict[str, Any]] = {
+    CODEACT_CAPABILITY_PRESET: {
+        "fs": {
+            "read": ["**"],
+            "write": ["**"],
+            "max_bytes": 1048576,
+        },
+        "vcs": "read",
+    },
+}
+
+
+@dataclass
+class DriverPlan:
+    treatment: str
+    backend: str
+    model: str
+    effort: str
+    working_dir: Path
+    task_file: Path | None = None
+    trace_ref: str = ""
+    command: list[str] = field(default_factory=list)
+    launch_plan_ref: str = ""
+    transcript_ref: str = ""
+    permission_assertions: dict[str, Any] = field(default_factory=dict)
+    capability_preset: str = ""
+    capability_hash: str = ""
+    action_surface: str = ""
+
+
+@dataclass
+class DriverResult:
+    blocked: bool = False
+    infra_class: str = ""
+    notes: str = ""
+    transcript_ref: str = ""
+    trace_ref: str = ""
+    launch_plan_ref: str = ""
+    metrics: dict[str, Any] = field(default_factory=dict)
+
+
+class TreatmentDriver:
+    name = ""
+    action_surface = ""
+
+    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
+        raise NotImplementedError
+
+
+class RawPromptDriver(TreatmentDriver):
+    name = "raw-codex"
+    action_surface = "raw-agent"
+
+    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
+        result = dispatch_single_prompt(args, task, tree, trace_ref)
+        metrics = dict(result.get("metrics") or {})
+        metrics.setdefault("action_surface", self.action_surface)
+        return DriverResult(
+            blocked=bool(result.get("blocked")),
+            infra_class=str(result.get("infra_class") or ""),
+            notes=str(result.get("notes") or ""),
+            trace_ref=container_path(trace_ref),
+            transcript_ref=container_path(str(result.get("transcript_ref") or trace_ref)),
+            metrics=metrics,
+        )
+
+
+class KitsokiMCPDriver(TreatmentDriver):
+    name = "kitsoki-mcp"
+    action_surface = "kitsoki-studio-mcp"
+
+    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
+        if args.backend != "codex":
+            return DriverResult(
+                blocked=True,
+                infra_class="infra:harness",
+                notes=f"kitsoki live dispatch currently expects backend 'codex', got {args.backend!r}",
+                metrics=zero_metrics(action_surface=self.action_surface),
+            )
+        result = dispatch_kitsoki(args, task, tree, trace_ref)
+        metrics = dict(result.get("metrics") or {})
+        metrics.setdefault("action_surface", self.action_surface)
+        metrics.setdefault("studio_mcp_driver", "kitsoki-mcp-driver")
+        return DriverResult(
+            blocked=bool(result.get("blocked")),
+            infra_class=str(result.get("infra_class") or ""),
+            notes=str(result.get("notes") or ""),
+            trace_ref=container_path(trace_ref),
+            transcript_ref=container_path(str(result.get("transcript_ref") or trace_ref)),
+            metrics=metrics,
+        )
+
+
+class KitsokiMCPCodeactDriver(KitsokiMCPDriver):
+    name = "kitsoki-mcp-codeact"
+    action_surface = "kitsoki-studio-mcp+codeact"
+
+    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
+        if not args.implementation_mode:
+            args.implementation_mode = "codeact"
+        result = super().run(args, task, tree, trace_ref)
+        cap_json, cap_hash = capability_preset_json(args, args.capability_preset or CODEACT_CAPABILITY_PRESET)
+        result.metrics.setdefault("implementation_mode", args.implementation_mode)
+        result.metrics.setdefault("codeact_surface", "host.agent.codeact")
+        result.metrics.setdefault("capability_preset", args.capability_preset or CODEACT_CAPABILITY_PRESET)
+        result.metrics.setdefault("capability_hash", cap_hash)
+        result.metrics.setdefault("capability_json", cap_json)
+        result.metrics.setdefault("action_surface", self.action_surface)
+        return result
+
+
+class CodexCodeactDriver(TreatmentDriver):
+    name = "codex-codeact"
+    action_surface = "kitsoki-codeact-mcp"
+
+    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
+        if args.backend != "codex":
+            return DriverResult(
+                blocked=True,
+                infra_class="infra:harness",
+                notes=f"codex-codeact live dispatch expects backend 'codex', got {args.backend!r}",
+                metrics=zero_metrics(action_surface=self.action_surface),
+            )
+        agent = args.agent or DEFAULT_CODEACT_AGENT
+        preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
+        try:
+            cap_json, cap_hash = capability_preset_json(args, preset_name)
+            task_file = write_task_file(args, task, trace_ref)
+            bin_dir = ensure_kitsoki_binary()
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 - report as harness failure.
+            return DriverResult(
+                blocked=True,
+                infra_class="infra:harness",
+                notes=f"codeact prepare failed: {exc}",
+                metrics=zero_metrics(action_surface=self.action_surface),
+            )
+
+        cmd = [
+            "kitsoki",
+            "agent",
+            "launch",
+            "--agent",
+            agent,
+            "--mode",
+            "codeact",
+            "--backend",
+            "codex",
+            "--working-dir",
+            str(tree),
+            "--codeact-capabilities-json",
+            cap_json,
+            "--task-file",
+            str(task_file),
+        ]
+        if args.model:
+            cmd.extend(["--model", args.model])
+        if args.effort:
+            cmd.extend(["--effort", args.effort])
+
+        env = dict(os.environ)
+        env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+        launch_plan_ref = str(Path(trace_ref).with_suffix(".launch-plan.json"))
+        dry = subprocess.run(cmd, cwd=KITSOKI_ROOT, text=True, capture_output=True, env=env)
+        Path(launch_plan_ref).write_text(dry.stdout if dry.stdout.strip() else json.dumps({
+            "stderr": dry.stderr[-4000:],
+            "returncode": dry.returncode,
+        }, indent=2), encoding="utf-8")
+        if dry.returncode != 0:
+            return DriverResult(
+                blocked=True,
+                infra_class="infra:harness",
+                notes=f"codeact launch dry-run failed exit={dry.returncode}: {first_line(dry.stdout + chr(10) + dry.stderr)}",
+                trace_ref=container_path(trace_ref),
+                launch_plan_ref=container_path(launch_plan_ref),
+                metrics=zero_metrics(action_surface=self.action_surface, capability_hash=cap_hash, launch_plan_ref=container_path(launch_plan_ref)),
+            )
+        try:
+            plan = json.loads(dry.stdout)
+        except json.JSONDecodeError as exc:
+            return DriverResult(
+                blocked=True,
+                infra_class="infra:harness",
+                notes=f"codeact launch dry-run did not return JSON: {exc}",
+                trace_ref=container_path(trace_ref),
+                launch_plan_ref=container_path(launch_plan_ref),
+                metrics=zero_metrics(action_surface=self.action_surface, capability_hash=cap_hash, launch_plan_ref=container_path(launch_plan_ref)),
+            )
+        assertions = assert_codeact_launch_plan(plan, tree=tree, agent=agent, backend="codex", capability_json=cap_json, capability_hash=cap_hash)
+        if not assertions["passed"]:
+            Path(trace_ref).write_text(json.dumps({
+                "launch_plan_ref": container_path(launch_plan_ref),
+                "permission_assertions": assertions,
+            }, indent=2, sort_keys=True), encoding="utf-8")
+            return DriverResult(
+                blocked=True,
+                infra_class="infra:harness",
+                notes="codeact launch plan assertion failed: " + "; ".join(assertions["failures"]),
+                trace_ref=container_path(trace_ref),
+                launch_plan_ref=container_path(launch_plan_ref),
+                metrics=zero_metrics(
+                    action_surface=self.action_surface,
+                    capability_hash=cap_hash,
+                    launch_plan_ref=container_path(launch_plan_ref),
+                    permission_assertions=assertions,
+                ),
+            )
+
+        exec_cmd = cmd + ["--exec"]
+        timeout = int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "900"))
+        try:
+            proc = subprocess.run(exec_cmd, cwd=KITSOKI_ROOT, text=True, capture_output=True, env=env, timeout=timeout)
+            timed_out = False
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            proc = subprocess.CompletedProcess(exec_cmd, 124, stdout=(exc.stdout or ""), stderr=(exc.stderr or ""))
+        trace_blob = {
+            "cmd": redact_cmd(exec_cmd),
+            "launch_plan_ref": container_path(launch_plan_ref),
+            "permission_assertions": assertions,
+            "capability_hash": cap_hash,
+            "timeout_s": timeout,
+            "timed_out": timed_out,
+            "returncode": proc.returncode,
+            "stdout_tail": proc.stdout[-4000:],
+            "stderr_tail": proc.stderr[-4000:],
+        }
+        Path(trace_ref).write_text(json.dumps(trace_blob, indent=2, sort_keys=True), encoding="utf-8")
+        metrics = codex_output_metrics(proc.stdout + "\n" + proc.stderr, args.model or "gpt-5.5")
+        metrics.update({
+            "action_surface": self.action_surface,
+            "capability_preset": preset_name,
+            "capability_hash": cap_hash,
+            "launch_plan_ref": container_path(launch_plan_ref),
+            "permission_assertions": assertions,
+        })
+        metrics.update(codeact_text_metrics(proc.stdout + "\n" + proc.stderr))
+        note = f"codeact codex exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
+        if timed_out:
+            note = f"codeact codex timed out at {timeout}s; " + first_line(proc.stdout + chr(10) + proc.stderr)
+        if metrics.get("cost_note"):
+            note += f"; {metrics['cost_note']}"
+        return DriverResult(
+            blocked=proc.returncode != 0 or timed_out,
+            infra_class="infra:harness" if proc.returncode != 0 or timed_out else "",
+            notes=note,
+            trace_ref=container_path(trace_ref),
+            transcript_ref=container_path(trace_ref),
+            launch_plan_ref=container_path(launch_plan_ref),
+            metrics=metrics,
+        )
+
+
+TREATMENT_DRIVERS: dict[str, TreatmentDriver] = {
+    "raw-codex": RawPromptDriver(),
+    "single-briefed": RawPromptDriver(),
+    "single-naive": RawPromptDriver(),
+    "codex-codeact": CodexCodeactDriver(),
+    "kitsoki": KitsokiMCPDriver(),
+    "kitsoki-mcp": KitsokiMCPDriver(),
+    "kitsoki-mcp-codeact": KitsokiMCPCodeactDriver(),
+}
+
+
+def resolve_treatment_driver(treatment: str) -> TreatmentDriver | None:
+    return TREATMENT_DRIVERS.get(treatment)
+
+
+def validate_driver_args(args: argparse.Namespace) -> str:
+    if args.treatment == "codex-codeact":
+        if not (args.agent or "").strip():
+            return "codex-codeact requires variant.agent, expected kitsoki-codeact-driver"
+        preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
+        try:
+            capability_preset_json(args, preset_name)
+        except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
+            return str(exc)
+    if args.treatment == "kitsoki-mcp-codeact":
+        preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
+        try:
+            capability_preset_json(args, preset_name)
+        except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
+            return str(exc)
+    return ""
+
+
+def zero_metrics(**extra: Any) -> dict[str, Any]:
+    metrics: dict[str, Any] = {
+        "cost_usd": 0.0,
+        "tokens": 0,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+        "cost_basis": "unknown",
+        "mcp_calls": 0,
+        "codeact_eval_calls": 0,
+        "codeact_domain_errors": 0,
+        "codeact_done_rejections": 0,
+    }
+    metrics.update(extra)
+    return metrics
+
+
+def merged_capability_presets(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
+    presets = json.loads(json.dumps(DEFAULT_CAPABILITY_PRESETS))
+    raw = (getattr(args, "capability_presets_json", "") or "").strip()
+    if not raw:
+        return presets
+    loaded = json.loads(raw)
+    if not isinstance(loaded, dict):
+        raise ValueError("--capability-presets-json must be a JSON object")
+    for name, value in loaded.items():
+        if not isinstance(value, dict):
+            raise ValueError(f"capability preset {name!r} must be a JSON object")
+        presets[str(name)] = value
+    return presets
+
+
+def capability_preset_json(args: argparse.Namespace, preset_name: str) -> tuple[str, str]:
+    presets = merged_capability_presets(args)
+    if preset_name not in presets:
+        known = ", ".join(sorted(presets))
+        raise ValueError(f"unknown capability preset {preset_name!r}; known: {known}")
+    canonical = canonical_json(presets[preset_name])
+    return canonical, capability_hash(canonical)
+
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def capability_hash(capability_json: str) -> str:
+    return "sha256:" + hashlib.sha256(capability_json.encode("utf-8")).hexdigest()
+
+
+def write_task_file(args: argparse.Namespace, task: dict[str, Any], trace_ref: str) -> Path:
+    task_file = Path(trace_ref).with_suffix(".task.md")
+    task_file.write_text(build_prompt(args, task), encoding="utf-8")
+    return task_file
+
+
+def assert_codeact_launch_plan(
+    plan: dict[str, Any],
+    *,
+    tree: Path,
+    agent: str,
+    backend: str,
+    capability_json: str,
+    capability_hash: str,
+) -> dict[str, Any]:
+    failures: list[str] = []
+
+    def require(label: str, ok: bool) -> None:
+        if not ok:
+            failures.append(label)
+
+    command = [str(part) for part in plan.get("command") or []]
+    joined = " ".join(command)
+    launch_policy = plan.get("launch_policy")
+    allowed = launch_policy is None or bool((launch_policy or {}).get("allowed", True))
+    require("mode == codeact", plan.get("mode") == "codeact")
+    require(f"agent == {agent}", plan.get("agent") == agent)
+    require(f"backend == {backend}", plan.get("backend") == backend)
+    require("working_dir == cell tree", str(Path(str(plan.get("working_dir") or "")).resolve()) == str(tree.resolve()))
+    require("only codeact tool exposed", plan.get("tools") == [CODEACT_MCP_TOOL])
+    require("codex shell disabled", f"--disable=shell_tool" in command)
+    require("codex apps disabled", f"--disable=apps" in command)
+    require("codex non-interactive MCP bypass flag present", "--dangerously-bypass-approvals-and-sandbox" in command)
+    require("codeact mcp server configured", f"mcp_servers.{CODEACT_MCP_SERVER}.command=\"kitsoki\"" in joined)
+    require("codeact mcp server enabled", f"mcp_servers.{CODEACT_MCP_SERVER}.enabled=true" in joined)
+    require("mcp-codeact command used", "mcp-codeact" in joined)
+    require("studio mcp not exposed", "mcp_servers.kitsoki.command=" not in joined and "mcp_servers.kitsoki.enabled=true" not in joined)
+    require("direct editor tools absent", all(tool not in joined for tool in ("--allowedTools Write", "--allowedTools Edit", "MultiEdit")))
+    require("launch policy allowed or absent", allowed)
+    require("capabilities json threaded", capability_json in joined)
+    return {
+        "passed": not failures,
+        "failures": failures,
+        "shell_disabled": "--disable=shell_tool" in command,
+        "apps_disabled": "--disable=apps" in command,
+        "only_codeact_tool": plan.get("tools") == [CODEACT_MCP_TOOL],
+        "launch_policy_allowed": allowed,
+        "capability_hash": capability_hash,
+    }
+
 
 def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
     """Rough USD cost from a TOTAL token count only.
@@ -84,6 +476,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--backend", default="")
     parser.add_argument("--model", default="")
     parser.add_argument("--effort", default="")
+    parser.add_argument("--agent", default="")
+    parser.add_argument("--worker-profile", default="")
+    parser.add_argument("--implementation-mode", default="")
+    parser.add_argument("--capability-preset", default="")
+    parser.add_argument("--capability-presets-json", default="")
+    parser.add_argument("--live-gate-env", default=DEFAULT_LIVE_GATE_ENV)
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--arm-only", action="store_true")
     parser.add_argument("--work-root", default=os.environ.get("ARENA_PAIRED_TASK_WORK_ROOT", "/workspace/kitsoki/.artifacts/arena/paired-task-work"))
@@ -202,9 +600,11 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
             notes=f"baseline materialization failed: {exc}",
             exit_code=0,
         )
+    baseline_ref = current_head(tree)
     dispatch = dispatch_worker(args, task, tree, trace_ref)
     score = score_tree(task, tree)
-    metrics = dispatch.get("metrics", {})
+    metrics = dict(dispatch.metrics or {})
+    metrics.update(diff_stats(tree, baseline_ref))
     cost_usd = metrics.get("cost_usd")
     if not isinstance(cost_usd, (int, float)):
         cost_usd = 0.0
@@ -212,9 +612,14 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     if not isinstance(tokens, int):
         tokens = 0
     verdict = score["verdict"]
-    if dispatch.get("blocked"):
+    if dispatch.blocked:
         verdict = "blocked"
-    notes = "; ".join(part for part in [dispatch.get("notes", ""), score.get("notes", "")] if part)
+    notes = "; ".join(part for part in [dispatch.notes, score.get("notes", "")] if part)
+    evidence_refs = [task_ref(task), score.get("evidence", "")]
+    if dispatch.launch_plan_ref:
+        evidence_refs.append(dispatch.launch_plan_ref)
+    if dispatch.transcript_ref and dispatch.transcript_ref != container_path(trace_ref):
+        evidence_refs.append(dispatch.transcript_ref)
     if not args.keep_workdir:
         cleanup_cell_workdir(tree)
         notes = "; ".join(part for part in [notes, f"removed scratch workdir {container_path(str(tree))}"] if part)
@@ -223,9 +628,10 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         cost_usd=cost_usd,
         tokens=tokens,
         wall_s=elapsed(started),
-        evidence_refs=[task_ref(task), score.get("evidence", "")],
-        trace_ref=container_path(trace_ref),
+        evidence_refs=evidence_refs,
+        trace_ref=dispatch.trace_ref or container_path(trace_ref),
         notes=notes,
+        metrics=metrics,
         exit_code=0,
     )
 
@@ -336,26 +742,39 @@ def bugswarm_source_dir(task: dict[str, Any]) -> str:
     return f"/home/travis/build/failed/{repo}"
 
 
-def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
+def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
     if args.backend == "synthetic":
-        return {"notes": "synthetic backend: no live model call; baseline scored directly", "metrics": {"cost_usd": 0.0, "tokens": 0}}
+        return DriverResult(notes="synthetic backend: no live model call; baseline scored directly", trace_ref=container_path(trace_ref), metrics=zero_metrics(action_surface="synthetic"))
     if args.backend not in {"codex", "claude"}:
-        return {"blocked": True, "notes": f"unsupported live backend {args.backend!r}", "metrics": {"cost_usd": 0.0, "tokens": 0}}
-    if os.environ.get("ARENA_PAIRED_TASK_ENABLE_CODEX") != "1":
-        return {
-            "blocked": True,
-            "notes": "live dispatch disabled; set ARENA_PAIRED_TASK_ENABLE_CODEX=1 to spend",
-            "metrics": {"cost_usd": 0.0, "tokens": 0},
-        }
-    if args.treatment == "kitsoki":
-        if args.backend != "codex":
-            return {
-                "blocked": True,
-                "notes": f"kitsoki live dispatch currently expects backend 'codex', got {args.backend!r}",
-                "metrics": {"cost_usd": 0.0, "tokens": 0},
-            }
-        return dispatch_kitsoki(args, task, tree, trace_ref)
-    return dispatch_single_prompt(args, task, tree, trace_ref)
+        return DriverResult(blocked=True, infra_class="infra:harness", notes=f"unsupported live backend {args.backend!r}", trace_ref=container_path(trace_ref), metrics=zero_metrics())
+    driver = resolve_treatment_driver(args.treatment)
+    if driver is None:
+        return DriverResult(
+            blocked=True,
+            infra_class="infra:harness",
+            notes=f"unknown paired-task treatment {args.treatment!r}; known: {', '.join(sorted(TREATMENT_DRIVERS))}",
+            trace_ref=container_path(trace_ref),
+            metrics=zero_metrics(),
+        )
+    validation_error = validate_driver_args(args)
+    if validation_error:
+        return DriverResult(
+            blocked=True,
+            infra_class="infra:harness",
+            notes=validation_error,
+            trace_ref=container_path(trace_ref),
+            metrics=zero_metrics(),
+        )
+    gate_env = (args.live_gate_env or DEFAULT_LIVE_GATE_ENV).strip() or DEFAULT_LIVE_GATE_ENV
+    if os.environ.get(gate_env) != "1":
+        return DriverResult(
+            blocked=True,
+            infra_class="infra:harness",
+            notes=f"live dispatch disabled; set {gate_env}=1 to spend",
+            trace_ref=container_path(trace_ref),
+            metrics=zero_metrics(live_gate_env=gate_env),
+        )
+    return driver.run(args, task, tree, trace_ref)
 
 
 def dispatch_single_prompt(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
@@ -387,13 +806,12 @@ def dispatch_single_prompt_codex(args: argparse.Namespace, task: dict[str, Any],
         "stdout_tail": proc.stdout[-4000:],
         "stderr_tail": proc.stderr[-4000:],
     }, indent=2), encoding="utf-8")
-    tokens = parse_tokens(proc.stdout + "\n" + proc.stderr)
-    cost_usd, cost_exact = blended_cost_usd(args.model or "gpt-5.5", tokens)
+    metrics = codex_output_metrics(proc.stdout + "\n" + proc.stderr, args.model or "gpt-5.5")
     return {
         "blocked": proc.returncode != 0,
         "notes": f"codex exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
-        + (f"; cost_usd={cost_usd} (blended estimate, not exact)" if not cost_exact else ""),
-        "metrics": {"cost_usd": cost_usd, "tokens": tokens},
+        + (f"; {metrics['cost_note']}" if metrics.get("cost_note") else ""),
+        "metrics": metrics,
     }
 
 
@@ -551,12 +969,12 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     (session_new {trace: ...}), so cost/tokens below are read off REAL recorded
     agent-call usage, not a codex stdout summary line."""
     model = args.model or "gpt-5.5"
-    profile = MODEL_TO_PROFILE.get(model)
+    profile = args.worker_profile or MODEL_TO_PROFILE.get(model)
     if not profile:
         return {
             "blocked": True,
             "notes": f"no kitsoki harness profile mapped for model {model!r}; add one to MODEL_TO_PROFILE",
-            "metrics": {"cost_usd": 0.0, "tokens": 0},
+            "metrics": zero_metrics(action_surface="kitsoki-studio-mcp"),
         }
     try:
         bin_dir = ensure_kitsoki_binary()
@@ -567,7 +985,7 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
         return {
             "blocked": True,
             "notes": f"kitsoki dispatch setup failed: {exc}",
-            "metrics": {"cost_usd": 0.0, "tokens": 0},
+            "metrics": zero_metrics(action_surface="kitsoki-studio-mcp"),
         }
 
     orchestrator_model = os.environ.get("ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL", "gpt-5.5")
@@ -606,7 +1024,7 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
         return {
             "blocked": True,
             "notes": f"drive.sh timed out after {exc.timeout}s",
-            "metrics": {"cost_usd": 0.0, "tokens": 0},
+            "metrics": zero_metrics(action_surface="kitsoki-studio-mcp", studio_mcp_trace_ref=container_path(trace_ref)),
         }
 
     drive_log = Path(trace_ref).with_suffix(".drive-log.json")
@@ -620,14 +1038,17 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     try:
         metrics = real_trace_metrics(trace_ref, model)
     except (Exception, SystemExit) as exc:  # noqa: BLE001 - trace may be absent on an early failure
-        metrics = {"cost_usd": 0.0, "tokens": 0, "cost_note": f"trace metrics unavailable: {exc}"}
+        metrics = zero_metrics(action_surface="kitsoki-studio-mcp", cost_note=f"trace metrics unavailable: {exc}")
     notes = f"drive.sh exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
     if metrics.get("cost_note"):
         notes += f"; {metrics['cost_note']}"
+    metrics["studio_mcp_trace_ref"] = container_path(trace_ref)
+    metrics["implementation_mode"] = args.implementation_mode or "agent_task"
+    metrics["worker_profile"] = profile
     return {
         "blocked": proc.returncode != 0,
         "notes": notes,
-        "metrics": {"cost_usd": metrics["cost_usd"], "tokens": metrics["tokens"]},
+        "metrics": metrics,
     }
 
 
@@ -727,6 +1148,7 @@ def build_kitsoki_prompt(
         f'       feature_branch: "{branch}"',
         f'       base_branch: "{branch}"',
         '       bugfix_mode: "full"',
+        f'       implementation_mode: "{args.implementation_mode or "agent_task"}"',
         '       judge_mode: "llm"',
         f'       test_cmd: "{test_cmd}"',
         "       bf_autostart_attempted: true",
@@ -783,9 +1205,20 @@ def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
             metered_cost += c
     tokens = total_in + total_out
     if metered_cost > 0:
-        return {"cost_usd": round(metered_cost, 6), "tokens": tokens, "cost_note": "cost_usd from real recorded trace usage (metered)"}
+        return {
+            "cost_usd": round(metered_cost, 6),
+            "tokens": tokens,
+            "input_tokens": total_in,
+            "cached_input_tokens": total_cached,
+            "output_tokens": total_out,
+            "reasoning_output_tokens": 0,
+            "cost_basis": "metered",
+            "cost_note": "cost_usd from real recorded trace usage (metered)",
+            "mcp_calls": trace_event_count(trace_ref, "mcp"),
+            "codeact_eval_calls": trace_event_count(trace_ref, "codeact_eval"),
+        }
     if tokens == 0:
-        return {"cost_usd": 0.0, "tokens": 0, "cost_note": "no trace usage recorded"}
+        return zero_metrics(cost_note="no trace usage recorded")
     price, _ = price_for(model)
     fresh_input = max(total_in - total_cached, 0)
     cost = (fresh_input * price.input + total_cached * price.cache_read + total_out * price.output) / 1e6
@@ -793,6 +1226,13 @@ def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
     return {
         "cost_usd": cost,
         "tokens": tokens,
+        "input_tokens": total_in,
+        "cached_input_tokens": total_cached,
+        "output_tokens": total_out,
+        "reasoning_output_tokens": 0,
+        "cost_basis": "cache-aware-estimate",
+        "mcp_calls": trace_event_count(trace_ref, "mcp"),
+        "codeact_eval_calls": trace_event_count(trace_ref, "codeact_eval"),
         "cost_note": (
             f"cost_usd={cost} (cache-aware estimate over REAL trace usage: "
             f"{fresh_input} fresh input + {total_cached} cache-read input + {total_out} output tokens; "
@@ -925,6 +1365,7 @@ def emit(
     evidence_refs: list[str] | None = None,
     trace_ref: str = "",
     notes: str = "",
+    metrics: dict[str, Any] | None = None,
     exit_code: int = 0,
 ) -> int:
     payload = {
@@ -936,6 +1377,8 @@ def emit(
         "trace_ref": trace_ref,
         "notes": notes,
     }
+    if metrics:
+        payload["metrics"] = metrics
     print(json.dumps(payload, sort_keys=True))
     return exit_code
 
@@ -966,6 +1409,7 @@ def parse_tokens(blob: str) -> int:
 def claude_output_metrics(blob: str, model: str) -> dict[str, Any]:
     tokens = parse_tokens(blob)
     cost_usd: float | None = None
+    buckets: dict[str, int] = {}
     for line in blob.splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -979,6 +1423,7 @@ def claude_output_metrics(blob: str, model: str) -> dict[str, Any]:
         usage = payload.get("usage") or (payload.get("message") or {}).get("usage")
         if isinstance(usage, dict):
             tokens = max(tokens, usage_token_count(usage))
+            buckets = usage_token_buckets(usage)
         for key in ("total_cost_usd", "cost_usd"):
             value = payload.get(key)
             if isinstance(value, (int, float)):
@@ -988,11 +1433,13 @@ def claude_output_metrics(blob: str, model: str) -> dict[str, Any]:
         return {
             "cost_usd": round(cost_usd, 6),
             "tokens": tokens,
+            **buckets,
+            "cost_basis": "metered",
             "cost_note": "cost_usd from claude JSON envelope",
         }
     cost, exact = blended_cost_usd(model, tokens)
     note = "blended estimate, not exact" if not exact else "priced from usage"
-    return {"cost_usd": cost, "tokens": tokens, "cost_note": note}
+    return {"cost_usd": cost, "tokens": tokens, **buckets, "cost_basis": "blended-estimate", "cost_note": note}
 
 
 def usage_token_count(usage: dict[str, Any]) -> int:
@@ -1013,6 +1460,127 @@ def usage_token_count(usage: dict[str, Any]) -> int:
             if isinstance(value, int):
                 total += value
     return total
+
+
+def usage_token_buckets(usage: dict[str, Any]) -> dict[str, int]:
+    cache_creation = usage.get("cache_creation") or {}
+    cache_creation_tokens = 0
+    if isinstance(cache_creation, dict):
+        cache_creation_tokens = sum(value for value in cache_creation.values() if isinstance(value, int))
+    input_tokens = int_value(usage.get("input_tokens")) + int_value(usage.get("cache_creation_input_tokens")) + cache_creation_tokens
+    cached_input_tokens = int_value(usage.get("cached_input_tokens")) + int_value(usage.get("cache_read_input_tokens"))
+    output_tokens = int_value(usage.get("output_tokens"))
+    reasoning_output_tokens = int_value(usage.get("reasoning_output_tokens"))
+    return {
+        "input_tokens": input_tokens,
+        "cached_input_tokens": cached_input_tokens,
+        "output_tokens": output_tokens,
+        "reasoning_output_tokens": reasoning_output_tokens,
+    }
+
+
+def int_value(value: Any) -> int:
+    return value if isinstance(value, int) else 0
+
+
+def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
+    tokens = parse_tokens(blob)
+    cost_usd: float | None = None
+    buckets: dict[str, int] = {}
+    for line in blob.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        usage = payload.get("usage") or (payload.get("message") or {}).get("usage")
+        if isinstance(usage, dict):
+            tokens = max(tokens, usage_token_count(usage))
+            buckets = usage_token_buckets(usage)
+        for key in ("total_cost_usd", "cost_usd"):
+            value = payload.get(key)
+            if isinstance(value, (int, float)):
+                cost_usd = float(value)
+                break
+    if cost_usd is not None:
+        return {
+            "cost_usd": round(cost_usd, 6),
+            "tokens": tokens,
+            **buckets,
+            "cost_basis": "metered",
+            "cost_note": "cost_usd from codex JSON envelope",
+        }
+    cost, exact = blended_cost_usd(model, tokens)
+    return {
+        "cost_usd": cost,
+        "tokens": tokens,
+        **buckets,
+        "cost_basis": "blended-estimate",
+        "cost_note": "blended estimate, not exact" if not exact else "priced from usage",
+    }
+
+
+def codeact_text_metrics(blob: str) -> dict[str, int]:
+    lowered = blob.lower()
+    return {
+        "mcp_calls": lowered.count("codeact_eval"),
+        "codeact_eval_calls": lowered.count("codeact_eval"),
+        "codeact_domain_errors": lowered.count("codeact_eval:"),
+        "codeact_done_rejections": lowered.count("schema") + lowered.count("done rejected"),
+    }
+
+
+def trace_event_count(trace_ref: str, needle: str) -> int:
+    if not os.path.exists(trace_ref):
+        return 0
+    count = 0
+    for line in Path(trace_ref).read_text(encoding="utf-8", errors="replace").splitlines():
+        if needle in line:
+            count += 1
+    return count
+
+
+def current_head(tree: Path) -> str:
+    if not (tree / ".git").exists():
+        return ""
+    proc = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tree,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
+def diff_stats(tree: Path, baseline_ref: str = "HEAD") -> dict[str, int]:
+    if not (tree / ".git").exists():
+        return {"diff_files": 0, "diff_lines_added": 0, "diff_lines_deleted": 0}
+    baseline = baseline_ref or "HEAD"
+    proc = subprocess.run(
+        ["git", "diff", "--numstat", baseline],
+        cwd=tree,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        return {"diff_files": 0, "diff_lines_added": 0, "diff_lines_deleted": 0}
+    files = added = deleted = 0
+    for line in proc.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        files += 1
+        if parts[0].isdigit():
+            added += int(parts[0])
+        if parts[1].isdigit():
+            deleted += int(parts[1])
+    return {"diff_files": files, "diff_lines_added": added, "diff_lines_deleted": deleted}
 
 
 def safe_name(value: str) -> str:

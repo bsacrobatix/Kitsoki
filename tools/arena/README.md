@@ -199,6 +199,57 @@ WB.2 paired-task gate:
 python3 tools/arena/tests/run_no_llm.py
 ```
 
+## Paired-Task CodeAct Treatments
+
+`paired-task` treatments are explicit driver names. Existing specs keep working:
+`kitsoki` is an alias for `kitsoki-mcp`, and `single-briefed` /
+`single-naive` are aliases for the raw one-shot prompt driver. CodeAct specs can
+now compare the same frozen task through four action surfaces:
+
+| treatment | Driver surface |
+|---|---|
+| `raw-codex` | Raw `codex exec` with the current baseline permissions. |
+| `codex-codeact` | `kitsoki-codeact-driver` launched through `kitsoki agent launch --mode codeact`; Codex shell/apps disabled; only `mcp__kitsoki-codeact__codeact_eval` exposed. |
+| `kitsoki-mcp` | `kitsoki-mcp-driver` drives the Studio MCP and the normal bench-bugfix worker path. |
+| `kitsoki-mcp-codeact` | Studio MCP drives the workflow, while the bugfix implementing room uses `host.agent.codeact` for the mutating edit step. |
+
+Direct CodeAct variants must declare `agent: kitsoki-codeact-driver` and a
+known `capability_preset`. The default `repo_patch` preset grants repository
+read/write through `ctx.fs` plus read-only git probes:
+
+```yaml
+options:
+  live_gate_env: ARENA_PAIRED_TASK_ENABLE_CODEX
+  capability_presets:
+    repo_patch:
+      fs:
+        read: ["**"]
+        write: ["**"]
+        max_bytes: 1048576
+      vcs: read
+```
+
+The runner always performs a dry-run `kitsoki agent launch` before a live
+`codex-codeact` cell. It persists the launch plan, asserts the expected tool
+surface, records the capability hash, and marks the cell `blocked`
+(`infra:harness`) if the permission proof fails. Live execution still requires
+both `arena run --live` and the configured gate environment variable.
+
+Every arena run now writes an offline review bundle in the output directory:
+
+```text
+run.yaml
+summary.json
+report.md
+deck.slidey.json
+rollup.json
+rollup.md
+cells/*.json
+```
+
+`summary.json`, `report.md`, and `deck.slidey.json` are regenerated from cell
+results only; they do not call a model.
+
 ## BugSwarm source pipeline
 
 BugSwarm is a reusable external source alongside the built-in OSS oracle corpus.

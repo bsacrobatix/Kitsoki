@@ -408,6 +408,16 @@ func parseInt(raw any, name string) (int, error) {
 		return v, nil
 	case int64:
 		return int(v), nil
+	case uint:
+		if uint64(v) > uint64(int(^uint(0)>>1)) {
+			return 0, fmt.Errorf("%s is too large", name)
+		}
+		return int(v), nil
+	case uint64:
+		if v > uint64(int(^uint(0)>>1)) {
+			return 0, fmt.Errorf("%s is too large", name)
+		}
+		return int(v), nil
 	case float64:
 		if v == float64(int(v)) {
 			return int(v), nil

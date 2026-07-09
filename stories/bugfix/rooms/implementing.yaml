@@ -39,6 +39,7 @@ states:
             Ticket:           "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Workspace:        '{{ world.workspace_id|default:"—" }}{% if world.workdir %}  ·  {{ world.workdir }}{% endif %}'
             "Feature branch": '{{ world.feature_branch|default:"—" }}'
+            "Action surface":  '{{ world.implementation_mode|default:"agent_task" }}'
             Applied:          '{{ world.implement_artifact.summary_title|default:"(pending — agent has not returned yet)" }}'
             Status:           '{% if world.implement_artifact.applied == false %}blocked{% elif world.implement_artifact.summary_title %}applied{% else %}(pending){% endif %}'
             Files:            '{{ world.implement_artifact.files_changed|join:", "|default:"(none recorded)" }}'
@@ -84,7 +85,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, propose_fix_artifact, implement_artifact, reproduction_artifact, gate_command, landing_gate, repro_committed, test_cmd, repro_gate_ran, repro_gate_ok, repro_baseline_green, repro_test_red, repro_gate_summary]
+    relevant_world: [ticket_id, ticket_title, workspace_id, workdir, feature_branch, implementation_mode, propose_fix_artifact, implement_artifact, codeact_implement_steps, reproduction_artifact, gate_command, landing_gate, repro_committed, test_cmd, repro_gate_ran, repro_gate_ok, repro_baseline_green, repro_test_red, repro_gate_summary]
     on_enter:
       # Self-heal the workspace before we touch it. bf.idle's auto-
       # create only runs when `!bf_autostart_attempted`, so once that
@@ -203,7 +204,7 @@ states:
       # failed/blocked accept arms, validating's fail_short arm, and the
       # restart_from-to-implementing arms — clears implement_artifact to
       # re-arm the apply.
-      - when: "world.workdir != ''"
+      - when: "world.workdir != '' && world.implementation_mode != 'codeact'"
         invoke: host.agent.task
         once: true
         with:
@@ -228,6 +229,53 @@ states:
               cycle:            "{{ world.cycle }}"
         bind:
           implement_artifact: submitted
+        on_error: idle
+
+      - when: "world.workdir != '' && world.implementation_mode == 'codeact'"
+        invoke: host.agent.codeact
+        once: true
+        with:
+          agent: implementer
+          working_dir: "{{ world.workdir }}"
+          budget: 10
+          capabilities:
+            world: read
+            fs:
+              read: ["**"]
+              write: ["**"]
+              max_bytes: 1048576
+            vcs: read
+          schema: schemas/implementing_artifact.json
+          goal: >-
+            Implement the proposed fix for {{ world.ticket_id }} —
+            {{ world.ticket_title }} inside the working tree rooted at
+            {{ world.workdir }}. Act only through Starlark snippets: inspect
+            files with ctx.fs.glob/read/exists, modify files with ctx.fs.write,
+            and inspect git state with ctx.probe("git.status") or
+            ctx.probe("git.ls_files"). Do not assume Bash, Python, Node, or
+            direct editor tools exist. The proposal says:
+            {{ world.propose_fix_artifact.fix_description }}
+            Root cause: {{ world.propose_fix_artifact.root_cause }}.
+            Affected files: {{ join(world.propose_fix_artifact.affected_files ?? [], ", ") }}.
+            {% if world.refine_feedback %}Refinement directive:
+            {{ world.refine_feedback }}{% endif %}
+            Apply the smallest correct edit, leave the workspace dirty for the
+            pipeline commit step, and finish by calling done() with a payload
+            matching schemas/implementing_artifact.json. Set applied=false with
+            concrete blockers if you cannot safely make the edit through the
+            granted CodeAct surface.
+          world:
+            ticket_id:        "{{ world.ticket_id }}"
+            ticket_title:     "{{ world.ticket_title }}"
+            workdir:          "{{ world.workdir }}"
+            fix_description:  "{{ world.propose_fix_artifact.fix_description }}"
+            root_cause:       "{{ world.propose_fix_artifact.root_cause }}"
+            affected_files:   "{{ world.propose_fix_artifact.affected_files }}"
+            refine_feedback:  "{{ world.refine_feedback }}"
+            cycle:            "{{ world.cycle }}"
+        bind:
+          implement_artifact: payload
+          codeact_implement_steps: steps
         on_error: idle
 
       - when: "world.workdir != ''"
