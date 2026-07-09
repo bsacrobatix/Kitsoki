@@ -138,9 +138,9 @@ const mediaPosterUrl = computed<string>(() => {
 });
 
 // A `slideshow` media kind is a multi-scene deck (e.g. a slidey deck rendered to
-// a self-contained HTML file). Inline display embeds the static HTML deck; when
-// annotation is opened and a semantic sidecar exists, the annotator switches to
-// the slidey poster+overlay substrate.
+// a self-contained HTML file). Inline display embeds the static HTML deck;
+// annotation uses the live embed substrate so the producer can report exact
+// semantic picks.
 const isSlideshow = computed<boolean>(
   () => (el.value.MediaKind ?? "").toLowerCase() === "slideshow"
 );
@@ -181,9 +181,9 @@ const slideshowUrl = computed<string>(() =>
 
 /** The engine's MediaKind ("video"|"image"|"html"|"slideshow"|"pdf") maps onto
  *  the annotator's MediaKind union. pdf is intentionally absent — a pdf is not
- *  annotatable, so `mediaAnnotatable` gates it out before this is consulted. A
- *  sidecar-bearing artifact is promoted to "slidey" at annotate-open time (see
- *  openAnnotate) so the deck gets the SemanticOverlay. */
+ *  annotatable, so `mediaAnnotatable` gates it out before this is consulted.
+ *  Sidecar-bearing DOM/image artifacts stay on their native substrate; video
+ *  artifacts use the poster-backed semantic overlay path. */
 const ENGINE_MEDIA_KIND: Record<string, MediaKind> = {
   video: "mp4",
   image: "png",
@@ -211,8 +211,8 @@ const mediaAnnotatable = computed<boolean>(() => {
 });
 
 const annotateOpen = ref(false);
-/** The MediaKind the annotator renders with once opened (slidey-promoted when a
- *  semantic sidecar exists for this handle). Null until openAnnotate resolves. */
+/** The MediaKind the annotator renders with once opened. Null until
+ *  openAnnotate resolves. */
 const annotateKind = ref<MediaKind | null>(null);
 const annotateBusy = ref(false);
 const annotateSent = ref<string | null>(null);
@@ -248,10 +248,10 @@ function anchorKey(anchor: AnnotationAnchor): string {
 /** Per-spot parked instruction drafts (keyed by anchorKey). */
 const drafts = ref<Record<string, string>>({});
 
-/** Open the annotator. Probe the semantic sidecar ONCE: a non-null map means the
- *  media (even an mp4 deck) carries producer-declared elements, so render with
- *  the slidey path (poster backdrop + SemanticOverlay) regardless of the base
- *  artifact's MIME. Otherwise use the engine-kind / MIME-mapped kind. */
+/** Open the annotator. Probe the semantic sidecar ONCE. DOM/image artifacts keep
+ *  their native substrate and render semantic markers there; time-based media
+ *  with a sidecar uses the existing poster overlay path because the video pixels
+ *  are not directly addressable. */
 async function openAnnotate(): Promise<void> {
   annotateError.value = null;
   annotateSent.value = null;
@@ -268,7 +268,7 @@ async function openAnnotate(): Promise<void> {
     try {
       if (_ds.semanticMap) {
         const env = await _ds.semanticMap(_sessionId.value, mediaHandle.value);
-        if (env && env.elements.length > 0) kind = "slidey";
+        if (env && env.elements.length > 0 && kind === "mp4") kind = "slidey";
       }
     } catch {
       /* no sidecar / probe failed — keep the MIME-mapped kind */

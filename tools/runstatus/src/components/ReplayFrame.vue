@@ -24,7 +24,11 @@
  */
 import { ref, watch, onMounted, onBeforeUnmount, computed } from "vue";
 import SpatialPicker from "./SpatialPicker.vue";
+import SemanticOverlay from "./SemanticOverlay.vue";
 import type { ResolvedElement } from "../lib/resolveElement.js";
+import type { SemanticMap } from "../lib/semanticPlugins.js";
+import { enrichSemanticMapFromDOM } from "../lib/semanticPlugins.js";
+import type { SemanticElementTarget } from "../lib/annotationAnchor.js";
 import type { RrwebEvent } from "../data/session-capture.js";
 
 const props = defineProps<{
@@ -34,6 +38,8 @@ const props = defineProps<{
   naturalWidth: number;
   /** The recording's intrinsic viewport height. */
   naturalHeight: number;
+  /** Optional producer-declared semantic fields to overlay on the replay DOM. */
+  semanticMap?: SemanticMap | null;
 }>();
 
 const emit = defineEmits<{
@@ -45,6 +51,7 @@ const emit = defineEmits<{
       element?: ResolvedElement;
     }
   ): void;
+  (e: "semantic-pick", target: SemanticElementTarget): void;
 }>();
 
 /** Minimal shape of rrweb's Replayer (same subset BugReportModal.vue drives). */
@@ -75,6 +82,12 @@ const aspectStyle = computed(() => ({
   // the iframe sizes (and the overlay has somewhere to live).
   aspectRatio: `${props.naturalWidth} / ${props.naturalHeight}`,
 }));
+
+const replaySemanticMap = computed<SemanticMap | null>(() =>
+  props.semanticMap
+    ? enrichSemanticMapFromDOM(props.semanticMap, replayRoot.value)
+    : null
+);
 
 async function mountPlayer(): Promise<void> {
   ready.value = false;
@@ -180,6 +193,13 @@ watch(
       :root="replayRoot"
       @pick="(b) => emit('pick', b)"
     />
+    <SemanticOverlay
+      v-if="ready && replaySemanticMap"
+      class="rf-semantic"
+      :style="{ width: renderW + 'px', height: renderH + 'px' }"
+      :map="replaySemanticMap"
+      @pick="(target) => emit('semantic-pick', target)"
+    />
   </div>
 </template>
 
@@ -213,6 +233,12 @@ watch(
   top: 0;
   left: 0;
   z-index: 2;
+}
+.rf-semantic {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
 }
 .rf-muted {
   color: #64748b;

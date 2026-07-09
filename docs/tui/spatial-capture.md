@@ -138,7 +138,10 @@ Web surface — Vitest + Playwright, never the Go `CapturedIO` harness, oracle
 
 ## Non-goals
 
-- **Arbitrary / external media** — kitsoki-rendered DOM only in v1; the bundle
-  is forward-compatible (`element` may be absent).
+- **Unresolved external media semantics** — generic HTML/rrweb/image artifacts
+  can now carry semantic sidecars and selector-resolved fields, but Kitsoki still
+  does not infer producer-specific object schemas on its own. A producer names
+  the fields it wants addressable; otherwise the picker falls back to DOM nodes
+  or pixel regions.
 - **A web-tier write path** — the chat is the read-only off-path `converse`;
   guidance never edits source from a click (shared decision 1).
