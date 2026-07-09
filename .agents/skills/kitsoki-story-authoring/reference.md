@@ -427,6 +427,13 @@ rendering instead of `{% if %}` inside a `view: |` string.
 - [ ] Actions are a `list:` with `hint:` for cost/consequence.
 - [ ] Empty / pending values use the lowercase parenthetical placeholders
       (`(pending)`, `(none)`, `(not yet chosen)`, `(empty — type X to search)`).
+- [ ] First-turn messaging is explicit for free-form captures, routers,
+      imports, workbenches, and long-running invokes: interpreted input,
+      selected path, mode/consequence, next action.
+- [ ] `say:` acknowledgements are one sentence and flow-tested with
+      `expect_events`; durable interpretations are also visible in the view.
+- [ ] The room interrupts only for required input, real choice, or side-effect
+      approval. One safe forward path is auto-advance, not a confirmation turn.
 - [ ] `look` is the last action and `target: .`.
 - [ ] The view renders to ≥ 1 visible line against an empty world `{}`.
       Action menu / reply prompt is unconditional.
@@ -470,6 +477,33 @@ state's `on:` bindings + each transition's first arm's guard +
 - **Operator-facing** — dev-story, bugfix, implementation, kitsoki-dev.
   Terse, declarative. "Bug-fix pipeline parked. Waiting for `start`."
   not "The bug glares at you menacingly."
+
+### User messaging: orient, then proceed
+
+For operator-facing stories, high-quality messaging starts before the first
+agent/host handoff. Any free-form capture, contextual router, imported story
+entry, workbench dispatch, or long-running `invoke:` must surface four facts:
+
+- what the story understood (captured text, proposal path, ticket, slots);
+- which story/state/workbench it selected;
+- the mode/consequence (read-only/write-capable, branch/workspace, external
+  post, destructive action, cost);
+- what happens next, or what the operator must do now.
+
+Use `kv:` in the view for facts that must survive `look`. Use a one-sentence
+`say:` for the transcript acknowledgement when the transition immediately
+starts another room or agent:
+
+```yaml
+- set: { landing_request: "{{ slots.request }}" }
+- say: "Request captured for story_authoring; starting read-only intake."
+```
+
+Interrupt only when the operator must choose, provide missing data, or approve
+a real side effect. If the interpretation is clear and safe, show it and keep
+moving. Add flow coverage for the message (`expect_events` on `machine.say`)
+and the durable view (`expect_view_matches`). Full standard:
+`docs/stories/story-style.md` §3.4.
 
 ### Placeholder vocabulary
 
