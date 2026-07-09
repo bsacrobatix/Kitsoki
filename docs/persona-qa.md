@@ -33,12 +33,20 @@ driver tools, launch/readiness hooks, affordances, and local oracles.
 ```sh
 kitsoki persona-qa init --root .
 kitsoki persona-qa validate --config persona-qa.yaml
+kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all
+kitsoki persona-qa emit-run --config persona-qa.yaml --scenario project-onboarding --transport all --preview
 kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all
 kitsoki persona-qa drive --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --mode replay
 kitsoki persona-qa review --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
 kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json
 kitsoki persona-qa complete --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
 ```
+
+`transports` and `emit-run --preview` are side-effect-free. They list the
+scenario x transport legs that would be planned, the stable open/observe/act
+entrypoints for each leg, the evidence contract, proof level, preflight, and
+recording rule. Use this before live capture to confirm one scenario can be
+driven on the intended surfaces without custom harness setup.
 
 `drive --mode replay` is deterministic and cost-free. It proves artifact wiring
 and review mechanics; proof-grade claims still need local, cassette, retained,
@@ -117,6 +125,7 @@ kits by `init`:
 - `driver-manifest.schema.json`
 - `run-bundle.schema.json`
 - `leg-result.schema.json`
+- `transport-suite.schema.json`
 - `review.schema.json`
 
 The shared completion-state contract remains `schemas/completion-state.schema.json`.
@@ -128,6 +137,11 @@ arena, and UIs can score a run without scraping stdout.
 Scenarios may declare `transports.allowed`, `transports.required`, and
 per-transport evidence overrides. `--transport all` expands one scenario into
 the applicable TUI, web, VS Code bridge, and CLI legs.
+
+The canonical transport catalog lives in `tools/persona_qa/transports.py`.
+The product CLI, compatibility runner, scenario-qa story, schemas, and
+validation gates all consume that same catalog, so adding or changing a
+transport should fail validation if any surface drifts.
 
 VS Code legs are always `bridge-level`: they prove the bridge/stub surface, not
 a native editor integration. CLI legs are `terminal-level`: they prove command
@@ -153,6 +167,7 @@ Automated checks should use:
 
 ```sh
 kitsoki persona-qa validate --config persona-qa.yaml
+kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all
 python3 tools/persona_qa/tests/test_kit_cli.py
 python3 tools/persona_qa/tests/test_deck_cli.py
 python3 tools/product-journey/transport_axis_test.py

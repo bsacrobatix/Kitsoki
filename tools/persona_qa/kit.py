@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="persona-qa",
-        description="Initialize, validate, run, review, deck, and complete Persona QA Kit bundles.",
+        description="Initialize, validate, preview, run, review, deck, and complete Persona QA Kit bundles.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -48,6 +48,15 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--config", default="persona-qa.yaml", help="kit config path")
     validate.add_argument("--json-output", action="store_true", help="print a machine-readable result")
     validate.set_defaults(func=cmd_validate)
+
+    transports = sub.add_parser("transports", help="Preview deterministic scenario x transport legs")
+    transports.add_argument("--config", default="persona-qa.yaml", help="kit config path")
+    transports.add_argument("--scenario", default="", help="single scenario id; alias for --scenarios")
+    transports.add_argument("--scenarios", default="", help="comma-separated scenario ids")
+    transports.add_argument("--transport", default="all", help="transport id, comma list, or all")
+    transports.add_argument("--driver", default="", help="driver manifest id/path; defaults to config drivers.default")
+    transports.add_argument("--json-output", action="store_true", help="print a machine-readable result")
+    transports.set_defaults(func=cmd_transports)
 
     emit = sub.add_parser("emit-run", help="Create a no-LLM run bundle from a kit config")
     add_common_run_flags(emit)
@@ -112,6 +121,7 @@ def add_common_run_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--driver", default="", help="driver manifest id/path; defaults to config drivers.default")
     parser.add_argument("--seed", default="persona-qa", help="deterministic run seed")
     parser.add_argument("--live-budget-minutes", type=int, default=20, help="budget written into run contracts")
+    parser.add_argument("--preview", action="store_true", help="print the scenario x transport suite without creating a run bundle")
     parser.add_argument("--json-output", action="store_true", help="print a machine-readable result")
 
 
@@ -147,9 +157,30 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 0 if result["status"] == "valid" else 1
 
 
+def cmd_transports(args: argparse.Namespace) -> int:
+    cfg = qa_config.load_config(args.config, repo_root=REPO_ROOT)
+    scenarios = args.scenarios or args.scenario or "project-onboarding"
+    runner_args = [
+        "--transport-suite",
+        "--scenarios",
+        scenarios,
+        "--transport",
+        args.transport,
+    ]
+    if args.driver:
+        runner_args.extend(["--driver", args.driver])
+    elif cfg.default_driver:
+        runner_args.extend(["--driver", cfg.default_driver])
+    if args.json_output:
+        runner_args.append("--json-output")
+    return run_runner(cfg, runner_args)
+
+
 def cmd_emit_run(args: argparse.Namespace) -> int:
     cfg = qa_config.load_config(args.config, repo_root=REPO_ROOT)
     scenarios = args.scenarios or args.scenario or "project-onboarding"
+    if args.preview:
+        return cmd_transports(args)
     runner_args = [
         "--emit-run",
         "--project",
@@ -316,6 +347,7 @@ def init_kit(root: Path, *, force: bool = False) -> dict[str, object]:
             "Start with:\n\n"
             "```sh\n"
             "kitsoki persona-qa validate --config persona-qa.yaml\n"
+            "kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all\n"
             "kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all\n"
             "kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json\n"
             "```\n"

@@ -31,6 +31,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools.persona_qa.config import load_collection as load_persona_qa_collection  # noqa: E402
 from tools.persona_qa.config import load_config as load_persona_qa_config  # noqa: E402
+from tools.persona_qa.transports import (  # noqa: E402
+    TRANSPORT_EVIDENCE_CONTRACTS,
+    TRANSPORT_IDS,
+    TRANSPORT_PROFILES,
+    compact_transport_profile as persona_compact_transport_profile,
+    normalize_transport_filter,
+    transport_profile as persona_transport_profile,
+)
 
 CATALOG = ROOT / "tools" / "product-journey" / "catalog.json"
 PERSONAS = ROOT / "tools" / "product-journey" / "personas.json"
@@ -116,91 +124,6 @@ CANONICAL_DRIVER_CAPABILITIES = [
     "session.trace",
     "render.tui",
 ]
-# Single source of truth for every transport the deterministic harness can
-# plan, drive, and judge. Scenarios select these ids; capture routes derive
-# their stable open/observe/act capabilities and proof rules from the profile
-# instead of scattering transport-specific conditionals through the runner.
-TRANSPORT_PROFILES = {
-    "tui": {
-        "id": "tui",
-        "label": "TUI",
-        "visual_surface": "tui",
-        "open_capabilities": ["session.open"],
-        "observe_capabilities": ["render.tui", "session.trace", "session.inspect"],
-        "act_capabilities": ["session.submit", "session.drive", "session.trace"],
-        "preflight": "Call render.tui_png or render.tui before the first action and confirm the frame is real.",
-        "recording_rule": "Persist pre-action and post-action TUI frames under the leg evidence directory.",
-        "evidence_contract": {
-            "primary_tool": "render.tui_png",
-            "evidence_kind": "rendered_tui_frame",
-            "level": "frame-level",
-            "capture_hint": "Capture render.tui_png frames before and after the interaction under test.",
-        },
-    },
-    "web": {
-        "id": "web",
-        "label": "Web UI",
-        "visual_surface": "web",
-        "open_capabilities": ["session.open", "visual.open"],
-        "observe_capabilities": ["visual.observe", "session.trace", "session.inspect"],
-        "act_capabilities": ["visual.act", "session.submit", "session.drive", "session.trace"],
-        "preflight": "Call visual.open and visual.observe before the first action and confirm the browser frame is real.",
-        "recording_rule": "Persist screenshots or rrweb clips that show the browser state before and after the interaction.",
-        "evidence_contract": {
-            "primary_tool": "visual.snapshot",
-            "evidence_kind": "browser_screenshot",
-            "level": "frame-level",
-            "capture_hint": "Capture a visual.snapshot or rrweb recording of the browser surface.",
-        },
-    },
-    "vscode": {
-        "id": "vscode",
-        "label": "VS Code bridge",
-        "visual_surface": "vscode",
-        "open_capabilities": ["session.open", "visual.open"],
-        "observe_capabilities": ["visual.observe", "session.trace", "session.inspect"],
-        "act_capabilities": ["session.submit", "session.drive", "visual.act", "session.trace"],
-        "preflight": "Call visual.open kind=vscode and visual.observe before driving, then capture the bridge again after the scenario reaches its target state.",
-        "recording_rule": "Persist distinct preflight and post-drive VS Code bridge captures; never reuse the preflight as outcome proof.",
-        "evidence_contract": {
-            "primary_tool": "visual.open (kind=vscode)",
-            "evidence_kind": "screenshot_or_tui_png",
-            "level": "bridge-level",
-            "capture_hint": (
-                "Open the VS Code bridge surface with visual.open kind=vscode; label "
-                "this evidence bridge-level, not editor-level. A preflight capture "
-                "alone is NOT sufficient: after driving the live session forward to "
-                "its target state, capture visual.open kind=vscode again against the "
-                "SAME session handle (a distinct post-drive capture, never reusing "
-                "the preflight file/slot) before the leg can be scored anything "
-                "other than degraded-evidence."
-            ),
-        },
-    },
-    "cli": {
-        "id": "cli",
-        "label": "CLI",
-        "visual_surface": "cli",
-        "open_capabilities": ["session.open"],
-        "observe_capabilities": ["session.status", "session.trace", "session.inspect"],
-        "act_capabilities": ["session.submit", "session.drive", "session.trace"],
-        "preflight": "Run the declared deterministic CLI/session entrypoint once and capture exit code plus stdout/stderr before treating command output as proof.",
-        "recording_rule": "Persist command transcript, exit code, cwd, and relevant trace references under the leg evidence directory.",
-        "evidence_contract": {
-            "primary_tool": "command transcript",
-            "evidence_kind": "command_output",
-            "level": "terminal-level",
-            "capture_hint": "Capture deterministic CLI stdout/stderr with exit code, cwd, and command line.",
-        },
-    },
-}
-TRANSPORT_IDS = list(TRANSPORT_PROFILES)
-TRANSPORT_EVIDENCE_CONTRACTS = {
-    transport: profile["evidence_contract"]
-    for transport, profile in TRANSPORT_PROFILES.items()
-}
-
-
 def truthy(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
@@ -264,23 +187,10 @@ def select_transports(transport_filter: str) -> list[str]:
     filter returns [] (today's byte-compatible, transport-unaware behavior);
     "all" (or any request that includes it) expands to every known transport.
     """
-    requested = [item.strip() for item in transport_filter.split(",") if item.strip()]
-    if not requested:
-        return []
-
-    if "all" in requested:
-        return list(TRANSPORT_IDS)
-
-    duplicates = sorted({item for item in requested if requested.count(item) > 1})
-    if duplicates:
-        raise SystemExit(f"--transport contains duplicate transport id(s): {', '.join(duplicates)}")
-
-    unknown = [item for item in requested if item not in TRANSPORT_IDS]
-    if unknown:
-        known = ", ".join(TRANSPORT_IDS + ["all"])
-        raise SystemExit(f"--transport contains unknown transport id(s): {', '.join(unknown)}. Known transports: {known}")
-
-    return requested
+    try:
+        return normalize_transport_filter(transport_filter)
+    except ValueError as exc:
+        raise SystemExit(f"--transport contains {exc}") from exc
 
 
 def load_github_targets(path: Path):
@@ -2568,24 +2478,14 @@ def driver_visual_surface(primary_story: str, required_mcp: list[str]) -> str:
 
 
 def transport_profile(transport: str) -> dict:
-    profile = TRANSPORT_PROFILES.get(transport)
-    if profile is None:
-        raise SystemExit(f"unknown transport profile: {transport}")
-    return profile
+    try:
+        return persona_transport_profile(transport)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def compact_transport_profile(profile: dict) -> dict:
-    contract = profile.get("evidence_contract", {})
-    return {
-        "id": profile.get("id", ""),
-        "label": profile.get("label", ""),
-        "visual_surface": profile.get("visual_surface", ""),
-        "primary_tool": contract.get("primary_tool", ""),
-        "evidence_kind": contract.get("evidence_kind", ""),
-        "level": contract.get("level", ""),
-        "preflight": profile.get("preflight", ""),
-        "recording_rule": profile.get("recording_rule", ""),
-    }
+    return persona_compact_transport_profile(profile)
 
 
 def transport_for_visual_surface(visual_surface: str, required_mcp: list[str]) -> str:
@@ -3272,6 +3172,170 @@ def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, e
         if capability in required_mcp and capability not in capabilities:
             capabilities.append(capability)
     return capabilities or ["session.status"]
+
+
+def build_transport_suite(
+    scenarios: list[dict],
+    transports: list[str],
+    driver_manifest: Optional[dict] = None,
+) -> dict:
+    """Describe the deterministic scenario x transport plan without artifacts.
+
+    This is the product-facing preview used by `kitsoki persona-qa transports`
+    and `emit-run --preview`: it answers which legs a scenario can drive, what
+    each leg must capture, and which stable entrypoints the driver must use.
+    """
+
+    driver_manifest = driver_manifest or load_driver_manifest()
+    requested = list(transports or TRANSPORT_IDS)
+    scenario_rows = []
+    all_legs = []
+    skipped_total: dict[str, int] = {transport: 0 for transport in requested}
+    for scenario in scenarios:
+        contract = resolve_scenario_transports(scenario)
+        allowed = list(contract.get("allowed", []))
+        required = list(contract.get("required", allowed))
+        legs = []
+        for leg in scenario_transport_legs(scenario, requested):
+            profile = transport_profile(leg["transport"])
+            contract_details = profile.get("evidence_contract", {})
+            primary_evidence_kind = contract_details.get("evidence_kind", "")
+            open_capabilities = capture_phase_capabilities(profile, "open", leg["required_mcp"]) or ["session.status"]
+            observe_capabilities = capture_observe_capabilities(
+                leg["required_mcp"],
+                leg.get("visual_surface", profile.get("visual_surface", leg["transport"])),
+                primary_evidence_kind,
+                profile,
+            )
+            act_capabilities = capture_phase_capabilities(profile, "act", leg["required_mcp"]) or ["session.trace"]
+            row = {
+                "leg_id": leg["leg_id"],
+                "scenario": scenario["id"],
+                "scenario_label": scenario.get("label", scenario["id"]),
+                "transport": leg["transport"],
+                "transport_label": profile.get("label", leg["transport"]),
+                "visual_surface": leg.get("visual_surface", profile.get("visual_surface", leg["transport"])),
+                "primary_story": scenario["primary_story"],
+                "required": leg["transport"] in required,
+                "required_mcp": leg["required_mcp"],
+                "resolved_mcp_tools": resolved_mcp_tools(leg["required_mcp"], driver_manifest),
+                "evidence": leg["evidence"],
+                "evidence_contract": contract_details,
+                "quality_gate": leg_quality_gate(scenario["id"], leg["evidence"], leg["transport"]),
+                "entrypoints": {
+                    "open": {
+                        "capabilities": open_capabilities,
+                        "resolved_tools": resolved_mcp_tools(open_capabilities, driver_manifest),
+                    },
+                    "observe": {
+                        "capabilities": observe_capabilities,
+                        "resolved_tools": resolved_mcp_tools(observe_capabilities, driver_manifest),
+                    },
+                    "act": {
+                        "capabilities": act_capabilities,
+                        "resolved_tools": resolved_mcp_tools(act_capabilities, driver_manifest),
+                    },
+                },
+                "preflight": profile.get("preflight", ""),
+                "recording_rule": profile.get("recording_rule", ""),
+                "capture_policy": {
+                    "proof_source_required": "retained|external|local|cassette",
+                    "no_substitution": "Do not attach demo, placeholder, synthetic, or unrelated media as proof.",
+                },
+            }
+            legs.append(row)
+            all_legs.append(row)
+        skipped = [transport for transport in requested if transport not in allowed]
+        for transport in skipped:
+            skipped_total[transport] = skipped_total.get(transport, 0) + 1
+        scenario_rows.append({
+            "scenario": scenario["id"],
+            "label": scenario.get("label", scenario["id"]),
+            "stage": scenario.get("stage", ""),
+            "primary_story": scenario.get("primary_story", ""),
+            "allowed_transports": allowed,
+            "required_transports": required,
+            "requested_transports": requested,
+            "applicable_transports": [leg["transport"] for leg in legs],
+            "skipped_transports": skipped,
+            "leg_count": len(legs),
+            "legs": legs,
+        })
+
+    return {
+        "schema": "kitsoki/persona-qa-transport-suite/v1",
+        "status": "ready",
+        "driver": driver_summary(driver_manifest),
+        "transport_profiles": [
+            compact_transport_profile(transport_profile(transport))
+            for transport in TRANSPORT_IDS
+        ],
+        "summary": {
+            "scenario_count": len(scenario_rows),
+            "requested_transports": requested,
+            "transport_count": len(requested),
+            "leg_count": len(all_legs),
+            "skipped_count": sum(skipped_total.values()),
+            "skipped_by_transport": {
+                transport: count
+                for transport, count in skipped_total.items()
+                if count
+            },
+        },
+        "scenarios": scenario_rows,
+        "legs": all_legs,
+    }
+
+
+def render_transport_suite(suite: dict) -> str:
+    summary = suite.get("summary", {})
+    lines = [
+        "# Persona QA Transport Suite",
+        "",
+        f"- Scenarios: {summary.get('scenario_count', 0)}",
+        f"- Requested transports: {', '.join(summary.get('requested_transports', []))}",
+        f"- Planned legs: {summary.get('leg_count', 0)}",
+        f"- Driver: {suite.get('driver', {}).get('id', '')}",
+        "",
+        "## Transport Profiles",
+        "",
+    ]
+    for profile in suite.get("transport_profiles", []):
+        lines.append(
+            f"- `{profile.get('id', '')}` ({profile.get('label', '')}): "
+            f"{profile.get('level', '')} via {profile.get('primary_tool', '')} "
+            f"-> `{profile.get('evidence_kind', '')}`"
+        )
+    lines.extend(["", "## Scenario Legs", ""])
+    if not suite.get("legs"):
+        lines.append("No legs resolved for this scenario/transport selection.")
+        return "\n".join(lines) + "\n"
+    for scenario in suite.get("scenarios", []):
+        lines.extend([
+            f"### {scenario.get('scenario', '')}: {scenario.get('label', '')}",
+            "",
+            f"- Primary story: `{scenario.get('primary_story', '')}`",
+            f"- Allowed: {', '.join(scenario.get('allowed_transports', [])) or '(none)'}",
+            f"- Applicable: {', '.join(scenario.get('applicable_transports', [])) or '(none)'}",
+        ])
+        if scenario.get("skipped_transports"):
+            lines.append(f"- Skipped: {', '.join(scenario.get('skipped_transports', []))}")
+        for leg in scenario.get("legs", []):
+            contract = leg.get("evidence_contract", {})
+            entrypoints = leg.get("entrypoints", {})
+            lines.extend([
+                "",
+                f"#### {leg.get('leg_id', '')}",
+                "",
+                f"- Transport: `{leg.get('transport', '')}` / `{leg.get('visual_surface', '')}`",
+                f"- Evidence: `{contract.get('evidence_kind', '')}` ({contract.get('level', '')}) via {contract.get('primary_tool', '')}",
+                f"- Open: {', '.join(entrypoints.get('open', {}).get('capabilities', []))}",
+                f"- Observe: {', '.join(entrypoints.get('observe', {}).get('capabilities', []))}",
+                f"- Act: {', '.join(entrypoints.get('act', {}).get('capabilities', []))}",
+                f"- Minimum evidence: {', '.join(leg.get('quality_gate', {}).get('minimum_evidence', []))}",
+            ])
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def capture_route_for_slot(
@@ -13028,11 +13092,12 @@ def main() -> None:
         "--transport",
         default="",
         help=(
-            "Comma-separated transport ids (tui,web,vscode) or 'all' to expand --emit-run's "
+            "Comma-separated transport ids (tui,web,vscode,cli) or 'all' to expand --emit-run's "
             "execution-plan/driver-plan into scenario x transport legs. Omit to keep today's "
             "single-surface-per-scenario output."
         ),
     )
+    parser.add_argument("--transport-suite", action="store_true", help="Preview scenario x transport legs without creating a run bundle")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
@@ -13217,6 +13282,21 @@ def main() -> None:
         if result["status"] != "ok":
             raise SystemExit(1)
         append_log(f"Validated driver manifest {result['driver']['id']}")
+        return
+
+    if args.transport_suite:
+        scenario_filter = args.scenarios or args.scenario or ""
+        selected_scenarios = select_scenarios(scenarios, scenario_filter)
+        selected_transports = select_transports(args.transport or "all")
+        suite = build_transport_suite(
+            selected_scenarios,
+            selected_transports,
+            load_driver_manifest(args.driver or ""),
+        )
+        if args.json_output:
+            print(json.dumps(suite, sort_keys=True))
+        else:
+            print(render_transport_suite(suite))
         return
 
     if args.prune_runs:

@@ -14,7 +14,9 @@ Use the public kit commands for project-facing work:
 ```sh
 kitsoki persona-qa init --root .
 kitsoki persona-qa validate --config persona-qa.yaml
+kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all
 kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all
+kitsoki persona-qa emit-run --config persona-qa.yaml --scenario project-onboarding --transport all --preview
 kitsoki persona-qa drive --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --mode replay
 kitsoki persona-qa review --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
 kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json
@@ -25,6 +27,9 @@ kitsoki persona-qa complete --config persona-qa.yaml --run-dir .artifacts/person
 backend. It also accepts `--config persona-qa.yaml` so its catalog, driver, and
 artifact paths can come from an external kit instead of this checkout's
 directory layout. See `docs/persona-qa.md` for the supported product contract.
+Use `persona-qa transports` or `emit-run --preview` when you only need the
+deterministic scenario x transport plan; those commands do not create a run
+bundle or launch capture.
 
 ## How to run the compatibility runner
 

@@ -82,6 +82,43 @@ with tempfile.TemporaryDirectory(prefix="persona-qa-kit-") as td:
     validate_result = json_stdout(["validate", "--config", str(config_path), "--json-output"])
     check_eq("validate CLI status", validate_result["status"], "valid")
 
+    transport_preview = json_stdout([
+        "transports",
+        "--config",
+        str(config_path),
+        "--scenario",
+        "project-onboarding",
+        "--transport",
+        "all",
+        "--json-output",
+    ])
+    check_eq("transport preview schema", transport_preview["schema"], "kitsoki/persona-qa-transport-suite/v1")
+    check_eq("transport preview status", transport_preview["status"], "ready")
+    check_eq("transport preview uses external web-only scenario", transport_preview["summary"]["leg_count"], 1)
+    check_eq("transport preview applicable transport", transport_preview["legs"][0]["transport"], "web")
+    check_eq("transport preview proof level", transport_preview["legs"][0]["evidence_contract"]["level"], "frame-level")
+    check("transport preview has stable entrypoints", "visual.observe" in transport_preview["legs"][0]["entrypoints"]["observe"]["capabilities"])
+    transport_schema = json.loads((schema_root / "transport-suite.schema.json").read_text(encoding="utf-8"))
+    check_eq(
+        "transport preview validates against public schema",
+        qa_config.validate_schema_subset(transport_preview, transport_schema),
+        [],
+    )
+
+    emit_preview = json_stdout([
+        "emit-run",
+        "--config",
+        str(config_path),
+        "--scenario",
+        "project-onboarding",
+        "--transport",
+        "all",
+        "--preview",
+        "--json-output",
+    ])
+    check_eq("emit-run preview reuses transport suite", emit_preview["schema"], "kitsoki/persona-qa-transport-suite/v1")
+    check_eq("emit-run preview does not create a run bundle", "run_dir" in emit_preview, False)
+
     emit_result = json_stdout([
         "emit-run",
         "--config",
