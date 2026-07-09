@@ -91,14 +91,19 @@ spend LLM tokens. The fixture preserves real issue titles/URLs for the 15-case
 demo, but it is not evidence that a paid GPT-5.5 marathon fixed those bugs.
 
 The default recording is intentionally paced for review: the two user commands
-are typed visibly, each submitted command holds briefly before Enter, every
-processed bug settles on a visible autonomous running/report state that names the
-latest case, and the spec fails a watch-speed recording if any chapter is shorter
-than the readable floor. The saved MP4 is trimmed to the first stable
-`kitsoki-dev` frame and holds that populated TUI briefly before typing, so bridge
-startup never becomes leading dead air; the chapter sidecar is shifted to the
-trimmed video clock. Use `WEB_CHAT_PACE=0 pnpm run validate:dogfood` only for
-fast assertions; it writes a `.fast.mp4` and is not a user-facing demo.
+are typed visibly, but the camera first exercises the landing quick-action picker
+with real `ArrowDown`/`ArrowUp` keystrokes and asserts the cursor row moves. This
+matters because the landing picker starts active in a real terminal; pressing
+`Tab` is the explicit "chat instead" gesture, so a recording that tabs away
+without showing the picker omits a bug-prone surface. Each submitted command
+holds briefly before Enter, every processed bug settles on a visible autonomous
+running/report state that names the latest case, and the spec fails a watch-speed
+recording if any chapter is shorter than the readable floor. The saved MP4 is
+trimmed to the first stable `kitsoki-dev` frame and holds that populated TUI
+briefly before typing, so bridge startup never becomes leading dead air; the
+chapter sidecar is shifted to the trimmed video clock. Use
+`WEB_CHAT_PACE=0 pnpm run validate:dogfood` only for fast assertions; it writes a
+`.fast.mp4` and is not a user-facing demo.
 
 ## Driving it from claude-in-chrome
 

@@ -79,6 +79,33 @@ test("resize control frame reaches the pty before subsequent input", async ({ pa
     .toContain("still-alive-after-resize");
 });
 
+test("browser sends arrow-key escape sequences through the pty bridge", async ({ page }) => {
+  test.setTimeout(90_000);
+  const port = await freePort();
+  const addr = `127.0.0.1:${port}`;
+  const script =
+    "bytes=$(dd bs=1 count=3 2>/dev/null | od -An -tx1 | tr -d ' \\n'); printf 'arrow:%s\\n' \"$bytes\"; sleep 30";
+  const bridge = startBridge(addr, ["--exec", "/bin/sh", "--", "-lc", script]);
+
+  try {
+    await page.goto(`/player/?ws=ws://${addr}/pty`);
+    await page.waitForFunction(() => (window as any).__ready === true);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__status()), { timeout: 60_000 })
+      .toBe("connected");
+
+    await page.click("#term");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__dump()), { timeout: 10_000 })
+      .toContain("arrow:1b5b42");
+  } finally {
+    stopBridge(bridge);
+  }
+});
+
 test("player preserves ANSI color and bold attributes from the pty", async ({ page }) => {
   test.setTimeout(90_000);
   const port = await freePort();
