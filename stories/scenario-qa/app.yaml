@@ -119,7 +119,7 @@ world:
   # ── request ────────────────────────────────────────────────────────────
   scenario_ref:         { type: string, default: "" }   # catalog scenario id, e.g. "bugfix"
   scenario_description: { type: string, default: "" }   # free-text ad-hoc scenario, if no scenario_ref
-  transport_arg:        { type: string, default: "tui" } # raw --transport value: tui|web|vscode|cli, comma list, or "all"
+  transport_arg:        { type: string, default: "all" } # raw --transport value: tui|web|vscode|cli, comma list, or "all"
   persona:              { type: string, default: "" }
   target:               { type: string, default: "" }   # --project, or primary_story override for an ad-hoc scenario
   seed:                 { type: string, default: "scenario-qa" }

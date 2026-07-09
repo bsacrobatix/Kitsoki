@@ -266,6 +266,31 @@ def _test_emit_run_transport_axis():
                "last_result.next_driver_capture_route" in bugfix_handoff["suggested_prompt"])
 
 
+def _test_transport_suite_preview():
+    scenarios = run.select_scenarios(run.load_scenarios(run.SCENARIOS), "bugfix")
+    suite = run.build_transport_suite(scenarios, list(run.TRANSPORT_IDS), run.load_driver_manifest())
+    _check("transport-suite preview uses the public schema", suite["schema"] == "kitsoki/persona-qa-transport-suite/v1")
+    _check("transport-suite preview is ready output", suite["status"] == "ready")
+    _check("transport-suite lists every canonical profile", [p["id"] for p in suite["transport_profiles"]] == list(run.TRANSPORT_IDS))
+    _check("bugfix transport-suite resolves four legs", suite["summary"]["leg_count"] == 4)
+    _check("bugfix transport-suite keeps requested transport order", [leg["transport"] for leg in suite["legs"]] == list(run.TRANSPORT_IDS))
+    cli_leg = next(leg for leg in suite["legs"] if leg["transport"] == "cli")
+    _check("transport-suite cli leg is terminal-level", cli_leg["evidence_contract"]["level"] == "terminal-level")
+    _check("transport-suite cli leg records command output", "command_output" in cli_leg["evidence"])
+    _check("transport-suite cli observe entrypoint uses session.trace", "session.trace" in cli_leg["entrypoints"]["observe"]["capabilities"])
+    _check("transport-suite forbids fake proof substitution", "no_substitution" in cli_leg["capture_policy"])
+    vscode_leg = next(leg for leg in suite["legs"] if leg["transport"] == "vscode")
+    _check("transport-suite vscode leg stays bridge-level", vscode_leg["evidence_contract"]["level"] == "bridge-level")
+    rendered = run.render_transport_suite(suite)
+    _check(
+        "transport-suite markdown names all legs",
+        "bugfix::tui" in rendered
+        and "bugfix::web" in rendered
+        and "bugfix::vscode" in rendered
+        and "bugfix::cli" in rendered,
+    )
+
+
 def _test_persona_lens_promotion():
     personas = run.load_personas(run.PERSONAS)
     by_id = {persona["id"]: persona for persona in personas}
@@ -296,6 +321,7 @@ def main():
     _test_select_transports()
     _test_scenario_transport_contracts()
     _test_emit_run_transport_axis()
+    _test_transport_suite_preview()
     _test_persona_lens_promotion()
     print("PASS")
 

@@ -510,6 +510,7 @@ def _validate_schema_root(path: Path, issues: list[dict[str, str]]) -> int:
         "driver-manifest.schema.json",
         "run-bundle.schema.json",
         "leg-result.schema.json",
+        "transport-suite.schema.json",
         "review.schema.json",
     ]
     if not path.is_dir():

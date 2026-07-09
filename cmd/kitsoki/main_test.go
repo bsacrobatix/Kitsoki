@@ -153,7 +153,7 @@ func TestCLI_PersonaQAHelp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("persona-qa --help: %v\n%s", err, out)
 	}
-	for _, want := range []string{"Persona QA Kit", "emit-run", "deck", "complete"} {
+	for _, want := range []string{"Persona QA Kit", "transports", "emit-run", "deck", "complete"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("persona-qa help missing %q:\n%s", want, out)
 		}
