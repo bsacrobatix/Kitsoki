@@ -17,7 +17,7 @@ its persistence story differently. The result is surprising: useful artifacts
 exist on disk, while the job that produced them is hard to reopen, share, or
 inspect from another session.
 
-This slice makes dev-story the dogfood consumer for persistent artifact jobs.
+This slice makes dev-story the reference consumer for persistent artifact jobs.
 
 ## What changes
 
@@ -27,7 +27,7 @@ outlive one operator interaction:
 - PRD -> design
 - design proposal drafting and publish
 - implementation/delivery tail
-- bugfix/fix-tests handoff paths imported by kitsoki-dev
+- bugfix/fix-tests handoff paths imported by provider-bound project wrappers
 - demo/video and QA gates that produce terminal artifacts
 
 Each dev-story artifact job registers a durable `job_id`, binds its run URL,

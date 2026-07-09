@@ -27,7 +27,7 @@ STARTER_STORY_CATALOG = {
     "setup": {
         "title": "Project setup",
         "source_story": "dev-story:onboarding",
-        "summary": "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks.",
+        "summary": "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks.",
         "expansion": "Keep this enabled as the team's bootstrap and refresh path.",
     },
     "bugfix": {
@@ -57,14 +57,14 @@ STARTER_STORY_CATALOG = {
 }
 
 STORY_PACKS = {
-    "focused-engineering": {
-        "title": "Focused engineering starter",
-        "summary": "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
+    "core-engineering": {
+        "title": "Core engineering starter",
+        "summary": "Focused first-run set for ordinary software repositories: setup, bug fixing, repo-history capsules, PR refinement, and git operations.",
         "stories": ["setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"],
     },
     "core-setup": {
         "title": "Core setup",
-        "summary": "Bring a project under Kitsoki management with setup and guarded git operations only.",
+        "summary": "Bring a project under project-local Kitsoki tooling with setup and guarded git operations only.",
         "stories": ["setup", "git-ops"],
     },
     "planning-delivery": {
@@ -98,7 +98,7 @@ STORY_PACKS = {
     },
 }
 
-DEFAULT_STORY_PACK_ID = "focused-engineering"
+DEFAULT_STORY_PACK_ID = "core-engineering"
 DEFAULT_STARTER_STORY_IDS = STORY_PACKS[DEFAULT_STORY_PACK_ID]["stories"]
 
 STARTER_STORY_ALIASES = {
@@ -128,12 +128,18 @@ STARTER_STORY_ALIASES = {
 }
 
 STORY_PACK_ALIASES = {
-    "focusedengineering": "focused-engineering",
-    "focused-engineering": "focused-engineering",
-    "focused_engineering": "focused-engineering",
-    "focused": "focused-engineering",
-    "targeted": "focused-engineering",
-    "targeted-engineering": "focused-engineering",
+    "cyber": "core-engineering",
+    "cyberrepo": "core-engineering",
+    "cyber-repo": "core-engineering",
+    "cyber_repo": "core-engineering",
+    "focusedengineering": "core-engineering",
+    "focused_engineering": "core-engineering",
+    "focused": "core-engineering",
+    "focused-engineering": "core-engineering",
+    "targeted": "core-engineering",
+    "targeted-engineering": "core-engineering",
+    "core-engineering": "core-engineering",
+    "engineering": "core-engineering",
     "core": "core-setup",
     "setup": "core-setup",
     "minimal": "core-setup",

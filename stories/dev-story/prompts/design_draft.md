@@ -104,11 +104,16 @@ in `kind`.
 ## 2. Copy the matching template and fill it
 
 {% if args.template_dir %}
-Read the matching template under **`{{ args.template_dir }}/`** (the
-`<kind>.md` for the kitsoki set, or `DESIGN/template.md` for an external
-spec-template tree) and fill it:
+Before copying a template, inspect nearby existing design/proposal docs in the
+target repo and follow their format when a clear local convention exists. If no
+local convention exists, read the matching template under
+**`{{ args.template_dir }}/`** (the `<kind>.md` for the Kitsoki fallback set, or
+`DESIGN/template.md` for an external spec-template tree) and fill it:
 {% else %}
-Write a self-contained design document with this structure:
+Before inventing structure, inspect nearby existing design/proposal docs in the
+target repo and follow their format when a clear local convention exists. If no
+local convention exists, write a self-contained design document with this
+structure:
 
 - **Status**
 - **Kind**

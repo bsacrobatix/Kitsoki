@@ -38,7 +38,8 @@
 test_kind: flow
 app: ../app.yaml
 initial_state: landing
-initial_world: {}
+initial_world:
+  origin_repo: "acme/project"
 
 starlark_inspect_cassette: ../cassettes/issues_migrated_incomplete.inspect.yaml
 
@@ -76,6 +77,6 @@ turns:
     expect_world:
       verify_ok: false
       captured: 0
-      last_error: "Verify failed: Migration incomplete: GitHub lists 1 issue(s) for bsacrobatix/Kitsoki (< 3 expected)."
+      last_error: "Verify failed: Migration incomplete: GitHub lists 1 issue(s) for acme/project (< 3 expected)."
 
 expect_no_errors: true

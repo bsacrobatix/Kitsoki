@@ -1,7 +1,6 @@
 # design_workspace_unwritable_fallback — design_search's resolve_durable_path
 # step falls back to a writable location when the configured durable path
-# (design_durable_path, default "docs/proposals" — Kitsoki's own dogfood
-# convention) is not writable.
+# (design_durable_path, default "docs/proposals") is not writable.
 #
 # This is the regression coverage for the scenario-qa finding O2
 # ("host.artifacts_dir: mkdir docs/proposals/.workspace/<slug>: permission
@@ -9,7 +8,7 @@
 # read-only per AGENTS.md, and the design pipeline hardcoded its workspace
 # under that tree with no fallback). host.fs.writable_dir is stubbed here to
 # report the configured path as NOT writable (used_fallback: true), exactly
-# as it would for real against a read-only docs/proposals/ — proving the
+# as it would for real against a read-only docs/proposals/ - proving the
 # room rebinds design_durable_path to the fallback and every downstream step
 # (workspace minting, artifact writes) uses that rebound value instead of
 # hard-failing on a raw permission-denied mkdir.

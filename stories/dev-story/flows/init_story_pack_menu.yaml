@@ -5,29 +5,29 @@ test_kind: flow
 app: ../app.yaml
 initial_state: init
 initial_world:
-  init_target_path: "/srv/repos/focused-engineering"
-  init_project_id: "focused-engineering"
-  init_project_title: "Focused Engineering"
+  init_target_path: "/srv/repos/acme-api"
+  init_project_id: "acme-api"
+  init_project_title: "Acme Api"
   init_stack: "go project"
   init_profile_status: "draft"
   init_story_pack: "core-setup"
   init_story_pack_title: "Core setup"
-  init_story_pack_summary: "Bring a project under Kitsoki management with setup and guarded git operations only."
+  init_story_pack_summary: "Bring a project under project-local Kitsoki tooling with setup and guarded git operations only."
   init_story_packs:
-    - id: "focused-engineering"
-      title: "Focused engineering starter"
-      summary: "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations."
+    - id: "core-engineering"
+      title: "Core engineering starter"
+      summary: "Focused first-run set for ordinary software repositories: setup, bug fixing, repo-history capsules, PR refinement, and git operations."
       stories: [setup, bugfix, repo-bakeoff, pr-refinement, git-ops]
     - id: "core-setup"
       title: "Core setup"
-      summary: "Bring a project under Kitsoki management with setup and guarded git operations only."
+      summary: "Bring a project under project-local Kitsoki tooling with setup and guarded git operations only."
       stories: [setup, git-ops]
   init_starter_stories:
     - id: "setup"
       title: "Project setup"
       source_story: "dev-story:onboarding"
       status: "enabled"
-      summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks."
+      summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks."
       expansion: "Keep this enabled as the team's bootstrap and refresh path."
     - id: "git-ops"
       title: "Git operations"
@@ -39,19 +39,19 @@ initial_world:
 turns:
   - intent: { name: review_story_pack, slots: {} }
     expect_state: init_story_pack
-    expect_view_matches: "focused-engineering"
+    expect_view_matches: "core-engineering"
 
-  - intent: { name: select_story_pack, slots: { pack: "focused-engineering" } }
+  - intent: { name: select_story_pack, slots: { pack: "core-engineering" } }
     expect_state: init
     expect_world:
-      init_story_pack: "focused-engineering"
-      init_story_pack_title: "Focused engineering starter"
+      init_story_pack: "core-engineering"
+      init_story_pack_title: "Core engineering starter"
       init_starter_stories:
         - id: "setup"
           title: "Project setup"
           source_story: "dev-story:onboarding"
           status: "enabled"
-          summary: "Onboard the checkout, install the Kitsoki toolkit, and run explicit readiness checks."
+          summary: "Onboard the checkout, install project-local Kitsoki tooling, and run explicit readiness checks."
           expansion: "Keep this enabled as the team's bootstrap and refresh path."
         - id: "bugfix"
           title: "Bug fixing"
@@ -77,6 +77,6 @@ turns:
           status: "enabled"
           summary: "Use the guarded git command hub for status, worktrees, commits, rebases, sync, and integration."
           expansion: "Extend with project branch and remote-sync policy once the team's git flow is stable."
-    expect_view_matches: "Focused engineering starter"
+    expect_view_matches: "Core engineering starter"
 
 expect_no_errors: true

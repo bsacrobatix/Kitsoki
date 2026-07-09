@@ -145,9 +145,9 @@ def file_feature_issue_github(slug: str, title: str, idea: str, design_rel: str,
 
     Labels target:<repo-name> + comp:proposal (the GitHub twin of the local
     format's component: proposal). The target label derives from the repo
-    slug's name segment — never a hardcoded project — so an onboarded external
-    repo (e.g. acme/gears-rust → target:gears-rust) gets its own vocabulary
-    while kitsoki-dev (constructorfabric/Kitsoki) keeps target:kitsoki.
+    slug's name segment - never a hardcoded project - so an onboarded external
+    repo (e.g. acme/gears-rust -> target:gears-rust) gets its own vocabulary,
+    and a local project instance can keep its own target label convention.
     Returns (issue_number, issue_url). Routes through Kitsoki's native GitHub
     filing path instead of shelling out to gh.
     """
@@ -234,7 +234,7 @@ def main() -> None:
 
     # Mint the feature ticket that links back to the published proposal, so the
     # draft room can route straight into the implementation pipeline. Precedence:
-    #   ticket_repo set  → a GitHub feature issue (kitsoki-dev's GitHub cutover);
+    #   ticket_repo set  → a GitHub feature issue for the configured repo;
     #   ticket_dir set   → a local issues/features/<id>.md file (the default);
     #   both empty       → skip (an external target tracks work elsewhere).
     ticket_url = ""

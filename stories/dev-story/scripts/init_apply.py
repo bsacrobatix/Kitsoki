@@ -106,12 +106,12 @@ def starter_story_focus(data: dict) -> list[dict]:
 
 
 def selected_story_pack(data: dict) -> dict:
-    pack_id = normalize_story_pack_id(str(data.get("story_pack") or "focused-engineering"))
+    pack_id = normalize_story_pack_id(str(data.get("story_pack") or "core-engineering"))
     known = story_pack(pack_id)
     if pack_id == "custom" or known["id"] == pack_id:
         return known
     story_ids = starter_story_ids(data)
-    for candidate in ["focused-engineering", "core-setup", "planning-delivery", "review-quality", "full-dev-story"]:
+    for candidate in ["core-engineering", "core-setup", "planning-delivery", "review-quality", "full-dev-story"]:
         if story_ids == [str(item) for item in story_pack(candidate).get("stories", [])]:
             return story_pack(candidate)
     return story_pack("custom")
@@ -269,7 +269,7 @@ def dev_story_docs_profile(data: dict) -> dict:
             "design_doc_filename": "",
             "design_ticket_dir": "",
             # GitHub tracker ⇒ feature publish mints a GitHub issue on the
-            # detected slug (same convention as kitsoki-dev); otherwise "".
+            # selected slug; otherwise "".
             "ticket_repo": data.get("ticket_repo") or "",
         }
     override = data.get("dev_story_docs_profile")
@@ -285,7 +285,7 @@ def app_yaml(data: dict) -> str:
     title = data["project_title"]
     docs = dev_story_docs_profile(data)
     # Ticket source passthrough: a GitHub-tracked project binds the ticket
-    # interface to the gh adapter pinned on the detected `owner/repo` slug
+    # interface to the gh adapter pinned on the selected `owner/repo` slug
     # (world.ticket_repo — dev-story rooms thread it into every
     # iface.ticket.* call as the `repo` arg). Everything else keeps
     # local-file tickets under the checkout.
@@ -410,11 +410,13 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     data["repo_vcs"] = repo["vcs"]
     data["repo_default_branch"] = repo["default_branch"]
     data["repo_remote"] = repo["remote"]
-    # External ticket-repo passthrough: when the tracker is GitHub, the
-    # generated instance pins `iface.ticket → host.gh.ticket` on this slug
-    # (derived from the origin remote, never hardcoded). Any other tracker —
-    # or an unparseable remote — degrades honestly to local-file tickets.
-    data["ticket_repo"] = github_repo_slug(repo["remote"]) if data.get("tracker") == "github" else ""
+    # External ticket-repo passthrough: when the selected tracker is GitHub, the
+    # generated instance pins `iface.ticket -> host.gh.ticket` on the selected
+    # slug. Discovery can prefill that slug from origin, but an explicit
+    # onboarding choice wins. Any other tracker, or an unparseable remote,
+    # degrades honestly to local-file/copy-paste tickets.
+    selected_ticket_repo = str(data.get("ticket_repo") or github_repo_slug(repo["remote"]) or "")
+    data["ticket_repo"] = selected_ticket_repo if data.get("tracker") == "github" else ""
     data["has_makefile"] = (root / "Makefile").exists()
     cargo = root / "Cargo.toml"
     data["has_cargo"] = cargo.exists()
@@ -614,7 +616,7 @@ def onboarding_profile(data: dict) -> dict:
         {
             "id": "project-doc-defaults",
             "status": "applied",
-            "summary": "Retarget generated PRD/design outputs to project-local runtime docs paths instead of Kitsoki's own docs tree.",
+            "summary": "Retarget generated PRD/design outputs to project-local runtime docs paths.",
             "evidence": f"{dev_story_docs_profile(data)['publish_durable_path']}, {dev_story_docs_profile(data)['design_durable_path']}",
         },
     ]
@@ -631,6 +633,13 @@ def onboarding_profile(data: dict) -> dict:
             "status": "applied",
             "summary": f"Tickets bind to GitHub issues on `{data['ticket_repo']}` (iface.ticket → host.gh.ticket, pinned via world.ticket_repo).",
             "evidence": f"remote={data.get('repo_remote', '')}",
+        })
+    else:
+        customizations.append({
+            "id": "local-ticket-intake",
+            "status": "applied",
+            "summary": "Tickets use local markdown/copy-paste intake. This is the good no-provider mode; configure a ticket provider later for remote search, body fetch, comments, and status transitions.",
+            "evidence": "ticket provider not selected during onboarding",
         })
     customizations.append({
         "id": "starter-story-focus",
@@ -655,6 +664,12 @@ def onboarding_profile(data: dict) -> dict:
         "story_pack_summary": pack["summary"],
         "starter_stories": starter_story_focus(data),
         "expansion_policy": expansion_policy(data),
+        "capability": "full" if data.get("ticket_repo") else "good",
+        "capability_reason": (
+            f"Full ticket capability is enabled through GitHub Issues on `{data['ticket_repo']}`."
+            if data.get("ticket_repo")
+            else "Good local capability is enabled without remote ticket setup; use pasted reports or local markdown tickets until a provider is configured."
+        ),
         "repo_patterns": patterns,
         "story_customizations": customizations,
         "recording_policy": "no-llm-only",
@@ -1716,6 +1731,12 @@ def readme(data: dict, profile_path: str) -> str:
         "Use the imported dev-story fixtures in the Kitsoki checkout for hub coverage, "
         "and add project-local flows when this repo needs its own story-specific assertions."
     )
+    ticket_provider = "GitHub Issues" if data.get("ticket_repo") else "local markdown / pasted reports"
+    ticket_capability = (
+        f"Full ticket capability is enabled for `{data['ticket_repo']}`: ticket search, body fetch, comments, and transitions use the configured provider."
+        if data.get("ticket_repo")
+        else "Good local capability is enabled without remote setup: paste a bug report into the bugfix path or keep markdown tickets under `issues/bugs/`. Configure a provider later when you want remote search, issue-body fetch, comments, and transitions."
+    )
     mining_note = ""
     if mining_seed_enabled(data):
         mining_note = f"""
@@ -1779,6 +1800,10 @@ publish under `{docs["design_durable_path"]}`. Update
 `.kitsoki/project-profile.yaml` and `.kitsoki/stories/{story_id}/app.yaml`
 together if this project later adopts a different documentation layout.
 
+Ticket provider: {ticket_provider}
+
+{ticket_capability}
+
 Inferred project commands:
 
 ```sh
@@ -1838,7 +1863,8 @@ def main() -> int:
         "conventions": sys.argv[8],
         "tracker": sys.argv[9] if len(sys.argv) > 9 else "none",
         "starter_stories": starter_story_entries(),
-        "story_pack": "focused-engineering",
+        "story_pack": "core-engineering",
+        "ticket_repo": "",
     }
     # Validate + enrich the target BEFORE draft-profile defaulting so the
     # detected repo shape (remote → ticket_repo, toolchain files) seeds the
@@ -1869,6 +1895,8 @@ def main() -> int:
         data["story_pack"] = "custom"
     if len(sys.argv) > 13 and sys.argv[13].strip():
         data["story_pack"] = normalize_story_pack_id(sys.argv[13])
+    if len(sys.argv) > 14 and sys.argv[14].strip() and data.get("tracker") == "github":
+        data["ticket_repo"] = sys.argv[14].strip()
     if draft_profile is not None and "mining" not in draft_profile:
         draft_profile["mining"] = data.get("mining_recommendation") or mining_recommendation(Path(data["target_path"]))
     if isinstance(draft_profile, dict):

@@ -67,7 +67,7 @@ func TestOnboardSisterProjects_FromBaseline(t *testing.T) {
 			sourceEnv:         "KITSOKI_SLIDEY_REPO",
 			sourceDefault:     filepath.Join(filepath.Dir(kitsokiRoot), "slidey"),
 			baselineCommit:    "1a018e5939ee662d37c392067ce496d9c94d1b68",
-			deterministicFlow: "stories/dev-story/flows/init_slidey_dogfood.yaml",
+			deterministicFlow: "stories/dev-story/flows/init_slidey_project.yaml",
 			projectID:         "slidey",
 			projectTitle:      "Slidey",
 			stack:             "node/vue/vite/puppeteer declarative deck engine with web, html, pdf, and mp4 outputs",

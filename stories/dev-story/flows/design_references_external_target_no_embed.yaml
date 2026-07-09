@@ -1,6 +1,6 @@
 # design_references_external_target_no_embed — the design_researcher agent
 # must still land a valid (possibly empty) references bind when driving an
-# EXTERNAL target repo (no kitsoki-shaped docs/proposals, .agents/skills,
+# EXTERNAL target repo (no project-local proposal docs, .agents/skills, or
 # stories/ tree) through the no-embedder fallback path.
 #
 # Regression coverage for the live scenario-qa confirmation rerun
@@ -26,8 +26,8 @@
 #
 # This flow test covers the adjacent, still-real story-level contract: when
 # the researcher DOES get to submit (as it will now that submit is
-# reachable) and finds nothing — the expected, common outcome for a target
-# repo with none of kitsoki's own proposal/story conventions — an EMPTY
+# reachable) and finds nothing - the expected, common outcome for a target
+# repo with none of the configured proposal/story conventions - an EMPTY
 # `items` list is a valid verdict that must flow straight through to
 # design_refine, not bounce back to design_search as if it were a failure.
 
@@ -36,9 +36,9 @@ app: ../app.yaml
 initial_state: design
 initial_world:
   judge_mode: "human"
-  # Shaped like an external target: workdir points outside kitsoki's own
-  # tree, so none of the kitsoki-specific reference paths
-  # (docs/proposals/**, .agents/skills/**, stories/**) exist there.
+  # Shaped like an external target: workdir points outside this checkout, so
+  # none of the configured reference paths (docs/proposals/**,
+  # .agents/skills/**, stories/**) exist there.
   workdir: "/tmp/external-target-checkout"
 
 starlark_inspect_cassette: ../cassettes/design_happy_path.inspect.yaml

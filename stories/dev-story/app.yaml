@@ -5,8 +5,8 @@
 # pr-refinement sub-stories and routes between them via the
 # day-level rooms (main, inbox, ticket_search, workspace_manager,
 # standup, code_review, agent, …). It does NOT bind providers —
-# concrete bindings happen at the INSTANCE level (kitsoki-dev,
-# importing dev-story instances). The `default:` values in `host_interfaces:`
+# concrete bindings happen in a generated `.kitsoki/` wrapper or another
+# importing project instance. The `default:` values in `host_interfaces:`
 # are the fallback for standalone runs.
 #
 # Provider-neutral world: no `jira_*` keys. `ticket_query` /
@@ -73,8 +73,7 @@ app:
     what work is picked up, whether a change is acceptable, and what gets
     reported to a team. Favor precision; cite concrete files, symbols, and
     commands; and prefer the smallest change that satisfies the task. This is
-    also the story kitsoki uses to improve itself, so correctness and clear,
-    auditable reasoning matter more than speed.
+    clear, auditable reasoning matter more than speed.
 
 # Local model for cheap, offline slug naming. Qwen2.5-1.5B-Instruct at Q4_K_M;
 # grammar: true enables constrained decoding so the JSON schema is satisfied on
@@ -113,7 +112,7 @@ hosts:
   # published PRD. Its decide/task/search/artifacts_dir/ide.open_file/run
   # needs are already covered above; converse + chat.resolve are unique to
   # it. An instance importing dev-story with `hosts: declared` must list
-  # both in its own allow-list (see .kitsoki/stories/kitsoki-dev/app.yaml).
+  # both in its own allow-list.
   - host.agent.converse
   - host.chat.resolve
   # ── Ad-hoc structured plan (rooms/landing|applying|verifying.yaml) ─────
@@ -190,7 +189,7 @@ agents:
   # read-only except the refiner and author, which write into the
   # per-session workspace.
   design_namer:
-    system_prompt: "You name kitsoki proposals. Turn an idea into a short, meaningful 2-5 word kebab-case slug (like an existing docs/proposals/<slug>.md filename) — never a raw sentence. Glance at the existing proposals + in-progress workspace to match the house style and avoid an already-taken name."
+    system_prompt: "You name project proposals. Turn an idea into a short, meaningful 2-5 word kebab-case slug (like an existing proposal filename) — never a raw sentence. Glance at the existing proposals + in-progress workspace to match the house style and avoid an already-taken name."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
 
@@ -200,7 +199,7 @@ agents:
     tools: [Read, Grep, Glob]
 
   design_scout:
-    system_prompt: "You are a kitsoki maintainer checking whether a proposed idea overlaps with work already in flight. Search the proposals workspace (docs/proposals/.workspace/), the accepted proposals (docs/proposals/*.md), and the feature/bug docs for anything the idea duplicates, extends, or conflicts with. When you find an overlap, recommend AMENDING the existing proposal rather than creating a new one. Report where the idea fits on the roadmap."
+    system_prompt: "You are a project maintainer checking whether a proposed idea overlaps with work already in flight. Search the configured proposal workspace, accepted proposals, and feature/bug docs for anything the idea duplicates, extends, or conflicts with. When you find an overlap, recommend AMENDING the existing proposal rather than creating a new one. Report where the idea fits on the roadmap."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
 
@@ -208,12 +207,12 @@ agents:
     # ⛔ This agent MAINTAINS THE BRIEF — it must NEVER implement the idea.
     # working_dir is the per-session workspace, NOT a write jail — the constraint
     # is this instruction. It writes EXACTLY ONE file: the brief at the given path.
-    system_prompt: "You are a kitsoki maintainer maintaining a proposal BRIEF markdown file, using search results (prior-art overlaps and curated references) to fill and sharpen it. You write EXACTLY ONE file — the brief at the given path — and nothing else. You MUST NOT implement the idea or touch any source code, test, config, story YAML, or other repository file; doing so is a hard failure. Read the brief, fold in search context and any operator message, fill the Why / What changes / Impact / Why-kitsoki / How-it's-used spine where you now have signal, and leave honest `<…>` placeholders where you don't. Keep it skim-in-two-minutes."
+    system_prompt: "You are a project maintainer maintaining a proposal BRIEF markdown file, using search results (prior-art overlaps and curated references) to fill and sharpen it. You write EXACTLY ONE file — the brief at the given path — and nothing else. You MUST NOT implement the idea or touch any source code, test, config, story YAML, or other repository file; doing so is a hard failure. Read the brief, fold in search context and any operator message, fill the Why / What changes / Impact / How-it's-used spine where you now have signal, and leave honest `<...>` placeholders where you don't. Keep it skim-in-two-minutes."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Write, Edit]
 
   design_researcher:
-    system_prompt: "You are a kitsoki maintainer curating the reference materials a proposal must build on. Read the idea and the brief, then search the repo's DOCUMENTATION, rules, and guidelines — docs/, READMEs, gold-standard stories, the proposal templates and skill — for prior art, constraints, and conventions the proposal must honour. For each reference give the path, the specific section(s) / line range that matter, and a one-line rationale. Prefer a short, high-signal list."
+    system_prompt: "You are a project maintainer curating the reference materials a proposal must build on. Read the idea and the brief, then search the repo's documentation, rules, guidelines, existing proposals/design docs, and available proposal templates for prior art, constraints, and conventions the proposal must honour. For each reference give the path, the specific section(s) / line range that matter, and a one-line rationale. Prefer a short, high-signal list."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob]
 
@@ -222,7 +221,7 @@ agents:
     # idea. The hard rule is repeated in prompts/design_draft.md. It has
     # Write/Edit ONLY to produce the proposal markdown (working_dir is not a
     # write jail — the constraint is the instruction, so it is emphatic).
-    system_prompt: "You are a kitsoki maintainer authoring a PROPOSAL DOCUMENT — a design write-up, NOT an implementation. You write exactly ONE file: the proposal markdown at the given output path (or, when amending, the named existing proposal). You MUST NOT implement the idea: do NOT create, edit, or modify any source code, test, config, story YAML, or any other repository file. Reading the codebase (Read/Grep/Glob) to ground the proposal is expected; writing anything other than the single proposal markdown is a hard failure. Classify the change kind, copy the matching template under docs/proposals/templates/, and fill the Why / What changes / Impact spine, grounding every claim in the cited references."
+    system_prompt: "You are a project maintainer authoring a PROPOSAL DOCUMENT — a design write-up, NOT an implementation. You write exactly ONE file: the proposal markdown at the given output path (or, when amending, the named existing proposal). You MUST NOT implement the idea: do NOT create, edit, or modify any source code, test, config, story YAML, or any other repository file. Reading the codebase (Read/Grep/Glob) to ground the proposal is expected; writing anything other than the single proposal markdown is a hard failure. First find and follow any existing proposal/design format in the repo; if none exists, use the configured template directory, falling back to Kitsoki's docs/proposals template style. Fill the Why / What changes / Impact spine, grounding every claim in the cited references."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Write, Edit]
 
@@ -232,7 +231,7 @@ agents:
   # does the rewrite). Bash under the read-only profile is for `git log` /
   # `git show` (the proven combo used by stories/bugfix + stories/docs-review).
   ideas_reviewer:
-    system_prompt: "You are a kitsoki maintainer reconciling a hand-maintained ideas backlog against work that has actually shipped. Read the backlog file, scan the commit history (git log — read-only Bash), the proposals (docs/proposals/), and the docs (docs/) for concrete evidence that an item has shipped or partially shipped. Be conservative: only propose a section move when you can cite real evidence (a commit, a proposal, a doc); leave ambiguous items alone. Also surface a few high-value items still in the Ideas section worth proposing next. You PROPOSE moves only — you never edit the backlog yourself."
+    system_prompt: "You are a project maintainer reconciling a hand-maintained ideas backlog against work that has actually shipped. Read the backlog file, scan the commit history (git log — read-only Bash), proposals/design docs, and project docs for concrete evidence that an item has shipped or partially shipped. Be conservative: only propose a section move when you can cite real evidence (a commit, a proposal, a doc); leave ambiguous items alone. Also surface a few high-value items still in the Ideas section worth proposing next. You PROPOSE moves only — you never edit the backlog yourself."
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
@@ -421,14 +420,12 @@ world:
   # cached. (See rooms/applying.yaml.)
   apply_note:          { type: object, default: {} }
   # issue_source selects WHICH repo the verify gate probes; origin_repo /
-  # upstream_repo are the concrete owner/repo each resolves to (configurable per
-  # instance — kitsoki-dev pins its fork as origin and constructorfabric/Kitsoki
-  # as upstream). combined probes both (v1: the verifying room resolves the
-  # concrete repo and the .star sums/probes; combined falls back to origin_repo
-  # for the single-probe v1 script). Default origin.
+  # upstream_repo are instance-configured owner/repo slugs. combined probes both
+  # (v1: the verifying room resolves the concrete repo and the .star sums/probes;
+  # combined falls back to origin_repo for the single-probe v1 script).
   issue_source:        { type: string, default: "origin" }
-  origin_repo:         { type: string, default: "bsacrobatix/Kitsoki" }
-  upstream_repo:       { type: string, default: "constructorfabric/Kitsoki" }
+  origin_repo:         { type: string, default: "" }
+  upstream_repo:       { type: string, default: "" }
 
   # ── Ticket search / pickup ────────────────────────────────────────
   ticket_query:        { type: string, default: "" }
@@ -439,6 +436,7 @@ world:
   ticket_id:           { type: string, default: "" }
   ticket_title:        { type: string, default: "" }
   ticket_url:          { type: string, default: "" }
+  ticket_body:         { type: string, default: "" }
   # ticket_type is how `drive` chooses a pipeline (bug → bf,
   # feature → impl, epic → cyp). Set by pick_ticket from its `type:`
   # slot (or carried through from a prior pick when the slot is
@@ -672,8 +670,10 @@ world:
   init_repo_remote:      { type: string, default: "" }
   init_conventions:      { type: string, default: "hybrid" }
   init_tracker:          { type: string, default: "none" }
-  init_story_pack:       { type: string, default: "focused-engineering" }
-  init_story_pack_title: { type: string, default: "Focused engineering starter" }
+  init_ticket_provider:  { type: string, default: "" }
+  init_ticket_repo:      { type: string, default: "" }
+  init_story_pack:       { type: string, default: "core-engineering" }
+  init_story_pack_title: { type: string, default: "Core engineering starter" }
   init_story_pack_summary: { type: string, default: "" }
   init_story_packs:      { type: list, default: [] }
   init_starter_stories:  { type: list, default: [] }
@@ -770,7 +770,7 @@ world:
   design_draft_budget:      { type: int, default: 5 }
 
   # ── External-target profile (doc shape + placement) ───────────────
-  # Defaults reproduce kitsoki's own behaviour exactly (flat docs/proposals
+  # Defaults use a local project docs profile (flat docs/proposals
   # + docs/prd, slug-named files, a feature ticket on publish). An importing
   # project instance can retarget the PRD → Design walk by overriding these:
   # publish into <workdir>/<durable>, choose fixed filenames, read the target's
@@ -971,10 +971,18 @@ intents:
   select_story_pack:
     title: "Select Story Pack"
     description: "Select one named onboarding story pack."
-    examples: ["select focused engineering", "use core setup", "full dev-story pack"]
+    examples: ["select core engineering", "use core setup", "full dev-story pack"]
     priority: 31
     slots:
       pack: { type: string, required: true, description: "Story pack id." }
+  select_ticket_provider:
+    title: "Select Ticket Provider"
+    description: "Select local/copy-paste ticket intake or a configured remote provider for onboarding."
+    examples: ["use local tickets", "use github issues", "configure ticket provider"]
+    priority: 31
+    slots:
+      provider: { type: string, required: false, description: "Ticket provider id: local or github." }
+      repo: { type: string, required: false, description: "Remote owner/repo slug for GitHub Issues." }
   go_deploy:
     title: "Deploy"
     description: "Open the deploy room."
@@ -1339,6 +1347,34 @@ intents:
         type: string
         required: false
         description: "Optional ticket-type override (bug / feature / epic). Wins over the row-lookup derivation; useful for fixtures + operators who already know the routing target."
+  bugfix_report:
+    title: "Fix Pasted Bug Report"
+    description: "Start bugfix from an inline or pasted bug report when no ticket has been filed."
+    examples: ["fix this bug report", "debug this pasted bug", "pasted bug report"]
+    synonyms:
+      - "fix bug {complaint}"
+      - "debug bug {complaint}"
+      - "bug report {complaint}"
+      - "user complaint {complaint}"
+      - "work complaint {complaint}"
+    priority: 88
+    slots:
+      complaint: { type: string, required: true, description: "The pasted bug report or complaint text." }
+      title: { type: string, required: false, description: "Optional short title for the report." }
+  bugfix_link:
+    title: "Fix Bug Link"
+    description: "Start bugfix from a remote issue link. Full remote capability requires the matching ticket provider to be configured."
+    examples: ["fix this github issue", "debug this issue link", "fix bug link"]
+    synonyms:
+      - "fix issue {url}"
+      - "debug issue {url}"
+      - "fix bug link {url}"
+      - "work issue {url}"
+      - "fix github issue {url}"
+    priority: 89
+    slots:
+      url: { type: string, required: true, description: "Remote issue URL or provider issue reference." }
+      title: { type: string, required: false, description: "Optional short title for the issue." }
 
   # Pipeline-launching navigation (dispatches into bf / pr / impl /
   # rev imports). `go_bugfix` targets the `bf` import compound; the
@@ -1386,7 +1422,7 @@ intents:
   go_bugfix:
     title: "Fix Bug"
     description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room will ask them to pick one first."
-    examples: ["fix bug", "bugfix", "work on bug", "fix bugs", "i want to fix a bug", "i want to work on some bugs"]
+    examples: ["bugfix", "work on selected bug", "fix selected bug", "fix bugs from the queue", "i want to work on some bugs"]
     priority: 55
   bugfix_open_pr:
     title: "Fix Bug and Open PR"
@@ -1866,6 +1902,7 @@ imports:
       ticket_id:       "{{ world.ticket_id }}"
       ticket_title:    "{{ world.ticket_title }}"
       ticket_url:      "{{ world.ticket_url }}"
+      ticket_body:     "{{ world.ticket_body }}"
       ticket_repo:     "{{ world.ticket_repo }}"
       thread:          "{{ world.thread }}"
       ticket_source_mode: "{{ world.ticket_source_mode }}"
@@ -2267,7 +2304,7 @@ imports:
       # Doc-profile passthrough: an importing instance overrides these on the
       # hub so the imported prd publishes into that project's target tree and
       # filename convention. Defaults keep prd's own docs/prd/<slug>.md
-      # behaviour for kitsoki-dev.
+      # behaviour for standalone runs.
       publish_durable_path: "{{ world.publish_durable_path }}"
       prd_doc_filename:     "{{ world.prd_doc_filename }}"
 

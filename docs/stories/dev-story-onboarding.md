@@ -2,7 +2,7 @@
 
 The [dev-story](../../stories/dev-story/README.md) hub ships a small,
 deterministic **project onboarding** pipeline that takes a target checkout from
-nothing to a fully working kitsoki environment. This is the dev-story-specific
+no `.kitsoki/` files to a working Kitsoki environment. This is the dev-story-specific
 mechanics; for the user-facing "how do I onboard my repo" walkthrough and the
 standalone `kitsoki project-tools install` command, read
 [getting-started.md](../getting-started.md) first.
@@ -60,19 +60,40 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 The request can also preselect a named first-run story pack:
 
 ```text
-onboard ~/code/my-monorepo --pack focused-engineering
+onboard ~/code/acme-api --pack core-engineering
 ```
 
 Discovery emits the pack catalog and the selected pack into
 `init_story_packs`, `init_story_pack`, and `init_starter_stories`. The review
 room exposes a `story packs` menu before writes happen; selecting a pack updates
-the starter set in memory. The default focused-engineering starter pack is
-`focused-engineering`: `setup`, `bugfix`, `repo-bakeoff` (repo-history capsules),
-`pr-refinement`, and `git-ops`.
+the starter set in memory. The default `core-engineering` pack is `setup`,
+`bugfix`, `repo-bakeoff` (repo-history capsules), `pr-refinement`, and
+`git-ops`.
 
 For one-off custom scopes, discovery still accepts
 `--stories`/`stories=`/`focus=` and normalizes aliases such as `bugfixing` →
 `bugfix` and `gitops` → `git-ops`; those are recorded as a custom pack.
+
+## Ticket provider setup
+
+Onboarding also asks which ticket intake mode this project should start with:
+
+- **Good capability, no provider required** — local markdown tickets and pasted
+  bug reports. A user can start from `tickets`, a local file under
+  `issues/bugs/`, or a pasted report (`fix bug ...`) without configuring a
+  remote service.
+- **Full capability** — a configured ticket provider such as GitHub Issues.
+  When discovery sees a `github.com` origin, the provider menu offers that
+  `owner/repo` slug. The operator can also type a custom slug. Full mode lets
+  the story search remote issues, fetch issue bodies from links, comment, and
+  transition status through `iface.ticket`.
+
+The selected provider is written into `.kitsoki/project-profile.yaml` and the
+generated `.kitsoki/stories/<id>-dev/app.yaml`. Choosing local mode keeps
+`iface.ticket` bound to `host.local_files.ticket`; choosing GitHub binds it to
+`host.gh.ticket` pinned by `world.ticket_repo`. No network call is made during
+discovery or apply; actual GitHub use happens later when the user searches or
+starts work from a link and has access.
 
 ## Local harness profile setup
 
@@ -156,9 +177,11 @@ override if git tracks it.
 
 The generated `.kitsoki/stories/<id>-dev/app.yaml` imports
 `@kitsoki/dev-story` from the binary's embedded story library and rebinds the
-providers to local implementations (`host.local_files.ticket`, `host.git`,
-`host.local`, `host.git_worktree`, `host.append_to_file`), so it runs
-standalone with only the `kitsoki` binary present.
+providers to project-selected implementations. Local mode uses
+`host.local_files.ticket`; full GitHub mode uses `host.gh.ticket` with the
+selected `owner/repo`. The other defaults (`host.git`, `host.local`,
+`host.git_worktree`, `host.append_to_file`) let the instance run standalone
+with only the `kitsoki` binary present.
 
 When deterministic discovery finds associated Claude/Codex transcript history,
 apply also writes `.context/kitsoki-session-mining-seed.md` and records a
@@ -202,16 +225,18 @@ The instance `app.yaml` carries an **external-target profile**: a block of world
 keys (`publish_durable_path`, `prd_doc_filename`, `design_*`, `ticket_repo`, …)
 that retargets doc placement, fixed filenames, or a GitHub-issue tracker.
 Generic generated projects default PRDs and design documents into `.context/`
-subdirectories and assume no project-specific design template directory. Known
-dogfood profiles, such as Slidey, can keep repo-native docs paths. That profile
-is documented authoritatively in the dev-story README's
+subdirectories and assume no project-specific design template directory.
+Project-specific profiles, such as a Slidey checkout that already has a docs
+tree, can keep repo-native docs paths. That profile is documented
+authoritatively in the dev-story README's
 [Doc profile section](../../stories/dev-story/README.md#doc-profile--targeting-an-external-project)
 — onboarding seeds the defaults; tuning it is a per-instance edit.
 
 ## Testing — no LLM
 
 The walk is covered by focused no-LLM flows such as
-[`flows/init_slidey_dogfood.yaml`](../../stories/dev-story/flows/init_slidey_dogfood.yaml),
+[`flows/init_ticket_provider_menu.yaml`](../../stories/dev-story/flows/init_ticket_provider_menu.yaml),
+[`flows/init_slidey_project.yaml`](../../stories/dev-story/flows/init_slidey_project.yaml),
 [`flows/init_customizations_review.yaml`](../../stories/dev-story/flows/init_customizations_review.yaml),
 [`flows/init_readiness_check.yaml`](../../stories/dev-story/flows/init_readiness_check.yaml),
 [`flows/init_git_metadata.yaml`](../../stories/dev-story/flows/init_git_metadata.yaml),

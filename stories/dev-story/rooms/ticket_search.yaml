@@ -2,9 +2,9 @@
 # Jira-flavoured `testdata/apps/dev-story/rooms/jira_search.yaml`.
 #
 # Search dispatches via iface.ticket.search; in standalone runs the
-# default binding (host.local_files.ticket) scans the configured
-# ticket globs. Project-specific flavours can rebind iface.ticket to
-# host.jira via the parent instance's host_bindings.
+# default binding (host.local_files.ticket) scans the configured ticket globs.
+# A generated project wrapper or importing instance can rebind iface.ticket to
+# GitHub, Jira, or another provider via host_bindings.
 #
 # After picking a ticket, the operator transitions into the bf import
 # (`go_bugfix`) which projects the picked ticket's keys into bf's
@@ -29,8 +29,8 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
-          # repo is honoured by host.gh.ticket (the GitHub binding: kitsoki-dev
-          # + onboarded external repos); ignored by host.local_files.ticket.
+          # repo is honoured by host.gh.ticket (the GitHub binding for
+          # onboarded repos); ignored by host.local_files.ticket.
           # "" ⇒ gh's local-remote default.
           repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
           # root is honoured by host.local_files.ticket (tickets under an
@@ -237,6 +237,7 @@ states:
             # non-empty.
             - set:
                 ticket_id:     "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
+                ticket_body:   ""
                 # Populate ticket_type from the picked ROW so `drive`
                 # routes by kind (bug → bf, feature → impl, epic → cyp).
                 # Direct index access off world.ticket_results works in
@@ -292,8 +293,8 @@ states:
       #
       # `continue` is the canonical name surfaced in the action menu;
       # `go_bugfix` is the legacy alias kept here so existing flows
-      # and fixtures (dev-story/flows/*, scenarios/pickup_*.yaml, the
-      # dogfood smoke test) keep working unchanged.
+      # and fixtures (dev-story/flows/*, scenarios/pickup_*.yaml, and smoke
+      # tests) keep working unchanged.
       continue:
         - when: "world.ticket_id != '' && world.ticket_type == 'feature'"
           target: impl
@@ -439,8 +440,8 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
-          # repo is honoured by host.gh.ticket (the GitHub binding: kitsoki-dev
-          # + onboarded external repos); ignored by host.local_files.ticket.
+          # repo is honoured by host.gh.ticket (the GitHub binding for
+          # onboarded repos); ignored by host.local_files.ticket.
           # "" ⇒ gh's local-remote default.
           repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
           # root is honoured by host.local_files.ticket (tickets under an
@@ -468,6 +469,7 @@ states:
           effects:
             - set:
                 ticket_id:    "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
+                ticket_body:  ""
                 ticket_title: "(picked from search)"
                 ticket_type:  "{{ slots.type ?? world.ticket_type }}"
                 thread:       "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
