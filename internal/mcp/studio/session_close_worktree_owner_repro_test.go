@@ -72,6 +72,7 @@ states:
           repo:       "{{ world.repo }}"
           id:         "{{ world.workspace_id }}"
           name:       "{{ world.workspace_id }}"
+          base:       main
           session_id: "{{ world.session_id }}"
         on_error: idle
     view:
@@ -153,6 +154,7 @@ func TestMCPSessionClose_ReleasesWorktreeOwnerForRerun(t *testing.T) {
 		"repo":       repo,
 		"id":         "reusable-worktree",
 		"name":       "reusable-worktree",
+		"base":       "main",
 		"session_id": "next-session",
 	})
 	require.NoError(t, herr)
