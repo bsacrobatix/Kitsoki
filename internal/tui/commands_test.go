@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/chats"
@@ -38,6 +40,7 @@ func TestHelpCommandLists(t *testing.T) {
 		"room switches",
 		"system",
 		"/help",
+		"/stories",
 		"/bug [description]",
 		"/chat show",
 		"/intents",
@@ -49,6 +52,93 @@ func TestHelpCommandLists(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("/help missing %q in output\n---\n%s", want, body)
 		}
+	}
+}
+
+func TestStoriesSlashOpensSelector(t *testing.T) {
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "",
+		WithStorySelector([]StoryOption{
+			{Path: "/repo/stories/alpha/app.yaml", AppID: "alpha", Title: "Alpha"},
+			{Path: "/repo/stories/beta/app.yaml", AppID: "beta", Title: "Beta"},
+		}, nil, nil),
+	)
+
+	next, cmd := m.RunSlashCommand("/stories")
+	if cmd != nil {
+		t.Fatal("/stories should open synchronously")
+	}
+	if next.mode != ModeStorySelector {
+		t.Fatalf("mode = %v, want ModeStorySelector", next.mode)
+	}
+	view := next.View()
+	for _, want := range []string{"stories", "Alpha", "Beta"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("selector view missing %q\n---\n%s", want, view)
+		}
+	}
+}
+
+func TestStorySelectorSelectionInvokesCallbackAndQuits(t *testing.T) {
+	orch := testCloakOrchestrator(t)
+	var selected StoryOption
+	m := NewRootModel(orch, app.SessionID("session-123"), "../../testdata/apps/cloak/app.yaml", "",
+		WithStorySelector([]StoryOption{
+			{Path: "/repo/stories/alpha/app.yaml", AppID: "alpha", Title: "Alpha"},
+			{Path: "/repo/stories/beta/app.yaml", AppID: "beta", Title: "Beta"},
+		}, nil, func(story StoryOption) { selected = story }),
+	)
+
+	next, _ := m.RunSlashCommand("/stories")
+	model, _ := tea.Model(next).Update(tea.KeyMsg{Type: tea.KeyDown})
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter should emit a story selection command")
+	}
+	model, cmd = model.Update(runBatch(t, cmd))
+	if selected.Path != "/repo/stories/beta/app.yaml" {
+		t.Fatalf("selected path = %q, want beta", selected.Path)
+	}
+	if cmd == nil {
+		t.Fatal("selection should return tea.Quit")
+	}
+	rm, ok := model.(RootModel)
+	if !ok {
+		t.Fatalf("model = %T, want RootModel", model)
+	}
+	if !rm.quitting {
+		t.Fatal("model should be marked quitting after story selection")
+	}
+}
+
+func TestStorySelectorCurrentStoryDoesNotRestart(t *testing.T) {
+	orch := testCloakOrchestrator(t)
+	current := "../../testdata/apps/cloak/app.yaml"
+	called := false
+	m := NewRootModel(orch, app.SessionID("session-123"), current, "",
+		WithStorySelector([]StoryOption{
+			{Path: current, AppID: "cloak-of-darkness", Title: "Cloak"},
+		}, nil, func(StoryOption) { called = true }),
+	)
+
+	next, _ := m.RunSlashCommand("/stories")
+	model, cmd := tea.Model(next).Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("enter should emit a story selection command")
+	}
+	model, _ = model.Update(runBatch(t, cmd))
+	if called {
+		t.Fatal("current-story selection should not invoke restart callback")
+	}
+	rm, ok := model.(RootModel)
+	if !ok {
+		t.Fatalf("model = %T, want RootModel", model)
+	}
+	if rm.quitting {
+		t.Fatal("current-story selection should leave the model running")
+	}
+	if !strings.Contains(rm.transcript.LastBody(), "already running") {
+		t.Fatalf("transcript missing already-running notice:\n%s", rm.transcript.LastBody())
 	}
 }
 

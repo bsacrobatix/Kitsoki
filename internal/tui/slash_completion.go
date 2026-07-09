@@ -80,6 +80,7 @@ func slashCommandCatalogue(m RootModel) []SlashCommandSpec {
 	enterCmd, exitCmd := offPathTriggers(m.orch.AppDef())
 	specs := []SlashCommandSpec{
 		{Name: "/help", Description: "show commands"},
+		{Name: "/stories", Description: "open the story selector"},
 		{Name: "/bug", Usage: "/bug [description]", Description: "file a bug report with TUI evidence"},
 		{Name: "/route", Usage: "/route up|down", Description: "rate the last routed turn"},
 		{Name: "/ideas", Usage: "/ideas <text>", Description: "capture an idea without interrupting the session"},

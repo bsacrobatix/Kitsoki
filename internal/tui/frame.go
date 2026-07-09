@@ -156,6 +156,8 @@ func composePromptAndBanner(m RootModel) (promptLine, bannerLine string) {
 		promptLine = m.menuSystem.View()
 	case ModeMetaSessions:
 		promptLine = m.sessionsPanel.View()
+	case ModeStorySelector:
+		promptLine = m.storySelector.View()
 	case ModeAwaitingLLM:
 		caption := "thinking… (Ctrl+C to cancel)"
 		if m.pendingKind == pendingDeterministic {
