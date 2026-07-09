@@ -85,6 +85,24 @@ host_handlers:
             next_driver_attach_command: "python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/campaign-run-1 --scenario agent-launch-experience --evidence-kind session_trace --evidence-path <path> --evidence-source <retained|external|local|cassette>"
             next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/campaign-run-1 --scenario agent-launch-experience --title <blocker-title> --summary <summary> --evidence-path <path>"
             evidence_source: retained
+      record_campaign_worker_receipt:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            status: campaign_worker_recorded
+            run_dir: .artifacts/product-journey/campaign-run-1
+            campaign_worker_backend: vm
+            campaign_worker_id: qa-vm-1
+            campaign_worker_status: ready
+            campaign_worker_ready_status: pass
+            campaign_worker_summary: "vm:qa-vm-1 ready; ready=pass; artifacts=1"
+            campaign_worker_receipt_path: .artifacts/product-journey/campaign-run-1/campaign-worker-receipt.json
+            campaign_worker_receipt_markdown_path: .artifacts/product-journey/campaign-run-1/campaign-worker-receipt.md
+            campaign_worker_imported_artifact_count: 1
+            campaign_worker_artifact_import_status: imported
+            deck_path: .artifacts/product-journey/campaign-run-1/deck.slidey.json
+            driver_handoff_path: .artifacts/product-journey/campaign-run-1/driver-handoff.md
       autonomous_product_journey_fix:
         data:
           ok: true
@@ -276,6 +294,34 @@ turns:
     expect_host_calls:
       - handler: host.run
         args: { call: attach_product_journey_evidence }
+
+  - intent:
+      name: campaign_worker
+      slots:
+        backend: vm
+        worker_id: qa-vm-1
+        status: ready
+        ready_status: pass
+        ready_summary: "healthz ok; arena receipt available"
+        budget_minutes: 15
+        receipt_source: vm://qa-vm-1/campaign/campaign-run-1
+        import_artifacts: .artifacts/product-journey/campaign-run-1/worker/receipt.json
+        summary: "VM worker is ready for bounded campaign capture."
+    expect_state: run_created
+    expect_world:
+      status: campaign_worker_recorded
+      campaign_status: worker_receipt_recorded
+      campaign_worker_backend: vm
+      campaign_worker_id: qa-vm-1
+      campaign_worker_status: ready
+      campaign_worker_ready_status: pass
+      campaign_worker_imported_artifact_count: 1
+      campaign_worker_artifact_import_status: imported
+      campaign_worker_receipt_markdown_path: .artifacts/product-journey/campaign-run-1/campaign-worker-receipt.md
+    expect_view_matches: "RUN CREATED[\\s\\S]*Campaign worker[\\s\\S]*vm / qa-vm-1 / ready[\\s\\S]*Worker readiness[\\s\\S]*pass[\\s\\S]*Worker receipt[\\s\\S]*campaign-worker-[\\s\\S]*receipt\\.md"
+    expect_host_calls:
+      - handler: host.run
+        args: { call: record_campaign_worker_receipt }
 
   - intent:
       name: campaign_issue_fix
