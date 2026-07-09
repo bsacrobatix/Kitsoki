@@ -328,6 +328,11 @@ synthetic `AppDef` for the cross-app `kitsoki.*` modes). Read-only surfaces
 (`kitsoki status serve`) leave `Entry.Meta` nil, so meta RPCs report
 `codeReadOnly`.
 
+The web launcher curates the product-facing modes: Story edit, Story Q&A,
+Improve run, Kitsoki help, and Improve kitsoki. The `improve` modes are
+read-only introspection reports grounded in the live trace; they recommend
+prompt/tool/script/permission/test changes without mutating files.
+
 **No-LLM posture.** Under `--flow` / `--host-cassette` the meta agent is
 replaced by a deterministic stub (`internal/metamode/stub_agent.go`): read-only
 modes return a scripted reply; Story-edit makes a real, controlled disk write so

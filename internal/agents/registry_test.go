@@ -21,6 +21,36 @@ func TestNewBuiltinsHasStoryAuthor(t *testing.T) {
 	}
 }
 
+func TestNewBuiltinsHasImprovers(t *testing.T) {
+	r := NewBuiltins()
+
+	story, ok := r.Get(NameStoryImprover)
+	if !ok {
+		t.Fatal("expected story-improver in builtins")
+	}
+	if story.SystemPrompt == "" {
+		t.Error("story-improver SystemPrompt is empty")
+	}
+	wantStoryTools := []string{"Read", "Glob", "Grep"}
+	if !reflect.DeepEqual(story.Tools, wantStoryTools) {
+		t.Errorf("story-improver Tools = %v, want %v", story.Tools, wantStoryTools)
+	}
+
+	kitsoki, ok := r.Get(NameKitsokiImprover)
+	if !ok {
+		t.Fatal("expected kitsoki-improver in builtins")
+	}
+	if kitsoki.SystemPrompt == "" {
+		t.Error("kitsoki-improver SystemPrompt is empty")
+	}
+	if !reflect.DeepEqual(kitsoki.Tools, wantStoryTools) {
+		t.Errorf("kitsoki-improver Tools = %v, want %v", kitsoki.Tools, wantStoryTools)
+	}
+	if kitsoki.DefaultCwd != "${KITSOKI_REPO}" {
+		t.Errorf("kitsoki-improver DefaultCwd = %q, want ${KITSOKI_REPO}", kitsoki.DefaultCwd)
+	}
+}
+
 func TestRegistryGetMissing(t *testing.T) {
 	r := NewBuiltins()
 	a, ok := r.Get("nonexistent")

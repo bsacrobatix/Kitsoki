@@ -233,14 +233,25 @@ Three more agents ship pre-registered alongside `story-author`:
   reached through the builtin `kitsoki.bug` meta mode.
 - **`story-explainer`** — read-only sibling of `story-author`
   (`Read`, `Glob`, `Grep` only). Reached through `story.ask`.
+- **`story-improver`** — read-only continuous-improvement reviewer for
+  the running story. It reads the current context and trace, inspects
+  prompts / rooms / scripts / agent declarations, and returns an
+  introspection report: observed false start, likely cause,
+  recommended story change, tool/permission notes, and no-LLM
+  regression coverage. Reached through `story.improve`.
+- **`kitsoki-improver`** — read-only continuous-improvement reviewer
+  for kitsoki engine runs. It uses the same trace-backed report shape,
+  but looks for reusable engine, host, tool, prompt, workflow, or
+  test improvements rather than story-specific edits. Reached through
+  `kitsoki.improve`.
 
 ### 3.2 Builtin meta_modes
 
-The loader injects six meta_modes that every app gets without
+The loader injects eight meta_modes that every app gets without
 declaring them in YAML (mirrors the agent-builtin pattern, see
 `internal/app/builtin_meta_modes.go`). Map keys follow a
 `group.verb` convention so a single namespace (`story.*`,
-`kitsoki.*`) can carry multiple verbs (`edit`, `ask`, `bug`)
+`kitsoki.*`) can carry multiple verbs (`edit`, `ask`, `improve`, `bug`)
 without inventing ad-hoc names. Each group has a `default` verb
 that bare `/meta <group>` resolves to (`edit` for both builtin
 groups):
@@ -250,6 +261,13 @@ groups):
   Per-app keying.
 - **`story.ask`** — `/meta story ask`. Read-only Q&A about the
   story, agent `story-explainer`, tools `Read`/`Glob`/`Grep`.
+- **`story.improve`** — `/meta story improve`; bare
+  `/meta improve` resolves here. Read-only introspection for the
+  current run, agent `story-improver`, tools `Read`/`Glob`/`Grep`.
+  Use this when the run produced a surprising answer, the operator
+  corrected the agent, or a tool loop looked wasteful and you want a
+  concrete report on prompt / tool / script / permission / flow-test
+  improvements before editing.
 - **`story.bug`** — `/meta story bug`. Files a story bug via
   `kitsoki bug create --target story`; agent
   `story-bug-reporter`.
@@ -261,6 +279,12 @@ groups):
   the same row the user reopens while playing dev-story.
 - **`kitsoki.ask`** — `/meta kitsoki ask`. Read-only Q&A about
   kitsoki source, agent `kitsoki-explainer`.
+- **`kitsoki.improve`** — `/meta kitsoki improve`. Read-only
+  introspection for reusable engine improvements, agent
+  `kitsoki-improver`, tools `Read`/`Glob`/`Grep`, cwd
+  `${KITSOKI_REPO}`. Use this when the durable fix belongs in
+  kitsoki's runtime, host/tool surface, prompts, trace UX, docs, or
+  no-LLM regression harness rather than in the running story.
 - **`kitsoki.bug`** — `/meta kitsoki bug`. Files a kitsoki bug
   via `kitsoki bug create --target kitsoki`; agent
   `kitsoki-bug-reporter`.
@@ -268,8 +292,9 @@ groups):
 The entire `kitsoki.*` group is omitted from the injection set
 when `KITSOKI_REPO` is unset.
 
-**Agent verb for read-only metas.** The two read-only modes above
-(`story.ask`, `kitsoki.ask`) — and any app-declared meta whose agent's
+**Agent verb for read-only metas.** The read-only modes above
+(`story.ask`, `story.improve`, `kitsoki.ask`, `kitsoki.improve`) —
+and any app-declared meta whose agent's
 `Tools` contains only read-only entries — use `host.agent.ask` as
 their underlying agent verb (agent-split proposal §2.3, decision
 D14). The loader cross-checks: a meta whose agent carries `Edit` or
@@ -289,21 +314,23 @@ Trigger uniqueness is per-group, so `story.bug` and `kitsoki.bug`
 (both trigger `bug`) coexist.
 
 **Bare verbs resolve to the story group.** A single-token
-`/meta <verb>` (`/meta bug`, `/meta ask`, `/meta edit`) is NOT a
+`/meta <verb>` (`/meta bug`, `/meta ask`, `/meta improve`,
+`/meta edit`) is NOT a
 group lookup — there is no group named `bug`. The TUI resolver
 (`resolveMetaName` → `metaVerbKey`) maps the bare verb to the
 matching grouped builtin, **preferring the `story` group**, so
 `/meta bug` ≡ `/meta story bug`, `/meta ask` ≡ `/meta story ask`,
-`/meta edit` ≡ `/meta story edit`. This keeps the common,
+`/meta improve` ≡ `/meta story improve`, `/meta edit` ≡
+`/meta story edit`. This keeps the common,
 story-targeting verbs one token short while leaving the keys
 grouped — the grouping is what lets a story declare an `ask` /
 `bug` intent without colliding with these triggers (see the
 intent-collision check in `validateMetaModes`; a flat,
 un-namespaced builtin trigger would not be free to coexist with a
 same-named intent). Engine-targeting stays explicit: there is no
-bare `/meta` shortcut into `kitsoki.*` — type `/meta kitsoki bug`
-/ `/meta kitsoki edit`. Bare `/meta` (no verb) likewise resolves
-the `story` group's default verb.
+bare `/meta` shortcut into `kitsoki.*` — type `/meta kitsoki improve`,
+`/meta kitsoki bug`, or `/meta kitsoki edit`. Bare `/meta` (no verb)
+likewise resolves the `story` group's default verb.
 
 The `/meta self` single-token trigger from prior versions is gone
 (use `/meta kitsoki edit`).
@@ -667,6 +694,9 @@ What ships with kitsoki today (formerly under "Limitations"):
   `kitsoki.edit` uses the `kitsoki-engineer` agent rooted at
   `${KITSOKI_REPO}` and keys its chat against a synthetic `app_id`
   so the conversation is the same row across every running app;
+  `story.improve` / `kitsoki.improve` are read-only introspection
+  report modes for continuous improvement after false starts or
+  operator corrections;
   `story.bug` uses the `story-bug-reporter` agent which files
   reports via `kitsoki bug create --target story` under the selected
   local sink (`issues/bugs/` or `.artifacts/issues/bugs/`); `kitsoki.bug`

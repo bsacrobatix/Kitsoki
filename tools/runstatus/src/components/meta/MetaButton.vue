@@ -244,9 +244,21 @@ const uiModes = [
     disabledHint: "Open a story first",
   },
   {
+    key: "story.improve",
+    label: "Improve run",
+    hint: "Review the latest run for prompt, tool, and flow-test improvements",
+    disabledHint: "Open a story first",
+  },
+  {
     key: "kitsoki.ask",
     label: "Kitsoki help",
     hint: "Ask about kitsoki itself (read-only)",
+    disabledHint: "Unavailable",
+  },
+  {
+    key: "kitsoki.improve",
+    label: "Improve kitsoki",
+    hint: "Review this run for reusable kitsoki engine improvements",
     disabledHint: "Unavailable",
   },
 ] as const;
