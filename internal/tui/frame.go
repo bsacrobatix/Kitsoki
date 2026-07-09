@@ -151,17 +151,7 @@ func composePromptAndBanner(m RootModel) (promptLine, bannerLine string) {
 	m.prompt.SetHeight(promptHeightFor(&m.prompt))
 	switch m.mode {
 	case ModeChoosing:
-		if m.pendingDraft != "" {
-			promptLine = lipgloss.NewStyle().
-				Foreground(colorMuted).
-				Italic(true).
-				Render("(picker active — /input restores your prior draft)")
-		} else {
-			promptLine = lipgloss.NewStyle().
-				Foreground(colorMuted).
-				Italic(true).
-				Render("(picker active)")
-		}
+		promptLine = m.choicePromptLine()
 	case ModeMenu:
 		promptLine = m.menuSystem.View()
 	case ModeMetaSessions:

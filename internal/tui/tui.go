@@ -887,9 +887,6 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		}
 		m.transcript.AppendSystemTyped(initialView, typedForBody, m.initialTypedEnv, m.initialTypedRR)
 		appendStartupNotices(&m)
-		if m.mode == ModeChoosing {
-			m.transcript.AppendLive(m.choice.View(m.transcript.wrapWidth()))
-		}
 	} else if initialView != "" {
 		slog.Info("tui.initial_paint",
 			"path", "legacy_system",
@@ -2778,7 +2775,6 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 		// over the destination state.
 		if m.choice.IsActive() {
 			m.choice.Close()
-			m.transcript.FinalizeLive("")
 			if m.mode == ModeChoosing {
 				m.mode = ModeOnPath
 			}
@@ -2841,10 +2837,6 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.transcript.AppendAgentBody(out.View)
 		}
-		if m.mode == ModeChoosing {
-			m.transcript.AppendLive(m.choice.View(m.transcript.wrapWidth()))
-		}
-
 		// Update menu.
 		w := m.orch.InitialWorld() // only used for initial world; menu comes from allowed list
 		m = m.updateMenuFromAllowed(out.AllowedIntents, w)
@@ -4372,12 +4364,7 @@ func (m RootModel) updateDisambiguating(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		var cmd tea.Cmd
-		m, cmd = m.handleWindowSize(msg)
-		// Re-render the widget at the new width so the live region
-		// reflows in place.
-		m.transcript.UpdateLive(m.choice.View(m.transcript.wrapWidth()))
-		return m, cmd
+		return m.handleWindowSize(msg)
 
 	case turnOutcomeMsg:
 		// A turn outcome arriving while ModeChoosing means an
@@ -4385,7 +4372,6 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// pressed Enter on the prompt). Close the widget and fall
 		// through to the normal handler.
 		m.choice.Close()
-		m.transcript.FinalizeLive("")
 		m.mode = ModeOnPath
 		return m.handleTurnOutcome(msg)
 
@@ -4407,10 +4393,6 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.choice, cmd, commit = m.choice.Update(msg)
 
-		// Always refresh the live region after a key — even a no-op
-		// arrow may have moved the cursor.
-		m.transcript.UpdateLive(m.choice.View(m.transcript.wrapWidth()))
-
 		if commit == nil {
 			return m, cmd
 		}
@@ -4428,10 +4410,10 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// draft remains in m.pendingDraft, reachable via
 				// /input.
 				slog.Debug("tui.choice.to_chat")
-				m.transcript.FinalizeLive("")
+				m.transcript.AppendBlock(body)
 				m.transcript.AppendSystem("(picker dismissed — type to chat. /input restores your prior draft.)")
 			} else {
-				m.transcript.FinalizeLive(body)
+				m.transcript.AppendBlock(body)
 				m.transcript.AppendSystem("(picker cancelled)")
 				// Cancel via Esc — restore the pre-widget draft so
 				// the user can continue editing where they left off.
@@ -4447,7 +4429,7 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Commit — finalise the widget and dispatch.
 		m.choice.Close()
-		m.transcript.FinalizeLive(body)
+		m.transcript.AppendBlock(body)
 		display := commit.Intent
 		m.lastInput = display
 		next, asyncCmd := startAsyncTurn(m, display,
@@ -4857,25 +4839,7 @@ func (m RootModel) View() string {
 	var promptLine string
 	switch m.mode {
 	case ModeChoosing:
-		// While the choice widget owns focus the prompt textarea is
-		// inert — keystrokes route to the widget, not the buffer.
-		// Suppress the textarea entirely; the widget's own footer
-		// (above the divider) advertises its keymap, so a second
-		// hint here would either repeat it or — worse — mislead in
-		// modes where typed letters get absorbed by the picker
-		// (paramMode, form mode). When there's a draft worth
-		// restoring, surface a single line about /input.
-		if m.pendingDraft != "" {
-			promptLine = lipgloss.NewStyle().
-				Foreground(colorMuted).
-				Italic(true).
-				Render("(picker active — /input restores your prior draft)")
-		} else {
-			promptLine = lipgloss.NewStyle().
-				Foreground(colorMuted).
-				Italic(true).
-				Render("(picker active)")
-		}
+		promptLine = m.choicePromptLine()
 	case ModeMenu:
 		promptLine = m.menuSystem.View()
 	case ModeMetaSessions:
@@ -4946,6 +4910,44 @@ func (m RootModel) View() string {
 	// byte-identical to the pre-composer assembly.
 	parts := composeChromeParts(m, m.width, promptLine, bannerLine)
 	return joinChromeParts(parts)
+}
+
+const (
+	choiceChromeMinRows     = 4
+	choiceChromeDefaultRows = 12
+	choiceChromeReserved    = 8
+)
+
+func choiceChromeMaxRows(height int) int {
+	if height <= 0 {
+		return choiceChromeDefaultRows
+	}
+	rows := height - choiceChromeReserved
+	if rows < choiceChromeMinRows {
+		rows = choiceChromeMinRows
+	}
+	if rows > choiceChromeDefaultRows {
+		rows = choiceChromeDefaultRows
+	}
+	return rows
+}
+
+func (m RootModel) choicePromptLine() string {
+	if m.choice.IsActive() {
+		return m.choice.ChromeView(m.transcript.wrapWidth(), choiceChromeMaxRows(m.height))
+	}
+	return pickerActiveLine(m.pendingDraft)
+}
+
+func pickerActiveLine(pendingDraft string) string {
+	text := "(picker active)"
+	if pendingDraft != "" {
+		text = "(picker active — /input restores your prior draft)"
+	}
+	return lipgloss.NewStyle().
+		Foreground(colorMuted).
+		Italic(true).
+		Render(text)
 }
 
 // promptPrefix returns the styled mode-specific prompt prefix.
