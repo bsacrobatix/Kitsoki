@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,4 +22,11 @@ func TestRunFlags_HostCassetteRegistered(t *testing.T) {
 
 	assert.NotNil(t, cmd.Flags().Lookup("host-cassette"),
 		"run should support deterministic host replay for real TUI demos")
+}
+
+func TestTUIMetaAgentCaller_ReplayUsesStub(t *testing.T) {
+	t.Setenv("KITSOKI_META_STREAM_DELAY_MS", "0")
+
+	assert.Contains(t, fmt.Sprintf("%T", tuiMetaAgentCaller("replay")), "StubAgentCaller")
+	assert.NotContains(t, fmt.Sprintf("%T", tuiMetaAgentCaller("live")), "StubAgentCaller")
 }

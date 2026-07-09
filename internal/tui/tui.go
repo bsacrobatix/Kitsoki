@@ -48,6 +48,7 @@ import (
 )
 
 const githubInboxPollInterval = 5 * time.Minute
+const completionImprovePrompt = "[Improve this run]\nRun `/meta improve` now to review false starts, unexpected output, wasted tool calls, prompt/tool/script changes, permission cleanup, and no-LLM regression coverage. In the web UI, enable \"Auto-run at completion\" to create this report automatically after future runs."
 
 // Mode describes which interaction mode the TUI is currently in.
 type Mode int
@@ -2859,6 +2860,7 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 
 		if out.Mode == orchestrator.ModeCompleted {
 			m.transcript.AppendSystem("\n[Game over — start a new session to play again]")
+			m = m.appendCompletionImprovePrompt()
 			m.prompt.Placeholder = "(game over)"
 		}
 
@@ -2953,6 +2955,17 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m RootModel) appendCompletionImprovePrompt() RootModel {
+	if m.metaController == nil || m.orch == nil || m.orch.AppDef() == nil {
+		return m
+	}
+	if _, ok := m.orch.AppDef().MetaModes["story.improve"]; !ok {
+		return m
+	}
+	m.transcript.AppendSystem(completionImprovePrompt)
+	return m
 }
 
 // renderRejection writes a friendly clarification or guard message into
