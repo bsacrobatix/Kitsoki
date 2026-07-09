@@ -97,9 +97,10 @@ and the dogfood marathon landing room. This matters because the widget starts
 active in a real terminal; pressing `Tab` is the explicit "chat instead" gesture,
 so a recording that tabs away without showing the widget omits a bug-prone
 surface. The serious-exception checkpoint is also handled through the same
-choice widget: the warning stays on screen, the cursor moves to "acknowledge and
-continue", and Enter commits that actual intent instead of typing a staged
-free-text answer. Each submitted command holds briefly before Enter, every
+choice widget: the warning stays on screen with a distinct question, impact,
+Issue link, and trace link; the cursor moves to "park case and continue"; and
+Enter commits that actual intent instead of typing a staged free-text answer.
+Each submitted command holds briefly before Enter, every
 processed bug settles on a visible autonomous running/report state that names
 the current case and its source details, and the spec fails a watch-speed
 recording if any chapter is shorter than the readable floor. The saved MP4 is

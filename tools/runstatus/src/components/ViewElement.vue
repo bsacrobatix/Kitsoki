@@ -502,6 +502,35 @@ function isMarkdownPath(value: string): boolean {
   return /\S+\.md$/.test(value.trim());
 }
 
+interface KVInlineLink {
+  label: string;
+  target: string;
+}
+
+function kvInlineLink(value: string): KVInlineLink | null {
+  const trimmed = value.trim();
+  if (trimmed === "" || trimmed !== value || trimmed.includes("\n")) return null;
+  const markdown = /^\[([^\]\n]+)\]\(([^)\s]+)\)$/.exec(trimmed);
+  if (markdown) {
+    const label = markdown[1].trim();
+    const target = markdown[2].trim();
+    if (label !== "" && target !== "") return { label, target };
+    return null;
+  }
+  if (/^https?:\/\/[^\s]+$/i.test(trimmed)) {
+    return { label: trimmed, target: trimmed };
+  }
+  return null;
+}
+
+function kvInlineLinkRel(target: string): string | undefined {
+  return /^https?:\/\//i.test(target) ? "noopener noreferrer" : undefined;
+}
+
+function kvInlineLinkTarget(target: string): string | undefined {
+  return /^https?:\/\//i.test(target) ? "_blank" : undefined;
+}
+
 /** A literal hex accent (#rgb / #rrggbb / #rrggbbaa) authored on the banner. */
 const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const bannerSource = computed<string>(() => el.value.Source ?? "");
@@ -601,8 +630,15 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
     <template v-for="(pair, pi) in pairs" :key="pi">
       <dt class="ve-kv-key">{{ pair.Key }}</dt>
       <dd class="ve-kv-value">
+        <a
+          v-if="kvInlineLink(pair.Value)"
+          class="ve-kv-inline-link"
+          :href="kvInlineLink(pair.Value)?.target"
+          :target="kvInlineLinkTarget(kvInlineLink(pair.Value)?.target ?? '')"
+          :rel="kvInlineLinkRel(kvInlineLink(pair.Value)?.target ?? '')"
+        >{{ kvInlineLink(pair.Value)?.label }}</a>
         <button
-          v-if="isMarkdownPath(pair.Value)"
+          v-else-if="isMarkdownPath(pair.Value)"
           class="ve-kv-file-link"
           @click="openedPath = pair.Value.trim()"
         >{{ pair.Value }}</button>
@@ -994,7 +1030,8 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
   color: var(--k-paper-fg, #1f2430);
 }
 
-.ve-kv-file-link {
+.ve-kv-file-link,
+.ve-kv-inline-link {
   background: none;
   border: none;
   padding: 0;
@@ -1007,7 +1044,8 @@ const bannerStyle = computed<Record<string, string>>((): Record<string, string> 
   word-break: break-all;
   text-align: left;
 }
-.ve-kv-file-link:hover {
+.ve-kv-file-link:hover,
+.ve-kv-inline-link:hover {
   color: var(--k-fg-accent, #1e40af);
 }
 

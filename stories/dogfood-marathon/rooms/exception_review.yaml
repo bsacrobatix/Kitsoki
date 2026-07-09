@@ -21,20 +21,20 @@ states:
             Title:      '{{ world.current_case.title|default:world.last_result.title|default:"—" }}'
             Severity:   'serious'
             Question:   '{{ world.last_result.operator_question|default:world.exception_summary|default:world.last_error|default:"—" }}'
-            Impact:     '{{ world.exception_summary|default:"the case is recorded and parked until an operator decision is durable" }}'
-            Source:     '{{ world.current_case.source_url|default:world.current_case.source_path|default:world.last_result.source_url|default:"—" }}'
-            Trace:      '{{ world.last_result.trace|default:world.drive_result.trace|default:"—" }}'
+            Impact:     '{{ world.last_result.operator_impact|default:"the case remains parked as needs-human until an operator supplies scope" }}'
+            Issue:      '{{ world.last_result.issue_link|default:world.current_case.issue_link|default:world.current_case.source_url|default:world.current_case.source_path|default:world.last_result.source_url|default:"—" }}'
+            Trace:      '{{ world.last_result.trace_link|default:world.drive_result.trace_link|default:world.last_result.trace|default:world.drive_result.trace|default:"—" }}'
             Last exit:  '{{ world.last_result.exit|default:world.drive_result.exit|default:"—" }}'
             Verify:     '{{ world.last_result.verify_status|default:world.verify_result.status|default:"—" }}'
             Exceptions: '{{ world.exceptions.items|length }}'
             Journal:    '{{ world.journal_path|default:"(pending)" }}'
-      - prose: "The autonomous run is paused because this case needs an explicit operator decision. Answer if you can give safe scope; otherwise acknowledge to keep the case journaled as needs-human and continue with the next case."
+      - prose: "The autonomous run paused to collect an operator decision for this case. Answer the question if you want to resolve it now, or park it as needs-human in the journal and continue with the next case."
       - choice:
           mode: single
-          prompt: "Resolve this exception"
+          prompt: "Resolve this question"
           items:
-            - label: "acknowledge and continue"
-              hint:  "leave this case journaled as needs-human and move on"
+            - label: "park case and continue"
+              hint:  "leave the question unresolved in the journal and move on"
               intent: ack_exception
             - label: "answer with guidance"
               hint:  "write the operator decision into the durable journal"
@@ -118,12 +118,12 @@ states:
                 inputs:
                   exceptions: "{{ world.exceptions }}"
                   case_id:    "{{ world.exception_pending != '' ? world.exception_pending : world.current_case.id }}"
-                  status:     "acknowledged"
-                  answer:     "acknowledged"
+                  status:     "parked"
+                  answer:     "parked without operator answer"
               bind:
                 exceptions: exceptions
             - set:
-                exception_answer:  "acknowledged"
+                exception_answer:  "parked without operator answer"
                 case_index:        "{{ world.case_index + 1 }}"
                 cases_processed:   "{{ world.cases_processed + 1 }}"
                 current_case:      {}
@@ -149,7 +149,7 @@ states:
                   fs:
                     write: [".artifacts/dogfood-marathon/**"]
                 inputs:
-                  stage:                 "exception_acknowledged"
+                  stage:                 "exception_parked"
                   run_id:                "{{ world.run_id }}"
                   run_dir:               "{{ world.run_dir }}"
                   journal_path:          "{{ world.journal_path }}"
