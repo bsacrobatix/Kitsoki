@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/reportcontract"
 	"kitsoki/internal/ticketprovider"
 )
 
@@ -18,7 +19,7 @@ import (
 // Report Bug, while rendering the markdown as a continuous-improvement report.
 func (s *Server) metaImproveReportContext(ctx context.Context, params map[string]any) (any, *rpcError) {
 	sessionID := strings.TrimSpace(stringParam(params, "session_id"))
-	destination := normalizeImproveDestination(stringParam(params, "destination"))
+	destination := reportcontract.NormalizeDestination(stringParam(params, "destination"))
 	title := strings.TrimSpace(stringParam(params, "title"))
 	if title == "" {
 		if sessionID != "" {
@@ -46,8 +47,8 @@ func (s *Server) metaImproveReportContext(ctx context.Context, params map[string
 		}
 	}
 
-	useProvider := destination != "local" && strings.TrimSpace(s.improveTicketProvider) != ""
-	if destination == "local" || useProvider {
+	useProvider := destination != reportcontract.DestinationLocal && strings.TrimSpace(s.improveTicketProvider) != ""
+	if destination == reportcontract.DestinationLocal || useProvider {
 		reportParams["force_local"] = true
 	}
 
@@ -56,8 +57,8 @@ func (s *Server) metaImproveReportContext(ctx context.Context, params map[string
 		return nil, rerr
 	}
 	result := normalizeImproveReportResult(localOrConfigured)
-	result["report_kind"] = "meta-improve"
-	result["destination"] = destination
+	result["report_kind"] = reportcontract.KindMetaImprove.String()
+	result["destination"] = destination.String()
 
 	if !useProvider {
 		return result, nil
@@ -65,20 +66,7 @@ func (s *Server) metaImproveReportContext(ctx context.Context, params map[string
 	return s.postMetaImproveReport(ctx, params, reportParams, title, body, result), nil
 }
 
-func normalizeImproveDestination(raw string) string {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "configured", "default":
-		return "configured"
-	case "local", "local-artifact":
-		return "local"
-	case "provider", "ticket-provider", "ticket_provider":
-		return "ticket-provider"
-	default:
-		return "configured"
-	}
-}
-
-func buildMetaImproveReportBody(params map[string]any, destination string) string {
+func buildMetaImproveReportBody(params map[string]any, destination reportcontract.Destination) string {
 	report := strings.TrimSpace(stringParam(params, "report"))
 	if report == "" {
 		report = "No meta report text was supplied. The evidence bundle still captures the session state for review."
@@ -97,7 +85,7 @@ func buildMetaImproveReportBody(params map[string]any, destination string) strin
 	sb.WriteString("\n\n## Operator Guidance\n\n")
 	sb.WriteString(guidance)
 	sb.WriteString("\n\n## Evidence Bundle\n\n")
-	sb.WriteString("- Report kind: `meta-improve`\n")
+	fmt.Fprintf(&sb, "- Report kind: `%s`\n", reportcontract.KindMetaImprove)
 	if sessionID != "" {
 		fmt.Fprintf(&sb, "- Session: `%s`\n", sessionID)
 	}
@@ -105,17 +93,11 @@ func buildMetaImproveReportBody(params map[string]any, destination string) strin
 	if chatID != "" {
 		fmt.Fprintf(&sb, "- Meta chat: `%s`\n", chatID)
 	}
-	sb.WriteString("- Expected artifacts: scrubbed HAR (`har.json`), session replay (`rrweb.json` when browser capture is available), recent console (`console.json` when present), and redacted trace (`trace.redacted.jsonl` when the session can be resolved).\n")
-	sb.WriteString("- Review focus: false starts, unexpected outputs, prompt/tool/script changes, permission cleanup, and no-LLM regression coverage.\n")
+	fmt.Fprintf(&sb, "- %s\n", reportcontract.ExpectedBrowserEvidenceSentence())
+	fmt.Fprintf(&sb, "- Review focus: %s.\n", reportcontract.KindMetaImprove.ReviewFocus())
 	sb.WriteString("\n## Posting\n\n")
-	switch destination {
-	case "local":
-		sb.WriteString("Requested destination: local artifact report.\n")
-	case "ticket-provider":
-		sb.WriteString("Requested destination: configured ticket provider after local evidence capture.\n")
-	default:
-		sb.WriteString("Requested destination: configured sink (GitHub when `--ticket-repo` is set, otherwise local artifact report).\n")
-	}
+	sb.WriteString(destination.PostingDescription())
+	sb.WriteString("\n")
 	return sb.String()
 }
 
@@ -132,14 +114,14 @@ func (s *Server) postMetaImproveReport(ctx context.Context, original, reportPara
 	localReportAbs := displayPathAbs(root, local["path"])
 	localArtifactsAbs := displayPathAbs(root, local["artifacts_path"])
 	args := map[string]any{
-		"kind":                 "meta-improve",
+		"kind":                 reportcontract.KindMetaImprove.String(),
 		"title":                title,
 		"body":                 body + providerLocalEvidenceSection(local),
-		"labels":               stringAnySlice([]string{"kitsoki", "meta-improve"}),
+		"labels":               stringAnySlice(reportcontract.KindMetaImprove.Labels()),
 		"session_id":           stringParam(reportParams, "trace_ref"),
 		"mode":                 nonEmpty(stringParam(original, "mode"), "story.improve"),
 		"chat_id":              stringParam(original, "chat_id"),
-		"destination":          "ticket-provider",
+		"destination":          reportcontract.DestinationTicketProvider.String(),
 		"local_report_path":    local["path"],
 		"local_artifacts_path": local["artifacts_path"],
 		"local_report_abs":     localReportAbs,

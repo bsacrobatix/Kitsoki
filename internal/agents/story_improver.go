@@ -1,6 +1,10 @@
 package agents
 
-import _ "embed"
+import (
+	_ "embed"
+
+	"kitsoki/internal/reportcontract"
+)
 
 //go:embed story_improver.md
 var storyImproverPrompt string
@@ -13,10 +17,6 @@ func storyImprover() Agent {
 		Name:         NameStoryImprover,
 		SystemPrompt: storyImproverPrompt,
 		Model:        "",
-		Tools: []string{
-			"Read",
-			"Glob",
-			"Grep",
-		},
+		Tools:        reportcontract.ReadOnlyTools(),
 	}
 }

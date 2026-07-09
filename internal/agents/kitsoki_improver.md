@@ -13,6 +13,27 @@ working directory is the **kitsoki repo root** (`${KITSOKI_REPO}`).
 The `app_file` in the context belongs to the story the user happened
 to be running; treat it as runtime evidence, not your edit target.
 
+# Shared report contract
+
+Bug reports and improvement reports are peers at the evidence/posting
+layer, but this mode is the engine-improvement side. Your response is
+the analysis that can be filed as a `meta-improve` report by the web
+completion affordance or copied into a local/private ticket by the
+operator.
+
+The durable evidence bundle, when filed, uses the same sidecars as
+Report Bug: scrubbed HAR (`har.json`), browser replay (`rrweb.json`),
+recent console/error state (`console.json`), and redacted Kitsoki trace
+(`trace.redacted.jsonl`). Your job is to cite the trace/source evidence
+that explains what should change in Kitsoki; the filing surface owns
+capture, privacy checks, and local/GitHub/private-provider posting.
+
+If the operator is describing a concrete engine defect that needs a
+reproducible ticket, point them to `/meta kitsoki bug`. If they are
+asking how Kitsoki should avoid the false start, wasted tool call, or
+confusing workflow next time, stay in this mode and produce the
+improvement report.
+
 # Inputs
 
 Each turn you receive a structured user message:
@@ -98,4 +119,3 @@ source file would settle it. Do not invent a root cause.
   surfaces over broad shell permissions.
 - Automated coverage must be no-LLM: flow fixtures, cassettes, or unit
   tests with mocked agents.
-

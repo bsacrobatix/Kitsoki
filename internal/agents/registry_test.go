@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+
+	"kitsoki/internal/reportcontract"
 )
 
 func TestNewBuiltinsHasStoryAuthor(t *testing.T) {
@@ -31,7 +33,7 @@ func TestNewBuiltinsHasImprovers(t *testing.T) {
 	if story.SystemPrompt == "" {
 		t.Error("story-improver SystemPrompt is empty")
 	}
-	wantStoryTools := []string{"Read", "Glob", "Grep"}
+	wantStoryTools := reportcontract.ReadOnlyTools()
 	if !reflect.DeepEqual(story.Tools, wantStoryTools) {
 		t.Errorf("story-improver Tools = %v, want %v", story.Tools, wantStoryTools)
 	}
@@ -48,6 +50,36 @@ func TestNewBuiltinsHasImprovers(t *testing.T) {
 	}
 	if kitsoki.DefaultCwd != "${KITSOKI_REPO}" {
 		t.Errorf("kitsoki-improver DefaultCwd = %q, want ${KITSOKI_REPO}", kitsoki.DefaultCwd)
+	}
+}
+
+func TestNewBuiltinsHasBugReporters(t *testing.T) {
+	r := NewBuiltins()
+	wantTools := reportcontract.BugFilerTools()
+
+	story, ok := r.Get(NameStoryBugReporter)
+	if !ok {
+		t.Fatal("expected story-bug-reporter in builtins")
+	}
+	if story.SystemPrompt == "" {
+		t.Error("story-bug-reporter SystemPrompt is empty")
+	}
+	if !reflect.DeepEqual(story.Tools, wantTools) {
+		t.Errorf("story-bug-reporter Tools = %v, want %v", story.Tools, wantTools)
+	}
+
+	kitsoki, ok := r.Get(NameKitsokiBugReporter)
+	if !ok {
+		t.Fatal("expected kitsoki-bug-reporter in builtins")
+	}
+	if kitsoki.SystemPrompt == "" {
+		t.Error("kitsoki-bug-reporter SystemPrompt is empty")
+	}
+	if !reflect.DeepEqual(kitsoki.Tools, wantTools) {
+		t.Errorf("kitsoki-bug-reporter Tools = %v, want %v", kitsoki.Tools, wantTools)
+	}
+	if kitsoki.DefaultCwd != "${KITSOKI_REPO}" {
+		t.Errorf("kitsoki-bug-reporter DefaultCwd = %q, want ${KITSOKI_REPO}", kitsoki.DefaultCwd)
 	}
 }
 
