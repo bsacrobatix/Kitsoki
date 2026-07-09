@@ -2,7 +2,7 @@ states:
 
   idle:
     description: "Waiting to check a scenario across one or more transports."
-    relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, run_id, run_dir, last_error, status]
+    relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, suite_status, suite_leg_count, suite_skipped_count, run_id, run_dir, last_error, status]
     view:
       - banner:
           text: "SCENARIO QA"
@@ -15,6 +15,7 @@ states:
             Transport: "{{ world.transport_arg }}"
             Persona: '{{ world.persona|default:"(default)" }}'
             Target: '{{ world.target|default:"(default)" }}'
+            Transport suite: '{{ world.suite_status|default:"(not previewed)" }}; legs={{ world.suite_leg_count }}, skipped={{ world.suite_skipped_count }}'
             Last run: '{{ world.run_id|default:"(none yet)" }}'
             Status: "{{ world.status }}"
       - prose: "{{ world.last_error }}"
@@ -30,6 +31,9 @@ states:
             - label: 'check description="..." transport=...'
               hint: "draft an ad-hoc scenario from a free-text description and check it"
               intent: check
+            - label: "preview scenario=... transport=..."
+              hint: "show deterministic transport legs without creating a run bundle"
+              intent: preview
             - label: "report"
               hint: "(re)build report.md for the last run, if any"
               intent: report
@@ -80,6 +84,46 @@ states:
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
+      preview:
+        - when: "(slots.scenario ?? '') == ''"
+          target: .
+          effects:
+            - set:
+                last_error: "preview needs scenario=<catalog-id>."
+        - target: .
+          effects:
+            - set:
+                scenario_ref: "{{ slots.scenario ?? world.scenario_ref }}"
+                transport_arg: "{{ slots.transport ?? world.transport_arg }}"
+                suite_status: ""
+                suite_leg_count: 0
+                suite_skipped_count: 0
+                transport_suite: {}
+                last_error: ""
+                status: "previewing"
+            - invoke: host.run
+              id: preview_transport_suite
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --transport-suite
+                  - --scenarios
+                  - "{{ slots.scenario ?? world.scenario_ref }}"
+                  - --transport
+                  - "{{ slots.transport ?? world.transport_arg }}"
+                  - --json-output
+                cwd: "."
+                fail_on_error: true
+              bind:
+                last_result: stdout_json
+                transport_suite: stdout_json
+                suite_status: "stdout_json.status"
+                suite_leg_count: "stdout_json.summary.leg_count"
+                suite_skipped_count: "stdout_json.summary.skipped_count"
+              on_error: idle
+            - set:
+                status: "preview_ready"
       report:
         - when: "world.run_dir_rel == ''"
           target: .

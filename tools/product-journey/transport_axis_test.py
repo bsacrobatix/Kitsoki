@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Runner-level test for the --transport axis and the persona lens catalog.
+"""Runner-level test for the story-owned --transport axis and persona lens catalog.
 
-Covers docs/persona-qa.md's "transport as data" contract:
+Covers docs/persona-qa.md's scenario-qa "transport as data" contract:
   - select_transports() validation (dup/unknown ids, "all" expansion)
   - resolve_scenario_transports()/scenario_transport_legs() for scenarios that
     declare `transports` vs scenarios that don't (mined scenarios, which get

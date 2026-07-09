@@ -15,7 +15,8 @@ import (
 func personaQACmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "persona-qa <init|validate|transports|emit-run|drive|review|deck|complete> [flags]",
-		Short:              "Initialize, preview, run, review, deck, and score Persona QA Kit bundles",
+		Short:              "Internal Persona QA compatibility adapter",
+		Hidden:             true,
 		DisableFlagParsing: true,
 		SilenceUsage:       true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -31,9 +32,18 @@ func personaQACmd() *cobra.Command {
 
 func printPersonaQAHelp(cmd *cobra.Command) {
 	out := cmd.OutOrStdout()
-	fmt.Fprintln(out, "Persona QA Kit")
+	fmt.Fprintln(out, "Persona QA compatibility adapter")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Usage:")
+	fmt.Fprintln(out, "The supported operator surface is the story:")
+	fmt.Fprintln(out, "  kitsoki run @kitsoki/scenario-qa")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Story intents:")
+	fmt.Fprintln(out, "  preview scenario=project-onboarding transport=all")
+	fmt.Fprintln(out, "  check scenario=project-onboarding transport=all persona=core-maintainer target=gears-rust")
+	fmt.Fprintln(out, "  next_leg")
+	fmt.Fprintln(out, "  report")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Maintainer/debug adapter usage:")
 	fmt.Fprintln(out, "  kitsoki persona-qa init --root .")
 	fmt.Fprintln(out, "  kitsoki persona-qa validate --config persona-qa.yaml")
 	fmt.Fprintln(out, "  kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all")
@@ -44,7 +54,7 @@ func printPersonaQAHelp(cmd *cobra.Command) {
 	fmt.Fprintln(out, "  kitsoki persona-qa deck --config persona-qa.yaml --run-dir <run-dir> --out docs/decks/persona-qa-latest.slidey.json")
 	fmt.Fprintln(out, "  kitsoki persona-qa complete --config persona-qa.yaml --run-dir <run-dir>")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Commands are no-LLM by default. Live capture stays behind explicit story/operator surfaces.")
+	fmt.Fprintln(out, "Adapter commands are no-LLM by default. Live capture stays behind explicit story/operator surfaces.")
 }
 
 func hasHelpArg(args []string) bool {

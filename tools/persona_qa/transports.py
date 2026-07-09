@@ -1,10 +1,10 @@
-"""Canonical Persona QA transport profiles.
+"""Canonical transport profiles for the story-owned Persona QA harness.
 
-The product-facing Persona QA Kit treats transport as data: a scenario says
-which surfaces it can be driven on, and this module defines the deterministic
-entrypoints and proof contract for each surface. The legacy product-journey
-runner imports this module so `kitsoki persona-qa`, scenario-qa stories, and
-run-bundle validation all agree on the same transport catalog.
+The scenario-qa story treats transport as data: a scenario says which surfaces
+it can be driven on, and this module defines the deterministic entrypoints and
+proof contract for each surface. The product-journey runner, compatibility
+adapter, story tests, and validation gates import the same catalog so the
+operator-facing story cannot drift from retained kit/schema checks.
 """
 
 from __future__ import annotations

@@ -289,7 +289,7 @@ def template_config() -> dict[str, Any]:
 
 def template_catalog() -> dict[str, Any]:
     return {
-        "program": "Persona QA Kit",
+        "program": "Scenario QA",
         "targets": [
             {
                 "id": "local-app",

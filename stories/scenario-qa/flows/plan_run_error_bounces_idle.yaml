@@ -1,5 +1,5 @@
 # plan_run_error_bounces_idle — plan.yaml's FIRST invoke (host.run →
-# persona-qa emit-run) fails: on_error: idle routes straight back to idle
+# run.py --emit-run) fails: on_error: idle routes straight back to idle
 # without ever reaching plan_legs. The runtime itself writes the raw failure
 # into world.last_error the moment the on_error: arc fires (before idle's own
 # on_enter even runs) — idle.yaml's `- prose: "{{ world.last_error }}"` line
@@ -16,7 +16,7 @@ host_handlers:
   host.run:
     by_call:
       emit_scenario_qa_run:
-        error: "host.run: persona-qa emit-run exited 1: project 'gears-rust' not found"
+        error: "host.run: run.py --emit-run exited 1: project 'gears-rust' not found"
 
 turns:
   - intent:
@@ -30,11 +30,11 @@ turns:
     expect_state: idle
     expect_world:
       status: "planning"
-      last_error: "host.run: persona-qa emit-run exited 1: project 'gears-rust' not found"
+      last_error: "host.run: run.py --emit-run exited 1: project 'gears-rust' not found"
     expect_host_calls:
       - handler: host.run
         args: { call: emit_scenario_qa_run }
     expect_no_host_calls: [host.starlark.run, host.agent.task]
-    expect_view_matches: "host.run: persona-qa emit-run exited 1: project 'gears-rust' not found"
+    expect_view_matches: "host.run: run.py --emit-run exited 1: project 'gears-rust' not found"
 
 expect_no_errors: true
