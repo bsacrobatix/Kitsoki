@@ -719,6 +719,136 @@ func (m *choiceWidgetModel) View(width int) string {
 	return clampChoiceLines(sb.String(), width)
 }
 
+// ChromeView renders the active widget for RootModel.View()'s normal-screen
+// bottom chrome. The full widget can be taller than the terminal on hub rooms
+// such as dev-story's landing quick actions; Bubble Tea cannot repaint a
+// normal-screen live region that has scrolled off the visible viewport without
+// leaving old frames in scrollback. Keep the interactive chrome bounded and
+// cursor-centered while View() preserves the full body for committed transcript
+// entries.
+func (m *choiceWidgetModel) ChromeView(width, maxRows int) string {
+	full := m.View(width)
+	if full == "" || maxRows <= 0 {
+		return full
+	}
+	lines := strings.Split(full, "\n")
+	if len(lines) <= maxRows {
+		return full
+	}
+
+	footerRows := 1
+	if m.errMsg != "" {
+		footerRows = 2
+	}
+	if footerRows > len(lines) {
+		footerRows = len(lines)
+	}
+	body := append([]string(nil), lines[:len(lines)-footerRows]...)
+	footer := lines[len(lines)-footerRows:]
+	for len(body) > 0 && strings.TrimSpace(ansi.Strip(body[len(body)-1])) == "" {
+		body = body[:len(body)-1]
+	}
+
+	separatorRows := 0
+	if len(body) > 0 && maxRows > footerRows+1 {
+		separatorRows = 1
+	}
+	bodyBudget := maxRows - footerRows - separatorRows
+	if bodyBudget < 1 {
+		bodyBudget = maxRows
+		footer = nil
+		separatorRows = 0
+	}
+
+	cursor := choiceCursorLine(body)
+	if cursor < 0 {
+		cursor = len(body) - 1
+	}
+	body = windowChoiceLines(body, cursor, bodyBudget, width)
+	out := append([]string(nil), body...)
+	if len(footer) > 0 {
+		if separatorRows > 0 {
+			out = append(out, "")
+		}
+		out = append(out, footer...)
+	}
+	return clampChoiceLines(strings.Join(out, "\n"), width)
+}
+
+func choiceCursorLine(lines []string) int {
+	for i, line := range lines {
+		plain := ansi.Strip(line)
+		if strings.Contains(plain, "▸") || strings.Contains(plain, "_") {
+			return i
+		}
+	}
+	return -1
+}
+
+func windowChoiceLines(lines []string, cursor, maxRows, width int) []string {
+	if len(lines) <= maxRows || maxRows <= 0 {
+		return lines
+	}
+	if maxRows == 1 {
+		if cursor < 0 || cursor >= len(lines) {
+			cursor = 0
+		}
+		return []string{lines[cursor]}
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(lines) {
+		cursor = len(lines) - 1
+	}
+
+	start := cursor - maxRows/2
+	if start < 0 {
+		start = 0
+	}
+	if start+maxRows > len(lines) {
+		start = len(lines) - maxRows
+	}
+	end := start + maxRows
+	above := start
+	below := len(lines) - end
+	bodyRows := maxRows
+	if above > 0 {
+		bodyRows--
+	}
+	if below > 0 {
+		bodyRows--
+	}
+	if bodyRows < 1 {
+		bodyRows = 1
+	}
+
+	start = cursor - bodyRows/2
+	if start < 0 {
+		start = 0
+	}
+	if start+bodyRows > len(lines) {
+		start = len(lines) - bodyRows
+	}
+	end = start + bodyRows
+	above = start
+	below = len(lines) - end
+
+	out := make([]string, 0, maxRows)
+	if above > 0 {
+		out = append(out, choiceOverflowLine("↑", above, width))
+	}
+	out = append(out, lines[start:end]...)
+	if below > 0 {
+		out = append(out, choiceOverflowLine("↓", below, width))
+	}
+	return out
+}
+
+func choiceOverflowLine(dir string, n int, width int) string {
+	return choiceHintStyle.Render(truncateChoiceCell(fmt.Sprintf("  %s %d more", dir, n), width))
+}
+
 func (m *choiceWidgetModel) renderSingleBody(width int) string {
 	if len(m.items) == 0 {
 		return "  (no choices available)"
