@@ -1,17 +1,107 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { type Page, type Video } from "@playwright/test";
+import { type BrowserContext, type Page, type Video } from "@playwright/test";
 
 export const PACE = Number(process.env.WEB_CHAT_PACE ?? "1");
 export const MIN_DEMO_SECONDS = Number(process.env.KITSOKI_MIN_DEMO_SECONDS ?? "25");
+
+const patchedRrwebContexts = new WeakSet<BrowserContext>();
+
+export function rrwebCaptureOutPath(): string | null {
+  const out = process.env.KITSOKI_RRWEB_OUT?.trim();
+  return out ? path.resolve(out) : null;
+}
+
+function rrwebCaptureSidecarPath(out: string): string {
+  return out.endsWith(".rrweb.json")
+    ? out.replace(/\.rrweb\.json$/, ".rrweb.capture.json")
+    : `${out}.capture.json`;
+}
+
+function rrwebBundlePath(): string {
+  return path.resolve(import.meta.dirname, "..", "..", "node_modules", "rrweb", "dist", "rrweb.umd.min.cjs");
+}
+
+export async function maybeInstallAutoRrwebCapture(page: Page): Promise<void> {
+  const out = rrwebCaptureOutPath();
+  if (!out) return;
+
+  const events: unknown[] = [];
+  await page.exposeFunction("__kitsokiTuiRrwebEmit", (event: unknown) => {
+    events.push(event);
+  });
+
+  await page.addScriptTag({ path: rrwebBundlePath() });
+  await page.evaluate(() => {
+    if (!(window as any).rrweb) {
+      throw new Error("rrweb global was not installed");
+    }
+    if ((window as any).__kitsokiTuiRrwebStop) return;
+    (window as any).__kitsokiTuiRrwebStop = (window as any).rrweb.record({
+      emit(event: unknown) {
+        (window as any).__kitsokiTuiRrwebEmit(event);
+      },
+      maskAllInputs: false,
+      maskAllText: false,
+      recordCanvas: false,
+    });
+  });
+
+  const context = page.context();
+  if (patchedRrwebContexts.has(context)) return;
+  patchedRrwebContexts.add(context);
+
+  const originalClose = context.close.bind(context);
+  context.close = async (...args: Parameters<BrowserContext["close"]>) => {
+    try {
+      await page.evaluate(() => {
+        const stop = (window as any).__kitsokiTuiRrwebStop;
+        if (typeof stop === "function") stop();
+      });
+    } catch {
+      // The page may already be gone if the test failed during navigation.
+    }
+
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    fs.writeFileSync(
+      out,
+      JSON.stringify(
+        {
+          schema: "kitsoki-tui-rrweb/v1",
+          created_at: new Date().toISOString(),
+          source: "tools/tui-bridge",
+          events,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    fs.writeFileSync(
+      rrwebCaptureSidecarPath(out),
+      JSON.stringify(
+        {
+          schema: "kitsoki-tui-rrweb-capture/v1",
+          created_at: new Date().toISOString(),
+          rrweb_path: out,
+          event_count: events.length,
+          viewport: page.viewportSize(),
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+
+    return originalClose(...args);
+  };
+}
 
 export function cameraContext(opts: { recordVideoDir?: string } = {}) {
   const size = { width: 1600, height: 900 };
   return {
     viewport: size,
     deviceScaleFactor: 2,
-    ...(opts.recordVideoDir ? { recordVideo: { dir: opts.recordVideoDir, size } } : {}),
+    ...(opts.recordVideoDir && !rrwebCaptureOutPath() ? { recordVideo: { dir: opts.recordVideoDir, size } } : {}),
   };
 }
 
@@ -67,6 +157,8 @@ export async function saveVideoAsMp4(
   name: string,
   opts: SaveVideoOptions = {},
 ): Promise<string | null> {
+  const rrwebOut = rrwebCaptureOutPath();
+  if (rrwebOut) return rrwebOut;
   if (!video) return null;
   const gate = PACE === 0;
   const outName = gate ? `${name}.fast` : name;

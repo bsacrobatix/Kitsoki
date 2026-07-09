@@ -8,7 +8,9 @@
     "serve": "node player/serve.mjs",
     "test": "playwright test",
     "validate:dogfood": "WEB_CHAT_PACE=0 playwright test tests/dogfood-marathon-real-tui.e2e.spec.ts",
-    "record:dogfood": "playwright test tests/dogfood-marathon-real-tui.e2e.spec.ts"
+    "record:dogfood": "playwright test tests/dogfood-marathon-real-tui.e2e.spec.ts",
+    "validate:presentation-onboarding": "WEB_CHAT_PACE=0 playwright test tests/presentation-onboarding-real-tui.e2e.spec.ts",
+    "record:presentation-onboarding": "playwright test tests/presentation-onboarding-real-tui.e2e.spec.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
@@ -17,6 +19,7 @@
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0"
+    "@xterm/xterm": "^5.5.0",
+    "rrweb": "2.0.1"
   }
 }
