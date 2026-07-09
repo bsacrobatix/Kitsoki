@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"kitsoki/internal/agents"
+	"kitsoki/internal/reportcontract"
 )
 
 // builtinMetaModes returns the meta_modes that ship with kitsoki and are
@@ -51,7 +52,8 @@ import (
 // everywhere. Apps that want them regardless declare them explicitly.
 func builtinMetaModes() map[string]*MetaModeDef {
 	onpath := &MetaReturnDef{Intent: "onpath"}
-	roTools := []string{"Read", "Glob", "Grep"}
+	roTools := reportcontract.ReadOnlyTools()
+	bugTools := reportcontract.BugFilerTools()
 
 	out := map[string]*MetaModeDef{
 		"story.edit": {
@@ -87,6 +89,7 @@ func builtinMetaModes() map[string]*MetaModeDef {
 			Label:   "Story bug",
 			Banner:  "Filing a story bug — write it down and the agent files it under issues/bugs/.",
 			Agent:   agents.NameStoryBugReporter,
+			Tools:   bugTools,
 			Return:  onpath,
 		},
 	}
@@ -128,6 +131,7 @@ func builtinMetaModes() map[string]*MetaModeDef {
 			Banner:  "Filing a bug against kitsoki — write it down and the agent files it under issues/bugs/.",
 			Agent:   agents.NameKitsokiBugReporter,
 			Cwd:     "${KITSOKI_REPO}",
+			Tools:   bugTools,
 			Return:  onpath,
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"kitsoki/internal/reportcontract"
 	"kitsoki/internal/runstatus"
 )
 
@@ -42,7 +43,7 @@ func TestMetaImproveReport_FilesLocalEvidenceBundle(t *testing.T) {
 	if out["sink"] != "local-artifact" {
 		t.Fatalf("sink = %#v, want local-artifact; result=%#v", out["sink"], out)
 	}
-	if out["report_kind"] != "meta-improve" {
+	if out["report_kind"] != reportcontract.KindMetaImprove.String() {
 		t.Fatalf("report_kind = %#v", out["report_kind"])
 	}
 
@@ -67,7 +68,12 @@ func TestMetaImproveReport_FilesLocalEvidenceBundle(t *testing.T) {
 	}
 
 	artifactsDir := filepath.Join(root, filepath.FromSlash(out["artifacts_path"].(string)))
-	for _, name := range []string{"har.json", "rrweb.json", "console.json", "trace.redacted.jsonl"} {
+	for _, name := range []string{
+		reportcontract.ArtifactHAR,
+		reportcontract.ArtifactRRWeb,
+		reportcontract.ArtifactConsole,
+		reportcontract.ArtifactTrace,
+	} {
 		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
 			t.Fatalf("expected artifact %s: %v", name, err)
 		}

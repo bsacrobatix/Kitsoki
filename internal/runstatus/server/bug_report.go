@@ -38,6 +38,7 @@ import (
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/reportcontract"
 	"kitsoki/internal/reportmeta"
 	"kitsoki/internal/runstatus/harscrub"
 )
@@ -185,11 +186,11 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	png := decodeScreenshot(stringParam(params, "screenshot_png_b64"))
 
 	artifacts := []bugreport.Artifact{
-		{Name: "screenshot.png", Data: png, Image: true, Label: "Screenshot"},
-		{Name: "har.json", Data: harJSON, Label: "HAR capture (scrubbed)"},
-		{Name: "rrweb.json", Data: rrwebJSON, Label: "Session replay (rrweb)"},
-		{Name: "console.json", Data: consoleJSON, Label: "Console log"},
-		{Name: "trace.redacted.jsonl", Data: traceJSON, Label: "Depersonalized session trace (redacted)"},
+		{Name: reportcontract.ArtifactScreenshot, Data: png, Image: true, Label: reportcontract.LabelScreenshot},
+		{Name: reportcontract.ArtifactHAR, Data: harJSON, Label: reportcontract.LabelHAR},
+		{Name: reportcontract.ArtifactRRWeb, Data: rrwebJSON, Label: reportcontract.LabelRRWeb},
+		{Name: reportcontract.ArtifactConsole, Data: consoleJSON, Label: reportcontract.LabelConsole},
+		{Name: reportcontract.ArtifactTrace, Data: traceJSON, Label: reportcontract.LabelTrace},
 	}
 
 	// Enrich the prose body with deterministic evidence-derived triage, then
@@ -276,10 +277,10 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	// Append an Artifacts section linking the sidecar files relatively, plus the
 	// recorder horizon so a reader knows how much history the HAR covers.
 	arts := artifactLinks{
-		hasScreenshot: bugreport.HasArtifact(artifacts, "screenshot.png"),
-		hasRRWeb:      bugreport.HasArtifact(artifacts, "rrweb.json"),
-		hasConsole:    bugreport.HasArtifact(artifacts, "console.json"),
-		hasTrace:      bugreport.HasArtifact(artifacts, "trace.redacted.jsonl"),
+		hasScreenshot: bugreport.HasArtifact(artifacts, reportcontract.ArtifactScreenshot),
+		hasRRWeb:      bugreport.HasArtifact(artifacts, reportcontract.ArtifactRRWeb),
+		hasConsole:    bugreport.HasArtifact(artifacts, reportcontract.ArtifactConsole),
+		hasTrace:      bugreport.HasArtifact(artifacts, reportcontract.ArtifactTrace),
 	}
 	if appendErr := appendArtifactsSection(absPath, id, arts, depth, capacity, harSource); appendErr != nil {
 		return nil, serverErr(fmt.Errorf("append artifacts section: %w", appendErr))
@@ -353,7 +354,7 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 	// same DeckID the agent's issues.opened webhook will look up — so it produces
 	// the hosted no-LLM deck without re-downloading anything. Best-effort: a
 	// deposit failure must not fail the (already-filed) bug report.
-	s.depositAgentEvidence(res.Number, artifactData(artifacts, "rrweb.json"), artifactData(artifacts, "har.json"))
+	s.depositAgentEvidence(res.Number, artifactData(artifacts, reportcontract.ArtifactRRWeb), artifactData(artifacts, reportcontract.ArtifactHAR))
 
 	return map[string]any{
 		"id":             res.Number,
@@ -521,17 +522,17 @@ func appendArtifactsSection(absPath, id string, arts artifactLinks, depth, capac
 	var sb strings.Builder
 	sb.WriteString("\n## Artifacts\n\n")
 	if arts.hasScreenshot {
-		fmt.Fprintf(&sb, "- Screenshot: ./%s.artifacts/screenshot.png\n", id)
+		fmt.Fprintf(&sb, "- %s: ./%s.artifacts/%s\n", reportcontract.LabelScreenshot, id, reportcontract.ArtifactScreenshot)
 	}
-	fmt.Fprintf(&sb, "- HAR capture (scrubbed): ./%s.artifacts/har.json\n", id)
+	fmt.Fprintf(&sb, "- %s: ./%s.artifacts/%s\n", reportcontract.LabelHAR, id, reportcontract.ArtifactHAR)
 	if arts.hasRRWeb {
-		fmt.Fprintf(&sb, "- Session replay (rrweb): ./%s.artifacts/rrweb.json\n", id)
+		fmt.Fprintf(&sb, "- %s: ./%s.artifacts/%s\n", reportcontract.LabelRRWeb, id, reportcontract.ArtifactRRWeb)
 	}
 	if arts.hasConsole {
-		fmt.Fprintf(&sb, "- Console log: ./%s.artifacts/console.json\n", id)
+		fmt.Fprintf(&sb, "- %s: ./%s.artifacts/%s\n", reportcontract.LabelConsole, id, reportcontract.ArtifactConsole)
 	}
 	if arts.hasTrace {
-		fmt.Fprintf(&sb, "- Depersonalized session trace (redacted): ./%s.artifacts/trace.redacted.jsonl\n", id)
+		fmt.Fprintf(&sb, "- %s: ./%s.artifacts/%s\n", reportcontract.LabelTrace, id, reportcontract.ArtifactTrace)
 	}
 	if harSource == "browser-fetch" {
 		fmt.Fprintf(&sb, "\nThe HAR is the browser-observed network capture reviewed before filing (%d exchange(s)).\n", depth)

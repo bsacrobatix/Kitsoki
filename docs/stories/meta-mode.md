@@ -226,9 +226,10 @@ Three more agents ship pre-registered alongside `story-author`:
 - **`story-bug-reporter`** — gathers reproduction context and files a
   story bug by invoking `kitsoki bug create --target story` (see
   `cmd/kitsoki/bug.go`). Tool surface:
-  `Bash(kitsoki bug create*)` — a single-command pattern that
-  forbids the agent from running anything else. Reached through
-  the builtin `story.bug` meta mode.
+  `Read`/`Glob`/`Grep` plus `Bash(kitsoki bug create*)`. The first
+  three tools let the reporter read the context trace and prior local
+  bugs; the Bash pattern is the only filing side effect. Reached
+  through the builtin `story.bug` meta mode.
 - **`kitsoki-bug-reporter`** — same shape against `--target kitsoki`,
   reached through the builtin `kitsoki.bug` meta mode.
 - **`story-explainer`** — read-only sibling of `story-author`
@@ -248,6 +249,18 @@ Three more agents ship pre-registered alongside `story-author`:
   but looks for reusable engine, host, tool, prompt, workflow, or
   test improvements rather than story-specific edits. Reached through
   `kitsoki.improve`.
+
+Bug and improvement reports share a small internal report contract:
+stable report kinds (`bug`, `meta-improve`), the browser evidence
+sidecars (`screenshot.png`, `har.json`, `rrweb.json`, `console.json`,
+`trace.redacted.jsonl`), the destination names (`configured`, `local`,
+`ticket-provider`), and two permission profiles. Improvers use the
+read-only profile (`Read`/`Glob`/`Grep`) and never post or mutate on
+their own. Bug reporters use the bug-filer profile, which is the
+read-only profile plus `Bash(kitsoki bug create*)` so they can perform
+their one confirmed side effect. The web completion affordance then
+uses the same evidence/posting contract for `runstatus.meta.improve.report`
+that Report Bug uses for `runstatus.bug.report`.
 
 ### 3.2 Builtin meta_modes
 
@@ -278,7 +291,8 @@ groups):
   `kitsoki web --improve-ticket-provider <provider.star>`.
 - **`story.bug`** — `/meta story bug`. Files a story bug via
   `kitsoki bug create --target story`; agent
-  `story-bug-reporter`.
+  `story-bug-reporter`, tools `Read`/`Glob`/`Grep` plus
+  `Bash(kitsoki bug create*)`.
 - **`kitsoki.edit`** — `/meta kitsoki edit` (default verb, so
   bare `/meta kitsoki` resolves here). Agent `kitsoki-engineer`,
   cwd `${KITSOKI_REPO}`. Chat row keys against the synthetic
@@ -295,7 +309,8 @@ groups):
   no-LLM regression harness rather than in the running story.
 - **`kitsoki.bug`** — `/meta kitsoki bug`. Files a kitsoki bug
   via `kitsoki bug create --target kitsoki`; agent
-  `kitsoki-bug-reporter`.
+  `kitsoki-bug-reporter`, tools `Read`/`Glob`/`Grep` plus
+  `Bash(kitsoki bug create*)`.
 
 The entire `kitsoki.*` group is omitted from the injection set
 when `KITSOKI_REPO` is unset.

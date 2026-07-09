@@ -326,9 +326,10 @@ are available for the current surface:
   **Auto-run at completion**, and **File evidence report** controls. The button
   opens `story.improve`, sends the standard completed-session review prompt,
   and, when evidence filing is enabled, calls `runstatus.meta.improve.report`.
-  The filed report reuses the Report Bug evidence pipeline: scrubbed browser
-  HAR (`har.json`), rrweb session replay (`rrweb.json`), recent console/error
-  state, and a redacted session trace (`trace.redacted.jsonl`) when available.
+  The filed report uses the same report contract as Report Bug: stable report
+  kind, scrubbed browser HAR (`har.json`), rrweb session replay (`rrweb.json`),
+  recent console/error state (`console.json`), and a redacted session trace
+  (`trace.redacted.jsonl`) when available.
   The destination defaults to the configured sink: local `.artifacts` tickets
   when no sink is configured, GitHub when `kitsoki web --ticket-repo
   <owner/repo>` is set, or a private `ticket_provider/v1` create operation when

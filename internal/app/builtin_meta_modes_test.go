@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	"kitsoki/internal/reportcontract"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,7 +30,7 @@ func TestInjectBuiltinMetaModes_FillsStoryBuiltinsWhenAbsent(t *testing.T) {
 	require.Equal(t, "ask", storyAsk.Trigger)
 	require.Equal(t, "story", storyAsk.Group)
 	require.False(t, storyAsk.Default)
-	require.Equal(t, []string{"Read", "Glob", "Grep"}, storyAsk.Tools)
+	require.Equal(t, reportcontract.ReadOnlyTools(), storyAsk.Tools)
 
 	storyImprove, ok := def.MetaModes["story.improve"]
 	require.True(t, ok, "story.improve builtin must be injected")
@@ -36,7 +38,7 @@ func TestInjectBuiltinMetaModes_FillsStoryBuiltinsWhenAbsent(t *testing.T) {
 	require.Equal(t, "improve", storyImprove.Trigger)
 	require.Equal(t, "story", storyImprove.Group)
 	require.False(t, storyImprove.Default)
-	require.Equal(t, []string{"Read", "Glob", "Grep"}, storyImprove.Tools)
+	require.Equal(t, reportcontract.ReadOnlyTools(), storyImprove.Tools)
 
 	storyBug, ok := def.MetaModes["story.bug"]
 	require.True(t, ok, "story.bug builtin must be injected")
@@ -44,6 +46,7 @@ func TestInjectBuiltinMetaModes_FillsStoryBuiltinsWhenAbsent(t *testing.T) {
 	require.Equal(t, "bug", storyBug.Trigger)
 	require.Equal(t, "story", storyBug.Group)
 	require.False(t, storyBug.Default)
+	require.Equal(t, reportcontract.BugFilerTools(), storyBug.Tools)
 }
 
 // TestInjectBuiltinMetaModes_AppOverrideWins asserts that an app-declared
@@ -110,20 +113,21 @@ func TestInjectBuiltinMetaModes_KitsokiGroupRequiresEnvVar(t *testing.T) {
 	kAsk, ok := def.MetaModes["kitsoki.ask"]
 	require.True(t, ok, "kitsoki.ask MUST be injected when KITSOKI_REPO is set")
 	require.Equal(t, "kitsoki-explainer", kAsk.Agent)
-	require.Equal(t, []string{"Read", "Glob", "Grep"}, kAsk.Tools)
+	require.Equal(t, reportcontract.ReadOnlyTools(), kAsk.Tools)
 	require.False(t, kAsk.Default)
 
 	kImprove, ok := def.MetaModes["kitsoki.improve"]
 	require.True(t, ok, "kitsoki.improve MUST be injected when KITSOKI_REPO is set")
 	require.Equal(t, "kitsoki-improver", kImprove.Agent)
 	require.Equal(t, "${KITSOKI_REPO}", kImprove.Cwd)
-	require.Equal(t, []string{"Read", "Glob", "Grep"}, kImprove.Tools)
+	require.Equal(t, reportcontract.ReadOnlyTools(), kImprove.Tools)
 	require.False(t, kImprove.Default)
 
 	kBug, ok := def.MetaModes["kitsoki.bug"]
 	require.True(t, ok, "kitsoki.bug MUST be injected when KITSOKI_REPO is set")
 	require.Equal(t, "kitsoki-bug-reporter", kBug.Agent)
 	require.Equal(t, "${KITSOKI_REPO}", kBug.Cwd)
+	require.Equal(t, reportcontract.BugFilerTools(), kBug.Tools)
 }
 
 // TestInjectBuiltinMetaModes_LegacyKeysAbsent asserts the
