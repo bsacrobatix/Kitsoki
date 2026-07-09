@@ -35,6 +35,13 @@ For a reader-specific path through the docs, start at
 
 Product site: [bsacrobatix.github.io/Kitsoki](https://bsacrobatix.github.io/Kitsoki/).
 
+Slidey is Kitsoki's sister project for evidence-first narrative decks. Kitsoki
+uses Slidey wherever reasonable: demos, QA/readiness reports, bug evidence,
+workflow walkthroughs, comparison studies, and product review artifacts should
+become shareable decks when the evidence is visual, temporal, or comparative.
+JSON and markdown remain useful for machines and quick audit, but Slidey is the
+preferred human review and presentation surface when it adds clarity.
+
 **Free-text in, deterministic transitions out.**
 
 ```sh
