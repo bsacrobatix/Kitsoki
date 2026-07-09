@@ -5153,6 +5153,7 @@ def run_story_summary(run_dir: Path) -> dict:
     control = read_json(autonomous_marathon_control_path(run_dir)) if autonomous_marathon_control_path(run_dir).exists() else {}
     watchdog = read_json(autonomous_marathon_watchdog_path(run_dir)) if autonomous_marathon_watchdog_path(run_dir).exists() else {}
     driver_dispatch = read_json(autonomous_driver_dispatch_path(run_dir)) if autonomous_driver_dispatch_path(run_dir).exists() else {}
+    campaign_worker = read_json(campaign_worker_receipt_path(run_dir)) if campaign_worker_receipt_path(run_dir).exists() else {}
     finding_summary = findings.get("summary", {})
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
     issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
@@ -5279,6 +5280,15 @@ def run_story_summary(run_dir: Path) -> dict:
         "autonomous_driver_dispatch_status": driver_dispatch.get("status", ""),
         "autonomous_driver_dispatch_summary": driver_dispatch.get("summary", ""),
         "autonomous_driver_dispatch_trace": driver_dispatch.get("trace", ""),
+        "campaign_worker_backend": campaign_worker.get("backend", ""),
+        "campaign_worker_id": campaign_worker.get("worker_id", ""),
+        "campaign_worker_status": campaign_worker.get("status", ""),
+        "campaign_worker_ready_status": campaign_worker.get("ready_status", ""),
+        "campaign_worker_summary": campaign_worker_summary(campaign_worker) if campaign_worker else "",
+        "campaign_worker_receipt_path": str(campaign_worker_receipt_path(run_dir)) if campaign_worker else "",
+        "campaign_worker_receipt_markdown_path": str(campaign_worker_receipt_markdown_path(run_dir)) if campaign_worker else "",
+        "campaign_worker_imported_artifact_count": len(campaign_worker.get("imported_artifacts", [])),
+        "campaign_worker_artifact_import_status": campaign_worker.get("artifact_import_status", ""),
     }
 
 
@@ -7233,6 +7243,14 @@ def autonomous_driver_dispatch_markdown_path(run_dir: Path) -> Path:
     return run_dir / "autonomous-driver-dispatch.md"
 
 
+def campaign_worker_receipt_path(run_dir: Path) -> Path:
+    return run_dir / "campaign-worker-receipt.json"
+
+
+def campaign_worker_receipt_markdown_path(run_dir: Path) -> Path:
+    return run_dir / "campaign-worker-receipt.md"
+
+
 def render_autonomous_driver_dispatch_receipt(receipt: dict) -> str:
     blockers = receipt.get("blockers", [])
     lines = [
@@ -7290,6 +7308,101 @@ def record_autonomous_driver_dispatch(
         render_autonomous_driver_dispatch_receipt(receipt),
         encoding="utf-8",
     )
+    return receipt
+
+
+def render_campaign_worker_receipt(receipt: dict) -> str:
+    lines = [
+        "# Campaign Worker Receipt",
+        "",
+        f"- Run: `{receipt.get('run_id', '')}`",
+        f"- Backend: `{receipt.get('backend', '')}`",
+        f"- Worker: `{receipt.get('worker_id', '')}`",
+        f"- Status: `{receipt.get('status', '')}`",
+        f"- Ready: `{receipt.get('ready_status', '')}` - {receipt.get('ready_summary', '')}",
+        f"- Scenario scope: `{', '.join(receipt.get('scenario_scope', [])) or '(none)'}`",
+        f"- Budget: `{receipt.get('budget_minutes', 0)}` min/scenario",
+        f"- Receipt source: `{receipt.get('receipt_source', '') or '(operator)'}`",
+        f"- Artifact import: `{receipt.get('artifact_import_status', '')}` - {receipt.get('artifact_import_summary', '')}",
+        f"- Recorded at: `{receipt.get('recorded_at', '')}`",
+        "",
+        "## Artifacts",
+        "",
+    ]
+    imported = receipt.get("imported_artifacts", [])
+    if imported:
+        lines.extend(f"- `{item}`" for item in imported)
+    else:
+        lines.append("- No imported artifacts were reported.")
+    lines.extend(["", "## Summary", "", receipt.get("summary", "") or "(none)"])
+    return "\n".join(lines) + "\n"
+
+
+def campaign_worker_summary(receipt: dict) -> str:
+    return (
+        f"{receipt.get('backend', '')}:{receipt.get('worker_id', '')} "
+        f"{receipt.get('status', '')}; ready={receipt.get('ready_status', '')}; "
+        f"artifacts={len(receipt.get('imported_artifacts', []))}"
+    )
+
+
+def record_campaign_worker_receipt(
+    run_dir: Path,
+    backend: str,
+    worker_id: str,
+    status: str,
+    ready_status: str,
+    ready_summary: str,
+    budget_minutes: int,
+    receipt_source: str,
+    imported_artifacts: str,
+    summary: str,
+) -> dict:
+    run_json = read_json(run_dir / "run.json")
+    backend = (backend or "local").strip()
+    if backend not in {"local", "arena", "vm"}:
+        raise SystemExit("--worker-backend must be local, arena, or vm")
+    status = (status or "ready").strip()
+    if status not in {"ready", "blocked", "running", "completed", "failed"}:
+        raise SystemExit("--worker-status must be ready, blocked, running, completed, or failed")
+    ready_status = (ready_status or ("pass" if status in {"ready", "running", "completed"} else "fail")).strip()
+    if ready_status not in {"pass", "warn", "fail"}:
+        raise SystemExit("--worker-ready-status must be pass, warn, or fail")
+    worker_id = (worker_id or f"{backend}-worker").strip()
+    artifacts = split_csv(imported_artifacts)
+    existing = [item for item in artifacts if item and Path(item).exists()]
+    import_status = "imported" if artifacts and len(existing) == len(artifacts) else ("partial" if existing else "none")
+    missing = [item for item in artifacts if item and item not in existing]
+    receipt = {
+        "schema": "kitsoki/product-journey-campaign-worker-receipt/v1",
+        "run_id": run_json.get("run_id", run_dir.name),
+        "run_dir": str(run_dir),
+        "backend": backend,
+        "worker_id": worker_id,
+        "status": status,
+        "ready_status": ready_status,
+        "ready_summary": ready_summary or f"{backend} worker {worker_id} reported {ready_status}",
+        "scenario_scope": [
+            scenario.get("id", "")
+            for scenario in run_json.get("scenarios", [])
+            if isinstance(scenario, dict) and scenario.get("id")
+        ],
+        "budget_minutes": max(0, int(budget_minutes or run_json.get("live_budget_minutes", 0) or 0)),
+        "receipt_source": receipt_source,
+        "imported_artifacts": artifacts,
+        "artifact_import_status": import_status,
+        "artifact_import_summary": (
+            f"imported {len(existing)}/{len(artifacts)} artifact(s)"
+            if artifacts else
+            "no artifacts supplied by worker receipt"
+        ),
+        "missing_artifacts": missing,
+        "summary": summary or f"Campaign worker {worker_id} is {status} for {run_json.get('run_id', run_dir.name)}.",
+        "recorded_at": now_utc(),
+    }
+    write_json(campaign_worker_receipt_path(run_dir), receipt)
+    campaign_worker_receipt_markdown_path(run_dir).write_text(render_campaign_worker_receipt(receipt), encoding="utf-8")
+    update_derived_artifacts(run_dir, publish_deck=None)
     return receipt
 
 
@@ -13433,6 +13546,7 @@ def main() -> None:
     parser.add_argument("--record-blocker", action="store_true", help="Record an explicit blocked scenario as an issue finding")
     parser.add_argument("--record-driver-event", action="store_true", help="Append one driver execution event to driver-journal.json")
     parser.add_argument("--record-autonomous-driver-dispatch", action="store_true", help="Write the story-owned autonomous driver dispatch receipt into a run bundle")
+    parser.add_argument("--campaign-worker", action="store_true", help="Record/import a local, arena, or VM campaign worker readiness receipt into a run bundle")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="Internal legacy test backend for kitsoki gitops autonomous-fix")
@@ -13527,6 +13641,14 @@ def main() -> None:
     parser.add_argument("--driver-trace", default="", help="Trace or journal path for --record-autonomous-driver-dispatch")
     parser.add_argument("--autonomous-driver-evidence-count", type=int, default=0, help="Evidence count reported by the autonomous driver task")
     parser.add_argument("--autonomous-driver-issue-count", type=int, default=0, help="Issue count reported by the autonomous driver task")
+    parser.add_argument("--worker-backend", default="local", choices=["local", "arena", "vm"], help="Worker backend for --campaign-worker")
+    parser.add_argument("--worker-id", default="", help="Worker identity for --campaign-worker receipts")
+    parser.add_argument("--worker-status", default="ready", choices=["ready", "blocked", "running", "completed", "failed"], help="Worker status for --campaign-worker")
+    parser.add_argument("--worker-ready-status", default="", choices=["", "pass", "warn", "fail"], help="Readiness gate status for --campaign-worker")
+    parser.add_argument("--worker-ready-summary", default="", help="Human-readable readiness summary for --campaign-worker")
+    parser.add_argument("--worker-budget-minutes", type=int, default=0, help="Per-scenario budget asserted by the worker receipt")
+    parser.add_argument("--worker-receipt-source", default="", help="External receipt, arena run id, or operator note that produced --campaign-worker")
+    parser.add_argument("--worker-import-artifact", action="append", default=[], help="Artifact path imported from the worker; repeatable")
     parser.add_argument(
         "--finding-kind",
         default="issue",
@@ -14497,6 +14619,47 @@ def main() -> None:
         print(f"Autonomous driver dispatch: {receipt['status']}")
         print(f"Receipt: {result['autonomous_driver_dispatch_markdown_path']}")
         append_log(f"Recorded autonomous driver dispatch for {run_dir.name}: {receipt['status']}")
+        return
+
+    if args.campaign_worker:
+        if not args.run_dir:
+            raise SystemExit("--campaign-worker requires --run-dir")
+        run_dir = run_dir_from_arg(args.run_dir)
+        receipt = record_campaign_worker_receipt(
+            run_dir,
+            args.worker_backend,
+            args.worker_id,
+            args.worker_status,
+            args.worker_ready_status,
+            args.worker_ready_summary,
+            args.worker_budget_minutes,
+            args.worker_receipt_source,
+            ",".join(args.worker_import_artifact),
+            args.summary,
+        )
+        result = {
+            "status": "campaign_worker_recorded",
+            "run_dir": str(run_dir),
+            "campaign_worker_backend": receipt["backend"],
+            "campaign_worker_id": receipt["worker_id"],
+            "campaign_worker_status": receipt["status"],
+            "campaign_worker_ready_status": receipt["ready_status"],
+            "campaign_worker_summary": campaign_worker_summary(receipt),
+            "campaign_worker_receipt_path": str(campaign_worker_receipt_path(run_dir)),
+            "campaign_worker_receipt_markdown_path": str(campaign_worker_receipt_markdown_path(run_dir)),
+            "campaign_worker_imported_artifact_count": len(receipt["imported_artifacts"]),
+            "campaign_worker_artifact_import_status": receipt["artifact_import_status"],
+            "deck_path": str(run_dir / "deck.slidey.json"),
+            "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+        }
+        result.update(run_story_summary(run_dir))
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Recorded campaign worker receipt for {run_dir.name}: {receipt['status']}")
+            return
+        print(f"Campaign worker: {receipt['status']}")
+        print(f"Receipt: {result['campaign_worker_receipt_markdown_path']}")
+        append_log(f"Recorded campaign worker receipt for {run_dir.name}: {receipt['status']}")
         return
 
     if args.record_blocker:
