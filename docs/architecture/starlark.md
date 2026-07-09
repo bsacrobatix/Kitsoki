@@ -174,7 +174,7 @@ external stdio server has no safe session-local host registry to call.
 |---|---|---|---|
 | `ctx.inputs` | yes | n/a | For `host.starlark.run`, a dict of effect inputs type-checked by the sidecar. For MCP CodeAct, the tool call's `inputs` object. Story CodeAct snippets do not have per-snippet sidecars and should use `ctx.world` for session state. |
 | `ctx.world` | yes | `world: read` or default | Read-only `ctx.world.get(key)` snapshot. Set `world: none` to remove it. |
-| `ctx.http` | no | `http:` | `get` / `post`, method and host filtered, cassette-aware. |
+| `ctx.http` | no | `http:` | `get` / `post`, method and host filtered, cassette-aware. With auth-aware runners such as `ticket_provider/v1`, optional `auth=` names host-side policies; the transport injects credentials without exposing secret values to Starlark. |
 | `ctx.fs` | no | `fs.read` / `fs.write` | Rooted read/exists/glob/write with path patterns and byte caps. |
 | `ctx.probe` | no | `probe`, `vcs`, or `github` | Fixed read-only probes such as `git.status`, `git.ls_files`, `gh.issue.list`. |
 | `ctx.host` | no | `host.verbs` | Exact allow-listed engine host calls. |

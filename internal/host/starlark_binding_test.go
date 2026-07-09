@@ -114,6 +114,40 @@ func TestRegisterStarlarkBindings_DispatchesThroughPrefixFallback(t *testing.T) 
 	}
 }
 
+func TestRegisterStarlarkBindings_TicketProviderFunctions(t *testing.T) {
+	dir := t.TempDir()
+	script := writeStarlarkScript(t, dir, "ticket_provider.star",
+		"kind: ticket_provider/v1\nhttp:\n  enabled: false\n",
+		"def search(ctx):\n    return {\"tickets\": [{\"id\": \"T-1\", \"title\": ctx.inputs[\"query\"]}], \"project\": ctx.world.get(\"project\")}\n",
+	)
+
+	reg := NewRegistry()
+	const handlerName = "host.starlark_binding.ticketprovider"
+	RegisterStarlarkBindings(reg, map[string]string{handlerName: script})
+
+	res, err := reg.Invoke(context.Background(), handlerName+".search", map[string]any{
+		"query": "provider-backed",
+		"world": map[any]any{"project": "inherited"},
+	})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("unexpected provider error: %s", res.Error)
+	}
+	tickets, ok := res.Data["tickets"].([]any)
+	if !ok || len(tickets) != 1 {
+		t.Fatalf("tickets = %#v, want one ticket row", res.Data["tickets"])
+	}
+	row := tickets[0].(map[string]any)
+	if got := row["title"]; got != "provider-backed" {
+		t.Fatalf("ticket title = %v, want provider-backed", got)
+	}
+	if got := res.Data["project"]; got != "inherited" {
+		t.Fatalf("provider world project = %v, want inherited", got)
+	}
+}
+
 // TestRegisterStarlarkBindings_PanicsOnDuplicateName matches RegisterBuiltins'
 // init-time contract (Registry.Register panics on a duplicate) — a caller
 // wiring the same bindings map twice is a caller bug, not something to

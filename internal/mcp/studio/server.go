@@ -205,6 +205,9 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	// gh.* — read GitHub issues/PRs and post comments from inside the studio.
 	srv.registerGHTools()
 
+	// ticket.call — reusable Starlark ticket-provider modules.
+	srv.registerTicketProviderTools()
+
 	// visual.* — token-efficient visual interaction over web/TUI/VS Code-like
 	// surfaces, built on existing session/render seams.
 	srv.registerVisualTools()

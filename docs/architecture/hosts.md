@@ -197,8 +197,8 @@ Starlark "has no `.X` field" traceback, surfaced as a domain error.
 ```
 ctx.inputs["name"]                          # dict of the resolved, type-checked inputs
 ctx.world.get("key")                        # read-only world snapshot; None when absent
-ctx.http.get(url, headers={})               # -> response (only with http grant)
-ctx.http.post(url, body=..., headers={})    # -> response (only with http grant)
+ctx.http.get(url, headers={}, auth=None)    # -> response (only with http grant)
+ctx.http.post(url, body=..., headers={}, auth=None) # -> response (only with http grant)
 ctx.fs.read(path)                           # -> string (only with fs.read grant)
 ctx.fs.exists(path)                         # -> bool (only with fs.read grant)
 ctx.fs.glob(pattern)                        # -> [path] (only with fs.read grant)
@@ -216,6 +216,11 @@ ctx.host.call(name, args={})                # -> dict (only with exact host.verb
 - `ctx.http.post` `body` may be a Starlark dict (JSON-encoded, `Content-Type`
   defaulted to `application/json`) or a string (sent verbatim). `headers` is a
   dict of string→string.
+- `ctx.http.get/post` `auth` may be a string or list of strings when the
+  injected HTTP client supports auth policy, such as `ticket_provider/v1`
+  runners. It is symbolic: the script names host-side auth policies, and the
+  transport resolves env/secrets and applies request headers after Starlark
+  constructs the request. Secret values are never exposed as Starlark values.
 - The **response** object exposes `.status` (int), `.headers` (dict), `.text()`
   (string method) and `.json()` (parses the body to a Starlark value; a parse
   error is a Starlark error). A response is truthy iff its status is in

@@ -16,7 +16,14 @@
 // straight to a starlark script instead of writing a Go handler.
 package host
 
-import "context"
+import (
+	"context"
+	"os"
+	"strings"
+
+	starlarkhost "kitsoki/internal/host/starlark"
+	"kitsoki/internal/ticketprovider"
+)
 
 // StarlarkBindingHandler returns a Handler that delegates every call to
 // host.starlark.run for the fixed script at scriptPath, translating the
@@ -46,6 +53,19 @@ func StarlarkBindingHandler(scriptPath string) Handler {
 			inputs[k] = v
 		}
 
+		if ticketprovider.IsProviderScript(scriptPath) {
+			op, _ := args["op"].(string)
+			res, err := (&ticketprovider.StarlarkProvider{
+				Script: scriptPath,
+				Env:    TicketProviderEnvLookup,
+				World:  toStringMap(args["world"]),
+			}).Invoke(ctx, op, inputs)
+			if err != nil {
+				return Result{}, err
+			}
+			return ticketProviderHostResult(res), nil
+		}
+
 		innerArgs := map[string]any{
 			"script": scriptPath,
 			"inputs": inputs,
@@ -55,6 +75,64 @@ func StarlarkBindingHandler(scriptPath string) Handler {
 		}
 		return StarlarkRunHandler(ctx, innerArgs)
 	}
+}
+
+func ticketProviderHostResult(res ticketprovider.Result) Result {
+	data := make(map[string]any, len(res.Data)+2)
+	for k, v := range res.Data {
+		data[k] = v
+	}
+	if len(res.Exchanges) > 0 {
+		summaries := make([]any, len(res.Exchanges))
+		for i, ex := range res.Exchanges {
+			summaries[i] = map[string]any{
+				"method": ex.Method,
+				"url":    ex.URL,
+				"status": ex.Status,
+			}
+		}
+		data[starlarkhost.ExchangesOutputKey] = summaries
+	}
+	if res.Error == nil {
+		return Result{Data: data}
+	}
+	data["error_code"] = res.Error.Code
+	data["error_message"] = res.Error.Message
+	if res.Error.Hint != "" {
+		data["error_hint"] = res.Error.Hint
+	}
+	if len(res.Error.Details) > 0 {
+		data["error_details"] = res.Error.Details
+	}
+	return Result{Data: data, Error: res.Error.Error()}
+}
+
+// TicketProviderEnvLookup resolves credentials for reusable ticket providers.
+// It checks per-call command env overrides, registry-injected secrets, process
+// env, then ~/.kitsoki/secrets.yaml. It returns only the requested value to the
+// Go HTTP transport; Starlark code receives symbolic auth names, never secrets.
+func TicketProviderEnvLookup(ctx context.Context, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if env := CLIExecEnvFromCtx(ctx); len(env) > 0 {
+		if v := strings.TrimSpace(env[name]); v != "" {
+			return v
+		}
+	}
+	if secrets := SecretsFromContext(ctx); len(secrets) > 0 {
+		if v := strings.TrimSpace(secrets[name]); v != "" {
+			return v
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	if secrets := LoadSecrets(); len(secrets) > 0 {
+		return strings.TrimSpace(secrets[name])
+	}
+	return ""
 }
 
 // RegisterStarlarkBindings registers one StarlarkBindingHandler per (handler

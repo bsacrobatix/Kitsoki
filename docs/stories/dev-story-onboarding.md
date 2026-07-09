@@ -224,6 +224,19 @@ generated `.kitsoki/check-readiness.py` checks and runs from the parent root.
 `ticket_repo` stays GitHub-only, so private providers use the `iface.ticket`
 binding without triggering GitHub-specific publish or closeout behavior.
 
+Inherited `.star` bindings can be first-class ticket providers by declaring a
+`ticket_provider/v1` sidecar. The script defines pure functions such as
+`search(ctx)` and `get(ctx)` rather than `main(ctx)`. Its sidecar declares HTTP
+hosts/methods and symbolic auth policies; scripts pass `auth="name"` to
+`ctx.http.get/post`, while the Go HTTP transport reads the configured env or
+secret and applies headers after the Starlark runtime has built the request.
+Provider functions return normal ticket data or `{"ok": false, "error":
+{"code": "...", "message": "..."}}` for custom operator-facing failures.
+
+The same module is reusable outside a story through
+`kitsoki ticket-provider call --script <provider.star> --op search ...` and the
+studio MCP `ticket.call` tool.
+
 The generated `.kitsoki/check-readiness.py` is the explicit post-apply verifier.
 It mirrors `setup_plan.verifications`, supports `--list` for review, and writes
 `.artifacts/kitsoki-readiness.json` when run. With `--update-profile`, it also
