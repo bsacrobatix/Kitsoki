@@ -406,7 +406,7 @@ func TestTUIPromptWidthHonoursMinimum(t *testing.T) {
 		"prompt width must clamp to the 20-column inner minimum on narrow terminals")
 }
 
-func TestTUIResizeClearsNormalScreen(t *testing.T) {
+func TestTUIResizeDoesNotClearNormalScreen(t *testing.T) {
 	orch, sid := setupCloak(t)
 
 	for _, tc := range []struct {
@@ -440,22 +440,35 @@ func TestTUIResizeClearsNormalScreen(t *testing.T) {
 
 			_, cmd := tea.Model(rm).Update(tea.WindowSizeMsg{Width: 72, Height: 20})
 
-			require.Contains(t, commandMessageTypes(cmd), "tea.clearScreenMsg",
-				"resize must clear the visible normal screen so stale wrapped rows cannot corrupt the next paint")
+			require.NotContains(t, commandMessageTypes(cmd), "tea.clearScreenMsg",
+				"resize is a regular repaint; clearing the normal screen on SIGWINCH appends duplicate live chrome to scrollback")
 		})
 	}
 }
 
-func TestTUIResizeClearsBeforePendingTranscriptFlush(t *testing.T) {
+func TestTUIResizeAwaitingLLMDoesNotReprintLiveChrome(t *testing.T) {
+	orch, sid := setupCloak(t)
+	m := buildModel(t, orch, sid)
+	rm, ok := tuipkg.ExtractRootModel(m)
+	require.True(t, ok)
+	tuipkg.ClearTranscriptPendingForTest(&rm)
+	rm = tuipkg.SimulateSlowHarnessTurnStart(rm)
+	tuipkg.AppendLiveForTest(&rm, strings.Repeat("routing status ", 20))
+
+	_, cmd := tea.Model(rm).Update(tea.WindowSizeMsg{Width: 72, Height: 20})
+
+	require.Nil(t, cmd, "resizing while running must only repaint View(); commands like ClearScreen/Println reprint the live running panel")
+}
+
+func TestTUIResizePreservesPendingTranscriptFlush(t *testing.T) {
 	orch, sid := setupCloak(t)
 	m := buildModel(t, orch, sid)
 
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 72, Height: 20})
 
 	types := commandMessageTypes(cmd)
-	require.GreaterOrEqual(t, len(types), 2, "resize with startup scrollback should clear and then print pending transcript")
-	require.Equal(t, "tea.clearScreenMsg", types[0],
-		"pending transcript output must be printed after the resize clear, otherwise startup content can be wiped")
+	require.NotContains(t, types, "tea.clearScreenMsg",
+		"resize should not clear the normal screen before repainting")
 	require.Contains(t, types, "tea.printLineMessage",
 		"resize should preserve pending transcript flushes")
 }

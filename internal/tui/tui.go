@@ -4727,16 +4727,13 @@ func (m RootModel) handleWindowSize(msg tea.WindowSizeMsg) (RootModel, tea.Cmd) 
 	m.height = msg.Height
 	m = m.resize()
 
-	// This TUI intentionally paints in the normal screen so transcript
-	// scrollback remains native. When the terminal shrinks horizontally, rows
-	// rendered at the old width can wrap into extra physical rows before
-	// Bubble Tea's next cursor-up repaint, leaving stale cells interleaved with
-	// the new chrome. Clear the visible screen on resize, then repaint from the
-	// freshly computed model.
-	if flush := (&m).flushPendingWhenStable(); flush != nil {
-		return m, tea.Sequence(tea.ClearScreen, flush)
-	}
-	return m, tea.ClearScreen
+	// A resize is a regular Bubble Tea redraw. Do not issue ClearScreen here:
+	// Kitsoki deliberately runs in the normal screen so transcript history stays
+	// native, and clearing on every SIGWINCH makes terminals append another full
+	// live chrome frame to scrollback. If a resize happens while transcript
+	// scrollback is already queued, preserve that flush; otherwise let the
+	// renderer repaint the resized live region in place.
+	return m, (&m).flushPendingWhenStable()
 }
 
 func (m RootModel) resize() RootModel {
