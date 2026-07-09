@@ -77,6 +77,14 @@ It is intentionally no-LLM:
   the same attach runner as `attach`, then marks the campaign summary/deck as
   refreshed so operators can use one vocabulary for retained browser, TUI,
   MCP/session, rrweb, and worker evidence.
+- `campaign_worker` calls `tools/product-journey/run.py --campaign-worker
+  --json-output` to record a local, arena, or VM worker readiness receipt in
+  the current run bundle. The receipt writes `campaign-worker-receipt.json/md`,
+  names the backend, worker id, scenario scope, budget, readiness status,
+  receipt source, and imported artifacts, then binds those fields back into the
+  run page. This is the stable artifact seam for a future real VM/arena
+  dispatcher; a blocked worker receipt stays visible and conservative instead
+  of implying evidence capture happened.
 - `record` calls `tools/product-journey/run.py --record-finding --json-output`
   for strengths, weaknesses, issues, and fixes.
 - `blocker` calls `tools/product-journey/run.py --record-blocker --json-output`

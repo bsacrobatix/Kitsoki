@@ -34,6 +34,15 @@ world:
   campaign_status: { type: string, default: "" }
   campaign_summary: { type: string, default: "" }
   campaign_scenarios: { type: string, default: "docs-to-mcp-first-run,agent-launch-experience,remote-worker-campaign,campaign-rollup-review" }
+  campaign_worker_backend: { type: string, default: "" }
+  campaign_worker_id: { type: string, default: "" }
+  campaign_worker_status: { type: string, default: "" }
+  campaign_worker_ready_status: { type: string, default: "" }
+  campaign_worker_summary: { type: string, default: "" }
+  campaign_worker_receipt_path: { type: string, default: "" }
+  campaign_worker_receipt_markdown_path: { type: string, default: "" }
+  campaign_worker_imported_artifact_count: { type: int, default: 0 }
+  campaign_worker_artifact_import_status: { type: string, default: "" }
   live_budget_minutes: { type: int, default: 20 }
   matrix_id:      { type: string, default: "" }
   matrix_dir:     { type: string, default: "" }
@@ -535,6 +544,20 @@ intents:
       evidence_path: { type: string, required: true }
       source: { type: string, required: false }
       notes: { type: string, required: false }
+  campaign_worker:
+    description: "Record or import a local, arena, or VM worker readiness receipt for the current campaign run."
+    examples: ["campaign worker backend=vm worker_id=persona-vm-1", "campaign worker backend=arena status=ready", "import campaign worker receipt"]
+    priority: 85
+    slots:
+      backend: { type: string, required: false }
+      worker_id: { type: string, required: false }
+      status: { type: string, required: false }
+      ready_status: { type: string, required: false }
+      ready_summary: { type: string, required: false }
+      budget_minutes: { type: int, required: false }
+      receipt_source: { type: string, required: false }
+      import_artifacts: { type: string, required: false }
+      summary: { type: string, required: false }
   record:
     description: "Record a strength, weakness, issue, or fix for the run summary deck."
     examples: ["record finding", "note a weakness", "record a fix", "add strength"]
@@ -655,7 +678,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, validate_marathon_smoke_ledger, campaign_plan, campaign_tick, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, campaign_attach, record, blocker, file_findings, autonomous_fix, campaign_issue_fix, stats, campaign_stats, driver_event, seed_demo, handoff, review, campaign_deck_refresh, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, validate_marathon_smoke_ledger, campaign_plan, campaign_tick, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, campaign_attach, campaign_worker, record, blocker, file_findings, autonomous_fix, campaign_issue_fix, stats, campaign_stats, driver_event, seed_demo, handoff, review, campaign_deck_refresh, validate, accept, quit, look]
 
 root: idle
 

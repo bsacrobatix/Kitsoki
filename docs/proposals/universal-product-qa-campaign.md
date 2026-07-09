@@ -1,8 +1,8 @@
 # Epic: Universal Product QA Campaign
 
-**Status:** Draft v2. Catalog/docs and campaign story-surface slices implemented in `tools/product-journey/personas.json`, `tools/product-journey/scenarios.json`, `tools/product-journey/README.md`, and `stories/product-journey-qa`; runtime/arena/finding-policy/product-docs slices remain.
+**Status:** Draft v3. Catalog/docs, campaign story surface, and worker receipt/import slices implemented in `tools/product-journey`, `tools/product-journey/personas.json`, `tools/product-journey/scenarios.json`, `tools/product-journey/README.md`, and `stories/product-journey-qa`; finding-policy and product-docs/deck slices remain.
 **Kind:**   epic
-**Slices:** 5 (2/5 shipped)
+**Slices:** 5 (3/5 shipped)
 
 ## Why
 
@@ -30,7 +30,7 @@ The end state is a reusable campaign product surface:
 |---|---|---|---|---|---|---|
 | 1 | Campaign catalog | story | Add general-purpose personas/scenarios and README guidance for product-site/docs/MCP/agent-launch/worker/rollup QA. | - | Shipped in this slice | This epic |
 | 2 | Campaign story surface | story | Add explicit standing-campaign intents for plan, tick, attach, issue/fix, stats, and deck refresh. | 1 | Shipped in this slice | This epic |
-| 3 | Worker backend | runtime | Route bounded campaign batches to local or VM arena workers with readiness, receipts, and artifact import. | 1 | Draft | TBD |
+| 3 | Worker backend | runtime | Route bounded campaign batches to local or VM arena workers with readiness, receipts, and artifact import. | 1 | Shipped in this slice | This epic |
 | 4 | Finding sinks | runtime/tracing | Make local issue artifacts and GitHub evidence-backed filing a declared campaign policy with traceable sink decisions. | 1, 2 | Draft | TBD |
 | 5 | Product docs and decks | docs | Publish the general user guide, campaign summary shape, and canonical Slidey rollup contract. | 1-4 | Draft | TBD |
 
@@ -41,7 +41,7 @@ The end state is a reusable campaign product surface:
       \-> #3 worker backend --------------------------/
 ```
 
-The catalog can ship first because it exercises existing runner/story behavior without adding a new execution substrate. Worker placement can develop in parallel once the campaign batch and artifact receipt shape is stable.
+The catalog can ship first because it exercises existing runner/story behavior without adding a new execution substrate. The worker slice now ships the artifact receipt/import seam; real remote VM dispatch can plug into that seam without changing the campaign run/deck contract.
 
 ## Shared Decisions
 

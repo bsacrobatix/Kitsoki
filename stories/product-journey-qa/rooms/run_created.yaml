@@ -44,6 +44,10 @@ states:
             Last evidence: '{{ world.scenario|default:"(none)" }} / {{ world.evidence_kind|default:"" }}'
             Last finding: '{{ world.finding_kind|default:"(none)" }} / {{ world.finding_title|default:"" }}'
             Ticket repo: '{{ world.ticket_repo|default:"(not set)" }}'
+            Campaign worker: '{{ world.campaign_worker_backend|default:"(not set)" }} / {{ world.campaign_worker_id|default:"" }} / {{ world.campaign_worker_status|default:"(not checked)" }}'
+            Worker readiness: '{{ world.campaign_worker_ready_status|default:"(not checked)" }}: {{ world.campaign_worker_summary|default:"" }}'
+            Worker receipt: '{{ world.campaign_worker_receipt_markdown_path|default:"(not generated)" }}'
+            Worker artifacts: '{{ world.campaign_worker_artifact_import_status|default:"(not imported)" }}: {{ world.campaign_worker_imported_artifact_count }}'
             Autonomous fix: '{{ world.autonomous_fix_status|default:"(not run)" }}'
             Autonomous report: '{{ world.autonomous_fix_report_path|default:"(not generated)" }}'
             Autonomous gates: '{{ world.autonomous_gate_summary|default:"(not run)" }}'
@@ -113,6 +117,9 @@ states:
             - label: "campaign_attach scenario=... evidence_kind=... evidence_path=..."
               hint: "attach campaign evidence and update the campaign deck summary"
               intent: campaign_attach
+            - label: "campaign_worker backend=local worker_id=..."
+              hint: "record local, arena, or VM worker readiness and artifact-import receipt"
+              intent: campaign_worker
             - label: "record finding_kind=... title=... summary=..."
               hint: "record a strength, weakness, issue, or fix for the review deck"
               intent: record
@@ -397,6 +404,65 @@ states:
                 campaign_status: "evidence_attached"
                 campaign_summary: "Campaign evidence attached; deck and handoff artifacts refreshed."
                 status: "campaign_evidence_attached"
+      campaign_worker:
+        - target: run_created
+          effects:
+            - set:
+                campaign_worker_backend: "{{ slots.backend ?? 'local' }}"
+                campaign_worker_id: "{{ slots.worker_id ?? '' }}"
+                campaign_worker_status: "{{ slots.status ?? 'ready' }}"
+                campaign_worker_ready_status: "{{ slots.ready_status ?? '' }}"
+                campaign_worker_summary: "{{ slots.summary ?? '' }}"
+                campaign_status: "worker_receipt"
+                campaign_summary: "Recording the campaign worker readiness receipt and imported artifact references."
+                status: "campaign_worker_recording"
+            - invoke: host.run
+              id: record_campaign_worker_receipt
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --campaign-worker
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                  - --worker-backend
+                  - "{{ slots.backend ?? 'local' }}"
+                  - --worker-id
+                  - "{{ slots.worker_id ?? '' }}"
+                  - --worker-status
+                  - "{{ slots.status ?? 'ready' }}"
+                  - --worker-ready-status
+                  - "{{ slots.ready_status ?? '' }}"
+                  - --worker-ready-summary
+                  - "{{ slots.ready_summary ?? '' }}"
+                  - --worker-budget-minutes
+                  - "{{ slots.budget_minutes ?? world.live_budget_minutes }}"
+                  - --worker-receipt-source
+                  - "{{ slots.receipt_source ?? '' }}"
+                  - --worker-import-artifact
+                  - "{{ slots.import_artifacts ?? '' }}"
+                  - --summary
+                  - "{{ slots.summary ?? '' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                campaign_worker_backend: "stdout_json.campaign_worker_backend"
+                campaign_worker_id: "stdout_json.campaign_worker_id"
+                campaign_worker_status: "stdout_json.campaign_worker_status"
+                campaign_worker_ready_status: "stdout_json.campaign_worker_ready_status"
+                campaign_worker_summary: "stdout_json.campaign_worker_summary"
+                campaign_worker_receipt_path: "stdout_json.campaign_worker_receipt_path"
+                campaign_worker_receipt_markdown_path: "stdout_json.campaign_worker_receipt_markdown_path"
+                campaign_worker_imported_artifact_count: "stdout_json.campaign_worker_imported_artifact_count"
+                campaign_worker_artifact_import_status: "stdout_json.campaign_worker_artifact_import_status"
+                deck_path: "stdout_json.deck_path"
+                driver_handoff_path: "stdout_json.driver_handoff_path"
+              on_error: run_created
+            - set:
+                campaign_status: "worker_receipt_recorded"
+                campaign_summary: "{{ world.campaign_worker_summary }}"
+                status: "campaign_worker_recorded"
       record:
         - target: run_created
           effects:
