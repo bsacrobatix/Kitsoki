@@ -215,6 +215,15 @@ make_writable_roots() {
   make_tracked_writable_root_files
 }
 
+make_recursive_writable_root_contents() {
+  local root
+  for root in $writable_roots; do
+    root="$(normalize_path "$root")"
+    [ -d "$root" ] || continue
+    chmod -R u+rwX "$root" 2>/dev/null || true
+  done
+}
+
 lock_checkout() {
   local file dir
 
@@ -263,6 +272,7 @@ repair_writable_roots() {
   [ -w . ] && root_was_writable=1
   chmod u+rwx . 2>/dev/null || true
   make_writable_roots
+  make_recursive_writable_root_contents
   [ "$root_was_writable" -eq 1 ] || chmod a-w . 2>/dev/null || true
 
   if [ "$quiet" -ne 1 ]; then
