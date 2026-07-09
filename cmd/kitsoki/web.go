@@ -325,6 +325,7 @@ authentication.`,
 				server.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
 				server.WithBugPrivacyCheckerResolver(bugPrivacyServerResolver(bugPrivacyResolver)),
 				server.WithSetupWarnings(setupWarningsFromRuntimeConfig(cfg, runtime.GOOS, bugPrivacyRuntime, ticketRepo != "")),
+				server.WithProjectOnboarded(projectOnboardedForRoot(bugRoot)),
 				server.WithKits(kits),
 			)
 			// Attach the cross-session notification relay sink so each new

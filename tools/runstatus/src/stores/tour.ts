@@ -89,9 +89,9 @@ export const useTourStore = defineStore("tour", () => {
     active.value = true;
   }
 
-  /** First-login auto-start: skip if completed, in snapshot, or under automation. */
-  function maybeAutoStart(): void {
-    if (completed.value || isSnapshot() || isAutomated()) return;
+  /** First-login auto-start: skip if completed, in snapshot, under automation, or in an already-onboarded project. */
+  function maybeAutoStart(opts: { projectOnboarded?: boolean } = {}): void {
+    if (opts.projectOnboarded || completed.value || isSnapshot() || isAutomated()) return;
     start();
   }
 

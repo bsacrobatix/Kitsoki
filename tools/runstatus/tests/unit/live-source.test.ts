@@ -386,11 +386,13 @@ describe("LiveSource", () => {
             story_id: "run-as-user-setup",
           },
         ],
+        project_onboarded: true,
       })
     );
     const src = new LiveSource("/");
     const status = await src.setupStatus();
     expect(status.warnings[0]!.id).toBe("run-as-user");
+    expect(status.project_onboarded).toBe(true);
     const body = JSON.parse(
       (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
     ) as { method: string };
