@@ -166,7 +166,8 @@ main() {
         return 1
       fi
       remove_path "$modules"
-      ln -s "$cache_modules" "$modules"
+      copy_modules "$cache_modules" "$modules"
+      chmod -R u+rwX "$modules" 2>/dev/null || true
       echo "restored runstatus deps from $cache_modules"
       ;;
     prepare-install)
@@ -180,8 +181,6 @@ main() {
       mkdir -p "$cache_base"
       printf '%s\n' "$key" >"$modules/.kitsoki-cache-key"
       if valid_modules "$cache_modules" "$key"; then
-        remove_path "$modules"
-        ln -s "$cache_modules" "$modules"
         echo "using existing runstatus deps cache at $cache_modules"
         return 0
       fi
@@ -208,8 +207,6 @@ main() {
       trap - EXIT INT TERM
       cleanup
 
-      remove_path "$modules"
-      ln -s "$cache_modules" "$modules"
       ;;
     *)
       usage
