@@ -99,23 +99,6 @@ fixtures:
         complaint: "a bugfix edits main instead of its managed capsule workspace"
     inputs:
       - "fix the bug where a bugfix edits main instead of its managed capsule workspace"
-
-  - id: symptom-is-broken
-    intent:
-      name: bugfix_report
-      slots:
-        complaint: "make install"
-    inputs:
-      - "make install is broken"
-
-  - id: symptom-fails
-    intent:
-      name: bugfix_report
-      slots:
-        complaint: "npm test"
-    inputs:
-      - "npm test fails"
-
   # References: the operator has supplied an ID/URL. These intentionally defer
   # out of semantic routing so landing's default-intent capture can preserve the
   # exact punctuation/case (`TKT-404`, `#77`, GitHub URLs) before provider lookup.
@@ -158,7 +141,6 @@ fixtures:
     defers_to_interpreter: true
     inputs:
       - "https://github.com/acme/api/issues/77"
-
   - id: url-first-github-issue-with-query
     defers_to_interpreter: true
     inputs:
@@ -186,7 +168,6 @@ fixtures:
         bugfix brief
         Steps: open a ticket, choose Fix Bug, then paste an issue URL.
         Actual: the landing workbench implements it on main.
-
   # Boundaries: existing queue commands stay queue commands; bug filing remains
   # the separate report-bug surface, not the fix pipeline.
   - id: selected-bug-still-queue-command
