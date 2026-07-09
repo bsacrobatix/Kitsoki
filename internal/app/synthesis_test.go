@@ -36,6 +36,9 @@ func TestSynthesizeRoot_Rung0(t *testing.T) {
 	if !containsStr(def.Hosts, "host.local_files.ticket") {
 		t.Fatalf("expected dev-story default ticket handler in hosts, got %v", def.Hosts)
 	}
+	if !containsStr(def.Hosts, "host.slidey.render") {
+		t.Fatalf("expected dev-story slidey render handler in hosts, got %v", def.Hosts)
+	}
 	// app.id is the repo basename (provenance).
 	if def.App.ID == "" {
 		t.Fatal("synthesized app.id is empty")

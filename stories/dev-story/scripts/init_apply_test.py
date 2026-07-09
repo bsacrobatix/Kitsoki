@@ -96,10 +96,21 @@ def fake_kitsoki(ok: bool) -> Path:
     payload = {"ok": ok}
     if not ok:
         payload["schema"] = ["forced invalid profile"]
+    validation_guard = ""
+    if ok:
+        validation_guard = (
+            "    last=\n"
+            "    for arg do last=$arg; done\n"
+            "    if [ -n \"$last\" ] && grep -q '^[[:space:]]*capability:' \"$last\"; then\n"
+            "      printf '%s\\n' '{\"ok\":false,\"schema\":[\"forbidden onboarding capability\"],\"semantic\":[],\"warnings\":[]}'\n"
+            "      exit 1\n"
+            "    fi\n"
+        )
     path.write_text(
         "#!/bin/sh\n"
         "case \"$*\" in\n"
         "  *'project-profile validate'*)\n"
+        f"{validation_guard}"
         f"    printf '%s\\n' {json.dumps(json.dumps(payload))}\n"
         f"    exit {0 if ok else 1}\n"
         "    ;;\n"
@@ -242,7 +253,7 @@ if profile_path.exists():
     check("valid onboarding repo patterns", "repo_patterns:" in profile_text)
     check("valid onboarding customizations", "story_customizations:" in profile_text)
     check("valid onboarding toolchain customization", "id: \"toolchain-gates\"" in profile_text)
-    check("valid onboarding good capability", "capability: \"good\"" in profile_text)
+    check("valid onboarding omits invalid capability", "capability:" not in profile_text)
     check("valid local ticket customization", "id: \"local-ticket-intake\"" in profile_text)
     check("valid ticket intake customization", "id: \"ticket-intake\"" in profile_text)
     check("valid starter focus customization", "id: \"starter-story-focus\"" in profile_text)
@@ -258,6 +269,7 @@ if app_path.exists():
     check("valid app design no template", 'design_template_dir:        { type: string, default: "" }' in app_text)
     check("valid app design local path", 'design_durable_path:        { type: string, default: ".context/designs" }' in app_text)
     check("valid app github source empty", 'ticket_github_repo:         { type: string, default: "" }' in app_text)
+    check("valid app slidey render host declared", "- host.slidey.render" in app_text)
 readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
 if readme_path.exists():
     readme_text = readme_path.read_text(encoding="utf-8")
@@ -526,7 +538,7 @@ if profile_path.exists():
     check("gh tracker docs ticket_repo opt-in empty", "ticket_repo: \"\"" in profile_text)
     check("gh tracker ticket intake", "id: \"ticket-intake\"" in profile_text)
     check("gh tracker customization", "id: \"github-ticket-source\"" in profile_text)
-    check("gh tracker full capability", "capability: \"full\"" in profile_text)
+    check("gh tracker omits invalid capability", "capability:" not in profile_text)
 app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
 check("gh tracker instance write", app_path.exists())
 if app_path.exists():
@@ -536,6 +548,7 @@ if app_path.exists():
     check("gh tracker github source pin", 'ticket_github_repo:         { type: string, default: "example/acme" }' in app_text)
     check("gh tracker instance hosts", "- host.gh.ticket.transition" in app_text)
     check("gh tracker instance local github host", "- host.local_github.ticket" in app_text)
+    check("gh tracker slidey render host declared", "- host.slidey.render" in app_text)
     check("gh tracker current host surface", "- host.agent.codeact" in app_text and "- host.chat.transcript" in app_text and "- host.ide.get_diagnostics" in app_text)
 readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
 if readme_path.exists():

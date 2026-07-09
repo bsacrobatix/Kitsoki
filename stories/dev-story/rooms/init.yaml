@@ -79,7 +79,7 @@ states:
         with:
           cmd: bash
           args:
-            - "-lc"
+            - "-c"
             - 'python3 "$KITSOKI_APP_DIR/scripts/init_discover.py" "$@"'
             - "init_discover"
             - "{{ world.init_request }}"
@@ -964,7 +964,7 @@ states:
         with:
           cmd: bash
           args:
-            - "-lc"
+            - "-c"
             - 'python3 "$KITSOKI_APP_DIR/scripts/init_apply.py" "$@"'
             - "init_apply"
             - "{{ world.init_target_path }}"
@@ -1051,7 +1051,13 @@ states:
           text:     "PROJECT ONBOARDING"
           subtitle: "apply failed"
           color:    "#EF4444"
+      - prose: >-
+          Profile validation failed during apply. Return to the profile review
+          before retrying; rerunning apply will repeat the same validation
+          failure until the profile is corrected.
+        when: "world.init_apply_result.status == 'profile-validation-failed'"
       - prose: "Apply did not complete successfully. Review the output, then retry or return to the profile review."
+        when: "world.init_apply_result.status != 'profile-validation-failed'"
       - kv:
           pairs:
             Target:  "{{ world.init_target_path }}"
@@ -1065,14 +1071,22 @@ states:
           mode: single
           prompt: "Actions"
           items:
-            - label:  "retry"
-              hint:   "rerun apply"
-              intent: confirm_init
             - label:  "review"
               hint:   "return to the profile review"
               intent: revise_init
               slots:
                 feedback: "review after apply failure"
+              when:   "world.init_apply_result.status == 'profile-validation-failed'"
+            - label:  "retry"
+              hint:   "rerun apply"
+              intent: confirm_init
+              when:   "world.init_apply_result.status != 'profile-validation-failed'"
+            - label:  "review"
+              hint:   "return to the profile review"
+              intent: revise_init
+              slots:
+                feedback: "review after apply failure"
+              when:   "world.init_apply_result.status != 'profile-validation-failed'"
             - label:  "quit"
               hint:   "back to the workbench"
               intent: quit
@@ -1370,7 +1384,7 @@ states:
           cmd: bash
           cwd: "{{ world.init_target_path }}"
           args:
-            - "-lc"
+            - "-c"
             - |
               if [ ! -f .kitsoki/promote-session-mining.py ]; then
                 printf '{"action":"missing-helper","entries":[],"changed":[],"counts":{},"updated":false,"error":".kitsoki/promote-session-mining.py was not found"}\n'
@@ -1500,7 +1514,7 @@ states:
           cmd: bash
           cwd: "{{ world.init_target_path }}"
           args:
-            - "-lc"
+            - "-c"
             - |
               if [ ! -f .kitsoki/check-readiness.py ]; then
                 printf '{"schema":"kitsoki-readiness/v1","status":"error","out":".artifacts/kitsoki-readiness.json","checks":[{"id":"readiness-script","status":"fail","detail":".kitsoki/check-readiness.py was not found"}]}\n'

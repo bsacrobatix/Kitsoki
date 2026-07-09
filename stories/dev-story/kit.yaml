@@ -83,6 +83,7 @@ root:
     - host.chat.resolve
     - host.chat.transcript
     - host.diff.open
+    - host.slidey.render
     - host.starlark.run
 
 conformance:

@@ -43,13 +43,18 @@ host_handlers:
         data:
           ok: true
           exit_code: 0
-          stdout: '{"status":"applied","config_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","profile_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","instance_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml","gitignore_path":"/tmp/kitsoki-init-fixtures/acme-rust/.gitignore","writes":["/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"]}'
+          stdout: '{"status":"applied","config_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","profile_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","instance_path":"/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml","gitignore_path":"/tmp/kitsoki-init-fixtures/acme-rust/.gitignore","profile_validation":{"ok":true,"schema":[],"semantic":[],"warnings":[]},"writes":["/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml","/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"]}'
           stdout_json:
             status: "applied"
             config_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
             profile_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
             instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
             gitignore_path: "/tmp/kitsoki-init-fixtures/acme-rust/.gitignore"
+            profile_validation:
+              ok: true
+              schema: []
+              semantic: []
+              warnings: []
             writes:
               - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
               - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
@@ -150,6 +155,44 @@ turns:
         args: { call: install_tools }
         times: 1
     expect_world:
+      init_apply_result:
+        status: "applied"
+        config_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
+        profile_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
+        instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+        gitignore_path: "/tmp/kitsoki-init-fixtures/acme-rust/.gitignore"
+        profile_validation:
+          ok: true
+          schema: []
+          semantic: []
+          warnings: []
+        writes:
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"
       init_tools_ok: true
+
+  - intent: { name: init_applied, slots: {} }
+    expect_state: init_done
+    expect_world:
+      init_profile_status: "applied"
+      init_apply_result:
+        status: "applied"
+        config_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
+        profile_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
+        instance_path: "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+        gitignore_path: "/tmp/kitsoki-init-fixtures/acme-rust/.gitignore"
+        profile_validation:
+          ok: true
+          schema: []
+          semantic: []
+          warnings: []
+        writes:
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/project-profile.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/app.yaml"
+          - "/tmp/kitsoki-init-fixtures/acme-rust/.kitsoki/stories/acme-rust-dev/README.md"
+    expect_view_matches: "Profile valid"
 
 expect_no_errors: true

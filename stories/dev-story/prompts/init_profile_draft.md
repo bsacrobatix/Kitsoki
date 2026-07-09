@@ -42,12 +42,17 @@ Hard requirements:
   unless the repo evidence strongly says another embedded starter is better.
 - Include `onboarding.starter_stories` and `onboarding.expansion_policy` so a
   team can begin with setup, bugfix, PR refinement, and git-ops before expanding
-  deliberately.
-- Include concise `onboarding.repo_patterns` evidence and
-  `onboarding.story_customizations` entries so future session mining can evolve
-  the project-local profile instead of patching the shared story.
-- Include `setup_plan.writes` for `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml`, `.kitsoki.yaml`, and `.gitignore`.
-- Include `setup_plan.verifications` for story-load, tests, and build when commands are known.
+  deliberately. `onboarding.expansion_policy` must be a string.
+- Include concise `onboarding.repo_patterns` evidence objects with `id`,
+  `source`, `evidence`, and optional `recommendation`.
+- Include `onboarding.story_customizations` objects with `id`, `status`,
+  `summary`, and optional `evidence` so future session mining can evolve the
+  project-local profile instead of patching the shared story.
+- Include `setup_plan.writes` objects with `path`, `action`, and `summary` for
+  `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml`,
+  `.kitsoki.yaml`, and `.gitignore`.
+- Include `setup_plan.verifications` objects with `id`, `kind`, `command`, and
+  `gate` for story-load, tests, and build when commands are known.
 
 Use read-only tools if you need evidence from package manifests, Makefiles,
 README files, or existing project rules. Keep the profile concise and useful;
