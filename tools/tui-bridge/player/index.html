@@ -256,6 +256,11 @@
       return dumpVisible();
     }
 
+    function focusTerm() {
+      term.focus();
+      return document.activeElement ? document.activeElement.className : "";
+    }
+
     function cellAttrs(row, col) {
       const buf = term.buffer.active;
       const line = buf.getLine(buf.viewportY + Number(row || 0));
@@ -299,6 +304,7 @@
     window.__dumpBuffer = dumpBuffer;
     window.__cellAttrs = cellAttrs;
     window.__textAttrs = textAttrs;
+    window.__focusTerm = focusTerm;
     window.__scrollLines = (n) => { term.scrollLines(Number(n) || 0); return dumpVisible(); };
     window.__scrollToText = scrollToText;
     window.__scrollToTop = () => { term.scrollToTop(); return dumpVisible(); };
