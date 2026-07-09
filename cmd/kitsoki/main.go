@@ -13,8 +13,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -23,12 +25,14 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/buildinfo"
+	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/kitrepo"
 	"kitsoki/internal/machine"
 	kitsokimcp "kitsoki/internal/mcp"
+	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
@@ -230,6 +234,35 @@ func versionCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Printf("kitsoki %s\n", version)
 		},
+	}
+}
+
+func tuiMetaAgentCaller(harnessType string) metamode.AgentCaller {
+	if strings.TrimSpace(harnessType) == "replay" {
+		var opts []metamode.StubOption
+		if v := os.Getenv("KITSOKI_META_STREAM_DELAY_MS"); v != "" {
+			if ms, err := strconv.Atoi(v); err == nil && ms > 0 {
+				opts = append(opts, metamode.WithStubStreamDelay(time.Duration(ms)*time.Millisecond))
+			}
+		}
+		return metamode.NewStubAgentCaller(opts...)
+	}
+	return metamode.NewAgentCallerAdapter()
+}
+
+func tuiMetaController(def *app.AppDef, cs *chats.Store, harnessType string) *metamode.Controller {
+	if def == nil || cs == nil || len(def.MetaModes) == 0 {
+		return nil
+	}
+	reg := host.AgentRegistry()
+	if reg == nil {
+		return nil
+	}
+	return &metamode.Controller{
+		Chats:  metamode.NewChatStoreAdapter(cs),
+		Agents: reg,
+		AppDef: def,
+		Agent:  tuiMetaAgentCaller(harnessType),
 	}
 }
 
@@ -620,6 +653,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				if tuiMetaTracePath != "" {
 					tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(tuiMetaTracePath))
 				}
+				if metaController := tuiMetaController(def, rawChatStore, harnessType); metaController != nil {
+					tuiOptions = append(tuiOptions, tui.WithMetaController(metaController))
+				}
 				// Allocate the meta-mode stream sink up-front so the
 				// model can hold a reference; bind it to the program
 				// post-construction via sink.Attach(p) below.
@@ -806,6 +842,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 			}
 			if freshMetaTracePath != "" {
 				tuiOptions = append(tuiOptions, tui.WithExternalTraceFile(freshMetaTracePath))
+			}
+			if metaController := tuiMetaController(def, rawChatStore, harnessType); metaController != nil {
+				tuiOptions = append(tuiOptions, tui.WithMetaController(metaController))
 			}
 			// Allocate the meta-mode stream sink up-front so the
 			// model can hold a reference; bind it to the program

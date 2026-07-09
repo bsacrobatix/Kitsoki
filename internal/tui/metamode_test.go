@@ -227,6 +227,11 @@ func buildMetaModeModel(t *testing.T, metaModes map[string]*app.MetaModeDef, age
 			Name:         "story-author",
 			SystemPrompt: "you are the story author.",
 		},
+		"story-improver": {
+			Name:         "story-improver",
+			SystemPrompt: "you review the completed run.",
+			Tools:        []string{"Read", "Glob", "Grep"},
+		},
 		"story-bug-reporter": {
 			Name:         "story-bug-reporter",
 			SystemPrompt: "you file story bugs.",
@@ -257,6 +262,19 @@ func singleStoryMode() map[string]*app.MetaModeDef {
 			Label:   "improve the story",
 			Banner:  "*** meta:story — improving the story ***",
 			Agent:   "story-author",
+		},
+	}
+}
+
+func storyImproveMode() map[string]*app.MetaModeDef {
+	return map[string]*app.MetaModeDef{
+		"story.improve": {
+			Group:   "story",
+			Trigger: "improve",
+			Label:   "Improve run",
+			Banner:  "Reviewing this run for improvements.",
+			Agent:   "story-improver",
+			Tools:   []string{"Read", "Glob", "Grep"},
 		},
 	}
 }
@@ -298,6 +316,25 @@ func TestMetaMode_EnterViaSlash_NamedMode(t *testing.T) {
 	require.Equal(t, "meta:story.bug", store.chat.room,
 		"named /meta story bug should resolve story.bug, not story.edit")
 	require.Contains(t, extractTranscript(t, m), "*** story.bug ***")
+}
+
+func TestMetaMode_CompletionSuggestsImprove(t *testing.T) {
+	m, _, _ := buildMetaModeModel(t, storyImproveMode(), "improvement report")
+
+	for _, turn := range []string{
+		"go west",
+		"hang the cloak",
+		"go east",
+		"go south",
+		"read the message",
+	} {
+		m = runTurnBlocking(t, m, turn)
+	}
+
+	content := extractTranscript(t, m)
+	require.Contains(t, content, "Improve this run")
+	require.Contains(t, content, "/meta improve")
+	require.Contains(t, content, "Auto-run at completion")
 }
 
 // TestMetaMode_EnterViaSlash_BareVerb dispatches `/meta bug` — a bare
