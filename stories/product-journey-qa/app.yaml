@@ -30,6 +30,10 @@ world:
   persona:        { type: string, default: "core-maintainer" }
   seed:           { type: string, default: "default" }
   scenario_scope: { type: string, default: "" }
+  campaign_id:    { type: string, default: "" }
+  campaign_status: { type: string, default: "" }
+  campaign_summary: { type: string, default: "" }
+  campaign_scenarios: { type: string, default: "docs-to-mcp-first-run,agent-launch-experience,remote-worker-campaign,campaign-rollup-review" }
   live_budget_minutes: { type: int, default: 20 }
   matrix_id:      { type: string, default: "" }
   matrix_dir:     { type: string, default: "" }
@@ -397,6 +401,32 @@ intents:
     slots:
       marathon_smoke_ledger: { type: string, required: false }
       min_cycles: { type: int, required: false }
+  campaign_plan:
+    description: "Plan a reusable standing product QA campaign from project-owned personas and scenarios."
+    examples: ["campaign plan", "plan product qa campaign", "start universal qa campaign", "campaign plan scenarios=docs-to-mcp-first-run,agent-launch-experience"]
+    priority: 91
+    slots:
+      project: { type: string, required: false }
+      persona: { type: string, required: false }
+      seed: { type: string, required: false }
+      scenarios: { type: string, required: false }
+      live_budget_minutes: { type: int, required: false }
+  campaign_tick:
+    description: "Advance the next due standing campaign cycle through the story-owned autonomous loop."
+    examples: ["campaign tick", "run campaign tick", "advance campaign"]
+    priority: 90
+    slots:
+      stats_root: { type: string, required: false }
+      stats_output: { type: string, required: false }
+      issue_state_file: { type: string, required: false }
+      due_now: { type: string, required: false }
+      due_limit: { type: int, required: false }
+      gh_agent_db: { type: string, required: false }
+      gh_agent_story: { type: string, required: false }
+      gh_agent_project_root: { type: string, required: false }
+      gh_agent_incident_repo: { type: string, required: false }
+      gh_agent_asset_dir: { type: string, required: false }
+      gh_agent_comment_mode: { type: string, required: false }
   autonomous_marathon:
     description: "Create or finalize a standing persona-QA marathon through autonomous fix, review, validation, weakness routing, and stats."
     examples: ["autonomous marathon", "start autonomous marathon scenarios=core-use-cases", "finalize autonomous marathon ticket_repo=bsacrobatix/Kitsoki"]
@@ -495,6 +525,16 @@ intents:
       evidence_path: { type: string, required: true }
       source: { type: string, required: false }
       notes: { type: string, required: false }
+  campaign_attach:
+    description: "Attach campaign evidence to the current run and refresh the generated deck/artifact summary."
+    examples: ["campaign attach", "attach campaign evidence", "campaign attach scenario=docs-to-mcp-first-run evidence_kind=browser_screenshot"]
+    priority: 86
+    slots:
+      scenario: { type: string, required: true }
+      evidence_kind: { type: string, required: true }
+      evidence_path: { type: string, required: true }
+      source: { type: string, required: false }
+      notes: { type: string, required: false }
   record:
     description: "Record a strength, weakness, issue, or fix for the run summary deck."
     examples: ["record finding", "note a weakness", "record a fix", "add strength"]
@@ -536,10 +576,33 @@ intents:
       gh_agent_incident_repo: { type: string, required: false }
       gh_agent_asset_dir: { type: string, required: false }
       gh_agent_comment_mode: { type: string, required: false }
+  campaign_issue_fix:
+    description: "Run the campaign issue-to-fix gate through evidence-backed filing and gh-agent repair."
+    examples: ["campaign issue fix", "campaign fix findings ticket_repo=owner/repo", "run campaign issue/fix"]
+    priority: 81
+    slots:
+      ticket_repo: { type: string, required: false }
+      gh_agent_db: { type: string, required: false }
+      gh_agent_story: { type: string, required: false }
+      gh_agent_public_base_url: { type: string, required: false }
+      gh_agent_project_root: { type: string, required: false }
+      gh_agent_incident_repo: { type: string, required: false }
+      gh_agent_asset_dir: { type: string, required: false }
+      gh_agent_comment_mode: { type: string, required: false }
   stats:
     description: "Derive filed/fixed/reopened/similar issue stats from product-journey run bundles and native/cached GitHub issue state."
     examples: ["stats", "derive issue stats", "stats refresh_issue_state=true ticket_repo=owner/repo"]
     priority: 78
+    slots:
+      stats_root: { type: string, required: false }
+      issue_state_file: { type: string, required: false }
+      refresh_issue_state: { type: string, required: false }
+      ticket_repo: { type: string, required: false }
+      stats_output: { type: string, required: false }
+  campaign_stats:
+    description: "Refresh campaign-level filed/fixed/reopened/similar issue statistics."
+    examples: ["campaign stats", "refresh campaign stats", "campaign stats refresh_issue_state=true"]
+    priority: 79
     slots:
       stats_root: { type: string, required: false }
       issue_state_file: { type: string, required: false }
@@ -570,6 +633,10 @@ intents:
     description: "Review the current product-journey bundle for readiness."
     examples: ["review run", "check readiness", "is this bundle reviewable"]
     priority: 76
+  campaign_deck_refresh:
+    description: "Regenerate the campaign review deck and readiness summary from retained run artifacts."
+    examples: ["campaign deck refresh", "refresh campaign deck", "update campaign summary"]
+    priority: 77
   validate:
     description: "Validate the current run bundle without rewriting artifacts."
     examples: ["validate run", "check artifact contract", "verify bundle"]
@@ -588,7 +655,7 @@ intents:
     priority: 10
 
 exports:
-  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, validate_marathon_smoke_ledger, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, record, blocker, file_findings, autonomous_fix, stats, driver_event, seed_demo, handoff, review, validate, accept, quit, look]
+  intents: [start, matrix, dogfood_smoke, driver_replay_smoke, driver_replay_sweep, validate_corpus, capture_preflight, native_ghagent_smoke, autonomous_fix_smoke, persona_autofix_smoke, autonomous_marathon_smoke, validate_marathon_smoke_ledger, campaign_plan, campaign_tick, autonomous_marathon, autonomous_marathon_due, autonomous_marathon_advance_due, dispatch_driver, autonomous_watchdog, refresh_targets, load, rollup, validate_matrix, validate_matrix_strict, attach, campaign_attach, record, blocker, file_findings, autonomous_fix, campaign_issue_fix, stats, campaign_stats, driver_event, seed_demo, handoff, review, campaign_deck_refresh, validate, accept, quit, look]
 
 root: idle
 

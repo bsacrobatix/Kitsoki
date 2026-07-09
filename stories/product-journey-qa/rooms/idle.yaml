@@ -1,7 +1,7 @@
 states:
   idle:
     description: "Waiting to create a product-journey QA run bundle."
-    relevant_world: [project, persona, seed, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_cycle_count, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, marathon_smoke_ledger_validation_status, marathon_smoke_ledger_validation_summary, marathon_smoke_ledger_validation_errors, marathon_smoke_ledger_validation_warnings, marathon_smoke_ledger_validation_cycle_count, marathon_smoke_ledger_validation_min_cycle_count, marathon_smoke_ledger_validation_path, marathon_smoke_ledger_validation_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, campaign_id, campaign_status, campaign_summary, campaign_scenarios, matrix_personas, target_proof_file, capture_preflight_status, capture_preflight_failed, corpus_validation_status, corpus_validation_errors, corpus_validation_warnings, native_ghagent_status, autonomous_fix_smoke_status, persona_autofix_smoke_status, autonomous_marathon_smoke_status, autonomous_marathon_smoke_project, autonomous_marathon_smoke_cycle_count, autonomous_marathon_smoke_persona_count, autonomous_marathon_smoke_scenario_count, autonomous_marathon_smoke_run_count, autonomous_marathon_smoke_filed_issue_count, autonomous_marathon_smoke_done_count, autonomous_marathon_smoke_landing_count, autonomous_marathon_smoke_flawless_count, autonomous_marathon_smoke_success_rate, autonomous_marathon_smoke_report_path, autonomous_marathon_smoke_report_markdown_path, marathon_smoke_ledger_validation_status, marathon_smoke_ledger_validation_summary, marathon_smoke_ledger_validation_errors, marathon_smoke_ledger_validation_warnings, marathon_smoke_ledger_validation_cycle_count, marathon_smoke_ledger_validation_min_cycle_count, marathon_smoke_ledger_validation_path, marathon_smoke_ledger_validation_markdown_path, autonomous_marathon_status, autonomous_marathon_report_path, autonomous_due_status, autonomous_due_summary, autonomous_due_count, autonomous_due_blocked_count, autonomous_due_next_run_dir, autonomous_due_next_story_intent, autonomous_due_advance_status, autonomous_due_advance_summary, autonomous_due_source_run_id, autonomous_due_source_run_dir, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_evidence_count, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, validation_status, validation_errors, validation_issue_summary, status]
     view:
       - banner:
           text: "PRODUCT JOURNEY QA"
@@ -12,6 +12,9 @@ states:
             Project: "{{ world.project }}"
             Persona: "{{ world.persona }}"
             Seed: "{{ world.seed }}"
+            Campaign: '{{ world.campaign_status|default:"(not planned)" }}'
+            Campaign summary: '{{ world.campaign_summary|default:"(none)" }}'
+            Campaign scenarios: "{{ world.campaign_scenarios }}"
             Matrix personas: "{{ world.matrix_personas }}"
             Target proof: '{{ world.target_proof_file|default:"(not refreshed)" }}'
             Capture preflight: '{{ world.capture_preflight_status|default:"(not checked)" }}'
@@ -47,6 +50,12 @@ states:
             - label: "start project=... persona=... seed=..."
               hint: "emit a run bundle under .artifacts/product-journey"
               intent: start
+            - label: "campaign_plan project=... persona=... seed=..."
+              hint: "plan the standing universal QA campaign using the shared scenario catalog"
+              intent: campaign_plan
+            - label: "campaign_tick"
+              hint: "advance the next due campaign cycle through the story-owned gates"
+              intent: campaign_tick
             - label: "matrix seed=... matrix_personas=primary"
               hint: "emit the 10-repo GitHub matrix under .artifacts/product-journey/matrices"
               intent: matrix
@@ -98,6 +107,30 @@ states:
             - label: "look"
               intent: look
     on:
+      campaign_plan:
+        - target: .
+          effects:
+            - set:
+                project: "{{ slots.project ?? world.project }}"
+                persona: "{{ slots.persona ?? world.persona }}"
+                seed: "{{ slots.seed ?? world.seed }}"
+                scenario_scope: "{{ slots.scenarios ?? world.campaign_scenarios }}"
+                live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                campaign_id: "{{ slots.seed ?? world.seed }}"
+                campaign_status: "planning"
+                campaign_summary: "Standing campaign plan uses the shared persona/scenario catalog and the product-journey evidence pipeline."
+                status: "campaign_planning"
+            - emit_intent: start
+      campaign_tick:
+        - target: .
+          effects:
+            - set:
+                stats_root: "{{ slots.stats_root ?? world.stats_root }}"
+                stats_output: "{{ slots.stats_output ?? world.stats_output }}"
+                campaign_status: "ticking"
+                campaign_summary: "Advancing the next due standing campaign control artifact."
+                status: "campaign_ticking"
+            - emit_intent: autonomous_marathon_advance_due
       validate_corpus:
         - target: .
           effects:

@@ -64,9 +64,19 @@ It is intentionally no-LLM:
   --json-output` to check the matrix and rollup artifact contract without
   rewriting files.
 - `start` calls `tools/product-journey/run.py --emit-run --json-output`.
+- `campaign_plan` is the product-facing standing-campaign entrypoint. It plans
+  a reusable run from the shared persona/scenario catalog, defaulting to the
+  universal campaign scenarios for docs-to-MCP first run, agent launch,
+  remote-worker readiness, and campaign rollup review. It delegates to `start`
+  so the generated run bundle, driver handoff, capture routes, and Slidey deck
+  stay in the normal product-journey artifact shape.
 - `attach` calls `tools/product-journey/run.py --attach-evidence --json-output`;
   include `source` when the driver knows whether the artifact is `retained`,
   `external`, `local`, or `cassette`.
+- `campaign_attach` is the product-facing evidence writeback action. It calls
+  the same attach runner as `attach`, then marks the campaign summary/deck as
+  refreshed so operators can use one vocabulary for retained browser, TUI,
+  MCP/session, rrweb, and worker evidence.
 - `record` calls `tools/product-journey/run.py --record-finding --json-output`
   for strengths, weaknesses, issues, and fixes.
 - `blocker` calls `tools/product-journey/run.py --record-blocker --json-output`
@@ -86,6 +96,18 @@ It is intentionally no-LLM:
   `autonomous_watchdog` before filing anything and returns a reviewable
   `autonomous_fix_invalid` result when the standing-loop control is missing or
   stale.
+- `campaign_issue_fix` delegates to `autonomous_fix` after binding the campaign
+  ticket repo and hosted gh-agent URL into story state. It is the general
+  issue/fix product verb; raw filing remains behind the evidence-backed
+  autonomous gate.
+- `campaign_stats` delegates to `stats` for filed/fixed/reopened/similar issue
+  counts across retained campaign artifacts.
+- `campaign_deck_refresh` delegates to `review` to regenerate the Slidey deck
+  and readiness summary from the current run. The deck remains conservative
+  whenever evidence, playback, validation, issue, or worker gates are red.
+- `campaign_tick` advances the next due standing campaign control artifact via
+  the existing autonomous-marathon due path. It is the cadence verb a local or
+  VM worker can call without copying runner commands together.
 - `autonomous_marathon scenarios=core-use-cases autonomous_driver_mode=replay
   ...` creates a scoped run for onboarding, PRD/design, and bugfix, attaches
   cassette-backed local proof artifacts, records the driver journal and
