@@ -35,7 +35,7 @@ commit_file() {
 assert_contains() {
   local file="$1"
   local needle="$2"
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     echo "expected '$needle' in $file" >&2
     cat "$file" >&2
     exit 1
@@ -98,6 +98,40 @@ git -C "$local_repo" merge-base --is-ancestor main staging/local ||
   fail "primary staging/local and staging capsule HEAD differ"
 cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
   fail "refresh did not copy .kitsoki.local.yaml into staging capsule"
+
+printf 'scratch\n' >"$local_repo/.capsules/staging/local/scratch.txt"
+dirty_out="$tmp/dirty-capsule.out"
+set +e
+(
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote
+) >"$dirty_out" 2>&1
+dirty_status=$?
+set -e
+[ "$dirty_status" -eq 1 ] ||
+  fail "expected dirty staging capsule to stop with exit 1, got $dirty_status"
+assert_contains "$dirty_out" "staging capsule has uncommitted changes"
+assert_contains "$dirty_out" "Useful next steps"
+assert_contains "$dirty_out" "--dirty-action preserve"
+[ -f "$local_repo/.capsules/staging/local/scratch.txt" ] ||
+  fail "dirty abort removed the untracked file"
+
+preserve_out="$tmp/dirty-capsule-preserve.out"
+(
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote --dirty-action preserve --gate 'git diff --check'
+) >"$preserve_out" 2>&1
+assert_contains "$preserve_out" "preserved dirty staging-capsule changes"
+assert_contains "$preserve_out" "staging/local ->"
+[ ! -e "$local_repo/.capsules/staging/local/scratch.txt" ] ||
+  fail "preserve did not clean the untracked file"
+preserve_patch="$(ls "$local_repo/.artifacts/staging-local-preserved"/staging-capsule-dirty-*.patch | tail -1)"
+assert_contains "$preserve_patch" "scratch.txt"
+remaining_dirty="$(git -C "$local_repo/.capsules/staging/local" status --porcelain --untracked-files=all |
+  grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' ||
+  true)"
+[ -z "$remaining_dirty" ] ||
+  fail "preserve left staging capsule dirty: $remaining_dirty"
 
 make_out="$tmp/make-staging.out"
 (
