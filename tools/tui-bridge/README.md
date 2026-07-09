@@ -96,11 +96,14 @@ with `ArrowDown`/`ArrowUp` keystrokes on both the `kitsoki-dev` landing surface
 and the dogfood marathon landing room. This matters because the widget starts
 active in a real terminal; pressing `Tab` is the explicit "chat instead" gesture,
 so a recording that tabs away without showing the widget omits a bug-prone
-surface. After the clean `start the marathon` command is submitted, the player
-chrome turns on a `FAST FORWARD` badge labelled as cassette replay for the
-autonomous 15-case loop. The opening setup therefore reads as real-time terminal
-interaction, while the sped-up cassette section is visibly marked as accelerated
-replay. The serious-exception checkpoint is also
+surface. The dogfood landing menu starts on `start the marathon`, moves down to
+the real `refine plan` affordance, and hides `resume the marathon` in a fresh
+session because there is no durable journal to resume yet. After the clean
+`start the marathon` command is submitted, the player chrome turns on a
+`FAST FORWARD` badge labelled as cassette replay for the autonomous 15-case
+loop. The opening setup therefore reads as real-time terminal interaction,
+while the sped-up cassette section is visibly marked as accelerated replay. The
+serious-exception checkpoint is also
 handled through the same choice widget: the warning stays on screen with a
 distinct question, impact, Issue link, and trace link; the cursor moves to
 "park case and continue"; and Enter commits that actual intent instead of

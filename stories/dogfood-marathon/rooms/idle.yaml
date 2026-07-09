@@ -5,7 +5,7 @@ states:
 
   idle:
     description: "Dogfood marathon. Pick the inner pipeline + backlog, then process every case and report the run."
-    relevant_world: [inner_pipeline, backlog_sources, baseline_policy, profile, model, backlog_limit, run_id, journal_path, autonomous]
+    relevant_world: [inner_pipeline, backlog_sources, baseline_policy, profile, model, backlog_limit, run_id, journal_path, autonomous, plan_revision, plan_feedback]
     view:
       - heading: "Dogfood marathon"
       - prose: "Drive a backlog of cases through an inner kitsoki pipeline (bugfix / delivery-tail / ship-it), independently verify every deliverable, capture friction as findings, and bake the run into a slidey report. This wraps the dogfood-marathon skill — improve the pipeline WITHOUT overfitting to the cases."
@@ -20,7 +20,12 @@ states:
             Mode:            '{% if world.autonomous %}autonomous{% else %}operator-paced{% endif %}'
             Run id:          '{{ world.run_id }}'
             Journal:         '{{ world.journal_path|default:"(derived at intake)" }}'
-      - prose: "Default start is intentionally clean: `start the marathon` uses the configured 15-case backlog, codex-native / gpt-5.5, and a fresh durable journal. Type free-form only when you need to override the run."
+            "Plan revision": '{{ world.plan_revision }}'
+      - heading: "Plan"
+      - prose: "Start will load up to {{ world.backlog_limit }} case(s) from {{ world.backlog_sources }}, run {{ world.inner_pipeline }} with {{ world.profile }} / {{ world.model }}, keep a durable journal under the run id, independently verify each deliverable, park serious exceptions for the operator, and produce one slidey deck per case plus an aggregate deck."
+      - prose: "Last refinement: {{ world.plan_feedback }}"
+        when: "world.plan_feedback != ''"
+      - prose: "Default start is intentionally clean: `start the marathon` uses this configured plan and a fresh durable journal. Use `refine plan` before start when the source, limit, model, or run id needs to change."
       - choice:
           mode: single
           prompt: "Actions"
@@ -28,9 +33,18 @@ states:
             - label: "start the marathon"
               hint:  "fresh durable journal; autonomous until a serious exception"
               intent: start_marathon
+            - label: "refine plan"
+              hint:  "edit sources, limit, model, or run id before starting"
+              intent: refine_plan
+              param:
+                slot:        feedback
+                type:        string
+                placeholder: "what should change?"
+                required:    false
             - label: "resume the marathon"
               hint:  "load the durable journal and continue from the next case"
               intent: resume
+              when:  "world.journal_path != ''"
             - label: "quit"
               hint:  "abandon"
               intent: quit
@@ -85,6 +99,7 @@ states:
                 journal_status: ""
                 journal_summary: ""
                 last_checkpoint: "start"
+                plan_feedback: ""
       start_marathon:
         - target: intake
           effects:
@@ -132,6 +147,23 @@ states:
                 journal_status: ""
                 journal_summary: ""
                 last_checkpoint: "start"
+                plan_feedback: ""
+      refine_plan:
+        - target: .
+          effects:
+            - set:
+                backlog_source:  "{{ slots.backlog_source ?? world.backlog_source }}"
+                backlog_sources: "{{ slots.backlog_sources ?? slots.backlog_source ?? world.backlog_sources }}"
+                inner_pipeline:  "{{ slots.inner_pipeline ?? world.inner_pipeline }}"
+                backlog_limit:   "{{ slots.backlog_limit ?? world.backlog_limit }}"
+                run_id:          "{{ slots.run_id ?? world.run_id }}"
+                journal_path:    "{{ slots.journal_path ?? world.journal_path }}"
+                profile:         "{{ slots.profile ?? world.profile }}"
+                model:           "{{ slots.model ?? world.model }}"
+                resume_from_journal: false
+                plan_revision:   "{{ world.plan_revision + 1 }}"
+                plan_feedback:   "{{ slots.feedback ?? 'plan reviewed without extra notes' }}"
+            - say: "Dogfood marathon plan updated. Review the plan, then start the marathon or refine again."
       resume:
         - target: intake
           effects:

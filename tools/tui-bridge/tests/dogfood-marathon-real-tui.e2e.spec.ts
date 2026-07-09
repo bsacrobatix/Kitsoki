@@ -215,15 +215,22 @@ async function exerciseChoiceWidget(
   page: Page,
   shot: (page: Page, label: string) => Promise<string>,
   labelPrefix: string,
+  expected?: { initialIncludes?: string; downIncludes?: string },
 ): Promise<void> {
   await focusTerminal(page);
   await waitForScreen(page, "[↑/↓ move");
   const initial = await waitForChoiceCursor(page);
+  if (expected?.initialIncludes) {
+    expect(initial).toContain(expected.initialIncludes);
+  }
   await shot(page, `${labelPrefix}-choice-initial`);
   await dwell(page, CHOICE_HOLD_MS);
 
   const down = await pressChoiceKeyForCursorChange(page, "ArrowDown", initial);
   expect(down).not.toEqual(initial);
+  if (expected?.downIncludes) {
+    expect(down).toContain(expected.downIncludes);
+  }
   await shot(page, `${labelPrefix}-choice-arrow-down`);
   await dwell(page, CHOICE_HOLD_MS);
 
@@ -295,15 +302,20 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     await focusChat(page);
     await typeLine(page, "I want to do a dogfood marathon", shot, "typed-dev-request");
     await waitForScreen(page, "Dogfood marathon", 60_000);
-    const idleScreen = await bottom(page);
-    expect(idleScreen).toContain("Drive a backlog of cases");
     expect(await fullBuffer(page)).toContain("Drive a backlog of cases");
+    await scrollUpUntilVisible(page, "Drive a backlog of cases");
     await shot(page, "dogfood-idle-full-message");
     await dwell(page, START_HOLD_MS);
-    await bottom(page);
+    const actionScreen = await bottom(page);
+    expect(actionScreen).toContain("Plan");
+    expect(actionScreen).toContain("refine plan");
+    expect(actionScreen).not.toContain("resume the marathon");
 
     chapters.open("dogfood-choice-widget", "Move the dogfood marathon action choice widget with arrow keys", RECORDING);
-    await exerciseChoiceWidget(page, shot, "dogfood");
+    await exerciseChoiceWidget(page, shot, "dogfood", {
+      initialIncludes: "start the marathon",
+      downIncludes: "refine plan",
+    });
 
     chapters.open("start", "Start autonomous 15-bug dogfood marathon", RECORDING);
     await focusChat(page);

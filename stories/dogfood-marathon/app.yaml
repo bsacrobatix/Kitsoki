@@ -107,6 +107,8 @@ world:
   loaded_journal:   { type: bool,   default: false }
   resume_from_journal: { type: bool, default: false }
   last_checkpoint:  { type: string, default: "" }
+  plan_revision:    { type: int,    default: 0 }
+  plan_feedback:    { type: string, default: "" }
   # baseline_policy — how each case's baseline (the buggy state the inner pipeline
   # reproduces against) is pinned. fix-parent = <fix>^ for a merged-fix case;
   # current-main = a live ticket filed against main. (SKILL.md gotcha #11.)
@@ -215,6 +217,21 @@ intents:
       backlog_limit:   { type: int, required: false }
       profile:         { type: string, required: false }
       model:           { type: string, required: false }
+  refine_plan:
+    title: "refine plan"
+    description: "Revise the marathon configuration before starting."
+    examples: ["refine plan", "refine plan feedback=use delivery-tail", "refine plan backlog_limit=10 run_id=nightly-dogfood"]
+    priority: 89
+    slots:
+      feedback:        { type: string, required: false }
+      backlog_source:  { type: string, required: false }
+      backlog_sources: { type: string, required: false }
+      inner_pipeline:  { type: string, required: false }
+      backlog_limit:   { type: int, required: false }
+      run_id:          { type: string, required: false }
+      journal_path:    { type: string, required: false }
+      profile:         { type: string, required: false }
+      model:           { type: string, required: false }
   # ── per-case loop drivers (mostly internal emit_intent; a few operator-typable) ──
   enter_processing:
     description: "(internal) the backlog is loaded; enter the per-case dispatcher."
@@ -287,6 +304,7 @@ exits:
 exports:
   intents:
     - start_marathon
+    - refine_plan
     - ack_exception
     - answer_exception
 
