@@ -61,9 +61,10 @@ class Cell:
     variant: Variant
     axis: dict[str, str] = field(default_factory=dict)   # e.g. {"bug": "qs1"}
     status: str = "planned"
+    options: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "id": self.id,
             "job_type": self.job_type,
             "target": asdict(self.target),
@@ -71,6 +72,9 @@ class Cell:
             "axis": dict(self.axis),
             "status": self.status,
         }
+        if self.options:
+            out["options"] = dict(self.options)
+        return out
 
 
 # Job-type-agnostic verdicts. Plugins map their native grade into these so the
@@ -363,6 +367,7 @@ class JobSpec:
                             target=target,
                             variant=variant,
                             axis=axis,
+                            options=dict(self.options),
                         )
                     )
         return out

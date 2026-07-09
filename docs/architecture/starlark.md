@@ -166,6 +166,26 @@ The standalone MCP server supports `ctx.world`, `ctx.fs`, `ctx.probe`/`vcs`, and
 `ctx.http` when granted. It deliberately rejects `ctx.host` grants for now: an
 external stdio server has no safe session-local host registry to call.
 
+## Benchmark Usage
+
+The arena paired-task harness uses CodeAct in two different ways:
+
+- `codex-codeact` launches `kitsoki-codeact-driver` through
+  `kitsoki agent launch --mode codeact`. The dry-run launch plan is saved before
+  the live run, and the harness asserts that Codex shell/apps are disabled and
+  only `mcp__kitsoki-codeact__codeact_eval` is exposed.
+- `kitsoki-mcp-codeact` keeps `kitsoki-mcp-driver` on the Studio MCP surface for
+  orchestration, then seeds `implementation_mode: codeact` into the
+  `bench-bugfix` story. The imported bugfix implementing room swaps only the
+  mutating implementer step from `host.agent.task` to `host.agent.codeact`; the
+  rest of the pipeline remains the same.
+
+That separation matters when reading benchmark results: Studio MCP evidence
+shows how the workflow was driven, while CodeAct evidence shows the write
+surface used by the model applying the fix. Arena cell JSON records the action
+surface, launch-plan reference, capability hash, and permission assertion
+outcomes when those are available.
+
 ## `ctx` Surface
 
 `ctx` is the whole Starlark world:

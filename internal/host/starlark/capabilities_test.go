@@ -13,3 +13,15 @@ func TestParseCapabilitiesRejectsTopLevelList(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "mapping")
 }
+
+func TestParseCapabilitiesAcceptsUnsignedFSMaxBytes(t *testing.T) {
+	caps, err := starlarkhost.ParseCapabilities(map[string]any{
+		"fs": map[string]any{
+			"read":      []any{"**"},
+			"write":     []any{"**"},
+			"max_bytes": uint64(1048576),
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1048576, caps.FS.MaxBytes)
+}

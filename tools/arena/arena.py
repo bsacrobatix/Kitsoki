@@ -119,8 +119,35 @@ def cmd_run(args: argparse.Namespace) -> int:
         on_result=lambda r: print(f"  {r.cell_id} ({r.check_type}): {r.verdict} [{r.health}]"),
     )
     paths = write_rollup(results, args.out)
+    write_run_manifest(spec, args.spec, args.out, args.live)
     print(f"\nrollup → {paths['summary']}")
     return 0
+
+
+def write_run_manifest(spec: JobSpec, spec_path: str, out_dir: str, live: bool) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "kind: arena_run",
+        f"run_id: {out.name}",
+        f"spec_path: {spec_path}",
+        f"job_type: {spec.job_type}",
+        f"live: {'true' if live else 'false'}",
+        f"targets: {len(spec.targets)}",
+        f"variants: {len(spec.variants)}",
+        f"cells: {len(spec.cells())}",
+        "checks:",
+    ]
+    lines.extend(f"  - {check.check_type}" for check in spec.checks)
+    lines.append("artifacts:")
+    lines.extend([
+        "  summary_json: summary.json",
+        "  report_md: report.md",
+        "  deck_slidey_json: deck.slidey.json",
+        "  rollup_json: rollup.json",
+        "  cells_dir: cells/",
+    ])
+    (out / "run.yaml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def cmd_plugins(_args: argparse.Namespace) -> int:

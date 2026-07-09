@@ -63,6 +63,7 @@ imports:
       base_branch:     "{{ world.base_branch }}"
       feature_branch:  "{{ world.feature_branch }}"
       bugfix_mode:     "{{ world.bugfix_mode }}"
+      implementation_mode: "{{ world.implementation_mode }}"
       # End at the PR-ready close-out (reviewing → validating → done); no push.
       bugfix_exit:     "open-PR"
       judge_mode:      "{{ world.judge_mode }}"
@@ -109,6 +110,7 @@ world:
   base_branch:     { type: string, default: "main" }
   feature_branch:  { type: string, default: "" }
   bugfix_mode:     { type: string, default: "full" }
+  implementation_mode: { type: string, default: "agent_task" }
   judge_mode:      { type: string, default: "llm" }
   test_cmd:        { type: string, default: "" }
   build_cmd:       { type: string, default: "" }
