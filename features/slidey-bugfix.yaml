@@ -11,6 +11,7 @@ docs:
 related:
   - dev-story-bugfix
 demo:
+  format: rrweb
   spec: tests/playwright/slidey-bugfix-video.spec.ts
   artifactDir: slidey-bugfix
   videoBase: slidey-bugfix-demo

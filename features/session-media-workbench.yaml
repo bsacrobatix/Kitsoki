@@ -12,6 +12,7 @@ related:
   - mockup-video
   - trace-features
 demo:
+  format: rrweb
   spec: tests/playwright/session-media-workbench-video.spec.ts
   artifactDir: session-media-workbench
   videoBase: session-media-workbench-demo

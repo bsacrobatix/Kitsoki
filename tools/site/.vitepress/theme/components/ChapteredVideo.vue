@@ -1,8 +1,7 @@
 <script setup lang="ts">
 /**
- * The demo-video player: MP4 + optional chapter sidecar (the recording specs'
- * <video>.mp4.chapters.json) rendered as a clickable chapter rail that seeks
- * the video and highlights the active chapter during playback.
+ * The demo player: rrweb replay iframe first, with the legacy MP4 + optional
+ * chapter sidecar path retained only for explicit fallback media.
  *
  * A rrweb-native story-demo has no mp4 at all (see demo.embed in
  * features/*.yaml) — instead of a black "not rendered" placeholder it embeds
@@ -13,8 +12,8 @@
  * Degrades by design:
  *  - embedded variant (binary /help/): poster only + "watch online" link —
  *    MP4s and deck embeds are never embedded into the binary.
- *  - video not staged locally and no embed: poster (or empty placeholder) + a
- *    hint to record it (`make demo-feature FEATURE=<id>`). The site build
+ *  - replay not staged locally and no embed: poster (or empty placeholder) + a
+ *    hint to capture it (`make demo-feature-rrweb FEATURE=<id>`). The site build
  *    never fails on missing media.
  */
 import { ref, computed, onMounted } from "vue";
@@ -177,8 +176,8 @@ defineExpose({ seekToStep, hasChapters: () => chapters.value.length > 0 });
           <a :href="watchOnlineUrl" target="_blank" rel="noopener">{{ text.watchOnline ?? "Watch this demo online" }} →</a>
         </template>
         <template v-else>
-          {{ text.demoMissing ?? "demo video not rendered in this build" }}
-          <code v-if="featureId">make demo-feature FEATURE={{ featureId }}</code>
+          {{ text.demoMissing ?? "demo replay not captured in this build" }}
+          <code v-if="featureId">make demo-feature-rrweb FEATURE={{ featureId }}</code>
         </template>
       </p>
     </div>

@@ -92,7 +92,8 @@ while IFS=$'\t' read -r id profile format renderer specName artifactDir target y
 	ok=0
 	for attempt in 1 2; do
 		if [ "$format" = "rrweb" ]; then
-			if (cd "$RUNSTATUS_DIR" && KITSOKI_DEMO_PROFILE="$profile" WEB_CHAT_PACE=1 pnpm exec playwright test "$run_spec" --project=chromium) &&
+			rrweb_abs="$ROOT/$rrweb"
+			if (cd "$RUNSTATUS_DIR" && KITSOKI_RRWEB_OUT="$rrweb_abs" KITSOKI_DEMO_PROFILE="$profile" WEB_CHAT_PACE=1 pnpm exec playwright test "$run_spec" --project=chromium) &&
 				bash scripts/build-rrweb-viewer.sh "$rrweb" "$viewer"; then
 				ok=1
 				break
@@ -122,7 +123,7 @@ done < <(jq -r '
 	.features[]
 	| . as $f
 	| select($f.demo != null and $f.demo.external == false)
-	| ($f.demo.format // "mp4") as $fmt
+	| ($f.demo.format // "rrweb") as $fmt
 	| if $fmt == "rrweb" then
 	    select(($f.demo.rrwebSpec // $f.demo.spec) != null)
 	    | [ $f.id, "desktop", $fmt, ($f.demo.renderer // "playwright"), ($f.demo.rrwebSpecName // $f.demo.specName // $f.id), $f.demo.artifactDir,

@@ -853,7 +853,7 @@ demo-feature: build-bin
 # demo-feature-rrweb captures ONE feature's rrweb tour and bundles a
 # self-contained Slidey HTML viewer. It skips the MP4 replay-render step.
 # Usage: make demo-feature-rrweb FEATURE=web-inbox
-demo-feature-rrweb: build-bin
+demo-feature-rrweb: build-bin features-index
 	@test -n "$(FEATURE)" || { echo "usage: make demo-feature-rrweb FEATURE=<id>" >&2; exit 1; }
 	$(call runstatus_pnpm_install,--silent)
 	@set -e; \
@@ -861,7 +861,8 @@ demo-feature-rrweb: build-bin
 	spec=$$(printf '%s' "$$demo" | cut -f1); \
 	rrweb=$$(printf '%s' "$$demo" | cut -f3); \
 	viewer=$$(printf '%s' "$$demo" | cut -f4); \
-	(cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=1 pnpm exec playwright test "$$spec" --project=chromium); \
+	rrweb_abs="$$(pwd)/$$rrweb"; \
+	(cd $(RUNSTATUS_DIR) && KITSOKI_RRWEB_OUT="$$rrweb_abs" WEB_CHAT_PACE=1 pnpm exec playwright test "$$spec" --project=chromium); \
 	bash scripts/build-rrweb-viewer.sh "$$rrweb" "$$viewer"
 
 # feature-qa is the legacy MP4 visual-QA path. For rrweb-first demos, use
@@ -967,19 +968,18 @@ demos-force: build-bin features-index
 site-full: demos site
 
 # ── render: one friendly, extensible front door for local artifacts ─────────
-# The rendering machinery already exists (demos / demo-feature / site), but
-# under names you have to know. `make render` is the discoverable entrypoint
-# for "generate the things people watch and read, locally": demo media, docs,
-# and the legacy stitched product-tour master.
+# The local media/docs generation machinery already exists (demos /
+# demo-feature-rrweb / site), but under names you have to know. `make render`
+# is the discoverable entrypoint for "generate the things people watch and read,
+# locally": rrweb demo media and docs. Legacy rendered-video exports are
+# explicit opt-ins only.
 #
 # It is reuse-first — every render-* target delegates to the underlying target
 # so there is exactly one implementation each. The media path stays incremental
 # (per-demo content stamps skip anything unchanged — see scripts/record-demos.sh),
 # so re-running `make render` after a docs-only edit captures nothing.
 #
-# To grow it: add a render-<kind> target below and list it in `make render-help`
-# (`render-tour` is the legacy MP4 stitch path for per-section videos with
-# .agents/skills/kitsoki-ui-demo/scripts/concat-videos.sh).
+# To grow it: add a render-<kind> target below and list it in `make render-help`.
 .PHONY: render render-help render-videos render-video render-docs render-tour render-all
 FORCE ?=
 
@@ -994,9 +994,9 @@ render-help:
 	@echo "  make render FORCE=1             recapture every stale demo media artifact"
 	@echo "  make demo-feature-rrweb FEATURE=<id>  one feature: rrweb + HTML viewer"
 	@echo "  make render-video FEATURE=<id>  legacy fallback: MP4 + GIF + contact sheet"
-	@echo "  make render-tour                legacy fallback: stitch MP4 sections into the master tour"
+	@echo "  make render-tour                legacy export: stitch existing MP4 sections into old master tour"
 	@echo "  make render-docs                build the promo site + help docs"
-	@echo "  make render-all                 demo media + tour + docs"
+	@echo "  make render-all                 demo replays + docs"
 
 # render-videos delegates to the incremental demos pipeline (FORCE=1 -> force).
 render-videos:
@@ -1007,11 +1007,12 @@ render-videos:
 render-video:
 	@$(MAKE) demo-feature FEATURE=$(FEATURE)
 
-# render-tour stitches per-section legacy videos into the complete-product-tour
-# master (one video + a merged 8-group chapter rail). Depends on `demos` so each
-# section source is captured/fresh first (incremental — unchanged demos skip);
-# the stitch itself is pure no-LLM post-processing (scripts/features/stitch-tour.mjs).
-render-tour: demos
+# render-tour stitches pre-existing per-section legacy MP4 exports into the old
+# complete-product-tour master. It is not part of normal catalog media
+# generation or CI; create any required section videos explicitly with
+# `make render-video FEATURE=<id>` before running this target.
+render-tour: features-index
+	@echo "render-tour: legacy MP4 export; catalog demos are rrweb-first and CI does not run this target"
 	@cd $(RUNSTATUS_DIR) && pnpm exec tsx scripts/features/stitch-tour.mjs complete-product-tour
 
 # render-docs builds the VitePress promo site + help docs from whatever demo
@@ -1019,10 +1020,9 @@ render-tour: demos
 render-docs:
 	@$(MAKE) site
 
-# render-all is the everything path: refresh demo media, stitch the master tour,
-# then build the site.
+# render-all is the everything path: refresh rrweb demo media, then build the site.
 render-all:
-	@$(MAKE) render-tour
+	@$(MAKE) demos
 	@$(MAKE) site
 
 # ── Promo site + help docs (tools/site, VitePress) ──────────────────────────

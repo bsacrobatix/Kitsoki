@@ -25,10 +25,12 @@ flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 
 > **Pick the worked reference that matches the ask — copy it, don't start blank:**
 > - **A product-site demo of one feature** → make the catalog entry
->   `demo.format: rrweb`, add or copy a `*-rrweb-capture.spec.ts`, and run
->   `make demo-feature-rrweb FEATURE=<id>`. Use the legacy `agent-actions`
->   video spec only as a narration/pacing reference or as the fallback when the
->   surface cannot be reconstructed by rrweb.
+>   `demo.format: rrweb`, reuse or add a deterministic Playwright tour spec,
+>   and run `make demo-feature-rrweb FEATURE=<id>`. Existing `*-video.spec.ts`
+>   specs can run in rrweb mode because the shared helpers disable
+>   `recordVideo` when `KITSOKI_RRWEB_OUT` is set; add a separate
+>   `*-rrweb-capture.spec.ts` only when the rrweb capture needs different
+>   behavior.
 > - **The golden example of conversation-driven development** (iterative
 >   clarification, brief refinement, multi-document publication in one session) →
 >   the **dev-story PRD → Design** demo (de-listed from the feature catalog —
@@ -198,6 +200,9 @@ For new product-site demos, keep the source and published artifact rrweb-native:
 1. Set `demo.format: rrweb` in the feature catalog source and use
    `demo.rrwebSpec` when the capture spec name differs from the legacy
    bijection anchor.
+   Existing `*-video.spec.ts` tours may be the rrweb capture spec; the shared
+   camera/server helpers suppress Playwright video output and write the rrweb
+   log when `KITSOKI_RRWEB_OUT` is set.
 2. Capture and bundle:
    ```bash
    make demo-feature-rrweb FEATURE=<id>
@@ -1147,9 +1152,11 @@ make mcp-qa           # vision QA gate (GATED: local claude CLI)
 - **rrweb capture → replay-render (deterministic, server-free):**
   `tests/playwright/_helpers/rrweb-replay.ts` + `agent-actions-rrweb-capture.spec.ts`
   (simple) / `diagram-showcase-rrweb-capture.spec.ts` (complex view-dwell) /
-  `rrweb-replay-render.spec.ts` (render) / `rrweb-replay-smoke.spec.ts` (smoke) /
+  existing `*-video.spec.ts` tours in `KITSOKI_RRWEB_OUT` mode /
+  `rrweb-replay-smoke.spec.ts` (smoke) /
   `rrweb-replay-viewport-assert.spec.ts` (viewport-match guard). Canvas/video
-  surfaces stay on the live `*-video.spec.ts` path.
+  surfaces stay on the legacy MP4 export path only when rrweb cannot reconstruct
+  the actual user-visible content.
 - Sibling feature tour: `trace-features-video.spec.ts` + `src/tour/trace-manifest.ts`
 - Sibling feature tour (cassette slow-play streaming): `chat-stream-video.spec.ts` +
   `src/tour/chat-stream-manifest.ts` — films the live turn-stream in the MAIN

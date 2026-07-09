@@ -9,6 +9,7 @@ promo:
 docs:
   - docs/web/README.md
 demo:
+  format: rrweb
   spec: tests/playwright/tour-video.spec.ts
   artifactDir: tour-video
   videoBase: tour-video-demo

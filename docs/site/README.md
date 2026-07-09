@@ -7,10 +7,8 @@ flowchart LR
     feature["features/&lt;id&gt;.yaml"]
     tour["tools/runstatus/src/tour/generated/&lt;id&gt;.ts<br/>(committed)"]
     overlay["live tour overlay<br/>(web UI)"]
-    spec["Playwright rrweb capture spec<br/>(fallback *-video.spec.ts)"]
+    spec["Playwright tour spec<br/>(rrweb mode)"]
     artifacts[".artifacts/&lt;dir&gt;/<br/>rrweb JSON + HTML viewer + step PNGs"]
-    stitch["legacy stitch-tour.mjs<br/>(MP4 product-tour sections)"]
-    master["legacy complete-product-tour.mp4<br/>+ merged rail"]
     index["features-index.json<br/>+ qa/&lt;id&gt; scenarios and feature docs"]
     site["tools/site<br/>(VitePress)"]
     pages["GitHub Pages<br/>base /Kitsoki/, replay viewers"]
@@ -20,12 +18,10 @@ flowchart LR
     tour --> overlay
     tour --> spec
     spec --> artifacts
-    artifacts --> stitch --> master
     feature -->|"codegen"| index
     feature --> site
     index --> site
     artifacts --> site
-    master --> site
     site --> pages
     site --> help
 ```
@@ -58,16 +54,19 @@ requests. Generated media is **never committed**. Legacy MP4 specs also emit a
 for its clickable chapter rail.
 
 For `demo.format: rrweb`, the capture spec writes `<videoBase>.rrweb.json` and
-step screenshots; `scripts/build-rrweb-viewer.sh` then calls Slidey
-(`KITSOKI_SLIDEY_CMD`, `SLIDEY_HOME`, a sibling checkout, or `slidey` on PATH)
-to bundle `<videoBase>.html`. The product site stages that HTML as
-`/media/<feature>/demo.html` and embeds it directly, avoiding the rrweb
-seek-rasterize-to-MP4 render step during iteration.
+step screenshots; `scripts/build-rrweb-viewer.sh` then bundles
+`<videoBase>.html` with Slidey when available (`KITSOKI_SLIDEY_CMD`,
+`SLIDEY_HOME`, a sibling checkout, or `slidey` on PATH) or with the local
+fallback viewer. The product site stages that HTML as
+`/media/<feature>/demo.html` and embeds it directly, avoiding the
+seek-rasterize-to-MP4 render step during iteration and CI.
 
 Every capture context comes from one device-profile registry
 (`tests/playwright/_helpers/camera.ts`): `cameraContext()` sources the viewport,
 scale, and fallback `recordVideo.size`, so every capture uses the same
-1600×900 canvas. `demo.profiles` (default `[desktop]`) is the device-matrix
+1600×900 canvas. When `KITSOKI_RRWEB_OUT` is set, the helper disables
+Playwright video recording and the shared server helper installs rrweb into the
+page before the tour begins. `demo.profiles` (default `[desktop]`) is the device-matrix
 dimension — `desktop` is the only enabled profile until a demo's UI is
 responsive; `mobile`/`tablet` are a per-demo opt-in, captured under
 `KITSOKI_DEMO_PROFILE` with a `--<profile>` filename suffix.
@@ -79,28 +78,19 @@ site-side variant serving — per-profile `stage-media` outputs + `ChapteredVide
 runtime switching on viewport — lands when the first demo actually goes
 responsive, so nothing ships a shrunken-desktop "mobile" cut in the meantime.)
 
-## The master product tour (`make render-tour`)
+## Legacy Product-Tour Export (`make render-tour`)
 
-This is a legacy MP4 stitch path. Do not use it as the model for new demo
-work; new multi-act work should be a Slidey deck with rrweb scenes or an rrweb
-feature replay.
+`make render-tour` is a manual MP4 export path kept for old complete-product-tour
+artifacts. It is no longer part of normal catalog demo generation or Pages CI.
+Do not use it as the model for new demo work; new multi-act work should be a
+Slidey deck with rrweb scenes or a feature-level rrweb replay.
 
-`features/complete-product-tour.yaml` (`kind: product-tour`) is **stitched, not
-directly captured**: it declares ordered `sections`, each with `clips` referencing a
-demo-bound feature (optionally trimmed to a `[startChapterId, endChapterId]`
-window of that feature's sidecar). Because its legacy video is composed, the master's
-`demo` has no `spec` (`demo.spec` is optional only for a sectioned product-tour;
-record-demos skips it). `scripts/features/stitch-tour.mjs` resolves each clip's
-per-profile MP4 + sidecar, ffmpeg-trims to the window, renders a title card per
-section, composes via the shared `concat-videos.sh`, and **merges** the
-per-section sidecars into one master rail — section-prefixed ids, a
-`group`/`group_label` per section, cumulative offsets (each card included,
-probed for exact duration), and a preserved `source_ref` for deep-linking.
-`ChapteredVideo.vue` renders that into one collapsible block per section (the
-8-group rail); a plain per-feature sidecar still renders flat. `make render-tour`
-captures any stale sources then stitches; the stitch is incremental (skips when
-the master is newer than every input — `KITSOKI_STITCH_FORCE=1` rebuilds) and
-pure no-LLM post-processing.
+`features/complete-product-tour.yaml` (`kind: product-tour`) can still describe
+ordered sections for narrative/reference use, but it is not staged as a normal
+product-site demo. If a rendered master export is explicitly requested,
+`scripts/features/stitch-tour.mjs` can resolve legacy MP4 clip inputs, render
+section cards, concatenate them with `concat-videos.sh`, and merge chapter
+sidecars into one rail.
 
 ## The site (`tools/site`, VitePress)
 
@@ -149,20 +139,19 @@ Targets: `make site` (build, base `/Kitsoki/`, output `.temp/site/dist`),
 ## Publishing
 
 - **GitHub Pages**: `.github/workflows/site.yml` builds the binary, captures
-  stale demos (two-level cache: `actions/cache` over `.artifacts` + the
-  per-demo stamps), stitches the legacy master product tour, builds, deploys.
-  Docs-only pushes deploy in minutes with 0 captures; a cold run captures every
-  recordable feature in the catalog. Capture (`Record demos`) and stitching
-  (`Stitch master product tour`) are `continue-on-error` — cached media from a
-  prior run can ship if either fails — but a subsequent hard gate
+  stale rrweb demos (two-level cache: `actions/cache` over `.artifacts` + the
+  per-demo stamps), builds, deploys. Docs-only pushes deploy in minutes with 0
+  captures; a cold run captures every recordable rrweb feature in the catalog.
+  Capture (`Capture rrweb demos`) is `continue-on-error` so cached media from a
+  prior run can ship if a flaky capture fails, but a subsequent hard gate
   (`make media-check-promo`, no `continue-on-error`) fails the build if any
   promo-grid feature ends up with no staged media at all, so silent all-stale
-  ships can't happen. Any capture failures are also written to the job's
-  step summary. `scripts/check-download-links.mjs` HEAD-checks download.md's
+  ships can't happen. Any capture failures are also written to the job's step
+  summary. `scripts/check-download-links.mjs` HEAD-checks download.md's
   `releases/latest/download/...` links (temporarily non-blocking until the
   v0.1.0 release assets publish — see the TODO in site.yml). Manual dispatch
-  has a `rerecord` input for cache-busting existing workflow inputs. One-time setup: repo Settings → Pages → Source:
-  GitHub Actions.
+  has a `rerecord` input for cache-busting existing workflow inputs. One-time
+  setup: repo Settings → Pages → Source: GitHub Actions.
 - **In the binary**: `make site-embed` builds the embedded variant
   (base `/help/`, posters only — never MP4s, ~5MB) into
   `internal/helpdocs/assets/`; the next `make build` embeds it and
@@ -171,12 +160,11 @@ Targets: `make site` (build, base `/Kitsoki/`, output `.temp/site/dist`),
 
 ## QA (gated — real LLM, never automatic)
 
-`make feature-qa FEATURE=<id>` records a legacy MP4 demo then judges it against
-the catalog-generated scenarios + feature spec
+`make feature-qa FEATURE=<id>` is the gated legacy video-review path: it records
+an MP4 export and judges it against the catalog-generated scenarios + feature spec
 (`.artifacts/features/qa/<id>.{scenarios.yaml,feature.md}`) via the
 [kitsoki-ui-qa](../../.agents/skills/kitsoki-ui-qa/SKILL.md) pipeline. For
 rrweb-first demos, use the captured step PNGs or make an explicit rendered-video
 export before running the same gated QA path. `make demo-tour-qa` is the
-onboarding-tour instance of the same flow. For the stitched master (which has no
-direct capture spec), `make tour-qa` renders it via `render-tour` then judges the
-master video against its generated scenarios the same way.
+onboarding-tour instance of the same flow. `make tour-qa` is retained only for
+manual legacy complete-product-tour exports.

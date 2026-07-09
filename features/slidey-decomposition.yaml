@@ -10,6 +10,7 @@ docs:
 related:
   - slidey-architect-design
 demo:
+  format: rrweb
   spec: tests/playwright/slidey-decomposition-rrweb-capture.spec.ts
   artifactDir: slidey-decomposition
   videoBase: slidey-decomposition

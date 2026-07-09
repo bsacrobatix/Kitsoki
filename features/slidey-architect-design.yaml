@@ -11,6 +11,7 @@ docs:
 related:
   - slidey-dev-prd-design
 demo:
+  format: rrweb
   spec: tests/playwright/slidey-architect-design-video.spec.ts
   artifactDir: slidey-architect-design
   videoBase: slidey-architect-design

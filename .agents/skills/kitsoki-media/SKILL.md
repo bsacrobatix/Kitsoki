@@ -1,6 +1,6 @@
 ---
 name: kitsoki-media
-description: Organize, review, document, or validate Kitsoki media artifacts, especially rrweb product-site replays, staged VitePress media, complete-product-tour sections, and Slidey decks with embedded rrweb clips. Use when Codex is asked to find demo/replay media, clean up media layout, add media validation to tests, decide where a demo/deck artifact belongs, update docs/media guidance, or troubleshoot product-site media staging without recording live LLM runs.
+description: Organize, review, document, or validate Kitsoki media artifacts, especially rrweb product-site replays, staged VitePress media, legacy complete-product-tour exports, and Slidey decks with embedded rrweb clips. Use when Codex is asked to find demo/replay media, clean up media layout, add media validation to tests, decide where a demo/deck artifact belongs, update docs/media guidance, or troubleshoot product-site media staging without recording live LLM runs.
 ---
 
 # Kitsoki Media
@@ -22,7 +22,7 @@ Only read `kitsoki-ui-demo` or `kitsoki-ui-qa` when the task requires capture or
 
 Classify every media path before editing:
 
-- Source contracts: `features/*.yaml`, `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts`, legacy `*-video.spec.ts` fallbacks, committed tour manifests generated from features, and intentionally committed deck-local rrweb clips.
+- Source contracts: `features/*.yaml`, `tools/runstatus/tests/playwright/*-rrweb-capture.spec.ts`, existing `*-video.spec.ts` specs running in `KITSOKI_RRWEB_OUT` mode, committed tour manifests generated from features, and intentionally committed deck-local rrweb clips.
 - Generated review artifacts: `.artifacts/**`. Do not commit these unless the user explicitly asks for a source fixture and the path is clearly appropriate.
 - Site staging: `tools/site/src/public/media/<feature>/`. Treat as generated from `.artifacts` by the site pipeline, not as source.
 - Built site output: `tools/site/.vitepress/dist/**`. Never treat as source.
@@ -72,5 +72,5 @@ make tour-qa
 - Do not move or delete generated media merely because it exists; first determine whether it is ignored staging, review output, or a committed source fixture.
 - Preserve unrelated dirty work, especially under `docs/decks/`, `stories/slidey-edit/`, and `.worktrees/`.
 - If adding a new long-lived Slidey deck, keep deck-local rrweb assets under `docs/decks/assets/<deck-id>/` and update `docs/media/README.md` if it changes the inventory or policy.
-- If adding a new product demo, make it `demo.format: rrweb` unless the surface requires the legacy MP4 fallback. Update the feature YAML first, regenerate feature outputs with `make features`, and validate with `make media-check`.
+- If adding a new product demo, make it `demo.format: rrweb` unless the surface requires the legacy MP4 fallback. Update the graph-backed feature source first, regenerate feature outputs with `make features`, and validate with `make media-check`.
 - Commit only the media-contract/doc/checker changes you made.

@@ -749,6 +749,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/operator-ask-video.spec.ts
     artifacts:
@@ -950,6 +951,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/operation-handles-video.spec.ts
     artifacts:
@@ -1346,7 +1348,7 @@ nodes:
       artifactDir: agent-actions
       videoBase: agent-actions-demo
       posterStep: aa-intro-home
-      expectedPath: public/media/agent-actions/agent-actions-demo.mp4
+      expectedPath: public/media/agent-actions/demo.html
     sources:
       - source-agent-actions-feature
       - source-product-site-docs
@@ -1400,6 +1402,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/agent-actions-video.spec.ts
     artifacts:
@@ -1576,7 +1579,7 @@ nodes:
       artifactDir: trace-introspection-demo
       videoBase: trace-introspection-demo
       posterStep: ti-welcome
-      expectedPath: public/media/trace-introspection-demo/trace-introspection-demo.mp4
+      expectedPath: public/media/trace-introspection/demo.html
     sources:
       - source-trace-introspection-feature
       - source-product-site-docs
@@ -1630,6 +1633,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/trace-introspection-demo.spec.ts
     artifacts:
@@ -1730,7 +1734,7 @@ nodes:
       artifactDir: meta-mode
       videoBase: meta-mode-demo
       posterStep: meta-mode-demo
-      expectedPath: public/media/meta-mode/meta-mode-demo.mp4
+      expectedPath: public/media/meta-mode/demo.html
     sources:
       - source-meta-mode-feature
       - source-product-site-docs
@@ -1784,6 +1788,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/meta-mode.spec.ts
     artifacts:
@@ -1876,6 +1881,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/dev-story-bugfix-video.spec.ts
     artifacts:
@@ -2658,6 +2664,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/chat-stream-video.spec.ts
     artifacts:
@@ -2955,8 +2962,6 @@ nodes:
       tagline: One continuous walkthrough — eight independently-releasable sections.
       summary: A ~10-minute walkthrough that takes a first-time evaluator from the thesis, through a real run, into the audit surfaces that PROVE (not assert) determinism, into live self-authoring, and out across breadth — closing on the punchline that the film itself is a passing deterministic test. Stitched from eight chaptered sections; the master and each section are generated from this one catalog, so they can never diverge.
       narrative: 'Every beat exists to defeat one dismissal — "this is just structured output with ceremony." The throughline is control inversion, proven: the runtime is a YAML state machine, the LLM is a callee at named traceable decision points, and everything on screen is the consequence of that one choice — shown, never asserted. The whole cut is no-LLM and byte-deterministic (flow + cassette per section), so the promo can never drift from the product — which is itself the closing argument.'
-    promo:
-      order: 5
     docs:
       - docs/evaluate-kitsoki.md
       - docs/site/README.md
@@ -3057,8 +3062,6 @@ nodes:
     edges:
       presents:
         - feature-complete-product-tour
-      has_media:
-        - evidence-complete-product-tour-tour
       governed_by:
         - req-complete-product-tour-behavior
       changed_by: []
@@ -3084,6 +3087,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/design-walkthrough.spec.ts
     artifacts:
@@ -3304,6 +3308,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/diagram-showcase.spec.ts
     artifacts:
@@ -3507,6 +3512,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/dynamic-workflows-video.spec.ts
     artifacts:
@@ -3893,6 +3899,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/harness-picker-video.spec.ts
     artifacts:
@@ -4044,6 +4051,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/mockup-video-demo.spec.ts
     artifacts:
@@ -4248,6 +4256,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/session-media-workbench-video.spec.ts
     artifacts:
@@ -4444,6 +4453,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/multi-story.spec.ts
     artifacts:
@@ -4648,6 +4658,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/tour-video.spec.ts
     artifacts:
@@ -4898,6 +4909,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/punch-list-video.spec.ts
     artifacts:
@@ -5112,6 +5124,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/review-video.spec.ts
     artifacts:
@@ -5295,6 +5308,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     embed:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/architect-design.rrweb.json
@@ -5505,6 +5519,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     embed:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/slidey-bugfix.rrweb.json
@@ -5778,6 +5793,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     embed:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/decomposition.rrweb.json
@@ -5941,6 +5957,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     embed:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/pm-idea.rrweb.json
@@ -6177,6 +6194,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     embed:
       deck: docs/decks/dev-story-hybrid.slidey.json
       rrweb: assets/dev-story-hybrid/open-pr.rrweb.json
@@ -6402,6 +6420,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/story-editor-video.spec.ts
     artifacts:
@@ -6677,6 +6696,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/trace-features-video.spec.ts
     artifacts:
@@ -6937,6 +6957,7 @@ nodes:
     status: current
     visibility: public
     evidence_kind: deterministic_demo
+    format: rrweb
     producers:
       - tests/playwright/weather-report-tour.spec.ts
     artifacts:
@@ -7130,7 +7151,6 @@ nodes:
     visibility: public
     evidence_kind: deterministic_demo
     format: rrweb
-    rrwebSpec: tests/playwright/web-inbox-rrweb-capture.spec.ts
     producers:
       - tests/playwright/web-inbox-video.spec.ts
     artifacts:

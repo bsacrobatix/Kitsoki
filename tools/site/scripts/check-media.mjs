@@ -52,7 +52,7 @@ const warnings = [];
 
 /**
  * Known legacy demo.renderer -> primary staged media filename. rrweb-first
- * demos use `demo.html`; fallback video renderers still normalize to
+ * demos use `demo.html`; explicit fallback video renderers still normalize to
  * `demo.mp4`. Extend this table (or set an explicit `demo.mediaKind` in the
  * feature YAML, checked first below) when a new renderer/embed kind ships its
  * own staged-media shape.
@@ -67,13 +67,13 @@ const RENDERER_MEDIA = {
  * loosely — any staged file besides poster.png counts). */
 function expectedMediaFile(f) {
   if (f.demo?.mediaKind) return f.demo.mediaKind;
-  if ((f.demo?.format ?? "mp4") === "rrweb") return "demo.html";
+  if ((f.demo?.format ?? "rrweb") === "rrweb") return "demo.html";
   const renderer = f.demo?.renderer ?? "playwright";
   return Object.prototype.hasOwnProperty.call(RENDERER_MEDIA, renderer) ? RENDERER_MEDIA[renderer] : null;
 }
 
 function captureCommand(f) {
-  return (f.demo?.format ?? "mp4") === "rrweb"
+  return (f.demo?.format ?? "rrweb") === "rrweb"
     ? `make demo-feature-rrweb FEATURE=${f.id}`
     : `make demo-feature FEATURE=${f.id}`;
 }
@@ -141,7 +141,10 @@ function checkFeatureDemos() {
       problems.push(`${f.id}: demo.artifactDir must live under .artifacts, got ${f.demo.artifactDir}`);
     }
 
-    const format = f.demo.format ?? "mp4";
+    const format = f.demo.format ?? "rrweb";
+    if (format !== "rrweb") {
+      problems.push(`${f.id}: product-site demos must be rrweb-first; legacy MP4 exports should not be catalog media`);
+    }
     if (format === "rrweb") {
       if (!f.demo.rrweb?.endsWith(".rrweb.json")) {
         problems.push(`${f.id}: demo.rrweb must be a .rrweb.json path, got ${f.demo.rrweb}`);

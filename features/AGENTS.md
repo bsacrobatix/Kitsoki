@@ -53,14 +53,17 @@ file-based — see `schema.ts`):
   authored story).
 - `promo`: present ⇒ the feature appears on the promo landing page, sorted by
   `order` (lower first); `highlight: true` marks featured slots.
-- `demo`: binds the feature to its deterministic capture spec. Prefer
-  `demo.format: rrweb` for new product-site demos; that produces
-  `<videoBase>.rrweb.json` plus a Slidey-bundled `<videoBase>.html` viewer.
-  Use `demo.rrwebSpec` when the real capture spec differs from the
-  catalog/bijection anchor `demo.spec`. MP4 demos are the legacy fallback for
-  surfaces rrweb cannot reconstruct (`<canvas>`, `<video>`, WebGL) or an
-  explicitly requested video export; for those, `artifactDir` / `videoBase`
-  must match the spec's `ARTIFACT_DIR` / `saveVideoAsMp4` values.
+- `demo`: binds the feature to its deterministic capture spec. Product-site
+  catalog demos should use `demo.format: rrweb`; that produces
+  `<videoBase>.rrweb.json` plus a self-contained `<videoBase>.html` viewer.
+  Most tours can reuse an existing `*-video.spec.ts` in rrweb mode because the
+  shared helpers disable Playwright `recordVideo` when `KITSOKI_RRWEB_OUT` is
+  set. Use `demo.rrwebSpec` when the real capture spec differs from the
+  catalog/bijection anchor `demo.spec`. MP4 is the legacy fallback for surfaces
+  rrweb cannot reconstruct (`<canvas>`, `<video>`, WebGL) or an explicitly
+  requested video export; it should not be catalog media by default. For those
+  exports, `artifactDir` / `videoBase` must match the spec's `ARTIFACT_DIR` /
+  `saveVideoAsMp4` values.
   `external: true` marks demos that depend on paths outside this repo — they
   are excluded from capture and path validation.
 - `demo.embed`: presents a rrweb-native story-demo (its video spec is a
