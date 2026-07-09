@@ -27,20 +27,20 @@ host_handlers:
               leg_count: 2
               skipped_count: 0
             scenarios:
-              - scenario: bugfix
-                label: Bug fix workflow
-                task: Reproduce a reported product bug, capture evidence, and verify whether the fix path is clear.
+              - scenario: required-input-affordance
+                label: Required input affordance
+                task: Check that QA engineers and developers can provide required input, understand the planned transport checks, and interpret the final report.
                 applicable_transports: [web, tui]
                 skipped_transports: []
             legs:
-              - leg_id: "bugfix::web"
-                scenario: bugfix
+              - leg_id: "required-input-affordance::web"
+                scenario: required-input-affordance
                 transport: web
                 transport_label: Web
                 visual_surface: web
                 evidence_contract: { evidence_kind: browser_screenshot, level: frame-level, primary_tool: visual.snapshot }
-              - leg_id: "bugfix::tui"
-                scenario: bugfix
+              - leg_id: "required-input-affordance::tui"
+                scenario: required-input-affordance
                 transport: tui
                 transport_label: TUI
                 visual_surface: tui
@@ -58,32 +58,44 @@ host_handlers:
             driver_plan:
               driver_agent: ".agents/agents/product-journey-qa-driver.md"
               scenarios:
-                - leg_id: "bugfix::web"
-                  scenario: bugfix
-                  label: Bug fix workflow
+                - leg_id: "required-input-affordance::web"
+                  scenario: required-input-affordance
+                  label: Required input affordance
+                  task: Check that QA engineers and developers can provide required input, understand the planned transport checks, and interpret the final report.
                   transport: web
                   visual_surface: web
-                  evidence_dir: "evidence/bugfix/web"
+                  evidence_dir: "evidence/required-input-affordance/web"
                   primary_story: "stories/operator-ask/app.yaml"
+                  success_criteria:
+                    - The operator can enter the plain-language request.
+                    - The preview explains what will be checked before capture.
+                    - The report shows per-transport verdicts and replay artifacts.
+                    - The report screen has a main-room return action.
                   transport_evidence_contract:
                     primary_tool: "visual.snapshot"
                     evidence_kind: "browser_screenshot"
                     level: "frame-level"
                   playback_path: "clips/web-required-input.rrweb.json"
-                  playback_caption: "Web session replay shows the forwarded question modal, option choices, custom answer input, and resumed session."
-                - leg_id: "bugfix::tui"
-                  scenario: bugfix
-                  label: Bug fix workflow
+                  playback_caption: "Web session replay shows scenario entry, plan preview, two transport checks, summary report, and main-room return."
+                - leg_id: "required-input-affordance::tui"
+                  scenario: required-input-affordance
+                  label: Required input affordance
+                  task: Check that QA engineers and developers can provide required input, understand the planned transport checks, and interpret the final report.
                   transport: tui
                   visual_surface: tui
-                  evidence_dir: "evidence/bugfix/tui"
+                  evidence_dir: "evidence/required-input-affordance/tui"
                   primary_story: "stories/operator-ask/app.yaml"
+                  success_criteria:
+                    - The operator can enter the same plain-language request in the terminal.
+                    - The preview explains what will be checked before capture.
+                    - The report shows per-transport verdicts and replay artifacts.
+                    - The report screen has a main-room return action.
                   transport_evidence_contract:
                     primary_tool: "render.tui_png"
                     evidence_kind: "rendered_tui_frame"
                     level: "frame-level"
                   playback_path: "clips/tui-required-input.rrweb.json"
-                  playback_caption: "TUI session replay shows an input-required prompt, available choices, typed answer, and resumed status."
+                  playback_caption: "TUI session replay shows scenario entry, plan preview, two transport checks, summary report, and main-room return through the real TUI bridge."
       build_scenario_qa_deck:
         data:
           ok: true
@@ -113,7 +125,7 @@ host_handlers:
           ok: true
           submitted:
             verdict: "pass"
-            summary: "Captured evidence shows the required-input affordance, answer path, and resumed session."
+            summary: "Captured evidence shows the required-input request entry, preview plan, final report, replay artifact links, and main-room return action."
             cited_frames: ["frame-required-input.png"]
 
 turns:

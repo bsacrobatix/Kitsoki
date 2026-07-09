@@ -11913,6 +11913,86 @@ def scenario_qa_leg_counts(items: list[dict]) -> dict:
     }
 
 
+def scenario_qa_leg_task(item: dict, fallback: str) -> str:
+    for key in ("scenario_task", "task", "description"):
+        value = str(item.get(key, "") or "").strip()
+        if value:
+            return value
+    return fallback
+
+
+def scenario_qa_leg_persona(item: dict) -> str:
+    personas = item.get("personas")
+    if isinstance(personas, list):
+        text = ", ".join(str(persona).strip() for persona in personas if str(persona).strip())
+        if text:
+            return text
+    for key in ("persona", "persona_label"):
+        value = str(item.get(key, "") or "").strip()
+        if value:
+            return value
+    return "QA engineer / developer"
+
+
+def scenario_qa_leg_checked_lines(item: dict) -> list[str]:
+    raw = item.get("checked")
+    if raw is None:
+        raw = item.get("checklist")
+    if isinstance(raw, list):
+        lines = [str(line).strip().rstrip(".") for line in raw if str(line).strip()]
+        if lines:
+            return lines[:4]
+    if isinstance(raw, str) and raw.strip():
+        return [line.strip(" -").rstrip(".") for line in raw.splitlines() if line.strip(" -")][:4]
+
+    transport = str(item.get("transport", "") or "").strip()
+    level = scenario_qa_leg_level(item)
+    return [
+        f"Drive the requested behavior in the {transport or 'selected'} transport",
+        f"Collect {level or 'transport'} evidence that an independent judge can inspect",
+        "Show the final verdict and replay/report artifacts to the operator",
+    ]
+
+
+def scenario_qa_leg_label(item: dict, fallback: str) -> str:
+    transport = str(item.get("transport", "") or "").strip()
+    label = str(item.get("transport_label", "") or "").strip()
+    if not label:
+        label = {
+            "web": "Web UI",
+            "tui": "TUI",
+            "vscode": "VS Code bridge",
+            "cli": "CLI",
+        }.get(transport, transport or "Transport")
+    task = scenario_qa_leg_task(item, fallback)
+    if len(task) > 72:
+        task = task[:69].rstrip() + "..."
+    return f"{label}: {task}"
+
+
+def scenario_qa_leg_detail(item: dict, playback_refs: list[dict]) -> str:
+    transport = str(item.get("transport", "") or "").strip() or "transport"
+    level = scenario_qa_leg_level(item) or "evidence"
+    tool = ""
+    contract = item.get("transport_evidence_contract")
+    if isinstance(contract, dict):
+        tool = str(contract.get("primary_tool", "") or "").strip()
+    if not tool:
+        tool = str(item.get("primary_tool", "") or item.get("evidence_tool", "") or "").strip()
+
+    checked = "; ".join(scenario_qa_leg_checked_lines(item))
+    evidence = f"{level} {transport} evidence"
+    if tool:
+        evidence += f" via {tool}"
+    if playback_refs:
+        evidence += f"; replay {playback_refs[0]['path']}"
+    verdict = str(item.get("verdict", "") or "unjudged")
+    summary = str(item.get("verdict_summary", "") or "").strip()
+    if summary:
+        return f"Checked: {checked}. Evidence: {evidence}. Judge: {verdict} - {summary}"
+    return f"Checked: {checked}. Evidence: {evidence}. Judge: {verdict}."
+
+
 def scenario_qa_report_summary(name: str, counts: dict) -> str:
     summary = f"{counts['pass']} / {counts['total']} transport checks passed"
     if counts["fail"] > 0:
@@ -12043,16 +12123,16 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
     for item in items[:6]:
         playback_refs = scenario_qa_playback_refs(item)
         ref = playback_refs[0]["path"] if playback_refs else item.get("leg_id", "")
+        ref_type = "log"
+        if playback_refs:
+            ref_type = "rrweb" if str(ref).lower().endswith(".rrweb.json") else "artifact"
         verdict_items.append({
-            "label": f"{item.get('transport', '')} / {scenario_qa_leg_level(item)}",
+            "label": scenario_qa_leg_label(item, name),
             "status": scenario_qa_deck_status(str(item.get("verdict", ""))),
-            "detail": (
-                f"{item.get('verdict_summary', '')} "
-                f"(driver={item.get('driver_status', '')}, verdict={item.get('verdict', '')})"
-            ).strip(),
-            "refType": "artifact" if playback_refs else "log",
+            "detail": scenario_qa_leg_detail(item, playback_refs),
+            "refType": ref_type,
             "ref": ref,
-            "note": item.get("scenario", ""),
+            "note": f"Scenario: {item.get('scenario', '') or name}; persona: {scenario_qa_leg_persona(item)}; driver={item.get('driver_status', '')}",
         })
     scenes = [
         {
@@ -12063,13 +12143,14 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
         },
         {
             "type": "evidence",
-            "title": scenario_qa_report_summary(name, counts),
+            "title": "What was checked: " + scenario_qa_report_summary(name, counts),
             "items": verdict_items or [{
                 "label": "No transport checks recorded",
                 "status": "pending",
                 "detail": "Run the scenario across one or more transports before reviewing this report.",
             }],
-            "narration": "Each row is one transport check: an independently-driven and independently-judged capture, never the driver's own self-report.",
+            "caption": f"Scenario: {name}",
+            "narration": "Each row states the real task, operator persona, transport, evidence source, and independent judge verdict.",
         },
     ]
     if playback_items:
@@ -12081,7 +12162,7 @@ def render_scenario_qa_deck(name: str, run_id: str, items: list[dict], counts: d
                     "label": f"{item.get('transport', '')} user session",
                     "status": "done",
                     "detail": item.get("notes", "") or "Recorded user-session playback.",
-                    "refType": "artifact",
+                    "refType": "rrweb" if str(item.get("path", "")).lower().endswith(".rrweb.json") else "artifact",
                     "ref": item.get("path", ""),
                     "note": item.get("scenario", ""),
                 }
