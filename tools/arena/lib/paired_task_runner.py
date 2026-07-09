@@ -10,7 +10,6 @@ only calls a live CLI when ARENA_PAIRED_TASK_ENABLE_CODEX=1 is set.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import shutil
@@ -20,7 +19,6 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +33,25 @@ BENCH = KITSOKI_ROOT / "tools/bugfix-bakeoff/external/bench.py"
 DRIVE_SH = KITSOKI_ROOT / "tools/mcp-drive/drive.sh"
 BENCH_BUGFIX_STORY = KITSOKI_ROOT / "stories/bench-bugfix/app.yaml"
 
+sys.path.insert(0, str(KITSOKI_ROOT / "tools/arena"))
 sys.path.insert(0, str(KITSOKI_ROOT / "tools/session-mining"))
+from arena.treatments import (  # noqa: E402
+    CODEACT_CAPABILITY_PRESET,
+    DEFAULT_CAPABILITY_PRESETS,
+    DEFAULT_CODEACT_AGENT,
+    DriverResult,
+    DriverServices,
+    TREATMENT_DRIVERS,
+    assert_codeact_launch_plan,
+    capability_hash,
+    capability_preset_json,
+    canonical_json,
+    known_treatments,
+    merged_capability_presets,
+    resolve_treatment_driver,
+    treatment_catalog,
+    validate_driver_args,
+)
 from pricing import price_for  # noqa: E402  (path set above; single price table for the repo)
 
 # Paired-task's `--model` axis names a WORKER model the same way
@@ -59,293 +75,6 @@ SUBSCRIPTION_RAW_CLAUDE_MODELS = {
 }
 
 DEFAULT_LIVE_GATE_ENV = "ARENA_PAIRED_TASK_ENABLE_CODEX"
-DEFAULT_CODEACT_AGENT = "kitsoki-codeact-driver"
-CODEACT_MCP_SERVER = "kitsoki-codeact"
-CODEACT_MCP_TOOL = "mcp__kitsoki-codeact__codeact_eval"
-CODEACT_CAPABILITY_PRESET = "repo_patch"
-DEFAULT_CAPABILITY_PRESETS: dict[str, dict[str, Any]] = {
-    CODEACT_CAPABILITY_PRESET: {
-        "fs": {
-            "read": ["**"],
-            "write": ["**"],
-            "max_bytes": 1048576,
-        },
-        "vcs": "read",
-    },
-}
-
-
-@dataclass
-class DriverPlan:
-    treatment: str
-    backend: str
-    model: str
-    effort: str
-    working_dir: Path
-    task_file: Path | None = None
-    trace_ref: str = ""
-    command: list[str] = field(default_factory=list)
-    launch_plan_ref: str = ""
-    transcript_ref: str = ""
-    permission_assertions: dict[str, Any] = field(default_factory=dict)
-    capability_preset: str = ""
-    capability_hash: str = ""
-    action_surface: str = ""
-
-
-@dataclass
-class DriverResult:
-    blocked: bool = False
-    infra_class: str = ""
-    notes: str = ""
-    transcript_ref: str = ""
-    trace_ref: str = ""
-    launch_plan_ref: str = ""
-    metrics: dict[str, Any] = field(default_factory=dict)
-
-
-class TreatmentDriver:
-    name = ""
-    action_surface = ""
-
-    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
-        raise NotImplementedError
-
-
-class RawPromptDriver(TreatmentDriver):
-    name = "raw-codex"
-    action_surface = "raw-agent"
-
-    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
-        result = dispatch_single_prompt(args, task, tree, trace_ref)
-        metrics = dict(result.get("metrics") or {})
-        metrics.setdefault("action_surface", self.action_surface)
-        return DriverResult(
-            blocked=bool(result.get("blocked")),
-            infra_class=str(result.get("infra_class") or ""),
-            notes=str(result.get("notes") or ""),
-            trace_ref=container_path(trace_ref),
-            transcript_ref=container_path(str(result.get("transcript_ref") or trace_ref)),
-            metrics=metrics,
-        )
-
-
-class KitsokiMCPDriver(TreatmentDriver):
-    name = "kitsoki-mcp"
-    action_surface = "kitsoki-studio-mcp"
-
-    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
-        if args.backend != "codex":
-            return DriverResult(
-                blocked=True,
-                infra_class="infra:harness",
-                notes=f"kitsoki live dispatch currently expects backend 'codex', got {args.backend!r}",
-                metrics=zero_metrics(action_surface=self.action_surface),
-            )
-        result = dispatch_kitsoki(args, task, tree, trace_ref)
-        metrics = dict(result.get("metrics") or {})
-        metrics.setdefault("action_surface", self.action_surface)
-        metrics.setdefault("studio_mcp_driver", "kitsoki-mcp-driver")
-        return DriverResult(
-            blocked=bool(result.get("blocked")),
-            infra_class=str(result.get("infra_class") or ""),
-            notes=str(result.get("notes") or ""),
-            trace_ref=container_path(trace_ref),
-            transcript_ref=container_path(str(result.get("transcript_ref") or trace_ref)),
-            metrics=metrics,
-        )
-
-
-class KitsokiMCPCodeactDriver(KitsokiMCPDriver):
-    name = "kitsoki-mcp-codeact"
-    action_surface = "kitsoki-studio-mcp+codeact"
-
-    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
-        if not args.implementation_mode:
-            args.implementation_mode = "codeact"
-        result = super().run(args, task, tree, trace_ref)
-        cap_json, cap_hash = capability_preset_json(args, args.capability_preset or CODEACT_CAPABILITY_PRESET)
-        result.metrics.setdefault("implementation_mode", args.implementation_mode)
-        result.metrics.setdefault("codeact_surface", "host.agent.codeact")
-        result.metrics.setdefault("capability_preset", args.capability_preset or CODEACT_CAPABILITY_PRESET)
-        result.metrics.setdefault("capability_hash", cap_hash)
-        result.metrics.setdefault("capability_json", cap_json)
-        result.metrics.setdefault("action_surface", self.action_surface)
-        return result
-
-
-class CodexCodeactDriver(TreatmentDriver):
-    name = "codex-codeact"
-    action_surface = "kitsoki-codeact-mcp"
-
-    def run(self, args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> DriverResult:
-        if args.backend != "codex":
-            return DriverResult(
-                blocked=True,
-                infra_class="infra:harness",
-                notes=f"codex-codeact live dispatch expects backend 'codex', got {args.backend!r}",
-                metrics=zero_metrics(action_surface=self.action_surface),
-            )
-        agent = args.agent or DEFAULT_CODEACT_AGENT
-        preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
-        try:
-            cap_json, cap_hash = capability_preset_json(args, preset_name)
-            task_file = write_task_file(args, task, trace_ref)
-            bin_dir = ensure_kitsoki_binary()
-        except (Exception, SystemExit) as exc:  # noqa: BLE001 - report as harness failure.
-            return DriverResult(
-                blocked=True,
-                infra_class="infra:harness",
-                notes=f"codeact prepare failed: {exc}",
-                metrics=zero_metrics(action_surface=self.action_surface),
-            )
-
-        cmd = [
-            "kitsoki",
-            "agent",
-            "launch",
-            "--agent",
-            agent,
-            "--mode",
-            "codeact",
-            "--backend",
-            "codex",
-            "--working-dir",
-            str(tree),
-            "--codeact-capabilities-json",
-            cap_json,
-            "--task-file",
-            str(task_file),
-        ]
-        if args.model:
-            cmd.extend(["--model", args.model])
-        if args.effort:
-            cmd.extend(["--effort", args.effort])
-
-        env = dict(os.environ)
-        env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
-        launch_plan_ref = str(Path(trace_ref).with_suffix(".launch-plan.json"))
-        dry = subprocess.run(cmd, cwd=KITSOKI_ROOT, text=True, capture_output=True, env=env)
-        Path(launch_plan_ref).write_text(dry.stdout if dry.stdout.strip() else json.dumps({
-            "stderr": dry.stderr[-4000:],
-            "returncode": dry.returncode,
-        }, indent=2), encoding="utf-8")
-        if dry.returncode != 0:
-            return DriverResult(
-                blocked=True,
-                infra_class="infra:harness",
-                notes=f"codeact launch dry-run failed exit={dry.returncode}: {first_line(dry.stdout + chr(10) + dry.stderr)}",
-                trace_ref=container_path(trace_ref),
-                launch_plan_ref=container_path(launch_plan_ref),
-                metrics=zero_metrics(action_surface=self.action_surface, capability_hash=cap_hash, launch_plan_ref=container_path(launch_plan_ref)),
-            )
-        try:
-            plan = json.loads(dry.stdout)
-        except json.JSONDecodeError as exc:
-            return DriverResult(
-                blocked=True,
-                infra_class="infra:harness",
-                notes=f"codeact launch dry-run did not return JSON: {exc}",
-                trace_ref=container_path(trace_ref),
-                launch_plan_ref=container_path(launch_plan_ref),
-                metrics=zero_metrics(action_surface=self.action_surface, capability_hash=cap_hash, launch_plan_ref=container_path(launch_plan_ref)),
-            )
-        assertions = assert_codeact_launch_plan(plan, tree=tree, agent=agent, backend="codex", capability_json=cap_json, capability_hash=cap_hash)
-        if not assertions["passed"]:
-            Path(trace_ref).write_text(json.dumps({
-                "launch_plan_ref": container_path(launch_plan_ref),
-                "permission_assertions": assertions,
-            }, indent=2, sort_keys=True), encoding="utf-8")
-            return DriverResult(
-                blocked=True,
-                infra_class="infra:harness",
-                notes="codeact launch plan assertion failed: " + "; ".join(assertions["failures"]),
-                trace_ref=container_path(trace_ref),
-                launch_plan_ref=container_path(launch_plan_ref),
-                metrics=zero_metrics(
-                    action_surface=self.action_surface,
-                    capability_hash=cap_hash,
-                    launch_plan_ref=container_path(launch_plan_ref),
-                    permission_assertions=assertions,
-                ),
-            )
-
-        exec_cmd = cmd + ["--exec"]
-        timeout = int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "900"))
-        try:
-            proc = subprocess.run(exec_cmd, cwd=KITSOKI_ROOT, text=True, capture_output=True, env=env, timeout=timeout)
-            timed_out = False
-        except subprocess.TimeoutExpired as exc:
-            timed_out = True
-            proc = subprocess.CompletedProcess(exec_cmd, 124, stdout=(exc.stdout or ""), stderr=(exc.stderr or ""))
-        trace_blob = {
-            "cmd": redact_cmd(exec_cmd),
-            "launch_plan_ref": container_path(launch_plan_ref),
-            "permission_assertions": assertions,
-            "capability_hash": cap_hash,
-            "timeout_s": timeout,
-            "timed_out": timed_out,
-            "returncode": proc.returncode,
-            "stdout_tail": proc.stdout[-4000:],
-            "stderr_tail": proc.stderr[-4000:],
-        }
-        Path(trace_ref).write_text(json.dumps(trace_blob, indent=2, sort_keys=True), encoding="utf-8")
-        metrics = codex_output_metrics(proc.stdout + "\n" + proc.stderr, args.model or "gpt-5.5")
-        metrics.update({
-            "action_surface": self.action_surface,
-            "capability_preset": preset_name,
-            "capability_hash": cap_hash,
-            "launch_plan_ref": container_path(launch_plan_ref),
-            "permission_assertions": assertions,
-        })
-        metrics.update(codeact_text_metrics(proc.stdout + "\n" + proc.stderr))
-        note = f"codeact codex exit={proc.returncode}: {first_line(proc.stdout + chr(10) + proc.stderr)}"
-        if timed_out:
-            note = f"codeact codex timed out at {timeout}s; " + first_line(proc.stdout + chr(10) + proc.stderr)
-        if metrics.get("cost_note"):
-            note += f"; {metrics['cost_note']}"
-        return DriverResult(
-            blocked=proc.returncode != 0 or timed_out,
-            infra_class="infra:harness" if proc.returncode != 0 or timed_out else "",
-            notes=note,
-            trace_ref=container_path(trace_ref),
-            transcript_ref=container_path(trace_ref),
-            launch_plan_ref=container_path(launch_plan_ref),
-            metrics=metrics,
-        )
-
-
-TREATMENT_DRIVERS: dict[str, TreatmentDriver] = {
-    "raw-codex": RawPromptDriver(),
-    "single-briefed": RawPromptDriver(),
-    "single-naive": RawPromptDriver(),
-    "codex-codeact": CodexCodeactDriver(),
-    "kitsoki": KitsokiMCPDriver(),
-    "kitsoki-mcp": KitsokiMCPDriver(),
-    "kitsoki-mcp-codeact": KitsokiMCPCodeactDriver(),
-}
-
-
-def resolve_treatment_driver(treatment: str) -> TreatmentDriver | None:
-    return TREATMENT_DRIVERS.get(treatment)
-
-
-def validate_driver_args(args: argparse.Namespace) -> str:
-    if args.treatment == "codex-codeact":
-        if not (args.agent or "").strip():
-            return "codex-codeact requires variant.agent, expected kitsoki-codeact-driver"
-        preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
-        try:
-            capability_preset_json(args, preset_name)
-        except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
-            return str(exc)
-    if args.treatment == "kitsoki-mcp-codeact":
-        preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
-        try:
-            capability_preset_json(args, preset_name)
-        except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
-            return str(exc)
-    return ""
 
 
 def zero_metrics(**extra: Any) -> dict[str, Any]:
@@ -366,87 +95,26 @@ def zero_metrics(**extra: Any) -> dict[str, Any]:
     return metrics
 
 
-def merged_capability_presets(args: argparse.Namespace) -> dict[str, dict[str, Any]]:
-    presets = json.loads(json.dumps(DEFAULT_CAPABILITY_PRESETS))
-    raw = (getattr(args, "capability_presets_json", "") or "").strip()
-    if not raw:
-        return presets
-    loaded = json.loads(raw)
-    if not isinstance(loaded, dict):
-        raise ValueError("--capability-presets-json must be a JSON object")
-    for name, value in loaded.items():
-        if not isinstance(value, dict):
-            raise ValueError(f"capability preset {name!r} must be a JSON object")
-        presets[str(name)] = value
-    return presets
-
-
-def capability_preset_json(args: argparse.Namespace, preset_name: str) -> tuple[str, str]:
-    presets = merged_capability_presets(args)
-    if preset_name not in presets:
-        known = ", ".join(sorted(presets))
-        raise ValueError(f"unknown capability preset {preset_name!r}; known: {known}")
-    canonical = canonical_json(presets[preset_name])
-    return canonical, capability_hash(canonical)
-
-
-def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
-
-def capability_hash(capability_json: str) -> str:
-    return "sha256:" + hashlib.sha256(capability_json.encode("utf-8")).hexdigest()
-
-
 def write_task_file(args: argparse.Namespace, task: dict[str, Any], trace_ref: str) -> Path:
     task_file = Path(trace_ref).with_suffix(".task.md")
     task_file.write_text(build_prompt(args, task), encoding="utf-8")
     return task_file
 
 
-def assert_codeact_launch_plan(
-    plan: dict[str, Any],
-    *,
-    tree: Path,
-    agent: str,
-    backend: str,
-    capability_json: str,
-    capability_hash: str,
-) -> dict[str, Any]:
-    failures: list[str] = []
-
-    def require(label: str, ok: bool) -> None:
-        if not ok:
-            failures.append(label)
-
-    command = [str(part) for part in plan.get("command") or []]
-    joined = " ".join(command)
-    launch_policy = plan.get("launch_policy")
-    allowed = launch_policy is None or bool((launch_policy or {}).get("allowed", True))
-    require("mode == codeact", plan.get("mode") == "codeact")
-    require(f"agent == {agent}", plan.get("agent") == agent)
-    require(f"backend == {backend}", plan.get("backend") == backend)
-    require("working_dir == cell tree", str(Path(str(plan.get("working_dir") or "")).resolve()) == str(tree.resolve()))
-    require("only codeact tool exposed", plan.get("tools") == [CODEACT_MCP_TOOL])
-    require("codex shell disabled", f"--disable=shell_tool" in command)
-    require("codex apps disabled", f"--disable=apps" in command)
-    require("codex non-interactive MCP bypass flag present", "--dangerously-bypass-approvals-and-sandbox" in command)
-    require("codeact mcp server configured", f"mcp_servers.{CODEACT_MCP_SERVER}.command=\"kitsoki\"" in joined)
-    require("codeact mcp server enabled", f"mcp_servers.{CODEACT_MCP_SERVER}.enabled=true" in joined)
-    require("mcp-codeact command used", "mcp-codeact" in joined)
-    require("studio mcp not exposed", "mcp_servers.kitsoki.command=" not in joined and "mcp_servers.kitsoki.enabled=true" not in joined)
-    require("direct editor tools absent", all(tool not in joined for tool in ("--allowedTools Write", "--allowedTools Edit", "MultiEdit")))
-    require("launch policy allowed or absent", allowed)
-    require("capabilities json threaded", capability_json in joined)
-    return {
-        "passed": not failures,
-        "failures": failures,
-        "shell_disabled": "--disable=shell_tool" in command,
-        "apps_disabled": "--disable=apps" in command,
-        "only_codeact_tool": plan.get("tools") == [CODEACT_MCP_TOOL],
-        "launch_policy_allowed": allowed,
-        "capability_hash": capability_hash,
-    }
+def treatment_services() -> DriverServices:
+    return DriverServices(
+        kitsoki_root=KITSOKI_ROOT,
+        dispatch_single_prompt=dispatch_single_prompt,
+        dispatch_kitsoki=dispatch_kitsoki,
+        zero_metrics=zero_metrics,
+        container_path=container_path,
+        write_task_file=write_task_file,
+        ensure_kitsoki_binary=ensure_kitsoki_binary,
+        first_line=first_line,
+        redact_cmd=redact_cmd,
+        codex_output_metrics=codex_output_metrics,
+        codeact_text_metrics=codeact_text_metrics,
+    )
 
 
 def blended_cost_usd(model: str, tokens: int) -> tuple[float, bool]:
@@ -752,7 +420,7 @@ def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, 
         return DriverResult(
             blocked=True,
             infra_class="infra:harness",
-            notes=f"unknown paired-task treatment {args.treatment!r}; known: {', '.join(sorted(TREATMENT_DRIVERS))}",
+            notes=f"unknown paired-task treatment {args.treatment!r}; known: {', '.join(known_treatments())}",
             trace_ref=container_path(trace_ref),
             metrics=zero_metrics(),
         )
@@ -774,7 +442,7 @@ def dispatch_worker(args: argparse.Namespace, task: dict[str, Any], tree: Path, 
             trace_ref=container_path(trace_ref),
             metrics=zero_metrics(live_gate_env=gate_env),
         )
-    return driver.run(args, task, tree, trace_ref)
+    return driver.run(args, task, tree, trace_ref, treatment_services())
 
 
 def dispatch_single_prompt(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
