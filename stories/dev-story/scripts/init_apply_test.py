@@ -212,15 +212,20 @@ if profile_path.exists():
     check("valid onboarding toolchain customization", "id: \"toolchain-gates\"" in profile_text)
     check("valid onboarding good capability", "capability: \"good\"" in profile_text)
     check("valid local ticket customization", "id: \"local-ticket-intake\"" in profile_text)
+    check("valid ticket intake customization", "id: \"ticket-intake\"" in profile_text)
     check("valid starter focus customization", "id: \"starter-story-focus\"" in profile_text)
     check("valid rules files", "rules_files:\n    - \"AGENTS.md\"" in profile_text)
     check("valid repo rules evidence", "id: \"repo-rules\"" in profile_text)
 app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
 if app_path.exists():
     app_text = app_path.read_text(encoding="utf-8")
+    check("valid app fallback routing", "free_form_fallback:\n    state: core.landing\n    intent: core__landing_capture" in app_text)
+    check("valid app composite host declared", "- host.local_github.ticket" in app_text)
+    check("valid app codeact host declared", "- host.agent.codeact" in app_text)
     check("valid app prd local path", 'publish_durable_path:       { type: string, default: ".context/prd" }' in app_text)
     check("valid app design no template", 'design_template_dir:        { type: string, default: "" }' in app_text)
     check("valid app design local path", 'design_durable_path:        { type: string, default: ".context/designs" }' in app_text)
+    check("valid app github source empty", 'ticket_github_repo:         { type: string, default: "" }' in app_text)
 readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
 if readme_path.exists():
     readme_text = readme_path.read_text(encoding="utf-8")
@@ -473,9 +478,10 @@ if profile_path.exists():
     check("custom starter gitops", "- \"git-ops\"" in profile_text)
     check("custom starter omits setup", "- \"setup\"" not in profile_text)
 
-# 9. GitHub tracker ⇒ the external ticket-repo passthrough: the generated
-# instance binds iface.ticket → host.gh.ticket pinned on the slug derived from
-# the origin remote (never hardcoded), and the profile records the source.
+# 9. GitHub tracker ⇒ combined local+GitHub ticket intake: the generated
+# instance binds iface.ticket → host.local_github.ticket, searches the slug
+# derived from the origin remote, and keeps active ticket_repo empty until a
+# GitHub row is picked.
 repo = mkgitrepo()
 proc = run_apply_with(repo, fake_kitsoki(True), "acme", "Acme", "go project", "", "go test ./...", "go build ./...", tracker="github")
 check("gh tracker exit", proc.returncode == 0, proc.stdout + proc.stderr)
@@ -484,17 +490,24 @@ if profile_path.exists():
     profile_text = profile_path.read_text(encoding="utf-8")
     check("gh tracker provider", "provider: \"github\"" in profile_text)
     check("gh tracker repo slug", "repo: \"example/acme\"" in profile_text)
-    check("gh tracker binding", "ticket: host.gh.ticket" in profile_text)
-    check("gh tracker docs ticket_repo", "ticket_repo: \"example/acme\"" in profile_text)
+    check("gh tracker binding", "ticket: host.local_github.ticket" in profile_text)
+    check("gh tracker docs ticket_repo opt-in empty", "ticket_repo: \"\"" in profile_text)
+    check("gh tracker ticket intake", "id: \"ticket-intake\"" in profile_text)
     check("gh tracker customization", "id: \"github-ticket-source\"" in profile_text)
     check("gh tracker full capability", "capability: \"full\"" in profile_text)
 app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
 check("gh tracker instance write", app_path.exists())
 if app_path.exists():
     app_text = app_path.read_text(encoding="utf-8")
-    check("gh tracker instance binding", "ticket:    host.gh.ticket" in app_text)
-    check("gh tracker instance world pin", 'ticket_repo:                { type: string, default: "example/acme" }' in app_text)
+    check("gh tracker instance binding", "ticket:    host.local_github.ticket" in app_text)
+    check("gh tracker active repo empty", 'ticket_repo:                { type: string, default: "" }' in app_text)
+    check("gh tracker github source pin", 'ticket_github_repo:         { type: string, default: "example/acme" }' in app_text)
     check("gh tracker instance hosts", "- host.gh.ticket.transition" in app_text)
+    check("gh tracker instance local github host", "- host.local_github.ticket" in app_text)
+readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
+if readme_path.exists():
+    readme_text = readme_path.read_text(encoding="utf-8")
+    check("gh tracker readme provider", "Ticket provider: GitHub issues from `example/acme` plus local markdown / pasted reports" in readme_text)
 
 # 9b. GitHub tracker WITHOUT a parseable GitHub remote degrades honestly to
 # local-file tickets (no guessed slug, no gh binding).
@@ -505,7 +518,8 @@ app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
 if app_path.exists():
     app_text = app_path.read_text(encoding="utf-8")
     check("gh no-remote local binding", "ticket:    host.local_files.ticket" in app_text)
-    check("gh no-remote empty pin", 'ticket_repo:                { type: string, default: "" }' in app_text)
+    check("gh no-remote empty active repo", 'ticket_repo:                { type: string, default: "" }' in app_text)
+    check("gh no-remote empty github source", 'ticket_github_repo:         { type: string, default: "" }' in app_text)
 
 # 9c. tracker=none keeps the local binding even when the remote IS GitHub
 # (the operator's explicit choice wins over remote evidence).

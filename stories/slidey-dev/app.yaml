@@ -38,6 +38,7 @@ routing:
 
 hosts:
   - host.local_files.ticket
+  - host.local_github.ticket
   - host.gh.ticket
   - host.gh.ticket.comment
   - host.gh.ticket.get
@@ -88,11 +89,20 @@ imports:
       design_doc_filename:        "{{ world.design_doc_filename }}"
       design_ticket_dir:          "{{ world.design_ticket_dir }}"
       ticket_repo:                "{{ world.ticket_repo }}"
+      ticket_github_repo:         "{{ world.ticket_github_repo }}"
+      bugfix_destination:         "{{ world.bugfix_destination }}"
+      build_cmd:                  "{{ world.build_cmd }}"
+      test_cmd:                   "{{ world.test_cmd }}"
+      quick_test_cmd:             "{{ world.quick_test_cmd }}"
+      quick_test_timeout_seconds: "{{ world.quick_test_timeout_seconds }}"
+      full_test_timeout_seconds:  "{{ world.full_test_timeout_seconds }}"
 
 world:
   workdir:                    { type: string, default: "." }
   repo_root:                  { type: string, default: "." }
   ticket_repo:                { type: string, default: "" }
+  ticket_github_repo:         { type: string, default: "" }
+  bugfix_destination:         { type: string, default: "open-pr" }
   judge_mode:                 { type: string, default: "human" }
   judge_confidence_threshold: { type: float, default: 0.8 }
 
@@ -107,5 +117,10 @@ world:
   design_durable_path:        { type: string, default: "docs/proposals" }
   design_doc_filename:        { type: string, default: "" }
   design_ticket_dir:          { type: string, default: "issues/features" }
+  build_cmd:                  { type: string, default: "" }
+  test_cmd:                   { type: string, default: "" }
+  quick_test_cmd:             { type: string, default: "" }
+  quick_test_timeout_seconds: { type: int,    default: 180 }
+  full_test_timeout_seconds:  { type: int,    default: 1200 }
 
 root: core

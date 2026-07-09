@@ -268,9 +268,11 @@ def dev_story_docs_profile(data: dict) -> dict:
             "design_durable_path": ".context/designs",
             "design_doc_filename": "",
             "design_ticket_dir": "",
-            # GitHub tracker ⇒ feature publish mints a GitHub issue on the
-            # selected slug; otherwise "".
-            "ticket_repo": data.get("ticket_repo") or "",
+            # Bug intake and design-ticket creation are separate knobs.
+            # Onboarding wires GitHub issue search through ticket_github_repo in
+            # the instance wrapper; feature/proposal publishing only files a
+            # GitHub issue when a project explicitly opts into this docs field.
+            "ticket_repo": "",
         }
     override = data.get("dev_story_docs_profile")
     if isinstance(override, dict):
@@ -280,17 +282,72 @@ def dev_story_docs_profile(data: dict) -> dict:
     return defaults
 
 
+DEV_STORY_INSTANCE_HOSTS = [
+    "host.local_files.ticket",
+    "host.local_github.ticket",
+    "host.gh.ticket",
+    "host.gh.ticket.get",
+    "host.gh.ticket.comment",
+    "host.gh.ticket.transition",
+    "host.git",
+    "host.local",
+    "host.git_worktree",
+    "host.append_to_file",
+    "host.inbox.add",
+    "host.agent.ask",
+    "host.agent.decide",
+    "host.agent.task",
+    "host.agent.codeact",
+    "host.agent.search",
+    "host.agent.converse",
+    "host.chat.resolve",
+    "host.chat.transcript",
+    "host.artifacts_dir",
+    "host.fs.writable_dir",
+    "host.ide.get_diagnostics",
+    "host.ide.open_file",
+    "host.ide.open_diff",
+    "host.diff.open",
+    "host.run",
+    "host.starlark.run",
+]
+
+
+def dev_story_instance_hosts_yaml(indent: int = 2) -> str:
+    pad = " " * indent
+    return "\n".join(f"{pad}- {host}" for host in DEV_STORY_INSTANCE_HOSTS)
+
+
+def ticket_binding(data: dict) -> str:
+    if data.get("ticket_repo"):
+        return "host.local_github.ticket"
+    return "host.local_files.ticket"
+
+
+def ticket_repo_default(data: dict) -> str:
+    # Leave the active ticket repo empty at rest. ticket_search fills it only
+    # after a GitHub row is picked, so local/pasted bugs do not accidentally
+    # close or comment on a remote issue.
+    return ""
+
+
+def ticket_github_repo_default(data: dict) -> str:
+    # The configured GitHub source shown beside local artifact tickets.
+    return data.get("ticket_repo") or ""
+
+
+def ticket_provider_summary(data: dict) -> str:
+    repo = data.get("ticket_repo") or ""
+    if repo:
+        return f"GitHub issues from `{repo}` plus local markdown / pasted reports"
+    return "local markdown / pasted reports"
+
+
 def app_yaml(data: dict) -> str:
     project_id = data["project_id"]
     title = data["project_title"]
     docs = dev_story_docs_profile(data)
-    # Ticket source passthrough: a GitHub-tracked project binds the ticket
-    # interface to the gh adapter pinned on the selected `owner/repo` slug
-    # (world.ticket_repo — dev-story rooms thread it into every
-    # iface.ticket.* call as the `repo` arg). Everything else keeps
-    # local-file tickets under the checkout.
-    ticket_repo = data.get("ticket_repo") or ""
-    ticket_binding = "host.gh.ticket" if ticket_repo else "host.local_files.ticket"
+    binding = ticket_binding(data)
     return f"""app:
   id: {project_id}-dev
   version: 0.1.0
@@ -301,34 +358,12 @@ def app_yaml(data: dict) -> str:
 routing:
   embedding:
     model: "nomic-embed-text-v1.5"
+  free_form_fallback:
+    state: core.landing
+    intent: core__landing_capture
 
 hosts:
-  - host.local_files.ticket
-  - host.gh.ticket
-  - host.gh.ticket.get
-  - host.gh.ticket.comment
-  - host.gh.ticket.transition
-  - host.git
-  - host.local
-  - host.git_worktree
-  - host.append_to_file
-  - host.inbox.add
-  - host.agent.ask
-  - host.agent.decide
-  - host.agent.task
-  - host.agent.codeact
-  - host.agent.search
-  - host.agent.converse
-  - host.chat.resolve
-  - host.chat.transcript
-  - host.artifacts_dir
-  - host.fs.writable_dir
-  - host.ide.get_diagnostics
-  - host.ide.open_file
-  - host.ide.open_diff
-  - host.diff.open
-  - host.run
-  - host.starlark.run
+{dev_story_instance_hosts_yaml()}
 
 imports:
   core:
@@ -336,7 +371,7 @@ imports:
     entry: landing
     hosts: declared
     host_bindings:
-      ticket:    {ticket_binding}
+      ticket:    {binding}
       vcs:       host.git
       ci:        host.local
       workspace: host.git_worktree
@@ -348,11 +383,14 @@ imports:
       judge_confidence_threshold: "{{{{ world.judge_confidence_threshold }}}}"
       publish_durable_path:       "{{{{ world.publish_durable_path }}}}"
       prd_doc_filename:           "{{{{ world.prd_doc_filename }}}}"
+      prd_mockup_path:            "{{{{ world.prd_mockup_path }}}}"
       design_template_dir:        "{{{{ world.design_template_dir }}}}"
       design_durable_path:        "{{{{ world.design_durable_path }}}}"
       design_doc_filename:        "{{{{ world.design_doc_filename }}}}"
       design_ticket_dir:          "{{{{ world.design_ticket_dir }}}}"
       ticket_repo:                "{{{{ world.ticket_repo }}}}"
+      ticket_github_repo:         "{{{{ world.ticket_github_repo }}}}"
+      bugfix_destination:         "{{{{ world.bugfix_destination }}}}"
       # Project toolchain commands. Empty means dev-story/bugfix keeps its
       # default gates; non-Go projects should set these from their profile.
       build_cmd:                  "{{{{ world.build_cmd }}}}"
@@ -364,14 +402,20 @@ imports:
 world:
   workdir:                    {{ type: string, default: "." }}
   repo_root:                  {{ type: string, default: "." }}
-  # Non-empty ⇒ tickets are GitHub issues on this repo (host.gh.ticket
-  # binding above); "" ⇒ local files under issues/ (host.local_files.ticket).
-  ticket_repo:                {{ type: string, default: {q(ticket_repo)} }}
+  # ticket_repo is the active selected GitHub issue repo. It stays empty at rest
+  # so local artifact and pasted-report bugfixes close out locally. A picked
+  # GitHub row fills it before entering child stories.
+  ticket_repo:                {{ type: string, default: {q(ticket_repo_default(data))} }}
+  # ticket_github_repo is the configured remote source displayed beside local
+  # artifacts when the ticket binding is host.local_github.ticket.
+  ticket_github_repo:         {{ type: string, default: {q(ticket_github_repo_default(data))} }}
+  bugfix_destination:         {{ type: string, default: "open-pr" }}
   judge_mode:                 {{ type: string, default: "human" }}
   judge_confidence_threshold: {{ type: float, default: 0.8 }}
 
   publish_durable_path:       {{ type: string, default: {q(docs["publish_durable_path"])} }}
   prd_doc_filename:           {{ type: string, default: {q(docs["prd_doc_filename"])} }}
+  prd_mockup_path:            {{ type: string, default: {q(data.get("prd_mockup_path", ""))} }}
   design_template_dir:        {{ type: string, default: {q(docs["design_template_dir"])} }}
   design_durable_path:        {{ type: string, default: {q(docs["design_durable_path"])} }}
   design_doc_filename:        {{ type: string, default: {q(docs["design_doc_filename"])} }}
@@ -610,7 +654,7 @@ def onboarding_profile(data: dict) -> dict:
         {
             "id": "project-local-instance",
             "status": "applied",
-            "summary": "Generate a thin project-owned dev-story wrapper under `.kitsoki/stories/<id>-dev/` that imports `@kitsoki/dev-story`.",
+            "summary": "Generate a project-owned dev-story wrapper under `.kitsoki/stories/<id>-dev/` that imports `@kitsoki/dev-story` and carries the standard provider/routing bindings.",
             "evidence": f".kitsoki/stories/{data['project_id']}-dev/app.yaml",
         },
         {
@@ -618,6 +662,12 @@ def onboarding_profile(data: dict) -> dict:
             "status": "applied",
             "summary": "Retarget generated PRD/design outputs to project-local runtime docs paths.",
             "evidence": f"{dev_story_docs_profile(data)['publish_durable_path']}, {dev_story_docs_profile(data)['design_durable_path']}",
+        },
+        {
+            "id": "ticket-intake",
+            "status": "applied",
+            "summary": f"Ticket intake starts with {ticket_provider_summary(data)}.",
+            "evidence": f"binding={ticket_binding(data)}; github_source={ticket_github_repo_default(data)}",
         },
     ]
     if data.get("build_command") or data.get("test_command"):
@@ -631,7 +681,7 @@ def onboarding_profile(data: dict) -> dict:
         customizations.append({
             "id": "github-ticket-source",
             "status": "applied",
-            "summary": f"Tickets bind to GitHub issues on `{data['ticket_repo']}` (iface.ticket → host.gh.ticket, pinned via world.ticket_repo).",
+            "summary": f"Ticket search includes GitHub issues from `{data['ticket_repo']}` through the composite local+GitHub provider; selected GitHub rows carry the remote repo into child stories.",
             "evidence": f"remote={data.get('repo_remote', '')}",
         })
     else:
@@ -903,7 +953,7 @@ kitsoki:
     id: {data["project_id"]}-dev
     path: .kitsoki/stories/{data["project_id"]}-dev/app.yaml
     bindings:
-      ticket: {"host.gh.ticket" if data.get("ticket_repo") else "host.local_files.ticket"}
+      ticket: {ticket_binding(data)}
       vcs: host.git
       ci: host.local
       workspace: host.git_worktree
@@ -1731,11 +1781,16 @@ def readme(data: dict, profile_path: str) -> str:
         "Use the imported dev-story fixtures in the Kitsoki checkout for hub coverage, "
         "and add project-local flows when this repo needs its own story-specific assertions."
     )
-    ticket_provider = "GitHub Issues" if data.get("ticket_repo") else "local markdown / pasted reports"
-    ticket_capability = (
-        f"Full ticket capability is enabled for `{data['ticket_repo']}`: ticket search, body fetch, comments, and transitions use the configured provider."
+    provider_note = ticket_provider_summary(data)
+    provider_detail = (
+        "Full ticket capability is enabled: GitHub issues appear beside local "
+        "markdown tickets and pasted reports. Local/pasted reports stay local; "
+        "a selected GitHub row carries the remote repo into bugfix close-out."
         if data.get("ticket_repo")
-        else "Good local capability is enabled without remote setup: paste a bug report into the bugfix path or keep markdown tickets under `issues/bugs/`. Configure a provider later when you want remote search, issue-body fetch, comments, and transitions."
+        else "Good local capability is enabled without remote setup: paste a "
+        "bug report into the bugfix path or keep markdown tickets under "
+        "`issues/bugs/`. Configure a provider later when you want remote search, "
+        "issue-body fetch, comments, and transitions."
     )
     mining_note = ""
     if mining_seed_enabled(data):
@@ -1780,6 +1835,10 @@ Project profile: `{Path(profile_path).relative_to(Path(data["target_path"]))}`
 Readiness verifier: `.kitsoki/check-readiness.py`
 Session mining promotion helper: `.kitsoki/promote-session-mining.py`
 
+Ticket provider: {provider_note}
+
+{provider_detail}
+
 Starter story pack: `{pack["id"]}` - {pack["title"]}
 
 {starter_lines}
@@ -1799,10 +1858,6 @@ Generated PRDs publish under `{docs["publish_durable_path"]}` and design drafts
 publish under `{docs["design_durable_path"]}`. Update
 `.kitsoki/project-profile.yaml` and `.kitsoki/stories/{story_id}/app.yaml`
 together if this project later adopts a different documentation layout.
-
-Ticket provider: {ticket_provider}
-
-{ticket_capability}
 
 Inferred project commands:
 

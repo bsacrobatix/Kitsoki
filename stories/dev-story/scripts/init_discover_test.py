@@ -86,7 +86,7 @@ default_focus = mod.parse_story_focus("")
 check("story focus default", [item["id"] for item in default_focus], ["setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"])
 check("story pack default", mod.parse_story_pack(""), "core-engineering")
 check("story pack alias", mod.parse_story_pack("onboard . --pack core"), "core-setup")
-check("legacy story pack alias", mod.parse_story_pack("onboard . --pack cyber-repo"), "core-engineering")
+check("focused story pack alias", mod.parse_story_pack("onboard . --pack focused-engineering"), "core-engineering")
 pack_focus = mod.parse_story_focus("onboard . --pack core")
 check("story pack focus", [item["id"] for item in pack_focus], ["setup", "git-ops"])
 

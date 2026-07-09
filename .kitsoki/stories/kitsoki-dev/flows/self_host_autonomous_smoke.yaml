@@ -1,4 +1,4 @@
-# dogfood_autonomous_smoke — autonomous pickup chain through TWO
+# self_host_autonomous_smoke — autonomous pickup chain through TWO
 # nested import boundaries (kitsoki-dev/core → dev-story/bf →
 # bugfix). With the §W6.6 #1 fix, the LLM-judge's bare `accept`
 # verdict resolves through the chained alias map
