@@ -229,6 +229,12 @@ type Server struct {
 	// at the same directory (co-located, or a shared volume).
 	agentEvidenceDir string
 
+	// improveTicketProvider, when set, routes meta-improve evidence reports to a
+	// reusable ticket_provider/v1 script after first writing the local evidence
+	// bundle. This is for private stories or community story packs that want a
+	// non-GitHub destination while keeping the same HAR/rrweb/trace artifacts.
+	improveTicketProvider string
+
 	// bugPrivacyChecker, when set, runs the provider-backed bug report privacy
 	// gate after deterministic scrubbing and before any local/GitHub filing.
 	// Nil keeps deterministic scrubbing only; tests and replay surfaces stay
@@ -309,6 +315,7 @@ type serverConfig struct {
 	bugRoot                   string
 	ticketRepo                string
 	agentEvidenceDir          string
+	improveTicketProvider     string
 	bugPrivacyChecker         bugprivacy.Checker
 	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
 	workflowRoot              string
@@ -342,6 +349,15 @@ func WithTicketRepo(repo string) Option {
 // `--evidence-dir`. Empty (the default) skips the deposit.
 func WithAgentEvidenceDir(dir string) Option {
 	return func(c *serverConfig) { c.agentEvidenceDir = strings.TrimSpace(dir) }
+}
+
+// WithImproveTicketProvider routes runstatus.meta.improve.report to a reusable
+// ticket_provider/v1 script. The handler still writes a local evidence bundle
+// first, then calls the provider's create op with title/body and artifact
+// paths. Empty (the default) uses WithTicketRepo when configured, otherwise the
+// local artifact sink.
+func WithImproveTicketProvider(script string) Option {
+	return func(c *serverConfig) { c.improveTicketProvider = strings.TrimSpace(script) }
 }
 
 // WithBugPrivacyChecker enables the provider-backed bug report privacy gate.
@@ -478,6 +494,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		bugRoot:                   cfg.bugRoot,
 		ticketRepo:                cfg.ticketRepo,
 		agentEvidenceDir:          cfg.agentEvidenceDir,
+		improveTicketProvider:     cfg.improveTicketProvider,
 		bugPrivacyChecker:         cfg.bugPrivacyChecker,
 		bugPrivacyCheckerResolver: cfg.bugPrivacyCheckerResolver,
 		workflowRoot:              cfg.workflowRoot,
@@ -1670,6 +1687,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, serverErr(err)
 		}
 		return map[string]any{"messages": msgs}, nil
+
+	case "runstatus.meta.improve.report":
+		return s.metaImproveReportContext(ctx, params)
 
 	// ── Annotation sidecar ────────────────────────────────────────────────────
 	case "runstatus.annotation.add":

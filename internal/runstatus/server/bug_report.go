@@ -243,8 +243,10 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 
 	// GitHub mode (kitsoki web --ticket-repo): file a real GitHub issue and save
 	// evidence under .artifacts for developer-local review, instead of writing a
-	// local .artifacts/issues/bugs/<id>.md file.
-	if s.ticketRepo != "" {
+	// local .artifacts/issues/bugs/<id>.md file. Internal callers may force the
+	// local path when they need a durable evidence bundle before forwarding it to
+	// a custom provider.
+	if s.ticketRepo != "" && !boolParam(params, "force_local") {
 		return s.fileBugToGitHub(params, title, body, severity, traceRef, repro, artifacts, runtime, privacy)
 	}
 
@@ -284,10 +286,12 @@ func (s *Server) bugReportContext(ctx context.Context, params map[string]any) (a
 	}
 
 	return map[string]any{
-		"id":      id,
-		"path":    filepath.ToSlash(serverDisplayBugPath(localDisplayPrefix, relPath)),
-		"sink":    "local-artifact",
-		"privacy": privacy,
+		"id":             id,
+		"path":           filepath.ToSlash(serverDisplayBugPath(localDisplayPrefix, relPath)),
+		"sink":           "local-artifact",
+		"artifacts":      bugreport.ArtifactNames(artifacts),
+		"artifacts_path": filepath.ToSlash(serverDisplayBugPath(localDisplayPrefix, strings.TrimSuffix(relPath, ".md")+".artifacts")),
+		"privacy":        privacy,
 	}, nil
 }
 
@@ -351,7 +355,15 @@ func (s *Server) fileBugToGitHub(params map[string]any, title, body, severity, t
 	// deposit failure must not fail the (already-filed) bug report.
 	s.depositAgentEvidence(res.Number, artifactData(artifacts, "rrweb.json"), artifactData(artifacts, "har.json"))
 
-	return map[string]any{"id": res.Number, "url": res.URL, "github": true, "privacy": privacy}, nil
+	return map[string]any{
+		"id":             res.Number,
+		"url":            res.URL,
+		"github":         true,
+		"sink":           "github",
+		"artifacts":      bugreport.ArtifactNames(artifacts),
+		"artifacts_path": filepath.ToSlash(filepath.Join(displayRoot, prefix)),
+		"privacy":        privacy,
+	}, nil
 }
 
 func (s *Server) bugRuntimeSnapshot(root string, params map[string]any) reportmeta.Snapshot {
@@ -700,6 +712,11 @@ func cloneParams(params map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+func boolParam(params map[string]any, key string) bool {
+	v, _ := params[key].(bool)
+	return v
 }
 
 // stringSliceParam reads a []string param from a JSON array of strings.

@@ -62,6 +62,7 @@ func webCmd() *cobra.Command {
 		actor            string
 		ticketRepo       string
 		agentEvidenceDir string
+		improveProvider  string
 		maxSessions      int
 		kitsDir          string
 	)
@@ -320,6 +321,7 @@ authentication.`,
 				server.WithWorkflowRoot(bugRoot),
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
+				server.WithImproveTicketProvider(improveProvider),
 				server.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
 				server.WithBugPrivacyCheckerResolver(bugPrivacyServerResolver(bugPrivacyResolver)),
 				server.WithSetupWarnings(setupWarningsFromRuntimeConfig(cfg, runtime.GOOS, bugPrivacyRuntime, ticketRepo != "")),
@@ -374,6 +376,7 @@ authentication.`,
 	cmd.Flags().StringVar(&actor, "actor", "", "operator identity recorded on browser-driven turns as slots.author (default: git config user.name; the X-Kitsoki-Actor header and an explicit actor RPC param override it)")
 	cmd.Flags().StringVar(&ticketRepo, "ticket-repo", "", "file Report-bug reports as GitHub issues on this owner/repo (evidence saved under .artifacts/bug-reports for developer review); requires GitHub auth from `kitsoki gh-agent login`, `kitsoki gh-agent token`, or GH_TOKEN/GITHUB_TOKEN. Default empty value writes local artifact tickets under .artifacts/issues/bugs instead")
 	cmd.Flags().StringVar(&agentEvidenceDir, "agent-evidence-dir", "", "after a GitHub bug filing, also deposit the scrubbed rrweb+HAR here under <DeckID>/ so the kitsoki gh-agent can auto-build a hosted deck without re-downloading; point at the agent's --evidence-dir")
+	cmd.Flags().StringVar(&improveProvider, "improve-ticket-provider", "", "ticket_provider/v1 .star script used by meta-improve reports after writing a local evidence bundle; useful for private story ticket systems. Empty uses --ticket-repo when set, otherwise local artifacts")
 	cmd.Flags().IntVar(&maxSessions, "max-sessions", 0, "cap on concurrently live in-memory sessions before idle eviction kicks in (default: $KITSOKI_WEB_MAX_SESSIONS or a generous built-in default; 0 means use that default)")
 	cmd.Flags().StringVar(&kitsDir, "kits-dir", "", "directory of installed kit.yaml roots (enables kit.<kit>.<iface>.<op> + runstatus.kits.list, S3b)")
 

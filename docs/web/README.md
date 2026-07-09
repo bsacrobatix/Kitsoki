@@ -286,13 +286,16 @@ A global **Meta** button (bottom-right, on every screen) opens a large,
 **persistent** overlay chat with one of kitsoki's named meta agents — the web
 surface for the same overlay the TUI reaches with `/meta` (see
 [`docs/stories/meta-mode.md`](../stories/meta-mode.md) for the engine
-mechanism). The dropdown offers three modes:
+mechanism). The dropdown offers the story-scoped and kitsoki-scoped modes that
+are available for the current surface:
 
 | Mode | Agent | Writes? | Scope |
 |---|---|---|---|
 | **Story edit** | `story-author` | yes — edits the story YAML, commits, reloads | the running session's state |
 | **Story Q&A** | `story-explainer` | no (read-only) | the running session's state |
+| **Story improve** | `story-improver` | no — introspection report only | the running session's latest run |
 | **Kitsoki help** | `kitsoki-explainer` | no (read-only) | cross-app (needs `$KITSOKI_REPO`) |
+| **Kitsoki improve** | `kitsoki-improver` | no — engine introspection report only | cross-app (needs `$KITSOKI_REPO`) |
 
 - **Persistent** — the overlay state lives in an app-global store, so closing it
   and navigating (Drive ⇄ Observe ⇄ home) and reopening returns to the **same
@@ -318,6 +321,19 @@ mechanism). The dropdown offers three modes:
   final reply also arrives as narration; flushed into the feed when later
   activity proves it intermediate, dropped on `done`). This mirrors the TUI's
   `metaStreamPending` deferral.
+- **Improve reports close the loop.** When a live session reaches a terminal
+  state, the web UI shows an "Improve this run" bar with **Run improve now**,
+  **Auto-run at completion**, and **File evidence report** controls. The button
+  opens `story.improve`, sends the standard completed-session review prompt,
+  and, when evidence filing is enabled, calls `runstatus.meta.improve.report`.
+  The filed report reuses the Report Bug evidence pipeline: scrubbed browser
+  HAR (`har.json`), rrweb session replay (`rrweb.json`), recent console/error
+  state, and a redacted session trace (`trace.redacted.jsonl`) when available.
+  The destination defaults to the configured sink: local `.artifacts` tickets
+  when no sink is configured, GitHub when `kitsoki web --ticket-repo
+  <owner/repo>` is set, or a private `ticket_provider/v1` create operation when
+  `kitsoki web --improve-ticket-provider <provider.star>` is set. Operators can
+  force **Local artifact** from the completion bar.
 
 **Architecture.** The server exposes a separate optional `MetaDriver` seam
 (`internal/runstatus/server/meta.go`) on each `Entry`; the concrete

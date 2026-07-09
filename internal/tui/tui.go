@@ -48,7 +48,7 @@ import (
 )
 
 const githubInboxPollInterval = 5 * time.Minute
-const completionImprovePrompt = "[Improve this run]\nRun `/meta improve` now to review false starts, unexpected output, wasted tool calls, prompt/tool/script changes, permission cleanup, and no-LLM regression coverage. In the web UI, enable \"Auto-run at completion\" to create this report automatically after future runs."
+const completionImprovePrompt = "[Improve this run]\nRun `/meta improve` now to review false starts, unexpected output, wasted tool calls, prompt/tool/script changes, permission cleanup, evidence-backed posting, and no-LLM regression coverage. In the web UI, enable \"Auto-run at completion\" to create this report automatically after future runs; evidence reports can stay local, post to GitHub via `--ticket-repo`, or use a private `--improve-ticket-provider`."
 
 // Mode describes which interaction mode the TUI is currently in.
 type Mode int

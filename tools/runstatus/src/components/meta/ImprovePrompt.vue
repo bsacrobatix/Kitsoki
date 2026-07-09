@@ -25,6 +25,41 @@
       >
         {{ error }}
       </div>
+      <div
+        v-if="reportResult"
+        class="improve-prompt__report"
+        data-testid="improve-report-status"
+      >
+        <div>
+          Evidence report filed to {{ reportSinkLabel }}.
+          <a
+            v-if="reportResult.url"
+            :href="reportResult.url"
+            target="_blank"
+            rel="noreferrer"
+            data-testid="improve-report-url"
+          >
+            Open ticket
+          </a>
+          <span
+            v-else-if="reportPrimaryPath"
+            data-testid="improve-report-path"
+          >
+            {{ reportPrimaryPath }}
+          </span>
+        </div>
+        <div
+          v-if="reportArtifacts.length"
+          class="improve-prompt__artifacts"
+          data-testid="improve-report-artifacts"
+        >
+          Artifacts: {{ reportArtifacts.join(", ") }}
+        </div>
+        <div v-if="reportResult.provider_error" class="improve-prompt__error">
+          Provider post failed; local evidence is still filed.
+          {{ reportResult.provider_error }}
+        </div>
+      </div>
     </div>
 
     <div class="improve-prompt__actions">
@@ -47,31 +82,63 @@
         />
         <span>Auto-run at completion</span>
       </label>
+
+      <label class="improve-prompt__auto">
+        <input
+          v-model="fileEvidenceReport"
+          type="checkbox"
+          data-testid="improve-report-toggle"
+        />
+        <span>File evidence report</span>
+      </label>
+
+      <select
+        v-model="reportDestination"
+        class="improve-prompt__select"
+        data-testid="improve-report-destination"
+        :disabled="!fileEvidenceReport || runState !== 'idle'"
+        aria-label="Improve report destination"
+      >
+        <option value="configured">Configured sink</option>
+        <option value="local">Local artifact</option>
+      </select>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { LiveSource } from "../../data/live-source.js";
+import {
+  LiveSource,
+  type MetaImproveReportResult,
+} from "../../data/live-source.js";
 import { useMetaStore } from "../../stores/meta.js";
+import { recentConsole } from "../../data/console-capture.js";
+import { gatherErrorInfo } from "../../data/error-capture.js";
+import { snapshotNetworkHar } from "../../data/network-capture.js";
+import { snapshotSessionEvents } from "../../data/session-capture.js";
 
 const IMPROVE_MODE = "story.improve";
 const AUTO_RUN_KEY = "kitsoki:improve:autoRun";
 const AUTO_RAN_PREFIX = "kitsoki:improve:autoRan:";
+const FILE_REPORT_KEY = "kitsoki:improve:fileReport";
+const REPORT_DESTINATION_KEY = "kitsoki:improve:reportDestination";
 const IMPROVE_PROMPT =
-  "Review this completed session for false starts, unexpected output, wasted tool calls, prompt/tool/script improvements, permission cleanup, and no-LLM regression coverage. Produce the standard introspection improvement report.";
+  "Review this completed session for false starts, unexpected output, wasted tool calls, prompt/tool/script improvements, permission cleanup, and no-LLM regression coverage. Produce the standard introspection improvement report, including evidence/posting recommendations for the follow-up report.";
 
 const props = defineProps<{ sessionId: string }>();
 
 const meta = useMetaStore();
 const source = new LiveSource("/");
 const autoRun = ref(readAutoRun());
+const fileEvidenceReport = ref(readFileReport());
+const reportDestination = ref<"configured" | "local">(readReportDestination());
 const modesLoadedFor = ref("");
 const loadingModes = ref(false);
-const runState = ref<"idle" | "starting" | "running">("idle");
+const runState = ref<"idle" | "starting" | "running" | "filing">("idle");
 const statusMessage = ref("");
 const error = ref("");
+const reportResult = ref<MetaImproveReportResult | null>(null);
 
 const improveAvailable = computed(
   () =>
@@ -92,15 +159,31 @@ const runDisabled = computed(
 const runLabel = computed(() => {
   if (runState.value === "starting") return "Opening improve...";
   if (runState.value === "running" || improveBusy.value) return "Running improve...";
+  if (runState.value === "filing") return "Filing evidence...";
   if (loadingModes.value) return "Checking improve...";
   if (!improveAvailable.value) return "Improve unavailable";
   return "Run improve now";
 });
 const runTitle = computed(() =>
   improveAvailable.value
-    ? "Open Meta and run the completed-session improvement report"
+    ? "Open Meta, run the completed-session improvement report, and file evidence when enabled"
     : "This session does not advertise story.improve"
 );
+const reportArtifacts = computed(() => reportResult.value?.artifacts ?? []);
+const reportPrimaryPath = computed(
+  () =>
+    reportResult.value?.path ??
+    reportResult.value?.local_path ??
+    reportResult.value?.artifacts_path ??
+    reportResult.value?.local_artifacts_path ??
+    ""
+);
+const reportSinkLabel = computed(() => {
+  const sink = reportResult.value?.sink ?? "";
+  if (sink === "ticket-provider") return "ticket provider";
+  if (sink === "github") return "GitHub";
+  return "local artifacts";
+});
 
 onMounted(() => {
   void refreshModes().then(maybeAutoRun);
@@ -111,6 +194,7 @@ watch(
   () => {
     statusMessage.value = "";
     error.value = "";
+    reportResult.value = null;
     void refreshModes().then(maybeAutoRun);
   }
 );
@@ -119,6 +203,9 @@ watch(autoRun, (enabled) => {
   writeAutoRun(enabled);
   if (enabled) void maybeAutoRun();
 });
+
+watch(fileEvidenceReport, (enabled) => writeFileReport(enabled));
+watch(reportDestination, (destination) => writeReportDestination(destination));
 
 async function refreshModes(): Promise<void> {
   if (!props.sessionId) return;
@@ -137,6 +224,7 @@ async function runImprove(): Promise<void> {
   if (!props.sessionId || runState.value !== "idle" || improveBusy.value) return;
   statusMessage.value = "";
   error.value = "";
+  reportResult.value = null;
   if (!improveAvailable.value) await refreshModes();
   if (!improveAvailable.value) {
     error.value = "Improve mode is not available for this session.";
@@ -147,7 +235,20 @@ async function runImprove(): Promise<void> {
     await meta.openMode(source, props.sessionId, IMPROVE_MODE);
     runState.value = "running";
     await meta.send(source, IMPROVE_PROMPT);
-    statusMessage.value = "Improve report is ready in Meta.";
+    if (meta.error) {
+      error.value = meta.error;
+      return;
+    }
+    const report = latestAssistantReport();
+    if (fileEvidenceReport.value) {
+      runState.value = "filing";
+      reportResult.value = await fileImproveReport(report);
+      statusMessage.value = reportResult.value.provider_error
+        ? "Improve report is ready in Meta; local evidence filed, remote provider needs attention."
+        : "Improve report is ready in Meta and evidence report is filed.";
+    } else {
+      statusMessage.value = "Improve report is ready in Meta.";
+    }
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -159,6 +260,53 @@ async function maybeAutoRun(): Promise<void> {
   if (!autoRun.value || !props.sessionId || !improveAvailable.value) return;
   if (!claimAutoRun(props.sessionId)) return;
   await runImprove();
+}
+
+async function fileImproveReport(
+  report: string
+): Promise<MetaImproveReportResult> {
+  const rrwebEvents = safeJSONStringify(snapshotSessionEvents());
+  const consoleLogs = safeJSONStringify(recentConsole(10));
+  const errorInfo = safeJSONStringify(gatherErrorInfo(source));
+  let captureId = "";
+  try {
+    const preview = await source.bugPreview({
+      har_json: safeJSONStringify(snapshotNetworkHar()),
+    });
+    captureId = preview.capture_id;
+  } catch {
+    captureId = "";
+  }
+  return source.metaImproveReport({
+    session_id: props.sessionId,
+    mode: IMPROVE_MODE,
+    title: `introspection: improve report for ${props.sessionId}`,
+    report,
+    guidance: IMPROVE_PROMPT,
+    destination: reportDestination.value,
+    capture_id: captureId || undefined,
+    trace_ref: props.sessionId,
+    rrweb_events: rrwebEvents,
+    console_logs: consoleLogs,
+    error_info: errorInfo,
+  });
+}
+
+function latestAssistantReport(): string {
+  const transcript = meta.activeTranscript;
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    const msg = transcript[i];
+    if (msg.role === "assistant" && msg.text.trim()) return msg.text;
+  }
+  return "Improve report completed; see the meta transcript for the assistant response.";
+}
+
+function safeJSONStringify(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function autoRanKey(sessionId: string): string {
@@ -181,6 +329,41 @@ function readAutoRun(): boolean {
     return localStorage.getItem(AUTO_RUN_KEY) === "1";
   } catch {
     return false;
+  }
+}
+
+function readFileReport(): boolean {
+  try {
+    const raw = localStorage.getItem(FILE_REPORT_KEY);
+    return raw == null ? true : raw === "1";
+  } catch {
+    return true;
+  }
+}
+
+function writeFileReport(enabled: boolean): void {
+  try {
+    localStorage.setItem(FILE_REPORT_KEY, enabled ? "1" : "0");
+  } catch {
+    // Local storage is a convenience, not required for manual improve.
+  }
+}
+
+function readReportDestination(): "configured" | "local" {
+  try {
+    return localStorage.getItem(REPORT_DESTINATION_KEY) === "local"
+      ? "local"
+      : "configured";
+  } catch {
+    return "configured";
+  }
+}
+
+function writeReportDestination(destination: "configured" | "local"): void {
+  try {
+    localStorage.setItem(REPORT_DESTINATION_KEY, destination);
+  } catch {
+    // Local storage is a convenience, not required for manual improve.
   }
 }
 
@@ -239,11 +422,30 @@ function writeAutoRun(enabled: boolean): void {
   font-size: 0.76rem;
 }
 
+.improve-prompt__report {
+  margin-top: 0.3rem;
+  color: #bbf7d0;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.improve-prompt__report a,
+.improve-prompt__report span {
+  color: #7dd3fc;
+  font-weight: 700;
+}
+
+.improve-prompt__artifacts {
+  color: #cbd5e1;
+}
+
 .improve-prompt__actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .improve-prompt__run {
@@ -282,6 +484,20 @@ function writeAutoRun(enabled: boolean): void {
   width: 0.95rem;
   height: 0.95rem;
   accent-color: #38bdf8;
+}
+
+.improve-prompt__select {
+  border: 1px solid #1d4ed8;
+  border-radius: 4px;
+  background: #0f172a;
+  color: #dbeafe;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.28rem 0.45rem;
+}
+
+.improve-prompt__select:disabled {
+  opacity: 0.58;
 }
 
 @media (max-width: 720px) {
