@@ -88,6 +88,17 @@ host_handlers:
             ticket_path:   "issues/features/F-2026-06-11T120000Z-working-folder-primitive.md"
             ticket_title:  "Working folder primitive"
             ticket_url:    "docs/proposals/working-folder-primitive.md"
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-working-folder","item_id":"proposal/working-folder-primitive","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-working-folder"
+            item_id: "proposal/working-folder-primitive"
+            changed: true
 
 turns:
   # Stage 1: Intake — one message mints the candidate SLUG (no folder yet) and
@@ -181,11 +192,19 @@ turns:
       ticket_id:   "F-2026-06-11T120000Z-working-folder-primitive"
       ticket_type: "feature"
       ticket_url:  "docs/proposals/working-folder-primitive.md"
+      roadmap_ledger_result:
+        ok: true
+        ledger: ".artifacts/roadmap/progress.yaml"
+        event_id: "evt-working-folder"
+        item_id: "proposal/working-folder-primitive"
+        changed: true
     expect_host_calls:
       - handler: host.run
         args: { call: "publish" }
+      - handler: host.run
+        args: { call: "roadmap_ledger_proposal_published" }
     # The done room surfaces the published path as a discrete "Published" kv.
-    expect_view_matches: "Published.*working-folder-primitive\\.md"
+    expect_view_matches: "Roadmap ledger.*\\.artifacts/roadmap/progress\\.yaml"
 
   # Back to the day landing.
   - intent: { name: go_main, slots: {} }

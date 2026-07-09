@@ -147,6 +147,16 @@ host_handlers:
             ticket_id:    "F-2026-06-12T120000Z-tour-subcommand"
             ticket_path:  "issues/features/F-2026-06-12T120000Z-tour-subcommand.md"
             ticket_title: "product tour subcommand"
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-tour-subcommand"
+            item_id: "proposal/tour-subcommand"
+            changed: true
 
 turns:
   # ── PRD half ───────────────────────────────────────────────────────────────

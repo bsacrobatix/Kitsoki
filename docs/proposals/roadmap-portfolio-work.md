@@ -1,6 +1,9 @@
 # Story: Roadmap and portfolio work taxonomy
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Partial slice shipped. A local `.artifacts/roadmap/progress.yaml`
+ledger, `kitsoki roadmap ledger` CLI, dev-story proposal-publish hook, docs,
+and no-LLM flow coverage exist; the broader portfolio taxonomy story,
+prioritization surfaces, and human-action integration remain in design.
 **Kind:**   story
 **Epic:**   ../human-action-workflows.md
 
@@ -43,6 +46,26 @@ Add planning surfaces that can create and manage these items as first-class
 artifacts. The first version can be story-level: a `roadmap` or `portfolio`
 story that reads proposals, PRDs, issue queues, and decomposition manifests,
 then emits a validated roadmap manifest.
+
+## Shipped slice: local roadmap progress ledger
+
+The first shipped slice is intentionally smaller than the full taxonomy: a
+local YAML ledger under `.artifacts/roadmap/progress.yaml`, maintained by both
+ad-hoc agents and story checkpoints.
+
+- `kitsoki roadmap ledger event` upserts an item and appends an idempotent
+  event whose id is derived from the event payload.
+- `kitsoki roadmap ledger check` validates schema, ids, status vocabulary, event
+  references, and completion coverage.
+- `stories/dev-story` writes a `proposal_published` event when the design
+  pipeline publishes a proposal, marking proposal coverage done and docs,
+  feature YAML, product-site, and rrweb demo coverage pending.
+- The operator workflow is documented in
+  [`../workflows/roadmap-ledger.md`](../workflows/roadmap-ledger.md).
+
+This shipped slice does not replace the future roadmap/portfolio story. It gives
+the current roadmap deck process a deterministic local log while the richer
+taxonomy and human-action workflow remain open.
 
 ## Impact
 
@@ -112,18 +135,18 @@ intake -> inventory -> classify -> prioritize -> validate -> publish -> review
 
 ```
 ## 1. Taxonomy
-- [ ] 1.1 Define `roadmap/v1` manifest schema.
-- [ ] 1.2 Add deterministic lint for DAG, goal coverage, owner resolution, and gate coverage.
+- [x] 1.1 Define the minimal `kitsoki-roadmap-ledger/v1` progress schema.
+- [x] 1.2 Add deterministic lint for ledger ids, statuses, event references, and done-coverage checks.
 - [ ] 1.3 Document how the taxonomy maps to existing PRD/proposal/decomposition vocabulary.
 
 ## 2. Story
-- [ ] 2.1 Add a roadmap planning story or dev-story room.
+- [x] 2.1 Add a dev-story publish hook that records proposal-introduction events.
 - [ ] 2.2 Use existing overlap/roadmap-fit prompts as the inventory/scout basis.
 - [ ] 2.3 Add human prioritization/review calls through `host.human.decide`.
 
 ## 3. Verification
-- [ ] 3.1 No-LLM flow for an initiative with two epics, mixed agent/human changes, and one prioritization decision.
-- [ ] 3.2 Lint fixtures for missing gate, dangling dependency, duplicate scope, and orphaned goal.
+- [x] 3.1 No-LLM flow coverage for proposal publish writing the ledger event.
+- [x] 3.2 CLI tests for idempotent events and completion-coverage lint.
 - [ ] 3.3 Migrate shipped docs and trim/delete this proposal.
 ```
 

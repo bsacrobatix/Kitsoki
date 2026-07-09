@@ -57,6 +57,9 @@ for its room-by-room detail. `design_done` then offers
 `implement` (drives the linked feature ticket straight into the impl
 pipeline — see [`decompose-and-implement.md`](decompose-and-implement.md))
 or `decompose` (drives it into `deliver` instead).
+The same publish turn writes `.artifacts/roadmap/progress.yaml`; see
+[`roadmap-ledger.md`](roadmap-ledger.md) for the proposal, docs, feature
+catalog, product-site, and demo checks that keep roadmap updates deterministic.
 
 Standalone (no dev-story hub, just the PRD pipeline on its own):
 
