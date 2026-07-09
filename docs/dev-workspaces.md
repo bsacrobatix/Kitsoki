@@ -139,11 +139,11 @@ scripts/merge-to-main.sh
 
 Final local promotion is staging-capsule first. The default source is the
 managed capsule checkout at `.capsules/staging/local` on branch `staging/local`.
-The helper refuses unmanaged source directories, refuses dirty staging state,
-rebases staging onto local `main`, runs `make test` in the staging capsule, then
-fast-forwards protected local `main`. Pass `--gate "<cmd>"` to use a different
-gate. Pass `--force` only when an equivalent gate has already run and you
-intentionally want to skip the default `make test`.
+The helper refuses unmanaged source directories, prompts for dirty staging-state
+recovery when interactive, rebases staging onto local `main`, runs `make test`
+in the staging capsule, then fast-forwards protected local `main`. Pass
+`--gate "<cmd>"` to use a different gate. Pass `--force` only when an equivalent
+gate has already run and you intentionally want to skip the default `make test`.
 
 Create the long-lived staging capsule with:
 
@@ -165,11 +165,15 @@ make install-staging
 remote-sync steps, and stops; complete that sync and rerun the refresh. Once
 local `main` is current, the helper refreshes `.capsules/staging/local` from
 local `staging/local`, rebases it onto local `main`, and imports the refreshed
-`staging/local` ref back into the primary checkout. The Make targets call this
-refresh helper first, then verify that `.capsules/staging/local` is a managed
-capsule at the current `staging/local` head before running the corresponding
-command inside it. To refresh without running a staging command, use
-`make refresh-staging`.
+`staging/local` ref back into the primary checkout. If the staging capsule is
+dirty and the helper is attached to a terminal, it asks whether to inspect,
+preserve-and-clean, discard-and-clean, or stop. Non-interactive runs stop with
+the same next-step commands; pass `--dirty-action preserve` or
+`--dirty-action discard` only when that outcome is intentional. The Make targets
+call this refresh helper first, then verify that `.capsules/staging/local` is a
+managed capsule at the current `staging/local` head before running the
+corresponding command inside it. To refresh without running a staging command,
+use `make refresh-staging`.
 
 If a workspace merge rebase conflicts, resolve it inside that managed workspace,
 rerun the focused validation, then rerun `merge`. If a staging refresh rebase

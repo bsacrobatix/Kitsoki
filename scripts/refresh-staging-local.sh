@@ -34,6 +34,7 @@ staging_capsule="$DEFAULT_STAGING_CAPSULE"
 skip_remote=0
 no_fetch=0
 gate=""
+dirty_action="auto"
 
 usage() {
   cat >&2 <<EOF
@@ -41,7 +42,8 @@ usage:
   scripts/refresh-staging-local.sh [--remote origin] [--remote-branch main] [--base main]
                                    [--staging-branch staging/local]
                                    [--staging-capsule .capsules/staging/local]
-                                   [--gate CMD] [--skip-remote] [--no-fetch]
+                                   [--gate CMD] [--dirty-action ACTION]
+                                   [--skip-remote] [--no-fetch]
 
 Refreshes the managed local staging capsule from local staging, rebases it onto
 local main, and updates the primary staging ref from the capsule.
@@ -53,6 +55,12 @@ you to complete the printed sync steps before rerunning.
 --skip-remote intentionally skips the remote freshness check.
 --no-fetch checks existing remote-tracking refs without fetching first.
 --gate runs CMD inside the staging capsule after the rebase and before import.
+--dirty-action controls dirty staging-capsule recovery:
+  auto      prompt when interactive, otherwise stop with next steps (default)
+  abort     stop with next steps
+  prompt    require an interactive prompt
+  preserve  stash changes, write a patch artifact, clean, and continue
+  discard   discard changes, clean, and continue
 EOF
 }
 
@@ -75,6 +83,185 @@ source_dirty() {
   git -C "$dir" status --porcelain --untracked-files=all |
     grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' ||
     true
+}
+
+staging_sentinel_files=(
+  "$CAPSULE_SENTINEL"
+  "$CLONE_SENTINEL"
+  "capsule-manifest.json"
+  ".kitsoki-dev-workspace.json"
+  ".kitsoki-owner"
+)
+
+print_dirty_next_steps() {
+  local dir="$1"
+  cat >&2 <<EOF
+
+Refresh needs a clean staging capsule before it can rebase or import staging.
+
+Useful next steps:
+  inspect:   git -C "$dir" diff --stat HEAD && git -C "$dir" diff HEAD
+  preserve:  scripts/refresh-staging-local.sh --dirty-action preserve
+  discard:   scripts/refresh-staging-local.sh --dirty-action discard
+  manual:    cd "$dir" and commit, stash, or remove the changes, then rerun refresh
+EOF
+}
+
+clean_dirty_staging_capsule() {
+  local dir="$1"
+  git -C "$dir" reset --hard HEAD >/dev/null
+  git -C "$dir" clean -fd \
+    -e "$CAPSULE_SENTINEL" \
+    -e "$CLONE_SENTINEL" \
+    -e capsule-manifest.json \
+    -e .kitsoki-dev-workspace.json \
+    -e .kitsoki-owner >/dev/null
+}
+
+preserve_dirty_staging_capsule() {
+  local dir="$1"
+  local patch_dir patch stamp status_file sentinel_tmp sentinel moved output
+
+  stamp="$(date +%Y%m%dT%H%M%S)"
+  patch_dir="$repo_root/.artifacts/staging-local-preserved"
+  mkdir -p "$patch_dir"
+  patch="$patch_dir/staging-capsule-dirty-$stamp-$$.patch"
+  status_file="$patch_dir/staging-capsule-dirty-$stamp-$$.status.txt"
+  sentinel_tmp="$(mktemp -d "${TMPDIR:-/tmp}/kitsoki-staging-sentinels.XXXXXX")"
+
+  git -C "$dir" status --short --untracked-files=all >"$status_file"
+  for sentinel in "${staging_sentinel_files[@]}"; do
+    if [ -e "$dir/$sentinel" ]; then
+      mv "$dir/$sentinel" "$sentinel_tmp/$sentinel"
+    fi
+  done
+  if ! output="$(git -C "$dir" stash push --include-untracked \
+    -m "pre-refresh dirty staging capsule $stamp" 2>&1)"; then
+    for moved in "$sentinel_tmp"/*; do
+      [ -e "$moved" ] || continue
+      mv "$moved" "$dir/$(basename "$moved")"
+    done
+    rm -rf "$sentinel_tmp"
+    echo "$output" >&2
+    return 1
+  fi
+  for moved in "$sentinel_tmp"/*; do
+    [ -e "$moved" ] || continue
+    mv "$moved" "$dir/$(basename "$moved")"
+  done
+  rm -rf "$sentinel_tmp"
+
+  if ! git -C "$dir" rev-parse --verify --quiet refs/stash >/dev/null; then
+    echo "error: git stash did not create a preserved change set" >&2
+    return 1
+  fi
+
+  {
+    printf 'staging capsule: %s\n' "$dir"
+    printf 'branch: %s\n' "$(git -C "$dir" branch --show-current)"
+    printf 'head: %s\n' "$(git -C "$dir" rev-parse HEAD)"
+    printf 'stash: stash@{0}\n'
+    printf '\n'
+    printf 'status before preserve:\n'
+    cat "$status_file"
+    printf '\n'
+    git -C "$dir" stash show --stat --include-untracked 'stash@{0}' || true
+    printf '\n'
+    git -C "$dir" stash show -p --binary --include-untracked 'stash@{0}' || true
+  } >"$patch"
+
+  echo "refresh-staging-local: preserved dirty staging-capsule changes:" >&2
+  echo "  stash: git -C \"$dir\" stash show -p --include-untracked 'stash@{0}'" >&2
+  echo "  patch: $patch" >&2
+}
+
+handle_dirty_staging_capsule() {
+  local dir="$1"
+  local dirty="$2"
+  local action="$dirty_action"
+  local choice confirm remaining
+
+  echo "error: staging capsule has uncommitted changes: $dir" >&2
+  printf '%s\n' "$dirty" >&2
+
+  if [ "$action" = auto ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      action=prompt
+    else
+      action=abort
+    fi
+  fi
+
+  case "$action" in
+    abort)
+      print_dirty_next_steps "$dir"
+      return 1
+      ;;
+    preserve)
+      preserve_dirty_staging_capsule "$dir"
+      ;;
+    discard)
+      clean_dirty_staging_capsule "$dir"
+      echo "refresh-staging-local: discarded dirty staging-capsule changes" >&2
+      ;;
+    prompt)
+      if [ ! -t 0 ] || [ ! -t 1 ]; then
+        echo "error: --dirty-action prompt requires an interactive terminal" >&2
+        print_dirty_next_steps "$dir"
+        return 1
+      fi
+      while true; do
+        cat >&2 <<EOF
+
+Refresh needs a clean staging capsule. What do you want to do?
+  1) Show the diff
+  2) Preserve changes to a stash plus .artifacts patch, clean, and continue
+  3) Discard changes, clean, and continue
+  4) Stop and leave changes in place
+EOF
+        printf 'Choose [1-4]: ' >&2
+        IFS= read -r choice || choice=4
+        case "$choice" in
+          1|s|S|show)
+            git -C "$dir" --no-pager status --short --untracked-files=all >&2
+            git -C "$dir" --no-pager diff --stat HEAD >&2 || true
+            git -C "$dir" --no-pager diff HEAD >&2 || true
+            ;;
+          2|p|P|preserve)
+            preserve_dirty_staging_capsule "$dir"
+            break
+            ;;
+          3|d|D|discard)
+            printf "Type 'discard' to remove these staging-capsule changes: " >&2
+            IFS= read -r confirm || confirm=
+            if [ "$confirm" = discard ]; then
+              clean_dirty_staging_capsule "$dir"
+              echo "refresh-staging-local: discarded dirty staging-capsule changes" >&2
+              break
+            fi
+            echo "refresh-staging-local: discard not confirmed" >&2
+            ;;
+          4|q|Q|quit|"")
+            echo "refresh-staging-local: stopped; staging capsule left unchanged" >&2
+            return 1
+            ;;
+          *)
+            echo "refresh-staging-local: choose 1, 2, 3, or 4" >&2
+            ;;
+        esac
+      done
+      ;;
+    *)
+      die "invalid --dirty-action: $dirty_action (expected auto, abort, prompt, preserve, or discard)"
+      ;;
+  esac
+
+  remaining="$(source_dirty "$dir")"
+  if [ -n "$remaining" ]; then
+    echo "error: staging capsule is still dirty after --dirty-action $dirty_action:" >&2
+    printf '%s\n' "$remaining" >&2
+    return 1
+  fi
 }
 
 ensure_managed_capsule() {
@@ -117,6 +304,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --gate)
       gate="${2:?--gate requires a value}"
+      shift 2
+      ;;
+    --dirty-action)
+      dirty_action="${2:?--dirty-action requires a value}"
       shift 2
       ;;
     --skip-remote)
@@ -208,9 +399,7 @@ if [ "$source_branch" != "$staging_branch" ]; then
 fi
 dirty="$(source_dirty "$staging_capsule")"
 if [ -n "$dirty" ]; then
-  echo "error: staging capsule has uncommitted changes: $staging_capsule" >&2
-  printf '%s\n' "$dirty" >&2
-  exit 1
+  handle_dirty_staging_capsule "$staging_capsule" "$dirty" || exit 1
 fi
 git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
   die "staging capsule has no 'source' remote: $staging_capsule"
