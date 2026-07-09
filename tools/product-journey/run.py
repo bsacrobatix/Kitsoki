@@ -62,6 +62,34 @@ PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
 # (which accepts a cassette:// URI once it resolves to a backing file), a
 # playback slot must be a real LOCAL file — see is_playback_evidence.
 PLAYBACK_EVIDENCE_KINDS = {"rrweb", "trace-replay", "flow-fixture", "png-sequence"}
+EVIDENCE_FILE_EXTENSIONS = {
+    "browser_screenshot": "png",
+    "screenshot_or_tui_png": "png",
+    "rendered_tui_frame": "png",
+    "key_interaction_video": "mp4",
+    "rrweb": "rrweb.json",
+    "trace-replay": "jsonl",
+    "flow-fixture": "yaml",
+    "png-sequence": "frames.json",
+    "session_trace": "jsonl",
+    "trace_reference": "jsonl",
+    "navigation_trace": "json",
+    "checkpoint_rating": "json",
+    "generated_config_diff": "diff",
+    "candidate_diff": "diff",
+    "implementation_diff": "diff",
+    "onboarding_smoke_result": "json",
+    "oracle_result": "json",
+    "full_suite_result": "txt",
+    "targeted_test_result": "txt",
+    "prd_artifact": "md",
+    "design_artifact": "md",
+    "review_notes": "md",
+    "review_summary": "md",
+    "bug_report_markdown": "md",
+    "reproduction_steps": "md",
+    "page_url": "txt",
+}
 SCENARIO_ALIASES = {
     "core-use-cases": ["project-onboarding", "prd-design", "bugfix"],
     "core": ["project-onboarding", "prd-design", "bugfix"],
@@ -1921,6 +1949,7 @@ def validate_driver_agent_contract(issues: list[dict]) -> None:
         "last_result.missing_proof_evidence",
         "last_result.driver_final_gates",
         "last_result.next_driver_capture",
+        "last_result.next_driver_capture_route",
         "last_result.next_driver_attach_command",
         "last_result.next_driver_blocker_command",
         "record the honest blocker",
@@ -3033,6 +3062,165 @@ def final_story_gate_commands() -> list[str]:
     ]
 
 
+def attach_evidence_command(run_dir_arg: str, scenario_id: str, evidence_kind: str) -> str:
+    return (
+        "python3 tools/product-journey/run.py --attach-evidence "
+        f"--run-dir {run_dir_arg} "
+        f"--scenario {scenario_id} "
+        f"--evidence-kind {evidence_kind} "
+        "--evidence-path <path-or-retained-id> "
+        "--evidence-source <retained|external|local|cassette> "
+        f"--notes \"{evidence_capture_hint(evidence_kind)}\""
+    )
+
+
+def record_blocker_command(run_dir_arg: str, scenario_id: str) -> str:
+    return (
+        "python3 tools/product-journey/run.py --record-blocker "
+        f"--run-dir {run_dir_arg} "
+        f"--scenario {scenario_id} "
+        "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
+        "--evidence-path <trace-or-frame-path>"
+    )
+
+
+def journal_attempt_command(run_dir_arg: str, scenario_id: str) -> str:
+    return (
+        "python3 tools/product-journey/run.py --record-driver-event "
+        f"--run-dir {run_dir_arg} "
+        f"--scenario {scenario_id} "
+        "--dispatch-mode <replay|record|live> "
+        "--driver-status <attempted|captured|blocked|validated> "
+        "--mcp-tools <comma-separated-tools-used> "
+        "--evidence-refs <comma-separated-paths-or-retained-ids> "
+        "--blockers <comma-separated-blockers-if-any> "
+        "--summary <what-the-driver-actually-tried>"
+    )
+
+
+def evidence_artifact_path_template(evidence_dir: str, scenario_id: str, evidence_kind: str) -> str:
+    ext = EVIDENCE_FILE_EXTENSIONS.get(evidence_kind, "txt")
+    return f"{evidence_dir}/{scenario_id}-{evidence_kind}.{ext}"
+
+
+def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, evidence_kind: str) -> list[str]:
+    capabilities: list[str] = []
+    if evidence_kind in {"rendered_tui_frame", "png-sequence"} or visual_surface == "tui":
+        capabilities.append("render.tui")
+    if evidence_kind in {"browser_screenshot", "screenshot_or_tui_png", "key_interaction_video", "rrweb"} or visual_surface in {"web", "vscode", "web-or-tui"}:
+        capabilities.append("visual.observe")
+    if evidence_kind in {"session_trace", "trace_reference", "trace-replay", "flow-fixture", "navigation_trace"}:
+        capabilities.append("session.trace")
+    for capability in ["render.tui", "visual.observe", "session.trace", "session.inspect"]:
+        if capability in required_mcp and capability not in capabilities:
+            capabilities.append(capability)
+    return capabilities or ["session.status"]
+
+
+def capture_route_for_slot(
+    scenario: dict,
+    run_json: dict,
+    run_dir_arg: str,
+    evidence_kind: str,
+    required_mcp: list[str],
+    visual_surface: str,
+    driver_manifest: Optional[dict] = None,
+    leg: Optional[dict] = None,
+) -> dict:
+    scenario_id = scenario["id"]
+    transport = (leg or {}).get("transport", "")
+    route_surface = transport or visual_surface or driver_visual_surface(scenario.get("primary_story", ""), required_mcp)
+    evidence_dir = scenario.get(
+        "evidence_dir",
+        f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}",
+    )
+    open_capabilities = [
+        capability for capability in ["session.open", "visual.open"]
+        if capability in required_mcp
+    ] or ["session.status"]
+    observe_capabilities = capture_observe_capabilities(required_mcp, route_surface, evidence_kind)
+    act_capabilities = [
+        capability for capability in ["session.submit", "session.drive", "visual.act", "session.trace"]
+        if capability in {"session.submit", "session.trace"} or capability in required_mcp
+    ]
+    artifact_template = evidence_artifact_path_template(evidence_dir, scenario_id, evidence_kind)
+    route = {
+        "route_id": f"{scenario_id}::{route_surface or 'default'}::{evidence_kind}",
+        "scenario": scenario_id,
+        "evidence_kind": evidence_kind,
+        "primary_story": scenario["primary_story"],
+        "transport": transport,
+        "visual_surface": route_surface,
+        "harness": driver_harness(scenario["primary_story"]),
+        "dispatch_mode_arg": "<replay|record|live>",
+        "live_profile_arg": "<explicit-live-profile-if-record-or-live>",
+        "evidence_dir": evidence_dir,
+        "artifact_path_template": artifact_template,
+        "setup_entrypoint": {
+            "story_load_intent": f"load run_dir={run_dir_arg}",
+            "primary_session": (
+                f"session.new app={scenario['primary_story']} "
+                "harness=<replay|record|live> profile=<explicit-live-profile-if-record-or-live>"
+            ),
+            "preflight": "capture_preflight must pass before record/live dispatch; replay uses cassette/local fixtures only.",
+        },
+        "open": {
+            "capabilities": open_capabilities,
+            "resolved_tools": resolved_mcp_tools(open_capabilities, driver_manifest),
+        },
+        "observe": {
+            "capabilities": observe_capabilities,
+            "resolved_tools": resolved_mcp_tools(observe_capabilities, driver_manifest),
+        },
+        "act": {
+            "capabilities": act_capabilities,
+            "resolved_tools": resolved_mcp_tools(act_capabilities, driver_manifest),
+        },
+        "recording": {
+            "start": "Start recording before the first persona action from this route.",
+            "stop": "Stop recording immediately after the target evidence slot and final frame are captured.",
+            "path_template": artifact_template,
+            "proof_source_required": "retained|external|local|cassette",
+            "no_substitution": "Do not attach demo, placeholder, synthetic, or unrelated media for this route.",
+        },
+        "commands": {
+            "attach": attach_evidence_command(run_dir_arg, scenario_id, evidence_kind),
+            "blocker": record_blocker_command(run_dir_arg, scenario_id),
+            "journal": journal_attempt_command(run_dir_arg, scenario_id),
+        },
+    }
+    if leg is not None:
+        route["leg_id"] = leg.get("leg_id", "")
+        route["transport_evidence_contract"] = leg.get("transport_evidence_contract", {})
+    return route
+
+
+def capture_routes_for_evidence(
+    scenario: dict,
+    run_json: dict,
+    run_dir_arg: str,
+    evidence_view: list[dict],
+    required_mcp: list[str],
+    visual_surface: str,
+    driver_manifest: Optional[dict] = None,
+    leg: Optional[dict] = None,
+) -> list[dict]:
+    return [
+        capture_route_for_slot(
+            scenario,
+            run_json,
+            run_dir_arg,
+            item["kind"],
+            required_mcp,
+            visual_surface,
+            driver_manifest,
+            leg,
+        )
+        for item in evidence_view
+        if item.get("kind")
+    ]
+
+
 def _execution_plan_step(
     order: int,
     scenario: dict,
@@ -3040,25 +3228,15 @@ def _execution_plan_step(
     run_dir_arg: str,
     evidence_view: list[dict],
     required_mcp: list[str],
+    driver_manifest: Optional[dict] = None,
     leg: Optional[dict] = None,
 ) -> dict:
     attach_commands = [
-        "python3 tools/product-journey/run.py --attach-evidence "
-        f"--run-dir {run_dir_arg} "
-        f"--scenario {scenario['id']} "
-        f"--evidence-kind {item['kind']} "
-        f"--evidence-path <path-or-retained-id> "
-        "--evidence-source <retained|external|local|cassette> "
-        f"--notes \"{evidence_capture_hint(item['kind'])}\""
+        attach_evidence_command(run_dir_arg, scenario["id"], item["kind"])
         for item in evidence_view
     ]
-    record_blocker_command = (
-        "python3 tools/product-journey/run.py --record-blocker "
-        f"--run-dir {run_dir_arg} "
-        f"--scenario {scenario['id']} "
-        "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
-        "--evidence-path <trace-or-frame-path>"
-    )
+    blocker_command = record_blocker_command(run_dir_arg, scenario["id"])
+    visual_surface = leg["transport"] if leg is not None else driver_visual_surface(scenario["primary_story"], required_mcp)
     step = {
         "order": order,
         "scenario": scenario["id"],
@@ -3080,7 +3258,17 @@ def _execution_plan_step(
         "success_criteria": scenario["success_criteria"],
         "quality_gate": scenario_quality_gate(scenario["id"]),
         "attach_commands": attach_commands,
-        "record_blocker_command": record_blocker_command,
+        "record_blocker_command": blocker_command,
+        "capture_routes": capture_routes_for_evidence(
+            scenario,
+            run_json,
+            run_dir_arg,
+            evidence_view,
+            required_mcp,
+            visual_surface,
+            driver_manifest,
+            leg,
+        ),
     }
     if leg is not None:
         step["transport"] = leg["transport"]
@@ -3100,6 +3288,7 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
     `transport_evidence_contract` describing how that transport's evidence is
     captured.
     """
+    driver_manifest = driver_manifest or load_driver_manifest()
     evidence_by_scenario: dict[str, list[dict]] = {}
     for item in evidence.get("items", []):
         evidence_by_scenario.setdefault(item["scenario"], []).append(item)
@@ -3116,6 +3305,7 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
                 order, scenario, run_json, run_dir_arg,
                 leg_evidence_view(scenario["evidence"], scenario_evidence_items),
                 scenario["required_mcp"],
+                driver_manifest,
             ))
             continue
         legs = scenario_transport_legs(scenario, transports)
@@ -3127,6 +3317,7 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
                 order, scenario, run_json, run_dir_arg,
                 leg_evidence_view(leg["evidence"], scenario_evidence_items),
                 leg["required_mcp"],
+                driver_manifest,
                 leg=leg,
             ))
 
@@ -3139,7 +3330,6 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
         summary["scenario_count"] = scenarios_with_legs
         summary["leg_count"] = len(steps)
 
-    driver_manifest = driver_manifest or load_driver_manifest()
     return {
         "run_id": run_json["run_id"],
         "driver": driver_summary(driver_manifest),
@@ -3209,6 +3399,7 @@ def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict, driv
                 "case_variants": step.get("case_variants", []),
                 "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
                 "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
+                "capture_routes": step.get("capture_routes", []),
                 **({"transport": step["transport"], "leg_id": step["leg_id"]} if "transport" in step else {}),
             }
             for step in execution_plan.get("steps", [])
@@ -3243,6 +3434,16 @@ def _driver_plan_entry(
     leg: Optional[dict] = None,
 ) -> dict:
     scenario_id = scenario["id"]
+    capture_routes = capture_routes_for_evidence(
+        scenario,
+        run_json,
+        run_dir_arg,
+        evidence_view,
+        required_mcp,
+        visual_surface,
+        driver_manifest,
+        leg,
+    )
     entry = {
         "scenario": scenario_id,
         "label": scenario["label"],
@@ -3257,6 +3458,7 @@ def _driver_plan_entry(
         "resolved_mcp_tools": resolved_mcp_tools(required_mcp, driver_manifest),
         "action_sequence": driver_action_sequence(required_mcp),
         "driver_actions": driver_actions(driver_action_scenario, run_json, driver_action_evidence, driver_manifest),
+        "capture_routes": capture_routes,
         "persona_prompts": [
             f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
             f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
@@ -3281,23 +3483,9 @@ def _driver_plan_entry(
             "--title <title> --summary <summary> --evidence-path <path-or-retained-id>"
         ),
         "record_blocker_command": step.get("record_blocker_command", (
-            "python3 tools/product-journey/run.py --record-blocker "
-            f"--run-dir {run_dir_arg} "
-            f"--scenario {scenario_id} "
-            "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
-            "--evidence-path <trace-or-frame-path>"
+            record_blocker_command(run_dir_arg, scenario_id)
         )),
-        "journal_command": (
-            "python3 tools/product-journey/run.py --record-driver-event "
-            f"--run-dir {run_dir_arg} "
-            f"--scenario {scenario_id} "
-            "--dispatch-mode <replay|record|live> "
-            "--driver-status <attempted|captured|blocked|validated> "
-            "--mcp-tools <comma-separated-tools-used> "
-            "--evidence-refs <comma-separated-paths-or-retained-ids> "
-            "--blockers <comma-separated-blockers-if-any> "
-            "--summary <what-the-driver-actually-tried>"
-        ),
+        "journal_command": journal_attempt_command(run_dir_arg, scenario_id),
     }
     if leg is not None:
         entry["transport"] = leg["transport"]
@@ -3434,6 +3622,18 @@ def render_driver_plan(plan: dict) -> str:
             scenario["task_prompt"],
             "",
         ])
+        capture_routes = scenario.get("capture_routes", [])
+        if capture_routes:
+            lines.extend(["### Deterministic Capture Routes", ""])
+            for route in capture_routes[:8]:
+                lines.append(
+                    f"- `{route.get('route_id', '')}`: `{route.get('primary_story', '')}` "
+                    f"via `{route.get('visual_surface', '')}` -> "
+                    f"`{route.get('artifact_path_template', '')}`"
+                )
+            if len(capture_routes) > 8:
+                lines.append(f"- +{len(capture_routes) - 8} more route(s)")
+            lines.append("")
         utterances = scenario.get("natural_utterances", [])
         if utterances:
             lines.extend(["### Transcript-Derived Utterances", ""])
@@ -3599,6 +3799,7 @@ def render_agent_brief(brief: dict) -> str:
             f"- Resolved tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
             f"- Evidence: {', '.join(scenario['evidence'])}",
             f"- Live budget: {scenario.get('live_budget', {}).get('summary', '')}",
+            f"- Capture routes: {len(scenario.get('capture_routes', []))}",
             "",
             scenario.get("task_prompt", scenario["task"]),
             "",
@@ -3652,8 +3853,11 @@ def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
     }
     rows = []
     run_dir_arg = run_dir_cli_arg(run_json.get("run_id", "<run-id>"))
+    driver_manifest = driver_manifest_for_run_json(run_json)
     for scenario in run_json.get("scenarios", []):
         scenario_id = scenario.get("id", "")
+        required_mcp = scenario.get("required_mcp", [])
+        visual_surface = driver_visual_surface(scenario.get("primary_story", ""), required_mcp)
         minimum = scenario_quality_gate(scenario.get("id", "")).get("minimum_evidence", [])
         captured_minimum = [
             kind for kind in minimum
@@ -3673,25 +3877,21 @@ def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
                 "minimum_evidence_count": len(minimum),
                 "missing_proof_evidence": missing,
                 "record_blocker_command": (
-                    "python3 tools/product-journey/run.py --record-blocker "
-                    f"--run-dir {run_dir_arg} "
-                    f"--scenario {scenario_id} "
-                    "--title <blocker-title> "
-                    "--summary <why-this-scenario-could-not-be-captured> "
-                    "--evidence-path <trace-or-frame-path>"
+                    record_blocker_command(run_dir_arg, scenario_id)
                 ),
                 "slots": [
                     {
                         "kind": kind,
                         "capture_hint": evidence_capture_hint(kind),
-                        "attach_command": (
-                            "python3 tools/product-journey/run.py --attach-evidence "
-                            f"--run-dir {run_dir_arg} "
-                            f"--scenario {scenario_id} "
-                            f"--evidence-kind {kind} "
-                            "--evidence-path <path-or-retained-id> "
-                            "--evidence-source <retained|external|local|cassette> "
-                            f"--notes \"{evidence_capture_hint(kind)}\""
+                        "attach_command": attach_evidence_command(run_dir_arg, scenario_id, kind),
+                        "capture_route": capture_route_for_slot(
+                            scenario,
+                            run_json,
+                            run_dir_arg,
+                            kind,
+                            required_mcp,
+                            visual_surface,
+                            driver_manifest,
                         ),
                     }
                     for kind in missing
@@ -3763,14 +3963,16 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
             f"Drive product journey QA for run_dir={run_dir_arg}. Open or attach "
             "stories/product-journey-qa/app.yaml, submit "
             f"`load run_dir={run_dir_arg}`, then inspect story world `last_result.driver_scenarios`, "
-            "`last_result.next_driver_capture`, `last_result.next_driver_attach_command`, "
+            "`last_result.next_driver_capture`, `last_result.next_driver_capture_route`, "
+            "`last_result.next_driver_attach_command`, "
             "`last_result.next_driver_blocker_command`, `last_result.missing_proof_evidence`, "
             "and `last_result.driver_final_gates`. "
             "Respect each scenario's `live_budget` from driver-plan.json; when the live budget is exhausted, "
             "record the blocker, journal the attempt, and move to the next scenario. "
-            "Use `last_result.next_driver_attach_command` for the first proof attach when present, "
+            "Use `last_result.next_driver_capture_route` as the deterministic setup/recording route for the first proof slot, "
+            "`last_result.next_driver_attach_command` for the proof attach when present, "
             "or `last_result.next_driver_blocker_command` when the slot is attempted but blocked, "
-            "then use Kitsoki Studio MCP and visual MCP to capture proof-source evidence or blockers, "
+            "then use only the route's stable entrypoints and resolved tools to capture proof-source evidence or blockers, "
             "record findings, run autonomous_watchdog, then run the autonomous issue-to-fix gate when credible issue findings exist. "
             "If the autonomous fix gate is not armed with ticket_repo and gh_agent_public_base_url, leave those "
             "parameters explicit for the operator instead of silently skipping the gate. Finish with review and validation."
@@ -3835,6 +4037,12 @@ def render_driver_handoff(handoff: dict) -> str:
             )
             for slot in row.get("slots", []):
                 lines.append(f"  - `{slot.get('kind', '')}`: {slot.get('capture_hint', '')}")
+                route = slot.get("capture_route", {}) if isinstance(slot.get("capture_route", {}), dict) else {}
+                if route:
+                    lines.append(
+                        f"    - Route `{route.get('route_id', '')}` opens `{route.get('primary_story', '')}` "
+                        f"via `{route.get('visual_surface', '')}` and records `{route.get('artifact_path_template', '')}`"
+                    )
                 lines.append(f"    ```sh\n    {slot.get('attach_command', '')}\n    ```")
     else:
         lines.append("- (none)")
@@ -3967,6 +4175,12 @@ def driver_summary(manifest: dict) -> dict:
         "notes": manifest.get("notes", []),
         "oracles": manifest.get("oracles", []),
     }
+
+
+def driver_manifest_for_run_json(run_json: dict) -> dict:
+    driver = run_json.get("driver", {}) if isinstance(run_json, dict) else {}
+    manifest_ref = driver.get("manifest_path") or driver.get("id") or DEFAULT_DRIVER_ID
+    return load_driver_manifest(manifest_ref)
 
 
 def validate_driver_manifest(manifest: dict) -> dict:
@@ -4343,6 +4557,7 @@ def render_prd_design_intake(intake: dict) -> str:
 
 def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None) -> None:
     run_json = read_json(run_dir / "run.json")
+    driver_manifest = driver_manifest_for_run_json(run_json)
     evidence = read_json(run_dir / "evidence.json")
     bugs = read_json(run_dir / "bugs.json")
     findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"run_id": run_json["run_id"], "items": []}
@@ -4440,16 +4655,16 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     write_json(run_dir / "review.json", review)
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "scenarios.json", {"run_id": run_json["run_id"], "items": run_json["scenarios"]})
-    execution_plan = build_execution_plan(run_json, evidence)
+    execution_plan = build_execution_plan(run_json, evidence, driver_manifest=driver_manifest)
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
-    driver_plan = build_driver_plan(run_json, evidence, execution_plan)
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan, driver_manifest=driver_manifest)
     write_json(run_dir / "driver-plan.json", driver_plan)
     (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
     driver_journal = build_driver_journal(run_json["run_id"], driver_journal.get("items", []))
     write_json(run_dir / "driver-journal.json", driver_journal)
     (run_dir / "driver-journal.md").write_text(render_driver_journal(driver_journal), encoding="utf-8")
-    agent_brief = build_agent_brief(run_json, evidence, execution_plan)
+    agent_brief = build_agent_brief(run_json, evidence, execution_plan, driver_manifest)
     write_json(run_dir / "agent-brief.json", agent_brief)
     (run_dir / "agent-brief.md").write_text(render_agent_brief(agent_brief), encoding="utf-8")
     driver_handoff = build_driver_handoff(run_json, metrics, evidence, review)
@@ -4505,7 +4720,8 @@ def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
         f"{f' ({scenario_ids})' if scenario_ids else ''}; "
         f"{len(missing_proof_evidence)} missing-proof rows; "
         f"{len(final_gates)} final gates. Inspect last_result.driver_scenarios, "
-        "last_result.missing_proof_evidence, and last_result.driver_final_gates."
+        "last_result.next_driver_capture_route, last_result.missing_proof_evidence, "
+        "and last_result.driver_final_gates."
     )
 
 
@@ -4520,6 +4736,12 @@ def next_driver_capture_slot(handoff: dict) -> dict:
         if kind:
             return {"scenario": scenario, **slot}
     return {}
+
+
+def next_driver_capture_route(handoff: dict) -> dict:
+    slot = next_driver_capture_slot(handoff)
+    route = slot.get("capture_route", {})
+    return route if isinstance(route, dict) else {}
 
 
 def next_driver_blocker_command(handoff: dict) -> str:
@@ -4539,8 +4761,11 @@ def build_next_driver_capture(handoff: dict) -> str:
         scenario = slot.get("scenario", "")
         kind = slot.get("kind", "")
         hint = slot.get("capture_hint", "")
+        route = slot.get("capture_route", {}) if isinstance(slot.get("capture_route", {}), dict) else {}
+        route_id = route.get("route_id", "")
+        route_suffix = f" Route: {route_id}." if route_id else ""
         if kind:
-            return f"Next capture: {scenario}/{kind}. {hint}".strip()
+            return f"Next capture: {scenario}/{kind}.{route_suffix} {hint}".strip()
     return ""
 
 
@@ -4560,6 +4785,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
             "visual_surface": scenario.get("visual_surface", ""),
             "resolved_mcp_tools": scenario.get("resolved_mcp_tools", []),
             "driver_actions": scenario.get("driver_actions", []),
+            "capture_routes": scenario.get("capture_routes", []),
             "persona_lens": scenario.get("persona_lens", {}),
             "evidence": scenario.get("evidence", []),
             "quality_gate": scenario.get("quality_gate", {}),
@@ -4594,6 +4820,7 @@ def summarize_run_bundle(run_dir: Path) -> dict:
         "missing_proof_evidence": missing_proof_evidence,
         "driver_contract_summary": driver_contract_summary,
         "next_driver_capture": build_next_driver_capture(handoff),
+        "next_driver_capture_route": next_driver_capture_route(handoff),
         "next_driver_attach_command": next_driver_capture_slot(handoff).get("attach_command", ""),
         "next_driver_blocker_command": next_driver_blocker_command(handoff),
         "suggested_prompt": handoff.get("suggested_prompt", ""),
@@ -4684,6 +4911,7 @@ def run_story_summary(run_dir: Path) -> dict:
         "missing_proof_summary": "; ".join(missing_proof_summary),
         "driver_contract_summary": build_driver_contract_summary(driver_plan, handoff) if driver_plan else "",
         "next_driver_capture": build_next_driver_capture(handoff),
+        "next_driver_capture_route": next_driver_capture_route(handoff),
         "next_driver_attach_command": next_driver_capture_slot(handoff).get("attach_command", ""),
         "next_driver_blocker_command": next_driver_blocker_command(handoff),
         "review_passed_count": review.get("summary_counts", {}).get("passed", 0),
@@ -8709,13 +8937,19 @@ def validate_run_bundle(run_dir: Path) -> dict:
         if missing_step_keys:
             add_validation_issue(issues, "error", "execution-plan-step-required-keys", "execution-plan.json steps are missing required keys", ", ".join(missing_step_keys))
         stale_attach_commands = []
+        invalid_step_routes = []
         for index, step in enumerate(execution_steps, start=1):
             scenario_id = step.get("scenario", f"step-{index}")
             evidence_kinds = [item.get("kind", "") for item in step.get("evidence", []) if item.get("kind", "")]
             commands = step.get("attach_commands", [])
+            routes = step.get("capture_routes", [])
             if len(commands) != len(evidence_kinds):
                 stale_attach_commands.append(
                     f"{scenario_id}: expected={len(evidence_kinds)}, actual={len(commands)}"
+                )
+            if len(routes) != len(evidence_kinds):
+                invalid_step_routes.append(
+                    f"{scenario_id}: expected={len(evidence_kinds)}, actual={len(routes)}"
                 )
             for evidence_kind in evidence_kinds:
                 matching = [
@@ -8728,8 +8962,23 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 for token in schema["execution_plan"]["attach_command_tokens"]:
                     if token not in matching[0]:
                         stale_attach_commands.append(f"{scenario_id}/{evidence_kind}: command missing {token}")
+                route = next((item for item in routes if item.get("evidence_kind") == evidence_kind), {})
+                if not route:
+                    invalid_step_routes.append(f"{scenario_id}/{evidence_kind}: missing route")
+                    continue
+                if route.get("scenario") != scenario_id:
+                    invalid_step_routes.append(f"{scenario_id}/{evidence_kind}: route scenario={route.get('scenario', '')}")
+                if route.get("primary_story") != step.get("primary_story"):
+                    invalid_step_routes.append(f"{scenario_id}/{evidence_kind}: route primary_story mismatch")
+                if not route.get("setup_entrypoint", {}).get("story_load_intent", "").startswith("load run_dir="):
+                    invalid_step_routes.append(f"{scenario_id}/{evidence_kind}: missing story_load_intent")
+                route_attach = route.get("commands", {}).get("attach", "")
+                if route_attach != matching[0]:
+                    invalid_step_routes.append(f"{scenario_id}/{evidence_kind}: route attach command mismatch")
         if stale_attach_commands:
             add_validation_issue(issues, "error", "execution-plan-attach-commands", "execution-plan.json attach commands do not cover the evidence contract", "; ".join(stale_attach_commands))
+        if invalid_step_routes:
+            add_validation_issue(issues, "error", "execution-plan-capture-routes", "execution-plan.json capture routes do not cover deterministic evidence entrypoints", "; ".join(invalid_step_routes))
     if driver_plan and len(driver_scenarios) != len(scenarios):
         add_validation_issue(
             issues,
@@ -8864,19 +9113,56 @@ def validate_run_bundle(run_dir: Path) -> dict:
         if missing_journal_commands:
             add_validation_issue(issues, "error", "driver-plan-journal-command", "driver-plan.json scenarios are missing record-driver-event journal commands", ", ".join(missing_journal_commands))
         stale_driver_attach_commands = []
+        invalid_driver_routes = []
         for index, scenario in enumerate(driver_scenarios, start=1):
             scenario_id = scenario.get("scenario", f"driver-scenario-{index}")
             evidence_kinds = [item.get("kind", "") for item in scenario.get("evidence", []) if item.get("kind", "")]
             commands = scenario.get("attach_commands", [])
+            routes = scenario.get("capture_routes", [])
             if len(commands) != len(evidence_kinds):
                 stale_driver_attach_commands.append(
                     f"{scenario_id}: expected={len(evidence_kinds)}, actual={len(commands)}"
                 )
+            if len(routes) != len(evidence_kinds):
+                invalid_driver_routes.append(
+                    f"{scenario_id}: expected={len(evidence_kinds)}, actual={len(routes)}"
+                )
             for evidence_kind in evidence_kinds:
-                if not any(f"--scenario {scenario_id}" in command and f"--evidence-kind {evidence_kind}" in command for command in commands):
+                matching = [
+                    command for command in commands
+                    if f"--scenario {scenario_id}" in command and f"--evidence-kind {evidence_kind}" in command
+                ]
+                if not matching:
                     stale_driver_attach_commands.append(f"{scenario_id}/{evidence_kind}: missing command")
+                    continue
+                route = next((item for item in routes if item.get("evidence_kind") == evidence_kind), {})
+                if not route:
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: missing route")
+                    continue
+                missing_route_keys = [
+                    key for key in schema["driver_plan"].get("capture_route_required", [])
+                    if key not in route
+                ]
+                if missing_route_keys:
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: missing {', '.join(missing_route_keys)}")
+                if route.get("scenario") != scenario_id:
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route scenario={route.get('scenario', '')}")
+                if route.get("primary_story") != scenario.get("primary_story"):
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route primary_story mismatch")
+                if route.get("harness") != scenario.get("harness"):
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route harness mismatch")
+                if route.get("commands", {}).get("attach", "") != matching[0]:
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route attach command mismatch")
+                if route.get("commands", {}).get("blocker", "") != scenario.get("record_blocker_command", ""):
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route blocker command mismatch")
+                if route.get("commands", {}).get("journal", "") != scenario.get("journal_command", ""):
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: route journal command mismatch")
+                if not route.get("recording", {}).get("path_template", ""):
+                    invalid_driver_routes.append(f"{scenario_id}/{evidence_kind}: missing recording path_template")
         if stale_driver_attach_commands:
             add_validation_issue(issues, "error", "driver-plan-attach-commands", "driver-plan.json attach commands do not cover the scenario evidence slots", "; ".join(stale_driver_attach_commands))
+        if invalid_driver_routes:
+            add_validation_issue(issues, "error", "driver-plan-capture-routes", "driver-plan.json capture routes do not define stable setup/recording entrypoints", "; ".join(invalid_driver_routes))
     if driver_journal:
         missing_event_keys = [
             f"{event.get('id', f'event-{index}')}/{key}"
@@ -9056,6 +9342,20 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 for token in ["--attach-evidence", f"--scenario {scenario_id}", f"--evidence-kind {kind}", "--evidence-source <retained|external|local|cassette>"]:
                     if command and token not in command:
                         missing_slot_details.append(f"{scenario_id}/{kind}: attach_command missing {token}")
+                route = slot.get("capture_route", {})
+                if not isinstance(route, dict) or not route:
+                    missing_slot_details.append(f"{scenario_id}/{kind}: missing capture_route")
+                else:
+                    if route.get("scenario") != scenario_id:
+                        missing_slot_details.append(f"{scenario_id}/{kind}: route scenario={route.get('scenario', '')}")
+                    if route.get("evidence_kind") != kind:
+                        missing_slot_details.append(f"{scenario_id}/{kind}: route evidence_kind={route.get('evidence_kind', '')}")
+                    if route.get("commands", {}).get("attach", "") != command:
+                        missing_slot_details.append(f"{scenario_id}/{kind}: route attach command mismatch")
+                    if not route.get("setup_entrypoint", {}).get("primary_session", ""):
+                        missing_slot_details.append(f"{scenario_id}/{kind}: route missing primary_session")
+                    if not route.get("recording", {}).get("path_template", ""):
+                        missing_slot_details.append(f"{scenario_id}/{kind}: route missing recording path_template")
         if stale_proof_rows:
             add_validation_issue(issues, "error", "driver-handoff-proof-gap-detail", "driver-handoff.json missing proof evidence details are stale", "; ".join(stale_proof_rows))
         if missing_slot_details:
@@ -9075,6 +9375,8 @@ def validate_run_bundle(run_dir: Path) -> dict:
             handoff_prompt = driver_handoff.get("suggested_prompt", "")
             if "last_result.next_driver_capture" not in handoff_prompt:
                 add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_capture")
+            if "last_result.next_driver_capture_route" not in handoff_prompt:
+                add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_capture_route")
             if "last_result.next_driver_attach_command" not in handoff_prompt:
                 add_validation_issue(issues, "error", "driver-handoff-prompt", "driver-handoff.json suggested_prompt does not mention next_driver_attach_command")
             if "last_result.next_driver_blocker_command" not in handoff_prompt:
@@ -9087,6 +9389,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
         summary_final_gates = summary.get("driver_final_gates", [])
         summary_contract = summary.get("driver_contract_summary", "")
         summary_next_capture = summary.get("next_driver_capture", "")
+        summary_next_capture_route = summary.get("next_driver_capture_route", {})
         summary_next_attach_command = summary.get("next_driver_attach_command", "")
         summary_next_blocker_command = summary.get("next_driver_blocker_command", "")
         if len(summary_scenarios) != len(driver_scenarios):
@@ -9138,6 +9441,15 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "summarize-run next_driver_attach_command does not match driver-handoff.json",
                 f"expected={expected_next_attach_command}, actual={summary_next_attach_command}",
             )
+        expected_next_capture_route = next_driver_capture_route(driver_handoff)
+        if summary_next_capture_route != expected_next_capture_route:
+            add_validation_issue(
+                issues,
+                "error",
+                "loaded-driver-next-capture-route",
+                "summarize-run next_driver_capture_route does not match driver-handoff.json",
+                f"expected={expected_next_capture_route.get('route_id', '')}, actual={summary_next_capture_route.get('route_id', '') if isinstance(summary_next_capture_route, dict) else type(summary_next_capture_route).__name__}",
+            )
         expected_next_blocker_command = next_driver_blocker_command(driver_handoff)
         if summary_next_blocker_command != expected_next_blocker_command:
             add_validation_issue(
@@ -9151,6 +9463,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
             token for token in [
                 "Driver contract:",
                 "last_result.driver_scenarios",
+                "last_result.next_driver_capture_route",
                 "last_result.missing_proof_evidence",
                 "last_result.driver_final_gates",
             ]

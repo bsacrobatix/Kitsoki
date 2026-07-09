@@ -17,6 +17,11 @@ Inputs:
 Use `.agents/agents/product-journey-qa-driver.md` as the operating contract.
 Open or attach a product-journey story session for `stories/product-journey-qa/app.yaml`,
 then submit `load run_dir={{ args.run_dir }}` before recording evidence.
+After load, inspect `last_result.next_driver_capture_route` before opening a
+scenario surface. Use that route's setup entrypoint, resolved open/observe/act
+tools, artifact path template, attach command, blocker command, and journal
+command. If a route is missing or unusable, return `blocked` and record the
+blocker through the product-journey story instead of improvising a setup path.
 
 If driver mode is `replay`, do not open any `harness: "live"` session and do
 not retry a replay miss with a live/backend profile. Record the miss as a

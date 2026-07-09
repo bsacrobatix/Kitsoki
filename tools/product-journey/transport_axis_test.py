@@ -148,6 +148,20 @@ def _test_emit_run_transport_axis():
                 base_driver["scenarios"][0]["primary_story"], base_driver["scenarios"][0]["required_mcp"],
             ),
         )
+        base_route = base_driver["scenarios"][0]["capture_routes"][0]
+        _check("driver-plan declares one capture route per evidence slot",
+               len(base_driver["scenarios"][0]["capture_routes"]) == len(base_driver["scenarios"][0]["evidence"]))
+        _check("capture route pins the scenario id and primary story",
+               base_route["scenario"] == base_driver["scenarios"][0]["scenario"]
+               and base_route["primary_story"] == base_driver["scenarios"][0]["primary_story"])
+        _check("capture route owns stable setup and recording entrypoints",
+               base_route["setup_entrypoint"]["story_load_intent"].startswith("load run_dir=")
+               and "session.new app=" in base_route["setup_entrypoint"]["primary_session"]
+               and base_route["recording"]["path_template"].startswith(base_driver["scenarios"][0]["evidence_dir"]))
+        _check("capture route owns attach/blocker/journal commands",
+               base_route["commands"]["attach"] in base_driver["scenarios"][0]["attach_commands"]
+               and base_route["commands"]["blocker"] == base_driver["scenarios"][0]["record_blocker_command"]
+               and base_route["commands"]["journal"] == base_driver["scenarios"][0]["journal_command"])
 
         # One explicit transport: one leg per scenario (both scenarios allow tui).
         tui_dir, tui_json = run.build_run_bundle(
@@ -178,6 +192,11 @@ def _test_emit_run_transport_axis():
         vscode_step = next(step for step in all_driver["scenarios"] if step["transport"] == "vscode")
         _check("vscode leg is labeled bridge-level", vscode_step["transport_evidence_contract"]["level"] == "bridge-level")
         _check("vscode leg's visual_surface is pinned to vscode, not inferred", vscode_step["visual_surface"] == "vscode")
+        vscode_route = vscode_step["capture_routes"][0]
+        _check("vscode capture route carries the leg id and bridge visual surface",
+               vscode_route["leg_id"] == vscode_step["leg_id"]
+               and vscode_route["visual_surface"] == "vscode"
+               and vscode_route["transport_evidence_contract"]["level"] == "bridge-level")
         web_step = next(step for step in all_driver["scenarios"] if step["scenario"] == "product-discovery" and step["transport"] == "web")
         _check(
             "web leg's driver_actions reflect the per-transport required_mcp override",
@@ -214,6 +233,18 @@ def _test_emit_run_transport_axis():
             "bugfix tui natural utterances cite mined transcript sources",
             all(item.get("source") == "session-transcript" and item.get("source_ref", "").startswith("mined-scn-") for item in bugfix_utterances),
         )
+        bugfix_handoff = run.read_json(bugfix_dir / "driver-handoff.json")
+        first_slot = bugfix_handoff["missing_proof_evidence"][0]["slots"][0]
+        _check("missing proof slots include the deterministic capture route",
+               first_slot["capture_route"]["scenario"] == "bugfix"
+               and first_slot["capture_route"]["evidence_kind"] == first_slot["kind"]
+               and first_slot["capture_route"]["commands"]["attach"] == first_slot["attach_command"])
+        summary = run.summarize_run_bundle(bugfix_dir)
+        _check("summarize-run exposes the next capture route for MCP drivers",
+               summary["next_driver_capture_route"] == first_slot["capture_route"]
+               and "last_result.next_driver_capture_route" in summary["driver_contract_summary"])
+        _check("handoff prompt points drivers at next_driver_capture_route",
+               "last_result.next_driver_capture_route" in bugfix_handoff["suggested_prompt"])
 
 
 def _test_persona_lens_promotion():

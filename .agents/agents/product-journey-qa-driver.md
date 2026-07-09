@@ -37,9 +37,15 @@ trying to attach evidence, record findings, or run gates. Then read the story
 world `last_result.driver_scenarios`, `last_result.missing_proof_evidence`, and
 `last_result.driver_final_gates`; those are the MCP-visible copy of the bundle
 contract. Use `last_result.next_driver_capture` to identify the first proof slot
-and `last_result.next_driver_attach_command` as the first attach command when it
-is present. If that slot was attempted but cannot be captured, use
-`last_result.next_driver_blocker_command` to record the honest blocker, then
+and `last_result.next_driver_capture_route` as the deterministic setup and
+recording entrypoint for that slot. The route names the primary story,
+transport/visual surface, harness argument, live-profile placeholder, resolved
+open/observe/act tools, artifact path template, attach command, journal command,
+and blocker command. Do not choose a different setup path because it looks more
+convenient; if the route is absent or cannot be opened, record that as the
+blocker. Use `last_result.next_driver_attach_command` as the first attach
+command when it is present. If that slot was attempted but cannot be captured,
+use `last_result.next_driver_blocker_command` to record the honest blocker, then
 continue through `missing_proof_evidence`. Do not invent missing scenario
 contracts. If the bundle is missing the brief/plan/evidence contract, record
 that as a blocker finding through the product-journey story if a story session
@@ -151,8 +157,8 @@ story `blocker` intent. Do not silently substitute a fake pass.
 
 For each scenario in the bundle:
 
-1. Read the scenario task, primary story, `driver_actions`, required MCP tools,
-   `resolved_mcp_tools`, evidence slots, `live_budget`, and success criteria. Treat the
+1. Read the scenario task, primary story, `capture_routes`, `driver_actions`,
+   required MCP tools, `resolved_mcp_tools`, evidence slots, `live_budget`, and success criteria. Treat the
    scenario `quality_gate` in `driver-plan.json` as the minimum proof contract: capture its
    `minimum_evidence`, satisfy `done_when`, or record a blocker matching one of
    the `block_if` conditions.
@@ -164,9 +170,14 @@ For each scenario in the bundle:
    run. Use its starting surface, first skepticism question, evidence emphasis,
    escalation trigger, and finding bias when choosing actions and deciding what
    to record.
-2. Open or attach the appropriate surface using the concrete tools resolved for
-   the scenario's `open_surface` action. For the default Kitsoki driver, this
-   usually means opening or attaching the appropriate Kitsoki session:
+2. Open or attach the appropriate surface through the matching `capture_route`
+   for the evidence slot you are capturing. Use the route's
+   `setup_entrypoint.primary_session` shape and `open.resolved_tools`; use the
+   route's `observe.resolved_tools` for before/after frames; save artifacts
+   under `recording.path_template`; and use `commands.attach`,
+   `commands.blocker`, and `commands.journal` when writing back. For the
+   default Kitsoki driver, this usually means opening or attaching the
+   appropriate Kitsoki session:
    - product discovery: visual web surface for the local product site;
    - onboarding / PRD / design / feature: `stories/dev-story/app.yaml`;
    - bugfix: `stories/bugfix/app.yaml`;
@@ -183,8 +194,10 @@ For each scenario in the bundle:
 4. Follow the generated `driver_actions` in order: open the surface, read the
    current frame, act as the persona, capture required evidence, and journal the
    attempt. Use each action's `resolved_tools` as the concrete tool list for the
-   abstract `tools` capability names. If one action cannot proceed, record the
-   exact blocker and still journal the attempt.
+   abstract `tools` capability names, but let the slot's `capture_route`
+   constrain setup, recording boundaries, artifact path, attach, blocker, and
+   journal commands. If one action cannot proceed, record the exact blocker and
+   still journal the attempt.
 5. Capture every requested evidence slot with an artifact reference:
    - visual state: retained `image_id`, screenshot path, or web frame reference;
    - TUI state: `render.tui` text or `render.tui_png` path;

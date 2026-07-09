@@ -65,6 +65,13 @@ naming the capture tool, evidence kind, and proof level for that transport
 -> `visual.open kind=vscode`, always labeled bridge-level). A scenario that
 doesn't allow a requested transport is skipped for it rather than erroring.
 Omitting `--transport` keeps today's one-entry-per-scenario output unchanged.
+Every execution step and driver-plan scenario also carries deterministic
+`capture_routes`. A route is generated from the run id, scenario id, primary
+story, transport/visual surface, evidence kind, and driver manifest. It names
+the story load intent, the primary `session.new` shape, resolved open/observe/
+act tools, recording start/stop policy, artifact path template, and exact
+attach/blocker/journal commands. Drivers should follow the route for setup and
+recording instead of choosing ad hoc entrypoints.
 
 Validate the reusable natural-use corpus before planning a sweep:
 
@@ -193,6 +200,10 @@ load run_dir=.artifacts/product-journey/<run-id>
 The story calls `--summarize-run --json-output` so the driver can see the run
 paths, persona lens, review counts, compact `driver_scenarios`, final gates, and
 proof backlog through `session.world last_result` before attaching evidence.
+Loaded runs also expose `last_result.next_driver_capture_route`, the structured
+route object for the first missing proof slot. That object is the stable
+entrypoint for opening the primary story, recording the interaction, attaching
+proof, journaling the attempt, or recording an honest blocker.
 
 After one or more assignment runs have captured evidence and been reviewed,
 roll them back up into the matrix:
@@ -264,11 +275,13 @@ without launching live LLM work. When demo or partial evidence is already
 attached, use the handoff's `Missing Proof Evidence` section as the live or
 cassette capture backlog; raw `missing_evidence` can be empty while proof-source
 quality gates are still unsatisfied. Each missing proof row includes slot-level
-capture hints plus ready-to-fill `--attach-evidence` commands, so the driver can
-work directly from the handoff instead of reverse-engineering commands from the
-generic evidence list.
+capture hints, deterministic `capture_route` data, and ready-to-fill
+`--attach-evidence` commands, so the driver can work directly from the handoff
+instead of reverse-engineering setup, recording, or commands from the generic
+evidence list.
 When the run is loaded through `stories/product-journey-qa/app.yaml`, the story
 also exposes `last_result.next_driver_capture` and
+`last_result.next_driver_capture_route` plus
 `last_result.next_driver_attach_command` so a reusable driver can start with the
 first missing proof slot without reopening the markdown handoff.
 Each scenario also carries a `quality_gate` with `minimum_evidence`,
@@ -284,6 +297,10 @@ include one actionable `--attach-evidence` command for every declared evidence
 slot, and that the execution plan, agent brief, driver plan, and handoff retain
 the story-owned final gates: `autonomous_watchdog`, `autonomous_fix`, `review`,
 and `validate`.
+It also checks that every evidence slot has a matching `capture_route`, and
+that the route's setup entrypoint, artifact template, attach command, blocker
+command, and journal command stay synchronized with the surrounding plan and
+handoff.
 It also enforces the
 driver action contract: every scenario must keep the ordered
 `open_surface -> read_current_frame -> act_as_persona -> capture_required_evidence -> journal_attempt`
