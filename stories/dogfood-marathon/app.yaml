@@ -78,7 +78,7 @@ agents:
     model: gpt-5.5
     tools: [Read, Grep, Glob, Bash]
     bash_profile: read-only
-    external_side_effect: false
+    effect: write
   driver:
     # Thin delegator: a real marathon drives the inner pipeline LIVE through the
     # kitsoki-mcp-driver agent (session_new harness:live, explicit trace:, base=
@@ -88,7 +88,7 @@ agents:
     system_prompt: "You drive an inner kitsoki pipeline (bugfix / delivery-tail / ship-it) over one case to its terminal exit, then report the deliverable and the trace path. You do NOT self-grade — an independent verify oracle decides solved/partial/failed on the produced worktree. Surface the exit, the worktree/branch, and the trace for cost/token accounting."
     model: gpt-5.5
     tools: [Read, Grep, Glob, Bash, Edit, Write]
-    external_side_effect: true
+    effect: write
 
 # ── Typed world ─────────────────────────────────────────────────────────────
 world:

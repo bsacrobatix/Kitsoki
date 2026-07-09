@@ -416,6 +416,11 @@ func TestAssertMCPContainsExpectations(t *testing.T) {
 	require.NoError(t, err)
 
 	err = assertMCPContainsExpectations("session.command", result, map[string]string{
+		"frame.text": "Async MCP chat",
+	})
+	require.NoError(t, err)
+
+	err = assertMCPContainsExpectations("session.command", result, map[string]string{
 		"structuredContent.frame.text": "missing title",
 	})
 	require.Error(t, err)
@@ -428,10 +433,18 @@ func TestAssertMCPExistsExpectations(t *testing.T) {
 			map[string]interface{}{"type": "text", "text": "render.web: ok"},
 			map[string]interface{}{"type": "image", "mimeType": "image/png", "data": "base64"},
 		},
+		"structuredContent": map[string]interface{}{
+			"ok": true,
+		},
 	}
 
 	err := assertMCPExistsExpectations("render.web", result, []string{
 		"content.1.data",
+	})
+	require.NoError(t, err)
+
+	err = assertMCPExistsExpectations("render.web", result, []string{
+		"ok",
 	})
 	require.NoError(t, err)
 
@@ -444,6 +457,29 @@ func TestAssertMCPExistsExpectations(t *testing.T) {
 	err = assertMCPExistsExpectations("render.web", result, []string{""})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exists expectation path is empty")
+}
+
+func TestAssertMCPExpectationsDefaultsToStructuredContent(t *testing.T) {
+	result := map[string]interface{}{
+		"content": []interface{}{
+			map[string]interface{}{"type": "text", "text": "render.web: ok"},
+		},
+		"structuredContent": map[string]interface{}{
+			"ok":    true,
+			"state": "idle",
+		},
+	}
+
+	err := assertMCPExpectations("story.validate", result, map[string]any{
+		"ok":    true,
+		"state": "idle",
+	})
+	require.NoError(t, err)
+
+	err = assertMCPExpectations("story.validate", result, map[string]any{
+		"content.0.type": "text",
+	})
+	require.NoError(t, err)
 }
 
 // cobraCommandStub is a presence marker for the registration test (the real
