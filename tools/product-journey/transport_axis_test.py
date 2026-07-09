@@ -93,6 +93,15 @@ def _test_scenario_transport_contracts():
     )
     _check("leg_id names scenario and transport", tui_leg["leg_id"] == "product-discovery::tui")
 
+    dogfood_marathon = by_id["dogfood-marathon-tui"]
+    dogfood_contract = run.resolve_scenario_transports(dogfood_marathon)
+    _check("dogfood marathon is a TUI-only scenario", dogfood_contract["allowed"] == ["tui"])
+    _check("dogfood marathon requires TUI coverage", dogfood_contract["required"] == ["tui"])
+    dogfood_legs = run.scenario_transport_legs(dogfood_marathon, list(run.TRANSPORT_IDS))
+    _check("dogfood marathon produces exactly one TUI leg", [leg["transport"] for leg in dogfood_legs] == ["tui"])
+    _check("dogfood marathon keeps all 15 catalog cases", len(dogfood_marathon.get("case_variants", [])) == 15)
+    _check("dogfood marathon declares frame playback evidence", "png-sequence" in dogfood_marathon.get("evidence", []))
+
     # A mined scenario has no declared `transports`; its contract must be
     # derived from required_mcp so nothing breaks for the un-annotated corpus.
     mined = next(s for s in scenarios if s.get("source") == "mined" and s.get("required_mcp"))
@@ -227,6 +236,24 @@ def _test_emit_run_transport_axis():
         run.review_run_bundle(all_dir, None)
         validation = run.validate_run_bundle(all_dir)
         _check("reviewed transport-axis bundle validates", validation["status"] == "valid")
+        frames_path = all_dir / "evidence" / "gears-rust--core-maintainer" / "product-discovery" / "frames.json"
+        frames_path.parent.mkdir(parents=True, exist_ok=True)
+        frames_path.write_text('{"schema":"test/png-sequence/v1","frames":[]}\n', encoding="utf-8")
+        run.attach_evidence(
+            all_dir,
+            "product-discovery",
+            "png-sequence",
+            str(frames_path.relative_to(all_dir)),
+            "captured",
+            "local",
+            "transport-axis regression frame manifest",
+            None,
+        )
+        attached_execution = run.read_json(all_dir / "execution-plan.json")
+        attached_driver = run.read_json(all_dir / "driver-plan.json")
+        _check("attached evidence preserves transport-expanded leg_count", attached_execution["summary"]["leg_count"] == 6)
+        _check("attached evidence preserves transport keys in execution plan", all("transport" in step for step in attached_execution["steps"]))
+        _check("attached evidence preserves transport keys in driver plan", all("transport" in scenario for scenario in attached_driver["scenarios"]))
 
         # Scenario QA consumes driver-plan.json's transport-expanded scenarios
         # as leg payloads. Core scenarios must keep transcript-derived natural

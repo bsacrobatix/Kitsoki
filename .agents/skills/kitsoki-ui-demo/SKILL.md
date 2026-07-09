@@ -18,6 +18,15 @@ iteration avoids the MP4 render step entirely.
 Use MP4 only as a fallback for surfaces rrweb cannot reconstruct (`<canvas>`,
 `<video>`, WebGL) or when a rendered video export is the explicit deliverable.
 
+If the demo claims coverage of a product-journey scenario, a transport, or a
+TUI/VS Code/browser scenario QA path, start from the universal scenario mechanism
+instead of a standalone recorder. Register/update the scenario in
+`tools/product-journey/scenarios.json`, emit a run with
+`tools/product-journey/run.py --emit-run --transport ...`, consume
+`driver-plan.json` capture routes, and attach the MP4/rrweb/frame evidence back
+to that same run. A Playwright, xterm.js, or rrweb spec may drive the pixels, but
+it must not own private case lists, evidence paths, or quality gates.
+
 Why no-LLM: the capture must be **reproducible and free** — same input, same
 frames, no API cost, no flakiness. This is the same posture the engine uses for
 flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
@@ -1105,6 +1114,14 @@ Then QA the produced MP4 — see [[kitsoki-ui-qa]] → "Full-editor (VS Code)
 evidence" (pass the labeled `NN-*.png` via `--frames`).
 
 ## Terminal surface (MCP / coding-agent demos)
+
+A terminal demo can still be scenario evidence. When the terminal clip is proving
+a catalog scenario (for example a TUI dogfood marathon), use `tools/tui-bridge`
+or a termcast player only as the capture adapter for the emitted scenario run:
+read `driver-plan.json`, drive the named TUI leg, write video/frames under that
+leg's evidence directory, then `--attach-evidence` and `--record-driver-event`.
+If the terminal spec has its own hard-coded backlog or pass criteria, it is a
+demo of the bridge, not scenario QA evidence.
 
 A demo where an *external coding agent* drives kitsoki over the **MCP** server
 (`kitsoki mcp`) is recorded on a **terminal** surface, not the web SPA: an xterm.js

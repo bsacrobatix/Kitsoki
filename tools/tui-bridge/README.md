@@ -70,10 +70,14 @@ go run ./cmd/kitsoki tui-serve --addr 127.0.0.1:4700 -- run myapp.yaml --harness
 passed through as-is) — this is what the test suite uses to drive `/bin/cat`
 deterministically, with no kitsoki or LLM involved.
 
-## Dogfood marathon demo
+## Scenario-backed dogfood marathon TUI recording
 
-The dogfood marathon recording lives on this real TUI bridge, not under
-`tools/mcp-demo`'s synthetic termcast replay:
+The dogfood marathon scenario is owned by the universal product-journey
+mechanism, not by this bridge. The canonical case list, success criteria, and
+capture routes live in `tools/product-journey/scenarios.json` under
+`dogfood-marathon-tui`; `tools/product-journey/run.py --emit-run --transport tui`
+creates the run bundle and `driver-plan.json`. This bridge is only the TUI
+transport capture adapter for that emitted leg:
 
 ```bash
 cd tools/tui-bridge
@@ -89,6 +93,12 @@ story's free-text routing and LLM-bearing host outcomes are replayed from
 `tools/tui-bridge/fixtures/`, so the recording is deterministic and does not
 spend LLM tokens. The fixture preserves real issue titles/URLs for the 15-case
 demo, but it is not evidence that a paid GPT-5.5 marathon fixed those bugs.
+The Playwright spec reads those 15 cases from the scenario run's
+`driver-plan.json`, writes MP4/frames under that run's evidence directory, and
+attaches `key_interaction_video`, `png-sequence`, `rendered_tui_frame`, and a
+driver journal event back to the same run. A stable pointer for humans is written
+to `.artifacts/tui-bridge/dogfood-marathon-real-tui/latest-run.json`; the
+canonical artifacts live under `.artifacts/product-journey/<run-id>/`.
 
 The default recording is intentionally paced for review: the two user commands
 are typed visibly, but the camera also exercises the real TUI `choice` widget
@@ -159,8 +169,10 @@ viewport text after scrolling.
   or, from the repo root, `make tui-bridge-test`.
 - `tools/tui-bridge/tests/dogfood-marathon-real-tui.e2e.spec.ts` — launches a
   real dogfood-marathon TUI under `--harness replay --host-cassette`, drives one
-  continuous xterm session, and writes MP4, chapters, screenshots, and bridge
-  logs under `.artifacts/tui-bridge/dogfood-marathon-real-tui/`.
+  continuous xterm session, and writes MP4, chapters, screenshots, bridge logs,
+  a PNG-sequence manifest, attached scenario evidence, and a driver journal
+  event under `.artifacts/product-journey/<run-id>/` with a pointer at
+  `.artifacts/tui-bridge/dogfood-marathon-real-tui/latest-run.json`.
 
 Neither test path spawns a real kitsoki session or an LLM — per repo policy,
 that only happens when explicitly requested (point `-- run ...` or `--exec`

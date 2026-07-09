@@ -1581,6 +1581,17 @@ def scenario_quality_gate(scenario_id: str) -> dict:
                 "No deterministic oracle, targeted test, or classified full-suite result is available.",
             ],
         },
+        "dogfood-marathon-tui": {
+            "minimum_evidence": ["rendered_tui_frame", "key_interaction_video", "png-sequence"],
+            "done_when": "One continuous kitsoki-dev TUI recording shows the real arrow-key menus, the 15-case autonomous marathon, the serious exception decision, and the final report/deck evidence.",
+            "block_if": [
+                "The recorder owns a private case list instead of consuming the scenario run bundle.",
+                "The proof skips or fakes the TUI arrow-key choice widgets.",
+                "The video is too fast to understand without a fast-forward/cassette affordance or frame/chapter evidence.",
+                "The serious exception lacks an Issue reference, trace reference, warning affordance, or real decision question.",
+                "The capture is not attached back to the universal scenario run as video and PNG sequence evidence.",
+            ],
+        },
         "prd-design": {
             "minimum_evidence": ["session_trace", "prd_artifact", "design_artifact", "review_notes", "key_interaction_video"],
             "done_when": "The PRD/design artifact cites real repo files or commands, is reviewably scoped, and exposes open questions.",
@@ -2438,6 +2449,10 @@ def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) 
         ),
         "bugfix": (
             f"Use the target bug queue for {repo}: {bug_query}. Pick or simulate one concrete bug candidate from that queue, drive the bugfix story, and require deterministic oracle/test evidence before calling the fix credible."
+        ),
+        "dogfood-marathon-tui": (
+            "Start in the real kitsoki-dev TUI, ask `I want to do a dogfood marathon`, then type `start the marathon`. "
+            "Capture one continuous interactive session that uses real arrow-key choice widgets, visibly processes all 15 cataloged bugs, surfaces the serious exception as a real decision, and ends with the aggregate report and per-bug deck evidence."
         ),
         "prd-design": (
             f"Turn one small improvement idea for {repo} into a PRD/design artifact. The idea should be grounded in {repo}'s stack ({stack}), existing project conventions, and the {persona_label} risk focus: {risk_focus}."
@@ -4908,10 +4923,11 @@ def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None)
     write_json(run_dir / "review.json", review)
     write_json(run_dir / "metrics.json", metrics)
     write_json(run_dir / "scenarios.json", {"run_id": run_json["run_id"], "items": run_json["scenarios"]})
-    execution_plan = build_execution_plan(run_json, evidence, driver_manifest=driver_manifest)
+    transports = run_json.get("transports") or []
+    execution_plan = build_execution_plan(run_json, evidence, transports, driver_manifest)
     write_json(run_dir / "execution-plan.json", execution_plan)
     (run_dir / "execution-plan.md").write_text(render_execution_plan(execution_plan), encoding="utf-8")
-    driver_plan = build_driver_plan(run_json, evidence, execution_plan, driver_manifest=driver_manifest)
+    driver_plan = build_driver_plan(run_json, evidence, execution_plan, transports, driver_manifest)
     write_json(run_dir / "driver-plan.json", driver_plan)
     (run_dir / "driver-plan.md").write_text(render_driver_plan(driver_plan), encoding="utf-8")
     driver_journal = build_driver_journal(run_json["run_id"], driver_journal.get("items", []))

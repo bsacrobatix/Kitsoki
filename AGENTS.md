@@ -139,6 +139,20 @@ preferred review surface. Put generated deck renders and throwaway review
 artifacts under `.artifacts`; commit source decks/bundles only when they are
 intended to live under `docs/decks/` per `docs/media/README.md`.
 
+Any demo, QA proof, deck, or video that claims coverage of a product-journey
+scenario or transport must start from the universal scenario mechanism:
+`tools/product-journey/scenarios.json`, `tools/product-journey/run.py --emit-run
+--transport ...`, and/or `stories/scenario-qa/app.yaml`. Bespoke Playwright,
+xterm.js, VS Code, rrweb, or shell recorders are capture adapters only: they must
+consume the generated run bundle/driver-plan capture routes, avoid private
+hard-coded case lists, attach evidence back with `--attach-evidence`, and record
+driver events in the same run. Before adding or refreshing such a recorder, read
+and apply `.agents/skills/scenario-qa/SKILL.md`,
+`.agents/skills/kitsoki-ui-demo/SKILL.md`,
+`.agents/skills/kitsoki-ui-qa/SKILL.md`, and, when the story surface changes,
+`.agents/skills/kitsoki-story-authoring/SKILL.md`; update any skill that would
+have prevented a missed scenario ownership rule.
+
 Automated testing should never use a real LLM or incur costs - mock agents via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
 
 Use hermetic capsules for reusable repository/workspace fixtures. Prefer `capsules/<name>/capsule.yaml` plus `internal/capsuletest.Open(t, "<name>")` over ad hoc `git init` setup in tests, story fixtures, and agent validation. Only keep bespoke temp repos when the behavior under test is the repository creation/bootstrap process itself or the exact git command sequence. When adding or migrating these fixtures, use the `.agents/skills/capsules/SKILL.md` project skill.

@@ -45,6 +45,13 @@ backward-compatible default).
 
 ## Operating rules
 
+- If the task asks for a demo, QA proof, video, deck, or recorder for a named
+  scenario/transport, the **scenario run bundle is the source of truth**. Register
+  or update the scenario in `tools/product-journey/scenarios.json`, emit it with
+  `tools/product-journey/run.py --emit-run --transport ...`, consume
+  `driver-plan.json` capture routes, and attach the produced evidence back to
+  that run. Do not let a Playwright/xterm/rrweb recorder own private case lists,
+  evidence paths, or pass/fail criteria.
 - One leg = one driver dispatch (transport-pinned) + one independent judge
   verdict. The judge never trusts the driver's own report — see
   `stories/scenario-qa/rooms/judge.yaml`'s header comment.
