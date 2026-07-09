@@ -50,6 +50,8 @@ import (
 const githubInboxPollInterval = 5 * time.Minute
 const completionImprovePrompt = "[Improve this run]\nRun `/meta improve` now to review false starts, unexpected output, wasted tool calls, prompt/tool/script changes, permission cleanup, evidence-backed posting, and no-LLM regression coverage. In the web UI, enable \"Auto-run at completion\" to create this report automatically after future runs; evidence reports can stay local, post to GitHub via `--ticket-repo`, or use a private `--improve-ticket-provider`."
 
+const metaImproveAutoPrompt = "Review this completed session for false starts, unexpected output, wasted tool calls, prompt/tool/script improvements, permission cleanup, and no-LLM regression coverage. Produce the standard introspection improvement report, including evidence/posting recommendations for the follow-up report."
+
 // Mode describes which interaction mode the TUI is currently in.
 type Mode int
 
@@ -3650,7 +3652,30 @@ func (m RootModel) handleMetaEnterDone(msg metaEnterDoneMsg) (tea.Model, tea.Cmd
 	if m.chatStore != nil {
 		m.replayMetaTranscript(msg.session.Chat.ID())
 	}
+	if m.shouldAutoRunImprove(msg.modeName, msg.session) {
+		text := metaImproveAutoPrompt
+		m.transcript.AppendTurn(text, "")
+		m.metaMode.inFlight = true
+		turn := m.buildMetaTurnContext()
+		return m, tea.Batch(m.spinner.Tick,
+			metaSendCmd(context.Background(), m.metaController, m.metaMode.session, text, turn, m.metaStreamSink))
+	}
 	return m, nil
+}
+
+func (m RootModel) shouldAutoRunImprove(modeName string, sess *metamode.Session) bool {
+	if modeName != "story.improve" && modeName != "kitsoki.improve" {
+		return false
+	}
+	if sess == nil || sess.Chat == nil {
+		return false
+	}
+	first, err := sess.Chat.FirstUserMessage()
+	if err != nil {
+		slog.Warn("tui.meta: inspect improve transcript failed", "err", err, "chat_id", sess.Chat.ID())
+		return false
+	}
+	return strings.TrimSpace(first) == ""
 }
 
 // replayMetaTranscript loads the chat-row messages for the given chat
