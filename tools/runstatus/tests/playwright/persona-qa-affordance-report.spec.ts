@@ -22,11 +22,10 @@ import {
   dwell,
   demoAddr,
   makeShot,
-  PACE,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
-import { dumpCapture, installCapture, writeEvents } from "./_helpers/rrweb-replay.js";
+import { captureSidecarPath, dumpCapture, installCapture, writeEvents } from "./_helpers/rrweb-replay.js";
 
 const ADDR = demoAddr(7794);
 const STORY_DIR = path.join(repoRoot, "stories", "scenario-qa");
@@ -37,6 +36,7 @@ const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "persona-qa-affordance-re
 const RUN_ID = "persona-qa-affordance-required-input";
 const RUN_DIR = path.join(ARTIFACT_DIR, RUN_ID);
 const CLIPS_DIR = path.join(RUN_DIR, "clips");
+const RAW_CLIPS_DIR = path.join(ARTIFACT_DIR, "_raw-clips", RUN_ID);
 const OPEN_DIR = path.join(ARTIFACT_DIR, "opened");
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 const TUI_DB_PATH = path.join(ARTIFACT_DIR, "tui-session.db");
@@ -46,7 +46,15 @@ const SCENARIO_REQUEST = `${SCENARIO} transport=web,tui target=kitsoki seed=affo
 const PREVIEW_REQUEST = `preview ${SCENARIO_REQUEST}`;
 const WEB_RRWEB = path.join(CLIPS_DIR, "web-required-input.rrweb.json");
 const TUI_RRWEB = path.join(CLIPS_DIR, "tui-required-input.rrweb.json");
-const TYPE_DELAY_MS = PACE === 0 ? 0 : 24;
+const RAW_WEB_RRWEB = path.join(RAW_CLIPS_DIR, "web-required-input.raw.rrweb.json");
+const RAW_TUI_RRWEB = path.join(RAW_CLIPS_DIR, "tui-required-input.raw.rrweb.json");
+
+// This spec is an artifact producer. Keep its generated rrweb clips readable
+// even when the Playwright invocation uses WEB_CHAT_PACE=0 for fast assertions.
+// Set PERSONA_QA_REPLAY_PACE=0 only when intentionally producing throwaway
+// speed-run evidence.
+const REPLAY_PACE = Number(process.env.PERSONA_QA_REPLAY_PACE ?? "1");
+const TYPE_DELAY_MS = REPLAY_PACE <= 0 ? 0 : Math.round(38 * REPLAY_PACE);
 
 let server: WebServer;
 
@@ -70,6 +78,15 @@ function slideyCommand(): { cmd: string; argsPrefix: string[]; cwd: string } {
   if (process.env.SLIDEY_BIN) return { cmd: process.env.SLIDEY_BIN, argsPrefix: [], cwd: repoRoot };
   const homeBin = path.join(process.env.HOME ?? "", ".local", "bin", "slidey");
   return { cmd: fs.existsSync(homeBin) ? homeBin : "slidey", argsPrefix: [], cwd: repoRoot };
+}
+
+function replayMs(ms: number): number {
+  return Math.round(ms * (Number.isFinite(REPLAY_PACE) ? REPLAY_PACE : 1));
+}
+
+async function replayDwell(page: Page, ms: number): Promise<void> {
+  const delay = replayMs(ms);
+  if (delay > 0) await page.waitForTimeout(delay);
 }
 
 async function freePort(): Promise<number> {
@@ -131,6 +148,76 @@ async function stamp(page: Page, id: string, label: string): Promise<void> {
   }, [id, label]);
 }
 
+const CHAT_SCROLL_CONTROL = `(() => {
+  const el = document.querySelector('[data-testid="chat-transcript"]');
+  if (!el) return false;
+  if (el.__personaQaReveal) return true;
+  el.__personaQaReveal = true;
+  const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  const realGet = () => desc.get.call(el);
+  const realSet = (v) => desc.set.call(el, v);
+  Object.defineProperty(el, 'scrollTop', {
+    configurable: true,
+    get() { return realGet(); },
+    set() { /* native snap-to-bottom ignored; replay camera owns scroll */ },
+  });
+  window.__personaQaEase = (to, ms) => new Promise((res) => {
+    const from = realGet();
+    const max = el.scrollHeight - el.clientHeight;
+    const target = Math.max(0, Math.min(to, max));
+    if (ms <= 0 || Math.abs(target - from) < 2) { realSet(target); return res(); }
+    const t0 = performance.now();
+    const tick = (now) => {
+      const p = Math.min(1, (now - t0) / ms);
+      const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      realSet(from + (target - from) * eased);
+      if (p < 1) requestAnimationFrame(tick); else res();
+    };
+    requestAnimationFrame(tick);
+  });
+  window.__personaQaLastUserTop = () => {
+    const rows = el.querySelectorAll('[data-testid="chat-row-user"]');
+    const last = rows[rows.length - 1];
+    return last ? Math.max(0, last.offsetTop - 16) : el.scrollHeight;
+  };
+  window.__personaQaScrollMax = () => el.scrollHeight - el.clientHeight;
+  return true;
+})()`;
+
+async function installWebConversationReveal(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(CHAT_SCROLL_CONTROL), { timeout: 10_000 }).toBeTruthy();
+}
+
+async function easeWebChat(page: Page, to: number, ms: number): Promise<void> {
+  await page.evaluate(
+    async ([target, duration]) => {
+      await (window as unknown as { __personaQaEase?: (to: number, ms: number) => Promise<void> }).__personaQaEase?.(
+        target as number,
+        duration as number,
+      );
+    },
+    [to, ms],
+  );
+}
+
+async function revealWebTurn(page: Page): Promise<void> {
+  if (REPLAY_PACE <= 0) return;
+  await installWebConversationReveal(page);
+  await replayDwell(page, 700);
+  const top = await page.evaluate(() => {
+    return (window as unknown as { __personaQaLastUserTop?: () => number }).__personaQaLastUserTop?.() ?? 0;
+  });
+  await easeWebChat(page, top, replayMs(1200));
+  await replayDwell(page, 1200);
+  const max = await page.evaluate(() => {
+    return (window as unknown as { __personaQaScrollMax?: () => number }).__personaQaScrollMax?.() ?? 0;
+  });
+  const span = Math.max(0, max - top);
+  const downMs = Math.min(3600, Math.max(900, Math.round(span * 4)));
+  await easeWebChat(page, max, replayMs(downMs));
+  await replayDwell(page, 1100);
+}
+
 async function typeAndSend(page: Page, text: string): Promise<void> {
   const input = page.getByTestId("text-floor-input").or(page.getByTestId("composer-input")).first();
   await expect(input).toBeVisible({ timeout: 15_000 });
@@ -138,9 +225,89 @@ async function typeAndSend(page: Page, text: string): Promise<void> {
   await input.click();
   await input.fill("");
   await input.pressSequentially(text, { delay: TYPE_DELAY_MS });
-  await dwell(page, 700);
+  await replayDwell(page, 1300);
   const send = page.getByTestId("text-floor-send").or(page.getByTestId("composer-send")).first();
   await send.evaluate((el) => (el as HTMLButtonElement).click());
+}
+
+function runSlideyCli(args: string[], label: string): void {
+  const slidey = slideyCommand();
+  const result = spawnSync(slidey.cmd, [...slidey.argsPrefix, ...args], {
+    cwd: slidey.cwd,
+    encoding: "utf8",
+  });
+  expect(result.status, `${label}\n${result.stdout}\n${result.stderr}`).toBe(0);
+  diag(`${label}: ${(result.stderr || result.stdout || "").trim()}`);
+}
+
+function rrwebDurationMs(eventsPath: string): number {
+  const raw = JSON.parse(fs.readFileSync(eventsPath, "utf8"));
+  const events = Array.isArray(raw) ? raw : raw.events;
+  expect(Array.isArray(events), `${eventsPath} should contain an rrweb event array`).toBeTruthy();
+  if (events.length < 2) return 0;
+  return Number(events[events.length - 1].timestamp) - Number(events[0].timestamp);
+}
+
+function polishRrwebClip(
+  rawPath: string,
+  outPath: string,
+  opts: { repace?: boolean; minDurationMs?: number; maxDurationMs?: number } = {},
+): void {
+  const repace = opts.repace ?? true;
+  const revealedPath = outPath.replace(/\.rrweb\.json$/i, ".revealed.rrweb.json");
+  runSlideyCli(
+    [
+      "rrweb-reveal",
+      rawPath,
+      revealedPath,
+      "--hold",
+      "850",
+      "--ease-min",
+      "950",
+      "--ease-max",
+      "3400",
+      "--per-px",
+      "4",
+      "--tail-hold",
+      "900",
+    ],
+    `rrweb reveal ${path.basename(outPath)}`,
+  );
+  if (repace) {
+    runSlideyCli(
+      [
+        "rrweb-repace",
+        revealedPath,
+        outPath,
+        "--min-dwell",
+        "1200",
+        "--max-dwell",
+        "2400",
+        "--per-char",
+        "10",
+        "--coalesce",
+        "180",
+        "--hold",
+        "1400",
+      ],
+      `rrweb repace ${path.basename(outPath)}`,
+    );
+  } else {
+    fs.copyFileSync(revealedPath, outPath);
+    diag(`rrweb repace skipped for ${path.basename(outPath)}; reveal track is the readable terminal pacing`);
+  }
+  fs.rmSync(revealedPath, { force: true });
+  const rawSidecar = captureSidecarPath(rawPath);
+  if (fs.existsSync(rawSidecar)) {
+    fs.copyFileSync(rawSidecar, captureSidecarPath(outPath));
+  }
+  const duration = rrwebDurationMs(outPath);
+  expect(duration, `${path.basename(outPath)} should be long enough to watch`).toBeGreaterThanOrEqual(
+    opts.minDurationMs ?? 24_000,
+  );
+  expect(duration, `${path.basename(outPath)} should not be padded into dead air`).toBeLessThanOrEqual(
+    opts.maxDurationMs ?? 150_000,
+  );
 }
 
 async function captureWebSession(context: BrowserContext): Promise<void> {
@@ -150,19 +317,20 @@ async function captureWebSession(context: BrowserContext): Promise<void> {
   await page.waitForURL(/#\/s\/[0-9a-f-]{36}\/chat$/, { timeout: 15_000 });
   await expect(page.getByTestId("chat-section")).toBeVisible({ timeout: 15_000 });
   await installCapture(page);
+  await installWebConversationReveal(page);
 
   await stamp(page, "web-request", "Web UI accepts a plain-language QA request");
   await typeAndSend(page, PREVIEW_REQUEST);
   await expect(page.getByTestId("chat-section")).toContainText("Preview ready: 2 transport checks", { timeout: 20_000 });
   await expect(page.getByTestId("chat-section")).toContainText("Transports to check: web, tui", { timeout: 20_000 });
   await stamp(page, "web-preview-plan", "Web UI explains the test plan before capture");
-  await dwell(page, 900);
+  await revealWebTurn(page);
 
   await typeAndSend(page, SCENARIO_REQUEST);
   await expect(page.getByTestId("chat-section")).toContainText(/Transport check:?\s*1 of 2/, { timeout: 20_000 });
   await expect(page.getByTestId("chat-section")).toContainText(/Driver status:?\s*captured/, { timeout: 20_000 });
   await stamp(page, "web-first-result", "Web UI shows the first transport result");
-  await dwell(page, 900);
+  await revealWebTurn(page);
 
   await page.getByTestId("intent-btn-next_leg").first().evaluate((el) => (el as HTMLElement).click());
   await expect(page.getByTestId("chat-section")).toContainText("2 / 2 transport checks passed", { timeout: 20_000 });
@@ -170,16 +338,17 @@ async function captureWebSession(context: BrowserContext): Promise<void> {
   await expect(page.getByTestId("chat-section")).toContainText("clips/web-required-input.rrweb.json", { timeout: 20_000 });
   await expect(page.getByTestId("chat-section")).toContainText("clips/tui-required-input.rrweb.json", { timeout: 20_000 });
   await stamp(page, "web-summary-report", "Web UI shows final summary and clickable artifacts");
-  await dwell(page, 900);
+  await revealWebTurn(page);
 
   await page.getByTestId("intent-btn-main_room").first().evaluate((el) => (el as HTMLElement).click());
   await expect(page.getByTestId("chat-section")).toContainText(/Last run\s*scenario-qa-affordance-demo-run/, { timeout: 20_000 });
   await stamp(page, "web-main-room", "Web UI returns to the main room after the report");
-  await dwell(page, 700);
+  await revealWebTurn(page);
 
   const capture = await dumpCapture(page);
   expect(capture.events.length).toBeGreaterThan(40);
-  writeEvents(capture.events, WEB_RRWEB, capture.viewport);
+  writeEvents(capture.events, RAW_WEB_RRWEB, capture.viewport);
+  polishRrwebClip(RAW_WEB_RRWEB, WEB_RRWEB);
   await page.close();
 }
 
@@ -209,7 +378,7 @@ function startTuiBridge(addr: string): ChildProcess {
       cwd: repoRoot,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
-      env: { ...process.env, KITSOKI_META_STREAM_DELAY_MS: PACE === 0 ? "0" : "120" },
+      env: { ...process.env, KITSOKI_META_STREAM_DELAY_MS: REPLAY_PACE <= 0 ? "0" : "120" },
     },
   );
   pipeProcessLog(proc, path.join(ARTIFACT_DIR, "tui-bridge.log"));
@@ -259,9 +428,9 @@ async function typeTuiLine(page: Page, text: string): Promise<void> {
   await page.evaluate(() => (window as unknown as { __scrollToBottom?: () => string }).__scrollToBottom?.());
   await page.click("#term");
   await page.keyboard.press("Tab");
-  await dwell(page, 300);
+  await replayDwell(page, 450);
   await page.keyboard.type(text, { delay: TYPE_DELAY_MS });
-  await dwell(page, 450);
+  await replayDwell(page, 1300);
   await page.keyboard.press("Enter");
 }
 
@@ -287,30 +456,31 @@ async function captureTuiSession(context: BrowserContext): Promise<void> {
     await waitForTui(page, "Preview ready: 2 transport checks", 60_000);
     await waitForTui(page, "Transports to check: web, tui", 60_000);
     await stamp(page, "tui-preview-plan", "TUI explains the test plan before capture");
-    await dwell(page, 900);
+    await replayDwell(page, 1800);
 
     await typeTuiLine(page, SCENARIO_REQUEST);
     await waitForTui(page, /Transport check:?\s*1 of 2/, 60_000);
     await waitForTui(page, /Driver status:?\s*captured/, 60_000);
     await stamp(page, "tui-first-result", "TUI shows the first transport result");
-    await dwell(page, 900);
+    await replayDwell(page, 1800);
 
     await typeTuiLine(page, "next transport");
     await waitForTui(page, "2 / 2 transport checks passed", 60_000);
     await waitForTui(page, "Review deck", 60_000);
     await waitForTui(page, "clips/tui-required-input.rrweb.json", 60_000);
     await stamp(page, "tui-summary-report", "TUI shows final summary and report artifacts");
-    await dwell(page, 900);
+    await replayDwell(page, 1800);
 
     await typeTuiLine(page, "main room");
     await waitForTui(page, "Last run", 60_000);
     await waitForTui(page, "scenario-qa-affordance-demo-run", 60_000);
     await stamp(page, "tui-main-room", "TUI returns to the main room after the report");
-    await dwell(page, 700);
+    await replayDwell(page, 1400);
 
     const capture = await dumpCapture(page);
     expect(capture.events.length).toBeGreaterThan(40);
-    writeEvents(capture.events, TUI_RRWEB, capture.viewport);
+    writeEvents(capture.events, RAW_TUI_RRWEB, capture.viewport);
+    polishRrwebClip(RAW_TUI_RRWEB, TUI_RRWEB, { repace: false, minDurationMs: 35_000, maxDurationMs: 90_000 });
   } finally {
     await page.close().catch(() => undefined);
     stopProcess(bridge);
@@ -452,6 +622,17 @@ async function openAndClickThrough(deckPath: string): Promise<void> {
     await dwell(page, 900);
     await shot(page, "04-rrweb-popout");
     await page.getByTestId("rrweb-popout-close").click();
+    await expect(page.getByTestId("rrweb-popout-modal")).toHaveCount(0, { timeout: 15_000 });
+
+    await page.goto(`${baseUrl}?scene=2&step=2`);
+    await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
+    await expect(page.getByTestId("evidence-open-rrweb")).toHaveCount(2, { timeout: 15_000 });
+    await page.getByTestId("evidence-open-rrweb").nth(1).evaluate((el) => (el as HTMLElement).click());
+    await expect(page.getByTestId("rrweb-popout-modal")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("rrweb-popout-player")).toBeVisible({ timeout: 15_000 });
+    await dwell(page, 900);
+    await shot(page, "04b-tui-rrweb-popout");
+    await page.getByTestId("rrweb-popout-close").click();
 
     await page.goto(`${baseUrl}?scene=3&step=0`);
     await page.evaluate(() => (window as unknown as { __slideySettle?: () => Promise<void> }).__slideySettle?.());
@@ -473,6 +654,7 @@ async function openAndClickThrough(deckPath: string): Promise<void> {
 test.beforeAll(async () => {
   fs.rmSync(ARTIFACT_DIR, { recursive: true, force: true });
   fs.mkdirSync(CLIPS_DIR, { recursive: true });
+  fs.mkdirSync(RAW_CLIPS_DIR, { recursive: true });
   fs.mkdirSync(OPEN_DIR, { recursive: true });
   fs.writeFileSync(DIAG_LOG, "");
   server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
