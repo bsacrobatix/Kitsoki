@@ -394,6 +394,10 @@
           <div v-if="store.terminal" class="iv__done-note">
             Session complete — no further input accepted.
           </div>
+          <ImprovePrompt
+            v-if="store.terminal"
+            :session-id="props.sessionId"
+          />
           <InputBar
             v-else
             :intents="store.currentView?.intents ?? []"
@@ -666,6 +670,7 @@ import TracePet from "../components/TracePet.vue";
 import ViewElement from "../components/ViewElement.vue";
 import StoryFreshness from "../components/StoryFreshness.vue";
 import MetaButton from "../components/meta/MetaButton.vue";
+import ImprovePrompt from "../components/meta/ImprovePrompt.vue";
 import ProposalsBadge from "../components/ProposalsBadge.vue";
 import { useProposalsStore } from "../stores/proposals.js";
 import type { Proposal } from "../stores/proposals.js";
