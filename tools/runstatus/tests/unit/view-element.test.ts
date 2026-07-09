@@ -493,6 +493,22 @@ describe("ViewElement", () => {
     w.unmount();
   });
 
+  it("keeps a sidecar-bearing html artifact on the html substrate with semantic markers", async () => {
+    dsStub.semanticMap.mockResolvedValue(SIDECAR);
+    const w = renderWithSession({
+      Kind: "media",
+      Handle: "mockup.html",
+      Mime: "text/html",
+    });
+    await w.find('[data-testid="media-annotate"]').trigger("click");
+    await flushPromises();
+    expect(w.find('[data-testid="aa-html"]').exists()).toBe(true);
+    expect(w.find('[data-testid="aa-slidey"]').exists()).toBe(false);
+    expect(w.find('[data-testid="semantic-overlay"]').exists()).toBe(true);
+    expect(w.find('[data-testid="so-marker-1/card_0"]').exists()).toBe(true);
+    w.unmount();
+  });
+
   it("dispatches an emitted anchor as an anchored off-path note", async () => {
     dsStub.semanticMap.mockResolvedValue(SIDECAR);
     const w = renderWithSession({
