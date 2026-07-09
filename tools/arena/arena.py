@@ -261,19 +261,33 @@ def validate_spec(spec_path: str, *, live: bool = False) -> tuple[list[str], lis
 
 
 def _check_docker() -> str:
+    version_error = _run_docker_probe(["docker", "version"], "docker version", 10)
+    if version_error:
+        return _with_docker_context_hint(version_error)
+    api_error = _run_docker_probe(["docker", "ps", "--format", "{{.ID}}"], "docker container API", 10)
+    if api_error:
+        return _with_docker_context_hint(api_error)
+    return ""
+
+
+def _run_docker_probe(cmd: list[str], label: str, timeout_s: int) -> str:
     try:
-        proc = subprocess.run(["docker", "version"], text=True, capture_output=True, timeout=10)
+        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout_s)
     except FileNotFoundError:
         return "docker CLI not found on PATH"
     except subprocess.TimeoutExpired:
-        return "docker version timed out after 10s"
+        return f"{label} timed out after {timeout_s}s"
     if proc.returncode == 0:
         return ""
     detail = _first_nonempty_line(proc.stderr) or _first_nonempty_line(proc.stdout) or f"exit {proc.returncode}"
+    return f"docker unavailable: {label} failed: {detail}"
+
+
+def _with_docker_context_hint(error: str) -> str:
     context_hint = _docker_context_hint()
     if context_hint:
-        detail = f"{detail}; {context_hint}"
-    return f"docker unavailable: {detail}"
+        return f"{error}; {context_hint}"
+    return error
 
 
 def _docker_context_hint() -> str:

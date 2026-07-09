@@ -136,7 +136,6 @@ Contract rules:
 | `arena/placement.py` | sweep scheduler (concurrency, INFRA-vs-MODEL retry) |
 | `arena/rollup.py` | job-agnostic leaderboard → `rollup.json` + `rollup.md` |
 | `arena.py` | CLI: `plan` · `validate` · `doctor` · `treatments` · `run` · `plugins` |
-| `scripts/render_showdown_demo.py` | deterministic static demo page + QA scenario generator from an arena run directory |
 | `specs/*.yaml` | example job specs |
 | `tests/test_*.py` | no-LLM, no-docker end-to-end (FakeBackend) |
 
@@ -204,10 +203,10 @@ python3 tools/arena/arena.py run --spec tools/arena/specs/bugfix-query-string.ya
 ARENA_PAIRED_TASK_ENABLE_CODEX=1 python3 tools/arena/arena.py run --spec … --out … --live
 ```
 
-`doctor` is intentionally stricter than `validate`: it checks the active Docker
-daemon/context because arena cells run in containers even on the no-LLM arming
-path. Docker startup failures roll up as `blocked` / `infra:harness`, not as a
-model loss.
+`doctor` is intentionally stricter than `validate`: it checks Docker daemon
+reachability and the container API because arena cells run in containers even on
+the no-LLM arming path. Docker startup, context, sign-in, or admin-policy
+failures roll up as `blocked` / `infra:harness`, not as a model loss.
 
 WB.2 paired-task gate:
 
@@ -258,8 +257,6 @@ Operator runbook for the CodeAct-vs-Codex action-surface matrix:
 ```bash
 make arena-showdown-plan
 make arena-showdown-run       # no-LLM arming run, containerized
-make arena-showdown-demo      # records .artifacts/arena-showdown-demo/arena-showdown-demo.mp4
-make arena-showdown-qa        # gated visual QA over the recorded video
 ```
 
 The live spend path is separate and still double-gated:
@@ -268,10 +265,12 @@ The live spend path is separate and still double-gated:
 ARENA_PAIRED_TASK_ENABLE_CODEX=1 make arena-showdown-live
 ```
 
-`arena-showdown-demo` records a tour over the actual arena output directory
-(`ARENA_SHOWDOWN_OUT`, default `.artifacts/arena/codeact-showdown`) and writes
-the generated HTML, QA feature, QA scenarios, MP4, chapters, and labeled PNG
-frames under `.artifacts/arena-showdown-demo/`.
+Every run writes its durable evidence into `ARENA_SHOWDOWN_OUT` (default
+`.artifacts/arena/codeact-showdown`). Treat `summary.json`, `report.md`, and
+the per-cell JSON files as the source of truth. Do not produce a narrative video
+until a real no-LLM or live arena run has completed; demos should be generated
+from those run artifacts or from a recorded trace, not from a handcrafted
+showdown page.
 
 New treatments should be added to `arena/treatments/registry.py`, documented in
 the package README and `docs/research/arena-treatments.md`, and covered by a

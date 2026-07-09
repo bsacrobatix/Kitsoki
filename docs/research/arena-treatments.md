@@ -48,22 +48,27 @@ Direct CodeAct validation is exact: `codex-codeact` requires
 uses Studio MCP orchestration and forces the mutating implementation step
 through `host.agent.codeact`.
 
-## CodeAct-vs-Codex Demo
+## CodeAct-vs-Codex Runbook
 
-The reusable demo path records a tour over the actual arena output bundle:
+The reusable path runs the action-surface matrix and writes durable arena
+artifacts:
 
 ```bash
 make arena-showdown-plan
 make arena-showdown-run
-make arena-showdown-demo
-make arena-showdown-qa
 ```
 
-Artifacts are written under `.artifacts/arena-showdown-demo/`; visual QA writes
-its gated report under `.artifacts/ui-qa/arena-showdown-demo/`. The video is
-honest about run health. If Docker is unavailable, the demo shows the
-`infra:harness` blocker from the real run bundle instead of inventing a green
-showdown.
+The live spend path is separate and still double-gated:
+
+```bash
+ARENA_PAIRED_TASK_ENABLE_CODEX=1 make arena-showdown-live
+```
+
+Artifacts are written under `ARENA_SHOWDOWN_OUT` (default
+`.artifacts/arena/codeact-showdown`). The run bundle, especially `summary.json`,
+`report.md`, and the per-cell JSON files, is the source of truth. Do not present
+a generated video as arena evidence unless it is produced from a completed real
+run or a trace captured from one.
 
 ## Adding a Treatment
 
