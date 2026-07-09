@@ -132,9 +132,12 @@ outputs: demos, QA/readiness reports, bug evidence, workflow walkthroughs,
 comparison studies, and product review artifacts. JSON stays the canonical
 machine artifact and markdown stays useful for quick audit/review, but the
 preferred human presentation surface is a Slidey deck when it adds clarity
-instead of ceremony. Put generated deck renders and throwaway review artifacts
-under `.artifacts`; commit source decks/bundles only when they are intended to
-live under `docs/decks/` per `docs/media/README.md`.
+instead of ceremony. Provide the `.slidey.json` deck link for review. Do not
+render Slidey decks to MP4, and do not bundle them to HTML, unless the user
+explicitly asks for that derived artifact; the VS Code Slidey previewer is the
+preferred review surface. Put generated deck renders and throwaway review
+artifacts under `.artifacts`; commit source decks/bundles only when they are
+intended to live under `docs/decks/` per `docs/media/README.md`.
 
 Automated testing should never use a real LLM or incur costs - mock agents via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
 
