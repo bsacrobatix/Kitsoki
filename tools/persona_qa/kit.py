@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""First-class Persona QA Kit CLI.
+"""Internal Persona QA compatibility adapter.
 
-The CLI is a product boundary around the older product-journey runner. It owns
-portable kit configuration, init templates, and the public completion-state
-adapter while delegating mature run-bundle mechanics to
-tools/product-journey/run.py.
+The Kitsoki product surface is the scenario-qa story. This module keeps
+portable kit configuration, retained-fixture deck generation, and completion
+state adapters deterministic and testable while delegating run-bundle mechanics
+to tools/product-journey/run.py.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="persona-qa",
-        description="Initialize, validate, preview, run, review, deck, and complete Persona QA Kit bundles.",
+        description="Maintainer/debug adapter for Persona QA kit files. Prefer stories/scenario-qa for operator workflows.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -136,7 +136,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"Persona QA kit initialized: {result['root']}")
         for path in result["files"]:
             print(f"- {path}")
-        print("Run: kitsoki persona-qa validate --config persona-qa.yaml")
+        print("Run: kitsoki run @kitsoki/scenario-qa")
     return 0
 
 
@@ -342,15 +342,20 @@ def init_kit(root: Path, *, force: bool = False) -> dict[str, object]:
     _write(
         kit_root / "README.md",
         (
-            "# Persona QA Kit\n\n"
-            "This kit describes persona lenses, scenarios, drivers, local fixtures, and public schemas for product journey QA.\n\n"
+            "# Persona QA Support Files\n\n"
+            "This kit describes persona lenses, scenarios, drivers, local fixtures, and schemas for story-owned product journey QA.\n\n"
             "Start with:\n\n"
             "```sh\n"
-            "kitsoki persona-qa validate --config persona-qa.yaml\n"
-            "kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all\n"
-            "kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all\n"
-            "kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json\n"
+            "kitsoki run @kitsoki/scenario-qa\n"
+            "```\n\n"
+            "Then submit story intents such as:\n\n"
+            "```text\n"
+            "preview scenario=project-onboarding transport=all\n"
+            "check scenario=project-onboarding transport=all persona=core-maintainer target=local-app\n"
+            "next_leg\n"
+            "report\n"
             "```\n"
+            "\nThe `kitsoki persona-qa` command remains a maintainer/debug adapter for validation, retained fixture decks, and CI checks.\n"
         ),
         force,
         files,

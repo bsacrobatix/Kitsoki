@@ -8,14 +8,13 @@
 # (run.py --scenario-qa-report) -- with VS Code legs labeled "bridge-level"
 # and CLI legs labeled "terminal-level".
 #
-# This story is a THIN wrapper over the public Persona QA Kit surface:
-# tools/persona_qa/kit.py emit-run owns scenario/persona/transport resolution
-# (schema.json's transports contract, §S1), and
-# .agents/agents/product-journey-qa-driver.md owns the actual MCP-driven
-# capture. The rooms here only sequence the loop and journal what happened —
-# mirrors stories/product-journey-qa (host.run → run.py) crossed with
-# stories/dogfood-marathon (host.agent.task per unit of work, INDEPENDENT
-# verify never the maker's self-report).
+# This story is the operator-facing Persona QA product surface. It wraps the
+# deterministic product-journey runner directly for scenario/persona/transport
+# resolution, then hands one transport-pinned leg at a time to the reusable
+# .agents/agents/product-journey-qa-driver.md capture agent. Lower-level Python
+# modules under tools/ are implementation adapters for deterministic planning,
+# schema validation, deck folding, and tests; operators should not need to find
+# or drive those modules directly.
 #
 # # Pipeline
 #
@@ -28,8 +27,9 @@
 #
 #   idle       operator surface: "check" a scenario (catalog id or a free-text
 #              description) on one or more transports.
-#   plan       host.run → persona-qa emit-run --transport <...> builds the run
-#              bundle (project/persona resolution, evidence dirs).
+#   plan       host.run → tools/product-journey/run.py --emit-run --transport
+#              <...> builds the run bundle (project/persona resolution,
+#              evidence dirs).
 #   resolve    scripts/plan_legs.star reads the bundle back into scenario x
 #              transport legs; for a free-text ad-hoc scenario, it first
 #              DRAFTS a scenario entry (id/task/success_criteria) and splices
@@ -60,7 +60,7 @@ app:
   license: "CC0"
 
 # Host allow-list.
-#   host.run          — shell to tools/persona_qa/kit.py emit-run to
+#   host.run          — shell to tools/product-journey/run.py --emit-run to
 #                        build the scenario/persona/transport run bundle
 #                        (project + persona resolution, evidence dirs,
 #                        driver-plan.json), then --scenario-qa-report to fold
@@ -128,6 +128,10 @@ world:
   mode:                 { type: string, default: "catalog" } # catalog | adhoc
 
   # ── run bundle ─────────────────────────────────────────────────────────
+  transport_suite:       { type: object, default: {} }   # side-effect-free preview from run.py --transport-suite
+  suite_status:          { type: string, default: "" }
+  suite_leg_count:       { type: int, default: 0 }
+  suite_skipped_count:   { type: int, default: 0 }
   run_id:               { type: string, default: "" }
   run_dir:              { type: string, default: "" }    # absolute — for the driver's own tools and display
   run_dir_rel:          { type: string, default: "" }    # repo-relative — for this story's own ctx.fs reads/writes
@@ -186,6 +190,16 @@ intents:
       seed:         { type: string, required: false }
       profile:      { type: string, required: false }  # harness profile for the driver's nested LIVE sessions (e.g. claude-native)
       live_budget_minutes: { type: int, required: false }  # override run.py's default per-scenario live budget (20 min)
+  preview:
+    description: "Preview the deterministic scenario x transport suite without creating a run bundle or launching capture."
+    examples:
+      - "preview scenario=bugfix transport=all"
+      - "preview bugfix on web"
+      - "preview scenario=prd-design transport=tui,web"
+    priority: 75
+    slots:
+      scenario:  { type: string, required: false }
+      transport: { type: string, required: false }
   # ── internal loop drivers (emitted by on_enter, not typed by an operator) ──
   run_emitted:
     description: "(internal) the run bundle's project/persona resolution committed; re-enter plan to resolve transport legs."

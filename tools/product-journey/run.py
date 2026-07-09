@@ -3181,9 +3181,10 @@ def build_transport_suite(
 ) -> dict:
     """Describe the deterministic scenario x transport plan without artifacts.
 
-    This is the product-facing preview used by `kitsoki persona-qa transports`
-    and `emit-run --preview`: it answers which legs a scenario can drive, what
-    each leg must capture, and which stable entrypoints the driver must use.
+    This is the story-facing preview used by `stories/scenario-qa` and by the
+    internal compatibility adapter: it answers which legs a scenario can drive,
+    what each leg must capture, and which stable entrypoints the driver must
+    use.
     """
 
     driver_manifest = driver_manifest or load_driver_manifest()

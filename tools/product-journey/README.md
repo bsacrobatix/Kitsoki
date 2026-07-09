@@ -7,29 +7,29 @@ journey** experiment:
 - keep checks deterministic by default,
 - and emit evidence artifacts (log + deck) as execution progresses.
 
-## Productized Persona QA Kit
+## Story-Owned Persona QA
 
-Use the public kit commands for project-facing work:
+Use `stories/scenario-qa` for project-facing Persona QA work:
 
 ```sh
-kitsoki persona-qa init --root .
-kitsoki persona-qa validate --config persona-qa.yaml
-kitsoki persona-qa transports --config persona-qa.yaml --scenario project-onboarding --transport all
-kitsoki persona-qa emit-run --config persona-qa.yaml --project local-app --persona core-maintainer --scenario project-onboarding --transport all
-kitsoki persona-qa emit-run --config persona-qa.yaml --scenario project-onboarding --transport all --preview
-kitsoki persona-qa drive --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --mode replay
-kitsoki persona-qa review --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
-kitsoki persona-qa deck --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id> --out docs/decks/persona-qa-latest.slidey.json
-kitsoki persona-qa complete --config persona-qa.yaml --run-dir .artifacts/persona-qa/<run-id>
+kitsoki run @kitsoki/scenario-qa
 ```
 
-`tools/product-journey/run.py` remains the compatibility runner and story
-backend. It also accepts `--config persona-qa.yaml` so its catalog, driver, and
-artifact paths can come from an external kit instead of this checkout's
-directory layout. See `docs/persona-qa.md` for the supported product contract.
-Use `persona-qa transports` or `emit-run --preview` when you only need the
-deterministic scenario x transport plan; those commands do not create a run
-bundle or launch capture.
+Then drive the story with:
+
+```text
+preview scenario=project-onboarding transport=all
+check scenario=project-onboarding transport=all persona=core-maintainer target=gears-rust
+next_leg
+report
+```
+
+`tools/product-journey/run.py` is the deterministic backend for that story. It
+emits run bundles, transport suites, review artifacts, and Slidey decks, but it
+is not the operator product surface. `tools/persona_qa` remains an internal
+compatibility package for schemas, completion-state conversion, retained fixture
+deck generation, and no-LLM tests. See `docs/persona-qa.md` for the supported
+story contract.
 
 ## How to run the compatibility runner
 

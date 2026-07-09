@@ -53,8 +53,8 @@ turns:
           call: emit_scenario_qa_run
           cmd: python3
           args:
-            - tools/persona_qa/kit.py
-            - emit-run
+            - tools/product-journey/run.py
+            - --emit-run
             - --project
             - gears-rust
             - --persona

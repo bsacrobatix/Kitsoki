@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Deterministic tests for the Persona QA Kit CLI.
+"""Deterministic tests for the Persona QA compatibility adapter.
 
 Run directly:
   python3 tools/persona_qa/tests/test_kit_cli.py
 
 No test calls a live LLM. The end-to-end path emits and reviews a dry run
-bundle from a temp external kit config.
+bundle from a temp external kit config while the story remains the operator
+surface.
 """
 
 from __future__ import annotations
