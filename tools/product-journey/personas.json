@@ -91,6 +91,60 @@
       }
     },
     {
+      "id": "workflow-author",
+      "label": "Workflow author",
+      "description": "Builds reusable Kitsoki stories for another project and needs proof that the QA loop generalizes beyond Kitsoki itself.",
+      "surface_preference": "docs-and-mcp-first",
+      "risk_focus": [
+        "generalization",
+        "story reuse",
+        "configuration clarity"
+      ],
+      "persona_lens": {
+        "starting_surface": "docs-and-mcp-first; start from authoring docs or Studio MCP surfaces before Kitsoki-internal scripts",
+        "first_question": "Can I adapt this scenario/persona QA loop to my own story without copying Kitsoki-specific harness code?",
+        "evidence_emphasis": "config files, story entrypoints, generated run bundles, driver handoff, and no-LLM replay commands",
+        "escalation_trigger": "Kitsoki-only assumptions, private catalog paths, missing extension points, or story-specific hardcoding",
+        "finding_bias": "Favor portability, clean configuration boundaries, and reusable story contracts."
+      }
+    },
+    {
+      "id": "remote-ops-owner",
+      "label": "Remote ops owner",
+      "description": "Owns a VM or worker pool that should run evidence capture and autonomous repairs without losing observability.",
+      "surface_preference": "web-and-cli-first",
+      "risk_focus": [
+        "remote readiness",
+        "worker isolation",
+        "operational recovery"
+      ],
+      "persona_lens": {
+        "starting_surface": "web-and-cli-first; verify hosted health/readiness and retained artifacts before dispatching live work",
+        "first_question": "Can I trust the remote worker to capture evidence, file issues, drain fixes, and expose a useful receipt?",
+        "evidence_emphasis": "health/readiness probes, arena placement receipt, worker logs, run URLs, watchdog output, and close-out stats",
+        "escalation_trigger": "stale heartbeats, missing hosted URL, mismatched ticket repo, unclear teardown, or no independent verification artifact",
+        "finding_bias": "Favor deployment readiness, isolation, recovery instructions, and durable operational receipts."
+      }
+    },
+    {
+      "id": "enterprise-evaluator",
+      "label": "Enterprise evaluator",
+      "description": "Evaluates Kitsoki for an engineering organization and needs product-site, docs, MCP, web, and TUI proof before adopting it.",
+      "surface_preference": "product-site-first",
+      "risk_focus": [
+        "trust signals",
+        "governance",
+        "adoption proof"
+      ],
+      "persona_lens": {
+        "starting_surface": "product-site-first; follow public product and documentation surfaces before relying on repo-local context",
+        "first_question": "Is this a mature workflow product my team can trial, or a private harness that only works for Kitsoki?",
+        "evidence_emphasis": "product-site claims, docs paths, hosted decks, issue-to-fix evidence, governance boundaries, and adoption-ready next steps",
+        "escalation_trigger": "unsupported claims, unclear security/cost posture, missing public proof, or reliance on private operator knowledge",
+        "finding_bias": "Favor adoption blockers, trust gaps, governance gaps, and missing public-facing evidence."
+      }
+    },
+    {
       "id": "bugfix-contributor",
       "label": "Bugfix Contributor",
       "description": "Clustered from 3 mined session span(s). Sample goal(s): why do we keep losing the mcp tools - i updated .<file> a few times an apparently it's gone again | we have some .kitsoki-owner problem that's preventing us from merging some bug fixes - i was using bug fix in a previous | file the bug, then land the fixes",

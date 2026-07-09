@@ -1513,6 +1513,7 @@ def mcp_step(tool: str) -> str:
 def evidence_capture_hint(kind: str) -> str:
     hints = {
         "browser_screenshot": "Save a retained visual MCP screenshot or PNG reference.",
+        "command_output": "Save a command transcript with cwd, command line, exit code, stdout/stderr, and any trace reference needed to replay the result.",
         "page_url": "Record the exact local URL or GitHub page used.",
         "navigation_trace": "Record the browser action sequence that reached the finding.",
         "checkpoint_rating": "Rate whether the persona could proceed without private context.",
@@ -1590,6 +1591,42 @@ def scenario_quality_gate(scenario_id: str) -> dict:
                 "The video is too fast to understand without a fast-forward/cassette affordance or frame/chapter evidence.",
                 "The serious exception lacks an Issue reference, trace reference, warning affordance, or real decision question.",
                 "The capture is not attached back to the universal scenario run as video and PNG sequence evidence.",
+            ],
+        },
+        "docs-to-mcp-first-run": {
+            "minimum_evidence": ["browser_screenshot", "rendered_tui_frame", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
+            "done_when": "A cold persona can move from docs/product-site material to a verified Studio MCP-backed scenario QA run with run, report, and deck paths.",
+            "block_if": [
+                "The docs path does not lead to a reusable story-owned scenario QA surface.",
+                "Studio MCP identity or story loadability cannot be verified before dispatch.",
+                "The run bundle, driver handoff, report, or deck path is missing from the evidence.",
+            ],
+        },
+        "agent-launch-experience": {
+            "minimum_evidence": ["session_trace", "rendered_tui_frame", "browser_screenshot", "checkpoint_rating", "review_notes", "key_interaction_video"],
+            "done_when": "The persona can launch a Kitsoki-backed agent run with visible profile/state parity and supported operator-question behavior.",
+            "block_if": [
+                "The selected story/profile/model boundary is not visible before live dispatch.",
+                "Web and TUI surfaces disagree about current state or next action.",
+                "A needed operator question silently defaults instead of using operator-ask or recording a replay blocker.",
+            ],
+        },
+        "remote-worker-campaign": {
+            "minimum_evidence": ["session_trace", "command_output", "review_notes", "bug_report_markdown", "trace-replay"],
+            "done_when": "A bounded remote worker or arena batch has a readiness receipt, attached evidence, issue-pipeline routing, and refreshed campaign artifacts.",
+            "block_if": [
+                "Remote readiness, gh-agent readiness, watchdog state, or ticket repo cannot be verified before dispatch.",
+                "Worker placement does not leave a durable receipt naming worker, budget, scenarios, and run directory.",
+                "Credible findings bypass the evidence-backed issue/fix pipeline or local stabilization sink rules.",
+            ],
+        },
+        "campaign-rollup-review": {
+            "minimum_evidence": ["session_trace", "review_summary", "checkpoint_rating", "rrweb"],
+            "done_when": "The stakeholder rollup is regenerated from artifacts and conservatively reports coverage, evidence gaps, issue/fix state, cost, deck link, and next campaign slice.",
+            "block_if": [
+                "The summary relies on conversation memory instead of retained artifacts.",
+                "A failed evidence, validation, issue, or gh-agent gate is summarized as passed.",
+                "The Slidey deck claims coverage without playback media or an explicit blocker.",
             ],
         },
         "prd-design": {

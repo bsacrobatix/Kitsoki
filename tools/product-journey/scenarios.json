@@ -518,6 +518,325 @@
       }
     },
     {
+      "id": "docs-to-mcp-first-run",
+      "label": "Docs to MCP first run",
+      "stage": "follow_tutorial",
+      "task": "Start from public docs or the product site, find the path to run Kitsoki through Studio MCP from Codex, launch the appropriate story, and verify the run exposes enough state for a reusable scenario/persona QA campaign.",
+      "natural_utterances": [
+        {
+          "text": "i want codex to run kitsoki through mcp; where do i start and how do i know it is connected?",
+          "source": "curated-corpus",
+          "source_ref": "docs-mcp-first-run-start"
+        },
+        {
+          "text": "show me the documented path from product site to a real scenario qa run",
+          "source": "curated-corpus",
+          "source_ref": "docs-mcp-first-run-docs"
+        },
+        {
+          "text": "prove this is a reusable story surface and not just a local script",
+          "source": "curated-corpus",
+          "source_ref": "docs-mcp-first-run-reuse"
+        }
+      ],
+      "primary_story": "stories/scenario-qa/app.yaml",
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "session.trace",
+        "render.tui",
+        "visual.observe"
+      ],
+      "evidence": [
+        "browser_screenshot",
+        "rendered_tui_frame",
+        "session_trace",
+        "navigation_trace",
+        "checkpoint_rating",
+        "key_interaction_video",
+        "flow-fixture"
+      ],
+      "success_criteria": [
+        "The persona can navigate from public product/docs material to the scenario-qa or product-journey story contract.",
+        "The first-run path verifies Studio MCP health or records a visible blocker before dispatching any live work.",
+        "The generated run bundle, driver handoff, report path, and Slidey deck path are discoverable without private repo archaeology.",
+        "Any missing setup, stale docs, or confusing MCP terminology is recorded as a finding with evidence."
+      ],
+      "case_variants": [
+        {
+          "id": "cold-docs-reader",
+          "utterance": "i only have the docs open; get me to a real MCP-backed QA run",
+          "setup": "Start from documentation or product-site navigation, not from remembered commands.",
+          "success_focus": "The path names the story, the MCP health check, and the first scenario command."
+        },
+        {
+          "id": "codex-attached",
+          "utterance": "codex says it has kitsoki tools; prove the attached MCP server is the right checkout",
+          "setup": "Assume Codex has a Studio MCP attachment and needs to confirm it before driving.",
+          "success_focus": "The run verifies server identity, story loadability, and trace/report paths."
+        },
+        {
+          "id": "external-story-author",
+          "utterance": "i have my own story; show which config/catalog pieces i would replace",
+          "setup": "Interpret the docs through a non-Kitsoki project author lens.",
+          "success_focus": "The product separates generic scenario/persona inputs from Kitsoki-specific defaults."
+        }
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "cli"],
+        "required": ["tui", "web"],
+        "overrides": {
+          "web": {
+            "required_mcp": ["session.open", "session.inspect", "visual.open", "visual.observe"],
+            "evidence": ["browser_screenshot", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"]
+          },
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "flow-fixture"]
+          }
+        }
+      }
+    },
+    {
+      "id": "agent-launch-experience",
+      "label": "Kitsoki agent launch experience",
+      "stage": "onboard_project",
+      "task": "Launch a Kitsoki-backed agent experience from Codex or a terminal, verify the selected profile/model/tool boundary, and confirm the run can ask for operator input through supported surfaces instead of hidden AskUserQuestion fallbacks.",
+      "natural_utterances": [
+        {
+          "text": "launch the kitsoki agent experience from codex and prove it is using the expected profile",
+          "source": "curated-corpus",
+          "source_ref": "agent-launch-profile"
+        },
+        {
+          "text": "when the agent needs a human decision, show me where that question appears",
+          "source": "curated-corpus",
+          "source_ref": "agent-launch-operator-ask"
+        },
+        {
+          "text": "i need the web and tui surfaces to agree about session state before i trust the run",
+          "source": "curated-corpus",
+          "source_ref": "agent-launch-state-parity"
+        }
+      ],
+      "primary_story": "stories/dev-story/app.yaml",
+      "required_mcp": [
+        "session.open",
+        "session.status",
+        "session.inspect",
+        "session.trace",
+        "render.tui",
+        "visual.observe"
+      ],
+      "evidence": [
+        "session_trace",
+        "rendered_tui_frame",
+        "browser_screenshot",
+        "checkpoint_rating",
+        "review_notes",
+        "key_interaction_video",
+        "flow-fixture"
+      ],
+      "success_criteria": [
+        "The launch path names the intended story, profile, and model/tool boundary before live agent dispatch.",
+        "TUI and web evidence show the same current state, next action, or visible blocker.",
+        "Operator questions use the supported operator-ask bridge when available, and headless/replay mode records an explicit blocker instead of silently defaulting.",
+        "The run records profile mismatch, missing MCP tools, or stale checkout identity as product findings."
+      ],
+      "case_variants": [
+        {
+          "id": "codex-native-launch",
+          "utterance": "start a codex-driven kitsoki run and show the profile/model choice in the trace",
+          "setup": "Start from Codex with Studio MCP available and avoid shell-only shortcuts.",
+          "success_focus": "The evidence ties the run to the expected profile and checkout."
+        },
+        {
+          "id": "operator-question",
+          "utterance": "make the agent ask for a real operator decision and show where i answer it",
+          "setup": "Use a scenario that needs a human choice or a cassette-backed simulation of that choice.",
+          "success_focus": "The operator question is visible in web/TUI or is an explicit replay blocker."
+        },
+        {
+          "id": "surface-parity",
+          "utterance": "show me the same run state in the TUI and web before continuing",
+          "setup": "Capture both transport views around the same session state.",
+          "success_focus": "The frames agree on current room, progress, and next action."
+        }
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "cli"],
+        "required": ["tui", "web"],
+        "overrides": {
+          "web": {
+            "required_mcp": ["session.open", "session.inspect", "visual.open", "visual.observe", "visual.act"],
+            "evidence": ["browser_screenshot", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"]
+          },
+          "cli": {
+            "required_mcp": ["session.open", "session.status", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "review_notes", "flow-fixture"]
+          }
+        }
+      }
+    },
+    {
+      "id": "remote-worker-campaign",
+      "label": "Remote worker campaign readiness",
+      "stage": "score_and_report",
+      "task": "Prepare a standing persona/scenario QA campaign for a remote VM or arena worker: validate worker readiness, assign a bounded scenario batch, capture evidence, file credible findings through the existing issue pipeline, and update the rollup deck and summary.",
+      "natural_utterances": [
+        {
+          "text": "i have a vm i want to use as the worker; validate it before spending live qa budget",
+          "source": "curated-corpus",
+          "source_ref": "remote-worker-readiness"
+        },
+        {
+          "text": "send a bounded persona qa batch to arena and keep the issue/deck rollup updated",
+          "source": "curated-corpus",
+          "source_ref": "remote-worker-arena"
+        },
+        {
+          "text": "file real findings with evidence, but keep local stabilization bugs local unless the handoff is github",
+          "source": "curated-corpus",
+          "source_ref": "remote-worker-issue-sink"
+        }
+      ],
+      "primary_story": "stories/product-journey-qa/app.yaml",
+      "required_mcp": [
+        "session.open",
+        "session.status",
+        "session.inspect",
+        "session.trace",
+        "render.tui",
+        "visual.observe"
+      ],
+      "evidence": [
+        "session_trace",
+        "command_output",
+        "review_notes",
+        "bug_report_markdown",
+        "key_interaction_video",
+        "trace-replay"
+      ],
+      "success_criteria": [
+        "Worker readiness checks cover health, ticket repo, hosted gh-agent readiness when needed, watchdog state, and artifact paths before live dispatch.",
+        "Arena or worker placement produces a durable receipt that names project, persona, scenarios, budget, worker, and run directory.",
+        "Credible issues reuse the existing file-findings/autonomous-fix pipeline with evidence, dedupe, claim, independent verify, close-out, and stats where applicable.",
+        "Local stabilization findings default to `.artifacts/issues/bugs` unless the scenario's handoff boundary explicitly requires GitHub.",
+        "The campaign summary and Slidey rollup deck are refreshed from artifacts rather than prose memory."
+      ],
+      "case_variants": [
+        {
+          "id": "vm-preflight",
+          "utterance": "check the VM is ready to run capture before assigning it work",
+          "setup": "Start with a configured remote worker candidate and no assumption that hosted services are healthy.",
+          "success_focus": "The run fails closed on stale heartbeat, wrong repo, unhealthy URL, or missing artifact path."
+        },
+        {
+          "id": "arena-batch",
+          "utterance": "run a small persona/scenario batch through arena and show the retained receipt",
+          "setup": "Use a bounded batch rather than a full campaign to prove placement and artifact collection.",
+          "success_focus": "The retained result records worker identity, scenario list, costs, outputs, and validation."
+        },
+        {
+          "id": "issue-to-fix-rollup",
+          "utterance": "take credible findings through filing/fixing and refresh the deck and summary",
+          "setup": "Start after evidence exists for at least one credible issue finding.",
+          "success_focus": "The issue pipeline, gh-agent fix evidence, final validation, stats, and Slidey rollup are linked."
+        }
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "cli"],
+        "required": ["cli"],
+        "overrides": {
+          "web": {
+            "required_mcp": ["session.open", "session.inspect", "visual.open", "visual.observe"],
+            "evidence": ["browser_screenshot", "session_trace", "navigation_trace", "review_notes", "key_interaction_video"]
+          },
+          "cli": {
+            "required_mcp": ["session.open", "session.status", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "review_notes", "bug_report_markdown", "trace-replay"]
+          }
+        }
+      }
+    },
+    {
+      "id": "campaign-rollup-review",
+      "label": "Campaign rollup review",
+      "stage": "score_and_report",
+      "task": "Review the standing campaign artifacts as a stakeholder: compare persona/scenario outcomes, open findings, filed issues, gh-agent fixes, evidence gaps, cost, and the latest Slidey deck before choosing the next campaign slice.",
+      "natural_utterances": [
+        {
+          "text": "show me what the ongoing product qa campaign found this week and what changed",
+          "source": "curated-corpus",
+          "source_ref": "campaign-rollup-weekly"
+        },
+        {
+          "text": "which personas and scenarios are still under-tested, and what should we run next?",
+          "source": "curated-corpus",
+          "source_ref": "campaign-rollup-next"
+        },
+        {
+          "text": "do not call it passed if the evidence gaps or issue fixes are still red",
+          "source": "curated-corpus",
+          "source_ref": "campaign-rollup-honesty"
+        }
+      ],
+      "primary_story": "stories/product-journey-qa/app.yaml",
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "session.trace",
+        "render.tui"
+      ],
+      "evidence": [
+        "session_trace",
+        "review_summary",
+        "checkpoint_rating",
+        "key_interaction_video",
+        "rrweb"
+      ],
+      "success_criteria": [
+        "The rollup summarizes outcomes by persona, scenario, transport, proof source, finding kind, issue state, cost, and run freshness.",
+        "The Slidey deck links retained playback or an explicit playback blocker for each claimed coverage area.",
+        "Open evidence gaps, failed validations, stale workers, and unresolved gh-agent fixes keep the summary in a blocked or needs-evidence state.",
+        "The next campaign slice is generated from missing coverage and high-severity findings, not from ad hoc operator memory."
+      ],
+      "case_variants": [
+        {
+          "id": "weekly-summary",
+          "utterance": "give me the current campaign deck and a concise summary of what changed",
+          "setup": "Start from existing campaign artifacts and avoid re-running live capture.",
+          "success_focus": "The summary is regenerated from artifact state and points to the current Slidey deck."
+        },
+        {
+          "id": "coverage-gap",
+          "utterance": "find the weakest persona/scenario/transport coverage and plan the next batch",
+          "setup": "Use rollup metadata and missing proof evidence rows.",
+          "success_focus": "The next batch is justified by concrete missing coverage or high-risk findings."
+        },
+        {
+          "id": "red-gate-honesty",
+          "utterance": "mark the campaign blocked if any proof, issue, or fix gate is still red",
+          "setup": "Inject or retain a red validation/fix/evidence state in the rollup.",
+          "success_focus": "The stakeholder view stays conservative and cites the blocking artifact."
+        }
+      ],
+      "transports": {
+        "allowed": ["tui", "web", "cli"],
+        "required": ["web"],
+        "overrides": {
+          "web": {
+            "required_mcp": ["session.open", "session.inspect", "visual.open", "visual.observe"],
+            "evidence": ["browser_screenshot", "session_trace", "review_summary", "rrweb", "key_interaction_video"]
+          },
+          "cli": {
+            "required_mcp": ["session.open", "session.inspect", "session.trace"],
+            "evidence": ["session_trace", "command_output", "review_summary", "trace-replay"]
+          }
+        }
+      }
+    },
+    {
       "id": "feature-implementation",
       "label": "Feature implementation",
       "stage": "plan_project_work",

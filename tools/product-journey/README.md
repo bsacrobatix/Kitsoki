@@ -146,6 +146,42 @@ design, and derives stats without operator glue. Leave
 `--autonomous-driver-mode` at `pending` when a live budgeted driver should
 capture evidence before finalization.
 
+## Standing Universal QA Campaign
+
+Use the active persona/scenario corpus as the source of truth for ongoing
+product QA across Kitsoki's public product site, docs, Studio MCP, Codex agent
+launch, web UI, TUI, and remote-worker experience. The reusable campaign loop
+is:
+
+1. Run no-LLM preflights (`--validate-corpus`, `--capture-preflight`, replay
+   smoke) before any live driver spend.
+2. Emit a bounded run or autonomous marathon from catalog data, not a private
+   recorder case list.
+3. Capture evidence through the generated `capture_routes` and attach it back
+   to the run.
+4. Route credible findings through the existing evidence-backed issue/fix
+   pipeline; keep local stabilization bugs under `.artifacts/issues/bugs`
+   unless the scenario's handoff boundary is GitHub.
+5. Regenerate review artifacts, stats, and the Slidey deck from retained run
+   artifacts. A red evidence, validation, issue, or gh-agent gate keeps the
+   campaign in `needs_evidence` or blocked state.
+
+The campaign-oriented active scenarios are:
+
+- `docs-to-mcp-first-run` - product site/docs to Studio MCP and scenario QA.
+- `agent-launch-experience` - Codex/Kitsoki agent launch, profile visibility,
+  web/TUI state parity, and operator-ask behavior.
+- `remote-worker-campaign` - VM/arena readiness, bounded batch placement,
+  evidence-backed filing/fixing, and rollup refresh.
+- `campaign-rollup-review` - stakeholder summary, Slidey deck, coverage gaps,
+  cost, open issue/fix state, and next campaign slice.
+
+The additional active personas (`workflow-author`, `remote-ops-owner`, and
+`enterprise-evaluator`) are intentionally not Kitsoki-maintainer personas. They
+exercise the same runner/story/issue/deck pipeline from the perspective of a
+user adapting Kitsoki to their own stories, operating a remote worker, or
+evaluating whether the product is adoption-ready.
+
 Prove one reusable-driver scenario loop with cassette-backed proof evidence:
 
 ```sh
