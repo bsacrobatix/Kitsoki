@@ -175,6 +175,23 @@ func TestStoryGraphMatchesEditor(t *testing.T) {
 
 // TestStoryGraphDetailAndAgents exercises the mode selection: a room id selects
 // detail, the agents flag selects agent contracts.
+
+func TestStoryGraphSuggestsStoryRootsForRepoDir(t *testing.T) {
+	ctx := context.Background()
+	cs := newStudioWithWorkspace(ctx, t, bugfixDir(t))
+
+	res, err := callTool(ctx, cs, "story.graph", map[string]any{"dir": repoRoot(t)})
+	require.NoError(t, err)
+	require.True(t, res.IsError, "repo root without app.yaml should be an actionable structured error")
+
+	var toolErr studio.ToolError
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &toolErr))
+	assert.Equal(t, studio.ErrBadRequest, toolErr.Code)
+	assert.Contains(t, toolErr.Error, "no app.yaml")
+	assert.Contains(t, toolErr.Error, "pass dir as a story root")
+	assert.Contains(t, toolErr.Error, "stories/")
+}
+
 func TestStoryGraphDetailAndAgents(t *testing.T) {
 	ctx := context.Background()
 	dir := bugfixDir(t)
@@ -255,6 +272,34 @@ func TestStoryTestReproducesFlows(t *testing.T) {
 	for _, r := range got.Results {
 		assert.True(t, r.Passed || r.Skipped, "fixture %s passed or skipped; failure_count=%d failures=%v", r.File, r.FailureCount, r.Failures)
 	}
+}
+
+func TestStoryTestResolvesRelativeFlowPathsAgainstStoryDir(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(repoRoot(t), "stories", "inbox-demo")
+	cs := newStudioWithWorkspace(ctx, t, dir)
+
+	var got studio.StoryTestOK
+	callStory(ctx, t, cs, "story.test", map[string]any{
+		"flows": "flows/background_notifies.yaml",
+	}, &got)
+	assert.True(t, got.OK, "relative flow path should resolve against story dir; failed=%d", got.Failed)
+	assert.Equal(t, 1, got.Passed)
+	assert.Equal(t, 0, got.Failed)
+}
+
+func TestStoryTestResolvesRelativeFlowGlobsAgainstStoryDir(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(repoRoot(t), "stories", "inbox-demo")
+	cs := newStudioWithWorkspace(ctx, t, dir)
+
+	var got studio.StoryTestOK
+	callStory(ctx, t, cs, "story.test", map[string]any{
+		"flows": "flows/background_*.yaml",
+	}, &got)
+	assert.True(t, got.OK, "relative flow glob should resolve against story dir; failed=%d", got.Failed)
+	assert.GreaterOrEqual(t, got.Passed, 1)
+	assert.Equal(t, 0, got.Failed)
 }
 
 func TestStoryTestExposesCLIFlowOptions(t *testing.T) {

@@ -325,9 +325,9 @@ func (srv *Server) handleStoryTest(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
-	glob := args.Flows
-	if glob == "" {
-		glob = filepath.Join(storyDir, "flows", "*.yaml")
+	glob, gerr := resolveFlowGlob(storyDir, args.Flows)
+	if gerr != nil {
+		return buildToolError(ErrBadRequest, "story.test: "+gerr.Error()), nil, nil
 	}
 	report, err := testrunner.RunFlows(ctx, appPath, glob, testrunner.FlowOptions{
 		RecordingOverride:     args.Recording,
@@ -363,7 +363,119 @@ func (srv *Server) resolveWorkspace(override string) (storyDir, appPath string, 
 		base = wh.Dir
 	}
 	dir, app := splitWorkspacePath(base)
+	if st, err := os.Stat(app); err == nil && !st.IsDir() {
+		return dir, app, nil
+	}
+	if suggestions := discoverStoryRoots(dir, 8); len(suggestions) > 0 {
+		return "", "", buildToolError(ErrBadRequest, fmt.Sprintf("no app.yaml at %s; pass dir as a story root, for example: %s", app, strings.Join(suggestions, ", ")))
+	}
 	return dir, app, nil
+}
+
+func resolveFlowGlob(storyDir, flows string) (string, error) {
+	if strings.TrimSpace(flows) == "" {
+		return filepath.Join(storyDir, "flows", "*.yaml"), nil
+	}
+	parts := strings.Split(flows, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if filepath.IsAbs(part) {
+			out = append(out, part)
+			continue
+		}
+		joined, err := safeJoin(storyDir, part)
+		if err != nil {
+			return "", err
+		}
+		out = append(out, joined)
+	}
+	if len(out) == 0 {
+		return "", errors.New("flows is empty")
+	}
+	return strings.Join(out, ","), nil
+}
+
+func discoverStoryRoots(base string, max int) []string {
+	if max <= 0 {
+		return nil
+	}
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return nil
+	}
+	if st, err := os.Stat(absBase); err != nil || !st.IsDir() {
+		return nil
+	}
+	seen := map[string]bool{}
+	var roots []string
+	addRoot := func(root string) bool {
+		if rel, relErr := filepath.Rel(absBase, root); relErr == nil && rel != "." {
+			root = rel
+		}
+		root = filepath.ToSlash(root)
+		if root == "." || seen[root] {
+			return len(roots) >= max
+		}
+		seen[root] = true
+		roots = append(roots, root)
+		return len(roots) >= max
+	}
+	for _, preferred := range []string{"stories", filepath.Join("internal", "basestories", "stories"), filepath.Join(".kitsoki", "stories")} {
+		entries, err := os.ReadDir(filepath.Join(absBase, preferred))
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			root := filepath.Join(absBase, preferred, entry.Name())
+			if st, err := os.Stat(filepath.Join(root, "app.yaml")); err == nil && !st.IsDir() {
+				if addRoot(root) {
+					return roots
+				}
+			}
+		}
+	}
+	walkErr := filepath.WalkDir(absBase, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if path != absBase && skipStoryDiscoveryDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "app.yaml" {
+			return nil
+		}
+		root := filepath.Dir(path)
+		if addRoot(root) {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
+		return nil
+	}
+	return roots
+}
+
+func skipStoryDiscoveryDir(name string) bool {
+	if strings.HasPrefix(name, ".") {
+		return true
+	}
+	switch name {
+	case "node_modules", "vendor", "dist", "build", "target":
+		return true
+	default:
+		return false
+	}
 }
 
 // splitWorkspacePath maps a workspace handle (a story dir or an app.yaml path)
