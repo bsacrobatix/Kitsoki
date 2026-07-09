@@ -596,8 +596,14 @@ states:
         - when: "trim(slots.request) == 'fix bug'"
           target: bugfix_intake
           effects:
-            - set: { last_error: "" }
-            - say: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the bugfix pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - paste a GitHub issue URL
+                  - `fix this bug ...` — paste an inline bug report
         - when: "hasPrefix(trim(slots.request), 'fix issue link ')"
           target: bugfix_link_intake
           effects:
@@ -1007,8 +1013,15 @@ states:
         - default: true
           target: bugfix_intake
           effects:
-            - set: { last_error: "" }
-            - say: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
+            - set:
+                last_error: |
+                  No ticket selected — pick one before entering the bugfix pipeline.
+
+                  Suggestions:
+                  - `tickets` — search and pick a ticket
+                  - paste a GitHub issue URL
+                  - `fix this bug ...` — paste an inline bug report
+                  - `workspaces` — resume an in-progress workspace
       bugfix_report:
         - target: bf
           effects:
