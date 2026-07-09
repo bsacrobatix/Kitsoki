@@ -127,6 +127,9 @@ Then hand it to the reusable driver:
    capture.
 3. Attach evidence with `--attach-evidence` or the story `attach` intent;
    loaded runs also expose `last_result.next_driver_attach_command`.
+   Use `last_result.next_driver_capture_route` as the deterministic setup and
+   recording entrypoint for the first missing proof slot. If the route is
+   absent or unusable, record a blocker instead of inventing a setup path.
 4. Record findings with `--record-finding`; record honest blockers with
    `--record-blocker` or `last_result.next_driver_blocker_command`.
 5. Record each attempt with `--record-driver-event` or the story `driver_event`

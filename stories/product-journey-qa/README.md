@@ -16,8 +16,9 @@ It is intentionally no-LLM:
   point when the reusable driver receives a `run_dir` and needs to attach
   evidence through Kitsoki instead of reading files directly. After `load`, the
   story world `last_result` contains `driver_scenarios`,
-  `missing_proof_evidence`, and `driver_final_gates` for the driver to inspect
-  through MCP.
+  `next_driver_capture_route`, `missing_proof_evidence`, and
+  `driver_final_gates` for the driver to inspect through MCP. The route is the
+  deterministic setup/recording entrypoint for the first missing proof slot.
 - `matrix` calls `tools/product-journey/run.py --emit-matrix --json-output` to
   create the 10-repo GitHub assignment plan. Pass `target_proof_file=...` after
   `refresh_targets` when the matrix should embed current GitHub proof.
@@ -148,10 +149,12 @@ driver inputs, dispatch modes, missing evidence, and final watchdog,
 autonomous-fix, review, and validation commands without spending live model
 calls.
 Loaded runs expose `last_result.next_driver_capture`,
-`last_result.next_driver_attach_command`, and
-`last_result.next_driver_blocker_command` so the reusable driver can begin with
-the first missing proof slot directly from story state and can record an honest
-blocker instead of faking evidence.
+`last_result.next_driver_capture_route`, `last_result.next_driver_attach_command`,
+and `last_result.next_driver_blocker_command` so the reusable driver can begin
+with the first missing proof slot directly from story state. The route names
+the primary story session, resolved tools, artifact path template, and writeback
+commands; if that route is missing or unusable, the driver records an honest
+blocker instead of improvising setup or faking evidence.
 Use `driver-journal.md` to review the driver's attempted actions, MCP tools,
 evidence references, blockers, and per-scenario status before judging whether a
 run reflects natural product usage.
