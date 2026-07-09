@@ -57,6 +57,12 @@ printf '.kitsoki.local.yaml\n' >"$local_repo/.gitignore"
 cat >"$local_repo/Makefile" <<'MK'
 test:
 	@true
+web-dev:
+	@true
+install:
+	@true
+site-dev:
+	@true
 MK
 printf 'base\n' >"$local_repo/README.md"
 printf 'default_profile: codex-native\nharness_profiles:\n  codex-native:\n    backend: codex\n' >"$local_repo/.kitsoki.local.yaml"
@@ -78,7 +84,7 @@ commit_file "$local_repo" main.txt main-update
 local_out="$tmp/local-refresh.out"
 (
   cd "$local_repo"
-  scripts/refresh-staging-local.sh --skip-remote --gate "git diff --check"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'test "$GIT_EDITOR" = true && test "$GIT_SEQUENCE_EDITOR" = true && test "$GIT_MERGE_AUTOEDIT" = no && test "$GIT_PAGER" = cat && git diff --check'
 ) >"$local_out" 2>&1
 assert_contains "$local_out" "staging/local ->"
 assert_contains "$local_out" "copied .kitsoki.local.yaml into staging capsule"
@@ -98,9 +104,18 @@ make_out="$tmp/make-staging.out"
   cd "$script_dir/.."
   make -n test-staging STAGING_CAPSULE="$local_repo/.capsules/staging/local" STAGING_REFRESH_GATE=true
 ) >"$make_out" 2>&1
+assert_contains "$make_out" "GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true GIT_MERGE_AUTOEDIT=no GIT_PAGER=cat"
 assert_contains "$make_out" "scripts/refresh-staging-local.sh --staging-branch"
 assert_contains "$make_out" " --gate \"true\""
 assert_contains "$make_out" "$local_repo/.capsules/staging/local\" test"
+for target in web-dev-staging install-staging site-dev-staging; do
+  target_out="$tmp/$target.out"
+  (
+    cd "$script_dir/.."
+    make -n "$target" STAGING_CAPSULE="$local_repo/.capsules/staging/local" STAGING_REFRESH_GATE=true
+  ) >"$target_out" 2>&1
+  assert_contains "$target_out" "GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true GIT_MERGE_AUTOEDIT=no GIT_PAGER=cat"
+done
 
 bare="$tmp/origin.git"
 seed="$tmp/seed"

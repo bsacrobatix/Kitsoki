@@ -9,6 +9,14 @@
 # checkout.
 set -euo pipefail
 
+# The staging make targets must be safe to run from an interactive terminal.
+# Git may otherwise honor EDITOR/VISUAL/PAGER and block on vim/less during
+# merge/rebase message handling or paged output.
+export GIT_EDITOR=true
+export GIT_SEQUENCE_EDITOR=true
+export GIT_MERGE_AUTOEDIT=no
+export GIT_PAGER=cat
+
 DEFAULT_BASE="main"
 DEFAULT_REMOTE="origin"
 DEFAULT_REMOTE_BRANCH="main"
