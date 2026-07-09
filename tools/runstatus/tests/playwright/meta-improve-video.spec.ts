@@ -127,6 +127,7 @@ test("completion reminder to story.improve report video", async () => {
   let sawAutoToggle = false;
   let sawStreaming = false;
   let sawReport = false;
+  let sawArtifacts = false;
 
   try {
     await cinematicGoto(page, `${server.base}/#/`, { waitForTestId: "home-view" });
@@ -173,6 +174,7 @@ test("completion reminder to story.improve report video", async () => {
     await narrate(page, chapters, shot, "mi-reminder");
     sawAutoToggle = await page.getByTestId("improve-auto-toggle").isVisible().catch(() => false);
     await narrate(page, chapters, shot, "mi-auto-run");
+    await narrate(page, chapters, shot, "mi-evidence-report");
 
     await narrate(page, chapters, shot, "mi-run-improve");
     const runButton = page.getByTestId("improve-run").first();
@@ -190,6 +192,38 @@ test("completion reminder to story.improve report video", async () => {
     sawReport = true;
     await narrate(page, chapters, shot, "mi-report-ready");
 
+    await page.getByTestId("meta-close").click();
+    await expect(page.getByTestId("improve-report-status")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId("improve-report-artifacts")).toContainText("har.json", {
+      timeout: 15000,
+    });
+    await expect(page.getByTestId("improve-report-artifacts")).toContainText("rrweb.json", {
+      timeout: 15000,
+    });
+    await expect(page.getByTestId("improve-report-artifacts")).toContainText("trace.redacted.jsonl", {
+      timeout: 15000,
+    });
+    const filedPath = (await page.getByTestId("improve-report-path").innerText()).trim();
+    const reportPath = path.join(repoRoot, filedPath);
+    if (!fs.existsSync(reportPath)) {
+      throw new Error(`meta improve report path does not exist: ${reportPath}`);
+    }
+    const reportMarkdown = fs.readFileSync(reportPath, "utf8");
+    for (const text of ["## Introspection Report", "## Evidence Bundle", "## Artifacts"]) {
+      if (!reportMarkdown.includes(text)) {
+        throw new Error(`meta improve report missing ${text}: ${reportPath}`);
+      }
+    }
+    const artifactsDir = reportPath.replace(/\.md$/, ".artifacts");
+    for (const name of ["har.json", "rrweb.json", "trace.redacted.jsonl"]) {
+      const artifactPath = path.join(artifactsDir, name);
+      if (!fs.existsSync(artifactPath)) {
+        throw new Error(`missing meta improve artifact ${name}: ${artifactPath}`);
+      }
+    }
+    sawArtifacts = true;
+    await narrate(page, chapters, shot, "mi-artifacts-filed");
+
     await page.getByTestId("tour-next").click().catch(() => undefined);
   } catch (e) {
     diag(`FAILED: ${e instanceof Error ? e.stack ?? e.message : String(e)}`);
@@ -204,10 +238,11 @@ test("completion reminder to story.improve report video", async () => {
 
   diag(
     `VERDICTS sawPrompt=${sawPrompt} sawAutoToggle=${sawAutoToggle} ` +
-      `sawStreaming=${sawStreaming} sawReport=${sawReport}`
+      `sawStreaming=${sawStreaming} sawReport=${sawReport} sawArtifacts=${sawArtifacts}`
   );
   expect(sawPrompt, "completion improve prompt visible").toBe(true);
   expect(sawAutoToggle, "auto-run toggle visible").toBe(true);
   expect(sawStreaming, "story.improve streaming turn visible").toBe(true);
   expect(sawReport, "introspection report visible").toBe(true);
+  expect(sawArtifacts, "evidence report artifacts filed").toBe(true);
 });

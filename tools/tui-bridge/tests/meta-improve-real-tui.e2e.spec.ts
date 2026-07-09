@@ -179,6 +179,8 @@ test("records a real Kitsoki TUI completion reminder and /meta improve report", 
       "typed-improve-request",
     );
     await waitForBuffer(page, "Introspection report", 60_000);
+    await waitForBuffer(page, "Evidence bundle", 60_000);
+    await waitForBuffer(page, "Posting", 60_000);
     await waitForBuffer(page, "Tool and permission notes", 60_000);
     await waitForBuffer(page, "Regression coverage", 60_000);
     await scrollLines(page, -16);

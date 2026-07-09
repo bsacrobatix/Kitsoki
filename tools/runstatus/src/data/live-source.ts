@@ -855,6 +855,36 @@ export class LiveSource implements DataSource {
       .then((r) => r.messages ?? []);
   }
 
+  /**
+   * File/post an evidence-backed meta-improve report. The server reuses the
+   * bug-report artifact pipeline so the report carries scrubbed HAR, rrweb,
+   * console, and redacted trace evidence when available.
+   */
+  metaImproveReport(
+    params: MetaImproveReportParams
+  ): Promise<MetaImproveReportResult> {
+    return this.client.post<MetaImproveReportResult>(
+      "runstatus.meta.improve.report",
+      {
+        session_id: params.session_id,
+        mode: params.mode,
+        chat_id: params.chat_id,
+        title: params.title,
+        report: params.report,
+        guidance: params.guidance,
+        destination: params.destination,
+        capture_id: params.capture_id,
+        trace_ref: params.trace_ref,
+        filed_by: params.filed_by,
+        story_path: params.story_path,
+        target_dir: params.target_dir,
+        rrweb_events: params.rrweb_events,
+        console_logs: params.console_logs,
+        error_info: params.error_info,
+      }
+    );
+  }
+
   // ── Agent-action transcripts ──────────────────────────────────────────────
 
   /**
@@ -1452,9 +1482,47 @@ export interface BugPreviewResult {
   capacity: number;
 }
 
+/** Request shape for runstatus.meta.improve.report. */
+export interface MetaImproveReportParams {
+  session_id: string;
+  mode?: string;
+  chat_id?: string;
+  title?: string;
+  report?: string;
+  guidance?: string;
+  /** configured = provider/GitHub/local according to server flags; local forces .artifacts. */
+  destination?: "configured" | "local" | "ticket-provider";
+  capture_id?: string;
+  trace_ref?: string;
+  filed_by?: string;
+  story_path?: string;
+  target_dir?: string;
+  rrweb_events?: string;
+  console_logs?: string;
+  error_info?: string;
+}
+
+/** Result of runstatus.meta.improve.report. */
+export interface MetaImproveReportResult {
+  id?: string | number;
+  path?: string;
+  url?: string;
+  sink?: "local-artifact" | "github" | "ticket-provider" | string;
+  report_kind?: "meta-improve" | string;
+  destination?: string;
+  artifacts?: string[];
+  artifacts_path?: string;
+  local_path?: string;
+  local_artifacts_path?: string;
+  provider?: string;
+  provider_ok?: boolean;
+  provider_error?: string;
+  provider_hint?: string;
+}
+
 /** Result of runstatus.bug.status. */
 export interface BugStatusResult {
-  mode: "github" | "local";
+  mode: "github" | "local" | "local-artifact";
   repo?: string;
   can_file: boolean;
   github_auth_configured?: boolean;

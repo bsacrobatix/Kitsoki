@@ -238,7 +238,11 @@ Three more agents ship pre-registered alongside `story-author`:
   prompts / rooms / scripts / agent declarations, and returns an
   introspection report: observed false start, likely cause,
   recommended story change, tool/permission notes, and no-LLM
-  regression coverage. Reached through `story.improve`.
+  regression coverage. Reached through `story.improve`. Web sessions
+  can file the completed report through `runstatus.meta.improve.report`,
+  which writes the same evidence bundle shape as bug reports: redacted
+  trace, browser HAR, rrweb replay, console/error state, and local or
+  remote posting metadata.
 - **`kitsoki-improver`** — read-only continuous-improvement reviewer
   for kitsoki engine runs. It uses the same trace-backed report shape,
   but looks for reusable engine, host, tool, prompt, workflow, or
@@ -267,7 +271,11 @@ groups):
   Use this when the run produced a surprising answer, the operator
   corrected the agent, or a tool loop looked wasteful and you want a
   concrete report on prompt / tool / script / permission / flow-test
-  improvements before editing.
+  improvements before editing. Terminal states in the TUI and web UI
+  surface an "Improve this run" reminder; the web reminder can also
+  file an evidence-backed report locally, through `--ticket-repo`, or
+  through a private `ticket_provider/v1` script passed with
+  `kitsoki web --improve-ticket-provider <provider.star>`.
 - **`story.bug`** — `/meta story bug`. Files a story bug via
   `kitsoki bug create --target story`; agent
   `story-bug-reporter`.
@@ -696,7 +704,11 @@ What ships with kitsoki today (formerly under "Limitations"):
   so the conversation is the same row across every running app;
   `story.improve` / `kitsoki.improve` are read-only introspection
   report modes for continuous improvement after false starts or
-  operator corrections;
+  operator corrections. The web completion affordance can persist a
+  meta-improve report with trace/HAR/rrweb/console evidence under
+  `.artifacts/issues/bugs`, post to GitHub via `--ticket-repo`, or call
+  a custom `ticket_provider/v1` create operation via
+  `--improve-ticket-provider`;
   `story.bug` uses the `story-bug-reporter` agent which files
   reports via `kitsoki bug create --target story` under the selected
   local sink (`issues/bugs/` or `.artifacts/issues/bugs/`); `kitsoki.bug`

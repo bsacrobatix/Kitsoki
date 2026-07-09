@@ -7,13 +7,28 @@ const live = vi.hoisted(() => {
   const metaEnter = vi.fn();
   const metaStream = vi.fn();
   const reloadSession = vi.fn();
+  const bugPreview = vi.fn();
+  const metaImproveReport = vi.fn();
+  const lastRpcError = vi.fn();
   const LiveSource = vi.fn().mockImplementation(() => ({
     metaModes,
     metaEnter,
     metaStream,
     reloadSession,
+    bugPreview,
+    metaImproveReport,
+    lastRpcError,
   }));
-  return { LiveSource, metaModes, metaEnter, metaStream, reloadSession };
+  return {
+    LiveSource,
+    metaModes,
+    metaEnter,
+    metaStream,
+    reloadSession,
+    bugPreview,
+    metaImproveReport,
+    lastRpcError,
+  };
 });
 
 vi.mock("../../src/data/live-source.js", () => ({
@@ -41,6 +56,9 @@ describe("ImprovePrompt", () => {
     live.metaEnter.mockReset();
     live.metaStream.mockReset();
     live.reloadSession.mockReset();
+    live.bugPreview.mockReset();
+    live.metaImproveReport.mockReset();
+    live.lastRpcError.mockReset();
     live.metaModes.mockResolvedValue([improveMode]);
     live.metaEnter.mockResolvedValue({
       chat_id: "c1",
@@ -53,6 +71,19 @@ describe("ImprovePrompt", () => {
       reload_requested: false,
       changed_files: [],
     });
+    live.bugPreview.mockResolvedValue({
+      capture_id: "cap-1",
+      har: { log: { entries: [] } },
+      depth: 0,
+      capacity: 0,
+    });
+    live.metaImproveReport.mockResolvedValue({
+      sink: "local-artifact",
+      path: ".artifacts/issues/bugs/meta.md",
+      artifacts: ["har.json", "rrweb.json", "trace.redacted.jsonl"],
+      artifacts_path: ".artifacts/issues/bugs/meta.artifacts",
+    });
+    live.lastRpcError.mockReturnValue(null);
   });
 
   it("opens story.improve and sends the standard improvement request", async () => {
@@ -76,9 +107,25 @@ describe("ImprovePrompt", () => {
       expect.stringContaining("false starts"),
       expect.any(Function)
     );
+    expect(live.bugPreview).toHaveBeenCalledTimes(1);
+    expect(live.metaImproveReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: "s1",
+        mode: "story.improve",
+        capture_id: "cap-1",
+        destination: "configured",
+        report: "improvement report",
+      })
+    );
     expect(useMetaStore().open).toBe(true);
     expect(wrapper.find("[data-testid='improve-status']").text()).toContain(
       "ready"
+    );
+    expect(wrapper.find("[data-testid='improve-report-status']").text()).toContain(
+      "Evidence report filed"
+    );
+    expect(wrapper.find("[data-testid='improve-report-artifacts']").text()).toContain(
+      "har.json"
     );
 
     wrapper.unmount();
