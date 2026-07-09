@@ -23,7 +23,7 @@ model.
 
 ## Author workflows safely
 
-<FeatureGrid :ids="['meta-mode', 'story-editor', 'dynamic-workflows', 'punch-list', 'goal-seeker']" />
+<FeatureGrid :ids="['meta-improvement', 'meta-mode', 'story-editor', 'dynamic-workflows', 'punch-list', 'goal-seeker']" />
 
 ## Inspect and operate runs
 

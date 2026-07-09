@@ -82,10 +82,11 @@ only normalizes an already-produced verdict artifact.
 The feature catalog currently stages direct rrweb replay viewers for these demo
 ids when their artifacts exist: `agent-actions`, `chat-stream`,
 `design-walkthrough`, `dev-story-bugfix`, `diagram-showcase`,
-`dynamic-workflows`, `harness-picker`, `meta-mode`, `mockup-video`,
-`multi-story`, `onboarding-tour`, `operation-handles`, `operator-ask`,
-`punch-list`, `review`, `session-media-workbench`, `story-editor`,
-`trace-features`, `trace-introspection`, `weather-report`, and `web-inbox`.
+`dynamic-workflows`, `harness-picker`, `meta-improvement`, `meta-mode`,
+`mockup-video`, `multi-story`, `onboarding-tour`, `operation-handles`,
+`operator-ask`, `punch-list`, `review`, `session-media-workbench`,
+`story-editor`, `trace-features`, `trace-introspection`, `weather-report`,
+and `web-inbox`.
 
 The catalog also stages embedded Slidey rrweb deck scenes for
 `slidey-dev-prd-design`, `slidey-architect-design`, `slidey-decomposition`,

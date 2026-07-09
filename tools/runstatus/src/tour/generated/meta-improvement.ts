@@ -1,8 +1,12 @@
-import { type TourStep } from "./types.js";
+// Code generated from features/meta-improvement.yaml by scripts/features/generate.ts. DO NOT EDIT.
+// Edit the YAML and run `make features` to regenerate.
 
+import { type TourStep } from "../types.js";
+
+// Re-export so a Playwright spec can import the step type alongside the array.
 export type { TourStep };
 
-export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
+export const META_IMPROVEMENT_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "mi-intro-home",
     route: "home",
@@ -55,7 +59,7 @@ export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "current-state",
     title: "A brief middle beat",
-    body: "The run moves through a couple of deterministic turns. This keeps the demo focused on the improvement loop.",
+    body: "The run moves through deterministic turns. This keeps the demo focused on the improvement loop rather than story mechanics.",
     placement: "bottom",
     kind: "explain",
     advance: "next",
@@ -67,7 +71,7 @@ export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "intent-btn-read_message",
     title: "Complete the session",
-    body: "Reading the message lands in the terminal state. This is where kitsoki should make improvement the obvious next step.",
+    body: "Reading the message lands in the terminal state. This is where Kitsoki should make improvement the obvious next step.",
     placement: "top",
     kind: "explain",
     advance: "next",
@@ -79,7 +83,7 @@ export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "improve-prompt",
     title: "The reminder appears at completion",
-    body: "At the end of the session, kitsoki recommends reviewing the run for false starts, wasted tool calls, prompt/tool changes, scripts, permission cleanup, and no-LLM regression coverage.",
+    body: "At the end of the session, Kitsoki recommends reviewing the run for false starts, unexpected output, wasted tool calls, prompt/tool/script improvements, permission cleanup, and no-LLM regression coverage.",
     placement: "top",
     kind: "explain",
     advance: "next",
@@ -103,12 +107,12 @@ export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "improve-report-toggle",
     title: "Evidence filing is built in",
-    body: "The same affordance can file a durable introspection report with trace, HAR, replay, console, and posting metadata. Users can force a local artifact or use the configured ticket sink.",
+    body: "Filing is enabled by default. The report path can stay local for private iteration, post to GitHub for engine or community-story issues, or call a private ticket provider.",
     placement: "top",
     kind: "explain",
     advance: "next",
     waitForTarget: "improve-report-toggle",
-    dwellMs: 5200,
+    dwellMs: 4600,
   },
   {
     id: "mi-run-improve",
@@ -139,7 +143,7 @@ export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
     route: "interactive",
     target: "meta-row-agent",
     title: "The introspection report is ready",
-    body: "The report identifies the durable improvement loop: keep the reminder visible, keep improve read-only, and cover completion to improve with no-LLM evidence.",
+    body: "The report names the improvement, keeps improve read-only, and points to the evidence bundle and local, GitHub, or private ticket-provider posting paths.",
     placement: "right",
     kind: "explain",
     advance: "next",
@@ -149,13 +153,13 @@ export const META_IMPROVE_TOUR_STEPS: readonly TourStep[] = [
   {
     id: "mi-artifacts-filed",
     route: "interactive",
-    target: "improve-report-status",
-    title: "Artifacts are ready for review",
-    body: "After the meta report finishes, kitsoki files the evidence bundle and shows the destination, report path, and sidecar files.",
+    target: "improve-report-artifacts",
+    title: "Evidence artifacts are filed",
+    body: "The completion bar records the filed report and artifact sidecars, so the recommendation has trace, HAR, rrweb, console, and playback evidence just like a bug report.",
     placement: "top",
     kind: "explain",
     advance: "next",
-    waitForTarget: "improve-report-status",
-    dwellMs: 5600,
+    waitForTarget: "improve-report-artifacts",
+    dwellMs: 5200,
   },
 ];

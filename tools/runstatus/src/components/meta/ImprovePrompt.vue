@@ -380,9 +380,10 @@ function writeAutoRun(enabled: boolean): void {
 <style scoped>
 .improve-prompt {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-direction: column;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.65rem;
   padding: 0.65rem 0.9rem;
   background: #0b1d2a;
   border-top: 1px solid #164e63;
@@ -393,6 +394,7 @@ function writeAutoRun(enabled: boolean): void {
 
 .improve-prompt__copy {
   min-width: 0;
+  width: 100%;
 }
 
 .improve-prompt__title {
@@ -427,6 +429,7 @@ function writeAutoRun(enabled: boolean): void {
   color: #bbf7d0;
   font-size: 0.76rem;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .improve-prompt__report a,
@@ -445,7 +448,8 @@ function writeAutoRun(enabled: boolean): void {
   gap: 0.65rem;
   flex-shrink: 0;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .improve-prompt__run {
@@ -501,12 +505,6 @@ function writeAutoRun(enabled: boolean): void {
 }
 
 @media (max-width: 720px) {
-  .improve-prompt {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 0.65rem;
-  }
-
   .improve-prompt__actions {
     justify-content: space-between;
   }

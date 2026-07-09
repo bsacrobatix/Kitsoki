@@ -26,23 +26,24 @@ import {
   writeChapters,
   SETTLE_MS,
   demoAddr,
+  maybeInstallAutoRrwebCapture,
   type WebServer,
 } from "./_helpers/server.js";
 import { cameraContext } from "./_helpers/camera.js";
 import {
-  META_IMPROVE_TOUR_STEPS,
+  META_IMPROVEMENT_TOUR_STEPS,
   type TourStep,
-} from "../../src/tour/meta-improve-manifest.js";
+} from "../../src/tour/generated/meta-improvement.js";
 
-const CHAPTER_SOURCE = "tools/runstatus/src/tour/meta-improve-manifest.ts";
+const CHAPTER_SOURCE = "features/meta-improvement.yaml";
 const ADDR = demoAddr(7771);
 const STORY_DIR = path.join(repoRoot, "testdata", "apps", "cloak");
 const FLOW = path.join(STORY_DIR, "flows", "winning.yaml");
-const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "meta-improve");
+const ARTIFACT_DIR = path.join(repoRoot, ".artifacts", "meta-improvement");
 const VIDEO_DIR = path.join(ARTIFACT_DIR, "video");
 const DIAG_LOG = path.join(ARTIFACT_DIR, "diagnostic.log");
 const STEP_BY_ID: Record<string, TourStep> = Object.fromEntries(
-  META_IMPROVE_TOUR_STEPS.map((s) => [s.id, s])
+  META_IMPROVEMENT_TOUR_STEPS.map((s) => [s.id, s])
 );
 
 let server: WebServer;
@@ -62,7 +63,7 @@ test.beforeAll(async () => {
   fs.writeFileSync(DIAG_LOG, "");
   if (process.env.KITSOKI_META_STREAM_DELAY_MS === undefined) {
     process.env.KITSOKI_META_STREAM_DELAY_MS =
-      process.env.WEB_CHAT_PACE === "0" ? "60" : "260";
+      process.env.WEB_CHAT_PACE === "0" ? "60" : "90";
   }
   server = await startWebServer({ addr: ADDR, flow: FLOW, storiesDir: STORY_DIR });
 });
@@ -86,7 +87,7 @@ async function narrate(
     await page.evaluate((stepsJson: string) => {
       (window as unknown as { __startTourWithSteps?: (s: string) => void })
         .__startTourWithSteps?.(stepsJson);
-    }, JSON.stringify(META_IMPROVE_TOUR_STEPS));
+    }, JSON.stringify(META_IMPROVEMENT_TOUR_STEPS));
   }
   await page.evaluate((id: string) => {
     (window as unknown as { __tourGoTo?: (s: string) => void }).__tourGoTo?.(id);
@@ -108,6 +109,7 @@ async function submitIntent(
   diag(`submit intent ${intent} ${JSON.stringify(slots)} -> ${expectedState}`);
   await server.rpc("runstatus.session.submit", { session_id: sessionId, intent, slots });
   await page.reload();
+  await maybeInstallAutoRrwebCapture(page);
   await expect(page.getByTestId("current-state")).toHaveText(expectedState, { timeout: 30000 });
   await dwell(page, SETTLE_MS);
 }
@@ -134,7 +136,7 @@ test("completion reminder to story.improve report video", async () => {
     await page.evaluate((stepsJson: string) => {
       (window as unknown as { __startTourWithSteps?: (s: string) => void })
         .__startTourWithSteps?.(stepsJson);
-    }, JSON.stringify(META_IMPROVE_TOUR_STEPS));
+    }, JSON.stringify(META_IMPROVEMENT_TOUR_STEPS));
     await expect(page.getByTestId("tour-overlay")).toBeVisible({ timeout: 8000 });
 
     await narrate(page, chapters, shot, "mi-intro-home");
@@ -175,6 +177,7 @@ test("completion reminder to story.improve report video", async () => {
     sawAutoToggle = await page.getByTestId("improve-auto-toggle").isVisible().catch(() => false);
     await narrate(page, chapters, shot, "mi-auto-run");
     await narrate(page, chapters, shot, "mi-evidence-report");
+    await expect(page.getByTestId("improve-report-toggle")).toBeChecked({ timeout: 15000 });
 
     await narrate(page, chapters, shot, "mi-run-improve");
     const runButton = page.getByTestId("improve-run").first();
@@ -189,6 +192,9 @@ test("completion reminder to story.improve report video", async () => {
     const report = page.getByTestId("meta-row-agent").last();
     await expect(report).toContainText("Introspection report", { timeout: 15000 });
     await expect(report).toContainText("Tool and permission notes", { timeout: 15000 });
+    await expect(report).toContainText("Evidence bundle", { timeout: 15000 });
+    await expect(report).toContainText("Posting", { timeout: 15000 });
+    await expect(page.getByTestId("improve-report-artifacts")).toBeVisible({ timeout: 30000 });
     sawReport = true;
     await narrate(page, chapters, shot, "mi-report-ready");
 
@@ -231,7 +237,7 @@ test("completion reminder to story.improve report video", async () => {
     throw e;
   } finally {
     await context.close();
-    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "meta-improve-demo");
+    const mp4 = await saveVideoAsMp4(video, ARTIFACT_DIR, "meta-improvement-demo");
     writeChapters(mp4, chapters.list());
     await browser.close();
   }

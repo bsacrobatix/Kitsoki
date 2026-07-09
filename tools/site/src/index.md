@@ -64,4 +64,4 @@ not a mockup of the workflow; it is the workflow.
 These are the demos a curious developer should watch first. The full feature
 and story catalog is still available from [Demos and features](/features/).
 
-<FeatureGrid :ids="['agent-actions', 'trace-introspection', 'operator-ask', 'dev-story-bugfix', 'stranger-install']" />
+<FeatureGrid :ids="['agent-actions', 'meta-improvement', 'trace-introspection', 'operator-ask', 'dev-story-bugfix', 'stranger-install']" />

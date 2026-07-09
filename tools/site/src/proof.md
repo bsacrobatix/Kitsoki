@@ -25,7 +25,16 @@ the workflow?"
 
 <FeatureGrid :ids="['trace-introspection', 'trace-features']" />
 
-## 3. Can this drive real repo work?
+## 3. Can the system improve from its own misses?
+
+A completed run should not disappear into a chat transcript. Kitsoki keeps the
+improvement loop close to the run: launch `/meta improve`, review prompt, tool,
+script, and permission lessons against the trace, then file an evidence-backed
+report locally, to GitHub, or to a private ticket provider.
+
+<FeatureGrid :ids="['meta-improvement', 'meta-mode']" />
+
+## 4. Can this drive real repo work?
 
 These demos show Kitsoki as a graph of rooms and gates over a real engineering
 workflow: triage, reproduce, propose, implement, test, review, validate, and
@@ -33,7 +42,7 @@ open the PR.
 
 <FeatureGrid :ids="['dev-story-bugfix', 'slidey-bugfix', 'slidey-open-pr']" />
 
-## 4. Can I try it locally?
+## 5. Can I try it locally?
 
 The install path starts from your repository, not from a Kitsoki checkout. Use
 the binary, run onboarding from the project root, inspect what it discovered,
