@@ -22,6 +22,10 @@ gitc() {
   git -C "$1" -c user.name="Test User" -c user.email="test@example.com" "${@:2}"
 }
 
+stat_device_inode() {
+  stat -f '%d:%i' "$1" 2>/dev/null || stat -c '%d:%i' "$1"
+}
+
 write_merge_helper() {
   local repo="$1"
   mkdir -p "$repo/scripts"
@@ -92,6 +96,12 @@ workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <
 [ "$(git -C "$workspace" branch --show-current)" = "agent/case-1" ] || fail "workspace branch mismatch"
 [ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"])' <"$workspace/.kitsoki-dev-workspace.json")" = "staging/local" ] || fail "default base was not recorded as staging/local"
 [ "$(cat "$workspace/staged-baseline.txt")" = "staged baseline" ] || fail "default create did not start from staging/local"
+readme_blob="$(git -C "$source_repo" rev-parse HEAD:README.md)"
+source_readme_obj="$source_repo/.git/objects/${readme_blob:0:2}/${readme_blob:2}"
+workspace_readme_obj="$workspace/.git/objects/${readme_blob:0:2}/${readme_blob:2}"
+if [ -f "$source_readme_obj" ] && [ -f "$workspace_readme_obj" ]; then
+  [ "$(stat_device_inode "$source_readme_obj")" = "$(stat_device_inode "$workspace_readme_obj")" ] || fail "create did not hardlink local git objects"
+fi
 
 "$dev_workspace" create --repo "$source_repo" --root "$root" --id local-config --branch agent/local-config --bootstrap >/dev/null
 local_config_workspace="$root/local-config"
