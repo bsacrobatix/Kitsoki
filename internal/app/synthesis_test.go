@@ -37,7 +37,7 @@ func TestSynthesizeRoot_Rung0(t *testing.T) {
 		t.Fatalf("expected dev-story default ticket handler in hosts, got %v", def.Hosts)
 	}
 	if !containsStr(def.Hosts, "host.slidey.render") {
-		t.Fatalf("expected dev-story slidey render handler in hosts, got %v", def.Hosts)
+		t.Fatalf("expected dev-story visual producer host in synthesized root hosts, got %v", def.Hosts)
 	}
 	// app.id is the repo basename (provenance).
 	if def.App.ID == "" {

@@ -108,7 +108,7 @@ func TestMaterializeRoundTrip(t *testing.T) {
 
 	// Emit, write under the repo worktree so @kitsoki/dev-story resolves, reload.
 	slug := "materialize-roundtrip"
-	yamlBytes, err := emitRootYAML(spec, slug, root)
+	yamlBytes, err := emitRootYAML(spec, slug, root, nil)
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
@@ -157,7 +157,7 @@ outputs:
 
 	slug := "script-binding"
 	spec := &app.RootSpec{Bindings: map[string]string{"ticket": ".kitsoki/providers/ticket.star"}}
-	yamlBytes, err := emitRootYAML(spec, slug, root)
+	yamlBytes, err := emitRootYAML(spec, slug, root, nil)
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}
@@ -183,7 +183,7 @@ outputs:
 }
 
 func TestMaterializeEmitHasProvenanceHeaderAndDevStorySource(t *testing.T) {
-	b, err := emitRootYAML(nil, "provtest", testRepoRoot(t))
+	b, err := emitRootYAML(nil, "provtest", testRepoRoot(t), nil)
 	if err != nil {
 		t.Fatalf("emit: %v", err)
 	}

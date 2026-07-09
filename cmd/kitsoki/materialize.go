@@ -98,7 +98,7 @@ func runMaterialize(repoRoot, configPath, nameFlag string) (string, error) {
 		return "", fmt.Errorf("%s already exists; this root is already materialized — edit it directly", outPath)
 	}
 
-	yamlBytes, err := emitRootYAML(rootSpec, slug, repoRoot)
+	yamlBytes, err := emitRootYAML(rootSpec, slug, repoRoot, buildImportResolver())
 	if err != nil {
 		return "", fmt.Errorf("emit app.yaml: %w", err)
 	}
@@ -174,8 +174,8 @@ type rootYAMLIntent struct {
 // the kitsoki-dev instance shape, prefixed with a provenance header. It reuses
 // app.BuildRootImporter so the emitted file is byte-faithful to what the loader
 // synthesizes — app.Load(emit(spec)) deep-equals app.SynthesizeRoot(spec).
-func emitRootYAML(spec *app.RootSpec, slug, repoRoot string) ([]byte, error) {
-	imp, absRoot, err := app.BuildRootImporter(spec, repoRoot)
+func emitRootYAML(spec *app.RootSpec, slug, repoRoot string, resolver app.ImportResolver) ([]byte, error) {
+	imp, absRoot, err := app.BuildRootImporterWithResolver(spec, repoRoot, resolver)
 	if err != nil {
 		return nil, err
 	}

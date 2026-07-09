@@ -76,6 +76,7 @@ root:
     - host.run
     - host.agent.search
     - host.artifacts_dir
+    - host.slidey.render
     - host.ide.get_diagnostics
     - host.ide.open_file
     - host.ide.open_diff

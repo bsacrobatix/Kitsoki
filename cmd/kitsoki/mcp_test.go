@@ -128,7 +128,7 @@ func TestMCPTestCmd_Registered(t *testing.T) {
 	for _, c := range root.Commands() {
 		if c.Name() == "mcp-test" {
 			found = true
-			for _, f := range []string{"server-command", "server-arg", "stories-dir", "workspace", "read-only", "timeout", "list-tools", "tool", "tool-args", "calls"} {
+			for _, f := range []string{"server-command", "server-arg", "stories-dir", "workspace", "read-only", "timeout", "list-tools", "tool", "tool-args", "expect", "expect-contains", "expect-exists", "expect-error", "calls"} {
 				require.NotNil(t, c.Flags().Lookup(f), "mcp-test must declare --%s", f)
 			}
 			assert.Equal(t, "10s", c.Flags().Lookup("timeout").DefValue)
@@ -216,6 +216,45 @@ func TestRunStudioMCPTestSession_SingleTool(t *testing.T) {
 	assert.True(t, report.OK)
 	require.Len(t, report.ToolRuns, 1)
 	assert.Equal(t, "studio.ping", report.ToolRuns[0].Name)
+}
+
+func TestRunStudioMCPTestSession_SingleToolExpectedError(t *testing.T) {
+	ctx := context.Background()
+	srv := studio.NewServer(studio.NewStudioSession(nil))
+	cs := connectStudioTestClient(ctx, t, srv)
+
+	report, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
+		ServerCommand: "kitsoki",
+		ServerArgs:    []string{"mcp"},
+		ListTools:     false,
+		ToolName:      "story.validate",
+		ToolExpectContains: map[string]string{
+			"content.0.text": "NO_WORKSPACE",
+		},
+		ToolExpectError: true,
+	})
+	require.NoError(t, err)
+
+	assert.True(t, report.OK)
+	require.Len(t, report.ToolRuns, 1)
+	assert.Equal(t, "story.validate", report.ToolRuns[0].Name)
+	assert.True(t, report.ToolRuns[0].IsError)
+}
+
+func TestRunStudioMCPTestSession_ExpectedErrorButToolSucceedsFailsRun(t *testing.T) {
+	ctx := context.Background()
+	srv := studio.NewServer(studio.NewStudioSession(nil))
+	cs := connectStudioTestClient(ctx, t, srv)
+
+	_, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
+		ServerCommand:   "kitsoki",
+		ServerArgs:      []string{"mcp"},
+		ListTools:       false,
+		ToolName:        "studio.ping",
+		ToolExpectError: true,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "studio.ping expected a structured tool error")
 }
 
 func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
@@ -311,6 +350,31 @@ func TestRunStudioMCPTestSession_SaveFeedsLaterCall(t *testing.T) {
 	require.Len(t, report.ToolRuns, 2)
 	assert.Equal(t, "session.inspect", report.ToolRuns[1].Name)
 	assert.False(t, report.ToolRuns[1].IsError)
+}
+
+func TestRunStudioMCPTestSession_CallExpectedError(t *testing.T) {
+	ctx := context.Background()
+	srv := studio.NewServer(studio.NewStudioSession(nil))
+	cs := connectStudioTestClient(ctx, t, srv)
+
+	report, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
+		ServerCommand: "kitsoki",
+		ServerArgs:    []string{"mcp"},
+		ListTools:     false,
+		Calls: []studioMCPTestCall{
+			{
+				Name: "story.validate",
+				ExpectContains: map[string]string{
+					"content.0.text": "NO_WORKSPACE",
+				},
+				ExpectError: true,
+			},
+		},
+	})
+	require.NoError(t, err)
+	assert.True(t, report.OK)
+	require.Len(t, report.ToolRuns, 1)
+	assert.True(t, report.ToolRuns[0].IsError)
 }
 
 func TestRunStudioMCPTestSession_ExpectationFailureFailsRun(t *testing.T) {
