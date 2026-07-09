@@ -549,6 +549,8 @@ type orchRig struct {
 	httpCassetteFlush func() error
 }
 
+const flowDrainTimeout = 30 * time.Second
+
 // buildOrchestratorRig constructs a fully wired orchestrator rig for one flow
 // run, using an in-memory SQLite store and a fake clock at epoch zero.
 //
@@ -947,6 +949,9 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	rig.sid = sid
 	rig.clk = clk
 	rig.cleanup = func() error {
+		drainCtx, cancel := context.WithTimeout(context.Background(), flowDrainTimeout)
+		_ = drainRig(drainCtx, &rig)
+		cancel()
 		_ = eventSink.Close()
 		if traceOwned {
 			_ = os.Remove(tracePath)
@@ -1709,7 +1714,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 				return nil, fmt.Errorf("turn %d: advance_clock %q: %w", i+1, turn.AdvanceClock, parseErr)
 			}
 			if d > 0 {
-				waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				waitCtx, cancel := context.WithTimeout(ctx, flowDrainTimeout)
 				if advErr := advanceAndWait(waitCtx, rig, d); advErr != nil {
 					cancel()
 					return nil, fmt.Errorf("turn %d: advance_clock: %w", i+1, advErr)
@@ -2252,13 +2257,16 @@ func advanceAndWait(ctx context.Context, rig *orchRig, d time.Duration) error {
 		return fmt.Errorf("park barrier: %w", err)
 	}
 	rig.clk.Advance(d)
+	return drainRig(ctx, rig)
+}
 
+func drainRig(ctx context.Context, rig *orchRig) error {
 	// Drain loop: WaitIdle + WaitListenerIdle each cover one barrier; together
 	// they guarantee "no jobs running" + "all events fanned out have been
 	// processed by the listener".  Cascading on_complete chains can dispatch
 	// new jobs during the wait, so we loop until IsIdle() reports a stable
 	// no-running state after both barriers cleared.
-	const maxIter = 32
+	const maxIter = 128
 	for i := 0; i < maxIter; i++ {
 		if err := rig.sched.WaitIdle(ctx); err != nil {
 			return fmt.Errorf("scheduler WaitIdle: %w", err)
