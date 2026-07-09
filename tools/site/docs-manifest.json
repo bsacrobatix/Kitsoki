@@ -76,6 +76,7 @@
           "collapsed": false,
           "items": [
             { "from": "docs/guide/agents/README.md", "to": "guide/agents/index.md", "title": "Agent guide" },
+            { "from": "docs/guide/agents/mcp.md", "to": "guide/agents/mcp.md", "title": "Use Kitsoki through MCP" },
             { "from": "docs/guide/agents/launch.md", "to": "guide/agents/launch.md", "title": "Agent launch" },
             { "from": "docs/guide/agents/launch-policy.md", "to": "guide/agents/launch-policy.md", "title": "Launch policy" },
             { "from": "docs/guide/agents/harness-profiles.md", "to": "guide/agents/harness-profiles.md", "title": "Harness profiles" },
