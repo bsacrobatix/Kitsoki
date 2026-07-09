@@ -1,8 +1,8 @@
 # Epic: Universal Product QA Campaign
 
-**Status:** Draft v1. First catalog/docs slice implemented in `tools/product-journey/personas.json`, `tools/product-journey/scenarios.json`, and `tools/product-journey/README.md`; story/runtime/arena/product docs slices remain.
+**Status:** Draft v2. Catalog/docs and campaign story-surface slices implemented in `tools/product-journey/personas.json`, `tools/product-journey/scenarios.json`, `tools/product-journey/README.md`, and `stories/product-journey-qa`; runtime/arena/finding-policy/product-docs slices remain.
 **Kind:**   epic
-**Slices:** 5 (1/5 shipped)
+**Slices:** 5 (2/5 shipped)
 
 ## Why
 
@@ -29,7 +29,7 @@ The end state is a reusable campaign product surface:
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
 | 1 | Campaign catalog | story | Add general-purpose personas/scenarios and README guidance for product-site/docs/MCP/agent-launch/worker/rollup QA. | - | Shipped in this slice | This epic |
-| 2 | Campaign story surface | story | Add explicit standing-campaign intents for plan, tick, attach, issue/fix, stats, and deck refresh. | 1 | Draft | TBD |
+| 2 | Campaign story surface | story | Add explicit standing-campaign intents for plan, tick, attach, issue/fix, stats, and deck refresh. | 1 | Shipped in this slice | This epic |
 | 3 | Worker backend | runtime | Route bounded campaign batches to local or VM arena workers with readiness, receipts, and artifact import. | 1 | Draft | TBD |
 | 4 | Finding sinks | runtime/tracing | Make local issue artifacts and GitHub evidence-backed filing a declared campaign policy with traceable sink decisions. | 1, 2 | Draft | TBD |
 | 5 | Product docs and decks | docs | Publish the general user guide, campaign summary shape, and canonical Slidey rollup contract. | 1-4 | Draft | TBD |

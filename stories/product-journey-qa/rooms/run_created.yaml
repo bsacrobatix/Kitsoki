@@ -1,7 +1,7 @@
 states:
   run_created:
     description: "A product-journey QA run bundle exists; waiting for captured evidence."
-    relevant_world: [project, persona, seed, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, weakness_route_count, weakness_route_summary, prd_design_intake_path, prd_design_intake_count, prd_design_intake_summary, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_marathon_status, autonomous_marathon_summary, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_summary, autonomous_driver_evidence_count, autonomous_driver_issue_count, autonomous_driver_dispatch_markdown_path, autonomous_driver_dispatch_trace, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_control_markdown_path, autonomous_watchdog_status, autonomous_watchdog_summary, autonomous_watchdog_path, autonomous_watchdog_markdown_path, autonomous_watchdog_age_minutes, autonomous_fix_status, autonomous_fix_report_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, issue_closeout_status, issue_closeout_count, issue_closeout_summary, gh_agent_health_status, gh_agent_health_summary, gh_agent_readiness_status, gh_agent_readiness_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_claim_status, gh_agent_claim_count, gh_agent_claim_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_triage_evidence_count, gh_agent_missing_triage_count, gh_agent_independent_verify_count, gh_agent_missing_verify_count, gh_agent_missing_run_url_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, gh_agent_triage_evidence_summary, gh_agent_missing_triage_summary, gh_agent_independent_verify_summary, gh_agent_missing_verify_summary, stats_status, stats_root, stats_output, stats_summary, issue_state_status, issue_state_output, issue_state_count, issue_state_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
+    relevant_world: [project, persona, seed, campaign_id, campaign_status, campaign_summary, campaign_scenarios, scenario_scope, run_scenario_count, live_budget_minutes, run_id, run_dir, deck_path, execution_plan_path, driver_plan_path, driver_journal_path, agent_brief_path, driver_handoff_path, media_manifest_path, scenario_outcomes_path, persona_starting_surface, persona_first_question, persona_evidence_emphasis, persona_escalation_trigger, persona_finding_bias, proof_evidence_count, demo_evidence_count, finding_total_count, strength_count, weakness_count, weakness_route_count, weakness_route_summary, prd_design_intake_path, prd_design_intake_count, prd_design_intake_summary, issue_count, fix_count, blocked_count, missing_evidence_count, missing_proof_evidence_count, proof_minimum_evidence_count, minimum_evidence_count, missing_proof_summary, driver_contract_summary, next_driver_capture, next_driver_attach_command, next_driver_blocker_command, scenario, evidence_kind, evidence_path, evidence_source, finding_kind, finding_title, ticket_repo, filing_status, filing_dry_run, findings_filed_count, findings_skipped_count, findings_failed_count, findings_unfiled_count, filed_issue_summary, filing_summary, autonomous_marathon_status, autonomous_marathon_summary, autonomous_marathon_report_path, autonomous_driver_mode, autonomous_driver_live_profile, autonomous_driver_status, autonomous_driver_summary, autonomous_driver_evidence_count, autonomous_driver_issue_count, autonomous_driver_dispatch_markdown_path, autonomous_driver_dispatch_trace, autonomous_control_status, autonomous_control_summary, autonomous_control_path, autonomous_control_markdown_path, autonomous_watchdog_status, autonomous_watchdog_summary, autonomous_watchdog_path, autonomous_watchdog_markdown_path, autonomous_watchdog_age_minutes, autonomous_fix_status, autonomous_fix_report_path, autonomous_gate_summary, independent_verify_status, independent_verify_summary, issue_closeout_status, issue_closeout_count, issue_closeout_summary, gh_agent_health_status, gh_agent_health_summary, gh_agent_readiness_status, gh_agent_readiness_summary, gh_agent_enqueue_status, gh_agent_enqueued_count, gh_agent_skipped_count, gh_agent_job_summary, gh_agent_claim_status, gh_agent_claim_count, gh_agent_claim_summary, gh_agent_drain_status, gh_agent_drained_count, gh_agent_done_count, gh_agent_failed_count, gh_agent_active_count, gh_agent_run_summary, gh_agent_fix_evidence_count, gh_agent_missing_evidence_count, gh_agent_triage_evidence_count, gh_agent_missing_triage_count, gh_agent_independent_verify_count, gh_agent_missing_verify_count, gh_agent_missing_run_url_count, gh_agent_fix_evidence_summary, gh_agent_missing_evidence_summary, gh_agent_triage_evidence_summary, gh_agent_missing_triage_summary, gh_agent_independent_verify_summary, gh_agent_missing_verify_summary, stats_status, stats_root, stats_output, stats_summary, issue_state_status, issue_state_output, issue_state_count, issue_state_summary, stats_gate_status, stats_gate_summary, stats_current_run_scanned, stats_runs_scanned, stats_found_count, stats_filed_count, stats_fixed_count, stats_reopened_count, stats_unknown_state_count, stats_similar_pair_count, driver_event_id, dispatch_mode, driver_status, driver_summary, review_status, review_summary, review_passed_count, review_failed_count, review_warning_count, review_total_count, review_backlog_summary, validation_status, validation_errors, validation_warnings, validation_issue_summary, status]
     on_enter:
       - when: "(world.autonomous_driver_mode == 'record' || world.autonomous_driver_mode == 'live') && world.autonomous_driver_status == 'ready_for_dispatch'"
         emit_intent: dispatch_driver
@@ -15,6 +15,8 @@ states:
             Run: '{{ world.run_id|default:"(pending)" }}'
             Project: "{{ world.project }}"
             Persona: "{{ world.persona }}"
+            Campaign: '{{ world.campaign_status|default:"(not planned)" }}'
+            Campaign summary: '{{ world.campaign_summary|default:"(none)" }}'
             Scenario scope: '{{ world.scenario_scope|default:"all" }}'
             Scenario count: "{{ world.run_scenario_count }}"
             Live budget: "{{ world.live_budget_minutes }} min/scenario"
@@ -108,6 +110,9 @@ states:
             - label: "attach scenario=... evidence_kind=... evidence_path=..."
               hint: "mark one scenario evidence slot captured and regenerate the deck"
               intent: attach
+            - label: "campaign_attach scenario=... evidence_kind=... evidence_path=..."
+              hint: "attach campaign evidence and update the campaign deck summary"
+              intent: campaign_attach
             - label: "record finding_kind=... title=... summary=..."
               hint: "record a strength, weakness, issue, or fix for the review deck"
               intent: record
@@ -123,6 +128,9 @@ states:
             - label: "autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
               hint: "file credible issues, drain gh-agent fixes, refresh review artifacts, and validate in one gate"
               intent: autonomous_fix
+            - label: "campaign_issue_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>"
+              hint: "run the campaign issue-to-fix loop through the evidence-backed gate"
+              intent: campaign_issue_fix
             - label: "autonomous_marathon ticket_repo=owner/repo gh_agent_public_base_url=<url>"
               hint: "finalize this run through autonomous fix, review, validation, weakness routing, and stats"
               intent: autonomous_marathon
@@ -135,6 +143,9 @@ states:
             - label: "stats"
               hint: "derive filed/fixed/reopened/similar issue counts from run bundles"
               intent: stats
+            - label: "campaign_stats"
+              hint: "refresh campaign-level issue and fix statistics"
+              intent: campaign_stats
             - label: "seed_demo"
               hint: "populate representative evidence and findings for deck review"
               intent: seed_demo
@@ -144,6 +155,9 @@ states:
             - label: "review"
               hint: "score whether the bundle is ready for human review"
               intent: review
+            - label: "campaign_deck_refresh"
+              hint: "regenerate the campaign Slidey deck and readiness summary"
+              intent: campaign_deck_refresh
             - label: "validate"
               hint: "check schema and cross-file consistency without rewriting artifacts"
               intent: validate
@@ -303,6 +317,86 @@ states:
               on_error: run_created
             - set:
                 status: "evidence_attached"
+      campaign_attach:
+        - target: run_created
+          effects:
+            - set:
+                scenario: "{{ slots.scenario }}"
+                evidence_kind: "{{ slots.evidence_kind }}"
+                evidence_path: "{{ slots.evidence_path }}"
+                evidence_source: "{{ slots.source ?? '' }}"
+                notes: "{{ slots.notes ?? '' }}"
+                campaign_status: "attaching_evidence"
+                campaign_summary: "Attaching campaign evidence through the shared product-journey evidence contract."
+                validation_status: ""
+                validation_errors: 0
+                validation_warnings: 0
+                validation_issue_summary: ""
+                status: "campaign_attaching"
+            - invoke: host.run
+              id: attach_product_journey_evidence
+              with:
+                cmd: python3
+                args:
+                  - tools/product-journey/run.py
+                  - --attach-evidence
+                  - --json-output
+                  - --run-dir
+                  - "{{ world.run_dir }}"
+                  - --scenario
+                  - "{{ slots.scenario }}"
+                  - --evidence-kind
+                  - "{{ slots.evidence_kind }}"
+                  - --evidence-path
+                  - "{{ slots.evidence_path }}"
+                  - --evidence-source
+                  - "{{ slots.source ?? '' }}"
+                  - --notes
+                  - "{{ slots.notes ?? '' }}"
+                cwd: "."
+              bind:
+                last_result: stdout_json
+                deck_path: "stdout_json.deck_path"
+                execution_plan_path: "stdout_json.execution_plan_path"
+                driver_plan_path: "stdout_json.driver_plan_path"
+                driver_journal_path: "stdout_json.driver_journal_path"
+                agent_brief_path: "stdout_json.agent_brief_path"
+                driver_handoff_path: "stdout_json.driver_handoff_path"
+                media_manifest_path: "stdout_json.media_manifest_path"
+                scenario_outcomes_path: "stdout_json.scenario_outcomes_path"
+                persona_starting_surface: "stdout_json.persona_starting_surface"
+                persona_first_question: "stdout_json.persona_first_question"
+                persona_evidence_emphasis: "stdout_json.persona_evidence_emphasis"
+                persona_escalation_trigger: "stdout_json.persona_escalation_trigger"
+                persona_finding_bias: "stdout_json.persona_finding_bias"
+                proof_evidence_count: "stdout_json.proof_evidence_count"
+                demo_evidence_count: "stdout_json.demo_evidence_count"
+                finding_total_count: "stdout_json.finding_total_count"
+                strength_count: "stdout_json.strength_count"
+                weakness_count: "stdout_json.weakness_count"
+                weakness_route_count: "stdout_json.weakness_route_count"
+                weakness_route_summary: "stdout_json.weakness_route_summary"
+                prd_design_intake_path: "stdout_json.prd_design_intake_path"
+                prd_design_intake_count: "stdout_json.prd_design_intake_count"
+                prd_design_intake_summary: "stdout_json.prd_design_intake_summary"
+                issue_count: "stdout_json.issue_count"
+                fix_count: "stdout_json.fix_count"
+                blocked_count: "stdout_json.blocked_count"
+                missing_evidence_count: "stdout_json.missing_evidence_count"
+                missing_proof_evidence_count: "stdout_json.missing_proof_evidence_count"
+                proof_minimum_evidence_count: "stdout_json.proof_minimum_evidence_count"
+                minimum_evidence_count: "stdout_json.minimum_evidence_count"
+                missing_proof_summary: "stdout_json.missing_proof_summary"
+                driver_contract_summary: "stdout_json.driver_contract_summary"
+                next_driver_capture: "stdout_json.next_driver_capture"
+                next_driver_attach_command: "stdout_json.next_driver_attach_command"
+                next_driver_blocker_command: "stdout_json.next_driver_blocker_command"
+                evidence_source: "stdout_json.evidence_source"
+              on_error: run_created
+            - set:
+                campaign_status: "evidence_attached"
+                campaign_summary: "Campaign evidence attached; deck and handoff artifacts refreshed."
+                status: "campaign_evidence_attached"
       record:
         - target: run_created
           effects:
@@ -907,7 +1001,7 @@ states:
             - set:
                 status: "autonomous_watchdog_checked"
       autonomous_fix:
-        - when: "slots.ticket_repo == nil || slots.ticket_repo == ''"
+        - when: "(slots.ticket_repo == nil || slots.ticket_repo == '') && (world.ticket_repo == nil || world.ticket_repo == '')"
           target: run_created
           guard_hint: "Provide ticket_repo=owner/repo so autonomous fixes are filed against the intended repository."
           effects:
@@ -946,7 +1040,7 @@ states:
           guard_hint: "Provide gh_agent_public_base_url=<public agent URL> for autonomous fixes."
           effects:
             - set:
-                ticket_repo: "{{ slots.ticket_repo }}"
+                ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
                 gh_agent_public_base_url: "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
                 filing_dry_run: "file"
                 autonomous_fix_status: "autonomous_fix_invalid"
@@ -979,7 +1073,7 @@ states:
         - target: run_created
           effects:
             - set:
-                ticket_repo: "{{ slots.ticket_repo }}"
+                ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
                 filing_dry_run: "file"
                 autonomous_fix_status: "running"
                 autonomous_fix_report_path: ""
@@ -1018,7 +1112,7 @@ states:
                   - --run-dir
                   - "{{ world.run_dir }}"
                   - --ticket-repo
-                  - "{{ slots.ticket_repo }}"
+                  - "{{ slots.ticket_repo ?? world.ticket_repo }}"
                   - --agent-db
                   - "{{ slots.gh_agent_db ?? (world.run_dir + '/gh-agent-jobs.sqlite') }}"
                   - --agent-story
@@ -1131,12 +1225,22 @@ states:
               on_error: run_created
             - set:
                 status: "autonomous_fix_complete"
+      campaign_issue_fix:
+        - target: run_created
+          effects:
+            - set:
+                ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
+                gh_agent_public_base_url: "{{ slots.gh_agent_public_base_url ?? world.gh_agent_public_base_url }}"
+                campaign_status: "issue_fixing"
+                campaign_summary: "Running campaign issue filing, gh-agent repair, independent verification, review, and validation through the existing autonomous gate."
+                status: "campaign_issue_fixing"
+            - emit_intent: autonomous_fix
       stats:
         - target: run_created
           effects:
             - set:
-                stats_root: "{{ slots.stats_root ?? '.artifacts/product-journey' }}"
-                stats_output: "{{ slots.stats_output ?? '' }}"
+                stats_root: "{{ slots.stats_root ?? (world.stats_root ?? '.artifacts/product-journey') }}"
+                stats_output: "{{ slots.stats_output ?? world.stats_output }}"
                 validation_status: ""
                 validation_errors: 0
                 validation_warnings: 0
@@ -1151,7 +1255,7 @@ states:
                   - --stats
                   - --json-output
                   - --stats-root
-                  - "{{ slots.stats_root ?? '.artifacts/product-journey' }}"
+                  - "{{ slots.stats_root ?? (world.stats_root ?? '.artifacts/product-journey') }}"
                   - --issue-state-file
                   - "{{ slots.issue_state_file ?? '' }}"
                   - --refresh-issue-state
@@ -1159,7 +1263,7 @@ states:
                   - --ticket-repo
                   - "{{ slots.ticket_repo ?? world.ticket_repo }}"
                   - --stats-output
-                  - "{{ slots.stats_output ?? '' }}"
+                  - "{{ slots.stats_output ?? world.stats_output }}"
                 cwd: "."
               bind:
                 last_result: stdout_json
@@ -1181,6 +1285,17 @@ states:
               on_error: run_created
             - set:
                 status: "stats_derived"
+      campaign_stats:
+        - target: run_created
+          effects:
+            - set:
+                stats_root: "{{ slots.stats_root ?? (world.stats_root ?? '.artifacts/product-journey') }}"
+                stats_output: "{{ slots.stats_output ?? world.stats_output }}"
+                ticket_repo: "{{ slots.ticket_repo ?? world.ticket_repo }}"
+                campaign_status: "refreshing_stats"
+                campaign_summary: "Refreshing campaign issue and fix statistics from retained product-journey artifacts."
+                status: "campaign_stats_refreshing"
+            - emit_intent: stats
       driver_event:
         - when: "(slots.dispatch_mode ?? 'replay') == 'live' && world.live_budget_minutes == 0 && (slots.driver_status ?? 'attempted') != 'blocked'"
           target: run_created
@@ -1402,6 +1517,14 @@ states:
               on_error: run_created
             - set:
                 status: "reviewed"
+      campaign_deck_refresh:
+        - target: run_created
+          effects:
+            - set:
+                campaign_status: "refreshing_deck"
+                campaign_summary: "Refreshing the campaign Slidey deck and readiness summary from retained evidence."
+                status: "campaign_deck_refreshing"
+            - emit_intent: review
       handoff:
         - target: run_created
           effects:
