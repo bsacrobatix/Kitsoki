@@ -20,25 +20,33 @@ states:
     description: "Driving the inner pipeline live over the current case (tracked)."
     relevant_world: [current_case, inner_pipeline, profile, model, run_dir, journal_path, drive_result, drive_job_id, results, last_result]
     view:
-      - heading: "Dogfood marathon · driving"
+      - heading: "Case {{ world.case_index + 1 }} / {{ world.backlog.items|length }} · driving · {{ world.current_case.id }}"
       - kv:
           pairs:
             Case:     '{{ world.current_case.id }}'
+            Title:    '{{ world.current_case.title|default:"—" }}'
+            Source:   '{{ world.current_case.source_url|default:world.current_case.source_path|default:world.current_case.source_repo|default:"—" }}'
+            Baseline: '{{ world.current_case.baseline|default:"—" }}'
+            Repro:    '{{ world.current_case.repro_command|default:"(none supplied)" }}'
             Recorded: '{{ world.results.items|length }}'
             Pipeline: '{{ world.inner_pipeline }}'
             Profile:  '{{ world.profile }}'
             Model:    '{{ world.model }}'
             Exit:     '{{ world.drive_result.exit|default:"(driving…)" }}'
+            Summary:  '{{ world.drive_result.summary|default:"(pending)" }}'
+            Worktree: '{{ world.drive_result.worktree|default:"(pending)" }}'
+            Fix ref:  '{{ world.drive_result.fix_ref|default:world.drive_result.branch|default:"(pending)" }}'
             Trace:    '{{ world.drive_result.trace|default:"—" }}'
             Job:      '{{ world.drive_job_id|default:"(starting)" }}'
             Run dir:  '{{ world.run_dir|default:"(derived)" }}'
+      - prose: '{{ world.current_case.body_excerpt|default:"Driving the inner pipeline on this case." }}'
       - heading: "Last recorded"
         when: "world.last_result.case_id"
       - kv:
           pairs:
             Case:   '{{ world.last_result.case_id|default:"—" }}'
             Title:  '{{ world.last_result.title|default:"—" }}'
-            Source: '{{ world.last_result.source_url|default:"—" }}'
+            Source: '{{ world.last_result.source_url|default:world.last_result.source_path|default:world.last_result.source_repo|default:"—" }}'
             Exit:   '{{ world.last_result.exit|default:"—" }}'
             Verify: '{{ world.last_result.verify_status|default:"—" }}'
             Tokens: '{{ world.last_result.tokens_display|default:"0" }}'

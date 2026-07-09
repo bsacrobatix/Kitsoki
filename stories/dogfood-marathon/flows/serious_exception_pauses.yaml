@@ -61,6 +61,11 @@ host_handlers:
           exception_pending: "case-blocked"
           exception_summary: "choose a reproduction baseline"
           record_status: "recorded"
+      resolve_exception:
+        data:
+          exceptions:
+            items:
+              - { case_id: "case-blocked", severity: "serious", summary: "choose a reproduction baseline", status: "acknowledged", answer: "acknowledged" }
       aggregate_run:
         data:
           rollup:
@@ -130,6 +135,9 @@ turns:
       exception_pending: ""
       cases_processed: 1
       report_handle: "dogfood-marathon#exception"
+      exceptions:
+        items:
+          - { case_id: "case-blocked", severity: "serious", summary: "choose a reproduction baseline", status: "acknowledged", answer: "acknowledged" }
 
 expect_terminal: false
 expect_no_errors: true

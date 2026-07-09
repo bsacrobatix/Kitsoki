@@ -16,13 +16,18 @@ states:
     description: "Triaging the current case (read-only verdict, no fix)."
     relevant_world: [current_case, triage_verdict, drop_already_fixed, triage_job_id]
     view:
-      - heading: "Dogfood marathon · triaging"
+      - heading: "Case {{ world.case_index + 1 }} / {{ world.backlog.items|length }} · triage · {{ world.current_case.id|default:'(none)' }}"
       - kv:
           pairs:
             Case:    '{{ world.current_case.id|default:"(none)" }}'
             Title:   '{{ world.current_case.title|default:"—" }}'
+            Source:  '{{ world.current_case.source_url|default:world.current_case.source_path|default:world.current_case.source_repo|default:"—" }}'
+            Baseline: '{{ world.current_case.baseline|default:"—" }}'
+            Repro:   '{{ world.current_case.repro_command|default:"(none supplied)" }}'
             Verdict: '{{ world.triage_verdict.verdict|default:"(triaging…)" }}'
+            Evidence: '{{ world.triage_verdict.evidence|default:"(pending)" }}'
             Job:     '{{ world.triage_job_id|default:"(starting)" }}'
+      - prose: '{{ world.current_case.body_excerpt|default:"Checking whether this case is still live before spending maker budget." }}'
       - prose: "Read-only triage — does the bug still exist at the baseline? ALREADY-FIXED cases are dropped (degenerate baseline); STILL-LIVE / PARTIAL run the full inner pipeline."
     on_enter:
       - invoke: host.agent.task

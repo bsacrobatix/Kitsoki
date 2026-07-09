@@ -22,7 +22,7 @@ states:
           pairs:
             Case:   '{{ world.last_result.case_id|default:"—" }}'
             Title:  '{{ world.last_result.title|default:"—" }}'
-            Source: '{{ world.last_result.source_url|default:"—" }}'
+            Source: '{{ world.last_result.source_url|default:world.last_result.source_path|default:world.last_result.source_repo|default:"—" }}'
             Exit:   '{{ world.last_result.exit|default:"—" }}'
             Verify: '{{ world.last_result.verify_status|default:"—" }}'
             Tokens: '{{ world.last_result.tokens_display|default:"0" }}'
@@ -40,11 +40,13 @@ states:
           {% for deck in world.deck_spec.case_decks %}- {{ deck.case_id }}: {{ deck.path }}
           {% endfor %}
         when: "world.deck_spec.case_decks"
-      - heading: "Actions"
-      - list:
+      - choice:
+          mode: single
+          prompt: "Actions"
           items:
             - label: "look"
               hint:  "re-render the gallery"
+              intent: look
     on:
       look:
         - target: .

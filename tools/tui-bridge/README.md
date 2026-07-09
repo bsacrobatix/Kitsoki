@@ -91,13 +91,17 @@ spend LLM tokens. The fixture preserves real issue titles/URLs for the 15-case
 demo, but it is not evidence that a paid GPT-5.5 marathon fixed those bugs.
 
 The default recording is intentionally paced for review: the two user commands
-are typed visibly, but the camera first exercises the landing quick-action picker
-with real `ArrowDown`/`ArrowUp` keystrokes and asserts the cursor row moves. This
-matters because the landing picker starts active in a real terminal; pressing
-`Tab` is the explicit "chat instead" gesture, so a recording that tabs away
-without showing the picker omits a bug-prone surface. Each submitted command
-holds briefly before Enter, every processed bug settles on a visible autonomous
-running/report state that names the latest case, and the spec fails a watch-speed
+are typed visibly, but the camera also exercises the real TUI `choice` widget
+with `ArrowDown`/`ArrowUp` keystrokes on both the `kitsoki-dev` landing surface
+and the dogfood marathon landing room. This matters because the widget starts
+active in a real terminal; pressing `Tab` is the explicit "chat instead" gesture,
+so a recording that tabs away without showing the widget omits a bug-prone
+surface. The serious-exception checkpoint is also handled through the same
+choice widget: the warning stays on screen, the cursor moves to "acknowledge and
+continue", and Enter commits that actual intent instead of typing a staged
+free-text answer. Each submitted command holds briefly before Enter, every
+processed bug settles on a visible autonomous running/report state that names
+the current case and its source details, and the spec fails a watch-speed
 recording if any chapter is shorter than the readable floor. The saved MP4 is
 trimmed to the first stable `kitsoki-dev` frame and holds that populated TUI
 briefly before typing, so bridge startup never becomes leading dead air; the

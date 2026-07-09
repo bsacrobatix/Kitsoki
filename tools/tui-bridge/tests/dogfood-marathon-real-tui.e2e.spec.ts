@@ -30,24 +30,24 @@ const REPORT_HOLD_MS = 5_000;
 const READABLE_CHAPTER_MIN_MS = 3_000;
 const START_FRAME_SETTLE_MS = 500;
 const INTRO_HOLD_MS = 2_000;
-const PICKER_HOLD_MS = 1_300;
+const CHOICE_HOLD_MS = 1_300;
 const MAX_USEFUL_PREROLL_MS = 3_500;
-const CASE_IDS = [
-  "constructorfabric/Kitsoki#66",
-  "constructorfabric/Kitsoki#65",
-  "constructorfabric/Kitsoki#64",
-  "constructorfabric/Kitsoki#63",
-  "constructorfabric/Kitsoki#61",
-  "bsacrobatix/Kitsoki#1202",
-  "bsacrobatix/Kitsoki#1201",
-  "bsacrobatix/Kitsoki#1200",
-  "bsacrobatix/Kitsoki#1199",
-  "bsacrobatix/Kitsoki#1198",
-  "bsacrobatix/Kitsoki#1197",
-  "bsacrobatix/Kitsoki#1196",
-  "bsacrobatix/Kitsoki#1194",
-  "bsacrobatix/Kitsoki#1190",
-  "local/bugfix-auth-profile",
+const CASES = [
+  { id: "constructorfabric/Kitsoki#66", title: "raw AskOffPath payload" },
+  { id: "constructorfabric/Kitsoki#65", title: "init failure title" },
+  { id: "constructorfabric/Kitsoki#64", title: "landing action rows" },
+  { id: "constructorfabric/Kitsoki#63", title: "duplicate inbox notification" },
+  { id: "constructorfabric/Kitsoki#61", title: "first-run profile scope" },
+  { id: "bsacrobatix/Kitsoki#1202", title: "blocked findings accounting" },
+  { id: "bsacrobatix/Kitsoki#1201", title: "replay agent-task dispatch" },
+  { id: "bsacrobatix/Kitsoki#1200", title: "empty ticket queue" },
+  { id: "bsacrobatix/Kitsoki#1199", title: "hosted preflight triage" },
+  { id: "bsacrobatix/Kitsoki#1198", title: "HAR method labels" },
+  { id: "bsacrobatix/Kitsoki#1197", title: "trace row labels" },
+  { id: "bsacrobatix/Kitsoki#1196", title: "mobile tour dead-end" },
+  { id: "bsacrobatix/Kitsoki#1194", title: "GitHub label rate limits" },
+  { id: "bsacrobatix/Kitsoki#1190", title: "wrong profile after on_error" },
+  { id: "local/bugfix-auth-profile", title: "codex profile backend assertion" },
 ];
 
 async function freePort(): Promise<number> {
@@ -114,8 +114,23 @@ async function fullBuffer(page: Page): Promise<string> {
   return page.evaluate(() => (window as any).__dumpBuffer());
 }
 
+async function visibleScreen(page: Page): Promise<string> {
+  return page.evaluate(() => (window as any).__dump());
+}
+
 async function scrollLines(page: Page, lines: number): Promise<void> {
   await page.evaluate((n) => (window as any).__scrollLines(n), lines);
+}
+
+async function scrollUpUntilVisible(page: Page, text: string): Promise<void> {
+  for (let i = 0; i < 8; i += 1) {
+    if ((await visibleScreen(page)).includes(text)) {
+      return;
+    }
+    await scrollLines(page, -8);
+    await dwell(page, 100);
+  }
+  await expect.poll(() => visibleScreen(page), { timeout: 5_000 }).toContain(text);
 }
 
 async function focusTerminal(page: Page): Promise<void> {
@@ -155,7 +170,7 @@ async function typeLine(
   await page.keyboard.press("Enter");
 }
 
-async function pickerCursorLine(page: Page): Promise<string> {
+async function choiceCursorLine(page: Page): Promise<string> {
   const screen = await page.evaluate(() => (window as any).__dump());
   return String(screen)
     .split("\n")
@@ -163,40 +178,65 @@ async function pickerCursorLine(page: Page): Promise<string> {
     .find((line) => line.includes("▸")) ?? "";
 }
 
-async function waitForPickerCursor(page: Page): Promise<string> {
-  await expect.poll(() => pickerCursorLine(page), { timeout: 10_000 }).not.toBe("");
-  return pickerCursorLine(page);
+async function waitForChoiceCursor(page: Page): Promise<string> {
+  await expect.poll(() => choiceCursorLine(page), { timeout: 10_000 }).not.toBe("");
+  return choiceCursorLine(page);
 }
 
-async function pressPickerKeyForCursorChange(
+async function pressChoiceKeyForCursorChange(
   page: Page,
   key: "ArrowDown" | "ArrowUp",
   before: string,
 ): Promise<string> {
   await page.keyboard.press(key);
-  await expect.poll(() => pickerCursorLine(page), { timeout: 10_000 }).not.toBe(before);
-  return pickerCursorLine(page);
+  await expect.poll(() => choiceCursorLine(page), { timeout: 10_000 }).not.toBe(before);
+  return choiceCursorLine(page);
 }
 
-async function exerciseArrowPicker(
+async function exerciseChoiceWidget(
+  page: Page,
+  shot: (page: Page, label: string) => Promise<string>,
+  labelPrefix: string,
+): Promise<void> {
+  await focusTerminal(page);
+  await waitForScreen(page, "[↑/↓ move");
+  const initial = await waitForChoiceCursor(page);
+  await shot(page, `${labelPrefix}-choice-initial`);
+  await dwell(page, CHOICE_HOLD_MS);
+
+  const down = await pressChoiceKeyForCursorChange(page, "ArrowDown", initial);
+  expect(down).not.toEqual(initial);
+  await shot(page, `${labelPrefix}-choice-arrow-down`);
+  await dwell(page, CHOICE_HOLD_MS);
+
+  await page.keyboard.press("ArrowUp");
+  await expect.poll(() => choiceCursorLine(page), { timeout: 10_000 }).toBe(initial);
+  await shot(page, `${labelPrefix}-choice-arrow-up`);
+  await dwell(page, CHOICE_HOLD_MS);
+}
+
+async function acknowledgeExceptionWithChoice(
   page: Page,
   shot: (page: Page, label: string) => Promise<string>,
 ): Promise<void> {
   await focusTerminal(page);
+  await waitForBuffer(page, "! SERIOUS EXCEPTION");
   await waitForScreen(page, "[↑/↓ move");
-  const initial = await waitForPickerCursor(page);
-  await shot(page, "quick-action-picker-initial");
-  await dwell(page, PICKER_HOLD_MS);
+  const initial = await waitForChoiceCursor(page);
+  expect(initial).toContain("acknowledge and continue");
+  await shot(page, "exception-choice-initial");
+  await dwell(page, CHOICE_HOLD_MS);
 
-  const down = await pressPickerKeyForCursorChange(page, "ArrowDown", initial);
-  expect(down).not.toEqual(initial);
-  await shot(page, "quick-action-picker-arrow-down");
-  await dwell(page, PICKER_HOLD_MS);
+  const answer = await pressChoiceKeyForCursorChange(page, "ArrowDown", initial);
+  expect(answer).toContain("answer with guidance");
+  await shot(page, "exception-choice-answer");
+  await dwell(page, CHOICE_HOLD_MS);
 
   await page.keyboard.press("ArrowUp");
-  await expect.poll(() => pickerCursorLine(page), { timeout: 10_000 }).toBe(initial);
-  await shot(page, "quick-action-picker-arrow-up");
-  await dwell(page, PICKER_HOLD_MS);
+  await expect.poll(() => choiceCursorLine(page), { timeout: 10_000 }).toBe(initial);
+  await shot(page, "exception-choice-acknowledge");
+  await dwell(page, CHOICE_HOLD_MS);
+  await page.keyboard.press("Enter");
 }
 
 test("records one continuous real Kitsoki TUI dogfood marathon session", async ({ browser }) => {
@@ -227,8 +267,8 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     await shot(page, "connected-kitsoki-dev");
     await dwell(page, INTRO_HOLD_MS);
 
-    chapters.open("landing-arrow-picker", "Move the active TUI quick-action picker with arrow keys", RECORDING);
-    await exerciseArrowPicker(page, shot);
+    chapters.open("kitsoki-dev-choice-widget", "Move the kitsoki-dev TUI choice widget with arrow keys", RECORDING);
+    await exerciseChoiceWidget(page, shot, "kitsoki-dev");
 
     chapters.open("kitsoki-dev-request", "Request the dogfood marathon from kitsoki-dev", RECORDING);
     await focusChat(page);
@@ -241,31 +281,38 @@ test("records one continuous real Kitsoki TUI dogfood marathon session", async (
     await dwell(page, START_HOLD_MS);
     await bottom(page);
 
+    chapters.open("dogfood-choice-widget", "Move the dogfood marathon action choice widget with arrow keys", RECORDING);
+    await exerciseChoiceWidget(page, shot, "dogfood");
+
     chapters.open("start", "Start autonomous 15-bug dogfood marathon", RECORDING);
     await focusChat(page);
     await typeLine(page, "start the marathon", shot, "typed-start-marathon");
-    await waitForScreen(page, "Dogfood marathon · driving", 60_000);
-    await waitForScreenPattern(page, /Recorded:\s+0/);
+    if (PACE === 0) {
+      await waitForBuffer(page, CASES[0].id, 60_000);
+    } else {
+      await waitForScreen(page, `Case 1 / ${CASES.length} · driving`, 60_000);
+      await waitForScreenPattern(page, /Recorded:\s+0/);
+    }
     await shot(page, "backlog-loaded-driving");
     await dwell(page, START_HOLD_MS);
 
-    for (let i = 1; i <= CASE_IDS.length; i += 1) {
-      const caseId = CASE_IDS[i - 1];
-      chapters.open(`bug-${String(i).padStart(2, "0")}`, `Autonomously process ${caseId}`, RECORDING);
+    for (let i = 1; i <= CASES.length; i += 1) {
+      const { id: caseId, title } = CASES[i - 1];
+      chapters.open(`bug-${String(i).padStart(2, "0")}`, `Process ${caseId}: ${title}`, RECORDING);
       await waitForBuffer(page, caseId, 90_000);
       if (i === 5) {
         await waitForScreen(page, "core.dogfood.exception_review");
+        await waitForBuffer(page, "! SERIOUS EXCEPTION");
         await waitForBuffer(page, caseId);
-        await scrollLines(page, -8);
+        await scrollUpUntilVisible(page, "! SERIOUS EXCEPTION");
         await dwell(page, COMMAND_HOLD_MS);
         await shot(page, "exception-review");
         await dwell(page, EXCEPTION_HOLD_MS);
-        chapters.open("operator-exception", "Operator acknowledges serious question", RECORDING);
+        chapters.open("operator-exception", "Acknowledge the serious exception through the choice widget", RECORDING);
         await bottom(page);
-        await focusChat(page);
-        await typeLine(page, "acknowledge and continue", shot, "typed-exception-ack");
+        await acknowledgeExceptionWithChoice(page, shot);
       }
-      if (i === CASE_IDS.length) {
+      if (i === CASES.length) {
         await waitForBuffer(page, "15 case(s)", 60_000);
       }
       await shot(page, i === 5 ? "exception-acknowledged" : `processed-${String(i).padStart(2, "0")}`);
