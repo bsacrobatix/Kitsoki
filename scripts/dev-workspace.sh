@@ -12,6 +12,7 @@ CAPSULE_MANIFEST="capsule-manifest.json"
 CLONE_SENTINEL=".kitsoki-clone"
 DEV_MANIFEST=".kitsoki-dev-workspace.json"
 DEFAULT_TARGET="staging/local"
+DEFAULT_BASE="$DEFAULT_TARGET"
 LOCAL_CONFIG=".kitsoki.local.yaml"
 
 usage() {
@@ -28,7 +29,7 @@ usage:
 Defaults:
   REPO   current git repository root
   ROOT   <repo>/.capsules/workspaces
-  BASE   main
+  BASE   staging/local
   BRANCH agent/<id>
   TARGET staging/local
 EOF
@@ -347,7 +348,7 @@ cmd_create() {
   local root=""
   local id=""
   local branch=""
-  local base="main"
+  local base="$DEFAULT_BASE"
   local target="$DEFAULT_TARGET"
   local session_id=""
   local bootstrap=0

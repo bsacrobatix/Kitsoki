@@ -9,15 +9,15 @@ rebase, merge, or teardown commands by hand.
 The script is the contract. It creates an isolated clone, writes Kitsoki
 ownership metadata, optionally bootstraps the clone, commits the finished work,
 lands it into the configured local target branch, and removes the workspace when
-requested. The default target is `staging/local`, so local stabilization does
-not move `main`. Use `--target main` only for an explicit final local promotion.
+requested. Normal development starts from `staging/local` and lands back into
+`staging/local`, so local stabilization does not move `main`.
 
 ## Quick path
 
 From the primary checkout:
 
 ```sh
-scripts/dev-workspace.sh create --id docs-example --branch agent/docs-example --base main --target staging/local --bootstrap
+scripts/dev-workspace.sh create --id docs-example --branch agent/docs-example --bootstrap
 scripts/dev-workspace.sh status docs-example
 ```
 
@@ -25,7 +25,7 @@ Do the implementation inside the reported workspace path, then:
 
 ```sh
 scripts/dev-workspace.sh commit docs-example --message "Document managed workspaces"
-scripts/dev-workspace.sh merge docs-example --target staging/local --gate "go test ./internal/host" --teardown
+scripts/dev-workspace.sh merge docs-example --gate "go test ./internal/host" --teardown
 ```
 
 For docs-only changes, the merge gate can be a focused committed-diff check
@@ -62,13 +62,13 @@ metadata is local provenance rather than project source.
 ### `create`
 
 ```sh
-scripts/dev-workspace.sh create --id <id> --branch <branch> --base <base> [--bootstrap] [--json]
+scripts/dev-workspace.sh create --id <id> --branch <branch> [--bootstrap] [--json]
 ```
 
 `id` is a single path segment and becomes the workspace directory name.
-`branch` defaults to `agent/<id>`. `base` defaults to `main`. `target` defaults
-to `staging/local`. `--bootstrap` runs `make bootstrap-workspace` inside the
-clone after checkout.
+`branch` defaults to `agent/<id>`. `base` and `target` default to
+`staging/local`. `--bootstrap` runs `make bootstrap-workspace` inside the clone
+after checkout.
 
 Use `--session-id <id>` from story/runtime code so repeated entry by the same
 session is idempotent while a different session is refused instead of being
@@ -114,22 +114,17 @@ slice, not the mechanics of the workspace.
 ### `merge`
 
 ```sh
-scripts/dev-workspace.sh merge <workspace-or-id> --target staging/local --gate "<focused validation>" --teardown
+scripts/dev-workspace.sh merge <workspace-or-id> --gate "<focused validation>" --teardown
 ```
 
 `merge` refuses dirty workspaces, fetches the current target branch when it
-exists, rebases the workspace branch onto that target (or `main` when the
-target is being created for the first time), runs the optional gate inside the
-workspace, imports the branch into the primary checkout as a temporary
+exists, rebases the workspace branch onto that target, runs the optional gate
+inside the workspace, imports the branch into the primary checkout as a temporary
 `capsule/<id>-land` branch, and fast-forwards the local target ref.
 
 For non-`main` targets such as `staging/local`, the primary checkout can stay on
 `main`; the helper updates the target branch ref without touching the primary
-working tree. For `--target main`, the primary checkout must be on `main`, clean,
-and locally available, and the helper lands through `scripts/merge-to-main.sh`.
-Explicit `--target main` refuses primary-checkout dirt only when that dirt
-overlaps files the workspace branch will update; unrelated dirty primary files
-are preserved.
+working tree.
 
 ### `merge-to-main`
 
@@ -211,17 +206,12 @@ not a direction to create a Git linked worktree.
   existing path when branch and owner metadata match.
 - **Existing workspace, different session:** `create` refuses reuse. Pick a
   distinct id or close the old session/workspace deliberately.
-- **Primary checkout has overlapping dirt:** `merge` refuses to land when a
-  dirty primary path overlaps a file the workspace branch would update during
-  `--target main`. Preserve or commit that primary change separately before
-  retrying. Dirty primary files outside the branch's changed paths are left
-  alone, and non-main targets update branch refs without touching the primary
-  working tree.
+- **Primary checkout has dirt:** normal staging merges update branch refs
+  without touching the primary working tree.
 - **Workspace is dirty:** `merge` refuses to land. Commit or discard the
   workspace changes first.
 - **Target advanced:** `merge` rebases the workspace onto the current local
-  target before running the gate. If `staging/local` does not exist yet, it is
-  seeded from `main` by the first successful merge.
+  target before running the gate.
 - **Gate fails:** fix the workspace, recommit or amend there, and rerun `merge`.
 - **Workspace no longer needed:** run `teardown`; do not leave merged workspaces
   behind.
