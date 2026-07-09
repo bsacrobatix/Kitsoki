@@ -1,6 +1,8 @@
 Review whether any existing gate's recorded decisions justify dropping a determinism rung.
 
 Target story tree: `{{ args.stories_dir }}`
+Prepared source plan (JSON): {{ args.source_plan }}
+Selected: {{ args.selected_theme }} ({{ args.selected_artifact_kind }})
 Newly authored this loop: {{ args.author_summary }}
 
 The determinism ladder (tools/session-mining/README.md): a gate climbs L2→L3→L4 as recorded decisions accumulate. An LLM-decided gate whose recorded decisions are dominated by one branch is a candidate to drop to a default rule (LLM only on low confidence), then to a pure rule.
