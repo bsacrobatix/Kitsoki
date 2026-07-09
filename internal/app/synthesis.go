@@ -140,6 +140,15 @@ func BuildRootImporter(spec *RootSpec, repoRoot string) (def *AppDef, abs string
 	return buildRootImporter(spec, repoRoot, nil)
 }
 
+// BuildRootImporterWithResolver is BuildRootImporter plus the same injected
+// @kitsoki/<name> resolver used by SynthesizeRootWithResolver. Emitters that
+// serialize a synthesized root must use this variant whenever validation used
+// an embedded or override resolver, otherwise the emitted host allow-list can
+// drift from the loaded root.
+func BuildRootImporterWithResolver(spec *RootSpec, repoRoot string, resolver ImportResolver) (def *AppDef, abs string, err error) {
+	return buildRootImporter(spec, repoRoot, resolver)
+}
+
 // buildRootImporter is BuildRootImporter plus an injected ImportResolver,
 // mirroring buildKitImporter/BuildKitImporter. SynthesizeRootWithResolver
 // passes its resolver through here so root-kit resolution (ResolveRootKit)
