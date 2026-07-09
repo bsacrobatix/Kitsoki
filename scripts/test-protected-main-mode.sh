@@ -88,6 +88,19 @@ touch "$repo/.claude/local-state"
 mkdir "$repo/.worktrees/new-worktree-dir"
 touch "$repo/.kitsoki/local-state"
 
+mkdir -p "$repo/.temp/deps/pkg/bin"
+touch "$repo/.temp/deps/pkg/bin/tool"
+chmod -R a-w "$repo/.temp/deps"
+(
+  cd "$repo"
+  scripts/protected-main-mode.sh repair-writable-roots >"$tmp/repair.out"
+)
+assert_contains "$tmp/repair.out" "writable roots repaired"
+assert_writable "$repo/.temp/deps"
+assert_writable "$repo/.temp/deps/pkg"
+assert_writable "$repo/.temp/deps/pkg/bin/tool"
+assert_readonly "$repo/src"
+
 if touch "$repo/src/new-source.txt" 2>/dev/null; then
   echo "expected source directory creation to fail while locked" >&2
   exit 1
