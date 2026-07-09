@@ -80,15 +80,16 @@ def _draft_scenario(description, primary_story):
 def main(ctx):
     mode = ctx.inputs.get("mode", "catalog")
     run_id = ctx.inputs.get("run_id", "")
-    # ARTIFACT_ROOT (tools/product-journey/run.py) is always the repo-relative
-    # .artifacts/product-journey/<run_id> -- derive it here rather than
-    # trusting a pre-computed value from the calling room (see this file's
-    # header comment).
-    run_dir_rel = ".artifacts/product-journey/" + run_id
-
     last_result = ctx.inputs.get("last_result", {})
     if type(last_result) != "dict":
         last_result = {}
+    # Prefer the runner-returned path. In live scenario-qa runs the bundle may
+    # live in an automatically managed capsule workspace, so the path is the
+    # workspace-local run dir rather than a primary-checkout artifact path.
+    run_dir_rel = last_result.get("run_dir_rel", "")
+    if run_dir_rel == "":
+        # Backward-compatible fallback for old flow fixtures and cassettes.
+        run_dir_rel = ".artifacts/product-journey/" + run_id
     plan = last_result.get("driver_plan", {})
     if type(plan) != "dict" or len(plan) == 0:
         content = ctx.fs.read(run_dir_rel + "/driver-plan.json")

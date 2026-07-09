@@ -196,7 +196,7 @@ turns:
       pass_count: 2
       fail_count: 0
       degraded_count: 0
-      report_path: ".artifacts/product-journey/scenario-qa-affordance-demo-run/report.md"
+      report_path: "/repo/.artifacts/product-journey/scenario-qa-affordance-demo-run/report.md"
       report_summary: "2 / 2 transport checks passed."
       deck_path: "/repo/.artifacts/product-journey/scenario-qa-affordance-demo-run/deck.slidey.json"
     expect_host_calls:
@@ -220,7 +220,7 @@ turns:
     expect_state: idle
     expect_world:
       run_id: scenario-qa-affordance-demo-run
-      report_path: ".artifacts/product-journey/scenario-qa-affordance-demo-run/report.md"
+      report_path: "/repo/.artifacts/product-journey/scenario-qa-affordance-demo-run/report.md"
       status: idle
     expect_view_matches: "SCENARIO QA[\\s\\S]*Last run[\\s\\S]*scenario-qa-affordance-demo-run[\\s\\S]*report"
 

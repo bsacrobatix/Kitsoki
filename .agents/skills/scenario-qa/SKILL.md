@@ -12,6 +12,9 @@ transports" — not a full persona/matrix sweep (that's
 - Runner: `tools/product-journey/run.py` (owns scenario/persona/transport
   resolution — the `transports` contract on `scenarios.json`, `--transport`)
 - Story wrapper: `stories/scenario-qa/app.yaml`
+- Workspace: `check` runs pass `--scenario-qa-workspace`, so the runner
+  automatically creates or reuses a managed clone-backed capsule workspace via
+  `scripts/dev-workspace.sh`; preview/transport-suite runs stay side-effect-free
 - Driver agent: `.agents/agents/product-journey-qa-driver.md` (transport-pinned
   per leg — the handoff's `transport:` field OVERRIDES the driver's usual
   cheapest-surface heuristic)
@@ -48,7 +51,7 @@ backward-compatible default).
 - If the task asks for a demo, QA proof, video, deck, or recorder for a named
   scenario/transport, the **scenario run bundle is the source of truth**. Register
   or update the scenario in `tools/product-journey/scenarios.json`, emit it with
-  `tools/product-journey/run.py --emit-run --transport ...`, consume
+  `tools/product-journey/run.py --emit-run --scenario-qa-workspace --transport ...`, consume
   `driver-plan.json` capture routes, and attach the produced evidence back to
   that run. Do not let a Playwright/xterm/rrweb recorder own private case lists,
   evidence paths, or pass/fail criteria.
@@ -109,7 +112,8 @@ otherwise pass their description as `description=`.
 4. Submit `next_leg` once per remaining transport leg.
 5. Read `report.md` (`world.report_path`) and/or `deck.slidey.json`
    (`world.deck_path`) in the run dir for the final per-transport verdict
-   table.
+   table. The run dir is inside the managed capsule workspace; use
+   `world.scenario_workspace_root` when you need to inspect the checkout.
 
 Point the caller at the run dir (`world.run_dir`), `report.md`
 (`world.report_path`), and `deck.slidey.json` (`world.deck_path`) as the

@@ -11,7 +11,7 @@ states:
 
   report:
     description: "Folded the per-transport verdict table into report.md."
-    relevant_world: [run_id, run_dir, scenario_ref, scenario_description, leg_results, pass_count, fail_count, degraded_count, report_path, report_summary, deck_path, last_error, status]
+    relevant_world: [run_id, run_dir, scenario_workspace_root, scenario_ref, scenario_description, leg_results, pass_count, fail_count, degraded_count, report_path, report_summary, deck_path, last_error, status]
     default_intent: check_request
     view:
       - banner:
@@ -21,6 +21,7 @@ states:
       - kv:
           pairs:
             Run: "{{ world.run_id }}"
+            Capsule workspace: '{{ world.scenario_workspace_root|default:"(none)" }}'
             Result: "{{ world.report_summary }}"
       - kv:
           pairs:
@@ -76,12 +77,9 @@ states:
         id: build_report
         with:
           script: scripts/build_report.star
-          capabilities:
-            fs:
-              write: ["**"]
           inputs:
             run_id: "{{ world.run_id }}"
-            run_dir: "{{ world.run_dir_rel }}"
+            run_dir: "{{ world.run_dir }}"
             scenario_ref: "{{ world.scenario_ref }}"
             scenario_description: "{{ world.scenario_description }}"
             leg_results: "{{ world.leg_results }}"

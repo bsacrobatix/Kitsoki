@@ -1,13 +1,16 @@
-# build_report.star — fold leg_results into report.md under the run dir: the
-# per-transport verdict table. Mirrors stories/fix-tests's write_report.star
-# (markdown assembly + ctx.fs.write). leg_results is a templated INPUT (not
+# build_report.star — fold leg_results into a report summary/path for the
+# per-transport verdict table. The actual report.md file is written by
+# tools/product-journey/run.py --scenario-qa-report, in the same run directory
+# as deck.slidey.json; this script stays file-system-free so a scenario-qa run
+# bundle can live in an automatically managed capsule workspace. leg_results is
+# a templated INPUT (not
 # read via ctx.world) so the engine's dispatch-time re-render of this
 # invoke's `inputs:` picks up the very last leg's recording even when this
 # room is entered in the same cascading turn as that leg's record_leg_result
 # (see plan.yaml's header comment for the general gotcha).
 #
 # Interface (authoritative in build_report.star.yaml):
-#   inputs:  run_id (string), run_dir (string, repo-relative),
+#   inputs:  run_id (string), run_dir (string, absolute or repo-relative),
 #            scenario_ref (string), scenario_description (string),
 #            leg_results (object {items:[...]})
 #   outputs: report_path (string), report_summary (string)
@@ -112,5 +115,4 @@ def main(ctx):
     else:
         path = ".artifacts/scenario-qa/" + (run_id if run_id != "" else "adhoc") + "/report.md"
 
-    written = ctx.fs.write(path, "".join(lines))
-    return {"report_path": written, "report_summary": summary}
+    return {"report_path": path, "report_summary": summary}

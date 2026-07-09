@@ -43,7 +43,7 @@ states:
 
   plan:
     description: "Building the run bundle and resolving it into per-transport checks."
-    relevant_world: [mode, scenario_ref, scenario_description, transport_arg, persona, target, seed, run_id, run_dir, leg_count, status]
+    relevant_world: [mode, scenario_ref, scenario_description, transport_arg, persona, target, seed, scenario_workspace_root, run_id, run_dir, leg_count, status]
     view:
       - heading: "Scenario QA · plan"
       - kv:
@@ -51,6 +51,7 @@ states:
             Mode: "{{ world.mode }}"
             Scenario: "{{ world.scenario_ref }}"
             Transport: "{{ world.transport_arg }}"
+            Capsule workspace: '{{ world.scenario_workspace_root|default:"(creating…)" }}'
             Run: '{{ world.run_id|default:"(building…)" }}'
             Transport checks: "{{ world.leg_count }}"
         when: "world.mode != 'adhoc'"
@@ -59,6 +60,7 @@ states:
             Mode: "{{ world.mode }}"
             Description: "{{ world.scenario_description }}"
             Transport: "{{ world.transport_arg }}"
+            Capsule workspace: '{{ world.scenario_workspace_root|default:"(creating…)" }}'
             Run: '{{ world.run_id|default:"(building…)" }}'
             Transport checks: "{{ world.leg_count }}"
         when: "world.mode == 'adhoc'"
@@ -71,6 +73,7 @@ states:
           args:
             - tools/product-journey/run.py
             - --emit-run
+            - --scenario-qa-workspace
             - --project
             - "{{ world.target != '' ? world.target : 'gears-rust' }}"
             - --persona
@@ -90,6 +93,10 @@ states:
           last_result: stdout_json
           run_id: "stdout_json.run_id"
           run_dir: "stdout_json.run_dir"
+          run_dir_rel: "stdout_json.run_dir_rel"
+          scenario_workspace: "stdout_json.scenario_qa_workspace"
+          scenario_workspace_root: "stdout_json.scenario_qa_workspace.root"
+          scenario_workspace_id: "stdout_json.scenario_qa_workspace.id"
           driver_plan_path: "stdout_json.driver_plan_path"
           execution_plan_path: "stdout_json.execution_plan_path"
           agent_brief_path: "stdout_json.agent_brief_path"
