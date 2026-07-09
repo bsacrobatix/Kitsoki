@@ -55,13 +55,34 @@ missing_agent = argparse.Namespace(
 )
 require("missing agent validation", "requires variant.agent" in treatments.validate_driver_args(missing_agent))
 
+wrong_agent = argparse.Namespace(
+    treatment="codex-codeact",
+    backend="codex",
+    agent="kitsoki-mcp-driver",
+    capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+    capability_presets_json="",
+)
+require("wrong codeact agent validation", "kitsoki-codeact-driver" in treatments.validate_driver_args(wrong_agent))
+
 bad_preset = argparse.Namespace(
     treatment="kitsoki-mcp-codeact",
+    backend="codex",
     agent="",
+    implementation_mode="codeact",
     capability_preset="missing",
     capability_presets_json="",
 )
 require("bad preset validation", "unknown capability preset" in treatments.validate_driver_args(bad_preset))
+
+bad_mode = argparse.Namespace(
+    treatment="kitsoki-mcp-codeact",
+    backend="codex",
+    agent="",
+    implementation_mode="patch",
+    capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+    capability_presets_json="",
+)
+require("bad implementation mode validation", "implementation_mode 'codeact'" in treatments.validate_driver_args(bad_mode))
 
 with tempfile.TemporaryDirectory(prefix="arena-treatment-") as td:
     tree = Path(td).resolve()

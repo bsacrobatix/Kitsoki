@@ -15,6 +15,19 @@ The reusable library lives in `tools/arena/arena/treatments/`:
 | `codex_codeact.py` | Direct `kitsoki-codeact-driver` treatment. |
 | `kitsoki_mcp.py` | Studio MCP and Studio MCP plus CodeAct treatments. |
 
+Operator UX is intentionally first-class:
+
+```bash
+python3 tools/arena/arena.py treatments --aliases
+python3 tools/arena/arena.py validate --spec tools/arena/specs/codex-codeact-action-surface.yaml
+python3 tools/arena/arena.py doctor --spec tools/arena/specs/codex-codeact-action-surface.yaml
+```
+
+`validate` is pure spec validation: no Docker, no LLM. `doctor` additionally
+checks local prerequisites such as Docker context/daemon availability. A Docker
+startup failure is an infrastructure result (`blocked` / `infra:harness`), not a
+model loss.
+
 ## Current Treatments
 
 | Treatment ID | Alias | Action surface | Required fields | Notes |
@@ -28,6 +41,29 @@ Direct CodeAct treatments should use a named capability preset. The default
 `repo_patch` preset grants repository file read/write plus read-only git probes;
 the runner records the canonical JSON hash in the cell metrics so reports can
 prove which surface was used.
+
+Direct CodeAct validation is exact: `codex-codeact` requires
+`agent: kitsoki-codeact-driver`. The Studio MCP profiles are separate surfaces:
+`kitsoki-mcp` uses the normal Studio MCP driver, while `kitsoki-mcp-codeact`
+uses Studio MCP orchestration and forces the mutating implementation step
+through `host.agent.codeact`.
+
+## CodeAct-vs-Codex Demo
+
+The reusable demo path records a tour over the actual arena output bundle:
+
+```bash
+make arena-showdown-plan
+make arena-showdown-run
+make arena-showdown-demo
+make arena-showdown-qa
+```
+
+Artifacts are written under `.artifacts/arena-showdown-demo/`; visual QA writes
+its gated report under `.artifacts/ui-qa/arena-showdown-demo/`. The video is
+honest about run health. If Docker is unavailable, the demo shows the
+`infra:harness` blocker from the real run bundle instead of inventing a green
+showdown.
 
 ## Adding a Treatment
 

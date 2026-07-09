@@ -17,6 +17,11 @@ from . import base
 
 KITSOKI_MNT = "/workspace/kitsoki"
 RUNNER = f"{KITSOKI_MNT}/tools/arena/lib/paired_task_runner.py"
+_INFRA_RE = re.compile(
+    r"no such tool|worker.never.ran|host[_-]error|connection refused|provider 5\d\d|"
+    r"docker endpoint|docker daemon|context .*not found|error during connect|command not found",
+    re.I,
+)
 
 
 class PairedTaskPlugin:
@@ -67,7 +72,7 @@ class PairedTaskPlugin:
         )
         blob = f"{stdout}\n{stderr}"
 
-        if re.search(r"no such tool|worker.never.ran|host[_-]error|connection refused|provider 5\d\d", blob, re.I):
+        if _INFRA_RE.search(blob):
             result.verdict = "blocked"
             result.health = "infra:harness"
             result.notes = _first_line(blob)
