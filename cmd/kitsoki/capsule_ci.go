@@ -16,6 +16,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/hygiene"
 	"kitsoki/internal/capsule/record"
 	"kitsoki/internal/capsule/storylauncher"
 )
@@ -97,7 +98,7 @@ func capsuleCIRunCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewConfiguredExecutors(cfg), Launcher: launcher}
+		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewConfiguredExecutors(cfg), Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project)}
 		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: mustFileDigest(filepath.Join(project, p.Story)), Trigger: ci.Trigger{Kind: "local", RequestedPipeline: args[0]}})
 		if err != nil {
 			return err
@@ -123,6 +124,16 @@ func capsuleCIRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("workspace")
 	return cmd
+}
+
+func capsuleCIHygienePlanner(project string) ci.HygienePlanner {
+	return ci.HygienePlannerFunc(func(ctx context.Context, policy ci.CleanupPolicy) (ci.HygieneReport, error) {
+		plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: project, KeepRuns: policy.KeepRuns, IncludeCapsuleCache: policy.IncludeCapsuleCache, IncludeGoBuildCache: policy.IncludeGoBuildCache})
+		if err != nil {
+			return ci.HygieneReport{}, err
+		}
+		return ci.HygieneReport{Schema: plan.Schema, Candidates: len(plan.Candidates), TotalBytes: plan.TotalBytes}, nil
+	})
 }
 func capsuleCIStatusCmd() *cobra.Command {
 	var project, job string

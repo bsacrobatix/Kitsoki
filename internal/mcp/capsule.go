@@ -461,7 +461,7 @@ func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a 
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
-	service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewConfiguredExecutors(cfg), Launcher: s.ciLauncher(filepath.Join(project, pipeline.Story))}
+	service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewConfiguredExecutors(cfg), Launcher: s.ciLauncher(filepath.Join(project, pipeline.Story)), Hygiene: capsuleCIHygienePlanner(project)}
 	digest, err := capsuleStoryDigest(filepath.Join(project, pipeline.Story))
 	if err != nil {
 		return capsuleErr(err), nil, nil
@@ -514,6 +514,15 @@ func (s *CapsuleServer) ciSummary(_ context.Context, _ *mcpsdk.CallToolRequest, 
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "summary": summary}, nil
+}
+func capsuleCIHygienePlanner(project string) ci.HygienePlanner {
+	return ci.HygienePlannerFunc(func(ctx context.Context, policy ci.CleanupPolicy) (ci.HygieneReport, error) {
+		plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: project, KeepRuns: policy.KeepRuns, IncludeCapsuleCache: policy.IncludeCapsuleCache})
+		if err != nil {
+			return ci.HygieneReport{}, err
+		}
+		return ci.HygieneReport{Schema: plan.Schema, Candidates: len(plan.Candidates), TotalBytes: plan.TotalBytes}, nil
+	})
 }
 func (s *CapsuleServer) cleanupPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCleanupArgs) (*mcpsdk.CallToolResult, any, error) {
 	plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: s.manager.Grant.ProjectRoot, KeepRuns: a.KeepRuns, IncludeCapsuleCache: a.IncludeCapsuleCache})

@@ -3,8 +3,9 @@
 **Status:** v1 in progress. A local vertical slice now ships: scoped native
 workspaces/MCP, self+pinned sources, environment locks, story-native CI,
 canonical receipts, local ref plans, host/fake/configured-HTTPS remote
-executors, cleanup planning/apply, MCP-scoped hygiene, and run-index status
-projection (see `docs/guide/development/capsule-ci.md`). Native lifecycle
+executors, cleanup planning/apply, MCP-scoped hygiene, cleanup policy checks
+inside CI verdicts, and run-index status projection (see
+`docs/guide/development/capsule-ci.md`). Native lifecycle
 compatibility is now the agent-facing path; story workspace-contract
 migration, conflict continuations, production remote publication, container
 adoption, and full adoption remain below.
@@ -63,7 +64,8 @@ long-term implementation.
 - **Net surface:** project capsule/environment definitions under `.kitsoki/`, a
   checked-in `.kitsoki/ci.yaml` routing manifest, a project-scoped Capsule MCP
   server, local/container/remote executor providers, compare-and-swap ref
-  reconciliation, story CI result contracts, and a rebuildable
+  reconciliation, story CI result contracts, cleanup retention/threshold policy,
+  and a rebuildable
   `capsule-ci-receipt/v1` artifact.
 - **Docs on ship:** `docs/guide/development/capsules.md`,
   `docs/guide/development/capsule-ci.md`, `docs/stories/ci.md`,

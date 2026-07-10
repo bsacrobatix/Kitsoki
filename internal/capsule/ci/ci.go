@@ -30,6 +30,7 @@ type Config struct {
 	Pipelines          map[string]Pipeline `yaml:"pipelines" json:"pipelines"`
 	Remotes            map[string]Remote   `yaml:"remotes,omitempty" json:"remotes,omitempty"`
 	Receipt            ReceiptPolicy       `yaml:"receipt,omitempty" json:"receipt,omitempty"`
+	Cleanup            CleanupPolicy       `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
 }
 type Pipeline struct {
 	Story       string         `yaml:"story" json:"story"`
@@ -40,6 +41,7 @@ type Pipeline struct {
 	Required    bool           `yaml:"required,omitempty" json:"required,omitempty"`
 	Permissions Permissions    `yaml:"permissions,omitempty" json:"permissions,omitempty"`
 	Agents      Agents         `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Cleanup     CleanupPolicy  `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
 	Result      ResultContract `yaml:"result" json:"result"`
 }
 type Permissions struct {
@@ -65,6 +67,13 @@ type Remote struct {
 type ReceiptPolicy struct {
 	RequireSignature bool   `yaml:"require_signature,omitempty" json:"require_signature,omitempty"`
 	Signer           string `yaml:"signer,omitempty" json:"signer,omitempty"`
+}
+type CleanupPolicy struct {
+	KeepRuns            int   `yaml:"keep_runs,omitempty" json:"keep_runs,omitempty"`
+	MaxReclaimableBytes int64 `yaml:"max_reclaimable_bytes,omitempty" json:"max_reclaimable_bytes,omitempty"`
+	RequireHygieneCheck bool  `yaml:"require_hygiene_check,omitempty" json:"require_hygiene_check,omitempty"`
+	IncludeCapsuleCache bool  `yaml:"include_capsule_cache,omitempty" json:"include_capsule_cache,omitempty"`
+	IncludeGoBuildCache bool  `yaml:"include_go_build_cache,omitempty" json:"include_go_build_cache,omitempty"`
 }
 type Trigger struct {
 	Kind              string   `json:"kind"`
@@ -122,6 +131,9 @@ func Validate(project string, cfg Config) error {
 	if cfg.Receipt.RequireSignature && strings.TrimSpace(cfg.Receipt.Signer) == "" {
 		return fmt.Errorf("capsule ci: receipt signer is required when signatures are required")
 	}
+	if err := validateCleanupPolicy("cleanup", cfg.Cleanup); err != nil {
+		return err
+	}
 	for name, remote := range cfg.Remotes {
 		if strings.TrimSpace(name) == "" || isBuiltinExecutor(name) {
 			return fmt.Errorf("capsule ci remote %q: invalid executor name", name)
@@ -135,6 +147,9 @@ func Validate(project string, cfg Config) error {
 		}
 	}
 	for name, p := range cfg.Pipelines {
+		if err := validateCleanupPolicy("pipeline "+name+" cleanup", p.Cleanup); err != nil {
+			return err
+		}
 		if strings.TrimSpace(p.Story) == "" || filepath.IsAbs(p.Story) || strings.HasPrefix(filepath.Clean(p.Story), "..") {
 			return fmt.Errorf("capsule ci pipeline %q: story must be project-relative", name)
 		}
@@ -231,7 +246,23 @@ type Service struct {
 	Provider    executor.Provider
 	Executors   ExecutorSelector
 	Launcher    Launcher
+	Hygiene     HygienePlanner
 }
+type HygienePlanner interface {
+	PlanHygiene(context.Context, CleanupPolicy) (HygieneReport, error)
+}
+type HygieneReport struct {
+	Schema      string `json:"schema,omitempty"`
+	Candidates  int    `json:"candidates"`
+	TotalBytes  int64  `json:"total_bytes"`
+	EvidenceRef string `json:"evidence_ref,omitempty"`
+}
+type HygienePlannerFunc func(context.Context, CleanupPolicy) (HygieneReport, error)
+
+func (f HygienePlannerFunc) PlanHygiene(ctx context.Context, policy CleanupPolicy) (HygieneReport, error) {
+	return f(ctx, policy)
+}
+
 type RunRequest struct {
 	Pipeline         string
 	Workspace        control.Handle
@@ -261,6 +292,7 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	if !ok {
 		return Pipeline{}, executor.Envelope{}, fmt.Errorf("capsule ci: pipeline %q not found", req.Pipeline)
 	}
+	p.Cleanup = mergeCleanupPolicy(cfg.Cleanup, p.Cleanup)
 	if req.Trigger.Kind == "" {
 		req.Trigger.Kind = "local"
 	}
@@ -335,6 +367,18 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		}
 	}
 	if runErr == nil {
+		verdict, runErr = s.applyHygienePolicy(ctx, p, verdict)
+		if runErr == nil {
+			raw, e := json.Marshal(verdict)
+			if e != nil {
+				runErr = e
+			} else {
+				execution.VerdictJSON = raw
+				execution.VerdictArtifact = "verdict:" + hashVerdict(verdict)
+			}
+		}
+	}
+	if runErr == nil {
 		if err := ValidateVerdict(verdict, prepared.Envelope, p.Result); err != nil {
 			runErr = err
 		}
@@ -385,6 +429,93 @@ func hashVerdict(v Verdict) string {
 	raw, _ := json.Marshal(v)
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+func (s Service) applyHygienePolicy(ctx context.Context, p Pipeline, v Verdict) (Verdict, error) {
+	policy := p.Cleanup
+	if !policy.RequireHygieneCheck && policy.MaxReclaimableBytes <= 0 {
+		return v, nil
+	}
+	if s.Hygiene == nil {
+		return v, fmt.Errorf("capsule ci: hygiene check required but no hygiene planner is configured")
+	}
+	report, err := s.Hygiene.PlanHygiene(ctx, policy)
+	if err != nil {
+		return v, err
+	}
+	outcome := "passed"
+	summary := fmt.Sprintf("hygiene within policy: %d reclaimable byte(s) across %d candidate(s)", report.TotalBytes, report.Candidates)
+	if policy.MaxReclaimableBytes > 0 && report.TotalBytes > policy.MaxReclaimableBytes {
+		outcome = "failed"
+		summary = fmt.Sprintf("hygiene exceeds policy: %d reclaimable byte(s) across %d candidate(s), max %d", report.TotalBytes, report.Candidates, policy.MaxReclaimableBytes)
+	}
+	evidence := []string{}
+	if report.EvidenceRef != "" {
+		evidence = append(evidence, report.EvidenceRef)
+	}
+	v.Checks = replaceCheck(v.Checks, Check{ID: "capsule-hygiene", Kind: "hygiene", Outcome: outcome, Evidence: evidence, DecisionRef: summary})
+	v.PromotionEligible = verdictDerivedPromotion(v)
+	if outcome != "passed" && v.Outcome == "passed" {
+		v.Outcome = "failed"
+		if v.Summary == "" {
+			v.Summary = summary
+		}
+	}
+	return v, nil
+}
+func replaceCheck(checks []Check, check Check) []Check {
+	out := make([]Check, 0, len(checks)+1)
+	replaced := false
+	for _, existing := range checks {
+		if existing.ID == check.ID {
+			out = append(out, check)
+			replaced = true
+			continue
+		}
+		out = append(out, existing)
+	}
+	if !replaced {
+		out = append(out, check)
+	}
+	return out
+}
+func verdictDerivedPromotion(v Verdict) bool {
+	if v.Outcome != "passed" {
+		return false
+	}
+	for _, c := range v.Checks {
+		if c.Outcome != "passed" {
+			return false
+		}
+	}
+	return true
+}
+func mergeCleanupPolicy(base, override CleanupPolicy) CleanupPolicy {
+	out := base
+	if override.KeepRuns != 0 {
+		out.KeepRuns = override.KeepRuns
+	}
+	if override.MaxReclaimableBytes != 0 {
+		out.MaxReclaimableBytes = override.MaxReclaimableBytes
+	}
+	if override.RequireHygieneCheck {
+		out.RequireHygieneCheck = true
+	}
+	if override.IncludeCapsuleCache {
+		out.IncludeCapsuleCache = true
+	}
+	if override.IncludeGoBuildCache {
+		out.IncludeGoBuildCache = true
+	}
+	return out
+}
+func validateCleanupPolicy(label string, policy CleanupPolicy) error {
+	if policy.KeepRuns < 0 {
+		return fmt.Errorf("capsule ci %s: keep_runs must be >= 0", label)
+	}
+	if policy.MaxReclaimableBytes < 0 {
+		return fmt.Errorf("capsule ci %s: max_reclaimable_bytes must be >= 0", label)
+	}
+	return nil
 }
 func isBuiltinExecutor(name string) bool {
 	switch name {
