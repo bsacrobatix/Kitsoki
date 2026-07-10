@@ -9,6 +9,12 @@ The receipt joins the sealed execution envelope, a validated
 source, story, environment, executor policy, and verdict digests so promotion
 cannot accidentally use evidence from another commit or environment.
 
+`internal/capsule/trace` defines the shared `capsule-ci-trace/v1` document
+schema and event-kind constants for workspace lifecycle, environment, CI, and
+sync facts. Producers should use those constants instead of string literals so
+receipt rebuilders, runstatus projections, and provider comments consume one
+event vocabulary.
+
 `internal/capsule/receipt` provides deterministic build and verify operations:
 
 - missing job, envelope, environment, verdict, or trace facts yield

@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/receipt"
+	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
 type Stored struct {
@@ -18,17 +18,6 @@ type Stored struct {
 	Verification receipt.Verification `json:"verification"`
 	TracePath    string               `json:"trace_path"`
 	ReceiptPath  string               `json:"receipt_path"`
-}
-type traceDocument struct {
-	Schema string       `json:"schema"`
-	Events []traceEvent `json:"events"`
-}
-type traceEvent struct {
-	Kind           string    `json:"kind"`
-	At             time.Time `json:"at"`
-	JobID          string    `json:"job_id"`
-	EnvelopeDigest string    `json:"envelope_digest"`
-	Outcome        string    `json:"outcome,omitempty"`
 }
 
 func Persist(project string, result ci.RunResult) (Stored, error) {
@@ -39,8 +28,11 @@ func Persist(project string, result ci.RunResult) (Stored, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Stored{}, err
 	}
-	trace := traceDocument{Schema: "capsule-ci-trace/v1", Events: []traceEvent{{Kind: "capsule.ci.started", At: time.Now().UTC(), JobID: string(result.Job.ID), EnvelopeDigest: result.Envelope.Digest}, {Kind: "capsule.ci.verdict", At: time.Now().UTC(), JobID: string(result.Job.ID), EnvelopeDigest: result.Envelope.Digest, Outcome: result.Verdict.Outcome}}}
-	raw, err := json.Marshal(trace)
+	trace := capsuletrace.NewDocument(
+		capsuletrace.Event{Kind: capsuletrace.KindCIStarted, JobID: string(result.Job.ID), EnvelopeDigest: result.Envelope.Digest},
+		capsuletrace.Event{Kind: capsuletrace.KindCIVerdict, JobID: string(result.Job.ID), EnvelopeDigest: result.Envelope.Digest, Outcome: result.Verdict.Outcome},
+	)
+	raw, err := capsuletrace.MarshalDocument(trace)
 	if err != nil {
 		return Stored{}, err
 	}

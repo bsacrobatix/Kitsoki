@@ -1,9 +1,10 @@
 # Tracing: capsule CI receipts and attestations
 
 **Status:** v1 in progress. Canonical receipt build/verification, tamper tests,
-signer DI, controller trace sidecars, promotion-gate binding, and
-`capsule-ci-run-index/v1` status projection ship. Rich trace producers,
-runstatus/provider publication, and trusted remote receipt adoption remain.
+signer DI, shared trace schema constants, controller trace sidecars,
+promotion-gate binding, and `capsule-ci-run-index/v1` status projection ship.
+Rich trace producers, runstatus/provider publication, and trusted remote receipt
+adoption remain.
 **Kind:**   tracing
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -188,6 +189,8 @@ of evidence.
 ```text
 ## 1. Emit and schema
 - [ ] 1.1 Define capsule lifecycle, environment/executor/policy, CI verdict, and sync trace event schemas with shared run/envelope ids
+  - Shipped: `internal/capsule/trace` defines `capsule-ci-trace/v1` document validation plus CI/workspace/environment/sync event-kind schemas; CI receipt traces and sync lifecycle facts consume these shared constants.
+  - Remaining: complete producer adoption for all lifecycle/environment/executor/policy facts and golden trace coverage.
 - [x] 1.2 Define capsule-ci-receipt/v1 JSON schema, canonicalizer, content hashing, and verification result
 - [ ] 1.3 Wire runtime/story producers and enforce secret/path redaction
 
