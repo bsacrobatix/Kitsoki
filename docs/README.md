@@ -16,6 +16,7 @@ For the elevator pitch and user quickstart, see the top-level
 | Debugging a session | [`tracing/README.md`](tracing/README.md) -> [`tracing/testing.md`](tracing/testing.md) -> [`tracing/trace-format.md`](tracing/trace-format.md) |
 | Working on UI | [`web/README.md`](web/README.md) or [`tui/README.md`](tui/README.md) -> [`tui/rendering-tests.md`](tui/rendering-tests.md) |
 | Managing local development workspaces | [`dev-workspaces.md`](dev-workspaces.md) -> [`architecture/hosts.md#hostgit_worktree-workspace-interface`](architecture/hosts.md#hostgit_worktree-workspace-interface) -> [`guide/development/capsules.md`](guide/development/capsules.md) |
+| Checking whether the product actually works for a user | [`persona-qa.md`](persona-qa.md) -> [`testing/README.md`](testing/README.md) |
 
 The tree is organised by task and area. Each section has its own `README.md`
 index. The proposal tree is design history and work in progress, not the
@@ -61,6 +62,17 @@ The session trace is the authoritative state; everything else derives
 from it. This section covers the trace format, the two test modes,
 host cassettes, the `kitsoki turn` probe, and how to replay and debug
 a session. *Audience: anyone testing, debugging, or developing a story.*
+
+### [`testing/`](testing/README.md) — evaluating Kitsoki against real use
+
+Story-local agent benchmarks, routing-fixture tuning, upgraded-story CI
+checks, model/harness comparison, and **Persona QA** — checking a product
+scenario across transports or running a full persona x scenario matrix sweep
+against real repos, with an independent judge and a report + Slidey deck.
+*Audience: anyone evaluating whether a story or the product itself actually
+works.*
+
+Start with [`persona-qa.md`](persona-qa.md) for the 5-minute path.
 
 ### [`recipes/`](recipes/README.md) — copy-paste patterns
 
