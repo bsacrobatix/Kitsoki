@@ -42,6 +42,22 @@ host_handlers:
               - id: "tests"
                 status: "fail"
                 detail: "python -m pytest exited 1"
+  host.starlark.run:
+    by_call:
+      readiness:
+        data:
+          result:
+            schema: "kitsoki-readiness/v1"
+            status: "fail"
+            ok: false
+            out: ".artifacts/kitsoki-readiness.json"
+            checks:
+              - id: "story-load"
+                status: "pass"
+                detail: "go run ./cmd/kitsoki validate .kitsoki/stories/acme-py-dev/app.yaml"
+              - id: "tests"
+                status: "fail"
+                detail: "python -m pytest exited 1"
 
 turns:
   - intent: { name: run_readiness, slots: {} }
@@ -52,6 +68,7 @@ turns:
       init_readiness_result:
         schema: "kitsoki-readiness/v1"
         status: "fail"
+        ok: false
         out: ".artifacts/kitsoki-readiness.json"
         checks:
           - id: "story-load"
@@ -69,6 +86,7 @@ turns:
       init_readiness_result:
         schema: "kitsoki-readiness/v1"
         status: "fail"
+        ok: false
         out: ".artifacts/kitsoki-readiness.json"
         checks:
           - id: "story-load"

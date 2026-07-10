@@ -5,8 +5,9 @@
 #   init_done -> init_readiness -> init_done
 #   init_done -> init_customizations -> init_done
 #
-# Discovery and apply are host.run scripts that emit JSON. Flow fixtures stub
-# both calls, so this remains no-LLM and cost-free in tests. The review room is
+# Discovery and apply are native host capabilities called through a Starlark
+# adapter. Flow fixtures stub both calls, so this remains no-LLM and cost-free
+# in tests. The review room is
 # the operator checkpoint: no files are written until confirm_init enters the
 # apply room.
 
@@ -73,43 +74,45 @@ states:
               hint:   "re-render"
               intent: look
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         once: true
         id: discover
         with:
-          cmd: python3
-          script: scripts/init_discover.py
-          args:
-            - "{{ world.init_request }}"
-            - "{{ world.workdir }}"
-            - "{{ world.repo_root }}"
+          script: scripts/init_onboarding.star
+          inputs:
+            op: discover
+            request: "{{ world.init_request }}"
+            workdir: "{{ world.workdir }}"
+            repo_root: "{{ world.repo_root }}"
+          capabilities:
+            host:
+              verbs: [host.dev.onboarding]
         bind:
-          init_run_ok:        "ok"
-          init_run_output:    "stdout"
-          init_discovery:     "stdout_json"
-          init_discovery_error: "stdout_json.error"
-          init_target_path:   "stdout_json.target_path"
-          init_project_id:    "stdout_json.project_id"
-          init_project_title: "stdout_json.project_title"
-          init_stack:         "stdout_json.stack"
-          init_dev_command:   "stdout_json.dev_command"
-          init_test_command:  "stdout_json.test_command"
-          init_build_command: "stdout_json.build_command"
-          init_repo_vcs:      "stdout_json.repo_vcs"
-          init_repo_default_branch: "stdout_json.repo_default_branch"
-          init_repo_remote:   "stdout_json.repo_remote"
-          init_conventions:   "stdout_json.conventions"
-          init_tracker:       "stdout_json.tracker"
-          init_ticket_provider: "stdout_json.tracker"
-          init_ticket_repo:   "stdout_json.ticket_repo"
-          init_story_pack:    "stdout_json.story_pack"
-          init_story_pack_title: "stdout_json.story_pack_title"
-          init_story_pack_summary: "stdout_json.story_pack_summary"
-          init_story_packs:   "stdout_json.story_packs"
-          init_starter_stories: "stdout_json.starter_stories"
-          init_transcript_count:      "stdout_json.transcript_count"
-          init_transcript_sources:    "stdout_json.transcript_sources"
-          init_mining_recommendation: "stdout_json.mining_recommendation"
+          init_run_ok:        "result.status"
+          init_discovery:     "result"
+          init_discovery_error: "result.error"
+          init_target_path:   "result.target_path"
+          init_project_id:    "result.project_id"
+          init_project_title: "result.project_title"
+          init_stack:         "result.stack"
+          init_dev_command:   "result.dev_command"
+          init_test_command:  "result.test_command"
+          init_build_command: "result.build_command"
+          init_repo_vcs:      "result.repo_vcs"
+          init_repo_default_branch: "result.repo_default_branch"
+          init_repo_remote:   "result.repo_remote"
+          init_conventions:   "result.conventions"
+          init_tracker:       "result.tracker"
+          init_ticket_provider: "result.tracker"
+          init_ticket_repo:   "result.ticket_repo"
+          init_story_pack:    "result.story_pack"
+          init_story_pack_title: "result.story_pack_title"
+          init_story_pack_summary: "result.story_pack_summary"
+          init_story_packs:   "result.story_packs"
+          init_starter_stories: "result.starter_stories"
+          init_transcript_count:      "result.transcript_count"
+          init_transcript_sources:    "result.transcript_sources"
+          init_mining_recommendation: "result.mining_recommendation"
         on_error: init_discover_failed
     on:
       init_discovered:
@@ -956,33 +959,40 @@ states:
               hint:   "re-render"
               intent: look
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         once: true
         id: apply
         with:
-          cmd: python3
-          script: scripts/init_apply.py
-          args:
-            - "{{ world.init_target_path }}"
-            - "{{ world.init_project_id }}"
-            - "{{ world.init_project_title }}"
-            - "{{ world.init_stack }}"
-            - "{{ world.init_dev_command }}"
-            - "{{ world.init_test_command }}"
-            - "{{ world.init_build_command }}"
-            - "{{ world.init_conventions }}"
-            - "{{ world.init_ticket_provider == 'github' ? 'github' : 'none' }}"
-            - "{{ world.init_profile_json }}"
-            - "{{ world.init_mining_recommendation }}"
-            - "{{ world.init_starter_stories }}"
-            - "{{ world.init_story_pack }}"
-            - "{{ world.init_ticket_repo }}"
-          fail_on_error: true
+          script: scripts/init_onboarding.star
+          inputs:
+            op: apply
+            profile_json: "{{ world.init_profile_json }}"
+            data:
+              target_path: "{{ world.init_target_path }}"
+              project_id: "{{ world.init_project_id }}"
+              project_title: "{{ world.init_project_title }}"
+              stack: "{{ world.init_stack }}"
+              dev_command: "{{ world.init_dev_command }}"
+              test_command: "{{ world.init_test_command }}"
+              build_command: "{{ world.init_build_command }}"
+              conventions: "{{ world.init_conventions }}"
+              tracker: "{{ world.init_ticket_provider }}"
+              ticket_repo: "{{ world.init_ticket_repo }}"
+              repo_vcs: "{{ world.init_repo_vcs }}"
+              repo_default_branch: "{{ world.init_repo_default_branch }}"
+              repo_remote: "{{ world.init_repo_remote }}"
+          capabilities:
+            host:
+              verbs: [host.dev.onboarding]
         bind:
-          init_apply_ok: "ok"
-          init_apply_output: "stdout"
-          init_apply_result: "stdout_json"
+          init_apply_ok: "result.profile_validation.ok"
+          init_apply_output: "result.error"
+          init_apply_result: "result"
         on_error: init_apply_failed
+      - when: "world.init_apply_result.status == 'apply-failed'"
+        emit_intent: init_applied
+      - when: "world.init_apply_result.status == 'profile-validation-failed'"
+        emit_intent: init_applied
       # Install the kitsoki agent toolkit (skills + shared subagents) and
       # register the studio MCP into the target checkout, so an onboarded
       # project is a fully working kitsoki environment (not just config files).
@@ -1373,41 +1383,24 @@ states:
               hint:   "re-render"
               intent: look
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         once: true
         id: customizations
         with:
-          cmd: bash
-          cwd: "{{ world.init_target_path }}"
-          args:
-            - "-c"
-            - |
-              if [ ! -f .kitsoki/promote-session-mining.py ]; then
-                printf '{"action":"missing-helper","entries":[],"changed":[],"counts":{},"updated":false,"error":".kitsoki/promote-session-mining.py was not found"}\n'
-                exit 0
-              fi
-              case "$1" in
-                accept)
-                  python3 .kitsoki/promote-session-mining.py --accept-pending --json
-                  ;;
-                refine)
-                  python3 .kitsoki/promote-session-mining.py --refine-pending "$2" --json
-                  ;;
-                list)
-                  python3 .kitsoki/promote-session-mining.py --list --json
-                  ;;
-                *)
-                  python3 .kitsoki/promote-session-mining.py --json
-                  ;;
-              esac
-            - "customizations"
-            - "{{ world.init_customization_action }}"
-            - "{{ world.init_customization_feedback }}"
-          timeout: "2m"
+          script: scripts/init_onboarding.star
+          inputs:
+            op: customizations
+            data:
+              target_path: "{{ world.init_target_path }}"
+              action: "{{ world.init_customization_action }}"
+              feedback: "{{ world.init_customization_feedback }}"
+          capabilities:
+            host:
+              verbs: [host.dev.onboarding]
         bind:
-          init_customization_ok: "ok"
-          init_customization_output: "stdout"
-          init_customization_result: "stdout_json"
+          init_customization_ok: "result.ok"
+          init_customization_output: "result.error"
+          init_customization_result: "result"
     on:
       accept_customizations:
         - target: .
@@ -1468,7 +1461,7 @@ states:
           text:     "PROJECT ONBOARDING"
           subtitle: "readiness check"
           color:    "#0EA5E9"
-      - prose: "Running the generated readiness verifier against the target checkout. Project command failures are captured as report data."
+      - prose: "Running the native readiness verifier against the target checkout. Project command failures are captured as report data."
         when: "world.init_readiness_result.status == ''"
       - kv:
           pairs:
@@ -1503,25 +1496,23 @@ states:
               hint:   "re-render"
               intent: look
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         once: true
         id: readiness
         with:
-          cmd: bash
-          cwd: "{{ world.init_target_path }}"
-          args:
-            - "-c"
-            - |
-              if [ ! -f .kitsoki/check-readiness.py ]; then
-                printf '{"schema":"kitsoki-readiness/v1","status":"error","out":".artifacts/kitsoki-readiness.json","checks":[{"id":"readiness-script","status":"fail","detail":".kitsoki/check-readiness.py was not found"}]}\n'
-                exit 0
-              fi
-              python3 .kitsoki/check-readiness.py --json --update-profile
-          timeout: "10m"
+          script: scripts/init_onboarding.star
+          inputs:
+            op: readiness
+            data:
+              target_path: "{{ world.init_target_path }}"
+              project_id: "{{ world.init_project_id }}"
+          capabilities:
+            host:
+              verbs: [host.dev.onboarding]
         bind:
-          init_readiness_ok: "ok"
-          init_readiness_output: "stdout"
-          init_readiness_result: "stdout_json"
+          init_readiness_ok: "result.ok"
+          init_readiness_output: "result.error"
+          init_readiness_result: "result"
     on:
       readiness_checked:
         - target: init_done

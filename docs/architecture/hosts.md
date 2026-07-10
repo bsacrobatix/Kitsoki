@@ -2212,7 +2212,8 @@ a Go constant: pin an explicit `owner/repo`, or override the world key
 per-session, to retarget a fork-of-a-fork or downstream project.
 
 **External repo binding (onboarding passthrough).** Project onboarding
-(`stories/dev-story/scripts/init_discover.py` + `init_apply.py`) closes the
+(`stories/dev-story/scripts/init_onboarding.star` calling the native
+`host.dev.onboarding` capability) closes the
 same loop for external repos: discovery classifies `tracker: github` when the
 target's `origin` remote parses to a `github.com` `owner/repo` slug, and apply
 generates an instance whose `host_bindings` pin `ticket: host.gh.ticket` with

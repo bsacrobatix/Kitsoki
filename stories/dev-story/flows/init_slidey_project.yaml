@@ -54,6 +54,42 @@ host_handlers:
               - "kitsoki-mcp-driver.md"
             mcp_path: "/Users/brad/code/slidey/.mcp.json"
             mcp_written: true
+  host.starlark.run:
+    by_call:
+      discover:
+        data:
+          result:
+            target_path: "/Users/brad/code/slidey"
+            project_id: "slidey"
+            project_title: "Slidey"
+            stack: "node/vue/vite/puppeteer declarative deck engine with web, html, pdf, and mp4 outputs"
+            dev_command: "node src/index.js examples/hello.slidey.json --port 5000 --no-open"
+            test_command: "npm test"
+            build_command: "npm run build"
+            conventions: "hybrid"
+            tracker: "none"
+      apply:
+        data:
+          result:
+            status: "applied"
+            config_path: "/Users/brad/code/slidey/.kitsoki.yaml"
+            profile_path: "/Users/brad/code/slidey/.kitsoki/project-profile.yaml"
+            instance_path: "/Users/brad/code/slidey/.kitsoki/stories/slidey-dev/app.yaml"
+            gitignore_path: "/Users/brad/code/slidey/.gitignore"
+            writes:
+              - "/Users/brad/code/slidey/.kitsoki.yaml"
+              - "/Users/brad/code/slidey/.kitsoki/project-profile.yaml"
+              - "/Users/brad/code/slidey/.kitsoki/stories/slidey-dev/app.yaml"
+      install_tools:
+        data:
+          result:
+            target: "/Users/brad/code/slidey"
+            skills:
+              - "kitsoki-story-authoring"
+            agents:
+              - "kitsoki-mcp-driver.md"
+            mcp_path: "/Users/brad/code/slidey/.mcp.json"
+            mcp_written: true
 
 turns:
   - intent: { name: go_init, slots: {} }

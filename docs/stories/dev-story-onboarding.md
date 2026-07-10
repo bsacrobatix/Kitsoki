@@ -7,9 +7,10 @@ mechanics; for the user-facing "how do I onboard my repo" walkthrough and the
 standalone `kitsoki project-tools install` command, read
 [getting-started.md](../getting-started.md) first.
 
-The pipeline is **boring and auditable on purpose**: discovery and apply are
-plain Python scripts that emit JSON, the operator reviews the profile before any
-write, and the whole walk is gated by a no-LLM flow fixture.
+The pipeline is **boring and auditable on purpose**: discovery, apply, readiness,
+and customization review are native host operations called through the
+story-provided Starlark adapter, the operator reviews the profile before any
+write, and the whole walk is gated by no-LLM flow fixtures.
 
 ---
 
@@ -18,10 +19,10 @@ write, and the whole walk is gated by a no-LLM flow fixture.
 ```mermaid
 flowchart LR
     landing -->|"onboard &lt;path&gt;"| init_discover
-    init_discover -->|"on_enter: init_discover.py"| init
+    init_discover -->|"on_enter: init_onboarding.star"| init
     init_discover --> init_discover_failed
     init -->|"confirm / review"| init_apply
-    init_apply -->|"on_enter: init_apply.py<br/>+ project-tools install"| init_done
+    init_apply -->|"on_enter: init_onboarding.star<br/>+ project-tools install"| init_done
     init_done -->|"customizations"| init_customizations
     init_customizations -->|"continue"| init_done
     init_done -->|"readiness"| init_readiness
@@ -33,12 +34,12 @@ Defined in [`stories/dev-story/rooms/init.yaml`](../../stories/dev-story/rooms/i
 
 | Room | Does |
 |---|---|
-| `init_discover` | `on_enter` runs [`scripts/init_discover.py`](../../stories/dev-story/scripts/init_discover.py) against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, repo metadata, …). Commands are **stack-aware**: Node scripts through the repo's selected package manager (`npm`, `pnpm`, `yarn`, or `bun`), Cargo (`cargo build`/`test`, or Makefile targets), Go (`go build ./...`/`go test ./...`, Makefile targets winning), and Python (`pytest`/`tox`, FastAPI/Flask dev hints) — so a recognised stack is never left command-less when it has canonical commands. Reads nothing it shouldn't — discovery is **read-only** and refuses missing or non-directory targets instead of creating them. |
+| `init_discover` | `on_enter` runs [`scripts/init_onboarding.star`](../../stories/dev-story/scripts/init_onboarding.star), which calls native `host.dev.onboarding` discovery against the target and binds the discovered profile (`init_project_id`, `init_stack`, dev/test/build commands, repo metadata, …). Reads nothing it shouldn't — discovery is **read-only** and refuses missing or non-directory targets instead of creating them. |
 | `init` | Operator **reviews** the discovered profile. `confirm_init` applies; `revise_init` records feedback; `quit` returns to the workbench. No writes happen until confirm. |
 | `init_apply` | `on_enter` runs the file apply and toolkit install host steps (below), then surfaces the written paths + MCP registration or a loud retry read-out. |
 | `init_done` | Read-out of the applied result; `review_customizations` promotes and reviews mined customization reports; `run_readiness` explicitly runs the generated verifier; `go_main` returns to the workbench. |
-| `init_customizations` | Runs `.kitsoki/promote-session-mining.py`, shows pending/accepted/refinement counts and entries, and lets the operator accept pending entries or record refinement feedback in the project profile. |
-| `init_readiness` | Runs `.kitsoki/check-readiness.py --json --update-profile` in the target checkout, captures pass/fail as report data, and returns to `init_done` for review. |
+| `init_customizations` | Calls native `host.dev.onboarding` through `init_onboarding.star`, shows pending/accepted/refinement counts and entries, and lets the operator accept pending entries or record refinement feedback in the project profile. |
+| `init_readiness` | Calls native `host.dev.onboarding` through `init_onboarding.star`, runs declared project checks, writes `.artifacts/kitsoki-readiness.json`, updates the profile readiness block, and returns to `init_done` for review. |
 | `init_discover_failed` / `init_apply_failed` | Error read-outs with retry arcs. |
 
 ## Entering onboarding
@@ -48,12 +49,13 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 
 - **`go_init`** — the explicit "onboard" quick action. Its optional `target`
   slot points at an **external** repo deterministically (no free-text routing):
-  the slot value becomes `init_request`, which `init_discover.py` resolves like
+  the slot value becomes `init_request`, which the Starlark adapter passes to
+  native discovery like
   any path. An empty slot (the bare button) falls back to the current checkout.
 - **`work`** with an onboarding utterance — `landing`'s default intent captures
   free text, and a narrow guard routes leading verbs
   (`onboard …` / `project onboarding …` / `init project …`) into onboarding,
-  carrying the request as `init_request`. `init_discover.py` parses the target
+  carrying the request as `init_request`. Native discovery parses the target
   path out of the request (`onboard ~/code/foo` → `/abs/.../foo`), falling back
   to `repo_root` / `workdir` / cwd.
 
@@ -130,9 +132,9 @@ The graph is:
 ```mermaid
 flowchart LR
     landing -->|"provider"| profile_setup_discover
-    profile_setup_discover -->|"on_enter: profile_setup_discover.py"| profile_setup_review
+    profile_setup_discover -->|"on_enter: profile_setup.star"| profile_setup_review
     profile_setup_review -->|"confirm"| profile_setup_apply
-    profile_setup_apply -->|"on_enter: profile_setup_apply.py"| profile_setup_done
+    profile_setup_apply -->|"on_enter: profile_setup.star"| profile_setup_done
     profile_setup_apply --> profile_setup_apply_failed
 ```
 
@@ -144,16 +146,17 @@ model id. Apply writes only `.kitsoki.local.yaml`, preserves unrelated local
 keys where possible, refuses raw secret values, and refuses to write the local
 override if git tracks it.
 
-## The apply step — two host calls
+## The apply step — the native host boundary plus toolkit install
 
-`init_apply.on_enter` runs two `host.run` invocations, in order:
+`init_apply.on_enter` runs the Starlark onboarding adapter and then the toolkit
+installer:
 
-1. **`init_apply.py`** ([source](../../stories/dev-story/scripts/init_apply.py))
-   — writes the checked-in onboarding files: `.kitsoki.yaml`,
-   `.kitsoki/project-profile.yaml`, `.kitsoki/check-readiness.py`,
-   `.kitsoki/promote-session-mining.py`,
+1. **`scripts/init_onboarding.star`** ([source](../../stories/dev-story/scripts/init_onboarding.star))
+   — calls native `host.dev.onboarding` to write the checked-in onboarding files:
+   `.kitsoki.yaml`, `.kitsoki/project-profile.yaml`,
    `.kitsoki/stories/<id>-dev/app.yaml` (+ README), and appends the kitsoki
-   runtime block to `.gitignore`. Binds
+   runtime block to `.gitignore`. It validates the generated profile before any
+   write and binds
    `init_apply_result` (the JSON report); a failure routes to
    `init_apply_failed`. The generated profile's `onboarding` block records the
    selected starter pack, deterministic repo evidence, and initial
@@ -194,8 +197,8 @@ opt in later with `/mine resume` or `/mine now` without re-discovering scope.
 This is a review handoff only: no mining pass or LLM call runs during
 onboarding.
 
-The generated `.kitsoki/promote-session-mining.py` is the deterministic bridge
-from emitted mining reports to profile customizations. It scans
+The native `host.dev.onboarding` customization operation is the deterministic
+bridge from emitted mining reports to profile customizations. It scans
 `.artifacts/mining/jobs/*/analysis.json` (or explicit paths), ignores
 quarantined recipes, and appends pending `onboarding.story_customizations`
 entries for operator review. It never edits the shared base story and never
@@ -220,7 +223,8 @@ again into the generated `.kitsoki/stories/<id>-dev/app.yaml`.
 Parent tracker metadata is copied into the child's `tracker:` block. When the
 parent declares `setup_command`, `readiness_command`, or `required_env`, those
 remain generic profile metadata; a declared `readiness_command` is added to the
-generated `.kitsoki/check-readiness.py` checks and runs from the parent root.
+generated profile checks and runs from the parent root through the native
+readiness operation.
 `ticket_repo` stays GitHub-only, so private providers use the `iface.ticket`
 binding without triggering GitHub-specific publish or closeout behavior.
 
@@ -237,12 +241,11 @@ The same module is reusable outside a story through
 `kitsoki ticket-provider call --script <provider.star> --op search ...` and the
 studio MCP `ticket.call` tool.
 
-The generated `.kitsoki/check-readiness.py` is the explicit post-apply verifier.
-It mirrors `setup_plan.verifications`, supports `--list` for review, and writes
-`.artifacts/kitsoki-readiness.json` when run. With `--update-profile`, it also
-replaces the profile's top-level `readiness:` block with a schema-shaped summary
-of the pass/fail results. Onboarding does not execute those commands
-automatically.
+The native `host.dev.onboarding` readiness operation is the explicit post-apply
+verifier. It mirrors the profile's declared commands, writes
+`.artifacts/kitsoki-readiness.json`, and replaces the profile's top-level
+`readiness:` block with a schema-shaped summary of the pass/fail results.
+Onboarding does not execute those commands automatically.
 
 The story exposes that verifier as an explicit `readiness` action from
 `init_done`. Red project checks are treated as data: the action stays in the
