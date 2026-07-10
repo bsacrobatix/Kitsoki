@@ -7,6 +7,8 @@ def main(ctx):
         "receipt": {
             "kind": "corpus-receipt.v1",
             "selection_id": ctx.inputs["selection_id"],
+            "corpus_role": ctx.inputs["corpus_role"],
+            "source_manifest_ref": ctx.inputs["source_manifest_ref"],
             "candidate_count": len(candidates),
             "candidates": candidates,
             "proofs": proofs,

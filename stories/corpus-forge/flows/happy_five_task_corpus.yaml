@@ -5,6 +5,8 @@ test_kind: flow
 app: ../app.yaml
 initial_state: idle
 initial_world:
+  corpus_role: calibration
+  source_manifest_ref: fixtures/arena-five.yaml
   task_limit: 5
   source_candidates:
     - { kind: corpus-case.v1, id: five, repo: example/five, source: arena, baseline_ref: base-five, fix_ref: fix-five, ticket: five, archetype: bugfix, oracle: { command: [test, five] }, provenance: { adapter: fixture, locator: five, source_digest: sha256:five }, verified_red: false, verified_green: false }
@@ -34,6 +36,7 @@ turns:
     expect_host_calls: [{ handler: host.starlark.run }]
   - intent: { name: accept, slots: {} }
     expect_state: receipt
+    expect_view_matches: "frozen receipt"
     expect_host_calls: [{ handler: host.starlark.run }]
   - intent: { name: accept, slots: {} }
     expect_state: __exit__done

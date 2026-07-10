@@ -1,4 +1,4 @@
-app: { id: corpus-forge, version: 0.2.0, title: "Corpus Forge", author: Kitsoki, license: CC0 }
+app: { id: corpus-forge, version: 0.3.0, title: "Corpus Forge", author: Kitsoki, license: CC0 }
 hosts: [host.starlark.run, host.corpus.prove]
 world:
   # Intake adapters supply only the canonical corpus-case.v1 candidate list.
@@ -6,6 +6,8 @@ world:
   source_candidates: { type: list, default: [] }
   task_limit: { type: int, default: 5 }
   selection_id: { type: string, default: "local-corpus-forge" }
+  corpus_role: { type: string, default: "calibration" }
+  source_manifest_ref: { type: string, default: "" }
   loaded_candidates: { type: list, default: [] }
   selected_candidates: { type: list, default: [] }
   selected_ids: { type: string, default: "" }
