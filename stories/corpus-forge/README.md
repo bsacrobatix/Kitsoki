@@ -64,14 +64,35 @@ using `session.inspect` or a targeted `session.world` read.
 }
 ```
 
-For a production drive, register the proof handler and an explicitly configured
-receipt handler in the host registry rather than using cassettes:
+For a production drive, start Studio with an explicit local runtime file rather
+than using cassettes. This installs both handlers for every `session.new`:
 
-```go
-store, _ := corpusreceipt.NewFileStore("/reviewed/evals/my-story/receipts")
-registry := corpusreceipt.Registry{Store: store}
-hostReg.Replace("host.corpus.freeze_receipt", host.CorpusReceiptHandler(registry))
+```yaml
+# corpus-runtime.local.yaml — keep it out of version control
+schema: corpus-runtime/v1
+repository_root: /srv/mirrors/my-story-target
+repository_identity: acme/my-story-target
+workspace_root: /var/tmp/my-story-corpus-work
+receipt_store: /srv/evaluations/my-story/receipts
+sandbox:
+  # Linux: bubblewrap /usr/bin/bwrap. macOS: sandbox-exec /usr/bin/sandbox-exec.
+  kind: sandbox-exec
+  binary: /usr/bin/sandbox-exec
 ```
+
+```sh
+go run ./cmd/kitsoki mcp --stories-dir ./stories \
+  --corpus-runtime-config /secure/path/corpus-runtime.local.yaml
+```
+
+`repository_root` must be a local Git mirror; Corpus Forge never fetches a
+candidate-controlled remote. The sandbox is mandatory: Linux `bubblewrap`
+receives a fixed `--unshare-net` profile, while macOS `sandbox-exec` receives a
+generated deny-by-default Seatbelt profile with no network and writes permitted
+only inside each isolated checkout. A missing, non-executable, or unsupported
+sandbox aborts Studio startup; there is no unrestricted fallback. The file
+store is created at startup and remains shared across Studio processes. Keep it
+outside `workspace_root`, which is cleaned after each proof.
 
 A default Studio host intentionally has neither proof executor nor receipt
 registry, so it rejects rather than inventing proof or global durability. Use a
