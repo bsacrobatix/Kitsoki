@@ -595,6 +595,12 @@ func RegisterBuiltins(r *Registry) {
 	// prefix fallback resolves every host.graph.<op> call here with <op>
 	// injected into args["op"].
 	r.Register("host.graph", GraphHandler)
+
+	// Use-case loop A2 — host.demo.* (mockup/demo packet pipeline: create,
+	// record, doctor; see demo_handlers.go). Registered bare so the
+	// registry's longest-prefix fallback resolves every host.demo.<op>
+	// call here with <op> injected into args["op"].
+	r.Register("host.demo", DemoHandler)
 }
 
 // AgentExtractHandler is implemented in agent_extract.go.
