@@ -1,0 +1,58 @@
+package control
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"testing"
+)
+
+type defs map[string]Definition
+
+func (d defs) Get(_ context.Context, id string) (Definition, error) {
+	v, ok := d[id]
+	if !ok {
+		return Definition{}, ErrNotFound
+	}
+	return v, nil
+}
+func (d defs) List(context.Context) ([]Definition, error) { return nil, nil }
+
+type provider struct {
+	name  string
+	calls int
+}
+
+func (p *provider) Name() string { return p.name }
+func (p *provider) Create(_ context.Context, _ Definition, in Instance) (MaterializedWorkspace, error) {
+	p.calls++
+	return MaterializedWorkspace{Path: in.Path, Head: "abc"}, nil
+}
+func (p *provider) Close(context.Context, Instance) error { return nil }
+
+func TestManagerLeaseIdempotencyAndStaleHandle(t *testing.T) {
+	root := t.TempDir()
+	p := &provider{name: "synthetic"}
+	store := NewMemoryInstanceStore()
+	m := &Manager{Definitions: defs{"clean": {ID: "clean", Schema: DefinitionSchema, Source: Source{Kind: SourceSynthetic, SyntheticSpec: "x"}, Digest: "sha256:x"}}, Instances: store, Providers: map[string]WorkspaceProvider{"synthetic": p}, Grant: ScopeGrant{ProjectRoot: root, WorkspaceRoots: []string{filepath.Join(root, ".capsules")}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}}}
+	ctx := context.Background()
+	first, err := m.Create(ctx, CreateRequest{ID: "one", DefinitionID: "clean", Owner: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := m.Create(ctx, CreateRequest{ID: "one", DefinitionID: "clean", Owner: "agent"})
+	if err != nil || again != first || p.calls != 1 {
+		t.Fatalf("idempotency = %#v %v calls=%d", again, err, p.calls)
+	}
+	if _, err := m.Create(ctx, CreateRequest{ID: "one", DefinitionID: "clean", Owner: "other"}); err == nil {
+		t.Fatal("different lease owner succeeded")
+	}
+	if _, err := store.CompareAndSwap(ctx, "one", first.Generation, func(*Instance) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Status(ctx, first); err == nil {
+		t.Fatal("stale handle succeeded")
+	} else if got := fmt.Sprint(err); got == "" {
+		t.Fatal("missing stale error")
+	}
+}
