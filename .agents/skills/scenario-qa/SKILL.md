@@ -23,11 +23,13 @@ transports" — not a full persona/matrix sweep (that's
   evidence" section documents the `render.tui_png` frame contract this leg
   uses, plus the `tui-serve` live-bridge escape hatch for scenarios that need
   more than a headless spec/state render)
-- Report: `<run-dir>/report.md` (folded in Starlark, `scripts/build_report.star`)
-  and `<run-dir>/deck.slidey.json` (folded by `run.py --scenario-qa-report`) —
-  the ONE per-transport verdict table, in both forms, for every transport the
-  check ran (single transport or `transport=all`); VS Code legs are labeled
-  `bridge-level` in both, never mistaken for editor-level coverage
+- Report: `<run-dir>/report.md` and `<run-dir>/deck.slidey.json`, both written
+  by `run.py --scenario-qa-report` (`scripts/build_report.star` only computes
+  the summary/path, file-system-free) — the ONE per-transport verdict table,
+  in both forms, for every transport the check ran (single transport or
+  `transport=all`); VS Code legs are labeled `bridge-level` in both, never
+  mistaken for editor-level coverage; every non-`pass` leg's row carries a
+  deterministic `cause` (see "Authorization & harness (fail-closed)" below)
 
 ## What "transport" means here
 
@@ -45,6 +47,25 @@ mirrored in `stories/scenario-qa/scripts/plan_legs.star`):
 vscode`); a scenario without a declared `transports` contract falls back to
 whatever `driver_visual_surface()` derives from its `required_mcp` (S1's
 backward-compatible default).
+
+## Authorization & harness (fail-closed)
+
+`profile=<name>` is the ONLY live authorization — see
+`docs/persona-qa.md`'s "Authorization & Harness (fail-closed)" section for
+the full contract. Summary: a leg that needs interpretive/live drive with no
+`profile=` supplied gets an explicit up-front warning at plan time
+(`scripts/plan_legs.star`'s `live_authorization_note` /
+`live_authorization_summary`, rendered in the `plan` and `execute` rooms) —
+never a silent replay-only fallback discovered only after the fact. A
+replay-miss (a `harness: "replay"` session hitting a `host.agent.*` call with
+no matching cassette episode) is a hard MCP error the driver reports as the
+blocker, never a reason to open a new session live on its own initiative —
+enforced by the session runtime itself
+(`internal/mcp/studio/session_runtime.go`), not just prompt text. Every
+non-`pass` leg carries a `cause` (`scripts/record_leg_result.star`), and a
+driver that reports `harness_used: "live"` without a supplied `profile=` gets
+its verdict forced to `degraded-evidence` with a policy-violation cause
+regardless of what it or the judge otherwise said.
 
 ## Operating rules
 
@@ -85,9 +106,8 @@ Open `stories/scenario-qa/app.yaml`. Intents:
 
 - `check scenario=<catalog-id> transport=tui|web|vscode|all persona=... target=... seed=... profile=...`
   — `profile=` names the harness profile (e.g. `claude-native`) the driver
-  passes to nested LIVE `session.new` calls when the scenario's flow needs
-  interpretive behavior no cassette covers; omit it and the driver stays
-  replay-only, reporting missing-cassette blockers as `degraded-evidence`
+  passes to nested LIVE `session.new` calls; see "Authorization & harness
+  (fail-closed)" above for what omitting it does and does not silently do
 - `check description="<free text>" transport=...` — ad-hoc scenario
 - `next_leg` — drive the next transport leg (one leg per turn; the loop
   pauses at `recording` between legs so the internal emit chain never

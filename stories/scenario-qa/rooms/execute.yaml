@@ -13,7 +13,7 @@ states:
 
   execute:
     description: "Dispatching the reusable driver for the current transport check."
-    relevant_world: [run_id, run_dir, leg_index, leg_count, current_leg, drive_result, status]
+    relevant_world: [run_id, run_dir, leg_index, leg_count, current_leg, drive_result, live_authorization_summary, status]
     view:
       - heading: "Scenario QA · execute"
       - kv:
@@ -24,7 +24,24 @@ states:
             Transport: "{{ world.current_leg.transport }}"
             Visual surface: "{{ world.current_leg.visual_surface }}"
             Evidence dir: "{{ world.current_leg.evidence_dir }}"
+      - kv:
+          pairs:
+            Live authorization: "{{ world.current_leg.live_authorization_note }}"
+        when: "world.current_leg.live_authorization_note != ''"
       - prose: "Dispatching product-journey-qa-driver for `{{ world.current_leg.transport }}`. This transport pin overrides the driver's usual cheapest-surface heuristic. A missing or JSON-degraded visual surface is reported as a blocker, never fabricated."
+      # Plan-time announcement (issue group B / bug #105): every leg that
+      # needs interpretive/live drive and has no profile= authorization was
+      # already flagged, up front, before this or any other leg was driven --
+      # scripts/plan_legs.star computes this deterministically, not an LLM
+      # judgment call. Shown on every leg of a multi-transport check so the
+      # operator sees the whole plan's exposure, not just this leg's own note.
+      - heading: "Live authorization notes (all legs)"
+        when: "len(world.live_authorization_summary) > 0"
+      - code: |
+          {% for note in world.live_authorization_summary %}
+          - {{ note }}
+          {% endfor %}
+        when: "len(world.live_authorization_summary) > 0"
     on_enter:
       - invoke: host.starlark.run
         id: pick_leg

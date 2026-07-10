@@ -31,6 +31,14 @@
       "type": "string",
       "description": "vscode legs only: the live session_handle the post-drive capture was taken against (e.g. \"s2\"). Should match the session handle the scenario was actually driven to, proving the capture reflects the driven-forward state rather than the original preflight session."
     },
+    "harness_used": {
+      "type": "string",
+      "description": "replay | live | (empty if no primary_story session.new call was needed). The harness this leg's PRIMARY session.new call actually used -- report honestly even when it differs from what args.live_profile implied. The story's record_leg_result.star deterministically forces the verdict to degraded-evidence, with an explicit policy-violation cause, if this is \"live\" while args.live_profile was empty: an explicit profile= is the ONLY live authorization, and a replay-miss (a session.new(harness=\"replay\") call that hits a host.agent.* call with no matching cassette episode) is a hard MCP error to report as the blocker, never a signal to open a new session live on your own initiative."
+    },
+    "profile_used": {
+      "type": "string",
+      "description": "The harness profile actually passed to this leg's primary session.new call when harness_used is \"live\" (should equal args.live_profile -- report honestly if it does not)."
+    },
     "summary": {
       "type": "string",
       "description": "What the driver actually attempted for this leg."

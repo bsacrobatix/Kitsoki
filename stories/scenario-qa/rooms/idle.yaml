@@ -119,6 +119,7 @@ states:
                 drive_result: {}
                 judge_result: {}
                 leg_results: { items: [] }
+                live_authorization_summary: []
                 scenario_workspace: {}
                 scenario_workspace_root: ""
                 scenario_workspace_id: ""
@@ -156,6 +157,7 @@ states:
                 drive_result: {}
                 judge_result: {}
                 leg_results: { items: [] }
+                live_authorization_summary: []
                 scenario_workspace: {}
                 scenario_workspace_root: ""
                 scenario_workspace_id: ""
