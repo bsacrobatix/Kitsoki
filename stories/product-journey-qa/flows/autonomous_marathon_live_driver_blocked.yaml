@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       capture_product_journey_preflight:
         data:
@@ -170,7 +170,7 @@ turns:
       capture_preflight_status: passed
       capture_preflight_failed: 0
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: capture_product_journey_preflight }
 
   - intent:
@@ -204,13 +204,13 @@ turns:
       validation_issue_summary: autonomous-driver-dispatch
     expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous gates[\\s\\S]*driver=fail, watchdog=not_run[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*Autonomous driver[\\s\\S]*live / blocked[\\s\\S]*Issue filing[\\s\\S]*not_run[\\s\\S]*GH-agent drain[\\s\\S]*not_run[\\s\\S]*Validation issues[\\s\\S]*autonomous-driver-dispatch"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_marathon_create }
       - handler: host.agent.task
         args: { call: autonomous_product_journey_driver }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: record_autonomous_product_journey_driver_dispatch }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_marathon_finalize }
 
 expect_no_errors: true

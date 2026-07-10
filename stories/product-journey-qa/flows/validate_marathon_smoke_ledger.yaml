@@ -7,7 +7,7 @@ initial_world:
   autonomous_marathon_smoke_report_markdown_path: .artifacts/product-journey/marathon-smokes/fixture/autonomous-marathon-smoke.md
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       validate_autonomous_marathon_smoke_ledger:
         data:
@@ -48,7 +48,7 @@ turns:
       marathon_smoke_ledger_validation_path: .artifacts/product-journey/marathon-smokes/fixture/autonomous-marathon-smoke.json
       marathon_smoke_ledger_validation_markdown_path: .artifacts/product-journey/marathon-smokes/fixture/autonomous-marathon-smoke.md
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: validate_autonomous_marathon_smoke_ledger }
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Marathon smoke ledger[\\s\\S]*autonomous-marathon-smoke.md[\\s\\S]*Marathon ledger validation[\\s\\S]*valid: valid: 5/5 flawless[\\s\\S]*filed=15[\\s\\S]*fixed=15[\\s\\S]*landed=15[\\s\\S]*cycles=1, min=1[\\s\\S]*Marathon ledger validated[\\s\\S]*autonomous-marathon-smoke.json[\\s\\S]*Status[\\s\\S]*marathon_smoke_ledger_validated"
 

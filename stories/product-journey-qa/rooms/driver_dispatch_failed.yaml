@@ -20,12 +20,10 @@ states:
           autonomous_driver_evidence_count: 0
           autonomous_driver_issue_count: 0
           autonomous_driver_dispatch_trace: ""
-      - invoke: host.run
+      - invoke: host.product_journey.run
         id: record_autonomous_product_journey_driver_dispatch_failure
         with:
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --record-autonomous-driver-dispatch
             - --json-output
             - --run-dir
@@ -72,12 +70,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "running_autonomous_marathon"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: autonomous_product_journey_marathon_finalize
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --autonomous-marathon
                   - --json-output
                   - --report-invalid-autonomous-marathon

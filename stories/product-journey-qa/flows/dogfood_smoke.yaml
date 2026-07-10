@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       dogfood_product_journey_smoke:
         data:
@@ -75,7 +75,7 @@ turns:
       dogfood_run_validation_issue_summary: "warn: artifact-ref-exists (artifacts/bugfix.mp4)"
       dogfood_matrix_validation_issue_summary: "warn: matrix-target-proof (vscode, kubernetes)"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: dogfood_product_journey_smoke }
     expect_view_matches: "Review checks[\\s\\S]*16 / 20 passed; 1 failed; 3 warnings[\\s\\S]*Run validation issues[\\s\\S]*artifact-ref-exists[\\s\\S]*Matrix validation issues[\\s\\S]*matrix-target-proof[\\s\\S]*fail: quality-gates[\\s\\S]*warn: non-demo-evidence"
 

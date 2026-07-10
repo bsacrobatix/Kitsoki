@@ -209,7 +209,7 @@ It is intentionally no-LLM:
 - `validate` calls `tools/product-journey/run.py --validate-run --json-output`
   to check required files, metrics freshness, media coverage, scenario
   outcomes, review statuses, and Slidey scenes without rewriting files.
-- Flow fixtures stub `host.run`, so automated tests never call a live model or
+- Flow fixtures stub `host.product_journey.run`, so automated tests never call a live model or
   external service.
 
 The generated run bundle under `.artifacts/product-journey/<run-id>/` is the

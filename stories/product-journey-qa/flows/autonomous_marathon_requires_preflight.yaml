@@ -27,6 +27,6 @@ turns:
       validation_issue_summary: capture-preflight-required
       review_status: not_run
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*Autonomous driver[\\s\\S]*pending / invalid[\\s\\S]*Validation issues[\\s\\S]*capture-preflight-required"
-    expect_no_host_calls: [host.run]
+    expect_no_host_calls: [host.product_journey.run]
 
 expect_no_errors: true

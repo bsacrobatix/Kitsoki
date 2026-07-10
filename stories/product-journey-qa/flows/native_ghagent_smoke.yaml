@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       native_product_journey_ghagent_smoke:
         data:
@@ -26,7 +26,7 @@ turns:
       native_ghagent_summary: native gh-agent queue/drain smoke passed
       native_ghagent_exit_code: 0
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: native_product_journey_ghagent_smoke }
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Native gh-agent[\\s\\S]*passed[\\s\\S]*Status[\\s\\S]*native_ghagent_smoke_checked"
 

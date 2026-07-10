@@ -7,7 +7,7 @@ initial_state: idle
 # bundle — credible findings remain unfiled.
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       load_product_journey_run:
         data:
@@ -72,7 +72,7 @@ turns:
       filing_summary: "Dry-run rendered 2 candidate issue(s) for bsacrobatix/Kitsoki; nothing was filed."
     expect_view_matches: "RUN CREATED[\\s\\S]*Issue filing[\\s\\S]*findings_dry_run: filed 0, skipped 0, failed 0, unfiled 2[\\s\\S]*Dry-run rendered 2 candidate issue"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: file_product_journey_findings }
 
 expect_no_errors: true

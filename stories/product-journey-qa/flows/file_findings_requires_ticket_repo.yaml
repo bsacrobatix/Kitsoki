@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       load_product_journey_run:
         data:
@@ -27,7 +27,7 @@ turns:
         run_dir: .artifacts/product-journey/run-777
     expect_state: run_created
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: load_product_journey_run }
 
   - intent:

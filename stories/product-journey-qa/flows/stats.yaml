@@ -7,7 +7,7 @@ initial_state: idle
 # only drives the runner; no GitHub or LLM calls happen in this flow.
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       load_product_journey_run:
         data:
@@ -70,7 +70,7 @@ turns:
       run_dir: .artifacts/product-journey/run-777
       issue_count: 2
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: load_product_journey_run }
 
   - intent:
@@ -100,7 +100,7 @@ turns:
       stats_summary: "Derived product-journey stats: 11 found, 9 filed, 4 fixed, 1 reopened, 3 similar pair(s)."
     expect_view_matches: "RUN CREATED[\\s\\S]*Issue state[\\s\\S]*issue_state_cached: 9 refreshed[\\s\\S]*Derived stats[\\s\\S]*stats_derived: found 11, filed 9, fixed 4, reopened 1,[\\s\\S]*similar 3[\\s\\S]*Stats runs[\\s\\S]*8 scanned; unknown state 2[\\s\\S]*Issue state artifact[\\s\\S]*\\.artifacts/product-journey/issue-state\\.json[\\s\\S]*Refreshed 9 issue state record\\(s\\) through kitsoki gitops issue-state-cache\\.[\\s\\S]*Derived product-journey stats: 11 found, 9 filed, 4 fixed, 1 reopened, 3 similar[\\s\\S]*pair\\(s\\)\\."
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: derive_product_journey_stats }
 
 expect_no_errors: true

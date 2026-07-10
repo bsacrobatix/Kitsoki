@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       autonomous_product_journey_marathon_advance_due:
         data:
@@ -97,7 +97,7 @@ turns:
       stats_status: stats_derived
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Campaign[\\s\\S]*ticking[\\s\\S]*Due advance[\\s\\S]*advanced[\\s\\S]*Due source[\\s\\S]*campaign-run-due"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_marathon_advance_due }
 
 expect_no_errors: true
