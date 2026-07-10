@@ -18,6 +18,7 @@ type AgentSandboxSpec struct {
 	RW          []string
 	Hidden      []string
 	Network     agentruntime.NetworkPolicy
+	InheritHome bool
 	Resources   agentruntime.ResourcePolicy
 	Degrade     agentruntime.DegradePolicy
 }
@@ -91,6 +92,12 @@ func parseAgentSandbox(args map[string]any) (*AgentSandboxSpec, string) {
 		}
 		spec.Degrade = p
 	}
+	if v, _ := m["auth_home"].(string); strings.TrimSpace(v) != "" {
+		if v != "inherit" {
+			return nil, fmt.Sprintf("sandbox.auth_home %q is not \"inherit\"", v)
+		}
+		spec.InheritHome = true
+	}
 	rw, err := sandboxStringList(m["rw"], "sandbox.rw")
 	if err != "" {
 		return nil, err
@@ -161,19 +168,20 @@ func (s AgentSandboxSpec) launchSpec(ctx context.Context, command string, args [
 		env = envScrubIDE(env)
 	}
 	return agentruntime.LaunchSpec{
-		Command:   command,
-		Args:      args,
-		Stdin:     strings.NewReader(stdin),
-		Dir:       workingDir,
-		Env:       env,
-		RepoRoot:  workingDir,
-		Min:       s.MinStrength,
-		Repo:      s.Repo,
-		RW:        append([]string(nil), s.RW...),
-		Hidden:    append([]string(nil), s.Hidden...),
-		Network:   s.Network,
-		Resources: s.Resources,
-		Degrade:   s.Degrade,
+		Command:     command,
+		Args:        args,
+		Stdin:       strings.NewReader(stdin),
+		Dir:         workingDir,
+		Env:         env,
+		RepoRoot:    workingDir,
+		Min:         s.MinStrength,
+		Repo:        s.Repo,
+		RW:          append([]string(nil), s.RW...),
+		Hidden:      append([]string(nil), s.Hidden...),
+		Network:     s.Network,
+		InheritHome: s.InheritHome,
+		Resources:   s.Resources,
+		Degrade:     s.Degrade,
 	}
 }
 

@@ -101,19 +101,23 @@ type ResourcePolicy struct {
 }
 
 type LaunchSpec struct {
-	Command   string
-	Args      []string
-	Stdin     io.Reader
-	Dir       string
-	Env       []string
-	RepoRoot  string
-	Min       Strength
-	Repo      RepoPolicy
-	RW        []string
-	Hidden    []string
-	Network   NetworkPolicy
-	Resources ResourcePolicy
-	Degrade   DegradePolicy
+	Command  string
+	Args     []string
+	Stdin    io.Reader
+	Dir      string
+	Env      []string
+	RepoRoot string
+	Min      Strength
+	Repo     RepoPolicy
+	RW       []string
+	Hidden   []string
+	Network  NetworkPolicy
+	// InheritHome permits an explicitly opted-in runtime to retain the host
+	// HOME. It is required for provider CLIs whose interactive credential is
+	// tied to the operator's login state; callers must opt in deliberately.
+	InheritHome bool
+	Resources   ResourcePolicy
+	Degrade     DegradePolicy
 }
 
 func (s LaunchSpec) EffectiveMin() Strength {
