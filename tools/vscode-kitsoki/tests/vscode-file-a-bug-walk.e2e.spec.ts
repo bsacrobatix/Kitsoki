@@ -12,7 +12,7 @@
  *
  * The session backdrop reuses the SAME `stories/bugfix/flows/happy_llm.yaml`
  * fixture the bugfix walk spec drives — this spec only needs AN active
- * session open in the popped-out chat panel; it does not drive the pipeline
+ * session open in the bottom Chat panel; it does not drive the pipeline
  * itself, so no cascading-judge settle logic is needed here.
  *
  * Filing is LOCAL: no `kitsoki.ticketRepo`-equivalent is configured (the
@@ -121,17 +121,6 @@ function paneByTitle(win: Page, title: string) {
     .first();
 }
 
-/** Click a pane's title-bar action — `kitsoki.popOutChat` is hidden from the
- * command palette, so it can only be driven via this view/title icon. */
-async function clickViewTitleAction(win: Page, paneTitle: string, actionLabel: string): Promise<void> {
-  const pane = paneByTitle(win, paneTitle);
-  await pane.locator('.pane-header').hover().catch(() => undefined);
-  await pane
-    .locator(`.actions-container a[aria-label*="${actionLabel}" i], .actions-container a[title*="${actionLabel}" i]`)
-    .first()
-    .click()
-    .catch(() => undefined);
-}
 
 const DEMO_TITLE = 'VS Code file-a-bug walk: sanity-check title';
 const DEMO_DESCRIPTION =
@@ -202,25 +191,16 @@ test('vscode: Meta → Report a bug → review capture → describe → File bug
       await win.screenshot({ path: path.join(ARTIFACT_DIR, `${n}-${label}.png`) }).catch(() => undefined);
     };
 
-    // ── Open Chat → pick the bugfix story → pop out to the full editor panel ──
+    // ── Open Chat → pick the bugfix story → maximize the bottom Chat panel ────
     await win.waitForSelector('.monaco-workbench', { timeout: 60_000 });
-    const icon = win.locator('.activitybar [aria-label*="Kitsoki" i]').first();
-    await expect(icon).toBeVisible({ timeout: 30_000 });
-    await icon.click();
-    await expect(win.locator('.pane-header').filter({ hasText: /^\s*Chat\b/i }).first()).toBeVisible({
-      timeout: 30_000,
-    });
     const opened = await runPaletteCommand(win, ['>Kitsoki: Open Chat']);
     if (!opened) throw new Error('could not run "Kitsoki: Open Chat" from the command palette');
     const picked = await drivePicker(win, 'Bug-fix pipeline');
     if (!picked) throw new Error('could not pick the "Bug-fix pipeline" story from the quick pick');
-    await clickViewTitleAction(win, 'Chat', 'Open Chat in Editor');
-    await win.locator('.tab.active').filter({ hasText: /Kitsoki/i }).first().waitFor({ timeout: 30_000 }).catch(() => undefined);
-
-    await runPaletteCommand(win, ['>View: Close Primary Side Bar', '>View: Toggle Primary Side Bar']);
+    await runPaletteCommand(win, ['>View: Toggle Maximized Panel']);
     await sleep(600);
 
-    const chat = await surfaceFrame(win, 'back-stories', 45_000);
+    const chat = await surfaceFrame(win, 'surface-chat', 45_000);
     await shot('a-session-open');
 
     // Focus + Enter, NOT a coordinate click: the embedded webview's topbar
