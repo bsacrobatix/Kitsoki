@@ -69,6 +69,17 @@ host_handlers:
             summary: "10 passed, 0 partial, 0 failed, 0 skipped, 0 pending"
   host.starlark.run:
     by_call:
+      punch_verify-load-bug: &verify_pass_star
+        data: { verify_result: { status: passed, summary: "1/1 deterministic checks passed", checks: [ { cmd: "go run ./cmd/kitsoki render <story> -o -", exit_code: 0, ok: true } ] } }
+      punch_verify-capability-taxonomy: *verify_pass_star
+      punch_verify-toolbox-enforcement: *verify_pass_star
+      punch_verify-cassette-conformance: *verify_pass_star
+      punch_verify-project-init-hardening: *verify_pass_star
+      punch_verify-session-mining-productization: *verify_pass_star
+      punch_verify-deliver-decomposition-decision: *verify_pass_star
+      punch_verify-contextual-routing-controls: *verify_pass_star
+      punch_verify-multi-hop-routing: *verify_pass_star
+      punch_verify-story-qa-workflow: *verify_pass_star
       punch_load:
         data:
           manifest_path: "stories/punch-list/testdata/top10_gpt55.yaml"

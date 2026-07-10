@@ -112,6 +112,12 @@ host_handlers:
             summary: "2 passed, 0 partial, 0 failed, 0 skipped, 0 pending"
   host.starlark.run:
     by_call:
+      punch_verify-validate-punch-list:
+        data:
+          verify_result: { status: passed, summary: "1/1 deterministic checks passed", checks: [ { cmd: "true", exit_code: 0, ok: true } ] }
+      punch_verify-policy-demo:
+        data:
+          verify_result: { status: passed, summary: "1/1 deterministic checks passed", checks: [ { cmd: "true", exit_code: 0, ok: true } ] }
       punch_load:
         data:
           manifest_path: "stories/punch-list/testdata/two_items.yaml"
