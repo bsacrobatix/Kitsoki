@@ -52,7 +52,7 @@ states:
 
   landing:
     description: "dev-story — the free-form workbench. Describe what you want, or pick a quick action."
-    relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, oversight_mode, captured, landing_request, landing_note, roadmap_implementation_completion_pending, roadmap_implementation_progress_path, roadmap_implementation_completed_result]
+    relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, oversight_mode, captured, landing_request, landing_note, roadmap_implementation_completion_pending, roadmap_implementation_progress_path, roadmap_implementation_completed_result, landing_next_step_label, landing_next_step_command, landing_next_step_stdout, landing_next_step_exit_code, landing_next_step_ran]
     prerequisites:
       - id: local-harness-profile
         title: "Local harness profile"
@@ -184,13 +184,30 @@ states:
       - code: '{{ world.landing_note.details|default:"" }}'
         when: "(world.landing_note.details ?? '') != ''"
 
-      # The agent's suggested next steps (e.g. surfaced when a mutating edit
-      # was held read-only pending a write-mode grant). Rendered only when the
-      # array is non-empty so a note without next_steps shows nothing here.
+      # The latest next-step action result. The workbench renders an explicit
+      # exit-code affordance: green/check for exit 0, amber warning when the
+      # selected action marked non-zero as warning, red/error otherwise.
+      - banner:
+          text: "{% if world.landing_next_step_exit_code == 0 %}NEXT STEP ✓{% elif world.landing_next_step_severity == 'warning' %}NEXT STEP ⚠{% else %}NEXT STEP ✗{% endif %}"
+          subtitle: "exit {{ world.landing_next_step_exit_code }} · {{ world.landing_next_step_label }}"
+          color: "{% if world.landing_next_step_exit_code == 0 %}#10B981{% elif world.landing_next_step_severity == 'warning' %}#F59E0B{% else %}#DC2626{% endif %}"
+        when: "world.landing_next_step_ran == true"
+      - kv:
+          pairs:
+            Command: "{{ world.landing_next_step_command }}"
+        when: "world.landing_next_step_ran == true"
+      - code: '{{ world.landing_next_step_stdout|default:"" }}'
+        when: "world.landing_next_step_ran == true && world.landing_next_step_stdout != ''"
+
+      # Structured next steps. Object rows are deterministic actions: the
+      # operator picks run_next_step n=<row>, the arc runs that row's command via
+      # host.run, and the result above shows stdout + exit code. Legacy string
+      # rows still render as prose-only suggestions for old recordings.
       - heading: "Next steps"
         when: "world.landing_note.next_steps"
-      - template: |
-          {% for s in world.landing_note.next_steps %}- {{ s }}
+      - code: |
+          #  Action                          Command / detail
+          {% for s in world.landing_note.next_steps %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if s.command %}{{ s.label|default:"next step"|col:30 }}  {{ s.command }}{% if s.description %} — {{ s.description }}{% endif %}{% else %}{{ s }}{% endif %}
           {% endfor %}
         when: "world.landing_note.next_steps"
 
@@ -251,6 +268,15 @@ states:
               hint:   "jump onto the suggested pipeline (or ignore and keep working here)"
               intent: take_route
               when:   "(world.landing_note.route.intent ?? '') != ''"
+            - label:  "run_next_step"
+              hint:   "run a numbered next-step command and show its log + exit code"
+              intent: run_next_step
+              when:   "world.landing_note.next_steps"
+              param:
+                slot:        n
+                type:        int
+                placeholder: "next-step row number"
+                required:    true
             - label:  "tickets"
               hint:   "search and pick a ticket"
               intent: go_ticket_search
@@ -742,6 +768,42 @@ states:
                 ticket_type: "{{ world.landing_note.route.ticket_type ?? world.ticket_type }}"
                 last_error:  ""
             - emit_intent: "{{ world.landing_note.route.intent }}"
+
+      # Run a structured next-step action from the latest workbench result.
+      # This turns post-task follow-up from prose into a deterministic menu
+      # choice: select row n, execute that row's command through host.run, then
+      # render stdout + the exit-code banner in the landing view.
+      run_next_step:
+        - when: "slots.n != nil && (int(slots.n) < 1 || int(slots.n) > len(world.landing_note.next_steps))"
+          target: .
+          guard_hint: "Next-step row {{ slots.n }} is out of range — pick 1..{{ len(world.landing_note.next_steps) }}."
+        - when: "slots.n == nil"
+          target: .
+          guard_hint: "Provide n=<row number> from the Next steps table."
+        - when: "world.landing_note.next_steps[int(slots.n) - 1].command == nil || world.landing_note.next_steps[int(slots.n) - 1].command == ''"
+          target: .
+          guard_hint: "Next-step row {{ slots.n }} is prose-only; pick a row with a command."
+        - target: .
+          effects:
+            - set:
+                landing_next_step_index:     "{{ int(slots.n) }}"
+                landing_next_step_label:     "{{ world.landing_note.next_steps[int(slots.n) - 1].label }}"
+                landing_next_step_command:   "{{ world.landing_note.next_steps[int(slots.n) - 1].command }}"
+                landing_next_step_severity:  "{{ world.landing_note.next_steps[int(slots.n) - 1].severity ?? 'error' }}"
+                landing_next_step_stdout:    ""
+                landing_next_step_exit_code: 0
+                landing_next_step_ran:       false
+            - invoke: host.run
+              id: landing-next-step
+              with:
+                cmd: "{{ world.landing_next_step_command }}"
+                dir: "{{ world.workdir != '' ? world.workdir : '.' }}"
+              bind:
+                landing_next_step_stdout: stdout
+                landing_next_step_exit_code: exit_code
+            - set:
+                landing_next_step_ran: true
+                last_error: ""
 
       # Accept & apply the proposed plan. Freeze the plan into accepted_plan
       # (so a later landing_note clear can't disturb the executing plan), emit

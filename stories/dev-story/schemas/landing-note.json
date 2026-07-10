@@ -16,8 +16,23 @@
     },
     "next_steps": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "Optional suggested follow-ups (e.g. a pipeline to drive, a file to review)."
+      "description": "Optional deterministic follow-ups. Prefer object entries with label + command so the landing can render selectable actions and run them through host.run. String entries are accepted only for backward compatibility and render as prose-only rows.",
+      "items": {
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "command"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "description": "Menu/display label for this next step." },
+              "command": { "type": "string", "minLength": 1, "description": "Shell command to execute through host.run when selected." },
+              "description": { "type": "string", "description": "Optional detail shown next to the command before execution." },
+              "severity": { "type": "string", "enum": ["warning", "error"], "description": "How a non-zero exit should be presented. Defaults to error." }
+            }
+          }
+        ]
+      }
     },
     "route": {
       "type": "object",

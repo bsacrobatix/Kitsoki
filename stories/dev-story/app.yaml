@@ -383,6 +383,17 @@ world:
   landing_note:        { type: object, default: {} }
   landing_started:     { type: bool,   default: false }
   landing_expected_effects: { type: array, default: [] }
+  # Workbench next-step action state. `landing_note.next_steps` may include
+  # structured rows with {label, command, severity}; selecting run_next_step
+  # records the chosen row and the host.run result so the landing can show the
+  # command log and an exit-code affordance instead of prose-only suggestions.
+  landing_next_step_index:     { type: int,    default: 0 }
+  landing_next_step_label:     { type: string, default: "" }
+  landing_next_step_command:   { type: string, default: "" }
+  landing_next_step_severity:  { type: string, default: "" }
+  landing_next_step_stdout:    { type: string, default: "" }
+  landing_next_step_exit_code: { type: int,    default: 0 }
+  landing_next_step_ran:       { type: bool,   default: false }
   # Thread continuity: the prior turn's note, preserved across the `work`
   # arc's landing_note clear so the next agent dispatch can build on what
   # it last reported (so "ok go ahead" continues the thread instead of a
@@ -1827,6 +1838,13 @@ intents:
   apply_plan:
     title: "Apply the plan"
     description: "Alias of accept_plan — apply the proposed plan as-is."
+    examples: []
+    priority: 50
+  run_next_step:
+    title: "Run next step"
+    description: "Run one structured next-step action from the workbench result and show its command log and exit code."
+    slots:
+      n: { type: int, required: true, description: "1-based row number from the Next steps table." }
     examples: []
     priority: 50
   # Internal routing intents emitted from applying/verifying on_enter once the
