@@ -1,0 +1,16 @@
+test_kind: flow
+app: capsule-ci
+initial_state: idle
+initial_world:
+  ci_job_id: job-fixture
+  ci_pipeline: change
+turns:
+  - intent: { name: run, slots: {} }
+    expect_state: prepare
+  - intent: { name: checks_passed, slots: {} }
+    expect_state: deterministic_checks
+  - intent: { name: checks_passed, slots: {} }
+    expect_state: passed
+    expect_world:
+      ci_outcome: passed
+expect_no_errors: true

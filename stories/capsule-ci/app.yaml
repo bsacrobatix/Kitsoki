@@ -1,0 +1,110 @@
+app:
+  id: capsule-ci
+  version: 0.1.0
+  title: "Story-native Capsule CI"
+  author: "Kitsoki"
+  license: "CC0"
+
+# This reference story is deliberately a composition skeleton, not a second CI
+# DAG. Project stories import or replace its phase rooms while preserving the
+# normalized trigger and typed verdict contract consumed by capsule ci.
+world:
+  ci_job_id: { type: string, default: "" }
+  ci_pipeline: { type: string, default: "" }
+  ci_trigger: { type: object, default: {} }
+  ci_source: { type: object, default: {} }
+  ci_workspace: { type: object, default: {} }
+  ci_environment: { type: object, default: {} }
+  ci_policy: { type: object, default: {} }
+  ci_verdict: { type: object, default: {} }
+  ci_outcome: { type: string, default: "" }
+
+intents:
+  run:
+    description: "Validate the supplied Capsule CI envelope."
+    examples: [run, start]
+    priority: 90
+  checks_passed:
+    description: "Record that required deterministic checks passed."
+    examples: []
+    priority: 1
+  checks_failed:
+    description: "Record a required deterministic check failure."
+    examples: []
+    priority: 1
+  needs_input:
+    description: "Park honestly for a missing authority or decision."
+    examples: []
+    priority: 1
+  look:
+    description: "Re-render the current CI phase."
+    examples: [look, status]
+    priority: 5
+
+root: idle
+
+states:
+  idle:
+    relevant_world: [ci_pipeline, ci_job_id]
+    view:
+      - heading: "Capsule CI"
+      - kv:
+          pairs:
+            Pipeline: "{{ world.ci_pipeline|default:'(not supplied)' }}"
+            Job: "{{ world.ci_job_id|default:'(not supplied)' }}"
+      - prose: "Run validates the immutable Capsule envelope before project checks begin."
+    on:
+      run:
+        - target: prepare
+      look:
+        - target: .
+  prepare:
+    relevant_world: [ci_source, ci_workspace, ci_environment, ci_policy]
+    view:
+      - heading: "Prepare"
+      - prose: "A concrete project composition verifies workspace, environment, policy, and source digests here."
+    on:
+      checks_passed:
+        - target: deterministic_checks
+      checks_failed:
+        - target: failed
+          effects:
+            - set: { ci_outcome: "failed" }
+      needs_input:
+        - target: parked
+          effects:
+            - set: { ci_outcome: "needs_input" }
+      look:
+        - target: .
+  deterministic_checks:
+    relevant_world: [ci_pipeline]
+    view:
+      - heading: "Deterministic checks"
+      - prose: "Project-defined facts and evidence artifacts run here; an optional LLM review is a normal later story room, never an implicit CI feature."
+    on:
+      checks_passed:
+        - target: passed
+          effects:
+            - set: { ci_outcome: "passed" }
+      checks_failed:
+        - target: failed
+          effects:
+            - set: { ci_outcome: "failed" }
+      needs_input:
+        - target: parked
+          effects:
+            - set: { ci_outcome: "needs_input" }
+      look:
+        - target: .
+  passed:
+    view:
+      - heading: "Passed"
+      - prose: "The runner builds and validates capsule-ci-verdict/v1 before promotion eligibility is derived."
+  failed:
+    view:
+      - heading: "Failed"
+      - prose: "A required check failed; the terminal verdict preserves its evidence."
+  parked:
+    view:
+      - heading: "Needs input"
+      - prose: "The pipeline is parked rather than silently widening authority or spending more agent budget."
