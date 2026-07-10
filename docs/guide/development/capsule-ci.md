@@ -112,4 +112,12 @@ Capsule receipts are canonical `capsule-ci-receipt/v1` projections over a
 sealed envelope, typed verdict, artifacts, and trace custody digest. A receipt
 must verify, be promotion eligible, and bind to the promotion plan's exact
 candidate before it can authorize promotion; a green-looking story response
-alone cannot. See [Capsule CI receipts](../../tracing/capsule-ci-receipts.md).
+alone cannot.
+
+Local `integrate`, `refresh`, and `promote` reconciliation plans update refs
+only through stale-safe fast-forward checks. `publish` is deliberately separate:
+a publish plan carries the `remote_publish` effect and cannot apply through the
+local Git reconciler. A remote publication provider must be explicitly granted
+and injected before a publish plan can be applied.
+
+See [Capsule CI receipts](../../tracing/capsule-ci-receipts.md).

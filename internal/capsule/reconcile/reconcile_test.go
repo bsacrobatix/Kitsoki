@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kitsoki/internal/capsuletest"
@@ -61,12 +62,55 @@ func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 		t.Fatal("stale plan accepted")
 	}
 }
+func TestPublishRequiresExplicitProvider(t *testing.T) {
+	dir := capsuletest.Open(t, "clean-repo")
+	runGit(t, dir, "checkout", "-b", "candidate")
+	if err := os.WriteFile(filepath.Join(dir, "publish.txt"), []byte("publish"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "publish.txt")
+	runGit(t, dir, "commit", "-m", "publish")
+	r := Reconciler{VCS: Git{}}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Publish, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.RequiredEffect != "remote_publish" {
+		t.Fatalf("effect %s", p.RequiredEffect)
+	}
+	if _, err := r.Apply(context.Background(), p, ""); err == nil {
+		t.Fatal("publish without provider applied")
+	}
+	publisher := recordingPublisher{}
+	result, err := (Reconciler{VCS: Git{}, Publisher: &publisher}).Apply(context.Background(), p, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied || publisher.plan.Digest != p.Digest || publisher.refs.WorkspaceHead != p.Candidate {
+		t.Fatalf("publish result=%#v publisher=%#v", result, publisher)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, dir, "rev-parse", "main")); got != p.Expected.Target {
+		t.Fatalf("publish mutated local main: %s", got)
+	}
+}
 func TestPlanRejectsUnknownOperation(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	if _, err := (Reconciler{VCS: Git{}}).Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Operation("invent"), Generation: 1}); err == nil {
 		t.Fatal("unknown operation was accepted")
 	}
 }
+
+type recordingPublisher struct {
+	plan Plan
+	refs ObservedRefs
+}
+
+func (p *recordingPublisher) Publish(_ context.Context, plan Plan, refs ObservedRefs) (ApplyResult, error) {
+	p.plan = plan
+	p.refs = refs
+	return ApplyResult{PlanDigest: plan.Digest, OldTarget: refs.Target, NewTarget: plan.Candidate, Applied: true}, nil
+}
+
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -74,4 +118,14 @@ func runGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
+}
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
 }

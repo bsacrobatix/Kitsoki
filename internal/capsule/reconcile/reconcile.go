@@ -65,6 +65,9 @@ type VCSProvider interface {
 	IsAncestor(context.Context, string, string, string) (bool, error)
 	UpdateRef(context.Context, string, string, string, string) error
 }
+type PublishProvider interface {
+	Publish(context.Context, Plan, ObservedRefs) (ApplyResult, error)
+}
 type GateVerifier interface {
 	Verify(context.Context, string, Plan) error
 }
@@ -73,9 +76,10 @@ type GateVerifierFunc func(context.Context, string, Plan) error
 func (f GateVerifierFunc) Verify(ctx context.Context, r string, p Plan) error { return f(ctx, r, p) }
 
 type Reconciler struct {
-	VCS   VCSProvider
-	Gates GateVerifier
-	Now   func() time.Time
+	VCS       VCSProvider
+	Publisher PublishProvider
+	Gates     GateVerifier
+	Now       func() time.Time
 }
 type PlanRequest struct {
 	Workspace    string
@@ -142,6 +146,12 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 	if p.Class == UpToDate {
 		return ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: current.Target, Applied: true}, nil
 	}
+	if p.Operation == Publish {
+		if r.Publisher == nil {
+			return ApplyResult{}, fmt.Errorf("capsule reconcile: remote publish provider is required")
+		}
+		return r.Publisher.Publish(ctx, p, current)
+	}
 	if p.Operation == Promote || p.Operation == Integrate || p.Operation == Refresh {
 		ok, err := r.VCS.IsAncestor(ctx, p.Workspace, current.Target, p.Candidate)
 		if err != nil {
@@ -195,6 +205,10 @@ func ValidOperation(op Operation) bool {
 }
 
 func effect(op Operation) string {
+	return RequiredEffect(op)
+}
+
+func RequiredEffect(op Operation) string {
 	if op == Publish {
 		return "remote_publish"
 	}
