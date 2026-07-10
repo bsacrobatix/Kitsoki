@@ -201,6 +201,21 @@ world:
   deck_path:            { type: string, default: "" }  # deck.slidey.json, folded by run.py --scenario-qa-report
   deck_error:           { type: string, default: "" }  # set when deck generation fails; report.md still succeeds
 
+  # ── project journey-pack lifecycle ─────────────────────────────────────
+  # The story remains the operator front door. These values intentionally hold
+  # only repo-relative source paths; run/artifact paths are supplied by the
+  # explicit lifecycle commands and never written into project source.
+  journey_path:         { type: string, default: ".kitsoki/qa/journeys/onboarding/journey.yaml" }
+  journey_action:       { type: string, default: "" }
+  journey_flow:         { type: string, default: ".kitsoki/qa/journeys/onboarding/flows/accepted.yaml" }
+  journey_artifacts:    { type: string, default: "" }
+  journey_origin_trace: { type: string, default: "" }
+  journey_cassette:     { type: string, default: "" }
+  journey_tour:         { type: string, default: "" }
+  journey_deck:         { type: string, default: "" }
+  journey_result:       { type: object, default: {} }
+  journey_output:       { type: string, default: "" }
+
   # ── misc / diagnostics ───────────────────────────────────────────────────
   last_result:          { type: object, default: {} }
   last_error:           { type: string, default: "" }
@@ -273,6 +288,60 @@ intents:
     slots:
       scenario:  { type: string, required: false }
       transport: { type: string, required: false }
+  journey_bootstrap:
+    title: "bootstrap journey pack"
+    description: "Create the portable project-local onboarding journey-pack source skeleton."
+    examples: ["bootstrap onboarding QA for this project"]
+    priority: 72
+  journey_preview:
+    title: "preview journey pack"
+    description: "Preview the journey's persona x scenario x transport matrix without writes or model calls."
+    examples: ["preview the onboarding journey"]
+    priority: 72
+    slots:
+      journey: { type: string, required: false }
+  journey_check:
+    title: "check frozen journey"
+    description: "Run the journey's deterministic no-LLM replay fixture."
+    examples: ["check the frozen onboarding journey"]
+    priority: 72
+    slots:
+      journey: { type: string, required: false }
+      flow: { type: string, required: false }
+      artifacts: { type: string, required: false }
+  journey_freeze:
+    title: "freeze accepted journey"
+    description: "Verify an accepted origin trace against its no-LLM flow and cassette."
+    priority: 72
+    slots:
+      journey: { type: string, required: false }
+      origin_trace: { type: string, required: true }
+      flow: { type: string, required: true }
+      cassette: { type: string, required: true }
+      artifacts: { type: string, required: false }
+  journey_produce:
+    title: "produce journey artifacts"
+    description: "Generate protected tutorial content and tour inputs from a passed freeze receipt."
+    priority: 72
+    slots:
+      journey: { type: string, required: false }
+      artifacts: { type: string, required: false }
+  journey_publish:
+    title: "publish journey release"
+    description: "Publish only a real-origin, replay-passed journey with its required proof artifacts."
+    priority: 72
+    slots:
+      journey: { type: string, required: false }
+      artifacts: { type: string, required: false }
+      tour: { type: string, required: true }
+      deck: { type: string, required: true }
+  journey_status:
+    title: "journey status"
+    description: "Show the current receipts and blockers for a project journey pack."
+    priority: 72
+    slots:
+      journey: { type: string, required: false }
+      artifacts: { type: string, required: false }
   # ── internal loop drivers (emitted by on_enter, not typed by an operator) ──
   run_emitted:
     description: "(internal) the run bundle's project/persona resolution committed; re-enter plan to resolve transport legs."
