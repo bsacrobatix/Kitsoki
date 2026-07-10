@@ -256,9 +256,10 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("Claude argv sends configured model", argv[argv.index("--model") + 1], "claude-fable-5")
     require("Claude argv disables persistence", "--no-session-persistence" in argv)
     require("Claude argv requires generated strict MCP config", "--mcp-config" in argv and "--strict-mcp-config" in argv)
-    enabled_tools = argv[argv.index("--tools") + 1]
-    require("Claude argv permits only explicit strict MCP tools", enabled_tools.split(",") == list(live.CLAUDE_STRICT_MCP_TOOLS))
-    require("Claude argv excludes generic shell/filesystem tools", not any(token in enabled_tools.lower() for token in ("bash", "host_run", "worktree", "vcs")))
+    check("Claude argv disables built-in tools", argv[argv.index("--tools") + 1], "")
+    allowed_tools = argv[argv.index("--allowedTools") + 1]
+    check("Claude argv permits only strict MCP and schema tool", allowed_tools.split(","), list(live.CLAUDE_ALLOWED_TOOLS))
+    require("Claude argv excludes generic shell/filesystem tools", not set(allowed_tools.split(",")).intersection({"Bash", "Read", "Write", "Edit", "Glob", "Grep", "host.run", "host.patch", "worktree.create", "vcs.commit"}))
     check("Claude argv delimits variadic tools before prompt", argv[-2], "--")
     generated_config = json.loads(Path(request["runtime"]["mcp_config_path"]).read_text(encoding="utf-8"))
     strict_server = generated_config["mcpServers"]["kitsoki_strict"]
