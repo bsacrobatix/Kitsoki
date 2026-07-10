@@ -464,6 +464,26 @@ lists both). One cell = one `(target, persona, scenario)` triple:
 Not yet wired: the browser cell image (`arena-browser-image`) and the swarm job
 type build on this plugin but are separate changes.
 
+**P2.10 — scenario-qa can now drive arena in parallel.** `stories/scenario-qa`
+(the operator-facing Persona QA product surface) previously had no way to run
+its transport legs concurrently — it either drove them one at a time
+(`pause=each-leg`) or auto-drained them serially within one turn
+(`pause=auto`, the default). `check ... parallel=true` now hands the resolved
+legs to a small, arena-adjacent concurrent runner
+(`tools/arena/scripts/run_scenario_qa_legs_parallel.py`) that reuses this
+plugin's own `CompletionState` contract (`tools/persona_qa/completion.py`) to
+score each leg and folds the results back through the story's own
+`record_leg_result.star`/`build_report.star`, so `report.md`/`deck.slidey.json`
+are identical in shape to a serial run. It is a lightweight local
+`ThreadPoolExecutor` sweep over `tools/persona_qa/kit.py replay-smoke` today,
+not a containerized `arena run` sweep of this plugin — see that script's own
+docstring for why (no transport axis on this plugin's cell shape yet, and a
+story-level opt-in shouldn't force a Docker dependency). Promoting it to real
+containerized cells (one per transport leg, sharing the browser-capable image
+so per-transport VISUAL evidence can be captured too) is a natural follow-up;
+see `docs/persona-qa.md`'s "Parallel legs" section for the operator-facing
+contract.
+
 ## Status — swarm job type landed (swarm-arena-job)
 
 `swarm` is a third job type alongside `bugfix`/`persona-qa` (`arena plugins`

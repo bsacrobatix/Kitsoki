@@ -44,6 +44,12 @@ Useful prompts:
 - `next transport` (intent `next_leg`) advances to the next transport check.
   With the default `pause=auto` it fires itself; with `pause=each-leg` it is
   how you continue by hand.
+- `check bugfix on all transports parallel=true` hands the resolved transport
+  legs to arena's persona-qa job type instead of driving them one at a time,
+  folding the results into the SAME `report.md` / `deck.slidey.json` shape —
+  opt-in, always zero-LLM-spend. See
+  [`docs/persona-qa.md`](../../docs/persona-qa.md)'s "Parallel legs" section
+  for the full contract and scope note.
 - `report` rebuilds `report.md` and `deck.slidey.json` for the current run.
 - `main room` returns from the closeout report to the Scenario QA start screen
   while keeping the last run available.
