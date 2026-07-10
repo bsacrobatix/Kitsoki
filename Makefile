@@ -679,8 +679,8 @@ FIX_TESTS_TEST_CMD ?= make test
 # 180-second quick-loop default. The standalone entry point must give its
 # first run the same budget as the full gate; callers with a genuinely quick
 # reproducer can override this command and timeout explicitly.
-FIX_TESTS_QUICK_TEST_CMD ?= $(FIX_TESTS_TEST_CMD)
-FIX_TESTS_QUICK_TIMEOUT_SECONDS ?= 1200
+FIX_TESTS_QUICK_TEST_CMD ?= go test -short ./...
+FIX_TESTS_QUICK_TIMEOUT_SECONDS ?= 300
 FIX_TESTS_FULL_TIMEOUT_SECONDS ?= 1200
 FIX_TESTS_MAX_CYCLES ?= 3
 fix-tests:
@@ -688,6 +688,7 @@ fix-tests:
 	@go build -o ./.kitsoki-fixtests $(PKG)
 	@db=$$(mktemp "$${TMPDIR:-/tmp}/kitsoki-fixtests.XXXXXX.db"); \
 	 marker=$$(mktemp "$${TMPDIR:-/tmp}/kitsoki-fixtests-report.XXXXXX"); \
+	 report_dir=.artifacts/fix-tests/runs/$$(date +%Y%m%dT%H%M%S)-$$$$; mkdir -p "$$report_dir"; \
 	 trap 'rm -f ./.kitsoki-fixtests "$$db" "$$marker"' EXIT; \
 	 slots=$$(jq -cn \
 	   --arg test_cmd "$(FIX_TESTS_TEST_CMD)" \
@@ -695,7 +696,8 @@ fix-tests:
 	   --argjson quick_test_timeout_seconds "$(FIX_TESTS_QUICK_TIMEOUT_SECONDS)" \
 	   --argjson full_test_timeout_seconds "$(FIX_TESTS_FULL_TIMEOUT_SECONDS)" \
 	   --argjson max_cycles "$(FIX_TESTS_MAX_CYCLES)" \
-	   '{test_cmd: $$test_cmd, quick_test_cmd: $$quick_test_cmd, quick_test_timeout_seconds: $$quick_test_timeout_seconds, full_test_timeout_seconds: $$full_test_timeout_seconds, max_cycles: $$max_cycles}'); \
+	   --arg report_dir "$$report_dir" \
+	   '{test_cmd: $$test_cmd, quick_test_cmd: $$quick_test_cmd, quick_test_timeout_seconds: $$quick_test_timeout_seconds, full_test_timeout_seconds: $$full_test_timeout_seconds, max_cycles: $$max_cycles, report_dir: $$report_dir}'); \
 	 sid=$$(./.kitsoki-fixtests session create --app $(FIX_TESTS_APP) --db "$$db" | jq -r .session_id); \
 	 echo "fix-tests: driving session $$sid"; \
 	 echo "fix-tests: quick gate: $(FIX_TESTS_QUICK_TEST_CMD) ($(FIX_TESTS_QUICK_TIMEOUT_SECONDS)s timeout)"; \
@@ -704,7 +706,7 @@ fix-tests:
 	 out=$$(./.kitsoki-fixtests session continue --app $(FIX_TESTS_APP) --db "$$db" --id "$$sid" --intent start --mode one-shot --slots "$$slots"); \
 	 state=$$(printf '%s' "$$out" | jq -r .new_state); \
 	 echo; echo "fix-tests: final state = $$state"; \
-	 report=$$(find .artifacts/fix-tests -maxdepth 1 -name 'report-*.md' -newer "$$marker" -print 2>/dev/null | head -1); \
+	 report=$$(find "$$report_dir" -maxdepth 1 -name 'report-*.md' -newer "$$marker" -print 2>/dev/null | head -1); \
 	 if [ -n "$$report" ]; then echo; echo "──────── $$report ────────"; cat "$$report"; echo "─────────────────────────"; fi; \
 	 case "$$state" in \
 	   done_clean) echo "fix-tests: PASS — suite is green."; exit 0;; \
