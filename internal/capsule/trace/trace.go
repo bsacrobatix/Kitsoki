@@ -4,6 +4,7 @@ package trace
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -92,6 +93,12 @@ func ValidateEvent(event Event) error {
 	if strings.TrimSpace(event.Kind) == "" {
 		return fmt.Errorf("kind is required")
 	}
+	if err := validateProviderSafeValue("error", event.Error); err != nil {
+		return err
+	}
+	if err := validateProviderSafeFields(event.Fields); err != nil {
+		return err
+	}
 	switch event.Kind {
 	case KindCIStarted, KindCIVerdict:
 		if event.JobID == "" || event.EnvelopeDigest == "" {
@@ -112,4 +119,99 @@ func ValidateEvent(event Event) error {
 		return fmt.Errorf("unknown kind %q", event.Kind)
 	}
 	return nil
+}
+
+func validateProviderSafeFields(fields map[string]any) error {
+	for key, value := range fields {
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if normalized == "" {
+			return fmt.Errorf("field key is required")
+		}
+		if providerUnsafeKey(normalized) {
+			return fmt.Errorf("field %q is not provider-safe", key)
+		}
+		if err := validateProviderSafeValue(key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProviderSafeValue(path string, value any) error {
+	switch v := value.(type) {
+	case nil, bool, float64, int, int64, uint64, json.Number:
+		return nil
+	case string:
+		if providerUnsafeString(v) {
+			return fmt.Errorf("field %q contains provider-unsafe value", path)
+		}
+	case []any:
+		for i, item := range v {
+			if err := validateProviderSafeValue(fmt.Sprintf("%s[%d]", path, i), item); err != nil {
+				return err
+			}
+		}
+	case []string:
+		for i, item := range v {
+			if err := validateProviderSafeValue(fmt.Sprintf("%s[%d]", path, i), item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for key, item := range v {
+			normalized := strings.ToLower(strings.TrimSpace(key))
+			if normalized == "" {
+				return fmt.Errorf("field key is required")
+			}
+			if providerUnsafeKey(normalized) {
+				return fmt.Errorf("field %q is not provider-safe", key)
+			}
+			if err := validateProviderSafeValue(path+"."+key, item); err != nil {
+				return err
+			}
+		}
+	default:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("field %q contains unsupported value %T", path, value)
+		}
+		var decoded any
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return fmt.Errorf("field %q contains unsupported value %T", path, value)
+		}
+		return validateProviderSafeValue(path, decoded)
+	}
+	return nil
+}
+
+func providerUnsafeKey(key string) bool {
+	for _, marker := range []string{"secret", "token", "password", "credential", "private_key", "api_key"} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func providerUnsafeString(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+	if filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, "~"+string(filepath.Separator)) {
+		return true
+	}
+	for _, token := range strings.Fields(trimmed) {
+		token = strings.Trim(token, `"'()[]{}:;,`)
+		if filepath.IsAbs(token) || strings.HasPrefix(token, "~"+string(filepath.Separator)) {
+			return true
+		}
+	}
+	lower := strings.ToLower(trimmed)
+	for _, marker := range []string{"secret=", "token=", "password=", "credential=", "api_key=", "private_key="} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
