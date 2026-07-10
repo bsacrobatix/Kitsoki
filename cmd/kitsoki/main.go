@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -733,6 +734,11 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 						defer roomEnterSink.Detach()
 						detach := tui.AttachOrchestratorObserver(orch, p, sid)
 						defer detach()
+						restoreProcessOutput, captureErr := captureTUIProcessOutput(cmd, p)
+						if captureErr != nil {
+							return fmt.Errorf("isolate TUI process output: %w", captureErr)
+						}
+						defer restoreProcessOutput()
 
 						lockErr := s.WithWriterLock(ctx, sid, func() error {
 							_, runErr := p.Run()
@@ -928,6 +934,11 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					// stays frozen until the next keystroke.
 					detach := tui.AttachOrchestratorObserver(orch, p, sid)
 					defer detach()
+					restoreProcessOutput, captureErr := captureTUIProcessOutput(cmd, p)
+					if captureErr != nil {
+						return fmt.Errorf("isolate TUI process output: %w", captureErr)
+					}
+					defer restoreProcessOutput()
 					_, err = p.Run()
 					if selectedStoryPath != "" && err == nil {
 						return nil
@@ -981,6 +992,36 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 		"file TUI /bug reports as GitHub issues on this owner/repo with uploaded evidence; requires GitHub auth from `kitsoki gh-agent login`, `kitsoki gh-agent token`, or GH_TOKEN/GITHUB_TOKEN. Default empty value writes local artifact tickets under .artifacts/issues/bugs instead")
 
 	return cmd
+}
+
+// captureTUIProcessOutput quarantines process-level stdout/stderr while Bubble
+// Tea owns the terminal. tea.NewProgram must be constructed first so its
+// renderer retains the real terminal writer; everything else is redirected to
+// a pipe and returned to the model as managed terminalOutputMsg values.
+func captureTUIProcessOutput(cmd *cobra.Command, program *tea.Program) (func(), error) {
+	capture, err := tui.NewTerminalOutputCapture()
+	if err != nil {
+		return nil, err
+	}
+
+	priorStdout, priorStderr := os.Stdout, os.Stderr
+	priorCmdOut, priorCmdErr := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	capture.Attach(program)
+	os.Stdout = capture.Writer()
+	os.Stderr = capture.Writer()
+	cmd.SetOut(capture.Writer())
+	cmd.SetErr(capture.Writer())
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			os.Stdout = priorStdout
+			os.Stderr = priorStderr
+			cmd.SetOut(priorCmdOut)
+			cmd.SetErr(priorCmdErr)
+			_ = capture.Close()
+		})
+	}, nil
 }
 
 // setHarnessLogger wires the logger into harness implementations that support it.
