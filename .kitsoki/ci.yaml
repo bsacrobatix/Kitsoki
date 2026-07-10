@@ -7,6 +7,7 @@ pipelines:
     story: stories/capsule-ci/app.yaml
     triggers: [local]
     environment: ci
+    executor: host
     mode: one-shot
     required: true
     permissions:
