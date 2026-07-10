@@ -265,6 +265,12 @@ func (s *CapsuleServer) syncPlan(ctx context.Context, _ *mcpsdk.CallToolRequest,
 	if !s.manager.Grant.Allows("effect", "local_reconcile") {
 		return capsuleErr(fmt.Errorf("%w: local_reconcile", control.ErrDenied)), nil, nil
 	}
+	if !s.manager.Grant.Allows("branch", a.Target) {
+		return capsuleErr(fmt.Errorf("%w: branch %q", control.ErrDenied, a.Target)), nil, nil
+	}
+	if !reconcile.ValidOperation(a.Operation) {
+		return capsuleErr(fmt.Errorf("capsule sync: unsupported operation %q", a.Operation)), nil, nil
+	}
 	in, err := s.manager.Status(ctx, a.Workspace)
 	if err != nil {
 		return capsuleErr(err), nil, nil

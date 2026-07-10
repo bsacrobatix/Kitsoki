@@ -14,10 +14,20 @@ The exposed effect families are intentionally distinct:
 - FS, declared execution, and local commit affect one managed workspace;
 - environment lock persistence requires `env_write`;
 - local reconciliation requires `local_reconcile` and uses a stable plan/apply
-  digest; and
+  digest, and may target only a branch granted at server startup; and
 - remote publication and credentials are absent unless a future explicit grant
   and provider are configured.
 
 Verifier-only overlays and secret values are not placed in the agent-visible
 filesystem or MCP response payloads. Lifecycle operations emit deterministic
 Capsule facts for receipt/tracing consumers.
+
+Start reconciliation authority narrowly, for example:
+
+```sh
+kitsoki capsule mcp --project /path/to/project --branch staging/local
+```
+
+Omitting `--branch` still permits workspace and CI operations but denies all
+`capsule.sync.plan` calls. A required promotion gate additionally verifies the
+persisted receipt, its run projection, and its exact candidate source digest.

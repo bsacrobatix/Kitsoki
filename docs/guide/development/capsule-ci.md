@@ -49,14 +49,16 @@ Run the standalone server when a coding agent should receive only one scoped
 tool surface:
 
 ```sh
-kitsoki capsule mcp --project /path/to/project --pipeline change --executor local
+kitsoki capsule mcp --project /path/to/project --pipeline change --executor local --branch staging/local
 ```
 
 It exposes opaque workspace handles and project-relative filesystem paths. The
 agent cannot name arbitrary host paths, add a remote, obtain credentials, or
 widen effects. Available operations include workspace/FS/declared-command/local
 VCS actions, environment resolution, local reconciliation, and CI plan/run/
-status. Remote publication is intentionally not part of this grant.
+status. `--branch` is required for each reconciliation target; omitting it
+denies synchronization while retaining the rest of the tool surface. Remote
+publication is intentionally not part of this grant.
 
 ## Environments and remote placement
 
@@ -78,5 +80,6 @@ Git operations.
 
 Capsule receipts are canonical `capsule-ci-receipt/v1` projections over a
 sealed envelope, typed verdict, artifacts, and trace custody digest. A receipt
-must verify before it can authorize promotion; a green-looking story response
+must verify, be promotion eligible, and bind to the promotion plan's exact
+candidate before it can authorize promotion; a green-looking story response
 alone cannot. See [Capsule CI receipts](../../tracing/capsule-ci-receipts.md).

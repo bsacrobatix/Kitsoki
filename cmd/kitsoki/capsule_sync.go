@@ -114,10 +114,8 @@ func capsuleSyncApplyCmd() *cobra.Command {
 
 func capsuleReconcileOperation(value string) (reconcile.Operation, error) {
 	op := reconcile.Operation(value)
-	switch op {
-	case reconcile.Integrate, reconcile.Refresh, reconcile.Promote, reconcile.Publish:
+	if reconcile.ValidOperation(op) {
 		return op, nil
-	default:
-		return "", fmt.Errorf("capsule sync: unsupported operation %q", value)
 	}
+	return "", fmt.Errorf("capsule sync: unsupported operation %q", value)
 }
