@@ -626,7 +626,40 @@ func onboardingConfigYAML() string {
 	return "story_dirs:\n  - ./.kitsoki/stories\n\nproject_profile: .kitsoki/project-profile.yaml\n\nroot:\n  import: dev-story\n"
 }
 
-var onboardingInstanceHosts = []string{"host.local_files.ticket", "host.local_github.ticket", "host.gh.ticket", "host.gh.ticket.get", "host.gh.ticket.comment", "host.gh.ticket.transition", "host.git", "host.local", "host.git_worktree", "host.append_to_file", "host.inbox.add", "host.agent.ask", "host.agent.decide", "host.agent.task", "host.agent.codeact", "host.agent.search", "host.agent.converse", "host.chat.resolve", "host.chat.transcript", "host.artifacts_dir", "host.slidey.render", "host.fs.writable_dir", "host.ide.get_diagnostics", "host.ide.open_file", "host.ide.open_diff", "host.diff.open", "host.run", "host.starlark.run"}
+var onboardingInstanceHosts = []string{
+	"host.local_files.ticket",
+	"host.local_github.ticket",
+	"host.gh.ticket",
+	"host.gh.ticket.get",
+	"host.gh.ticket.comment",
+	"host.gh.ticket.transition",
+	"host.git",
+	"host.local",
+	"host.git_worktree",
+	"host.append_to_file",
+	"host.inbox.add",
+	"host.agent.ask",
+	"host.agent.decide",
+	"host.agent.task",
+	"host.agent.codeact",
+	"host.agent.search",
+	"host.agent.converse",
+	"host.chat.resolve",
+	"host.chat.transcript",
+	"host.artifacts_dir",
+	"host.slidey.render",
+	"host.fs.writable_dir",
+	"host.ide.get_diagnostics",
+	"host.ide.open_file",
+	"host.ide.open_diff",
+	"host.diff.open",
+	"host.run",
+	"host.starlark.run",
+	"host.proposal.publish",
+	"host.dev.profile_setup",
+	"host.dev.onboarding",
+	"host.decomposition.update",
+}
 
 func onboardingInstanceYAML(data map[string]any) string {
 	id := stringValue(data, "project_id")

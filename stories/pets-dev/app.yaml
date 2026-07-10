@@ -64,7 +64,11 @@ hosts:
   - host.ide.open_diff
   - host.diff.open
   - host.run
+  - host.proposal.publish
   - host.starlark.run
+  - host.decomposition.update
+  - host.dev.profile_setup
+  - host.dev.onboarding
 
 imports:
   core:
