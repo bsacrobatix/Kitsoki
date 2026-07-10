@@ -70,6 +70,25 @@ func TestPromotionGateEnforcesReceiptSignaturePolicy(t *testing.T) {
 	}
 }
 
+func TestPromotionGateRejectsAcceptedAttemptSubstitution(t *testing.T) {
+	root := t.TempDir()
+	run := validRunResult("job", "sha256:candidate")
+	stored, err := Persist(root, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	substituted := validRunResult("job", "sha256:candidate")
+	substituted.Envelope.StoryDigest = "sha256:other-story"
+	substituted.Verdict.StoryDigest = "sha256:other-story"
+	if err := (ci.FileRunStore{ProjectRoot: root}).Write(ci.RunRecord{JobID: "job", Result: substituted, ReceiptID: stored.Receipt.ReceiptID, ReceiptVerification: "valid"}); err != nil {
+		t.Fatal(err)
+	}
+	plan := reconcile.Plan{Candidate: "sha256:candidate"}
+	if err := (PromotionGate{ProjectRoot: root}).Verify(nil, stored.Receipt.ReceiptID, plan); err == nil || !strings.Contains(err.Error(), "run record does not match receipt") {
+		t.Fatalf("accepted substituted run record: %v", err)
+	}
+}
+
 func validRunResult(jobID, sourceDigest string) ci.RunResult {
 	e, _ := executor.Seal(executor.Envelope{JobID: jobID, ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: sourceDigest, StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: executor.Policy{Network: "none"}})
 	v := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []ci.Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: e.SourceDigest, StoryDigest: e.StoryDigest, EnvironmentDigest: e.Environment.Digest, EnvelopeDigest: e.Digest}

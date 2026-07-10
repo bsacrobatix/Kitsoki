@@ -48,6 +48,49 @@ func TestReceiptIsCanonicalAndTamperFails(t *testing.T) {
 	}
 }
 
+func TestReceiptRejectsKeyFieldTampering(t *testing.T) {
+	base, v, err := Build(validInput())
+	if err != nil || v.Status != "valid" {
+		t.Fatalf("build %#v %v", v, err)
+	}
+	signed, err := Sign(base, fakeSigner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*Receipt){
+		"source": func(r *Receipt) {
+			r.Envelope.SourceDigest = "sha256:other-source"
+		},
+		"story": func(r *Receipt) {
+			r.Envelope.StoryDigest = "sha256:other-story"
+		},
+		"environment": func(r *Receipt) {
+			r.Envelope.Environment.Digest = "sha256:other-env"
+		},
+		"policy": func(r *Receipt) {
+			r.Envelope.Policy.Network = "live"
+		},
+		"artifact": func(r *Receipt) {
+			r.Artifacts[0].Handle = "artifact:other"
+		},
+		"signer": func(r *Receipt) {
+			r.Integrity.Signer = "other"
+		},
+		"signature": func(r *Receipt) {
+			r.Integrity.Signature = "bad"
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			tampered := signed
+			mutate(&tampered)
+			if got := Verify(tampered, fakeSigner{}, true); got.Status != "invalid" {
+				t.Fatalf("tamper accepted %#v", got)
+			}
+		})
+	}
+}
+
 func TestVerifyRejectsAContentValidReceiptWithInvalidVerdict(t *testing.T) {
 	r, _, err := Build(validInput())
 	if err != nil {

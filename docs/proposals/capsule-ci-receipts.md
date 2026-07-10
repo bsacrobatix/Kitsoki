@@ -205,7 +205,8 @@ of evidence.
 
 ## 3. Prove and document
 - [ ] 3.1 Add all golden traces above; assert byte-stable unsigned rebuild and old-reader compatibility
-- [ ] 3.2 Tamper tests cover trace, artifact, source, story, environment, policy, signer, and accepted-attempt substitution
+- [x] 3.2 Tamper tests cover trace, artifact, source, story, environment, policy, signer, and accepted-attempt substitution
+  - Shipped: receipt verification rejects trace/artifact/source/story/environment/policy/signer/signature tampering, and promotion gates reject a run record that substitutes a different accepted attempt behind a valid receipt id.
 - [ ] 3.3 Add one no-LLM local and fake-remote end-to-end receipt used by a promotion-plan fixture
 - [ ] 3.4 Update trace/receipt/runstatus docs; trim/delete this proposal
 ```
