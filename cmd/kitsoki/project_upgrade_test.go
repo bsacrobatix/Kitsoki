@@ -24,7 +24,7 @@ func TestProjectToolsUpgrade_NotOnboardedInvitesOnboarding(t *testing.T) {
 }
 
 func TestProjectToolsUpgradeDetectsOldDevStoryCapsule(t *testing.T) {
-	t.Parallel()
+	useCurrentKitsokiRepo(t)
 	root := capsuletest.Open(t, "old-dev-story-project")
 
 	rep, err := checkProjectUpgrade(context.Background(), projectUpgradeOptions{Target: root})
