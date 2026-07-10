@@ -376,16 +376,25 @@ PY
 bootstrap_workspace() {
   local path="$1"
   local source_repo="${2:-}"
+  local bootstrap_tmp=""
+  local bootstrap_status=0
   [ -d "$path" ] || die "workspace does not exist: $path"
   # tsx leaves its IPC socket beneath TMPDIR when an interrupted bootstrap
   # exits. A retry must not inherit that dead socket and fail with EADDRINUSE.
   rm -rf "$path/.temp"/tsx-* 2>/dev/null || true
   copy_local_config "$path" "$source_repo"
+  # A Studio server can itself run from the managed staging capsule, putting a
+  # child workspace far beyond macOS's Unix-domain socket-path limit. Keep the
+  # bootstrap-only tsx socket root short and unique; Make propagates TEMP_DIR
+  # to both TMPDIR and KITSOKI_TEMP_ROOT for the runstatus commands.
+  bootstrap_tmp="$(mktemp -d /tmp/kitsoki-bootstrap.XXXXXX)" || die "could not create short bootstrap temp root"
   if make -C "$path" -n bootstrap-workspace >/dev/null 2>&1; then
-    make -C "$path" bootstrap-workspace
+    make -C "$path" TEMP_DIR="$bootstrap_tmp" bootstrap-workspace || bootstrap_status=$?
   else
-    make -C "$path" bootstrap-worktree
+    make -C "$path" TEMP_DIR="$bootstrap_tmp" bootstrap-worktree || bootstrap_status=$?
   fi
+  rm -rf "$bootstrap_tmp"
+  return "$bootstrap_status"
 }
 
 copy_local_config() {

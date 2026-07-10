@@ -69,9 +69,10 @@ source_repo="$tmp/source"
 mkdir -p "$source_repo"
 git -C "$source_repo" init --quiet --initial-branch=main
 write_merge_helper "$source_repo"
-printf '.kitsoki.local.yaml\n' >"$source_repo/.gitignore"
+printf '.kitsoki.local.yaml\n.bootstrap-tempdir\n' >"$source_repo/.gitignore"
 cat >"$source_repo/Makefile" <<'MK'
 bootstrap-workspace:
+	@printf '%s\n' "$(TEMP_DIR)" > .bootstrap-tempdir
 	@echo "bootstrap output"
 
 bootstrap-worktree: bootstrap-workspace
@@ -177,6 +178,12 @@ fi
 local_config_workspace="$root/local-config"
 [ -f "$local_config_workspace/.kitsoki.local.yaml" ] || fail "bootstrap did not copy .kitsoki.local.yaml"
 cmp "$source_repo/.kitsoki.local.yaml" "$local_config_workspace/.kitsoki.local.yaml" >/dev/null || fail "bootstrap copied the wrong .kitsoki.local.yaml content"
+bootstrap_temp="$(cat "$local_config_workspace/.bootstrap-tempdir")"
+case "$bootstrap_temp" in
+  /tmp/kitsoki-bootstrap.*) ;;
+  *) fail "bootstrap did not use a compact temp root: $bootstrap_temp" ;;
+esac
+[ ! -e "$bootstrap_temp" ] || fail "bootstrap did not remove its temporary root"
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$local_config_workspace" >/dev/null
 
 json_bootstrap="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id json-bootstrap --branch agent/json-bootstrap --bootstrap --json)"
