@@ -6,11 +6,7 @@ initial_world:
   ci_pipeline: change
 turns:
   - intent: { name: run, slots: {} }
-    expect_state: prepare
-  - intent: { name: checks_passed, slots: {} }
-    expect_state: deterministic_checks
-  - intent: { name: checks_passed, slots: {} }
-    expect_state: passed
+    expect_state: parked
     expect_world:
-      ci_outcome: passed
+      ci_outcome: needs_input
 expect_no_errors: true
