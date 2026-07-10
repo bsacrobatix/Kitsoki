@@ -1,8 +1,8 @@
 # Runtime: capsule ref sync and promotion
 
-**Status:** Draft v1. Nothing in the generic runtime slice is implemented yet.
-Kitsoki's local scripts already prove the intended protected-main and staging
-behavior for this repository.
+**Status:** v1 in progress. Local typed plan/classify/apply with stale and
+fast-forward checks is available through Capsule MCP. Conflict integration,
+remote publish, script parity, and promotion receipt enforcement remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)

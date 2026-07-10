@@ -1,8 +1,8 @@
 # Story: story-native capsule CI
 
-**Status:** Draft v1. Nothing in this story/pipeline slice is implemented yet.
-Existing stories, execution modes, local CI host calls, and flow/cassette tests
-are the composition substrate.
+**Status:** v1 in progress. `.kitsoki/ci.yaml`, the reference story, typed
+verdict/envelope service, engine launcher, CLI, and Capsule MCP CI tools ship.
+Project wrappers, LLM/writer fixtures, cancellation, and GitHub ingress remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),

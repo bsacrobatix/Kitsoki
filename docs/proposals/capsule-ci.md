@@ -1,10 +1,12 @@
 # Epic: productized capsule CI
 
-**Status:** Draft v1. The local synthetic-capsule and clone-backed workspace
-foundations have shipped; none of the five productization slices below is
-implemented yet.
+**Status:** v1 in progress. A local vertical slice now ships: scoped native
+workspaces/MCP, self+pinned sources, environment locks, story-native CI,
+canonical receipts, local ref plans, and host/fake-remote providers (see
+`docs/guide/development/capsule-ci.md`). Script/host migration, production
+remote publication, receipt indexing, and full adoption remain below.
 **Kind:**   epic
-**Slices:** 5 (0/5 shipped)
+**Slices:** 5 (all have partial substrate; none is fully retired)
 
 ## Why
 
