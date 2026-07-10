@@ -329,6 +329,9 @@ func qaProduceCmd() *cobra.Command {
 		if freeze.Result != "passed" {
 			return fmt.Errorf("freeze receipt is not passed")
 		}
+		if !sameDigests(freeze.SourceDigests, journeyDigests(root, p, digest)) {
+			return fmt.Errorf("freeze receipt is stale for the current journey sources")
+		}
 		if p.Outputs.Tutorial.Template == "" || p.Outputs.Storyboard == "" {
 			return fmt.Errorf("journey requires tutorial.template and outputs.storyboard")
 		}
@@ -347,10 +350,25 @@ func qaProduceCmd() *cobra.Command {
 		if err = runJourneyKitsoki(cmd, root, "storyboard", "emit", "tour", filepath.Join(root, p.Outputs.Storyboard), "--root", root, "--out", filepath.Join(artifacts, "tour.yaml")); err != nil {
 			return err
 		}
+		deckPath := filepath.Join(artifacts, "deck.slidey.json")
+		deck := journeyDeck(p, freeze, digest)
+		if err = writeJourneyJSON(deckPath, deck, cmd); err != nil {
+			return err
+		}
+		if err = validateJourneyDeck(cmd, deckPath); err != nil {
+			return err
+		}
 		tutorial := struct {
+			Status        string            `json:"status"`
+			Digest        string            `json:"digest"`
+			SourceDigests map[string]string `json:"source_digests"`
+		}{Status: "passed", Digest: digestBytes([]byte(text)), SourceDigests: journeyDigests(root, p, digest)}
+		if err = writeJourneyJSON(filepath.Join(artifacts, "tutorial-receipt.json"), tutorial, cmd); err != nil {
+			return err
+		}
+		return writeJourneyJSON(filepath.Join(artifacts, "deck-receipt.json"), struct {
 			Status, Digest string `json:"status"`
-		}{Status: "passed", Digest: digestBytes([]byte(text))}
-		return writeJourneyJSON(filepath.Join(artifacts, "tutorial-receipt.json"), tutorial, cmd)
+		}{Status: "passed", Digest: digestFile(deckPath)}, cmd)
 	}}
 	cmd.Flags().StringVar(&artifacts, "artifacts", "", "artifact directory")
 	return cmd
@@ -370,7 +388,7 @@ func qaStatusCmd() *cobra.Command {
 			artifacts = defaultJourneyArtifacts(root, p.ID, digest)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "journey: %s\nartifacts: %s\n", p.ID, repoRelative(root, artifacts))
-		for _, name := range []string{"check-receipt.json", "freeze-receipt.json", "tutorial-receipt.json", "release-receipt.json"} {
+		for _, name := range []string{"check-receipt.json", "freeze-receipt.json", "tutorial-receipt.json", "deck-receipt.json", "release-receipt.json"} {
 			path := filepath.Join(artifacts, name)
 			if fileExists(path) {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s: present\n", name)
@@ -407,11 +425,20 @@ func qaPublishCmd() *cobra.Command {
 		if freeze.Result != "passed" || freeze.Origin.Kind != "real" || freeze.Replay.Status != "passed" {
 			return fmt.Errorf("publish requires a passed real-origin freeze receipt")
 		}
+		if !sameDigests(freeze.SourceDigests, journeyDigests(root, p, digest)) {
+			return fmt.Errorf("publish requires a current freeze receipt")
+		}
 		var tutorial struct {
 			Status string `json:"status"`
 		}
 		if err = readJSON(filepath.Join(artifacts, "tutorial-receipt.json"), &tutorial); err != nil || tutorial.Status != "passed" {
 			return fmt.Errorf("publish requires a passed tutorial receipt")
+		}
+		var deckReceipt struct {
+			Status string `json:"status"`
+		}
+		if err = readJSON(filepath.Join(artifacts, "deck-receipt.json"), &deckReceipt); err != nil || deckReceipt.Status != "passed" {
+			return fmt.Errorf("publish requires a passed Slidey deck receipt")
 		}
 		if tour == "" {
 			tour = filepath.Join(artifacts, "tour.mp4")
@@ -818,6 +845,40 @@ func replaceGeneratedRegion(text, generated string) string {
 		return text[:a] + generated + text[b+len(end):]
 	}
 	return text + "\n\n" + generated + "\n"
+}
+
+// journeyDeck is deliberately small and proof-first. It never presents a
+// demo/replay origin as an accepted real journey; the origin is an evidence row
+// reviewers can inspect before promotion.
+func journeyDeck(p *journeyPack, freeze journeyFreezeReceipt, digest string) map[string]any {
+	originStatus := "pending"
+	if freeze.Origin.Kind == "real" {
+		originStatus = "done"
+	}
+	return map[string]any{
+		"meta": map[string]any{"mode": "pitch", "title": p.Title, "resolution": map[string]any{"width": 1920, "height": 1080}},
+		"scenes": []any{
+			map[string]any{"type": "title", "title": p.Title, "subtitle": p.ID, "narration": "A deterministic journey-pack proof summary."},
+			map[string]any{"type": "evidence", "title": "Replay provenance", "caption": "The release gate recomputes these digests before publication.", "items": []any{
+				map[string]any{"label": "Origin", "status": originStatus, "detail": freeze.Origin.Kind + " origin: " + freeze.Origin.Trace},
+				map[string]any{"label": "Replay", "status": "done", "detail": freeze.Replay.Status + ": " + freeze.Replay.Flow},
+				map[string]any{"label": "Journey digest", "status": "done", "detail": digest},
+			}},
+			map[string]any{"type": "narrative", "eyebrow": "Publication posture", "lede": "Real once, replay often", "body": "A demo origin validates artifact shape but cannot publish a successful journey. The release receipt requires a real origin, replay, tutorial, deck, and tour evidence.", "narration": "The pack keeps demo and real proof visibly distinct."},
+		},
+	}
+}
+
+func validateJourneyDeck(cmd *cobra.Command, path string) error {
+	if _, err := exec.LookPath("slidey"); err != nil {
+		return fmt.Errorf("Slidey is required to validate the generated deck: %w", err)
+	}
+	check := exec.CommandContext(cmd.Context(), "slidey", path, "--validate")
+	check.Stdout, check.Stderr = cmd.OutOrStdout(), cmd.ErrOrStderr()
+	if err := check.Run(); err != nil {
+		return fmt.Errorf("validate generated Slidey deck: %w", err)
+	}
+	return nil
 }
 
 func validateJourneyTutorial(text string) error {

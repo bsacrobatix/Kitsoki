@@ -97,3 +97,22 @@ func TestValidateJourneyTutorialRejectsMachinePath(t *testing.T) {
 		t.Fatal("expected machine-specific tutorial path to fail")
 	}
 }
+
+func TestJourneyDeckKeepsDemoOriginPending(t *testing.T) {
+	p := &journeyPack{ID: "demo/onboarding", Title: "Demo"}
+	var freeze journeyFreezeReceipt
+	freeze.Origin.Kind = "demo"
+	freeze.Origin.Trace = ".artifacts/origin.jsonl"
+	freeze.Replay.Flow = ".kitsoki/qa/flows/accepted.yaml"
+	freeze.Replay.Status = "passed"
+	deck := journeyDeck(p, freeze, "digest")
+	scenes, ok := deck["scenes"].([]any)
+	if !ok || len(scenes) < 2 {
+		t.Fatal("expected proof deck scenes")
+	}
+	evidence := scenes[1].(map[string]any)
+	items := evidence["items"].([]any)
+	if got := items[0].(map[string]any)["status"]; got != "pending" {
+		t.Fatalf("demo origin status = %v, want pending", got)
+	}
+}
