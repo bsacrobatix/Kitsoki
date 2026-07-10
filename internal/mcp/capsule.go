@@ -5,27 +5,37 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/environment"
+	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/reconcile"
 )
 
 type CapsuleConfig struct {
-	Manager   *control.Manager
-	Owner     string
-	ProjectID string
+	Manager    *control.Manager
+	Owner      string
+	ProjectID  string
+	CILauncher func(string) ci.Launcher
 }
 type CapsuleServer struct {
 	mcpSrv           *mcpsdk.Server
 	manager          *control.Manager
 	owner, projectID string
 	plans            map[string]capsuleSyncPlan
+	ciLauncher       func(string) ci.Launcher
 	mu               sync.Mutex
 }
 type capsuleSyncPlan struct {
@@ -40,7 +50,7 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	if strings.TrimSpace(cfg.Owner) == "" {
 		return nil, fmt.Errorf("capsule mcp: owner is required")
 	}
-	s := &CapsuleServer{manager: cfg.Manager, owner: cfg.Owner, projectID: cfg.ProjectID, plans: map[string]capsuleSyncPlan{}}
+	s := &CapsuleServer{manager: cfg.Manager, owner: cfg.Owner, projectID: cfg.ProjectID, plans: map[string]capsuleSyncPlan{}, ciLauncher: cfg.CILauncher}
 	s.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{Name: "kitsoki-capsule", Version: "v1"}, nil)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.project.describe", Description: "Describe this already-scoped Capsule project and its fixed capabilities. No machine paths or secret values are returned."}, s.describe)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.definition.inspect", Description: "Inspect an allowed immutable Capsule definition."}, s.definition)
@@ -57,6 +67,9 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.vcs.commit", Description: "Commit local Capsule workspace changes. This does not publish or update a remote."}, s.vcsCommit)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.plan", Description: "Observe a handle-scoped workspace and create an immutable, stale-safe local reconciliation plan. It never publishes remotely."}, s.syncPlan)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.apply", Description: "Apply a previously returned reconciliation plan only if all observed refs and the workspace generation are unchanged. Required CI gate evidence is checked before promotion."}, s.syncApply)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.plan", Description: "Build the sealed environment and story envelope for an allowed project pipeline and workspace handle."}, s.ciPlan)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.run", Description: "Run the declared project CI story through the Capsule executor and return its typed verdict. A story can pass, fail, or park; it cannot self-authorize promotion."}, s.ciRun)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.status", Description: "Read persisted Capsule CI run records without host paths or raw secrets."}, s.ciStatus)
 	return s, nil
 }
 func (s *CapsuleServer) Run(ctx context.Context) error {
@@ -110,6 +123,13 @@ type capsuleSyncPlanArgs struct {
 type capsuleSyncApplyArgs struct {
 	PlanDigest  string `json:"plan_digest"`
 	GateReceipt string `json:"gate_receipt,omitempty"`
+}
+type capsuleCIArgs struct {
+	Workspace control.Handle `json:"workspace"`
+	Pipeline  string         `json:"pipeline"`
+}
+type capsuleCIStatusArgs struct {
+	Job string `json:"job,omitempty"`
 }
 type capsuleError struct {
 	OK    bool   `json:"ok"`
@@ -286,6 +306,84 @@ func (s *CapsuleServer) syncApply(ctx context.Context, _ *mcpsdk.CallToolRequest
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "result": result, "workspace": next}, nil
+}
+func (s *CapsuleServer) ciPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCIArgs) (*mcpsdk.CallToolResult, any, error) {
+	_, _, envelope, err := s.planCI(ctx, a.Workspace, a.Pipeline)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "envelope": envelope}, nil
+}
+func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCIArgs) (*mcpsdk.CallToolResult, any, error) {
+	in, pipeline, _, err := s.planCI(ctx, a.Workspace, a.Pipeline)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	project := s.manager.Grant.ProjectRoot
+	if s.ciLauncher == nil {
+		return capsuleErr(fmt.Errorf("capsule ci: no story launcher is configured")), nil, nil
+	}
+	service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Provider: executor.NewFakeProvider("local"), Launcher: s.ciLauncher(filepath.Join(project, pipeline.Story))}
+	digest, err := capsuleStoryDigest(filepath.Join(project, pipeline.Story))
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	result, err := service.Run(ctx, ci.RunRequest{Pipeline: a.Pipeline, Workspace: a.Workspace, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: digest, Trigger: ci.Trigger{Kind: "local", RequestedPipeline: a.Pipeline}})
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	if err := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result}); err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": result.Verdict.Outcome == "passed", "result": result}, nil
+}
+func (s *CapsuleServer) ciStatus(_ context.Context, _ *mcpsdk.CallToolRequest, a capsuleCIStatusArgs) (*mcpsdk.CallToolResult, any, error) {
+	store := ci.FileRunStore{ProjectRoot: s.manager.Grant.ProjectRoot}
+	if a.Job != "" {
+		record, err := store.Get(a.Job)
+		if err != nil {
+			return capsuleErr(err), nil, nil
+		}
+		return nil, map[string]any{"ok": true, "run": record}, nil
+	}
+	all, err := store.List()
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "runs": all}, nil
+}
+func (s *CapsuleServer) planCI(ctx context.Context, h control.Handle, name string) (control.Instance, ci.Pipeline, executor.Envelope, error) {
+	in, err := s.manager.Status(ctx, h)
+	if err != nil {
+		return control.Instance{}, ci.Pipeline{}, executor.Envelope{}, err
+	}
+	if in.Lease.Owner != s.owner {
+		return control.Instance{}, ci.Pipeline{}, executor.Envelope{}, control.ErrDenied
+	}
+	project := s.manager.Grant.ProjectRoot
+	cfg, err := ci.Load(project)
+	if err != nil {
+		return control.Instance{}, ci.Pipeline{}, executor.Envelope{}, err
+	}
+	pipeline, ok := cfg.Pipelines[name]
+	if !ok {
+		return control.Instance{}, ci.Pipeline{}, executor.Envelope{}, fmt.Errorf("capsule ci: pipeline %q not found", name)
+	}
+	digest, err := capsuleStoryDigest(filepath.Join(project, pipeline.Story))
+	if err != nil {
+		return control.Instance{}, ci.Pipeline{}, executor.Envelope{}, err
+	}
+	service := ci.Service{ProjectRoot: project, Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}}
+	_, envelope, err := service.Plan(ctx, ci.RunRequest{Pipeline: name, Workspace: h, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: digest, Trigger: ci.Trigger{Kind: "local", RequestedPipeline: name}})
+	return in, pipeline, envelope, err
+}
+func capsuleStoryDigest(path string) (string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 func capsuleErr(err error) *mcpsdk.CallToolResult {
 	return &mcpsdk.CallToolResult{IsError: true, StructuredContent: capsuleError{OK: false, Error: err.Error()}, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: fmt.Sprintf(`{"ok":false,"error":%q}`, err.Error())}}}

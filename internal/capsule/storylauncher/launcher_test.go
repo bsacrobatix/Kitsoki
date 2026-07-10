@@ -1,4 +1,4 @@
-package ci
+package storylauncher
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"kitsoki/internal/capsule/executor"
 )
 
-func TestEngineLauncherUsesStoryTerminalVerdict(t *testing.T) {
+func TestLauncherUsesStoryTerminalVerdict(t *testing.T) {
 	dir := t.TempDir()
 	story := filepath.Join(dir, "app.yaml")
 	raw := `app:
@@ -61,9 +61,7 @@ states:
 	if err != nil {
 		t.Fatal(err)
 	}
-	envelope.Trigger["envelope_digest"] = envelope.Digest
-	launcher := EngineLauncher{StoryPath: story}
-	got, err := launcher.Launch(context.Background(), executor.Prepared{Envelope: envelope})
+	got, err := Launcher{StoryPath: story}.Launch(context.Background(), executor.Prepared{Envelope: envelope})
 	if err != nil {
 		t.Fatal(err)
 	}

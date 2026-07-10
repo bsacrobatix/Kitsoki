@@ -7,7 +7,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/storylauncher"
 	kitsokimcp "kitsoki/internal/mcp"
 )
 
@@ -35,7 +37,7 @@ general-purpose Studio MCP server.`,
 				pipeline = "default"
 			}
 			_ = pipeline // CI registration consumes this selected pipeline in the next slice.
-			server, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: owner, ProjectID: projectID})
+			server, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: owner, ProjectID: projectID, CILauncher: func(path string) ci.Launcher { return storylauncher.Launcher{StoryPath: path} }})
 			if err != nil {
 				return err
 			}
