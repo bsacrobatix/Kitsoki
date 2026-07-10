@@ -234,6 +234,7 @@ states:
             Oversight: "{{ world.oversight_mode|default:'gated' }}"
 
       - heading: "Quick actions"
+        when: "(world.landing_note.summary ?? '') == '' || len(world.landing_note.plan ?? '') > 0 || (world.landing_note.route.intent ?? '') != ''"
       - choice:
           mode: single
           prompt: ""
@@ -349,9 +350,10 @@ states:
             - label:  "look"
               hint:   "re-render the workbench"
               intent: look
+          when: "(world.landing_note.summary ?? '') == '' || len(world.landing_note.plan ?? '') > 0 || (world.landing_note.route.intent ?? '') != ''"
 
       - prose: "Type a request in your own words (\"fix the login crash\", \"pick TKT-014 and drive it\", \"ask claude how imports resolve\"), or pick a quick action above."
-        when: "world.last_error == ''"
+        when: "world.last_error == '' && (world.landing_note.summary ?? '') == ''"
 
     on_enter:
       # 1. First-start banner sentinel — fires once, reload-safe (the set is
@@ -694,7 +696,7 @@ states:
                 landing_request:       "{{ slots.request }}"
                 landing_note:          {}
                 last_error:            ""
-            - say: "Workbench request captured; dispatching the read-only landing agent for: {{ slots.request }}"
+            - say: "Processing this request in the workbench: {{ slots.request }}"
 
       # On-path bail (B). Fired by the "→ on-path" choice item when the
       # workbench agent set landing_note.route. Projects the suggested
