@@ -502,7 +502,7 @@ func capsuleCloseCmd() *cobra.Command {
 		Short: "Remove a materialized capsule workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := capsule.Close(args[0]); err != nil {
+			if err := capsuleCloseManaged(cmd.Context(), args[0]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "closed %s\n", args[0])
@@ -510,4 +510,50 @@ func capsuleCloseCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func capsuleCloseManaged(ctx context.Context, workspace string) error {
+	if strings.TrimSpace(workspace) == "" {
+		return capsule.Close(workspace)
+	}
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return err
+	}
+	manifest, err := capsule.ReadManifest(abs)
+	if err != nil {
+		return capsule.Close(workspace)
+	}
+	projectRoot := capsuleListRepoRoot()
+	definitions := control.FileDefinitionStore{ProjectRoot: projectRoot}
+	def, err := definitions.Get(ctx, manifest.CapsuleName)
+	if err != nil || def.Source.Kind != control.SourceSynthetic {
+		return capsule.Close(workspace)
+	}
+	manager, err := capsuleproject.Open(projectRoot, nil)
+	if err != nil {
+		return err
+	}
+	manager.Instances = control.NewMemoryInstanceStore()
+	manager.Grant.WorkspaceRoots = []string{filepath.Dir(abs)}
+	id := filepath.Base(abs)
+	if !validCapsuleManagedInstanceID(id) {
+		id = safeCapsuleInstanceID(manifest.CapsuleName) + "-close"
+	}
+	in, err := manager.Instances.Create(ctx, control.Instance{
+		ID:               id,
+		DefinitionID:     def.ID,
+		DefinitionDigest: def.Digest,
+		Provider:         string(control.SourceSynthetic),
+		Path:             abs,
+		SourceRef:        def.Source.SyntheticSpec,
+		Head:             manifest.Source.Head,
+		Branch:           manifest.Source.Branch,
+		State:            control.StateReady,
+		Lease:            control.Lease{Owner: "capsule-cli"},
+	})
+	if err != nil {
+		return err
+	}
+	return manager.Close(ctx, control.Handle{ID: in.ID, Generation: in.Generation}, "capsule-cli")
 }
