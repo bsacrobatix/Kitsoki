@@ -33,7 +33,7 @@
           "visual_surface": { "type": "string" },
           "primary_tool": { "type": "string" },
           "evidence_kind": { "type": "string" },
-          "level": { "type": "string", "enum": ["frame-level", "bridge-level", "terminal-level"] },
+          "level": { "type": "string", "enum": ["frame-level", "bridge-level", "terminal-level", "editor-level"] },
           "preflight": { "type": "string" },
           "recording_rule": { "type": "string" }
         }
@@ -78,6 +78,12 @@
           "resolved_mcp_tools": { "type": "array", "items": { "type": "string" } },
           "evidence": { "type": "array", "items": { "type": "string" } },
           "evidence_contract": {
+            "type": "object",
+            "required": ["primary_tool", "evidence_kind", "level"],
+            "additionalProperties": true
+          },
+          "editor_evidence_contract": {
+            "description": "vscode legs only: the opportunistic editor-level tier reached via host.ide.* (see tools/persona_qa/transports.py). Absent for every other transport.",
             "type": "object",
             "required": ["primary_tool", "evidence_kind", "level"],
             "additionalProperties": true

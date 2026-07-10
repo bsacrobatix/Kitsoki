@@ -82,6 +82,17 @@ naming the capture tool, evidence kind, and proof level for that transport
 -> `visual.open kind=vscode`, always labeled bridge-level, `cli` -> command
 transcript, labeled terminal-level). A scenario that
 doesn't allow a requested transport is skipped for it rather than erroring.
+
+`vscode` legs additionally carry an `editor_evidence_contract` (present only
+on `vscode`) and one extra `capture_routes` entry (`evidence_kind:
+ide_context_capture`) for the opportunistic **editor-level** tier: a
+post-drive `host.ide.*` `ide.context_captured` trace event, proof a real VS
+Code + kitsoki extension was linked and queried, on top of the mandatory
+bridge-level floor. It is additive, not a replacement, and only ever
+populates when a real editor is attached and the leg's `primary_story` calls
+`host.ide.*` while driving — see `tools/persona_qa/transports.py` and
+`docs/persona-qa.md`'s Transport Contract section for the exact pass/degraded
+rule `stories/scenario-qa/scripts/record_leg_result.star` enforces.
 Omitting `--transport` keeps today's one-entry-per-scenario output unchanged.
 Every execution step and driver-plan scenario also carries deterministic
 `capture_routes`. A route is generated from the run id, scenario id, primary

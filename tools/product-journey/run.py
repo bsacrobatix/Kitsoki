@@ -98,6 +98,7 @@ EVIDENCE_FILE_EXTENSIONS = {
     "reproduction_steps": "md",
     "command_output": "txt",
     "page_url": "txt",
+    "ide_context_capture": "json",
 }
 SCENARIO_ALIASES = {
     "core-use-cases": ["project-onboarding", "prd-design", "bugfix"],
@@ -1685,6 +1686,7 @@ def evidence_capture_hint(kind: str) -> str:
         "trace-replay": "Save a local Kitsoki trace file replayable via `kitsoki trace to-flow` / `test flows` (a real path, not cassette://).",
         "flow-fixture": "Save a local flow fixture (`kitsoki test flows <app.yaml> --flows ...`) that replays this scenario no-LLM.",
         "png-sequence": "Save a local directory or manifest of PNG frames captured via render.tui/visual.observe for frame-by-frame playback.",
+        "ide_context_capture": "Save the post-drive host.ide.* ide.context_captured trace event JSON (vscode legs' opportunistic editor-level tier) -- leave unattached and report honestly when no real editor was connected/queried.",
     }
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
 
@@ -2827,6 +2829,13 @@ def scenario_transport_leg(scenario: dict, transport: str) -> dict:
     leg["visual_surface"] = profile["visual_surface"]
     leg["transport_profile"] = compact_transport_profile(profile)
     leg["transport_evidence_contract"] = profile["evidence_contract"]
+    # editor_evidence_contract is the opportunistic, stronger tier vscode legs
+    # can reach on top of the mandatory bridge-level floor above (see
+    # tools/persona_qa/transports.py). Only vscode carries one today; other
+    # transports simply omit the key.
+    editor_contract = profile.get("editor_evidence_contract")
+    if editor_contract:
+        leg["editor_evidence_contract"] = editor_contract
     leg["leg_id"] = f"{scenario['id']}::{transport}"
     return leg
 
@@ -3444,7 +3453,7 @@ def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, e
         for capability in ["session.status", "session.trace"]:
             if capability not in capabilities:
                 capabilities.append(capability)
-    if evidence_kind in {"session_trace", "trace_reference", "trace-replay", "flow-fixture", "navigation_trace"}:
+    if evidence_kind in {"session_trace", "trace_reference", "trace-replay", "flow-fixture", "navigation_trace", "ide_context_capture"}:
         if "session.trace" not in capabilities:
             capabilities.append("session.trace")
     for capability in ["render.tui", "visual.observe", "session.trace", "session.inspect"]:
@@ -3566,6 +3575,8 @@ def build_transport_suite(
                     "no_substitution": "Do not attach demo, placeholder, synthetic, or unrelated media as proof.",
                 },
             }
+            if profile.get("editor_evidence_contract"):
+                row["editor_evidence_contract"] = profile["editor_evidence_contract"]
             legs.append(row)
             all_legs.append(row)
         skipped = [transport for transport in requested if transport not in allowed]
@@ -4018,6 +4029,29 @@ def _driver_plan_entry(
         driver_manifest,
         leg,
     )
+    # vscode legs get ONE extra capture route for the opportunistic
+    # editor-level tier (tools/persona_qa/transports.py's
+    # editor_evidence_contract), on top of the mandatory bridge-level route
+    # capture_routes_for_evidence already emitted above. It is additive, not
+    # a replacement -- see docs/persona-qa.md and record_leg_result.star for
+    # how a missing editor-level route keeps a vscode leg at bridge-level
+    # (degraded-evidence) rather than failing outright.
+    editor_contract = (leg or {}).get("editor_evidence_contract")
+    if editor_contract:
+        editor_leg = dict(leg)
+        editor_leg["transport_evidence_contract"] = editor_contract
+        capture_routes = list(capture_routes) + [
+            capture_route_for_slot(
+                scenario,
+                run_json,
+                run_dir_arg,
+                editor_contract.get("evidence_kind", "ide_context_capture"),
+                required_mcp,
+                visual_surface,
+                driver_manifest,
+                editor_leg,
+            )
+        ]
     entry = {
         "scenario": scenario_id,
         "label": scenario["label"],
@@ -4073,6 +4107,8 @@ def _driver_plan_entry(
         entry["leg_id"] = leg["leg_id"]
         entry["transport_profile"] = leg["transport_profile"]
         entry["transport_evidence_contract"] = leg["transport_evidence_contract"]
+        if leg.get("editor_evidence_contract"):
+            entry["editor_evidence_contract"] = leg["editor_evidence_contract"]
     return entry
 
 

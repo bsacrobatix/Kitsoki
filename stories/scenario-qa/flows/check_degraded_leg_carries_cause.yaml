@@ -107,6 +107,7 @@ turns:
             driver_status: "blocked"
             evidence_refs: []
             post_drive_evidence_ref: ""
+            post_drive_editor_evidence_ref: ""
             harness_used: ""
             playback_path: ""
             playback_caption: ""
