@@ -3,8 +3,9 @@
 **Status:** v1 in progress. Local typed plan/classify/apply with stale and
 fast-forward checks and receipt-to-candidate gate binding are available through
 Capsule CLI/MCP. The native `development` compatibility provider preserves the
-existing protected rebase/gate workflow. Conflict integration and remote
-publish remain.
+existing protected rebase/gate workflow. `publish` is now guarded behind an
+explicit remote publisher provider instead of local ref mutation. Conflict
+integration and the remote publish provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -177,9 +178,9 @@ operations.
 
 ```text
 ## 1. Plan/apply substrate
-- [ ] 1.1 Define ObservedRefs, ReconcilePlan, plan hashing, operation/class enums, VCSProvider, RemoteProvider, and fakes
-- [ ] 1.2 Implement deterministic observe/classify for local branches, protected refs, upstream refs, dirt, and overlap
-- [ ] 1.3 Implement stale-safe prepare/apply/abort with compare-and-swap ref updates and idempotency keys
+- [x] 1.1 Define ObservedRefs, ReconcilePlan, plan hashing, operation/class enums, VCSProvider, RemoteProvider, and fakes
+- [x] 1.2 Implement deterministic observe/classify for local branches, protected refs, upstream refs, dirt, and overlap
+- [x] 1.3 Implement stale-safe prepare/apply/abort with compare-and-swap ref updates and idempotency keys
 - [ ] 1.4 Emit sync lifecycle facts and bind exact gate/CI receipt requirements
 
 ## 2. Conflict and remote seams

@@ -2,9 +2,10 @@
 
 **Status:** v1 in progress. Environment definitions/locks, host and fake-remote
 executor contracts, pipeline-selected CLI/MCP placement, and environment
-operations ship locally. The HTTPS remote-worker transport serializes sealed
-envelopes and typed results with header-only credential injection; project
-launch configuration, Arena adoption, and migrations remain.
+operations ship locally. The HTTPS remote-worker transport and checked-in
+`remotes:` project selection serialize sealed envelopes and typed results with
+header-only credential injection. Arena/container adoption and migrations
+remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -212,16 +213,16 @@ decision.
 
 ```text
 ## 1. Environment contract
-- [ ] 1.1 Define environment schema, loader, lock schema, resolver DI seams, and content hashing
+- [x] 1.1 Define environment schema, loader, lock schema, resolver DI seams, and content hashing
 - [ ] 1.2 Implement host probe, image-digest/devcontainer resolution, lockfile/bootstrap hashing, and no-auto-install refusal
 - [ ] 1.3 Define cache and secret-reference grants; redact all serialized surfaces
-- [ ] 1.4 Add env resolve|lock|verify CLI/MCP and compatibility host-current definition
+- [x] 1.4 Add env resolve|lock|verify CLI/MCP and compatibility host-current definition
 
 ## 2. Executor contract
-- [ ] 2.1 Define ExecutionEnvelope, capabilities, provider interface, event sink, attempts, cancellation, and fake provider
-- [ ] 2.2 Implement host provider with declared commands, sandbox/applied-policy reporting, and artifact collection
+- [x] 2.1 Define ExecutionEnvelope, capabilities, provider interface, event sink, attempts, cancellation, and fake provider
+- [x] 2.2 Implement host provider with declared commands, sandbox/applied-policy reporting, and artifact collection
 - [ ] 2.3 Adapt/extract Arena container backend and completion-state handling; prove local container parity
-- [ ] 2.4 Implement remote one-shot protocol and fake streaming worker; add one real remote adapter only after offline conformance is green
+- [x] 2.4 Implement remote one-shot protocol and fake streaming worker; add one real remote adapter only after offline conformance is green
 
 ## 3. Adopt and document
 - [ ] 3.1 Express Kitsoki bootstrap and runstatus cache as environment hooks/cache grants

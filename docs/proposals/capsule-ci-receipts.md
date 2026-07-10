@@ -1,8 +1,9 @@
 # Tracing: capsule CI receipts and attestations
 
 **Status:** v1 in progress. Canonical receipt build/verification, tamper tests,
-and signer DI ship in `internal/capsule/receipt`; RunIndex/runstatus projection,
-trace producers, and trusted remote receipt adoption remain.
+signer DI, controller trace sidecars, promotion-gate binding, and
+`capsule-ci-run-index/v1` status projection ship. Rich trace producers,
+runstatus/provider publication, and trusted remote receipt adoption remain.
 **Kind:**   tracing
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -187,13 +188,15 @@ of evidence.
 ```text
 ## 1. Emit and schema
 - [ ] 1.1 Define capsule lifecycle, environment/executor/policy, CI verdict, and sync trace event schemas with shared run/envelope ids
-- [ ] 1.2 Define capsule-ci-receipt/v1 JSON schema, canonicalizer, content hashing, and verification result
+- [x] 1.2 Define capsule-ci-receipt/v1 JSON schema, canonicalizer, content hashing, and verification result
 - [ ] 1.3 Wire runtime/story producers and enforce secret/path redaction
 
 ## 2. Rebuild and consume
-- [ ] 2.1 Add deterministic receipt builder over manifests, trace, artifact index, and typed verdict
-- [ ] 2.2 Derive promotion eligibility and explicit incomplete/invalid reasons
+- [x] 2.1 Add deterministic receipt builder over manifests, trace, artifact index, and typed verdict
+- [x] 2.2 Derive promotion eligibility and explicit incomplete/invalid reasons
 - [ ] 2.3 Add RunIndex receipt projection, capsule ci status output, and runstatus/provider summary consumers
+  - Shipped: `capsule-ci-run-index/v1` plus CLI/MCP status projection.
+  - Remaining: runstatus/provider summary consumers.
 - [ ] 2.4 Add signer/verifier DI seam and fake; require according to project policy
 
 ## 3. Prove and document
