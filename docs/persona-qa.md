@@ -44,8 +44,9 @@ kitsoki run @kitsoki/scenario-qa
 `check` plans a run bundle, drives the transport(s) with the reusable
 [`product-journey-qa-driver`](../.agents/agents/product-journey-qa-driver.md)
 agent, and independently judges the captured evidence. Add `transport=tui,web`
-or `transport=all` to check more than one transport (pausing after each for
-`next transport`). `report` folds every recorded leg into
+or `transport=all` to check more than one transport — every leg drains
+automatically by default (add `pause=each-leg` to pause after each leg for an
+explicit `next transport` instead). `report` folds every recorded leg into
 `.artifacts/product-journey/<run-id>/report.md` (the verdict table) and
 `deck.slidey.json` (a Slidey deck of the run). For the fuller persona x
 scenario x 10-repo matrix workflow, see
