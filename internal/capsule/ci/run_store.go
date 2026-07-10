@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"kitsoki/internal/artifactjob"
 )
@@ -15,8 +16,10 @@ import (
 // this record makes the completed envelope/verdict recoverable without a new
 // registry schema.
 type RunRecord struct {
-	JobID  string    `json:"job_id"`
-	Result RunResult `json:"result"`
+	JobID               string    `json:"job_id"`
+	Result              RunResult `json:"result"`
+	ReceiptID           string    `json:"receipt_id,omitempty"`
+	ReceiptVerification string    `json:"receipt_verification,omitempty"`
 }
 type FileRunStore struct{ ProjectRoot string }
 
@@ -32,10 +35,13 @@ func (s FileRunStore) Write(record RunRecord) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, record.JobID+".json"), append(raw, '\n'), 0o600)
+	return os.WriteFile(filepath.Join(dir, record.JobID+".run.json"), append(raw, '\n'), 0o600)
 }
 func (s FileRunStore) Get(id string) (RunRecord, error) {
-	raw, err := os.ReadFile(filepath.Join(s.ProjectRoot, ".capsules", "ci", id+".json"))
+	raw, err := os.ReadFile(filepath.Join(s.ProjectRoot, ".capsules", "ci", id+".run.json"))
+	if os.IsNotExist(err) {
+		raw, err = os.ReadFile(filepath.Join(s.ProjectRoot, ".capsules", "ci", id+".json"))
+	}
 	if err != nil {
 		return RunRecord{}, err
 	}
@@ -55,12 +61,17 @@ func (s FileRunStore) List() ([]RunRecord, error) {
 	}
 	var out []RunRecord
 	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" || strings.HasSuffix(entry.Name(), ".receipt.json") || strings.HasSuffix(entry.Name(), ".trace.json") {
 			continue
 		}
-		record, err := s.Get(entry.Name()[:len(entry.Name())-5])
+		id := strings.TrimSuffix(entry.Name(), ".run.json")
+		id = strings.TrimSuffix(id, ".json")
+		record, err := s.Get(id)
 		if err != nil {
 			return nil, err
+		}
+		if string(record.Result.Job.ID) != record.JobID {
+			continue
 		}
 		out = append(out, record)
 	}

@@ -22,6 +22,7 @@ import (
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/reconcile"
+	"kitsoki/internal/capsule/record"
 )
 
 type CapsuleConfig struct {
@@ -339,7 +340,11 @@ func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a 
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
-	if err := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result}); err != nil {
+	stored, err := record.Persist(project, result)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	if err := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result, ReceiptID: stored.Receipt.ReceiptID, ReceiptVerification: stored.Verification.Status}); err != nil {
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": result.Verdict.Outcome == "passed", "result": result}, nil

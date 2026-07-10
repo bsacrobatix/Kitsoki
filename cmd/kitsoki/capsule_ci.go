@@ -16,6 +16,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/record"
 	"kitsoki/internal/capsule/storylauncher"
 )
 
@@ -97,7 +98,11 @@ func capsuleCIRunCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if err := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result}); err != nil {
+		stored, err := record.Persist(project, result)
+		if err != nil {
+			return err
+		}
+		if err := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result, ReceiptID: stored.Receipt.ReceiptID, ReceiptVerification: stored.Verification.Status}); err != nil {
 			return err
 		}
 		_ = m
