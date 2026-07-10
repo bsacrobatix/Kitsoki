@@ -34,6 +34,7 @@ package studio
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"runtime/debug"
@@ -42,6 +43,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
+	starlarkhost "kitsoki/internal/host/starlark"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -61,6 +63,11 @@ const implementationName = "kitsoki-studio"
 type Server struct {
 	mcpSrv *mcpsdk.Server
 	sess   *StudioSession
+	// operatingSystem is the optional strict/escape integration surface.  It is
+	// deliberately injected: unit-only Server construction retains the legacy
+	// toolbox without acquiring a process runner or a repository root.
+	operatingSystem        *OperatingSystemServices
+	operatingSystemProfile StudioOperatingProfile
 	// visualHandles are lightweight logical surfaces opened by visual.open.
 	// They deliberately do not own a browser process in the first slice; they
 	// bind a stable visual handle to an existing driving handle and reuse the
@@ -109,6 +116,89 @@ type Server struct {
 // ServerOption configures a studio Server at construction.
 type ServerOption func(*Server)
 
+// StudioOperatingProfile selects the server-exposed operating-system tool
+// surface.  Legacy remains the compatibility default while the replay decision
+// is hold; strict is an explicit preview and escape is an audited exception
+// profile.
+type StudioOperatingProfile string
+
+const (
+	StudioOperatingProfileLegacy StudioOperatingProfile = "legacy"
+	StudioOperatingProfileStrict StudioOperatingProfile = "strict"
+	StudioOperatingProfileEscape StudioOperatingProfile = "escape"
+)
+
+// OperatingSystemServices is the server-held authority graph shared by the
+// objective, managed-workspace, CodeAct, gate, and host.run policy handlers.
+// Callers construct it once per server so every tool observes the same receipt
+// store and workspace registry.
+type OperatingSystemServices struct {
+	Objectives *ObjectiveService
+	Workspaces *ManagedWorkspaceService
+	Guard      *FSGuard
+	Codeact    *WorkspaceCodeactService
+	Gates      *GateRunner
+	HostRun    HostRunPolicy
+}
+
+// NewOperatingSystemServices constructs the production authority graph.  It
+// runs no agent: all process execution stays behind the managed-workspace and
+// typed-gate runners.  The caller supplies repository-relative paths so a
+// Studio subprocess and its child workspace commands agree on containment.
+func NewOperatingSystemServices(profile StudioOperatingProfile, workspaceRoot, workspaceScript string) (*OperatingSystemServices, error) {
+	if profile == "" {
+		profile = StudioOperatingProfileLegacy
+	}
+	if profile != StudioOperatingProfileLegacy && profile != StudioOperatingProfileStrict && profile != StudioOperatingProfileEscape {
+		return nil, fmt.Errorf("unknown operating-system profile %q", profile)
+	}
+	objectives, err := NewObjectiveService(NewMemoryObjectiveStore(), nil)
+	if err != nil {
+		return nil, err
+	}
+	workspaces, err := NewManagedWorkspaceService(workspaceRoot, workspaceScript, nil, objectives, nil)
+	if err != nil {
+		return nil, err
+	}
+	guard, err := NewFSGuard(workspaces)
+	if err != nil {
+		return nil, err
+	}
+	// The server ceiling deliberately permits only guarded workspace filesystem
+	// I/O. Each call must still request a subset, and WorkspaceCodeactService
+	// refuses host capabilities or a different root; using the pure default here
+	// would make the advertised workspace.codeact mutation plane unusable.
+	codeactCeiling := starlarkhost.DefaultCapabilities()
+	codeactCeiling.FS.ReadPatterns = []string{"**"}
+	codeactCeiling.FS.WritePatterns = []string{"**"}
+	codeact, err := NewWorkspaceCodeactService(workspaces, guard, codeactCeiling)
+	if err != nil {
+		return nil, err
+	}
+	gates, err := NewGateRunner(DefaultGateCatalog(), workspaces, nil, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	hostRun, err := NewHostRunPolicy(HostRunPolicyConfig{Profile: HostRunProfile(profile), Objectives: objectives})
+	if err != nil {
+		return nil, err
+	}
+	return &OperatingSystemServices{Objectives: objectives, Workspaces: workspaces, Guard: guard, Codeact: codeact, Gates: gates, HostRun: hostRun}, nil
+}
+
+// WithOperatingSystemServices enables the integrated profile.  A nil service
+// is rejected at construction time because a profile without its authority
+// graph would advertise tools that cannot uphold their receipt contract.
+func WithOperatingSystemServices(profile StudioOperatingProfile, services *OperatingSystemServices) ServerOption {
+	return func(s *Server) {
+		if profile == "" {
+			profile = StudioOperatingProfileLegacy
+		}
+		s.operatingSystemProfile = profile
+		s.operatingSystem = services
+	}
+}
+
 // ReadOnly omits the story-mutating tool (story.write) from the registry. Read
 // tools and replay-default session driving stay available — read-only here means
 // "cannot edit the story tree", not "cannot run the story". See Server.readOnly.
@@ -139,6 +229,9 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	for _, opt := range opts {
 		opt(srv)
 	}
+	if srv.operatingSystemProfile == "" {
+		srv.operatingSystemProfile = StudioOperatingProfileLegacy
+	}
 	srv.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    implementationName,
 		Version: Version,
@@ -162,57 +255,49 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 		Description: "Read-only prioritized work queue across all open driving handles. Returns async jobs, unread notifications, pending/dispatching/failed chat drives, backgrounded chats, and parked operator questions with reacquisition hints.",
 	}, srv.handleWork)
 
-	// story.* — the deterministic, LLM-free authoring tools (slice 6).
-	srv.registerStoryTools()
-
-	// story.list / story.search — discover and grep a story's files (the
-	// read/grep surface that lets a driver stay off the host Read/Grep).
-	srv.registerStorySearchTools()
-
-	// story.turn — dry-run one transition (the debugging microscope).
-	srv.registerStoryTurnTool()
-
-	// workflow.* — dynamic-workflow create/validate/export receipts.
-	srv.registerWorkflowTools()
-
-	// session.* / render.* — drive a live (replay-default) session and see it
-	// (slice 7).
-	srv.registerSessionTools()
-
-	// chat.* — read-side drill-down for async chat/subagent context.
-	srv.registerChatTools()
-
-	// inbox.* — external intake into the per-session inbox.
-	srv.registerInboxTools()
-
-	// issue.* — file a local artifact ticket or GitHub issue with studio-produced
-	// evidence bundled in.
-	srv.registerIssueTools()
-
-	// host.* — the standalone gate-runner: run a command against a worktree
-	// (e.g. go test) outside any live session, to gate on the real deliverable.
-	srv.registerHostTools()
-
-	// trace.* — read a session trace OFF DISK (no live handle) and convert one
-	// to a replayable flow fixture (the no-LLM test loop, closed in MCP).
-	srv.registerTraceTools()
-
-	// vcs.* / worktree.* — a structured git surface: status/diff/log, worktree
-	// lifecycle, and the guarded squash-merge that replaces the main-destroying
-	// `reset --soft` ritual.
-	srv.registerVCSTools()
-
-	// gh.* — read GitHub issues/PRs and post comments from inside the studio.
-	srv.registerGHTools()
-
-	// ticket.call — reusable Starlark ticket-provider modules.
-	srv.registerTicketProviderTools()
-
-	// visual.* — token-efficient visual interaction over web/TUI/VS Code-like
-	// surfaces, built on existing session/render seams.
-	srv.registerVisualTools()
+	if srv.operatingSystemProfile == StudioOperatingProfileLegacy {
+		// Legacy is the default compatibility toolbox while strict remains on
+		// replay-decision hold.  It keeps every existing authoring surface.
+		srv.registerLegacyToolbox()
+	} else if srv.operatingSystemProfile == StudioOperatingProfileEscape {
+		// Escape deliberately exposes only the audited host.run exception in
+		// addition to the operating-system plane; host.patch remains legacy-only.
+		srv.registerHostTools()
+	}
+	if srv.operatingSystem != nil {
+		srv.registerOperatingSystemTools()
+	}
 
 	return srv
+}
+
+func (srv *Server) registerLegacyToolbox() {
+	srv.registerStoryTools()
+	srv.registerStorySearchTools()
+	srv.registerStoryTurnTool()
+	srv.registerWorkflowTools()
+	srv.registerSessionTools()
+	srv.registerChatTools()
+	srv.registerInboxTools()
+	srv.registerIssueTools()
+	srv.registerHostTools()
+	srv.registerTraceTools()
+	srv.registerVCSTools()
+	srv.registerGHTools()
+	srv.registerTicketProviderTools()
+	srv.registerVisualTools()
+}
+
+func (srv *Server) registerOperatingSystemTools() {
+	os := srv.operatingSystem
+	if os.Objectives == nil || os.Workspaces == nil || os.Guard == nil || os.Codeact == nil || os.Gates == nil {
+		panic("operating-system services are incomplete")
+	}
+	RegisterObjectivePolicyTools(srv.mcpSrv, os.Objectives)
+	RegisterManagedWorkspaceTools(srv.mcpSrv, os.Workspaces, os.Guard)
+	RegisterWorkspaceCodeactTool(srv.mcpSrv, os.Codeact)
+	RegisterGateTools(srv.mcpSrv, os.Gates)
+	srv.registerDiagnoseExplainTools()
 }
 
 // Session exposes the underlying StudioSession so callers and tests can open or

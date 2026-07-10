@@ -51,7 +51,10 @@ const hostRunArtifactsDir = ".artifacts/mcp-host-run"
 // server: a command runner is a write surface (it can run builds/tests that
 // mutate the worktree), so the Q&A surface must not expose it.
 func (srv *Server) registerHostTools() {
-	if srv.readOnly {
+	if srv.readOnly || srv.operatingSystemProfile == StudioOperatingProfileStrict {
+		return
+	}
+	if srv.operatingSystemProfile == StudioOperatingProfileEscape {
 		return
 	}
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -93,6 +96,13 @@ func hostRunInputSchema() *jsonschema.Schema {
 
 // HostRunArgs is the input to host.run.
 type HostRunArgs struct {
+	// ObjectiveID and WorkspaceID bind escape/typed-gate host.run use to the
+	// operating-system receipt graph. They are optional only for legacy
+	// compatibility; strict and escape policy rejects an unbound request.
+	ObjectiveID string      `json:"objective_id,omitempty"`
+	WorkspaceID string      `json:"workspace_id,omitempty"`
+	Mode        HostRunMode `json:"mode,omitempty"`
+	Reason      string      `json:"reason,omitempty"`
 	// Dir is the working directory the command runs in — a worktree path.
 	// Required: a gate must name the tree it gates, never the server's cwd.
 	Dir string `json:"dir"`
@@ -156,6 +166,19 @@ func (srv *Server) handleHostRun(
 	req *mcpsdk.CallToolRequest,
 	args HostRunArgs,
 ) (*mcpsdk.CallToolResult, any, error) {
+	var hostPolicy HostRunPolicy
+	if srv.operatingSystem != nil {
+		hostPolicy = srv.operatingSystem.HostRun
+	}
+	decision, policyErr := AuthorizeHostRun(ctx, hostPolicy, HostRunPolicyRequest{
+		ObjectiveID: args.ObjectiveID, WorkspaceID: args.WorkspaceID, Mode: args.Mode, Reason: args.Reason,
+	})
+	if policyErr != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("host.run policy: %v", policyErr)), nil, nil
+	}
+	if !decision.Allowed {
+		return buildToolError(decision.Code, decision.Reason), nil, nil
+	}
 	if args.Dir == "" {
 		return buildToolError(ErrBadRequest, "host.run: dir is required (the worktree to gate)"), nil, nil
 	}

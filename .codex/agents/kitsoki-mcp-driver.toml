@@ -27,6 +27,13 @@ You orchestrate kitsoki using ONLY the kitsoki studio MCP. Do not use shell,
 filesystem edits, git, or gh for the core workflow — there is an MCP tool for it
 (story.* to author/validate/test, session.* to drive, render.*/visual.* to see,
 host.run/vcs.*/worktree.*/gh.* to gate & integrate, trace.read/to_flow to debug).
+The normal attachment uses legacy compatibility. The operating-system strict
+profile is explicit preview only and currently HOLD (the replay
+trace-stalled-turn correctness cell fails); do not claim it is promoted. When
+strict is explicitly selected, open objective.open before mutation; use only
+workspace.* or workspace.codeact, retain receipts, run gate.run, and close only
+with fresh gate evidence. Strict intentionally omits raw worktree/vcs,
+host.patch, and arbitrary host.run.
 Your job is to fix friction you find in kitsoki stories. If a run reveals a
 reproducible breakage or friction in behavior, reproduce it first, patch the
 story directly via story.write, and rerun story.validate + story.test until it is
@@ -59,4 +66,4 @@ story.test before claiming done.
 # role to exactly these — no other MCP server is available to it.
 [mcp_servers.kitsoki]
 command = "kitsoki"
-args = ["mcp", "--stories-dir", "stories"]
+args = ["mcp", "--stories-dir", "stories", "--operating-profile", "legacy"]

@@ -126,6 +126,35 @@ func TestStudioToolsListed(t *testing.T) {
 	assert.True(t, names["host.patch"], "host.patch registered on a read-write server")
 }
 
+func TestStrictOperatingSystemProfileRegistersOnlyItsPreviewPlane(t *testing.T) {
+	ctx := context.Background()
+	services, err := studio.NewOperatingSystemServices(
+		studio.StudioOperatingProfileStrict,
+		"../../../.capsules/workspaces",
+		"../../../scripts/dev-workspace.sh",
+	)
+	require.NoError(t, err)
+	srv := studio.NewServer(studio.NewStudioSession(stubBuilder()),
+		studio.WithOperatingSystemServices(studio.StudioOperatingProfileStrict, services),
+	)
+	cs := connectInProcess(ctx, t, srv)
+	res, err := cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	names := map[string]bool{}
+	for _, tool := range res.Tools {
+		names[tool.Name] = true
+	}
+	for _, required := range []string{
+		"objective.open", "objective.close", "workspace.create", "workspace.codeact", "gate.run",
+		"studio.diagnose", "session.explain", "trace.explain",
+	} {
+		assert.Truef(t, names[required], "strict preview must expose %s", required)
+	}
+	for _, forbidden := range []string{"host.run", "host.patch", "vcs.status", "worktree.create", "story.write", "session.new"} {
+		assert.Falsef(t, names[forbidden], "strict preview must not expose %s", forbidden)
+	}
+}
+
 // TestReadOnlyOmitsStoryWrite confirms a server built with ReadOnly() drops
 // story.write (the only story-tree mutation) while keeping the read tools and
 // the replay-driving tools — the meta-mode Q&A surface.
