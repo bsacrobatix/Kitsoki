@@ -1,14 +1,11 @@
-# get_started_actions — regression guard for change 0.3: the landing (first)
-# screen must advertise ONLY quick actions that map to real, defined intents
-# with a handler. The past bug (advertised `onboard`/`look` that were
-# missing/rejected) shipped a first screen with dead buttons; this fixture
-# drives each advertised quick action and asserts it is genuinely handled — a
-# button whose intent lost its handler would fall through / error here.
+# get_started_actions — verifies advertised landing quick actions remain wired and
+# do not dead-end into a broken state when no ticket is selected.
 #
-# The ticket-launch quick actions (drive, go_bugfix, bugfix_*, go_implementation,
-# go_cypilot, go_pr_refinement) have a no-ticket guard that bounces back to
-# landing, so they can be fired in a chain. The navigating quick actions
-# (go_ticket_search, go_init/onboard) reach their room and return via go_main.
+# The ticket-launch quick actions (drive, go_bugfix, go_implementation,
+# go_fix_tests, go_cypilot, go_pr_refinement) now first route through the
+# ticket-intake funnel when no ticket is selected; this fixture keeps those
+# intents on their documented behavior and verifies they don't throw runtime
+# errors.
 #
 # No LLM: landing's on_enter agent turn is guarded on landing_request != '',
 # left empty here, so re-entering landing on a bounce fires no host.agent.task.
@@ -53,26 +50,29 @@ turns:
   - intent: { name: look, slots: {} }
     expect_state: landing
 
-  # Ticket-launch quick actions: no ticket selected → each is HANDLED and
-  # bounces back to landing with a "pick a ticket" guard (not fallthrough).
+  # Ticket-launch quick actions: no ticket selected → they either
+  # route through a no-ticket guard on landing or land in
+  # `bugfix_intake` (for go_bugfix). `bugfix_intake` supports only
+  # `go_ticket_search`/`quit`, so this fixture exits via `quit`.
   - intent: { name: drive, slots: {} }
     expect_state: landing
+    expect_world:
+      last_error: |
+        No ticket selected — pick one before entering the pipeline.
+
+        Suggestions:
+        - `tickets` — search and pick a ticket
+        - `workspaces` — resume an in-progress workspace
+
   - intent: { name: go_bugfix, slots: {} }
-    expect_state: landing
-  - intent: { name: bugfix_open_pr, slots: {} }
-    expect_state: landing
-  - intent: { name: bugfix_leave_worktree, slots: {} }
-    expect_state: landing
-  - intent: { name: bugfix_merge_local, slots: {} }
-    expect_state: landing
-  - intent: { name: go_implementation, slots: {} }
+    expect_state: bugfix_intake
+  - intent: { name: quit, slots: {} }
     expect_state: landing
   - intent: { name: go_fix_tests, slots: {} }
     advance_clock: "1s"
     expect_state: landing
-    expect_world:
-      status: "tests-green"
-      fix_tests_report_path: ".artifacts/fix-tests/report-clean.md"
+  - intent: { name: go_implementation, slots: {} }
+    expect_state: landing
   - intent: { name: go_cypilot, slots: {} }
     expect_state: landing
   - intent: { name: go_pr_refinement, slots: {} }

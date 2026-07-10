@@ -1,6 +1,6 @@
-# bugfix_bare_command_pick_ticket_guard -- bare "fix bug" is handled by the
-# default-intent capture at runtime so semantic routing does not steal richer
-# inline reports like "fix this bug <complaint>".
+# bugfix_bare_command_pick_ticket_guard -- bare "fix bug" now flows into the
+# explicit bugfix-intake fast path so operators are sent to the quick inline
+# intake (no ticket required) instead of staying on landing.
 
 test_kind: flow
 app: ../app.yaml
@@ -11,14 +11,8 @@ turns:
       name: landing_capture
       slots:
         request: "fix bug"
-    expect_state: landing
+    expect_state: bugfix_intake
     expect_world:
-      last_error: |
-        No ticket selected — pick one before entering the bugfix pipeline.
-
-        Suggestions:
-        - `tickets` — search and pick a ticket
-        - paste a GitHub issue URL
-        - `fix this bug ...` — paste an inline bug report
+      last_error: ""
 
 expect_no_errors: true
