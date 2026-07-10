@@ -37,6 +37,7 @@ const (
 	DriveClickIntent   = "click-intent"
 	DriveClickSelector = "click-selector"
 	DriveWaitState     = "wait-state"
+	DriveWaitText      = "wait-text"
 	DriveRevealTurn    = "reveal-turn"
 	DriveDwellMs       = "dwell-ms"
 )
@@ -61,6 +62,10 @@ func (d DriveAction) Validate() error {
 	case DriveWaitState:
 		if d.State == "" {
 			return fmt.Errorf("drive %q requires state", d.Type)
+		}
+	case DriveWaitText:
+		if d.Text == "" {
+			return fmt.Errorf("drive %q requires text", d.Type)
 		}
 	case DriveDwellMs:
 		if d.Ms <= 0 {

@@ -3,6 +3,7 @@ package tour
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/runtime"
@@ -58,6 +59,8 @@ func (e *executor) one(a DriveAction) error {
 		return e.clickSelector(a.Selector)
 	case DriveWaitState:
 		return e.waitForState(a.State, 20*time.Second)
+	case DriveWaitText:
+		return e.waitForText(a.Text, 30*time.Second)
 	case DriveRevealTurn:
 		return e.revealTurn()
 	case DriveDwellMs:
@@ -65,6 +68,23 @@ func (e *executor) one(a DriveAction) error {
 	default:
 		return fmt.Errorf("unknown drive type %q", a.Type)
 	}
+}
+
+func (e *executor) waitForText(want string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var body string
+		if err := chromedp.Run(e.ctx, chromedp.Evaluate(`document.body ? document.body.innerText : ''`, &body)); err != nil {
+			return err
+		}
+		if strings.Contains(body, want) {
+			return nil
+		}
+		if err := e.sleepRaw(200 * time.Millisecond); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("text %q did not appear", want)
 }
 
 // dwell holds on the current frame for ms, pace-scaled. The single pacing
