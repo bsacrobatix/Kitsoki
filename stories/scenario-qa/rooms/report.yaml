@@ -180,6 +180,7 @@ states:
                   default_seed: "{{ world.seed }}"
                   default_profile: "{{ world.live_profile }}"
                   default_live_budget_minutes: "{{ world.live_budget_minutes }}"
+                  default_parallel: "{{ world.parallel }}"
               bind:
                 scenario_ref: scenario_ref
                 scenario_description: scenario_description
@@ -189,6 +190,7 @@ states:
                 seed: seed
                 live_profile: live_profile
                 live_budget_minutes: live_budget_minutes
+                parallel: parallel
                 mode: mode
                 request_status: request_status
               on_error: idle
@@ -204,6 +206,8 @@ states:
                 judge_result: {}
                 leg_results: { items: [] }
                 live_authorization_summary: []
+                parallel_records: []
+                record_status: {}
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
@@ -224,6 +228,7 @@ states:
                 seed: "{{ slots.seed ?? world.seed }}"
                 live_profile: "{{ slots.profile ?? world.live_profile }}"
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                parallel: "{{ slots.parallel ?? world.parallel }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
                 suite_summary: ""
@@ -239,6 +244,8 @@ states:
                 judge_result: {}
                 leg_results: { items: [] }
                 live_authorization_summary: []
+                parallel_records: []
+                record_status: {}
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
