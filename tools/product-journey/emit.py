@@ -327,6 +327,14 @@ def evidence_capture_hint(kind: str) -> str:
         "flow-fixture": "Save a local flow fixture (`kitsoki test flows <app.yaml> --flows ...`) that replays this scenario no-LLM.",
         "png-sequence": "Save a local directory or manifest of PNG frames captured via render.tui/visual.observe for frame-by-frame playback.",
         "ide_context_capture": "Save the post-drive host.ide.* ide.context_captured trace event JSON (vscode legs' opportunistic editor-level tier) -- leave unattached and report honestly when no real editor was connected/queried.",
+        "trace-derived-flow": "Save the flow fixture generated from the real source trace with `kitsoki trace to-flow`.",
+        "host-cassette": "Save the host cassette generated beside the trace-derived flow; it must cite the source trace.",
+        "provider_config_receipt": "Save the provider setup receipt or the visible blocker that prevented provider setup.",
+        "project_profile": "Save the generated project profile and project-local story app path.",
+        "artifact_open_evidence": "Save screenshot, trace event, or IDE/open-file evidence proving the generated artifact was opened.",
+        "github_issue_url": "Save the selected live GitHub issue URL.",
+        "pull_request_url": "Save the real pull request URL opened by the run.",
+        "slidey_deck": "Save the Slidey deck source that embeds the accepted replay videos and links the evidence manifest.",
     }
     return hints.get(kind, "Save this evidence artifact and attach it to the run.")
 
@@ -349,6 +357,31 @@ def scenario_quality_gate(scenario_id: str) -> dict:
                 "The onboarding story cannot be opened or rendered.",
                 "The path requires live LLM authorization and no cassette exists.",
                 "Generated config or smoke output is unavailable for deterministic review.",
+            ],
+        },
+        "gears-first-run-web-demo": {
+            "minimum_evidence": [
+                "session_trace",
+                "trace-replay",
+                "trace-derived-flow",
+                "host-cassette",
+                "provider_config_receipt",
+                "project_profile",
+                "prd_artifact",
+                "artifact_open_evidence",
+                "github_issue_url",
+                "candidate_diff",
+                "oracle_result",
+                "full_suite_result",
+                "pull_request_url",
+                "key_interaction_video",
+                "slidey_deck",
+            ],
+            "done_when": "The web demo can be replayed from real-run-derived fixtures and the deck links provider setup, project onboarding, PRD artifact, selected issue, fix evidence, and PR URL.",
+            "block_if": [
+                "Any embedded video lacks a source trace and trace-derived replay fixture.",
+                "Provider setup, PRD artifact, selected issue, or pull request URL is missing from the evidence manifest.",
+                "The selected Gears Rust issue does not have enough reproduction detail to produce credible fix evidence.",
             ],
         },
         "tui-slash-commands": {
