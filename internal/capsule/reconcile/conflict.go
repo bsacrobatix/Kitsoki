@@ -52,6 +52,17 @@ type ContinuationApplyRequest struct {
 	LostWorkReview    string
 	ValidationReceipt string
 }
+type AbortContinuationRequest struct {
+	Plan        Plan
+	ProjectRoot string
+	Preserve    bool
+}
+type AbortResult struct {
+	PlanDigest        string `json:"plan_digest"`
+	ContinuationToken string `json:"continuation_token"`
+	Aborted           bool   `json:"aborted"`
+	PreservedPatch    string `json:"preserved_patch,omitempty"`
+}
 
 func (r Reconciler) MaterializeConflictArtifact(ctx context.Context, p Plan, projectRoot string) (ConflictArtifact, string, error) {
 	if err := validateConflictPlan(p); err != nil {
@@ -258,6 +269,87 @@ func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApply
 	result := ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: resolved, Applied: true}
 	if err := r.emitApplied(ctx, p, result); err != nil {
 		return ApplyResult{}, err
+	}
+	return result, nil
+}
+
+func (r Reconciler) AbortContinuation(ctx context.Context, req AbortContinuationRequest) (AbortResult, error) {
+	p := req.Plan
+	if err := validateConflictPlan(p); err != nil {
+		return AbortResult{}, err
+	}
+	root, err := filepath.Abs(req.ProjectRoot)
+	if err != nil {
+		return AbortResult{}, err
+	}
+	instance, err := readIntegrationInstance(root, p.Continuation.Token)
+	if err != nil {
+		return AbortResult{}, err
+	}
+	if instance.PlanDigest != p.Digest || instance.ContinuationToken != p.Continuation.Token {
+		return AbortResult{}, fmt.Errorf("capsule reconcile: integration instance does not match plan")
+	}
+	instancePath, err := resolveSyncPath(root, instance.InstancePath)
+	if err != nil {
+		return AbortResult{}, err
+	}
+	syncDir := filepath.Join(root, ".capsules", "sync")
+	result := AbortResult{PlanDigest: p.Digest, ContinuationToken: p.Continuation.Token, Aborted: true}
+	if req.Preserve {
+		patch, err := git(ctx, instancePath, "diff", "--binary")
+		if err != nil {
+			return AbortResult{}, err
+		}
+		staged, err := git(ctx, instancePath, "diff", "--binary", "--cached")
+		if err != nil {
+			return AbortResult{}, err
+		}
+		status, err := git(ctx, instancePath, "status", "--porcelain")
+		if err != nil {
+			return AbortResult{}, err
+		}
+		patchPath := filepath.Join(syncDir, p.Continuation.Token+".abort.patch")
+		var b strings.Builder
+		b.WriteString("# capsule-sync-abort/v1\n")
+		b.WriteString("plan_digest: " + p.Digest + "\n")
+		b.WriteString("continuation_token: " + p.Continuation.Token + "\n")
+		b.WriteString("status:\n")
+		for _, line := range strings.Split(strings.TrimSpace(status), "\n") {
+			if line != "" {
+				b.WriteString("#   " + line + "\n")
+			}
+		}
+		if staged != "" {
+			b.WriteString("\n# staged diff\n")
+			b.WriteString(staged)
+			if !strings.HasSuffix(staged, "\n") {
+				b.WriteString("\n")
+			}
+		}
+		if patch != "" {
+			b.WriteString("\n# worktree diff\n")
+			b.WriteString(patch)
+			if !strings.HasSuffix(patch, "\n") {
+				b.WriteString("\n")
+			}
+		}
+		if err := os.WriteFile(patchPath, []byte(b.String()), 0o600); err != nil {
+			return AbortResult{}, err
+		}
+		rel, err := filepath.Rel(root, patchPath)
+		if err != nil {
+			return AbortResult{}, err
+		}
+		result.PreservedPatch = filepath.ToSlash(rel)
+	}
+	if err := os.RemoveAll(instancePath); err != nil {
+		return AbortResult{}, err
+	}
+	if err := os.Remove(filepath.Join(syncDir, p.Continuation.Token+".integration.json")); err != nil && !os.IsNotExist(err) {
+		return AbortResult{}, err
+	}
+	if err := r.emit(ctx, Event{Kind: capsuletrace.KindSyncAborted, PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: p.Continuation.Token}); err != nil {
+		return AbortResult{}, err
 	}
 	return result, nil
 }

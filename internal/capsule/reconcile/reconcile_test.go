@@ -164,6 +164,53 @@ func TestApplyContinuationUpdatesTargetFromResolvedIntegration(t *testing.T) {
 		t.Fatalf("target not preserved: %v", err)
 	}
 }
+
+func TestAbortContinuationPreservesPatchAndRemovesIntegration(t *testing.T) {
+	dir := capsuletest.Open(t, "rebase-conflict-ready")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".kitsoki-capsule\ncapsule-manifest.json\n.capsules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var events []Event
+	r := Reconciler{VCS: Git{}, Events: EventSinkFunc(func(_ context.Context, e Event) error {
+		events = append(events, e)
+		return nil
+	})}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Refresh, Generation: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, _, err := r.MaterializeIntegrationInstance(context.Background(), p, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instancePath := filepath.Join(dir, filepath.FromSlash(instance.InstancePath))
+	if err := os.WriteFile(filepath.Join(instancePath, "file.txt"), []byte("manual resolution draft\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.AbortContinuation(context.Background(), AbortContinuationRequest{Plan: p, ProjectRoot: dir, Preserve: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Aborted || result.PreservedPatch == "" {
+		t.Fatalf("abort result %#v", result)
+	}
+	if _, err := os.Stat(instancePath); !os.IsNotExist(err) {
+		t.Fatalf("integration instance still exists or stat failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".capsules", "sync", p.Continuation.Token+".integration.json")); !os.IsNotExist(err) {
+		t.Fatalf("integration artifact still exists or stat failed: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(result.PreservedPatch)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "manual resolution draft") || !strings.Contains(string(raw), p.Digest) {
+		t.Fatalf("preserved patch %s", raw)
+	}
+	if !sawEvent(events, "capsule.sync.aborted") {
+		t.Fatalf("missing abort event %#v", events)
+	}
+}
 func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	runGit(t, dir, "checkout", "-b", "candidate")
