@@ -478,6 +478,8 @@ export async function startWebServer(opts: {
   harness?: string;
   /** Recording YAML for --harness replay (deterministic, hand-authorable). */
   recording?: string;
+  /** JSONL output trace for --harness recording (real browser/session capture). */
+  record?: string;
   /** Execution mode: "one-shot" (auto-advance synthetic emit chains through
    *  decision gates — needed for an autonomous in-story loop) or "staged"
    *  (default). */
@@ -523,6 +525,7 @@ export async function startWebServer(opts: {
   if (opts.flow) args.push("--flow", opts.flow);
   if (opts.harness) args.push("--harness", opts.harness);
   if (opts.recording) args.push("--recording", opts.recording);
+  if (opts.record) args.push("--record", opts.record);
   if (opts.mode) args.push("--mode", opts.mode);
   if (opts.hostCassette) args.push("--host-cassette", opts.hostCassette);
   if (configPath) args.push("--config", configPath);
