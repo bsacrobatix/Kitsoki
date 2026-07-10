@@ -62,23 +62,34 @@ func newCapsuleManager(project, executor string) (*control.Manager, string, erro
 	if len(list) == 0 {
 		return nil, "", fmt.Errorf("capsule mcp: no definitions found under %s/.kitsoki/capsules or %s/capsules", root, root)
 	}
-	if executor != "synthetic" {
-		return nil, "", fmt.Errorf("capsule mcp: executor %q is not implemented; use synthetic for synthetic definitions", executor)
+	if executor != "" && executor != "local" && executor != "synthetic" {
+		return nil, "", fmt.Errorf("capsule mcp: executor %q is not configured", executor)
 	}
 	definitionIDs := make([]string, 0, len(list))
+	providers := map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: root}}
+	allowedProviders := []string{"synthetic"}
+	git := control.GitSourceProvider{ProjectRoot: root}
 	for _, def := range list {
 		definitionIDs = append(definitionIDs, def.ID)
+		switch def.Source.Kind {
+		case control.SourceSelf:
+			providers["self"] = git
+			providers["git"] = git
+			allowedProviders = append(allowedProviders, "self")
+		case control.SourcePinned:
+			providers["pinned"] = git
+			providers["git"] = git
+			allowedProviders = append(allowedProviders, "pinned")
+		}
 	}
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	manager := &control.Manager{
 		Definitions: defs,
 		Instances:   control.FileInstanceStore{Root: workspaceRoot},
-		Providers: map[string]control.WorkspaceProvider{
-			"synthetic": control.SyntheticProvider{ProjectRoot: root},
-		},
+		Providers:   providers,
 		Grant: control.ScopeGrant{
 			ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot},
-			Definitions: definitionIDs, Executors: []string{"synthetic"},
+			Definitions: definitionIDs, Executors: allowedProviders,
 			Effects: []string{"exec", "vcs_commit", "local_reconcile"},
 		},
 	}
