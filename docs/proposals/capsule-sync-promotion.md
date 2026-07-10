@@ -189,7 +189,7 @@ operations.
 - [x] 1.4 Emit sync lifecycle facts and bind exact gate/CI receipt requirements
 
 ## 2. Conflict and remote seams
-- [ ] 2.1 Create integration instances and structured conflict/continuation artifacts
+- [x] 2.1 Create integration instances and structured conflict/continuation artifacts
   - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, CLI/MCP `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, overlaps, CLI/MCP `capsule-sync-integration/v1` managed integration instances under `.capsules/sync/`, and continuation apply from resolved integration commits that preserve both histories.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
   - Shipped: runtime continuation apply refuses to proceed without resolver decision, independent lost-work review, and validation receipt inputs.
