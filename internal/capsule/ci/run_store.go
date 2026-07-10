@@ -7,9 +7,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"kitsoki/internal/artifactjob"
 )
+
+const RunIndexSchema = "capsule-ci-run-index/v1"
 
 // RunRecord is the durable, project-local projection used by `capsule ci
 // status`. Artifact-job remains the durable run identity during a live process;
@@ -20,6 +23,30 @@ type RunRecord struct {
 	Result              RunResult `json:"result"`
 	ReceiptID           string    `json:"receipt_id,omitempty"`
 	ReceiptVerification string    `json:"receipt_verification,omitempty"`
+}
+
+type RunIndex struct {
+	Schema string          `json:"schema"`
+	Runs   []RunProjection `json:"runs"`
+}
+
+type RunProjection struct {
+	JobID               string             `json:"job_id"`
+	Status              artifactjob.Status `json:"status"`
+	Story               string             `json:"story,omitempty"`
+	Workspace           string             `json:"workspace,omitempty"`
+	Pipeline            string             `json:"pipeline,omitempty"`
+	Outcome             string             `json:"outcome,omitempty"`
+	PromotionEligible   bool               `json:"promotion_eligible"`
+	ReceiptID           string             `json:"receipt_id,omitempty"`
+	ReceiptVerification string             `json:"receipt_verification,omitempty"`
+	EnvelopeDigest      string             `json:"envelope_digest,omitempty"`
+	SourceDigest        string             `json:"source_digest,omitempty"`
+	StoryDigest         string             `json:"story_digest,omitempty"`
+	EnvironmentDigest   string             `json:"environment_digest,omitempty"`
+	TracePath           string             `json:"trace_path,omitempty"`
+	ReceiptPath         string             `json:"receipt_path,omitempty"`
+	UpdatedAt           time.Time          `json:"updated_at,omitempty"`
 }
 type FileRunStore struct{ ProjectRoot string }
 
@@ -79,6 +106,58 @@ func (s FileRunStore) List() ([]RunRecord, error) {
 	return out, nil
 }
 
+func (s FileRunStore) Index() (RunIndex, error) {
+	records, err := s.List()
+	if err != nil {
+		return RunIndex{}, err
+	}
+	out := RunIndex{Schema: RunIndexSchema, Runs: []RunProjection{}}
+	for _, record := range records {
+		out.Runs = append(out.Runs, s.Project(record))
+	}
+	return out, nil
+}
+
+func (s FileRunStore) Project(record RunRecord) RunProjection {
+	job := record.Result.Job
+	verdict := record.Result.Verdict
+	envDigest := record.Result.Envelope.Environment.Digest
+	projection := RunProjection{
+		JobID:               record.JobID,
+		Status:              job.Status,
+		Story:               job.Story,
+		Workspace:           string(job.WorkspaceInstanceID),
+		Pipeline:            verdict.Pipeline,
+		Outcome:             verdict.Outcome,
+		PromotionEligible:   verdict.PromotionEligible,
+		ReceiptID:           record.ReceiptID,
+		ReceiptVerification: record.ReceiptVerification,
+		EnvelopeDigest:      record.Result.Envelope.Digest,
+		SourceDigest:        verdict.SourceDigest,
+		StoryDigest:         verdict.StoryDigest,
+		EnvironmentDigest:   envDigest,
+		UpdatedAt:           job.UpdatedAt,
+	}
+	if projection.SourceDigest == "" {
+		projection.SourceDigest = record.Result.Envelope.SourceDigest
+	}
+	if projection.StoryDigest == "" {
+		projection.StoryDigest = record.Result.Envelope.StoryDigest
+	}
+	if projection.EnvironmentDigest == "" {
+		projection.EnvironmentDigest = envDigest
+	}
+	if record.JobID != "" {
+		if rel := s.rel(filepath.Join(s.ProjectRoot, ".capsules", "ci", record.JobID+".trace.json")); rel != "" {
+			projection.TracePath = rel
+		}
+		if rel := s.rel(filepath.Join(s.ProjectRoot, ".capsules", "ci", record.JobID+".receipt.json")); rel != "" {
+			projection.ReceiptPath = rel
+		}
+	}
+	return projection
+}
+
 // Cancel records a visible terminal cancel for a parked/running CI job. Active
 // remote providers receive the same request through ExecutorProvider.Cancel;
 // this local store path makes cancellation durable even when no worker remains.
@@ -99,4 +178,15 @@ func (s FileRunStore) Cancel(id string) (RunRecord, error) {
 		return RunRecord{}, err
 	}
 	return record, nil
+}
+
+func (s FileRunStore) rel(path string) string {
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(s.ProjectRoot, path)
+	if err != nil || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }

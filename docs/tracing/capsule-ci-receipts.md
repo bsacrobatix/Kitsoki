@@ -22,6 +22,9 @@ cannot accidentally use evidence from another commit or environment.
 
 CLI/MCP CI runs write a compact controller trace sidecar and a verified receipt
 alongside their local run record; status includes receipt identity and
-verification. RunIndex/runstatus projection and provider-status publication are
-being added on top of the same receipt schema; they must not introduce a second
+verification. `capsule ci status` and `capsule.ci.status` now expose a compact
+`capsule-ci-run-index/v1` projection with job status, pipeline outcome,
+promotion eligibility, receipt verification, digest bindings, and relative
+trace/receipt sidecar paths. Runstatus/provider publication can consume that
+projection on top of the same receipt schema; it must not introduce a second
 evidence format.

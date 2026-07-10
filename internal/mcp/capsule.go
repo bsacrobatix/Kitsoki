@@ -368,7 +368,11 @@ func (s *CapsuleServer) ciStatus(_ context.Context, _ *mcpsdk.CallToolRequest, a
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
-	return nil, map[string]any{"ok": true, "runs": all}, nil
+	index, err := store.Index()
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "index": index, "runs": index.Runs, "records": len(all)}, nil
 }
 func (s *CapsuleServer) ciCancel(_ context.Context, _ *mcpsdk.CallToolRequest, a capsuleCIStatusArgs) (*mcpsdk.CallToolResult, any, error) {
 	if a.Job == "" {

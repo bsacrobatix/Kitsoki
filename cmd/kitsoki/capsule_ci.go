@@ -135,6 +135,13 @@ func capsuleCIStatusCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		index, err := store.Index()
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return capsuleWorkspaceWrite(cmd, index, jsonOut)
+		}
 		return capsuleWorkspaceWrite(cmd, map[string]any{"runs": all}, jsonOut)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
