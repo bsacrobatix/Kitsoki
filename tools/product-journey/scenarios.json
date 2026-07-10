@@ -256,6 +256,120 @@
       }
     },
     {
+      "id": "gears-first-run-web-demo",
+      "tier": "curated",
+      "label": "Gears Rust first-run web demo",
+      "stage": "onboard_project",
+      "task": "Record a first-time web user experience for Kitsoki on constructorfabric/gears-rust: configure the provider, onboard the project, create and open PRD artifacts, inspect open bug tickets, fix one bug, and end on the real pull request link.",
+      "natural_utterances": [
+        {
+          "text": "show me the full first run in the web ui on constructorfabric/gears-rust",
+          "source": "curated-corpus",
+          "source_ref": "gears-first-run-full-web"
+        },
+        {
+          "text": "set up my provider, onboard this repo, create a PRD, then fix one open bug and show me the PR",
+          "source": "curated-corpus",
+          "source_ref": "gears-first-run-provider-prd-bugfix"
+        },
+        {
+          "text": "the replay can be cassette driven, but the cassette must come from a real run and link the real artifacts",
+          "source": "curated-corpus",
+          "source_ref": "gears-first-run-real-run-cassette-contract"
+        }
+      ],
+      "primary_story": ".kitsoki/stories/gears-rust-dev/app.yaml",
+      "required_mcp": [
+        "session.open",
+        "session.inspect",
+        "session.trace",
+        "visual.observe"
+      ],
+      "evidence": [
+        "session_trace",
+        "trace-replay",
+        "trace-derived-flow",
+        "host-cassette",
+        "provider_config_receipt",
+        "project_profile",
+        "prd_artifact",
+        "artifact_open_evidence",
+        "github_issue_url",
+        "candidate_diff",
+        "oracle_result",
+        "full_suite_result",
+        "pull_request_url",
+        "key_interaction_video",
+        "slidey_deck"
+      ],
+      "success_criteria": [
+        "The replay flow and host cassette are generated from a recorded real run trace, not hand-authored synthetic fixture content.",
+        "The evidence manifest links the originating trace, generated flow, generated host cassette, video, deck, and every real artifact opened in the UI.",
+        "Provider setup reaches a usable configured state or records a visible blocker before any project work begins.",
+        "Project onboarding produces or opens the Gears Rust project profile under .kitsoki and names real repository commands and files.",
+        "The PRD chapter shows the user driving the PRD flow and opening the produced PRD artifact in the UI.",
+        "The bugfix chapter starts from a live open bug issue in https://github.com/constructorfabric/gears-rust/issues and records the selected issue URL.",
+        "The fix chapter links candidate diff evidence, targeted oracle or test output, full-suite output or classified blocker, and the final pull request URL.",
+        "The Slidey deck embeds only videos derived from the accepted real-run cassettes and its narration calls out the real artifact links."
+      ],
+      "case_variants": [
+        {
+          "id": "provider-setup",
+          "utterance": "start from a blank web ui and configure the provider before doing project work",
+          "setup": "Use a fresh profile or capsule where provider state is absent or explicitly reset.",
+          "success_focus": "The video shows the provider setup path and the evidence manifest records the provider receipt or blocker."
+        },
+        {
+          "id": "project-onboarding-prd",
+          "utterance": "onboard constructorfabric/gears-rust, create a PRD, and open the artifact",
+          "setup": "Run against the Gears Rust checkout with .kitsoki profile generation enabled.",
+          "success_focus": "The project profile and PRD artifact are real files linked from the deck and visible in the web UI."
+        },
+        {
+          "id": "github-bugfix-pr",
+          "utterance": "pick one open bug in constructorfabric/gears-rust, fix it, and show the PR link",
+          "setup": "Fetch the live GitHub bug queue and select an issue with enough reproduction detail to drive the bugfix story.",
+          "success_focus": "The issue URL, fix evidence, and pull request URL are all linked and traceable to the recorded run."
+        }
+      ],
+      "transports": {
+        "allowed": [
+          "web"
+        ],
+        "required": [
+          "web"
+        ],
+        "overrides": {
+          "web": {
+            "required_mcp": [
+              "session.open",
+              "session.inspect",
+              "session.trace",
+              "visual.open",
+              "visual.observe"
+            ],
+            "evidence": [
+              "browser_screenshot",
+              "session_trace",
+              "trace-replay",
+              "trace-derived-flow",
+              "host-cassette",
+              "provider_config_receipt",
+              "project_profile",
+              "prd_artifact",
+              "github_issue_url",
+              "candidate_diff",
+              "oracle_result",
+              "full_suite_result",
+              "pull_request_url",
+              "key_interaction_video",
+              "slidey_deck"
+            ]
+          }
+        }
+      }
+    },
+    {
       "id": "bugfix",
       "tier": "curated",
       "label": "Bug fix with hidden oracle",
