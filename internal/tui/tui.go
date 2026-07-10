@@ -5068,11 +5068,33 @@ const (
 	choiceChromeReserved    = 8
 )
 
-func choiceChromeMaxRows(height int) int {
+// choiceChromeRowsFor returns the picker budget after reserving the rows that
+// composeChromeParts adds around it.  The operation row is especially
+// important here: without reserving it, an operation-driven picker can make
+// the live region taller than the terminal and Bubble Tea leaves old bottom
+// rows in scrollback on repaint.
+func (m RootModel) choiceChromeRowsFor(height int) int {
+	reserved := choiceChromeReserved
+	if m.transcript.LiveLine() != "" {
+		reserved++
+	}
+	if m.inbox.ActionRequiredBanner() != "" {
+		reserved++
+	}
+	if operationRunChromeLine(m, m.width) != "" {
+		reserved++
+	}
+	if footerStoryLine(m) != "" {
+		reserved++
+	}
+	return choiceChromeMaxRowsWithReserved(height, reserved)
+}
+
+func choiceChromeMaxRowsWithReserved(height, reserved int) int {
 	if height <= 0 {
 		return choiceChromeDefaultRows
 	}
-	rows := height - choiceChromeReserved
+	rows := height - reserved
 	if rows < choiceChromeMinRows {
 		rows = choiceChromeMinRows
 	}
@@ -5084,7 +5106,7 @@ func choiceChromeMaxRows(height int) int {
 
 func (m RootModel) choicePromptLine() string {
 	if m.choice.IsActive() {
-		return m.choice.ChromeView(m.transcript.wrapWidth(), choiceChromeMaxRows(m.height))
+		return m.choice.ChromeView(m.transcript.wrapWidth(), m.choiceChromeRowsFor(m.height))
 	}
 	return pickerActiveLine(m.pendingDraft)
 }
