@@ -19,6 +19,12 @@ kitsoki run @kitsoki/scenario-qa
 `@kitsoki/persona-qa` is a story alias for the same story — use whichever name
 you remember; see [Naming](#naming) below.
 
+For a project-owned journey that freezes accepted evidence into replay, a
+tutorial, a Slidey proof deck, and a tour release gate, see
+[Project journey packs](journey-packs.md). Scenario QA remains the exploratory
+and independently judged front door; the journey-pack lifecycle never replaces
+it with an unchecked shell shortcut.
+
 ## Naming
 
 One product, four names — keep them straight:
