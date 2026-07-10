@@ -922,7 +922,11 @@ func traceTargets(path string) ([]string, error) {
 	defer f.Close()
 	var targets []string
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 1024), 4*1024*1024)
+	// Session traces may embed the expanded story source in session.story. A
+	// real project story can exceed the default Scanner limit (or our old 4 MiB
+	// cap), so QA must read the whole valid trace before comparing replay
+	// targets. Keep a bounded ceiling rather than accepting unbounded records.
+	scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		var event struct {
 			Kind    string         `json:"kind"`
