@@ -133,6 +133,9 @@ The command writes a `capsule-sync-conflict/v1` artifact under
 `.capsules/sync/` with the merge base, candidate/target changed paths, overlap
 paths, required story inputs, and continuation token. Managed integration
 instance creation and continuation apply remain separate runtime work.
+Agents limited to Capsule MCP use `capsule.sync.conflicts` for the same
+operation; it accepts only a server-owned plan digest and returns only the
+project-relative artifact path.
 
 For credential-free local development and tests, `capsule sync apply` can inject
 a local bare-remote publisher:

@@ -189,7 +189,7 @@ operations.
 
 ## 2. Conflict and remote seams
 - [ ] 2.1 Create integration instances and structured conflict/continuation artifacts
-  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, and `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, and overlaps.
+  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, and CLI/MCP `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, and overlaps.
   - Remaining: materialize managed integration instances.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
 - [ ] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
