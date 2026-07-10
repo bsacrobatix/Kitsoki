@@ -12,6 +12,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// useCurrentKitsokiRepo makes tests that exercise the current development
+// story source independent of a developer's persisted repo or kit-dev
+// override. Production resolution keeps honoring those overrides.
+func useCurrentKitsokiRepo(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KITSOKI_KIT_DEV_DEV_STORY", "")
+	t.Setenv(kitrepo.EnvVar, testRepoRoot(t))
+}
+
 // TestEmbeddedDevStoryResolvesWithoutCheckout is the slice-1 end-to-end load
 // smoke: a foreign repo carrying ONLY a tiny instance that imports
 // `@kitsoki/dev-story` loads against the embedded story library when no

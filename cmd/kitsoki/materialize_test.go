@@ -199,6 +199,7 @@ func TestMaterializeEmitHasProvenanceHeaderAndDevStorySource(t *testing.T) {
 // (runMaterialize): a rung-0 .kitsoki.yaml (no root: block) materializes a
 // loadable file, and a second run against the same slug refuses to overwrite.
 func TestMaterializeCmd_RoundTripAndRefuseOverwrite(t *testing.T) {
+	useCurrentKitsokiRepo(t)
 	root := writableRepoRoot(t)
 	// Materialize's write root is a temp dir UNDER the repo root (not real
 	// stories/): @kitsoki/dev-story still resolves via findRepoRoot, while the
@@ -236,6 +237,7 @@ func TestMaterializeCmd_RoundTripAndRefuseOverwrite(t *testing.T) {
 }
 
 func TestMaterializeCmd_UsesProjectProfile(t *testing.T) {
+	useCurrentKitsokiRepo(t)
 	root := writableRepoRoot(t)
 	matRoot, err := os.MkdirTemp(root, "mat-profile-")
 	if err != nil {

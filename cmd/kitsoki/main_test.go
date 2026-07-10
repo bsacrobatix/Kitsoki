@@ -192,6 +192,7 @@ func TestCLI_NoArgsDelegatesToRun(t *testing.T) {
 }
 
 func TestCLI_NoArgsAcceptsRunFlags(t *testing.T) {
+	useCurrentKitsokiRepo(t)
 	out, err := execRoot(t, "--mode", "definitely-not-a-mode")
 	if err == nil {
 		t.Fatal("expected bare kitsoki to parse --mode and fail validation")
