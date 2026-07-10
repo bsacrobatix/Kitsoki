@@ -14,4 +14,7 @@ caches:
   - id: go-build
     scope: project
     mode: read_write
+  - id: runstatus-node-modules
+    scope: project
+    mode: read_write
 sandbox: supervised

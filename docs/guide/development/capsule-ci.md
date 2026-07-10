@@ -21,6 +21,13 @@ project definition uses `capsule-definition/v1` and may select `synthetic`,
 `capsule-environment/v1`; `network: none` is the default and host resolution
 only probes tools—it never installs software.
 
+Kitsoki's checked-in `ci` environment declares `bootstrap-workspace` as the
+bootstrap hook and grants project-scoped `go-build` plus
+`runstatus-node-modules` caches. The environment lock includes `go.sum`,
+`tools/runstatus/pnpm-lock.yaml`, the bootstrap command digest, and stable cache
+keys, so local and remote CI can refuse drift instead of silently using a
+different workspace setup.
+
 ## Local lifecycle
 
 ```sh

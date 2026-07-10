@@ -60,6 +60,9 @@ caches:
   - id: go-build
     scope: project
     mode: read_write
+  - id: runstatus-node-modules
+    scope: project
+    mode: read_write
 sandbox:
   minimum: supervised
 ```
@@ -227,7 +230,7 @@ decision.
 - [x] 2.4 Implement remote one-shot protocol and fake streaming worker; add one real remote adapter only after offline conformance is green
 
 ## 3. Adopt and document
-- [ ] 3.1 Express Kitsoki bootstrap and runstatus cache as environment hooks/cache grants
+- [x] 3.1 Express Kitsoki bootstrap and runstatus cache as environment hooks/cache grants
 - [ ] 3.2 Run one no-LLM story identically on host, fake remote, and optional gated container; compare normalized results
 - [ ] 3.3 Migrate one repo-history capsule and one foreign onboarded project
 - [ ] 3.4 Update environment/executor/Arena docs; trim/delete this proposal

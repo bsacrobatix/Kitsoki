@@ -131,7 +131,7 @@ func TestResolveSerializesCacheGrantsAndRedactsSecretRefs(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\ncaches:\n  - id: go-build\n    scope: project\n    mode: read_write\nsecret_refs: [CI_TOKEN]\n")
+	raw := []byte("schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\nbootstrap:\n  command: bootstrap-workspace\ncaches:\n  - id: runstatus-node-modules\n    scope: project\n    mode: read_write\n  - id: go-build\n    scope: project\n    mode: read_write\nsecret_refs: [CI_TOKEN]\n")
 	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +139,11 @@ func TestResolveSerializesCacheGrantsAndRedactsSecretRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !lock.SecretRequired || len(lock.CacheKeys) != 1 || lock.CacheKeys[0] != "project:go-build" {
-		t.Fatalf("lock grants %#v", lock)
+	if !lock.SecretRequired || lock.BootstrapDigest == "" {
+		t.Fatalf("lock missing bootstrap/secret facts %#v", lock)
+	}
+	if got, want := strings.Join(lock.CacheKeys, ","), "project:go-build,project:runstatus-node-modules"; got != want {
+		t.Fatalf("lock cache grants got %q, want %q: %#v", got, want, lock)
 	}
 	encoded, _ := json.Marshal(lock)
 	if strings.Contains(string(encoded), "CI_TOKEN") {
