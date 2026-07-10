@@ -817,6 +817,54 @@ agent_launch_policy:
 	require.Contains(t, err.Error(), "inside protected root")
 }
 
+func TestAgentLaunchPlan_FreestandingCodexAgentLocalOverrideExtendsBase(t *testing.T) {
+	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+	agentsDir := filepath.Join(dir, ".codex", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0755))
+	base := filepath.Join(agentsDir, "kitsoki-mcp-driver.toml")
+	require.NoError(t, os.WriteFile(base, []byte(`
+name = "kitsoki-mcp-driver"
+developer_instructions = "File engine bugs to constructorfabric/Kitsoki."
+model = "gpt-5.5"
+[mcp_servers.kitsoki]
+command = "kitsoki"
+args = ["mcp"]
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "kitsoki-mcp-driver.local.toml"), []byte(`
+extends = "kitsoki-mcp-driver.toml"
+developer_instructions_append = "File my local findings to bsacrobatix/Kitsoki."
+[mcp_servers.kitsoki]
+args = ["mcp", "--stories-dir", ".kitsoki/stories"]
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{AgentName: "kitsoki-mcp-driver"})
+	require.NoError(t, err)
+	require.Contains(t, plan.AgentFile, "kitsoki-mcp-driver.local.toml")
+	prompt := plan.Command[len(plan.Command)-1]
+	require.Contains(t, prompt, "constructorfabric/Kitsoki")
+	require.Contains(t, prompt, "bsacrobatix/Kitsoki")
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, `mcp_servers.kitsoki.command="kitsoki"`)
+	require.Contains(t, joined, `mcp_servers.kitsoki.args=["mcp","--stories-dir",".kitsoki/stories"]`)
+}
+
+func TestLoadStandaloneCodexAgentRejectsExtendsCycle(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.toml")
+	b := filepath.Join(dir, "b.toml")
+	require.NoError(t, os.WriteFile(a, []byte(`extends = "b.toml"`), 0644))
+	require.NoError(t, os.WriteFile(b, []byte(`extends = "a.toml"`), 0644))
+	_, err := loadStandaloneCodexAgent(a)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "extends cycle")
+}
+
 func flagValue(t *testing.T, args []string, flag string) string {
 	t.Helper()
 	for i, arg := range args {

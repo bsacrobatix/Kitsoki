@@ -48,6 +48,11 @@ __pycache__/
 # profiles; start from .kitsoki.local.yaml.example. See webconfig.LocalConfigPath.
 .kitsoki.local.yaml
 
+# Personal extensions of project-managed Codex agent prompts. The base prompts
+# and examples are committed; these overlays hold an individual filing route.
+.kitsoki/agents/*.local.toml
+.codex/agents/*.local.toml
+
 # Runtime worktree ownership marker; written by host.git_worktree and local to a
 # checkout/worktree.
 .kitsoki-owner

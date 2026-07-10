@@ -110,7 +110,10 @@ backend switch (Claude or Codex); with `--agent` it no longer needs an
 **Codex — spawn the mirrored subagent, not a whole-session role.** Codex has a
 subagent format that is the structural analog of the Claude agent file:
 `.codex/agents/kitsoki-mcp-driver.toml` (project-scoped; `~/.codex/agents/` for
-personal). It carries the same persona via `developer_instructions`, a `model`,
+personal). A project may instead put an inheriting routing layer at
+`.kitsoki/agents/kitsoki-mcp-driver.toml`, and an ignored personal overlay at
+`.kitsoki/agents/kitsoki-mcp-driver.local.toml`; see the agent-launch guide. It
+carries the same persona via `developer_instructions`, a `model`,
 a `sandbox_mode` (`read-only` — the MCP is the only write surface), and a
 `[mcp_servers.kitsoki]` block that scopes the role to just the kitsoki studio:
 
