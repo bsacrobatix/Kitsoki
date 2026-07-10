@@ -528,6 +528,7 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.git", GitVCSHandler)
 	r.Register("host.local", LocalCIHandler)
 	r.Register("host.git_worktree", GitWorktreeHandler)
+	r.Register("host.capsule_workspace", CapsuleWorkspaceHandler)
 	r.Register("host.append_to_file", AppendFileTransportHandler)
 	r.Register("host.artifacts_dir", ArtifactsDirTransportHandler)
 	r.Register("host.inbox.add", InboxAddHandler)
