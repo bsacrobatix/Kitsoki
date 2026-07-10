@@ -404,6 +404,32 @@ workspace_dirty() {
   [ -n "$(git -C "$path" status --porcelain)" ]
 }
 
+# A local clone may share objects with its source repository. Before using a
+# ref fetched after workspace creation, make the failure mode explicit here
+# rather than letting rebase (or a later primary-checkout fetch) discover a
+# missing object halfway through a landing operation.
+verify_commit_objects() {
+  local path="$1"
+  local ref="$2"
+  local context="$3"
+  local commit
+  commit="$(git -C "$path" rev-parse --verify "${ref}^{commit}" 2>/dev/null)" || die "$context: cannot resolve commit $ref in $path"
+  git -C "$path" cat-file -e "${commit}^{tree}" 2>/dev/null || die "$context: cannot read tree for $ref in $path"
+  if ! git -C "$path" rev-list --objects "$commit" | git -C "$path" cat-file --batch-check='%(objectname) %(objecttype)' >/dev/null; then
+    die "$context: missing or unreadable objects for $ref in $path"
+  fi
+}
+
+verify_clean_readable_checkout() {
+  local path="$1"
+  local ref="$2"
+  local context="$3"
+  verify_commit_objects "$path" "$ref" "$context"
+  git -C "$path" diff --quiet || die "$context: checkout has unstaged changes"
+  git -C "$path" diff --cached --quiet || die "$context: checkout has staged changes"
+  [ -z "$(git -C "$path" status --porcelain)" ] || die "$context: checkout is not clean"
+}
+
 primary_dirty_overlaps_file_list() {
   local repo="$1"
   local files_path="$2"
@@ -784,11 +810,19 @@ cmd_merge() {
   else
     target_base="main"
   fi
-  git -C "$path" fetch source "+refs/heads/$target_base:refs/remotes/source/$target_base"
+  # Always refresh from the source before rebasing: the target may have moved
+  # after this clone-backed capsule was created. Verify the complete fetched
+  # graph in the capsule before rebase so shared-object problems fail before
+  # any worktree mutation.
+  git -C "$path" fetch --no-tags source "+refs/heads/$target_base:refs/remotes/source/$target_base"
+  verify_commit_objects "$path" "source/$target_base" "merge: fetched target"
+  verify_commit_objects "$path" HEAD "merge: workspace branch before rebase"
   git -C "$path" rebase "source/$target_base"
+  verify_clean_readable_checkout "$path" HEAD "merge: rebased workspace"
   if [ -n "$gate" ]; then
     (cd "$path" && sh -c "$gate")
   fi
+  verify_clean_readable_checkout "$path" HEAD "merge: workspace after gate"
 
   if [ "$target" = "main" ]; then
     local changed_files_file
@@ -821,14 +855,28 @@ cmd_merge() {
       die "merge: landing branch already exists and is not merged: $landing_branch"
     fi
   fi
-  git -C "$repo" fetch "$path" "$branch:refs/heads/$landing_branch"
+  git -C "$repo" fetch --no-tags "$path" "$branch:refs/heads/$landing_branch"
+  verify_commit_objects "$path" HEAD "merge: landing source"
+  verify_commit_objects "$repo" "$landing_branch" "merge: landing branch"
+  local landed=0
   if [ "$target" = "main" ]; then
     local -a merge_args
     merge_args=("$branch" "--source-dir" "$path")
     if [ -n "$gate" ]; then
       merge_args+=("--gate" "$gate")
     fi
+    set +e
     (cd "$repo" && scripts/merge-to-main.sh "${merge_args[@]}")
+    local main_merge_status=$?
+    set -e
+    if [ "$main_merge_status" -ne 0 ]; then
+      if git -C "$repo" merge-base --is-ancestor "$landing_branch" "refs/heads/main"; then
+        echo "warning: merge-to-main exited $main_merge_status after main advanced; treating landing as successful" >&2
+      else
+        return "$main_merge_status"
+      fi
+    fi
+    landed=1
   else
     if ! git -C "$repo" merge-base --is-ancestor "$target_base" "$landing_branch"; then
       die "merge: $landing_branch is not a fast-forward of $target_base"
@@ -842,12 +890,21 @@ cmd_merge() {
       git -C "$repo" update-ref -m "dev-workspace create $target from $branch" "refs/heads/$target" "$new_target"
     fi
     echo "$target -> $(git -C "$repo" rev-parse --short "$target")"
+    landed=1
   fi
-  git -C "$repo" branch -D "$landing_branch" >/dev/null
+
+  # From this point the target already contains the work. Cleanup is useful,
+  # but must not turn a successful landing into a reported failure.
+  if ! git -C "$repo" branch -D "$landing_branch" >/dev/null; then
+    echo "warning: merge landed but could not remove temporary branch $landing_branch" >&2
+  fi
 
   if [ "$teardown" = "1" ]; then
-    cmd_close --repo "$repo" --root "$root" "$path"
+    if ! cmd_close --repo "$repo" --root "$root" "$path"; then
+      echo "warning: merge landed but teardown failed for $path" >&2
+    fi
   fi
+  [ "$landed" = "1" ] || die "merge: target did not advance"
   echo "merged: $branch -> $target"
 }
 
@@ -881,7 +938,16 @@ cmd_close() {
     die "close: workspace has uncommitted changes: $path"
   fi
   chmod -R u+rwX "$path" 2>/dev/null || true
-  rm -rf "$path"
+  # Keep cleanup failures observable to merge, which can then report a
+  # successful landing with a truthful teardown warning.
+  if ! rm -rf "$path"; then
+    echo "error: close: failed to remove workspace: $path" >&2
+    return 1
+  fi
+  if [ -e "$path" ]; then
+    echo "error: close: workspace remains after removal: $path" >&2
+    return 1
+  fi
   echo "removed: $path"
 }
 

@@ -227,6 +227,53 @@ printf 'three\n' >"$second_workspace/feature2.txt"
 [ "$(git -C "$source_repo" show staging/local:feature.txt)" = "two" ] || fail "second merge dropped existing staging/local content"
 [ "$(git -C "$source_repo" show staging/local:feature2.txt)" = "three" ] || fail "second merge did not advance existing staging/local"
 
+# The target can advance after a capsule clone is created. Merge must fetch
+# and prove the target graph inside the capsule before rebase, run the gate on
+# the rebased clean checkout, then land and tear the capsule down successfully.
+integrity_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id merge-object-integrity --branch agent/merge-object-integrity --json)"
+integrity_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$integrity_json")"
+printf 'workspace feature\n' >"$integrity_workspace/object-integrity-feature.txt"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$integrity_workspace" --message 'add object integrity feature' >/dev/null
+gitc "$source_repo" switch -q staging/local
+printf 'target advanced\n' >"$source_repo/target-advanced-after-clone.txt"
+gitc "$source_repo" add target-advanced-after-clone.txt
+gitc "$source_repo" commit --quiet -m 'advance target after capsule creation'
+advanced_target="$(git -C "$source_repo" rev-parse staging/local)"
+gitc "$source_repo" switch -q main
+gate_order="$tmp/merge-object-integrity-gate"
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$integrity_workspace" --gate "test '\$(cat target-advanced-after-clone.txt)' = 'target advanced'; test -z '\$(git status --porcelain)'; printf rebased-and-clean > '$gate_order'" --teardown >/dev/null
+[ "$(cat "$gate_order")" = "rebased-and-clean" ] || fail "merge gate did not run after target fetch and rebase"
+[ ! -e "$integrity_workspace" ] || fail "object-integrity merge --teardown left workspace behind"
+[ -z "$(git -C "$source_repo" branch --list capsule/merge-object-integrity-land)" ] || fail "object-integrity merge left temporary landing branch behind"
+[ "$(git -C "$source_repo" merge-base "$advanced_target" staging/local)" = "$advanced_target" ] || fail "object-integrity merge dropped target advancement"
+[ "$(git -C "$source_repo" show staging/local:target-advanced-after-clone.txt)" = "target advanced" ] || fail "object-integrity merge cannot read advanced target object"
+[ "$(git -C "$source_repo" show staging/local:object-integrity-feature.txt)" = "workspace feature" ] || fail "object-integrity merge did not land workspace feature"
+git -C "$source_repo" fsck --connectivity-only --no-dangling staging/local >/dev/null || fail "object-integrity merge left unreadable target objects"
+
+# Teardown happens after the target update. A cleanup failure must leave a
+# truthful successful merge result (with a warning), not tell callers to retry
+# a landing that already advanced the target.
+truthful_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id truthful-teardown --branch agent/truthful-teardown --json)"
+truthful_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$truthful_json")"
+printf 'landed despite teardown failure\n' >"$truthful_workspace/truthful-teardown.txt"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$truthful_workspace" --message 'add truthful teardown feature' >/dev/null
+fakebin="$tmp/fakebin"
+mkdir -p "$fakebin"
+cat >"$fakebin/rm" <<EOF
+#!/usr/bin/env bash
+echo "forced teardown failure" >&2
+exit 1
+EOF
+chmod +x "$fakebin/rm"
+if ! PATH="$fakebin:$PATH" "$dev_workspace" merge --repo "$source_repo" --root "$root" "$truthful_workspace" --teardown >"$tmp/truthful-teardown.log" 2>&1; then
+  fail "merge reported failure after target advanced and teardown failed"
+fi
+grep -Fq "warning: merge landed but teardown failed" "$tmp/truthful-teardown.log" || fail "merge did not warn about post-landing teardown failure"
+grep -Fq "merged: agent/truthful-teardown -> staging/local" "$tmp/truthful-teardown.log" || fail "merge did not report successful target landing"
+[ "$(git -C "$source_repo" show staging/local:truthful-teardown.txt)" = "landed despite teardown failure" ] || fail "truthful merge did not advance target"
+[ -e "$truthful_workspace" ] || fail "forced teardown failure unexpectedly removed workspace"
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$truthful_workspace" >/dev/null
+
 main_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-main --branch agent/case-main --base main --target main --json)"
 main_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$main_json")"
 [ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target"])' <"$main_workspace/.kitsoki-dev-workspace.json")" = "main" ] || fail "create --target main was not recorded in workspace manifest"
