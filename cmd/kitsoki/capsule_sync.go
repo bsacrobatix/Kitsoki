@@ -1,0 +1,129 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+
+	"github.com/spf13/cobra"
+
+	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/reconcile"
+)
+
+func capsuleSyncCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "sync", Short: "Plan and apply stale-safe Capsule reconciliation"}
+	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd())
+	return cmd
+}
+
+func capsuleSyncPlanCmd() *cobra.Command {
+	var project, workspace, target, operation, requiredGate string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "plan",
+		Short: "Observe refs and save an immutable reconciliation plan",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			op, err := capsuleReconcileOperation(operation)
+			if err != nil {
+				return err
+			}
+			manager, err := capsuleWorkspaceManager(project)
+			if err != nil {
+				return err
+			}
+			instance, err := manager.Instances.Get(cmd.Context(), workspace)
+			if err != nil {
+				return err
+			}
+			path, err := manager.WorkspacePath(cmd.Context(), control.Handle{ID: instance.ID, Generation: instance.Generation})
+			if err != nil {
+				return err
+			}
+			plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(cmd.Context(), reconcile.PlanRequest{
+				Workspace: path, TargetRef: target, Operation: op, Generation: instance.Generation, RequiredGate: requiredGate,
+			})
+			if err != nil {
+				return err
+			}
+			root, err := filepath.Abs(project)
+			if err != nil {
+				return err
+			}
+			if err := (reconcile.FilePlanStore{ProjectRoot: root}).Write(reconcile.StoredPlan{WorkspaceID: workspace, Plan: plan}); err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, plan, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&workspace, "workspace", "", "managed workspace id")
+	cmd.Flags().StringVar(&target, "target", "", "target local ref")
+	cmd.Flags().StringVar(&operation, "operation", "integrate", "integrate|refresh|promote|publish")
+	cmd.Flags().StringVar(&requiredGate, "required-gate", "", "configured CI receipt/gate requirement")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("workspace")
+	_ = cmd.MarkFlagRequired("target")
+	return cmd
+}
+
+func capsuleSyncApplyCmd() *cobra.Command {
+	var project, digest, gateReceipt string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "apply",
+		Short: "Apply one saved plan only when refs and generation still match",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := filepath.Abs(project)
+			if err != nil {
+				return err
+			}
+			stored, err := (reconcile.FilePlanStore{ProjectRoot: root}).Get(digest)
+			if err != nil {
+				return err
+			}
+			manager, err := capsuleWorkspaceManager(root)
+			if err != nil {
+				return err
+			}
+			instance, err := manager.Instances.Get(cmd.Context(), stored.WorkspaceID)
+			if err != nil {
+				return err
+			}
+			if instance.Generation != stored.Plan.Expected.Generation {
+				return fmt.Errorf("capsule sync: stale workspace generation")
+			}
+			gates := reconcile.GateVerifierFunc(func(_ context.Context, receipt string, plan reconcile.Plan) error {
+				if plan.RequiredGate != "" && receipt == "" {
+					return fmt.Errorf("capsule sync: required gate receipt is missing")
+				}
+				return nil
+			})
+			result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: gates}).Apply(cmd.Context(), stored.Plan, gateReceipt)
+			if err != nil {
+				return err
+			}
+			handle, err := manager.MarkIntegrated(cmd.Context(), control.Handle{ID: instance.ID, Generation: instance.Generation})
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, map[string]any{"result": result, "workspace": handle}, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&digest, "plan", "", "plan digest")
+	cmd.Flags().StringVar(&gateReceipt, "gate-receipt", "", "required CI receipt id")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("plan")
+	return cmd
+}
+
+func capsuleReconcileOperation(value string) (reconcile.Operation, error) {
+	op := reconcile.Operation(value)
+	switch op {
+	case reconcile.Integrate, reconcile.Refresh, reconcile.Promote, reconcile.Publish:
+		return op, nil
+	default:
+		return "", fmt.Errorf("capsule sync: unsupported operation %q", value)
+	}
+}
