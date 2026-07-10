@@ -377,6 +377,9 @@ bootstrap_workspace() {
   local path="$1"
   local source_repo="${2:-}"
   [ -d "$path" ] || die "workspace does not exist: $path"
+  # tsx leaves its IPC socket beneath TMPDIR when an interrupted bootstrap
+  # exits. A retry must not inherit that dead socket and fail with EADDRINUSE.
+  rm -rf "$path/.temp"/tsx-* 2>/dev/null || true
   copy_local_config "$path" "$source_repo"
   if make -C "$path" -n bootstrap-workspace >/dev/null 2>&1; then
     make -C "$path" bootstrap-workspace
@@ -396,6 +399,10 @@ copy_local_config() {
   local dst="$path/$LOCAL_CONFIG"
   [ -f "$src" ] || return 0
   [ "$src" != "$dst" ] || return 0
+  # A previous bootstrap can have preserved a read-only local config. This is
+  # transient workspace state; replace it atomically on retry.
+  chmod u+w "$dst" 2>/dev/null || true
+  rm -f "$dst"
   cp -p "$src" "$dst"
 }
 
