@@ -466,6 +466,11 @@ def dispatch_single_prompt_codex(args: argparse.Namespace, task: dict[str, Any],
     ]
     if args.model:
         cmd.extend(["--model", args.model])
+    if args.effort:
+        # Codex otherwise inherits the operator's global effort (currently
+        # potentially `max`, which GPT-5.4 rejects). The experiment's declared
+        # effort is part of the matched cell contract and must reach raw Codex.
+        cmd.extend(["--config", f'model_reasoning_effort="{args.effort}"'])
     cmd.append(prompt)
     proc = subprocess.run(cmd, cwd=tree, text=True, capture_output=True, timeout=int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "900")))
     Path(trace_ref).write_text(json.dumps({
