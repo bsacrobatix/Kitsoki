@@ -31,6 +31,18 @@ initial_world:
 starlark_inspect_cassette: ../cassettes/design_happy_path.inspect.yaml
 
 host_handlers:
+  host.run:
+    by_call:
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-working-folder"
+            item_id: "proposal/working-folder-primitive"
+            changed: true
   host.fs.writable_dir:
     data: { path: "docs/proposals", used_fallback: false }
   host.ide.open_file:
@@ -79,12 +91,11 @@ host_handlers:
     by_call:
       publish:
         data:
-          result:
-            design_file: "docs/proposals/working-folder-primitive.md"
-            ticket_id: "F-2026-06-11T120000Z-working-folder-primitive"
-            ticket_path: "issues/features/F-2026-06-11T120000Z-working-folder-primitive.md"
-            ticket_title: "Working folder primitive"
-            ticket_url: "docs/proposals/working-folder-primitive.md"
+          design_file: "docs/proposals/working-folder-primitive.md"
+          ticket_id: "F-2026-06-11T120000Z-working-folder-primitive"
+          ticket_path: "issues/features/F-2026-06-11T120000Z-working-folder-primitive.md"
+          ticket_title: "Working folder primitive"
+          ticket_url: "docs/proposals/working-folder-primitive.md"
       roadmap_ledger_proposal_published:
         data:
           ok: true

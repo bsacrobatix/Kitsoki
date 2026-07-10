@@ -35,18 +35,29 @@ initial_world:
       Add a repeatable routing-tuning loop with fixtures, reports, and session-mined cases.
 
 host_handlers:
+  host.run:
+    by_call:
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-routing-tuning"
+            item_id: "proposal/routing-tuning"
+            changed: true
   host.ide.open_file:
     data: { ok: true, connected: true }
   host.starlark.run:
     by_call:
       publish:
         data:
-          result:
-            design_file: "docs/proposals/routing-tuning.md"
-            ticket_id: ""
-            ticket_path: ""
-            ticket_title: "Story: routing tuning"
-            ticket_url: "docs/proposals/routing-tuning.md"
+          design_file: "docs/proposals/routing-tuning.md"
+          ticket_id: ""
+          ticket_path: ""
+          ticket_title: "Story: routing tuning"
+          ticket_url: "docs/proposals/routing-tuning.md"
       roadmap_ledger_proposal_published:
         data:
           ok: true
