@@ -3,7 +3,10 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
+
+	"kitsoki/internal/kit"
 )
 
 // repoRootForTest resolves the kitsoki repo root from the test's package dir so
@@ -42,6 +45,45 @@ func TestSynthesizeRoot_Rung0(t *testing.T) {
 	// app.id is the repo basename (provenance).
 	if def.App.ID == "" {
 		t.Fatal("synthesized app.id is empty")
+	}
+}
+
+// TestDevStoryKitRootHostsCoverExpandedStory keeps the manifest-driven
+// synthesized-root allow-list in lockstep with the fully expanded dev-story
+// subtree. SynthesizeRoot imports that subtree with hosts: declared, so a
+// missing entry would otherwise make every implicit root fail to load.
+func TestDevStoryKitRootHostsCoverExpandedStory(t *testing.T) {
+	root := repoRootForTest(t)
+	manifest, err := kit.Load(filepath.Join(root, "stories", "dev-story", kit.ManifestFileName))
+	if err != nil {
+		t.Fatalf("load dev-story kit manifest: %v", err)
+	}
+	storyPath := filepath.Join(root, "stories", "dev-story", "app.yaml")
+	bytes, err := os.ReadFile(storyPath)
+	if err != nil {
+		t.Fatalf("read dev-story: %v", err)
+	}
+	story, parseErrs := parseAndMerge(bytes, storyPath, filepath.Dir(storyPath))
+	if len(parseErrs) != 0 {
+		t.Fatalf("parse dev-story: %v", parseErrs)
+	}
+	if importErrs := resolveImports(story, storyPath, filepath.Dir(storyPath), []string{canonicalPath(storyPath)}, nil); len(importErrs) != 0 {
+		t.Fatalf("expand dev-story imports: %v", importErrs)
+	}
+
+	declared := make(map[string]struct{}, len(manifest.Root.Hosts))
+	for _, host := range manifest.Root.Hosts {
+		declared[host] = struct{}{}
+	}
+	var missing []string
+	for _, host := range story.Hosts {
+		if _, ok := declared[host]; !ok {
+			missing = append(missing, host)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) != 0 {
+		t.Fatalf("dev-story kit root.hosts must cover the pre-interface expanded subtree under hosts: declared; missing %v", missing)
 	}
 }
 
