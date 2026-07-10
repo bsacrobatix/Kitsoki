@@ -109,6 +109,16 @@ func parseAgentSandbox(args map[string]any) (*AgentSandboxSpec, string) {
 			}
 			spec.Resources.Timeout = d
 		}
+		if timeout, _ := resources["activity_timeout"].(string); strings.TrimSpace(timeout) != "" {
+			d, err := time.ParseDuration(timeout)
+			if err != nil || d <= 0 {
+				if err == nil {
+					err = fmt.Errorf("must be greater than zero")
+				}
+				return nil, fmt.Sprintf("sandbox.resources.activity_timeout: %v", err)
+			}
+			spec.Resources.ActivityTimeout = d
+		}
 	}
 	return spec, ""
 }

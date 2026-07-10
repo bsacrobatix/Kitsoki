@@ -155,6 +155,16 @@ states:
         with:
           agent: fixer
           working_dir: "{{ world.workdir }}"
+          # A repair may legitimately take several minutes, but it must keep
+          # producing stream-json activity. The shorter activity deadline
+          # kills a wedged provider/tool turn instead of waiting out a long
+          # completion timeout.
+          sandbox:
+            min_strength: supervised
+            degrade: warn
+            resources:
+              timeout: "30m"
+              activity_timeout: "90s"
           acceptance:
             schema: schemas/fix_artifact.json
             max_retries: 3
