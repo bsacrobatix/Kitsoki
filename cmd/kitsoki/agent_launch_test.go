@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -852,6 +853,52 @@ args = ["mcp", "--stories-dir", ".kitsoki/stories"]
 	joined := strings.Join(plan.Command, " ")
 	require.Contains(t, joined, `mcp_servers.kitsoki.command="kitsoki"`)
 	require.Contains(t, joined, `mcp_servers.kitsoki.args=["mcp","--stories-dir",".kitsoki/stories"]`)
+}
+
+func TestAgentLaunchPlan_RendersEmbeddedAgentWithoutProjectInstall(t *testing.T) {
+	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	library := filepath.Join(dir, "embedded-toolkit")
+	require.NoError(t, os.MkdirAll(filepath.Join(library, "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(library, "agents", "kitsoki-mcp-driver.md"), []byte(`---
+name: kitsoki-mcp-driver
+description: Drive Kitsoki through Studio MCP.
+model: gpt-5.5
+effort: medium
+tools: [mcp__kitsoki__studio_ping]
+---
+
+Use only the Kitsoki Studio MCP. Start with studio.ping.
+`), 0644))
+	oldMaterialize := materializeBuiltInAgentLibrary
+	materializeBuiltInAgentLibrary = func(context.Context) (string, error) { return library, nil }
+	t.Cleanup(func() { materializeBuiltInAgentLibrary = oldMaterialize })
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName: "kitsoki-mcp-driver",
+		Backend:   "codex",
+		Task:      "Call studio.ping.",
+	})
+	require.NoError(t, err)
+	require.Contains(t, plan.AgentFile, "kitsoki-agent-launch-")
+	_, err = os.Stat(plan.AgentFile)
+	require.NoError(t, err, "the rendered definition must survive until launch cleanup")
+	require.Contains(t, readCodexModelInstructionsFile(t, plan.Command), "Use only the Kitsoki Studio MCP.")
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, `mcp_servers.kitsoki.command="kitsoki"`)
+	require.Contains(t, joined, "--disable="+launchCodexShellToolFeature)
+
+	for _, cleanup := range plan.cleanups {
+		cleanup()
+	}
+	_, err = os.Stat(plan.AgentFile)
+	require.True(t, os.IsNotExist(err), "rendered definition must not leak into normal sessions")
 }
 
 func TestLoadStandaloneCodexAgentRejectsExtendsCycle(t *testing.T) {

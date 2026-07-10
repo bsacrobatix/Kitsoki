@@ -25,7 +25,8 @@ Actually run a task-backed story agent after inspecting the plan:
 kitsoki agent launch --app stories/prd/app.yaml --agent author --task-file .context/prd-task.md --exec
 ```
 
-Launch a freestanding agent task from `.codex/agents/<name>.toml`:
+Launch a packaged Kitsoki agent task without installing any prompt or agent
+files into the target project:
 
 ```sh
 kitsoki agent launch --agent kitsoki-mcp-driver --backend codex --task-file .context/drive.md
@@ -68,11 +69,17 @@ story's top-level `agents:` block and supplies the persona, cwd, tools, model,
 effort, and provider name.
 
 Freestanding launch omits `--app` and resolves an agent from the current
-project, or the file passed with `--agent-file`. Resolution is deterministic:
+project, an embedded Kitsoki agent, or the file passed with `--agent-file`.
+Resolution is deterministic:
 `.kitsoki/agents/<name>.local.toml`, `.kitsoki/agents/<name>.toml`,
 `.codex/agents/<name>.local.toml`, `.codex/agents/<name>.toml`, then the same
-two `.codex/agents/` names under `~`. The file supplies developer instructions,
-model, effort, and optional `[mcp_servers.*]` blocks.
+two `.codex/agents/` names under `~`, then the embedded Kitsoki agent library.
+The embedded fallback renders the package's Markdown agent into a private
+temporary TOML file for just this launch and deletes it after planning or
+execution. It never writes `.agents`, `.claude`, `.codex`, or `.kitsoki` into
+the target project or the user's home directory. A project or personal TOML
+file remains an explicit override and supplies developer instructions, model,
+effort, and optional `[mcp_servers.*]` blocks.
 
 Use `extends = "path/to/parent.toml"` to keep a community or project prompt
 managed while specializing it. A child may set
