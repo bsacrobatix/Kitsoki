@@ -10,6 +10,20 @@ stay side-effect-free and do not create a workspace.
 kitsoki run @kitsoki/scenario-qa
 ```
 
+`@kitsoki/persona-qa` is a story alias that resolves here — use either name.
+
+## Naming
+
+One product, four names:
+
+| Name | What it is |
+|---|---|
+| **Persona QA** | The product ([`docs/persona-qa.md`](../../docs/persona-qa.md)). |
+| **`scenario-qa`** | This story — `kitsoki run @kitsoki/scenario-qa` (alias `@kitsoki/persona-qa`). |
+| **`product-journey-qa`** | The broader persona x scenario x 10-repo matrix story ([`../product-journey-qa/README.md`](../product-journey-qa/README.md)). |
+| **`product-journey`** | The deterministic runner backend this story drives ([`../../tools/product-journey/README.md`](../../tools/product-journey/README.md)). |
+| **`persona_qa`** | A shared support kit, not an operator surface. |
+
 Useful prompts:
 
 - `preview <catalog-scenario-id> across all transports` shows the scenario x

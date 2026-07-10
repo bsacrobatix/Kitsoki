@@ -3,6 +3,28 @@
 This story wraps the deterministic product-journey runner so operators can drive
 the standard persona/scenario evidence workflow inside Kitsoki.
 
+```sh
+kitsoki run @kitsoki/product-journey-qa
+```
+
+For the narrow "check one scenario across transports" case, use
+[`stories/scenario-qa`](../scenario-qa/README.md) (`kitsoki run
+@kitsoki/scenario-qa`) instead — this story is the broader persona x scenario x
+10-repo matrix, marathon, and autonomous-fix surface. See [Naming](#naming)
+below.
+
+## Naming
+
+One product, four names:
+
+| Name | What it is |
+|---|---|
+| **Persona QA** | The product ([`docs/persona-qa.md`](../../docs/persona-qa.md)). |
+| **`scenario-qa`** | The narrow one-scenario x N-transports story ([`../scenario-qa/README.md`](../scenario-qa/README.md), alias `@kitsoki/persona-qa`). |
+| **`product-journey-qa`** | This story — the broader persona x scenario x 10-repo matrix, marathon, and autonomous-fix surface. |
+| **`product-journey`** | The deterministic runner backend this story drives ([`../../tools/product-journey/README.md`](../../tools/product-journey/README.md)). |
+| **`persona_qa`** | A shared support kit, not an operator surface. |
+
 It is intentionally no-LLM:
 
 - `validate_corpus` calls `tools/product-journey/run.py --validate-corpus
