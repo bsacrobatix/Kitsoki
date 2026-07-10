@@ -38,6 +38,7 @@ app:
 # Host allow-list.
 hosts:
   - host.starlark.run   # deterministic source/determinism planning
+  - host.session_mining.run # named session-mining adapter boundary
   - host.run            # mining pipeline, gate-inventory scan, `kitsoki test flows`
   - host.agent.task    # agentic producers (miner, mapper, author, recorder)
   - host.agent.ask     # read-only producer (ranker)

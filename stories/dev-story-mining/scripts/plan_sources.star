@@ -53,8 +53,8 @@ def _claude_source(job, project_dir):
         "kind": "claude-code-jsonl",
         "transcript_root": root,
         "job_dir": job_dir,
-        "prep_command": "cd tools/session-mining && python3 prep.py %s --job %s-claude --sample recency" % (root, job),
-        "outcomes_command": "cd tools/session-mining && python3 outcomes.py --raw %s/raw --out %s/outcomes.json" % (job_dir, job_dir),
+        "prep_command": "host.session_mining.run --op prep %s --job %s-claude --sample recency" % (root, job),
+        "outcomes_command": "host.session_mining.run --op outcomes --raw %s/raw --out %s/outcomes.json" % (job_dir, job_dir),
         "strengths": [
             "verbatim user turns and lexical correction signals are available",
             "cost extraction is supported where message usage events exist",
@@ -71,8 +71,8 @@ def _codex_source(job, codex_sessions_dir, project_dir):
         "kind": "codex-rollout-jsonl",
         "transcript_root": codex_sessions_dir if codex_sessions_dir else "~/.codex/sessions",
         "job_dir": job_dir,
-        "prep_command": "cd tools/session-mining && python3 codex_prep.py %s --cwd %s --job %s-codex" % (codex_sessions_dir, cwd_filter, job),
-        "outcomes_command": "cd tools/session-mining && python3 codex_outcomes.py --raw %s/raw --out %s/outcomes.json" % (job_dir, job_dir),
+        "prep_command": "host.session_mining.run --op codex_prep %s --cwd %s --job %s-codex" % (codex_sessions_dir, cwd_filter, job),
+        "outcomes_command": "host.session_mining.run --op codex_outcomes --raw %s/raw --out %s/outcomes.json" % (job_dir, job_dir),
         "strengths": [
             "tool outcomes join by call_id, so action grounding is structurally strong",
             "feeds the same ground/tag/emit spine as Claude after adaptation",
