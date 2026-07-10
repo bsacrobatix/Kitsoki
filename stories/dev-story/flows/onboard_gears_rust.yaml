@@ -12,8 +12,7 @@
 #     ticket-repo passthrough from the real git remote — the recorded
 #     cassette's discover episode carries `"tracker": "github",
 #     "ticket_repo": "bsacrobatix/gears-rust"` with no operator input, and the
-#     applied project-profile.yaml (see .context/dwf3-a3-recording-notes.md)
-#     binds `iface.ticket -> host.gh.ticket`.
+#     generated wrapper uses that slug as the GitHub ticket source.
 #   - turns 3-4: the optional LLM-draft path (`draft_profile`/
 #     `profile_drafted`) — the one real live-LLM call this recording spent.
 #   - turn 5 (`quit`): the recorded session bailed out of the LLM-draft path
