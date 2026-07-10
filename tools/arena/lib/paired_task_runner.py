@@ -713,8 +713,9 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     metrics["studio_mcp_trace_ref"] = container_path(trace_ref)
     metrics["implementation_mode"] = args.implementation_mode or "agent_task"
     metrics["worker_profile"] = profile
+    incomplete_measurement = metrics.get("measurement_status") == "incomplete"
     return {
-        "blocked": proc.returncode != 0,
+        "blocked": proc.returncode != 0 or incomplete_measurement,
         "notes": notes,
         "metrics": metrics,
     }
@@ -853,7 +854,11 @@ def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
     own per-call usage breakdown — the same pricing table method_cost() uses
     on Claude usage blocks, applied here to codex's usage shape."""
     if not os.path.exists(trace_ref):
-        return {"cost_usd": 0.0, "tokens": 0, "cost_note": "no trace usage recorded"}
+        return {
+            **zero_metrics(),
+            "measurement_status": "incomplete",
+            "cost_note": "no trace usage recorded",
+        }
     total_in = total_cached = total_out = 0
     metered_cost = 0.0
     for line in Path(trace_ref).read_text(encoding="utf-8").splitlines():
@@ -886,7 +891,11 @@ def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
             "codeact_eval_calls": trace_event_count(trace_ref, "codeact_eval"),
         }
     if tokens == 0:
-        return zero_metrics(cost_note="no trace usage recorded")
+        return {
+            **zero_metrics(),
+            "measurement_status": "incomplete",
+            "cost_note": "no trace usage recorded",
+        }
     price, _ = price_for(model)
     fresh_input = max(total_in - total_cached, 0)
     cost = (fresh_input * price.input + total_cached * price.cache_read + total_out * price.output) / 1e6

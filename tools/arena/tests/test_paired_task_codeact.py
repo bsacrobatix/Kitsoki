@@ -92,6 +92,19 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
         capability_hash=cap_hash,
     )
     check("valid plan passes", assertions["passed"], True)
+    escaped = dict(plan, command=command[:-1] + [
+        f'mcp_servers.kitsoki-codeact.args=["mcp-codeact","--capabilities-json","{cap_json.replace(chr(34), chr(92) + chr(34))}"]',
+        command[-1],
+    ])
+    assertions = runner.assert_codeact_launch_plan(
+        escaped,
+        tree=tree,
+        agent="kitsoki-codeact-driver",
+        backend="codex",
+        capability_json=cap_json,
+        capability_hash=cap_hash,
+    )
+    check("escaped capability plan passes", assertions["passed"], True)
     bad = dict(plan, tools=["mcp__kitsoki-codeact__codeact_eval", "Bash"])
     assertions = runner.assert_codeact_launch_plan(
         bad,
@@ -102,6 +115,9 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
         capability_hash=cap_hash,
     )
     check("extra tool fails", assertions["passed"], False)
+
+missing_trace = runner.real_trace_metrics(str(tree / "absent.jsonl"), "gpt-5.4")
+check("missing studio trace is incomplete", missing_trace.get("measurement_status"), "incomplete")
 
 spec = JobSpec.from_dict({
     "job_type": "paired-task",
