@@ -154,12 +154,113 @@ func TestServiceHostAndFakeRemoteProduceEquivalentStoryRun(t *testing.T) {
 	}
 }
 
+func TestServiceAddsRequiredHygieneCheckToVerdict(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\ncleanup:\n  keep_runs: 10\n  require_hygiene_check: true\n  max_reclaimable_bytes: 100\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		ProjectRoot: root,
+		Jobs:        artifactjob.NewMemoryStore(),
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Executors:   NewBuiltinExecutors(),
+		Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+			return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+		}),
+		Hygiene: HygienePlannerFunc(func(_ context.Context, policy CleanupPolicy) (HygieneReport, error) {
+			if policy.KeepRuns != 10 || policy.MaxReclaimableBytes != 100 {
+				t.Fatalf("policy %#v", policy)
+			}
+			return HygieneReport{Schema: "capsule-hygiene-plan/v1", Candidates: 2, TotalBytes: 50, EvidenceRef: "artifact:hygiene-plan"}, nil
+		}),
+	}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Verdict.PromotionEligible {
+		t.Fatalf("verdict %#v", result.Verdict)
+	}
+	got := checkByID(result.Verdict.Checks, "capsule-hygiene")
+	if got == nil || got.Outcome != "passed" || len(got.Evidence) != 1 || got.Evidence[0] != "artifact:hygiene-plan" {
+		t.Fatalf("hygiene check %#v", got)
+	}
+}
+
+func TestServiceHygieneDebtBlocksPromotion(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\ncleanup:\n  require_hygiene_check: true\n  max_reclaimable_bytes: 100\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		ProjectRoot: root,
+		Jobs:        artifactjob.NewMemoryStore(),
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Executors:   NewBuiltinExecutors(),
+		Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+			return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+		}),
+		Hygiene: HygienePlannerFunc(func(context.Context, CleanupPolicy) (HygieneReport, error) {
+			return HygieneReport{Schema: "capsule-hygiene-plan/v1", Candidates: 3, TotalBytes: 101, EvidenceRef: "artifact:hygiene-plan"}, nil
+		}),
+	}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Verdict.Outcome != "failed" || result.Verdict.PromotionEligible {
+		t.Fatalf("verdict %#v", result.Verdict)
+	}
+	got := checkByID(result.Verdict.Checks, "capsule-hygiene")
+	if got == nil || got.Outcome != "failed" {
+		t.Fatalf("hygiene check %#v", got)
+	}
+}
+
+func TestPipelineCleanupPolicyOverridesGlobalRetention(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw := []byte("schema: capsule-ci/v1\ndefault_environment: ci\ncleanup:\n  keep_runs: 20\n  require_hygiene_check: true\n  max_reclaimable_bytes: 100\npipelines:\n  change:\n    story: .kitsoki/stories/ci/app.yaml\n    triggers: [local]\n    cleanup:\n      keep_runs: 5\n      max_reclaimable_bytes: 10\n    result:\n      schema: capsule-ci-verdict/v1\n")
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}}
+	pipeline, _, err := service.Plan(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pipeline.Cleanup.KeepRuns != 5 || pipeline.Cleanup.MaxReclaimableBytes != 10 || !pipeline.Cleanup.RequireHygieneCheck {
+		t.Fatalf("cleanup policy %#v", pipeline.Cleanup)
+	}
+}
+
 func normalizeEquivalentRun(result RunResult) RunResult {
 	result.Execution.ExecutionID = ""
 	result.Job.ID = ""
 	result.Job.CreatedAt = result.Job.CreatedAt.UTC()
 	result.Job.UpdatedAt = result.Job.CreatedAt
 	return result
+}
+
+func checkByID(checks []Check, id string) *Check {
+	for i := range checks {
+		if checks[i].ID == id {
+			return &checks[i]
+		}
+	}
+	return nil
 }
 
 func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testing.T) {

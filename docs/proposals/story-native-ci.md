@@ -34,6 +34,10 @@ the steps inside it.
 schema: capsule-ci/v1
 project_profile: .kitsoki/project-profile.yaml
 default_environment: ci
+cleanup:
+  keep_runs: 20
+  require_hygiene_check: true
+  max_reclaimable_bytes: 1073741824
 
 pipelines:
   change:
@@ -51,6 +55,8 @@ pipelines:
       profiles: [ci-reviewer]
       max_cost_usd: 2.00
       on_unavailable: needs_input
+    cleanup:
+      keep_runs: 10
     result:
       schema: schemas/capsule-ci-verdict-v1.json
       pass_exits: [passed]
@@ -141,6 +147,14 @@ Allowed outcomes are `passed|failed|needs_input|cancelled|infra_failed`.
 `promotion_eligible` is derived and checked by the runner; the story cannot make
 it true while required checks are missing or the source/environment/story digest
 does not match the run.
+
+Disk hygiene is also a CI fact, not only an operator chore. When
+`cleanup.require_hygiene_check` is true, the runner appends a
+`capsule-hygiene` verdict check from the conservative cleanup planner. If the
+plan reports more reclaimable bytes than `max_reclaimable_bytes`, the final
+verdict is failed/not promotion-eligible. Cleanup application remains explicit
+and permissioned through `kitsoki capsule cleanup apply` or
+`capsule.cleanup.apply`; CI planning never deletes state as a side effect.
 
 ## Story graph
 
@@ -271,6 +285,7 @@ project wrapper that imports only deterministic checks and adjudication.
 - [x] 1.1 Define/load `.kitsoki/ci.yaml`; validate story, trigger, environment, executor, permission, agent budget, and result references
 - [x] 1.2 Define normalized trigger and capsule-ci-verdict/v1 schemas plus terminal-exit mapping
 - [x] 1.3 Add `capsule ci plan|run|status|cancel` CLI/MCP over artifact-job and execution-envelope seams
+- [x] 1.4 Add cleanup retention/threshold policy to `.kitsoki/ci.yaml` and enforce it as a `capsule-hygiene` verdict check in CLI/MCP CI runs
 
 ## 2. Reference composition
 - [ ] 2.1 Scaffold stories/capsule-ci with typed views and prepare/check/review/refine/adjudicate rooms

@@ -203,3 +203,26 @@ Agents limited to `kitsoki capsule mcp` use `capsule.cleanup.plan` for a
 path-redacted hygiene dry run and `capsule.cleanup.apply` when their immutable
 startup grant includes the `cleanup` effect. MCP cleanup intentionally stays
 inside the project Capsule tree and does not clear host-global Go caches.
+
+Projects can also make hygiene a required CI fact in `.kitsoki/ci.yaml`:
+
+```yaml
+cleanup:
+  keep_runs: 20
+  require_hygiene_check: true
+  max_reclaimable_bytes: 1073741824 # 1 GiB
+
+pipelines:
+  change:
+    cleanup:
+      keep_runs: 10
+```
+
+When `require_hygiene_check` is true, `kitsoki capsule ci run` and
+`capsule.ci.run` add a `capsule-hygiene` verdict check from the same cleanup
+planner used by `kitsoki capsule cleanup plan`. If reclaimable state exceeds
+`max_reclaimable_bytes`, the run is not promotion-eligible. CI does not delete
+state as a side effect; deletion still goes through `cleanup apply` with the
+appropriate CLI/operator/MCP authority. The Capsule MCP CI path remains
+project-scoped for hygiene planning; host-global Go cache inspection is a
+CLI/operator concern.
