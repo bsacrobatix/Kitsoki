@@ -1180,6 +1180,7 @@ def build_run_bundle(
 ) -> tuple[Path, dict]:
     if live_budget_minutes < 0:
         raise SystemExit("--live-budget-minutes must be >= 0")
+    _TIER_NOTICES.clear()
     target = resolve_project(catalog, github_targets, project_id)
     persona = select_persona(personas, persona_id, f"{project_id}:{seed}")
     driver_manifest = driver_manifest or load_driver_manifest()
@@ -1306,6 +1307,8 @@ def build_run_bundle(
     driver_handoff = build_driver_handoff(run_json, metrics, evidence, review)
     journey = render_journey(run_json)
     deck = render_deck(run_json, metrics, evidence=evidence, findings=findings, execution_plan=execution_plan, media_manifest=media_manifest, scenario_outcomes=scenario_outcomes, driver_plan=driver_plan)
+
+    run_json["tier_notices"] = list(_TIER_NOTICES)
 
     write_json(run_dir / "run.json", run_json)
     (run_dir / "journey.md").write_text(journey, encoding="utf-8")
@@ -2400,6 +2403,35 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
         if blanks:
             add_corpus_issue(issues, "error", f"blank-{label}-ids", f"Blank {label} ids", ", ".join(blanks))
 
+    for scenario in scenarios:
+        declared_tier = scenario.get("tier")
+        if declared_tier is not None and declared_tier not in CATALOG_TIERS:
+            add_corpus_issue(
+                issues, "error", "scenario-tier",
+                "Scenario tier must be curated or mined when declared",
+                f"{scenario.get('id', 'unknown')}: tier={declared_tier!r}",
+            )
+        elif declared_tier is None:
+            add_corpus_issue(
+                issues, "warn", "scenario-tier-undeclared",
+                "Scenario does not declare an explicit tier; inferred from whether it has transports",
+                f"{scenario.get('id', 'unknown')}: inferred={scenario_tier(scenario)}",
+            )
+    for persona in personas:
+        declared_tier = persona.get("tier")
+        if declared_tier is not None and declared_tier not in CATALOG_TIERS:
+            add_corpus_issue(
+                issues, "error", "persona-tier",
+                "Persona tier must be curated or mined when declared",
+                f"{persona.get('id', 'unknown')}: tier={declared_tier!r}",
+            )
+        elif declared_tier is None:
+            add_corpus_issue(
+                issues, "warn", "persona-tier-undeclared",
+                "Persona does not declare an explicit tier; inferred from whether it has persona_lens",
+                f"{persona.get('id', 'unknown')}: inferred={persona_tier(persona)}",
+            )
+
     if draft_persona_list:
         draft_ids = ", ".join(sorted(persona.get("id", "unknown") for persona in draft_persona_list))
         add_corpus_issue(issues, "warn", "draft-personas", "Draft personas are skipped by active product-journey gates", draft_ids)
@@ -2693,6 +2725,50 @@ def transport_for_visual_surface(visual_surface: str, required_mcp: list[str]) -
     return "tui"
 
 
+_TIER_NOTICES: list[str] = []
+CATALOG_TIERS = ("curated", "mined")
+
+
+def scenario_tier(scenario: dict) -> str:
+    """Return this scenario's corpus tier (see schema.json `tier`).
+
+    An explicit `tier` wins. Absent that, a scenario that declares
+    `transports` is treated as curated (it was reviewed enough to author a
+    real contract); everything else is treated as mined, matching the
+    inference `resolve_scenario_transports()` already used before `tier`
+    existed.
+    """
+    declared = scenario.get("tier")
+    if declared in CATALOG_TIERS:
+        return declared
+    return "curated" if scenario.get("transports") else "mined"
+
+
+def persona_tier(persona: dict) -> str:
+    """Return this persona's corpus tier (see scenario_tier)."""
+    declared = persona.get("tier")
+    if declared in CATALOG_TIERS:
+        return declared
+    return "curated" if persona.get("persona_lens") else "mined"
+
+
+def note_tier_synthesis(kind: str, entry_id: str, field: str, tier: str) -> None:
+    """Print + buffer a visible notice when a mined-tier entry's `field` is
+    being synthesized from defaults rather than authored.
+
+    Printed to stderr so it surfaces on any invocation path (CLI, story
+    `check`, live drive); also appended to a module-level buffer that
+    build_run_bundle() copies into run.json's `tier_notices` before writing
+    the bundle, so a reviewer can see synthesis history without re-running
+    anything. A no-op for tier=curated entries.
+    """
+    if tier != "mined":
+        return
+    message = f"{kind} {entry_id} is tier=mined: {field} synthesized from defaults"
+    print(f"[persona-qa] NOTICE: {message}", file=sys.stderr)
+    _TIER_NOTICES.append(message)
+
+
 def default_scenario_transports(scenario: dict) -> dict:
     """Derive an implicit transports contract from a scenario's required_mcp.
 
@@ -2701,8 +2777,11 @@ def default_scenario_transports(scenario: dict) -> dict:
     don't declare it. This mirrors driver_visual_surface()'s existing
     single-surface inference so a scenario missing the field keeps behaving
     exactly as it did before --transport existed, and only gains additional
-    transports when it explicitly opts in via scenarios.json.
+    transports when it explicitly opts in via scenarios.json. Synthesizing
+    this contract for a tier=mined scenario prints and records a visible
+    notice -- see note_tier_synthesis().
     """
+    note_tier_synthesis("scenario", scenario.get("id", "?"), "transports", scenario_tier(scenario))
     surface = driver_visual_surface(scenario.get("primary_story", ""), scenario.get("required_mcp", []))
     if surface == "web":
         allowed = ["web"]
@@ -4002,13 +4081,16 @@ def persona_lens(persona: dict) -> dict:
     The lens is now a cataloged field (personas.json `persona_lens`) for the
     curated personas rather than a value computed only at runtime, so arena
     and other read-only consumers of the catalog can see it too. Personas
-    that don't carry the field (today, every mined persona) fall back to a
-    lens synthesized from surface_preference/risk_focus -- this is the same
-    fallback shape the hardcoded lookup used before the field existed.
+    that don't carry the field fall back to a lens synthesized from
+    surface_preference/risk_focus -- this is the same fallback shape the
+    hardcoded lookup used before the field existed. Synthesizing this lens
+    for a tier=mined persona prints and records a visible notice -- see
+    note_tier_synthesis().
     """
     declared = persona.get("persona_lens")
     if isinstance(declared, dict) and declared:
         return declared
+    note_tier_synthesis("persona", persona.get("id", "?"), "persona_lens", persona_tier(persona))
     return {
         "starting_surface": persona.get("surface_preference", "surface chosen by scenario"),
         "first_question": f"What would a {persona.get('label', 'reviewer')} naturally try first, and what evidence proves the result?",
@@ -13403,6 +13485,55 @@ def render_deck(
     }
 
 
+def resolve_local_repo_path(project: dict) -> tuple[str, list[str]]:
+    """Resolve a catalog project's local checkout path portably.
+
+    Priority: the project's own env var (`local_repo_env`, e.g.
+    `POSTGRESQL_REPO`) -> `$KITSOKI_PJ_REPOS_DIR/<project id>` -> the
+    `~/code/<project id>` convention every other Kitsoki dev doc assumes ->
+    a legacy `local_repo_path` catalog field for callers that still set one.
+    No machine-specific absolute path is baked into this repo; every path
+    here is either an operator-provided env var or derived from a portable
+    convention. Returns (resolved_path, candidates_tried) so callers can
+    build an actionable message naming every env var that was checked.
+    """
+    local_repo_env = project.get("local_repo_env", "")
+    project_id = project.get("id", "")
+    candidates: list[str] = []
+    if local_repo_env:
+        env_value = os.environ.get(local_repo_env, "")
+        if env_value:
+            return env_value, candidates
+        candidates.append(local_repo_env)
+    if project_id:
+        repos_dir = os.environ.get("KITSOKI_PJ_REPOS_DIR", "")
+        if repos_dir:
+            candidate = Path(repos_dir) / project_id
+            candidates.append(str(candidate))
+            if candidate.exists():
+                return str(candidate), candidates
+        home_candidate = Path.home() / "code" / project_id
+        candidates.append(str(home_candidate))
+        if home_candidate.exists():
+            return str(home_candidate), candidates
+    legacy_path = project.get("local_repo_path", "")
+    if legacy_path:
+        return legacy_path, candidates
+    return "", candidates
+
+
+def local_repo_path_gate_message(project: dict, candidates: list[str]) -> str:
+    """Actionable preflight message for an unresolved local checkout path."""
+    local_repo_env = project.get("local_repo_env", "")
+    project_id = project.get("id", "unknown")
+    env_hint = f"set {local_repo_env}=/path/to/{project_id}, or " if local_repo_env else ""
+    return (
+        f"Gate: could not resolve a local checkout for '{project_id}'. "
+        f"{env_hint}set KITSOKI_PJ_REPOS_DIR=/parent/dir containing a {project_id}/ checkout, "
+        f"or place the checkout at ~/code/{project_id} (checked: {', '.join(candidates) or 'none'})."
+    )
+
+
 def run_project_check(project):
     validation_command = project.get("validation_command", "")
     if validation_command:
@@ -13480,9 +13611,7 @@ def run_project_check(project):
     ]
 
     local_repo_env = project.get("local_repo_env", "")
-    local_repo_path = os.environ.get(local_repo_env, "") if local_repo_env else ""
-    if not local_repo_path:
-        local_repo_path = project.get("local_repo_path", "")
+    local_repo_path, checked_candidates = resolve_local_repo_path(project)
     if project.get("local_repo_env"):
         checks.append(f"Local repo env: {local_repo_env}")
     if local_repo_path:
@@ -13494,9 +13623,9 @@ def run_project_check(project):
             run_command = run_command.replace("<path>", local_repo_path)
             checks.append(f"{local_repo_env}={local_repo_path}")
             if not Path(local_repo_path).exists():
-                checks.append(f"Gate: {local_repo_env} path does not exist: {local_repo_path}")
+                checks.append(f"Gate: resolved path does not exist: {local_repo_path}")
         else:
-            checks.append(f"Gate: set {local_repo_env} before running this command.")
+            checks.append(local_repo_path_gate_message(project, checked_candidates))
     checks.extend([
         "Run command:",
         f"  {run_command}",

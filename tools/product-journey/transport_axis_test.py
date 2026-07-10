@@ -104,7 +104,17 @@ def _test_scenario_transport_contracts():
 
     # A mined scenario has no declared `transports`; its contract must be
     # derived from required_mcp so nothing breaks for the un-annotated corpus.
-    mined = next(s for s in scenarios if s.get("source") == "mined" and s.get("required_mcp"))
+    # The live corpus is fully curated today (see the 2026-07-10 persona-qa
+    # productization brief, P2.13 "curate or cut the mined tier"), so this
+    # exercises the fallback with a synthetic tier=mined scenario instead of
+    # depending on the corpus still carrying one.
+    mined = {
+        "id": "synthetic-mined-web",
+        "tier": "mined",
+        "primary_story": "stories/product-site/app.yaml",
+        "required_mcp": ["visual.open", "visual.observe"],
+    }
+    _check("synthetic fixture is tier=mined", run.scenario_tier(mined) == "mined")
     mined_contract = run.resolve_scenario_transports(mined)
     expected_surface = run.driver_visual_surface(mined.get("primary_story", ""), mined.get("required_mcp", []))
     if expected_surface == "web":
@@ -118,7 +128,7 @@ def _test_scenario_transport_contracts():
 
     # A mined scenario with empty required_mcp derives to no allowed transport
     # -- it never produces a leg, transport or not.
-    artifact_only = next(s for s in scenarios if s.get("source") == "mined" and not s.get("required_mcp"))
+    artifact_only = {"id": "synthetic-mined-artifact-only", "tier": "mined", "primary_story": "", "required_mcp": []}
     _check("artifact-only mined scenario has no allowed transport", run.resolve_scenario_transports(artifact_only)["allowed"] == [])
     _check("artifact-only mined scenario produces zero legs even for 'all'", run.scenario_transport_legs(artifact_only, list(run.TRANSPORT_IDS)) == [])
 
@@ -336,8 +346,18 @@ def _test_persona_lens_promotion():
         _check(f"{persona_id} carries a cataloged persona_lens", "persona_lens" in persona)
         _check(f"{persona_id} persona_lens() returns the cataloged lens", run.persona_lens(persona) == persona["persona_lens"])
 
-    # Mined personas don't carry persona_lens; they keep the synthesized fallback.
-    mined = next(persona for persona in personas if persona.get("source") == "mined")
+    # Mined personas don't carry persona_lens; they keep the synthesized
+    # fallback. The live corpus is fully curated today (see the 2026-07-10
+    # persona-qa productization brief, P2.13), so this exercises the
+    # fallback with a synthetic tier=mined persona instead of depending on
+    # the corpus still carrying one.
+    mined = {
+        "id": "synthetic-mined-persona",
+        "tier": "mined",
+        "surface_preference": "terminal-first",
+        "risk_focus": ["time budget", "setup friction"],
+    }
+    _check("synthetic fixture is tier=mined", run.persona_tier(mined) == "mined")
     _check("mined persona has no cataloged persona_lens", "persona_lens" not in mined)
     fallback = run.persona_lens(mined)
     _check("mined persona falls back to surface_preference", fallback["starting_surface"] == mined.get("surface_preference", "surface chosen by scenario"))

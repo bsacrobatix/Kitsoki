@@ -84,13 +84,17 @@
   "stage_statuses": ["planned", "ready", "captured", "cached_validated", "validated", "blocked", "error"],
   "scenario": {
     "required": ["id", "label", "stage", "task", "task_prompt", "primary_story", "required_mcp", "evidence", "success_criteria"],
-    "optional": ["natural_utterances", "case_variants", "transports"],
+    "optional": ["tier", "natural_utterances", "case_variants", "transports"],
     "natural_utterance_required": ["text", "source", "source_ref"],
     "case_variant_required": ["id", "utterance", "setup", "success_focus"],
     "core_scenarios_require_natural_utterances": ["project-onboarding", "prd-design", "bugfix"]
   },
+  "tier": {
+    "comment": "tier is an explicit, honest label an editor puts on every scenario/persona catalog entry: `curated` means it was hand-authored (or promoted from mining with real transports/persona_lens/case_variants), `mined` means it came straight out of tools/session-mining and has not been reviewed. tier is optional on both scenario and persona objects for backward compatibility -- an entry that omits it is inferred as `mined` unless it already declares transports (scenario) or persona_lens (persona), matching the inference resolve_scenario_transports()/persona_lens() used before the field existed. Whenever run.py has to synthesize a scenario's transports contract or a persona's persona_lens because the entry is tier=mined, it prints a `[persona-qa] NOTICE: ... is tier=mined: ... synthesized from defaults` line to stderr and, for --emit-run, records the same message in run.json's `tier_notices` list so a reviewer can see synthesis history without re-running anything.",
+    "allowed_values": ["curated", "mined"]
+  },
   "transports": {
-    "comment": "Transport is the surface a scenario is driven and judged on. The `transports` field on a scenario is optional -- scenarios that omit it (today, the mined scenarios) get an implicit contract derived from required_mcp by run.py's default_scenario_transports(), so existing scenarios keep behaving exactly as before this field existed.",
+    "comment": "Transport is the surface a scenario is driven and judged on. The `transports` field on a scenario is optional -- a scenario that omits it gets an implicit contract derived from required_mcp by run.py's default_scenario_transports(), so a scenario authored before this field existed (or a fresh tier=mined entry) keeps behaving exactly as before this field existed, minus the visible synthesis notice described under `tier`.",
     "allowed_values": ["tui", "web", "vscode", "cli"],
     "field_shape": {
       "allowed": "subset of allowed_values this scenario can be driven on",
@@ -106,9 +110,12 @@
   },
   "persona": {
     "required": ["id", "label", "description", "surface_preference", "risk_focus"],
-    "optional": ["persona_lens"],
+    "optional": ["tier", "persona_lens"],
     "persona_lens_required": ["starting_surface", "first_question", "evidence_emphasis", "escalation_trigger", "finding_bias"],
-    "comment": "persona_lens is optional -- personas that omit it (today, the mined personas) fall back to run.py's persona_lens() default synthesis, built from surface_preference/risk_focus."
+    "comment": "persona_lens is optional -- a persona that omits it falls back to run.py's persona_lens() default synthesis, built from surface_preference/risk_focus. See `tier` for the visible-notice contract that fires when this synthesis happens for a tier=mined persona."
+  },
+  "quality_gate_and_playback_evidence": {
+    "comment": "quality_gate (minimum_evidence/done_when/block_if) and the playback-evidence classification are NOT scenario-authored catalog fields -- they do not appear anywhere in scenarios.json. Both are derived at emit time from code that is keyed by scenario id: quality_gate comes from run.py's scenario_quality_gate() table (falls back to a generic gate -- empty minimum_evidence, generic done_when/block_if -- for any scenario id not in that table), and playback-evidence classification comes from run.py's is_playback_evidence()/PLAYBACK_EVIDENCE_KINDS (rrweb, trace-replay, flow-fixture, png-sequence). They only show up as generated fields in run.json/driver-plan.json/agent-brief.json/execution-plan.json (see `driver_plan.quality_gate_required` above). To give a scenario a real quality gate, extend scenario_quality_gate() in run.py; do not add a `quality_gate` key to scenarios.json -- it is ignored there."
   },
   "evidence_statuses": ["missing", "captured", "validated", "rejected"],
   "evidence_sources": ["demo", "retained", "external", "local", "cassette", "unknown"],

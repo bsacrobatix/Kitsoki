@@ -338,11 +338,14 @@ also exposes `last_result.next_driver_capture` and
 `last_result.next_driver_capture_route` plus
 `last_result.next_driver_attach_command` so a reusable driver can start with the
 first missing proof slot without reopening the markdown handoff.
-Each scenario also carries a `quality_gate` with `minimum_evidence`,
-`done_when`, and `block_if` rules. Live/cassette drivers should satisfy that
-gate before calling a scenario done, or record a blocker tied to the matching
-condition. The generated Slidey deck includes a `Proof gates` scene that rolls
-up each scenario's minimum-evidence coverage and current outcome for review.
+Each scenario in a generated bundle also carries a `quality_gate` with
+`minimum_evidence`, `done_when`, and `block_if` rules -- derived at emit
+time, not authored in `scenarios.json` itself; see **Derived fields:
+`quality_gate` and `playback_evidence`** below. Live/cassette drivers should
+satisfy that gate before calling a scenario done, or record a blocker tied to
+the matching condition. The generated Slidey deck includes a `Proof gates`
+scene that rolls up each scenario's minimum-evidence coverage and current
+outcome for review.
 Every representative scenario includes `key_interaction_video` in its minimum
 evidence so the final review deck can show playback of the important operator
 path instead of only static traces or written artifacts.
@@ -803,22 +806,115 @@ coverage of this mapping.
 
 ## Files
 
-- `catalog.json` — first-pass project + perspective registry.
+- `catalog.json` — first-pass project + perspective registry. See
+  **Portability** below for how local checkout paths resolve.
 - `github-targets.json` — 10 GitHub candidate targets for natural-usage
   journey sweeps.
 - `personas.json` — reusable personas for deterministic journey assignment.
   Curated personas carry a `persona_lens` object (`starting_surface`,
   `first_question`, `evidence_emphasis`, `escalation_trigger`, `finding_bias`)
-  read by `persona_lens()`; personas without it (today, every mined persona)
-  fall back to a lens synthesized from `surface_preference`/`risk_focus`.
+  read by `persona_lens()`; a persona without it falls back to a lens
+  synthesized from `surface_preference`/`risk_focus`. See **Corpus tiers**
+  below.
 - `scenarios.json` — reusable scenario/task definitions with required MCP tools,
   expected evidence, and success criteria. Scenarios may declare an optional
   `transports` object (`allowed`, `required`, and per-transport `overrides` of
-  `required_mcp`/`evidence`) consumed by `--emit-run --transport`; scenarios
-  without it (today, every mined scenario) get an implicit contract derived
-  from `required_mcp` by `default_scenario_transports()`.
+  `required_mcp`/`evidence`) consumed by `--emit-run --transport`; a scenario
+  without it gets an implicit contract derived from `required_mcp` by
+  `default_scenario_transports()`. See **Corpus tiers** below.
 - `schema.json` — current artifact and stage contract.
 - `run.py` — entrypoint script used by the journey orchestrator.
+
+## Corpus tiers
+
+Every scenario in `scenarios.json` and every persona in `personas.json`
+carries an explicit `tier: curated | mined`:
+
+- **`curated`** — hand-authored (or promoted from mining with real work): a
+  scenario declares its own `transports` contract, `case_variants`, and
+  `success_criteria`; a persona declares its own `persona_lens`. All 12
+  scenarios and all 8 personas in the corpus today are `curated`.
+- **`mined`** — pulled straight out of `tools/session-mining` from a real
+  session transcript and not yet reviewed. A `tier=mined` entry is still
+  usable — `run.py` synthesizes a `transports` contract for a scenario (from
+  `required_mcp`, via `default_scenario_transports()`) or a `persona_lens`
+  for a persona (from `surface_preference`/`risk_focus`, via `persona_lens()`
+  fallback) — but that synthesis is never silent. Every time it happens,
+  `run.py` prints `[persona-qa] NOTICE: <kind> <id> is tier=mined: <field>
+  synthesized from defaults` to stderr, and `--emit-run` also records the
+  same message in the generated `run.json`'s `tier_notices` list so a
+  reviewer can see synthesis history without re-running anything.
+  `tier` is optional for backward compatibility: an entry that omits it is
+  inferred as `curated` if it already declares `transports`/`persona_lens`,
+  `mined` otherwise (`--validate-corpus` warns on any entry with an
+  undeclared tier).
+
+The corpus previously carried an 18-scenario / 6-persona `mined-scn-*`/legacy
+backlog alongside the curated set — silent padding that made "26 scenarios /
+11 personas" look like real coverage when only 8 scenarios and 5 personas (at
+the time) were reviewed. That backlog was cut (see the 2026-07-10 persona-qa
+productization brief, P2.13 "curate or cut the mined tier"): every mined
+entry's real content was either already folded into a curated scenario's
+`natural_utterances` (bugfix, project-onboarding, prd-design), folded into a
+curated scenario's `case_variants` (an MCP-config-persistence case on
+`docs-to-mcp-first-run`; three VM-lifecycle cases on
+`remote-worker-campaign`), or was thin/duplicative internal-dev-ops chatter
+(worktree/branch hygiene, VM housekeeping) with no distinct product-journey
+value. `tools/session-mining/product_journey_compiler.py` can still merge new
+mined entries into these files at any time; they will simply carry
+`tier: mined` (or infer it) and surface the notice above until someone
+reviews and promotes or deletes them.
+
+Validate the corpus against `schema.json` (shape, tiers, transport/MCP
+consistency, quality-gate coverage, GitHub target contract) with:
+
+```sh
+python3 tools/product-journey/run.py --validate-corpus
+```
+
+## Portability
+
+`catalog.json` never bakes in a machine-specific absolute path. A project
+resolves its local checkout in this order:
+
+1. The project's own env var (`local_repo_env` in `catalog.json`, e.g.
+   `POSTGRESQL_REPO`, `KUBERNETES_REPO`, `BUGFIX_BAKEOFF_REPO`).
+2. `$KITSOKI_PJ_REPOS_DIR/<project-id>` — set `KITSOKI_PJ_REPOS_DIR` to the
+   parent directory holding your checkouts (e.g. `~/code`) and every project
+   resolves under it by id.
+3. The `~/code/<project-id>` convention, so a checkout at the default
+   location just works with no env vars set.
+
+`run.py`'s `resolve_local_repo_path()` implements this for
+`run_project_check()` (`--project <id> --mode check`); when none of the
+candidates resolve to an existing directory it fails with an actionable
+`Gate: could not resolve a local checkout for '<id>' ...` message that names
+every candidate it checked. The two local-oracle validation scripts
+(`checks/postgresql-oracle.sh`, `checks/kubernetes-oracle.sh`) implement the
+same env-var / `KITSOKI_PJ_REPOS_DIR` / `~/code` fallback chain directly in
+bash and print the same actionable "set `<ENV_VAR>`, or `KITSOKI_PJ_REPOS_DIR`"
+message when the checkout is missing.
+
+## Derived fields: `quality_gate` and `playback_evidence`
+
+`quality_gate` (`minimum_evidence`/`done_when`/`block_if`) and the
+playback-evidence classification are **not** scenario-authored catalog
+fields — they never appear in `scenarios.json`. Both are derived at emit
+time from code keyed by scenario id:
+
+- `quality_gate` comes from `scenario_quality_gate()` in `run.py`, a table
+  keyed by scenario id (falls back to a generic gate — empty
+  `minimum_evidence`, generic `done_when`/`block_if` — for any id not in the
+  table).
+- Playback-evidence classification comes from `is_playback_evidence()` /
+  `PLAYBACK_EVIDENCE_KINDS` in `run.py` (`rrweb`, `trace-replay`,
+  `flow-fixture`, `png-sequence`).
+
+They only show up as generated fields in `run.json` /
+`driver-plan.json` / `agent-brief.json` / `execution-plan.json` for a scenario
+that was actually included in a run. To give a scenario a real quality gate,
+extend `scenario_quality_gate()` in `run.py` — adding a `quality_gate` key to
+`scenarios.json` itself has no effect; it is ignored there.
 
 ## Output discipline
 
