@@ -100,6 +100,7 @@
     </div>
   </div>
   <script>
+    const params = new URLSearchParams(location.search);
     const THEME = {
       background: "#0b1120", foreground: "#e2e8f0", cursor: "#fbbf24",
       selectionBackground: "#33415588",
@@ -112,8 +113,11 @@
     const term = new window.Terminal({
       cols: 116, rows: 26,
       fontFamily: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace',
-      fontSize: 17, lineHeight: 1.3, letterSpacing: 0,
-      cursorBlink: true, cursorStyle: "bar", scrollback: 2000,
+      fontSize: Number(params.get("fontSize") ?? "17"),
+      lineHeight: Number(params.get("lineHeight") ?? "1.3"),
+      letterSpacing: 0,
+      cursorBlink: true, cursorStyle: "bar", scrollback: Number(params.get("scrollback") ?? "2000"),
+      smoothScrollDuration: 650,
       drawBoldTextInBrightColors: true, fontWeight: 400, fontWeightBold: 700,
       theme: THEME, convertEol: false, allowProposedApi: true,
     });
@@ -256,6 +260,20 @@
       return dumpVisible();
     }
 
+    async function scrollToBottomSmooth(delayMs = 18) {
+      const delay = Math.max(0, Number(delayMs) || 0);
+      for (let i = 0; i < 2000; i++) {
+        const buf = term.buffer.active;
+        const remaining = buf.baseY - buf.viewportY;
+        if (remaining <= 0) break;
+        term.scrollLines(1);
+        if (delay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+      return dumpVisible();
+    }
+
     function focusTerm() {
       term.focus();
       return document.activeElement ? document.activeElement.className : "";
@@ -309,6 +327,7 @@
     window.__scrollToText = scrollToText;
     window.__scrollToTop = () => { term.scrollToTop(); return dumpVisible(); };
     window.__scrollToBottom = () => { term.scrollToBottom(); return dumpVisible(); };
+    window.__scrollToBottomSmooth = scrollToBottomSmooth;
     window.__status = () => statusEl.textContent;
     window.__reconnectAttempts = () => reconnectAttempts;
     window.__setWarpOverlay = setWarpOverlay;

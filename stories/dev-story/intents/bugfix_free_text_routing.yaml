@@ -48,6 +48,22 @@ fixtures:
     inputs:
       - "pasted bug report the web ui hangs after reload"
 
+  - id: symptom-is-broken
+    intent:
+      name: bugfix_report
+      slots:
+        complaint: "make install"
+    inputs:
+      - "make install is broken"
+
+  - id: symptom-fails
+    intent:
+      name: bugfix_report
+      slots:
+        complaint: "npm test"
+    inputs:
+      - "npm test fails"
+
   # References: the operator has supplied an ID/URL. These intentionally defer
   # out of semantic routing so landing's default-intent capture can preserve the
   # exact punctuation/case (`TKT-404`, `#77`, GitHub URLs) before provider lookup.
