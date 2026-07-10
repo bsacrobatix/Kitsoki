@@ -17,7 +17,7 @@ initial_world:
   candidates: [opus-4.8]
 
 host_handlers:
-  host.run:
+  host.bakeoff.run:
     by_call:
       preflight_local:
         data:

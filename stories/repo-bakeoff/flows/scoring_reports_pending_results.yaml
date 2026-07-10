@@ -20,7 +20,7 @@ initial_world:
   oracles_armed: true
 
 host_handlers:
-  host.run:
+  host.bakeoff.run:
     by_call:
       completion_local:
         data:

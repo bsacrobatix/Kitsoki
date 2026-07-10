@@ -25,7 +25,23 @@ func BakeoffRunHandler(ctx context.Context, args map[string]any) (Result, error)
 	}
 	var script string
 	var argv []string
+	executable := "python3"
 	switch op {
+	case "bench":
+		script = "bench.py"
+		var err error
+		argv, err = coerceArgs(args["args"])
+		if err != nil {
+			return Result{Error: fmt.Sprintf("host.bakeoff.run: %v", err)}, nil
+		}
+		argv = append([]string{script}, argv...)
+	case "prepare_handoffs":
+		executable = "./prepare_handoffs.sh"
+		var err error
+		argv, err = coerceArgs(args["args"])
+		if err != nil {
+			return Result{Error: fmt.Sprintf("host.bakeoff.run: %v", err)}, nil
+		}
 	case "aggregate":
 		script = "aggregate.py"
 		argv = []string{script, "--generated-at", stringValue(args, "generated_at")}
@@ -37,7 +53,7 @@ func BakeoffRunHandler(ctx context.Context, args map[string]any) (Result, error)
 	}
 	commandCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "python3", argv...)
+	cmd := exec.CommandContext(commandCtx, executable, argv...)
 	cmd.Dir = cwd
 	out, err := cmd.CombinedOutput()
 	data := map[string]any{"ok": err == nil, "exit_code": 0, "stdout": string(out)}
