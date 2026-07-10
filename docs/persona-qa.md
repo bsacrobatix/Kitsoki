@@ -7,6 +7,45 @@ hunt for under `tools/`. The canonical surface is:
 kitsoki run @kitsoki/scenario-qa
 ```
 
+`@kitsoki/persona-qa` is a story alias for the same story — use whichever name
+you remember; see [Naming](#naming) below.
+
+## Naming
+
+One product, four names — keep them straight:
+
+| Name | What it is |
+|---|---|
+| **Persona QA** | The product. This doc is the canonical reference. |
+| **`scenario-qa`** | The story you run: `kitsoki run @kitsoki/scenario-qa` (alias `@kitsoki/persona-qa`, [`stories/scenario-qa/README.md`](../stories/scenario-qa/README.md)). |
+| **`product-journey-qa`** | The broader story for persona x scenario x 10-repo matrix sweeps, marathons, and autonomous fixing ([`stories/product-journey-qa/README.md`](../stories/product-journey-qa/README.md)). |
+| **`product-journey`** | The deterministic runner backend both stories drive: `tools/product-journey/run.py` ([`tools/product-journey/README.md`](../tools/product-journey/README.md)). |
+| **`persona_qa`** | A shared support kit (schemas, completion-state conversion, deck generation, no-LLM tests) — not an operator surface; see [Why `tools/persona_qa` Exists](#why-toolspersona_qa-exists). |
+
+## Quickstart (5 minutes)
+
+One prompt in, a verdict table and a deck out:
+
+```sh
+kitsoki run @kitsoki/scenario-qa
+> check whether the onboarding tour renders on web transport=web
+> report
+```
+
+`check` plans a run bundle, drives the transport(s) with the reusable
+[`product-journey-qa-driver`](../.agents/agents/product-journey-qa-driver.md)
+agent, and independently judges the captured evidence. Add `transport=tui,web`
+or `transport=all` to check more than one transport (pausing after each for
+`next transport`). `report` folds every recorded leg into
+`.artifacts/product-journey/<run-id>/report.md` (the verdict table) and
+`deck.slidey.json` (a Slidey deck of the run). For the fuller persona x
+scenario x 10-repo matrix workflow, see
+[`stories/product-journey-qa/README.md`](../stories/product-journey-qa/README.md)
+and the [`product-journey-qa`](../.agents/skills/product-journey-qa/SKILL.md)
+skill instead — this quickstart covers the narrow single-scenario `scenario-qa`
+surface. The [`scenario-qa`](../.agents/skills/scenario-qa/SKILL.md) skill
+covers the same narrow surface with the driving-agent contract.
+
 From the story, use natural prompts or explicit `key=value` qualifiers:
 
 ```text
@@ -156,3 +195,13 @@ python3 tools/persona_qa/tests/test_deck_cli.py
 
 Do not call a live LLM from tests. Put replay inputs under fixtures and record
 honest blockers when proof evidence cannot be captured.
+
+## History
+
+Persona QA's exploratory-walkthrough posture (drive a story as a skeptical
+persona, judge the rendered screen, report findings) originated in the
+`story-qa-agent` / `qa-agent-skill` proposals. Their substrate shipped as the
+MCP studio (`docs/architecture/mcp-studio.md`) and the `.agents/skills/story-qa/`
+skill + `docs/stories/story-qa.md` guide; their persona/scenario/transport
+product surface shipped as this story. Both proposals were deleted per the
+proposal lifecycle once their content was covered here and in those docs.

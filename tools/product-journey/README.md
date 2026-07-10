@@ -7,6 +7,18 @@ journey** experiment:
 - keep checks deterministic by default,
 - and emit evidence artifacts (log + deck) as execution progresses.
 
+## Naming
+
+One product, four names:
+
+| Name | What it is |
+|---|---|
+| **Persona QA** | The product ([`docs/persona-qa.md`](../../docs/persona-qa.md)). |
+| **`scenario-qa`** | The story you run for one scenario x N transports ([`../../stories/scenario-qa/README.md`](../../stories/scenario-qa/README.md), alias `@kitsoki/persona-qa`). |
+| **`product-journey-qa`** | The story for persona x scenario x 10-repo matrix sweeps ([`../../stories/product-journey-qa/README.md`](../../stories/product-journey-qa/README.md)). |
+| **`product-journey`** | This directory — the deterministic runner backend (`run.py`) both stories drive. |
+| **`persona_qa`** | `tools/persona_qa` — a shared support kit, not an operator surface. |
+
 ## Story-Owned Persona QA
 
 Use `stories/scenario-qa` for project-facing Persona QA work:

@@ -18,14 +18,15 @@ One surface below remains in design: `loading_view` per-state YAML
 (§2). The TUI's automatic spinner (the alternative noted in §2) is
 already implemented.
 
-§1 (`kitsoki drive`) has been **superseded** by the
-[`story-qa-agent`](story-qa-agent.md) epic. The scripted-input driver
-sketched there is the wrong shape for an AI *agent*, which decides its
-next input from what it just saw; the shipped **interactive** `kitsoki
-drive` (free-text input, live or replay harness, VCR cassette modes,
-human-fidelity frame per turn — part of the
-[`mcp-studio`](../architecture/mcp-studio.md) substrate) is that reframing.
-§1 is retained below only as the original sketch it built on.
+§1 (`kitsoki drive`) has been **superseded** by the interactive drive loop
+that shipped under [`mcp-studio`](../architecture/mcp-studio.md), now consumed
+by the [`story-qa`](../stories/story-qa.md) skill (formerly the
+`story-qa-agent` epic, since deleted per the proposal lifecycle). The
+scripted-input driver sketched below is the wrong shape for an AI *agent*,
+which decides its next input from what it just saw; the shipped
+**interactive** `kitsoki drive` (free-text input, live or replay harness, VCR
+cassette modes, human-fidelity frame per turn) is that reframing. §1 is
+retained below only as the original sketch it built on.
 
 **Context.** The motivating `devstory` story is built by an AI
 agent and driven by a human. Every bug that only the human sees

@@ -1,5 +1,11 @@
 # Testing
 
+- [`../persona-qa.md`](../persona-qa.md) — **Persona QA**: check a product
+  scenario across TUI/web/VS Code/CLI transports, or run a full persona x
+  scenario x 10-repo matrix sweep, with an independent judge and a
+  `report.md` + Slidey deck. Start here for "does the product actually work
+  for a real user" evaluation; `kitsoki run @kitsoki/scenario-qa` is the
+  5-minute path.
 - [`agent-evals.md`](agent-evals.md) — story-local benchmarks for bounded
   `host.agent.*` call sites.
 - [`routing-tuning.md`](routing-tuning.md) — free-text routing fixtures, live

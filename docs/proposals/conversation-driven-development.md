@@ -247,7 +247,7 @@ the full loop end-to-end.
   the design pipeline and decomposition with humans at the gates; the case
   changes what enters that pipeline, not the pipeline.
 - **General usability auditing.** [`kitsoki-ui-review`](../skills/kitsoki-ui-review/SKILL.md)
-  (heuristic audit) and the [`story-qa-agent`](story-qa-agent.md) epic
+  (heuristic audit) and the [`story-qa`](../stories/story-qa.md) skill
   (TUI persona walks) keep their roles; CDD's gate asks only "does the
   product hold this conversation."
 - **Replacing proposals.** Cases specify *conversations*; engine/runtime
