@@ -18,10 +18,13 @@
 # WRONG target string, which the cassette's exact-match replay reports as a
 # loud miss instead of silently succeeding.
 #
-# transport=all (2 legs) so the loop pauses at `recording` after leg 0 without
-# ever reaching build_report/host.run's deck step — record_leg_result and
-# pick_leg touch only world state (no ctx.fs), so no further cassette
-# interactions are needed to prove the fix.
+# transport=all (2 legs) with pause=each-leg so the loop pauses at `recording`
+# after leg 0 without ever reaching build_report/host.run's deck step —
+# record_leg_result and pick_leg touch only world state (no ctx.fs), so no
+# further cassette interactions are needed to prove the fix. (pause=each-leg
+# is an explicit opt-out here, not the default: this fixture only wants to
+# prove plan_legs's real ctx.fs.read path, not exercise the auto-drive loop —
+# see check_all_transports_auto.yaml for that.)
 
 test_kind: flow
 app: ../app.yaml
@@ -72,6 +75,7 @@ turns:
         persona: core-maintainer
         target: gears-rust
         seed: story-flow
+        pause: each-leg
     expect_state: recording
     expect_world:
       mode: catalog

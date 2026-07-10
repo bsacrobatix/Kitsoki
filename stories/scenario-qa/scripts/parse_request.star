@@ -120,6 +120,8 @@ def _extract_key_values(text):
             opts["profile"] = value
         elif key in ["budget", "live_budget", "live_budget_minutes"]:
             opts["live_budget_minutes"] = value
+        elif key == "pause":
+            opts["pause"] = value.lower()
         else:
             keep.append(raw)
     return opts, _collapse_ws(" ".join(keep))
@@ -236,6 +238,7 @@ def main(ctx):
             opts.get("live_budget_minutes", ""),
             ctx.inputs.get("default_live_budget_minutes", 0),
         ),
+        "pause": opts.get("pause", ctx.inputs.get("default_pause", "auto")) or "auto",
         "mode": mode,
         "request_status": {
             "parsed": True,

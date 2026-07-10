@@ -5,6 +5,13 @@
 # the TUI. The fixture stubs the expensive host/agent work, but leaves the story
 # Starlark helpers real so parsing, ad-hoc preview text, leg selection, result
 # accumulation, and report.md writing follow the production path.
+#
+# The check request carries an explicit `pause=each-leg` qualifier: this tour
+# specifically demonstrates the per-leg "next transport" mechanics (see
+# features/persona-qa.yaml's `pqa-next-tui` step, which clicks
+# `intent-btn-next_leg`), so it opts out of the pause=auto DEFAULT on
+# purpose rather than being changed by it. The default one-prompt auto-drain
+# behavior is covered by check_all_transports_auto.yaml instead.
 
 test_kind: flow
 app: ../app.yaml
@@ -159,10 +166,11 @@ turns:
   - intent:
       name: check_request
       slots:
-        request: "required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo"
+        request: "required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo pause=each-leg"
     expect_state: recording
     expect_world:
       mode: adhoc
+      pause: each-leg
       scenario_description: "required user input affordance as a QA engineer and developer"
       run_id: scenario-qa-affordance-demo-run
       leg_count: 2
