@@ -47,7 +47,7 @@ from arena import model as arena_model  # noqa: E402
 from arena.plugins import usable_kitsoki_gate as gate_plugin  # noqa: E402
 from arena.plugins import usable_kitsoki_gate_constants as gate_constants  # noqa: E402
 
-DEFAULT_CONCURRENCY = 4
+DEFAULT_CONCURRENCY = 2
 
 # The three real workbench: rooms this project ships (S6 "no-llm-parity"):
 # dev-story is the hand-authored primary, pets-dev/slidey-dev import it

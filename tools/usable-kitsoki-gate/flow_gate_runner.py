@@ -71,6 +71,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -121,9 +122,12 @@ def target_app_path(target: str | None) -> Path:
 
 # `kitsoki test flows` reuses the caller-provided test binary when
 # KITSOKI_TEST_KITSOKI_BINARY is set (make test builds one for flow-heavy
-# suites). Standalone invocations fall back to `go run`. 180s allows slower CI
-# runners to finish without masking true hangs.
-FLOW_TIMEOUT_SECONDS = 180
+# suites). Standalone invocations build a shared one-time binary under the repo
+# cache so we don't pay `go run` compilation for every cell.
+FLOW_TIMEOUT_SECONDS = 300
+
+_BUILD_LOCK = threading.Lock()
+_BIN_PATH: str | None = None
 
 
 class ScenarioNotFound(Exception):
@@ -175,14 +179,33 @@ def run_scenario_flow(
         raise ScenarioNotFound(f"no compiled flow fixture for {scenario_id!r} at {flow_path}")
     app_path = target_app_path(target)
 
+    if not os.environ.get("KITSOKI_TEST_KITSOKI_BINARY", "").strip():
+        # If no binary was already injected, compile once and reuse. We avoid
+        # launching 162 `go run` calls with their expensive compiler warmups;
+        # a single binary keeps CI runners deterministic under concurrency.
+        with _BUILD_LOCK:
+            global _BIN_PATH
+            if _BIN_PATH is None:
+                kitsoki_bin = Path.cwd() / ".temp" / "kitsoki-gate-flow-runner"
+                kitsoki_bin.parent.mkdir(parents=True, exist_ok=True)
+                build = subprocess.run(
+                    ["go", "build", "-o", str(kitsoki_bin), "./cmd/kitsoki"],
+                    cwd=str(kitsoki_root),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if build.returncode != 0:
+                    blob = (build.stdout + "\n" + build.stderr).strip()
+                    raise RuntimeError(f"go build ./cmd/kitsoki failed: {blob or 'no output'}")
+                _BIN_PATH = str(kitsoki_bin)
+        kitsoki_bin = _BIN_PATH
+    else:
+        kitsoki_bin = os.environ.get("KITSOKI_TEST_KITSOKI_BINARY", "").strip()
+
     with tempfile.TemporaryDirectory() as tmp:
         trace_out = Path(tmp) / f"{scenario_id}.trace.jsonl"
-        kitsoki_bin = os.environ.get("KITSOKI_TEST_KITSOKI_BINARY", "").strip()
-        cmd = (
-            [kitsoki_bin, "test", "flows"]
-            if kitsoki_bin
-            else ["go", "run", "./cmd/kitsoki", "test", "flows"]
-        )
+        cmd = [kitsoki_bin, "test", "flows"]
         proc = subprocess.run(
             cmd + [
                 str(app_path),
