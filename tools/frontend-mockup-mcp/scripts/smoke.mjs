@@ -37,7 +37,8 @@ for (const name of [
   "mockup_tour_start",
   "mockup_tour_export",
   "mockup_demo_doctor",
-  "mockup_record_tour"
+  "mockup_record_tour",
+  "mockup_create"
 ]) {
   if (!list.result.tools.some((tool) => tool.name === name)) {
     throw new Error(`${name} tool missing`);
