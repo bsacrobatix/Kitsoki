@@ -18,7 +18,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       preview_transport_suite:
         data:
@@ -156,7 +156,7 @@ turns:
     expect_host_calls:
       - handler: host.starlark.run
         args: { call: parse_check_request }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: preview_transport_suite }
       - handler: host.starlark.run
         args: { call: summarize_transport_suite }
@@ -180,7 +180,7 @@ turns:
     expect_host_calls:
       - handler: host.starlark.run
         args: { call: parse_check_request }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -220,7 +220,7 @@ turns:
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*Result:[\\s\\S]*2 / 2 transport checks passed[\\s\\S]*Pass:[\\s\\S]*2[\\s\\S]*Summary report:[\\s\\S]*report.md[\\s\\S]*Review deck:[\\s\\S]*deck.slidey.json[\\s\\S]*web \\[frame-level\\] verdict=pass[\\s\\S]*tui \\[frame-level\\] verdict=pass[\\s\\S]*main room"
 

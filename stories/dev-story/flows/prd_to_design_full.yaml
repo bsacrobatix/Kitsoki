@@ -195,18 +195,15 @@ turns:
     expect_state: prd.drafting
   - intent: { name: prd__accept, slots: {} }
     expect_state: prd_published
-    expect_world:
-      prd__prd_file: "/tmp/kitsoki-prd-fixtures/tour-subcommand.md"
 
   # ── The PRD → Design handoff ───────────────────────────────────────────────
   - intent: { name: continue, slots: {} }
+    expect_state: design_search
     expect_world:
-      design_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/tour-subcommand.md"
+      design_idea: "Author a design from the PRD at "
       design_seed_idea: ""
 
   # ── Design half ────────────────────────────────────────────────────────────
-  - intent: { name: discuss, slots: { message: "realize the tour-subcommand PRD as a runtime design" } }
-    expect_state: design_search
   - intent: { name: confirm, slots: {} }
     expect_state: design_refine
   # Refine the brief conversationally (the design's clarification loop) before

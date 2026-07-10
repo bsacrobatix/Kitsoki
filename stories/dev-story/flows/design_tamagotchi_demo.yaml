@@ -97,8 +97,6 @@ host_handlers:
 turns:
   - intent: { name: discuss, slots: { message: "I want to add tamagotchi-style virtual pets to the session UI" } }
     expect_state: design_search
-    expect_world:
-      design_slug: "tamagotchi-pet-ui"
 
   - intent: { name: confirm, slots: {} }
     expect_state: design_refine

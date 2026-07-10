@@ -26,7 +26,7 @@ initial_state: idle
 starlark_inspect_cassette: ../cassettes/check_live_authorization_warning_no_profile.inspect.yaml
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -84,7 +84,7 @@ turns:
         - "leg web: needs `profile=<name>` for live drive — will run replay-only; missing cassettes will be reported as degraded-evidence with cause."
       last_error: ""
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }

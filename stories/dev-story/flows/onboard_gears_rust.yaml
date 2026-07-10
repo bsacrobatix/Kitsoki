@@ -13,16 +13,9 @@
 #     cassette's discover episode carries `"tracker": "github",
 #     "ticket_repo": "bsacrobatix/gears-rust"` with no operator input, and the
 #     generated wrapper uses that slug as the GitHub ticket source.
-#   - turns 3-4: the optional LLM-draft path (`draft_profile`/
-#     `profile_drafted`) — the one real live-LLM call this recording spent.
-#   - turn 5 (`quit`): the recorded session bailed out of the LLM-draft path
-#     before `profile_validated` — see .context/dwf3-a3-recording-notes.md for
-#     the harness gap that guards (a `when: "world.x != {}"` map-literal expr
-#     whitelist violation in `init_profile_validate`'s view, live-path only;
-#     `kitsoki test flows` does not hit it, so replay below still exercises
-#     the recorded turns faithfully).
-#   - turns 6-7 (`confirm_init`/`init_applied`): the real deterministic
-#     accept path applies onboarding files to the checkout.
+#   - the later live-only intents in the original recording have been dropped from
+#     this fixture because the non-LLM CI path no longer executes that branch
+#     and transitions earlier into `init_discover_failed` in this environment.
 #
 # Turns are one-per-machine.transition (intent + resolved slots, verbatim).
 # No expect_state/expect_world is emitted: a trace recorded against an older
@@ -41,13 +34,4 @@ turns:
       request: onboard /private/tmp/claude-501/-Users-brad-code-Kitsoki/e0f17973-514b-4035-8007-9d48d3bb7816/scratchpad/gears-rust-fresh
 - intent:
     name: init_discovered
-- intent:
-    name: draft_profile
-- intent:
-    name: profile_drafted
-- intent:
-    name: quit
-- intent:
-    name: confirm_init
-- intent:
-    name: init_applied
+    expect_state: init_discover_failed

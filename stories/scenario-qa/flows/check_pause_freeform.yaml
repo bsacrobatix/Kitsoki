@@ -17,7 +17,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       preview_transport_suite:
         data:
@@ -69,7 +69,7 @@ turns:
       suite_leg_count: 2
       status: preview_ready
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: preview_transport_suite }
       - handler: host.starlark.run
         args: { call: parse_check_request }

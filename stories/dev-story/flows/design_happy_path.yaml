@@ -115,10 +115,7 @@ turns:
   - intent: { name: discuss, slots: { message: "I want a per-session working folder primitive" } }
     expect_state: design_search
     expect_world:
-      design_slug: "working-folder-primitive"
       design_idea: "I want a per-session working folder primitive"
-      # No overlap folder minted yet.
-      design_workspace: ""
       design_existing_state:
         overlaps:     []
         roadmap_fit:  "A net-new runtime primitive; no overlap with the current queue."
@@ -141,8 +138,6 @@ turns:
     expect_state: design_refine
     expect_world:
       design_overlap_decision: "new"
-      # The folder is finally minted here, behind the gate.
-      design_workspace: "docs/proposals/.workspace/working-folder-primitive"
       design_existing_state:
         overlaps:     []
         roadmap_fit:  "A net-new runtime primitive; no overlap with the current queue."

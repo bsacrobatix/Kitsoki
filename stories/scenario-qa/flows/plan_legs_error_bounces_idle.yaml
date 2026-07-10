@@ -11,7 +11,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -44,7 +44,7 @@ turns:
       run_id: "scenario-qa-run-legs-error"
       last_error: "host.starlark.run: plan_legs.star: ctx.fs.read: no such file .artifacts/product-journey/scenario-qa-run-legs-error/driver-plan.json"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
