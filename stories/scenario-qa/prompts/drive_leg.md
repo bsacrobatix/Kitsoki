@@ -13,6 +13,13 @@ Leg:
 - Run dir: `{{ args.run_dir }}`
 - Transport (pinned): `{{ args.transport }}`
 
+The leg above may carry its own `live_authorization_note` (computed
+deterministically by the story before you were dispatched — not your
+judgment call). If it says this leg needs `profile=` for live drive and none
+was supplied, that is the same conclusion the "Live drive authorization"
+section below reaches from `args.live_profile` — treat it as confirmation,
+not as license to go live anyway.
+
 Follow `.agents/agents/product-journey-qa-driver.md`'s transport discipline
 and this transport's evidence contract (`transport_evidence_contract` on the
 leg above). Before capturing, PREFLIGHT this transport's tools (e.g.
@@ -23,16 +30,43 @@ entrypoint cannot produce a persisted transcript, STOP and report `status:
 "degraded-evidence"` with the exact blocker — do not fabricate a screenshot or
 pass a stub frame/command off as real evidence.
 
-**Live drive authorization.** This is a live scenario check: cost-bearing
-live/model work IS authorized for this leg, within the leg's
-`live_budget.max_live_minutes` ceiling. When the scenario's flow needs
-interpretive behavior a cassette can't replay (free-text routing,
-host.agent.converse/decide steps), open the nested story session LIVE:
-`session.new` with `harness: "live"` and `profile: "{{ args.live_profile }}"`.
-If that profile value is empty, no live profile was supplied — fall back to
-replay and report the missing-cassette blocker honestly, as usual. Never
-burn live budget on steps a cassette or menu-driven submit can cover; go
-live only for the steps that need it.
+**Live drive authorization — `args.live_profile` is the ONLY gate.** Do not
+assume live/model work is authorized for this leg just because the scenario
+looks interpretive. Check `args.live_profile` FIRST:
+
+- **Non-empty** (`"{{ args.live_profile }}"`): this check explicitly
+  authorized live drive, up to the leg's `live_budget.max_live_minutes`
+  ceiling. When the scenario's flow needs interpretive behavior a cassette
+  can't replay (free-text routing, host.agent.converse/decide steps), open
+  the nested story session with `session.new`, `harness: "live"`, and
+  `profile: "{{ args.live_profile }}"` from that very call. Never burn live
+  budget on steps a cassette or menu-driven submit can cover; go live only
+  for the steps that need it. Report `harness_used: "live"` and
+  `profile_used: "{{ args.live_profile }}"` in your final submission.
+- **Empty**: no live profile was supplied — this leg stays `harness:
+  "replay"` for the whole session, full stop. Do not open a session with
+  `harness: "live"` on your own initiative, do not guess a profile string,
+  and do not treat an interpretive-looking task as implicit authorization.
+  Report `harness_used: "replay"` (or leave it empty if no `session.new` was
+  needed at all).
+
+**A replay-miss is a hard error you report, not a decision you make.** A
+`session.new` call opened with `harness: "replay"` (the leg's own primary
+session, or a nested one) HARD-FAILS the moment it dispatches a
+`host.agent.*` call (converse/decide/task/ask/extract/search) with no
+matching cassette episode — the MCP session runtime itself refuses to fall
+through to a live agent (this is enforced in code, not left to your
+judgment). When that happens: treat the tool error as the leg's blocker,
+report it verbatim under `blockers`, and set `status: "blocked"` or
+`"degraded-evidence"` — never retry the same step by opening a NEW session
+with `harness: "live"` unless `args.live_profile` was already non-empty from
+the start of this leg. Silently upgrading to live after a replay-miss is
+exactly the failure mode this contract exists to prevent (issue group B /
+bug #105 "replay-miss silently goes live"); the story's
+`record_leg_result.star` independently checks `harness_used` against whether
+`profile=` was supplied and forces the leg's verdict to `degraded-evidence`
+with an explicit policy-violation cause if you report `"live"` without
+authorization, so do not rely on this instruction alone — report honestly.
 
 **Drive to the scenario's declared completion — not just the first
 transition.** The leg above carries the scenario's own contract:
@@ -94,7 +128,7 @@ everything else about the scenario worked. So, for `vscode` legs:
    substitute for, precede, or silently downgrade this authorization. If
    `args.live_profile` is empty, fall back to replay here exactly as any
    other transport would, and report the resulting missing-cassette blocker
-   honestly.
+   honestly — do not open it live on your own initiative.
 3. Once the live session has reached its target state, call `visual.open
    kind=vscode` / `visual.observe` **again**, against the SAME session
    handle you just drove forward, and persist that frame into `evidence_dir`
@@ -121,7 +155,9 @@ When you finish, **report — do not grade**. Submit:
   "frames_dir": "<directory of captured frames, if any>",
   "post_drive_evidence_ref": "<path-or-retained-id of the POST-drive vscode capture; vscode legs only, empty if not captured>",
   "post_drive_session_handle": "<live session_handle the post-drive capture was taken against; vscode legs only>",
-  "blockers": ["<honest blocker, if any>"],
+  "harness_used": "replay | live | (empty if no primary_story session.new was needed)",
+  "profile_used": "<the profile actually passed to a live session.new call, empty otherwise>",
+  "blockers": ["<honest blocker, if any — a replay-miss hard error goes here verbatim>"],
   "summary": "<what you actually attempted for this leg>"
 }
 ```

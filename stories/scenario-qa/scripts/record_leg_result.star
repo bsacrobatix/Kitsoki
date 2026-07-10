@@ -5,8 +5,29 @@
 # pass/fail/degraded tallies. Nothing is fabricated: every field comes from
 # the driver's own report and the judge's own verdict.
 #
+# Issue group B (silent live-authorization fallback / bug #105 "replay-miss
+# silently goes live") deterministic backstops live here, mirroring the
+# existing _lacks_evidence/_vscode_missing_post_drive pattern -- a prompt
+# instruction alone is never trusted as enforcement:
+#   - `cause`: every leg whose verdict is not "pass" carries a machine- and
+#     human-readable reason (missing evidence, a reported blocker, no live
+#     authorization, an unauthorized live harness, or the judge's own
+#     grounding) instead of a bare verdict with no stated why.
+#   - `_unauthorized_live`: if the driver reports it opened this leg's
+#     primary_story session with `harness_used: "live"` while this check
+#     never supplied `profile=` (world.live_profile empty), that is a policy
+#     violation regardless of what the judge said -- the verdict is forced to
+#     "degraded-evidence" with an explicit cause. The MCP session runtime
+#     already hard-fails a REPLAY session that hits an uncovered
+#     host.agent.* call instead of silently falling through to live
+#     (internal/mcp/studio/session_runtime.go's replayAgentMissHandler); this
+#     is the story-level backstop for the other direction -- a driver that
+#     decides on its own initiative to open a brand new LIVE session without
+#     real authorization.
+#
 # Interface (authoritative in record_leg_result.star.yaml):
-#   inputs:  leg (object), drive_result (object), judge_result (object)
+#   inputs:  leg (object), drive_result (object), judge_result (object),
+#            live_profile (string, optional)
 #   world:   leg_results (object {items:[...]})
 #   outputs: leg_results (object {items:[...]}), pass_count (int),
 #            fail_count (int), degraded_count (int)
@@ -100,6 +121,53 @@ def _natural_utterance_summary(leg):
     }
 
 
+def _unauthorized_live(drive, live_profile):
+    # A driver only has a legitimate `profile` to pass to a LIVE session.new
+    # call when this check itself was authorized (world.live_profile
+    # non-empty, threaded to the driver as args.live_profile -- see
+    # drive_leg.md). If the driver reports it used a live harness anyway,
+    # that is a policy violation the deterministic backstop must catch, not
+    # a judgment call left to the driver's own prose.
+    if live_profile != "":
+        return False
+    return str(drive.get("harness_used", "")) == "live"
+
+
+def _cause(leg, drive, judge, verdict, unauthorized_live, live_profile):
+    if verdict == "pass" or verdict == "unjudged":
+        return ""
+
+    reasons = []
+    if unauthorized_live:
+        reasons.append("policy violation: live harness used without profile= authorization")
+    elif leg.get("needs_live_hint", False) and live_profile == "":
+        reasons.append("no live authorization (profile= not supplied)")
+
+    blockers = drive.get("blockers", [])
+    if type(blockers) == "list":
+        for b in blockers:
+            text = str(b).strip()
+            if text != "":
+                reasons.append("blocker: " + text)
+
+    if len(reasons) == 0:
+        evidence_refs = drive.get("evidence_refs", [])
+        if type(evidence_refs) != "list" or len(evidence_refs) == 0:
+            reasons.append("no evidence captured for this leg")
+        elif _vscode_missing_post_drive(leg, drive):
+            reasons.append("vscode leg missing post-drive capture (preflight only proves bridge reachability, not the driven-forward state)")
+
+    if len(reasons) == 0:
+        judge_summary = str(judge.get("summary", "")).strip()
+        if judge_summary != "":
+            reasons.append(judge_summary)
+
+    if len(reasons) == 0:
+        reasons.append("driver reported '" + str(drive.get("status", "unattempted")) + "' with no further detail")
+
+    return "; ".join(reasons)
+
+
 def _playback_path(leg, drive):
     for source in [leg, drive]:
         for key in ["playback_path", "playback_ref", "rrweb_path", "video_path"]:
@@ -125,6 +193,7 @@ def main(ctx):
     leg = _d(ctx.inputs.get("leg"))
     drive = _d(ctx.inputs.get("drive_result"))
     judge = _d(ctx.inputs.get("judge_result"))
+    live_profile = str(ctx.inputs.get("live_profile", "") or "")
 
     leg_results = ctx.world.get("leg_results") or {"items": []}
     if type(leg_results) != "dict":
@@ -132,15 +201,21 @@ def main(ctx):
     items = list(leg_results.get("items", []))
 
     verdict = judge.get("verdict", "unjudged")
+    unauthorized_live = _unauthorized_live(drive, live_profile)
     # Verdicts the judge itself never rendered ("unjudged", e.g. a dead judge
     # dispatch via judge.yaml's on_error: recording route) are left alone --
     # that is a different, already-honest failure mode, not a fabricated
     # pass. Anything the judge DID render (pass/fail/unsupported/
     # degraded-evidence) is downgraded to "degraded-evidence" when the
-    # driver's own report proves there was nothing real to judge.
+    # driver's own report proves there was nothing real to judge, when a
+    # vscode leg never re-captured post-drive, or when the driver reports it
+    # used a live harness this check never authorized (issue group B / bug
+    # #105's story-level backstop -- see this file's header comment).
     if verdict != "unjudged" and _lacks_evidence(drive):
         verdict = "degraded-evidence"
     if verdict != "unjudged" and _vscode_missing_post_drive(leg, drive):
+        verdict = "degraded-evidence"
+    if verdict != "unjudged" and unauthorized_live:
         verdict = "degraded-evidence"
 
     natural = _natural_utterance_summary(leg)
@@ -156,10 +231,12 @@ def main(ctx):
         "driver_status":           drive.get("status", "unattempted"),
         "evidence_refs":           drive.get("evidence_refs", []),
         "post_drive_evidence_ref": drive.get("post_drive_evidence_ref", ""),
+        "harness_used":            drive.get("harness_used", ""),
         "playback_path":           _playback_path(leg, drive),
         "playback_caption":        leg.get("playback_caption", drive.get("playback_caption", "")),
         "verdict":                 verdict,
         "verdict_summary":         judge.get("summary", ""),
+        "cause":                   _cause(leg, drive, judge, verdict, unauthorized_live, live_profile),
         "frames_dir":              judge.get("frames_dir", drive.get("frames_dir", "")),
     }
     items.append(record)

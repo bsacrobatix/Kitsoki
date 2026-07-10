@@ -2,6 +2,7 @@ inputs:
   leg:           { type: object, required: false }
   drive_result:  { type: object, required: false }
   judge_result:  { type: object, required: false }
+  live_profile:  { type: string, required: false }
 
 outputs:
   leg_results:     { type: object }

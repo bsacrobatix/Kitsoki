@@ -43,7 +43,7 @@ states:
 
   plan:
     description: "Building the run bundle and resolving it into per-transport checks."
-    relevant_world: [mode, scenario_ref, scenario_description, transport_arg, persona, target, seed, scenario_workspace_root, run_id, run_dir, leg_count, status]
+    relevant_world: [mode, scenario_ref, scenario_description, transport_arg, persona, target, seed, scenario_workspace_root, run_id, run_dir, leg_count, live_authorization_summary, status]
     view:
       - heading: "Scenario QA · plan"
       - kv:
@@ -65,6 +65,15 @@ states:
             Transport checks: "{{ world.leg_count }}"
         when: "world.mode == 'adhoc'"
       - prose: "Building the scenario-qa run bundle and resolving the requested transport checks."
+      # Fail-closed harness selection (issue group B / bug #105): named per
+      # leg, up front, before any leg is driven -- see scripts/plan_legs.star.
+      - heading: "Live authorization notes"
+        when: "len(world.live_authorization_summary) > 0"
+      - code: |
+          {% for note in world.live_authorization_summary %}
+          - {{ note }}
+          {% endfor %}
+        when: "len(world.live_authorization_summary) > 0"
     on_enter:
       - invoke: host.run
         id: emit_scenario_qa_run
@@ -113,6 +122,7 @@ states:
             run_id: "{{ world.run_id }}"
             description: "{{ world.scenario_description }}"
             primary_story: "{{ world.target }}"
+            live_profile: "{{ world.live_profile }}"
             last_result: "{{ world.last_result }}"
         bind:
           legs: legs
@@ -120,6 +130,7 @@ states:
           driver_agent: driver_agent
           run_dir_rel: run_dir_rel
           plan_status: plan_status
+          live_authorization_summary: live_authorization_summary
         on_error: idle
       # plan_status.resolved (see app.yaml's comment) errors pre-bind, so
       # this pair of guards correctly defers until plan_legs's bind lands

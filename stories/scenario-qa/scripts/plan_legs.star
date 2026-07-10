@@ -28,12 +28,32 @@
 # the emit-run result. Prefer it when present; production still reads the
 # canonical driver-plan.json from the run directory.
 #
+# Fail-closed harness selection (issue group B / bug #105 "replay-miss
+# silently goes live"): the MCP session runtime itself already hard-fails a
+# replay session that hits a host.agent.* call with no matching cassette
+# episode instead of silently falling through to a live agent
+# (internal/mcp/studio/session_runtime.go's replayAgentMissHandler, landed
+# 616bdeae). What that engine-level fix cannot cover is the OTHER silent
+# fallback this brief calls out: an operator running `check` without
+# `profile=` gets no visible warning before the driver quietly stays
+# replay-only and any missing cassette becomes a bare `degraded-evidence`
+# verdict with no stated cause. This script computes that warning
+# deterministically (Starlark, not an LLM judgment call) for every leg that
+# looks like it needs live/interpretive drive (a scenario with
+# `natural_utterances` — free-text routing a cassette can't cover — an
+# ad-hoc description, or a `harness` hint containing "live"), and attaches it
+# to each leg (`live_authorization_note`, also visible to the driver agent
+# since the leg is spliced verbatim into `leg_json`) plus a flat
+# `live_authorization_summary` list surfaced by `rooms/plan.yaml` and
+# `rooms/execute.yaml` up front, before any leg is driven.
+#
 # Interface (authoritative in plan_legs.star.yaml):
 #   inputs:  mode (string: catalog|adhoc), run_id (string),
 #            description (string), primary_story (string),
-#            last_result (object, optional)
+#            live_profile (string, optional), last_result (object, optional)
 #   outputs: legs (object {items:[...]}), leg_count (int),
-#            driver_agent (string), run_dir_rel (string, repo-relative)
+#            driver_agent (string), run_dir_rel (string, repo-relative),
+#            live_authorization_summary (list of string)
 
 _ALPHANUM = "abcdefghijklmnopqrstuvwxyz0123456789"
 
@@ -63,6 +83,51 @@ def _label(description):
     return description[:61] + "..."
 
 
+def _needs_live(leg, mode):
+    # Deterministic proxy for "this leg's flow needs interpretive behavior a
+    # cassette can't replay" — the exact condition drive_leg.md/product-
+    # journey-qa-driver.md already gate live authorization on in prose.
+    # natural_utterances (free-text phrasing the persona would actually type)
+    # is the strongest available signal; an ad-hoc description is by
+    # definition unscripted operator prose with no catalog contract
+    # guaranteeing a scripted-only flow, so it defaults to needing live too.
+    utterances = leg.get("natural_utterances", [])
+    if type(utterances) == "list" and len(utterances) > 0:
+        return True
+    harness = leg.get("harness", "")
+    if type(harness) == "string" and "live" in harness:
+        return True
+    if mode == "adhoc":
+        return True
+    return False
+
+
+def _live_authorization_note(leg, mode, live_profile):
+    transport = leg.get("transport", "")
+    if not _needs_live(leg, mode):
+        return ""
+    if live_profile != "":
+        return "leg " + transport + ": live drive authorized (profile=" + live_profile + ")."
+    return (
+        "leg " + transport + ": needs `profile=<name>` for live drive — will run " +
+        "replay-only; missing cassettes will be reported as degraded-evidence with cause."
+    )
+
+
+def _annotate_legs(legs, mode, live_profile):
+    annotated = []
+    summary = []
+    for leg in legs:
+        drafted = dict(leg)
+        note = _live_authorization_note(drafted, mode, live_profile)
+        drafted["live_authorization_note"] = note
+        drafted["needs_live_hint"] = _needs_live(drafted, mode)
+        annotated.append(drafted)
+        if note != "" and live_profile == "":
+            summary.append(note)
+    return annotated, summary
+
+
 def _draft_scenario(description, primary_story):
     scenario_id = "adhoc-" + _slug(description)
     return {
@@ -80,6 +145,7 @@ def _draft_scenario(description, primary_story):
 def main(ctx):
     mode = ctx.inputs.get("mode", "catalog")
     run_id = ctx.inputs.get("run_id", "")
+    live_profile = ctx.inputs.get("live_profile", "")
     last_result = ctx.inputs.get("last_result", {})
     if type(last_result) != "dict":
         last_result = {}
@@ -98,12 +164,14 @@ def main(ctx):
     driver_agent = plan.get("driver_agent", ".agents/agents/product-journey-qa-driver.md")
 
     if mode != "adhoc":
+        annotated_legs, summary = _annotate_legs(carrier_legs, mode, live_profile)
         return {
-            "legs": {"items": carrier_legs},
-            "leg_count": len(carrier_legs),
+            "legs": {"items": annotated_legs},
+            "leg_count": len(annotated_legs),
             "driver_agent": driver_agent,
             "run_dir_rel": run_dir_rel,
             "plan_status": {"resolved": True},
+            "live_authorization_summary": summary,
         }
 
     description = ctx.inputs.get("description", "")
@@ -123,10 +191,12 @@ def main(ctx):
         drafted["leg_id"] = scenario["id"] + "::" + transport
         legs.append(drafted)
 
+    annotated_legs, summary = _annotate_legs(legs, mode, live_profile)
     return {
-        "legs": {"items": legs},
-        "leg_count": len(legs),
+        "legs": {"items": annotated_legs},
+        "leg_count": len(annotated_legs),
         "driver_agent": driver_agent,
         "run_dir_rel": run_dir_rel,
         "plan_status": {"resolved": True},
+        "live_authorization_summary": summary,
     }

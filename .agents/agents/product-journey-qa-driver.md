@@ -160,6 +160,25 @@ When live/model work is not explicitly authorized, stop at the blocker and
 record the missing evidence or scenario gap with `--record-blocker` or the
 story `blocker` intent. Do not silently substitute a fake pass.
 
+**A replay-miss is a hard error to report, never a signal to go live on your
+own initiative.** A `session.new` call opened with `harness: "replay"`
+hard-fails the moment it dispatches a `host.agent.*` call (converse / decide
+/ task / ask / extract / search) with no matching cassette episode — the MCP
+session runtime itself refuses to fall through to a live agent
+(`internal/mcp/studio/session_runtime.go`'s replay-agent-miss handler; this
+is enforced in code, not left to your judgment). Treat that tool error as
+the blocker: report it verbatim, stop the leg/scenario as blocked or
+degraded-evidence, and do NOT retry by opening a new session with `harness:
+"live"` unless an explicit harness/profile argument was already supplied for
+this run from the start. Silently upgrading a replay-miss to a live call is
+exactly the failure this rule exists to prevent (the standing "replay-miss
+silently goes live" bug). When your caller's structured report schema
+includes `harness_used`/`profile_used` fields (e.g.
+`stories/scenario-qa/schemas/drive_leg_result.json`), fill them in honestly —
+a downstream deterministic check compares them against whether a profile was
+actually supplied and downgrades the verdict on a mismatch, so do not treat
+this instruction as the only safeguard.
+
 ## Scenario Loop
 
 For each scenario in the bundle:

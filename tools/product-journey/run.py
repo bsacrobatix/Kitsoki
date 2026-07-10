@@ -12338,7 +12338,11 @@ def scenario_qa_leg_detail(item: dict, playback_refs: list[dict]) -> str:
     if playback_refs:
         evidence += "; rrweb replay"
     verdict = str(item.get("verdict", "") or "unjudged")
-    return f"Checked: {checked}. Evidence: {evidence}. Judge: {verdict}."
+    detail = f"Checked: {checked}. Evidence: {evidence}. Judge: {verdict}."
+    cause = str(item.get("cause", "") or "").strip()
+    if verdict != "pass" and cause:
+        detail += f" Cause: {cause}."
+    return detail
 
 
 def scenario_qa_report_title(counts: dict) -> str:
@@ -12646,10 +12650,16 @@ def render_scenario_qa_markdown(name: str, run_id: str, items: list[dict], count
         f"- Scenario: `{name}`",
         f"- Run: `{run_id}`",
         "",
-        "| Transport | Scenario | Level | Natural prompts | Driver | Verdict | Playback | Notes |",
-        "|---|---|---|---:|---|---|---|---|",
+        "| Transport | Scenario | Level | Natural prompts | Driver | Verdict | Cause | Playback | Notes |",
+        "|---|---|---|---:|---|---|---|---|---|",
     ]
     for item in items:
+        # `cause` is computed deterministically by
+        # stories/scenario-qa/scripts/record_leg_result.star (never left to
+        # an LLM judge/summary) for every non-"pass" verdict -- issue group B
+        # (silent live-authorization fallback) requires every degraded/
+        # unsupported/blocked/failed leg to carry a machine-readable AND
+        # human-readable reason instead of a bare verdict with no stated why.
         lines.append(
             "| "
             + " | ".join(
@@ -12661,6 +12671,7 @@ def render_scenario_qa_markdown(name: str, run_id: str, items: list[dict], count
                     item.get("natural_utterance_count", 0),
                     item.get("driver_status", ""),
                     item.get("verdict", ""),
+                    item.get("cause", ""),
                     item.get("playback_path", ""),
                     item.get("verdict_summary", ""),
                 ]

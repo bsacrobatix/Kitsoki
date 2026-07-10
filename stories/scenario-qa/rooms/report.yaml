@@ -1,11 +1,16 @@
 # report — fold every recorded leg's driver+judge outcome (world.leg_results)
 # into report.md AND deck.slidey.json under the run dir: the ONE per-transport
 # verdict table (VS Code legs labeled "bridge-level", never editor-level).
-# report.md is folded in Starlark (scripts/build_report.star); deck.slidey.json
-# is folded by tools/product-journey/run.py's --scenario-qa-report subcommand,
-# which reuses this module's existing Slidey deck-shape validator. Re-runs on
-# every entry (including the operator-typable "report" intent), so both
-# artifacts always reflect the current session's leg_results, never stale.
+# scripts/build_report.star only computes the summary/path (file-system-free,
+# since a run bundle may live in a managed capsule workspace); the actual
+# report.md AND deck.slidey.json files are both written by
+# tools/product-journey/run.py's --scenario-qa-report subcommand
+# (render_scenario_qa_markdown / render_scenario_qa_deck), which reuses this
+# module's existing Slidey deck-shape validator. Every non-"pass" leg's report
+# row carries a deterministic `cause` (record_leg_result.star), never a bare
+# verdict with no stated reason (issue group B / bug #105). Re-runs on every
+# entry (including the operator-typable "report" intent), so both artifacts
+# always reflect the current session's leg_results, never stale.
 
 states:
 
@@ -48,7 +53,7 @@ states:
       - heading: "Transport verdicts"
       - code: |
           {% for leg in world.leg_results.items %}
-          - {{ leg.transport }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}] verdict={{ leg.verdict }} driver={{ leg.driver_status }}{% if leg.playback_path %} playback={{ leg.playback_path }}{% endif %}
+          - {{ leg.transport }} [{{ leg.evidence_level }}{% if leg.natural_utterance_count %}; natural_prompts={{ leg.natural_utterance_count }}{% endif %}] verdict={{ leg.verdict }} driver={{ leg.driver_status }}{% if leg.cause %} cause={{ leg.cause }}{% endif %}{% if leg.playback_path %} playback={{ leg.playback_path }}{% endif %}
           {% endfor %}
       - choice:
           mode: single
@@ -87,10 +92,10 @@ states:
           report_path: report_path
           report_summary: report_summary
         on_error: idle
-      # report.md is folded in Starlark (above); deck.slidey.json is folded by
-      # tools/product-journey/run.py's --scenario-qa-report subcommand instead
-      # — it reuses this module's existing Slidey deck-shape validator rather
-      # than reimplementing scene-shape rules here. leg_results is templated
+      # Both report.md and deck.slidey.json are written by
+      # tools/product-journey/run.py's --scenario-qa-report subcommand — it
+      # reuses this module's existing Slidey deck-shape validator rather than
+      # reimplementing scene-shape rules here. leg_results is templated
       # in directly (map -> compact JSON splice, reference.md:255-256) so no
       # intermediate file/`|json` filter is needed.
       - invoke: host.run
@@ -162,6 +167,7 @@ states:
                 drive_result: {}
                 judge_result: {}
                 leg_results: { items: [] }
+                live_authorization_summary: []
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
@@ -196,6 +202,7 @@ states:
                 drive_result: {}
                 judge_result: {}
                 leg_results: { items: [] }
+                live_authorization_summary: []
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0

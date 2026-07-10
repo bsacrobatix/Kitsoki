@@ -25,6 +25,8 @@ states:
             Fail: "{{ world.fail_count }}"
             Degraded: "{{ world.degraded_count }}"
       - prose: "Recorded this transport check's driver + judge outcome."
+      - prose: "{{ world.current_leg.live_authorization_note }}"
+        when: "world.current_leg.live_authorization_note != ''"
       - prose: "A dispatch along the way failed and was recorded honestly rather than silently retried: {{ world.last_error }}"
         when: "world.last_error != ''"
       - prose: "More transports remain. Use \"next transport\" to drive the next check."
@@ -51,6 +53,7 @@ states:
             leg: "{{ world.current_leg }}"
             drive_result: "{{ world.drive_result }}"
             judge_result: "{{ world.judge_result }}"
+            live_profile: "{{ world.live_profile }}"
         bind:
           leg_results: leg_results
           pass_count: pass_count
