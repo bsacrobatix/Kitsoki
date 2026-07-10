@@ -50,6 +50,38 @@ func TestPlanClassifiesDivergedCapsule(t *testing.T) {
 		t.Fatalf("conflicted events %#v", events)
 	}
 }
+
+func TestMaterializeConflictArtifactForDivergedPlan(t *testing.T) {
+	dir := capsuletest.Open(t, "diverged-remote")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".kitsoki-capsule\ncapsule-manifest.json\npeers/\n.capsules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "update-index", "--assume-unchanged", "peers/origin.git/refs/heads/main")
+	r := Reconciler{VCS: Git{}}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "origin/main", Operation: Refresh, Generation: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, path, err := r.MaterializeConflictArtifact(context.Background(), p, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Schema != ConflictArtifactSchema || artifact.PlanDigest != p.Digest || artifact.ContinuationToken != p.Continuation.Token {
+		t.Fatalf("artifact %#v", artifact)
+	}
+	if artifact.MergeBase == "" || len(artifact.CandidatePaths) == 0 || len(artifact.TargetPaths) == 0 {
+		t.Fatalf("missing conflict facts %#v", artifact)
+	}
+	if len(artifact.RequiredInputs) != len(p.Continuation.RequiredInputs) {
+		t.Fatalf("required inputs %#v", artifact.RequiredInputs)
+	}
+	if filepath.Base(path) != p.Continuation.Token+".conflict.json" {
+		t.Fatalf("artifact path %s", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	runGit(t, dir, "checkout", "-b", "candidate")
