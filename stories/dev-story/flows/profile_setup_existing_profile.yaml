@@ -10,14 +10,11 @@ initial_world:
   repo_root: "/tmp/kitsoki-profile-fixture"
 
 host_handlers:
-  host.run:
+  host.starlark.run:
     by_call:
       profile_setup_discover:
         data:
-          ok: true
-          exit_code: 0
-          stdout: '{"schema":"kitsoki-profile-setup-discovery/v1","status":"ok","target_path":"/tmp/kitsoki-profile-fixture","config_path":"/tmp/kitsoki-profile-fixture/.kitsoki.yaml","local_config_path":"/tmp/kitsoki-profile-fixture/.kitsoki.local.yaml","default_profile":"claude-native","profiles":[{"name":"claude-native","source":"baseline","backend":"claude","model":"opus","readiness":"installed"}],"backend_sources":[{"backend":"claude","installed":true,"logged_in":"yes","path_source":"PATH","auth_summary":"probe:logged-in","auth_probe":{"command":"claude auth status --json","status":"ok","exit_code":0,"logged_in":true,"auth_method":"subscription","api_provider":"firstParty"}}],"env_sources":[{"name":"ANTHROPIC_API_KEY","present":false}],"candidate_action":"set_default","candidate_profile":{"action":"set_default","name":"claude-native"},"patch_preview":"default_profile: claude-native\n","warnings":[".kitsoki.local.yaml does not exist yet; apply will create it"]}'
-          stdout_json:
+          result:
             schema: "kitsoki-profile-setup-discovery/v1"
             status: "ok"
             target_path: "/tmp/kitsoki-profile-fixture"
@@ -48,10 +45,7 @@ host_handlers:
               - ".kitsoki.local.yaml does not exist yet; apply will create it"
       profile_setup_apply:
         data:
-          ok: true
-          exit_code: 0
-          stdout: '{"schema":"kitsoki-profile-setup-apply/v1","status":"applied","target_path":"/tmp/kitsoki-profile-fixture","local_config_path":"/tmp/kitsoki-profile-fixture/.kitsoki.local.yaml","writes":["/tmp/kitsoki-profile-fixture/.kitsoki.local.yaml"],"default_profile":"claude-native","profiles":[{"name":"claude-native","source":"baseline","backend":"claude","model":"opus","readiness":"installed"}],"warnings":[]}'
-          stdout_json:
+          result:
             schema: "kitsoki-profile-setup-apply/v1"
             status: "applied"
             target_path: "/tmp/kitsoki-profile-fixture"

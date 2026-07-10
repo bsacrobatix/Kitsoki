@@ -21,14 +21,11 @@ initial_world:
   profile_setup_effective_profiles: []
 
 host_handlers:
-  host.run:
+  host.starlark.run:
     by_call:
       profile_setup_apply:
         data:
-          ok: true
-          exit_code: 0
-          stdout: '{"schema":"kitsoki-profile-setup-apply/v1","status":"applied","target_path":"/tmp/kitsoki-profile-fixture","local_config_path":"/tmp/kitsoki-profile-fixture/.kitsoki.local.yaml","writes":["/tmp/kitsoki-profile-fixture/.kitsoki.local.yaml"],"default_profile":"openai-codex","profiles":[{"name":"openai-codex","source":"local","backend":"codex","model":"gpt-5.5","readiness":"env-present","env_refs":["OPENAI_API_KEY"]}],"warnings":[]}'
-          stdout_json:
+          result:
             schema: "kitsoki-profile-setup-apply/v1"
             status: "applied"
             target_path: "/tmp/kitsoki-profile-fixture"

@@ -1,5 +1,5 @@
 # profile_setup_real_discover — regression for live sessions where the profile
-# setup helper path must resolve through the real host.run command. This keeps
+# setup capability must resolve through the real Starlark host call. This keeps
 # discovery unstubbed but does not call a provider or write files.
 
 test_kind: flow
@@ -10,10 +10,10 @@ initial_world:
   workdir: "."
   repo_root: "."
 
-# Trigger RegisterBuiltins so host.run is real in this fixture. No LLM host is
+# Trigger RegisterBuiltins so host.starlark.run is real in this fixture. No LLM host is
 # invoked by the profile_setup_discover room.
 host_bindings:
-  host.run: host.run
+  host.starlark.run: host.starlark.run
 
 turns:
   - intent: { name: go_profile_setup, slots: {} }

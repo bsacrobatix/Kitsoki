@@ -22,19 +22,15 @@ initial_world:
   profile_setup_patch_preview: "default_profile: bad-profile\n"
 
 host_handlers:
-  host.run:
+  host.starlark.run:
     by_call:
       profile_setup_apply:
         data:
-          ok: false
-          exit_code: 1
-          stdout: '{"schema":"kitsoki-profile-setup-apply/v1","status":"failed","target_path":"/tmp/kitsoki-profile-fixture","error":"env var ''sk-raw-secret'' is invalid; provide a variable name, not a raw key"}'
-          stdout_json:
+          result:
             schema: "kitsoki-profile-setup-apply/v1"
             status: "failed"
             target_path: "/tmp/kitsoki-profile-fixture"
             error: "env var 'sk-raw-secret' is invalid; provide a variable name, not a raw key"
-        error: "host.run: command exited 1"
 
 turns:
   - intent: { name: confirm_profile_setup, slots: {} }

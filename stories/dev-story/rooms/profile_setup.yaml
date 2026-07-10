@@ -4,7 +4,8 @@
 #   landing -> profile_setup_discover -> profile_setup_review
 #   profile_setup_review -> profile_setup_apply -> profile_setup_done
 #
-# Discovery reports credential source/presence and safe CLI auth-status probes.
+# Discovery reports credential source/presence and safe CLI auth-status probes
+# through the native host.dev.profile_setup capability.
 # Apply writes only the gitignored `.kitsoki.local.yaml`, after the operator
 # confirms the reviewed patch preview.
 
@@ -61,62 +62,29 @@ states:
               hint:   "re-render"
               intent: look
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         once: true
         id: profile_setup_discover
         with:
-          cmd: bash
-          args:
-            - "-c"
-            - |
-              set -eu
-              script_name="$0"
-              find_profile_setup_script() {
-                name="$1"
-                for root in \
-                  "${KITSOKI_APP_DIR:-}" \
-                  "${KITSOKI_REPO:+$KITSOKI_REPO/stories/dev-story}" \
-                  "$PWD/stories/dev-story" \
-                  "$PWD/internal/basestories/stories/dev-story"
-                do
-                  [ -n "$root" ] || continue
-                  candidate="$root/scripts/$name"
-                  if [ -f "$candidate" ]; then
-                    printf '%s\n' "$candidate"
-                    return 0
-                  fi
-                done
-                cache_root="${XDG_CACHE_HOME:-${HOME:-}/.cache}/kitsoki/stories"
-                if [ -d "$cache_root" ]; then
-                  for candidate in "$cache_root"/*/dev-story/scripts/"$name"; do
-                    if [ -f "$candidate" ]; then
-                      printf '%s\n' "$candidate"
-                      return 0
-                    fi
-                  done
-                fi
-                return 1
-              }
-              script="$(find_profile_setup_script "$script_name")" || {
-                printf '{"schema":"kitsoki-profile-setup-script/v1","status":"error","error":"profile setup helper not found: %s"}\n' "$script_name"
-                exit 1
-              }
-              exec python3 "$script" "$@"
-            - "profile_setup_discover.py"
-            - "{{ world.profile_setup_target_path }}"
-            - "{{ world.workdir }}"
-            - "{{ world.repo_root }}"
-          fail_on_error: true
+          script: scripts/profile_setup.star
+          inputs:
+            op: discover
+            target_path: "{{ world.profile_setup_target_path }}"
+            workdir: "{{ world.workdir }}"
+            repo_root: "{{ world.repo_root }}"
+          capabilities:
+            host:
+              verbs: [host.dev.profile_setup]
         bind:
-          profile_setup_discovery: "stdout_json"
-          profile_setup_target_path: "stdout_json.target_path"
-          profile_setup_default_profile: "stdout_json.default_profile"
-          profile_setup_effective_profiles: "stdout_json.profiles"
-          profile_setup_warnings: "stdout_json.warnings"
-          profile_setup_candidate_action: "stdout_json.candidate_action"
-          profile_setup_candidate_profile: "stdout_json.candidate_profile"
-          profile_setup_patch_preview: "stdout_json.patch_preview"
-          profile_setup_error: "stdout_json.error"
+          profile_setup_discovery: "result"
+          profile_setup_target_path: "result.target_path"
+          profile_setup_default_profile: "result.default_profile"
+          profile_setup_effective_profiles: "result.profiles"
+          profile_setup_warnings: "result.warnings"
+          profile_setup_candidate_action: "result.candidate_action"
+          profile_setup_candidate_profile: "result.candidate_profile"
+          profile_setup_patch_preview: "result.patch_preview"
+          profile_setup_error: "result.error"
         on_error: profile_setup_discover_failed
     on:
       profile_setup_discovered:
@@ -444,61 +412,30 @@ states:
               hint:   "re-render"
               intent: look
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         once: true
         id: profile_setup_apply
         with:
-          cmd: bash
-          args:
-            - "-c"
-            - |
-              set -eu
-              script_name="$0"
-              find_profile_setup_script() {
-                name="$1"
-                for root in \
-                  "${KITSOKI_APP_DIR:-}" \
-                  "${KITSOKI_REPO:+$KITSOKI_REPO/stories/dev-story}" \
-                  "$PWD/stories/dev-story" \
-                  "$PWD/internal/basestories/stories/dev-story"
-                do
-                  [ -n "$root" ] || continue
-                  candidate="$root/scripts/$name"
-                  if [ -f "$candidate" ]; then
-                    printf '%s\n' "$candidate"
-                    return 0
-                  fi
-                done
-                cache_root="${XDG_CACHE_HOME:-${HOME:-}/.cache}/kitsoki/stories"
-                if [ -d "$cache_root" ]; then
-                  for candidate in "$cache_root"/*/dev-story/scripts/"$name"; do
-                    if [ -f "$candidate" ]; then
-                      printf '%s\n' "$candidate"
-                      return 0
-                    fi
-                  done
-                fi
-                return 1
-              }
-              script="$(find_profile_setup_script "$script_name")" || {
-                printf '{"schema":"kitsoki-profile-setup-script/v1","status":"error","error":"profile setup helper not found: %s"}\n' "$script_name"
-                exit 1
-              }
-              exec python3 "$script" "$@"
-            - "profile_setup_apply.py"
-            - "{{ world.profile_setup_target_path }}"
-            - "{{ world.profile_setup_candidate_profile }}"
-            - "{{ world.workdir }}"
-            - "{{ world.repo_root }}"
-          fail_on_error: true
+          script: scripts/profile_setup.star
+          inputs:
+            op: apply
+            target_path: "{{ world.profile_setup_target_path }}"
+            candidate: "{{ world.profile_setup_candidate_profile }}"
+            workdir: "{{ world.workdir }}"
+            repo_root: "{{ world.repo_root }}"
+          capabilities:
+            host:
+              verbs: [host.dev.profile_setup]
         bind:
           profile_setup_apply_ok: "ok"
-          profile_setup_apply_output: "stdout"
-          profile_setup_apply_result: "stdout_json"
-          profile_setup_default_profile: "stdout_json.default_profile"
-          profile_setup_effective_profiles: "stdout_json.profiles"
-          profile_setup_error: "stdout_json.error"
+          profile_setup_apply_output: "result.error"
+          profile_setup_apply_result: "result"
+          profile_setup_default_profile: "result.default_profile"
+          profile_setup_effective_profiles: "result.profiles"
+          profile_setup_error: "result.error"
         on_error: profile_setup_apply_failed
+      - when: "world.profile_setup_apply_result.status == 'failed'"
+        emit_intent: profile_setup_applied
     on:
       profile_setup_applied:
         - when: "world.profile_setup_apply_result.status == 'applied'"
