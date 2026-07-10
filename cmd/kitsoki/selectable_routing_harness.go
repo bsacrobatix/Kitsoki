@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -86,6 +88,18 @@ func (h *selectableRoutingHarness) RunTurn(ctx context.Context, in harness.TurnI
 		return mcp.CallToolParams{}, err
 	}
 	return selected.RunTurn(ctx, in)
+}
+
+func (h *selectableRoutingHarness) RunStructured(ctx context.Context, in harness.StructuredInput) (json.RawMessage, error) {
+	selected, err := h.selectedHarness()
+	if err != nil {
+		return nil, err
+	}
+	structured, ok := selected.(harness.StructuredHarness)
+	if !ok {
+		return nil, fmt.Errorf("selected routing harness %T does not support arbitrary structured output", selected)
+	}
+	return structured.RunStructured(ctx, in)
 }
 
 func (h *selectableRoutingHarness) Close() error {
