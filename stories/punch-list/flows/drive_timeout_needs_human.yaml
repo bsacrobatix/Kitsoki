@@ -99,11 +99,11 @@ turns:
   - intent: { name: start_first, slots: {} }
     expect_state: drive
   - intent: { name: look, slots: {} }
-    advance_clock: "9m"
+    advance_clock: "46s"
     expect_state: needs_human
     expect_world:
       drive_status: partial
-      last_error: "Drive timed out for validate-punch-list after 8 minutes without returning a handoff."
+      last_error: "Drive control-plane timeout for validate-punch-list after 45 seconds without a durable handoff; job cancelled."
 
 expect_terminal: false
 expect_no_errors: true

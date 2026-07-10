@@ -1630,6 +1630,10 @@ func (d *OffRampDef) UnmarshalYAML(data []byte) error {
 type TimeoutDef struct {
 	After  string `yaml:"after"`
 	Target string `yaml:"target"`
+	// CancelJob aborts the most recently dispatched background job for this
+	// session when this timeout fires. It is the circuit-breaker form of a
+	// timeout: transition away *and* stop the work that is no longer useful.
+	CancelJob bool `yaml:"cancel_job,omitempty"`
 }
 
 // AgentDecl is one entry in the top-level agents: map.
