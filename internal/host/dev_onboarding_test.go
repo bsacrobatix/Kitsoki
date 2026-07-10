@@ -39,6 +39,9 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "go.sum"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	result, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": map[string]any{"target_path": root, "project_id": "example", "project_title": "Example", "stack": "go project", "test_command": "go test ./...", "build_command": "go build ./...", "repo_vcs": "none"}})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +49,7 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	if result.Error != "" || result.Data["status"] != "applied" {
 		t.Fatalf("apply = %#v", result)
 	}
-	for _, path := range []string{".kitsoki.yaml", ".kitsoki/project-profile.yaml", ".kitsoki/stories/example-dev/app.yaml"} {
+	for _, path := range []string{".kitsoki.yaml", ".kitsoki/environments/ci.yaml", ".kitsoki/ci.yaml", ".kitsoki/stories/capsule-ci/app.yaml", ".kitsoki/project-profile.yaml", ".kitsoki/stories/example-dev/app.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Fatalf("missing %s: %v", path, err)
 		}
@@ -57,6 +60,34 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	}
 	if !strings.Contains(string(profile), "schema: project-profile/v1") {
 		t.Fatalf("profile missing schema:\n%s", profile)
+	}
+	ciEnv, err := os.ReadFile(filepath.Join(root, ".kitsoki/environments/ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ciEnv), "schema: capsule-environment/v1") || !strings.Contains(string(ciEnv), "- go.sum") {
+		t.Fatalf("ci environment missing schema or lockfile:\n%s", ciEnv)
+	}
+	ciConfig, err := os.ReadFile(filepath.Join(root, ".kitsoki/ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ciConfig), "schema: capsule-ci/v1") || !strings.Contains(string(ciConfig), "require_hygiene_check: true") {
+		t.Fatalf("ci config missing schema or hygiene policy:\n%s", ciConfig)
+	}
+	ciStory, err := os.ReadFile(filepath.Join(root, ".kitsoki/stories/capsule-ci/app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(ciStory), "outcome: needs_input") || strings.Contains(string(ciStory), "outcome: passed") {
+		t.Fatalf("ci story should park without default pass:\n%s", ciStory)
+	}
+	gitignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gitignore), ".capsules/") {
+		t.Fatalf("gitignore missing capsule workspace entry:\n%s", gitignore)
 	}
 }
 

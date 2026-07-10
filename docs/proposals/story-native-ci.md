@@ -3,8 +3,9 @@
 **Status:** v1 in progress. `.kitsoki/ci.yaml`, the reference story, typed
 verdict/envelope service, engine launcher, CLI, cancellation, run status,
 Capsule MCP CI tools, deterministic verdict construction, and no-LLM
-pass/fail/park flow fixtures ship. Project wrappers, richer reference-story
-rooms, LLM/writer fixtures, and GitHub ingress remain.
+pass/fail/park flow fixtures ship. Onboarding now emits a checked-in CI
+manifest, environment definition, and minimal project CI story wrapper. Richer
+reference-story rooms, LLM/writer fixtures, and GitHub ingress remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -296,7 +297,7 @@ project wrapper that imports only deterministic checks and adjudication.
 - [ ] 2.4 Add cassette-backed LLM review and Capsule-MCP-only writer fixture; prove no ambient tools are required
 
 ## 3. Adopt and document
-- [ ] 3.1 Extend onboarding to generate `.kitsoki/ci.yaml`, environment definition, and a minimal project CI wrapper from project-profile commands
+- [x] 3.1 Extend onboarding to generate `.kitsoki/ci.yaml`, environment definition, and a minimal project CI wrapper from project-profile commands
 - [ ] 3.2 Dogfood Kitsoki's focused validation + review story locally, then through a fake and one gated real remote executor
 - [ ] 3.3 Add GitHub trigger/check adapter consuming the same pipeline/result contract
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal

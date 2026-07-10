@@ -233,6 +233,12 @@ decision.
 - [x] 3.1 Express Kitsoki bootstrap and runstatus cache as environment hooks/cache grants
 - [x] 3.2 Run one no-LLM story identically on host, fake remote, and optional gated container; compare normalized results
 - [ ] 3.3 Migrate one repo-history capsule and one foreign onboarded project
+  - Shipped: foreign project onboarding now writes a project-local
+    `.kitsoki/environments/ci.yaml`, `.kitsoki/ci.yaml`, and minimal
+    `.kitsoki/stories/capsule-ci/app.yaml` wrapper that parks honestly until
+    checks are composed.
+  - Remaining: adapt one repo-history materializer/capsule to the environment
+    lock/executor contract before marking this complete.
 - [ ] 3.4 Update environment/executor/Arena docs; trim/delete this proposal
 ```
 
