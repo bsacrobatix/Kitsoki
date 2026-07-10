@@ -58,6 +58,7 @@ you to complete the printed sync steps before rerunning.
 --dirty-action controls dirty staging-capsule recovery:
   auto      prompt when interactive, otherwise stop with next steps (default)
   abort     stop with next steps
+  move      commit the changes in a new managed recovery capsule, clean, and continue
   prompt    require an interactive prompt
   preserve  stash changes, write a patch artifact, clean, and continue
   discard   discard changes, clean, and continue
@@ -111,6 +112,7 @@ Refresh needs a clean staging capsule before it can rebase or import staging.
 
 Useful next steps:
   inspect:   git -C "$dir" diff --stat HEAD && git -C "$dir" diff HEAD
+  move:      scripts/refresh-staging-local.sh --dirty-action move
   preserve:  scripts/refresh-staging-local.sh --dirty-action preserve
   discard:   scripts/refresh-staging-local.sh --dirty-action discard
   manual:    cd "$dir" and commit, stash, or remove the changes, then rerun refresh
@@ -185,6 +187,57 @@ preserve_dirty_staging_capsule() {
   echo "  patch: $patch" >&2
 }
 
+move_dirty_staging_capsule() {
+  local dir="$1"
+  local stamp recovery_id recovery_branch recovery_dir patch_dir patch status_file untracked_file untracked_tar
+
+  stamp="$(date +%Y%m%dT%H%M%S)"
+  recovery_id="staging-dirty-recovery-$stamp-$$"
+  recovery_branch="agent/$recovery_id"
+  recovery_dir="$repo_root/.capsules/workspaces/$recovery_id"
+  patch_dir="$repo_root/.artifacts/staging-local-recovery"
+  mkdir -p "$patch_dir"
+  patch="$patch_dir/$recovery_id.patch"
+  status_file="$patch_dir/$recovery_id.status.txt"
+  untracked_file="$patch_dir/$recovery_id.untracked"
+  untracked_tar="$patch_dir/$recovery_id.untracked.tar"
+
+  git -C "$dir" status --short --untracked-files=all >"$status_file"
+  git -C "$dir" diff --binary HEAD >"$patch"
+  git -C "$dir" ls-files --others --exclude-standard -z >"$untracked_file"
+  if [ -s "$untracked_file" ]; then
+    tar -C "$dir" --null --files-from="$untracked_file" -cf "$untracked_tar"
+  fi
+
+  if ! scripts/dev-workspace.sh create \
+    --id "$recovery_id" \
+    --branch "$recovery_branch" \
+    --base "$staging_branch" \
+    --target "$staging_branch" \
+    --no-bootstrap >/dev/null; then
+    echo "error: could not create recovery capsule; staging capsule left unchanged" >&2
+    return 1
+  fi
+
+  if [ -s "$patch" ]; then
+    git -C "$recovery_dir" apply --index --binary "$patch"
+  fi
+  if [ -s "$untracked_file" ]; then
+    tar -C "$recovery_dir" -xf "$untracked_tar"
+  fi
+  if ! scripts/dev-workspace.sh commit "$recovery_dir" \
+    --message "chore: recover dirty staging capsule changes" >/dev/null; then
+    echo "error: could not commit recovery capsule; staging capsule left unchanged" >&2
+    return 1
+  fi
+
+  clean_dirty_staging_capsule "$dir"
+  echo "refresh-staging-local: moved dirty staging-capsule changes to a committed recovery capsule:" >&2
+  echo "  workspace: $recovery_dir" >&2
+  echo "  branch: $recovery_branch" >&2
+  echo "  patch: $patch" >&2
+}
+
 handle_dirty_staging_capsule() {
   local dir="$1"
   local dirty="$2"
@@ -207,6 +260,9 @@ handle_dirty_staging_capsule() {
       print_dirty_next_steps "$dir"
       return 1
       ;;
+    move)
+      move_dirty_staging_capsule "$dir"
+      ;;
     preserve)
       preserve_dirty_staging_capsule "$dir"
       ;;
@@ -224,24 +280,29 @@ handle_dirty_staging_capsule() {
         cat >&2 <<EOF
 
 Refresh needs a clean staging capsule. What do you want to do?
-  1) Show the diff
-  2) Preserve changes to a stash plus .artifacts patch, clean, and continue
-  3) Discard changes, clean, and continue
-  4) Stop and leave changes in place
+  1) Move changes to a new managed capsule, commit them, clean, and continue (default)
+  2) Show the diff
+  3) Preserve changes to a stash plus .artifacts patch, clean, and continue
+  4) Discard changes, clean, and continue
+  5) Stop and leave changes in place
 EOF
-        printf 'Choose [1-4]: ' >&2
-        IFS= read -r choice || choice=4
+        printf 'Choose [1-5] (default 1): ' >&2
+        IFS= read -r choice || choice=1
         case "$choice" in
-          1|s|S|show)
+          1|m|M|move|"")
+            move_dirty_staging_capsule "$dir"
+            break
+            ;;
+          2|s|S|show)
             git -C "$dir" --no-pager status --short --untracked-files=all >&2
             git -C "$dir" --no-pager diff --stat HEAD >&2 || true
             git -C "$dir" --no-pager diff HEAD >&2 || true
             ;;
-          2|p|P|preserve)
+          3|p|P|preserve)
             preserve_dirty_staging_capsule "$dir"
             break
             ;;
-          3|d|D|discard)
+          4|d|D|discard)
             printf "Type 'discard' to remove these staging-capsule changes: " >&2
             IFS= read -r confirm || confirm=
             if [ "$confirm" = discard ]; then
@@ -251,18 +312,18 @@ EOF
             fi
             echo "refresh-staging-local: discard not confirmed" >&2
             ;;
-          4|q|Q|quit|"")
+          5|q|Q|quit)
             echo "refresh-staging-local: stopped; staging capsule left unchanged" >&2
             return 1
             ;;
           *)
-            echo "refresh-staging-local: choose 1, 2, 3, or 4" >&2
+            echo "refresh-staging-local: choose 1, 2, 3, 4, or 5" >&2
             ;;
         esac
       done
       ;;
     *)
-      die "invalid --dirty-action: $dirty_action (expected auto, abort, prompt, preserve, or discard)"
+      die "invalid --dirty-action: $dirty_action (expected auto, abort, move, prompt, preserve, or discard)"
       ;;
   esac
 

@@ -167,9 +167,11 @@ local `main` is current, the helper refreshes `.capsules/staging/local` from
 local `staging/local`, rebases it onto local `main`, and imports the refreshed
 `staging/local` ref back into the primary checkout. If the staging capsule is
 dirty and the helper is attached to a terminal, it asks whether to inspect,
+move the work into a new committed managed recovery capsule (the default),
 preserve-and-clean, discard-and-clean, or stop. Non-interactive runs stop with
-the same next-step commands; pass `--dirty-action preserve` or
-`--dirty-action discard` only when that outcome is intentional. The Make targets
+the same next-step commands; pass `--dirty-action move`,
+`--dirty-action preserve`, or `--dirty-action discard` only when that outcome
+is intentional. The Make targets
 call this refresh helper first, then verify that `.capsules/staging/local` is a
 managed capsule at the current `staging/local` head before running the
 corresponding command inside it. To refresh without running a staging command,

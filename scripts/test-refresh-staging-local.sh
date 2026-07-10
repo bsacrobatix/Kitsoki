@@ -47,6 +47,7 @@ copy_scripts() {
   mkdir -p "$repo/scripts"
   cp "$script" "$repo/scripts/refresh-staging-local.sh"
   cp "$sync_script" "$repo/scripts/sync-main-from-remote.sh"
+  cp "$script_dir/dev-workspace.sh" "$repo/scripts/dev-workspace.sh"
   chmod +x "$repo/scripts/"*.sh
 }
 
@@ -133,6 +134,36 @@ assert_contains "$dirty_out" "--dirty-action preserve"
 [ -f "$local_repo/.capsules/staging/local/scratch.txt" ] ||
   fail "dirty abort removed the untracked file"
 
+default_out="$tmp/dirty-capsule-default.out"
+printf '\n' | script -q /dev/null bash -c '
+  cd "$1"
+  scripts/refresh-staging-local.sh --skip-remote --dirty-action prompt --gate "git diff --check"
+' bash "$local_repo" >"$default_out" 2>&1
+assert_contains "$default_out" "Move changes to a new managed capsule, commit them, clean, and continue (default)"
+assert_contains "$default_out" "moved dirty staging-capsule changes to a committed recovery capsule"
+default_recovery_dir="$(sed -n 's/^  workspace: //p' "$default_out" | tail -1 | tr -d '\r')"
+[ -n "$default_recovery_dir" ] || fail "default move did not report a recovery workspace"
+[ "$(git -C "$default_recovery_dir" show HEAD:scratch.txt)" = "scratch" ] ||
+  fail "default move did not commit the untracked staging file"
+
+printf 'scratch-explicit\n' >"$local_repo/.capsules/staging/local/scratch.txt"
+move_out="$tmp/dirty-capsule-move.out"
+(
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote --dirty-action move --gate 'git diff --check'
+) >"$move_out" 2>&1
+assert_contains "$move_out" "moved dirty staging-capsule changes to a committed recovery capsule"
+recovery_dir="$(sed -n 's/^  workspace: //p' "$move_out" | tail -1)"
+[ -n "$recovery_dir" ] || fail "move did not report a recovery workspace"
+[ -f "$recovery_dir/.kitsoki-dev-workspace.json" ] ||
+  fail "move did not create a managed recovery workspace"
+[ "$(git -C "$recovery_dir" show HEAD:scratch.txt)" = "scratch-explicit" ] ||
+  fail "move did not commit the untracked staging file"
+[ -z "$(git -C "$local_repo/.capsules/staging/local" status --porcelain --untracked-files=all |
+  grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' || true)" ] ||
+  fail "move left the staging capsule dirty"
+
+printf 'scratch-again\n' >"$local_repo/.capsules/staging/local/scratch.txt"
 preserve_out="$tmp/dirty-capsule-preserve.out"
 (
   cd "$local_repo"
