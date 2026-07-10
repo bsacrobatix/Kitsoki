@@ -45,6 +45,16 @@ func (s *Storyboard) TourSteps() []tour.TourStep {
 		if step.Advance == "" {
 			step.Advance = "next"
 		}
+		// An action scene usually transitions into the next scene's route (for
+		// example HomeView's New session → interactive chat). Make that route
+		// explicit for the renderer so it waits for the navigation instead of
+		// racing ahead and silently skipping the next beat.
+		if step.Advance == "route-match" && len(steps) < len(s.Scenes)-1 {
+			nextRoute := s.Scenes[len(steps)+1].Route
+			if nextRoute != "" && nextRoute != "any" && nextRoute != step.Route {
+				step.AdvanceRoute = nextRoute
+			}
+		}
 		steps = append(steps, step)
 	}
 	return steps
@@ -193,6 +203,8 @@ func driveLine(d tour.DriveAction) string {
 		return fmt.Sprintf("type & send: %q", d.Text)
 	case tour.DriveClickIntent:
 		return fmt.Sprintf("click intent `%s`", d.Intent)
+	case tour.DriveClickSelector:
+		return fmt.Sprintf("click selector `%s`", d.Selector)
 	case tour.DriveWaitState:
 		return fmt.Sprintf("wait for state `%s`", d.State)
 	case tour.DriveDwellMs:

@@ -18,24 +18,27 @@ import (
 //
 //	type-and-send → Text    fill the composer with Text, click send
 //	click-intent  → Intent  click intent-btn-<Intent>
+//	click-selector → Selector click an explicit, test-id-backed CSS selector
 //	wait-state    → State   poll current-state until it equals State
 //	reveal-turn   → —       ease the last turn to the top, hold, ease the reply
 //	dwell-ms      → Ms      hold on the current frame for Ms (pace-scaled)
 type DriveAction struct {
-	Type   string `yaml:"type" json:"type"`
-	Text   string `yaml:"text,omitempty" json:"text,omitempty"`
-	Intent string `yaml:"intent,omitempty" json:"intent,omitempty"`
-	State  string `yaml:"state,omitempty" json:"state,omitempty"`
-	Ms     int    `yaml:"ms,omitempty" json:"ms,omitempty"`
+	Type     string `yaml:"type" json:"type"`
+	Text     string `yaml:"text,omitempty" json:"text,omitempty"`
+	Intent   string `yaml:"intent,omitempty" json:"intent,omitempty"`
+	Selector string `yaml:"selector,omitempty" json:"selector,omitempty"`
+	State    string `yaml:"state,omitempty" json:"state,omitempty"`
+	Ms       int    `yaml:"ms,omitempty" json:"ms,omitempty"`
 }
 
 // Drive action type constants — the closed set the executor dispatches on.
 const (
-	DriveTypeAndSend = "type-and-send"
-	DriveClickIntent = "click-intent"
-	DriveWaitState   = "wait-state"
-	DriveRevealTurn  = "reveal-turn"
-	DriveDwellMs     = "dwell-ms"
+	DriveTypeAndSend   = "type-and-send"
+	DriveClickIntent   = "click-intent"
+	DriveClickSelector = "click-selector"
+	DriveWaitState     = "wait-state"
+	DriveRevealTurn    = "reveal-turn"
+	DriveDwellMs       = "dwell-ms"
 )
 
 // Validate reports whether the action carries the field its Type requires.
@@ -50,6 +53,10 @@ func (d DriveAction) Validate() error {
 	case DriveClickIntent:
 		if d.Intent == "" {
 			return fmt.Errorf("drive %q requires intent", d.Type)
+		}
+	case DriveClickSelector:
+		if d.Selector == "" {
+			return fmt.Errorf("drive %q requires selector", d.Type)
 		}
 	case DriveWaitState:
 		if d.State == "" {

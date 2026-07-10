@@ -54,6 +54,8 @@ func (e *executor) one(a DriveAction) error {
 		return e.typeAndSend(a.Text)
 	case DriveClickIntent:
 		return e.clickIntent(a.Intent)
+	case DriveClickSelector:
+		return e.clickSelector(a.Selector)
 	case DriveWaitState:
 		return e.waitForState(a.State, 20*time.Second)
 	case DriveRevealTurn:
@@ -144,6 +146,28 @@ func (e *executor) clickIntent(intent string) error {
 	}
 	if !ok {
 		return fmt.Errorf("intent button %q not found", intent)
+	}
+	return nil
+}
+
+// clickSelector clicks a deterministic data-testid selector for a transition
+// that is not a story intent, such as HomeView's New session control. Storyboard
+// validation keeps this explicit rather than teaching the renderer UI-specific
+// special cases.
+func (e *executor) clickSelector(selector string) error {
+	js := fmt.Sprintf(`(() => {
+  const el = document.querySelector(%q);
+  if (!el) return false;
+  el.scrollIntoView({ block: 'center' });
+  el.click();
+  return true;
+})()`, selector)
+	var ok bool
+	if err := chromedp.Run(e.ctx, chromedp.Evaluate(js, &ok)); err != nil {
+		return fmt.Errorf("click selector %q: %w", selector, err)
+	}
+	if !ok {
+		return fmt.Errorf("selector %q not found", selector)
 	}
 	return nil
 }
