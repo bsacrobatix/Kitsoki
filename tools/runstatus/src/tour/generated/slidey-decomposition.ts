@@ -54,6 +54,7 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 5500,
+    drive: [{"type":"wait-state","state":"configure"},{"type":"reveal-turn"}],
   },
   {
     id: "sdc-decompose",
@@ -66,6 +67,7 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7000,
+    drive: [{"type":"click-intent","intent":"start"},{"type":"wait-state","state":"fleet.load"},{"type":"reveal-turn"}],
   },
   {
     id: "sdc-fleet-load",
@@ -78,5 +80,6 @@ export const SLIDEY_DECOMPOSITION_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6500,
+    drive: [{"type":"reveal-turn"}],
   },
 ];

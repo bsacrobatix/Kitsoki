@@ -66,6 +66,7 @@ export const SLIDEY_OPEN_PR_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 8000,
+    drive: [{"type":"wait-state","state":"idle"},{"type":"click-intent","intent":"open"},{"type":"wait-state","state":"open_pr"},{"type":"reveal-turn"}],
   },
   {
     id: "sop-ci",
@@ -78,6 +79,7 @@ export const SLIDEY_OPEN_PR_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7500,
+    drive: [{"type":"click-intent","intent":"proceed"},{"type":"wait-state","state":"ci_monitoring"},{"type":"reveal-turn"}],
   },
   {
     id: "sop-merge",
@@ -90,6 +92,7 @@ export const SLIDEY_OPEN_PR_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7500,
+    drive: [{"type":"click-intent","intent":"proceed"},{"type":"wait-state","state":"merge_executing"},{"type":"reveal-turn"}],
   },
   {
     id: "sop-checkpoint",
@@ -102,6 +105,7 @@ export const SLIDEY_OPEN_PR_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 7500,
+    drive: [{"type":"click-intent","intent":"proceed"},{"type":"wait-state","state":"merge_awaiting_reply"},{"type":"reveal-turn"}],
   },
   {
     id: "sop-merged",
@@ -114,6 +118,7 @@ export const SLIDEY_OPEN_PR_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "state-badge",
     dwellMs: 6500,
+    drive: [{"type":"click-intent","intent":"accept"},{"type":"wait-state","state":"__exit__merged"},{"type":"dwell-ms","ms":1500}],
   },
   {
     id: "sop-outro",
