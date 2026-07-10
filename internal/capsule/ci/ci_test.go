@@ -2,6 +2,7 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -52,6 +53,40 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 		t.Fatalf("selected execution %#v", result.Execution)
 	}
 }
+
+func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n    executor: remote\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	remote := executor.NewRemoteProvider(remoteVerdictWorker{})
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: ExecutorSelectorFunc(func(context.Context, string) (executor.Provider, error) { return remote, nil })}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Verdict.Outcome != "passed" || result.Execution.ExecutionID == "" {
+		t.Fatalf("remote result %#v", result)
+	}
+}
+
+type remoteVerdictWorker struct{}
+
+func (remoteVerdictWorker) Describe(context.Context) (executor.Capabilities, error) {
+	return executor.Capabilities{ID: "remote", Placements: []string{"remote"}, Networks: []string{"none"}, Cancellable: true}, nil
+}
+func (remoteVerdictWorker) Run(_ context.Context, prepared executor.Prepared, _ executor.Task, _ executor.EventSink) (executor.Result, error) {
+	verdict := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: prepared.Envelope.SourceDigest, StoryDigest: prepared.Envelope.StoryDigest, EnvironmentDigest: prepared.Envelope.Environment.Digest, EnvelopeDigest: prepared.Envelope.Digest}
+	raw, _ := json.Marshal(verdict)
+	return executor.Result{VerdictArtifact: "artifact:verdict", VerdictJSON: raw}, nil
+}
+func (remoteVerdictWorker) Cancel(context.Context, string) error { return nil }
 func requireFiles(t *testing.T, root string) {
 	t.Helper()
 	for path, raw := range map[string]string{".kitsoki/environments/ci.yaml": "schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\ntoolchains:\n  go: '1.25'\n", ".kitsoki/ci.yaml": "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/ci/app.yaml\n    triggers: [local]\n    result:\n      schema: capsule-ci-verdict/v1\n", ".kitsoki/stories/ci/app.yaml": "app:\n  id: ci\nrooms:\n  idle:\n    view: ok\n"} {

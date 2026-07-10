@@ -66,6 +66,7 @@ type Result struct {
 	ExecutionID     string            `json:"execution_id"`
 	ExitCode        int               `json:"exit_code"`
 	VerdictArtifact string            `json:"verdict_artifact,omitempty"`
+	VerdictJSON     []byte            `json:"verdict_json,omitempty"`
 	Artifacts       []string          `json:"artifacts,omitempty"`
 	Provider        map[string]string `json:"provider,omitempty"`
 }

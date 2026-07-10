@@ -2,8 +2,9 @@
 
 **Status:** v1 in progress. Environment definitions/locks, host and fake-remote
 executor contracts, pipeline-selected CLI/MCP placement, and environment
-operations ship locally. Arena adoption, a production remote worker, and
-project migrations remain.
+operations ship locally. The HTTPS remote-worker transport serializes sealed
+envelopes and typed results with header-only credential injection; project
+launch configuration, Arena adoption, and migrations remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
