@@ -1,9 +1,11 @@
 package studio
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -66,6 +68,11 @@ func (srv *Server) registerHostTools() {
 		// Regression: TestHostRun_TimeoutSchemaIsObject.
 		InputSchema: hostRunInputSchema(),
 	}, srv.handleHostRun)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "host.patch",
+		Description: "Apply a unified diff to a worktree directory with an automatic preflight. {dir (required), patch (required unified diff), dry_run?}: runs git apply --check first; when dry_run is false it then applies the patch. Returns {ok, applied, files[], stdout?}. A failed preflight is data (ok:false, applied:false), not a transport error.",
+	}, srv.handleHostPatch)
 }
 
 // hostRunInputSchema reflects HostRunArgs and patches the polymorphic `timeout`
@@ -113,6 +120,27 @@ type HostRunOK struct {
 	// file holding the full combined output.
 	Truncated  bool   `json:"truncated,omitempty"`
 	OutputPath string `json:"output_path,omitempty"`
+}
+
+// HostPatchArgs is the input to host.patch.
+type HostPatchArgs struct {
+	// Dir is the worktree directory the patch applies in. Required.
+	Dir string `json:"dir"`
+	// Patch is a unified diff, typically from git diff or apply_patch-style output
+	// converted to a standard diff by the caller. Required.
+	Patch string `json:"patch"`
+	// DryRun only performs the preflight check and reports the files the patch
+	// would touch.
+	DryRun bool `json:"dry_run,omitempty"`
+}
+
+// HostPatchOK is the host.patch result. ok is true exactly when the preflight
+// succeeded and, unless dry_run was set, the patch was applied.
+type HostPatchOK struct {
+	OK      bool     `json:"ok"`
+	Applied bool     `json:"applied"`
+	Files   []string `json:"files"`
+	Stdout  string   `json:"stdout,omitempty"`
 }
 
 // handleHostRun executes a command in a worktree and returns its exit code +
@@ -188,6 +216,97 @@ func (srv *Server) handleHostRun(
 		out.Stdout = marker + stdout[len(stdout)-limit:]
 	}
 	return nil, out, nil
+}
+
+func (srv *Server) handleHostPatch(
+	ctx context.Context,
+	req *mcpsdk.CallToolRequest,
+	args HostPatchArgs,
+) (*mcpsdk.CallToolResult, any, error) {
+	if args.Dir == "" {
+		return buildToolError(ErrBadRequest, "host.patch: dir is required (the worktree to patch)"), nil, nil
+	}
+	if strings.TrimSpace(args.Patch) == "" {
+		return buildToolError(ErrBadRequest, "host.patch: patch is required"), nil, nil
+	}
+	if info, err := os.Stat(args.Dir); err != nil || !info.IsDir() {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("host.patch: dir %q is not an accessible directory", args.Dir)), nil, nil
+	}
+
+	files := filesFromUnifiedDiff(args.Patch)
+	stdout, ok, err := runGitApply(ctx, args.Dir, args.Patch, "--check")
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("host.patch: %v", err)), nil, nil
+	}
+	if !ok {
+		return nil, HostPatchOK{OK: false, Applied: false, Files: files, Stdout: collapseTerminalProgress(stdout)}, nil
+	}
+	if args.DryRun {
+		return nil, HostPatchOK{OK: true, Applied: false, Files: files, Stdout: collapseTerminalProgress(stdout)}, nil
+	}
+
+	stdout, ok, err = runGitApply(ctx, args.Dir, args.Patch)
+	if err != nil {
+		return buildToolError(ErrBadRequest, fmt.Sprintf("host.patch: %v", err)), nil, nil
+	}
+	return nil, HostPatchOK{OK: ok, Applied: ok, Files: files, Stdout: collapseTerminalProgress(stdout)}, nil
+}
+
+func runGitApply(ctx context.Context, dir, patch string, extraArgs ...string) (string, bool, error) {
+	argv := append([]string{"apply", "--whitespace=nowarn"}, extraArgs...)
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(patch)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	if err == nil {
+		return out.String(), true, nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return out.String(), false, nil
+	}
+	return out.String(), false, err
+}
+
+func filesFromUnifiedDiff(patch string) []string {
+	seen := map[string]bool{}
+	var files []string
+	for _, line := range strings.Split(patch, "\n") {
+		var path string
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			parts := strings.Fields(line)
+			if len(parts) >= 4 {
+				path = trimDiffPath(parts[3])
+			}
+		case strings.HasPrefix(line, "+++ "):
+			parts := strings.Fields(strings.TrimPrefix(line, "+++ "))
+			if len(parts) == 0 {
+				continue
+			}
+			path = parts[0]
+			if path == "/dev/null" {
+				path = ""
+			} else {
+				path = trimDiffPath(path)
+			}
+		}
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		files = append(files, path)
+	}
+	return files
+}
+
+func trimDiffPath(path string) string {
+	path = strings.Trim(path, "\t\r\n")
+	path = strings.TrimPrefix(path, "a/")
+	path = strings.TrimPrefix(path, "b/")
+	return path
 }
 
 func collapseTerminalProgress(stdout string) string {

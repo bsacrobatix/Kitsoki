@@ -123,6 +123,7 @@ func TestStudioToolsListed(t *testing.T) {
 	assert.True(t, names["session.drive_operation"], "session.drive_operation registered (dotted name accepted)")
 	assert.True(t, names["inbox.sync_github"], "inbox.sync_github registered (dotted name accepted)")
 	assert.True(t, names["story.write"], "story.write registered on a read-write server")
+	assert.True(t, names["host.patch"], "host.patch registered on a read-write server")
 }
 
 // TestReadOnlyOmitsStoryWrite confirms a server built with ReadOnly() drops
@@ -140,6 +141,7 @@ func TestReadOnlyOmitsStoryWrite(t *testing.T) {
 		names[tool.Name] = true
 	}
 	assert.False(t, names["story.write"], "story.write must be omitted in read-only mode")
+	assert.False(t, names["host.patch"], "host.patch must be omitted in read-only mode")
 	assert.True(t, names["story.read"], "story.read stays available in read-only mode")
 	assert.True(t, names["story.validate"], "story.validate stays available in read-only mode")
 	assert.True(t, names["session.drive"], "replay session driving stays available in read-only mode")
