@@ -218,8 +218,10 @@ all consumers migrate.
   - Shipped: `kitsoki capsule open <core-name>` now routes through
     `CapsuleManager`/`SyntheticProvider` and preserves the legacy manifest,
     text, JSON, verify, and close behavior for synthetic core capsules.
-  - Remaining: route `list`, workspace/spec `verify`, and path/workspace
-    `close` through the manager without output regressions.
+    `kitsoki capsule list --kind core` now reads manager definitions and keeps
+    the legacy catalog JSON/text/Markdown projection.
+  - Remaining: route workspace/spec `verify` and path/workspace `close`
+    through the manager without output regressions.
 - [x] 2.2 Add `workspace create|status|commit|close` CLI verbs and JSON schemas
 - [x] 2.3 Add `kitsoki capsule mcp --project --pipeline --executor` plus an internal ephemeral-grant input and handle-scoped project/workspace/fs/exec/vcs/cleanup tools
 - [x] 2.4 Enforce symlink-safe FS confinement, declared-command/raw-argv policy, request-level narrowing, and secret redaction

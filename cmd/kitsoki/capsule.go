@@ -294,38 +294,49 @@ func normalizeCapsuleListKind(raw string) string {
 }
 
 func collectCoreCapsules(root string) ([]capsuleListEntry, error) {
-	paths, err := filepath.Glob(filepath.Join(root, "capsules", "*", "capsule.yaml"))
+	manager, err := capsuleproject.Open(root, nil)
+	if err != nil {
+		return nil, err
+	}
+	definitions, err := manager.Definitions.List(context.Background())
 	if err != nil {
 		return nil, err
 	}
 	var entries []capsuleListEntry
-	for _, path := range paths {
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("read capsule spec %s: %w", path, err)
-		}
-		var spec struct {
-			Name     string `yaml:"name"`
-			Scenario struct {
-				Kind string `yaml:"kind"`
-			} `yaml:"scenario"`
-		}
-		if err := goyaml.Unmarshal(raw, &spec); err != nil {
-			return nil, fmt.Errorf("parse capsule spec %s: %w", path, err)
-		}
-		name := strings.TrimSpace(spec.Name)
-		if name == "" {
-			name = filepath.Base(filepath.Dir(path))
+	for _, def := range definitions {
+		path := def.LegacyPath
+		scenario := ""
+		if def.Source.Kind == control.SourceSynthetic {
+			spec, _, err := capsule.Load(path)
+			if err != nil {
+				return nil, err
+			}
+			if spec.Scenario != nil {
+				scenario = strings.TrimSpace(spec.Scenario.Kind)
+			}
 		}
 		entries = append(entries, capsuleListEntry{
-			Ref:      name,
+			Ref:      def.ID,
 			Kind:     "core",
 			Path:     relCapsulePath(root, path),
-			Executor: "internal/capsule",
-			Scenario: strings.TrimSpace(spec.Scenario.Kind),
+			Executor: capsuleListExecutor(def),
+			Scenario: scenario,
 		})
 	}
 	return entries, nil
+}
+
+func capsuleListExecutor(def control.Definition) string {
+	switch def.Source.Kind {
+	case control.SourceSynthetic:
+		return "internal/capsule"
+	case control.SourceDevWorkspaceScript:
+		return string(control.SourceDevWorkspaceScript)
+	case control.SourceSelf, control.SourcePinned:
+		return "git"
+	default:
+		return string(def.Source.Kind)
+	}
 }
 
 func collectRepoHistoryCapsules(root string) ([]capsuleListEntry, error) {
