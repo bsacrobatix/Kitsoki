@@ -1,0 +1,22 @@
+states:
+  idle:
+    view: [{ heading: "Corpus forge" }, { prose: "Freeze only RED/GREEN-proved tasks before spending." }]
+    on: { start: [{ target: select }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+  select:
+    view: [{ heading: "Corpus forge · select" }, { code: "{{ world.selected_ids|default:'(pending)' }}" }]
+    on_enter:
+      - invoke: host.run
+        id: corpus_select
+        with: { cmd: "python3 tools/arena/scripts/corpus_forge.py select --input '{{ world.source_manifest }}' --out '{{ world.output_manifest }}' --limit {{ world.task_limit }} --selection-id '{{ world.selection_id }}'" }
+        bind: { selected_ids: stdout }
+        on_error: idle
+    on: { accept: [{ target: validate }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+  validate:
+    view: [{ heading: "Corpus forge · validate" }, { code: "{{ world.validation|default:'(pending)' }}" }]
+    on_enter:
+      - invoke: host.run
+        id: corpus_validate
+        with: { cmd: "python3 tools/arena/scripts/corpus_forge.py check --input '{{ world.output_manifest }}' --json-out '{{ world.validation_path }}'" }
+        bind: { validation: stdout_json }
+        on_error: idle
+    on: { accept: [{ target: "@exit:done" }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }

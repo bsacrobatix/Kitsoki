@@ -1,0 +1,18 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+host_handlers:
+  host.run:
+    by_call:
+      corpus_select: { data: { ok: true, exit_code: 0, stdout: '{"ok":true,"task_ids":["one","two","three","four","five"]}' } }
+      corpus_validate: { data: { ok: true, exit_code: 0, stdout_json: { ok: true, task_count: 5, task_ids: [one, two, three, four, five], failures: [] } } }
+turns:
+  - intent: { name: start, slots: {} }
+    expect_state: select
+  - intent: { name: accept, slots: {} }
+    expect_state: validate
+    expect_world: { validation: { ok: true, task_count: 5, task_ids: [one, two, three, four, five], failures: [] } }
+  - intent: { name: accept, slots: {} }
+    expect_state: __exit__done
+expect_terminal: true
+expect_no_errors: true
