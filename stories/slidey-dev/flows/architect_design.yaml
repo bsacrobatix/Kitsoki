@@ -123,10 +123,10 @@ host_handlers:
 
 turns:
   - intent: { name: core__continue, slots: {} }
-    expect_state: core.design
-  - intent: { name: core__discuss, slots: { message: "realize the speaker-notes-export PRD as a slidey runtime design" } }
     expect_state: core.design_search
   - intent: { name: core__confirm, slots: {} }
+    expect_state: core.design_refine
+  - intent: { name: core__discuss, slots: { message: "realize the speaker-notes-export PRD as a slidey runtime design" } }
     expect_state: core.design_refine
   - intent: { name: core__discuss, slots: { message: "name the notes collector and the CLI seam, and the per-scene Markdown shape" } }
     expect_state: core.design_refine

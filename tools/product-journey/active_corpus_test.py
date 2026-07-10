@@ -48,6 +48,7 @@ def main():
         "project-onboarding",
         "tui-slash-commands",
         "bugfix",
+        "gears-first-run-web-demo",
         "docs-to-mcp-first-run",
         "agent-launch-experience",
         "remote-worker-campaign",
@@ -57,11 +58,12 @@ def main():
         "evidence-backed-product-bug",
         "dogfood-marathon-tui",
     }
+    expected_scenario_count = len(expected_active_scenarios)
 
     _check("full persona corpus has no undeclared draft backlog", len(personas) == 8)
-    _check("full scenario corpus has no undeclared mined backlog", len(scenarios) == 12)
+    _check("full scenario corpus has no undeclared mined backlog", len(scenarios) == expected_scenario_count)
     _check("active persona corpus is runnable", len(active_personas) == 8)
-    _check("active scenario corpus is runnable", len(active_scenarios) == 12)
+    _check("active scenario corpus is runnable", len(active_scenarios) == expected_scenario_count)
     _check("active scenarios are the natural-use contract", {item["id"] for item in active_scenarios} == expected_active_scenarios)
     _check("mined scenarios are draft only", not any(item["id"].startswith("mined-scn-") for item in active_scenarios))
     _check("every scenario declares an explicit tier", all(item.get("tier") == "curated" for item in scenarios))
@@ -79,9 +81,9 @@ def main():
     _check("full corpus validation has no errors", result["errors"] == 0)
     _check("full corpus validation has no warnings", result["warnings"] == 0)
     _check("validation reports active personas", result["personas"] == 8)
-    _check("validation reports active scenarios", result["scenarios"] == 12)
+    _check("validation reports active scenarios", result["scenarios"] == expected_scenario_count)
     _check("validation reports all personas", result["all_personas"] == 8)
-    _check("validation reports all scenarios", result["all_scenarios"] == 12)
+    _check("validation reports all scenarios", result["all_scenarios"] == expected_scenario_count)
     _check("validation reports no draft personas", result["draft_personas"] == 0)
     _check("validation reports no draft scenarios", result["draft_scenarios"] == 0)
     _check("validation has no draft warnings left to report", not {"draft-personas", "draft-scenarios"} & {issue["id"] for issue in result["issues"]})

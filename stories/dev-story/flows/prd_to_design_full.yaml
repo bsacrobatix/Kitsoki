@@ -195,8 +195,8 @@ turns:
   # ── The PRD → Design handoff ───────────────────────────────────────────────
   - intent: { name: continue, slots: {} }
     expect_world:
-      design_seed_idea: ""
       design_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/tour-subcommand.md"
+      design_seed_idea: ""
 
   # ── Design half ────────────────────────────────────────────────────────────
   - intent: { name: discuss, slots: { message: "realize the tour-subcommand PRD as a runtime design" } }
