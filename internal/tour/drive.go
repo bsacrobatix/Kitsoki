@@ -260,6 +260,13 @@ func (e *executor) revealTurn() error {
 	if err := e.ease(max, e.paced(downMs)); err != nil {
 		return err
 	}
+	// The transcript can grow after the scroll-span calculation (notably when a
+	// cassette-backed agent result lands). Anchor the actual response row as the
+	// final visibility assertion, rather than trusting a stale max scroll value.
+	const lastAgentIntoView = `(() => { const rows = document.querySelectorAll('[data-testid="chat-row-agent"]'); const last = rows[rows.length - 1]; if (last) last.scrollIntoView({block:'end'}); })()`
+	if err := chromedp.Run(e.ctx, chromedp.Evaluate(lastAgentIntoView, nil)); err != nil {
+		return err
+	}
 	return e.dwell(1500)
 }
 

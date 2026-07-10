@@ -146,6 +146,18 @@ func advance(ctx context.Context, exec *executor, step TourStep) error {
 	}
 	if step.Advance == "route-match" {
 		if err := waitRouteChange(ctx, step.AdvanceRoute, 15*time.Second); err != nil {
+			// Session creation can finish after the first DOM click has returned
+			// (the button is disabled while the RPC is in flight). Retry the same
+			// explicit target once before declaring a navigation failure.
+			if step.Target != "" {
+				js := fmt.Sprintf(`(() => { const t = document.querySelector(%q); if (!t || t.disabled) return false; t.click(); return true; })()`, targetSelector(step.Target))
+				var retried bool
+				if retryErr := chromedp.Run(ctx, chromedp.Evaluate(js, &retried)); retryErr == nil && retried {
+					if retryWait := waitRouteChange(ctx, step.AdvanceRoute, 15*time.Second); retryWait == nil {
+						return exec.dwell(1000)
+					}
+				}
+			}
 			// HomeView exposes session-creation failures in place. Preserve that
 			// concrete cause instead of collapsing every failed new-session click
 			// into a route timeout, so storyboard authors can fix the real flow
