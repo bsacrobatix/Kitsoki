@@ -56,6 +56,39 @@ func TestCapsuleListRepoHistoryJSON(t *testing.T) {
 	t.Fatalf("missing repo-history/gears-rust/bug1 in %+v", payload.Capsules)
 }
 
+func TestCapsuleListCoreJSONUsesManagedDefinitions(t *testing.T) {
+	out, err := execRoot(t, "capsule", "list", "--kind", "core", "--json")
+	if err != nil {
+		t.Fatalf("capsule list --kind core --json: %v\n%s", err, out)
+	}
+	var payload struct {
+		OK       bool   `json:"ok"`
+		Kind     string `json:"kind"`
+		Capsules []struct {
+			Ref      string `json:"ref"`
+			Kind     string `json:"kind"`
+			Path     string `json:"path"`
+			Executor string `json:"executor"`
+			Scenario string `json:"scenario"`
+		} `json:"capsules"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("capsule list core JSON decode: %v\n%s", err, out)
+	}
+	if !payload.OK || payload.Kind != "core" {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+	for _, entry := range payload.Capsules {
+		if entry.Ref == "clean-repo" {
+			if entry.Kind != "core" || entry.Executor != "internal/capsule" || entry.Path != "capsules/clean-repo/capsule.yaml" || entry.Scenario != "git-flow" {
+				t.Fatalf("unexpected clean-repo entry: %+v", entry)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing clean-repo in %+v", payload.Capsules)
+}
+
 func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
 	out, err := execRoot(t, "capsule", "list", "--kind", "repo-history", "--markdown")
 	if err != nil {
