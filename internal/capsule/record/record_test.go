@@ -2,6 +2,9 @@ package record
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
@@ -9,6 +12,7 @@ import (
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/receipt"
 	"kitsoki/internal/capsule/reconcile"
+	capsuletrace "kitsoki/internal/capsule/trace"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +32,70 @@ func TestPersistBuildsReceiptAndTrace(t *testing.T) {
 	}
 	if out.Verification.Status != "valid" || out.Receipt.ReceiptID == "" {
 		t.Fatalf("stored %#v", out)
+	}
+}
+
+func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
+	run := validRunResult("job", "sha256:source")
+	run.Execution.ExecutionID = "exec-1"
+	run.Envelope.Environment.CacheKeys = []string{"project:runstatus"}
+	run.Envelope.Environment.SecretRequired = true
+	run.Envelope.Policy = executor.Policy{Network: "replay", MinimumSandbox: "workspace", ExternalWrite: "deny"}
+	sealed, err := executor.Seal(run.Envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Envelope = sealed
+	run.Verdict.SourceDigest = sealed.SourceDigest
+	run.Verdict.StoryDigest = sealed.StoryDigest
+	run.Verdict.EnvironmentDigest = sealed.Environment.Digest
+	run.Verdict.EnvelopeDigest = sealed.Digest
+
+	out, err := Persist(t.TempDir(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(out.TracePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	sum := sha256.Sum256([]byte(trimmed))
+	if out.Receipt.TraceDigest != "sha256:"+hex.EncodeToString(sum[:]) {
+		t.Fatalf("trace digest mismatch receipt=%s raw=%s", out.Receipt.TraceDigest, trimmed)
+	}
+	var doc capsuletrace.Document
+	if err := json.Unmarshal([]byte(trimmed), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := capsuletrace.ValidateDocument(doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Events) != 5 {
+		t.Fatalf("events %#v", doc.Events)
+	}
+	wantKinds := []string{
+		capsuletrace.KindWorkspaceReady,
+		capsuletrace.KindEnvironmentResolved,
+		capsuletrace.KindExecutorPrepared,
+		capsuletrace.KindCIStarted,
+		capsuletrace.KindCIVerdict,
+	}
+	for i, want := range wantKinds {
+		if doc.Events[i].Kind != want {
+			t.Fatalf("event %d kind=%s want=%s events=%#v", i, doc.Events[i].Kind, want, doc.Events)
+		}
+	}
+	env := doc.Events[1].Fields
+	if env["environment_digest"] != sealed.Environment.Digest || env["environment_private_inputs"] != true {
+		t.Fatalf("environment fields %#v", env)
+	}
+	policy := doc.Events[2].Fields
+	if policy["network"] != "replay" || policy["minimum_sandbox"] != "workspace" || policy["external_write"] != "deny" {
+		t.Fatalf("policy fields %#v", policy)
+	}
+	if strings.Contains(trimmed, "/Users/") || strings.Contains(strings.ToLower(trimmed), "secret_required") {
+		t.Fatalf("trace leaked unsafe content: %s", trimmed)
 	}
 }
 

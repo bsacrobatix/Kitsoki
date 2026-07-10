@@ -36,10 +36,7 @@ func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Stored{}, err
 	}
-	trace := capsuletrace.NewDocument(
-		capsuletrace.Event{Kind: capsuletrace.KindCIStarted, JobID: string(result.Job.ID), EnvelopeDigest: result.Envelope.Digest},
-		capsuletrace.Event{Kind: capsuletrace.KindCIVerdict, JobID: string(result.Job.ID), EnvelopeDigest: result.Envelope.Digest, Outcome: result.Verdict.Outcome},
-	)
+	trace := runTrace(result)
 	raw, err := capsuletrace.MarshalDocument(trace)
 	if err != nil {
 		return Stored{}, err
@@ -74,6 +71,53 @@ func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions
 		return Stored{}, err
 	}
 	return Stored{Receipt: built, Verification: verification, TracePath: tracePath, ReceiptPath: receiptPath}, nil
+}
+
+func runTrace(result ci.RunResult) capsuletrace.Document {
+	jobID := string(result.Job.ID)
+	envelope := result.Envelope
+	events := []capsuletrace.Event{
+		{
+			Kind:       capsuletrace.KindWorkspaceReady,
+			InstanceID: envelope.Instance.ID,
+			Generation: envelope.Instance.Generation,
+			Fields: map[string]any{
+				"definition_digest": envelope.DefinitionDigest,
+				"source_digest":     envelope.SourceDigest,
+			},
+		},
+		{
+			Kind:           capsuletrace.KindEnvironmentResolved,
+			JobID:          jobID,
+			EnvelopeDigest: envelope.Digest,
+			Fields: map[string]any{
+				"environment_id":             envelope.Environment.ID,
+				"environment_digest":         envelope.Environment.Digest,
+				"environment_definition":     envelope.Environment.DefinitionDigest,
+				"environment_network":        envelope.Environment.Network,
+				"environment_sandbox":        envelope.Environment.Sandbox,
+				"environment_cache_keys":     envelope.Environment.CacheKeys,
+				"environment_private_inputs": envelope.Environment.SecretRequired,
+			},
+		},
+		{
+			Kind:           capsuletrace.KindExecutorPrepared,
+			JobID:          jobID,
+			EnvelopeDigest: envelope.Digest,
+			Fields: map[string]any{
+				"execution_id":     result.Execution.ExecutionID,
+				"network":          envelope.Policy.Network,
+				"minimum_sandbox":  envelope.Policy.MinimumSandbox,
+				"external_write":   envelope.Policy.ExternalWrite,
+				"source_digest":    envelope.SourceDigest,
+				"story_digest":     envelope.StoryDigest,
+				"verdict_artifact": result.Execution.VerdictArtifact,
+			},
+		},
+		{Kind: capsuletrace.KindCIStarted, JobID: jobID, EnvelopeDigest: envelope.Digest},
+		{Kind: capsuletrace.KindCIVerdict, JobID: jobID, EnvelopeDigest: envelope.Digest, Outcome: result.Verdict.Outcome},
+	}
+	return capsuletrace.NewDocument(events...)
 }
 
 func signByPolicy(project string, r receipt.Receipt, signer receipt.Signer) (receipt.Receipt, error) {

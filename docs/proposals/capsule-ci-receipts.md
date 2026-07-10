@@ -190,15 +190,22 @@ of evidence.
 ```text
 ## 1. Emit and schema
 - [ ] 1.1 Define capsule lifecycle, environment/executor/policy, CI verdict, and sync trace event schemas with shared run/envelope ids
-  - Shipped: `internal/capsule/trace` defines `capsule-ci-trace/v1` document validation plus CI/workspace/environment/sync event-kind schemas; CI receipt traces and sync lifecycle facts consume these shared constants.
-  - Remaining: complete producer adoption for all lifecycle/environment/executor/policy facts and golden trace coverage.
+  - Shipped: `internal/capsule/trace` defines `capsule-ci-trace/v1`
+    document validation plus CI/workspace/environment/executor/sync
+    event-kind schemas. Persisted CI receipt traces now emit workspace,
+    environment, executor-policy, CI start, and verdict facts from the shared
+    run/envelope ids; sync lifecycle facts consume the same constants.
+  - Remaining: complete producer adoption for story decision/cost facts and
+    sync promotion facts, plus the remaining golden trace cases.
 - [x] 1.2 Define capsule-ci-receipt/v1 JSON schema, canonicalizer, content hashing, and verification result
 - [ ] 1.3 Wire runtime/story producers and enforce secret/path redaction
   - Shipped: shared trace validation rejects provider-unsafe `fields` and
     `error` content, including secret/token/password/credential-style keys,
-    secret-looking inline values, and absolute host paths.
-  - Remaining: wire every runtime/story producer through this schema and add
-    producer-specific redaction fixtures.
+    secret-looking inline values, and absolute host paths. `record.Persist`
+    now writes its trace through that schema and has a producer fixture for
+    lifecycle/environment/policy facts.
+  - Remaining: wire story decision/cost producers and sync producers through
+    this schema and add their producer-specific redaction fixtures.
 
 ## 2. Rebuild and consume
 - [x] 2.1 Add deterministic receipt builder over manifests, trace, artifact index, and typed verdict

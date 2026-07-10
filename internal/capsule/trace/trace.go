@@ -22,6 +22,8 @@ const (
 
 	KindEnvironmentResolved = "capsule.environment.resolved"
 
+	KindExecutorPrepared = "capsule.executor.prepared"
+
 	KindCIStarted = "capsule.ci.started"
 	KindCIVerdict = "capsule.ci.verdict"
 
@@ -100,7 +102,7 @@ func ValidateEvent(event Event) error {
 		return err
 	}
 	switch event.Kind {
-	case KindCIStarted, KindCIVerdict:
+	case KindCIStarted, KindCIVerdict, KindExecutorPrepared:
 		if event.JobID == "" || event.EnvelopeDigest == "" {
 			return fmt.Errorf("%s requires job_id and envelope_digest", event.Kind)
 		}
