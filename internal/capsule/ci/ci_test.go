@@ -56,3 +56,17 @@ func TestFileRunStorePersistsCompletedRun(t *testing.T) {
 		t.Fatalf("record %#v", got)
 	}
 }
+
+func TestFileRunStoreCancelParksOrRunningJob(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	if err := store.Write(RunRecord{JobID: "job-cancel", Result: RunResult{Job: artifactjob.Job{ID: "job-cancel", Status: artifactjob.StatusAwaitingInput}, Verdict: Verdict{Outcome: "needs_input"}}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Cancel("job-cancel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Result.Job.Status != artifactjob.StatusCancelled || got.Result.Verdict.Outcome != "cancelled" {
+		t.Fatalf("cancel %#v", got)
+	}
+}

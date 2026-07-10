@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"kitsoki/internal/artifactjob"
 )
 
 // RunRecord is the durable, project-local projection used by `capsule ci
@@ -64,4 +66,26 @@ func (s FileRunStore) List() ([]RunRecord, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].JobID > out[j].JobID })
 	return out, nil
+}
+
+// Cancel records a visible terminal cancel for a parked/running CI job. Active
+// remote providers receive the same request through ExecutorProvider.Cancel;
+// this local store path makes cancellation durable even when no worker remains.
+func (s FileRunStore) Cancel(id string) (RunRecord, error) {
+	record, err := s.Get(id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	switch record.Result.Job.Status {
+	case artifactjob.StatusRunning, artifactjob.StatusAwaitingInput, artifactjob.StatusInterrupted:
+	default:
+		return RunRecord{}, fmt.Errorf("capsule ci: job %s cannot be cancelled from %s", id, record.Result.Job.Status)
+	}
+	record.Result.Job.Status = artifactjob.StatusCancelled
+	record.Result.Verdict.Outcome = "cancelled"
+	record.Result.Verdict.PromotionEligible = false
+	if err := s.Write(record); err != nil {
+		return RunRecord{}, err
+	}
+	return record, nil
 }
