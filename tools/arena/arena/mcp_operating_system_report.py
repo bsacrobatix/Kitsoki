@@ -20,6 +20,7 @@ from typing import Any
 SCHEMA = "mcp_operating_system_decision/v1"
 REQUIRED_PROFILES = ("strict", "escape", "legacy")
 REQUIRED_CASE_COUNT = 12
+LIVE_HARD_CAP_USD = 25.0
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -295,17 +296,25 @@ def validate_report(report: dict[str, Any]) -> None:
         raise ValueError("decision report must retain the no-test live boundary")
 
 
-def authorize_live_calibration(spec_path: str | Path, *, authorization: str, budget_usd: float) -> dict[str, Any]:
+def authorize_live_calibration(
+    spec_path: str | Path, *, authorization: str, budget_usd: float, provider: str, model: str
+) -> dict[str, Any]:
     spec = load_spec(spec_path)
     policy = spec["options"]["live_calibration"]
     if authorization != policy["operator_authorization"]:
         raise ValueError("live calibration requires the explicit operator authorization token")
-    if not isinstance(budget_usd, (int, float)) or budget_usd < policy["minimum_budget_usd"]:
-        raise ValueError("live calibration budget is below the configured minimum")
+    if not isinstance(budget_usd, (int, float)) or isinstance(budget_usd, bool) or float(budget_usd) != LIVE_HARD_CAP_USD:
+        raise ValueError(f"live calibration requires the exact USD {LIVE_HARD_CAP_USD:.0f} hard cap")
+    if provider not in {"claude-cli", "generic-command"}:
+        raise ValueError("live calibration requires a supported explicit provider identity")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("live calibration requires an explicit selected model")
     return {
         "schema_version": "mcp_operating_system_live_calibration_request/v1",
         "status": "authorized-not-dispatched",
         "budget_usd": budget_usd,
+        "provider": provider,
+        "model": model,
         "corpus_version": spec["targets"][0]["corpus_version"],
         "policy_hash": spec["targets"][0]["policy_hash"],
         "note": "Authorization is recorded separately; no provider call is made by this command.",
@@ -348,13 +357,21 @@ def main(argv: list[str] | None = None) -> int:
     live_parser.add_argument("--spec", required=True)
     live_parser.add_argument("--operator-authorization", required=True)
     live_parser.add_argument("--budget-usd", required=True, type=float)
+    live_parser.add_argument("--provider", required=True, choices=("claude-cli", "generic-command"))
+    live_parser.add_argument("--model", required=True)
     args = parser.parse_args(argv)
     if args.command == "report":
         print(json.dumps(write_bundle(args.spec, args.out), sort_keys=True))
     elif args.command == "replay":
         print(json.dumps(replay_cell(load_spec(args.spec), args.profile, args.case_id), sort_keys=True))
     else:
-        print(json.dumps(authorize_live_calibration(args.spec, authorization=args.operator_authorization, budget_usd=args.budget_usd), sort_keys=True))
+        print(json.dumps(authorize_live_calibration(
+            args.spec,
+            authorization=args.operator_authorization,
+            budget_usd=args.budget_usd,
+            provider=args.provider,
+            model=args.model,
+        ), sort_keys=True))
     return 0
 
 
