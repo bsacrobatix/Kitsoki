@@ -69,6 +69,57 @@ TRANSPORT_PROFILES: dict[str, dict[str, Any]] = {
                 "other than degraded-evidence."
             ),
         },
+        # editor_evidence_contract is a SECOND, stronger tier a vscode leg can
+        # opportunistically reach on top of the mandatory bridge-level floor
+        # above -- see docs/persona-qa.md's long-standing note that "VS Code
+        # checks are bridge-level proof unless a future native editor
+        # integration raises the contract". That integration is the
+        # host.ide.* verb family (internal/host/ide_handlers.go): it queries
+        # the REAL editor over the live internal/ide.Link the VS Code
+        # extension opens (the same link the TUI's `/ide` command drives),
+        # not the runstatus-webview stand-in visual.open kind=vscode renders.
+        # It only produces evidence when BOTH (a) a genuine VS Code + kitsoki
+        # extension is linked to this process, AND (b) the leg's driven
+        # primary_story issues a host.ide.* call (e.g. stories/bugfix's
+        # `validating` room already calls host.ide.get_diagnostics) while
+        # advancing the leg -- so this tier is opportunistic, not guaranteed,
+        # and MUST NOT be treated as a substitute for the bridge-level floor.
+        # No visual pixels are captured this way (that would need a real VS
+        # Code window screenshot, which the dev-workflows matrix's Mode A
+        # investigation found requires extension launch+packaging no story
+        # host call can reach deterministically today -- tracked as the
+        # remaining gap, not faked here).
+        "editor_evidence_contract": {
+            "primary_tool": "session.trace (reads the ide.context_captured event a host.ide.* call appends)",
+            "evidence_kind": "ide_context_capture",
+            "level": "editor-level",
+            "capture_hint": (
+                "After driving the leg's session to its target state, call "
+                "session.trace and look for a POST-drive `ide.context_captured` "
+                "event (kind emitted by host.ide.get_open_editors / "
+                "get_diagnostics / get_selection) whose payload has "
+                "`connected: true`. Attach that event's JSON (never the raw "
+                "selection/diagnostic text -- the handler already redacts it, "
+                "keeping only file path, counts, and provenance) as "
+                "post_drive_editor_evidence_ref, and its turn/verb as "
+                "post_drive_editor_trace_ref. This is genuine editor-level "
+                "proof -- it can only exist when a real editor was connected "
+                "AND actually queried during the drive, unlike the "
+                "always-available bridge-level capture above. Not every "
+                "primary_story queries host.ide.* today and no live VS Code "
+                "editor is attached in replay/CI, so this tier is "
+                "opportunistic: when no such event is found, report it "
+                "honestly (leave post_drive_editor_evidence_ref empty) rather "
+                "than fabricating one -- the bridge-level capture above stays "
+                "the mandatory floor either way."
+            ),
+            "requires": (
+                "A real internal/ide.Link connection (VS Code + the kitsoki "
+                "extension, matched by workspace) AND the leg's driven "
+                "primary_story issuing host.ide.get_open_editors / "
+                "get_diagnostics / get_selection during or after the drive."
+            ),
+        },
     },
     "cli": {
         "id": "cli",
