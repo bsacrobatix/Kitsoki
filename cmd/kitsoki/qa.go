@@ -498,7 +498,7 @@ func qaVerifyCmd() *cobra.Command {
 			return err
 		}
 		if receipt == "" {
-			receipt = filepath.Join(filepath.Dir(args[0]), "release-receipt.json")
+			receipt = filepath.Join(defaultJourneyArtifacts(root, pack.ID, digest), "release-receipt.json")
 		}
 		raw, err := os.ReadFile(receipt)
 		if err != nil {
@@ -519,7 +519,7 @@ func qaVerifyCmd() *cobra.Command {
 		fmt.Fprintf(cmd.OutOrStdout(), "✓ %s — release ready\n", pack.ID)
 		return nil
 	}}
-	cmd.Flags().StringVar(&receipt, "receipt", "", "release receipt path (default: beside journey manifest)")
+	cmd.Flags().StringVar(&receipt, "receipt", "", "release receipt path (default: current journey artifact directory)")
 	return cmd
 }
 
