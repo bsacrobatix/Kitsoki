@@ -72,6 +72,26 @@ type ApplyResult struct {
 	NewTarget  string `json:"new_target"`
 	Applied    bool   `json:"applied"`
 }
+type Event struct {
+	Kind              string    `json:"kind"`
+	At                time.Time `json:"at"`
+	PlanDigest        string    `json:"plan_digest,omitempty"`
+	Operation         Operation `json:"operation,omitempty"`
+	Class             Class     `json:"class,omitempty"`
+	TargetRef         string    `json:"target_ref,omitempty"`
+	Candidate         string    `json:"candidate,omitempty"`
+	OldTarget         string    `json:"old_target,omitempty"`
+	NewTarget         string    `json:"new_target,omitempty"`
+	ContinuationToken string    `json:"continuation_token,omitempty"`
+	Error             string    `json:"error,omitempty"`
+}
+type EventSink interface {
+	Emit(context.Context, Event) error
+}
+type EventSinkFunc func(context.Context, Event) error
+
+func (f EventSinkFunc) Emit(ctx context.Context, e Event) error { return f(ctx, e) }
+
 type VCSProvider interface {
 	Observe(context.Context, string, string, uint64) (ObservedRefs, error)
 	IsAncestor(context.Context, string, string, string) (bool, error)
@@ -91,6 +111,7 @@ type Reconciler struct {
 	VCS       VCSProvider
 	Publisher PublishProvider
 	Gates     GateVerifier
+	Events    EventSink
 	Now       func() time.Time
 }
 type PlanRequest struct {
@@ -128,6 +149,9 @@ func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
 	}
 	p.ID = "plan-" + shortHash([]byte(strings.Join([]string{string(p.Operation), p.Workspace, p.TargetRef, p.Candidate}, "\x00")))
 	p.Digest = planDigest(p)
+	if err := r.emit(ctx, Event{Kind: "capsule.sync.planned", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: continuationToken(p)}); err != nil {
+		return Plan{}, err
+	}
 	return p, nil
 }
 func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (ApplyResult, error) {
@@ -145,6 +169,9 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 		if p.Continuation != nil {
 			token = ": " + p.Continuation.Token
 		}
+		if err := r.emit(ctx, Event{Kind: "capsule.sync.conflicted", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: continuationToken(p), Error: "diverged plan requires integration conflict continuation"}); err != nil {
+			return ApplyResult{}, err
+		}
 		return ApplyResult{}, fmt.Errorf("capsule reconcile: diverged plan requires integration conflict continuation%s", token)
 	}
 	if p.RequiredGate != "" {
@@ -160,16 +187,30 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 		return ApplyResult{}, err
 	}
 	if current.WorkspaceHead != p.Expected.WorkspaceHead || current.Target != p.Expected.Target || current.Dirty != p.Expected.Dirty || current.Generation != p.Expected.Generation {
+		if err := r.emit(ctx, Event{Kind: "capsule.sync.stale", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: p.Expected.Target, NewTarget: current.Target, Error: "observed refs changed"}); err != nil {
+			return ApplyResult{}, err
+		}
 		return ApplyResult{}, fmt.Errorf("capsule reconcile: stale plan")
 	}
 	if p.Class == UpToDate {
-		return ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: current.Target, Applied: true}, nil
+		result := ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: current.Target, Applied: true}
+		if err := r.emitApplied(ctx, p, result); err != nil {
+			return ApplyResult{}, err
+		}
+		return result, nil
 	}
 	if p.Operation == Publish {
 		if r.Publisher == nil {
 			return ApplyResult{}, fmt.Errorf("capsule reconcile: remote publish provider is required")
 		}
-		return r.Publisher.Publish(ctx, p, current)
+		result, err := r.Publisher.Publish(ctx, p, current)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		if err := r.emitApplied(ctx, p, result); err != nil {
+			return ApplyResult{}, err
+		}
+		return result, nil
 	}
 	if p.Operation == Promote || p.Operation == Integrate || p.Operation == Refresh {
 		ok, err := r.VCS.IsAncestor(ctx, p.Workspace, current.Target, p.Candidate)
@@ -183,7 +224,11 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 	if err := r.VCS.UpdateRef(ctx, p.Workspace, p.TargetRef, p.Candidate, current.Target); err != nil {
 		return ApplyResult{}, err
 	}
-	return ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: p.Candidate, Applied: true}, nil
+	result := ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: p.Candidate, Applied: true}
+	if err := r.emitApplied(ctx, p, result); err != nil {
+		return ApplyResult{}, err
+	}
+	return result, nil
 }
 func (r Reconciler) classify(ctx context.Context, workspace string, o ObservedRefs) (Class, error) {
 	if o.Dirty {
@@ -256,6 +301,24 @@ func (r Reconciler) now() time.Time {
 		return r.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+func (r Reconciler) emit(ctx context.Context, e Event) error {
+	if r.Events == nil {
+		return nil
+	}
+	if e.At.IsZero() {
+		e.At = r.now()
+	}
+	return r.Events.Emit(ctx, e)
+}
+func (r Reconciler) emitApplied(ctx context.Context, p Plan, result ApplyResult) error {
+	return r.emit(ctx, Event{Kind: "capsule.sync.applied", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: result.OldTarget, NewTarget: result.NewTarget})
+}
+func continuationToken(p Plan) string {
+	if p.Continuation == nil {
+		return ""
+	}
+	return p.Continuation.Token
 }
 func planDigest(p Plan) string {
 	p.Digest = ""
