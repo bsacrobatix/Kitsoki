@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
 const ConflictArtifactSchema = "capsule-sync-conflict/v1"
@@ -42,6 +44,13 @@ type IntegrationInstance struct {
 	State             string    `json:"state"`
 	ConflictPaths     []string  `json:"conflict_paths,omitempty"`
 	StatusPorcelain   string    `json:"status_porcelain,omitempty"`
+}
+type ContinuationApplyRequest struct {
+	Plan              Plan
+	ProjectRoot       string
+	ResolverDecision  string
+	LostWorkReview    string
+	ValidationReceipt string
 }
 
 func (r Reconciler) MaterializeConflictArtifact(ctx context.Context, p Plan, projectRoot string) (ConflictArtifact, string, error) {
@@ -173,6 +182,86 @@ func (r Reconciler) MaterializeIntegrationInstance(ctx context.Context, p Plan, 
 	return instance, artifactPath, nil
 }
 
+func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApplyRequest) (ApplyResult, error) {
+	if r.VCS == nil {
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: vcs provider is required")
+	}
+	p := req.Plan
+	if err := validateConflictPlan(p); err != nil {
+		return ApplyResult{}, err
+	}
+	if strings.TrimSpace(req.ResolverDecision) == "" || strings.TrimSpace(req.LostWorkReview) == "" || strings.TrimSpace(req.ValidationReceipt) == "" {
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: continuation requires resolver decision, independent lost-work review, and validation receipt")
+	}
+	root, err := filepath.Abs(req.ProjectRoot)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	instance, err := readIntegrationInstance(root, p.Continuation.Token)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if instance.PlanDigest != p.Digest || instance.ContinuationToken != p.Continuation.Token {
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: integration instance does not match plan")
+	}
+	instancePath, err := resolveSyncPath(root, instance.InstancePath)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	status, err := git(ctx, instancePath, "status", "--porcelain")
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if strings.TrimSpace(status) != "" {
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: integration instance must be clean before continuation apply")
+	}
+	resolved, err := git(ctx, instancePath, "rev-parse", "HEAD")
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	resolved = strings.TrimSpace(resolved)
+	candidateIncluded, err := r.VCS.IsAncestor(ctx, instancePath, p.Candidate, resolved)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	targetIncluded, err := r.VCS.IsAncestor(ctx, instancePath, p.Expected.Target, resolved)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if !candidateIncluded || !targetIncluded {
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: resolved integration commit does not preserve both candidate and target histories")
+	}
+	if p.RequiredGate != "" {
+		if r.Gates == nil {
+			return ApplyResult{}, fmt.Errorf("capsule reconcile: gate verifier is required")
+		}
+		if err := r.Gates.Verify(ctx, req.ValidationReceipt, p); err != nil {
+			return ApplyResult{}, err
+		}
+	}
+	current, err := r.VCS.Observe(ctx, p.Workspace, p.TargetRef, p.Expected.Generation)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if current.WorkspaceHead != p.Expected.WorkspaceHead || current.Target != p.Expected.Target || current.Dirty != p.Expected.Dirty || current.Generation != p.Expected.Generation {
+		if err := r.emit(ctx, Event{Kind: capsuletrace.KindSyncStale, PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: p.Expected.Target, NewTarget: current.Target, Error: "observed refs changed"}); err != nil {
+			return ApplyResult{}, err
+		}
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: stale plan")
+	}
+	if _, err := git(ctx, p.Workspace, "fetch", instancePath, resolved); err != nil {
+		return ApplyResult{}, err
+	}
+	if err := r.VCS.UpdateRef(ctx, p.Workspace, p.TargetRef, resolved, current.Target); err != nil {
+		return ApplyResult{}, err
+	}
+	result := ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: resolved, Applied: true}
+	if err := r.emitApplied(ctx, p, result); err != nil {
+		return ApplyResult{}, err
+	}
+	return result, nil
+}
+
 func changedPaths(ctx context.Context, dir, from, to string) ([]string, error) {
 	return changedPathsWithFilter(ctx, dir, "", from, to)
 }
@@ -218,6 +307,34 @@ func validateConflictPlan(p Plan) error {
 		return fmt.Errorf("capsule reconcile: conflict artifact requires a diverged continuation plan")
 	}
 	return nil
+}
+
+func readIntegrationInstance(root, token string) (IntegrationInstance, error) {
+	path := filepath.Join(root, ".capsules", "sync", token+".integration.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return IntegrationInstance{}, err
+	}
+	var instance IntegrationInstance
+	if err := json.Unmarshal(raw, &instance); err != nil {
+		return IntegrationInstance{}, err
+	}
+	if instance.Schema != IntegrationInstanceSchema {
+		return IntegrationInstance{}, fmt.Errorf("capsule reconcile: invalid integration instance schema %q", instance.Schema)
+	}
+	return instance, nil
+}
+
+func resolveSyncPath(root, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("capsule reconcile: integration instance path must be project-relative")
+	}
+	candidate := filepath.Clean(filepath.Join(root, filepath.FromSlash(rel)))
+	syncRoot := filepath.Join(root, ".capsules", "sync")
+	if related, err := filepath.Rel(syncRoot, candidate); err != nil || filepath.IsAbs(related) || strings.HasPrefix(related, ".."+string(filepath.Separator)) || related == ".." {
+		return "", fmt.Errorf("capsule reconcile: integration instance path escapes sync scope")
+	}
+	return candidate, nil
 }
 
 func gitClone(ctx context.Context, from, to string) error {

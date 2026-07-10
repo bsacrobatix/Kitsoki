@@ -201,6 +201,19 @@ func TestCapsuleMCPSyncConflictsMaterializesProjectRelativeArtifact(t *testing.T
 	require.True(t, strings.HasPrefix(integrationBody.Instance.InstancePath, ".capsules/sync/"), "integration instance should stay inside Capsule state: %s", integrationBody.Instance.InstancePath)
 	require.FileExists(t, filepath.Join(project, filepath.FromSlash(integrationBody.Path)))
 	require.DirExists(t, filepath.Join(project, filepath.FromSlash(integrationBody.Instance.InstancePath)))
+	integrationPath := filepath.Join(project, filepath.FromSlash(integrationBody.Instance.InstancePath))
+	runMCPGit(t, integrationPath, "config", "user.email", "capsule@example.invalid")
+	runMCPGit(t, integrationPath, "config", "user.name", "Capsule Test")
+	runMCPGit(t, integrationPath, "commit", "-m", "resolved integration")
+	continued, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.continue", Arguments: map[string]any{"plan_digest": planBody.Plan.Digest, "resolver_decision": "artifact:resolver", "lost_work_review": "artifact:review", "validation_receipt": "receipt:validation"}})
+	require.NoError(t, err)
+	require.False(t, continued.IsError, contentText(continued))
+	require.NotContains(t, contentText(continued), project, "continuation result must not leak host paths")
+	var continuedBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(continued)), &continuedBody))
+	require.Greater(t, continuedBody.Workspace.Generation, createdBody.Workspace.Generation)
 }
 
 func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {

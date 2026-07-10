@@ -6,10 +6,11 @@ are available through Capsule CLI/MCP. The native `development` compatibility
 provider preserves the existing protected rebase/gate workflow. `publish` is now
 guarded behind an explicit remote publisher provider instead of local ref
 mutation. Conflict plans now carry structured continuation tokens, required
-story inputs, `capsule-sync-conflict/v1` path/tree artifacts, and managed
-`capsule-sync-integration/v1` integration instances; a credential-free local
-bare-remote publish provider ships for tests/local development. Continuation
-apply, fetch parity, and the production remote publish provider remain.
+story inputs, `capsule-sync-conflict/v1` path/tree artifacts, managed
+`capsule-sync-integration/v1` integration instances, and continuation apply
+from resolved integration commits; a credential-free local bare-remote publish
+provider ships for tests/local development. Story-level resolver UX, fetch
+parity, and the production remote publish provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -189,9 +190,10 @@ operations.
 
 ## 2. Conflict and remote seams
 - [ ] 2.1 Create integration instances and structured conflict/continuation artifacts
-  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, CLI/MCP `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, and overlaps, and CLI/MCP `capsule-sync-integration/v1` managed integration instances under `.capsules/sync/`.
-  - Remaining: continuation apply from resolved integration instances.
+  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, CLI/MCP `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, overlaps, CLI/MCP `capsule-sync-integration/v1` managed integration instances under `.capsules/sync/`, and continuation apply from resolved integration commits that preserve both histories.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
+  - Shipped: runtime continuation apply refuses to proceed without resolver decision, independent lost-work review, and validation receipt inputs.
+  - Remaining: wire the git-ops/dev-story resolver and reviewer rooms to these inputs.
 - [ ] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
   - Shipped: local bare-remote publish provider with live remote-ref lease check and no credential surface.
   - Remaining: explicit fetch-provider parity and production remote-provider split.

@@ -13,7 +13,7 @@ import (
 
 func capsuleSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "sync", Short: "Plan and apply stale-safe Capsule reconciliation"}
-	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd())
+	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd(), capsuleSyncContinueCmd())
 	return cmd
 }
 
@@ -180,6 +180,41 @@ func capsuleSyncIntegrationCmd() *cobra.Command {
 	cmd.Flags().StringVar(&digest, "plan", "", "plan digest")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("plan")
+	return cmd
+}
+
+func capsuleSyncContinueCmd() *cobra.Command {
+	var project, digest, resolverDecision, lostWorkReview, validationReceipt string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "continue",
+		Short: "Apply a resolved sync continuation from a managed integration instance",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := filepath.Abs(project)
+			if err != nil {
+				return err
+			}
+			stored, err := (reconcile.FilePlanStore{ProjectRoot: root}).Get(digest)
+			if err != nil {
+				return err
+			}
+			result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: root}}).ApplyContinuation(cmd.Context(), reconcile.ContinuationApplyRequest{Plan: stored.Plan, ProjectRoot: root, ResolverDecision: resolverDecision, LostWorkReview: lostWorkReview, ValidationReceipt: validationReceipt})
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, map[string]any{"ok": true, "result": result}, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&digest, "plan", "", "plan digest")
+	cmd.Flags().StringVar(&resolverDecision, "resolver-decision", "", "resolver decision artifact or receipt id")
+	cmd.Flags().StringVar(&lostWorkReview, "lost-work-review", "", "independent lost-work review artifact or receipt id")
+	cmd.Flags().StringVar(&validationReceipt, "validation-receipt", "", "validation receipt id")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("plan")
+	_ = cmd.MarkFlagRequired("resolver-decision")
+	_ = cmd.MarkFlagRequired("lost-work-review")
+	_ = cmd.MarkFlagRequired("validation-receipt")
 	return cmd
 }
 
