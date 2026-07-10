@@ -104,7 +104,10 @@ scripts/dev-workspace.sh status <workspace-or-id> [--json]
 
 Use `status` to find the path, current branch, short HEAD, and dirty state. For
 agent sessions, this is the supported replacement for manually inspecting linked
-worktree registries.
+worktree registries. While a create is still cloning, `status` reports
+`state: initializing` (or `"state": "initializing"` with `--json`) and exits
+non-zero rather than misclassifying the incomplete directory as unmanaged.
+Wait for the owner PID to finish; do not run a second create or teardown.
 
 ### `commit`
 
@@ -193,6 +196,23 @@ scripts/dev-workspace.sh teardown <workspace-or-id> --force
 Teardown refuses unmanaged directories and dirty workspaces. Use `--force` only
 when intentionally discarding uncommitted local state.
 
+### `recover`
+
+```sh
+scripts/dev-workspace.sh recover <workspace-or-id>
+scripts/dev-workspace.sh recover <workspace-or-id> --discard-incomplete
+```
+
+Creation claims `<root>/.initializing/<id>` atomically before cloning. The
+marker records the owning PID and intended target without writing anything into
+the target itself, so concurrent lifecycle calls can distinguish initialization
+from an unmanaged workspace. A live marker is never recoverable. A stale marker
+is explicit recovery work: `recover` removes it when the target is already a
+valid managed workspace or absent. If an interrupted clone remains, recovery
+first refuses; pass `--discard-incomplete` to remove only that marker-matched
+unmanaged Git clone and then release the stale marker. It never deletes an
+unexpected non-workspace directory.
+
 ## Story/runtime integration
 
 The `workspace` host interface still uses the historical provider name
@@ -217,6 +237,11 @@ not a direction to create a Git linked worktree.
   existing path when branch and owner metadata match.
 - **Existing workspace, different session:** `create` refuses reuse. Pick a
   distinct id or close the old session/workspace deliberately.
+- **Workspace is initializing:** `status` identifies the live or stale
+  initialization marker, and all mutating lifecycle commands refuse it. Wait
+  for the live owner. For an interrupted owner, use `recover`; use
+  `--discard-incomplete` only after confirming its marker-matched clone can be
+  discarded.
 - **Primary checkout has dirt:** normal staging merges update branch refs
   without touching the primary working tree.
 - **Workspace is dirty:** `merge` refuses to land. Commit or discard the

@@ -11,6 +11,8 @@ CAPSULE_SENTINEL=".kitsoki-capsule"
 CAPSULE_MANIFEST="capsule-manifest.json"
 CLONE_SENTINEL=".kitsoki-clone"
 DEV_MANIFEST=".kitsoki-dev-workspace.json"
+INITIALIZATION_DIR=".initializing"
+INITIALIZATION_METADATA="metadata"
 DEFAULT_TARGET="staging/local"
 DEFAULT_BASE="$DEFAULT_TARGET"
 LOCAL_CONFIG=".kitsoki.local.yaml"
@@ -23,6 +25,7 @@ usage:
   scripts/dev-workspace.sh status <workspace|id> [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh commit <workspace|id> --message MESSAGE [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh merge <workspace|id> [--repo REPO] [--root ROOT] [--branch BRANCH] [--target TARGET] [--gate CMD] [--teardown]
+  scripts/dev-workspace.sh recover <workspace|id> [--repo REPO] [--root ROOT] [--discard-incomplete]
   scripts/dev-workspace.sh close <workspace|id> [--repo REPO] [--root ROOT] [--force]
   scripts/dev-workspace.sh teardown <workspace|id> [--repo REPO] [--root ROOT] [--force]
 
@@ -34,6 +37,26 @@ Defaults:
   TARGET staging/local
 EOF
 }
+
+# Creation cannot put a sentinel in the target until git clone has made the
+# directory. Keep the lock beside targets instead: mkdir gives us an atomic
+# claim without making an incomplete target look like a managed workspace.
+CREATE_LOCK=""
+CREATE_PATH=""
+CREATE_IN_PROGRESS=0
+
+cleanup_interrupted_create() {
+  local status=$?
+  if [ "$CREATE_IN_PROGRESS" = "1" ]; then
+    # This process owns both paths. Removing them together means ordinary
+    # failures and interruptible signals never leave a half-clone behind.
+    rm -rf "$CREATE_PATH" "$CREATE_LOCK" 2>/dev/null || true
+  fi
+  return "$status"
+}
+trap cleanup_interrupted_create EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 die() {
   echo "error: $*" >&2
@@ -127,6 +150,92 @@ ensure_managed_workspace() {
   local path="$1"
   if [ ! -f "$path/$CAPSULE_SENTINEL" ] && [ ! -f "$path/$CLONE_SENTINEL" ]; then
     die "refusing unmanaged workspace: $path (missing $CAPSULE_SENTINEL or $CLONE_SENTINEL)"
+  fi
+}
+
+initialization_marker() {
+  local root="$1"
+  local id="$2"
+  printf '%s/%s/%s\n' "$root" "$INITIALIZATION_DIR" "$id"
+}
+
+initialization_metadata_value() {
+  local marker="$1"
+  local key="$2"
+  [ -f "$marker/$INITIALIZATION_METADATA" ] || return 0
+  sed -n "s/^${key}=//p" "$marker/$INITIALIZATION_METADATA" | head -n 1
+}
+
+initialization_state() {
+  local root="$1"
+  local id="$2"
+  local marker pid
+  marker="$(initialization_marker "$root" "$id")"
+  [ -d "$marker" ] || return 1
+  pid="$(initialization_metadata_value "$marker" pid)"
+  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    printf 'active\n'
+  else
+    printf 'stale\n'
+  fi
+}
+
+initialization_refusal() {
+  local command="$1"
+  local root="$2"
+  local id="$3"
+  local state marker pid path
+  state="$(initialization_state "$root" "$id")" || return 0
+  marker="$(initialization_marker "$root" "$id")"
+  pid="$(initialization_metadata_value "$marker" pid)"
+  path="$(initialization_metadata_value "$marker" path)"
+  if [ "$state" = "active" ]; then
+    die "$command: workspace is initializing${pid:+ (pid $pid)}: ${path:-$root/$id}; retry status after creation completes"
+  fi
+  die "$command: workspace has a stale initialization marker: ${path:-$root/$id}; inspect it, then run recover $id --discard-incomplete if it is an interrupted clone"
+}
+
+acquire_initialization_lock() {
+  local root="$1"
+  local id="$2"
+  local path="$3"
+  local branch="$4"
+  local session_id="$5"
+  local marker
+  marker="$(initialization_marker "$root" "$id")"
+  mkdir -p "$root/$INITIALIZATION_DIR"
+  if ! mkdir "$marker" 2>/dev/null; then
+    initialization_refusal create "$root" "$id"
+    die "create: could not acquire initialization marker for $path"
+  fi
+  {
+    printf 'pid=%s\n' "$$"
+    printf 'path=%s\n' "$path"
+    printf 'id=%s\n' "$id"
+    printf 'branch=%s\n' "$branch"
+    printf 'session_id=%s\n' "$session_id"
+    printf 'started_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$marker/$INITIALIZATION_METADATA"
+  CREATE_LOCK="$marker"
+  CREATE_PATH="$path"
+  CREATE_IN_PROGRESS=1
+}
+
+release_initialization_lock() {
+  rm -rf "$CREATE_LOCK"
+  CREATE_LOCK=""
+  CREATE_PATH=""
+  CREATE_IN_PROGRESS=0
+}
+
+ensure_not_initializing() {
+  local command="$1"
+  local root="$2"
+  local path="$3"
+  local id
+  id="$(basename "$path")"
+  if initialization_state "$root" "$id" >/dev/null; then
+    initialization_refusal "$command" "$root" "$id"
   fi
 }
 
@@ -379,6 +488,9 @@ cmd_create() {
   local path="$root/$id"
   local script_path="$repo/scripts/dev-workspace.sh"
 
+  if initialization_state "$root" "$id" >/dev/null; then
+    initialization_refusal create "$root" "$id"
+  fi
   if [ -e "$path" ]; then
     ensure_managed_workspace "$path"
     local existing_branch
@@ -413,6 +525,7 @@ cmd_create() {
   fi
 
   mkdir -p "$root"
+  acquire_initialization_lock "$root" "$id" "$path" "$branch" "$session_id"
   local source_commit source_ref
   source_ref="${base:-HEAD}"
   # An MCP-managed workspace can itself be a clone-backed agent capsule. Such
@@ -456,6 +569,7 @@ cmd_create() {
   local head
   head="$(git -C "$path" rev-parse HEAD)"
   write_manifests "$path" "$id" "$repo" "$root" "$branch" "$base" "$target" "$session_id" "$source_commit" "$head" "$script_path"
+  release_initialization_lock
 
   if [ "$bootstrap" = "1" ]; then
     # ManagedWorkspaceService consumes --json as a machine protocol. Bootstrap
@@ -505,6 +619,33 @@ cmd_status() {
   root="$(resolve_root "$repo" "$root")"
   local path
   path="$(workspace_path "$repo" "$root" "$ref")"
+  local id state marker pid initialized_path
+  id="$(basename "$path")"
+  if state="$(initialization_state "$root" "$id")"; then
+    marker="$(initialization_marker "$root" "$id")"
+    pid="$(initialization_metadata_value "$marker" pid)"
+    initialized_path="$(initialization_metadata_value "$marker" path)"
+    if [ "$json" = "1" ]; then
+      python3 - "$id" "${initialized_path:-$path}" "$state" "$pid" <<'PY'
+import json
+import sys
+ws_id, path, state, pid = sys.argv[1:]
+print(json.dumps({
+    "ok": False,
+    "id": ws_id,
+    "path": path,
+    "state": "initializing",
+    "initialization": state,
+    "pid": int(pid) if pid.isdigit() else None,
+}, indent=2, sort_keys=True))
+PY
+    else
+      echo "workspace: ${initialized_path:-$path}"
+      echo "state: initializing ($state)"
+      [ -n "$pid" ] && echo "pid: $pid"
+    fi
+    return 2
+  fi
   ensure_managed_workspace "$path"
   local branch dirty head
   branch="$(git -C "$path" branch --show-current 2>/dev/null || true)"
@@ -562,6 +703,7 @@ cmd_commit() {
   root="$(resolve_root "$repo" "$root")"
   local path
   path="$(workspace_path "$repo" "$root" "$ref")"
+  ensure_not_initializing commit "$root" "$path"
   ensure_managed_workspace "$path"
   if ! workspace_dirty "$path"; then
     die "commit: workspace has no changes"
@@ -611,6 +753,7 @@ cmd_merge() {
   root="$(resolve_root "$repo" "$root")"
   local path
   path="$(workspace_path "$repo" "$root" "$ref")"
+  ensure_not_initializing merge "$root" "$path"
   ensure_managed_workspace "$path"
   if [ -z "$target" ]; then
     target="$(manifest_value "$path" target "$DEFAULT_TARGET")"
@@ -731,6 +874,7 @@ cmd_close() {
   root="$(resolve_root "$repo" "$root")"
   local path
   path="$(workspace_path "$repo" "$root" "$ref")"
+  ensure_not_initializing close "$root" "$path"
   ensure_managed_workspace "$path"
   ensure_under_root_or_forced "$root" "$path" "$force"
   if [ "$force" != "1" ] && workspace_dirty "$path"; then
@@ -741,6 +885,53 @@ cmd_close() {
   echo "removed: $path"
 }
 
+cmd_recover() {
+  local repo="."
+  local root=""
+  local ref=""
+  local discard_incomplete=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --repo) repo="${2:?--repo requires a value}"; shift 2 ;;
+      --root) root="${2:?--root requires a value}"; shift 2 ;;
+      --discard-incomplete) discard_incomplete=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        [ -z "$ref" ] || die "recover: unexpected argument: $1"
+        ref="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$ref" ] || die "recover: workspace path or id is required"
+  repo="$(repo_root "$repo")"
+  root="$(resolve_root "$repo" "$root")"
+  local path id marker state recorded_path
+  path="$(workspace_path "$repo" "$root" "$ref")"
+  id="$(basename "$path")"
+  marker="$(initialization_marker "$root" "$id")"
+  state="$(initialization_state "$root" "$id")" || die "recover: no initialization marker for $path"
+  [ "$state" = "stale" ] || die "recover: workspace is still initializing; do not recover a live creation"
+  recorded_path="$(initialization_metadata_value "$marker" path)"
+  if [ -n "$recorded_path" ]; then
+    recorded_path="$(abs_path "$recorded_path")"
+  fi
+  [ -z "$recorded_path" ] || [ "$recorded_path" = "$path" ] || die "recover: marker path does not match requested workspace: $recorded_path"
+
+  if [ -e "$path" ]; then
+    if [ -f "$path/$CAPSULE_SENTINEL" ] || [ -f "$path/$CLONE_SENTINEL" ]; then
+      : # Creation completed before interruption; preserve the valid workspace.
+    elif [ -d "$path/.git" ]; then
+      [ "$discard_incomplete" = "1" ] || die "recover: interrupted clone remains at $path; rerun with --discard-incomplete to remove only this un-managed clone"
+      rm -rf "$path"
+    else
+      die "recover: refusing to remove unexpected non-workspace path: $path"
+    fi
+  fi
+  rm -rf "$marker"
+  echo "recovered initialization: $path"
+}
+
 main() {
   local cmd="${1:-}"
   case "$cmd" in
@@ -749,6 +940,7 @@ main() {
     status) shift; cmd_status "$@" ;;
     commit) shift; cmd_commit "$@" ;;
     merge|land) shift; cmd_merge "$@" ;;
+    recover) shift; cmd_recover "$@" ;;
     close|teardown) shift; cmd_close "$@" ;;
     -h|--help|"") usage; [ -n "$cmd" ] || exit 1 ;;
     *) usage; die "unknown command: $cmd" ;;

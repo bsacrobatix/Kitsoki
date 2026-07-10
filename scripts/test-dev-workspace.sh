@@ -87,6 +87,62 @@ gitc "$source_repo" commit --quiet -m 'staged baseline'
 gitc "$source_repo" switch -q main
 
 root="$tmp/workspaces"
+
+# Creation places its atomic lock beside targets, not inside the clone target.
+# A concurrent status must surface that state instead of calling the target an
+# unmanaged workspace, and a second create must not race it.
+initializing_id="initializing-case"
+initializing_path="$root/$initializing_id"
+initializing_marker="$root/.initializing/$initializing_id"
+mkdir -p "$initializing_marker"
+cat >"$initializing_marker/metadata" <<EOF
+pid=$$
+path=$initializing_path
+id=$initializing_id
+branch=agent/$initializing_id
+session_id=
+EOF
+if "$dev_workspace" status --repo "$source_repo" --root "$root" "$initializing_id" --json >"$tmp/initializing-status.json" 2>&1; then
+  fail "status succeeded while workspace was initializing"
+fi
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["state"])' <"$tmp/initializing-status.json")" = "initializing" ] || fail "status did not report initializing state"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["initialization"])' <"$tmp/initializing-status.json")" = "active" ] || fail "status did not report active initialization"
+if "$dev_workspace" create --repo "$source_repo" --root "$root" --id "$initializing_id" --branch "agent/$initializing_id" >/tmp/kitsoki-dev-workspace-initializing-create.log 2>&1; then
+  fail "create raced an initializing workspace"
+fi
+grep -Fq "workspace is initializing" /tmp/kitsoki-dev-workspace-initializing-create.log || fail "create did not identify initializing workspace"
+if "$dev_workspace" close --repo "$source_repo" --root "$root" --force "$initializing_id" >/tmp/kitsoki-dev-workspace-initializing-close.log 2>&1; then
+  fail "close removed an initializing workspace"
+fi
+grep -Fq "workspace is initializing" /tmp/kitsoki-dev-workspace-initializing-close.log || fail "close did not protect initializing workspace"
+[ ! -e "$initializing_path" ] || fail "initialization marker wrote into target before clone"
+rm -rf "$initializing_marker"
+
+# SIGKILL cannot run the script's EXIT cleanup. A stale marker keeps the
+# incomplete clone explicit until an operator deliberately discards it.
+stale_id="stale-incomplete"
+stale_path="$root/$stale_id"
+stale_marker="$root/.initializing/$stale_id"
+mkdir -p "$stale_path/.git" "$stale_marker"
+cat >"$stale_marker/metadata" <<EOF
+pid=99999999
+path=$stale_path
+id=$stale_id
+branch=agent/$stale_id
+session_id=
+EOF
+if "$dev_workspace" status --repo "$source_repo" --root "$root" "$stale_id" >/tmp/kitsoki-dev-workspace-stale-status.log 2>&1; then
+  fail "status succeeded for stale initialization"
+fi
+grep -Fq "state: initializing (stale)" /tmp/kitsoki-dev-workspace-stale-status.log || fail "status did not identify stale initialization"
+if "$dev_workspace" recover --repo "$source_repo" --root "$root" "$stale_id" >/tmp/kitsoki-dev-workspace-recover.log 2>&1; then
+  fail "recover discarded incomplete clone without explicit approval"
+fi
+grep -Fq -- "--discard-incomplete" /tmp/kitsoki-dev-workspace-recover.log || fail "recover did not explain explicit stale recovery"
+"$dev_workspace" recover --repo "$source_repo" --root "$root" "$stale_id" --discard-incomplete >/dev/null
+[ ! -e "$stale_path" ] || fail "recover --discard-incomplete left interrupted clone behind"
+[ ! -e "$stale_marker" ] || fail "recover --discard-incomplete left stale marker behind"
+
 create_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-1 --branch agent/case-1 --json)"
 workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$create_json")"
 [ -d "$workspace/.git" ] || fail "create did not produce a git workspace"
@@ -96,6 +152,20 @@ workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <
 [ "$(git -C "$workspace" branch --show-current)" = "agent/case-1" ] || fail "workspace branch mismatch"
 [ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"])' <"$workspace/.kitsoki-dev-workspace.json")" = "staging/local" ] || fail "default base was not recorded as staging/local"
 [ "$(cat "$workspace/staged-baseline.txt")" = "staged baseline" ] || fail "default create did not start from staging/local"
+# An interruption after manifests are durable leaves a valid workspace. Recovery
+# must only release its stale marker, never discard the completed clone.
+completed_marker="$root/.initializing/case-1"
+mkdir -p "$completed_marker"
+cat >"$completed_marker/metadata" <<EOF
+pid=99999999
+path=$workspace
+id=case-1
+branch=agent/case-1
+session_id=
+EOF
+"$dev_workspace" recover --repo "$source_repo" --root "$root" case-1 >/dev/null
+[ -f "$workspace/.kitsoki-dev-workspace.json" ] || fail "recover discarded a completed managed workspace"
+[ ! -e "$completed_marker" ] || fail "recover left stale marker on completed workspace"
 readme_blob="$(git -C "$source_repo" rev-parse HEAD:README.md)"
 source_readme_obj="$source_repo/.git/objects/${readme_blob:0:2}/${readme_blob:2}"
 workspace_readme_obj="$workspace/.git/objects/${readme_blob:0:2}/${readme_blob:2}"
