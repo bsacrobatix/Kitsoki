@@ -38,8 +38,8 @@
         },
         {
           "label": "Real artifacts",
-          "status": "pending",
-          "detail": "Provider receipt, project profile, PRD, issue URL, diff/test evidence, and PR URL are linked."
+          "status": "progress",
+          "detail": "Kitsoki scenario PR, Gears issue #3105, Gears PR #4082, and Cypilot validation are linked; provider receipt and PRD artifact still require the recorded first-run trace."
         },
         {
           "label": "Narrated video",
@@ -52,12 +52,41 @@
     },
     {
       "type": "evidence",
+      "title": "Real linked artifacts",
+      "items": [
+        {
+          "label": "Kitsoki onboarding PR",
+          "status": "done",
+          "detail": "Adds the Gears first-run product-journey scenario and this Slidey deck source.",
+          "refType": "doc",
+          "ref": "https://github.com/constructorfabric/Kitsoki/pull/67"
+        },
+        {
+          "label": "Selected Gears bug",
+          "status": "done",
+          "detail": "Issue #3105: make all fails on a Cypilot tomllib import path.",
+          "refType": "doc",
+          "ref": "https://github.com/constructorfabric/gears-rust/issues/3105"
+        },
+        {
+          "label": "Gears bugfix PR",
+          "status": "done",
+          "detail": "PR #4082 links the issue and includes Cypilot validation evidence.",
+          "refType": "doc",
+          "ref": "https://github.com/constructorfabric/gears-rust/pull/4082"
+        }
+      ],
+      "caption": "These are live GitHub artifacts, not synthetic demo links. The provider receipt, PRD artifact, trace-derived flow, cassette, and final videos remain gated on the recorded first-run web session.",
+      "narration": "The real GitHub artifacts are now in place. The Kitsoki pull request carries the demo scenario. Gears issue thirty one oh five is the selected bug. Gears pull request forty eighty two is the real fix link with validation evidence."
+    },
+    {
+      "type": "evidence",
       "title": "Live Gears Rust bug queue",
       "items": [
         {
           "label": "Issue #3105",
-          "status": "progress",
-          "detail": "When I run 'make all' it fails with unresolved python dependencies",
+          "status": "done",
+          "detail": "Selected for the demo bugfix; fixed by PR #4082.",
           "refType": "doc",
           "ref": "https://github.com/constructorfabric/gears-rust/issues/3105"
         },
@@ -76,8 +105,8 @@
           "ref": "https://github.com/constructorfabric/gears-rust/issues/2981"
         }
       ],
-      "caption": "Snapshot checked with gh issue list on 2026-07-10. The final run should refresh this list and choose one fixable bug.",
-      "narration": "The bug chapter starts from the live constructorfabric gears rust issue queue. These examples are open now, but the final recording must refresh the queue and record the exact selected issue URL."
+      "caption": "Snapshot checked with gh issue list on 2026-07-10. Issue #3105 was selected because the branch already contains a bounded, validated Cypilot compatibility fix.",
+      "narration": "The bug chapter starts from the live constructorfabric gears rust issue queue. Issue thirty one oh five is selected for the real demo because it has a bounded fix and a pull request link."
     },
     {
       "type": "objectives",
@@ -107,8 +136,8 @@
       "items": [
         {
           "label": "Project profile",
-          "status": "next",
-          "detail": ".kitsoki/project-profile.yaml and .kitsoki/stories/gears-rust-dev/app.yaml"
+          "status": "done",
+          "detail": ".kitsoki/project-profile.yaml and .kitsoki/stories/gears-rust-dev/app.yaml are in the Gears PR."
         },
         {
           "label": "PRD artifact",
@@ -129,28 +158,28 @@
       "items": [
         {
           "label": "Issue",
-          "status": "next",
-          "detail": "A live open bug from constructorfabric/gears-rust."
+          "status": "done",
+          "detail": "https://github.com/constructorfabric/gears-rust/issues/3105"
         },
         {
           "label": "Fix proof",
-          "status": "next",
-          "detail": "Candidate diff, targeted oracle or test output, and full-suite output or classified blocker."
+          "status": "done",
+          "detail": "Cypilot info and validate passed; validation reported 174 artifacts, 0 errors, and 95/95 code traceability coverage."
         },
         {
           "label": "Pull request",
-          "status": "next",
-          "detail": "The real PR URL opened by the run."
+          "status": "done",
+          "detail": "https://github.com/constructorfabric/gears-rust/pull/4082"
         }
       ],
       "narration": "Chapter three picks one open Gears Rust bug, fixes it, and ends on the real pull request link. The issue, diff, tests, and PR are not narration claims; they are linked evidence."
     },
     {
       "type": "cta",
-      "wordmark": "Ready to record",
-      "tagline": "Run the real session, convert the trace to replay, then embed the accepted videos here.",
-      "url": ".context/gears-first-run-demo-production.md",
-      "narration": "The next step is production: run the real web session in the capsule, convert its trace to replay fixtures, record the cassette playback, validate the frames, and replace these planning chapters with embedded videos."
+      "wordmark": "Ready for the real run",
+      "tagline": "Record the first-run web session, convert the trace to replay, validate the cassette playback, then embed the accepted videos.",
+      "url": "https://github.com/constructorfabric/Kitsoki/pull/67",
+      "narration": "The next step is the recorded web session. The live pull requests and selected bug are linked. The remaining gate is to capture the real first run, derive the replay cassette, validate the video frames, and embed the accepted video chapters."
     }
   ]
 }
