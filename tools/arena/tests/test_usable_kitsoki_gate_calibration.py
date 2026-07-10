@@ -75,7 +75,7 @@ evidence_dir = REPO_ROOT / ".artifacts" / "usable-kitsoki-gate" / "calibration-e
 targets = list(calib.DEFAULT_TARGETS)
 records = calib.sweep(
     corpus_dir, list(("web", "tui", "mcp")), run_id="calibration",
-    evidence_dir=evidence_dir, concurrency=4, targets=targets,
+    evidence_dir=evidence_dir, concurrency=2, targets=targets,
 )
 check("162 records for 18 scenarios x 3 surfaces x 3 workbench targets", len(records), 18 * 3 * len(targets))
 
