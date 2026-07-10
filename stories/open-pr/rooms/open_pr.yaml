@@ -187,7 +187,7 @@ states:
                 PACKAGE_TEXT=$(printf '%s- Render command: make demo-feature FEATURE=%s\n' "$PACKAGE_TEXT" "$FEATURE_ID")
               fi
               PACKAGE_TEXT=$(printf '%s\n## Validation\n\n- [ ] Review product-site copy against the implemented behavior.\n- [ ] Watch the rendered local demo video before requesting review.\n' "$PACKAGE_TEXT")
-              python3 -c 'import pathlib, sys; pathlib.Path(sys.argv[1]).write_text(sys.argv[2])' "$PACKAGE" "$PACKAGE_TEXT"
+              printf '%s' "$PACKAGE_TEXT" > "$PACKAGE"
               PACKAGE_REL=${PACKAGE#"$WT"/}
               if [ -z "$BODY" ]; then
                 BODY="$PACKAGE_TEXT"

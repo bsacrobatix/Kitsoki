@@ -94,14 +94,15 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.ide.open_diff":        {class: Write, deterministic: true},
 	"host.diff.open":            {class: Write, deterministic: true},
 
-	"host.starlark.run":      {class: Write, deterministic: true},
-	"host.punch.verify":      {class: Read, deterministic: true},
-	"host.proposal.publish":  {class: Write, deterministic: true},
-	"host.dev.profile_setup": {class: Write, deterministic: true},
-	"host.dev.onboarding":    {class: Write, deterministic: true},
-	"host.slidey.render":     {class: Write, deterministic: true},
-	"host.contact_sheet":     {class: Write, deterministic: true},
-	"host.video.frame":       {class: Write, deterministic: true},
+	"host.starlark.run":         {class: Write, deterministic: true},
+	"host.punch.verify":         {class: Read, deterministic: true},
+	"host.proposal.publish":     {class: Write, deterministic: true},
+	"host.dev.profile_setup":    {class: Write, deterministic: true},
+	"host.dev.onboarding":       {class: Write, deterministic: true},
+	"host.decomposition.update": {class: Write, deterministic: true},
+	"host.slidey.render":        {class: Write, deterministic: true},
+	"host.contact_sheet":        {class: Write, deterministic: true},
+	"host.video.frame":          {class: Write, deterministic: true},
 
 	// host.git — 7 ops, per-op tiers: local mutations (branch/commit) are
 	// Write; anything that reaches GitHub (push/open_pr/pr_comment) is

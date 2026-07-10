@@ -11,7 +11,7 @@
 #                         redecompose_delta_path, then submits a lightweight
 #                         confirmation ({trigger, added}) validated against
 #                         schemas/redecompose-delta.json.
-#   redecompose_apply   — host.run: tools/decomposition-update/apply_delta.py
+#   redecompose_apply   — host.starlark.run: host.decomposition.update
 #                         (the decompose-update transaction) versions the
 #                         prior graph, applies the delta, and writes the
 #                         updated manifest back to decomposition_path — the
@@ -70,7 +70,7 @@ states:
     description: "Apply the managed delta via the decompose-update transaction (no LLM)."
     relevant_world: [decomposition_path, redecompose_delta_path, redecompose_versions_dir, redecompose_event_log, redecompose_apply_ok, redecompose_apply_route]
     view:
-      - prose: "Applying the delta to {{ world.decomposition_path }} via tools/decomposition-update/apply_delta.py…"
+      - prose: "Applying the delta to {{ world.decomposition_path }} via the native managed-delta transaction…"
       - kv:
           pairs:
             OK: '{{ world.redecompose_apply_ok }}'
@@ -88,29 +88,26 @@ states:
       # guard, or branching on redecompose_apply_ok's bool default directly,
       # breaks the flow-test harness's discovery pass).
       - set: { redecompose_apply_route: "" }
-      - invoke: host.run
+      - invoke: host.starlark.run
         id: redecompose_apply
         with:
-          cmd: python3
-          args:
-            - tools/decomposition-update/apply_delta.py
-            - "{{ world.decomposition_path }}"
-            - "{{ world.redecompose_delta_path }}"
-            - "--out"
-            - "{{ world.decomposition_path }}"
-            - "--versions-dir"
-            - "{{ world.redecompose_versions_dir }}"
-            - "--event-log"
-            - "{{ world.redecompose_event_log }}"
-            - "--list-key"
-            - "briefs"
-            - "--skip-validate"
-          cwd: "{{ world.main_worktree_path }}"
-          timeout: "60s"
+          script: scripts/decomposition_update.star
+          inputs:
+            op: apply
+            base: "{{ world.decomposition_path }}"
+            delta: "{{ world.redecompose_delta_path }}"
+            out: "{{ world.decomposition_path }}"
+            versions_dir: "{{ world.redecompose_versions_dir }}"
+            event_log: "{{ world.redecompose_event_log }}"
+            list_key: briefs
+            skip_validate: true
+          capabilities:
+            host:
+              verbs: [host.decomposition.update]
         bind:
-          redecompose_apply_ok:     ok
-          redecompose_apply_stdout: stdout
-          redecompose_apply_route:  stdout_json.route
+          redecompose_apply_ok:     "result.ok"
+          redecompose_apply_stdout: "result.summary"
+          redecompose_apply_route:  "result.route"
         on_error: redecompose_error
       - when: "world.redecompose_apply_route == 'ok'"
         emit_intent: redecompose_applied

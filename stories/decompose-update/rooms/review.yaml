@@ -34,8 +34,8 @@ states:
           schema: schemas/review_delta.json
           inputs:
             workdir: "{{ world.workdir }}"
-            gate_command: "python3 tools/decomposition-update/tests/run_no_llm.py"
-            transaction_tool: "tools/decomposition-update/apply_delta.py"
+            gate_command: "native host.decomposition.update self-test"
+            transaction_tool: "host.decomposition.update"
         bind:
           review_approved: submitted.approved
           review_summary: submitted.summary

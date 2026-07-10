@@ -11,16 +11,17 @@ go run ./cmd/kitsoki test flows stories/decompose-update/app.yaml --flows storie
 ```
 
 The wrapped transaction lives in
-[`tools/decomposition-update/apply_delta.py`](../../tools/decomposition-update/README.md).
+the native `host.decomposition.update` capability via
+[`scripts/decomposition_update.star`](./scripts/decomposition_update.star).
 The deterministic tool versions the prior graph, validates candidate deltas
 before writing, rejects corrupted variants, and appends `plan-evolution.jsonl`
 events that goal-seeker reports project into PM artifacts.
 
-This story's own flow only drives the self-test wrapper
-(`tests/run_no_llm.py`) behind an adversarial review gate — a demo of the
-review-then-apply shape, not a real base/delta pair. The real caller is
+This story's own flow only drives the native transaction self-test behind an
+adversarial review gate — a demo of the review-then-apply shape, not a real
+base/delta pair. The real caller is
 [`stories/deliver/`](../deliver/): its `redecompose` room invokes
-`apply_delta.py` directly (`--list-key briefs --skip-validate`) when a prior
+the native transaction directly (`list_key: briefs`, `skip_validate: true`) when a prior
 decomposition already exists, instead of letting the decomposer agent
 overwrite it (proposal: deliver-canonical-decomposition B2c). See
 `tools/decomposition-update/README.md`'s Consumers section for the full

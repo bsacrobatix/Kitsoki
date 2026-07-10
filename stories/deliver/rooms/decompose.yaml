@@ -20,7 +20,7 @@
 # straight into the decomposer would silently overwrite it, dropping any
 # in-flight brief state — instead route to `redecompose`, which authors a
 # delta and applies it via the decompose-update transaction
-# (tools/decomposition-update/apply_delta.py) instead of overwriting.
+# (host.decomposition.update) instead of overwriting.
 #
 # `decomposing` (worker): host.agent.task (agent: decomposer, once:true). The
 # agent reads the epic at epic_path and WRITES the decomposition YAML to
