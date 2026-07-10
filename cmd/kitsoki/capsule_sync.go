@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 
@@ -9,6 +8,7 @@ import (
 
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/reconcile"
+	"kitsoki/internal/capsule/record"
 )
 
 func capsuleSyncCmd() *cobra.Command {
@@ -93,13 +93,7 @@ func capsuleSyncApplyCmd() *cobra.Command {
 			if instance.Generation != stored.Plan.Expected.Generation {
 				return fmt.Errorf("capsule sync: stale workspace generation")
 			}
-			gates := reconcile.GateVerifierFunc(func(_ context.Context, receipt string, plan reconcile.Plan) error {
-				if plan.RequiredGate != "" && receipt == "" {
-					return fmt.Errorf("capsule sync: required gate receipt is missing")
-				}
-				return nil
-			})
-			result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: gates}).Apply(cmd.Context(), stored.Plan, gateReceipt)
+			result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: root}}).Apply(cmd.Context(), stored.Plan, gateReceipt)
 			if err != nil {
 				return err
 			}

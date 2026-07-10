@@ -96,6 +96,9 @@ func Verify(r Receipt, s Signer, requireSignature bool) Verification {
 	if err := verifyContent(r); err != nil {
 		return Verification{Status: "invalid", Errors: []string{err.Error()}}
 	}
+	if err := ci.ValidateVerdict(r.Verdict, r.Envelope, ci.ResultContract{}); err != nil {
+		return Verification{Status: "invalid", Errors: []string{err.Error()}}
+	}
 	if requireSignature && (s == nil || r.Integrity.Signature == "") {
 		return Verification{Status: "invalid", Errors: []string{"required signature is missing"}}
 	}
