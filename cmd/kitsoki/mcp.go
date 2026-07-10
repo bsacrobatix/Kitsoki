@@ -114,6 +114,7 @@ func mcpCmd() *cobra.Command {
 		harnessType      string
 		workspace        string
 		flowPath         string
+		corpusRuntimeConfigPath string
 		issueSink        string
 		readOnly         bool
 		operatingProfile string
@@ -177,6 +178,9 @@ docs land):
 			}
 			defer chatCleanup()
 			sess.SetChatStore(chatStore)
+			if flowPath != "" && corpusRuntimeConfigPath != "" {
+				return fmt.Errorf("mcp: --flow cannot be combined with --corpus-runtime-config; flow stubs are not evaluation proof")
+			}
 			if flowPath != "" {
 				abs, aerr := filepath.Abs(flowPath)
 				if aerr != nil {
@@ -197,6 +201,13 @@ docs land):
 					testrunner.RegisterHostStubs(reg, fixture.HostHandlers)
 					return nil
 				})
+			}
+			if corpusRuntimeConfigPath != "" {
+				configure, configErr := loadCorpusRuntimeConfigurer(corpusRuntimeConfigPath, nil)
+				if configErr != nil {
+					return fmt.Errorf("mcp: load --corpus-runtime-config: %w", configErr)
+				}
+				sess.SetHostRegistryConfigurer(configure)
 			}
 
 			var studioBugPrivacyChecker bugprivacy.Checker
@@ -282,6 +293,8 @@ docs land):
 		"optional initial authoring workspace (a story dir or app.yaml) bound as the workspace handle on boot")
 	cmd.Flags().StringVar(&flowPath, "flow", "",
 		"deterministic flow fixture whose host_handlers stub host.* calls for every driving session (no LLM)")
+	cmd.Flags().StringVar(&corpusRuntimeConfigPath, "corpus-runtime-config", "",
+		"local corpus-runtime/v1 YAML that installs local proof and durable receipt handlers (requires Bubblewrap network isolation)")
 	cmd.Flags().StringVar(&issueSink, "issue-sink", studio.IssueSinkLocalArtifact,
 		"default issue.create sink: local-artifact writes .artifacts/issues/bugs; github files through the native GitHub issue provider")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
