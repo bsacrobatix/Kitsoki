@@ -262,14 +262,15 @@ func (s *CapsuleServer) vcsCommit(ctx context.Context, _ *mcpsdk.CallToolRequest
 	return nil, map[string]any{"ok": true, "workspace": h}, nil
 }
 func (s *CapsuleServer) syncPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleSyncPlanArgs) (*mcpsdk.CallToolResult, any, error) {
-	if !s.manager.Grant.Allows("effect", "local_reconcile") {
-		return capsuleErr(fmt.Errorf("%w: local_reconcile", control.ErrDenied)), nil, nil
+	if !reconcile.ValidOperation(a.Operation) {
+		return capsuleErr(fmt.Errorf("capsule sync: unsupported operation %q", a.Operation)), nil, nil
+	}
+	requiredEffect := reconcile.RequiredEffect(a.Operation)
+	if !s.manager.Grant.Allows("effect", requiredEffect) {
+		return capsuleErr(fmt.Errorf("%w: %s", control.ErrDenied, requiredEffect)), nil, nil
 	}
 	if !s.manager.Grant.Allows("branch", a.Target) {
 		return capsuleErr(fmt.Errorf("%w: branch %q", control.ErrDenied, a.Target)), nil, nil
-	}
-	if !reconcile.ValidOperation(a.Operation) {
-		return capsuleErr(fmt.Errorf("capsule sync: unsupported operation %q", a.Operation)), nil, nil
 	}
 	in, err := s.manager.Status(ctx, a.Workspace)
 	if err != nil {
