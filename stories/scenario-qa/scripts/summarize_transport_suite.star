@@ -92,6 +92,7 @@ def main(ctx):
     summary = _dict(suite.get("summary", {}))
     scenarios = _list(suite.get("scenarios", []))
     legs = _list(suite.get("legs", []))
+    live_authorization_summary = _list(suite.get("live_authorization_summary", []))
 
     leg_count = int(summary.get("leg_count", len(legs)) or 0)
     skipped_count = int(summary.get("skipped_count", 0) or 0)
@@ -119,8 +120,19 @@ def main(ctx):
             _plural(skipped_count, "transport is", "transports are") +
             " not applicable for this scenario."
         )
+    if len(live_authorization_summary) > 0:
+        suite_summary += (
+            " " + _str(len(live_authorization_summary)) + " " +
+            _plural(len(live_authorization_summary), "leg needs", "legs need") +
+            " a live profile to drive live; add profile=<name> to the request or they will run replay-only."
+        )
 
     lines = []
+    if len(live_authorization_summary) > 0:
+        lines.append("Live authorization:")
+        for note in live_authorization_summary:
+            lines.append("- " + _str(note))
+        lines.append("")
     if mode == "adhoc" and scenario_description != "":
         lines.append("Scenario: " + scenario_description)
         lines.append("Goal: Check that the requested behavior is usable in the selected transports: " + scenario_description)

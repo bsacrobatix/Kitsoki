@@ -80,6 +80,8 @@ turns:
             - bugfix
             - --transport
             - all
+            - --live-profile
+            - ""
             - --json-output
           cwd: "."
       - handler: host.starlark.run
