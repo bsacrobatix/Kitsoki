@@ -184,6 +184,7 @@ world:
   report_path:          { type: string, default: "" }
   report_summary:       { type: string, default: "" }
   deck_path:            { type: string, default: "" }  # deck.slidey.json, folded by run.py --scenario-qa-report
+  deck_error:           { type: string, default: "" }  # set when deck generation fails; report.md still succeeds
 
   # ── misc / diagnostics ───────────────────────────────────────────────────
   last_result:          { type: object, default: {} }

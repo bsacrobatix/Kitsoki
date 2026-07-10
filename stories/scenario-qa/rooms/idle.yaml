@@ -129,6 +129,9 @@ states:
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
+                report_path: ""
+                deck_path: ""
+                deck_error: ""
       check:
         - when: "(slots.scenario ?? '') == '' && (slots.description ?? '') == ''"
           target: .
@@ -168,6 +171,9 @@ states:
                 pass_count: 0
                 fail_count: 0
                 degraded_count: 0
+                report_path: ""
+                deck_path: ""
+                deck_error: ""
       preview:
         - when: "(slots.scenario ?? '') == ''"
           target: .
@@ -309,7 +315,20 @@ states:
             - set:
                 status: "preview_ready"
       report:
-        - when: "world.run_dir_rel == ''"
+        # Invariant: run_dir (absolute) and run_dir_rel (repo-relative — the
+        # SAME directory) are always bound together from the SAME site,
+        # plan.yaml's emit_scenario_qa_run invoke (stdout_json.run_dir /
+        # .run_dir_rel; plan_legs.star then re-derives run_dir_rel, still at
+        # the same on_enter cascade). Guarding on run_dir_rel alone made this
+        # an undocumented coupling: the "report" choice item above is only
+        # offered `when: "world.run_dir != ''"`, so a future refactor that
+        # stopped (re)binding run_dir_rel at one call site — while leaving
+        # run_dir populated — would silently detach this guard from the menu
+        # item's own visibility, letting the operator click a visible
+        # "report" action into a "No run to report yet" bounce. Accept
+        # EITHER var (fire "no run" only when both are empty) so the guard
+        # can never diverge from the menu item it gates.
+        - when: "world.run_dir == '' && world.run_dir_rel == ''"
           target: .
           effects:
             - set:

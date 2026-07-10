@@ -73,7 +73,7 @@ episodes:
                 transport: web
                 visual_surface: web
                 evidence_dir: "evidence/required-input-affordance/web"
-                primary_story: "stories/operator-ask/app.yaml"
+                primary_story: "stories/dev-story/app.yaml"
                 success_criteria:
                   - The operator can enter the plain-language request.
                   - The preview explains what will be checked before capture.
@@ -92,7 +92,7 @@ episodes:
                 transport: tui
                 visual_surface: tui
                 evidence_dir: "evidence/required-input-affordance/tui"
-                primary_story: "stories/operator-ask/app.yaml"
+                primary_story: "stories/dev-story/app.yaml"
                 success_criteria:
                   - The operator can enter the same plain-language request in the terminal.
                   - The preview explains what will be checked before capture.

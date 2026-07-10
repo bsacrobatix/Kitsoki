@@ -1115,6 +1115,17 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// authoring-time signal. Does NOT append to errs. See validate_exprs.go.
 	validateViewBindFallbacks(file, def, &errs)
 
+	// ── 7a'''. unknown template-namespace advisory ────────────────────────────
+	// Emit a NON-FATAL warning when an inline view template or a `with:
+	// {prompt: "..."}` agent-prompt file references a `{{ }}`/`{% %}`
+	// top-level namespace render.ToContext never populates (e.g. the
+	// historical `{{ context.* }}` — see .context/scenario-qa-prd-transports-
+	// kinks.md). pongo2 renders an unknown namespace as an empty string with
+	// no error, so this is otherwise only discoverable live, after an agent
+	// receives a blank handoff. Does NOT append to errs. See
+	// validate_template_namespaces.go.
+	validateTemplateNamespaces(file, def, &errs)
+
 	// Validate the engine-driven decider config (execution-modes proposal).
 	if d := def.Decider; d != nil {
 		if strings.TrimSpace(d.Agent) == "" {
