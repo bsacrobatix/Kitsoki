@@ -1,0 +1,21 @@
+schema: capsule-ci/v1
+project_profile: .kitsoki/project-profile.yaml
+default_environment: ci
+
+pipelines:
+  change:
+    story: stories/capsule-ci/app.yaml
+    triggers: [local]
+    environment: ci
+    mode: one-shot
+    required: true
+    permissions:
+      network: none
+      external_write: deny
+    agents:
+      policy: deny
+    result:
+      schema: capsule-ci-verdict/v1
+      pass_exits: [passed]
+      fail_exits: [failed]
+      park_exits: [needs_input]
