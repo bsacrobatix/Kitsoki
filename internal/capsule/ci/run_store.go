@@ -13,6 +13,7 @@ import (
 )
 
 const RunIndexSchema = "capsule-ci-run-index/v1"
+const ProviderSummarySchema = "capsule-ci-provider-summary/v1"
 
 // RunRecord is the durable, project-local projection used by `capsule ci
 // status`. Artifact-job remains the durable run identity during a live process;
@@ -28,6 +29,19 @@ type RunRecord struct {
 type RunIndex struct {
 	Schema string          `json:"schema"`
 	Runs   []RunProjection `json:"runs"`
+}
+type ProviderSummary struct {
+	Schema             string          `json:"schema"`
+	Total              int             `json:"total"`
+	Passed             int             `json:"passed"`
+	Failed             int             `json:"failed"`
+	NeedsInput         int             `json:"needs_input"`
+	Cancelled          int             `json:"cancelled"`
+	InfraFailed        int             `json:"infra_failed"`
+	PromotionEligible  int             `json:"promotion_eligible"`
+	Latest             []RunProjection `json:"latest"`
+	Markdown           string          `json:"markdown"`
+	ProviderSafeFields []string        `json:"provider_safe_fields"`
 }
 
 type RunProjection struct {
@@ -118,6 +132,43 @@ func (s FileRunStore) Index() (RunIndex, error) {
 	return out, nil
 }
 
+func (s FileRunStore) ProviderSummary(limit int) (ProviderSummary, error) {
+	index, err := s.Index()
+	if err != nil {
+		return ProviderSummary{}, err
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	summary := ProviderSummary{
+		Schema:             ProviderSummarySchema,
+		ProviderSafeFields: []string{"job_id", "status", "pipeline", "outcome", "promotion_eligible", "receipt_id", "receipt_verification", "source_digest", "story_digest", "environment_digest", "envelope_digest", "trace_path", "receipt_path"},
+	}
+	for _, run := range index.Runs {
+		summary.Total++
+		switch run.Outcome {
+		case "passed":
+			summary.Passed++
+		case "failed":
+			summary.Failed++
+		case "needs_input":
+			summary.NeedsInput++
+		case "cancelled":
+			summary.Cancelled++
+		case "infra_failed":
+			summary.InfraFailed++
+		}
+		if run.PromotionEligible {
+			summary.PromotionEligible++
+		}
+		if len(summary.Latest) < limit {
+			summary.Latest = append(summary.Latest, run)
+		}
+	}
+	summary.Markdown = providerMarkdown(summary)
+	return summary, nil
+}
+
 func (s FileRunStore) Project(record RunRecord) RunProjection {
 	job := record.Result.Job
 	verdict := record.Result.Verdict
@@ -189,4 +240,22 @@ func (s FileRunStore) rel(path string) string {
 		return ""
 	}
 	return filepath.ToSlash(rel)
+}
+
+func providerMarkdown(summary ProviderSummary) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Capsule CI: %d run(s), %d passed, %d failed, %d promotion eligible.\n", summary.Total, summary.Passed, summary.Failed, summary.PromotionEligible)
+	if len(summary.Latest) == 0 {
+		return b.String()
+	}
+	b.WriteString("\n| job | pipeline | outcome | receipt | evidence |\n")
+	b.WriteString("|---|---|---|---|---|\n")
+	for _, run := range summary.Latest {
+		evidence := run.TracePath
+		if evidence == "" {
+			evidence = run.ReceiptPath
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n", run.JobID, run.Pipeline, run.Outcome, run.ReceiptVerification, evidence)
+	}
+	return b.String()
 }

@@ -248,6 +248,46 @@ func TestFileRunStoreIndexProjectsReceiptAndDigestSummary(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreProviderSummaryUsesRunIndexEvidence(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	writeRun := func(id, outcome, receiptStatus string, eligible bool) {
+		t.Helper()
+		result := RunResult{
+			Job:      artifactjob.Job{ID: artifactjob.JobID(id), Status: artifactjob.StatusDone},
+			Envelope: executor.Envelope{Digest: "sha256:env-" + id, SourceDigest: "sha256:source-" + id, StoryDigest: "sha256:story-" + id, Environment: environment.Lock{Digest: "sha256:environment-" + id}},
+			Verdict:  Verdict{Pipeline: "change", Outcome: outcome, PromotionEligible: eligible},
+		}
+		if err := store.Write(RunRecord{JobID: id, Result: result, ReceiptID: "sha256:receipt-" + id, ReceiptVerification: receiptStatus}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeRun("b", "failed", "invalid", false)
+	writeRun("a", "passed", "valid", true)
+	dir := filepath.Join(root, ".capsules", "ci")
+	if err := os.WriteFile(filepath.Join(dir, "a.trace.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := store.ProviderSummary(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Schema != ProviderSummarySchema || summary.Total != 2 || summary.Passed != 1 || summary.Failed != 1 || summary.PromotionEligible != 1 {
+		t.Fatalf("summary %#v", summary)
+	}
+	if len(summary.Latest) != 1 || summary.Latest[0].JobID != "b" {
+		t.Fatalf("latest %#v", summary.Latest)
+	}
+	if !strings.Contains(summary.Markdown, "Capsule CI: 2 run(s)") || !strings.Contains(summary.Markdown, "| b | change | failed | invalid |") {
+		t.Fatalf("markdown %s", summary.Markdown)
+	}
+	for _, field := range summary.ProviderSafeFields {
+		if strings.Contains(field, "secret") {
+			t.Fatalf("unsafe provider field %q", field)
+		}
+	}
+}
+
 func TestFileRunStoreIndexEmptyRunsSlice(t *testing.T) {
 	index, err := (FileRunStore{ProjectRoot: t.TempDir()}).Index()
 	if err != nil {
