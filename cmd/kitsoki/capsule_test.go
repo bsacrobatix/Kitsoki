@@ -152,3 +152,23 @@ func TestCapsuleOpenCoreUsesManagedPathWithLegacyManifest(t *testing.T) {
 		t.Fatalf("workspace still exists or stat failed: %v", err)
 	}
 }
+
+func TestCapsuleVerifyCoreUsesManagedOpenWithLegacyResult(t *testing.T) {
+	out, err := execRoot(t, "capsule", "verify", "clean-repo", "--json")
+	if err != nil {
+		t.Fatalf("capsule verify clean-repo --json: %v\n%s", err, out)
+	}
+	var result struct {
+		OK                 bool   `json:"ok"`
+		CapsuleName        string `json:"capsule_name"`
+		Workspace          string `json:"workspace"`
+		ExpectedTreeDigest string `json:"expected_tree_digest"`
+		ActualTreeDigest   string `json:"actual_tree_digest"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("verify JSON decode: %v\n%s", err, out)
+	}
+	if !result.OK || result.CapsuleName != "clean-repo" || result.Workspace == "" || result.ActualTreeDigest == "" {
+		t.Fatalf("unexpected verify result: %+v", result)
+	}
+}
