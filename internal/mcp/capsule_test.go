@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -106,6 +107,79 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	require.Greater(t, integrated.Workspace.Generation, committedHandle.Workspace.Generation)
 }
 
+func TestCapsuleMCPSyncConflictsMaterializesProjectRelativeArtifact(t *testing.T) {
+	project := t.TempDir()
+	spec := filepath.Join(project, "capsules", "clean", "capsule.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(spec), 0o755))
+	require.NoError(t, os.WriteFile(spec, []byte("name: clean\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644))
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"local_reconcile"}, Branches: []string{"target"}}}
+	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent", ProjectID: "fixture"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	cs := connectCapsule(ctx, t, srv)
+
+	created, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.workspace.create", Arguments: map[string]any{"id": "diverged", "definition": "clean"}})
+	require.NoError(t, err)
+	require.False(t, created.IsError, contentText(created))
+	var createdBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(created)), &createdBody))
+	workspacePath, err := manager.WorkspacePath(ctx, createdBody.Workspace)
+	require.NoError(t, err)
+	runMCPGit(t, workspacePath, "config", "user.email", "capsule@example.invalid")
+	runMCPGit(t, workspacePath, "config", "user.name", "Capsule Test")
+	runMCPGit(t, workspacePath, "checkout", "-b", "target")
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "target.txt"), []byte("target\n"), 0o644))
+	runMCPGit(t, workspacePath, "add", "target.txt")
+	runMCPGit(t, workspacePath, "commit", "-m", "target")
+	runMCPGit(t, workspacePath, "checkout", "main")
+	runMCPGit(t, workspacePath, "checkout", "-b", "candidate")
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, "candidate.txt"), []byte("candidate\n"), 0o644))
+	runMCPGit(t, workspacePath, "add", "candidate.txt")
+	runMCPGit(t, workspacePath, "commit", "-m", "candidate")
+
+	planned, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.plan", Arguments: map[string]any{"workspace": createdBody.Workspace, "operation": "integrate", "target": "target"}})
+	require.NoError(t, err)
+	require.False(t, planned.IsError, contentText(planned))
+	var planBody struct {
+		Plan struct {
+			Digest string `json:"digest"`
+			Class  string `json:"class"`
+		} `json:"plan"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(planned)), &planBody))
+	require.Equal(t, "diverged", planBody.Plan.Class)
+
+	conflicts, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.conflicts", Arguments: map[string]any{"plan_digest": planBody.Plan.Digest}})
+	require.NoError(t, err)
+	require.False(t, conflicts.IsError, contentText(conflicts))
+	require.NotContains(t, contentText(conflicts), project, "conflict result must not leak host paths")
+	var conflictBody struct {
+		Path     string `json:"path"`
+		Artifact struct {
+			Schema            string   `json:"schema"`
+			PlanDigest        string   `json:"plan_digest"`
+			ContinuationToken string   `json:"continuation_token"`
+			CandidatePaths    []string `json:"candidate_paths"`
+			TargetPaths       []string `json:"target_paths"`
+			OverlapPaths      []string `json:"overlap_paths"`
+			RequiredInputs    []string `json:"required_inputs"`
+		} `json:"artifact"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(conflicts)), &conflictBody))
+	require.Equal(t, "capsule-sync-conflict/v1", conflictBody.Artifact.Schema)
+	require.Equal(t, planBody.Plan.Digest, conflictBody.Artifact.PlanDigest)
+	require.NotEmpty(t, conflictBody.Artifact.ContinuationToken)
+	require.Contains(t, conflictBody.Artifact.CandidatePaths, "candidate.txt")
+	require.Contains(t, conflictBody.Artifact.TargetPaths, "target.txt")
+	require.NotEmpty(t, conflictBody.Artifact.RequiredInputs)
+	require.False(t, filepath.IsAbs(conflictBody.Path), "artifact path must be project-relative")
+	require.True(t, strings.HasPrefix(conflictBody.Path, ".capsules/sync/"), "artifact path should stay inside Capsule state: %s", conflictBody.Path)
+	require.FileExists(t, filepath.Join(project, filepath.FromSlash(conflictBody.Path)))
+}
+
 func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {
 	project := t.TempDir()
 	ciDir := filepath.Join(project, ".capsules", "ci")
@@ -169,4 +243,12 @@ func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(ciDir, "b.trace.json"))
 	require.FileExists(t, filepath.Join(ciDir, "c.run.json"))
 	require.NoDirExists(t, cacheDir)
+}
+
+func runMCPGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 }
