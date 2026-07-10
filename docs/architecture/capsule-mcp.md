@@ -15,8 +15,9 @@ The exposed effect families are intentionally distinct:
 - environment lock persistence requires `env_write`;
 - local reconciliation requires `local_reconcile` and uses a stable plan/apply
   digest, and may target only a branch granted at server startup; and
-- remote publication and credentials are absent unless a future explicit grant
-  and provider are configured.
+- remote publication remains absent; remote CI execution is available only when
+  the checked-in CI config names a remote executor and the launching process
+  supplies its credential environment.
 
 Verifier-only overlays and secret values are not placed in the agent-visible
 filesystem or MCP response payloads. Lifecycle operations emit deterministic

@@ -43,11 +43,29 @@ that cannot complete safely must emit `needs_input`; the reference
 Pipeline `executor:` is an immutable placement selection: `host`/`local` runs
 through the host provider and `remote-fake` exercises the identical remote
 worker protocol without a network. A production remote-worker name must be
-injected by the project’s launching process; a story cannot select one itself.
-The shipped `HTTPRemoteWorker` adapter accepts only HTTPS endpoints, sends the
-sealed envelope to the worker, receives a serialized typed verdict/result, and
-uses an ephemeral authorization header callback. Credential values never enter
-the envelope, workspace, trace, or receipt.
+declared in the checked-in `remotes:` map; a story cannot select or add one
+itself. The shipped `HTTPRemoteWorker` adapter accepts only HTTPS endpoints,
+sends the sealed envelope to the worker, receives a serialized typed
+verdict/result, and uses an ephemeral authorization header callback. Credential
+values never enter the envelope, workspace, trace, or receipt.
+
+Example remote placement:
+
+```yaml
+remotes:
+  remote-prod:
+    endpoint: https://capsule-worker.example
+    credential_env: KITSOKI_CAPSULE_WORKER_TOKEN
+
+pipelines:
+  change:
+    executor: remote-prod
+```
+
+`credential_env` stores only the environment variable name in the checked-in
+file. If present, the variable must be set by the launching operator process;
+the value is read only when the HTTP request is made and is sent as an
+authorization header.
 
 The optional `--verdict file.json` run input is for an explicit external story
 adapter. It is not an authority bypass: the verdict still has to match the
@@ -74,9 +92,10 @@ publication is intentionally not part of this grant.
 
 `capsule env resolve|lock|verify` creates and verifies content-addressed
 environment locks. The executor contract supports host and remote providers;
-the repository currently ships host plus a deterministic fake remote worker for
-offline parity tests. A credentialed production remote-worker adapter is not
-yet enabled by these commands.
+the repository ships host, deterministic fake-remote, and checked-in
+HTTPS-remote selection. Remote workers own source materialization and story
+execution for the sealed envelope they receive; the local controller validates
+the returned typed verdict against that envelope before persisting receipts.
 
 ## Compatibility
 
