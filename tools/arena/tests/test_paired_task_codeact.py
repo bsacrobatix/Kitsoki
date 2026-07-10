@@ -175,6 +175,15 @@ with tempfile.TemporaryDirectory(prefix="paired-raw-effort-") as td:
         runner.subprocess.run = original_run
     require("raw Codex effort is explicit", 'model_reasoning_effort="medium"' in captured)
 
+with tempfile.TemporaryDirectory(prefix="paired-cleanup-") as td:
+    tree = Path(td) / "node_modules" / "nested"
+    tree.mkdir(parents=True)
+    locked = tree / "package.json"
+    locked.write_text("{}", encoding="utf-8")
+    locked.chmod(0o400)
+    runner.cleanup_cell_workdir(Path(td) / "node_modules")
+    check("cell cleanup removes read-only nested tree", (Path(td) / "node_modules").exists(), False)
+
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
     backend="codex",

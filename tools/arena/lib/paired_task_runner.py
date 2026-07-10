@@ -307,21 +307,10 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
 def cleanup_cell_workdir(tree: Path) -> None:
     if not tree.exists():
         return
-    for root, dirs, files in os.walk(tree):
-        for name in dirs:
-            if (Path(root) / name).is_symlink():
-                continue
-            try:
-                os.chmod(Path(root) / name, 0o700)
-            except OSError:
-                pass
-        for name in files:
-            if (Path(root) / name).is_symlink():
-                continue
-            try:
-                os.chmod(Path(root) / name, 0o600)
-            except OSError:
-                pass
+    # Cells routinely install a large node_modules tree. Recursively chmodding
+    # it before removal turns cleanup into an unbounded post-model delay. The
+    # cell container owns the workdir; let rmtree remove it directly and only
+    # repair an individual permission failure via onerror.
     shutil.rmtree(tree, onerror=remove_readonly)
 
 
