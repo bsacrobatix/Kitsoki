@@ -62,17 +62,14 @@ host_handlers:
         confidence:          0.88
         needs_clarification: false
         follow_up_questions: []
-  host.run:
+  host.starlark.run:
     by_call:
       publish:
         data:
-          ok: true
-          exit_code: 0
-          stdout: '{"design_file":"docs/proposals/tamagotchi-pet-ui.md","ticket_id":"F-2026-06-11T120000Z-tamagotchi-pet-ui","ticket_path":"issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md","ticket_title":"Tamagotchi pet UI"}'
-          stdout_json:
+          result:
             design_file: "docs/proposals/tamagotchi-pet-ui.md"
-            ticket_id:     "F-2026-06-11T120000Z-tamagotchi-pet-ui"
-            ticket_path:   "issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md"
+            ticket_id: "F-2026-06-11T120000Z-tamagotchi-pet-ui"
+            ticket_path: "issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md"
             ticket_title:  "Tamagotchi pet UI"
       roadmap_ledger_proposal_published:
         data:

@@ -9,7 +9,7 @@
 # workspace write and an amend of docs/proposals/<file>.md resolve.
 #
 # `accept` publishes the proposal and files a feature ticket. `accept_no_ticket`
-# publishes only. Both use publish_design.py; the save-only path passes an empty
+# publishes only. Both use publish_design.star; the save-only path passes an empty
 # ticket_dir so no implementation ticket is minted.
 #
 # Checkpoint exits: accept → publish (+ optional file ticket) → design_done;
@@ -128,7 +128,7 @@ states:
         on_error: .
     on:
       # Accept: publish the proposal (move it from workspace to docs/proposals/)
-      # AND mint a feature ticket that links back to it. publish_design.py
+      # AND mint a feature ticket that links back to it. publish_design.star
       # handles collision-proofing and emits a JSON envelope so a single call
       # binds the published path plus the new ticket's id / path / title.
       # ticket_type is pinned to "feature" here so the draft room's
@@ -137,33 +137,31 @@ states:
       accept:
         - target: design_done
           effects:
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: publish
               with:
-                cmd: python3
-                args:
-                  - "stories/dev-story/scripts/publish_design.py"
-                  - "{{ world.design_workspace }}"
-                  - "{{ world.design_slug }}"
-                  - "{{ world.design_change_target }}"
-                  - "{{ world.design_artifact.title }}"
-                  - "{{ world.design_idea }}"
-                  # External-target profile (defaults keep flat docs/proposals
-                  # + a feature ticket; an instance overrides these).
-                  - "{{ world.workdir }}"
-                  - "{{ world.design_durable_path }}"
-                  - "{{ world.design_doc_filename }}"
-                  - "{{ world.design_ticket_dir }}"
-                  # ticket_repo (slice #3): non-empty ⇒ mint a GitHub feature
-                  # issue instead of a local issues/features/<id>.md file.
-                  - "{{ world.ticket_repo }}"
+                script: scripts/publish_design.star
+                inputs:
+                  workspace: "{{ world.design_workspace }}"
+                  slug: "{{ world.design_slug }}"
+                  change_target: "{{ world.design_change_target }}"
+                  title: "{{ world.design_artifact.title }}"
+                  idea: "{{ world.design_idea }}"
+                  workdir: "{{ world.workdir }}"
+                  durable: "{{ world.design_durable_path }}"
+                  doc_filename: "{{ world.design_doc_filename }}"
+                  ticket_dir: "{{ world.design_ticket_dir }}"
+                  ticket_repo: "{{ world.ticket_repo }}"
+                capabilities:
+                  host:
+                    verbs: [host.proposal.publish]
               bind:
-                design_file: stdout_json.design_file
-                ticket_id:     stdout_json.ticket_id
-                ticket_title:  stdout_json.ticket_title
-                ticket_url:    stdout_json.ticket_url
-                thread:        stdout_json.ticket_id
-                design_ticket_path: stdout_json.ticket_path
+                design_file: design_file
+                ticket_id: ticket_id
+                ticket_title: ticket_title
+                ticket_url: ticket_url
+                thread: ticket_id
+                design_ticket_path: ticket_path
               on_error: design_draft
             - set:
                 ticket_type: "feature"
@@ -219,29 +217,31 @@ states:
       accept_no_ticket:
         - target: design_done
           effects:
-            - invoke: host.run
+            - invoke: host.starlark.run
               id: publish
               with:
-                cmd: python3
-                args:
-                  - "stories/dev-story/scripts/publish_design.py"
-                  - "{{ world.design_workspace }}"
-                  - "{{ world.design_slug }}"
-                  - "{{ world.design_change_target }}"
-                  - "{{ world.design_artifact.title }}"
-                  - "{{ world.design_idea }}"
-                  - "{{ world.workdir }}"
-                  - "{{ world.design_durable_path }}"
-                  - "{{ world.design_doc_filename }}"
-                  - ""
-                  - ""
+                script: scripts/publish_design.star
+                inputs:
+                  workspace: "{{ world.design_workspace }}"
+                  slug: "{{ world.design_slug }}"
+                  change_target: "{{ world.design_change_target }}"
+                  title: "{{ world.design_artifact.title }}"
+                  idea: "{{ world.design_idea }}"
+                  workdir: "{{ world.workdir }}"
+                  durable: "{{ world.design_durable_path }}"
+                  doc_filename: "{{ world.design_doc_filename }}"
+                  ticket_dir: ""
+                  ticket_repo: ""
+                capabilities:
+                  host:
+                    verbs: [host.proposal.publish]
               bind:
-                design_file: stdout_json.design_file
-                ticket_id:     stdout_json.ticket_id
-                ticket_title:  stdout_json.ticket_title
-                ticket_url:    stdout_json.ticket_url
-                thread:        stdout_json.ticket_id
-                design_ticket_path: stdout_json.ticket_path
+                design_file: design_file
+                ticket_id: ticket_id
+                ticket_title: ticket_title
+                ticket_url: ticket_url
+                thread: ticket_id
+                design_ticket_path: ticket_path
               on_error: design_draft
             - set:
                 ticket_type: ""
@@ -394,7 +394,7 @@ states:
         - target: .
 
   # Post-publish confirmation view (was design_publish.yaml, now inline).
-  # Entered from the accept arc after publish_design.py has bound design_file.
+  # Entered from the accept arc after publish_design.star has bound design_file.
   # on_enter is empty — publish already happened in the accept arc's effects.
   design_done:
     description: "Proposal published — review the file and return to your day."

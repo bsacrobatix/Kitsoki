@@ -133,16 +133,11 @@ host_handlers:
           submitted:
             summary: "Folded in the operator's note — the component model is now scoped."
             gaps:    ["Define the drive-action → DOM contract"]
-  host.run:
+  host.starlark.run:
     by_call:
-      # Design publish still uses publish_design.py through host.run. PRD publish
-      # now runs prd_publish.star through host.starlark.run and is covered by
-      # the inspect cassette above.
       publish:
         data:
-          ok: true
-          exit_code: 0
-          stdout_json:
+          result:
             design_file:  "docs/proposals/tour-subcommand.md"
             ticket_id:    "F-2026-06-12T120000Z-tour-subcommand"
             ticket_path:  "issues/features/F-2026-06-12T120000Z-tour-subcommand.md"

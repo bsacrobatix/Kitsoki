@@ -17,7 +17,7 @@ Every per-PRD artifact lands under a **slug-named workspace** —
 workspace shape the `dev-story` proposal pipeline uses. On `accept` the
 draft is **published** out of the gitignored workspace to its durable home
 (`docs/prd/<slug>.md` by default, collision-safe). This mirrors
-`dev-story`'s `design_workspace.py` / `publish_design.py` sandwich:
+`dev-story`'s `design_workspace.star` / `publish_design.star` sandwich:
 `scripts/prd_slug.star` mints + uniquifies the slug, `scripts/prd_publish.star`
 moves the accepted draft.
 

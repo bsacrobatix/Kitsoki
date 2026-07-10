@@ -44,7 +44,7 @@ The remaining story-authoring work is intentionally not hidden in the registry p
 
 - `artifacts:` story declarations for workspace items and lifecycle policy.
 - `iface.instance.*` host calls for get-or-create workspaces, share, publish, dispose, and retention scans.
-- Dev-story migration from `design_workspace.star` / `publish_design.py` onto those host calls.
+- Dev-story migration from `design_workspace.star` / `publish_design.star` onto those host calls.
 - TUI/web artifact-job console rows, actions, and galleries.
 
 Until those slices land, stories can still use `host.artifacts_dir` for emitted artifacts and can register jobs from runtime integration code without changing YAML loader behavior.

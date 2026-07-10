@@ -147,7 +147,7 @@ repo-native docs paths such as `docs/prd` and `docs/proposals`.
 How the keys reach the glue: the `prd` import's `world_in` projects
 `publish_durable_path` + `prd_doc_filename` into the prd child;
 [`rooms/design_draft.yaml`](./rooms/design_draft.yaml) passes the
-`design_*` keys to `publish_design.py` and threads `design_template_dir`
+`design_*` keys to `publish_design.star` and threads `design_template_dir`
 into the author prompt (`prompts/design_draft.md` reads
 `{{ args.template_dir }}`).
 
@@ -158,7 +158,7 @@ positional args:
   publishes to the `durable` home relative to `workdir`; a non-empty
   `doc_filename` overwrites a **fixed** `<durable>/<doc_filename>.md`
   instead of `<durable>/<slug>.md`.
-- [`stories/dev-story/scripts/publish_design.py`](./scripts/publish_design.py)
+- [`stories/dev-story/scripts/publish_design.star`](./scripts/publish_design.star)
   `… [workdir] [durable] [doc_filename] [ticket_dir]` — same `workdir` /
   `durable` / `doc_filename` contract, plus `ticket_dir`: a non-empty
   value mints the kitsoki feature ticket there (`issues/features` by
