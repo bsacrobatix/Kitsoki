@@ -66,8 +66,10 @@ and the conflict continuation token when deterministic apply must pause for a
 story resolver and independent lost-work review.
 
 For a diverged stored plan, `kitsoki capsule sync conflicts --plan <digest>`
-or the scoped `capsule.sync.conflicts` MCP tool materializes a
-`capsule-sync-conflict/v1` artifact under `.capsules/sync/`. The artifact
-records the merge base, candidate/target changed paths, overlap paths, required
-resolver/reviewer/validation inputs, and the continuation token that story
-traces must later reference.
+and `kitsoki capsule sync integration --plan <digest>` materialize
+`capsule-sync-conflict/v1` and `capsule-sync-integration/v1` artifacts under
+`.capsules/sync/`; scoped agents use `capsule.sync.conflicts` and
+`capsule.sync.integration` for the same server-owned plan. The artifacts record
+the merge base, candidate/target changed paths, overlap paths, required
+resolver/reviewer/validation inputs, the managed integration instance, and the
+continuation token that story traces must later reference.

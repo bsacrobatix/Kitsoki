@@ -6,10 +6,10 @@ are available through Capsule CLI/MCP. The native `development` compatibility
 provider preserves the existing protected rebase/gate workflow. `publish` is now
 guarded behind an explicit remote publisher provider instead of local ref
 mutation. Conflict plans now carry structured continuation tokens, required
-story inputs, and `capsule-sync-conflict/v1` path/tree artifacts; a
-credential-free local bare-remote publish provider ships for tests/local
-development. Managed integration-instance materialization, continuation apply,
-fetch parity, and the production remote publish provider remain.
+story inputs, `capsule-sync-conflict/v1` path/tree artifacts, and managed
+`capsule-sync-integration/v1` integration instances; a credential-free local
+bare-remote publish provider ships for tests/local development. Continuation
+apply, fetch parity, and the production remote publish provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -189,8 +189,8 @@ operations.
 
 ## 2. Conflict and remote seams
 - [ ] 2.1 Create integration instances and structured conflict/continuation artifacts
-  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, and CLI/MCP `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, and overlaps.
-  - Remaining: materialize managed integration instances.
+  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens, required resolver/reviewer/validation inputs, CLI/MCP `capsule-sync-conflict/v1` artifacts with merge base, candidate/target changed paths, and overlaps, and CLI/MCP `capsule-sync-integration/v1` managed integration instances under `.capsules/sync/`.
+  - Remaining: continuation apply from resolved integration instances.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
 - [ ] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
   - Shipped: local bare-remote publish provider with live remote-ref lease check and no credential surface.
