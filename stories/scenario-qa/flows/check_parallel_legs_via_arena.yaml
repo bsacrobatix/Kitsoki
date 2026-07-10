@@ -1,6 +1,6 @@
 # check_parallel_legs_via_arena — P2.10 "parallel legs via arena": `check ...
 # parallel=true` routes plan -> rooms/parallel.yaml instead of rooms/
-# execute.yaml. This fixture stubs the arena host.run call
+# execute.yaml. This fixture stubs the arena host.product_journey.run call
 # (run_arena_persona_qa_legs) with a canned set of two cell "completion
 # states" already folded into drive_result/judge_result pairs (the shape
 # tools/persona_qa/completion.py::to_scenario_qa_leg_result produces from a
@@ -55,7 +55,7 @@ initial_state: idle
 starlark_inspect_cassette: ../cassettes/check_parallel_legs_via_arena.inspect.yaml
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -196,17 +196,17 @@ turns:
             cause: "blocker: missing proof: bugfix"
             frames_dir: ""
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: run_arena_persona_qa_legs }
       - handler: host.starlark.run
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 2 transport checks passed, 1 degraded-evidence[\\s\\S]*tui \\[frame-level\\][^\\n]*verdict=pass driver=captured[\\s\\S]*web \\[frame-level\\][^\\n]*verdict=degraded-evidence driver=blocked"
 

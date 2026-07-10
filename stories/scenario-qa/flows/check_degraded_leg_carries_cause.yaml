@@ -14,7 +14,7 @@
 # blocker text>". A single-transport (tui-only) check so the loop auto-drains
 # straight to `report` in one turn (see check_single_transport.yaml), which
 # also exercises build_report.star for real (file-system-free, so no
-# additional cassette interactions are needed) while host.run's
+# additional cassette interactions are needed) while host.product_journey.run's
 # build_scenario_qa_deck subprocess call stays stubbed like every other flow
 # fixture here.
 
@@ -25,7 +25,7 @@ initial_state: idle
 starlark_inspect_cassette: ../cassettes/check_degraded_leg_carries_cause.inspect.yaml
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -116,7 +116,7 @@ turns:
             cause: "no live authorization (profile= not supplied); blocker: studio: harness:replay cannot dispatch host.agent.converse without a matching host_cassette episode; replay misses fail closed instead of falling through to a live agent"
             frames_dir: ""
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -130,7 +130,7 @@ turns:
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "verdict=degraded-evidence driver=blocked cause=no live authorization \\(profile= not supplied\\); blocker:"
 

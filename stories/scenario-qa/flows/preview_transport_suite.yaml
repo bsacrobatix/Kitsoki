@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       preview_transport_suite:
         data:
@@ -69,12 +69,10 @@ turns:
       last_error: ""
       status: preview_ready
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args:
           call: preview_transport_suite
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --transport-suite
             - --scenarios
             - bugfix

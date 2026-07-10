@@ -33,7 +33,7 @@
 #
 #   idle       operator surface: "check" a scenario (catalog id or a free-text
 #              description) on one or more transports.
-#   plan       host.run → tools/product-journey/run.py --emit-run --transport
+#   plan       host.product_journey.run → tools/product-journey/run.py --emit-run --transport
 #              <...> builds the run bundle (project/persona resolution,
 #              evidence dirs).
 #   resolve    scripts/plan_legs.star reads the bundle back into scenario x
@@ -66,7 +66,8 @@ app:
   license: "CC0"
 
 # Host allow-list.
-#   host.run          — shell to tools/product-journey/run.py --emit-run to
+#   host.product_journey.run — explicit external boundary to
+#                        tools/product-journey/run.py --emit-run to
 #                        build the scenario/persona/transport run bundle
 #                        (project + persona resolution, evidence dirs,
 #                        driver-plan.json), then --scenario-qa-report to fold
@@ -84,7 +85,7 @@ app:
 #                        Stubbed by id under flow/no-LLM tests; never
 #                        fabricated — a failed dispatch is recorded honestly.
 hosts:
-  - host.run
+  - host.product_journey.run
   - host.starlark.run
   - host.agent.task
 
@@ -174,7 +175,7 @@ world:
   # front by rooms/plan.yaml + rooms/execute.yaml before any leg is driven.
   live_authorization_summary: { type: list, default: [] }
   # P2.10 "parallel legs via arena": transient -- rooms/parallel.yaml's own
-  # host.run bind, consumed by the SAME turn's record_leg_result invoke
+  # host.product_journey.run bind, consumed by the SAME turn's record_leg_result invoke
   # (legs_batch: input) and never read anywhere else.
   parallel_records:     { type: list, default: [] }
   # Dedicated resolved-marker so rooms/parallel.yaml can defer its

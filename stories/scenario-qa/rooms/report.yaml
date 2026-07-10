@@ -132,12 +132,10 @@ states:
       # (see delivery-tail/rooms/integrate.yaml's run_exit comment: on_enter
       # effects can be walked more than once, so a `when:` guard placed right
       # after an invoke can fire against a stale pre-bind world).
-      - invoke: host.run
+      - invoke: host.product_journey.run
         id: build_scenario_qa_deck
         with:
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --scenario-qa-report
             - --json-output
             - --run-dir

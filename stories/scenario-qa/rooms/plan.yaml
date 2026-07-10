@@ -1,4 +1,4 @@
-# plan — build the run bundle (host.run → run.py --emit-run --transport ...)
+# plan — build the run bundle (host.product_journey.run → run.py --emit-run --transport ...)
 # then resolve it into scenario x transport legs (scripts/plan_legs.star).
 #
 # Catalog mode passes the requested scenario id straight through; run.py's own
@@ -81,12 +81,10 @@ states:
           {% endfor %}
         when: "len(world.live_authorization_summary) > 0"
     on_enter:
-      - invoke: host.run
+      - invoke: host.product_journey.run
         id: emit_scenario_qa_run
         with:
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --emit-run
             - --scenario-qa-workspace
             - --project

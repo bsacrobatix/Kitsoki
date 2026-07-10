@@ -58,7 +58,7 @@ states:
             - label: "look"
               intent: look
     on_enter:
-      # Surface a bounce back to idle from any later room (a failed host.run /
+      # Surface a bounce back to idle from any later room (a failed host.product_journey.run /
       # host.starlark.run invoke redirects here) — never a silent bounce. The
       # status value named by whichever room bounced gives the operator a hint
       # at where it failed without needing the trace.
@@ -203,12 +203,10 @@ states:
                 transport_suite: {}
                 last_error: ""
                 status: "previewing"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: preview_transport_suite
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --transport-suite
                   - --scenarios
                   - "{{ join(split((slots.scenario ?? world.scenario_ref), ' '), '-') }}"
@@ -287,12 +285,10 @@ states:
               on_error: idle
             - set:
                 status: "previewing"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: preview_transport_suite
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --transport-suite
                   - --scenarios
                   - "{{ world.mode == 'adhoc' ? 'bugfix' : world.scenario_ref }}"
