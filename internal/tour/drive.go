@@ -79,6 +79,22 @@ func (e *executor) waitForText(want string, timeout time.Duration) error {
 			return err
 		}
 		if strings.Contains(body, want) {
+			// Keep the proof target in view. A bound workbench response can be a
+			// tall card (prerequisites and quick actions flank its actual result),
+			// so scrolling the whole agent row is not enough to prove the required
+			// captured text in the poster frame.
+			focus := fmt.Sprintf(`(() => {
+  const root = document.querySelector('[data-testid="chat-transcript"]');
+  if (!root) return;
+  window.__tourResponseText = %q;
+  const matches = [...root.querySelectorAll('*')].filter((el) =>
+    (el.innerText || '').includes(%q) && ![...el.children].some((child) => (child.innerText || '').includes(%q)));
+  const target = matches[0];
+  if (target) { window.__tourResponseTarget = target; target.scrollIntoView({block:'center'}); }
+})()`, want, want, want)
+			if err := chromedp.Run(e.ctx, chromedp.Evaluate(focus, nil)); err != nil {
+				return err
+			}
 			return nil
 		}
 		if err := e.sleepRaw(200 * time.Millisecond); err != nil {
@@ -261,10 +277,31 @@ func (e *executor) revealTurn() error {
 		return err
 	}
 	// The transcript can grow after the scroll-span calculation (notably when a
-	// cassette-backed agent result lands). Anchor the actual response row as the
-	// final visibility assertion, rather than trusting a stale max scroll value.
-	const lastAgentIntoView = `(() => { const rows = document.querySelectorAll('[data-testid="chat-row-agent"]'); const last = rows[rows.length - 1]; if (last) last.scrollIntoView({block:'end'}); })()`
-	if err := chromedp.Run(e.ctx, chromedp.Evaluate(lastAgentIntoView, nil)); err != nil {
+	// cassette-backed agent result lands). Keep the required response text in
+	// view when wait-text established one; otherwise fall back to the last agent
+	// row for manifests that only use reveal-turn.
+	const lastAgentIntoView = `(async () => {
+  const root = document.querySelector('[data-testid="chat-transcript"]');
+  const want = window.__tourResponseText;
+  if (root && want && window.__ease) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const at = (node.textContent || '').indexOf(want);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at); range.setEnd(node, at + want.length);
+      const rect = range.getBoundingClientRect(), base = root.getBoundingClientRect();
+      await window.__ease(root.scrollTop + rect.top - base.top - root.clientHeight / 2, 0);
+      return;
+    }
+  }
+  const target = window.__tourResponseTarget;
+  if (target) { target.scrollIntoView({block:'center'}); return; }
+  const rows = document.querySelectorAll('[data-testid="chat-row-agent"]');
+  const last = rows[rows.length - 1]; if (last) last.scrollIntoView({block:'start'});
+})()`
+	if err := chromedp.Run(e.ctx, chromedp.Evaluate(lastAgentIntoView, nil, awaitPromise)); err != nil {
 		return err
 	}
 	return e.dwell(1500)

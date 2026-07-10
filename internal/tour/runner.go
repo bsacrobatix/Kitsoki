@@ -100,6 +100,19 @@ func walkSteps(ctx context.Context, cfg Config, exec *executor, chapters *chapte
 			if err := exec.dwell(dwellMs); err != nil {
 				return shots, err
 			}
+		} else {
+			// Interactive scenes open their chapter before the drive so its
+			// window contains the conversation. They still owe their authored
+			// screen dwell before the poster is captured; otherwise their chapter
+			// only measures the fixed transition settle and QA correctly rejects
+			// the release as shorter than the storyboard contract.
+			dwellMs := step.DwellMs
+			if dwellMs == 0 {
+				dwellMs = 3000
+			}
+			if err := exec.dwell(dwellMs); err != nil {
+				return shots, err
+			}
 		}
 		pngIdx++
 		png, err := capturePNG(ctx, cfg.OutDir, pngIdx, step.ID)
