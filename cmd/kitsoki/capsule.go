@@ -435,7 +435,7 @@ func capsuleVerifyCmd() *cobra.Command {
 		Short: "Verify a capsule spec or materialized workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := capsule.Verify(cmd.Context(), args[0], nil)
+			res, err := capsuleVerifyManaged(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
@@ -469,6 +469,31 @@ func capsuleVerifyCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print verification JSON")
 	return cmd
+}
+
+func capsuleVerifyManaged(ctx context.Context, ref string) (capsule.VerifyResult, error) {
+	if shouldUseLegacyCapsulePath(ref) {
+		return capsule.Verify(ctx, ref, nil)
+	}
+	projectRoot := capsuleListRepoRoot()
+	definitions := control.FileDefinitionStore{ProjectRoot: projectRoot}
+	def, err := definitions.Get(ctx, ref)
+	if err != nil {
+		return capsule.Verify(ctx, ref, nil)
+	}
+	if def.Source.Kind != control.SourceSynthetic {
+		return capsule.VerifyResult{}, fmt.Errorf("capsule verify: definition %q uses provider %q; use capsule workspace create/status for managed non-synthetic workspaces", def.ID, def.Source.Kind)
+	}
+	root, err := os.MkdirTemp("", "kitsoki-capsule-verify-"+safeCapsuleInstanceID(def.ID)+"-")
+	if err != nil {
+		return capsule.VerifyResult{}, fmt.Errorf("capsule verify: create temp workspace: %w", err)
+	}
+	defer os.RemoveAll(root)
+	opened, err := capsuleOpenManaged(ctx, ref, filepath.Join(root, safeCapsuleInstanceID(def.ID)))
+	if err != nil {
+		return capsule.VerifyResult{}, err
+	}
+	return capsule.Verify(ctx, opened.Manifest.Workspace, nil)
 }
 
 func capsuleCloseCmd() *cobra.Command {
