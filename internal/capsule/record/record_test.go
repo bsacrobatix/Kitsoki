@@ -1,6 +1,7 @@
 package record
 
 import (
+	"context"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
@@ -13,6 +14,12 @@ import (
 	"strings"
 	"testing"
 )
+
+type testLauncher func(context.Context, executor.Prepared) (ci.Verdict, error)
+
+func (f testLauncher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Verdict, error) {
+	return f(ctx, prepared)
+}
 
 func TestPersistBuildsReceiptAndTrace(t *testing.T) {
 	out, err := Persist(t.TempDir(), validRunResult("job", "sha256:source"))
@@ -89,6 +96,45 @@ func TestPromotionGateRejectsAcceptedAttemptSubstitution(t *testing.T) {
 	}
 }
 
+func TestLocalAndFakeRemoteReceiptsAuthorizePromotionPlan(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		executor string
+	}{
+		{name: "host"},
+		{name: "fake-remote", executor: "remote-fake"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeReceiptPolicyProjectWithExecutor(t, root, false, tc.executor)
+			service := ci.Service{
+				ProjectRoot: root,
+				Jobs:        artifactjob.NewMemoryStore(),
+				Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+				Executors:   ci.NewBuiltinExecutors(),
+				Launcher: testLauncher(func(_ context.Context, prepared executor.Prepared) (ci.Verdict, error) {
+					return ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", Summary: "promotion fixture", Checks: []ci.Check{{ID: "tests", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:tests"}}}, PromotionEligible: true, SourceDigest: prepared.Envelope.SourceDigest, StoryDigest: prepared.Envelope.StoryDigest, EnvironmentDigest: prepared.Envelope.Environment.Digest, EnvelopeDigest: prepared.Envelope.Digest}, nil
+				}),
+			}
+			run, err := service.Run(context.Background(), ci.RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:candidate", StoryDigest: "sha256:story", Trigger: ci.Trigger{Kind: "local"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := Persist(root, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := (ci.FileRunStore{ProjectRoot: root}).Write(ci.RunRecord{JobID: string(run.Job.ID), Result: run, ReceiptID: stored.Receipt.ReceiptID, ReceiptVerification: stored.Verification.Status}); err != nil {
+				t.Fatal(err)
+			}
+			plan := reconcile.Plan{Candidate: "sha256:candidate"}
+			if err := (PromotionGate{ProjectRoot: root}).Verify(context.Background(), stored.Receipt.ReceiptID, plan); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func validRunResult(jobID, sourceDigest string) ci.RunResult {
 	e, _ := executor.Seal(executor.Envelope{JobID: jobID, ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: sourceDigest, StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: executor.Policy{Network: "none"}})
 	v := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []ci.Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: e.SourceDigest, StoryDigest: e.StoryDigest, EnvironmentDigest: e.Environment.Digest, EnvelopeDigest: e.Digest}
@@ -97,10 +143,19 @@ func validRunResult(jobID, sourceDigest string) ci.RunResult {
 
 func writeReceiptPolicyProject(t *testing.T, root string, require bool) {
 	t.Helper()
+	writeReceiptPolicyProjectWithExecutor(t, root, require, "")
+}
+
+func writeReceiptPolicyProjectWithExecutor(t *testing.T, root string, require bool, executor string) {
+	t.Helper()
+	executorLine := ""
+	if executor != "" {
+		executorLine = "    executor: " + executor + "\n"
+	}
 	files := map[string]string{
 		".kitsoki/environments/ci.yaml": "schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\n",
 		".kitsoki/stories/ci/app.yaml":  "app:\n  id: ci\nrooms:\n  idle:\n    view: ok\n",
-		".kitsoki/ci.yaml":              "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/ci/app.yaml\n    triggers: [local]\n    result:\n      schema: capsule-ci-verdict/v1\n",
+		".kitsoki/ci.yaml":              "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/ci/app.yaml\n    triggers: [local]\n" + executorLine + "    result:\n      schema: capsule-ci-verdict/v1\n",
 	}
 	if require {
 		files[".kitsoki/ci.yaml"] += "receipt:\n  require_signature: true\n  signer: test-signer\n"
