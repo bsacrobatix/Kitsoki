@@ -1,9 +1,10 @@
 # Story: story-native capsule CI
 
 **Status:** v1 in progress. `.kitsoki/ci.yaml`, the reference story, typed
-verdict/envelope service, engine launcher, CLI, cancellation, run status, and
-Capsule MCP CI tools ship. Project wrappers, richer reference-story rooms,
-LLM/writer fixtures, and GitHub ingress remain.
+verdict/envelope service, engine launcher, CLI, cancellation, run status,
+Capsule MCP CI tools, deterministic verdict construction, and no-LLM
+pass/fail/park flow fixtures ship. Project wrappers, richer reference-story
+rooms, LLM/writer fixtures, and GitHub ingress remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -273,8 +274,10 @@ project wrapper that imports only deterministic checks and adjudication.
 
 ## 2. Reference composition
 - [ ] 2.1 Scaffold stories/capsule-ci with typed views and prepare/check/review/refine/adjudicate rooms
-- [ ] 2.2 Implement deterministic verdict builder and promotion-eligibility checks
+- [x] 2.2 Implement deterministic verdict builder and promotion-eligibility checks
 - [ ] 2.3 Add no-LLM flows for pass/fail/park/budget/remote-equivalence/digest mismatch
+  - Shipped: reference-story no-LLM pass/fail/park fixtures with typed `capsule-ci-verdict/v1` assertions.
+  - Remaining: budget, remote-equivalence, and digest-mismatch fixtures.
 - [ ] 2.4 Add cassette-backed LLM review and Capsule-MCP-only writer fixture; prove no ambient tools are required
 
 ## 3. Adopt and document
