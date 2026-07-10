@@ -282,6 +282,25 @@ type Server struct {
 	// projectOnboarded says the served checkout already has project-local
 	// Kitsoki onboarding markers.
 	projectOnboarded bool
+
+	// materializeSched runs graph.materialize.* jobs (node-artifact-
+	// materialization plan slice 4, materialize.go / materialize_stream.go).
+	// Always non-nil: its own dedicated in-memory jobs.Scheduler, separate
+	// from any orchestrator-level scheduler a session's stories use.
+	// Materialize jobs are process-local, short-lived, deterministic story
+	// drives, so no SQLite write-through is wired here (see
+	// materializeAnswer's doc comment for what that costs).
+	materializeSched jobs.Scheduler
+	// materializeRoot is the repo root a type's materialize.story path
+	// (pog/catalog.yaml type_registry) is resolved against. Empty (the
+	// default) resolves against ".", mirroring `kitsoki graph materialize`'s
+	// --repo-root default. Set via WithMaterializeRoot.
+	materializeRoot string
+	// materializeMu guards materializeJobs, the server-side per-job
+	// bookkeeping (see materializeJobState) that backs graph.materialize.status
+	// and /rpc/materialize-stream's initial gate frames.
+	materializeMu   sync.Mutex
+	materializeJobs map[jobs.JobID]*materializeJobState
 }
 
 // activeTurn is one in-flight streamed turn's cancel handle. Stored by pointer
@@ -323,6 +342,7 @@ type serverConfig struct {
 	bugPrivacyChecker         bugprivacy.Checker
 	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
 	workflowRoot              string
+	materializeRoot           string
 	kits                      *kitendpoint.Dispatcher
 	setupWarnings             []SetupWarning
 	projectOnboarded          bool
@@ -396,6 +416,16 @@ func WithBugPrivacyCheckerResolver(resolver BugPrivacyCheckerResolver) Option {
 // family on this server.
 func WithWorkflowRoot(dir string) Option {
 	return func(c *serverConfig) { c.workflowRoot = strings.TrimSpace(dir) }
+}
+
+// WithMaterializeRoot sets the repo root a type's materialize.story path
+// (a pog/catalog.yaml type_registry `materialize:` binding) is resolved
+// against for the graph.materialize.* RPC family (materialize.go). Empty
+// (the default) resolves story paths against ".", mirroring `kitsoki graph
+// materialize`'s --repo-root default; `kitsoki web` wires this to the same
+// git-root resolution it uses for WithBugRoot/WithWorkflowRoot.
+func WithMaterializeRoot(dir string) Option {
+	return func(c *serverConfig) { c.materializeRoot = strings.TrimSpace(dir) }
 }
 
 // WithKits attaches the installed-kit endpoint dispatcher (S3b —
@@ -515,6 +545,9 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		kits:                      cfg.kits,
 		setupWarnings:             append([]SetupWarning(nil), cfg.setupWarnings...),
 		projectOnboarded:          cfg.projectOnboarded,
+		materializeSched:          jobs.NewInMemoryScheduler(),
+		materializeRoot:           cfg.materializeRoot,
+		materializeJobs:           make(map[jobs.JobID]*materializeJobState),
 	}
 }
 
@@ -661,6 +694,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/point", s.handlePoint)
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
 	mux.HandleFunc("/rpc/turn-stream", s.handleTurnStream)
+	mux.HandleFunc("/rpc/materialize-stream", s.handleMaterializeStream)
 	// Embedded help-docs site (make site-embed). Serves an actionable
 	// placeholder when not staged — never an error (see internal/helpdocs).
 	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
@@ -1923,6 +1957,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		// kit.object-graph.graph.project) — see .context/kits-implementation-plan.md.
 		// ── Kit extension surface (S3b: kit.<kit>.<iface>.<op>) ──────────────
 		if result, rerr, handled := s.dispatchKit(ctx, method, params); handled {
+			return result, rerr
+		}
+		// ── Node artifact materialization (node-artifact-materialization
+		// plan slice 4, no story/session) ─────────────────────────────────
+		if result, rerr, handled := s.dispatchMaterialize(ctx, method, params); handled {
 			return result, rerr
 		}
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}

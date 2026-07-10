@@ -71,6 +71,52 @@ type TypeDef struct {
 	// `extends:` (Shared decision 2). The loader accepts it as an alias for
 	// Extends and records a warning; new type defs should use `extends:`.
 	DeprecatedParentAlias bool
+
+	// Artifact declares what a materialized instance of this type is
+	// (schema/format/presentation). Nil when the type does not declare
+	// itself an artifact. See node-artifact-materialization plan (POG
+	// .context/node-artifact-materialization-plan.md).
+	Artifact *ArtifactDecl
+
+	// Materialize declares how to produce this type's artifact: the bound
+	// story, the edge kinds pulled into the materialization context, the
+	// params accepted at invocation, and the node fields that must be set
+	// (gates) before invocation is offered. Nil when Artifact is nil or the
+	// type declares artifact: without a materialize: binding (contract-only,
+	// no invocation yet — see plan slice 1).
+	Materialize *MaterializeDecl
+}
+
+// ArtifactDecl is a type's `artifact:` declaration.
+type ArtifactDecl struct {
+	Schema       SchemaPin
+	Format       string
+	Presentation string
+}
+
+// MaterializeDecl is a type's `materialize:` binding.
+type MaterializeDecl struct {
+	// Story is a story root path (e.g. "stories/materialize-work-item"),
+	// relative to the repo root the catalog lives in — not to the catalog
+	// file itself.
+	Story string
+	// ContextEdges are edge field ids followed (recursively, through edges
+	// of the same kinds) to build the node's materialization context.
+	ContextEdges []EdgeField
+	// Params are invocation-time parameters (id/type/default/values),
+	// supplied before or at invocation.
+	Params []MaterializeParamDecl
+	// Gates names node fields that must be non-empty before the materialize
+	// intent is offered.
+	Gates []string
+}
+
+// MaterializeParamDecl is one entry of a materialize: declaration's params list.
+type MaterializeParamDecl struct {
+	ID      string
+	Type    string
+	Default any
+	Values  []string
 }
 
 // EffectiveType is a TypeDef with its whole extends ancestry resolved: the
@@ -186,6 +232,8 @@ func (r *Registry) resolve(id string, chain []string) (EffectiveType, error) {
 			Summary:        def.Summary,
 			RequiredFields: required,
 			EdgeFields:     edges,
+			Artifact:       def.Artifact,
+			Materialize:    def.Materialize,
 		},
 		Ancestry: append(append([]string{}, parent.Ancestry...), id),
 	}
