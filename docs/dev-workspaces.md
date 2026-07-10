@@ -166,9 +166,12 @@ make install-staging
 `refresh-staging-local.sh` checks the selected remote main first. If local
 `main` is stale, it delegates to `sync-main-from-remote.sh`, prints the required
 remote-sync steps, and stops; complete that sync and rerun the refresh. Once
-local `main` is current, the helper refreshes `.capsules/staging/local` from
-local `staging/local`, rebases it onto local `main`, and imports the refreshed
-`staging/local` ref back into the primary checkout. If the staging capsule is
+local `main` is current, the helper snapshots local `staging/local`, refreshes
+`.capsules/staging/local` from that exact snapshot, rebases it onto local
+`main`, and imports the refreshed ref with a compare-and-swap update. If a
+workspace merge advances primary `staging/local` during the refresh, the helper
+refuses rather than overwriting the newer work; rerun refresh from that newer
+snapshot. If the staging capsule is
 dirty and the helper is attached to a terminal, it asks whether to inspect,
 move the work into a new committed managed recovery capsule (the default),
 preserve-and-clean, discard-and-clean, or stop. Non-interactive runs stop with

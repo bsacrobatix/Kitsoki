@@ -100,6 +100,36 @@ git -C "$local_repo" merge-base --is-ancestor main staging/local ||
 cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
   fail "refresh did not copy .kitsoki.local.yaml into staging capsule"
 
+# A refresh must preserve the captured primary staging input.  Create a newer
+# primary staging commit, advance it from the gate (after the snapshot), and
+# prove refresh refuses rather than replacing it with the stale capsule result.
+commit_file "$local_repo/.capsules/staging/local" after-snapshot.txt capsule-after-snapshot
+advancer="$tmp/staging-advancer"
+git clone -q --no-local "$local_repo" "$advancer"
+git -C "$advancer" config user.name "Test User"
+git -C "$advancer" config user.email "test@example.invalid"
+git -C "$advancer" switch -q staging/local
+commit_file "$advancer" concurrent.txt concurrent-primary-advance
+concurrent_head="$(git -C "$advancer" rev-parse HEAD)"
+# A real workspace merge has already imported the object before it advances the
+# primary ref.  Make the deterministic race use the same ordering.
+git -C "$local_repo" fetch -q "$advancer" "HEAD:refs/kitsoki/test-concurrent-staging"
+concurrent_out="$tmp/concurrent-staging-advance.out"
+set +e
+(
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate "git -C '$local_repo' update-ref refs/heads/staging/local $concurrent_head"
+) >"$concurrent_out" 2>&1
+concurrent_status=$?
+set -e
+[ "$concurrent_status" -eq 1 ] ||
+  fail "expected concurrent staging advance to stop refresh with exit 1, got $concurrent_status"
+assert_contains "$concurrent_out" "staging branch advanced during refresh"
+[ "$(git -C "$local_repo" rev-parse staging/local)" = "$concurrent_head" ] ||
+  fail "refresh overwrote the newer primary staging ref"
+[ "$(git -C "$local_repo" show staging/local:concurrent.txt)" = "concurrent-primary-advance" ] ||
+  fail "refresh dropped the concurrent primary staging commit"
+
 printf 'default_profile: updated\n' >"$local_repo/.kitsoki.local.yaml"
 chmod u-w "$local_repo/.capsules/staging/local/.kitsoki.local.yaml"
 (
