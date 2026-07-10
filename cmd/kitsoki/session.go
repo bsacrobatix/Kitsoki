@@ -750,19 +750,20 @@ func sessionCreateCmd() *cobra.Command {
 
 func sessionContinueCmd() *cobra.Command {
 	var (
-		appPath        string
-		dbPath         string
-		key            string
-		idFlag         string
-		intentName     string
-		slotsFlag      string
-		rawText        string
-		harnessType    string
-		claudeModel    string
-		recordingPath  string
-		tracePath      string // --trace override; "" = use default JSONL path when key is known
-		execModeFlag   string
-		driveOperation bool
+		appPath          string
+		dbPath           string
+		key              string
+		idFlag           string
+		intentName       string
+		slotsFlag        string
+		rawText          string
+		harnessType      string
+		claudeModel      string
+		recordingPath    string
+		tracePath        string // --trace override; "" = use default JSONL path when key is known
+		execModeFlag     string
+		drainTimeoutFlag string
+		driveOperation   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "continue",
@@ -794,6 +795,13 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			}
 			if (key == "") == (idFlag == "") {
 				return fmt.Errorf("exactly one of --key or --id must be set")
+			}
+			drainTimeout, err := time.ParseDuration(drainTimeoutFlag)
+			if err != nil || drainTimeout <= 0 {
+				if err == nil {
+					err = fmt.Errorf("must be greater than zero")
+				}
+				return fmt.Errorf("--drain-timeout: %w", err)
 			}
 
 			def, err := loadAppWithEnv(appPath)
@@ -1062,7 +1070,6 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			// genuinely-broken story.
 			if jobScheduler != nil {
 				const maxDrainPasses = 8
-				const drainTimeout = 10 * time.Minute
 				for pass := 0; pass < maxDrainPasses; pass++ {
 					drainCtx, drainCancel := context.WithTimeout(ctx, drainTimeout)
 					schedErr := jobScheduler.WaitIdle(drainCtx)
@@ -1121,6 +1128,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 	cmd.Flags().StringVar(&slotsFlag, "slots", "", "intent slots as JSON or @file. With --intent: full slot set passed to SubmitDirect. With --raw: supplemental slots merged into the harness-resolved intent (existing keys are preserved).")
 	cmd.Flags().StringVar(&rawText, "raw", "", "raw inbound reply body, routed through the harness")
 	cmd.Flags().StringVar(&execModeFlag, "mode", "one-shot", `execution mode: "one-shot" (auto-advance, default) or "staged" (stop at decision gates)`)
+	cmd.Flags().StringVar(&drainTimeoutFlag, "drain-timeout", "10m", "maximum idle wait per background-job drain pass (for long-running one-shot workflows)")
 	cmd.Flags().StringVar(&harnessType, "harness", "", "harness for --raw: claude|live|replay (default auto)")
 	cmd.Flags().StringVar(&claudeModel, "claude-model", "", "model passed to claude -p --model")
 	cmd.Flags().StringVar(&recordingPath, "recording", "", "recording YAML for --harness replay")
