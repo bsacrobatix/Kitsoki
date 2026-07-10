@@ -177,6 +177,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(evalCmd())
 	root.AddCommand(agentBenchCmd())
 	root.AddCommand(personaQACmd())
+	root.AddCommand(qaCmd())
 	root.AddCommand(exportStatusCmd())
 	root.AddCommand(statusCmd())
 	root.AddCommand(webCmd())
