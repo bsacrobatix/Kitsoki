@@ -206,6 +206,8 @@ states:
                   - "{{ join(split((slots.scenario ?? world.scenario_ref), ' '), '-') }}"
                   - --transport
                   - "{{ slots.transport ?? world.transport_arg }}"
+                  - --live-profile
+                  - "{{ world.live_profile }}"
                   - --json-output
                 cwd: "."
                 fail_on_error: true
@@ -288,6 +290,8 @@ states:
                   - "{{ world.mode == 'adhoc' ? 'bugfix' : world.scenario_ref }}"
                   - --transport
                   - "{{ world.transport_arg }}"
+                  - --live-profile
+                  - "{{ world.live_profile }}"
                   - --json-output
                 cwd: "."
                 fail_on_error: true
