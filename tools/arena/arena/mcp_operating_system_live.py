@@ -354,6 +354,11 @@ def _event_tool_results(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _forbidden_tool(name: str) -> bool:
     lowered = name.lower()
+    # Claude may use these internal controls to discover an explicitly
+    # allowed MCP tool or emit the closed final schema. They do not provide
+    # shell, filesystem, VCS, or network authority.
+    if name in {"ToolSearch", CLAUDE_STRUCTURED_OUTPUT_TOOL}:
+        return False
     if lowered in FORBIDDEN_CLAUDE_TOOL_NAMES:
         return True
     # ``workspace.read`` is an approved strict tool; substring matching it as
