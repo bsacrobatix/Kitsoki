@@ -30,6 +30,7 @@ kitsoki capsule ci plan change --workspace change-1
 kitsoki capsule ci run change --workspace change-1
 kitsoki capsule ci status
 kitsoki capsule ci cancel --job <job-id>
+kitsoki capsule cleanup plan --keep-runs 20
 kitsoki capsule workspace commit --id change-1 --message "Implement change"
 kitsoki capsule workspace integrate --id change-1 --gate "go test ./..." --teardown
 ```
@@ -121,3 +122,29 @@ local Git reconciler. A remote publication provider must be explicitly granted
 and injected before a publish plan can be applied.
 
 See [Capsule CI receipts](../../tracing/capsule-ci-receipts.md).
+
+## Ongoing Cleanup
+
+Capsule CI writes useful local evidence: run records, receipt sidecars, compact
+controller traces, managed workspaces, and optional caches. Treat cleanup as a
+normal part of the CI lifecycle, especially on developer machines where Go
+build caches and repeated workspace runs can consume tens of gigabytes.
+
+Start with a dry-run plan:
+
+```sh
+kitsoki capsule cleanup plan --keep-runs 20
+```
+
+By default this only proposes old `.capsules/ci` run bundles beyond the newest
+retained run records. Project caches and Go build/test cache cleanup are
+explicit:
+
+```sh
+kitsoki capsule cleanup plan --include-capsule-cache --include-go-build-cache
+kitsoki capsule cleanup apply --include-capsule-cache --include-go-build-cache
+```
+
+The apply path removes only planned Capsule-managed project paths. Go build
+cache cleanup goes through `go clean -cache -testcache` rather than deleting an
+arbitrary directory, because that cache may live outside the project root.
