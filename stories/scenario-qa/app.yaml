@@ -155,6 +155,11 @@ world:
   # immediately against stale data instead of deferring). See plan.yaml.
   plan_status:          { type: object, default: {} }
   legs:                 { type: object, default: {} }             # resolved scenario x transport legs
+  # Fail-closed harness selection (issue group B / bug #105): one entry per
+  # leg that needs interpretive/live drive and has no profile= authorization,
+  # computed deterministically by scripts/plan_legs.star and surfaced up
+  # front by rooms/plan.yaml + rooms/execute.yaml before any leg is driven.
+  live_authorization_summary: { type: list, default: [] }
   leg_index:            { type: int, default: 0 }
   leg_count:            { type: int, default: 0 }
   current_leg:          { type: object, default: {} }

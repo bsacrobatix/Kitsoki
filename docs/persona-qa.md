@@ -107,6 +107,46 @@ raises the contract. CLI checks are terminal-level proof: command transcript,
 exit code, cwd, and trace references, not visual state. TUI and web checks are
 frame-level proof by default.
 
+## Authorization & Harness (fail-closed)
+
+`profile=<name>` is the ONLY live authorization. Omitting it keeps every leg
+of a `check` on `harness: "replay"` for its whole nested session — never a
+per-step judgment call by the driver agent, and never something the operator
+finds out about only after the fact from a mysterious `degraded-evidence`
+verdict. The contract runs in both directions:
+
+- **No silent replay-only fallback.** When a leg looks interpretive (a
+  catalog scenario with `natural_utterances` — free-text phrasing a cassette
+  can't cover — or any ad-hoc description) and no `profile=` was supplied,
+  `scripts/plan_legs.star` computes that fact deterministically at plan time
+  and names it per leg, up front, before any leg is driven — visible in the
+  `plan` and `execute` rooms' "Live authorization notes" and attached to the
+  leg itself (`live_authorization_note`) so the driver agent sees it too.
+- **No silent replay-miss-goes-live.** A `session.new` call opened with
+  `harness: "replay"` hard-fails the instant it dispatches a `host.agent.*`
+  call (converse/decide/task/ask/extract/search) with no matching cassette
+  episode — the MCP session runtime itself refuses to fall through to a live
+  agent (`internal/mcp/studio/session_runtime.go`'s replay-agent-miss
+  handler). This is enforced in code the driver cannot opt out of; the
+  driver's job is only to report that hard error as the leg's blocker, never
+  to retry the same step by opening a new session with `harness: "live"`
+  without a supplied `profile=`.
+- **No unexplained degraded verdict.** Every leg whose verdict is not `pass`
+  carries a `cause` (`stories/scenario-qa/scripts/record_leg_result.star`) —
+  missing evidence, a reported blocker (including a replay-miss's hard error
+  text), no live authorization, an unauthorized live harness, or the judge's
+  own grounding — shown in `report.md`'s Cause column and the report room's
+  transport-verdict lines. Nothing is left as a bare `degraded-evidence` with
+  no stated why.
+- **No unauthorized live self-authorization.** If a driver ever reports it
+  used `harness_used: "live"` for a leg while this check never supplied
+  `profile=`, `record_leg_result.star` deterministically forces that leg's
+  verdict to `degraded-evidence` with an explicit policy-violation cause,
+  regardless of what the driver or judge otherwise reported. Prompt
+  instructions (`.agents/agents/product-journey-qa-driver.md`,
+  `stories/scenario-qa/prompts/drive_leg.md`) state the same rule, but this
+  deterministic check is what actually enforces it.
+
 ## Evidence And Decks
 
 The story never treats a driver self-report as proof. The driver captures what
