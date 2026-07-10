@@ -27,7 +27,6 @@ var BuiltinHostVerbVocabulary = []string{
 	"host.decomposition.update",
 	"host.bakeoff.run",
 	"host.product_journey.run",
-	"host.bakeoff.run",
 	"host.session_mining.run",
 	"host.ui_qa.run",
 	"host.corpus.prove",

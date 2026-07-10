@@ -48,6 +48,44 @@ func TestOnboardingGeneratedDevStoryInstanceValidates(t *testing.T) {
 	}
 }
 
+func TestOnboardingGeneratedCapsuleCIStoryValidates(t *testing.T) {
+	root := t.TempDir()
+	result, err := host.DevOnboardingHandler(context.Background(), map[string]any{
+		"op": "apply",
+		"data": map[string]any{
+			"target_path": root, "project_id": "platform-presentation", "project_title": "Platform Presentation",
+			"stack": "go project", "build_command": "go build ./...", "test_command": "go test ./...", "repo_vcs": "none",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Error != "" || result.Data["status"] != "applied" {
+		t.Fatalf("apply = %#v", result)
+	}
+	path, _ := result.Data["ci_story_path"].(string)
+	if path == "" {
+		t.Fatalf("apply did not report ci_story_path: %#v", result.Data)
+	}
+	generated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated capsule ci story: %v", err)
+	}
+
+	appPath := filepath.Join(t.TempDir(), "app.yaml")
+	if err := os.WriteFile(appPath, generated, 0o644); err != nil {
+		t.Fatalf("write generated app: %v", err)
+	}
+
+	out, err := execRoot(t, "validate", appPath)
+	if err != nil {
+		t.Fatalf("generated capsule ci story should validate: %v\n%s\n--- generated ---\n%s", err, out, generated)
+	}
+	if strings.Contains(string(generated), "outcome: passed") {
+		t.Fatalf("generated capsule ci story must not default to pass:\n%s", generated)
+	}
+}
+
 func TestOnboardingDiscoveryUsesMetaRepoProjectMetadata(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "services", "example-service")
