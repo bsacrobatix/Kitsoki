@@ -2813,13 +2813,14 @@ func (o *Orchestrator) RenderState(state app.StatePath, w world.World) (string, 
 // the ANSI-stripped 80-col text, collapsing the room's typed elements
 // (banner, kv, prose paragraphs, choice→buttons) into one monospace blob.
 //
-// No-op when a typed view is already present (the non-binding fast path) or
-// when the state has no element-array view (RenderStateTyped returns a nil
-// typed view for legacy string / extends / template_file views — those are
-// served as text by design). Pure render; safe to call after all post-bind
-// settling (emit recursion, auto-gate) has fixed the final state/world.
+// Re-render even when TypedView is already populated. A same-room transition
+// has an initial typed view from the pre-bind world, which is just as stale as
+// a nil view after its on_enter host call binds. RenderStateTyped returns nil
+// for legacy string / extends / template_file views, which remain text-only.
+// This is pure rendering and is safe after all post-bind settling (emit
+// recursion, auto-gate) has fixed the final state/world.
 func (o *Orchestrator) refreshTypedViewAfterBind(res *machine.TurnResult) {
-	if res == nil || res.TypedView != nil {
+	if res == nil {
 		return
 	}
 	if _, tv, env, rr, err := o.machine.RenderStateTyped(res.NewState, res.World); err == nil && tv != nil {
