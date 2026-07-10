@@ -85,6 +85,10 @@ root:
     - host.chat.transcript
     - host.diff.open
     - host.slidey.render
+    - host.proposal.publish
+    - host.dev.profile_setup
+    - host.dev.onboarding
+    - host.decomposition.update
     - host.starlark.run
 
 conformance:

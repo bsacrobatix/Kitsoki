@@ -142,6 +142,10 @@ hosts:
   # a sandboxed, recordable Starlark script with the read-only inspection
   # surface (ctx.fs / ctx.probe). Required under `hosts: declared`.
   - host.starlark.run
+  - host.decomposition.update
+  - host.dev.onboarding
+  - host.dev.profile_setup
+  - host.proposal.publish
 
 # This instance has no day-level rooms of its own — every visible
 # state comes from the imported dev-story hub. Imports are folded in
