@@ -74,7 +74,8 @@ func (e *executor) waitForText(want string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		var body string
-		if err := chromedp.Run(e.ctx, chromedp.Evaluate(`document.body ? document.body.innerText : ''`, &body)); err != nil {
+		const transcriptText = `(() => { const el = document.querySelector('[data-testid="chat-transcript"]'); return el ? el.innerText : ''; })()`
+		if err := chromedp.Run(e.ctx, chromedp.Evaluate(transcriptText, &body)); err != nil {
 			return err
 		}
 		if strings.Contains(body, want) {
