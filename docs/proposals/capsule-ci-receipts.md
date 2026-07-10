@@ -1,7 +1,8 @@
 # Tracing: capsule CI receipts and attestations
 
-**Status:** Draft v1. Nothing in this receipt/attestation slice is implemented
-yet. Artifact-job registry and trace indexing substrate have shipped.
+**Status:** v1 in progress. Canonical receipt build/verification, tamper tests,
+and signer DI ship in `internal/capsule/receipt`; RunIndex/runstatus projection,
+trace producers, and trusted remote receipt adoption remain.
 **Kind:**   tracing
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),

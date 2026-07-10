@@ -1,8 +1,9 @@
 # Runtime: project-scoped Capsule control plane and MCP
 
-**Status:** Draft v1. Nothing in this productized control-plane slice is
-implemented yet; synthetic capsule CLI verbs and the script-backed local
-workspace provider are shipped foundations.
+**Status:** v1 in progress. `internal/capsule/control`, native workspace CLI,
+and scoped Capsule MCP now cover definitions, lease/generation handles, safe
+FS/exec/VCS, and synthetic/self/pinned providers. Script/host adoption and
+seal/cache/verifier-overlay completion remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 

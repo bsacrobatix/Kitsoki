@@ -1,8 +1,8 @@
 # Runtime: portable capsule environments and executors
 
-**Status:** Draft v1. Nothing in this slice is implemented yet. Local host
-bootstrap, Arena container/remote placement, and repo-history materializers are
-existing inputs to consolidate.
+**Status:** v1 in progress. Environment definitions/locks, host and fake-remote
+executor contracts, and CLI/MCP environment operations ship locally. Arena
+adoption, a production remote worker, and project migrations remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
