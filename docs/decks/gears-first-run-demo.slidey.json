@@ -46,7 +46,7 @@
         {
           "label": "Real artifacts",
           "status": "done",
-          "detail": "Links include Kitsoki PR #67, Gears issue #3105, Gears PR #4082, Cypilot validation, traces, cassettes, and the evidence manifest."
+          "detail": "Links include Gears issue #3105, the Gears bugfix PR #4082, Cypilot validation, traces, cassettes, and the evidence manifest. Kitsoki PR #67 is only the demo/deck delivery branch."
         }
       ],
       "caption": "Product-journey review: ready, 33/33 checks passed, 0 warnings, 0 failures.",
@@ -115,14 +115,14 @@
           "ref": ".artifacts/product-journey/20260710T051031Z-gears-rust-core-maintainer-gears-first-run-real-20260710/evidence/gears-rust--core-maintainer/gears-first-run-web-demo/gears-rust-project-profile.yaml"
         },
         {
-          "label": "Onboarding story bug fixed",
+          "label": "Demo harness fix",
           "status": "done",
-          "detail": "Imported dev-story init scripts now resolve from the base story instead of only the wrapper story directory.",
+          "detail": "The Kitsoki integration branch fixes imported dev-story script resolution so this first-run capture can reach the Gears onboarding path.",
           "refType": "doc",
           "ref": "https://github.com/constructorfabric/Kitsoki/pull/67"
         }
       ],
-      "narration": "The first run found a real Kitsoki integration bug. The Gears wrapper story could not locate the imported onboarding scripts. The Kitsoki branch fixes that resolution path and the same capture then moves through onboarding."
+      "narration": "The first run also found demo machinery that had to be fixed in Kitsoki. That branch is support work for the capture. The bugfix outcome of the demo remains the Gears Rust pull request shown at the end."
     },
     {
       "type": "evidence",
@@ -209,10 +209,10 @@
     },
     {
       "type": "cta",
-      "wordmark": "Ready to review",
-      "tagline": "Kitsoki PR #67 carries the demo scenario, capture harness, onboarding-script fix, and this deck source.",
-      "url": "https://github.com/constructorfabric/Kitsoki/pull/67",
-      "narration": "The Kitsoki onboarding pull request is ready to review with real evidence attached. The only product caveat is clearly called out: the current PRD story capture proves intake, but not final published artifact handoff."
+      "wordmark": "Gears bugfix PR",
+      "tagline": "constructorfabric/gears-rust#4082 is the real bugfix PR produced for issue #3105; Kitsoki#67 only carries the demo scenario and deck source.",
+      "url": "https://github.com/constructorfabric/gears-rust/pull/4082",
+      "narration": "The demo closes on the Gears Rust bugfix pull request. The Kitsoki branch is the evidence and replay packaging, not the product fix being demonstrated. The only product caveat is clearly called out: the current P R D story capture proves intake, but not final published artifact handoff."
     }
   ]
 }
