@@ -30,7 +30,9 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // AgentStreamer is the shared entry point for every host.agent.* claude
@@ -71,6 +73,51 @@ type AgentStreamer struct {
 	// registry and emits agent.runtime.start/end trace events. Nil preserves
 	// the historical direct transport path.
 	Sandbox *AgentSandboxSpec
+}
+
+type agentActivityWatchdog struct{ last atomic.Int64 }
+type agentActivityWatchdogKey struct{}
+
+// withAgentActivityTimeout cancels ctx only after an agent has produced no
+// stream output for d. It deliberately lives at the stream transport, where
+// JSONL is observable, rather than behind a buffered runtime pipe.
+func withAgentActivityTimeout(ctx context.Context, d time.Duration) (context.Context, func()) {
+	if d <= 0 {
+		return ctx, func() {}
+	}
+	child, cancel := context.WithCancel(ctx)
+	w := &agentActivityWatchdog{}
+	w.last.Store(time.Now().UnixNano())
+	child = context.WithValue(child, agentActivityWatchdogKey{}, w)
+	interval := d / 4
+	if interval < time.Millisecond {
+		interval = time.Millisecond
+	}
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-child.Done():
+				return
+			case <-done:
+				return
+			case <-t.C:
+				if time.Since(time.Unix(0, w.last.Load())) >= d {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return child, func() { close(done); cancel() }
+}
+
+func noteAgentActivity(ctx context.Context) {
+	if w, _ := ctx.Value(agentActivityWatchdogKey{}).(*agentActivityWatchdog); w != nil {
+		w.last.Store(time.Now().UnixNano())
+	}
 }
 
 // Run dispatches the claude invocation. "stream-json everywhere": every agent
@@ -118,6 +165,19 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	args := appendClaudeMCPPermissionSettings(ctx, s.CLIArgs)
 	args = append(args, "--output-format", "stream-json", "--verbose")
 	if s.Sandbox != nil {
+		if s.Sandbox.InheritHome {
+			// Claude's OAuth login is tied to the operator environment. Keep the
+			// real stream transport in this explicit mode so the watchdog sees
+			// JSONL activity and the provider sees its login.
+			if s.Sandbox.Resources.Timeout > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, s.Sandbox.Resources.Timeout)
+				defer cancel()
+			}
+			ctx, stop := withAgentActivityTimeout(ctx, s.Sandbox.Resources.ActivityTimeout)
+			defer stop()
+			return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+		}
 		return s.runWithRuntime(ctx, args)
 	}
 	return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)

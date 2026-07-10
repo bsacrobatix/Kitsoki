@@ -415,6 +415,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		seenThinking  map[string]bool
 	)
 	for scanner.Scan() {
+		noteAgentActivity(ctx)
 		line := scanner.Text()
 		rawLines.WriteString(line)
 		rawLines.WriteByte('\n')
