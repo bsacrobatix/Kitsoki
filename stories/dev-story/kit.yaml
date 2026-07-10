@@ -53,10 +53,10 @@ root:
   # host_interfaces: block, stories/dev-story/app.yaml) — the only ifaces an
   # `overrides.bindings.<iface>` may rebind.
   host_interfaces: [ticket, vcs, ci, workspace, transport]
-  # Mirrors the old synthesizedRootHosts() list byte-for-byte
-  # (internal/app/synthesis.go) — the fixed host allow-list the synthesized
-  # root declares (hosts: declared) so dev-story's subtree has the same
-  # fail-fast host surface a hand-written or generated project instance does.
+  # The fixed host allow-list the synthesized root declares (hosts: declared)
+  # so dev-story's fully expanded subtree has the same fail-fast host surface
+  # a hand-written or generated project instance does. The synthesis test
+  # verifies this list covers every expanded subtree host.
   hosts:
     - host.local_files.ticket
     - host.gh.ticket
