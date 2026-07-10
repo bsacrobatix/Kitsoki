@@ -57,6 +57,13 @@ sends the sealed envelope to the worker, receives a serialized typed
 verdict/result, and uses an ephemeral authorization header callback. Credential
 values never enter the envelope, workspace, trace, or receipt.
 
+The checked-in reference `stories/capsule-ci` is covered as a no-LLM parity
+fixture on both `host` and `remote-fake`: both placements consume the same
+sealed envelope, emit the same normalized typed result, and park with
+`needs_input` rather than fabricating a green gate before a project-specific
+composition exists. Container parity is tracked separately under the Arena
+executor adoption work.
+
 Example remote placement:
 
 ```yaml
