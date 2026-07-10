@@ -256,7 +256,7 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("Claude argv sends configured model", argv[argv.index("--model") + 1], "claude-fable-5")
     require("Claude argv disables persistence", "--no-session-persistence" in argv)
     require("Claude argv requires generated strict MCP config", "--mcp-config" in argv and "--strict-mcp-config" in argv)
-    check("Claude argv disables built-in tools", argv[argv.index("--tools") + 1], "")
+    require("Claude argv omits built-in --tools selector", "--tools" not in argv)
     allowed_tools = argv[argv.index("--allowedTools") + 1]
     check("Claude argv permits only strict MCP and schema tool", allowed_tools.split(","), list(live.CLAUDE_ALLOWED_TOOLS))
     require("Claude argv excludes generic shell/filesystem tools", not set(allowed_tools.split(",")).intersection({"Bash", "Read", "Write", "Edit", "Glob", "Grep", "host.run", "host.patch", "worktree.create", "vcs.commit"}))
