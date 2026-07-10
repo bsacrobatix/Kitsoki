@@ -19,10 +19,15 @@ host_handlers:
       read-proposal: { data: { ok: true, exit_code: 0, stdout: "Demo the agent-actions drawer." } }
       stamp-epoch:   { data: { ok: true, exit_code: 0, stdout: "1750000000" } }
       validate-1:    { data: { ok: true, exit_code: 0, stdout: "" } }
+  host.ui_qa.run:
+    by_call:
       qa-1:
         data:
           ok: true
           exit_code: 0
+          qa_ok: true
+          qa_exit_code: 0
+          qa_completion_state_path: "/tmp/ui-qa-completion-state.json"
           stdout: "PASS"
           stdout_json:
             qa_ok: true
@@ -87,7 +92,7 @@ turns:
       - handler: host.artifacts_dir
         args: { call: emit-qa-completion-state-1 }
         times: 1
-      - handler: host.run
+      - handler: host.ui_qa.run
         args: { call: qa-1 }
         times: 1
 
