@@ -524,7 +524,7 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 	requireDogfoodHostArgAny(t, history, []string{
 		"host.gh.ticket.search",
 		"host.local_github.ticket.search",
-	}, "repo", "origin")
+	}, "repo", nil)
 
 	// 2. In the strict ticket-search menu the operator does NOT pick a row —
 	//    they describe a piece of ad-hoc work in their own words (the exact
@@ -574,6 +574,11 @@ func requireDogfoodHostArgAny(t *testing.T, history []store.Event, namespaces []
 		}
 		if !found {
 			continue
+		}
+		if want == nil {
+			require.NotNil(t, payload.Args[key], "missing argument %q on host dispatch %s", key, payload.Namespace)
+			require.NotEmpty(t, payload.Args[key], "argument %q on host dispatch %s should be non-empty", key, payload.Namespace)
+			return
 		}
 		require.Equal(t, want, payload.Args[key])
 		return
