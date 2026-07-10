@@ -75,6 +75,7 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.plan", Description: "Build the sealed environment and story envelope for an allowed project pipeline and workspace handle."}, s.ciPlan)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.run", Description: "Run the declared project CI story through the Capsule executor and return its typed verdict. A story can pass, fail, or park; it cannot self-authorize promotion."}, s.ciRun)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.status", Description: "Read persisted Capsule CI run records without host paths or raw secrets."}, s.ciStatus)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.summary", Description: "Read a provider-safe Capsule CI summary derived from the canonical run index and receipt projections."}, s.ciSummary)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.cancel", Description: "Cancel a persisted running or parked Capsule CI job. Remote workers receive the same cancellation contract when configured."}, s.ciCancel)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.cleanup.plan", Description: "Plan project-scoped Capsule disk hygiene using project-relative paths only. This never deletes files or host-global caches."}, s.cleanupPlan)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.cleanup.apply", Description: "Apply project-scoped Capsule disk hygiene when the startup grant includes the cleanup effect. Host-global caches are not deleted through MCP."}, s.cleanupApply)
@@ -141,6 +142,9 @@ type capsuleCIArgs struct {
 }
 type capsuleCIStatusArgs struct {
 	Job string `json:"job,omitempty"`
+}
+type capsuleCISummaryArgs struct {
+	Limit int `json:"limit,omitempty"`
 }
 type capsuleCleanupArgs struct {
 	KeepRuns            int  `json:"keep_runs,omitempty"`
@@ -393,6 +397,13 @@ func (s *CapsuleServer) ciCancel(_ context.Context, _ *mcpsdk.CallToolRequest, a
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "run": record}, nil
+}
+func (s *CapsuleServer) ciSummary(_ context.Context, _ *mcpsdk.CallToolRequest, a capsuleCISummaryArgs) (*mcpsdk.CallToolResult, any, error) {
+	summary, err := (ci.FileRunStore{ProjectRoot: s.manager.Grant.ProjectRoot}).ProviderSummary(a.Limit)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "summary": summary}, nil
 }
 func (s *CapsuleServer) cleanupPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCleanupArgs) (*mcpsdk.CallToolResult, any, error) {
 	plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: s.manager.Grant.ProjectRoot, KeepRuns: a.KeepRuns, IncludeCapsuleCache: a.IncludeCapsuleCache})

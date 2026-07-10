@@ -22,7 +22,7 @@ import (
 
 func capsuleCICmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "ci", Short: "Plan, run, and inspect story-native Capsule CI"}
-	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCICancelCmd())
+	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCISummaryCmd(), capsuleCICancelCmd())
 	return cmd
 }
 func ciInputs(ctx context.Context, project, workspace, pipeline string) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, error) {
@@ -151,6 +151,26 @@ func capsuleCIStatusCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&job, "job", "", "job id")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	return cmd
+}
+func capsuleCISummaryCmd() *cobra.Command {
+	var project string
+	var limit int
+	var jsonOut bool
+	cmd := &cobra.Command{Use: "summary", Short: "Project a provider-safe Capsule CI status summary", RunE: func(cmd *cobra.Command, args []string) error {
+		summary, err := (ci.FileRunStore{ProjectRoot: project}).ProviderSummary(limit)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return capsuleWorkspaceWrite(cmd, summary, true)
+		}
+		_, err = cmd.OutOrStdout().Write([]byte(summary.Markdown))
+		return err
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().IntVar(&limit, "limit", 5, "number of latest runs to include")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	return cmd
 }

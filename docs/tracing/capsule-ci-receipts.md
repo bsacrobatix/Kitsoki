@@ -52,6 +52,12 @@ trace/receipt sidecar paths. Runstatus/provider publication can consume that
 projection on top of the same receipt schema; it must not introduce a second
 evidence format.
 
+`capsule ci summary` and `capsule.ci.summary` consume the run index into
+`capsule-ci-provider-summary/v1`: aggregate counts, latest safe run rows, and a
+Markdown body suitable for a future provider comment. The summary includes only
+provider-safe fields from the index; live publication remains a separate
+adapter.
+
 Sync and promotion traces join the same evidence stream through
 `capsule.sync.planned`, `capsule.sync.applied`, `capsule.sync.stale`, and
 `capsule.sync.conflicted` facts. These events carry the plan digest,
