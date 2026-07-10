@@ -1193,6 +1193,13 @@ func (m *RootModel) flushPendingWhenStable() tea.Cmd {
 }
 
 func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Process-level stdout/stderr is captured while the TUI owns the terminal.
+	// Handle it before mode-specific routers so an operator does not lose a
+	// warning merely because a menu, choice, or forwarded question is open.
+	if output, ok := msg.(terminalOutputMsg); ok {
+		m.transcript.appendTerminalOutput(output.text)
+		return m, nil
+	}
 	// If slot-filling is active, route to clarify model first.
 	if m.mode == ModeSlotFilling {
 		return m.updateSlotFilling(msg)
