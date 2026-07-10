@@ -64,6 +64,7 @@ states:
           review_reason:   ""
           review_feedback: ""
           report_path:     ""
+          report_dir:      "{{ slots.report_dir ?? world.report_dir }}"
       - emit_intent: start
     on:
       start:
@@ -380,6 +381,7 @@ states:
             fix_artifact: "{{ world.fix_artifact }}"
             review_artifact: "{{ world.review_artifact }}"
             tests_passed: true
+            report_dir: "{{ world.report_dir }}"
         bind:
           report_path: report_path
       - invoke: host.inbox.add
@@ -434,6 +436,7 @@ states:
             fix_artifact: "{{ world.fix_artifact }}"
             review_artifact: "{{ world.review_artifact }}"
             tests_passed: false
+            report_dir: "{{ world.report_dir }}"
         bind:
           report_path: report_path
       - invoke: host.inbox.add
@@ -491,6 +494,7 @@ states:
             fix_artifact: "{{ world.fix_artifact }}"
             review_artifact: "{{ world.review_artifact }}"
             tests_passed: true
+            report_dir: "{{ world.report_dir }}"
         bind:
           report_path: report_path
       - invoke: host.inbox.add
@@ -546,6 +550,7 @@ states:
             fix_artifact: "{{ world.fix_artifact }}"
             review_artifact: "{{ world.review_artifact }}"
             tests_passed: false
+            report_dir: "{{ world.report_dir }}"
         bind:
           report_path: report_path
       - invoke: host.inbox.add

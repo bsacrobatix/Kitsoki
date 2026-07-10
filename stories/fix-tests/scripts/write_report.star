@@ -136,6 +136,7 @@ def main(ctx):
     review = _artifact(ctx.inputs.get("review_artifact", {}))
     tests_passed = _bool(ctx.inputs.get("tests_passed", False))
 
-    path = ".artifacts/fix-tests/report-" + outcome + ".md"
+    report_dir = _str(ctx.inputs.get("report_dir", ".artifacts/fix-tests")).rstrip("/")
+    path = report_dir + "/report-" + outcome + ".md"
     written = ctx.fs.write(path, _render(ctx, outcome, cycle, max_cycles, artifact, review, tests_passed))
     return {"report_path": written}
