@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
 type Operation string
@@ -149,7 +151,7 @@ func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
 	}
 	p.ID = "plan-" + shortHash([]byte(strings.Join([]string{string(p.Operation), p.Workspace, p.TargetRef, p.Candidate}, "\x00")))
 	p.Digest = planDigest(p)
-	if err := r.emit(ctx, Event{Kind: "capsule.sync.planned", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: continuationToken(p)}); err != nil {
+	if err := r.emit(ctx, Event{Kind: capsuletrace.KindSyncPlanned, PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: continuationToken(p)}); err != nil {
 		return Plan{}, err
 	}
 	return p, nil
@@ -169,7 +171,7 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 		if p.Continuation != nil {
 			token = ": " + p.Continuation.Token
 		}
-		if err := r.emit(ctx, Event{Kind: "capsule.sync.conflicted", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: continuationToken(p), Error: "diverged plan requires integration conflict continuation"}); err != nil {
+		if err := r.emit(ctx, Event{Kind: capsuletrace.KindSyncConflicted, PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, ContinuationToken: continuationToken(p), Error: "diverged plan requires integration conflict continuation"}); err != nil {
 			return ApplyResult{}, err
 		}
 		return ApplyResult{}, fmt.Errorf("capsule reconcile: diverged plan requires integration conflict continuation%s", token)
@@ -187,7 +189,7 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 		return ApplyResult{}, err
 	}
 	if current.WorkspaceHead != p.Expected.WorkspaceHead || current.Target != p.Expected.Target || current.Dirty != p.Expected.Dirty || current.Generation != p.Expected.Generation {
-		if err := r.emit(ctx, Event{Kind: "capsule.sync.stale", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: p.Expected.Target, NewTarget: current.Target, Error: "observed refs changed"}); err != nil {
+		if err := r.emit(ctx, Event{Kind: capsuletrace.KindSyncStale, PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: p.Expected.Target, NewTarget: current.Target, Error: "observed refs changed"}); err != nil {
 			return ApplyResult{}, err
 		}
 		return ApplyResult{}, fmt.Errorf("capsule reconcile: stale plan")
@@ -312,7 +314,7 @@ func (r Reconciler) emit(ctx context.Context, e Event) error {
 	return r.Events.Emit(ctx, e)
 }
 func (r Reconciler) emitApplied(ctx context.Context, p Plan, result ApplyResult) error {
-	return r.emit(ctx, Event{Kind: "capsule.sync.applied", PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: result.OldTarget, NewTarget: result.NewTarget})
+	return r.emit(ctx, Event{Kind: capsuletrace.KindSyncApplied, PlanDigest: p.Digest, Operation: p.Operation, Class: p.Class, TargetRef: p.TargetRef, Candidate: p.Candidate, OldTarget: result.OldTarget, NewTarget: result.NewTarget})
 }
 func continuationToken(p Plan) string {
 	if p.Continuation == nil {
