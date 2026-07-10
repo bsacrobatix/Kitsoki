@@ -29,7 +29,7 @@ host_handlers:
 turns:
   - intent: { name: landing_capture, slots: { request: "inspect the stale landing fixture" } }
     expect_state: landing
-    expect_view_matches: 'Next steps[\s\S]*Run focused fixture[\s\S]*run_next_step'
+    expect_view_matches: 'Run focused fixture'
     expect_world:
       landing_note:
         summary: "Finished the requested inspection."

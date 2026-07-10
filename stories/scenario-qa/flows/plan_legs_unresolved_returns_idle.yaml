@@ -11,7 +11,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -49,7 +49,7 @@ turns:
       leg_count: 0
       last_error: "No transport checks resolved for this scenario/transport combination — check scenario/transport values."
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }

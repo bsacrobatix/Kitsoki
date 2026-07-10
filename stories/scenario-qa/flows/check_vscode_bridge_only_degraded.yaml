@@ -13,7 +13,7 @@
 # host.starlark.run is left UNSTUBBED so plan_legs.star and
 # record_leg_result.star run for REAL against the driver-plan.json this
 # flow's starlark_inspect_cassette serves -- only the driver/judge agent
-# dispatch (host.agent.task) and the run.py subprocess calls (host.run) are
+# dispatch (host.agent.task) and the run.py subprocess calls (host.product_journey.run) are
 # stubbed, mirroring check_degraded_leg_carries_cause.yaml.
 
 test_kind: flow
@@ -23,7 +23,7 @@ initial_state: idle
 starlark_inspect_cassette: ../cassettes/check_vscode_editor_level.inspect.yaml
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -121,7 +121,7 @@ turns:
             cause: "vscode leg is bridge-level only (visual.open kind=vscode proves the bridge, not a real editor) -- no post-drive host.ide.* editor-level capture (post_drive_editor_evidence_ref) was reported; see docs/persona-qa.md"
             frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -135,7 +135,7 @@ turns:
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "verdict=degraded-evidence driver=captured cause=vscode leg is bridge-level only"
 

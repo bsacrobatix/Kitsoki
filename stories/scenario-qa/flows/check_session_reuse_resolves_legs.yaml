@@ -26,7 +26,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:

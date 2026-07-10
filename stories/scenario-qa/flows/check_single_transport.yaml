@@ -13,7 +13,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -169,7 +169,7 @@ turns:
             verdict_summary: "TUI frame confirms the fix state."
             frames_dir: "evidence/gears-rust--core-maintainer/bugfix"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -183,7 +183,7 @@ turns:
         args: { call: record_leg_result }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport checks passed[\\s\\S]*Summary report:[\\s\\S]*report.md[\\s\\S]*tui \\[frame-level; natural_prompts=2\\] verdict=pass driver=captured"
 

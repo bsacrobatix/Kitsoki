@@ -10,7 +10,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -112,7 +112,7 @@ turns:
       report_summary: "1 / 1 transport checks passed."
       deck_path: "/repo/.artifacts/product-journey/scenario-qa-run-adhoc/deck.slidey.json"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -122,7 +122,7 @@ turns:
         args: { call: judge_leg }
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*1 / 1 transport checks passed[\\s\\S]*Scenario:[\\s\\S]*open the onboarding tour[\\s\\S]*Summary report:[\\s\\S]*report.md[\\s\\S]*tui[\\s\\S]*verdict=pass driver=captured"
 

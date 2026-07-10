@@ -8,7 +8,7 @@ match_on: [handler, call]
 episodes:
   - id: preview_transport_suite_required_input
     match:
-      handler: host.run
+      handler: host.product_journey.run
       call: preview_transport_suite
     response:
       data:
@@ -51,7 +51,7 @@ episodes:
 
   - id: emit_scenario_qa_run_required_input
     match:
-      handler: host.run
+      handler: host.product_journey.run
       call: emit_scenario_qa_run
     response:
       data:
@@ -156,7 +156,7 @@ episodes:
 
   - id: build_scenario_qa_deck_required_input
     match:
-      handler: host.run
+      handler: host.product_journey.run
       call: build_scenario_qa_deck
     response:
       data:

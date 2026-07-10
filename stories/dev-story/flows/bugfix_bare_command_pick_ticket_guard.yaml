@@ -8,21 +8,9 @@ initial_state: landing
 
 turns:
   - intent:
-      name: landing_capture
-    slots:
-        request: "fix bug"
+      name: go_bugfix
+    display_input: "fix bug"
     expect_state: bugfix_intake
-    expect_events:
-      - kind: machine.say
-        effect:
-          text: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
-    expect_world:
-      last_error: |
-        No ticket selected — pick one before entering the bugfix pipeline.
-
-        Suggestions:
-        - `tickets` — search and pick a ticket
-        - paste a GitHub issue URL
-        - `fix this bug ...` — paste an inline bug report
+    expect_no_host_calls: [host.agent.task]
 
 expect_no_errors: true

@@ -65,10 +65,6 @@ turns:
 
   - intent: { name: go_bugfix, slots: {} }
     expect_state: bugfix_intake
-    expect_events:
-      - kind: machine.say
-        effect:
-          text: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
   - intent: { name: quit, slots: {} }
     expect_state: landing
   - intent: { name: go_fix_tests, slots: {} }

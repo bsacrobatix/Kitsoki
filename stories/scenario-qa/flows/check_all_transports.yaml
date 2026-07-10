@@ -19,7 +19,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -153,7 +153,7 @@ turns:
       leg_index: 0
       pause: each-leg
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -192,7 +192,7 @@ turns:
     expect_host_calls:
       - handler: host.starlark.run
         args: { call: build_report }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
     expect_view_matches: "SCENARIO QA REPORT[\\s\\S]*3 / 4 transport checks passed, 1 degraded-evidence[\\s\\S]*Summary report:[\\s\\S]*report.md[\\s\\S]*vscode \\[bridge-level\\] verdict=degraded-evidence driver=degraded-evidence[\\s\\S]*cli \\[terminal-level\\] verdict=pass driver=captured"
 

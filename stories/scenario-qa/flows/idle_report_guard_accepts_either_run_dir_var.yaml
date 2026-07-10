@@ -36,7 +36,7 @@ initial_world:
   degraded_count: 0
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       build_scenario_qa_deck:
         data:

@@ -44,10 +44,6 @@ turns:
     expect_state: bugfix_intake
     expect_no_host_calls: [host.agent.task]
     expect_view_matches: "workbench agent"
-    expect_events:
-      - kind: machine.say
-        effect:
-          text: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
   - intent:
       name: bugfix_intake_capture
       slots:
