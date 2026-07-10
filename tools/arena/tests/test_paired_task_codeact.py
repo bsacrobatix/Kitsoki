@@ -154,6 +154,27 @@ for flag, value in {
 require("capability presets threaded", "--capability-presets-json" in argv)
 json.loads(argv[argv.index("--capability-presets-json") + 1])
 
+with tempfile.TemporaryDirectory(prefix="paired-raw-effort-") as td:
+    trace = Path(td) / "raw.jsonl"
+    captured: list[str] = []
+    original_run = runner.subprocess.run
+
+    def fake_run(cmd, **_kwargs):
+        captured.extend(cmd)
+        return runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    runner.subprocess.run = fake_run
+    try:
+        runner.dispatch_single_prompt_codex(
+            argparse.Namespace(model="gpt-5.4", effort="medium", treatment="raw-codex"),
+            {"id": "fixture", "ticket": "fix", "archetype": "bugfix", "oracle": {}},
+            Path(td),
+            str(trace),
+        )
+    finally:
+        runner.subprocess.run = original_run
+    require("raw Codex effort is explicit", 'model_reasoning_effort="medium"' in captured)
+
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
     backend="codex",
