@@ -901,6 +901,64 @@ Use only the Kitsoki Studio MCP. Start with studio.ping.
 	require.True(t, os.IsNotExist(err), "rendered definition must not leak into normal sessions")
 }
 
+func TestAgentLaunchPlan_RendersEmbeddedAgentWithExplicitTemplate(t *testing.T) {
+	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(dir))
+	t.Cleanup(func() { _ = os.Chdir(oldwd) })
+
+	library := filepath.Join(dir, "embedded-toolkit")
+	require.NoError(t, os.MkdirAll(filepath.Join(library, "agents"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(library, "agents", "kitsoki-mcp-driver.md"), []byte(`---
+name: kitsoki-mcp-driver
+model: gpt-5.5
+---
+
+Use only the packaged Studio MCP contract.
+`), 0644))
+	templatePath := filepath.Join(dir, "team-driver.toml")
+	require.NoError(t, os.WriteFile(templatePath, []byte(`
+developer_instructions_append = "Route team findings to example/team."
+model_reasoning_effort = "high"
+[mcp_servers.team]
+command = "team-mcp"
+args = ["serve"]
+`), 0644))
+	oldMaterialize := materializeBuiltInAgentLibrary
+	materializeBuiltInAgentLibrary = func(context.Context) (string, error) { return library, nil }
+	t.Cleanup(func() { materializeBuiltInAgentLibrary = oldMaterialize })
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:     "kitsoki-mcp-driver",
+		AgentTemplate: templatePath,
+		Backend:       "codex",
+		Task:          "Call studio.ping.",
+	})
+	require.NoError(t, err)
+	require.Contains(t, plan.AgentFile, "kitsoki-agent-launch-")
+	require.Contains(t, plan.AgentFile, ".templated.toml")
+	// The project contains neither .codex nor .kitsoki agent files: the supplied
+	// overlay is combined with the embedded base only in the temporary directory.
+	_, err = os.Stat(filepath.Join(dir, ".codex", "agents", "kitsoki-mcp-driver.toml"))
+	require.True(t, os.IsNotExist(err))
+	prompt := readCodexModelInstructionsFile(t, plan.Command)
+	require.Contains(t, prompt, "packaged Studio MCP contract")
+	require.Contains(t, prompt, "Route team findings to example/team")
+	require.Equal(t, "high", plan.Effort)
+	joined := strings.Join(plan.Command, " ")
+	require.Contains(t, joined, `mcp_servers.kitsoki.command="kitsoki"`)
+	require.Contains(t, joined, `mcp_servers.team.command="team-mcp"`)
+
+	for _, cleanup := range plan.cleanups {
+		cleanup()
+	}
+	_, err = os.Stat(plan.AgentFile)
+	require.True(t, os.IsNotExist(err))
+}
+
 func TestLoadStandaloneCodexAgentRejectsExtendsCycle(t *testing.T) {
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.toml")

@@ -68,21 +68,36 @@ Story-backed launch uses `--app` plus `--agent`. The agent comes from that
 story's top-level `agents:` block and supplies the persona, cwd, tools, model,
 effort, and provider name.
 
-Freestanding launch omits `--app` and resolves an agent from the current
-project, an embedded Kitsoki agent, or the file passed with `--agent-file`.
-Resolution is deterministic:
+Freestanding launch omits `--app` and resolves an agent from the embedded
+Kitsoki library, optionally applying a TOML template, or from the complete
+definition passed with `--agent-file`. The no-install path is:
+
+```sh
+kitsoki agent launch --agent kitsoki-mcp-driver \
+  --agent-template /path/to/team-driver.toml --backend codex
+```
+
+`--agent-template` is a partial TOML overlay: it may contain only the fields
+to change, such as `developer_instructions_append`, model/effort, or MCP
+servers. Kitsoki combines it with the packaged Markdown agent and writes the
+fully resolved TOML only into the private launch temporary directory. Neither
+the base agent nor the template needs to be installed into `.codex/`,
+`.claude/`, `.kitsoki/`, or the home directory.
+
+For backward compatibility, when `--agent-template` is omitted, legacy
+project/home TOML files are discovered in this deterministic order and treated
+as that same overlay:
 `.kitsoki/agents/<name>.local.toml`, `.kitsoki/agents/<name>.toml`,
 `.codex/agents/<name>.local.toml`, `.codex/agents/<name>.toml`, then the same
-two `.codex/agents/` names under `~`, then the embedded Kitsoki agent library.
-The embedded fallback renders the package's Markdown agent into a private
-temporary TOML file for just this launch and deletes it after planning or
-execution. It never writes `.agents`, `.claude`, `.codex`, or `.kitsoki` into
-the target project or the user's home directory. A project or personal TOML
-file remains an explicit override and supplies developer instructions, model,
-effort, and optional `[mcp_servers.*]` blocks.
+two `.codex/agents/` names under `~`. With no template at all, Kitsoki renders
+the packaged agent alone. Every embedded/template result is temporary and is
+deleted after planning or execution; Kitsoki never writes `.agents`,
+`.claude`, `.codex`, or `.kitsoki` into the target project or home directory.
+Use `--agent-file` only when supplying a complete standalone agent definition
+rather than an overlay.
 
-Use `extends = "path/to/parent.toml"` to keep a community or project prompt
-managed while specializing it. A child may set
+Use `extends = "path/to/parent.toml"` inside a template to keep a community or
+project prompt managed while specializing it. A child may set
 `developer_instructions_append = "..."`; that text is appended to its resolved
 parent instructions. Child scalar fields and MCP servers override parent values
 by name. A cycle is rejected. Put a personal route in the ignored
