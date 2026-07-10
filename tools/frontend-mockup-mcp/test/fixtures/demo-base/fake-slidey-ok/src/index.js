@@ -18,6 +18,10 @@ if (args[0] === "capture" && args[1] === "--tours") {
   const invocations = [];
   for (const tour of tourSet.tours) {
     const outAbs = path.resolve(tour.out);
+    // Progress marker: proves the record-tour progress-passthrough fix
+    // actually streams this child's output through to whoever spawned
+    // record-tour.mjs, instead of it being silently swallowed until exit.
+    process.stdout.write(`[fake-slidey] capturing ${tour.tour} -> ${tour.out}\n`);
     fs.mkdirSync(path.dirname(outAbs), { recursive: true });
     fs.writeFileSync(outAbs, JSON.stringify({ events: [], generatedBy: "fake-slidey-ok" }));
     fs.writeFileSync(`${outAbs}.chapters.json`, JSON.stringify(chaptersFor(outAbs), null, 2));

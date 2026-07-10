@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { runDoctor } from "./scripts/demo-doctor.mjs";
 import { runRecordTour } from "./scripts/record-tour.mjs";
+import { runCreateMockup } from "./scripts/create-mockup.mjs";
 
 const SERVER_INFO = { name: "kitsoki-frontend-mockup", version: "0.1.0" };
 const KITSOKI_REPO = process.env.KITSOKI_REPO || process.cwd();
@@ -242,6 +243,31 @@ const tools = [
         manifest: { type: "string", description: "Absolute path to the *.demo.json manifest." }
       },
       required: ["manifest"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "mockup_create",
+    description:
+      "Generate a self-contained mockup HTML from a *.mockup.json scenario spec: five stable zones " +
+      "(rail/intake/graph/inspector/timeline), a refreshable states data block, and the " +
+      "window.storyboard.setStep(id) contract. Optionally co-emits a starter *.demo.json manifest, one tour per " +
+      "state group, and a starter slidey deck so create -> record_tour -> demo_doctor is a closed loop. Does not " +
+      "require an active browser session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scenario: { type: "string", description: "Absolute path to the *.mockup.json scenario spec." },
+        out: { type: "string", description: "Absolute path to write the generated mockup HTML." },
+        manifest: { type: "boolean", description: "Also emit a starter *.demo.json manifest, tours, and deck." },
+        renderer: {
+          type: "string",
+          description:
+            "Absolute path to a graph-projection renderer.js to embed directly, bypassing slidey resolution. " +
+            "Omit to auto-resolve a slidey checkout (scenario 'slidey' field -> SLIDEY_SRC env -> ~/code/slidey)."
+        }
+      },
+      required: ["scenario", "out"],
       additionalProperties: false
     }
   }
@@ -1092,6 +1118,18 @@ async function callTool(name, args = {}) {
         }
         throw err;
       }
+    }
+    case "mockup_create": {
+      if (!args.scenario) throw new Error("scenario is required");
+      if (!args.out) throw new Error("out is required");
+      return textResult(
+        runCreateMockup({
+          scenarioPath: path.resolve(args.scenario),
+          outPath: path.resolve(args.out),
+          manifest: Boolean(args.manifest),
+          rendererPath: args.renderer ? path.resolve(args.renderer) : undefined
+        })
+      );
     }
     default:
       throw new Error(`unknown tool: ${name}`);

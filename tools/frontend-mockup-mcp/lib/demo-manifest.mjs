@@ -328,16 +328,33 @@ export function runSlideyEstimate(manifest) {
 /**
  * Run `node <slidey>/src/index.js capture --tours <tourSetPath>`. Throws on
  * any failure; callers decide how to surface that.
+ *
+ * A real multi-tour capture can run for minutes (browser launch + one
+ * capture per tour). Earlier versions used `spawnSync(..., {encoding:
+ * "utf8"})`, which buffers the child's entire stdout/stderr and hands it
+ * back only after the process exits -- so a healthy long-running capture
+ * and a silently hung one looked IDENTICAL to whoever was watching
+ * (nothing printed either way) until the final summary or a timeout. This
+ * streams the child's stdout AND stderr straight through to THIS process's
+ * stderr (fd 2, not fd 1) as they're written: `stdio: ["ignore", 2, 2]`
+ * duplicates the current process's real stderr fd for both of the child's
+ * output streams, so a caller watching stderr sees live progress, while
+ * this process's own stdout stays reserved for the final JSON summary
+ * (record-tour.mjs's `console.log(JSON.stringify(summary))`) -- callers
+ * that spawn record-tour.mjs as a subprocess can keep parsing stdout as
+ * pure JSON even though the nested slidey capture output flowed through.
  */
 export function runSlideyCapture(manifest, tourSetPath) {
   const indexJs = slideyIndexPath(manifest);
   const res = spawnSync(process.execPath, [indexJs, "capture", "--tours", tourSetPath], {
     cwd: manifest.dir,
-    encoding: "utf8"
+    stdio: ["ignore", 2, 2]
   });
   if (res.error || res.status !== 0) {
-    const detail = (res.stderr || res.stdout || "").trim().slice(0, 800);
-    throw new Error(`slidey capture --tours failed: ${res.error?.message || `exit ${res.status}`}${detail ? `: ${detail}` : ""}`);
+    throw new Error(
+      `slidey capture --tours failed: ${res.error?.message || `exit ${res.status}`} ` +
+        `(see the streamed capture output on stderr above for detail)`
+    );
   }
-  return { stdout: res.stdout, stderr: res.stderr };
+  return { status: res.status ?? 0 };
 }
