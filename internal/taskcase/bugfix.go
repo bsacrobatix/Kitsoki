@@ -77,7 +77,7 @@ func adaptBugfixManifest(m bugfixManifest, onlyIDs []string) ([]Case, error) {
 			prompt = strings.TrimSpace(bug.Title)
 		}
 		id := m.Project.ID + "-" + bug.ID
-		command := fmt.Sprintf("python3 tools/bugfix-bakeoff/external/bench.py verify --project %s --bug %s", m.Project.ID, bug.ID)
+		command := fmt.Sprintf("host.bakeoff.run --op bench --cwd tools/bugfix-bakeoff/external -- verify --project %s --bug %s", m.Project.ID, bug.ID)
 		if m.Project.LocalOnly {
 			command += " --repo-dir <local-checkout>"
 		}

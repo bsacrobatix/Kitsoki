@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -1254,7 +1253,6 @@ func closeoutIssueURLs(items []map[string]any) []string {
 
 func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousFixOptions) (map[string]any, error) {
 	args := []string{
-		"tools/product-journey/run.py",
 		"--autonomous-fix-loop",
 		"--run-dir", opts.RunDir,
 		"--ticket-repo", opts.TicketRepo,
@@ -1268,16 +1266,9 @@ func runGitopsAutonomousFixViaRunner(ctx context.Context, opts gitopsAutonomousF
 		"--report-invalid-autonomous-fix",
 		"--json-output",
 	}
-	py := exec.CommandContext(ctx, "python3", args...)
-	py.Dir = "."
-	py.Env = os.Environ()
-	out, err := py.CombinedOutput()
+	result, err := productJourneyJSON(ctx, args...)
 	if err != nil {
-		return nil, fmt.Errorf("product-journey autonomous-fix test fallback failed: %w\n%s", err, strings.TrimSpace(string(out)))
-	}
-	var result map[string]any
-	if err := json.Unmarshal(out, &result); err != nil {
-		return nil, fmt.Errorf("product-journey autonomous-fix test fallback printed invalid JSON: %w\n%s", err, strings.TrimSpace(string(out)))
+		return nil, fmt.Errorf("product-journey autonomous-fix test fallback failed: %w", err)
 	}
 	independentVerifyOK := gitopsIndependentVerifyGateOK(result)
 	if stringValue(result, "filing_status") == "findings_filed" && gitopsGHAgentGateOK(result) && independentVerifyOK {
@@ -1696,20 +1687,27 @@ func gitopsIntegrationRoot() string {
 }
 
 func productJourneyJSON(ctx context.Context, args ...string) (map[string]any, error) {
-	all := append([]string{"tools/product-journey/run.py"}, args...)
-	all = append(all, "--json-output")
-	py := exec.CommandContext(ctx, "python3", all...)
-	py.Dir = gitopsRepoRoot()
-	py.Env = os.Environ()
-	out, err := py.CombinedOutput()
-	var result map[string]any
-	if jsonErr := json.Unmarshal(out, &result); jsonErr != nil {
-		if err != nil {
-			return nil, fmt.Errorf("product-journey %s failed: %w\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-		}
-		return nil, fmt.Errorf("product-journey %s printed invalid JSON: %w\n%s", strings.Join(args, " "), jsonErr, strings.TrimSpace(string(out)))
+	argv := make([]any, 0, len(args)+1)
+	for _, arg := range args {
+		argv = append(argv, arg)
 	}
-	return result, nil
+	argv = append(argv, "--json-output")
+	result, err := host.ProductJourneyRunHandler(ctx, map[string]any{
+		"args":          argv,
+		"cwd":           gitopsRepoRoot(),
+		"fail_on_error": true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("product-journey %s failed: %w", strings.Join(args, " "), err)
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("product-journey %s failed: %s", strings.Join(args, " "), result.Error)
+	}
+	value, ok := result.Data["stdout_json"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("product-journey %s printed no JSON envelope", strings.Join(args, " "))
+	}
+	return value, nil
 }
 
 func gitopsRepoRoot() string {
