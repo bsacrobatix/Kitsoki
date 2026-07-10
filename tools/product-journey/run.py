@@ -5650,11 +5650,39 @@ def credible_issue_findings(findings: dict) -> list[dict]:
     ]
 
 
+def local_finding_ref(item: dict) -> dict:
+    """The `local_ticket` block a credible finding carries once it has been
+    filed to the default local-artifact sink (see `file_local_findings`).
+    Returns {} when the finding has no local ticket."""
+    ref = item.get("local_ticket")
+    return ref if isinstance(ref, dict) else {}
+
+
 def unfiled_credible_findings(findings: dict) -> list[str]:
+    """Credible issue findings resolved by NEITHER sink: no filed GitHub
+    issue and no local-artifact ticket. Filing to either sink satisfies the
+    `findings-filed` review/validate gate; only the GitHub-only autonomous
+    fix chain (gh-agent drain, close-out, autonomous-fix report) additionally
+    requires the GitHub sink specifically (see `credible_findings_requiring_github`)."""
     return [
         item.get("id", "")
         for item in credible_issue_findings(findings)
         if not item.get("github_issue", {}).get("url")
+        and not local_finding_ref(item).get("path")
+    ]
+
+
+def credible_findings_requiring_github(findings: dict) -> list[dict]:
+    """Credible issue findings not resolved via the local-artifact ticket
+    sink. Scopes the GitHub-only autonomous-fix gate chain (gh-agent drain,
+    fix/triage/verify evidence, run URLs, integration landing, issue
+    close-out, autonomous-fix report) so a campaign run that only used the
+    default local finding sink is never forced through GitHub filing/fixing
+    it never requested. Findings already filed to GitHub stay in this set so
+    their fix chain is still enforced."""
+    return [
+        item for item in credible_issue_findings(findings)
+        if not local_finding_ref(item).get("path")
     ]
 
 
@@ -6506,6 +6534,138 @@ def file_findings(
         if result.get("gh_agent_enqueue_status", "") not in {"", "disabled", "dry-run"}:
             result["autonomous_fix_report_path"] = str(write_autonomous_fix_report(run_dir, result))
         update_derived_artifacts(run_dir, publish_deck=publish_deck)
+    result.update(run_story_summary(run_dir))
+    return result
+
+
+def local_finding_body(item: dict, run_dir: Path) -> str:
+    lines = [str(item.get("summary", "")).strip()]
+    lines.append("")
+    if item.get("scenario"):
+        lines.append(f"Scenario: {item['scenario']}")
+    if item.get("severity"):
+        lines.append(f"Severity: {item['severity']}")
+    if item.get("evidence_path"):
+        lines.append(f"Evidence: {item['evidence_path']}")
+    lines.append(f"Run bundle: {run_dir}")
+    return "\n".join(line for line in lines if line is not None).strip() + "\n"
+
+
+def file_local_findings(
+    run_dir: Path,
+    dry_run: bool,
+    publish_deck: Optional[Path],
+    target: str = "kitsoki",
+    target_dir: str = "",
+) -> dict:
+    """File the bundle's credible issue findings as local `.artifacts/issues/bugs`
+    tickets via `kitsoki bug create --sink local-artifact` (the repo-wide local
+    stabilization sink documented in AGENTS.md). This is the default campaign
+    finding sink: local developer/dogfood findings stay local unless a caller
+    explicitly opts into the GitHub sink (`file_findings` / `autonomous_fix`).
+
+    Findings already resolved via either sink (an existing `github_issue.url`
+    or `local_ticket.path`) are skipped so re-runs are idempotent. Filing a
+    finding locally does not require or touch gh-agent; there is no
+    autonomous fix loop for the local sink by design (a human reviews the
+    local ticket pile directly, e.g. `kitsoki bug list --sink local-artifact
+    --target kitsoki`).
+    """
+    if not (run_dir / "findings.json").exists():
+        raise SystemExit(f"No findings.json in {run_dir}; record findings before filing")
+    findings = read_json(run_dir / "findings.json")
+    credible = credible_issue_findings(findings)
+    root_dir = target_dir or str(ROOT)
+    outcomes: list[dict] = []
+    filed = 0
+    skipped = 0
+    failed = 0
+    for item in credible:
+        existing_gh = item.get("github_issue", {}).get("url", "")
+        existing_local = local_finding_ref(item).get("path", "")
+        if existing_gh or existing_local:
+            skipped += 1
+            outcomes.append({
+                "finding_id": item.get("id", ""),
+                "status": "skipped",
+                "local_ticket_path": existing_local,
+                "github_issue_url": existing_gh,
+            })
+            continue
+        title = str(item.get("title") or item.get("id") or "campaign finding").strip()
+        body = local_finding_body(item, run_dir)
+        if dry_run:
+            outcomes.append({"finding_id": item.get("id", ""), "status": "dry-run", "title": title, "body": body})
+            continue
+        cmd = kitsoki_cli_command() + [
+            "bug", "create",
+            "--target", target,
+            "--target-dir", root_dir,
+            "--sink", "local-artifact",
+            "--title", title,
+            "--body", body,
+        ]
+        if item.get("severity"):
+            cmd += ["--severity", str(item["severity"])]
+        if item.get("evidence_path"):
+            cmd += ["--trace-ref", str(item["evidence_path"])]
+        proc = shell(cmd, ROOT)
+        if proc.returncode != 0:
+            failed += 1
+            detail = (proc.stderr or proc.stdout).strip()[:300]
+            outcomes.append({"finding_id": item.get("id", ""), "status": "failed", "error": detail})
+            continue
+        ticket_path = proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else ""
+        item["local_ticket"] = {
+            "path": ticket_path,
+            "sink": "local-artifact",
+            "target": target,
+            "target_dir": root_dir,
+            "filed_at": now_utc(),
+        }
+        filed += 1
+        outcomes.append({"finding_id": item.get("id", ""), "status": "filed", "local_ticket_path": ticket_path})
+
+    if not dry_run:
+        write_json(run_dir / "findings.json", findings)
+        update_derived_artifacts(run_dir, publish_deck=publish_deck)
+
+    unfiled = unfiled_credible_findings(findings)
+    filed_paths = [o["local_ticket_path"] for o in outcomes if o.get("status") == "filed"]
+    ticket_summary = "; ".join(filed_paths[:5])
+    if len(filed_paths) > 5:
+        ticket_summary += f"; +{len(filed_paths) - 5} more"
+    if dry_run:
+        summary = f"Dry-run rendered {len(outcomes)} candidate local ticket(s) for the .artifacts/issues/bugs sink; nothing was filed."
+    else:
+        summary = (
+            f"Filed findings to the local-artifact sink: {filed} filed, {skipped} already filed, "
+            f"{failed} failed; {len(unfiled)} credible finding(s) remain unfiled. "
+            "Use finding_sink=github ticket_repo=owner/repo for an explicit GitHub handoff."
+        )
+    result = {
+        "status": "findings_dry_run_local" if dry_run else "findings_filed_local",
+        "run_dir": str(run_dir),
+        "filing_sink": "local-artifact",
+        "local_sink_target": target,
+        "local_sink_target_dir": root_dir,
+        "dry_run": "yes" if dry_run else "no",
+        "findings_filed_count": filed,
+        "findings_skipped_count": skipped,
+        "findings_failed_count": failed,
+        "findings_unfiled_count": len(unfiled),
+        "filed_issue_summary": ticket_summary,
+        "filing_summary": summary,
+        "outcomes": outcomes,
+        "deck_path": str(run_dir / "deck.slidey.json"),
+        "execution_plan_path": str(run_dir / "execution-plan.md"),
+        "driver_plan_path": str(run_dir / "driver-plan.md"),
+        "driver_journal_path": str(run_dir / "driver-journal.md"),
+        "agent_brief_path": str(run_dir / "agent-brief.md"),
+        "driver_handoff_path": str(run_dir / "driver-handoff.md"),
+        "media_manifest_path": str(run_dir / "media-manifest.json"),
+        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
+    }
     result.update(run_story_summary(run_dir))
     return result
 
@@ -8511,9 +8671,14 @@ def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float,
             credible.append(entry)
             github_issue = item.get("github_issue", {}) or {}
             url = github_issue.get("url", "")
-            if not url:
+            local_ticket_path = local_finding_ref(item).get("path", "")
+            if not url and not local_ticket_path:
                 continue
             filed.append(entry)
+            if not url:
+                # Local-artifact-only ticket: filed, but there is no GitHub
+                # issue-state to reconcile fixed/reopened against.
+                continue
             merged_issue = dict(github_issue)
             if url in issue_state:
                 merged_issue.update(issue_state[url])
@@ -8916,6 +9081,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     ]
     filing_requested = bool(findings.get("filing", {}).get("requested"))
     credible_findings = credible_issue_findings(findings)
+    credible_findings_needing_github = credible_findings_requiring_github(findings)
     unfiled_credible = unfiled_credible_findings(findings)
     driver_receipt_gaps = credible_issue_driver_receipt_gaps(findings, driver_journal, evidence, run_dir)
     gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
@@ -8932,7 +9098,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_missing_landing = gh_agent_missing_integration_landing(gh_agent)
     autonomous_fix_report_missing = missing_autonomous_fix_report_tokens(run_dir, findings)
     gh_agent_jobs_terminal = (
-        (not credible_findings and not gh_agent_requested)
+        (not credible_findings_needing_github and not gh_agent_requested)
         or (
             gh_agent_enqueued > 0
             and gh_agent_drain_status == "drained"
@@ -8946,7 +9112,7 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     gh_agent_independent_verify_complete = (not gh_agent_requested) or not gh_agent_missing_verify
     gh_agent_run_urls_complete = (not gh_agent_requested) or not gh_agent_missing_run_url
     gh_agent_integration_landing_complete = (not gh_agent_requested) or not gh_agent_missing_landing
-    issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings, gh_agent_requested, credible_findings)
+    issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings, gh_agent_requested, credible_findings_needing_github)
 
     checks = [
         {
@@ -9125,8 +9291,8 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
             "status": "pass" if gh_agent_jobs_terminal else "fail",
             "summary": "When gh-agent fixing was requested, queued fix jobs drain to reviewable terminal runs.",
             "detail": (
-                f"credible issue findings require autonomous_fix; credible={len(credible_findings)}"
-                if credible_findings and not gh_agent_requested
+                f"credible issue findings require autonomous_fix or a local-artifact ticket; credible={len(credible_findings_needing_github)}"
+                if credible_findings_needing_github and not gh_agent_requested
                 else "gh-agent fixing not requested"
                 if not gh_agent_requested
                 else f"enqueue={gh_agent.get('enqueue_status', '')}, drain={gh_agent_drain_status}, enqueued={gh_agent_enqueued}, done={gh_agent_done}, failed={gh_agent_failed}, active={gh_agent_active}; {gh_agent.get('run_summary', '')}"
@@ -9210,11 +9376,11 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
         },
         {
             "id": "autonomous-fix-report",
-            "status": "pass" if (not credible_findings or (gh_agent_requested and not autonomous_fix_report_missing)) else "fail",
+            "status": "pass" if (not credible_findings_needing_github or (gh_agent_requested and not autonomous_fix_report_missing)) else "fail",
             "summary": "Autonomous fixes produce a complete human-review report with watchdog proof, hosted-agent readiness proof, filed issue links, run links, and evidence links.",
             "detail": (
-                f"credible issue findings require autonomous_fix; credible={len(credible_findings)}"
-                if credible_findings and not gh_agent_requested
+                f"credible issue findings require autonomous_fix or a local-artifact ticket; credible={len(credible_findings_needing_github)}"
+                if credible_findings_needing_github and not gh_agent_requested
                 else "gh-agent fixing not requested"
                 if not gh_agent_requested
                 else (
@@ -10381,6 +10547,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
     findings_json = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {}
     filing = findings_json.get("filing", {}) if findings_json else {}
     credible_findings = credible_issue_findings(findings_json)
+    credible_findings_needing_github = credible_findings_requiring_github(findings_json)
     unfiled = unfiled_credible_findings(findings_json)
     driver_receipt_gaps = credible_issue_driver_receipt_gaps(
         findings_json,
@@ -10500,20 +10667,20 @@ def validate_run_bundle(run_dir: Path) -> dict:
         )
     gh_agent = findings_json.get("gh_agent", {}) if isinstance(findings_json.get("gh_agent", {}), dict) else {}
     gh_agent_requested = gh_agent.get("enqueue_status", "") not in {"", "disabled", "dry-run"}
-    if credible_findings and not gh_agent_requested:
+    if credible_findings_needing_github and not gh_agent_requested:
         add_validation_issue(
             issues,
             "error",
             "gh-agent-fixes",
-            "Credible issue findings require the native autonomous_fix gate before final validation",
-            f"credible={len(credible_findings)}",
+            "Credible issue findings require the native autonomous_fix gate or a local-artifact ticket before final validation",
+            f"credible={len(credible_findings_needing_github)}",
         )
         add_validation_issue(
             issues,
             "error",
             "autonomous-fix-report",
-            "Credible issue findings require an autonomous-fix report with issue, run, and evidence links",
-            f"credible={len(credible_findings)}",
+            "Credible issue findings require an autonomous-fix report with issue, run, and evidence links, or a local-artifact ticket",
+            f"credible={len(credible_findings_needing_github)}",
         )
     if gh_agent_requested:
         enqueued = int(gh_agent.get("enqueued_count", 0) or 0)
@@ -10573,7 +10740,7 @@ def validate_run_bundle(run_dir: Path) -> dict:
                 "Completed gh-agent fix jobs are missing integration branch or commit landing proof",
                 ", ".join(missing_landing[:5]),
             )
-        issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings_json, gh_agent_requested, credible_findings)
+        issue_closeout_ok, issue_closeout_detail = issue_closeout_gate(findings_json, gh_agent_requested, credible_findings_needing_github)
         if not issue_closeout_ok:
             add_validation_issue(
                 issues,
@@ -13874,6 +14041,9 @@ def main() -> None:
     parser.add_argument("--campaign-worker", action="store_true", help="Record/import a local, arena, or VM campaign worker readiness receipt into a run bundle")
     parser.add_argument("--seed-demo-evidence", action="store_true", help="Attach deterministic demo evidence and findings to an existing run bundle")
     parser.add_argument("--file-findings", action="store_true", help="File the bundle's credible issue findings as GitHub issues via the kitsoki bug orchestration")
+    parser.add_argument("--file-local-findings", action="store_true", help="File the bundle's credible issue findings as local .artifacts/issues/bugs tickets via kitsoki bug create --sink local-artifact (the default campaign finding sink; see AGENTS.md)")
+    parser.add_argument("--local-sink-target", default="kitsoki", choices=["kitsoki", "story"], help="With --file-local-findings, the kitsoki bug create --target to file into (default: kitsoki)")
+    parser.add_argument("--local-sink-target-dir", default="", help="With --file-local-findings, override the local sink target-root; defaults to the kitsoki repo root")
     parser.add_argument("--autonomous-fix-loop", action="store_true", help="Internal legacy test backend for kitsoki gitops autonomous-fix")
     parser.add_argument("--autonomous-marathon", action="store_true", help="Create or finalize a standing persona-QA marathon through native autonomous fix, review, validation, and stats")
     parser.add_argument("--autonomous-marathon-due", action="store_true", help="Scan standing persona-QA marathon control artifacts and report due cadence cycles")
@@ -14728,6 +14898,35 @@ def main() -> None:
                 f"{result['gh_agent_active_count']} active)"
             )
         append_log(f"Filed findings for {run_dir.name}: {result['filing_summary']}")
+        return
+
+    if args.file_local_findings:
+        if not args.run_dir:
+            raise SystemExit("--file-local-findings requires --run-dir")
+        publish_deck = DEFAULT_DECK if args.publish_deck else None
+        run_dir = run_dir_from_arg(args.run_dir)
+        result = file_local_findings(
+            run_dir,
+            args.dry_run,
+            publish_deck,
+            args.local_sink_target,
+            args.local_sink_target_dir,
+        )
+        if args.json_output:
+            print(json.dumps(result, sort_keys=True))
+            append_log(f"Filed local findings for {run_dir.name}: {result['filing_summary']}")
+            return
+        print(f"Status: {result['status']}")
+        print(result["filing_summary"])
+        for outcome in result["outcomes"]:
+            line = f"- {outcome.get('finding_id', '?')} [{outcome.get('status', '?')}]"
+            if outcome.get("local_ticket_path"):
+                line += f" {outcome['local_ticket_path']}"
+            if outcome.get("error"):
+                line += f" ({outcome['error']})"
+            print(line)
+        print(f"Unfiled credible findings: {result['findings_unfiled_count']}")
+        append_log(f"Filed local findings for {run_dir.name}: {result['filing_summary']}")
         return
 
     if args.autonomous_fix_loop:
