@@ -108,7 +108,7 @@ or real-fix hints leak into the MCP prompt.
 The `running` room then computes the copy-ready live commands with:
 
 ```sh
-python3 bench.py drive-plan \
+host.bakeoff.run --op bench --cwd tools/bugfix-bakeoff/external -- drive-plan \
   --project gears-rust \
   --bug bug1,bug4 \
   --candidate opus-4.8,gpt-5.3-spark \

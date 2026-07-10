@@ -122,7 +122,7 @@ states:
       # stdout), never as Result.Error, so `on_error:` would never fire for
       # it anyway (the `on_error: .` this replaced was dead code against
       # exactly that failure shape — a redirect to "." only ever mattered for
-      # a Go-level infra failure, e.g. python3 itself missing). deck_error's
+      # a Go-level infra failure, e.g. the external adapter is missing). deck_error's
       # bind below covers BOTH cases: the subcommand's own reported cause
       # when it ran and failed internally (`result.stdout_json.deck_error`),
       # and a synthesized cause from exit_code/stdout for the rarer case
