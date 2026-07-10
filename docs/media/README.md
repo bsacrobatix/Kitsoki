@@ -13,6 +13,10 @@ Kitsoki has two long-lived media families:
   PNG checkpoints, and run evidence from the live bridge; do not substitute
   `kitsoki record`, GIF tooling, or static flow-frame renders.
 
+Plan a new tour-driven demo as a validated storyboard before authoring specs or
+manifests — see [storyboard.md](storyboard.md) (`kitsoki storyboard
+validate|render|emit|check`).
+
 Generated media belongs in `.artifacts/` or the `.temp/site` VitePress
 workspace. Committed media should be a source artifact: a catalog entry, a
 capture spec, an rrweb clip intentionally embedded by a deck, a small static

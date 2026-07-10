@@ -184,6 +184,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(projectToolsCmd())
 	root.AddCommand(kitCmd())
 	root.AddCommand(validateCmd())
+	root.AddCommand(storyboardCmd())
 	root.AddCommand(workflowCmd())
 	root.AddCommand(capsuleCmd())
 	root.AddCommand(gitopsCmd())

@@ -41,6 +41,35 @@ frames, no API cost, no flakiness. This is the same posture the engine uses for
 flow tests (see [[feedback_no_llm_tests]] and `docs/web/README.md` →
 "Deterministic, no-LLM"). **Never** record against a live LLM.
 
+## Storyboard first — the plan is a validated artifact
+
+Before authoring any spec or manifest, write the demo's plan as a
+`*.storyboard.yaml` (drafts in `.context/storyboards/`; promote it beside the
+capture spec when the demo is committed) and keep it lint-clean. The storyboard
+is the single source the capture formats derive from — goal, no-LLM binding,
+and per scene: purpose, narration, drive actions (the tour `DriveAction`
+vocabulary verbatim), dwell, and the observable `expect` claims QA will gate
+on. Full format + design rationale: `docs/media/storyboard.md`; worked example:
+`templates/storyboard.example.yaml` in this skill (validated by a repo test).
+
+```bash
+go run ./cmd/kitsoki storyboard validate <demo>.storyboard.yaml   # lint: ids, pacing budgets, bindings, scenario refs
+go run ./cmd/kitsoki storyboard render   <demo>.storyboard.yaml --out plan.md        # the reviewable plan
+go run ./cmd/kitsoki storyboard emit tour <demo>.storyboard.yaml --out tour.yaml     # kitsoki tour --manifest / spec steps
+go run ./cmd/kitsoki storyboard emit qa   <demo>.storyboard.yaml --out scenarios.yaml # kitsoki-ui-qa --scenarios contract
+go run ./cmd/kitsoki storyboard check <demo>.storyboard.yaml --chapters <video>.mp4  # post-capture drift vs the plan
+```
+
+The lint enforces this skill's discipline up front: dwell must cover the
+narration reading budget (the rrweb pacing-scan floor), total screen time must
+clear the recorder's `MIN_DEMO_SECONDS` gate, no raw `__` intent names in
+viewer-facing text, and every scene must promise something observable. After
+capture, `storyboard check` diffs the `<video>.chapters.json` sidecar against
+the plan (missing/reordered scenes, under-dwelled windows). A storyboard does
+not replace the product-journey run bundle — when the demo claims scenario
+coverage, reference it via `scenario:` and keep the run bundle as the evidence
+source of truth.
+
 > **Pick the worked reference that matches the ask — copy it, don't start blank:**
 > - **A product-site demo of one feature** → make the catalog entry
 >   `demo.format: rrweb`, reuse or add a deterministic Playwright tour spec,
