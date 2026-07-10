@@ -85,6 +85,7 @@ app:
 #                        Stubbed by id under flow/no-LLM tests; never
 #                        fabricated — a failed dispatch is recorded honestly.
 hosts:
+  - host.run
   - host.product_journey.run
   - host.starlark.run
   - host.agent.task
