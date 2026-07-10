@@ -494,6 +494,7 @@ func looksLikeJSON(s string) bool {
 func RegisterBuiltins(r *Registry) {
 	r.Register("host.workspace_manager.get", WorkspaceManagerGetHandler)
 	r.Register("host.run", RunHandler)
+	r.Register("host.corpus.prove", CorpusProofHandler(nil))
 	r.Register("host.punch.verify", PunchVerifyHandler)
 	r.Register("host.proposal.publish", ProposalPublishHandler)
 	r.Register("host.dev.profile_setup", ProfileSetupHandler)

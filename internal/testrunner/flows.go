@@ -616,7 +616,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	RegisterHostStubs(reg, fixture.HostHandlers)
 	if appDeclaresHost(def, "host.starlark.run") {
 		if _, ok := reg.Get("host.starlark.run"); !ok {
-			reg.Register("host.starlark.run", host.StarlarkRunHandler)
+			reg.Register("host.starlark.run", host.NewStarlarkRunHandler(reg))
 		}
 	}
 
@@ -802,7 +802,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		// host_bindings: is set, builtins are already registered above; otherwise
 		// register it here so reg.Get finds it.
 		if _, ok := reg.Get("host.starlark.run"); !ok {
-			reg.Register("host.starlark.run", host.StarlarkRunHandler)
+			reg.Register("host.starlark.run", host.NewStarlarkRunHandler(reg))
 		}
 		real, _ := reg.Get("host.starlark.run")
 		reg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {
@@ -838,7 +838,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 		// host_bindings: is set, builtins are already registered above; otherwise
 		// register it here so reg.Get finds it.
 		if _, ok := reg.Get("host.starlark.run"); !ok {
-			reg.Register("host.starlark.run", host.StarlarkRunHandler)
+			reg.Register("host.starlark.run", host.NewStarlarkRunHandler(reg))
 		}
 		real, _ := reg.Get("host.starlark.run")
 		reg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {
@@ -847,7 +847,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 	}
 	if starlarkCoverage != nil {
 		if _, ok := reg.Get("host.starlark.run"); !ok {
-			reg.Register("host.starlark.run", host.StarlarkRunHandler)
+			reg.Register("host.starlark.run", host.NewStarlarkRunHandler(reg))
 		}
 		real, _ := reg.Get("host.starlark.run")
 		reg.Replace("host.starlark.run", func(ctx context.Context, args map[string]any) (host.Result, error) {

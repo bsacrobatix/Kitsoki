@@ -1,18 +1,23 @@
-app: { id: corpus-forge, version: 0.1.0, title: "Corpus forge", author: Kitsoki, license: CC0 }
-hosts: [host.run]
+app: { id: corpus-forge, version: 0.2.0, title: "Corpus Forge", author: Kitsoki, license: CC0 }
+hosts: [host.starlark.run, host.corpus.prove]
 world:
-  source_manifest: { type: string, default: "tools/arena/corpus/cost-bench.manifest.yaml" }
-  output_manifest: { type: string, default: ".artifacts/corpus-forge/corpus.yaml" }
-  validation_path: { type: string, default: ".artifacts/corpus-forge/validation.json" }
-  selection_id: { type: string, default: "local-corpus-forge" }
+  # Intake adapters supply only the canonical corpus-case.v1 candidate list.
+  # Imported verified_red/verified_green fields are neither required nor read.
+  source_candidates: { type: list, default: [] }
   task_limit: { type: int, default: 5 }
+  selection_id: { type: string, default: "local-corpus-forge" }
+  loaded_candidates: { type: list, default: [] }
+  selected_candidates: { type: list, default: [] }
   selected_ids: { type: string, default: "" }
+  proofs: { type: list, default: [] }
   validation: { type: object, default: {} }
+  receipt: { type: object, default: {} }
+  last_error: { type: string, default: "" }
 intents:
-  start: { description: "Select an evidence-backed corpus.", examples: [start], priority: 90 }
+  start: { description: "Load canonical corpus candidates.", examples: [start], priority: 90 }
   accept: { description: "Continue.", examples: [accept], priority: 80 }
   quit: { description: "Stop.", examples: [quit], priority: 50 }
   look: { description: "Refresh.", examples: [look], priority: 10 }
-exits: { done: { requires: [validation] }, abandoned: {} }
+exits: { done: { requires: [receipt, validation] }, abandoned: {} }
 root: idle
 include: [rooms/*.yaml]

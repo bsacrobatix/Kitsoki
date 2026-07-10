@@ -30,6 +30,7 @@ var BuiltinHostVerbVocabulary = []string{
 	"host.bakeoff.run",
 	"host.session_mining.run",
 	"host.ui_qa.run",
+	"host.corpus.prove",
 }
 
 // CapabilitySpec is the normalized runtime authority for a Starlark run. Pure

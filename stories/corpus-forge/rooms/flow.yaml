@@ -1,22 +1,62 @@
 states:
   idle:
-    view: [{ heading: "Corpus forge" }, { prose: "Freeze only RED/GREEN-proved tasks before spending." }]
-    on: { start: [{ target: select }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+    view: [{ heading: "Corpus Forge" }, { prose: "Load canonical corpus-case.v1 proposals, independently prove RED/GREEN, then freeze a receipt." }]
+    on: { start: [{ target: load }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+
+  load:
+    view: [{ heading: "Corpus Forge · load" }, { prose: "Validating canonical intake records; self-reported verification flags are ignored." }]
+    on_enter:
+      - invoke: host.starlark.run
+        id: corpus_load_candidates
+        with:
+          script: scripts/load_candidates.star
+          inputs: { candidates: "{{ world.source_candidates }}" }
+        bind: { loaded_candidates: candidates }
+        on_error: failed
+    on: { accept: [{ target: select }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+
   select:
-    view: [{ heading: "Corpus forge · select" }, { code: "{{ world.selected_ids|default:'(pending)' }}" }]
+    view: [{ heading: "Corpus Forge · select" }, { code: "{{ world.selected_ids|default:'(pending)' }}" }]
     on_enter:
-      - invoke: host.run
+      - invoke: host.starlark.run
         id: corpus_select
-        with: { cmd: "python3 tools/arena/scripts/corpus_forge.py select --input '{{ world.source_manifest }}' --out '{{ world.output_manifest }}' --limit {{ world.task_limit }} --selection-id '{{ world.selection_id }}'" }
-        bind: { selected_ids: stdout }
-        on_error: idle
+        with:
+          script: scripts/select_corpus.star
+          inputs:
+            candidates: "{{ world.loaded_candidates }}"
+            task_limit: "{{ world.task_limit }}"
+        bind: { selected_candidates: candidates, selected_ids: selected_ids }
+        on_error: failed
     on: { accept: [{ target: validate }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+
   validate:
-    view: [{ heading: "Corpus forge · validate" }, { code: "{{ world.validation|default:'(pending)' }}" }]
+    view: [{ heading: "Corpus Forge · prove" }, { code: "{{ world.validation|default:'(pending)' }}" }]
     on_enter:
-      - invoke: host.run
-        id: corpus_validate
-        with: { cmd: "python3 tools/arena/scripts/corpus_forge.py check --input '{{ world.output_manifest }}' --json-out '{{ world.validation_path }}'" }
-        bind: { validation: stdout_json }
-        on_error: idle
+      - invoke: host.starlark.run
+        id: corpus_validate_manifest
+        with:
+          script: scripts/validate_manifest.star
+          capabilities: { host: { verbs: [host.corpus.prove] } }
+          inputs: { candidates: "{{ world.selected_candidates }}" }
+        bind: { proofs: proofs, validation: validation }
+        on_error: failed
+    on: { accept: [{ target: receipt }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+
+  receipt:
+    view: [{ heading: "Corpus Forge · receipt" }, { code: "{{ world.receipt|default:'(pending)' }}" }]
+    on_enter:
+      - invoke: host.starlark.run
+        id: corpus_build_receipt
+        with:
+          script: scripts/build_receipt.star
+          inputs:
+            selection_id: "{{ world.selection_id }}"
+            candidates: "{{ world.selected_candidates }}"
+            proofs: "{{ world.proofs }}"
+        bind: { receipt: receipt }
+        on_error: failed
     on: { accept: [{ target: "@exit:done" }], quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }
+
+  failed:
+    view: [{ heading: "Corpus Forge · rejected" }, { code: "{{ world.last_error|default:'Proof or control-plane failure' }}" }]
+    on: { quit: [{ target: "@exit:abandoned" }], look: [{ target: . }] }

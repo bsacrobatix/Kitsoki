@@ -95,6 +95,7 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.diff.open":            {class: Write, deterministic: true},
 
 	"host.starlark.run":         {class: Write, deterministic: true},
+	"host.corpus.prove":          {class: Write, deterministic: true},
 	"host.punch.verify":         {class: Read, deterministic: true},
 	"host.proposal.publish":     {class: Write, deterministic: true},
 	"host.dev.profile_setup":    {class: Write, deterministic: true},
