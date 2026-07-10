@@ -146,6 +146,8 @@ hosts:
   - host.dev.onboarding
   - host.dev.profile_setup
   - host.proposal.publish
+  - host.session_mining.run
+  - host.ui_qa.run
 
 # This instance has no day-level rooms of its own — every visible
 # state comes from the imported dev-story hub. Imports are folded in

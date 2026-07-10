@@ -93,7 +93,9 @@ root:
     - host.dev.profile_setup
     - host.dev.onboarding
     - host.decomposition.update
+    - host.session_mining.run
     - host.starlark.run
+    - host.ui_qa.run
 
 conformance:
   flows: ["flows/*.yaml"]

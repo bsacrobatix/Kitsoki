@@ -69,6 +69,8 @@ hosts:
   - host.decomposition.update
   - host.dev.profile_setup
   - host.dev.onboarding
+  - host.session_mining.run
+  - host.ui_qa.run
 
 imports:
   core:
