@@ -164,11 +164,13 @@ positional args:
   value mints the kitsoki feature ticket there (`issues/features` by
   default); an **empty** `ticket_dir` skips ticket minting entirely.
 
-Design publish also records a roadmap progress event in
-`.artifacts/roadmap/progress.yaml` through `kitsoki roadmap ledger event`. The
-entry marks the proposal as published and records docs, feature YAML,
-product-site, and rrweb demo coverage as pending so the next implementation or
-roadmap-deck update has a deterministic checklist. See
+Design publish and the direct implementation path also record roadmap progress
+events in `.artifacts/roadmap/progress.yaml` through
+`kitsoki roadmap ledger event`. Proposal publish records docs, feature YAML,
+product-site, and rrweb demo coverage as pending; implementation start moves
+the item to `in_progress`; implementation completion records `partial` and
+links the implementation progress artifact so restart/checkpoint evidence is
+visible from the global ledger. See
 [`docs/workflows/roadmap-ledger.md`](../../docs/workflows/roadmap-ledger.md).
 
 Project-specific placement is expressed as a plain relative directory plus an

@@ -205,6 +205,7 @@ func roadmapLedgerEventCmd(ledgerPath *string) *cobra.Command {
 func roadmapLedgerCheckCmd(ledgerPath *string) *cobra.Command {
 	var repoRoot string
 	var jsonOut bool
+	var strict bool
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Validate the roadmap ledger shape and completion coverage",
@@ -215,6 +216,9 @@ func roadmapLedgerCheckCmd(ledgerPath *string) *cobra.Command {
 				return err
 			}
 			errs := validateRoadmapLedger(ledger, repoRoot)
+			if strict {
+				errs = append(errs, validateStrictRoadmapLedger(ledger)...)
+			}
 			if jsonOut {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]interface{}{
 					"ok":       len(errs) == 0,
@@ -236,6 +240,7 @@ func roadmapLedgerCheckCmd(ledgerPath *string) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&repoRoot, "repo-root", ".", "repo root for path existence checks")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit JSON result")
+	cmd.Flags().BoolVar(&strict, "strict", false, "require known work items to declare coverage checks and event history")
 	return cmd
 }
 
@@ -407,6 +412,42 @@ func validateRoadmapLedger(ledger roadmapLedger, repoRoot string) []string {
 			errs = append(errs, fmt.Sprintf("%s: invalid event horizon %q", ev.ID, ev.Horizon))
 		}
 		errs = append(errs, validateRoadmapChecks(ev.ID, ev.Checks)...)
+	}
+	return errs
+}
+
+func validateStrictRoadmapLedger(ledger roadmapLedger) []string {
+	if len(ledger.Items) == 0 && len(ledger.Events) == 0 {
+		return nil
+	}
+	var errs []string
+	eventsByItem := map[string]int{}
+	for _, ev := range ledger.Events {
+		eventsByItem[ev.ItemID]++
+	}
+	requiredChecks := []string{"proposal", "docs", "feature_yaml", "product_site", "rrweb_demo"}
+	for _, item := range ledger.Items {
+		if item.ID == "" {
+			continue
+		}
+		if eventsByItem[item.ID] == 0 {
+			errs = append(errs, fmt.Sprintf("%s: strict mode requires at least one event", item.ID))
+		}
+		if item.Status != "in_progress" && item.Status != "partial" && item.Status != "done" {
+			continue
+		}
+		checks := map[string]roadmapLedgerCheck{}
+		for _, check := range item.Checks {
+			checks[check.Name] = check
+		}
+		for _, name := range requiredChecks {
+			if checks[name].Status == "" {
+				errs = append(errs, fmt.Sprintf("%s: strict mode requires %s check", item.ID, name))
+			}
+		}
+		if len(item.Refs) == 0 && item.Proposal == "" && len(item.Docs) == 0 && item.FeatureYAML == "" && item.ProductSite == "" && item.RRWebDemo == "" {
+			errs = append(errs, fmt.Sprintf("%s: strict mode requires at least one proposal, doc, surface, demo, or ref path", item.ID))
+		}
 	}
 	return errs
 }

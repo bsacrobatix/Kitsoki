@@ -832,7 +832,7 @@ dev-workflow-experience-list:
 
 .PHONY: roadmap-ledger-check
 roadmap-ledger-check:
-	go run ./cmd/kitsoki roadmap ledger check --ledger .artifacts/roadmap/progress.yaml --repo-root .
+	go run ./cmd/kitsoki roadmap ledger check --ledger .artifacts/roadmap/progress.yaml --repo-root . --strict
 
 # dev-workflow-gate is the WS-F F1 exit criterion: "make target / CI job that
 # prints the live matrix; a red cell blocks declaring the workflow

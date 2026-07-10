@@ -77,6 +77,30 @@ host_handlers:
           title: "Per-session working folder"
           type:  "feature"
           status: "open"
+  host.run:
+    by_call:
+      roadmap_ledger_implementation_started:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-impl-started","item_id":"feature/F-2026-06-11T120000Z-per-session-working-folder","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-impl-started"
+            item_id: "feature/F-2026-06-11T120000Z-per-session-working-folder"
+            changed: true
+      roadmap_ledger_implementation_completed:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-impl-completed","item_id":"feature/F-2026-06-11T120000Z-per-session-working-folder","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-impl-completed"
+            item_id: "feature/F-2026-06-11T120000Z-per-session-working-folder"
+            changed: true
   host.agent.decide:
     data:
       ok: true
@@ -142,5 +166,12 @@ turns:
     expect_state: landing
     expect_world:
       status: "merged"
+      roadmap_implementation_completion_pending: false
+      roadmap_implementation_completed_result:
+        ok: true
+        ledger: ".artifacts/roadmap/progress.yaml"
+        event_id: "evt-impl-completed"
+        item_id: "feature/F-2026-06-11T120000Z-per-session-working-folder"
+        changed: true
 
 expect_no_errors: true

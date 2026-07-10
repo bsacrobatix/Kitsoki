@@ -52,7 +52,7 @@ states:
 
   landing:
     description: "dev-story — the free-form workbench. Describe what you want, or pick a quick action."
-    relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, oversight_mode, captured, landing_request, landing_note]
+    relevant_world: [ticket_id, ticket_title, ticket_type, design_file, last_pr_url, status, inbox_unread, workdir, feature_branch, oversight_mode, captured, landing_request, landing_note, roadmap_implementation_completion_pending, roadmap_implementation_progress_path, roadmap_implementation_completed_result]
     prerequisites:
       - id: local-harness-profile
         title: "Local harness profile"
@@ -362,7 +362,71 @@ states:
       - when: "world.landing_started == false"
         set: { landing_started: true }
 
-      # 2. The agent turn — synthesized by the `workbench:` block above (host
+      # 2. Imported implementation exits can only project world values. Flush
+      #    the roadmap completion event here, once the child has returned and
+      #    the latest artifact-driven progress path is visible in parent world.
+      - when: "world.roadmap_implementation_completion_pending == true && world.roadmap_implementation_item_id != ''"
+        invoke: host.run
+        id: roadmap_ledger_implementation_completed
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              if [ -d ./cmd/kitsoki ]; then
+                exec go run ./cmd/kitsoki roadmap ledger event "$@"
+              fi
+              exec kitsoki roadmap ledger event "$@"
+            - "kitsoki-roadmap-ledger"
+            - "--ledger"
+            - "{{ world.roadmap_ledger_path }}"
+            - "--event"
+            - "implementation_completed"
+            - "--item-id"
+            - "{{ world.roadmap_implementation_item_id }}"
+            - "--kind"
+            - "{{ world.design_file != '' ? 'proposal' : 'feature' }}"
+            - "--title"
+            - "{{ world.ticket_title != '' ? world.ticket_title : world.design_artifact.title }}"
+            - "--status"
+            - "partial"
+            - "--horizon"
+            - "now"
+            - "--proposal"
+            - "{{ world.design_file }}"
+            - "--ref"
+            - "{{ world.design_ticket_path }}"
+            - "--ref"
+            - "{{ world.ticket_url }}"
+            - "--ref"
+            - "{{ world.last_pr_url }}"
+            - "--ref"
+            - "{{ world.roadmap_implementation_progress_path }}"
+            - "--check"
+            - "{{ world.design_file != '' ? 'proposal=done' : 'proposal=not_applicable' }}"
+            - "--check"
+            - "docs=pending"
+            - "--check"
+            - "feature_yaml=pending"
+            - "--check"
+            - "product_site=pending"
+            - "--check"
+            - "rrweb_demo=pending"
+            - "--check"
+            - "gate=done"
+            - "--source"
+            - "story:dev-story/impl"
+            - "--note"
+            - "Implementation pipeline completed; durable docs/site/demo coverage still needs explicit closure."
+            - "--json"
+        bind:
+          roadmap_implementation_completed_result: stdout_json
+        on_error: .
+      - when: "world.roadmap_implementation_completion_pending == true && world.roadmap_implementation_completed_result.event_id != ''"
+        set:
+          roadmap_implementation_completion_pending: false
+
+      # 3. The agent turn — synthesized by the `workbench:` block above (host
       #    .agent.task with the full-tool landing_agent; working_dir is
       #    world.workdir, empty ⇒ the subprocess inherits the repo root, the
       #    standalone default; once: keyed off its bind (landing_note) so
@@ -373,7 +437,7 @@ states:
       #    a mutating tool call the agent attempts holds for the write-mode
       #    opt-in the same workbench: block sets up).
 
-      # 3. PlanProposed signal. When the agent's close-out note carried a
+      # 4. PlanProposed signal. When the agent's close-out note carried a
       #    structured plan, narrate it (surfaces as a machine.say event) so the
       #    proposed-plan decision is recorded in the trace. Guarded on the plan
       #    being present so a plain exploration turn stays quiet. Reads
@@ -956,7 +1020,60 @@ states:
         - when: "world.ticket_id != ''"
           target: impl
           effects:
-            - set: { last_error: "" }
+            - set:
+                last_error: ""
+                roadmap_implementation_item_id: "{{ world.design_slug != '' ? 'proposal/' + world.design_slug : 'feature/' + world.ticket_id }}"
+                roadmap_implementation_completion_pending: false
+                roadmap_implementation_progress_path: ""
+                roadmap_implementation_completed_result: {}
+            - invoke: host.run
+              id: roadmap_ledger_implementation_started
+              with:
+                cmd: bash
+                args:
+                  - "-c"
+                  - |
+                    if [ -d ./cmd/kitsoki ]; then
+                      exec go run ./cmd/kitsoki roadmap ledger event "$@"
+                    fi
+                    exec kitsoki roadmap ledger event "$@"
+                  - "kitsoki-roadmap-ledger"
+                  - "--ledger"
+                  - "{{ world.roadmap_ledger_path }}"
+                  - "--event"
+                  - "implementation_started"
+                  - "--item-id"
+                  - "{{ world.design_slug != '' ? 'proposal/' + world.design_slug : 'feature/' + world.ticket_id }}"
+                  - "--kind"
+                  - "{{ world.design_file != '' ? 'proposal' : 'feature' }}"
+                  - "--title"
+                  - "{{ world.ticket_title }}"
+                  - "--status"
+                  - "in_progress"
+                  - "--horizon"
+                  - "now"
+                  - "--proposal"
+                  - "{{ world.design_file }}"
+                  - "--ref"
+                  - "{{ world.design_ticket_path }}"
+                  - "--ref"
+                  - "{{ world.ticket_url }}"
+                  - "--check"
+                  - "{{ world.design_file != '' ? 'proposal=done' : 'proposal=not_applicable' }}"
+                  - "--check"
+                  - "docs=pending"
+                  - "--check"
+                  - "feature_yaml=pending"
+                  - "--check"
+                  - "product_site=pending"
+                  - "--check"
+                  - "rrweb_demo=pending"
+                  - "--source"
+                  - "story:dev-story/go_implementation"
+                  - "--json"
+              bind:
+                roadmap_implementation_started_result: stdout_json
+              on_error: impl
         - default: true
           target: landing
           guard_hint: "Pick a ticket first — type tickets."
