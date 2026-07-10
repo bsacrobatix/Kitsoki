@@ -80,7 +80,24 @@ git -C "$local_repo/.capsules/staging/local" switch -q -c staging/local source/s
 touch "$local_repo/.capsules/staging/local/.kitsoki-capsule"
 
 commit_file "$local_repo/.capsules/staging/local" staged.txt staged
+# A long-lived staging capsule can retain a rebased source/staging tracking
+# ref.  Make it point to a commit which diverges from the primary staging ref:
+# the refresh must force-update only that capsule-private remote-tracking ref,
+# then still import through the existing snapshot and primary CAS checks.
+stale_source="$tmp/stale-staging-source"
+git clone -q --no-local "$local_repo" "$stale_source"
+git -C "$stale_source" config user.name "Test User"
+git -C "$stale_source" config user.email "test@example.invalid"
+git -C "$stale_source" switch -q staging/local
+commit_file "$stale_source" stale-tracking.txt stale-source-tracking-divergence
+stale_tracking_head="$(git -C "$stale_source" rev-parse HEAD)"
+git -C "$local_repo/.capsules/staging/local" fetch -q "$stale_source" \
+  "HEAD:refs/kitsoki/test-stale-source-staging"
+git -C "$local_repo/.capsules/staging/local" update-ref \
+  refs/remotes/source/staging/local "$stale_tracking_head"
+
 commit_file "$local_repo" main.txt main-update
+primary_staging_start="$(git -C "$local_repo" rev-parse staging/local)"
 
 local_out="$tmp/local-refresh.out"
 (
@@ -97,6 +114,8 @@ git -C "$local_repo" merge-base --is-ancestor main staging/local ||
   fail "refreshed staging/local dropped staged work"
 [ "$(git -C "$local_repo" rev-parse staging/local)" = "$(git -C "$local_repo/.capsules/staging/local" rev-parse HEAD)" ] ||
   fail "primary staging/local and staging capsule HEAD differ"
+[ "$(git -C "$local_repo/.capsules/staging/local" rev-parse refs/remotes/source/staging/local)" = "$primary_staging_start" ] ||
+  fail "refresh did not converge the capsule-private source/staging tracking ref"
 cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
   fail "refresh did not copy .kitsoki.local.yaml into staging capsule"
 

@@ -506,13 +506,19 @@ cleanup_refresh_refs() {
 trap cleanup_refresh_refs EXIT
 
 echo "refresh-staging-local: fetching staging snapshot $staging_start and local $base into staging capsule" >&2
+# The staging capsule is long-lived, so its source/staging ref can have been
+# rebased independently from the primary staging ref.  That ref is private to
+# the capsule: force-refresh it from the primary source, then pin the exact
+# OID we started with under a private snapshot ref for the rest of this run.
+# Never fetch directly into a primary ref.
 git -C "$staging_capsule" fetch source \
-  "refs/heads/$staging_branch:$snapshot_ref" \
+  "+refs/heads/$staging_branch:refs/remotes/source/$staging_branch" \
   "refs/heads/$base:refs/remotes/source/$base"
-snapshot_fetched="$(git -C "$staging_capsule" rev-parse "$snapshot_ref")"
+snapshot_fetched="$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$staging_branch")"
 if [ "$snapshot_fetched" != "$staging_start" ]; then
   die "staging branch advanced before the capsule could fetch its snapshot ($staging_start -> $snapshot_fetched); rerun refresh"
 fi
+git -C "$staging_capsule" update-ref "$snapshot_ref" "$snapshot_fetched"
 
 echo "refresh-staging-local: rebasing staging capsule onto the captured staging snapshot" >&2
 git -C "$staging_capsule" rebase "$snapshot_ref"
