@@ -3,8 +3,12 @@ package ci
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kitsoki/internal/artifactjob"
@@ -61,12 +65,45 @@ func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw = append(raw, []byte("\n    executor: remote\n")...)
+	raw = append(raw, []byte("\n    executor: remote\nremotes:\n  remote:\n    endpoint: https://worker.invalid\n    credential_env: KITSOKI_TEST_REMOTE_TOKEN\n")...)
 	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	remote := executor.NewRemoteProvider(remoteVerdictWorker{})
-	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: ExecutorSelectorFunc(func(context.Context, string) (executor.Provider, error) { return remote, nil })}
+	t.Setenv("KITSOKI_TEST_REMOTE_TOKEN", "secret-token")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/capsules/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": executor.Capabilities{ID: "remote", Placements: []string{"remote"}, Networks: []string{"none"}, Cancellable: true}})
+		case "/v1/capsules/run":
+			if got := r.Header.Get("Authorization"); got != "Bearer secret-token" {
+				t.Errorf("authorization %q", got)
+			}
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(body), "secret-token") {
+				t.Fatal("credential leaked into remote payload")
+			}
+			var req struct {
+				Prepared executor.Prepared `json:"prepared"`
+			}
+			if err := json.Unmarshal(body, &req); err != nil {
+				t.Fatal(err)
+			}
+			verdict := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: req.Prepared.Envelope.SourceDigest, StoryDigest: req.Prepared.Envelope.StoryDigest, EnvironmentDigest: req.Prepared.Envelope.Environment.Digest, EnvelopeDigest: req.Prepared.Envelope.Digest}
+			raw, _ := json.Marshal(verdict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": executor.Result{VerdictArtifact: "artifact:verdict", VerdictJSON: raw}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: ConfiguredExecutors{Builtins: NewBuiltinExecutors(), Remotes: cfg.Remotes, Client: ciRewriteClient(t, server)}}
 	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
 	if err != nil {
 		t.Fatal(err)
@@ -76,17 +113,35 @@ func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testi
 	}
 }
 
-type remoteVerdictWorker struct{}
+func TestValidateRejectsUndeclaredRemoteExecutor(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n    executor: remote\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "executor \"remote\" is not configured") {
+		t.Fatalf("expected undeclared executor error, got %v", err)
+	}
+}
 
-func (remoteVerdictWorker) Describe(context.Context) (executor.Capabilities, error) {
-	return executor.Capabilities{ID: "remote", Placements: []string{"remote"}, Networks: []string{"none"}, Cancellable: true}, nil
+func ciRewriteClient(t *testing.T, server *httptest.Server) *http.Client {
+	t.Helper()
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	return &http.Client{Transport: ciRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		request.URL.Scheme = "http"
+		request.URL.Host = strings.TrimPrefix(server.URL, "http://")
+		return transport.RoundTrip(request)
+	})}
 }
-func (remoteVerdictWorker) Run(_ context.Context, prepared executor.Prepared, _ executor.Task, _ executor.EventSink) (executor.Result, error) {
-	verdict := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: prepared.Envelope.SourceDigest, StoryDigest: prepared.Envelope.StoryDigest, EnvironmentDigest: prepared.Envelope.Environment.Digest, EnvelopeDigest: prepared.Envelope.Digest}
-	raw, _ := json.Marshal(verdict)
-	return executor.Result{VerdictArtifact: "artifact:verdict", VerdictJSON: raw}, nil
-}
-func (remoteVerdictWorker) Cancel(context.Context, string) error { return nil }
+
+type ciRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f ciRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 func requireFiles(t *testing.T, root string) {
 	t.Helper()
 	for path, raw := range map[string]string{".kitsoki/environments/ci.yaml": "schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\ntoolchains:\n  go: '1.25'\n", ".kitsoki/ci.yaml": "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/ci/app.yaml\n    triggers: [local]\n    result:\n      schema: capsule-ci-verdict/v1\n", ".kitsoki/stories/ci/app.yaml": "app:\n  id: ci\nrooms:\n  idle:\n    view: ok\n"} {

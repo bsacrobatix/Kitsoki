@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,6 +28,7 @@ type Config struct {
 	ProjectProfile     string              `yaml:"project_profile,omitempty" json:"project_profile,omitempty"`
 	DefaultEnvironment string              `yaml:"default_environment,omitempty" json:"default_environment,omitempty"`
 	Pipelines          map[string]Pipeline `yaml:"pipelines" json:"pipelines"`
+	Remotes            map[string]Remote   `yaml:"remotes,omitempty" json:"remotes,omitempty"`
 }
 type Pipeline struct {
 	Story       string         `yaml:"story" json:"story"`
@@ -54,6 +56,10 @@ type ResultContract struct {
 	PassExits []string `yaml:"pass_exits,omitempty" json:"pass_exits,omitempty"`
 	FailExits []string `yaml:"fail_exits,omitempty" json:"fail_exits,omitempty"`
 	ParkExits []string `yaml:"park_exits,omitempty" json:"park_exits,omitempty"`
+}
+type Remote struct {
+	Endpoint      string `yaml:"endpoint" json:"endpoint"`
+	CredentialEnv string `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
 }
 type Trigger struct {
 	Kind              string   `json:"kind"`
@@ -108,6 +114,18 @@ func Validate(project string, cfg Config) error {
 	if len(cfg.Pipelines) == 0 {
 		return fmt.Errorf("capsule ci: pipelines are required")
 	}
+	for name, remote := range cfg.Remotes {
+		if strings.TrimSpace(name) == "" || isBuiltinExecutor(name) {
+			return fmt.Errorf("capsule ci remote %q: invalid executor name", name)
+		}
+		u, err := url.Parse(remote.Endpoint)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return fmt.Errorf("capsule ci remote %q: endpoint must be https", name)
+		}
+		if remote.CredentialEnv != "" && !validEnvName(remote.CredentialEnv) {
+			return fmt.Errorf("capsule ci remote %q: invalid credential env", name)
+		}
+	}
 	for name, p := range cfg.Pipelines {
 		if strings.TrimSpace(p.Story) == "" || filepath.IsAbs(p.Story) || strings.HasPrefix(filepath.Clean(p.Story), "..") {
 			return fmt.Errorf("capsule ci pipeline %q: story must be project-relative", name)
@@ -133,6 +151,11 @@ func Validate(project string, cfg Config) error {
 		}
 		if p.Agents.Policy == "allow" && (len(p.Agents.Profiles) == 0 || p.Agents.MaxCostUSD <= 0 || p.Agents.OnUnavailable == "") {
 			return fmt.Errorf("capsule ci pipeline %q: allowed agents require profiles, budget, and fallback", name)
+		}
+		if p.Executor != "" && !isBuiltinExecutor(p.Executor) {
+			if _, ok := cfg.Remotes[p.Executor]; !ok {
+				return fmt.Errorf("capsule ci pipeline %q: executor %q is not configured", name, p.Executor)
+			}
 		}
 	}
 	return nil
@@ -354,6 +377,26 @@ func hashVerdict(v Verdict) string {
 	raw, _ := json.Marshal(v)
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+func isBuiltinExecutor(name string) bool {
+	switch name {
+	case "", "host", "local", "remote-fake":
+		return true
+	default:
+		return false
+	}
+}
+func validEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if r == '_' || ('A' <= r && r <= 'Z') || (i > 0 && '0' <= r && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 var _ = sort.Strings

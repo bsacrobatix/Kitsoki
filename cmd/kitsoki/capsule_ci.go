@@ -93,7 +93,11 @@ func capsuleCIRunCmd() *cobra.Command {
 		} else {
 			launcher = storylauncher.Launcher{StoryPath: filepath.Join(project, p.Story)}
 		}
-		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewBuiltinExecutors(), Launcher: launcher}
+		cfg, err := ci.Load(project)
+		if err != nil {
+			return err
+		}
+		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewConfiguredExecutors(cfg), Launcher: launcher}
 		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: mustFileDigest(filepath.Join(project, p.Story)), Trigger: ci.Trigger{Kind: "local", RequestedPipeline: args[0]}})
 		if err != nil {
 			return err
