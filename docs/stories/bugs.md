@@ -16,6 +16,16 @@ on disk. There is no service, no database, and no schema beyond what
 this doc describes — the pile is grep-friendly, hand-editable, and
 survives a `git mv` without losing meaning.
 
+Programmatic/batch filers use the same local-artifact sink and file format
+without a human in the loop: `kitsoki bug file-findings` files a
+product-journey run bundle's credible findings to GitHub, and
+`tools/product-journey/run.py --file-local-findings` (driven by the
+`stories/product-journey-qa` `campaign_issue_fix` intent, default
+`finding_sink=local-artifact`) files the same findings as local tickets under
+`.artifacts/issues/bugs/` instead — see
+[`agentic-qa-campaigns.md`](../guide/development/agentic-qa-campaigns.md) for
+the campaign finding-sink policy this doc's format backs.
+
 Two filing targets exist:
 
 - **Story bugs** — the surface that surprised you was the *app you

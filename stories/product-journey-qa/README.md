@@ -126,10 +126,31 @@ It is intentionally no-LLM:
   `autonomous_watchdog` before filing anything and returns a reviewable
   `autonomous_fix_invalid` result when the standing-loop control is missing or
   stale.
-- `campaign_issue_fix` delegates to `autonomous_fix` after binding the campaign
-  ticket repo and hosted gh-agent URL into story state. It is the general
-  issue/fix product verb; raw filing remains behind the evidence-backed
-  autonomous gate.
+- `campaign_issue_fix` is the general issue/fix product verb, gated by a
+  declared `finding_sink` policy (`finding_sink=local-artifact` by default, or
+  explicit `finding_sink=github`):
+  - `local-artifact` (default, no slots required) calls
+    `tools/product-journey/run.py --file-local-findings` for every credible
+    `issue` finding, which shells to `kitsoki bug create --sink local-artifact
+    --target kitsoki` per finding and records the returned path as
+    `item.local_ticket` in `findings.json`. This matches the repo-wide local
+    developer/dogfood bug-loop convention (AGENTS.md): findings stay local
+    under `.artifacts/issues/bugs/` and no GitHub filing or gh-agent repair is
+    touched. Review a filed local ticket pile directly with `kitsoki bug list
+    --sink local-artifact --target kitsoki` / `kitsoki bug show <id>`.
+  - `github` (explicit opt-in; requires `ticket_repo` and
+    `gh_agent_public_base_url`) delegates to `autonomous_fix` after binding the
+    campaign ticket repo and hosted gh-agent URL into story state, running the
+    full evidence-backed filing + gh-agent repair + independent verification +
+    close-out gate.
+  Both sinks satisfy the `findings-filed` review/validate gate for the
+  findings they resolve. The GitHub-only gate chain (gh-agent drain, fix/
+  triage/verify evidence, run URLs, integration landing, issue close-out,
+  autonomous-fix report) only applies to credible findings that are still
+  unresolved by the local sink, so a campaign run that only ever used the
+  default local sink is never forced through GitHub filing/fixing it never
+  requested. `campaign_worker` and `record`/`blocker` are unaffected by this
+  policy; it only governs where credible `issue` findings get filed.
 - `campaign_stats` delegates to `stats` for filed/fixed/reopened/similar issue
   counts across retained campaign artifacts.
 - `campaign_deck_refresh` delegates to `review` to regenerate the Slidey deck
