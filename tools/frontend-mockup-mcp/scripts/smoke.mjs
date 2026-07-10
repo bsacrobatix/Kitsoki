@@ -30,7 +30,15 @@ if (init.error) throw new Error(init.error.message);
 
 const list = await request("tools/list");
 if (list.error) throw new Error(list.error.message);
-for (const name of ["mockup_status", "mockup_visual_qa", "mockup_dom", "mockup_tour_start", "mockup_tour_export"]) {
+for (const name of [
+  "mockup_status",
+  "mockup_visual_qa",
+  "mockup_dom",
+  "mockup_tour_start",
+  "mockup_tour_export",
+  "mockup_demo_doctor",
+  "mockup_record_tour"
+]) {
   if (!list.result.tools.some((tool) => tool.name === name)) {
     throw new Error(`${name} tool missing`);
   }

@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { runDoctor } from "./scripts/demo-doctor.mjs";
+import { runRecordTour } from "./scripts/record-tour.mjs";
 
 const SERVER_INFO = { name: "kitsoki-frontend-mockup", version: "0.1.0" };
 const KITSOKI_REPO = process.env.KITSOKI_REPO || process.cwd();
@@ -214,6 +216,34 @@ const tools = [
     name: "mockup_close",
     description: "Close the current local frontend mockup browser session.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false }
+  },
+  {
+    name: "mockup_demo_doctor",
+    description:
+      "Run the demo-doctor checks (states, deck paths, freshness, chapters, estimate) against a *.demo.json manifest. " +
+      "Does not require an active browser session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        manifest: { type: "string", description: "Absolute path to the *.demo.json manifest." }
+      },
+      required: ["manifest"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "mockup_record_tour",
+    description:
+      "Run the record-tour closed loop for a *.demo.json manifest: per-cue dwell auto-sizing, tour-set capture via " +
+      "slidey, a re-estimate flag check, then a demo-doctor gate. Does not require an active browser session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        manifest: { type: "string", description: "Absolute path to the *.demo.json manifest." }
+      },
+      required: ["manifest"],
+      additionalProperties: false
+    }
   }
 ];
 
@@ -1048,6 +1078,21 @@ async function callTool(name, args = {}) {
       }
       activeTour = undefined;
       return textResult({ closed: true });
+    case "mockup_demo_doctor": {
+      if (!args.manifest) throw new Error("manifest is required");
+      return textResult(runDoctor(path.resolve(args.manifest)));
+    }
+    case "mockup_record_tour": {
+      if (!args.manifest) throw new Error("manifest is required");
+      try {
+        return textResult(await runRecordTour(path.resolve(args.manifest)));
+      } catch (err) {
+        if (err.doctorReport) {
+          return textResult({ ok: false, error: err.message, doctor: err.doctorReport });
+        }
+        throw err;
+      }
+    }
     default:
       throw new Error(`unknown tool: ${name}`);
   }
