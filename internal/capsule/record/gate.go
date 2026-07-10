@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/receipt"
@@ -55,7 +56,24 @@ func (g PromotionGate) Verify(_ context.Context, receiptID string, plan reconcil
 	if record.JobID != r.JobID || record.ReceiptID != receiptID || record.ReceiptVerification != "valid" {
 		return fmt.Errorf("capsule sync: gate receipt is not the verified result for its run")
 	}
+	if !runRecordMatchesReceipt(record, r) {
+		return fmt.Errorf("capsule sync: gate receipt run record does not match receipt")
+	}
 	return nil
+}
+
+func runRecordMatchesReceipt(record ci.RunRecord, r receipt.Receipt) bool {
+	result := record.Result
+	if string(result.Job.ID) != r.JobID {
+		return false
+	}
+	if result.Envelope.Digest != r.Envelope.Digest ||
+		result.Envelope.SourceDigest != r.Envelope.SourceDigest ||
+		result.Envelope.StoryDigest != r.Envelope.StoryDigest ||
+		result.Envelope.Environment.Digest != r.Envelope.Environment.Digest {
+		return false
+	}
+	return reflect.DeepEqual(result.Verdict, r.Verdict)
 }
 
 func (g PromotionGate) receipt(id string) (receipt.Receipt, error) {
