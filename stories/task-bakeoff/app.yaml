@@ -21,7 +21,7 @@
 #               In flow/no-LLM mode the cell results are supplied pre-computed
 #               (the committed results/cells/*.json the harness already wrote).
 #   scoring     deterministic: aggregate the per-cell results into a summary via
-#               host.run → tools/bugfix-bakeoff/aggregate.py (free, no LLM).
+#               host.starlark.run → host.bakeoff.run (free, no LLM).
 #   reporting   deterministic: assemble the comparison summary + build the slidey
 #               deck spec from the rollup (host.run → a deck-builder step; the
 #               baked deck.json is the no-LLM stand-in).
@@ -53,6 +53,8 @@ hosts:
   # host.run drives the deterministic harness scripts (aggregate / deck-build) and
   # — where wired — the cost-bearing prepare/run_cell per cell (manual only).
   - host.run
+  - host.starlark.run
+  - host.bakeoff.run
   # host.slidey.render + host.artifacts_dir produce the baked static-HTML report,
   # exactly like stories/slidey-edit/rooms/rendering.yaml.
   - host.slidey.render
@@ -65,7 +67,7 @@ world:
   # reimplement scoring/pricing — we call the scripts.
   harness_dir:   { type: string, default: "tools/bugfix-bakeoff" }
   manifest_path: { type: string, default: "tools/bugfix-bakeoff/external/projects/kitsoki/manifest.yaml" }
-  # generated_at is REQUIRED by aggregate.py / the report builder (the build bans
+  # generated_at is REQUIRED by the offline report tools (the build bans
   # implicit wall-clock timestamps). An operator/flow supplies a fixed value.
   generated_at:  { type: string, default: "1970-01-01T00:00:00Z" }
 
@@ -86,7 +88,7 @@ world:
 
   # ── Scoring / aggregation outputs ────────────────────────────────────────────
   # summary mirrors results/summary.json's shape (rollup by_treatment / by_candidate
-  # / by_cell_key). Bound from the aggregate.py run in `scoring`.
+  # / by_cell_key). Bound from the native bakeoff capability in `scoring`.
   summary:      { type: object, default: {} }
   summary_path: { type: string, default: "" }
 
