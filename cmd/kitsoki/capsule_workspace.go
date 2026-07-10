@@ -14,7 +14,7 @@ import (
 // letting any onboarded project use the native manager directly.
 func capsuleWorkspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "workspace", Short: "Create and manage native Capsule workspaces"}
-	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceCloseCmd())
+	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd())
 	return cmd
 }
 func capsuleWorkspaceManager(project string) (*control.Manager, error) {
@@ -106,6 +106,40 @@ func capsuleWorkspaceCommitCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("message")
+	return cmd
+}
+
+func capsuleWorkspaceIntegrateCmd() *cobra.Command {
+	var project, id, gate, owner string
+	var teardown, jsonOut bool
+	cmd := &cobra.Command{Use: "integrate", Short: "Integrate a provider-managed workspace through its declared protected lifecycle", RunE: func(cmd *cobra.Command, args []string) error {
+		m, err := capsuleWorkspaceManager(project)
+		if err != nil {
+			return err
+		}
+		in, err := m.Instances.Get(cmd.Context(), id)
+		if err != nil {
+			return err
+		}
+		h, err := m.Integrate(cmd.Context(), control.Handle{ID: in.ID, Generation: in.Generation}, gate)
+		if err != nil {
+			return err
+		}
+		if teardown {
+			if err := m.Close(cmd.Context(), h, owner); err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, map[string]any{"integrated": id, "closed": true}, jsonOut)
+		}
+		return capsuleWorkspaceWrite(cmd, h, jsonOut)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&id, "id", "", "workspace id")
+	cmd.Flags().StringVar(&gate, "gate", "", "focused validation command declared by the development adapter")
+	cmd.Flags().StringVar(&owner, "owner", "cli", "lease owner required when tearing down")
+	cmd.Flags().BoolVar(&teardown, "teardown", false, "close the workspace after successful integration")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
+	_ = cmd.MarkFlagRequired("id")
 	return cmd
 }
 func capsuleWorkspaceCloseCmd() *cobra.Command {

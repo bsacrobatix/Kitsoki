@@ -1,25 +1,29 @@
-Do implementation work in managed clone-backed capsule workspaces, not git
+Do implementation work in managed clone-backed Capsule workspaces, not Git
 worktrees. The primary checkout is protected as read-mostly; agents should not
-run raw `git worktree`, `git clone`, rebase, merge, or teardown commands for
-normal development. Delegate the lifecycle to:
+run raw `git worktree`, `git clone`, rebase, merge, teardown, or the legacy
+workspace script directly for normal development. Delegate the lifecycle to the
+native Capsule CLI from the protected checkout:
 
 ```
-scripts/dev-workspace.sh create --id <id> --branch <branch> --bootstrap
-scripts/dev-workspace.sh status <id>
-scripts/dev-workspace.sh commit <id> --message "<message>"
-scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown
+go run ./cmd/kitsoki capsule workspace create --id <id> --definition development --owner <owner>
+go run ./cmd/kitsoki capsule workspace status --id <id>
+go run ./cmd/kitsoki capsule workspace commit --id <id> --message "<message>"
+go run ./cmd/kitsoki capsule workspace integrate --id <id> --gate "<focused validation>" --teardown
 ```
 
-The script creates workspaces under `.capsules/workspaces`, writes the Kitsoki
-capsule/clone sentinels, bases normal development on `staging/local`, runs the
-bootstrap target when requested, imports completed local work back into
-`staging/local`, and removes the workspace on `--teardown`. If the target branch
-advanced, the script rebases the workspace onto the current target; rerun
-focused validation before retrying a failed/conflicted merge. Do not manually
-chmod the primary checkout except to repair the guard itself.
+The checked-in `development` definition is a native Capsule compatibility
+provider for Kitsoki's protected clone policy: it creates workspaces under
+`.capsules/workspaces`, writes the Capsule/clone sentinels, bases normal work on
+`staging/local`, bootstraps it, imports completed local work back into
+`staging/local`, and removes it after `--teardown`. Its implementation currently
+delegates protected rebase/guard details to `scripts/dev-workspace.sh`; that
+script is provider internals, not an agent interface. If the target advanced,
+the native integrate command performs the managed rebase and reruns its gate;
+fix conflicts inside the Capsule and retry. Do not manually chmod the primary
+checkout except to repair the guard itself.
 
-See `docs/dev-workspaces.md` for the full lifecycle contract, metadata files,
-failure modes, recovery rules, and validation commands.
+See `docs/dev-workspaces.md` for the full lifecycle contract, compatibility
+provider metadata, failure modes, recovery rules, and validation commands.
 
 Local developer bug loops should stay local by default. File iterative,
 developer-found, or dogfood bugs as local artifact tickets under
@@ -35,7 +39,7 @@ explicit final promotion. It is acceptable for tests to fail temporarily inside
 a managed workspace while implementation is in progress. When the task is
 complete, stabilize in that workspace, run focused validation, commit only your
 work, and merge to `staging/local` through
-`scripts/dev-workspace.sh merge <id> --gate "<focused validation>" --teardown`.
+`go run ./cmd/kitsoki capsule workspace integrate --id <id> --gate "<focused validation>" --teardown`.
 Do not stop at a workspace commit for completed implementation work unless the
 user explicitly asks you not to merge. Do not land local iterative work directly
 to `main`; final local promotion uses the staging capsule flow below after the
@@ -45,10 +49,9 @@ CI should use a non-main base prefix such as `agent/*`, `integration/*`, or
 `staging/*`.
 
 Final local promotion from staging to `main` goes through the staging capsule,
-not an ad hoc branch merge. Keep `.capsules/staging/local` as a managed capsule
-checkout on branch `staging/local` (`scripts/dev-workspace.sh create --root
-.capsules/staging --id local --branch staging/local --base staging/local
---target main --bootstrap`); run staging commands with `make test-staging`,
+not an ad hoc branch merge. Keep `.capsules/staging/local` as a managed Capsule
+checkout on branch `staging/local` (`go run ./cmd/kitsoki capsule workspace
+create --id local --definition staging --owner staging`); run staging commands with `make test-staging`,
 `make web-dev-staging`, `make site-dev-staging`, and `make install-staging`.
 Before staging validation or final promotion, run
 `scripts/refresh-staging-local.sh` from the primary checkout. It checks
@@ -120,12 +123,12 @@ should own the worker dispatch, trace, receipt, and reusable story artifacts.
 The supervising Codex session must independently inspect the receipt, trace,
 diff, untracked files, and validation gates instead of trusting worker claims.
 
-After creating a new managed workspace, run `make bootstrap-workspace` from
-inside it before running `go run ./cmd/kitsoki` or any Playwright spec. Passing
-`--bootstrap` to `scripts/dev-workspace.sh create` does this automatically; it
-stages the embed-only stories/SPA dirs, installs `tools/runstatus` node_modules,
-and warms the Go build cache, all of which are otherwise empty/cold in a fresh
-clone.
+After creating a new managed workspace, the checked-in `development` and
+`staging` definitions run `make bootstrap-workspace` before returning. Before
+running `go run ./cmd/kitsoki` or any Playwright spec in a custom definition,
+declare the same bootstrap hook or run it in that workspace. It stages the
+embed-only stories/SPA dirs, installs `tools/runstatus` node_modules, and warms
+the Go build cache, all of which are otherwise empty/cold in a fresh clone.
 
 When we do an implementation based on a proposal, the goal is to complete the proposal implementation and move the content to proper narrative docs and delete the proposal - don't leave unfinished work unless specifically instructed, and if so, update the proposal to summarize the completed aspect and focus on the remaining work.
 

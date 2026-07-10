@@ -2,7 +2,8 @@
 
 **Status:** v1 in progress. `internal/capsule/control`, native workspace CLI,
 and scoped Capsule MCP now cover definitions, lease/generation handles, safe
-FS/exec/VCS, and synthetic/self/pinned providers. Script/host adoption and
+FS/exec/VCS, synthetic/self/pinned providers, and the `development`/`staging`
+compatibility providers behind the native lifecycle. Host adoption and
 seal/cache/verifier-overlay completion remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
