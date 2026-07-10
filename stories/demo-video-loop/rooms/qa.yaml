@@ -8,7 +8,7 @@ states:
   # advances itself. QA pass always wins; otherwise loop_again (carrying the report
   # as feedback) re-enters generating, or a budget guard ends the run.
   #
-  # The story SHELLS OUT to qa.sh; it does not re-derive the vision review. qa_ok is
+  # The typed host capability invokes qa.sh; the story does not re-derive the vision review. qa_ok is
   # a tri-state ("" / true / false) so its routing emits defer to the post-bind pass
   # — the cherny-loop decision-emit discipline.
   qa:
@@ -17,38 +17,21 @@ states:
     on_enter:
       # 1. The QA gate. fail_on_error:false so a blocking/pipeline exit binds
       #    qa_ok:false (not an error bounce); qa_exit_code carries 0/1/2.
-      - invoke: host.run
+      - invoke: host.ui_qa.run
         id: "qa-{{ world.iteration }}"
         once: true
         with:
-          cmd: |
-            set +e
-            bash .agents/skills/kitsoki-ui-qa/scripts/qa.sh "{{ world.video_path }}" --frames "{{ world.frames_dir }}" --feature "{{ world.feature_md_path }}" --scenarios "{{ world.scenarios_path }}" --strict
-            rc=$?
-            out=""
-            verdict="$(ls -t "$PWD"/.artifacts/ui-qa/*/verdict.json 2>/dev/null | head -n 1)"
-            if [ -n "$verdict" ]; then
-              out="$PWD/.artifacts/ui-qa/completion-state.json"
-              if ! python3 -m tools.persona_qa --kind ui-qa --input "$verdict" --out "$out" >/dev/null; then
-                out=""
-              fi
-            fi
-            python3 - "$rc" "$out" <<'PY'
-            import json, sys
-            rc = int(sys.argv[1])
-            print(json.dumps({
-                "qa_ok": rc == 0,
-                "qa_exit_code": rc,
-                "qa_completion_state_path": sys.argv[2],
-            }))
-            PY
-            exit "$rc"
+          op: gate
           cwd: "{{ world.worktree_path }}"
+          video_path: "{{ world.video_path }}"
+          frames_dir: "{{ world.frames_dir }}"
+          feature_md_path: "{{ world.feature_md_path }}"
+          scenarios_path: "{{ world.scenarios_path }}"
           fail_on_error: false
         bind:
-          qa_ok:        ok
-          qa_exit_code: exit_code
-          qa_completion_state_path: stdout_json.qa_completion_state_path
+          qa_ok:        qa_ok
+          qa_exit_code: qa_exit_code
+          qa_completion_state_path: qa_completion_state_path
       # 2. Read the report so a loop-back maker turn gets concrete feedback. This is
       #    UNGUARDED on purpose: an on_enter invoke's `when:` is evaluated against the
       #    PRE-bind world (machine-build time), so `when: qa_ok == false` would never

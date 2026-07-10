@@ -40,12 +40,14 @@ app:
 # does not commit; the demo artifacts live under repo-root .artifacts/, not the
 # tree.
 #   host.agent.task    — the maker: authors the demo video + qa inputs each turn
-#   host.run            — the deterministic video-validation gate, the qa.sh gate,
-#                         and the diff/proposal/epoch helpers
+#   host.run            — the deterministic video-validation gate and the
+#                         diff/proposal/epoch helpers
+#   host.ui_qa.run      — the kitsoki-ui-qa gate and completion-state adapter
 #   host.artifacts_dir  — persist each iteration's record (the run trail)
 hosts:
   - host.agent.task
   - host.run
+  - host.ui_qa.run
   - host.artifacts_dir
 
 agents:
