@@ -21,7 +21,7 @@ import (
 
 func capsuleCICmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "ci", Short: "Plan, run, and inspect story-native Capsule CI"}
-	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd())
+	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCICancelCmd())
 	return cmd
 }
 func ciInputs(ctx context.Context, project, workspace, pipeline string) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, error) {
@@ -131,6 +131,22 @@ func capsuleCIStatusCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&job, "job", "", "job id")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	return cmd
+}
+func capsuleCICancelCmd() *cobra.Command {
+	var project, job string
+	var jsonOut bool
+	cmd := &cobra.Command{Use: "cancel", Short: "Cancel a persisted running or parked Capsule CI job", RunE: func(cmd *cobra.Command, args []string) error {
+		record, err := (ci.FileRunStore{ProjectRoot: project}).Cancel(job)
+		if err != nil {
+			return err
+		}
+		return capsuleWorkspaceWrite(cmd, record, jsonOut)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&job, "job", "", "job id")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("job")
 	return cmd
 }
 

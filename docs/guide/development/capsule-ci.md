@@ -29,6 +29,7 @@ kitsoki capsule env resolve ci
 kitsoki capsule ci plan change --workspace change-1
 kitsoki capsule ci run change --workspace change-1
 kitsoki capsule ci status
+kitsoki capsule ci cancel --job <job-id>
 kitsoki capsule workspace close --id change-1
 ```
 

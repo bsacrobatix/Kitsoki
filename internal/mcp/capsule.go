@@ -70,6 +70,7 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.plan", Description: "Build the sealed environment and story envelope for an allowed project pipeline and workspace handle."}, s.ciPlan)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.run", Description: "Run the declared project CI story through the Capsule executor and return its typed verdict. A story can pass, fail, or park; it cannot self-authorize promotion."}, s.ciRun)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.status", Description: "Read persisted Capsule CI run records without host paths or raw secrets."}, s.ciStatus)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.cancel", Description: "Cancel a persisted running or parked Capsule CI job. Remote workers receive the same cancellation contract when configured."}, s.ciCancel)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.resolve", Description: "Resolve a declared environment using probes only; it never installs host tools or returns secrets."}, s.envResolve)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.lock", Description: "Resolve and persist a reviewable environment lock when this immutable grant allows environment writes."}, s.envLock)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.verify", Description: "Verify a saved environment lock against current probes without modifying the host."}, s.envVerify)
@@ -357,6 +358,16 @@ func (s *CapsuleServer) ciStatus(_ context.Context, _ *mcpsdk.CallToolRequest, a
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "runs": all}, nil
+}
+func (s *CapsuleServer) ciCancel(_ context.Context, _ *mcpsdk.CallToolRequest, a capsuleCIStatusArgs) (*mcpsdk.CallToolResult, any, error) {
+	if a.Job == "" {
+		return capsuleErr(fmt.Errorf("capsule ci: job is required")), nil, nil
+	}
+	record, err := (ci.FileRunStore{ProjectRoot: s.manager.Grant.ProjectRoot}).Cancel(a.Job)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "run": record}, nil
 }
 func (s *CapsuleServer) envResolve(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleEnvArgs) (*mcpsdk.CallToolResult, any, error) {
 	r := environment.Resolver{ProjectRoot: s.manager.Grant.ProjectRoot, Probe: environment.HostProbe()}
