@@ -16,6 +16,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/storylauncher"
 )
 
 func capsuleCICmd() *cobra.Command {
@@ -89,7 +90,7 @@ func capsuleCIRunCmd() *cobra.Command {
 			}
 			launcher = ciLauncher{verdict: verdict}
 		} else {
-			launcher = ci.EngineLauncher{StoryPath: filepath.Join(project, p.Story)}
+			launcher = storylauncher.Launcher{StoryPath: filepath.Join(project, p.Story)}
 		}
 		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Provider: executor.NewFakeProvider("local"), Launcher: launcher}
 		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: mustFileDigest(filepath.Join(project, p.Story)), Trigger: ci.Trigger{Kind: "local", RequestedPipeline: args[0]}})
