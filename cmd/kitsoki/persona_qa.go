@@ -2,14 +2,8 @@ package main
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
-
-	"kitsoki/internal/kitrepo"
 )
 
 func personaQACmd() *cobra.Command {
@@ -24,7 +18,7 @@ func personaQACmd() *cobra.Command {
 				printPersonaQAHelp(cmd)
 				return nil
 			}
-			return runPersonaQAPython(cmd, args)
+			return fmt.Errorf("persona-qa: the compatibility adapter no longer runs Python; use `kitsoki run @kitsoki/scenario-qa` or `kitsoki starlark run <script.star>`")
 		},
 	}
 	return cmd
@@ -64,50 +58,4 @@ func hasHelpArg(args []string) bool {
 		}
 	}
 	return false
-}
-
-func runPersonaQAPython(cmd *cobra.Command, args []string) error {
-	repo := os.Getenv(kitrepo.EnvVar)
-	if strings.TrimSpace(repo) == "" {
-		repo = kitrepo.Resolve()
-	}
-	if strings.TrimSpace(repo) == "" {
-		return fmt.Errorf("persona-qa: cannot resolve Kitsoki repo; run from a checkout or set %s", kitrepo.EnvVar)
-	}
-	repoAbs, err := filepath.Abs(repo)
-	if err != nil {
-		return err
-	}
-	python := os.Getenv("PYTHON")
-	if strings.TrimSpace(python) == "" {
-		python = "python3"
-	}
-	argv := append([]string{"-m", "tools.persona_qa.kit"}, args...)
-	proc := exec.CommandContext(cmd.Context(), python, argv...)
-	if wd, err := os.Getwd(); err == nil {
-		proc.Dir = wd
-	}
-	proc.Stdout = cmd.OutOrStdout()
-	proc.Stderr = cmd.ErrOrStderr()
-	proc.Stdin = cmd.InOrStdin()
-	proc.Env = append(os.Environ(),
-		kitrepo.EnvVar+"="+repoAbs,
-		"PYTHONPATH="+prependEnvPath(os.Getenv("PYTHONPATH"), repoAbs),
-	)
-	if err := proc.Run(); err != nil {
-		return fmt.Errorf("persona-qa: %w", err)
-	}
-	return nil
-}
-
-func prependEnvPath(existing, value string) string {
-	if existing == "" {
-		return value
-	}
-	for _, part := range strings.Split(existing, string(os.PathListSeparator)) {
-		if part == value {
-			return existing
-		}
-	}
-	return value + string(os.PathListSeparator) + existing
 }
