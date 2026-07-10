@@ -554,6 +554,56 @@ readme_path = repo / ".kitsoki" / "stories" / "acme-dev" / "README.md"
 if readme_path.exists():
     readme_text = readme_path.read_text(encoding="utf-8")
     check("gh tracker readme provider", "- source: GitHub Issues `example/acme`" in readme_text)
+    check("gh tracker readme binding", "- binding: `host.local_github.ticket`" in readme_text)
+
+# 9a. A stale LLM draft that still mirrors the GitHub tracker slug into
+# dev_story_profile.docs.ticket_repo should be canonicalized back to the
+# wrapper-only GitHub source shape on write.
+repo = mkgitrepo()
+draft = {
+    "schema": "project-profile/v1",
+    "id": "acme",
+    "title": "Acme",
+    "repo": {"root": ".", "vcs": "git"},
+    "stack": {"kind": "go", "languages": ["go"]},
+    "commands": {"test": "go test ./...", "build": "go build ./..."},
+    "kitsoki": {
+        "story": "dev-story",
+        "instance": {
+            "id": "acme-dev",
+            "path": ".kitsoki/stories/acme-dev/app.yaml",
+            "bindings": {
+                "ticket": "host.gh.ticket",
+                "vcs": "host.git",
+                "ci": "host.local",
+                "workspace": "host.git_worktree",
+                "transport": "host.append_to_file",
+            },
+        },
+    },
+    "dev_story_profile": {
+        "docs": {
+            "publish_durable_path": ".context/prd",
+            "design_durable_path": ".context/designs",
+            "design_template_dir": "",
+            "design_ticket_dir": "",
+            "ticket_repo": "example/acme",
+        },
+        "bugfix": {"build_cmd": "go build ./...", "test_cmd": "go test ./..."},
+    },
+}
+proc = run_apply_with(repo, fake_kitsoki(True), "acme", "Acme", "go project", "", "go test ./...", "go build ./...", draft=draft, tracker="github")
+check("gh stale draft exit", proc.returncode == 0, proc.stdout + proc.stderr)
+profile_path = repo / ".kitsoki" / "project-profile.yaml"
+if profile_path.exists():
+    profile_text = profile_path.read_text(encoding="utf-8")
+    check("gh stale draft profile binding corrected", 'ticket: "host.local_github.ticket"' in profile_text)
+    check("gh stale draft docs ticket_repo cleared", "ticket_repo: \"example/acme\"" not in profile_text)
+app_path = repo / ".kitsoki" / "stories" / "acme-dev" / "app.yaml"
+if app_path.exists():
+    app_text = app_path.read_text(encoding="utf-8")
+    check("gh stale draft app binding corrected", "ticket:    host.local_github.ticket" in app_text)
+    check("gh stale draft github source pinned", 'ticket_github_repo:         { type: string, default: "example/acme" }' in app_text)
 
 # 9b. GitHub tracker WITHOUT a parseable GitHub remote degrades honestly to
 # local-file tickets (no guessed slug, no gh binding).

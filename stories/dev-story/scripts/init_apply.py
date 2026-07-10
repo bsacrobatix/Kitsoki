@@ -218,7 +218,14 @@ def ensure_draft_profile_defaults(profile: dict, data: dict) -> None:
     if not isinstance(docs, dict):
         docs = {}
         dev_story_profile["docs"] = docs
-    for key, value in dev_story_docs_profile(data).items():
+    docs_defaults = dev_story_docs_profile(data)
+    stale_tracker_docs_repo = (
+        data.get("tracker") == "github"
+        and str(docs.get("ticket_repo") or "") == str(data.get("ticket_repo") or "")
+    )
+    if stale_tracker_docs_repo:
+        docs["ticket_repo"] = docs_defaults["ticket_repo"]
+    for key, value in docs_defaults.items():
         docs.setdefault(key, value)
 
     bugfix = dev_story_profile.setdefault("bugfix", {})
@@ -351,6 +358,17 @@ def dev_story_docs_profile(data: dict) -> dict:
     if isinstance(override, dict):
         for key in defaults:
             if key in override and override[key] is not None:
+                if (
+                    key == "ticket_repo"
+                    and data.get("tracker") == "github"
+                    and str(override[key]) == str(data.get("ticket_repo") or "")
+                ):
+                    # The discovered GitHub issue repo belongs to the wrapper's
+                    # combined ticket intake (`ticket_github_repo`), not the
+                    # docs profile's explicit "publish a follow-up ticket"
+                    # knob. Keep docs.ticket_repo opt-in unless the operator
+                    # chose a distinct repo on purpose.
+                    continue
                 defaults[key] = str(override[key])
     return defaults
 
@@ -535,11 +553,11 @@ def enrich_project_shape(data: dict, root: Path) -> None:
     data["repo_default_branch"] = repo["default_branch"]
     data["repo_remote"] = repo["remote"]
     # External ticket-repo passthrough: when the selected tracker is GitHub, the
-    # generated instance pins `iface.ticket -> host.gh.ticket` on the selected
-    # slug. Discovery can prefill that slug from origin, but an explicit
-    # onboarding choice wins. Any other tracker, or an unparseable remote,
-    # can inherit a parent meta-repo provider or degrade honestly to
-    # local-file/copy-paste tickets.
+    # generated instance uses the composite local+GitHub ticket binding and
+    # shows the selected slug as the GitHub source. Discovery can prefill that
+    # slug from origin, but an explicit onboarding choice wins. Any other
+    # tracker, or an unparseable remote, can inherit a parent meta-repo
+    # provider or degrade honestly to local-file/copy-paste tickets.
     selected_ticket_repo = str(data.get("ticket_repo") or github_repo_slug(repo["remote"]) or "")
     data["ticket_repo"] = selected_ticket_repo if data.get("tracker") == "github" else ""
     data["ticket_binding"] = ""
@@ -1912,7 +1930,7 @@ def readme(data: dict, profile_path: str) -> str:
         ticket_note = f"""Ticket provider:
 
 - source: GitHub Issues `{data["ticket_repo"]}`
-- binding: `host.gh.ticket`
+- binding: `host.local_github.ticket`
 """
     else:
         ticket_note = """Ticket provider:
