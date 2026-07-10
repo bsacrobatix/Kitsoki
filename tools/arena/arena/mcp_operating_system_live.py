@@ -421,6 +421,9 @@ class ClaudeCLIDispatcher:
             "--mcp-config", str(config_path),
             "--strict-mcp-config",
             "--tools", ",".join(CLAUDE_STRICT_MCP_TOOLS),
+            # Claude's --tools is variadic. Delimit options so the fixed card
+            # prompt is positional instead of being swallowed as another tool.
+            "--",
             strict_card_prompt(request),
         ]
 
