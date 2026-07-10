@@ -105,7 +105,22 @@ func qaBootstrapCmd() *cobra.Command {
 		if err := os.WriteFile(journey, []byte(body), 0o644); err != nil {
 			return err
 		}
+		qaRoot := filepath.Clean(filepath.Join(dir, "..", ".."))
+		if err := os.MkdirAll(filepath.Join(qaRoot, "personas"), 0o755); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Join(qaRoot, "scenarios"), 0o755); err != nil {
+			return err
+		}
+		catalog := "schema: kitsoki/journey-catalog/v1\nimports:\n  personas: [\"@kitsoki/product-journey/personas\", personas]\n  scenarios: [\"@kitsoki/product-journey/scenarios\", scenarios]\n"
+		if err := os.WriteFile(filepath.Join(qaRoot, "catalog.yaml"), []byte(catalog), 0o644); err != nil {
+			return err
+		}
 		if err := os.WriteFile(filepath.Join(dir, "tutorial.md.tmpl"), []byte("# Project onboarding\n\n<!-- kitsoki:generated:start -->\n<!-- kitsoki:generated:end -->\n"), 0o644); err != nil {
+			return err
+		}
+		storyboard := fmt.Sprintf("version: 1\nid: onboarding\ntitle: Project onboarding\ngoal: Show the project-local Kitsoki entry point.\nsurface: web\nformat: tour\nminTotalMs: 1200\nbinding:\n  story: %s\nscenes:\n  - id: orientation\n    title: Project-local entry point\n    purpose: Establish the first useful screen.\n    narration: Start from the project-local story.\n    screen: The story landing state is visible.\n    dwellMs: 1200\n    expect: [A useful next action is visible.]\n", story)
+		if err := os.WriteFile(filepath.Join(dir, "onboarding.storyboard.yaml"), []byte(storyboard), 0o644); err != nil {
 			return err
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "created %s\n", journey)
@@ -523,6 +538,11 @@ func validateJourney(p *journeyPack, root string) error {
 	app := filepath.Join(root, p.Story.App)
 	if !fileExists(app) {
 		return fmt.Errorf("story.app not found: %s", p.Story.App)
+	}
+	for _, ref := range []string{p.Outputs.Storyboard, p.Outputs.Tutorial.Template} {
+		if ref != "" && !fileExists(filepath.Join(root, ref)) {
+			return fmt.Errorf("journey source reference not found: %s", ref)
+		}
 	}
 	for _, ref := range append(p.Catalogs.Personas, p.Catalogs.Scenarios...) {
 		if ref == "" || strings.HasPrefix(ref, "@kitsoki/") {
