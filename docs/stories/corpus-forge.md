@@ -28,9 +28,11 @@ candidate, and emits `corpus-receipt.v1`.
 
 For the promotion corpus, start a new run with `corpus_role: heldout` and a
 distinct source-manifest reference. Keep both receipts with the measurement
-result. The comparison runner must reject ID overlap before it starts the
-evaluation: a Studio story session deliberately has no ambient receipt registry
-and therefore cannot prove non-overlap with a prior independent session.
+result. A production Studio runtime uses one explicitly configured durable
+receipt registry, which rejects candidate-ID overlap across independent
+calibration and heldout sessions before the heldout receipt can freeze. The
+comparison runner must still consume the named frozen receipts, not mutable
+session state.
 Calibration may tune the story; heldout may only evaluate the frozen choice.
 
 ## Studio MCP dogfood
