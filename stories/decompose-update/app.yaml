@@ -6,7 +6,8 @@ app:
   license: "CC0"
 
 hosts:
-  - host.run
+  - host.starlark.run
+  - host.decomposition.update
   - host.agent.decide
 
 agents:
@@ -24,6 +25,7 @@ world:
   result_stdout: { type: string, default: "" }
   result_exit_code: { type: int, default: 0 }
   result_ok: { type: bool, default: false }
+  last_error: { type: string, default: "" }
 
 intents:
   run:
@@ -34,6 +36,10 @@ intents:
     description: "Accept the managed-update result."
     examples: ["accept", "done"]
     priority: 80
+  failed:
+    description: "Route a structured transaction failure to the failure room."
+    examples: []
+    priority: 1
   quit:
     description: "Exit the story."
     examples: ["quit", "stop"]

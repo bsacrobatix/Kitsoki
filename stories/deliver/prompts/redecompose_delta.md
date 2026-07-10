@@ -3,7 +3,7 @@ decomposition on disk. Do not overwrite it with a fresh manifest — a prior
 decomposition may carry briefs already in flight (assigned, in progress,
 under review) and a blind overwrite would silently drop or reshuffle them.
 Instead you author a **managed delta** that the decompose-update transaction
-(`tools/decomposition-update/apply_delta.py`) applies on top of the prior
+(`host.decomposition.update`) applies on top of the prior
 graph, versioning it first.
 
 {% if args.refine_feedback %}
@@ -27,7 +27,7 @@ not just resubmit the same delta:
    deltas are the safe default (destructive ops need an operator, not this
    pipeline).
 3. **Write** the delta document to `{{ args.delta_path }}` in this exact
-   YAML format (`apply_delta.py`'s contract):
+   YAML format (the `host.decomposition.update` contract):
 
 ```yaml
 trigger: "epic revised: <one-line reason>"

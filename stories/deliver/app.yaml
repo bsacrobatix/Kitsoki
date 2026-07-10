@@ -34,6 +34,7 @@ app:
 hosts:
   - host.run
   - host.starlark.run
+  - host.decomposition.update
   - host.agent.task
   - host.agent.decide
   - host.artifacts_dir
@@ -58,14 +59,14 @@ world:
   # decompose-update transaction instead of a blind decomposer overwrite.
   decompose_route:          { type: string, default: "" }   # "" | "fresh" | "redecompose" — detect_prior_decomposition.star's verdict
   redecompose_checked:      { type: bool,   default: false } # detection runs at most once per run (see decompose.yaml)
-  redecompose_delta_path:   { type: string, default: "" }   # delta document the decomposer authors (apply_delta.py's --delta)
-  redecompose_versions_dir: { type: string, default: "" }   # versioned prior-graph snapshots (apply_delta.py's --versions-dir)
-  redecompose_event_log:    { type: string, default: "" }   # plan-evolution.jsonl (apply_delta.py's --event-log)
+  redecompose_delta_path:   { type: string, default: "" }   # delta document the decomposer authors
+  redecompose_versions_dir: { type: string, default: "" }   # versioned prior-graph snapshots
+  redecompose_event_log:    { type: string, default: "" }   # plan-evolution.jsonl
   redecompose_trigger:      { type: string, default: "" }   # the delta's one-line trigger, echoed by the decomposer's confirmation
   redecompose_added:        { type: list,   default: [] }   # brief ids the delta adds, echoed by the decomposer's confirmation
-  redecompose_apply_ok:     { type: bool,   default: false } # apply_delta.py's exit-0 verdict
+  redecompose_apply_ok:     { type: bool,   default: false } # native transaction verdict
   redecompose_apply_stdout: { type: string, default: "" }
-  redecompose_apply_route:  { type: string, default: "" }   # "" | "ok" | "fail" — apply_delta.py's stdout_json.route (tri-state; never branch on a bool default)
+  redecompose_apply_route:  { type: string, default: "" }   # "" | "ok" | "fail" — native transaction route
 
 intents:
   start:

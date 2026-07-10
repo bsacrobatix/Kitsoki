@@ -24,6 +24,7 @@ var BuiltinHostVerbVocabulary = []string{
 	"host.proposal.publish",
 	"host.dev.profile_setup",
 	"host.dev.onboarding",
+	"host.decomposition.update",
 }
 
 // CapabilitySpec is the normalized runtime authority for a Starlark run. Pure

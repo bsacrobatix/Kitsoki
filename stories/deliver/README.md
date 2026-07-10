@@ -50,7 +50,7 @@ configure {epic_path}
                │              └─ host error ─▶ decompose_error ─▶ @exit:needs-human {last_error}
                ├─ redecompose (a prior decomposition.yaml already exists) ──▶ redecompose
                │      (host.agent.task: author an additive delta, no overwrite)
-               │        └─▶ redecompose_apply (host.run: tools/decomposition-update/apply_delta.py
+               │        └─▶ redecompose_apply (host.starlark.run: host.decomposition.update
                │             — the decompose-update transaction, --list-key briefs --skip-validate)
                │              ├─ ok ──▶ lint
                │              └─ fail/error ─▶ redecompose_error ─▶ @exit:needs-human {last_error}
@@ -80,7 +80,8 @@ lint-fail and review-revise refine edges share ONE `refine_cycle` /
 | `decomposing` | `host.agent.task` invokes the `decomposer` agent (`once: true` — clear `decomposition_briefs` to force a redo). The agent reads the epic, **writes the decomposition YAML to `decomposition_path`** (the format fleet's `load` parses), and submits a manifest validated against [`schemas/decomposition.json`](schemas/decomposition.json); `bind: decomposition_briefs, coverage_note`. On a re-entry (lint fail or review revise), `refine_feedback` is passed into the decomposer's prompt args so it addresses the specific gap instead of resubmitting blind. |
 | `decompose_error` | Host-call failure surface; auto-routes to `@exit:needs-human` (the engine sets `last_error`). |
 | `redecompose` | `host.agent.task` invokes the `decomposer` agent again, but with [`prompts/redecompose_delta.md`](prompts/redecompose_delta.md): read the epic + the PRIOR manifest and **write an additive delta document** (`trigger`/`provenance`/`operations`, `add_change` only) to `redecompose_delta_path`, then submit a lightweight confirmation validated against [`schemas/redecompose-delta.json`](schemas/redecompose-delta.json) (`{trigger, added}`). |
-| `redecompose_apply` | `host.run` invokes [`tools/decomposition-update/apply_delta.py`](../../tools/decomposition-update/README.md) directly — the SAME decompose-update transaction `stories/decompose-update/` wraps, called here with `--list-key briefs` (a deliver manifest, not the dev-workflow ledger graph) and `--skip-validate` (deliver's own `lint` room, entered next, is the deterministic check for this shape). Binds a tri-state `redecompose_apply_route` (`""`/`"ok"`/`"fail"` from `stdout_json.route`, reset before the invoke) rather than branching on the bool `redecompose_apply_ok` directly — a bool's zero-value would coincide with "failed" and break the flow-test harness's discovery pass. `ok` → `lint`; `fail` → `redecompose_error`. |
+| `redecompose_apply` | `host.starlark.run` calls native `host.decomposition.update` with `list_key: briefs` and `skip_validate: true`; it binds the tri-state route and enters `lint` on success or `redecompose_error` on failure. |
+
 | `redecompose_error` | Delta-authoring or apply-transaction failure surface; auto-routes to `@exit:needs-human`, mirroring `decompose_error`. |
 | `lint` | `host.starlark.run` [`scripts/lint_decomposition.star`](scripts/lint_decomposition.star) over `decomposition_path` → `{route: ok\|fail, error}`; resets `lint_route` before the invoke so stale values never route (the board.yaml pattern). Fail routes to `decompose` with `refine_feedback` set to the lint error and `refine_cycle` incremented — unless the budget is already spent, which routes straight to `@exit:needs-human`. |
 | `review` | `host.agent.decide` invokes the `reviewer` agent (prompt [`prompts/review_adversary.md`](prompts/review_adversary.md), schema [`schemas/review-decision.json`](schemas/review-decision.json)) — attacks per-brief buildability and whether `coverage_note` actually covers the epic. No `once:` guard: re-runs fresh on every entry, including after a refine cycle. `accept` → `fleet`; `revise` → `decompose` with the reviewer's `questions` folded into `refine_feedback` (budgeted, same counter as lint). |
@@ -186,8 +187,8 @@ holds a GLM decomposer benchmark script.
   review-then-apply demo of the SAME transaction (`review.yaml` is the
   decide-schema-bind-gate shape this story's `review` room lifts); `redecompose`
   above is the real caller, invoking
-  [`tools/decomposition-update/apply_delta.py`](../../tools/decomposition-update/README.md)
-  directly rather than importing the demo story.
+  native `host.decomposition.update` capability directly rather than importing
+  the demo story.
 - [`stories/bugfix/rooms/proposing.yaml`](../bugfix/rooms/proposing.yaml) —
   the budgeted refine-loop pattern (`refine_cycle`/`refine_budget`) this
   story's refine edges follow.

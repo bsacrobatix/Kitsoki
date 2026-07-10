@@ -14,13 +14,14 @@ host_handlers:
             approved: true
             summary: "Delta is provenance-backed, schema-gated, versioned, and report-visible."
             findings: []
-  host.run:
+  host.starlark.run:
     by_call:
       managed_delta_gate:
         data:
-          ok: true
-          exit_code: 0
-          stdout: "PASS: decomposition-update managed delta transaction"
+          result:
+            ok: true
+            exit_code: 0
+            summary: "PASS: decomposition-update managed delta transaction"
 
 turns:
   - intent: { name: run, slots: {} }

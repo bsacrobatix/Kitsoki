@@ -127,7 +127,7 @@ Onboarding writes a small, auditable set of files:
 |---|---|
 | `.kitsoki.yaml` | Points Kitsoki at the project profile and story dirs. |
 | `.kitsoki/project-profile.yaml` | Records stack, commands, conventions, and selected starter stories. |
-| `.kitsoki/check-readiness.py` | Lists and runs the build/test/story-load checks discovered for this repo. |
+| `.artifacts/kitsoki-readiness.json` | Native readiness report written after the onboarding story's explicit readiness action. |
 | `.kitsoki/stories/<id>-dev/app.yaml` | A local dev-story instance that can be edited and extended. |
 | `.mcp.json` | Registers the Kitsoki studio MCP server for MCP-capable clients. |
 | `.agents/` and `.claude/` entries | Installs the Kitsoki skill/agent toolkit for Codex and Claude Code. |
@@ -143,11 +143,11 @@ Start the onboarded story from the project root:
 kitsoki run
 ```
 
-Then inspect the readiness checks onboarding recorded:
+Then choose the explicit `readiness` action in the onboarding result to run the
+native `host.dev.onboarding` readiness operation:
 
 ```sh
-python3 .kitsoki/check-readiness.py --list
-python3 .kitsoki/check-readiness.py --json
+kitsoki run
 ```
 
 The report is written to `.artifacts/kitsoki-readiness.json`. Red checks are

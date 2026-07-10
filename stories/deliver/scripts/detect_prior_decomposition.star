@@ -6,7 +6,7 @@
 # "redecompose": a decomposition.yaml ALREADY exists at decomposition_path —
 # decompose must NOT blindly overwrite it; route to the redecompose room,
 # which authors a delta and applies it via the decompose-update transaction
-# (tools/decomposition-update/apply_delta.py) instead
+# (host.decomposition.update) instead
 # (proposal: deliver-canonical-decomposition B2c, task 3.1).
 
 

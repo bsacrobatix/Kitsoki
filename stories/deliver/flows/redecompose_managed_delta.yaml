@@ -1,14 +1,13 @@
 # redecompose_managed_delta — a prior decomposition.yaml already exists →
 # the change routes through the decompose-update transaction
-# (tools/decomposition-update/apply_delta.py), never a blind decomposer
+# (host.decomposition.update), never a blind decomposer
 # overwrite (proposal: deliver-canonical-decomposition B2c, task 3.2).
 #
 # Full path: configure → start → decompose (detect_prior_decomposition.star
 # finds decomposition_path already on disk → decompose_route=redecompose,
 # decomposer NOT invoked) → redecompose (decomposer agent authors an additive
-# delta, mocked) → redecompose_apply (host.run apply_delta.py, STUBBED — the
-# real transaction is covered by tools/decomposition-update/tests/run_no_llm.py
-# and stories/decompose-update's own flow) → lint (real Starlark over the
+# delta, mocked) → redecompose_apply (native Starlark host capability, STUBBED — the
+# real transaction is covered by stories/decompose-update's own flow) → lint (real Starlark over the
 # post-apply manifest) → review (agent mocked, accept) → fleet.load.
 
 test_kind: flow
@@ -37,16 +36,21 @@ host_handlers:
             verdict: accept
             reason: "The new metrics brief is self-contained and depends only on the prior health-model brief."
             questions: []
-  host.run:
+  host.starlark.run:
     by_call:
+      detect_prior_decomposition:
+        data:
+          route: "redecompose"
+      lint:
+        data:
+          route: "ok"
+          error: ""
       redecompose_apply:
         data:
-          ok: true
-          exit_code: 0
-          stdout: '{"route": "ok", "ok": true, "out": ".artifacts/deliver/decomposition.yaml", "added": ["health-metrics"]}'
-          stdout_json:
+          result:
             route: "ok"
             ok: true
+            summary: "PASS: decomposition-update managed delta transaction"
             out: ".artifacts/deliver/decomposition.yaml"
             added: [health-metrics]
 

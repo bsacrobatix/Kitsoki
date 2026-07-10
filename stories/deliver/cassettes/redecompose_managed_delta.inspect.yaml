@@ -1,6 +1,6 @@
 # A prior decomposition ALREADY exists at decomposition_path (exists: true —
 # the fork detect_prior_decomposition.star takes). The updated content below
-# is what apply_delta.py would have written after applying the delta (the
+# is what the native decomposition transaction would have written after applying the delta (the
 # transaction itself is stubbed via host.run in the sibling flow, so this
 # cassette only needs to serve the two REAL Starlark reads downstream: lint's
 # validation of the post-apply manifest and fleet.load's re-parse.
