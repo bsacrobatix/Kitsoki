@@ -125,10 +125,10 @@ host_handlers:
 
 turns:
   - intent: { name: core__continue, slots: {} }
-    expect_state: core.design
-  - intent: { name: core__discuss, slots: { message: "realize the trace-pet PRD as a kitsoki web design" } }
     expect_state: core.design_search
   - intent: { name: core__confirm, slots: {} }
+    expect_state: core.design_refine
+  - intent: { name: core__discuss, slots: { message: "realize the trace-pet PRD as a kitsoki web design" } }
     expect_state: core.design_refine
   - intent: { name: core__discuss, slots: { message: "name the sprite component and the trace-column dock seam, and the idle animation" } }
     expect_state: core.design_refine

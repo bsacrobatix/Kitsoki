@@ -99,7 +99,7 @@ turns:
   # PRD. This is the PRD -> Design baton.
   - intent: { name: continue, slots: {} }
     expect_world:
-      design_seed_idea: ""
       design_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/example-cli.md"
+      design_seed_idea: ""
 
 expect_no_errors: true

@@ -43,7 +43,7 @@ turns:
   - intent: { name: pick, slots: { n: 1 } }
     expect_state: design_search
     expect_world:
-      design_seed_idea: ""
       design_idea: "single LLM chat across rooms with scoped containment"
+      design_seed_idea: ""
 
 expect_no_errors: true

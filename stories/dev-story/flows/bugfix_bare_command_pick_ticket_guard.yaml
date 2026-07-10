@@ -12,7 +12,9 @@ turns:
       slots:
         request: "fix bug"
     expect_state: bugfix_intake
-    expect_world:
-      last_error: ""
+    expect_events:
+      - kind: machine.say
+        effect:
+          text: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
 
 expect_no_errors: true
