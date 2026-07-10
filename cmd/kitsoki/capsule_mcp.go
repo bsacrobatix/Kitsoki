@@ -9,6 +9,7 @@ import (
 
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
+	capsuleproject "kitsoki/internal/capsule/project"
 	"kitsoki/internal/capsule/storylauncher"
 	kitsokimcp "kitsoki/internal/mcp"
 )
@@ -58,64 +59,12 @@ func newCapsuleManager(project, executor string, branches []string) (*control.Ma
 	if err != nil {
 		return nil, "", err
 	}
-	defs := control.FileDefinitionStore{ProjectRoot: root}
-	list, err := defs.List(nil)
-	if err != nil {
-		return nil, "", err
-	}
-	if len(list) == 0 {
-		return nil, "", fmt.Errorf("capsule mcp: no definitions found under %s/.kitsoki/capsules or %s/capsules", root, root)
-	}
 	if executor != "" && executor != "local" && executor != "synthetic" {
 		return nil, "", fmt.Errorf("capsule mcp: executor %q is not configured", executor)
 	}
-	definitionIDs := make([]string, 0, len(list))
-	workspaceRoots := []string{filepath.Join(root, ".capsules", "workspaces")}
-	providers := map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: root}}
-	allowedProviders := []string{"synthetic"}
-	git := control.GitSourceProvider{ProjectRoot: root}
-	development := control.DevWorkspaceScriptProvider{ProjectRoot: root}
-	for _, def := range list {
-		definitionIDs = append(definitionIDs, def.ID)
-		switch def.Source.Kind {
-		case control.SourceSelf:
-			providers["self"] = git
-			providers["git"] = git
-			allowedProviders = append(allowedProviders, "self")
-		case control.SourcePinned:
-			providers["pinned"] = git
-			providers["git"] = git
-			allowedProviders = append(allowedProviders, "pinned")
-		case control.SourceDevWorkspaceScript:
-			providers[string(control.SourceDevWorkspaceScript)] = development
-			allowedProviders = append(allowedProviders, string(control.SourceDevWorkspaceScript))
-			if relative := def.Source.Development.Root; relative != "" {
-				candidate := filepath.Join(root, relative)
-				if !containsPath(workspaceRoots, candidate) {
-					workspaceRoots = append(workspaceRoots, candidate)
-				}
-			}
-		}
-	}
-	workspaceRoot := workspaceRoots[0]
-	manager := &control.Manager{
-		Definitions: defs,
-		Instances:   control.FileInstanceStore{Root: workspaceRoot},
-		Providers:   providers,
-		Grant: control.ScopeGrant{
-			ProjectRoot: root, WorkspaceRoots: workspaceRoots,
-			Definitions: definitionIDs, Executors: allowedProviders,
-			Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write"}, Branches: branches,
-		},
+	manager, err := capsuleproject.Open(root, branches)
+	if err != nil {
+		return nil, "", err
 	}
 	return manager, filepath.Base(root), nil
-}
-
-func containsPath(paths []string, candidate string) bool {
-	for _, path := range paths {
-		if filepath.Clean(path) == filepath.Clean(candidate) {
-			return true
-		}
-	}
-	return false
 }

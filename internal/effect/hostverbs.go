@@ -73,7 +73,16 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.chat.resolve_ref":   {class: Read, deterministic: true},
 	"host.chat.drive":         {class: Write, deterministic: false},
 
-	"host.git_worktree":   {class: Write, deterministic: true},
+	"host.git_worktree": {class: Write, deterministic: true},
+	"host.capsule_workspace": {
+		class: Write, deterministic: true,
+		ops: map[string]opEffect{
+			"get":    {class: Read, deterministic: true},
+			"create": {class: Write, deterministic: true},
+			"commit": {class: Write, deterministic: true},
+			"close":  {class: Write, deterministic: true},
+		},
+	},
 	"host.append_to_file": {class: Write, deterministic: true},
 	"host.artifacts_dir":  {class: Write, deterministic: true},
 	"host.inbox.add":      {class: Write, deterministic: true},
