@@ -422,12 +422,11 @@ class ClaudeCLIDispatcher:
             "--no-session-persistence",
             "--mcp-config", str(config_path),
             "--strict-mcp-config",
-            # --tools controls only Claude built-ins. Disable those entirely;
-            # MCP authorization is a separate --allowedTools permission list.
-            "--tools", "",
+            # Do not pass --tools: the CLI defines it as the available-tool
+            # set, and an empty value hides attached MCP tools as well.
             "--allowedTools", ",".join(CLAUDE_ALLOWED_TOOLS),
-            # Both --tools and --allowedTools are variadic. Delimit options so
-            # the fixed card prompt is positional instead of another tool.
+            # --allowedTools is variadic. Delimit it so the fixed card prompt
+            # is positional instead of another allowed tool.
             "--",
             strict_card_prompt(request),
         ]
