@@ -90,3 +90,10 @@ func TestVerifyJourneyReplayRejectsTransitionDrift(t *testing.T) {
 		t.Fatal("expected replay drift to fail")
 	}
 }
+
+func TestValidateJourneyTutorialRejectsMachinePath(t *testing.T) {
+	text := "<!-- kitsoki:generated:start -->\nopen /Users/someone/private\n<!-- kitsoki:generated:end -->"
+	if err := validateJourneyTutorial(text); err == nil {
+		t.Fatal("expected machine-specific tutorial path to fail")
+	}
+}
