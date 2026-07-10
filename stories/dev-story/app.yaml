@@ -91,6 +91,8 @@ hosts:
   - host.agent.ask
   - host.run
   - host.proposal.publish
+  - host.dev.profile_setup
+  - host.starlark.run
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search (decide ×2) → refine (task + decide) →
   # draft+publish (task + run). The brief is scaffolded in the refine room via
