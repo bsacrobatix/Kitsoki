@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,20 +19,30 @@ type Supervised struct{}
 // waiter that the child made progress. Claude's stream-json is written to
 // stdout, so this turns real trace activity into a renewable liveness signal.
 type activityBuffer struct {
-	bytes.Buffer
-	activity chan<- struct{}
+	data     bytes.Buffer
+	activity *activitySignal
+}
+
+type activitySignal struct {
+	last atomic.Int64
+}
+
+func (s *activitySignal) touch() {
+	if s == nil {
+		return
+	}
+	s.last.Store(time.Now().UnixNano())
 }
 
 func (b *activityBuffer) Write(p []byte) (int, error) {
-	n, err := b.Buffer.Write(p)
+	n, err := b.data.Write(p)
 	if n > 0 && b.activity != nil {
-		select {
-		case b.activity <- struct{}{}:
-		default:
-		}
+		b.activity.touch()
 	}
 	return n, err
 }
+
+func (b *activityBuffer) String() string { return b.data.String() }
 
 func NewSupervised() *Supervised { return &Supervised{} }
 
@@ -82,18 +94,33 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 	applyProcessGroup(cmd)
 	applyResourceLimits(cmd, spec.Resources)
 
-	activity := make(chan struct{}, 1)
+	activity := &activitySignal{}
+	activity.touch()
 	var stdout, stderr activityBuffer
 	stdout.activity = activity
 	stderr.activity = activity
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		os.RemoveAll(tempRoot)
+		return nil, AppliedPolicy{}, fmt.Errorf("agentruntime supervised: stdout pipe: %w", err)
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		os.RemoveAll(tempRoot)
+		return nil, AppliedPolicy{}, fmt.Errorf("agentruntime supervised: stderr pipe: %w", err)
+	}
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
 		cancel()
 		os.RemoveAll(tempRoot)
 		return nil, AppliedPolicy{}, fmt.Errorf("agentruntime supervised: start: %w", err)
 	}
+	stdoutDone := make(chan struct{})
+	stderrDone := make(chan struct{})
+	go func() { _, _ = io.Copy(&stdout, stdoutPipe); close(stdoutDone) }()
+	go func() { _, _ = io.Copy(&stderr, stderrPipe); close(stderrDone) }()
 
 	policy := AppliedPolicy{
 		Backend:      s.Name(),
@@ -113,39 +140,36 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 		defer cancel()
 		defer os.RemoveAll(tempRoot)
 		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
+		go func() {
+			err := cmd.Wait()
+			<-stdoutDone
+			<-stderrDone
+			done <- err
+		}()
 		var waitErr error
 		killed := false
-		var activityTimer *time.Timer
 		var activityC <-chan time.Time
+		var activityTicker *time.Ticker
 		if spec.Resources.ActivityTimeout > 0 {
-			activityTimer = time.NewTimer(spec.Resources.ActivityTimeout)
-			activityC = activityTimer.C
-			defer activityTimer.Stop()
+			// Poll a fraction of the requested bound instead of resetting a
+			// shared timer from an exec I/O goroutine. That avoids the Go timer
+			// receive/reset race exactly when output and expiry coincide.
+			interval := spec.Resources.ActivityTimeout / 4
+			if interval < time.Millisecond {
+				interval = time.Millisecond
+			}
+			activityTicker = time.NewTicker(interval)
+			activityC = activityTicker.C
+			defer activityTicker.Stop()
 		}
 		for {
 			select {
 			case waitErr = <-done:
 				goto finished
-			case <-activity:
-				if activityTimer != nil {
-					if !activityTimer.Stop() {
-						select {
-						case <-activityTimer.C:
-						default:
-						}
-					}
-					activityTimer.Reset(spec.Resources.ActivityTimeout)
-				}
 			case <-activityC:
-				// stdout and the timer can become ready together. Prefer the
-				// observed output: it was produced before the liveness decision
-				// and must renew the deadline rather than losing a race to it.
-				select {
-				case <-activity:
-					activityTimer.Reset(spec.Resources.ActivityTimeout)
+				last := activity.last.Load()
+				if last != 0 && time.Since(time.Unix(0, last)) < spec.Resources.ActivityTimeout {
 					continue
-				default:
 				}
 				killed = true
 				killProcessGroup(cmd)

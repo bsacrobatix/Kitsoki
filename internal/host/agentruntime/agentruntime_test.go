@@ -105,7 +105,7 @@ func TestSupervisedActivityTimeoutAllowsProgressingProcess(t *testing.T) {
 		t.Skip("shell fixture is Unix-only")
 	}
 	running, _, err := NewSupervised().Launch(context.Background(), LaunchSpec{
-		Command: "/bin/sh", Args: []string{"-c", "i=0; while [ $i -lt 4 ]; do printf '{\\\"type\\\":\\\"assistant\\\"}\\n'; sleep 0.04; i=$((i+1)); done"},
+		Command: "/bin/sh", Args: []string{"-c", "i=0; while [ $i -lt 8 ]; do printf '{\\\"type\\\":\\\"assistant\\\"}\\n'; sleep 0.04; i=$((i+1)); done"},
 		Env: []string{"PATH=" + os.Getenv("PATH")}, Min: StrengthSupervised,
 		Resources: ResourcePolicy{ActivityTimeout: 200 * time.Millisecond},
 	})
