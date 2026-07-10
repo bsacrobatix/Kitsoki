@@ -77,11 +77,9 @@ states:
         once: true
         id: discover
         with:
-          cmd: bash
+          cmd: python3
+          script: scripts/init_discover.py
           args:
-            - "-c"
-            - 'python3 "$KITSOKI_APP_DIR/scripts/init_discover.py" "$@"'
-            - "init_discover"
             - "{{ world.init_request }}"
             - "{{ world.workdir }}"
             - "{{ world.repo_root }}"
@@ -962,11 +960,9 @@ states:
         once: true
         id: apply
         with:
-          cmd: bash
+          cmd: python3
+          script: scripts/init_apply.py
           args:
-            - "-c"
-            - 'python3 "$KITSOKI_APP_DIR/scripts/init_apply.py" "$@"'
-            - "init_apply"
             - "{{ world.init_target_path }}"
             - "{{ world.init_project_id }}"
             - "{{ world.init_project_title }}"

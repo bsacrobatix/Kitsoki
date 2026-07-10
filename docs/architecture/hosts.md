@@ -90,6 +90,7 @@ arguments. The default `host` for "shell out and capture stdout".
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `cmd` | string | yes | The program (argv-mode) or shell command (bash-mode). |
+| `script` | string | no | App-relative script path inserted before `args`. This always selects argv-mode. Imported-story paths are rebased to the defining child story, avoiding parent/global `KITSOKI_APP_DIR` ambiguity. |
 | `args` | list | no | Present → argv-mode: `cmd` is exec'd directly with these positional args, no shell. Use this whenever an argument is templated from world or slot data. |
 | `cwd` | string | no | Working directory. |
 | `fail_on_error` | bool | no | Default `false`. When `true`, a non-zero exit populates `Result.Error` so `on_error:` fires instead of returning success-with-data. |
