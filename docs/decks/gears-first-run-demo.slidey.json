@@ -41,7 +41,7 @@
         {
           "label": "Video proof",
           "status": "done",
-          "detail": "The embedded MP4 is rendered from the captured rrweb event stream, not hand-authored demo media."
+          "detail": "The embedded playback is a readable repace of the real captured rrweb event stream, with the raw capture retained beside it."
         },
         {
           "label": "Real artifacts",
@@ -56,9 +56,9 @@
       "type": "video",
       "mode": "embedded",
       "title": "Real first-run web playback",
-      "rrweb": "assets/gears-first-run-demo/gears-first-run-web-demo.rrweb.json",
+      "rrweb": "assets/gears-first-run-demo/gears-first-run-web-demo.readable.rrweb.json",
       "chapters": "auto",
-      "caption": "Real rrweb DOM-session log captured from the first-run browser session; not a rendered MP4 placeholder.",
+      "caption": "Readable rrweb playback derived from the real first-run browser capture; raw capture and repace metadata are committed beside it.",
       "narration": "This is the real rrweb playback from the browser session. First, the provider setup path discovers a local harness profile. Then project onboarding creates the Gears Rust profile. The PRD chapter enters the PRD flow and receives a live model response. Finally, ticket search opens the live bug queue surface."
     },
     {
