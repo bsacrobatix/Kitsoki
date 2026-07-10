@@ -69,7 +69,7 @@ func TestMCPCmd_Registered(t *testing.T) {
 		if c.Name() == "mcp" {
 			mcp = &cobraCommandStub{}
 			// Verify the documented flags exist.
-			for _, f := range []string{"stories-dir", "db", "harness", "workspace", "flow"} {
+			for _, f := range []string{"stories-dir", "db", "harness", "workspace", "flow", "operating-profile"} {
 				require.NotNil(t, c.Flags().Lookup(f), "mcp must declare --%s", f)
 			}
 			// No-LLM default: --harness defaults to replay.
@@ -128,7 +128,7 @@ func TestMCPTestCmd_Registered(t *testing.T) {
 	for _, c := range root.Commands() {
 		if c.Name() == "mcp-test" {
 			found = true
-			for _, f := range []string{"server-command", "server-arg", "stories-dir", "workspace", "read-only", "timeout", "list-tools", "tool", "tool-args", "expect", "expect-contains", "expect-exists", "expect-error", "calls"} {
+			for _, f := range []string{"server-command", "server-arg", "stories-dir", "workspace", "read-only", "operating-profile", "timeout", "list-tools", "tool", "tool-args", "expect", "expect-contains", "expect-exists", "expect-error", "calls"} {
 				require.NotNil(t, c.Flags().Lookup(f), "mcp-test must declare --%s", f)
 			}
 			assert.Equal(t, "10s", c.Flags().Lookup("timeout").DefValue)
@@ -167,15 +167,15 @@ func (b *fakeWebShotBrowser) Capture(_ context.Context, req webshot.CaptureReque
 }
 
 func TestMCPTestServerArgs_DefaultsUseIsolatedDB(t *testing.T) {
-	args := studioMCPTestServerArgs(nil, "/work/stories", "/work/story", true, "/tmp/kitsoki-mcp-test-root")
-	require.Len(t, args, 8)
-	assert.Equal(t, []string{"mcp", "--stories-dir", "/work/stories", "--workspace", "/work/story", "--read-only", "--db"}, args[:7])
-	assert.Contains(t, args[7], "/tmp/kitsoki-mcp-test-root/kitsoki-mcp-test-")
-	assert.Contains(t, args[7], "/sessions.db")
+	args := studioMCPTestServerArgs(nil, "/work/stories", "/work/story", true, "strict", "/tmp/kitsoki-mcp-test-root")
+	require.Len(t, args, 10)
+	assert.Equal(t, []string{"mcp", "--stories-dir", "/work/stories", "--workspace", "/work/story", "--read-only", "--operating-profile", "strict", "--db"}, args[:9])
+	assert.Contains(t, args[9], "/tmp/kitsoki-mcp-test-root/kitsoki-mcp-test-")
+	assert.Contains(t, args[9], "/sessions.db")
 }
 
 func TestMCPTestServerArgs_OverrideWins(t *testing.T) {
-	args := studioMCPTestServerArgs([]string{"mcp", "--workspace", "custom"}, "/ignored", "/ignored-too", true, "/ignored-temp")
+	args := studioMCPTestServerArgs([]string{"mcp", "--workspace", "custom"}, "/ignored", "/ignored-too", true, "strict", "/ignored-temp")
 	assert.Equal(t, []string{"mcp", "--workspace", "custom"}, args)
 }
 

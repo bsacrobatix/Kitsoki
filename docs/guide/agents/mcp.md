@@ -14,6 +14,7 @@ page is the operational path.
 | Need | Use | Why |
 |---|---|---|
 | Drive or edit Kitsoki stories from Claude/Codex | `kitsoki mcp` | The Studio MCP exposes `story.*`, `session.*`, `workflow.*`, `render.*`, `visual.*`, `trace.*`, `host.*`, `vcs.*`, `gh.*`, and `issue.*` tools over one connection. |
+| Preview the agent operating system | `kitsoki mcp --operating-profile strict` | Objective-backed managed workspaces, CodeAct, typed gates, receipts, and bounded explanation; strict is **HOLD**, not the default. |
 | Let a model edit code without Bash, Python, Node, or editor tools | `kitsoki mcp-codeact` | The model calls one `codeact_eval` tool; Kitsoki runs capability-scoped Starlark snippets. |
 | Launch a preconfigured Claude/Codex/Copilot agent | `kitsoki agent launch` | It resolves agent files, story `agents:`, profiles, MCP attachments, launch policy, CodeAct mode, and the backend argv. |
 | Make a deterministic story call from a script | `kitsoki agent <verb>` or `agent-serve` | Direct CLI/JSON-RPC access to `host.agent.*`; see [`cli.md`](cli.md). |
@@ -23,6 +24,32 @@ Most Codex/Claude operator work starts with the Studio MCP. Use CodeAct when
 the task needs code actions but the model should not receive a general shell.
 Use `kitsoki agent launch` when you want Kitsoki to assemble the right backend
 command rather than hand-maintain each client's MCP flags.
+
+## Operating-system preview (HOLD)
+
+`legacy` is the default Studio profile and preserves the established toolbox.
+Use strict only by explicit operator choice while its replay matrix remains on
+hold:
+
+```json
+{
+  "mcpServers": {
+    "kitsoki-strict-preview": {
+      "command": "kitsoki",
+      "args": ["mcp", "--stories-dir", "stories", "--operating-profile", "strict"]
+    }
+  }
+}
+```
+
+In strict, open `objective.open` before `workspace.create`, mutate only through
+`workspace.*` or `workspace.codeact`, run named `gate.run` gates, preserve
+receipts, then call `objective.close`. Use `studio.diagnose`, `session.explain`,
+or `trace.explain` for evidence-backed diagnosis. Strict intentionally omits
+raw worktree/vcs lifecycle tools, `host.patch`, and arbitrary `host.run`.
+`escape` is an explicit audited exception profile; it is not a default fallback.
+The current hold and its `trace-stalled-turn` failure are documented in
+[MCP operating-system evaluations](../../testing/mcp-operating-system.md).
 
 ## Run Story Starlark Directly
 

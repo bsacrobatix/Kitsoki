@@ -109,13 +109,14 @@ func studioHarnessBuilder(mode studio.HarnessMode, recordingPath, storyPath stri
 //	  | kitsoki mcp --stories-dir ./stories
 func mcpCmd() *cobra.Command {
 	var (
-		storiesDir  string
-		dbPath      string
-		harnessType string
-		workspace   string
-		flowPath    string
-		issueSink   string
-		readOnly    bool
+		storiesDir       string
+		dbPath           string
+		harnessType      string
+		workspace        string
+		flowPath         string
+		issueSink        string
+		readOnly         bool
+		operatingProfile string
 	)
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -230,6 +231,19 @@ docs land):
 				}
 			}
 
+			// The operating-system graph is a server-held authority graph. Legacy
+			// remains the default because the replay decision is currently HOLD;
+			// strict is an explicit no-LLM preview and escape is an audited
+			// compatibility path.
+			operatingServices, osErr := studio.NewOperatingSystemServices(
+				studio.StudioOperatingProfile(operatingProfile),
+				filepath.Join(".capsules", "workspaces"),
+				filepath.Join("scripts", "dev-workspace.sh"),
+			)
+			if osErr != nil {
+				return fmt.Errorf("mcp: configure operating-system profile %q: %w", operatingProfile, osErr)
+			}
+
 			// Wire issue.create to file via host.gh.ticket.create and write
 			// rendered assets under the default artifacts dir. The default sink is
 			// local-artifact so local dogfood does not burn GitHub issues; GitHub
@@ -238,6 +252,7 @@ docs land):
 				studio.WithIssueFiler(ghIssueFiler),
 				studio.WithIssueSink(issueSink),
 				studio.WithImportResolver(studioImportResolver(storiesDir)),
+				studio.WithOperatingSystemServices(studio.StudioOperatingProfile(operatingProfile), operatingServices),
 			}
 			if studioBugPrivacyChecker != nil {
 				srvOpts = append(srvOpts, studio.WithBugPrivacyChecker(studioBugPrivacyChecker))
@@ -271,6 +286,8 @@ docs land):
 		"default issue.create sink: local-artifact writes .artifacts/issues/bugs; github files through the native GitHub issue provider")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
+	cmd.Flags().StringVar(&operatingProfile, "operating-profile", string(studio.StudioOperatingProfileLegacy),
+		"Studio operating-system profile: legacy (default compatibility), strict (preview; replay decision hold), or escape (audited exception)")
 	return cmd
 }
 

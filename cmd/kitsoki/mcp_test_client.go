@@ -28,6 +28,7 @@ func mcpTestCmd() *cobra.Command {
 		storiesDir             string
 		workspace              string
 		readOnly               bool
+		operatingProfile       string
 		timeout                time.Duration
 		listTools              bool
 		toolName               string
@@ -117,7 +118,7 @@ Examples:
 			}
 			opts := studioMCPTestOptions{
 				ServerCommand:      serverCommand,
-				ServerArgs:         studioMCPTestServerArgs(serverArgs, storiesDir, workspace, readOnly, os.TempDir()),
+				ServerArgs:         studioMCPTestServerArgs(serverArgs, storiesDir, workspace, readOnly, operatingProfile, os.TempDir()),
 				ListTools:          listTools,
 				ToolName:           toolName,
 				ToolArgs:           toolArgs,
@@ -143,6 +144,8 @@ Examples:
 		"forwarded to the default server args as `kitsoki mcp --workspace <dir-or-app.yaml>`")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"forwarded to the default server args as `kitsoki mcp --read-only`")
+	cmd.Flags().StringVar(&operatingProfile, "operating-profile", "",
+		"forwarded to the default server args as `kitsoki mcp --operating-profile <legacy|strict|escape>`")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second,
 		"overall timeout for server startup, initialize, and tool calls")
 	cmd.Flags().BoolVar(&listTools, "list-tools", true,
@@ -203,7 +206,7 @@ type studioMCPToolReport struct {
 	Result   map[string]interface{} `json:"result"`
 }
 
-func studioMCPTestServerArgs(override []string, storiesDir, workspace string, readOnly bool, tempRoot string) []string {
+func studioMCPTestServerArgs(override []string, storiesDir, workspace string, readOnly bool, operatingProfile, tempRoot string) []string {
 	if len(override) > 0 {
 		return append([]string(nil), override...)
 	}
@@ -216,6 +219,9 @@ func studioMCPTestServerArgs(override []string, storiesDir, workspace string, re
 	}
 	if readOnly {
 		args = append(args, "--read-only")
+	}
+	if operatingProfile != "" {
+		args = append(args, "--operating-profile", operatingProfile)
 	}
 	if tempRoot == "" {
 		tempRoot = os.TempDir()
@@ -241,14 +247,17 @@ func runStudioMCPTest(ctx context.Context, opts studioMCPTestOptions, out io.Wri
 	}
 	defer func() { _ = cs.Close() }()
 
-	report, err := runStudioMCPTestSession(ctx, cs, opts)
-	if err != nil {
-		return err
-	}
+	report, runErr := runStudioMCPTestSession(ctx, cs, opts)
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(report); err != nil {
 		return fmt.Errorf("mcp-test: encode report: %w", err)
+	}
+	// Preserve the structured tool result even when an expectation fails. This
+	// keeps stdio replay failures diagnosable without rerunning a costly managed
+	// workspace bootstrap just to learn the typed denial payload.
+	if runErr != nil {
+		return runErr
 	}
 	if !report.OK {
 		return fmt.Errorf("mcp-test: one or more tool calls returned errors")

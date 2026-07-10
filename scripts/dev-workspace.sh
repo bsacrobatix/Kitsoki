@@ -396,7 +396,11 @@ cmd_create() {
       die "create: \"$id\" is already checked out by session \"$existing_session\"; refusing to share"
     fi
     if [ "$bootstrap" = "1" ]; then
-      bootstrap_workspace "$path" "$repo"
+      if [ "$json" = "1" ]; then
+        bootstrap_workspace "$path" "$repo" >&2
+      else
+        bootstrap_workspace "$path" "$repo"
+      fi
     fi
     if [ "$json" = "1" ]; then
       emit_workspace_json "$path" true
@@ -409,8 +413,28 @@ cmd_create() {
   fi
 
   mkdir -p "$root"
-  local source_commit
-  source_commit="$(git -C "$repo" rev-parse "${base:-HEAD}")"
+  local source_commit source_ref
+  source_ref="${base:-HEAD}"
+  # An MCP-managed workspace can itself be a clone-backed agent capsule. Such
+  # a capsule carries staging/local as source/staging/local rather than a local
+  # branch, so resolve that tracked base before refusing creation. This keeps
+  # nested managed workspaces on the declared staging base instead of silently
+  # falling back to main.
+  if ! git -C "$repo" rev-parse --verify --quiet "${source_ref}^{commit}" >/dev/null; then
+    if [ -n "$base" ] && git -C "$repo" rev-parse --verify --quiet "source/${base}^{commit}" >/dev/null; then
+	  # A local clone advertises local heads, not another clone's remote-tracking
+	  # refs. Materialize the declared staging base in this managed parent before
+	  # cloning so its child receives the same immutable base and can later merge
+	  # back to that parent staging ref.
+	  git -C "$repo" branch --quiet "$base" "source/$base" 2>/dev/null ||
+	    git -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null ||
+	    die "create: could not materialize tracked base $base"
+      source_ref="source/$base"
+    else
+      die "create: base ref is not a commit: ${base:-HEAD}"
+    fi
+  fi
+  source_commit="$(git -C "$repo" rev-parse "$source_ref")"
   # The source is always a local repo path. Use local clone mode so existing
   # objects are hardlinked instead of copied while refs/worktree state stay
   # isolated inside the managed capsule clone.
@@ -434,7 +458,13 @@ cmd_create() {
   write_manifests "$path" "$id" "$repo" "$root" "$branch" "$base" "$target" "$session_id" "$source_commit" "$head" "$script_path"
 
   if [ "$bootstrap" = "1" ]; then
-    bootstrap_workspace "$path" "$repo"
+    # ManagedWorkspaceService consumes --json as a machine protocol. Bootstrap
+    # remains observable, but its progress must not corrupt that JSON response.
+    if [ "$json" = "1" ]; then
+      bootstrap_workspace "$path" "$repo" >&2
+    else
+      bootstrap_workspace "$path" "$repo"
+    fi
   fi
 
   if [ "$json" = "1" ]; then
@@ -602,6 +632,11 @@ cmd_merge() {
 
   local target_base
   if git -C "$repo" rev-parse --verify --quiet "refs/heads/$target" >/dev/null; then
+    target_base="$target"
+  elif git -C "$path" rev-parse --verify --quiet "source/$target^{commit}" >/dev/null; then
+    # Agent capsules track their target under source/<target> until the first
+    # local merge. Preserve that target rather than rebasing a nested workspace
+    # onto main merely because refs/heads/<target> is intentionally absent.
     target_base="$target"
   else
     target_base="main"

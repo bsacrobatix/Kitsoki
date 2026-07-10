@@ -86,6 +86,38 @@ stubs, not `host_cassette` or Starlark cassette fields.
 
 `story.validate` and `story.test` are deterministic by construction.
 
+## Operating-system profiles (strict preview on hold)
+
+Studio now has an objective-backed operating-system plane. The replay decision
+is currently **HOLD** because strict fails the `trace-stalled-turn` correctness
+cell; therefore `legacy` remains the default and no client should describe
+strict as promoted. Select a profile when starting the server:
+
+```sh
+# Default compatibility toolbox; existing story/session/host/vcs tools remain.
+kitsoki mcp --operating-profile legacy
+
+# Explicit no-LLM preview: only the objective/workspace/CodeAct/gate/explain plane.
+kitsoki mcp --operating-profile strict
+
+# Audited exception surface: strict plane plus host.run, never host.patch.
+kitsoki mcp --operating-profile escape
+```
+
+`strict` exposes `objective.*`, `evidence.record`, `receipt.list`,
+`workspace.*`, `workspace.codeact`, `gate.*`, `studio.diagnose`,
+`session.explain`, and `trace.explain` (plus liveness tools). It deliberately
+omits arbitrary `host.run`, `host.patch`, raw `worktree.*`, and `vcs.*` tools.
+`workspace.create`/commit/merge/teardown delegate to
+`scripts/dev-workspace.sh`; they never reimplement git lifecycle logic. Every
+mutation is tied to an open objective and returns an additive receipt. A named
+`gate.run` records evidence required by `objective.close`.
+
+Escape `host.run` requires an open objective plus an explicit mode and reason;
+it is an exception path, not a replacement for typed gates. See the durable
+[operating-system architecture](mcp-operating-system.md) and the replay
+[evaluation boundary](../testing/mcp-operating-system.md) for the hold evidence.
+
 ## Tool surface
 
 Tools keep the dotted `family.verb` name; the SDK exposes each to the client as

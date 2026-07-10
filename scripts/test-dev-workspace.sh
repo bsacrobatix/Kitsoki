@@ -72,7 +72,7 @@ write_merge_helper "$source_repo"
 printf '.kitsoki.local.yaml\n' >"$source_repo/.gitignore"
 cat >"$source_repo/Makefile" <<'MK'
 bootstrap-workspace:
-	@true
+	@echo "bootstrap output"
 
 bootstrap-worktree: bootstrap-workspace
 MK
@@ -109,6 +109,11 @@ local_config_workspace="$root/local-config"
 cmp "$source_repo/.kitsoki.local.yaml" "$local_config_workspace/.kitsoki.local.yaml" >/dev/null || fail "bootstrap copied the wrong .kitsoki.local.yaml content"
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$local_config_workspace" >/dev/null
 
+json_bootstrap="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id json-bootstrap --branch agent/json-bootstrap --bootstrap --json)"
+json_bootstrap_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$json_bootstrap")"
+[ -d "$json_bootstrap_workspace" ] || fail "bootstrap --json did not preserve a machine-readable response"
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$json_bootstrap_workspace" >/dev/null
+
 printf 'local scratch\n' >"$source_repo/untracked-primary.txt"
 printf 'two\n' >"$workspace/feature.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$workspace" --message 'add feature' >/dev/null
@@ -124,6 +129,23 @@ from_staging_json="$("$dev_workspace" create --repo "$source_repo" --root "$root
 from_staging_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$from_staging_json")"
 [ "$(cat "$from_staging_workspace/feature.txt")" = "two" ] || fail "default create did not start from staging branch"
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$from_staging_workspace" >/dev/null
+
+# A Studio MCP server can itself run inside an agent capsule. That clone tracks
+# staging/local as source/staging/local and intentionally has no local
+# staging/local branch. Nested workspace creation and merge must preserve that
+# tracked staging base rather than failing creation or falling back to main.
+nested_repo="$tmp/nested-agent-capsule"
+git clone -q --local --origin source "$source_repo" "$nested_repo"
+gitc "$nested_repo" switch -q -c agent/nested source/staging/local
+[ -z "$(git -C "$nested_repo" branch --list staging/local)" ] || fail "nested fixture unexpectedly has local staging/local"
+nested_root="$nested_repo/.capsules/workspaces"
+nested_json="$("$dev_workspace" create --repo "$nested_repo" --root "$nested_root" --id nested-child --branch agent/nested-child --json)"
+nested_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$nested_json")"
+[ "$(cat "$nested_workspace/feature.txt")" = "two" ] || fail "nested create did not resolve source/staging/local"
+printf 'nested\n' >"$nested_workspace/nested.txt"
+"$dev_workspace" commit --repo "$nested_repo" --root "$nested_root" "$nested_workspace" --message 'add nested feature' >/dev/null
+"$dev_workspace" merge --repo "$nested_repo" --root "$nested_root" "$nested_workspace" --teardown >/dev/null
+[ "$(git -C "$nested_repo" show staging/local:nested.txt)" = "nested" ] || fail "nested merge did not land on staging/local"
 
 second_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id case-2 --branch agent/case-2 --json)"
 second_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$second_json")"
