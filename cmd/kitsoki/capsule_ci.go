@@ -24,6 +24,11 @@ func capsuleCICmd() *cobra.Command {
 	return cmd
 }
 func ciInputs(ctx context.Context, project, workspace, pipeline string) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, error) {
+	root, err := filepath.Abs(project)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, err
+	}
+	project = root
 	m, err := capsuleWorkspaceManager(project)
 	if err != nil {
 		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, err
@@ -72,15 +77,20 @@ func capsuleCIRunCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		raw, err := os.ReadFile(verdictPath)
-		if err != nil {
-			return fmt.Errorf("capsule ci: read verdict: %w", err)
+		var launcher ci.Launcher
+		if verdictPath != "" {
+			raw, err := os.ReadFile(verdictPath)
+			if err != nil {
+				return fmt.Errorf("capsule ci: read verdict: %w", err)
+			}
+			var verdict ci.Verdict
+			if err := json.Unmarshal(raw, &verdict); err != nil {
+				return fmt.Errorf("capsule ci: parse verdict: %w", err)
+			}
+			launcher = ciLauncher{verdict: verdict}
+		} else {
+			launcher = ci.EngineLauncher{StoryPath: filepath.Join(project, p.Story)}
 		}
-		var verdict ci.Verdict
-		if err := json.Unmarshal(raw, &verdict); err != nil {
-			return fmt.Errorf("capsule ci: parse verdict: %w", err)
-		}
-		launcher := ciLauncher{verdict: verdict}
 		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Provider: executor.NewFakeProvider("local"), Launcher: launcher}
 		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: mustFileDigest(filepath.Join(project, p.Story)), Trigger: ci.Trigger{Kind: "local", RequestedPipeline: args[0]}})
 		if err != nil {
@@ -94,10 +104,9 @@ func capsuleCIRunCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "managed workspace id")
-	cmd.Flags().StringVar(&verdictPath, "verdict", "", "story-produced capsule-ci-verdict/v1 JSON")
+	cmd.Flags().StringVar(&verdictPath, "verdict", "", "optional externally produced capsule-ci-verdict/v1 JSON; omit to drive the declared story engine")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("workspace")
-	_ = cmd.MarkFlagRequired("verdict")
 	return cmd
 }
 func capsuleCIStatusCmd() *cobra.Command {
