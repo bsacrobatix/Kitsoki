@@ -86,12 +86,12 @@ host_handlers:
           policy_result: { status: ok, message: "profile/model/verifier policy passed" }
           error: ""
   host.agent.task:
-    delay: "9m"
+    delay: "0s"
     by_call:
       punch_drive-validate-punch-list:
         data:
           ok: true
-          submitted: { status: passed, story: "stories/punch-list/app.yaml", trace_path: ".artifacts/punch-list/traces/validate-punch-list.jsonl", model: gpt-5.5, profile: codex-native, findings: [], summary: "eventually finished" }
+          submitted: { status: partial, story: "stories/punch-list/app.yaml", trace_path: ".artifacts/punch-list/traces/validate-punch-list.jsonl", model: gpt-5.5, profile: codex-native, findings: [ { severity: high, summary: "trace locked" } ], summary: "trace locked before the target story could be opened" }
 
 turns:
   - intent: { name: start, slots: {} }
@@ -99,11 +99,11 @@ turns:
   - intent: { name: start_first, slots: {} }
     expect_state: drive
   - intent: { name: look, slots: {} }
-    advance_clock: "46s"
+    advance_clock: "2s"
     expect_state: needs_human
     expect_world:
       drive_status: partial
-      last_error: "Drive control-plane timeout for validate-punch-list after 45 seconds without a durable handoff; job cancelled."
+      last_error: "Drive ended partial for validate-punch-list: trace locked before the target story could be opened"
 
 expect_terminal: false
 expect_no_errors: true
