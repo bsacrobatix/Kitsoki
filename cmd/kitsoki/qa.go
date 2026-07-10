@@ -17,6 +17,8 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"kitsoki/internal/storyboard"
 )
 
 const journeyPackSchema = "kitsoki/journey-pack/v1"
@@ -321,6 +323,9 @@ func qaProduceCmd() *cobra.Command {
 		}
 		generated := "<!-- kitsoki:generated:start -->\n\n## Verified replay\n\nRun `kitsoki qa check " + repoRelative(root, args[0]) + " --flow " + freeze.Replay.Flow + "` to execute the no-LLM replay.\n\n- Journey: `" + p.ID + "`\n- Origin: `" + freeze.Origin.Kind + "`\n- Frozen flow: `" + freeze.Replay.Flow + "`\n\n<!-- kitsoki:generated:end -->"
 		text := replaceGeneratedRegion(string(tmpl), generated)
+		if err = validateJourneyTutorial(text); err != nil {
+			return fmt.Errorf("generated tutorial: %w", err)
+		}
 		if err = os.WriteFile(filepath.Join(artifacts, "tutorial.generated.md"), []byte(text), 0o644); err != nil {
 			return err
 		}
@@ -368,7 +373,7 @@ func qaStatusCmd() *cobra.Command {
 // generated artifacts that already have a passed deterministic receipt and
 // writes a receipt which qa verify recomputes from the source digest.
 func qaPublishCmd() *cobra.Command {
-	var artifacts, tour, deck string
+	var artifacts, tour, deck, chapters string
 	cmd := &cobra.Command{Use: "publish <journey.yaml>", Short: "Publish a release only when real-origin replay and generated products are current", Args: cobra.ExactArgs(1), SilenceUsage: true, RunE: func(cmd *cobra.Command, args []string) error {
 		p, root, digest, err := loadJourney(args[0])
 		if err != nil {
@@ -402,6 +407,22 @@ func qaPublishCmd() *cobra.Command {
 		if p.Outputs.Tour.RequireMP4 && !fileExists(tour) {
 			return fmt.Errorf("publish requires a rendered tour MP4: %s", tour)
 		}
+		if p.Outputs.Storyboard != "" {
+			if chapters == "" {
+				chapters = tour + ".chapters.json"
+			}
+			sb, loadErr := storyboard.Load(filepath.Join(root, p.Outputs.Storyboard))
+			if loadErr != nil {
+				return loadErr
+			}
+			issues, checkErr := storyboard.CheckChapters(sb, chapters)
+			if checkErr != nil {
+				return checkErr
+			}
+			if len(issues) > 0 {
+				return fmt.Errorf("publish requires a storyboard capture with no drift: %s", issues[0])
+			}
+		}
 		if p.Outputs.Deck.Publish != "" && !fileExists(deck) {
 			return fmt.Errorf("publish requires a proof-aware Slidey deck: %s", deck)
 		}
@@ -419,6 +440,7 @@ func qaPublishCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&artifacts, "artifacts", "", "artifact directory")
 	cmd.Flags().StringVar(&tour, "tour", "", "rendered tour MP4")
+	cmd.Flags().StringVar(&chapters, "chapters", "", "tour chapter sidecar (default: <tour>.chapters.json)")
 	cmd.Flags().StringVar(&deck, "deck", "", "proof-aware Slidey deck")
 	return cmd
 }
@@ -776,6 +798,19 @@ func replaceGeneratedRegion(text, generated string) string {
 		return text[:a] + generated + text[b+len(end):]
 	}
 	return text + "\n\n" + generated + "\n"
+}
+
+func validateJourneyTutorial(text string) error {
+	const start, end = "<!-- kitsoki:generated:start -->", "<!-- kitsoki:generated:end -->"
+	if strings.Count(text, start) != 1 || strings.Count(text, end) != 1 {
+		return fmt.Errorf("must contain one protected generated region")
+	}
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "/Users/") || strings.Contains(line, "/private/") || strings.Contains(line, "~/.kitsoki/sessions/") {
+			return fmt.Errorf("contains a machine-specific path")
+		}
+	}
+	return nil
 }
 
 func verifyJourneyReplay(origin, replay string) error {
