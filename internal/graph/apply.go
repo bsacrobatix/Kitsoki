@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -107,15 +108,40 @@ func Apply(rootPath string, changesetID NodeID, dryRun bool) (*ApplyResult, erro
 		return &ApplyResult{Applied: false, ChangedFiles: changedFiles}, nil
 	}
 
+	if err := commitChangedFiles(rootPath, scratchRoot, changedFiles); err != nil {
+		return nil, fmt.Errorf("graph apply: %w", err)
+	}
+	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, nil
+}
+
+// commitChangedFiles copies each of changedFiles (relative to scratchRoot,
+// as applyOperations returns them) over the real catalog at rootPath. For a
+// bundle-dir catalog this is a plain per-file join against rootDir; for a
+// single-file catalog, scratchRoot itself (not scratchRoot/<rel>) IS the
+// scratch copy of the one file, and rootPath itself IS the real destination
+// — joining rel onto either would double up the filename (a latent bug this
+// fixes: it only ever surfaced against a bundle-dir fixture in tests before
+// A1 exercised Apply against a real single-file catalog).
+func commitChangedFiles(rootPath, scratchRoot string, changedFiles []string) error {
+	info, err := os.Stat(rootPath)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		if len(changedFiles) == 0 {
+			return nil
+		}
+		return copyFile(scratchRoot, rootPath)
+	}
 	realRoot := rootDir(rootPath)
 	for _, rel := range changedFiles {
 		src := filepath.Join(scratchRoot, rel)
 		dst := filepath.Join(realRoot, rel)
 		if err := copyFile(src, dst); err != nil {
-			return nil, fmt.Errorf("graph apply: commit %s: %w", rel, err)
+			return fmt.Errorf("commit %s: %w", rel, err)
 		}
 	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, nil
+	return nil
 }
 
 // rootDir returns the directory a relative changed-file path should be
@@ -427,7 +453,7 @@ func applyOperations(cat *Catalog, ops []Operation, scratchRoot string) ([]strin
 	var changed []string
 	for scratchFile := range touched {
 		doc := docs[scratchFile]
-		out, err := yaml.Marshal(doc)
+		out, err := marshalYAMLNode(doc)
 		if err != nil {
 			return nil, fmt.Errorf("marshal %s: %w", scratchFile, err)
 		}
@@ -447,6 +473,29 @@ func applyOperations(cat *Catalog, ops []Operation, scratchRoot string) ([]strin
 		changed = append(changed, rel)
 	}
 	return changed, nil
+}
+
+// marshalYAMLNode re-serializes a parsed *yaml.Node with 2-space sequence
+// indent — every hand-authored catalog in this codebase (and POG's own
+// pog/catalog.yaml, a single ~1700-line file with everything after `nodes:`
+// living in ONE document, unlike a bundle catalog's small per-type files)
+// uses that convention. yaml.Marshal's package-level default indent is 4;
+// re-serializing a whole large single-file catalog at the wrong indent
+// turns a two-node changeset into a total-reformat diff (every touched
+// document gets re-marshaled whole, comments-preserved but indent-reflowed)
+// — exactly the failure mode a reviewable "git diff shows changeset+node
+// only" changeset apply must not have.
+func marshalYAMLNode(doc *yaml.Node) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func ensureDocLoaded(loadDoc func(string) (*yaml.Node, error), file string) error {

@@ -3,7 +3,6 @@ package graph
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // ProposeInput is the payload for Propose: a candidate changeset's title and
@@ -316,13 +315,8 @@ func commitScratchOperations(cat *Catalog, ops []Operation) (changedFiles []stri
 		return nil, issues, nil, nil
 	}
 
-	realRoot := rootDir(cat.RootPath)
-	for _, rel := range changed {
-		src := filepath.Join(scratchRoot, rel)
-		dst := filepath.Join(realRoot, rel)
-		if err := copyFile(src, dst); err != nil {
-			return nil, nil, nil, fmt.Errorf("commit %s: %w", rel, err)
-		}
+	if err := commitChangedFiles(cat.RootPath, scratchRoot, changed); err != nil {
+		return nil, nil, nil, err
 	}
 	return changed, nil, nil, nil
 }

@@ -1,6 +1,84 @@
 package graph
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// copySingleFileFixture copies a single-file catalog (not a bundle dir) into
+// a fresh temp file, so Propose/Authorize/Apply's single-file commit path
+// (commitChangedFiles' !info.IsDir() branch) gets exercised the same way
+// POG's own pog/catalog.yaml (a single file, not a bundle) hits it — the
+// bundle fixture above never exercises that branch at all. Adds a
+// "changeset" type_registry entry on top of testdata/good/minimal.yaml
+// (which doesn't declare one, and — unlike visibility-leak.yaml — is
+// otherwise lint-clean) so Propose's own changeset node passes lint.
+func copySingleFileFixture(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/good/minimal.yaml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	content := strings.Replace(string(raw), "type_registry:\n", "type_registry:\n  - id: changeset\n    schema: graph-type/v0\n    extends: core-node\n", 1)
+	dst := filepath.Join(t.TempDir(), "catalog.yaml")
+	if err := os.WriteFile(dst, []byte(content), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	return dst
+}
+
+func TestPropose_SingleFileCatalogCommitsCleanly(t *testing.T) {
+	root := copySingleFileFixture(t)
+	res, err := Propose(root, ProposeInput{
+		Title: "Add a requirement",
+		Operations: []map[string]any{
+			{"kind": "added", "after": map[string]any{"schema": "graph/requirement/v0", "id": "req-new", "title": "New requirement", "status": "draft", "visibility": "internal"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if len(res.RejectReasons) > 0 {
+		t.Fatalf("expected propose to succeed on a single-file catalog, got: %v", res.RejectReasons)
+	}
+
+	cat, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, ok := cat.Nodes[res.ChangesetID]; !ok {
+		t.Fatalf("changeset node %q not found after propose on a single-file catalog", res.ChangesetID)
+	}
+
+	authRes, err := Authorize(root, res.ChangesetID)
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if authRes.Rejected() {
+		t.Fatalf("expected authorize to succeed, got rejected: %+v", authRes)
+	}
+
+	applyRes, err := Apply(root, res.ChangesetID, false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if applyRes.Rejected() {
+		t.Fatalf("expected apply to succeed on a single-file catalog, got rejected: %+v", applyRes)
+	}
+
+	final, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("final reload: %v", err)
+	}
+	if _, ok := final.Nodes["req-new"]; !ok {
+		t.Error("req-new was not applied to the single-file catalog")
+	}
+	if final.Nodes[res.ChangesetID].Status != ChangesetStatusNotified {
+		t.Errorf("changeset status = %q, want notified", final.Nodes[res.ChangesetID].Status)
+	}
+}
 
 func TestPropose_AppendsChangesetNode(t *testing.T) {
 	root := copyBundleFixture(t)
