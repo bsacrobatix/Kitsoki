@@ -96,6 +96,33 @@ source_dirty() {
     true
 }
 
+# rebased_snapshot_is_preserved proves the captured staging patch series is
+# represented in result even though rebase necessarily rewrites commit IDs.
+# Comparing ancestry here is invalid: a successful rebase intentionally makes
+# the old snapshot a sibling of its rewritten replacement. Patch IDs preserve
+# the safety property we need — no captured staging change may disappear —
+# while allowing Git to skip a patch already present on the newer base.
+rebased_snapshot_is_preserved() {
+  local dir="$1" snapshot="$2" result="$3" base_ref="$4" snapshot_base snapshot_ids result_ids missing sha
+  snapshot_base="$(git -C "$dir" merge-base "$snapshot" "source/$base_ref" 2>/dev/null || true)"
+  [ -n "$snapshot_base" ] || return 1
+  snapshot_ids="$(mktemp "${TMPDIR:-/tmp}/kitsoki-refresh-snapshot-patches.XXXXXX")"
+  result_ids="$(mktemp "${TMPDIR:-/tmp}/kitsoki-refresh-result-patches.XXXXXX")"
+  missing="$(mktemp "${TMPDIR:-/tmp}/kitsoki-refresh-missing-patches.XXXXXX")"
+  for sha in $(git -C "$dir" rev-list --no-merges "$snapshot_base..$snapshot"); do
+    git -C "$dir" show --format= "$sha" | git patch-id --stable | awk '{print $1}'
+  done | sort -u >"$snapshot_ids"
+  for sha in $(git -C "$dir" rev-list --no-merges "$result"); do
+    git -C "$dir" show --format= "$sha" | git patch-id --stable | awk '{print $1}'
+  done | sort -u >"$result_ids"
+  comm -23 "$snapshot_ids" "$result_ids" >"$missing"
+  if [ -s "$missing" ]; then
+    rm -f "$snapshot_ids" "$result_ids" "$missing"
+    return 1
+  fi
+  rm -f "$snapshot_ids" "$result_ids" "$missing"
+}
+
 staging_sentinel_files=(
   "$CAPSULE_SENTINEL"
   "$CLONE_SENTINEL"
@@ -536,8 +563,10 @@ fi
 staging_result="$(git -C "$staging_capsule" rev-parse HEAD)"
 git -C "$staging_capsule" rev-parse --verify --quiet "$staging_result^{tree}" >/dev/null ||
   die "staging capsule result has no readable tree: $staging_result"
-git -C "$staging_capsule" merge-base --is-ancestor "$staging_start" "$staging_result" ||
-  die "refusing to import staging result that does not contain the captured staging snapshot"
+if ! git -C "$staging_capsule" merge-base --is-ancestor "$staging_start" "$staging_result"; then
+  rebased_snapshot_is_preserved "$staging_capsule" "$staging_start" "$staging_result" "$base" ||
+    die "refusing to import staging result that does not preserve the captured staging patch series"
+fi
 
 # Import the object under a private ref first.  Do not fetch directly into the
 # primary staging ref: doing so is a forceful ref mutation that can silently
