@@ -121,3 +121,56 @@ func TestRoadmapLedgerCheckRequiresDoneCoverage(t *testing.T) {
 		t.Fatalf("expected missing-check error, got %v\n%s", err, out)
 	}
 }
+
+func TestRoadmapLedgerStrictCheckRequiresKnownCoverage(t *testing.T) {
+	root := t.TempDir()
+	ledger := filepath.Join(root, ".artifacts", "roadmap", "progress.yaml")
+	out, err := execRoot(t,
+		"roadmap", "ledger", "--ledger", ledger, "event",
+		"--event", "implementation_started",
+		"--item-id", "feature/TKT-123",
+		"--kind", "feature",
+		"--title", "Feature ticket",
+		"--status", "in_progress",
+		"--horizon", "now",
+		"--ref", "issues/features/TKT-123.md",
+		"--check", "proposal=not_applicable",
+		"--check", "docs=pending",
+		"--check", "feature_yaml=pending",
+		"--check", "product_site=pending",
+		"--check", "rrweb_demo=pending",
+		"--source", "test",
+	)
+	if err != nil {
+		t.Fatalf("roadmap ledger event: %v\n%s", err, out)
+	}
+	out, err = execRoot(t, "roadmap", "ledger", "--ledger", ledger, "check", "--repo-root", root, "--strict")
+	if err != nil {
+		t.Fatalf("strict check should accept in-progress item with declared coverage: %v\n%s", err, out)
+	}
+
+	bad := filepath.Join(root, "bad.yaml")
+	if err := os.WriteFile(bad, []byte(`schema: kitsoki-roadmap-ledger/v1
+items:
+  - id: feature/orphan
+    kind: feature
+    title: Orphan
+    status: in_progress
+events: []
+`), 0o644); err != nil {
+		t.Fatalf("write bad ledger: %v", err)
+	}
+	out, err = execRoot(t, "roadmap", "ledger", "--ledger", bad, "check", "--repo-root", root, "--strict")
+	if err == nil {
+		t.Fatalf("strict check should reject orphan item; output:\n%s", out)
+	}
+	for _, want := range []string{
+		"strict mode requires at least one event",
+		"strict mode requires proposal check",
+		"strict mode requires at least one proposal, doc, surface, demo, or ref path",
+	} {
+		if !strings.Contains(out+err.Error(), want) {
+			t.Fatalf("strict check missing %q; err=%v\n%s", want, err, out)
+		}
+	}
+}

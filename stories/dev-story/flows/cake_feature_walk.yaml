@@ -48,6 +48,30 @@ host_handlers:
       comments: ""
   host.local:
     data: { ok: true, state: "success", log: "PASS: 5 tests", passed: 5, failed: 0 }
+  host.run:
+    by_call:
+      roadmap_ledger_implementation_started:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-cake-feature-started","item_id":"feature/F-2026-05-18-export-csv","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-cake-feature-started"
+            item_id: "feature/F-2026-05-18-export-csv"
+            changed: true
+      roadmap_ledger_implementation_completed:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-cake-feature-completed","item_id":"feature/F-2026-05-18-export-csv","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-cake-feature-completed"
+            item_id: "feature/F-2026-05-18-export-csv"
+            changed: true
 
   # impl.review_task_executing fires iface.ticket.get against the
   # feature; the rest of the flow only needs `transition` to succeed
@@ -192,6 +216,13 @@ turns:
     expect_world:
       status:      "merged"
       last_pr_url: "https://example/pr/F-2026-05-18-export-csv"
+      roadmap_implementation_completion_pending: false
+      roadmap_implementation_completed_result:
+        ok: true
+        ledger: ".artifacts/roadmap/progress.yaml"
+        event_id: "evt-cake-feature-completed"
+        item_id: "feature/F-2026-05-18-export-csv"
+        changed: true
 
 expect_no_errors: true
 

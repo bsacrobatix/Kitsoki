@@ -82,28 +82,48 @@ system, or missing substrate prevents the update.
 
 ## Story integration
 
-`stories/dev-story` writes the ledger automatically when the design pipeline
-publishes a proposal. The publish event records:
+`stories/dev-story` writes the ledger automatically at the boundaries it owns:
 
-- the proposal path;
-- the feature ticket path when one was filed;
-- `proposal=done`;
-- `docs`, `feature_yaml`, `product_site`, and `rrweb_demo` as `pending`.
+- proposal publish writes `proposal_published`;
+- entering the implementation import writes `implementation_started`;
+- returning from the implementation import writes `implementation_completed`.
 
-Implementation and delivery stories should keep using their local progress
-artifacts, then add roadmap-ledger events when a checkpoint changes the product
-surface. This keeps artifact-based story runs and ad-hoc agent work compatible:
-the global ledger is the cross-story rollup, while each story's own progress
-YAML remains the room-level checkpoint.
+The publish event records the proposal path, feature-ticket path when one was
+filed, `proposal=done`, and the durable-surface checks as `pending`. The
+implementation-start event moves the item to `in_progress`. The implementation
+completion event records `partial`, not `done`, and includes the child story's
+latest implementation progress artifact as a ref. That is deliberate: code can
+be merged while docs, feature YAML, product-site copy, rrweb media, or roadmap
+deck coverage are still pending.
+
+This is not perfect dev-story coverage. PRD publication, docs publishing,
+deploy/observability loops, demo-video production, deliver fan-out completion,
+and ad-hoc workbench plans still need their own ledger producers when they
+change the roadmap/product surface. The invariant is narrower and deterministic:
+proposal authoring and the direct implementation path cannot happen through
+dev-story without leaving a ledger event trail.
+
+Artifact-driven restart is connected at the boundary rather than replacing
+story-local artifacts. Implementation keeps writing its per-phase progress YAML
+for checkpoint/restart purposes; dev-story projects the last progress artifact
+out when the import exits and records it on the global ledger. The global ledger
+is the cross-story rollup, while each story's own progress YAML remains the
+room-level restart checkpoint.
 
 ## Validation
 
 ```sh
 go run ./cmd/kitsoki roadmap ledger check \
   --ledger .artifacts/roadmap/progress.yaml \
-  --repo-root .
+  --repo-root . \
+  --strict
 ```
 
 The checker validates schema, ids, statuses, event references, and completion
 coverage. A `done` item fails if any required check is still unresolved or if a
 `done` docs/feature/product-site/rrweb path is missing.
+
+Use `--strict` in gates. Strict mode still accepts an empty local ledger, but
+once items exist it requires event history, the standard coverage checks for
+`in_progress`, `partial`, and `done` items, and at least one proposal/doc/surface
+path or ref.

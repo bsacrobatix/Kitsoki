@@ -43,6 +43,30 @@ host_handlers:
     data: { ok: true, log: "" }
   host.local:
     data: { ok: true, log: "PASS", state: "success", passed: 1, failed: 0 }
+  host.run:
+    by_call:
+      roadmap_ledger_implementation_started:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-pickup-started","item_id":"feature/TKT-T-100","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-pickup-started"
+            item_id: "feature/TKT-T-100"
+            changed: true
+      roadmap_ledger_implementation_completed:
+        data:
+          ok: true
+          exit_code: 0
+          stdout: '{"ok":true,"ledger":".artifacts/roadmap/progress.yaml","event_id":"evt-pickup-completed","item_id":"feature/TKT-T-100","changed":true}'
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-pickup-completed"
+            item_id: "feature/TKT-T-100"
+            changed: true
   host.local_files.ticket:
     data:
       ok:    true
@@ -156,5 +180,12 @@ turns:
     expect_state: landing
     expect_world:
       status: "merged"
+      roadmap_implementation_completion_pending: false
+      roadmap_implementation_completed_result:
+        ok: true
+        ledger: ".artifacts/roadmap/progress.yaml"
+        event_id: "evt-pickup-completed"
+        item_id: "feature/TKT-T-100"
+        changed: true
 
 expect_no_errors: true
