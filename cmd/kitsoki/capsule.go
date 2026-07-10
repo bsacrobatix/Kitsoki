@@ -25,6 +25,7 @@ func capsuleCmd() *cobra.Command {
 	cmd.AddCommand(capsuleVerifyCmd())
 	cmd.AddCommand(capsuleCloseCmd())
 	cmd.AddCommand(capsuleWorkspaceCmd())
+	cmd.AddCommand(capsuleEnvCmd())
 	cmd.AddCommand(capsuleCICmd())
 	cmd.AddCommand(capsuleMCPCommand())
 	return cmd

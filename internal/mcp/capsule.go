@@ -70,6 +70,9 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.plan", Description: "Build the sealed environment and story envelope for an allowed project pipeline and workspace handle."}, s.ciPlan)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.run", Description: "Run the declared project CI story through the Capsule executor and return its typed verdict. A story can pass, fail, or park; it cannot self-authorize promotion."}, s.ciRun)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.status", Description: "Read persisted Capsule CI run records without host paths or raw secrets."}, s.ciStatus)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.resolve", Description: "Resolve a declared environment using probes only; it never installs host tools or returns secrets."}, s.envResolve)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.lock", Description: "Resolve and persist a reviewable environment lock when this immutable grant allows environment writes."}, s.envLock)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.verify", Description: "Verify a saved environment lock against current probes without modifying the host."}, s.envVerify)
 	return s, nil
 }
 func (s *CapsuleServer) Run(ctx context.Context) error {
@@ -130,6 +133,9 @@ type capsuleCIArgs struct {
 }
 type capsuleCIStatusArgs struct {
 	Job string `json:"job,omitempty"`
+}
+type capsuleEnvArgs struct {
+	ID string `json:"id"`
 }
 type capsuleError struct {
 	OK    bool   `json:"ok"`
@@ -351,6 +357,45 @@ func (s *CapsuleServer) ciStatus(_ context.Context, _ *mcpsdk.CallToolRequest, a
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "runs": all}, nil
+}
+func (s *CapsuleServer) envResolve(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleEnvArgs) (*mcpsdk.CallToolResult, any, error) {
+	r := environment.Resolver{ProjectRoot: s.manager.Grant.ProjectRoot, Probe: environment.HostProbe()}
+	lock, err := r.Resolve(ctx, a.ID)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "lock": lock}, nil
+}
+func (s *CapsuleServer) envLock(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleEnvArgs) (*mcpsdk.CallToolResult, any, error) {
+	if !s.manager.Grant.Allows("effect", "env_write") {
+		return capsuleErr(fmt.Errorf("%w: env_write", control.ErrDenied)), nil, nil
+	}
+	r := environment.Resolver{ProjectRoot: s.manager.Grant.ProjectRoot, Probe: environment.HostProbe()}
+	lock, err := r.Resolve(ctx, a.ID)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	path, err := environment.WriteLock(r.ProjectRoot, lock)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "lock": lock, "path": filepath.Base(path)}, nil
+}
+func (s *CapsuleServer) envVerify(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleEnvArgs) (*mcpsdk.CallToolResult, any, error) {
+	r := environment.Resolver{ProjectRoot: s.manager.Grant.ProjectRoot, Probe: environment.HostProbe()}
+	path := filepath.Join(r.ProjectRoot, ".kitsoki", "environments", a.ID+".lock.json")
+	saved, err := environment.ReadLock(path)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	current, err := r.Resolve(ctx, a.ID)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	if saved.Digest != current.Digest {
+		return capsuleErr(fmt.Errorf("capsule environment %s: lock mismatch", a.ID)), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "lock": saved}, nil
 }
 func (s *CapsuleServer) planCI(ctx context.Context, h control.Handle, name string) (control.Instance, ci.Pipeline, executor.Envelope, error) {
 	in, err := s.manager.Status(ctx, h)
