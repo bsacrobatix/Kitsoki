@@ -333,6 +333,52 @@ def _test_cli(tmp: Path):
         sys.argv = original_argv
 
 
+def _test_cli_deck_failure_still_writes_report(tmp: Path):
+    # Regression for persona-qa productization brief issue group F / P1.6
+    # ("quiet partial failures"): a deck-shape validation failure used to
+    # raise SystemExit BEFORE report.md was written at all, silently
+    # dropping the report. render_scenario_qa_deck is monkeypatched to
+    # simulate a validation failure (deliberately malformed rather than
+    # hand-crafting a leg_results shape that happens to trip the real
+    # validator, so this test stays independent of validator internals).
+    run_dir = tmp / "run-cli-deck-failure"
+    run_dir.mkdir()
+    leg_results_json = json.dumps(_LEG_RESULTS)
+
+    original_render_deck = run.render_scenario_qa_deck
+
+    def _broken_render_deck(name, run_id, items, counts):
+        deck = original_render_deck(name, run_id, items, counts)
+        del deck["scenes"]  # trips validate_slidey_deck_shape
+        return deck
+
+    run.render_scenario_qa_deck = _broken_render_deck
+    try:
+        payload = _run_cli(
+            run_dir,
+            ["--scenario", "bugfix", "--leg-results-json", leg_results_json],
+        )
+    finally:
+        run.render_scenario_qa_deck = original_render_deck
+
+    _check("a failed deck build reports a distinct status", payload["status"] == "scenario_qa_report_built_deck_failed")
+    _check("a failed deck build carries a non-empty deck_error", payload["deck_error"] != "")
+    _check("a failed deck build carries the deck validation cause", "deck validation failed" in payload["deck_error"])
+    _check("a failed deck build reports an empty deck_path", payload["deck_path"] == "")
+    _check("a failed deck build reports an empty review_path", payload["review_path"] == "")
+    _check("a failed deck build still reports the pass/fail/degraded counts", (payload["pass_count"], payload["fail_count"], payload["degraded_count"]) == (2, 0, 1))
+    # The load-bearing assertion: report.md must exist and be honest anyway.
+    report_path = Path(payload["report_path"])
+    _check("report.md path is reported even when the deck build failed", str(report_path) == str(run_dir / "report.md"))
+    _check("report.md was actually written despite the deck failure", report_path.exists())
+    report_text = report_path.read_text(encoding="utf-8")
+    _check("report.md still carries the transport verdict table", "bugfix::tui" in report_text or "tui" in report_text)
+    _check("report.md carries an honest deck-failure line", "Deck generation failed:" in report_text)
+    _check("report.md's deck-failure line names the cause", "deck validation failed" in report_text)
+    _check("deck.slidey.json was NOT written on a failed build", not (run_dir / "deck.slidey.json").exists())
+    _check("review.json was NOT written on a failed build", not (run_dir / "review.json").exists())
+
+
 def main():
     _test_leg_counts()
     _test_leg_level()
@@ -342,6 +388,7 @@ def main():
         tmp = Path(tmp)
         _test_parse_leg_results(tmp)
         _test_cli(tmp)
+        _test_cli_deck_failure_still_writes_report(tmp)
     _test_render_deck()
     _test_render_review()
     print("PASS")

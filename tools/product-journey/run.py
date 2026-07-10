@@ -14760,27 +14760,57 @@ def main() -> None:
         leg_results = parse_scenario_qa_leg_results(args.leg_results_json)
         items = scenario_qa_leg_items(leg_results)
         counts = scenario_qa_leg_counts(items)
-        deck = render_scenario_qa_deck(name, run_dir.name, items, counts)
-        deck_issues: list[dict] = []
-        validate_slidey_deck_shape(deck, {"items": []}, deck_issues)
-        if deck_issues:
-            raise SystemExit(f"scenario-qa deck validation failed: {validation_issue_summary(deck_issues)}")
-        report_path = run_dir / "report.md"
-        report_path.write_text(render_scenario_qa_markdown(name, run_dir.name, items, counts), encoding="utf-8")
-        deck_path = run_dir / "deck.slidey.json"
-        write_json(deck_path, deck)
-        review = render_scenario_qa_review(name, run_dir.name, items, counts)
-        review_path = run_dir / "review.json"
-        write_json(review_path, review)
         summary = scenario_qa_report_summary(name, counts)
+
+        # Deck generation (deck.slidey.json + review.json) is best-effort and
+        # must never take report.md down with it. Previously a deck-shape
+        # validation failure raised SystemExit BEFORE report.md was ever
+        # written (the write sat below the validation check), so a bad deck
+        # silently left report.md missing/stale with no cause recorded
+        # anywhere -- the "quiet partial failure" persona-qa productization
+        # brief issue group F / P1.6. deck_error carries the cause into both
+        # the JSON envelope (deck_error key, read by stories/scenario-qa's
+        # report room) and report.md itself, and report.md is now written
+        # UNCONDITIONALLY, after this best-effort block, regardless of
+        # whether it succeeded.
+        deck_error = ""
+        deck_path: Optional[Path] = None
+        review_path: Optional[Path] = None
+        review_status = ""
+        try:
+            deck = render_scenario_qa_deck(name, run_dir.name, items, counts)
+            deck_issues: list[dict] = []
+            validate_slidey_deck_shape(deck, {"items": []}, deck_issues)
+            if deck_issues:
+                raise ValueError(f"scenario-qa deck validation failed: {validation_issue_summary(deck_issues)}")
+            deck_path = run_dir / "deck.slidey.json"
+            write_json(deck_path, deck)
+            review = render_scenario_qa_review(name, run_dir.name, items, counts)
+            review_path = run_dir / "review.json"
+            write_json(review_path, review)
+            review_status = review["status"]
+        except Exception as exc:  # noqa: BLE001 -- best-effort; see comment above
+            deck_error = str(exc)
+            deck_path = None
+            review_path = None
+
+        report_markdown = render_scenario_qa_markdown(name, run_dir.name, items, counts)
+        if deck_error:
+            report_markdown += f"\nDeck generation failed: {deck_error}\n"
+        report_path = run_dir / "report.md"
+        report_path.write_text(report_markdown, encoding="utf-8")
+
+        status = "scenario_qa_deck_built" if not deck_error else "scenario_qa_report_built_deck_failed"
+        log_summary = summary if not deck_error else f"{summary} (deck generation failed: {deck_error})"
         if args.json_output:
             print(json.dumps({
-                "status": "scenario_qa_deck_built",
+                "status": status,
                 "run_dir": str(run_dir),
                 "report_path": str(report_path),
-                "deck_path": str(deck_path),
-                "review_path": str(review_path),
-                "review_status": review["status"],
+                "deck_path": str(deck_path) if deck_path else "",
+                "review_path": str(review_path) if review_path else "",
+                "review_status": review_status,
+                "deck_error": deck_error,
                 "leg_count": counts["total"],
                 "pass_count": counts["pass"],
                 "fail_count": counts["fail"],
@@ -14788,11 +14818,13 @@ def main() -> None:
                 "report_summary": summary,
                 "summary": summary,
             }, sort_keys=True))
-            append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
+            append_log(f"Built scenario-qa deck for {run_dir.name}: {log_summary}")
             return
-        print(f"Deck: {deck_path}")
+        print(f"Deck: {deck_path}" if deck_path else "Deck: (failed — see report.md)")
         print(summary)
-        append_log(f"Built scenario-qa deck for {run_dir.name}: {summary}")
+        if deck_error:
+            print(f"Deck generation failed: {deck_error}")
+        append_log(f"Built scenario-qa deck for {run_dir.name}: {log_summary}")
         return
 
     if args.autonomous_marathon_watchdog:

@@ -11,12 +11,20 @@
 # verdict with no stated reason (issue group B / bug #105). Re-runs on every
 # entry (including the operator-typable "report" intent), so both artifacts
 # always reflect the current session's leg_results, never stale.
+#
+# Deck generation is best-effort: --scenario-qa-report wraps the deck
+# build/validate/write in a try/except and writes report.md UNCONDITIONALLY
+# afterward (with an honest "Deck generation failed: <cause>" line appended
+# when it fails) — see the subcommand's own comment in
+# tools/product-journey/run.py. deck_error mirrors that JSON field so the
+# view below can surface the same failure without waiting for report.md to
+# be re-read (persona-qa productization brief issue group F / P1.6).
 
 states:
 
   report:
     description: "Folded the per-transport verdict table into report.md."
-    relevant_world: [run_id, run_dir, scenario_workspace_root, scenario_ref, scenario_description, leg_results, pass_count, fail_count, degraded_count, report_path, report_summary, deck_path, last_error, status]
+    relevant_world: [run_id, run_dir, scenario_workspace_root, scenario_ref, scenario_description, leg_results, pass_count, fail_count, degraded_count, report_path, report_summary, deck_path, deck_error, last_error, status]
     default_intent: check_request
     view:
       - banner:
@@ -47,7 +55,9 @@ states:
       - kv:
           pairs:
             Summary report: '{{ world.report_path|default:"(building…)" }}'
-            Review deck: '{{ world.deck_path|default:"(building…)" }}'
+            Review deck: '{% if world.deck_error != "" %}(failed — see below){% else %}{{ world.deck_path|default:"(building…)" }}{% endif %}'
+      - prose: "Deck generation failed: {{ world.deck_error ?? '' }}"
+        when: "world.deck_error != ''"
       - prose: "A dispatch along the way failed and was recorded honestly rather than silently retried: {{ world.last_error }}"
         when: "world.last_error != ''"
       - heading: "Transport verdicts"
@@ -98,6 +108,30 @@ states:
       # reimplementing scene-shape rules here. leg_results is templated
       # in directly (map -> compact JSON splice, reference.md:255-256) so no
       # intermediate file/`|json` filter is needed.
+      #
+      # The subcommand's own deck build is best-effort (see its comment in
+      # run.py): it writes report.md UNCONDITIONALLY and only skips
+      # deck.slidey.json/review.json on failure, reporting the cause as JSON
+      # field `deck_error`. report_path/report_summary/deck_path are bound
+      # straight from that JSON (present on every exit, success or deck
+      # failure) so they're authoritative over build_report.star's earlier
+      # (file-system-free) guess above once this invoke completes.
+      #
+      # No `on_error:` here on purpose — fail_on_error is left at its false
+      # default, so an ordinary non-zero exit lands as Data (exit_code/
+      # stdout), never as Result.Error, so `on_error:` would never fire for
+      # it anyway (the `on_error: .` this replaced was dead code against
+      # exactly that failure shape — a redirect to "." only ever mattered for
+      # a Go-level infra failure, e.g. python3 itself missing). deck_error's
+      # bind below covers BOTH cases: the subcommand's own reported cause
+      # when it ran and failed internally (`result.stdout_json.deck_error`),
+      # and a synthesized cause from exit_code/stdout for the rarer case
+      # where the process produced no parottable JSON at all (crashed before
+      # printing, wrong Python, etc.) — computed here, at THIS invoke's own
+      # bind time (tied to its completion), not a later `when:`/`set:` effect
+      # (see delivery-tail/rooms/integrate.yaml's run_exit comment: on_enter
+      # effects can be walked more than once, so a `when:` guard placed right
+      # after an invoke can fire against a stale pre-bind world).
       - invoke: host.run
         id: build_scenario_qa_deck
         with:
@@ -117,7 +151,9 @@ states:
           cwd: "."
         bind:
           deck_path: "stdout_json.deck_path"
-        on_error: .
+          report_path: "stdout_json.report_path"
+          report_summary: "stdout_json.report_summary"
+          deck_error: "{{ (result.stdout_json?.deck_path ?? '') != '' ? '' : ((result.stdout_json?.deck_error ?? '') != '' ? result.stdout_json.deck_error : ('deck build exited ' + string(result.exit_code ?? 0) + ((result.stdout ?? '') != '' ? ': ' + result.stdout : ''))) }}"
     on:
       check_request:
         - when: "(slots.request ?? '') == ''"
