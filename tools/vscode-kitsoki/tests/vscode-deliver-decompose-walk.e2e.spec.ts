@@ -200,28 +200,14 @@ test('vscode: design_done → go_deliver → deliver decompose/lint/review → f
       await win.screenshot({ path: path.join(ARTIFACT_DIR, `${n}-${label}.png`) }).catch(() => undefined);
     };
 
-    // ── Open Chat → pick the dev-story story → pop out to the full editor panel ─
+    // ── Open Chat → pick dev-story → maximize the bottom Chat panel ───────────
     await win.waitForSelector('.monaco-workbench', { timeout: 60_000 });
-    const icon = win.locator('.activitybar [aria-label*="Kitsoki" i]').first();
-    await expect(icon).toBeVisible({ timeout: 30_000 });
-    await icon.click();
-    await expect(win.locator('.pane-header').filter({ hasText: /^\s*Chat\b/i }).first()).toBeVisible({
-      timeout: 30_000,
-    });
     await runPaletteCommand(win, ['>Kitsoki: Open Chat']);
     await drivePicker(win, 'dev-story');
-    await clickViewTitleAction(win, 'Chat', 'Open Chat in Editor');
-    await win.locator('.tab.active').filter({ hasText: /Kitsoki/i }).first().waitFor({ timeout: 30_000 }).catch(() => undefined);
-
-    // Minimise the sidebar so the chat fills the frame (closing sidebar
-    // webviews re-indexes iframes, so do it before resolving the frame).
-    await runPaletteCommand(win, ['>View: Close Primary Side Bar', '>View: Toggle Primary Side Bar']);
+    await runPaletteCommand(win, ['>View: Toggle Maximized Panel']);
     await sleep(600);
 
-    // back-stories is present ONLY in the full editor panel → the expanded frame
-    // (mirrors vscode-prd-demo.e2e.spec.ts — resolving on it, not current-state
-    // directly, avoids matching a stale/narrower frame before the chat mounts).
-    const chat = await surfaceFrame(win, 'back-stories', 45_000);
+    const chat = await surfaceFrame(win, 'surface-chat', 45_000);
     const state = () => chat.locator('[data-testid="current-state"]');
     const wait = (s: string) => expect(state()).toHaveText(s, { timeout: 30_000 });
 

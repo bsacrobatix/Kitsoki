@@ -149,19 +149,6 @@ function paneByTitle(win: Page, title: string) {
     .first();
 }
 
-/** Click a pane's title-bar action (mirrors vscode-deliver-decompose-walk.e2e.spec.ts) —
- * `kitsoki.popOutChat` ("Open Chat in Editor") is deliberately hidden from the
- * command palette (`commandPalette` contribution: `"when": "false"`), so it
- * can only be driven via this view/title icon, not runPaletteCommand. */
-async function clickViewTitleAction(win: Page, paneTitle: string, actionLabel: string): Promise<void> {
-  const pane = paneByTitle(win, paneTitle);
-  await pane.locator('.pane-header').hover().catch(() => undefined);
-  await pane
-    .locator(`.actions-container a[aria-label*="${actionLabel}" i], .actions-container a[title*="${actionLabel}" i]`)
-    .first()
-    .click()
-    .catch(() => undefined);
-}
 
 test('vscode: bugfix happy_llm walk — auto-cascading judge settles at each leg, ending __exit__done, real IDE-link get_diagnostics captured', async () => {
   test.setTimeout(300_000);
@@ -214,33 +201,18 @@ test('vscode: bugfix happy_llm walk — auto-cascading judge settles at each leg
       await win.screenshot({ path: path.join(ARTIFACT_DIR, `${n}-${label}.png`) }).catch(() => undefined);
     };
 
-    // ── Open Chat → pick the bugfix story → pop out to the full editor panel ──
+    // ── Open Chat → pick the bugfix story → maximize the bottom Chat panel ────
     await win.waitForSelector('.monaco-workbench', { timeout: 60_000 });
-    const icon = win.locator('.activitybar [aria-label*="Kitsoki" i]').first();
-    await expect(icon).toBeVisible({ timeout: 30_000 });
-    await icon.click();
-    await expect(win.locator('.pane-header').filter({ hasText: /^\s*Chat\b/i }).first()).toBeVisible({
-      timeout: 30_000,
-    });
     const opened = await runPaletteCommand(win, ['>Kitsoki: Open Chat']);
     if (!opened) throw new Error('could not run "Kitsoki: Open Chat" from the command palette');
     // Story title is "Bug-fix pipeline" (stories/bugfix/app.yaml) — match the
     // literal hyphenated substring so VS Code's quick-pick fuzzy scorer hits.
     const picked = await drivePicker(win, 'Bug-fix pipeline');
     if (!picked) throw new Error('could not pick the "Bug-fix pipeline" story from the quick pick');
-    await clickViewTitleAction(win, 'Chat', 'Open Chat in Editor');
-    await win.locator('.tab.active').filter({ hasText: /Kitsoki/i }).first().waitFor({ timeout: 30_000 }).catch(() => undefined);
-
-    // Minimise the sidebar so the chat fills the frame (closing sidebar
-    // webviews re-indexes iframes, so do it before resolving the frame).
-    await runPaletteCommand(win, ['>View: Close Primary Side Bar', '>View: Toggle Primary Side Bar']);
+    await runPaletteCommand(win, ['>View: Toggle Maximized Panel']);
     await sleep(600);
 
-    // back-stories is present ONLY in the full editor panel (InteractiveView)
-    // → resolving on it, not current-state directly, avoids matching the
-    // stale/narrower sidebar Chat frame before the popped-out one mounts
-    // (mirrors vscode-prd-demo.e2e.spec.ts / vscode-deliver-decompose-walk).
-    const chat = await surfaceFrame(win, 'back-stories', 45_000);
+    const chat = await surfaceFrame(win, 'surface-chat', 45_000);
     const state = () => chat.locator('[data-testid="current-state"]');
 
     /** Poll current-state until it stops changing for `quietMs`, or give up at `maxMs`. */

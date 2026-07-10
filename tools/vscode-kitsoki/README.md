@@ -1,9 +1,11 @@
 # Kitsoki for VS Code
 
-Embeds the kitsoki web UI — **chat front and center**, with the live **trace** and
-**state graph** as their own dockable surfaces — inside the editor, themed to match
-VS Code. It is the same Vue SPA the browser web UI serves, relayed into a webview
-and driving a local `kitsoki web` backend over the same JSON-RPC/SSE protocol.
+Embeds the kitsoki web UI with **chat in VS Code's bottom panel**, beside
+Terminal, Ports, and testing views. Live **trace** and **state graph** views remain
+dockable in the Kitsoki Surfaces activity-bar container. Chat never consumes an
+editor tab. It is the same Vue SPA the browser web UI serves, relayed into a
+webview and driving a local `kitsoki web` backend over the same JSON-RPC/SSE
+protocol.
 
 See [`docs/tui/vscode-extension.md`](https://github.com/bsacrobatix/Kitsoki/blob/main/docs/tui/vscode-extension.md)
 for the full architecture.
@@ -24,9 +26,10 @@ stages the SPA/story embeds this extension doesn't need at runtime) from a
 kitsoki checkout, or set `kitsoki.binaryPath` to an existing binary elsewhere.
 
 Open a workspace that contains a `stories/` directory (or a `.kitsoki.yaml` /
-`.kitsoki/stories/` onboarded instance — see **Auto-discovery** below), then
-click the **Kitsoki** icon in the activity bar — or run **Kitsoki: Open Chat**
-from the Command Palette.
+`.kitsoki/stories/` onboarded instance — see **Auto-discovery** below), then run
+**Kitsoki: Open Chat** from the Command Palette. Pick a story and the Chat view
+opens in the bottom panel. The **Kitsoki Surfaces** activity-bar icon opens Trace
+and Graph.
 
 ### Auto-discovery
 

@@ -15,20 +15,15 @@
 
 import * as vscode from 'vscode';
 import * as path from 'node:path';
-import { ChatPanel } from './webview';
 import type { DiffController } from './ide-diff';
 
 /**
  * The editor column kitsoki opens host.ide documents (brief / PRD / diff) into.
- * It must be BESIDE the popped-out chat — never ON it — so the conversation
- * (the operator's inputs + the agent's replies) stays visible alongside the
- * file/diff. When the chat is popped out we target the column just past it (a
- * stable left=chat / right=docs split); otherwise we fall back to Beside the
- * active editor (the sidebar chat is always visible anyway).
+ * Chat lives in the bottom panel, outside the editor grid, so documents can use
+ * the active editor column without replacing or splitting the conversation.
  */
 export function chatDocColumn(): vscode.ViewColumn {
-  const col = ChatPanel.column;
-  return col ? ((col + 1) as vscode.ViewColumn) : vscode.ViewColumn.Beside;
+  return vscode.ViewColumn.Active;
 }
 
 /**
