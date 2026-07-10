@@ -35,6 +35,24 @@ func TestServiceRunsTypedStoryVerdictWithFakeExecutor(t *testing.T) {
 	}
 }
 
+func TestValidateVerdictRejectsDigestMismatchAndCallerControlledPromotion(t *testing.T) {
+	envelope, _ := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "story", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: executor.Policy{Network: "none"}})
+	valid := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: envelope.SourceDigest, StoryDigest: envelope.StoryDigest, EnvironmentDigest: envelope.Environment.Digest, EnvelopeDigest: envelope.Digest}
+	if err := ValidateVerdict(valid, envelope, ResultContract{}); err != nil {
+		t.Fatal(err)
+	}
+	mismatch := valid
+	mismatch.SourceDigest = "sha256:other"
+	if err := ValidateVerdict(mismatch, envelope, ResultContract{}); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("expected digest mismatch, got %v", err)
+	}
+	controlled := valid
+	controlled.Checks[0].Outcome = "failed"
+	if err := ValidateVerdict(controlled, envelope, ResultContract{}); err == nil || !strings.Contains(err.Error(), "derived") {
+		t.Fatalf("expected derived promotion eligibility error, got %v", err)
+	}
+}
+
 func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)
@@ -142,6 +160,22 @@ func TestValidateRequiresReceiptSignerWhenSignaturesAreRequired(t *testing.T) {
 	}
 	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "receipt signer is required") {
 		t.Fatalf("expected signer policy error, got %v", err)
+	}
+}
+
+func TestValidateAllowedAgentsRequireBudgetAndFallback(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n    agents:\n      policy: allow\n      profiles: [local]\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "allowed agents require profiles, budget, and fallback") {
+		t.Fatalf("expected budget/fallback policy error, got %v", err)
 	}
 }
 
