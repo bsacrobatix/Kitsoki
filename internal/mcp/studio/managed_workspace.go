@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -88,15 +89,29 @@ func NewManagedWorkspaceService(root, scriptPath string, runner WorkspaceCommand
 	if strings.TrimSpace(root) == "" || strings.TrimSpace(scriptPath) == "" || objectives == nil {
 		return nil, errors.New("managed workspace root, script path, and objective service are required")
 	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("workspace root: %w", err)
+	}
+	// Production accepts only the checked-in lifecycle script beneath the
+	// conventional <repo>/.capsules/workspaces root. Tests retain an injected
+	// runner and may use a synthetic script path; production always invokes an
+	// argv vector through exec.CommandContext, never a shell string.
 	if runner == nil {
+		expected := filepath.Join(filepath.Dir(filepath.Dir(absRoot)), "scripts", "dev-workspace.sh")
+		scriptAbs, err := filepath.Abs(scriptPath)
+		if err != nil || filepath.Clean(scriptAbs) != filepath.Clean(expected) {
+			return nil, errors.New("production managed workspace service requires the checked-in scripts/dev-workspace.sh")
+		}
+		info, err := os.Lstat(scriptAbs)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.Mode()&0o111 == 0 {
+			return nil, errors.New("checked-in scripts/dev-workspace.sh must be an executable non-symlink")
+		}
+		scriptPath = scriptAbs
 		runner = execWorkspaceCommandRunner{}
 	}
 	if now == nil {
 		now = time.Now
-	}
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return nil, fmt.Errorf("workspace root: %w", err)
 	}
 	return &ManagedWorkspaceService{root: filepath.Clean(absRoot), scriptPath: scriptPath, runner: runner, objectives: objectives, now: now, workspaces: map[string]ManagedWorkspace{}}, nil
 }

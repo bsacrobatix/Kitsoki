@@ -120,6 +120,13 @@ func TestWorkspaceRejectsForeignCreateResponse(t *testing.T) {
 	}
 }
 
+func TestWorkspaceProductionRunnerRequiresTrustedLifecycleScript(t *testing.T) {
+	_, err := NewManagedWorkspaceService(filepath.Join(t.TempDir(), ".capsules", "workspaces"), "/tmp/not-dev-workspace.sh", nil, workspaceObjective(t, 1), nil)
+	if err == nil || !strings.Contains(err.Error(), "checked-in scripts/dev-workspace.sh") {
+		t.Fatalf("production runner accepted an untrusted script: %v", err)
+	}
+}
+
 func TestWorkspaceToolsRegisterOnlyWhenExplicitlyRequested(t *testing.T) {
 	ctx := context.Background()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "workspace-contract-test", Version: "v1"}, nil)
