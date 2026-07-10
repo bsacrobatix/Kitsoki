@@ -120,6 +120,50 @@ func TestMaterializeIntegrationInstanceForDivergedPlan(t *testing.T) {
 		t.Fatalf("non-idempotent rematerialize: %#v %s", again, againPath)
 	}
 }
+
+func TestApplyContinuationUpdatesTargetFromResolvedIntegration(t *testing.T) {
+	dir := capsuletest.Open(t, "rebase-conflict-ready")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".kitsoki-capsule\ncapsule-manifest.json\n.capsules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Reconciler{VCS: Git{}, Gates: GateVerifierFunc(func(_ context.Context, receipt string, _ Plan) error {
+		if receipt != "validation-ok" {
+			return os.ErrPermission
+		}
+		return nil
+	})}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Refresh, Generation: 11, RequiredGate: "ci"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, _, err := r.MaterializeIntegrationInstance(context.Background(), p, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instancePath := filepath.Join(dir, filepath.FromSlash(instance.InstancePath))
+	if err := os.WriteFile(filepath.Join(instancePath, "file.txt"), []byte("resolved\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, instancePath, "add", "file.txt")
+	runGit(t, instancePath, "commit", "-m", "resolved integration")
+	result, err := r.ApplyContinuation(context.Background(), ContinuationApplyRequest{Plan: p, ProjectRoot: dir, ResolverDecision: "artifact:resolver", LostWorkReview: "artifact:review", ValidationReceipt: "validation-ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied || result.NewTarget == p.Candidate || result.NewTarget == p.Expected.Target {
+		t.Fatalf("result %#v", result)
+	}
+	got := strings.TrimSpace(runGitOutput(t, dir, "rev-parse", "main"))
+	if got != result.NewTarget {
+		t.Fatalf("main = %s, want %s", got, result.NewTarget)
+	}
+	if ok, err := r.VCS.IsAncestor(context.Background(), dir, p.Candidate, result.NewTarget); err != nil || !ok {
+		t.Fatalf("candidate not preserved: %v", err)
+	}
+	if ok, err := r.VCS.IsAncestor(context.Background(), dir, p.Expected.Target, result.NewTarget); err != nil || !ok {
+		t.Fatalf("target not preserved: %v", err)
+	}
+}
 func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	runGit(t, dir, "checkout", "-b", "candidate")

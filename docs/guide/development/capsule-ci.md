@@ -129,6 +129,11 @@ attempting continuation:
 ```sh
 kitsoki capsule sync conflicts --plan <digest>
 kitsoki capsule sync integration --plan <digest>
+kitsoki capsule sync continue \
+  --plan <digest> \
+  --resolver-decision <artifact> \
+  --lost-work-review <artifact> \
+  --validation-receipt <receipt>
 ```
 
 The command writes a `capsule-sync-conflict/v1` artifact under
@@ -137,10 +142,14 @@ paths, required story inputs, and continuation token. The integration command
 creates `.capsules/sync/<token>.integration`, checks out the candidate on a
 resolution branch, attempts a no-commit target merge, and writes a
 `capsule-sync-integration/v1` artifact with project-relative paths and conflict
-status. Continuation apply remains separate runtime work. Agents limited to
-Capsule MCP use `capsule.sync.conflicts` and `capsule.sync.integration` for the
-same operations; both accept only server-owned plan digests and return only
-project-relative artifact paths.
+status. After the resolver commits inside that managed integration instance,
+continuation apply verifies the resolver decision, independent lost-work review,
+validation receipt, unchanged original refs/generation, and that the resolved
+commit preserves both candidate and target histories before updating the target.
+Agents limited to Capsule MCP use `capsule.sync.conflicts`,
+`capsule.sync.integration`, and `capsule.sync.continue` for the same operations;
+all accept only server-owned plan digests and return only project-relative
+artifact paths.
 
 For credential-free local development and tests, `capsule sync apply` can inject
 a local bare-remote publisher:

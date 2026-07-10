@@ -69,7 +69,11 @@ For a diverged stored plan, `kitsoki capsule sync conflicts --plan <digest>`
 and `kitsoki capsule sync integration --plan <digest>` materialize
 `capsule-sync-conflict/v1` and `capsule-sync-integration/v1` artifacts under
 `.capsules/sync/`; scoped agents use `capsule.sync.conflicts` and
-`capsule.sync.integration` for the same server-owned plan. The artifacts record
-the merge base, candidate/target changed paths, overlap paths, required
-resolver/reviewer/validation inputs, the managed integration instance, and the
-continuation token that story traces must later reference.
+`capsule.sync.integration` for the same server-owned plan. After resolution,
+`kitsoki capsule sync continue` or `capsule.sync.continue` applies the resolved
+integration commit only when resolver decision, independent lost-work review,
+and validation receipt inputs are present and the resolved commit preserves
+both histories. The artifacts record the merge base, candidate/target changed
+paths, overlap paths, required resolver/reviewer/validation inputs, the managed
+integration instance, and the continuation token that story traces must later
+reference.
