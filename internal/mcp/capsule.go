@@ -287,29 +287,24 @@ func (s *CapsuleServer) syncPlan(ctx context.Context, _ *mcpsdk.CallToolRequest,
 }
 func (s *CapsuleServer) syncApply(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleSyncApplyArgs) (*mcpsdk.CallToolResult, any, error) {
 	s.mu.Lock()
-	record, ok := s.plans[a.PlanDigest]
+	storedPlan, ok := s.plans[a.PlanDigest]
 	s.mu.Unlock()
 	if !ok {
 		return capsuleErr(fmt.Errorf("capsule sync: plan %q not found", a.PlanDigest)), nil, nil
 	}
-	in, err := s.manager.Status(ctx, record.handle)
+	in, err := s.manager.Status(ctx, storedPlan.handle)
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
 	if in.Lease.Owner != s.owner {
 		return capsuleErr(control.ErrDenied), nil, nil
 	}
-	gate := reconcile.GateVerifierFunc(func(_ context.Context, receipt string, plan reconcile.Plan) error {
-		if plan.RequiredGate != "" && strings.TrimSpace(receipt) == "" {
-			return fmt.Errorf("capsule sync: required gate receipt is missing")
-		}
-		return nil
-	})
-	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: gate}).Apply(ctx, record.plan, a.GateReceipt)
+	gate := record.PromotionGate{ProjectRoot: s.manager.Grant.ProjectRoot}
+	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: gate}).Apply(ctx, storedPlan.plan, a.GateReceipt)
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
-	next, err := s.manager.MarkIntegrated(ctx, record.handle)
+	next, err := s.manager.MarkIntegrated(ctx, storedPlan.handle)
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}

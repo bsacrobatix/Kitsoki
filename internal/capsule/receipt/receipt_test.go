@@ -47,3 +47,19 @@ func TestReceiptIsCanonicalAndTamperFails(t *testing.T) {
 		t.Fatalf("tamper accepted %#v", got)
 	}
 }
+
+func TestVerifyRejectsAContentValidReceiptWithInvalidVerdict(t *testing.T) {
+	r, _, err := Build(validInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Verdict.Outcome = "not-a-verdict"
+	digest, err := digestReceipt(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ReceiptID, r.Integrity.ContentDigest = digest, digest
+	if got := Verify(r, nil, false); got.Status != "invalid" {
+		t.Fatalf("invalid verdict accepted %#v", got)
+	}
+}
