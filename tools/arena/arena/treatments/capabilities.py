@@ -89,7 +89,12 @@ def assert_codeact_launch_plan(
     require("studio mcp not exposed", "mcp_servers.kitsoki.command=" not in joined and "mcp_servers.kitsoki.enabled=true" not in joined)
     require("direct editor tools absent", all(tool not in joined for tool in ("--allowedTools Write", "--allowedTools Edit", "MultiEdit")))
     require("launch policy allowed or absent", allowed)
-    require("capabilities json threaded", capability_json in joined)
+    # Codex's launch plan serializes the value supplied to `-c` as a TOML-ish
+    # string. JSON quotes in the capability payload are consequently escaped
+    # in the plan (`{\\\"fs\\\":...}`), while the arena preset is deliberately
+    # canonical unescaped JSON. Compare both representations so the assertion
+    # proves the payload rather than its incidental transport encoding.
+    require("capabilities json threaded", capability_json in joined or capability_json in joined.replace('\\\\"', '"'))
     return {
         "passed": not failures,
         "failures": failures,
