@@ -98,6 +98,7 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.punch.verify":      {class: Read, deterministic: true},
 	"host.proposal.publish":  {class: Write, deterministic: true},
 	"host.dev.profile_setup": {class: Write, deterministic: true},
+	"host.dev.onboarding":    {class: Write, deterministic: true},
 	"host.slidey.render":     {class: Write, deterministic: true},
 	"host.contact_sheet":     {class: Write, deterministic: true},
 	"host.video.frame":       {class: Write, deterministic: true},

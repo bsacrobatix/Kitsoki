@@ -67,6 +67,54 @@ host_handlers:
             agents: ["kitsoki-mcp-driver.md"]
             mcp_path: "/tmp/kitsoki-init-fixtures/acme-py/.mcp.json"
             mcp_written: true
+  host.starlark.run:
+    by_call:
+      discover:
+        data:
+          result:
+            target_path: "/tmp/kitsoki-init-fixtures/acme-py"
+            project_id: "acme-py"
+            project_title: "Acme Py"
+            stack: "python/fastapi project"
+            dev_command: "uvicorn app:app --reload"
+            test_command: "python -m pytest"
+            build_command: ""
+            conventions: "project"
+            tracker: "none"
+            transcript_count: 0
+            transcript_sources: []
+            mining_recommendation:
+              status: "no-transcripts-found"
+              sample: "recency"
+              first_pass_sample: 0
+              transcript_count: 0
+              sources: []
+              note: "No associated Claude/Codex transcripts were found during deterministic discovery."
+      apply:
+        data:
+          result:
+            status: "applied"
+            config_path: "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki.yaml"
+            profile_path: "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki/project-profile.yaml"
+            instance_path: "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki/stories/acme-py-dev/app.yaml"
+            gitignore_path: "/tmp/kitsoki-init-fixtures/acme-py/.gitignore"
+            profile_validation:
+              ok: true
+              warnings:
+                - "commands.build is empty"
+            writes:
+              - "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki/project-profile.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki/stories/acme-py-dev/app.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-py/.kitsoki/stories/acme-py-dev/README.md"
+      install_tools:
+        data:
+          result:
+            target: "/tmp/kitsoki-init-fixtures/acme-py"
+            skills: ["kitsoki-story-authoring"]
+            agents: ["kitsoki-mcp-driver.md"]
+            mcp_path: "/tmp/kitsoki-init-fixtures/acme-py/.mcp.json"
+            mcp_written: true
 
 turns:
   - intent: { name: landing_capture, slots: { request: "onboard /tmp/kitsoki-init-fixtures/acme-py" } }

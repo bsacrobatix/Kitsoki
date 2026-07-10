@@ -1,6 +1,6 @@
 # init_missing_target -- invalid onboarding targets do not become generic
 # "local project" profiles and never reach apply. Host calls are stubbed;
-# the real path guard is covered by init_discover_test.py.
+# the real path guard is covered by the native onboarding handler tests.
 
 test_kind: flow
 app: ../app.yaml
@@ -18,6 +18,33 @@ host_handlers:
           exit_code: 0
           stdout: '{"target_path":"/srv/repos/missing","project_id":"","project_title":"","stack":"","dev_command":"","test_command":"","build_command":"","repo_vcs":"none","repo_default_branch":"","repo_remote":"","conventions":"local defaults","tracker":"none","transcript_count":0,"transcript_sources":[],"mining_recommendation":{"status":"no-transcripts-found","sample":"recency","first_pass_sample":0,"transcript_count":0,"sources":[],"note":"No associated Claude/Codex transcripts were found during deterministic discovery."},"error":"target path does not exist"}'
           stdout_json:
+            target_path: "/srv/repos/missing"
+            project_id: ""
+            project_title: ""
+            stack: ""
+            dev_command: ""
+            test_command: ""
+            build_command: ""
+            repo_vcs: "none"
+            repo_default_branch: ""
+            repo_remote: ""
+            conventions: "local defaults"
+            tracker: "none"
+            transcript_count: 0
+            transcript_sources: []
+            mining_recommendation:
+              status: "no-transcripts-found"
+              sample: "recency"
+              first_pass_sample: 0
+              transcript_count: 0
+              sources: []
+              note: "No associated Claude/Codex transcripts were found during deterministic discovery."
+            error: "target path does not exist"
+  host.starlark.run:
+    by_call:
+      discover:
+        data:
+          result:
             target_path: "/srv/repos/missing"
             project_id: ""
             project_title: ""

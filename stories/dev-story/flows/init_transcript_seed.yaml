@@ -89,6 +89,76 @@ host_handlers:
             agents: ["kitsoki-mcp-driver.md"]
             mcp_path: "/tmp/kitsoki-init-fixtures/acme-go/.mcp.json"
             mcp_written: true
+  host.starlark.run:
+    by_call:
+      discover:
+        data:
+          result:
+            target_path: "/tmp/kitsoki-init-fixtures/acme-go"
+            project_id: "acme-go"
+            project_title: "Acme Go"
+            stack: "go project"
+            dev_command: ""
+            test_command: "go test ./..."
+            build_command: "go build ./..."
+            conventions: "local defaults"
+            tracker: "none"
+            transcript_slug: "-tmp-kitsoki-init-fixtures-acme-go"
+            transcript_count: 2
+            transcript_sources:
+              - backend: claude-code
+                dir: "/home/u/.claude/projects/-tmp-kitsoki-init-fixtures-acme-go"
+                sessions: 1
+                latest_mtime: 1783000000
+                include: human
+              - backend: codex
+                dir: "/home/u/.codex/sessions"
+                sessions: 1
+                latest_mtime: 1783000001
+                include: human
+            mining_recommendation:
+              status: "transcripts-found"
+              sample: "recency"
+              first_pass_sample: 2
+              transcript_count: 2
+              sources:
+                - backend: claude-code
+                  dir: "/home/u/.claude/projects/-tmp-kitsoki-init-fixtures-acme-go"
+                  sessions: 1
+                  latest_mtime: 1783000000
+                  include: human
+                - backend: codex
+                  dir: "/home/u/.codex/sessions"
+                  sessions: 1
+                  latest_mtime: 1783000001
+                  include: human
+              note: "Seed project customization from recent associated transcripts after operator consent."
+      apply:
+        data:
+          result:
+            status: "applied"
+            config_path: "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki.yaml"
+            profile_path: "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki/project-profile.yaml"
+            instance_path: "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki/stories/acme-go-dev/app.yaml"
+            gitignore_path: "/tmp/kitsoki-init-fixtures/acme-go/.gitignore"
+            mining_seed_path: "/tmp/kitsoki-init-fixtures/acme-go/.context/kitsoki-session-mining-seed.md"
+            profile_validation:
+              ok: true
+              warnings: []
+            writes:
+              - "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki/project-profile.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki/stories/acme-go-dev/app.yaml"
+              - "/tmp/kitsoki-init-fixtures/acme-go/.kitsoki/stories/acme-go-dev/README.md"
+              - "/tmp/kitsoki-init-fixtures/acme-go/.context/kitsoki-session-mining-seed.md"
+      install_tools:
+        data:
+          result:
+            target: "/tmp/kitsoki-init-fixtures/acme-go"
+            skills: ["kitsoki-story-authoring"]
+            agents: ["kitsoki-mcp-driver.md"]
+            mcp_path: "/tmp/kitsoki-init-fixtures/acme-go/.mcp.json"
+            mcp_written: true
 
 turns:
   - intent: { name: landing_capture, slots: { request: "onboard /tmp/kitsoki-init-fixtures/acme-go" } }

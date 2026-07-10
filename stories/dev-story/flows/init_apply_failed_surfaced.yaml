@@ -5,8 +5,8 @@
 # init_apply's `apply` host.run exits non-zero (fail_on_error sets the host
 # error) → `on_error: init_apply_failed` routes to the dedicated failure
 # room. The never-silent contract: the operator sees WHERE it failed ("apply
-# failed" read-out + the command output) and last_error carries the host
-# error — no bounce back to landing with no reason. The retry arc
+# failed" read-out + the command output) and last_error carries the structured
+# onboarding error — no bounce back to landing with no reason. The retry arc
 # (confirm_init) must also clear last_error so a rerun starts clean.
 
 test_kind: flow
@@ -25,25 +25,33 @@ host_handlers:
         # Non-zero exit + fail_on_error → domain host error, on_error routes
         # to the loud read-out instead of init_done.
         data:
-          ok: false
-          exit_code: 1
-          stdout: "Error: target directory is not writable: /Users/brad/code/slidey"
-        error: "host.run: command exited 1"
+          result:
+            status: "apply-failed"
+            target_path: "/Users/brad/code/slidey"
+            error: "target directory is not writable: /Users/brad/code/slidey"
       install_tools:
         data:
           ok: true
           exit_code: 0
           stdout: '{"status":"installed"}'
+  host.starlark.run:
+    by_call:
+      apply:
+        data:
+          result:
+            status: "apply-failed"
+            target_path: "/Users/brad/code/slidey"
+            error: "target directory is not writable: /Users/brad/code/slidey"
 
-turns:
   # confirm_init enters init_apply: on_enter's apply fails → on_error routes
   # to init_apply_failed. The read-out names the failure and shows the
-  # command output; last_error carries the host error.
+  # command output; last_error carries the onboarding error.
+turns:
   - intent: { name: confirm_init, slots: {} }
     expect_state: init_apply_failed
     expect_world:
       init_apply_ok: false
-      last_error: "host.run: command exited 1"
+      last_error: "project onboarding apply failed"
     expect_view_matches: "apply failed"
 
   # The view also surfaces the command's own output so the operator can act.

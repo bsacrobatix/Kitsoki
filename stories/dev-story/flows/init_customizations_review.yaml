@@ -40,6 +40,22 @@ host_handlers:
                 summary: "Review session-mined deterministic recipe: run tests."
                 evidence: ".artifacts/mining/jobs/seed/analysis.json#session-1#003"
             changed: []
+  host.starlark.run:
+    by_call:
+      customizations:
+        data:
+          result:
+            action: "promote"
+            ok: true
+            updated: true
+            counts:
+              pending: 1
+            entries:
+              - id: "mined-session-1-003"
+                status: "pending"
+                summary: "Review session-mined deterministic recipe: run tests."
+                evidence: ".artifacts/mining/jobs/seed/analysis.json#session-1#003"
+            changed: []
 
 turns:
   - intent: { name: review_customizations, slots: {} }
@@ -50,6 +66,7 @@ turns:
       init_customization_ok: true
       init_customization_result:
         action: "promote"
+        ok: true
         updated: true
         counts:
           pending: 1
@@ -67,6 +84,7 @@ turns:
       init_profile_status: "applied"
       init_customization_result:
         action: "promote"
+        ok: true
         updated: true
         counts:
           pending: 1

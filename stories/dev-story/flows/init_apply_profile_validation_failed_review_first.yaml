@@ -52,6 +52,22 @@ host_handlers:
           ok: true
           exit_code: 0
           stdout: '{"status":"installed"}'
+  host.starlark.run:
+    by_call:
+      apply:
+        data:
+          result:
+            status: "profile-validation-failed"
+            target_path: "/Users/brad/code/platform-presentation"
+            profile_validation:
+              ok: false
+              schema:
+                - "at '/onboarding': additional properties 'capability', 'capability_reason' not allowed"
+              semantic: []
+              warnings: []
+      install_tools:
+        data:
+          stdout: '{"status":"installed"}'
 
 turns:
   - intent: { name: confirm_init, slots: {} }
@@ -66,7 +82,7 @@ turns:
             - "at '/onboarding': additional properties 'capability', 'capability_reason' not allowed"
           semantic: []
           warnings: []
-      last_error: "host.run: command exited 1"
+      last_error: "project onboarding apply failed"
     expect_view_matches: "Profile validation failed during apply"
 
   - intent: { name: revise_init, slots: { feedback: "review after apply failure" } }

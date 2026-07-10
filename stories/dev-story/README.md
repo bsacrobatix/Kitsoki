@@ -203,10 +203,11 @@ shape:
   GitHub search/fetch/close-out for remote issues without making pasted or local
   bug reports mutate GitHub.
 
-The renderer for onboarding-generated wrappers lives in
-[`scripts/init_apply.py`](./scripts/init_apply.py). Keep new import-surface
-requirements there first, then mirror only deliberate project-specific defaults
-in examples such as `stories/slidey-dev/`.
+The renderer for onboarding-generated wrappers lives in the native
+`host.dev.onboarding` handler, called by
+[`scripts/init_onboarding.star`](./scripts/init_onboarding.star). Keep new
+import-surface requirements there first, then mirror only deliberate
+project-specific defaults in examples such as `stories/slidey-dev/`.
 
 ## Provider Neutrality
 
@@ -275,7 +276,7 @@ expired access token versus a missing forge PAT.
 
 The generated child profile stores the inherited provider metadata, rebases
 the `.star` binding path relative to the child checkout, and adds the readiness
-command to `.kitsoki/check-readiness.py` when declared. `ticket_repo` remains
+command to the native readiness operation when declared. `ticket_repo` remains
 GitHub-only; private providers bind through `iface.ticket` and keep
 `ticket_repo: ""` so GitHub-specific publish/closeout paths do not run.
 

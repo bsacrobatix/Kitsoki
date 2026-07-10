@@ -33,10 +33,24 @@ host_handlers:
             build_command: "go build ./..."
             conventions: "local defaults"
             tracker: "none"
+  host.starlark.run:
+    by_call:
+      discover:
+        data:
+          result:
+            target_path: "/srv/repos/acme-go"
+            project_id: "acme-go"
+            project_title: "Acme Go"
+            stack: "go project"
+            dev_command: ""
+            test_command: "go test ./..."
+            build_command: "go build ./..."
+            conventions: "local defaults"
+            tracker: "none"
 
-turns:
   # The quick action carries an explicit external target — init_request is the
   # slot value, which parse_target resolves (the cwd-only limitation is gone).
+turns:
   - intent: { name: go_init, slots: { target: "/srv/repos/acme-go" } }
     expect_state: init_discover
     expect_world:

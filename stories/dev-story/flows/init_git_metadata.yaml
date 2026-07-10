@@ -39,6 +39,32 @@ host_handlers:
               transcript_count: 0
               sources: []
               note: "No associated Claude/Codex transcripts were found during deterministic discovery."
+  host.starlark.run:
+    by_call:
+      discover:
+        data:
+          result:
+            target_path: "/tmp/kitsoki-init-fixtures/branchy"
+            project_id: "branchy"
+            project_title: "Branchy"
+            stack: "go project"
+            dev_command: ""
+            test_command: "go test ./..."
+            build_command: "go build ./..."
+            repo_vcs: "git"
+            repo_default_branch: "trunk"
+            repo_remote: "git@github.com:example/branchy.git"
+            conventions: "local defaults"
+            tracker: "none"
+            transcript_count: 0
+            transcript_sources: []
+            mining_recommendation:
+              status: "no-transcripts-found"
+              sample: "recency"
+              first_pass_sample: 0
+              transcript_count: 0
+              sources: []
+              note: "No associated Claude/Codex transcripts were found during deterministic discovery."
 
 turns:
   - intent: { name: landing_capture, slots: { request: "onboard /tmp/kitsoki-init-fixtures/branchy" } }
