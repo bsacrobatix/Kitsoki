@@ -68,6 +68,38 @@ fixtures:
     inputs:
       - "bugfix brief the workbench sends issue links to the generic agent instead of bugfix"
 
+  - id: inline-upload-regression
+    intent:
+      name: bugfix_report
+      slots:
+        complaint: "uploading a screenshot leaves the submit button disabled"
+    inputs:
+      - "fix this bug uploading a screenshot leaves the submit button disabled"
+
+  - id: inline-reload-regression
+    intent:
+      name: bugfix_report
+      slots:
+        complaint: "reloading loses the selected ticket and returns to the workbench"
+    inputs:
+      - "debug this bug reloading loses the selected ticket and returns to the workbench"
+
+  - id: inline-provider-regression
+    intent:
+      name: bugfix_report
+      slots:
+        complaint: "github issue metadata is not passed to the triager"
+    inputs:
+      - "investigate this bug GitHub issue metadata is not passed to the triager"
+
+  - id: inline-workspace-regression
+    intent:
+      name: bugfix_report
+      slots:
+        complaint: "a bugfix edits main instead of its managed capsule workspace"
+    inputs:
+      - "fix the bug where a bugfix edits main instead of its managed capsule workspace"
+
   # References: the operator has supplied an ID/URL. These intentionally defer
   # out of semantic routing so landing's default-intent capture can preserve the
   # exact punctuation/case (`TKT-404`, `#77`, GitHub URLs) before provider lookup.
@@ -110,6 +142,34 @@ fixtures:
     defers_to_interpreter: true
     inputs:
       - "https://github.com/acme/api/issues/77"
+
+  - id: url-first-github-issue-with-query
+    defers_to_interpreter: true
+    inputs:
+      - "https://github.com/acme/api/issues/77?utm_source=chat"
+
+  - id: url-first-github-issue-with-fragment
+    defers_to_interpreter: true
+    inputs:
+      - "https://github.com/acme/api/issues/77#issuecomment-4"
+
+  - id: prefixed-gitlab-issue-link
+    defers_to_interpreter: true
+    inputs:
+      - "fix issue link https://gitlab.example.com/platform/api/-/issues/77"
+
+  - id: prefixed-linear-issue-link
+    defers_to_interpreter: true
+    inputs:
+      - "fix issue link https://linear.app/acme/issue/ENG-77/session-stalls"
+
+  - id: pasted-multiline-brief
+    defers_to_interpreter: true
+    inputs:
+      - |-
+        bugfix brief
+        Steps: open a ticket, choose Fix Bug, then paste an issue URL.
+        Actual: the landing workbench implements it on main.
 
   # Boundaries: existing queue commands stay queue commands; bug filing remains
   # the separate report-bug surface, not the fix pipeline.

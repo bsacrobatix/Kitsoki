@@ -1410,6 +1410,13 @@ intents:
     slots:
       url: { type: string, required: true, description: "Remote issue URL or provider issue reference." }
       title: { type: string, required: false, description: "Optional short title for the issue." }
+  bugfix_intake_capture:
+    title: "Capture Bugfix Brief"
+    description: "Internal intake for the pasted issue URL or free-form complaint after choosing Fix Bug without a selected ticket."
+    examples: []
+    priority: 1
+    slots:
+      request: { type: string, required: true, description: "The pasted issue URL or bug report." }
 
   # Pipeline-launching navigation (dispatches into bf / pr / impl /
   # rev imports). `go_bugfix` targets the `bf` import compound; the
@@ -1456,7 +1463,7 @@ intents:
     priority: 60
   go_bugfix:
     title: "Fix Bug"
-    description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room will ask them to pick one first."
+    description: "Start the bugfix path when the operator asks to fix, debug, investigate, or work on bugs. If no ticket is picked yet, the landing room captures the next URL or prose brief before entering bugfix."
     examples: ["bugfix", "i want to fix a bug", "work on selected bug", "fix selected bug", "fix bugs from the queue", "i want to work on some bugs"]
     priority: 55
   bugfix_open_pr:
