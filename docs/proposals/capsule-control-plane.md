@@ -4,7 +4,9 @@
 and scoped Capsule MCP now cover definitions, lease/generation handles, safe
 FS/exec/VCS, synthetic/self/pinned providers, and the `development`/`staging`
 compatibility providers behind the native lifecycle. Host adoption and
-seal/cache/verifier-overlay completion remain.
+story-contract migration have started via `host.capsule_workspace`; generic
+clone lifecycle, seal/cache/verifier-overlay completion, and full story rebinding
+remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 
@@ -203,22 +205,26 @@ all consumers migrate.
 
 ```text
 ## 1. Contract and native service
-- [ ] 1.1 Define DefinitionStore, InstanceStore, WorkspaceProvider, ScopeGrant, lease/generation, and lifecycle state types behind DI seams
-- [ ] 1.2 Discover project definitions under `.kitsoki/capsules/` plus compatible root `capsules/`; validate project/local config boundaries
+- [x] 1.1 Define DefinitionStore, InstanceStore, WorkspaceProvider, ScopeGrant, lease/generation, and lifecycle state types behind DI seams
+- [x] 1.2 Discover project definitions under `.kitsoki/capsules/` plus compatible root `capsules/`; validate project/local config boundaries
 - [ ] 1.3 Implement synthetic, live/self, and pinned local/remote source providers with content-addressed cache and workspace/verifier overlay visibility
-- [ ] 1.4 Implement native instance metadata and sentinel-gated create/status/close plus policy-filtered capsule seal
-- [ ] 1.5 Emit capsule.workspace lifecycle facts with stable instance/generation ids
+  - Shipped: synthetic, self, and pinned source providers.
+  - Remaining: content-addressed source cache and verifier-overlay completion.
+- [x] 1.4 Implement native instance metadata and sentinel-gated create/status/close plus policy-filtered capsule seal
+- [x] 1.5 Emit capsule.workspace lifecycle facts with stable instance/generation ids
 
 ## 2. Front doors
 - [ ] 2.1 Route existing `kitsoki capsule list|open|verify|close` through CapsuleManager without output regressions
-- [ ] 2.2 Add `workspace create|status|commit|close` CLI verbs and JSON schemas
-- [ ] 2.3 Add `kitsoki capsule mcp --project --pipeline --executor` plus an internal ephemeral-grant input and handle-scoped project/workspace/fs/exec/vcs tools
-- [ ] 2.4 Enforce symlink-safe FS confinement, declared-command/raw-argv policy, request-level narrowing, and secret redaction
-- [ ] 2.5 Bind artifact-job/job_id when `capsule.ci.run` is registered by slice 4
+- [x] 2.2 Add `workspace create|status|commit|close` CLI verbs and JSON schemas
+- [x] 2.3 Add `kitsoki capsule mcp --project --pipeline --executor` plus an internal ephemeral-grant input and handle-scoped project/workspace/fs/exec/vcs tools
+- [x] 2.4 Enforce symlink-safe FS confinement, declared-command/raw-argv policy, request-level narrowing, and secret redaction
+- [x] 2.5 Bind artifact-job/job_id when `capsule.ci.run` is registered by slice 4
 
 ## 3. Migrate and document
-- [ ] 3.1 Add dev-workspace-script adapter and a parity suite for create/bootstrap/status/commit/merge/teardown metadata
+- [x] 3.1 Add dev-workspace-script adapter and a parity suite for create/bootstrap/status/commit/merge/teardown metadata
 - [ ] 3.2 Route iface.workspace through the manager; rebind one generated foreign-project instance and Kitsoki dogfood
+  - Shipped: `host.capsule_workspace` manager-backed host surface and docs.
+  - Remaining: migrate story `workspace` contracts off `name`/`base`/`sync`.
 - [ ] 3.3 Move generic clone lifecycle into the native provider; reduce scripts to Kitsoki hooks/compat wrappers
 - [ ] 3.4 Update capsule, host, MCP, and onboarding docs; trim/delete this proposal
 ```

@@ -1,8 +1,9 @@
 # Story: story-native capsule CI
 
 **Status:** v1 in progress. `.kitsoki/ci.yaml`, the reference story, typed
-verdict/envelope service, engine launcher, CLI, and Capsule MCP CI tools ship.
-Project wrappers, LLM/writer fixtures, cancellation, and GitHub ingress remain.
+verdict/envelope service, engine launcher, CLI, cancellation, run status, and
+Capsule MCP CI tools ship. Project wrappers, richer reference-story rooms,
+LLM/writer fixtures, and GitHub ingress remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -266,9 +267,9 @@ project wrapper that imports only deterministic checks and adjudication.
 
 ```text
 ## 1. Routing and contracts
-- [ ] 1.1 Define/load `.kitsoki/ci.yaml`; validate story, trigger, environment, executor, permission, agent budget, and result references
-- [ ] 1.2 Define normalized trigger and capsule-ci-verdict/v1 schemas plus terminal-exit mapping
-- [ ] 1.3 Add `capsule ci plan|run|status|cancel` CLI/MCP over artifact-job and execution-envelope seams
+- [x] 1.1 Define/load `.kitsoki/ci.yaml`; validate story, trigger, environment, executor, permission, agent budget, and result references
+- [x] 1.2 Define normalized trigger and capsule-ci-verdict/v1 schemas plus terminal-exit mapping
+- [x] 1.3 Add `capsule ci plan|run|status|cancel` CLI/MCP over artifact-job and execution-envelope seams
 
 ## 2. Reference composition
 - [ ] 2.1 Scaffold stories/capsule-ci with typed views and prepare/check/review/refine/adjudicate rooms
