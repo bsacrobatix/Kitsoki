@@ -1873,6 +1873,30 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	case "runstatus.bug.report":
 		return s.bugReportContext(ctx, params)
 
+	// ── graph.* (A1, use-case-loop-plan §3.3): the changeset lifecycle
+	// verbs. Bare "graph.<verb>" (not kit.<kit>.<iface>.<op>-namespaced)
+	// because these operate generically over any caller-supplied
+	// catalog_path, the same way materialize-client.ts's aspirational
+	// graph.materialize.* naming already assumes — a project catalog like
+	// POG's pog/catalog.yaml is never "installed" as an object-graph kit's
+	// instance data, so the kit dispatch surface (which requires a
+	// provided story declaring host_interfaces bound to a fixed catalog)
+	// doesn't fit. See internal/graph/propose.go for Propose/Authorize
+	// themselves; internal/host/graph_handlers.go's graphProposeOp/
+	// graphAuthorizeOp expose the same two ops for kit/starlark/CLI
+	// callers that DO go through host.graph.*.
+	case "graph.propose":
+		return graphProposeRPC(params)
+
+	case "graph.authorize":
+		return graphAuthorizeRPC(params)
+
+	case "graph.apply":
+		return graphApplyRPC(params)
+
+	case "graph.withdraw":
+		return graphWithdrawRPC(params)
+
 	default:
 		// ── Story editor (per-story, no session) ─────────────────────────────
 		// The editor.* family operates on a story selected from the registry

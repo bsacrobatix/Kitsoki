@@ -60,6 +60,12 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphDiffOp(args)
 	case "apply":
 		return graphApplyOp(args)
+	case "propose":
+		return graphProposeOp(args)
+	case "authorize":
+		return graphAuthorizeOp(args)
+	case "withdraw":
+		return graphWithdrawOp(args)
 	case "query":
 		return graphQueryOp(args)
 	case "project":
@@ -67,7 +73,7 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 	case "presentation":
 		return graphPresentationOp(ctx, args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, query, project, presentation)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, query, project, presentation)", op)
 	}
 }
 
@@ -171,6 +177,118 @@ func graphApplyOp(args map[string]any) (Result, error) {
 		return Result{}, fmt.Errorf("host.graph.apply: requires both catalog_path and changeset_id")
 	}
 	res, err := objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolArg(args, "dry_run"))
+	if err != nil {
+		return Result{}, err
+	}
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	lintIssues := make([]any, len(res.LintIssues))
+	for i, iss := range res.LintIssues {
+		lintIssues[i] = iss.Error()
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	return Result{Data: map[string]any{
+		"rejected":       res.Rejected(),
+		"reject_reasons": rejectReasons,
+		"lint_issues":    lintIssues,
+		"changed_files":  changedFiles,
+	}}, nil
+}
+
+// graphProposeOp: {catalog_path, title, operations[, visibility, provenance]}
+// -> {changeset_id, status, lint, rejected, reject_reasons}. operations is
+// the changeset wire shape: a list of {"kind": ..., ...} mappings (see
+// internal/graph.ParseChangeset). provenance, when present, marks the
+// changeset system-authored for the D9 auto-authorize allowlist
+// (internal/graph.Propose).
+func graphProposeOp(args map[string]any) (Result, error) {
+	catalogPath := graphStringArg(args, "catalog_path")
+	if catalogPath == "" {
+		return Result{}, fmt.Errorf("host.graph.propose: missing required arg %q", "catalog_path")
+	}
+	rawOps, _ := args["operations"].([]any)
+	ops := make([]map[string]any, 0, len(rawOps))
+	for _, r := range rawOps {
+		if m, ok := r.(map[string]any); ok {
+			ops = append(ops, m)
+		}
+	}
+	provenance, _ := args["provenance"].(map[string]any)
+	res, err := objectgraph.Propose(catalogPath, objectgraph.ProposeInput{
+		Title:      graphStringArg(args, "title"),
+		Visibility: graphStringArg(args, "visibility"),
+		Operations: ops,
+		Provenance: provenance,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	lintIssues := make([]any, len(res.Lint))
+	for i, iss := range res.Lint {
+		lintIssues[i] = iss.Error()
+	}
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	return Result{Data: map[string]any{
+		"changeset_id":   string(res.ChangesetID),
+		"status":         res.Status,
+		"lint":           lintIssues,
+		"rejected":       len(res.RejectReasons) > 0 || len(res.Lint) > 0,
+		"reject_reasons": rejectReasons,
+	}}, nil
+}
+
+// graphAuthorizeOp: {catalog_path, changeset_id} -> the proposed->authorized
+// lifecycle flip (internal/graph.Authorize). Same rejected/reject_reasons/
+// lint_issues/changed_files shape as graphApplyOp for a consistent client
+// contract across the two lifecycle-writing ops.
+func graphAuthorizeOp(args map[string]any) (Result, error) {
+	catalogPath := graphStringArg(args, "catalog_path")
+	changesetID := graphStringArg(args, "changeset_id")
+	if catalogPath == "" || changesetID == "" {
+		return Result{}, fmt.Errorf("host.graph.authorize: requires both catalog_path and changeset_id")
+	}
+	res, err := objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID))
+	if err != nil {
+		return Result{}, err
+	}
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	lintIssues := make([]any, len(res.LintIssues))
+	for i, iss := range res.LintIssues {
+		lintIssues[i] = iss.Error()
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	return Result{Data: map[string]any{
+		"rejected":       res.Rejected(),
+		"reject_reasons": rejectReasons,
+		"lint_issues":    lintIssues,
+		"changed_files":  changedFiles,
+	}}, nil
+}
+
+// graphWithdrawOp: {catalog_path, changeset_id} -> the review queue's
+// "clean up a rejected proposal" action (internal/graph.Withdraw). Same
+// result shape as graphAuthorizeOp.
+func graphWithdrawOp(args map[string]any) (Result, error) {
+	catalogPath := graphStringArg(args, "catalog_path")
+	changesetID := graphStringArg(args, "changeset_id")
+	if catalogPath == "" || changesetID == "" {
+		return Result{}, fmt.Errorf("host.graph.withdraw: requires both catalog_path and changeset_id")
+	}
+	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID))
 	if err != nil {
 		return Result{}, err
 	}

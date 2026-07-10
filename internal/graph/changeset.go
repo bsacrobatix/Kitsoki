@@ -65,6 +65,13 @@ const (
 	ChangesetStatusProposed   = "proposed"
 	ChangesetStatusAuthorized = "authorized"
 	ChangesetStatusNotified   = "notified"
+	// ChangesetStatusWithdrawn is a terminal lifecycle state a reviewer can
+	// flip a "proposed" or "authorized" (not yet applied/"notified")
+	// changeset to, cleaning it out of the active review queue without
+	// deleting the audit record (A1, use-case-loop-plan §3.3's review-queue
+	// "withdraw" action). Like authorize, this is a blessed direct write
+	// (a lifecycle flip, not content), not a second changeset.
+	ChangesetStatusWithdrawn = "withdrawn"
 )
 
 // ParseChangeset decodes a changeset node's Fields["operations"] into typed

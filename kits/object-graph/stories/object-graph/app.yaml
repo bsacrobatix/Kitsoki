@@ -35,6 +35,15 @@ host_interfaces:
       apply:
         input: { catalog_path: string, changeset_id: string, dry_run: bool }
         output: { rejected: bool, reject_reasons: list, lint_issues: list, changed_files: list }
+      propose:
+        input: { catalog_path: string, title: string, operations: list, visibility: string, provenance: object }
+        output: { changeset_id: string, status: string, lint: list, rejected: bool, reject_reasons: list }
+      authorize:
+        input: { catalog_path: string, changeset_id: string }
+        output: { rejected: bool, reject_reasons: list, lint_issues: list, changed_files: list }
+      withdraw:
+        input: { catalog_path: string, changeset_id: string }
+        output: { rejected: bool, reject_reasons: list, lint_issues: list, changed_files: list }
       project:
         input: { catalog_path: string, overlay_path: string, graph_id: string }
         output: { graph: object }
