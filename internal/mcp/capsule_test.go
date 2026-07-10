@@ -31,7 +31,7 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(spec), 0o755))
 	require.NoError(t, os.WriteFile(spec, []byte("name: clean\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644))
 	root := filepath.Join(project, ".capsules", "workspaces")
-	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit"}}}
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit", "local_reconcile"}}}
 	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent", ProjectID: "fixture"})
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -60,4 +60,28 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	require.False(t, read.IsError, contentText(read))
 	require.Contains(t, contentText(read), "safe")
 	require.NotContains(t, contentText(created), project, "machine path leaked through create")
+	committed, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.commit", Arguments: map[string]any{"workspace": changed.Workspace, "message": "agent change"}})
+	require.NoError(t, err)
+	require.False(t, committed.IsError, contentText(committed))
+	var committedHandle struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(committed)), &committedHandle))
+	planned, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.plan", Arguments: map[string]any{"workspace": committedHandle.Workspace, "operation": "integrate", "target": "main"}})
+	require.NoError(t, err)
+	require.False(t, planned.IsError, contentText(planned))
+	var plan struct {
+		Plan struct {
+			Digest string `json:"digest"`
+		} `json:"plan"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(planned)), &plan))
+	applied, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.apply", Arguments: map[string]any{"plan_digest": plan.Plan.Digest}})
+	require.NoError(t, err)
+	require.False(t, applied.IsError, contentText(applied))
+	var integrated struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(applied)), &integrated))
+	require.Greater(t, integrated.Workspace.Generation, committedHandle.Workspace.Generation)
 }

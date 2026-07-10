@@ -248,6 +248,12 @@ func (m *Manager) CommitVCS(ctx context.Context, h Handle, message string) (Hand
 	return m.mark(ctx, h, StateCommitted, "capsule.workspace.committed")
 }
 
+// MarkIntegrated advances lifecycle only after a reconciler completed its
+// compare-and-swap update. It deliberately cannot perform Git operations.
+func (m *Manager) MarkIntegrated(ctx context.Context, h Handle) (Handle, error) {
+	return m.mark(ctx, h, StateIntegrated, "capsule.workspace.integrated")
+}
+
 func (m *Manager) resolve(ctx context.Context, h Handle, relative string, mustExist bool) (string, error) {
 	root, err := m.WorkspacePath(ctx, h)
 	if err != nil {
