@@ -27,3 +27,66 @@ func TestJourneyPackRejectsUnsafeOutput(t *testing.T) {
 		t.Fatal("expected absolute output path to fail")
 	}
 }
+
+func TestJourneyPackFindsRepositoryRootAndAcceptsLocalOverlay(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".kitsoki", "stories", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".kitsoki", "qa", "personas"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".kitsoki", "qa", "scenarios"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".kitsoki", "qa", "personas", "author.yaml"), []byte("id: author\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".kitsoki", "qa", "scenarios", "onboarding.yaml"), []byte("id: onboarding\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".kitsoki", "stories", "demo", "app.yaml"), []byte("app: {id: demo}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	journeyDir := filepath.Join(dir, ".kitsoki", "qa", "journeys", "onboarding")
+	if err := os.MkdirAll(journeyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(journeyDir, "journey.yaml")
+	body := "schema: kitsoki/journey-pack/v1\nid: demo/onboarding\ntitle: Demo\nstory: {app: .kitsoki/stories/demo/app.yaml}\ncatalogs: {personas: [../../personas], scenarios: [../../scenarios]}\nmatrix: {personas: [author], scenarios: [onboarding], transports: [web]}\ngate: {degraded_evidence: block_publish}\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, root, _, err := loadJourney(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root != dir {
+		t.Fatalf("root = %q, want %q", root, dir)
+	}
+	if err := validateJourney(p, root); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplaceGeneratedRegionPreservesHumanText(t *testing.T) {
+	got := replaceGeneratedRegion("# Human\n\n<!-- kitsoki:generated:start -->\nold\n<!-- kitsoki:generated:end -->\n", "<!-- kitsoki:generated:start -->\nnew\n<!-- kitsoki:generated:end -->")
+	if got != "# Human\n\n<!-- kitsoki:generated:start -->\nnew\n<!-- kitsoki:generated:end -->\n" {
+		t.Fatalf("unexpected generated-region replacement: %q", got)
+	}
+}
+
+func TestVerifyJourneyReplayRejectsTransitionDrift(t *testing.T) {
+	dir := t.TempDir()
+	origin := filepath.Join(dir, "origin.jsonl")
+	replay := filepath.Join(dir, "replay.jsonl")
+	if err := os.WriteFile(origin, []byte("{\"kind\":\"machine.transition\",\"payload\":{\"to\":\"ready\"}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(replay, []byte("{\"kind\":\"machine.transition\",\"payload\":{\"to\":\"idle\"}}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyJourneyReplay(origin, replay); err == nil {
+		t.Fatal("expected replay drift to fail")
+	}
+}
