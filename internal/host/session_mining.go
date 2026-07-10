@@ -24,6 +24,11 @@ func SessionMiningRunHandler(ctx context.Context, args map[string]any) (Result, 
 	if toolsDir == "" {
 		return Result{Error: "host.session_mining.run: tools_dir is required"}, nil
 	}
+	absToolsDir, err := filepath.Abs(toolsDir)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("host.session_mining.run: tools_dir: %v", err)}, nil
+	}
+	toolsDir = absToolsDir
 	op := stringValue(args, "op")
 	script, ok := sessionMiningScripts[op]
 	if !ok {

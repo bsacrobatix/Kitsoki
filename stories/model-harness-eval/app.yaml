@@ -7,7 +7,6 @@ app:
 
 hosts:
   - host.agent.task
-  - host.session_mining.run
 
 agents:
   reporter:
