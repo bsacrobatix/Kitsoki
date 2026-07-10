@@ -200,6 +200,29 @@ conflicts, resolve it inside `.capsules/staging/local`, rerun the needed staging
 validation, then rerun `refresh-staging-local.sh`. Do not resolve either path by
 editing the primary checkout.
 
+### Hygiene
+
+Long-running Capsule CI and development loops accumulate local evidence and
+cache state. Inspect reclaimable Capsule-managed state before or after large
+work blocks:
+
+```sh
+kitsoki capsule cleanup plan --keep-runs 20
+```
+
+The default plan keeps the newest Capsule CI run records and proposes older
+`.capsules/ci` run/receipt/trace bundles. Add explicit cache flags only when
+cache pressure matters:
+
+```sh
+kitsoki capsule cleanup plan --include-capsule-cache --include-go-build-cache
+kitsoki capsule cleanup apply --include-capsule-cache --include-go-build-cache
+```
+
+Go build cache cleanup intentionally uses `go clean -cache -testcache` because
+the active cache can live outside the project root. This keeps disk hygiene in
+the Capsule lifecycle without letting agents delete arbitrary host paths.
+
 ### `close` / `teardown`
 
 ```sh
