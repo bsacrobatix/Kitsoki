@@ -71,6 +71,11 @@ base branch prefix such as `agent/*`, `integration/*`, or `staging/*` when the
 PR is not ready for CI. Retarget or promote the finished PR to `main` only when
 it is ready for the required CI gate and GitHub merge.
 
+All commits in this repository must include a DCO sign-off. This is a known
+requirement for Kitsoki PRs and should be enforced in agent and manual
+workflows (use `git commit --signoff` or add `Signed-off-by` to commits); do not
+skip it.
+
 When local `main` must be reconciled with `origin/main` or `upstream/main`, do
 not run `git pull` in the protected primary checkout. From the primary checkout,
 run the scripted sync helper:
