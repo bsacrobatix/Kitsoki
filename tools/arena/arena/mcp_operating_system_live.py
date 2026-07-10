@@ -111,7 +111,14 @@ def _safe_provider_text(value: object) -> str:
     text = re.sub(r"(?i)\bbearer\s+[^\s,;]+", "Bearer [redacted]", text)
     text = re.sub(r"(?i)\b(api[_-]?key|token|authorization|password|secret)\s*([=:])\s*[^\s,;]+", r"\1\2[redacted]", text)
     text = re.sub(r"\b(?:sk|ak|rk)-[A-Za-z0-9_-]{8,}\b", "[redacted-key]", text)
-    return text[:MAX_PROVIDER_DIAGNOSTIC_CHARS]
+    if len(text) <= MAX_PROVIDER_DIAGNOSTIC_CHARS:
+        return text
+    # Stream-json begins with a large, low-signal init envelope. The useful
+    # CLI failure is normally the final event, so retain both ends rather than
+    # silently discarding the reason a calibration failed closed.
+    head = MAX_PROVIDER_DIAGNOSTIC_CHARS // 2
+    tail = MAX_PROVIDER_DIAGNOSTIC_CHARS - head
+    return text[:head] + "\n...[truncated]...\n" + text[-tail:]
 
 
 def _process_diagnostic(adapter: str, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
@@ -421,6 +428,10 @@ class ClaudeCLIDispatcher:
             "--print",
             "--output-format", "stream-json",
             "--verbose",
+            # Ignore user-global configuration, whose ambient MCP servers,
+            # hooks, and model defaults are not part of this fixed calibration.
+            "--setting-sources", "project,local",
+            "--disable-slash-commands",
             "--json-schema", json.dumps(CLAUDE_RESPONSE_SCHEMA, sort_keys=True, separators=(",", ":")),
             "--max-budget-usd", f"{request['max_cost_usd']:.6f}",
             "--model", self._config.model,

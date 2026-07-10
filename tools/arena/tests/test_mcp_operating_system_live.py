@@ -251,6 +251,8 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     argv = captured["argv"]
     require("Claude argv starts with configured executable", isinstance(argv, list) and argv[0] == "fake-claude")
     require("Claude argv enables stream-json capture", "--print" in argv and argv[argv.index("--output-format") + 1] == "stream-json" and "--verbose" in argv)
+    check("Claude argv isolates ambient user settings", argv[argv.index("--setting-sources") + 1], "project,local")
+    require("Claude argv disables ambient slash commands", "--disable-slash-commands" in argv)
     check("Claude argv schema is exact strict schema", json.loads(argv[argv.index("--json-schema") + 1]), CLAUDE_RESPONSE_SCHEMA)
     check("Claude argv sets per-case hard budget", argv[argv.index("--max-budget-usd") + 1], "2.000000")
     check("Claude argv sends configured model", argv[argv.index("--model") + 1], "claude-fable-5")
@@ -286,6 +288,9 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
             check("Claude exit diagnostic has return code", diagnostic["returncode"], 2)
             require("Claude exit diagnostic redacts stderr bearer", "private-value" not in json.dumps(diagnostic))
             require("Claude exit diagnostic redacts stdout token", "top-secret-token" not in json.dumps(diagnostic) and "abcdefghijk" not in json.dumps(diagnostic))
+
+    long_failure = "init=" + ("x" * (live.MAX_PROVIDER_DIAGNOSTIC_CHARS + 50)) + " final-error=not-connected"
+    check("provider diagnostic retains trailing failure", live._safe_provider_text(long_failure).endswith("final-error=not-connected"), True)
 
     with patch.object(live.subprocess, "run", failed_claude_run):
         failed_run = run_calibration(
