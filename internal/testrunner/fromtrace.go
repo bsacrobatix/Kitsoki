@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	goyaml "github.com/goccy/go-yaml"
@@ -76,6 +77,37 @@ type harnessPayload struct {
 	Data      map[string]any `json:"data"`
 }
 
+// These trace payloads complete a host.agent.* cassette episode. A host return
+// can replay state changes alone, but the workbench also needs the canonical
+// agent lifecycle pair to render the captured exchange.
+type agentCallStartPayload struct {
+	Verb       string `json:"verb"`
+	Agent      string `json:"agent"`
+	Model      string `json:"model"`
+	Prompt     string `json:"prompt"`
+	PromptFile string `json:"prompt_file"`
+}
+
+type agentCallCompletePayload struct {
+	Verb         string          `json:"verb"`
+	Agent        string          `json:"agent"`
+	Model        string          `json:"model"`
+	DurationMS   int64           `json:"duration_ms"`
+	Response     json.RawMessage `json:"response"`
+	ResponseFile string          `json:"response_file"`
+	Meta         struct {
+		CostUSD float64 `json:"cost_usd"`
+		Usage   struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	} `json:"meta"`
+	TranscriptRef *struct {
+		Format string `json:"format"`
+		Path   string `json:"path"`
+	} `json:"transcript_ref"`
+}
+
 // FlowFromTrace is the result of converting a trace: the flow fixture document
 // and (when the trace recorded any host call) the host cassette document, each
 // already marshalled to YAML bytes. CassetteYAML is nil when the trace recorded
@@ -109,6 +141,7 @@ type ConvertOptions struct {
 	// an empty map is emitted (the app's world schema defaults plus on_enter
 	// effects repopulate it on replay).
 	InitialWorld map[string]any
+	traceDir     string
 }
 
 // ConvertTraceToFlow reads the JSONL trace at tracePath and converts it into a
@@ -122,6 +155,7 @@ func ConvertTraceToFlow(tracePath string, opts ConvertOptions) (*FlowFromTrace, 
 	if err != nil {
 		return nil, fmt.Errorf("fromtrace: parse %q: %w", tracePath, err)
 	}
+	opts.traceDir = filepath.Dir(tracePath)
 	return convertTraceLines(lines, opts)
 }
 
@@ -193,6 +227,8 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 	originalInputByTurn := map[int64]string{}
 	var turns []flowTurnDoc
 	var episodes []cassetteEpisodeDoc
+	agentStarts := map[int64]agentCallStartPayload{}
+	agentCompletes := map[int64]agentCallCompletePayload{}
 	for _, tl := range lines {
 		switch tl.Kind {
 		case "turn.input":
@@ -226,6 +262,16 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 				Intent:       flowIntentDoc{Name: p.Intent, Slots: p.Slots},
 				DisplayInput: originalInputByTurn[tl.Turn],
 			})
+		case "agent.call.start":
+			var p agentCallStartPayload
+			if json.Unmarshal(tl.Payload, &p) == nil {
+				agentStarts[tl.Turn] = p
+			}
+		case "agent.call.complete":
+			var p agentCallCompletePayload
+			if json.Unmarshal(tl.Payload, &p) == nil {
+				agentCompletes[tl.Turn] = p
+			}
 		case "harness.returned":
 			var p harnessPayload
 			if err := json.Unmarshal(tl.Payload, &p); err != nil {
@@ -234,13 +280,17 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 			if !strings.HasPrefix(p.Namespace, "host.") {
 				continue
 			}
-			episodes = append(episodes, cassetteEpisodeDoc{
+			ep := cassetteEpisodeDoc{
 				ID:    fmt.Sprintf("%s_%d", episodeIDSlug(p.Namespace), len(episodes)+1),
 				Match: map[string]any{"handler": p.Namespace},
 				Response: cassetteResponseDoc{
 					Data: p.Data,
 				},
-			})
+			}
+			if strings.HasPrefix(p.Namespace, "host.agent.") {
+				ep.Agent = episodeAgentFromTrace(agentStarts[tl.Turn], agentCompletes[tl.Turn], opts.traceDir)
+			}
+			episodes = append(episodes, ep)
 		}
 	}
 
@@ -287,6 +337,67 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 	}
 	result.FlowYAML = withHeader(flowHeader, fb)
 	return result, nil
+}
+
+func episodeAgentFromTrace(start agentCallStartPayload, complete agentCallCompletePayload, traceDir string) *EpisodeAgent {
+	if start.Verb == "" && complete.Verb == "" {
+		return nil
+	}
+	verb := complete.Verb
+	if verb == "" {
+		verb = start.Verb
+	}
+	agent := complete.Agent
+	if agent == "" {
+		agent = start.Agent
+	}
+	model := complete.Model
+	if model == "" {
+		model = start.Model
+	}
+	prompt := start.Prompt
+	if prompt == "" {
+		prompt = readTraceSidecar(traceDir, start.PromptFile)
+	}
+	response := string(complete.Response)
+	if b := readTraceSidecar(traceDir, complete.ResponseFile); b != "" {
+		response = b
+	}
+	ep := &EpisodeAgent{Verb: verb, Agent: agent, Model: model, DurationMs: complete.DurationMS,
+		PromptTokens: complete.Meta.Usage.InputTokens, ResponseTokens: complete.Meta.Usage.OutputTokens,
+		CostUSD: complete.Meta.CostUSD, Prompt: prompt, Response: response}
+	if complete.TranscriptRef != nil {
+		ep.Transcript = readTraceTranscript(traceDir, complete.TranscriptRef.Path, complete.TranscriptRef.Format)
+	}
+	return ep
+}
+
+func readTraceSidecar(traceDir, rel string) string {
+	if traceDir == "" || rel == "" || filepath.IsAbs(rel) {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(traceDir, rel))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func readTraceTranscript(traceDir, rel, format string) *EpisodeTranscript {
+	data := readTraceSidecar(traceDir, rel)
+	if data == "" {
+		return nil
+	}
+	et := &EpisodeTranscript{Format: format}
+	for _, line := range strings.Split(strings.TrimSpace(data), "\n") {
+		if json.Valid([]byte(line)) {
+			et.Events = append(et.Events, line)
+		}
+	}
+	if len(et.Events) == 0 {
+		return nil
+	}
+	return et
 }
 
 // episodeIDSlug turns a handler namespace ("host.agent.converse") into a
@@ -355,6 +466,7 @@ type cassetteEpisodeDoc struct {
 	ID       string              `yaml:"id"`
 	Match    map[string]any      `yaml:"match"`
 	Response cassetteResponseDoc `yaml:"response"`
+	Agent    *EpisodeAgent       `yaml:"agent,omitempty"`
 }
 
 type cassetteResponseDoc struct {

@@ -172,6 +172,37 @@ func TestConvertTraceToFlow_SkipsSyntheticAndBackgroundTransitions(t *testing.T)
 	}
 }
 
+func TestConvertTraceToFlow_PreservesAgentLifecycleInCassette(t *testing.T) {
+	t.Parallel()
+	const trace = `{"turn":1,"kind":"turn.input","payload":{"input":"orient me"}}
+{"turn":1,"kind":"agent.call.start","payload":{"verb":"task","agent":"landing","model":"opus","prompt":"orient the operator"}}
+{"turn":1,"kind":"agent.call.complete","payload":{"verb":"task","agent":"landing","model":"opus","duration_ms":42,"response":{"summary":"No files were changed."},"meta":{"cost_usd":0.12,"usage":{"input_tokens":12,"output_tokens":34}}}}
+{"turn":1,"kind":"harness.returned","payload":{"namespace":"host.agent.task","data":{"submitted":{"summary":"No files were changed."}}}}
+{"turn":1,"kind":"machine.transition","payload":{"from":"core.landing","to":"core.landing","intent":"capture","slots":{}}}`
+	lines, err := parseTraceLines([]byte(trace))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := convertTraceLines(lines, ConvertOptions{AppPath: "app.yaml", CassettePath: "capture.yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cas Cassette
+	if err := goyaml.Unmarshal(res.CassetteYAML, &cas); err != nil {
+		t.Fatalf("unmarshal cassette: %v", err)
+	}
+	if len(cas.Episodes) != 1 || cas.Episodes[0].Agent == nil {
+		t.Fatalf("agent episode = %#v, want one lifecycle-bearing episode", cas.Episodes)
+	}
+	agent := cas.Episodes[0].Agent
+	if agent.Verb != "task" || agent.Agent != "landing" || agent.Response != `{"summary":"No files were changed."}` {
+		t.Errorf("agent = %#v, want preserved lifecycle fields", agent)
+	}
+	if agent.PromptTokens != 12 || agent.ResponseTokens != 34 || agent.CostUSD != 0.12 {
+		t.Errorf("agent usage = %#v, want trace usage", agent)
+	}
+}
+
 // stripComments removes whole-line YAML comments so body assertions don't trip
 // on words that legitimately appear in the generated header.
 func stripComments(b []byte) string {
