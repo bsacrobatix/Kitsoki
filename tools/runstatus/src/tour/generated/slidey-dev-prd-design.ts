@@ -54,6 +54,7 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6000,
+    drive: [{"type":"wait-state","state":"core.landing"},{"type":"click-intent","intent":"core__go_prd"},{"type":"wait-state","state":"core.prd.idle"},{"type":"reveal-turn"},{"type":"type-and-send","text":"I would love a way for slidey to give presenters a printable per-scene speaker-notes handout so they can rehearse a talk without rendering the whole video first"},{"type":"wait-state","state":"core.prd.idle"},{"type":"reveal-turn"}],
   },
   {
     id: "spm-prd-search",
@@ -66,6 +67,7 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6000,
+    drive: [{"type":"type-and-send","text":"ready"},{"type":"wait-state","state":"core.prd.search"},{"type":"reveal-turn"}],
   },
   {
     id: "spm-prd-clarify",
@@ -78,6 +80,7 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6500,
+    drive: [{"type":"type-and-send","text":"confirm"},{"type":"wait-state","state":"core.prd.clarifying"},{"type":"reveal-turn"},{"type":"type-and-send","text":"presenters rehearsing a talk; the metric is decks-exported-to-notes-without-rendering-video"},{"type":"wait-state","state":"core.prd.clarifying"},{"type":"reveal-turn"},{"type":"type-and-send","text":"submit"},{"type":"wait-state","state":"core.prd.brief"},{"type":"reveal-turn"}],
   },
   {
     id: "spm-prd-draft",
@@ -90,6 +93,7 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6500,
+    drive: [{"type":"click-intent","intent":"core__prd__confirm"},{"type":"wait-state","state":"core.prd.references"},{"type":"reveal-turn"},{"type":"click-intent","intent":"core__prd__confirm"},{"type":"wait-state","state":"core.prd.drafting"},{"type":"reveal-turn"}],
   },
   {
     id: "spm-prd-published",
@@ -102,6 +106,7 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "chat-transcript",
     dwellMs: 6500,
+    drive: [{"type":"click-intent","intent":"core__prd__accept"},{"type":"wait-state","state":"core.prd_published"},{"type":"reveal-turn"}],
   },
   {
     id: "spm-mockup",
@@ -114,5 +119,6 @@ export const SLIDEY_PM_IDEA_TOUR_STEPS: readonly TourStep[] = [
     advance: "next",
     waitForTarget: "media-slideshow-frame",
     dwellMs: 7000,
+    drive: [{"type":"reveal-turn"}],
   },
 ];

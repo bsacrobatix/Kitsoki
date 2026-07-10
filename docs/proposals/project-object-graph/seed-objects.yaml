@@ -7784,6 +7784,9 @@ nodes:
           advance: next
           waitForTarget: text-floor-input
           dwellMs: 4200
+          drive:
+            - type: type-and-send
+              text: "preview required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo"
         - id: pqa-preview-result
           route: interactive
           target: chat-section
@@ -7798,12 +7801,15 @@ nodes:
           route: interactive
           target: text-floor-input
           title: Type a check request
-          body: "The check uses the same plain-language request without the preview prefix. Without scenario=, the prose becomes an ad-hoc scenario."
+          body: "The check uses the same plain-language request without the preview prefix. Without scenario=, the prose becomes an ad-hoc scenario. pause=each-leg is added here so the tour can show the per-leg mechanics below — omit it and a multi-transport check drains straight to the report on its own."
           placement: right
           kind: explain
           advance: next
           waitForTarget: text-floor-input
           dwellMs: 4300
+          drive:
+            - type: type-and-send
+              text: "required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo pause=each-leg"
         - id: pqa-recording
           route: interactive
           target: chat-section

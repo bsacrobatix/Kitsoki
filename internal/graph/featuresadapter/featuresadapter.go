@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/graph"
+	"kitsoki/internal/tour"
 )
 
 // FeatureDoc mirrors features/feature.schema.json's fields this adapter
@@ -76,17 +77,18 @@ type Tour struct {
 }
 
 type TourStep struct {
-	ID            string `yaml:"id"`
-	Route         string `yaml:"route,omitempty"`
-	Target        string `yaml:"target,omitempty"`
-	Title         string `yaml:"title,omitempty"`
-	Body          string `yaml:"body,omitempty"`
-	Placement     string `yaml:"placement,omitempty"`
-	Kind          string `yaml:"kind,omitempty"`
-	Advance       string `yaml:"advance,omitempty"`
-	AdvanceRoute  string `yaml:"advanceRoute,omitempty"`
-	WaitForTarget string `yaml:"waitForTarget,omitempty"`
-	DwellMs       int    `yaml:"dwellMs,omitempty"`
+	ID            string             `yaml:"id"`
+	Route         string             `yaml:"route,omitempty"`
+	Target        string             `yaml:"target,omitempty"`
+	Title         string             `yaml:"title,omitempty"`
+	Body          string             `yaml:"body,omitempty"`
+	Placement     string             `yaml:"placement,omitempty"`
+	Kind          string             `yaml:"kind,omitempty"`
+	Advance       string             `yaml:"advance,omitempty"`
+	AdvanceRoute  string             `yaml:"advanceRoute,omitempty"`
+	WaitForTarget string             `yaml:"waitForTarget,omitempty"`
+	DwellMs       int                `yaml:"dwellMs,omitempty"`
+	Drive         []tour.DriveAction `yaml:"drive,omitempty"`
 }
 
 // PublicSitePages returns every visibility:public site-page node in cat, in
@@ -276,9 +278,29 @@ func tourFromFields(raw map[string]any) *Tour {
 			AdvanceRoute:  stringField(m, "advanceRoute", ""),
 			WaitForTarget: stringField(m, "waitForTarget", ""),
 			DwellMs:       intField(m, "dwellMs"),
+			Drive:         driveFromFields(m),
 		})
 	}
 	return t
+}
+
+func driveFromFields(m map[string]any) []tour.DriveAction {
+	rawActions, _ := m["drive"].([]any)
+	var actions []tour.DriveAction
+	for _, ra := range rawActions {
+		am, ok := ra.(map[string]any)
+		if !ok {
+			continue
+		}
+		actions = append(actions, tour.DriveAction{
+			Type:   stringField(am, "type", ""),
+			Text:   stringField(am, "text", ""),
+			Intent: stringField(am, "intent", ""),
+			State:  stringField(am, "state", ""),
+			Ms:     intField(am, "ms"),
+		})
+	}
+	return actions
 }
 
 func stringField(m map[string]any, key, fallback string) string {

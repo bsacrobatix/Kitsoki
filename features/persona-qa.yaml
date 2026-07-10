@@ -3,7 +3,7 @@ id: persona-qa
 kind: feature
 title: Persona QA
 tagline: Preview a real QA request, run it across transports, and review one evidence-backed report.
-summary: "Persona QA is the scenario-qa story workflow: preview a plain-language QA request by transport, create a run bundle, drive one transport-pinned check at a time, judge captured evidence, then fold report.md and deck.slidey.json from the recorded outcomes and replay evidence."
+summary: 'Persona QA is the scenario-qa story workflow: preview a plain-language QA request by transport, create a run bundle, drive one transport-pinned check at a time, judge captured evidence, then fold report.md and deck.slidey.json from the recorded outcomes and replay evidence.'
 promo:
   order: 58
 docs:
@@ -23,30 +23,29 @@ qa:
   scenarios:
     - id: preview-freeform-request
       required: true
-      title: Preview resolves a real QA request without creating a run
       steps:
         - The tour opens on the Scenario QA story in the home library
         - A preview request is typed for required-input affordances on web and TUI
         - The UI shows status ready with two transport checks and no run id
         - The preview explains the behavior being checked, not an unrelated catalog scenario
+      title: Preview resolves a real QA request without creating a run
     - id: check-first-leg
       required: true
-      title: Check creates a run bundle and records the web transport check
       steps:
         - A free-text check request is typed with transport, target, and seed qualifiers
         - The session reaches the recording state
         - The recording view shows two total transport checks and a recorded driver plus judge outcome
         - Pass, fail, and degraded counters are visible while the second transport remains
+      title: Check creates a run bundle and records the web transport check
     - id: next-leg-report
       required: true
-      title: Next transport advances to TUI and produces the report
       steps:
         - A next transport action is visible while more transport checks remain
         - Selecting next transport drives the TUI check
         - The final report shows two of two transport checks passed
+      title: Next transport advances to TUI and produces the report
     - id: report-and-deck
       required: true
-      title: Report closes out the run with clickable artifacts and replay paths
       steps:
         - The final state is a Scenario QA report
         - The report summary says two of two transport checks passed
@@ -54,13 +53,14 @@ qa:
         - A deck.slidey.json path is visible in the report
         - Web and TUI replay paths are visible in the per-transport verdict list
         - A main room action is available from the closeout report
+      title: Report closes out the run with clickable artifacts and replay paths
 tour:
   export: PERSONA_QA_TOUR_STEPS
   steps:
     - id: pqa-home
       route: home
       title: Start at Persona QA
-      body: "Persona QA is a story workflow. The operator starts from the story library, then drives scenario QA like any other Kitsoki run."
+      body: Persona QA is a story workflow. The operator starts from the story library, then drives scenario QA like any other Kitsoki run.
       placement: center
       kind: explain
       advance: next
@@ -70,7 +70,7 @@ tour:
       route: home
       target: story-card
       title: The scenario-qa story
-      body: "The scenario-qa story is the product surface. It wraps the deterministic product-journey transport planner and the per-transport driver and judge loop."
+      body: The scenario-qa story is the product surface. It wraps the deterministic product-journey transport planner and the per-transport driver and judge loop.
       placement: right
       kind: explain
       advance: next
@@ -80,7 +80,7 @@ tour:
       route: home
       target: new-session-btn
       title: Open a session
-      body: "Create a fresh session. The fixture is no-LLM: host calls are replayed from the flow, while the browser still drives the real web UI."
+      body: 'Create a fresh session. The fixture is no-LLM: host calls are replayed from the flow, while the browser still drives the real web UI.'
       placement: right
       kind: action
       advance: route-match
@@ -91,7 +91,7 @@ tour:
       route: interactive
       target: text-floor-input
       title: Preview the QA request
-      body: "The operator describes the real behavior they want checked: required user-input affordances for a QA engineer/developer, scoped to web and TUI."
+      body: 'The operator describes the real behavior they want checked: required user-input affordances for a QA engineer/developer, scoped to web and TUI.'
       placement: right
       kind: explain
       advance: next
@@ -99,12 +99,12 @@ tour:
       dwellMs: 4200
       drive:
         - type: type-and-send
-          text: "preview required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo"
+          text: preview required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo
     - id: pqa-preview-result
       route: interactive
       target: chat-section
       title: Two transport checks, no run
-      body: "The preview names the requested behavior, lists web and TUI evidence contracts, and keeps the run id empty because no capture has started."
+      body: The preview names the requested behavior, lists web and TUI evidence contracts, and keeps the run id empty because no capture has started.
       placement: right
       kind: explain
       advance: next
@@ -114,7 +114,7 @@ tour:
       route: interactive
       target: text-floor-input
       title: Type a check request
-      body: "The check uses the same plain-language request without the preview prefix. Without scenario=, the prose becomes an ad-hoc scenario. pause=each-leg is added here so the tour can show the per-leg mechanics below — omit it and a multi-transport check drains straight to the report on its own."
+      body: The check uses the same plain-language request without the preview prefix. Without scenario=, the prose becomes an ad-hoc scenario. pause=each-leg is added here so the tour can show the per-leg mechanics below — omit it and a multi-transport check drains straight to the report on its own.
       placement: right
       kind: explain
       advance: next
@@ -122,12 +122,12 @@ tour:
       dwellMs: 4300
       drive:
         - type: type-and-send
-          text: "required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo pause=each-leg"
+          text: required user input affordance as a QA engineer and developer transport=web,tui target=kitsoki seed=affordance-demo pause=each-leg
     - id: pqa-recording
       route: interactive
       target: chat-section
       title: Web transport recorded
-      body: "The story pauses after the first transport check with driver status, judge verdict, and counters visible before TUI runs."
+      body: The story pauses after the first transport check with driver status, judge verdict, and counters visible before TUI runs.
       placement: right
       kind: explain
       advance: next
@@ -137,7 +137,7 @@ tour:
       route: interactive
       target: intent-btn-next_leg
       title: Drive the TUI check
-      body: "Next transport advances exactly one transport check. The same scenario contract is reused, but the evidence contract changes to a rendered TUI frame."
+      body: Next transport advances exactly one transport check. The same scenario contract is reused, but the evidence contract changes to a rendered TUI frame.
       placement: right
       kind: action
       advance: click-target
@@ -147,7 +147,7 @@ tour:
       route: interactive
       target: chat-section
       title: One report and one deck
-      body: "After the TUI check, the closeout view shows the two-pass result first, then the summary report, review deck, and replay paths."
+      body: After the TUI check, the closeout view shows the two-pass result first, then the summary report, review deck, and replay paths.
       placement: right
       kind: explain
       advance: next
@@ -157,7 +157,7 @@ tour:
       route: interactive
       target: intent-btn-main_room
       title: Return to main
-      body: "The closeout is not a dead end. Main room returns to the Scenario QA start screen while keeping the last run available for report rebuilds."
+      body: The closeout is not a dead end. Main room returns to the Scenario QA start screen while keeping the last run available for report rebuilds.
       placement: top
       kind: action
       advance: click-target
@@ -166,7 +166,7 @@ tour:
     - id: pqa-done
       route: interactive
       title: Persona QA is closed out
-      body: "The run ends with per-transport verdicts, replay evidence, a summary report, and a clear route back to the main room. The scenario came from operator input, not a fixed button."
+      body: The run ends with per-transport verdicts, replay evidence, a summary report, and a clear route back to the main room. The scenario came from operator input, not a fixed button.
       placement: center
       kind: explain
       advance: next
