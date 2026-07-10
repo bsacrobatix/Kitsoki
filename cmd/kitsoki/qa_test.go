@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -134,5 +135,24 @@ func TestJourneyDeckKeepsDemoOriginPending(t *testing.T) {
 	items := evidence["items"].([]any)
 	if got := items[0].(map[string]any)["status"]; got != "pending" {
 		t.Fatalf("demo origin status = %v, want pending", got)
+	}
+}
+
+func TestJourneyDeckReceiptPreservesDistinctJSONFields(t *testing.T) {
+	receipt := struct {
+		Status        string            `json:"status"`
+		Digest        string            `json:"digest"`
+		SourceDigests map[string]string `json:"source_digests"`
+	}{Status: "passed", Digest: "deck-digest", SourceDigests: map[string]string{"journey": "journey-digest"}}
+	b, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["status"] != "passed" || got["digest"] != "deck-digest" {
+		t.Fatalf("receipt fields missing: %s", b)
 	}
 }

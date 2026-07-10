@@ -367,8 +367,10 @@ func qaProduceCmd() *cobra.Command {
 			return err
 		}
 		return writeJourneyJSON(filepath.Join(artifacts, "deck-receipt.json"), struct {
-			Status, Digest string `json:"status"`
-		}{Status: "passed", Digest: digestFile(deckPath)}, cmd)
+			Status        string            `json:"status"`
+			Digest        string            `json:"digest"`
+			SourceDigests map[string]string `json:"source_digests"`
+		}{Status: "passed", Digest: digestFile(deckPath), SourceDigests: journeyDigests(root, p, digest)}, cmd)
 	}}
 	cmd.Flags().StringVar(&artifacts, "artifacts", "", "artifact directory")
 	return cmd
@@ -429,15 +431,17 @@ func qaPublishCmd() *cobra.Command {
 			return fmt.Errorf("publish requires a current freeze receipt")
 		}
 		var tutorial struct {
-			Status string `json:"status"`
+			Status        string            `json:"status"`
+			SourceDigests map[string]string `json:"source_digests"`
 		}
-		if err = readJSON(filepath.Join(artifacts, "tutorial-receipt.json"), &tutorial); err != nil || tutorial.Status != "passed" {
+		if err = readJSON(filepath.Join(artifacts, "tutorial-receipt.json"), &tutorial); err != nil || tutorial.Status != "passed" || !sameDigests(tutorial.SourceDigests, journeyDigests(root, p, digest)) {
 			return fmt.Errorf("publish requires a passed tutorial receipt")
 		}
 		var deckReceipt struct {
-			Status string `json:"status"`
+			Status        string            `json:"status"`
+			SourceDigests map[string]string `json:"source_digests"`
 		}
-		if err = readJSON(filepath.Join(artifacts, "deck-receipt.json"), &deckReceipt); err != nil || deckReceipt.Status != "passed" {
+		if err = readJSON(filepath.Join(artifacts, "deck-receipt.json"), &deckReceipt); err != nil || deckReceipt.Status != "passed" || !sameDigests(deckReceipt.SourceDigests, journeyDigests(root, p, digest)) {
 			return fmt.Errorf("publish requires a passed Slidey deck receipt")
 		}
 		if tour == "" {
