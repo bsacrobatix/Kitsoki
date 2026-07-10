@@ -44,6 +44,10 @@ Pipeline `executor:` is an immutable placement selection: `host`/`local` runs
 through the host provider and `remote-fake` exercises the identical remote
 worker protocol without a network. A production remote-worker name must be
 injected by the project’s launching process; a story cannot select one itself.
+The shipped `HTTPRemoteWorker` adapter accepts only HTTPS endpoints, sends the
+sealed envelope to the worker, receives a serialized typed verdict/result, and
+uses an ephemeral authorization header callback. Credential values never enter
+the envelope, workspace, trace, or receipt.
 
 The optional `--verdict file.json` run input is for an explicit external story
 adapter. It is not an authority bypass: the verdict still has to match the

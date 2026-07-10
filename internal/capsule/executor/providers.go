@@ -96,7 +96,10 @@ func (p *RemoteProvider) Run(ctx context.Context, prepared Prepared, task Task, 
 	if p.Worker == nil {
 		return Result{}, fmt.Errorf("capsule executor: remote worker is required")
 	}
-	return p.Worker.Run(ctx, prepared, task, sink)
+	result, err := p.Worker.Run(ctx, prepared, task, sink)
+	result.ExecutionID = prepared.ID
+	sort.Strings(result.Artifacts)
+	return result, err
 }
 func (p *RemoteProvider) Cancel(ctx context.Context, id string) error {
 	if p.Worker == nil {

@@ -249,8 +249,8 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	return p, e, err
 }
 func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
-	if s.Jobs == nil || (s.Provider == nil && s.Executors == nil) || s.Launcher == nil {
-		return RunResult{}, fmt.Errorf("capsule ci: jobs, provider, and launcher are required")
+	if s.Jobs == nil || (s.Provider == nil && s.Executors == nil) {
+		return RunResult{}, fmt.Errorf("capsule ci: jobs and provider are required")
 	}
 	p, envelope, err := s.Plan(ctx, req)
 	if err != nil {
@@ -281,6 +281,9 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	}
 	var verdict Verdict
 	execution, runErr := provider.Run(ctx, prepared, func(ctx context.Context, prepared executor.Prepared) (executor.Result, error) {
+		if s.Launcher == nil {
+			return executor.Result{}, fmt.Errorf("capsule ci: no local launcher is configured")
+		}
 		v, e := s.Launcher.Launch(ctx, prepared)
 		if e != nil {
 			return executor.Result{}, e
@@ -288,9 +291,23 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		if e = ValidateVerdict(v, prepared.Envelope, p.Result); e != nil {
 			return executor.Result{}, e
 		}
+		raw, e := json.Marshal(v)
+		if e != nil {
+			return executor.Result{}, e
+		}
 		verdict = v
-		return executor.Result{VerdictArtifact: "verdict:" + hashVerdict(v)}, nil
+		return executor.Result{VerdictArtifact: "verdict:" + hashVerdict(v), VerdictJSON: raw}, nil
 	}, nil)
+	if runErr == nil && len(execution.VerdictJSON) > 0 {
+		if err := json.Unmarshal(execution.VerdictJSON, &verdict); err != nil {
+			runErr = fmt.Errorf("capsule ci: parse executor verdict: %w", err)
+		}
+	}
+	if runErr == nil {
+		if err := ValidateVerdict(verdict, prepared.Envelope, p.Result); err != nil {
+			runErr = err
+		}
+	}
 	status := artifactjob.StatusDone
 	if runErr != nil || verdict.Outcome == "infra_failed" {
 		status = artifactjob.StatusFailed
