@@ -1897,6 +1897,17 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	case "graph.withdraw":
 		return graphWithdrawRPC(params)
 
+	// ── demo.* (A2, use-case-loop-plan §3.5): mockup/demo packet pipeline
+	// verbs, bare for the same caller-supplied-path reason as graph.* above.
+	case "demo.create":
+		return demoRPC(ctx, "create", params)
+
+	case "demo.record":
+		return demoRPC(ctx, "record", params)
+
+	case "demo.doctor":
+		return demoRPC(ctx, "doctor", params)
+
 	default:
 		// ── Story editor (per-story, no session) ─────────────────────────────
 		// The editor.* family operates on a story selected from the registry
