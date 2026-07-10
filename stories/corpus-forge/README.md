@@ -28,15 +28,18 @@ seam is an injected `host.corpus.prove` handler backed by a
 4. **Freeze calibration.** Run with `corpus_role: calibration`, a stable
    `selection_id`, and a reviewable `source_manifest_ref`. Save the receipt.
 5. **Freeze heldout.** Run separately with `corpus_role: heldout` and a
-   distinct source-manifest reference. The comparison runner must compare the
-   two frozen receipts and reject overlap before it runs an evaluation; Studio
-   sessions are independent and intentionally do not keep a hidden receipt
-   registry. Do not tune a story or prompt on this receipt; use it only for
-   promotion measurements.
+   distinct source-manifest reference. Configure a shared receipt registry for
+   both sessions; it rejects candidate-ID overlap with calibration *before* a
+   heldout receipt can freeze. Do not tune a story or prompt on this receipt;
+   use it only for promotion measurements.
 
 The receipt records the role, source reference, selected canonical candidates,
-and proof evidence. Store it beside the evaluation artifact and review it
-before comparing a Kitsoki story against another approach.
+and proof evidence. `internal/corpusreceipt.Registry` accepts only this
+contract with complete RED/GREEN evidence. Give it a `FileStore` rooted at an
+operator-selected directory to make the registry durable across Studio
+sessions. Its default is fail-closed: an unconfigured Studio runtime refuses
+`host.corpus.freeze_receipt`; `MemoryStore` is explicit and only appropriate
+for deterministic tests.
 
 ## Studio route
 
@@ -61,10 +64,19 @@ using `session.inspect` or a targeted `session.world` read.
 }
 ```
 
-For a production drive, register the proof handler in the host registry rather
-than using a cassette. A default Studio host intentionally has no proof
-executor, so it rejects rather than inventing evidence. Use a flow or host
-cassette only for deterministic QA; it is not evidence for an evaluation claim.
+For a production drive, register the proof handler and an explicitly configured
+receipt handler in the host registry rather than using cassettes:
+
+```go
+store, _ := corpusreceipt.NewFileStore("/reviewed/evals/my-story/receipts")
+registry := corpusreceipt.Registry{Store: store}
+hostReg.Replace("host.corpus.freeze_receipt", host.CorpusReceiptHandler(registry))
+```
+
+A default Studio host intentionally has neither proof executor nor receipt
+registry, so it rejects rather than inventing proof or global durability. Use a
+flow or host cassette only for deterministic QA; it is not evidence for an
+evaluation claim.
 
 ## No-LLM verification
 
@@ -74,7 +86,8 @@ go run ./cmd/kitsoki validate stories/corpus-forge/app.yaml
 go run ./cmd/kitsoki test flows stories/corpus-forge/app.yaml
 ```
 
-The happy flow runs the real Starlark lifecycle with a deterministic proof
-stub. `proof_rejection.yaml` proves an independent rejection cannot produce a
-receipt, and `heldout_receipt.yaml` proves the separate heldout lifecycle. The
-comparison runner owns cross-receipt overlap rejection.
+The happy flow runs the real Starlark lifecycle with deterministic proof and
+freeze stubs. `proof_rejection.yaml` proves an independent rejection cannot
+produce a receipt, and `heldout_overlap_rejected.yaml` proves the story routes
+a durable-registry overlap refusal to **rejected**. Package tests exercise the
+real FileStore across two separate Registry instances.

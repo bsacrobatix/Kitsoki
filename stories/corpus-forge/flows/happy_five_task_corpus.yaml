@@ -20,6 +20,8 @@ host_handlers:
       proof:
         oracle_sha256: independent-proof
         environment_fingerprint: fixture-v1
+  host.corpus.freeze_receipt:
+    data: {}
 turns:
   - intent: { name: start, slots: {} }
     expect_state: load

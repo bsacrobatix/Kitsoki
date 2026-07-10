@@ -65,6 +65,7 @@ states:
         id: corpus_build_receipt
         with:
           script: scripts/build_receipt.star
+          capabilities: { host: { verbs: [host.corpus.freeze_receipt] } }
           inputs:
             selection_id: "{{ world.selection_id }}"
             corpus_role: "{{ world.corpus_role }}"
