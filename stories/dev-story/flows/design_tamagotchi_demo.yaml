@@ -17,6 +17,18 @@ initial_world:
 starlark_inspect_cassette: ../cassettes/design_tamagotchi.inspect.yaml
 
 host_handlers:
+  host.run:
+    by_call:
+      roadmap_ledger_proposal_published:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok: true
+            ledger: ".artifacts/roadmap/progress.yaml"
+            event_id: "evt-tamagotchi"
+            item_id: "proposal/tamagotchi-pet-ui"
+            changed: true
   host.fs.writable_dir:
     data: { path: "docs/proposals", used_fallback: false }
   host.ide.open_file:
@@ -66,11 +78,10 @@ host_handlers:
     by_call:
       publish:
         data:
-          result:
-            design_file: "docs/proposals/tamagotchi-pet-ui.md"
-            ticket_id: "F-2026-06-11T120000Z-tamagotchi-pet-ui"
-            ticket_path: "issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md"
-            ticket_title:  "Tamagotchi pet UI"
+          design_file: "docs/proposals/tamagotchi-pet-ui.md"
+          ticket_id: "F-2026-06-11T120000Z-tamagotchi-pet-ui"
+          ticket_path: "issues/features/F-2026-06-11T120000Z-tamagotchi-pet-ui.md"
+          ticket_title: "Tamagotchi pet UI"
       roadmap_ledger_proposal_published:
         data:
           ok: true
