@@ -55,6 +55,9 @@ type Fixture struct {
 type Workspace struct {
 	Path        string
 	Fingerprint string
+	// Release removes an owned materialized workspace. It is optional for
+	// externally managed fixtures; Executor invokes it after each proof leg.
+	Release func() error `json:"-"`
 }
 
 // FixtureOpener materializes one candidate revision in isolation. Implementers
@@ -149,6 +152,8 @@ func (e Executor) Prove(ctx context.Context, candidate ProofInput) (Proof, error
 	if err != nil {
 		return Proof{}, &Rejection{Kind: KindNonReproducible, Detail: "open fix fixture: " + err.Error()}
 	}
+	defer releaseWorkspace(baselineWorkspace)
+	defer releaseWorkspace(fixWorkspace)
 	if baselineWorkspace.Fingerprint == "" || fixWorkspace.Fingerprint == "" || baselineWorkspace.Fingerprint != fixWorkspace.Fingerprint {
 		return Proof{}, &Rejection{Kind: KindNonReproducible, Detail: "fixture environment fingerprints differ or are absent"}
 	}
@@ -171,6 +176,12 @@ func (e Executor) Prove(ctx context.Context, candidate ProofInput) (Proof, error
 		return Proof{}, &Rejection{Kind: KindNonReproducible, Detail: fmt.Sprintf("fix oracle exited %d", fix.ExitCode)}
 	}
 	return Proof{CandidateID: candidate.ID, OracleSHA256: hash, Baseline: baseline, Fix: fix, EnvironmentFingerprint: baselineWorkspace.Fingerprint}, nil
+}
+
+func releaseWorkspace(workspace Workspace) {
+	if workspace.Release != nil {
+		_ = workspace.Release()
+	}
 }
 
 func fixtureFor(c ProofInput, ref string) Fixture {

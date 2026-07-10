@@ -50,6 +50,70 @@ func TestExecutorRejectsNonReproducibleEnvironment(t *testing.T) {
 	assertRejection(t, err, corpusproof.KindNonReproducible)
 }
 
+func TestRepositoryFixtureOpenerMaterializesLocalCapsuleAndReleasesIt(t *testing.T) {
+	repo := capsuletest.Open(t, "clean-repo")
+	opener := corpusproof.RepositoryFixtureOpener{
+		SourceRoot: repo, RepositoryIdentity: "example/repo", EnvironmentFingerprint: "capsule-env",
+		Commands: corpusproof.ExecCommandExecutor{},
+	}
+	workspace, err := opener.Open(context.Background(), corpusproof.Fixture{Repo: "example/repo", Ref: "HEAD"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace.Path, "a.txt")); err != nil || string(got) != "a\n" {
+		t.Fatalf("materialized a.txt = %q, %v", got, err)
+	}
+	if workspace.Fingerprint != "capsule-env" {
+		t.Fatalf("fingerprint = %q", workspace.Fingerprint)
+	}
+	if err := workspace.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if _, err := os.Stat(workspace.Path); !os.IsNotExist(err) {
+		t.Fatalf("workspace remains after Release: %v", err)
+	}
+}
+
+func TestCommandOracleRunnerRequiresNetworkDisabledSandboxAndStrictOracle(t *testing.T) {
+	if _, err := corpusproof.NewCommandOracleRunner(fakeSandbox{network: "enabled"}); err == nil {
+		t.Fatal("NewCommandOracleRunner accepted network-enabled sandbox")
+	}
+	runner, err := corpusproof.NewCommandOracleRunner(fakeSandbox{network: corpusproof.NetworkDisabled, fingerprint: "sealed-env"})
+	if err != nil {
+		t.Fatalf("NewCommandOracleRunner: %v", err)
+	}
+	_, err = runner.Run(context.Background(), corpusproof.Workspace{Path: "/fixture"}, []byte(`{"command":["go"],"untrusted":true}`))
+	if err == nil {
+		t.Fatal("Run accepted oracle with unknown field")
+	}
+	evidence, err := runner.Run(context.Background(), corpusproof.Workspace{Path: "/fixture"}, []byte(`{"command":["go","test"],"env":{"GOWORK":"off"}}`))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got, want := evidence.Command, []string{"go", "test"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+	if evidence.EnvironmentFingerprint != "sealed-env" || evidence.ExitCode != 1 {
+		t.Fatalf("evidence = %#v", evidence)
+	}
+}
+
+func TestNewRuntimeRequiresExplicitFixtureAndOracleDependencies(t *testing.T) {
+	if _, err := corpusproof.NewRuntime(corpusproof.RuntimeConfig{}); err == nil {
+		t.Fatal("NewRuntime accepted missing dependencies")
+	}
+	if _, err := corpusproof.NewRuntime(corpusproof.RuntimeConfig{FixtureCommands: corpusproof.ExecCommandExecutor{}, OracleSandbox: fakeSandbox{network: corpusproof.NetworkDisabled}}); err == nil {
+		t.Fatal("NewRuntime accepted missing local repository configuration")
+	}
+	runtime, err := corpusproof.NewRuntime(corpusproof.RuntimeConfig{
+		RepositoryRoot: capsuletest.Open(t, "clean-repo"), FixtureCommands: corpusproof.ExecCommandExecutor{},
+		OracleSandbox: fakeSandbox{network: corpusproof.NetworkDisabled, fingerprint: "sealed-env"},
+	})
+	if err != nil || runtime.Fixtures == nil || runtime.Runner == nil {
+		t.Fatalf("NewRuntime = %#v, %v", runtime, err)
+	}
+}
+
 func candidate() corpusproof.ProofInput {
 	return corpusproof.ProofInput{
 		Kind: corpusproof.CorpusCaseV1, ID: "case-1", Repo: "example/repo", Source: "local-git-history",
@@ -89,6 +153,24 @@ func (f fakeRunner) Run(_ context.Context, workspace corpusproof.Workspace, _ js
 		exit = f.fix
 	}
 	return corpusproof.RunEvidence{Command: []string{"go", "test", "./..."}, ExitCode: exit, Output: "deterministic fixture", EnvironmentFingerprint: workspace.Fingerprint}, nil
+}
+
+type fakeSandbox struct {
+	network     corpusproof.NetworkMode
+	fingerprint string
+}
+
+func (s fakeSandbox) NetworkMode() corpusproof.NetworkMode { return s.network }
+
+func (s fakeSandbox) EnvironmentFingerprint(context.Context) (string, error) {
+	return s.fingerprint, nil
+}
+
+func (s fakeSandbox) Run(_ context.Context, command corpusproof.Command) (corpusproof.CommandResult, error) {
+	if command.Path != "go" || command.Dir != "/fixture" {
+		return corpusproof.CommandResult{}, errors.New("unexpected command")
+	}
+	return corpusproof.CommandResult{ExitCode: 1, Output: "sealed result"}, nil
 }
 
 func assertRejection(t *testing.T, err error, want corpusproof.RejectionKind) {

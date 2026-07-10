@@ -36,6 +36,34 @@ fixture adapter may bridge a synthetic [capsule](capsules.md) or a repo-history
 manifest; the executor never performs a network fetch or asks a model. Both
 legs must expose the same non-empty environment fingerprint.
 
+## Local repository runtime
+
+`corpusproof.NewRuntime` is the reusable production construction seam for a
+story or host that deliberately opts into proofing a local repository. It needs
+all of the following; there is no global or fake default:
+
+- a `RepositoryRoot` and, optionally, the expected `RepositoryIdentity`;
+- a `FixtureCommands` executor for local Git only; and
+- an `OracleSandbox` that reports `NetworkDisabled` and returns the stable
+  environment fingerprint for the exact sandbox it executes in. The runtime
+  reads that fingerprint itself and checks it again for each oracle leg.
+
+The runtime resolves each declared ref in that configured root, locally clones
+it into an owned temporary directory, checks out the resolved commit detached,
+then releases both directories after proof. Candidate `repo`, locator, and
+oracle data cannot cause a fetch, clone from a URL, or shell evaluation.
+
+Oracle JSON is deliberately small and strict:
+
+```json
+{"command":["go","test","./..."],"env":{"GOWORK":"off"}}
+```
+
+`command` is direct argv, not shell syntax; unknown JSON fields and malformed
+environment keys are rejected. A host connects it explicitly, for example by
+passing the constructed executor to `host.CorpusProofHandler(runtime)`. The
+host remains fail-closed until that deliberate configuration happens.
+
 The following typed rejections are durable exclusion evidence:
 
 - `missing_oracle` — the candidate cannot be evaluated.
