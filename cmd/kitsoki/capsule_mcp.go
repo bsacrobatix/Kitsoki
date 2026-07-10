@@ -70,9 +70,11 @@ func newCapsuleManager(project, executor string, branches []string) (*control.Ma
 		return nil, "", fmt.Errorf("capsule mcp: executor %q is not configured", executor)
 	}
 	definitionIDs := make([]string, 0, len(list))
+	workspaceRoots := []string{filepath.Join(root, ".capsules", "workspaces")}
 	providers := map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: root}}
 	allowedProviders := []string{"synthetic"}
 	git := control.GitSourceProvider{ProjectRoot: root}
+	development := control.DevWorkspaceScriptProvider{ProjectRoot: root}
 	for _, def := range list {
 		definitionIDs = append(definitionIDs, def.ID)
 		switch def.Source.Kind {
@@ -84,18 +86,36 @@ func newCapsuleManager(project, executor string, branches []string) (*control.Ma
 			providers["pinned"] = git
 			providers["git"] = git
 			allowedProviders = append(allowedProviders, "pinned")
+		case control.SourceDevWorkspaceScript:
+			providers[string(control.SourceDevWorkspaceScript)] = development
+			allowedProviders = append(allowedProviders, string(control.SourceDevWorkspaceScript))
+			if relative := def.Source.Development.Root; relative != "" {
+				candidate := filepath.Join(root, relative)
+				if !containsPath(workspaceRoots, candidate) {
+					workspaceRoots = append(workspaceRoots, candidate)
+				}
+			}
 		}
 	}
-	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	workspaceRoot := workspaceRoots[0]
 	manager := &control.Manager{
 		Definitions: defs,
 		Instances:   control.FileInstanceStore{Root: workspaceRoot},
 		Providers:   providers,
 		Grant: control.ScopeGrant{
-			ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot},
+			ProjectRoot: root, WorkspaceRoots: workspaceRoots,
 			Definitions: definitionIDs, Executors: allowedProviders,
 			Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write"}, Branches: branches,
 		},
 	}
 	return manager, filepath.Base(root), nil
+}
+
+func containsPath(paths []string, candidate string) bool {
+	for _, path := range paths {
+		if filepath.Clean(path) == filepath.Clean(candidate) {
+			return true
+		}
+	}
+	return false
 }

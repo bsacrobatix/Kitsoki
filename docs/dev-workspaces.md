@@ -1,31 +1,33 @@
 # Managed development workspaces
 
-Kitsoki development work happens in managed clone-backed capsule workspaces, not
+Kitsoki development work happens in managed clone-backed Capsule workspaces, not
 Git linked worktrees. The primary checkout is protected as read-mostly; agents
-and operators should delegate workspace lifecycle operations to
-`scripts/dev-workspace.sh` instead of running `git clone`, `git worktree`,
-rebase, merge, or teardown commands by hand.
+and operators should delegate lifecycle operations to `kitsoki capsule
+workspace` instead of running `git clone`, `git worktree`, rebase, merge,
+teardown, or the compatibility script by hand.
 
-The script is the contract. It creates an isolated clone, writes Kitsoki
-ownership metadata, optionally bootstraps the clone, commits the finished work,
-lands it into the configured local target branch, and removes the workspace when
-requested. Normal development starts from `staging/local` and lands back into
-`staging/local`, so local stabilization does not move `main`.
+The native Capsule contract creates an isolated clone, writes Kitsoki ownership
+metadata, bootstraps the clone, commits finished work, lands it into the
+configured local target branch, and removes it when requested. The current
+`development` provider delegates protected Git plumbing to
+`scripts/dev-workspace.sh` as an internal compatibility adapter. Normal
+development starts from `staging/local` and lands back into `staging/local`, so
+local stabilization does not move `main`.
 
 ## Quick path
 
 From the primary checkout:
 
 ```sh
-scripts/dev-workspace.sh create --id docs-example --branch agent/docs-example --bootstrap
-scripts/dev-workspace.sh status docs-example
+go run ./cmd/kitsoki capsule workspace create --id docs-example --definition development --owner docs-example
+go run ./cmd/kitsoki capsule workspace status --id docs-example
 ```
 
 Do the implementation inside the reported workspace path, then:
 
 ```sh
-scripts/dev-workspace.sh commit docs-example --message "Document managed workspaces"
-scripts/dev-workspace.sh merge docs-example --gate "go test ./internal/host" --teardown
+go run ./cmd/kitsoki capsule workspace commit --id docs-example --message "Document managed workspaces"
+go run ./cmd/kitsoki capsule workspace integrate --id docs-example --gate "go test ./internal/host" --teardown
 ```
 
 For docs-only changes, the merge gate can be a focused committed-diff check
@@ -67,13 +69,13 @@ metadata is local provenance rather than project source.
 ### `create`
 
 ```sh
-scripts/dev-workspace.sh create --id <id> --branch <branch> [--bootstrap] [--json]
+kitsoki capsule workspace create --id <id> --definition development --owner <owner>
 ```
 
-`id` is a single path segment and becomes the workspace directory name.
-`branch` defaults to `agent/<id>`. `base` and `target` default to
-`staging/local`. `--bootstrap` runs `make bootstrap-workspace` inside the clone
-after checkout.
+`id` is a single path segment and becomes the workspace directory name. The
+checked-in `development` definition declares the `agent/<id>` branch policy,
+`staging/local` base/target, and bootstrap hook. A project can declare another
+Capsule definition instead of passing mutable clone arguments.
 
 Use `--session-id <id>` from story/runtime code so repeated entry by the same
 session is idempotent while a different session is refused instead of being
@@ -81,9 +83,9 @@ handed another session's workspace.
 
 ### `bootstrap`
 
-```sh
-scripts/dev-workspace.sh bootstrap <workspace-or-id>
-```
+Bootstrap is a declared provider hook. The Kitsoki `development` and `staging`
+definitions enable it automatically; custom project definitions should record
+their own bootstrap policy.
 
 Bootstrap prepares embed-only story/SPA assets, installs the runstatus
 dependencies, and warms the Go build cache. `create --bootstrap` is the normal
@@ -99,7 +101,7 @@ machine-specific config.
 ### `status`
 
 ```sh
-scripts/dev-workspace.sh status <workspace-or-id> [--json]
+kitsoki capsule workspace status --id <workspace-id> [--json]
 ```
 
 Use `status` to find the path, current branch, short HEAD, and dirty state. For
@@ -112,7 +114,7 @@ Wait for the owner PID to finish; do not run a second create or teardown.
 ### `commit`
 
 ```sh
-scripts/dev-workspace.sh commit <workspace-or-id> --message "<message>"
+kitsoki capsule workspace commit --id <workspace-id> --message "<message>"
 ```
 
 `commit` stages the full workspace delta and commits it on the workspace branch.
@@ -122,7 +124,7 @@ slice, not the mechanics of the workspace.
 ### `merge`
 
 ```sh
-scripts/dev-workspace.sh merge <workspace-or-id> --gate "<focused validation>" --teardown
+kitsoki capsule workspace integrate --id <workspace-id> --gate "<focused validation>" --teardown
 ```
 
 `merge` refuses dirty workspaces, fetches the current target branch when it
@@ -160,7 +162,7 @@ gate has already run and you intentionally want to skip the default `make test`.
 Create the long-lived staging capsule with:
 
 ```sh
-scripts/dev-workspace.sh create --root .capsules/staging --id local --branch staging/local --base staging/local --target main --bootstrap
+kitsoki capsule workspace create --id local --definition staging --owner staging
 ```
 
 For day-to-day staging operations from the primary checkout:
@@ -201,8 +203,7 @@ editing the primary checkout.
 ### `close` / `teardown`
 
 ```sh
-scripts/dev-workspace.sh teardown <workspace-or-id>
-scripts/dev-workspace.sh teardown <workspace-or-id> --force
+kitsoki capsule workspace close --id <workspace-id> --owner <owner>
 ```
 
 Teardown refuses unmanaged directories and dirty workspaces. Use `--force` only
@@ -228,10 +229,10 @@ unexpected non-workspace directory.
 ## Story/runtime integration
 
 The `workspace` host interface still uses the historical provider name
-`host.git_worktree`, but default creation is script-backed:
+`host.git_worktree`, but default creation is migrating to Capsule-backed:
 
-- `workspace.create` and `workspace.clone_create` call
-  `scripts/dev-workspace.sh create`.
+- `workspace.create` and `workspace.clone_create` use the `development`
+  compatibility provider where the historical protected lifecycle is required.
 - New workspaces default to `.capsules/workspaces/<id>`.
 - Legacy linked worktree list and cleanup remain so older local checkouts can be
   inspected and removed.

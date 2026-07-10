@@ -24,13 +24,14 @@ only probes tools—it never installs software.
 ## Local lifecycle
 
 ```sh
-kitsoki capsule workspace create --id change-1 --definition clean-repo
+kitsoki capsule workspace create --id change-1 --definition development --owner developer
 kitsoki capsule env resolve ci
 kitsoki capsule ci plan change --workspace change-1
 kitsoki capsule ci run change --workspace change-1
 kitsoki capsule ci status
 kitsoki capsule ci cancel --job <job-id>
-kitsoki capsule workspace close --id change-1
+kitsoki capsule workspace commit --id change-1 --message "Implement change"
+kitsoki capsule workspace integrate --id change-1 --gate "go test ./..." --teardown
 ```
 
 `capsule ci run` seals source, story, environment, and policy identities into
@@ -70,11 +71,12 @@ yet enabled by these commands.
 
 ## Compatibility
 
-`scripts/dev-workspace.sh` remains the required workflow for Kitsoki's
-protected development checkout while its branch-target/bootstrap/merge parity
-adapter is completed. The native `capsule workspace` commands are the generic
-project API; do not replace the protected-checkout staging workflow with ad hoc
-Git operations.
+Kitsoki's checked-in `development` definition is the required protected
+development workflow. Use the native `capsule workspace` commands above; do
+not run the underlying `scripts/dev-workspace.sh` lifecycle directly. The
+compatibility provider intentionally preserves the script's clone,
+branch-target, bootstrap, rebase, and primary-checkout safeguards while the
+generic Capsule API remains available to every project with `.kitsoki/`.
 
 ## Receipts and promotion
 

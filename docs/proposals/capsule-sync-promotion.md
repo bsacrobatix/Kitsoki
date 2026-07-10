@@ -1,8 +1,10 @@
 # Runtime: capsule ref sync and promotion
 
 **Status:** v1 in progress. Local typed plan/classify/apply with stale and
-fast-forward checks is available through Capsule MCP. Conflict integration,
-remote publish, script parity, and promotion receipt enforcement remain.
+fast-forward checks and receipt-to-candidate gate binding are available through
+Capsule CLI/MCP. The native `development` compatibility provider preserves the
+existing protected rebase/gate workflow. Conflict integration and remote
+publish remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)

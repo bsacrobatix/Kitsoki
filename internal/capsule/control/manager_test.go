@@ -56,3 +56,17 @@ func TestManagerLeaseIdempotencyAndStaleHandle(t *testing.T) {
 		t.Fatal("missing stale error")
 	}
 }
+
+func TestManagerUsesOnlyGrantedDevelopmentWorkspaceRoot(t *testing.T) {
+	project := t.TempDir()
+	defaultRoot := filepath.Join(project, ".capsules", "workspaces")
+	stagingRoot := filepath.Join(project, ".capsules", "staging")
+	m := &Manager{Grant: ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{defaultRoot, stagingRoot}}}
+	got, err := m.workspaceRoot(Definition{Source: Source{Kind: SourceDevWorkspaceScript, Development: DevelopmentSource{Root: ".capsules/staging"}}})
+	if err != nil || got != stagingRoot {
+		t.Fatalf("workspace root %q: %v", got, err)
+	}
+	if _, err := m.workspaceRoot(Definition{Source: Source{Kind: SourceDevWorkspaceScript, Development: DevelopmentSource{Root: ".capsules/not-granted"}}}); err == nil {
+		t.Fatal("ungranted development root was accepted")
+	}
+}

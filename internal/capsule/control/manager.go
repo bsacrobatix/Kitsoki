@@ -64,7 +64,10 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 	} else if !strings.Contains(err.Error(), ErrNotFound.Error()) {
 		return Handle{}, err
 	}
-	root := m.Grant.WorkspaceRoots[0]
+	root, err := m.workspaceRoot(def)
+	if err != nil {
+		return Handle{}, err
+	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return Handle{}, fmt.Errorf("capsule control: create workspace root: %w", err)
 	}
@@ -97,6 +100,23 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 	}
 	_ = m.emit(ctx, "capsule.workspace.ready", in)
 	return Handle{ID: in.ID, Generation: in.Generation}, nil
+}
+
+func (m *Manager) workspaceRoot(def Definition) (string, error) {
+	root := m.Grant.WorkspaceRoots[0]
+	if def.Source.Kind != SourceDevWorkspaceScript || strings.TrimSpace(def.Source.Development.Root) == "" {
+		return root, nil
+	}
+	candidate, err := filepath.Abs(filepath.Join(m.Grant.ProjectRoot, def.Source.Development.Root))
+	if err != nil {
+		return "", err
+	}
+	for _, allowed := range m.Grant.WorkspaceRoots {
+		if filepath.Clean(candidate) == filepath.Clean(allowed) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("%w: development workspace root %q", ErrDenied, def.Source.Development.Root)
 }
 
 func (m *Manager) Status(ctx context.Context, h Handle) (Instance, error) {

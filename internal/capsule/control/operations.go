@@ -254,6 +254,33 @@ func (m *Manager) MarkIntegrated(ctx context.Context, h Handle) (Handle, error) 
 	return m.mark(ctx, h, StateIntegrated, "capsule.workspace.integrated")
 }
 
+// Integrate delegates a complete provider-owned integration lifecycle (such as
+// the protected development compatibility adapter), then advances the handle
+// only after that provider has succeeded. It cannot be used by an ungranted
+// agent-facing server.
+func (m *Manager) Integrate(ctx context.Context, h Handle, gate string) (Handle, error) {
+	if !m.Grant.Allows("effect", "local_reconcile") {
+		return Handle{}, fmt.Errorf("%w: local_reconcile", ErrDenied)
+	}
+	in, err := m.Status(ctx, h)
+	if err != nil {
+		return Handle{}, err
+	}
+	provider := m.Providers[in.Provider]
+	integrator, ok := provider.(WorkspaceIntegrator)
+	if !ok {
+		return Handle{}, fmt.Errorf("capsule workspace: provider %q does not own integration", in.Provider)
+	}
+	definition, err := m.Definitions.Get(ctx, in.DefinitionID)
+	if err != nil {
+		return Handle{}, err
+	}
+	if err := integrator.Integrate(ctx, definition, in, gate); err != nil {
+		return Handle{}, err
+	}
+	return m.MarkIntegrated(ctx, h)
+}
+
 func (m *Manager) resolve(ctx context.Context, h Handle, relative string, mustExist bool) (string, error) {
 	root, err := m.WorkspacePath(ctx, h)
 	if err != nil {

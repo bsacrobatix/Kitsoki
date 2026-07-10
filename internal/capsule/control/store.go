@@ -158,6 +158,13 @@ func validateDefinition(def Definition) error {
 		if strings.TrimSpace(def.Source.Ref) == "" || strings.TrimSpace(def.Source.Commit) == "" {
 			return fmt.Errorf("capsule definition %q: pinned source requires ref and commit", def.ID)
 		}
+	case SourceDevWorkspaceScript:
+		if strings.TrimSpace(def.Source.Development.Target) == "" {
+			return fmt.Errorf("capsule definition %q: development target is required", def.ID)
+		}
+		if root := def.Source.Development.Root; filepath.IsAbs(root) || strings.HasPrefix(filepath.Clean(root), "..") {
+			return fmt.Errorf("capsule definition %q: development root escapes project", def.ID)
+		}
 	default:
 		return fmt.Errorf("capsule definition %q: unknown source kind %q", def.ID, def.Source.Kind)
 	}

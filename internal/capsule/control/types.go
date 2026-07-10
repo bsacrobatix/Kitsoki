@@ -48,6 +48,10 @@ const (
 	SourceSynthetic SourceKind = "synthetic"
 	SourceSelf      SourceKind = "self"
 	SourcePinned    SourceKind = "pinned"
+	// SourceDevWorkspaceScript is a temporary Kitsoki compatibility source.
+	// It keeps the protected clone/rebase workflow behind the native manager
+	// while generic projects use self or pinned sources directly.
+	SourceDevWorkspaceScript SourceKind = "dev-workspace-script"
 )
 
 // Definition is a checked-in, immutable Capsule recipe. It contains references
@@ -68,10 +72,22 @@ type Definition struct {
 // project-local capsule recipe; Ref is a project-relative path for self and a
 // remote/cache reference for pinned sources.
 type Source struct {
-	Kind          SourceKind `yaml:"kind" json:"kind"`
-	Ref           string     `yaml:"ref,omitempty" json:"ref,omitempty"`
-	Commit        string     `yaml:"commit,omitempty" json:"commit,omitempty"`
-	SyntheticSpec string     `yaml:"synthetic_spec,omitempty" json:"synthetic_spec,omitempty"`
+	Kind          SourceKind        `yaml:"kind" json:"kind"`
+	Ref           string            `yaml:"ref,omitempty" json:"ref,omitempty"`
+	Commit        string            `yaml:"commit,omitempty" json:"commit,omitempty"`
+	SyntheticSpec string            `yaml:"synthetic_spec,omitempty" json:"synthetic_spec,omitempty"`
+	Development   DevelopmentSource `yaml:"development,omitempty" json:"development,omitempty"`
+}
+
+// DevelopmentSource records the protected-workspace policy consumed by the
+// migration adapter. It intentionally names refs and hooks, never paths or
+// credentials. BranchPrefix may contain no path separators beyond Git refs.
+type DevelopmentSource struct {
+	Base         string `yaml:"base,omitempty" json:"base,omitempty"`
+	Target       string `yaml:"target,omitempty" json:"target,omitempty"`
+	BranchPrefix string `yaml:"branch_prefix,omitempty" json:"branch_prefix,omitempty"`
+	Root         string `yaml:"root,omitempty" json:"root,omitempty"`
+	Bootstrap    bool   `yaml:"bootstrap,omitempty" json:"bootstrap,omitempty"`
 }
 
 // Overlay separates coding workspace material from verifier-only material.
@@ -217,6 +233,14 @@ type WorkspaceProvider interface {
 	Name() string
 	Create(context.Context, Definition, Instance) (MaterializedWorkspace, error)
 	Close(context.Context, Instance) error
+}
+
+// WorkspaceIntegrator is implemented only by providers that own a complete
+// protected integration lifecycle. Generic local ref reconciliation continues
+// through reconcile.Plan/Apply; this seam preserves the historical script's
+// rebase and primary-checkout protection during migration.
+type WorkspaceIntegrator interface {
+	Integrate(context.Context, Definition, Instance, string) error
 }
 
 // MaterializedWorkspace contains facts discovered by the provider, never a
