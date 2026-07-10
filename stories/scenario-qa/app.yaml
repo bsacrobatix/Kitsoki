@@ -20,10 +20,16 @@
 #
 #   idle → plan → resolve → execute → judge → recording → report
 #                               ^________________|
-#             (recording pauses here; "next leg" repeats the loop for the
-#              next transport leg — ONE leg per operator/flow turn, so the
-#              internal emit chain never approaches EmitIntentMaxDepth no
-#              matter how many transports were requested)
+#             (default pause=auto: `recording` self-emits "next leg" and the
+#              loop drains every transport leg in one turn — "check bugfix
+#              on all transports" → a single report, no per-leg ceremony.
+#              pause=each-leg opts back into the old ceremony: recording
+#              pauses for an explicit "next leg" per turn. Either way each
+#              leg is still its own execute → judge → recording hop; the
+#              per-leg emit chain (~3 emit_intent hops) stays well under the
+#              engine's EmitIntentMaxDepth even fully auto-chained across
+#              every transport known today — see recording.yaml's header
+#              comment for the measured budget.)
 #
 #   idle       operator surface: "check" a scenario (catalog id or a free-text
 #              description) on one or more transports.
@@ -126,6 +132,7 @@ world:
   live_profile:         { type: string, default: "" }   # harness profile the driver passes to nested live session.new calls
   live_budget_minutes:  { type: int, default: 0 }   # caller override for run.py --live-budget-minutes; 0 = run.py's own default (20)
   mode:                 { type: string, default: "catalog" } # catalog | adhoc
+  pause:                { type: string, default: "auto" } # auto (default: drain every leg without an operator turn) | each-leg (opt-out: pause at `recording` for an explicit "next transport")
   request_status:       { type: object, default: {} }
 
   # ── run bundle ─────────────────────────────────────────────────────────
@@ -235,6 +242,7 @@ intents:
       seed:         { type: string, required: false }
       profile:      { type: string, required: false }  # harness profile for the driver's nested LIVE sessions (e.g. claude-native)
       live_budget_minutes: { type: int, required: false }  # override run.py's default per-scenario live budget (20 min)
+      pause:        { type: string, required: false }  # auto (default) drains every leg automatically; each-leg pauses at `recording` for an explicit "next transport"
   preview:
     description: "Preview the deterministic scenario x transport suite without creating a run bundle or launching capture."
     synonyms:

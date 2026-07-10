@@ -2,7 +2,7 @@ states:
 
   idle:
     description: "Waiting to check a scenario across one or more transports."
-    relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, suite_status, suite_leg_count, suite_skipped_count, suite_summary, suite_plan, run_id, run_dir, last_error, status]
+    relevant_world: [scenario_ref, scenario_description, transport_arg, persona, target, seed, pause, suite_status, suite_leg_count, suite_skipped_count, suite_summary, suite_plan, run_id, run_dir, last_error, status]
     default_intent: check_request
     view:
       - banner:
@@ -16,6 +16,7 @@ states:
             Transport: "{{ world.transport_arg }}"
             Persona: '{{ world.persona|default:"(default)" }}'
             Target: '{{ world.target|default:"(default)" }}'
+            Pause mode: '{{ world.pause|default:"auto" }}'
             Preview: '{{ world.suite_summary|default:"(not previewed)" }}'
             Last run: '{{ world.run_id|default:"(none yet)" }}'
             Capsule workspace: '{{ world.scenario_workspace_root|default:"(none yet)" }}'
@@ -26,7 +27,7 @@ states:
         when: "world.suite_plan != ''"
       - prose: "{{ world.last_error }}"
         when: "world.last_error != ''"
-      - prose: "Describe the behavior to check. Add qualifiers such as transport=all|tui|web|vscode|cli, persona=<id>, target=<project>, seed=<id>, or profile=<profile>. Use scenario=<id> only when you want a catalog scenario instead of an ad-hoc behavior check."
+      - prose: "Describe the behavior to check. Add qualifiers such as transport=all|tui|web|vscode|cli, persona=<id>, target=<project>, seed=<id>, profile=<profile>, or pause=each-leg (default pause=auto drains every transport leg into one report; pause=each-leg pauses for an explicit \"next transport\" per leg). Use scenario=<id> only when you want a catalog scenario instead of an ad-hoc behavior check."
       - choice:
           mode: single
           prompt: "Actions"
@@ -96,6 +97,7 @@ states:
                   default_seed: "{{ world.seed }}"
                   default_profile: "{{ world.live_profile }}"
                   default_live_budget_minutes: "{{ world.live_budget_minutes }}"
+                  default_pause: "{{ world.pause }}"
               bind:
                 scenario_ref: scenario_ref
                 scenario_description: scenario_description
@@ -105,6 +107,7 @@ states:
                 seed: seed
                 live_profile: live_profile
                 live_budget_minutes: live_budget_minutes
+                pause: pause
                 mode: mode
                 request_status: request_status
               on_error: idle
@@ -143,6 +146,7 @@ states:
                 seed: "{{ slots.seed ?? world.seed }}"
                 live_profile: "{{ slots.profile ?? world.live_profile }}"
                 live_budget_minutes: "{{ slots.live_budget_minutes ?? world.live_budget_minutes }}"
+                pause: "{{ slots.pause ?? world.pause }}"
                 mode: "{{ (slots.description ?? '') != '' ? 'adhoc' : 'catalog' }}"
                 last_error: ""
                 suite_summary: ""
@@ -251,6 +255,7 @@ states:
                   default_seed: "{{ world.seed }}"
                   default_profile: "{{ world.live_profile }}"
                   default_live_budget_minutes: "{{ world.live_budget_minutes }}"
+                  default_pause: "{{ world.pause }}"
               bind:
                 scenario_ref: scenario_ref
                 scenario_description: scenario_description
@@ -260,6 +265,7 @@ states:
                 seed: seed
                 live_profile: live_profile
                 live_budget_minutes: live_budget_minutes
+                pause: pause
                 mode: mode
                 request_status: request_status
               on_error: idle

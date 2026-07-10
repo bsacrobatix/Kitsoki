@@ -6,6 +6,7 @@ inputs:
   default_seed:                { type: string, required: false }
   default_profile:             { type: string, required: false }
   default_live_budget_minutes: { type: int, required: false }
+  default_pause:               { type: string, required: false }
 
 outputs:
   scenario_ref:         { type: string }
@@ -16,5 +17,6 @@ outputs:
   seed:                 { type: string }
   live_profile:         { type: string }
   live_budget_minutes:  { type: int }
+  pause:                { type: string }
   mode:                 { type: string }
   request_status:       { type: object }

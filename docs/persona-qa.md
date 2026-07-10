@@ -60,11 +60,30 @@ From the story, use natural prompts or explicit `key=value` qualifiers:
 ```text
 preview required user input affordance transport=web,tui target=<project-id>
 preview scenario=<catalog-scenario-id> transport=all
-check scenario=<catalog-scenario-id> transport=tui,web persona=<persona-id> target=<project-id>
-check whether settings validation persists transport=web target=<project-id>
-next transport
+check bugfix on all transports
 report
 main room
+```
+
+That is the whole one-prompt path: `check` on however many transports drains
+every leg on its own and lands on `report` in one turn — no `next transport`
+in between. The explicit forms still work the same way:
+
+```text
+check scenario=<catalog-scenario-id> transport=tui,web persona=<persona-id> target=<project-id>
+check whether settings validation persists transport=web target=<project-id>
+```
+
+Add `pause=each-leg` to any `check` to opt back into the old per-leg ceremony
+— useful when a human wants to inspect each transport's evidence before
+continuing, or when an MCP-driven caller wants to control the pace itself
+with `session.submit next_leg` between legs:
+
+```text
+check scenario=<catalog-scenario-id> transport=all pause=each-leg
+next transport
+next transport
+report
 ```
 
 The resting room also accepts unmatched prose as a `check_request`, so an
@@ -80,9 +99,12 @@ renders the operator's requested behavior in the preview. It does not create a
 run bundle, launch capture, or call an LLM.
 
 `check` creates the run bundle under `.artifacts/product-journey/<run-id>/`,
-then drives one transport-pinned check at a time. Multi-transport checks pause
-after each transport so the operator can inspect evidence before continuing
-with `next transport`.
+then drives one transport-pinned check at a time. By default (`pause=auto`)
+a multi-transport check drains every leg in one turn — `check bugfix on all
+transports` produces a finished report with no further prompting. Add
+`pause=each-leg` to pause after each transport instead, so the operator (or
+an MCP caller submitting `next_leg` itself) can inspect evidence before
+continuing with `next transport`.
 `report` folds the recorded driver and judge outcomes into:
 
 - `report.md` for the per-transport verdict table.

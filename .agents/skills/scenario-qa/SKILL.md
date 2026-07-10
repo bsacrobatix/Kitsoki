@@ -109,10 +109,17 @@ Open `stories/scenario-qa/app.yaml`. Intents:
   passes to nested LIVE `session.new` calls; see "Authorization & harness
   (fail-closed)" above for what omitting it does and does not silently do
 - `check description="<free text>" transport=...` — ad-hoc scenario
-- `next_leg` — drive the next transport leg (one leg per turn; the loop
-  pauses at `recording` between legs so the internal emit chain never
-  approaches the engine's `EmitIntentMaxDepth` regardless of how many
-  transports were requested)
+- `pause=each-leg` — opt-out qualifier on `check` (default `pause=auto`):
+  pauses at `recording` after each transport leg for an explicit `next_leg`
+  instead of self-draining every leg in one turn. Use it when you (or an MCP
+  caller) want to inspect/gate each leg individually, e.g. drive it with
+  repeated `session.submit next_leg` calls.
+- `next_leg` — drive the next transport leg. With the default `pause=auto`
+  `recording` self-emits this after every leg but the last, so a
+  `transport=all` check drains straight to `report` without you submitting
+  it; with `pause=each-leg` you submit it yourself once per remaining leg.
+  Either way it is the SAME intent/handler — see `rooms/recording.yaml`'s
+  header comment for the measured emit-chain budget behind the default.
 - `report` — (re)build `report.md` from the current run's per-leg outcomes
 - `status` / `look` — re-render current progress
 
@@ -127,9 +134,13 @@ otherwise pass their description as `description=`.
 1. `session.open` (or `session.new`) on `stories/scenario-qa/app.yaml`.
 2. Submit `check` with the resolved slots.
 3. The room pipeline (`plan → execute → judge → recording → report`) drives
-   the run bundle, dispatches the driver per leg (transport-pinned), judges
-   each leg independently, and pauses at `recording` between legs.
-4. Submit `next_leg` once per remaining transport leg.
+   the run bundle, dispatches the driver per leg (transport-pinned), and
+   judges each leg independently. With the default `pause=auto` it drains
+   every leg and lands on `report` in that same `check` turn — nothing
+   further to submit. Pass `pause=each-leg` on `check` if you want it to
+   pause at `recording` between legs instead (step 4 below).
+4. Only with `pause=each-leg`: submit `next_leg` once per remaining
+   transport leg.
 5. Read `report.md` (`world.report_path`) and/or `deck.slidey.json`
    (`world.deck_path`) in the run dir for the final per-transport verdict
    table. The run dir is inside the managed capsule workspace; use
