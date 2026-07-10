@@ -9,3 +9,8 @@ or a DAG.
 The runtime, not this story, owns workspace materialization, environment locks,
 executor selection, receipts, and promotion authorization. Optional LLM review
 and writer phases are ordinary project story rooms with explicit policies.
+
+No-LLM flow fixtures cover the base story's honest park behavior plus direct
+phase outcomes for pass, fail, and needs-input. These fixtures assert the
+`capsule-ci-verdict/v1` object that project compositions and the Capsule CI
+runtime consume.
