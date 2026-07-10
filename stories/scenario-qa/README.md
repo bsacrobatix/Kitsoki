@@ -35,7 +35,15 @@ Useful prompts:
 - `check whether settings validation persists transport=web`
   drafts an ad-hoc scenario from prose and checks it on the requested
   transport.
-- `next transport` advances through the remaining transport checks one at a time.
+- `check bugfix on all transports` (or any multi-transport `check`) drains
+  every transport leg automatically and lands straight on the report — no
+  per-leg ceremony. Add `pause=each-leg` to opt back into the manual
+  ceremony (pause at `recording` after each leg for an explicit `next
+  transport`/`next_leg`, e.g. for an MCP caller driving the loop itself with
+  `session.submit next_leg`).
+- `next transport` (intent `next_leg`) advances to the next transport check.
+  With the default `pause=auto` it fires itself; with `pause=each-leg` it is
+  how you continue by hand.
 - `report` rebuilds `report.md` and `deck.slidey.json` for the current run.
 - `main room` returns from the closeout report to the Scenario QA start screen
   while keeping the last run available.
