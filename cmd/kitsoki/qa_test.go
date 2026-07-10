@@ -3,6 +3,8 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +90,24 @@ func TestVerifyJourneyReplayRejectsTransitionDrift(t *testing.T) {
 	}
 	if err := verifyJourneyReplay(origin, replay); err == nil {
 		t.Fatal("expected replay drift to fail")
+	}
+}
+
+func TestTraceTargetsAcceptsLargeEmbeddedStoryRecord(t *testing.T) {
+	dir := t.TempDir()
+	trace := filepath.Join(dir, "origin.jsonl")
+	large := strings.Repeat("x", 5*1024*1024)
+	body := `{"kind":"session.story","payload":{"source":"` + large + `"}}` + "\n" +
+		`{"kind":"machine.transition","payload":{"to":"core.landing"}}` + "\n"
+	if err := os.WriteFile(trace, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := traceTargets(trace)
+	if err != nil {
+		t.Fatalf("traceTargets: %v", err)
+	}
+	if got, want := targets, []string{"core.landing"}; !slices.Equal(got, want) {
+		t.Fatalf("targets = %v, want %v", got, want)
 	}
 }
 
