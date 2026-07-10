@@ -153,6 +153,17 @@ func TestCapsuleOpenCoreUsesManagedPathWithLegacyManifest(t *testing.T) {
 	}
 }
 
+func TestCapsuleCloseRefusesNonCapsule(t *testing.T) {
+	dir := t.TempDir()
+	out, err := execRoot(t, "capsule", "close", dir)
+	if err == nil {
+		t.Fatalf("capsule close accepted non-capsule:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "missing .kitsoki-capsule") {
+		t.Fatalf("unexpected close error: %v\n%s", err, out)
+	}
+}
+
 func TestCapsuleVerifyCoreUsesManagedOpenWithLegacyResult(t *testing.T) {
 	out, err := execRoot(t, "capsule", "verify", "clean-repo", "--json")
 	if err != nil {
