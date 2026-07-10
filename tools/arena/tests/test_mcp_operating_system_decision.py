@@ -120,14 +120,39 @@ except ValueError:
 
 # The separate live authorization record refuses both a missing token and an
 # insufficient budget and never makes a provider call even when accepted.
-for authorization, budget in [("", 3.0), ("I_UNDERSTAND_LIVE_CALIBRATION", 0.5)]:
+for authorization, budget in [("", 3.0), ("I_UNDERSTAND_LIVE_CALIBRATION", 0.5), ("I_UNDERSTAND_LIVE_CALIBRATION", 3.0)]:
     try:
-        authorize_live_calibration(SPEC, authorization=authorization, budget_usd=budget)
+        authorize_live_calibration(
+            SPEC,
+            authorization=authorization,
+            budget_usd=budget,
+            provider="claude-cli",
+            model="claude-fable-5",
+        )
         failures.append("invalid live calibration request was accepted")
     except ValueError:
         pass
-request = authorize_live_calibration(SPEC, authorization="I_UNDERSTAND_LIVE_CALIBRATION", budget_usd=3.0)
+try:
+    authorize_live_calibration(
+        SPEC,
+        authorization="I_UNDERSTAND_LIVE_CALIBRATION",
+        budget_usd=3.0,
+        provider="gpt-5.5",
+        model="gpt-5.5",
+    )
+    failures.append("unsupported or deceptive provider identity was accepted")
+except ValueError:
+    pass
+request = authorize_live_calibration(
+    SPEC,
+    authorization="I_UNDERSTAND_LIVE_CALIBRATION",
+    budget_usd=25.0,
+    provider="claude-cli",
+    model="claude-fable-5",
+)
 check("live authorization is not a dispatch", request["status"], "authorized-not-dispatched")
+check("live authorization records Claude provider", request["provider"], "claude-cli")
+check("live authorization records selected model", request["model"], "claude-fable-5")
 
 if failures:
     print("FAIL: MCP operating-system replay decision")

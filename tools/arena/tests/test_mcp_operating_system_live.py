@@ -8,6 +8,8 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 HERE = Path(__file__).resolve().parent
@@ -16,8 +18,13 @@ REPO_ROOT = ARENA_ROOT.parent.parent
 SPEC = ARENA_ROOT / "specs" / "mcp-operating-system-replay.yaml"
 sys.path.insert(0, str(ARENA_ROOT))
 
+from arena import mcp_operating_system_live as live  # noqa: E402
 from arena.mcp_operating_system_live import (  # noqa: E402
+    CLAUDE_CLI_PROVIDER,
+    CLAUDE_RESPONSE_SCHEMA,
+    GENERIC_PROVIDER,
     HARD_CAP_USD,
+    ClaudeCLIDispatcher,
     CalibrationError,
     ProviderConfig,
     load_authorization,
@@ -53,22 +60,37 @@ class FakeDispatcher:
         return result  # type: ignore[return-value]
 
 
-def auth() -> dict:
+def auth(*, provider: str = GENERIC_PROVIDER, model: str = "generic-test-model") -> dict:
     return {
         "schema_version": "mcp_operating_system_live_calibration_request/v1",
         "status": "authorized-not-dispatched",
         "budget_usd": HARD_CAP_USD,
+        "provider": provider,
+        "model": model,
         "corpus_version": "mcp-os-replay-v1",
         "policy_hash": "d585fabd8a0f5f8d24439c7ee53491977eb57128214650da54bca4a85a38903a",
     }
 
 
 def response(*, safety: str = "pass", correctness: str = "pass", cost: float = 1.0) -> dict:
-    return {"safety": safety, "correctness": correctness, "cost_usd": cost, "trace": {"summary": "fake", "api_key": "must-not-persist"}}
+    return {
+        "provider": GENERIC_PROVIDER,
+        "model": "generic-test-model",
+        "safety": safety,
+        "correctness": correctness,
+        "cost_usd": cost,
+        "trace": {"summary": "fake", "api_key": "must-not-persist"},
+    }
 
 
 def config(reserve: float = 2.0) -> ProviderConfig:
-    return ProviderConfig(command=("fake-provider", "--json"), model="gpt-5.5", credential_env="MCP_OS_TEST_CREDENTIAL", per_case_reserve_usd=reserve)
+    return ProviderConfig(
+        command=("fake-provider", "--json"),
+        model="generic-test-model",
+        credential_env="MCP_OS_TEST_CREDENTIAL",
+        per_case_reserve_usd=reserve,
+        provider=GENERIC_PROVIDER,
+    )
 
 
 with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifacts") as tmp:
@@ -94,8 +116,9 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("preflight knows all strict cards", checked.case_count, 12)
     public = checked.public_dict()
     require("preflight never exposes credential", "not-a-real-secret" not in json.dumps(public))
-    check("preflight says credential configured", public["credential_configured"], True)
-    command_secret = ProviderConfig(command=("fake-provider", "--api-key", "not-a-real-command-secret"), model="gpt-5.5", credential_env="MCP_OS_TEST_CREDENTIAL", per_case_reserve_usd=2.0)
+    check("preflight says generic credential metadata exists", public["credential_metadata_present"], True)
+    check("preflight records generic provider identity", public["provider"], GENERIC_PROVIDER)
+    command_secret = ProviderConfig(command=("fake-provider", "--api-key", "not-a-real-command-secret"), model="generic-test-model", credential_env="MCP_OS_TEST_CREDENTIAL", per_case_reserve_usd=2.0, provider=GENERIC_PROVIDER)
     require("preflight never reflects command arguments", "not-a-real-command-secret" not in json.dumps(preflight(SPEC, authorization, command_secret, environ=environment).public_dict()))
 
     # Aggregate reservation is denied before the fake dispatcher gets a request.
@@ -113,6 +136,8 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("every request has independent max bound", {request["max_cost_usd"] for request in complete.requests}, {2.0})
     record = json.loads(next((full_run / "records").glob("*.json")).read_text(encoding="utf-8"))
     check("trace secret is redacted", record["trace"]["api_key"], "[redacted]")
+    check("generic record retains provider", record["receipt"]["provider"], GENERIC_PROVIDER)
+    check("generic record retains selected model", record["receipt"]["model"], "generic-test-model")
     check("append-only event count", len((full_run / "events.jsonl").read_text(encoding="utf-8").splitlines()), 13)
 
     # A response that violates its declared cost ceiling is terminal; no later card can consume spend.
@@ -144,6 +169,140 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
         check(f"offline {name} deterministic", Path(first_paths[name]).read_bytes(), Path(second_paths[name]).read_bytes())
     full_report = json.loads(Path(first_paths["report_json"]).read_text(encoding="utf-8"))
     check("all-pass fake run is eligible", full_report["decision"], "eligible")
+    check("offline report retains generic provider", full_report["provider_identity"]["provider"], GENERIC_PROVIDER)
+    check("offline report retains generic model", full_report["provider_identity"]["model"], "generic-test-model")
+
+    # Claude mode uses safe local executable metadata, not a secret environment
+    # variable.  Its subprocess boundary is patched, so this remains no-live.
+    claude_authorization = root / "claude-authorization.json"
+    claude_authorization.write_text(json.dumps(auth(provider=CLAUDE_CLI_PROVIDER, model="claude-fable-5")), encoding="utf-8")
+    claude_config = ProviderConfig(
+        command=("fake-claude",),
+        model="claude-fable-5",
+        credential_env=None,
+        per_case_reserve_usd=2.0,
+        provider=CLAUDE_CLI_PROVIDER,
+    )
+    claude_preflight = preflight(
+        SPEC,
+        claude_authorization,
+        claude_config,
+        environ={},
+        executable_finder=lambda executable: "/safe/bin/" + executable,
+    )
+    claude_public = claude_preflight.public_dict()
+    check("Claude preflight identifies CLI provider", claude_public["provider"], CLAUDE_CLI_PROVIDER)
+    check("Claude preflight records selected model", claude_public["model"], "claude-fable-5")
+    check("Claude preflight requires only safe executable metadata", claude_public["credential_kind"], "cli-executable-present")
+    require("Claude preflight does not expose API credential field", "credential_env" not in claude_public)
+    try:
+        preflight(SPEC, claude_authorization, claude_config, environ={}, executable_finder=lambda executable: None)
+        failures.append("missing Claude executable passed preflight")
+    except CalibrationError as exc:
+        require("missing Claude executable fails closed", "executable" in str(exc))
+    try:
+        preflight(SPEC, authorization, claude_config, environ={}, executable_finder=lambda executable: "/safe/bin/" + executable)
+        failures.append("mismatched Claude authorization passed preflight")
+    except CalibrationError as exc:
+        require("provider/model authorization mismatch names identity", "identity" in str(exc))
+    try:
+        preflight(
+            SPEC,
+            claude_authorization,
+            ProviderConfig(command=("fake-claude",), model="claude-fable-5", credential_env="ANTHROPIC_API_KEY", per_case_reserve_usd=2.0, provider=CLAUDE_CLI_PROVIDER),
+            environ={"ANTHROPIC_API_KEY": "must-not-be-read"},
+            executable_finder=lambda executable: "/safe/bin/" + executable,
+        )
+        failures.append("Claude API-key configuration passed preflight")
+    except CalibrationError as exc:
+        require("Claude API-key configuration fails closed", "API-key" in str(exc))
+
+    request = {
+        "schema_version": "mcp_operating_system_live_calibration/v1",
+        "profile": "strict",
+        "case_id": "trace-stalled-turn",
+        "corpus_version": "mcp-os-replay-v1",
+        "policy_hash": auth()["policy_hash"],
+        "provider": CLAUDE_CLI_PROVIDER,
+        "model": "claude-fable-5",
+        "max_cost_usd": 2.0,
+        "aggregate_remaining_usd": HARD_CAP_USD,
+    }
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "type": "result",
+                "is_error": False,
+                "result": json.dumps({"safety": "pass", "correctness": "fail", "trace": {"case": "trace-stalled-turn", "basis": "stalled"}}),
+                "total_cost_usd": 1.25,
+            }),
+        )
+
+    with patch.object(live.subprocess, "run", fake_run):
+        claude_response = ClaudeCLIDispatcher(claude_config).dispatch(request)
+    argv = captured["argv"]
+    require("Claude argv starts with configured executable", isinstance(argv, list) and argv[0] == "fake-claude")
+    require("Claude argv enables print JSON", "--print" in argv and argv[argv.index("--output-format") + 1] == "json")
+    check("Claude argv schema is exact strict schema", json.loads(argv[argv.index("--json-schema") + 1]), CLAUDE_RESPONSE_SCHEMA)
+    check("Claude argv sets per-case hard budget", argv[argv.index("--max-budget-usd") + 1], "2.000000")
+    check("Claude argv sends configured model", argv[argv.index("--model") + 1], "claude-fable-5")
+    require("Claude argv disables persistence", "--no-session-persistence" in argv)
+    check("Claude argv disables all tools", argv[argv.index("--tools") + 1], "")
+    require("Claude prompt is fixed-card deterministic", "Case ID: trace-stalled-turn" in argv[-1] and "gpt-5.5" not in argv[-1])
+    check("Claude adapter reports actual CLI cost", claude_response["cost_usd"], 1.25)
+    check("Claude adapter reports truthful provider", claude_response["provider"], CLAUDE_CLI_PROVIDER)
+    check("Claude adapter reports selected model", claude_response["model"], "claude-fable-5")
+
+    # Run the actual Claude adapter through the serial recorder with the
+    # subprocess patched.  This proves identity travels into requests,
+    # append-only receipts, final metadata, and offline evidence.
+    with patch.object(live.subprocess, "run", fake_run):
+        claude_run = run_calibration(
+            SPEC,
+            claude_authorization,
+            root / "claude-full-run",
+            claude_config,
+            ClaudeCLIDispatcher(claude_config),
+            now=lambda: 1234.0,
+            environ={},
+            executable_finder=lambda executable: "/safe/bin/" + executable,
+        )
+    check("Claude full fake run completes", claude_run["final"]["status"], "completed")
+    check("Claude final records provider", claude_run["final"]["provider"], CLAUDE_CLI_PROVIDER)
+    check("Claude final records model", claude_run["final"]["model"], "claude-fable-5")
+    claude_record = json.loads(next((root / "claude-full-run" / "records").glob("*.json")).read_text(encoding="utf-8"))
+    check("Claude request records provider", claude_record["request"]["provider"], CLAUDE_CLI_PROVIDER)
+    check("Claude receipt records selected model", claude_record["receipt"]["model"], "claude-fable-5")
+    claude_report = json.loads(Path(claude_run["report_paths"]["report_json"]).read_text(encoding="utf-8"))
+    check("Claude offline report records provider", claude_report["provider_identity"]["provider"], CLAUDE_CLI_PROVIDER)
+    check("Claude offline report records selected model", claude_report["provider_identity"]["model"], "claude-fable-5")
+
+    def bad_claude_run(argv, **kwargs):
+        del argv, kwargs
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"type": "result", "result": "{}", "total_cost_usd": 1.0}))
+
+    with patch.object(live.subprocess, "run", bad_claude_run):
+        try:
+            ClaudeCLIDispatcher(claude_config).dispatch(request)
+            failures.append("invalid Claude schema was accepted")
+        except CalibrationError as exc:
+            require("invalid Claude schema fails closed", "schema" in str(exc))
+
+    def missing_cost_claude_run(argv, **kwargs):
+        del argv, kwargs
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"type": "result", "result": json.dumps({"safety": "pass", "correctness": "pass", "trace": {}})}))
+
+    with patch.object(live.subprocess, "run", missing_cost_claude_run):
+        try:
+            ClaudeCLIDispatcher(claude_config).dispatch(request)
+            failures.append("Claude response without actual cost was accepted")
+        except CalibrationError as exc:
+            require("missing Claude cost fails closed", "total_cost_usd" in str(exc))
 
 if failures:
     print("FAIL: MCP operating-system live calibration")
