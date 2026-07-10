@@ -686,10 +686,11 @@ FIX_TESTS_MAX_CYCLES ?= 3
 fix-tests:
 	@command -v jq >/dev/null 2>&1 || { echo "error: jq is required for 'make fix-tests'" >&2; exit 1; }
 	@go build -o ./.kitsoki-fixtests $(PKG)
-	@db=$$(mktemp "$${TMPDIR:-/tmp}/kitsoki-fixtests.XXXXXX.db"); \
-	 marker=$$(mktemp "$${TMPDIR:-/tmp}/kitsoki-fixtests-report.XXXXXX"); \
+	@tmpdir=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-fixtests.XXXXXX"); \
+	 db="$$tmpdir/session.db"; \
+	 marker="$$tmpdir/report-marker"; touch "$$marker"; \
 	 report_dir=.artifacts/fix-tests/runs/$$(date +%Y%m%dT%H%M%S)-$$$$; mkdir -p "$$report_dir"; \
-	 trap 'rm -f ./.kitsoki-fixtests "$$db" "$$marker"' EXIT; \
+	 trap 'rm -f ./.kitsoki-fixtests; rm -rf "$$tmpdir"' EXIT; \
 	 slots=$$(jq -cn \
 	   --arg test_cmd "$(FIX_TESTS_TEST_CMD)" \
 	   --arg quick_test_cmd "$(FIX_TESTS_QUICK_TEST_CMD)" \
