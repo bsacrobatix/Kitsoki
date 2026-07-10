@@ -24,17 +24,20 @@
 // # Contracts
 //
 // The zero value of Executor is not useful: callers must inject both
-// FixtureOpener and OracleRunner. The package never shells out, fetches a
-// repository, or calls a model itself. Implementations own those effects and
-// must provide isolated workspaces. Executor is safe for concurrent calls when
-// its dependencies are safe for concurrent calls.
+// FixtureOpener and OracleRunner. Executor itself never shells out, fetches a
+// repository, or calls a model; explicitly configured implementations own those
+// effects and must provide isolated workspaces. Executor is safe for concurrent
+// calls when its dependencies are safe for concurrent calls.
 //
 // # Non-goals
 //
 //   - Package corpusproof does not discover candidates or interpret a
 //     story-specific oracle; that would let an admission path certify itself.
-//   - Package corpusproof does not materialize remote history directly; capsule
-//     and repo-history executors own source-specific isolation.
+//   - Package corpusproof does not materialize remote history directly.
+//     RepositoryFixtureOpener works from one configured local root only, while
+//     capsule and repo-history adapters can own source-specific isolation.
+//   - Package corpusproof does not run an oracle through an ordinary process.
+//     CommandOracleRunner requires an injected network-disabled sandbox.
 //   - Package corpusproof does not retry a green baseline into a red result;
 //     such a case is an explicit rejection, not training evidence.
 //
