@@ -30,7 +30,15 @@ func (g PromotionGate) Verify(_ context.Context, receiptID string, plan reconcil
 	if err != nil {
 		return err
 	}
-	verified := receipt.Verify(r, g.Signer, g.RequireSignature)
+	policy, err := receiptPolicy(g.ProjectRoot)
+	if err != nil {
+		return err
+	}
+	requireSignature := g.RequireSignature || policy.RequireSignature
+	if policy.Signer != "" && g.Signer != nil && g.Signer.Name() != policy.Signer {
+		return fmt.Errorf("capsule sync: signer %q does not satisfy project policy %q", g.Signer.Name(), policy.Signer)
+	}
+	verified := receipt.Verify(r, g.Signer, requireSignature)
 	if verified.Status != "valid" || !verified.PromotionEligible {
 		return fmt.Errorf("capsule sync: gate receipt is not promotion eligible")
 	}

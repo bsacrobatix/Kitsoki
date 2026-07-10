@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,8 +20,15 @@ type Stored struct {
 	TracePath    string               `json:"trace_path"`
 	ReceiptPath  string               `json:"receipt_path"`
 }
+type PersistOptions struct {
+	Signer receipt.Signer
+}
 
 func Persist(project string, result ci.RunResult) (Stored, error) {
+	return PersistWithOptions(project, result, PersistOptions{})
+}
+
+func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions) (Stored, error) {
 	if result.Job.ID == "" {
 		return Stored{}, fmt.Errorf("capsule record: job id is required")
 	}
@@ -45,6 +53,15 @@ func Persist(project string, result ci.RunResult) (Stored, error) {
 	if err != nil {
 		return Stored{}, err
 	}
+	built, err = signByPolicy(project, built, opts.Signer)
+	if err != nil {
+		return Stored{}, err
+	}
+	policy, err := receiptPolicy(project)
+	if err != nil {
+		return Stored{}, err
+	}
+	verification = receipt.Verify(built, opts.Signer, policy.RequireSignature)
 	if verification.Status != "valid" {
 		return Stored{}, fmt.Errorf("capsule record: receipt %s", verification.Status)
 	}
@@ -57,4 +74,32 @@ func Persist(project string, result ci.RunResult) (Stored, error) {
 		return Stored{}, err
 	}
 	return Stored{Receipt: built, Verification: verification, TracePath: tracePath, ReceiptPath: receiptPath}, nil
+}
+
+func signByPolicy(project string, r receipt.Receipt, signer receipt.Signer) (receipt.Receipt, error) {
+	policy, err := receiptPolicy(project)
+	if err != nil {
+		return r, err
+	}
+	if !policy.RequireSignature {
+		return r, nil
+	}
+	if signer == nil {
+		return r, fmt.Errorf("capsule record: receipt signature required by project policy")
+	}
+	if policy.Signer != "" && signer.Name() != policy.Signer {
+		return r, fmt.Errorf("capsule record: signer %q does not satisfy project policy %q", signer.Name(), policy.Signer)
+	}
+	return receipt.Sign(r, signer)
+}
+
+func receiptPolicy(project string) (ci.ReceiptPolicy, error) {
+	cfg, err := ci.Load(project)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ci.ReceiptPolicy{}, nil
+		}
+		return ci.ReceiptPolicy{}, err
+	}
+	return cfg.Receipt, nil
 }

@@ -1,10 +1,10 @@
 # Tracing: capsule CI receipts and attestations
 
 **Status:** v1 in progress. Canonical receipt build/verification, tamper tests,
-signer DI, shared trace schema constants, controller trace sidecars,
-promotion-gate binding, and `capsule-ci-run-index/v1` status projection ship.
-Rich trace producers, runstatus/provider publication, and trusted remote receipt
-adoption remain.
+signer/verifier DI, fake signer, project receipt-signature policy, shared trace
+schema constants, controller trace sidecars, promotion-gate binding, and
+`capsule-ci-run-index/v1` status projection ship. Rich trace producers,
+runstatus/provider publication, and trusted remote receipt adoption remain.
 **Kind:**   tracing
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -200,7 +200,7 @@ of evidence.
 - [ ] 2.3 Add RunIndex receipt projection, capsule ci status output, and runstatus/provider summary consumers
   - Shipped: `capsule-ci-run-index/v1` plus CLI/MCP status projection.
   - Remaining: runstatus/provider summary consumers.
-- [ ] 2.4 Add signer/verifier DI seam and fake; require according to project policy
+- [x] 2.4 Add signer/verifier DI seam and fake; require according to project policy
 
 ## 3. Prove and document
 - [ ] 3.1 Add all golden traces above; assert byte-stable unsigned rebuild and old-reader compatibility

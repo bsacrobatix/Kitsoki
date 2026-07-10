@@ -72,7 +72,7 @@ func capsuleCIPlanCmd() *cobra.Command {
 	return cmd
 }
 func capsuleCIRunCmd() *cobra.Command {
-	var project, workspace, verdictPath string
+	var project, workspace, verdictPath, fakeReceiptSigner string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "run <pipeline>", Args: cobra.ExactArgs(1), Short: "Run declared Capsule CI with a story-produced typed verdict", RunE: func(cmd *cobra.Command, args []string) error {
 		m, in, p, _, err := ciInputs(cmd.Context(), project, workspace, args[0])
@@ -102,7 +102,11 @@ func capsuleCIRunCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		stored, err := record.Persist(project, result)
+		signer, err := capsuleFakeReceiptSigner(fakeReceiptSigner)
+		if err != nil {
+			return err
+		}
+		stored, err := record.PersistWithOptions(project, result, record.PersistOptions{Signer: signer})
 		if err != nil {
 			return err
 		}
@@ -115,6 +119,7 @@ func capsuleCIRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "managed workspace id")
 	cmd.Flags().StringVar(&verdictPath, "verdict", "", "optional externally produced capsule-ci-verdict/v1 JSON; omit to drive the declared story engine")
+	cmd.Flags().StringVar(&fakeReceiptSigner, "fake-receipt-signer", "", "deterministic local/test receipt signer id for projects requiring signed receipts")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("workspace")
 	return cmd
