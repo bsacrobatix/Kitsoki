@@ -7,11 +7,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/reconcile"
 )
 
 type CapsuleConfig struct {
@@ -23,6 +25,12 @@ type CapsuleServer struct {
 	mcpSrv           *mcpsdk.Server
 	manager          *control.Manager
 	owner, projectID string
+	plans            map[string]capsuleSyncPlan
+	mu               sync.Mutex
+}
+type capsuleSyncPlan struct {
+	plan   reconcile.Plan
+	handle control.Handle
 }
 
 func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
@@ -32,7 +40,7 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	if strings.TrimSpace(cfg.Owner) == "" {
 		return nil, fmt.Errorf("capsule mcp: owner is required")
 	}
-	s := &CapsuleServer{manager: cfg.Manager, owner: cfg.Owner, projectID: cfg.ProjectID}
+	s := &CapsuleServer{manager: cfg.Manager, owner: cfg.Owner, projectID: cfg.ProjectID, plans: map[string]capsuleSyncPlan{}}
 	s.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{Name: "kitsoki-capsule", Version: "v1"}, nil)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.project.describe", Description: "Describe this already-scoped Capsule project and its fixed capabilities. No machine paths or secret values are returned."}, s.describe)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.definition.inspect", Description: "Inspect an allowed immutable Capsule definition."}, s.definition)
@@ -47,6 +55,8 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.vcs.status", Description: "Read local Git status for a Capsule workspace."}, s.vcsStatus)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.vcs.diff", Description: "Read the local Git diff for a Capsule workspace."}, s.vcsDiff)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.vcs.commit", Description: "Commit local Capsule workspace changes. This does not publish or update a remote."}, s.vcsCommit)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.plan", Description: "Observe a handle-scoped workspace and create an immutable, stale-safe local reconciliation plan. It never publishes remotely."}, s.syncPlan)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.apply", Description: "Apply a previously returned reconciliation plan only if all observed refs and the workspace generation are unchanged. Required CI gate evidence is checked before promotion."}, s.syncApply)
 	return s, nil
 }
 func (s *CapsuleServer) Run(ctx context.Context) error {
@@ -90,6 +100,16 @@ type capsuleRunArgs struct {
 type capsuleCommitArgs struct {
 	Workspace control.Handle `json:"workspace"`
 	Message   string         `json:"message"`
+}
+type capsuleSyncPlanArgs struct {
+	Workspace    control.Handle      `json:"workspace"`
+	Operation    reconcile.Operation `json:"operation"`
+	Target       string              `json:"target"`
+	RequiredGate string              `json:"required_gate,omitempty"`
+}
+type capsuleSyncApplyArgs struct {
+	PlanDigest  string `json:"plan_digest"`
+	GateReceipt string `json:"gate_receipt,omitempty"`
 }
 type capsuleError struct {
 	OK    bool   `json:"ok"`
@@ -212,6 +232,60 @@ func (s *CapsuleServer) vcsCommit(ctx context.Context, _ *mcpsdk.CallToolRequest
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "workspace": h}, nil
+}
+func (s *CapsuleServer) syncPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleSyncPlanArgs) (*mcpsdk.CallToolResult, any, error) {
+	if !s.manager.Grant.Allows("effect", "local_reconcile") {
+		return capsuleErr(fmt.Errorf("%w: local_reconcile", control.ErrDenied)), nil, nil
+	}
+	in, err := s.manager.Status(ctx, a.Workspace)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	if in.Lease.Owner != s.owner {
+		return capsuleErr(control.ErrDenied), nil, nil
+	}
+	path, err := s.manager.WorkspacePath(ctx, a.Workspace)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	p, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{Workspace: path, TargetRef: a.Target, Operation: a.Operation, Generation: a.Workspace.Generation, RequiredGate: a.RequiredGate})
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	s.mu.Lock()
+	s.plans[p.Digest] = capsuleSyncPlan{plan: p, handle: a.Workspace}
+	s.mu.Unlock()
+	return nil, map[string]any{"ok": true, "plan": p}, nil
+}
+func (s *CapsuleServer) syncApply(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleSyncApplyArgs) (*mcpsdk.CallToolResult, any, error) {
+	s.mu.Lock()
+	record, ok := s.plans[a.PlanDigest]
+	s.mu.Unlock()
+	if !ok {
+		return capsuleErr(fmt.Errorf("capsule sync: plan %q not found", a.PlanDigest)), nil, nil
+	}
+	in, err := s.manager.Status(ctx, record.handle)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	if in.Lease.Owner != s.owner {
+		return capsuleErr(control.ErrDenied), nil, nil
+	}
+	gate := reconcile.GateVerifierFunc(func(_ context.Context, receipt string, plan reconcile.Plan) error {
+		if plan.RequiredGate != "" && strings.TrimSpace(receipt) == "" {
+			return fmt.Errorf("capsule sync: required gate receipt is missing")
+		}
+		return nil
+	})
+	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: gate}).Apply(ctx, record.plan, a.GateReceipt)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	next, err := s.manager.MarkIntegrated(ctx, record.handle)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "result": result, "workspace": next}, nil
 }
 func capsuleErr(err error) *mcpsdk.CallToolResult {
 	return &mcpsdk.CallToolResult{IsError: true, StructuredContent: capsuleError{OK: false, Error: err.Error()}, Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: fmt.Sprintf(`{"ok":false,"error":%q}`, err.Error())}}}
