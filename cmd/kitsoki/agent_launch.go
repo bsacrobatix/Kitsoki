@@ -116,7 +116,8 @@ into a concrete Claude/Codex task-agent launch.
 
 When --app is set, the agent comes from that story's top-level agents: block.
 When --app is omitted, the agent is resolved as a freestanding Codex agent from
-.codex/agents/<name>.toml (or --agent-file). Freestanding Codex agents may
+project overrides or the embedded Kitsoki agent library (or --agent-file).
+Freestanding Codex agents may
 declare [mcp_servers.*] blocks; launch attaches them exactly like a Claude
 --mcp-config, then the Codex backend translates them to codex -c overrides.
 
@@ -152,7 +153,7 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 	}
 
 	cmd.Flags().StringVar(&opts.AppPath, "app", "", "optional story app.yaml whose top-level agents: block declares --agent")
-	cmd.Flags().StringVar(&opts.AgentFile, "agent-file", "", "freestanding agent definition file; defaults to .codex/agents/<agent>.toml when --app is omitted")
+	cmd.Flags().StringVar(&opts.AgentFile, "agent-file", "", "freestanding agent definition file; project overrides and the embedded agent library are used when omitted")
 	cmd.Flags().StringVar(&opts.ConfigPath, "config", webconfig.DefaultConfigFile, "kitsoki config file for harness profiles")
 	cmd.Flags().StringVar(&opts.AgentName, "agent", "", "agent name to launch")
 	cmd.Flags().StringVar(&opts.Profile, "profile", "", "harness profile name; defaults to config default_profile when set")
