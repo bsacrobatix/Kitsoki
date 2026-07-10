@@ -20,7 +20,8 @@ cannot accidentally use evidence from another commit or environment.
 - `promotion_eligible` is accepted only when the verdict's matching digests and
   required evidence validate.
 
-The CLI/MCP CI status surfaces retain the run envelope and verdict locally. Run
-Index/runstatus receipt projection and provider-status publication are being
-added on top of the same receipt schema; they must not introduce a second
+CLI/MCP CI runs write a compact controller trace sidecar and a verified receipt
+alongside their local run record; status includes receipt identity and
+verification. RunIndex/runstatus projection and provider-status publication are
+being added on top of the same receipt schema; they must not introduce a second
 evidence format.

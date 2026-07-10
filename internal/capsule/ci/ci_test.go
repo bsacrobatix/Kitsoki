@@ -57,6 +57,25 @@ func TestFileRunStorePersistsCompletedRun(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreListSkipsReceiptSidecars(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	if err := store.Write(RunRecord{JobID: "job", Result: RunResult{Job: artifactjob.Job{ID: "job"}}}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, ".capsules", "ci")
+	if err := os.WriteFile(filepath.Join(dir, "job.receipt.json"), []byte(`{"job_id":"job"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].JobID != "job" {
+		t.Fatalf("records %#v", got)
+	}
+}
+
 func TestFileRunStoreCancelParksOrRunningJob(t *testing.T) {
 	store := FileRunStore{ProjectRoot: t.TempDir()}
 	if err := store.Write(RunRecord{JobID: "job-cancel", Result: RunResult{Job: artifactjob.Job{ID: "job-cancel", Status: artifactjob.StatusAwaitingInput}, Verdict: Verdict{Outcome: "needs_input"}}}); err != nil {

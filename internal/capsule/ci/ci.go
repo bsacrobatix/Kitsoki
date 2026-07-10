@@ -202,6 +202,11 @@ type RunResult struct {
 }
 
 func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.Envelope, error) {
+	root, err := filepath.Abs(s.ProjectRoot)
+	if err != nil {
+		return Pipeline{}, executor.Envelope{}, err
+	}
+	s.ProjectRoot = root
 	cfg, err := Load(s.ProjectRoot)
 	if err != nil {
 		return Pipeline{}, executor.Envelope{}, err
