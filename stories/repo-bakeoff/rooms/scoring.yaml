@@ -29,12 +29,11 @@ states:
       - prose: "bench.py completion records whether this matrix has complete evidence and whether it's pending-only or live-scored. If the completion report is incomplete but repairable, the story executes a free repair loop (`preflight` + `verify` + `prepare_handoffs`). If manual drives are still needed, scoring routes back to running to drive cells before rechecking completion."
     on_enter:
       - when: "world.repo_dir == ''"
-        invoke: host.run
+        invoke: host.bakeoff.run
         id: completion
         with:
-          cmd: python3
+          op: bench
           args:
-            - "bench.py"
             - "completion"
             - "--project"
             - "{{ world.project }}"
@@ -58,12 +57,11 @@ states:
           completion_diagnostics: ""
         on_error: running
       - when: "world.repo_dir != ''"
-        invoke: host.run
+        invoke: host.bakeoff.run
         id: completion_local
         with:
-          cmd: python3
+          op: bench
           args:
-            - "bench.py"
             - "completion"
             - "--project"
             - "{{ world.project }}"
@@ -134,12 +132,11 @@ states:
             Report:  '{{ world.report_dir }}'
       - prose: "The completion verdict is ready. Rolling cell verdicts into the comparison report and deck spec."
     on_enter:
-      - invoke: host.run
+      - invoke: host.bakeoff.run
         id: summarize
         with:
-          cmd: python3
+          op: bench
           args:
-            - "bench.py"
             - "summarize"
             - "--project"
             - "{{ world.project }}"

@@ -40,13 +40,12 @@ states:
               intent: quit
     on_enter:
       - when: "world.repo_dir == ''"
-        invoke: host.run
+        invoke: host.bakeoff.run
         id: drive_plan
         once: true
         with:
-          cmd: python3
+          op: bench
           args:
-            - "bench.py"
             - "drive-plan"
             - "--project"
             - "{{ world.project }}"
@@ -59,13 +58,12 @@ states:
           cell_commands_markdown: stdout_json.markdown
         on_error: .
       - when: "world.repo_dir != ''"
-        invoke: host.run
+        invoke: host.bakeoff.run
         id: drive_plan_local
         once: true
         with:
-          cmd: python3
+          op: bench
           args:
-            - "bench.py"
             - "drive-plan"
             - "--project"
             - "{{ world.project }}"
