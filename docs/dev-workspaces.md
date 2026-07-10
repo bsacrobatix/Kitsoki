@@ -228,8 +228,14 @@ unexpected non-workspace directory.
 
 ## Story/runtime integration
 
-The `workspace` host interface still uses the historical provider name
-`host.git_worktree`, but default creation is migrating to Capsule-backed:
+The forward host interface for new story-owned workspaces is
+`host.capsule_workspace`. It accepts a workspace `id` and a checked-in Capsule
+`definition`, then delegates source materialization, branch policy, bootstrap,
+commit, and close semantics to the Capsule manager. Use it when the story can
+express its workspace lifecycle through `.kitsoki/capsules/<definition>.yaml`.
+
+The historical `workspace` host binding still uses `host.git_worktree` in older
+stories. That provider is now a compatibility surface:
 
 - `workspace.create` and `workspace.clone_create` use the `development`
   compatibility provider where the historical protected lifecycle is required.
@@ -237,8 +243,12 @@ The `workspace` host interface still uses the historical provider name
 - Legacy linked worktree list and cleanup remain so older local checkouts can be
   inspected and removed.
 - Bugfix and implementation stories derive session-scoped workspace ids such as
-  `bf-<ticket>-<session>` and bind `world.workdir` from the script's returned
-  `path`.
+  `bf-<ticket>-<session>` and bind `world.workdir` from the returned `path`.
+
+Do not migrate a story binding from `host.git_worktree` to
+`host.capsule_workspace` until the story's `host_interfaces.workspace` contract
+has moved from dynamic `name` / `base` / `sync` arguments to checked-in
+definition ids and commit/close operations.
 
 The old `worktree_path` world key still exists in some story contracts as a
 field name. Treat it as a compatibility field for "the isolated workspace path",

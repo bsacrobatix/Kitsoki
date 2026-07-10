@@ -59,7 +59,8 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.agent.converse`](#hostagentconverse) | Free-form conversational Claude session with permission_mode control. |
 | [`host.transport.post`](#hosttransportpost) | Post a message to a registered transport (TUI / Jira / Bitbucket). |
 | [`host.workspace_manager.get`](#hostworkspace_managerget) | Load a structured workspace context (repos, issue, PRs). |
-| [`host.git_worktree`](#hostgit_worktree-workspace-interface) | `workspace` provider: script-backed `.capsules/workspaces/<id>` create/get/sync plus legacy worktree cleanup. |
+| [`host.capsule_workspace`](#hostcapsule_workspace-workspace-interface) | `workspace` provider: checked-in Capsule definitions create/get/commit/close under `.capsules/workspaces/<id>`. |
+| [`host.git_worktree`](#hostgit_worktree-compatibility-workspace-interface) | Compatibility `workspace` provider: legacy `name/base/sync` contract backed by the development Capsule provider plus linked-worktree cleanup. |
 | [`host.jobs.answer_clarification`](#hostjobsanswer_clarification) | Resume a paused background job with the user's answer. |
 | [`host.chat.resolve`](#hostchatresolve) | Get-or-create a persistent chat thread for a `(app, room, scope_key)`. |
 | [`host.chat.list`](#hostchatlist) | List chat threads matching `(app, room, scope_key)`. |
@@ -1304,9 +1305,65 @@ Returns the parsed object as `Result.Data`. Bind individual fields
 
 ---
 
-## host.git_worktree (`workspace` interface)
+## host.capsule_workspace (`workspace` interface)
 
-Script-backed `workspace` provider
+Capsule-backed `workspace` provider
+([`internal/host/capsule_workspace.go`](../../internal/host/capsule_workspace.go)).
+This is the forward story-facing interface for stories that can express their
+workspace policy as a checked-in `.kitsoki/capsules/<definition>.yaml`
+definition. It opens the project Capsule manager with repository-local
+definitions and materializes the workspace under the project-managed
+`.capsules/workspaces` root; branch, source, bootstrap, and scope policy come
+from the definition rather than from ad hoc story arguments.
+
+The handler dispatches `create` / `get` / `commit` / `close` via the `op` arg.
+It should be granted to agents when the desired authority is "manage Capsule
+workspaces in this project" rather than "run general git plumbing". A scoped MCP
+agent can receive only the Capsule MCP server; an in-story agent can receive
+this host binding for the same least-authority lifecycle.
+
+`create` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Workspace identity and instance key. |
+| `definition` | string | yes | Checked-in Capsule definition id, for example `development`, `staging`, or a story-specific fixture. |
+| `repo` | string | no | Project root. Empty means resolve the current git top-level. |
+| `owner` | string | no | Logical owner for close/lease semantics. Defaults to `host`. |
+
+`get` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Workspace identity. |
+| `repo` | string | no | Project root. |
+
+`commit` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Existing workspace identity. |
+| `message` | string | yes | Commit message passed to the Capsule VCS operation. |
+| `repo` | string | no | Project root. |
+
+`close` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Existing workspace identity. |
+| `owner` | string | no | Must match the logical owner when the provider enforces ownership. |
+| `repo` | string | no | Project root. |
+
+Returns `ok`, `id`, `generation`, and `path` for create-like operations.
+`get` also returns `branch` and `state` from the persisted Capsule instance.
+
+Stories that still need dynamic `name` / `base` arguments or the old `sync`
+operation should remain on `host.git_worktree` until their `host_interfaces`
+contract is migrated to checked-in definitions.
+
+## host.git_worktree (compatibility `workspace` interface)
+
+Compatibility `workspace` provider
 ([`internal/host/git_worktree.go`](../../internal/host/git_worktree.go)). A
 single prefix-fallback handler dispatches `list` / `get` / `create` / `sync` /
 `cleanup_scan` / `cleanup_apply` / `clone_create` /
@@ -1317,6 +1374,11 @@ clone-backed capsule workspaces under `<repo>/.capsules/workspaces/<id>`, writes
 the capsule/clone sentinels, and keeps git plumbing out of agents. Legacy linked
 worktree list/cleanup remains for old local checkouts. The operator-facing
 lifecycle runbook is [`../dev-workspaces.md`](../dev-workspaces.md).
+
+New stories should prefer `host.capsule_workspace` when they can choose a
+checked-in Capsule definition. Keep this provider for old story contracts that
+still speak in `name`, `base`, and `sync`, or for cleanup of legacy linked
+worktrees.
 
 `create` args:
 
