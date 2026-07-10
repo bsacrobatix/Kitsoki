@@ -54,6 +54,26 @@ type Signer interface {
 	Sign([]byte) (string, error)
 	Verify([]byte, string) error
 }
+type FakeSigner struct {
+	ID string
+}
+
+func (s FakeSigner) Name() string {
+	if strings.TrimSpace(s.ID) == "" {
+		return "fake"
+	}
+	return s.ID
+}
+func (s FakeSigner) Sign(b []byte) (string, error) {
+	return "fake-signature:" + s.Name() + ":" + string(b), nil
+}
+func (s FakeSigner) Verify(b []byte, sig string) error {
+	want, _ := s.Sign(b)
+	if sig != want {
+		return fmt.Errorf("capsule receipt: bad signature")
+	}
+	return nil
+}
 
 func Build(in BuildInput) (Receipt, Verification, error) {
 	missing := missingFacts(in)

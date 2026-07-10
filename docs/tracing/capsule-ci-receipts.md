@@ -26,6 +26,23 @@ event vocabulary.
 - `promotion_eligible` is accepted only when the verdict's matching digests and
   required evidence validate.
 
+Projects require receipt signatures with checked-in CI policy:
+
+```yaml
+receipt:
+  require_signature: true
+  signer: test-signer
+```
+
+When enabled, receipt persistence signs with the injected signer and verifies
+the signer name before writing a valid receipt. Promotion gates reload the same
+project policy and reject unsigned receipts, missing signers, or signer-name
+mismatches. Local projects can keep unsigned receipts by omitting the policy;
+tests use `receipt.FakeSigner` for deterministic no-credential coverage.
+`kitsoki capsule ci run` and `kitsoki capsule mcp` expose
+`--fake-receipt-signer <id>` for local/test projects that intentionally require
+signed receipts without introducing real key material.
+
 CLI/MCP CI runs write a compact controller trace sidecar and a verified receipt
 alongside their local run record; status includes receipt identity and
 verification. `capsule ci status` and `capsule.ci.status` now expose a compact

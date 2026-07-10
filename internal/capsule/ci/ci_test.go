@@ -129,6 +129,22 @@ func TestValidateRejectsUndeclaredRemoteExecutor(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresReceiptSignerWhenSignaturesAreRequired(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\nreceipt:\n  require_signature: true\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "receipt signer is required") {
+		t.Fatalf("expected signer policy error, got %v", err)
+	}
+}
+
 func ciRewriteClient(t *testing.T, server *httptest.Server) *http.Client {
 	t.Helper()
 	transport := http.DefaultTransport.(*http.Transport).Clone()

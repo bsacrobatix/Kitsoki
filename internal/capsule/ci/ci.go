@@ -29,6 +29,7 @@ type Config struct {
 	DefaultEnvironment string              `yaml:"default_environment,omitempty" json:"default_environment,omitempty"`
 	Pipelines          map[string]Pipeline `yaml:"pipelines" json:"pipelines"`
 	Remotes            map[string]Remote   `yaml:"remotes,omitempty" json:"remotes,omitempty"`
+	Receipt            ReceiptPolicy       `yaml:"receipt,omitempty" json:"receipt,omitempty"`
 }
 type Pipeline struct {
 	Story       string         `yaml:"story" json:"story"`
@@ -60,6 +61,10 @@ type ResultContract struct {
 type Remote struct {
 	Endpoint      string `yaml:"endpoint" json:"endpoint"`
 	CredentialEnv string `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
+}
+type ReceiptPolicy struct {
+	RequireSignature bool   `yaml:"require_signature,omitempty" json:"require_signature,omitempty"`
+	Signer           string `yaml:"signer,omitempty" json:"signer,omitempty"`
 }
 type Trigger struct {
 	Kind              string   `json:"kind"`
@@ -113,6 +118,9 @@ func Validate(project string, cfg Config) error {
 	}
 	if len(cfg.Pipelines) == 0 {
 		return fmt.Errorf("capsule ci: pipelines are required")
+	}
+	if cfg.Receipt.RequireSignature && strings.TrimSpace(cfg.Receipt.Signer) == "" {
+		return fmt.Errorf("capsule ci: receipt signer is required when signatures are required")
 	}
 	for name, remote := range cfg.Remotes {
 		if strings.TrimSpace(name) == "" || isBuiltinExecutor(name) {

@@ -22,6 +22,7 @@ import (
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/hygiene"
+	"kitsoki/internal/capsule/receipt"
 	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
 )
@@ -31,6 +32,7 @@ type CapsuleConfig struct {
 	Owner      string
 	ProjectID  string
 	CILauncher func(string) ci.Launcher
+	Signer     receipt.Signer
 }
 type CapsuleServer struct {
 	mcpSrv           *mcpsdk.Server
@@ -38,6 +40,7 @@ type CapsuleServer struct {
 	owner, projectID string
 	plans            map[string]capsuleSyncPlan
 	ciLauncher       func(string) ci.Launcher
+	signer           receipt.Signer
 	mu               sync.Mutex
 }
 type capsuleSyncPlan struct {
@@ -52,7 +55,7 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	if strings.TrimSpace(cfg.Owner) == "" {
 		return nil, fmt.Errorf("capsule mcp: owner is required")
 	}
-	s := &CapsuleServer{manager: cfg.Manager, owner: cfg.Owner, projectID: cfg.ProjectID, plans: map[string]capsuleSyncPlan{}, ciLauncher: cfg.CILauncher}
+	s := &CapsuleServer{manager: cfg.Manager, owner: cfg.Owner, projectID: cfg.ProjectID, plans: map[string]capsuleSyncPlan{}, ciLauncher: cfg.CILauncher, signer: cfg.Signer}
 	s.mcpSrv = mcpsdk.NewServer(&mcpsdk.Implementation{Name: "kitsoki-capsule", Version: "v1"}, nil)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.project.describe", Description: "Describe this already-scoped Capsule project and its fixed capabilities. No machine paths or secret values are returned."}, s.describe)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.definition.inspect", Description: "Inspect an allowed immutable Capsule definition."}, s.definition)
@@ -353,7 +356,7 @@ func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a 
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
-	stored, err := record.Persist(project, result)
+	stored, err := record.PersistWithOptions(project, result, record.PersistOptions{Signer: s.signer})
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}

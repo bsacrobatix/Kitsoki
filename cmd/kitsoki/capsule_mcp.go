@@ -18,7 +18,7 @@ import (
 // surface. An agent launched with this command receives only project-scoped
 // Capsule handles, never the server checkout or arbitrary host tools.
 func capsuleMCPCommand() *cobra.Command {
-	var project, pipeline, executor, owner string
+	var project, pipeline, executor, owner, fakeReceiptSigner string
 	var branches []string
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -39,7 +39,11 @@ general-purpose Studio MCP server.`,
 				pipeline = "default"
 			}
 			_ = pipeline // CI registration consumes this selected pipeline in the next slice.
-			server, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: owner, ProjectID: projectID, CILauncher: func(path string) ci.Launcher { return storylauncher.Launcher{StoryPath: path} }})
+			signer, err := capsuleFakeReceiptSigner(fakeReceiptSigner)
+			if err != nil {
+				return err
+			}
+			server, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: owner, ProjectID: projectID, CILauncher: func(path string) ci.Launcher { return storylauncher.Launcher{StoryPath: path} }, Signer: signer})
 			if err != nil {
 				return err
 			}
@@ -50,6 +54,7 @@ general-purpose Studio MCP server.`,
 	cmd.Flags().StringVar(&pipeline, "pipeline", "", "declared pipeline name (reserved for Capsule CI registration)")
 	cmd.Flags().StringVar(&executor, "executor", "synthetic", "allowed executor provider (synthetic is currently implemented)")
 	cmd.Flags().StringVar(&owner, "owner", "mcp-agent", "immutable lease owner recorded on created workspaces")
+	cmd.Flags().StringVar(&fakeReceiptSigner, "fake-receipt-signer", "", "deterministic local/test receipt signer id for projects requiring signed receipts")
 	cmd.Flags().StringSliceVar(&branches, "branch", nil, "allowed local reconciliation target branch (repeatable; omitted denies sync)")
 	return cmd
 }
