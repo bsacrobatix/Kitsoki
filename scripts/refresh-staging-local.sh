@@ -493,13 +493,29 @@ git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null ||
 git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$staging_branch" >/dev/null ||
   die "staging branch not found: $staging_branch"
 
-echo "refresh-staging-local: fetching local $staging_branch and $base into staging capsule" >&2
-git -C "$staging_capsule" fetch source \
-  "refs/heads/$staging_branch:refs/remotes/source/$staging_branch" \
-  "refs/heads/$base:refs/remotes/source/$base"
+# Capture the exact staging input before touching the capsule.  A workspace
+# merge may advance staging/local while this helper is rebasing; that new work
+# is authoritative and must never be replaced by a stale staging capsule.
+staging_start="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
+snapshot_ref="refs/kitsoki/refresh-staging-snapshot-$$"
+import_ref="refs/kitsoki/refresh-staging-import-$$"
+cleanup_refresh_refs() {
+  git -C "$repo_root" update-ref -d "$import_ref" >/dev/null 2>&1 || true
+  git -C "$staging_capsule" update-ref -d "$snapshot_ref" >/dev/null 2>&1 || true
+}
+trap cleanup_refresh_refs EXIT
 
-echo "refresh-staging-local: rebasing staging capsule onto source/$staging_branch" >&2
-git -C "$staging_capsule" rebase "source/$staging_branch"
+echo "refresh-staging-local: fetching staging snapshot $staging_start and local $base into staging capsule" >&2
+git -C "$staging_capsule" fetch source \
+  "refs/heads/$staging_branch:$snapshot_ref" \
+  "refs/heads/$base:refs/remotes/source/$base"
+snapshot_fetched="$(git -C "$staging_capsule" rev-parse "$snapshot_ref")"
+if [ "$snapshot_fetched" != "$staging_start" ]; then
+  die "staging branch advanced before the capsule could fetch its snapshot ($staging_start -> $snapshot_fetched); rerun refresh"
+fi
+
+echo "refresh-staging-local: rebasing staging capsule onto the captured staging snapshot" >&2
+git -C "$staging_capsule" rebase "$snapshot_ref"
 
 echo "refresh-staging-local: rebasing staging capsule onto source/$base" >&2
 git -C "$staging_capsule" rebase "source/$base"
@@ -511,7 +527,23 @@ if [ -n "$gate" ]; then
   (cd "$staging_capsule" && sh -c "$gate")
 fi
 
-git fetch "$staging_capsule" "+$staging_branch:refs/heads/$staging_branch"
+staging_result="$(git -C "$staging_capsule" rev-parse HEAD)"
+git -C "$staging_capsule" rev-parse --verify --quiet "$staging_result^{tree}" >/dev/null ||
+  die "staging capsule result has no readable tree: $staging_result"
+git -C "$staging_capsule" merge-base --is-ancestor "$staging_start" "$staging_result" ||
+  die "refusing to import staging result that does not contain the captured staging snapshot"
+
+# Import the object under a private ref first.  Do not fetch directly into the
+# primary staging ref: doing so is a forceful ref mutation that can silently
+# discard a successful concurrent workspace merge.
+git -C "$repo_root" fetch "$staging_capsule" "HEAD:$import_ref"
+staging_current="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
+if [ "$staging_current" != "$staging_start" ]; then
+  die "staging branch advanced during refresh ($staging_start -> $staging_current); refusing to overwrite newer work"
+fi
+if ! git -C "$repo_root" update-ref "refs/heads/$staging_branch" "$staging_result" "$staging_start"; then
+  die "staging branch changed while importing refreshed capsule; refusing to overwrite newer work"
+fi
 
 printf '%s -> %s\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")"
 printf 'staging capsule: %s\n' "$staging_capsule"
