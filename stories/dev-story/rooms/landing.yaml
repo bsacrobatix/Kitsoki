@@ -809,6 +809,14 @@ states:
         - target: design
           effects:
             - set: { prev_state: "landing", design_seed_idea: "" }
+      idea_brief:
+        - target: design
+          effects:
+            - set:
+                prev_state: "landing"
+                design_seed_idea: "{{ slots.brief }}"
+                last_error: ""
+            - say: "Feature idea captured; starting the design intake without the general workbench."
       go_ideas:
         - target: ideas
           effects:
