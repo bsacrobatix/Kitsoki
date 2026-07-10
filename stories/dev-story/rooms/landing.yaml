@@ -568,17 +568,10 @@ states:
             - set:
                 last_error: ""
         - when: "trim(slots.request) == 'fix bug'"
-          target: landing
-          guard_hint: "Pick a ticket first — type tickets."
+          target: bugfix_intake
           effects:
-            - set:
-                last_error: |
-                  No ticket selected — pick one before entering the bugfix pipeline.
-
-                  Suggestions:
-                  - `tickets` — search and pick a ticket
-                  - paste a GitHub issue URL
-                  - `fix this bug ...` — paste an inline bug report
+            - set: { last_error: "" }
+            - say: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
         - when: "hasPrefix(trim(slots.request), 'fix issue link ')"
           target: bugfix_link_intake
           effects:
@@ -942,18 +935,10 @@ states:
           effects:
             - set: { last_error: "" }
         - default: true
-          target: landing
-          guard_hint: "Pick a ticket first — type tickets."
+          target: bugfix_intake
           effects:
-            - set:
-                last_error: |
-                  No ticket selected — pick one before entering the bugfix pipeline.
-
-                  Suggestions:
-                  - `tickets` — search and pick a ticket
-                  - paste a GitHub issue URL
-                  - `fix this bug ...` — paste an inline bug report
-                  - `workspaces` — resume an in-progress workspace
+            - set: { last_error: "" }
+            - say: "Bugfix selected without a ticket. Paste an issue URL or describe the bug to start the bugfix pipeline."
       bugfix_report:
         - target: bf
           effects:
@@ -1223,6 +1208,90 @@ states:
         - target: landing
       go_back:
         - target: landing
+      look:
+        - target: .
+
+  # A no-ticket bugfix action must capture its next message here, rather than
+  # returning to landing where a pasted issue URL would invoke the write-capable
+  # workbench agent. URL input fetches provider metadata; prose becomes a
+  # free-form bugfix ticket.
+  bugfix_intake:
+    description: "Capture a bugfix brief when no ticket has been selected."
+    default_intent: bugfix_intake_capture
+    relevant_world: [ticket_id, ticket_title, ticket_body, ticket_url, ticket_source_mode]
+    view:
+      - banner:
+          text: "BUGFIX"
+          subtitle: "paste an issue URL or describe the bug"
+          color: "#EF4444"
+      - prose: "No ticket is selected. Paste a tracker issue URL to fetch its metadata, or describe the bug in your own words. The next message starts bugfix; it is not sent to the workbench agent."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: "tickets"
+              hint: "search and pick an existing ticket instead"
+              intent: go_ticket_search
+            - label: "look"
+              intent: look
+            - label: "quit"
+              hint: "return to the workbench without starting a bugfix"
+              intent: quit
+    on:
+      bugfix_intake_capture:
+        - when: "hasPrefix(lower(trim(slots.request)), 'https://') || hasPrefix(lower(trim(slots.request)), 'http://')"
+          target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(slots.request) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "Remote bug link"
+                last_error: ""
+            - say: "Bug link captured; resolving provider metadata before entering bugfix."
+        - target: bf
+          effects:
+            - set:
+                ticket_id: ""
+                ticket_title: "Free-form bug report"
+                ticket_url: ""
+                ticket_body: "{{ slots.request }}"
+                ticket_type: "bug"
+                ticket_source_mode: "freeform"
+                ticket_source_ref: "operator complaint"
+                thread: ""
+                last_error: ""
+            - say: "Bug report captured; entering bugfix with the inline complaint."
+      bugfix_report:
+        - target: bf
+          effects:
+            - set:
+                ticket_id: ""
+                ticket_title: "{{ slots.title ?? 'Free-form bug report' }}"
+                ticket_url: ""
+                ticket_body: "{{ slots.complaint }}"
+                ticket_type: "bug"
+                ticket_source_mode: "freeform"
+                ticket_source_ref: "operator complaint"
+                thread: ""
+                last_error: ""
+            - say: "Bug report captured; entering bugfix with the inline complaint."
+      bugfix_link:
+        - target: bugfix_link_intake
+          effects:
+            - set:
+                bugfix_link_input: "{{ trim(slots.url) }}"
+                bugfix_ref_input: ""
+                bugfix_intake_title: "{{ slots.title ?? 'Remote bug link' }}"
+                last_error: ""
+            - say: "Bug link captured; resolving provider metadata before entering bugfix."
+      go_ticket_search:
+        - target: ticket_search
+          effects:
+            - set: { prev_state: "bugfix_intake", last_error: "" }
+      quit:
+        - target: landing
+          effects:
+            - set: { last_error: "" }
       look:
         - target: .
 
