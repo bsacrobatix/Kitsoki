@@ -914,6 +914,56 @@ coverage of this mapping.
 - `schema.json` — current artifact and stage contract.
 - `run.py` — entrypoint script used by the journey orchestrator.
 
+## Module layout
+
+`run.py` started as a single ~15.8k-line file and is being carved into
+sibling flat modules (not a package — `tools/product-journey` has a hyphen,
+so plain `import <name>` sibling imports are used, mirroring how `run.py`
+itself is loaded by both `python3 tools/product-journey/run.py ...` and each
+`*_test.py`'s `importlib.util.spec_from_file_location(...)` load). The split
+is a **pure, behavior-preserving move**: every relocated name is re-exported
+from `run.py` (`from emit import build_agent_brief, ...`) so existing
+`import run` / `run.<fn>()` call sites — including every `run.<fn> =
+<fake>` test monkeypatch — keep working unmodified.
+
+- `common.py` — genuinely shared constants (`DEFAULT_DRIVER_ID`,
+  `DRIVERS_DIR`, `PROJECT_ROOT`, `STAGES`, evidence-kind sets, ...) and small
+  pure helpers used across two or more of the modules below (`write_json`/
+  `read_json`, driver-manifest loading, persona/transport tier helpers,
+  evidence-source classification).
+- `review.py` — check helpers that back `review_run_bundle()` /
+  `validate_run_bundle()` (deck/slidey-shape validation, gh-agent close-out
+  gap checks, `summarize_run_bundle()`).
+- `emit.py` — the `--emit-run` construction/rendering path: execution-plan,
+  driver-plan, and agent-brief rendering, capture-route/transport-suite
+  building, evidence-plan and live-authorization-note helpers.
+- `marathon.py` — the autonomous marathon/campaign machinery's satellite
+  helpers: control/watchdog file paths and rendering, gh-agent enqueue/drain
+  predicates, campaign-worker receipts, autonomous-fix report rendering.
+- `matrix.py` — `--emit-matrix`/`--rollup-matrix` aggregation and rendering
+  (`aggregate_*`, `render_matrix_*`, `render_rollup_*`).
+
+**What stayed in `run.py`.** A function moves only if neither it nor any
+transitive caller reads a module-level name that tests monkeypatch on the
+loaded `run` module instance (`ARTIFACT_ROOT`, `MATRIX_ROOT`,
+`TARGET_PROOF_ROOT`, `DOGFOOD_ROOT`, `PREFLIGHT_ROOT`, `ROOT`, `DRIVER_AGENT`,
+`AUTONOMOUS_DRIVER_PROMPT`, `PRODUCT_JOURNEY_SKILL`,
+`PRODUCT_JOURNEY_README`, or the directly-patched functions `now_utc`,
+`slug_timestamp`, `autonomous_marathon`, `autonomous_fix_loop`,
+`render_scenario_qa_deck`). Each test loads `run.py` as its own throwaway
+module object (not the standard `sys.modules["run"]`), so a sibling module's
+own `import run`/`from run import x` would silently bind a **second,
+unpatched** copy of `run.py` — reads of these globals only observe a test's
+monkeypatch when the reading function is physically defined in the same
+loaded `run.py` instance. This is why the trunk entry points
+(`build_run_bundle`, `capture_preflight`, `autonomous_marathon`,
+`build_matrix_bundle`, `review_run_bundle`, `validate_run_bundle`, `main`,
+...) and anything that calls them stay in `run.py`; the four modules above
+hold the surrounding non-stateful helper machinery, imported back into
+`run.py` in one direction only (`run.py` → the four modules → `common.py`;
+never the reverse, which is what keeps this safe against the
+`importlib`-loaded-module gotcha above).
+
 ## Corpus tiers
 
 Every scenario in `scenarios.json` and every persona in `personas.json`

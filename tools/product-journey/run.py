@@ -7,8 +7,6 @@ contracts so the runner itself stays cost-free by default.
 """
 
 import argparse
-import difflib
-import hashlib
 import json
 import os
 import re
@@ -26,7 +24,6 @@ from typing import Optional
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PROJECT_ROOT = ROOT
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools.persona_qa.config import load_collection as load_persona_qa_collection  # noqa: E402
@@ -40,13 +37,220 @@ from tools.persona_qa.transports import (  # noqa: E402
     transport_profile as persona_transport_profile,
 )
 
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+from common import (
+    CATALOG_TIERS,
+    DEFAULT_DRIVER_ID,
+    DRIVERS_DIR,
+    EVIDENCE_FILE_EXTENSIONS,
+    EVIDENCE_SOURCES,
+    PLAYBACK_EVIDENCE_KINDS,
+    PROJECT_ROOT,
+    SCENARIO_ALIASES,
+    STAGES,
+    _TIER_NOTICES,
+    compact_transport_profile,
+    driver_manifest_path,
+    driver_summary,
+    evidence_source,
+    format_case_variants,
+    load_driver_manifest,
+    media_kind,
+    normalize_capability_tools,
+    normalize_evidence_source,
+    persona_lens,
+    persona_tier,
+    read_json,
+    run_dir_from_arg,
+    select_persona,
+    transport_profile,
+    write_json,
+)
+
+from emit import (
+    _driver_plan_entry,
+    _driver_plan_evidence_view,
+    _execution_plan_step,
+    _meta_value,
+    attach_evidence_command,
+    autonomous_fix_story_command,
+    autonomous_watchdog_story_command,
+    build_agent_brief,
+    build_assignment_scenario_task,
+    build_driver_journal,
+    build_media_manifest,
+    capture_observe_capabilities,
+    capture_phase_capabilities,
+    capture_route_for_slot,
+    capture_routes_for_evidence,
+    command_output_text,
+    default_scenario_transports,
+    driver_action_sequence,
+    driver_actions,
+    driver_harness,
+    driver_visual_surface,
+    evidence_artifact_path_template,
+    evidence_capture_hint,
+    evidence_plan,
+    final_story_gate_commands,
+    journal_attempt_command,
+    leg_evidence_view,
+    leg_quality_gate,
+    mcp_step,
+    note_tier_synthesis,
+    parse_preflight_time,
+    quota_preflight_check,
+    record_blocker_command,
+    render_agent_brief,
+    render_capture_preflight_markdown,
+    render_driver_handoff,
+    render_driver_journal,
+    render_driver_plan,
+    render_execution_plan,
+    render_journey,
+    render_prd_design_intake,
+    render_scenario_outcomes,
+    render_weakness_routes,
+    resolve_mcp_tools,
+    resolve_project,
+    resolve_scenario_transports,
+    resolved_mcp_tools,
+    scenario_live_budget,
+    scenario_plan,
+    scenario_quality_gate,
+    scenario_tier,
+    scenario_transport_leg,
+    scenario_transport_legs,
+    stage_plan,
+    target_status,
+    transport_for_visual_surface,
+)
+
+from marathon import (
+    add_validation_issue,
+    autonomous_driver_dispatch_markdown_path,
+    autonomous_driver_dispatch_path,
+    autonomous_fix_report_path,
+    autonomous_marathon_control_markdown_path,
+    autonomous_marathon_control_path,
+    autonomous_marathon_control_summary,
+    autonomous_marathon_cycle_seed,
+    autonomous_marathon_due_command,
+    autonomous_marathon_due_item,
+    autonomous_marathon_due_params,
+    autonomous_marathon_due_story_intent,
+    autonomous_marathon_report_path,
+    autonomous_marathon_watchdog_markdown_path,
+    autonomous_marathon_watchdog_path,
+    build_driver_contract_summary,
+    build_next_driver_capture,
+    campaign_worker_receipt_markdown_path,
+    campaign_worker_receipt_path,
+    campaign_worker_summary,
+    check_gh_agent_health,
+    check_gh_agent_readiness,
+    credible_issue_findings,
+    demo_evidence_path,
+    derive_stats,
+    driver_manifest_for_run_json,
+    gh_agent_asset_name,
+    gh_agent_fix_evidence_links,
+    gh_agent_health_url,
+    gh_agent_independent_verify_links,
+    gh_agent_job_commit_sha,
+    gh_agent_job_commit_url,
+    gh_agent_job_evidence_links,
+    gh_agent_job_independent_verify_links,
+    gh_agent_job_integration_branch,
+    gh_agent_job_triage_evidence_links,
+    gh_agent_missing_fix_evidence,
+    gh_agent_missing_independent_verify,
+    gh_agent_missing_run_urls,
+    gh_agent_missing_triage_evidence,
+    gh_agent_ready_url,
+    gh_agent_triage_evidence_links,
+    github_issue_evidence_assets,
+    github_issue_ref,
+    independent_verify_gate_from_summary,
+    invalid_autonomous_marathon_creation,
+    issue_has_fixed_marker,
+    issue_is_closed,
+    issue_is_open,
+    issue_marker_text,
+    kitsoki_cli_command,
+    latest_driver_heartbeat,
+    load_issue_state,
+    local_finding_body,
+    local_finding_ref,
+    marathon_smoke_ledger_path,
+    next_driver_blocker_command,
+    next_driver_capture_route,
+    next_driver_capture_slot,
+    normalize_issue_title,
+    parse_final_json_object,
+    parse_iso_datetime,
+    render_autonomous_fix_report,
+    render_autonomous_marathon_control,
+    render_autonomous_marathon_report,
+    render_autonomous_marathon_watchdog,
+    render_campaign_worker_receipt,
+    run_story_summary,
+    scenario_minimum_evidence,
+    scenario_playback_kind,
+    scenario_qa_workspace_id,
+    select_scenarios,
+    shell,
+    shell_command,
+    split_csv,
+    strip_scenario_qa_workspace_args,
+    summarize_gh_agent_fix_evidence,
+    unfiled_credible_findings,
+    write_autonomous_fix_report,
+    write_autonomous_marathon_report,
+)
+
+from matrix import (
+    aggregate_driver_journal,
+    aggregate_missing_proof_evidence,
+    aggregate_persona_outcomes,
+    aggregate_quality_gates,
+    aggregate_scenario_outcomes,
+    render_matrix_deck,
+    render_matrix_summary,
+    render_rollup_deck,
+    render_rollup_summary,
+    rollup_handoff_backlog_summary,
+)
+
+from review import (
+    credible_findings_requiring_github,
+    deck_scene_eyebrows,
+    filed_issue_evidence_links,
+    gh_agent_integration_landing_lines,
+    gh_agent_missing_integration_landing,
+    issue_closeout_gate,
+    load_json_for_validation,
+    missing_autonomous_fix_report_tokens,
+    open_weakness_findings,
+    playback_scene_for_item,
+    route_profile_validation_errors,
+    summarize_driver_action_contract,
+    summarize_run_bundle,
+    unattached_driver_evidence_refs,
+    validate_final_commands,
+    validate_required_keys,
+    validate_slidey_deck_shape,
+    validation_issue_summary,
+)
+
 CATALOG = ROOT / "tools" / "product-journey" / "catalog.json"
 PERSONAS = ROOT / "tools" / "product-journey" / "personas.json"
 SCENARIOS = ROOT / "tools" / "product-journey" / "scenarios.json"
 GITHUB_TARGETS = ROOT / "tools" / "product-journey" / "github-targets.json"
 SCHEMA = ROOT / "tools" / "product-journey" / "schema.json"
-DRIVERS_DIR = ROOT / "tools" / "product-journey" / "drivers"
-DEFAULT_DRIVER_ID = "kitsoki-mcp"
 DRIVER_AGENT = ROOT / ".agents" / "agents" / "product-journey-qa-driver.md"
 AUTONOMOUS_DRIVER_PROMPT = ROOT / "stories" / "product-journey-qa" / "prompts" / "autonomous_driver.md"
 PRODUCT_JOURNEY_SKILL = ROOT / ".agents" / "skills" / "product-journey-qa" / "SKILL.md"
@@ -62,57 +266,7 @@ NATIVE_GHAGENT_SMOKE = ROOT / "tools" / "product-journey" / "native_ghagent_test
 AUTONOMOUS_FIX_SMOKE = ROOT / "tools" / "product-journey" / "file_findings_test.py"
 PERSONA_AUTOFIX_SMOKE = ROOT / "tools" / "product-journey" / "persona_autofix_smoke_test.py"
 AUTONOMOUS_MARATHON_SMOKE = ROOT / "tools" / "product-journey" / "autonomous_marathon_smoke_test.py"
-EVIDENCE_SOURCES = {"demo", "retained", "external", "local", "cassette", "unknown"}
 PROOF_EVIDENCE_SOURCES = {"retained", "external", "local", "cassette"}
-# Playback-capable evidence: a typed slot every natural-use scenario declares
-# so it can actually be REPLAYED (an rrweb viewer, `kitsoki test flows`, a PNG
-# frame sequence) rather than merely referenced. Unlike general proof evidence
-# (which accepts a cassette:// URI once it resolves to a backing file), a
-# playback slot must be a real LOCAL file — see is_playback_evidence.
-PLAYBACK_EVIDENCE_KINDS = {"rrweb", "trace-replay", "flow-fixture", "png-sequence"}
-EVIDENCE_FILE_EXTENSIONS = {
-    "browser_screenshot": "png",
-    "screenshot_or_tui_png": "png",
-    "rendered_tui_frame": "png",
-    "key_interaction_video": "mp4",
-    "rrweb": "rrweb.json",
-    "trace-replay": "jsonl",
-    "flow-fixture": "yaml",
-    "png-sequence": "frames.json",
-    "session_trace": "jsonl",
-    "trace_reference": "jsonl",
-    "navigation_trace": "json",
-    "checkpoint_rating": "json",
-    "generated_config_diff": "diff",
-    "candidate_diff": "diff",
-    "implementation_diff": "diff",
-    "onboarding_smoke_result": "json",
-    "oracle_result": "json",
-    "full_suite_result": "txt",
-    "targeted_test_result": "txt",
-    "prd_artifact": "md",
-    "design_artifact": "md",
-    "review_notes": "md",
-    "review_summary": "md",
-    "bug_report_markdown": "md",
-    "reproduction_steps": "md",
-    "command_output": "txt",
-    "page_url": "txt",
-    "ide_context_capture": "json",
-}
-SCENARIO_ALIASES = {
-    "core-use-cases": ["project-onboarding", "prd-design", "bugfix"],
-    "core": ["project-onboarding", "prd-design", "bugfix"],
-}
-STAGES = [
-    "discover_product",
-    "follow_tutorial",
-    "onboard_project",
-    "plan_project_work",
-    "fix_bug",
-    "file_product_issue",
-    "score_and_report",
-]
 CANONICAL_DRIVER_CAPABILITIES = [
     "visual.open",
     "visual.observe",
@@ -125,6 +279,8 @@ CANONICAL_DRIVER_CAPABILITIES = [
     "session.trace",
     "render.tui",
 ]
+
+
 def truthy(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
@@ -159,26 +315,6 @@ def is_active_scenario(scenario: dict) -> bool:
 
 def active_scenarios(scenarios: list[dict]) -> list[dict]:
     return [scenario for scenario in scenarios if is_active_scenario(scenario)]
-
-
-def select_scenarios(scenarios: list[dict], scenario_filter: str) -> list[dict]:
-    requested = []
-    for item in [item.strip() for item in scenario_filter.split(",") if item.strip()]:
-        requested.extend(SCENARIO_ALIASES.get(item, [item]))
-    if not requested:
-        return scenarios
-
-    by_id = {scenario["id"]: scenario for scenario in scenarios}
-    duplicates = sorted({scenario_id for scenario_id in requested if requested.count(scenario_id) > 1})
-    if duplicates:
-        raise SystemExit(f"--scenarios contains duplicate scenario id(s): {', '.join(duplicates)}")
-
-    unknown = [scenario_id for scenario_id in requested if scenario_id not in by_id]
-    if unknown:
-        known = ", ".join(sorted(by_id))
-        raise SystemExit(f"--scenarios contains unknown active scenario id(s): {', '.join(unknown)}. Known active scenarios: {known}")
-
-    return [by_id[scenario_id] for scenario_id in requested]
 
 
 def select_transports(transport_filter: str) -> list[str]:
@@ -245,29 +381,8 @@ def now_utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
-def parse_iso_datetime(value: str) -> datetime.datetime:
-    try:
-        parsed = datetime.datetime.fromisoformat(value)
-    except ValueError as exc:
-        raise SystemExit(f"Invalid ISO datetime: {value}") from exc
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
-    return parsed.astimezone(datetime.timezone.utc)
-
-
 def slug_timestamp() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-
-
-def shell(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd,
-        cwd=cwd,
-        check=False,
-        env=os.environ.copy(),
-        text=True,
-        capture_output=True,
-    )
 
 
 def in_managed_dev_workspace(root: Path = ROOT) -> bool:
@@ -276,34 +391,8 @@ def in_managed_dev_workspace(root: Path = ROOT) -> bool:
     )
 
 
-def scenario_qa_workspace_id(value: str) -> str:
-    raw = (value or os.environ.get("KITSOKI_SCENARIO_QA_WORKSPACE_ID") or "scenario-qa").strip()
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip(".-")
-    return safe or "scenario-qa"
-
-
 def scenario_qa_workspace_branch(workspace_id: str) -> str:
     return "agent/" + re.sub(r"[^A-Za-z0-9._/-]+", "-", workspace_id)
-
-
-def parse_final_json_object(text: str) -> dict:
-    stripped = text.strip()
-    if not stripped:
-        raise json.JSONDecodeError("empty output", text, 0)
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        start = stripped.rfind("\n{")
-        if start >= 0:
-            parsed = json.loads(stripped[start + 1 :])
-        else:
-            start = stripped.rfind("{")
-            if start < 0:
-                raise
-            parsed = json.loads(stripped[start:])
-    if not isinstance(parsed, dict):
-        raise json.JSONDecodeError("final JSON value is not an object", text, 0)
-    return parsed
 
 
 def ensure_scenario_qa_workspace(workspace_id: str) -> dict:
@@ -341,24 +430,6 @@ def ensure_scenario_qa_workspace(workspace_id: str) -> dict:
         detail = (create.stderr or create.stdout or "").strip()
         raise SystemExit(f"scenario-qa workspace create failed: {detail}")
     return parse_final_json_object(create.stdout)
-
-
-def strip_scenario_qa_workspace_args(argv: list[str]) -> list[str]:
-    stripped: list[str] = []
-    skip_next = False
-    for arg in argv:
-        if skip_next:
-            skip_next = False
-            continue
-        if arg == "--scenario-qa-workspace":
-            continue
-        if arg == "--scenario-qa-workspace-id":
-            skip_next = True
-            continue
-        if arg.startswith("--scenario-qa-workspace-id="):
-            continue
-        stripped.append(arg)
-    return stripped
 
 
 def rerun_scenario_qa_in_workspace(args: argparse.Namespace) -> bool:
@@ -411,14 +482,6 @@ def rerun_scenario_qa_in_workspace(args: argparse.Namespace) -> bool:
     if proc.stderr:
         print(proc.stderr, end="", file=sys.stderr)
     return True
-
-
-def command_output_text(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
 
 
 def native_ghagent_smoke() -> dict:
@@ -515,13 +578,6 @@ def autonomous_marathon_smoke(repeats: int = 1) -> dict:
         "report_markdown_path": str(report_dir / "autonomous-marathon-smoke.md"),
         **summary,
     }
-
-
-def marathon_smoke_ledger_path(value: str) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path
 
 
 def validate_marathon_smoke_ledger(ledger_arg: str, min_cycles: int = 1) -> dict:
@@ -717,41 +773,6 @@ def verify_external_project(project: dict, repo_path: str) -> dict:
         }
     finally:
         shutil.rmtree(clone.parent, ignore_errors=True)
-
-
-def _meta_value(project):
-    meta = {
-        "id": project["id"],
-        "label": project.get("label", project["id"]),
-        "status": project.get("status", "planned"),
-        "notes": project.get("notes", ""),
-        "manifest": project.get("manifest"),
-    }
-    for key in ["repo", "stack", "license_spdx", "bug_query", "open_bug_floor", "source"]:
-        if project.get(key) is not None:
-            meta[key] = project[key]
-    return meta
-
-
-def resolve_project(catalog: dict, github_targets: dict, project_id: str) -> dict:
-    target = next((t for t in catalog["targets"] if t["id"] == project_id), None)
-    if target is not None:
-        resolved = dict(target)
-        resolved.setdefault("source", "catalog")
-        return resolved
-
-    target = next((t for t in github_targets["targets"] if t["id"] == project_id), None)
-    if target is not None:
-        resolved = dict(target)
-        resolved.setdefault("source", "github-targets")
-        resolved.setdefault("run_mode", "github-matrix")
-        return resolved
-
-    known = ", ".join(
-        [t["id"] for t in catalog["targets"]]
-        + [t["id"] for t in github_targets["targets"]]
-    )
-    raise SystemExit(f"Unknown project '{project_id}'. Known: {known}")
 
 
 def github_issue_search_query(target: dict) -> str:
@@ -1018,153 +1039,9 @@ def merge_target_proofs(github_targets: dict, target_proof: dict) -> dict:
     return merged
 
 
-def target_status(project: dict) -> str:
-    if project.get("validation_command"):
-        return "ready-heavy-check"
-    if project.get("run_mode") == "external-benchmark" and project.get("status") == "validated":
-        return "cached_validated"
-    if project.get("source") == "github-targets" or project.get("run_mode") == "github-matrix":
-        return "planned"
-    return project.get("status", "planned")
-
-
-def select_persona(personas: list[dict], persona_id: str, seed: str) -> dict:
-    if persona_id:
-        for persona in personas:
-            if persona["id"] == persona_id:
-                return persona
-        known = ", ".join(persona["id"] for persona in personas)
-        raise SystemExit(f"Unknown persona '{persona_id}'. Known: {known}")
-    digest = hashlib.sha256(seed.encode("utf-8")).digest()
-    return personas[digest[0] % len(personas)]
-
-
-def stage_plan(project: dict, scenarios: list[dict]) -> list[dict]:
-    readiness = target_status(project)
-    stages: list[dict] = []
-    for stage in STAGES:
-        status = "planned"
-        evidence: list[str] = []
-        stage_scenarios = [scenario["id"] for scenario in scenarios if scenario["stage"] == stage]
-        if stage == "score_and_report":
-            status = readiness
-            evidence.append(project.get("manifest") or project.get("validation_command") or project.get("bug_query") or "catalog target")
-        elif stage in {"discover_product", "follow_tutorial", "file_product_issue"}:
-            status = "planned"
-            evidence.append("requires visual MCP/browser evidence in live or cassette run")
-        elif stage == "onboard_project":
-            status = "planned"
-            evidence.append(project.get("manifest") or project.get("repo") or "project onboarding fixture pending")
-        elif stage in {"plan_project_work", "fix_bug"}:
-            status = readiness if project.get("manifest") else "planned"
-            evidence.append(project.get("manifest") or project.get("bug_query") or "bug/design fixture pending")
-        stages.append({"id": stage, "status": status, "evidence": evidence, "scenarios": stage_scenarios})
-    return stages
-
-
-def scenario_plan(scenarios: list[dict]) -> list[dict]:
-    planned = []
-    for scenario in scenarios:
-        item = {
-            "id": scenario["id"],
-            "label": scenario["label"],
-            "stage": scenario["stage"],
-            "task": scenario["task"],
-            "primary_story": scenario["primary_story"],
-            "required_mcp": scenario["required_mcp"],
-            "evidence": scenario["evidence"],
-            "success_criteria": scenario["success_criteria"],
-            "status": "planned",
-            "evidence_status": "missing",
-            "artifacts": {},
-        }
-        if scenario.get("natural_utterances"):
-            item["natural_utterances"] = scenario["natural_utterances"]
-        if scenario.get("case_variants"):
-            item["case_variants"] = scenario["case_variants"]
-        if scenario.get("transports"):
-            item["transports"] = scenario["transports"]
-        planned.append(item)
-    return planned
-
-
-def evidence_plan(run_json: dict) -> dict:
-    items = []
-    for scenario in run_json["scenarios"]:
-        for evidence_kind in scenario["evidence"]:
-            items.append({
-                "scenario": scenario["id"],
-                "kind": evidence_kind,
-                "status": "missing",
-                "path": "",
-                "source": "unknown",
-                "notes": "Attach from visual MCP, Kitsoki MCP trace, oracle runner, or generated artifact.",
-            })
-    return {
-        "run_id": run_json["run_id"],
-        "items": items,
-        "summary": {
-            "required": len(items),
-            "present": 0,
-            "missing": len(items),
-        },
-    }
-
-
-def build_driver_journal(run_id: str, items: list[dict]) -> dict:
-    statuses = {}
-    modes = {}
-    scenarios = set()
-    for item in items:
-        status = item.get("status", "attempted")
-        mode = item.get("dispatch_mode", "")
-        statuses[status] = statuses.get(status, 0) + 1
-        if mode:
-            modes[mode] = modes.get(mode, 0) + 1
-        if item.get("scenario"):
-            scenarios.add(item["scenario"])
-    return {
-        "run_id": run_id,
-        "items": items,
-        "summary": {
-            "events": len(items),
-            "scenarios_attempted": len(scenarios),
-            "statuses": statuses,
-            "dispatch_modes": modes,
-        },
-    }
-
-
-def render_driver_journal(journal: dict) -> str:
-    lines = [
-        "# Product journey driver journal",
-        "",
-        f"- Run: `{journal['run_id']}`",
-        f"- Events: {journal['summary']['events']}",
-        f"- Scenarios attempted: {journal['summary']['scenarios_attempted']}",
-        "",
-    ]
-    if not journal["items"]:
-        lines.append("- (no driver events recorded)")
-        return "\n".join(lines) + "\n"
-    for item in journal["items"]:
-        lines.extend([
-            f"## {item['id']}",
-            "",
-            f"- Scenario: `{item['scenario']}`",
-            f"- Dispatch mode: `{item['dispatch_mode']}`",
-            f"- Status: `{item['status']}`",
-            f"- Created: {item['created_at']}",
-            f"- MCP tools: {', '.join(item.get('mcp_tools', [])) or '(none recorded)'}",
-            f"- Evidence refs: {', '.join(item.get('evidence_refs', [])) or '(none)'}",
-            f"- Blockers: {', '.join(item.get('blockers', [])) or '(none)'}",
-            "",
-            item.get("summary", ""),
-            "",
-        ])
-    return "\n".join(lines) + "\n"
-
-
+# TODO(carve): stays in run.py -- reads a monkeypatch-sensitive module
+# global (see tools/product-journey/README.md#module-layout); moving it would
+# silently stop observing test monkeypatches on the loaded run.py instance.
 def build_run_bundle(
     catalog: dict,
     github_targets: dict,
@@ -1343,80 +1220,6 @@ def build_run_bundle(
     return run_dir, run_json
 
 
-def render_capture_preflight_markdown(result: dict) -> str:
-    lines = [
-        "# Product Journey Capture Preflight",
-        "",
-        f"- Status: `{result['status']}`",
-        f"- Preflight: `{result['preflight_id']}`",
-        f"- Created: {result['created_at']}",
-        f"- Output: `{result['webshot_output']}`",
-        "",
-        "## Checks",
-        "",
-    ]
-    for check in result["checks"]:
-        lines.append(f"- `{check['id']}`: {check['status']} - {check['summary']}")
-    if result.get("stderr"):
-        lines.extend(["", "## stderr", "", "```", result["stderr"][-4000:], "```"])
-    if result.get("stdout"):
-        lines.extend(["", "## stdout", "", "```", result["stdout"][-4000:], "```"])
-    return "\n".join(lines) + "\n"
-
-
-def parse_preflight_time(value: str) -> Optional[datetime.datetime]:
-    value = str(value or "").strip()
-    if not value:
-        return None
-    if value.endswith("Z"):
-        value = value[:-1] + "+00:00"
-    try:
-        return datetime.datetime.fromisoformat(value)
-    except ValueError:
-        return None
-
-
-def quota_preflight_check(path: Path, now: Optional[datetime.datetime] = None) -> tuple[bool, str]:
-    if now is None:
-        now = datetime.datetime.now(datetime.timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=datetime.timezone.utc)
-    if not path.exists():
-        return True, f"{path} (not present; no quota cooldown recorded)"
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        return False, f"{path}: read failed: {exc}"
-    if not raw.strip():
-        return True, f"{path} (empty; no quota cooldown recorded)"
-    try:
-        state = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        return False, f"{path}: invalid JSON: {exc}"
-    if not isinstance(state, dict):
-        return False, f"{path}: expected object"
-    if state.get("schema") not in {"", None, "kitsoki/provider-quota/v1"}:
-        return False, f"{path}: unexpected schema {state.get('schema')}"
-    profiles = state.get("profiles", {})
-    if profiles is None:
-        profiles = {}
-    if not isinstance(profiles, dict):
-        return False, f"{path}: profiles must be an object"
-    blocked: list[str] = []
-    for profile, data in profiles.items():
-        if not isinstance(data, dict):
-            return False, f"{path}: profile {profile} must be an object"
-        for key in ("backoff_until", "last_throttle_until"):
-            ts = parse_preflight_time(str(data.get(key, "")))
-            if ts is not None and ts.tzinfo is None:
-                ts = ts.replace(tzinfo=datetime.timezone.utc)
-            if ts is not None and ts > now:
-                blocked.append(f"{profile} {key}={data.get(key)}")
-    if blocked:
-        return False, "provider quota cooldown active: " + "; ".join(blocked[:5])
-    return True, f"{path}: {len(profiles)} profile(s), no active cooldown"
-
-
 def run_preflight_command(check_id: str, command: str, timeout: int, env: dict[str, str]) -> tuple[bool, str, str, str]:
     if not command:
         return True, "skipped", "", ""
@@ -1438,6 +1241,9 @@ def run_preflight_command(check_id: str, command: str, timeout: int, env: dict[s
         return False, f"{check_id} timed out after {timeout}s; command={shlex.join(cmd)}", stdout, stderr
 
 
+# TODO(carve): stays in run.py -- reads a monkeypatch-sensitive module
+# global (see tools/product-journey/README.md#module-layout); moving it would
+# silently stop observing test monkeypatches on the loaded run.py instance.
 def capture_preflight(
     seed: str,
     command: str = "",
@@ -1553,6 +1359,9 @@ def capture_preflight(
     return result
 
 
+# TODO(carve): stays in run.py -- reads a monkeypatch-sensitive module
+# global (see tools/product-journey/README.md#module-layout); moving it would
+# silently stop observing test monkeypatches on the loaded run.py instance.
 def build_matrix_bundle(
     github_targets: dict,
     personas: list[dict],
@@ -1643,209 +1452,6 @@ def build_matrix_bundle(
     (matrix_dir / "matrix.md").write_text(render_matrix_summary(matrix), encoding="utf-8")
     write_json(matrix_dir / "deck.slidey.json", render_matrix_deck(matrix))
     return matrix_dir, matrix
-
-
-def mcp_step(tool: str) -> str:
-    steps = {
-        "visual.open": "Open the local product site or relevant browser surface.",
-        "visual.observe": "Capture the current browser frame or retained screenshot reference.",
-        "visual.act": "Perform the next natural browser action for the persona.",
-        "session.open": "Open or resume the Kitsoki story session for this scenario.",
-        "session.inspect": "Inspect the current Kitsoki session state and trace context.",
-        "render.tui": "Capture the rendered TUI or web frame for the current room.",
-    }
-    return steps.get(tool, f"Use {tool} and capture its output.")
-
-
-def evidence_capture_hint(kind: str) -> str:
-    hints = {
-        "browser_screenshot": "Save a retained visual MCP screenshot or PNG reference.",
-        "command_output": "Save a command transcript with cwd, command line, exit code, stdout/stderr, and any trace reference needed to replay the result.",
-        "page_url": "Record the exact local URL or GitHub page used.",
-        "navigation_trace": "Record the browser action sequence that reached the finding.",
-        "checkpoint_rating": "Rate whether the persona could proceed without private context.",
-        "session_trace": "Save the Kitsoki session trace or trace id.",
-        "rendered_tui_frame": "Save the rendered TUI/web frame for the room under review.",
-        "generated_config_diff": "Save the generated config diff or a no-change note.",
-        "onboarding_smoke_result": "Save the deterministic onboarding smoke result.",
-        "candidate_diff": "Save the candidate patch diff.",
-        "oracle_result": "Save the hidden or targeted oracle result.",
-        "full_suite_result": "Save full-suite output or a classified reason it was skipped.",
-        "key_interaction_video": "Save an MP4/GIF clip or retained video reference for Slidey playback.",
-        "prd_artifact": "Save the PRD artifact generated during the scenario.",
-        "design_artifact": "Save the design artifact generated during the scenario.",
-        "review_notes": "Save reviewer notes, objections, and unresolved questions.",
-        "implementation_diff": "Save the implementation diff.",
-        "targeted_test_result": "Save targeted deterministic test output.",
-        "review_summary": "Save the final implementation review summary.",
-        "bug_report_markdown": "Save the product bug report markdown.",
-        "screenshot_or_tui_png": "Save screenshot or TUI PNG evidence.",
-        "trace_reference": "Save the trace reference for reproduction.",
-        "reproduction_steps": "Save deterministic reproduction steps.",
-        "rrweb": "Save a local rrweb session capture JSON (real recorded browser session, not a cassette:// ref) so the scenario replays in an rrweb viewer.",
-        "trace-replay": "Save a local Kitsoki trace file replayable via `kitsoki trace to-flow` / `test flows` (a real path, not cassette://).",
-        "flow-fixture": "Save a local flow fixture (`kitsoki test flows <app.yaml> --flows ...`) that replays this scenario no-LLM.",
-        "png-sequence": "Save a local directory or manifest of PNG frames captured via render.tui/visual.observe for frame-by-frame playback.",
-        "ide_context_capture": "Save the post-drive host.ide.* ide.context_captured trace event JSON (vscode legs' opportunistic editor-level tier) -- leave unattached and report honestly when no real editor was connected/queried.",
-    }
-    return hints.get(kind, "Save this evidence artifact and attach it to the run.")
-
-
-def scenario_quality_gate(scenario_id: str) -> dict:
-    gates = {
-        "product-discovery": {
-            "minimum_evidence": ["rendered_tui_frame", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
-            "done_when": "The persona can state what Kitsoki is, who it is for, and one credible next action after walking the product overview story.",
-            "block_if": [
-                "The product-site story cannot be opened or rendered.",
-                "The walkthrough requires live LLM authorization and no cassette exists.",
-                "The discovery checkpoint (what it is + next action) cannot be reached deterministically.",
-            ],
-        },
-        "project-onboarding": {
-            "minimum_evidence": ["session_trace", "rendered_tui_frame", "generated_config_diff", "onboarding_smoke_result", "key_interaction_video"],
-            "done_when": "The persona can identify the generated project profile, the relevant commands/files, and the next Kitsoki story to launch.",
-            "block_if": [
-                "The onboarding story cannot be opened or rendered.",
-                "The path requires live LLM authorization and no cassette exists.",
-                "Generated config or smoke output is unavailable for deterministic review.",
-            ],
-        },
-        "tui-slash-commands": {
-            "minimum_evidence": ["rendered_tui_frame", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
-            "done_when": "A docs-trained persona can discover the slash menu, filter it, Tab-complete the primary suggestion, and execute the completed command in the TUI.",
-            "block_if": [
-                "The TUI frame does not show a slash command menu after typing / at the beginning of the prompt.",
-                "Filtering with letters after / does not narrow the visible command list.",
-                "No primary suggestion is visibly marked as the Tab target.",
-                "Tab completion or Enter execution cannot be captured without live LLM authorization.",
-            ],
-        },
-        "bugfix": {
-            "minimum_evidence": ["session_trace", "candidate_diff", "oracle_result", "full_suite_result", "key_interaction_video"],
-            "done_when": "A concrete bug candidate has a reviewable diff plus deterministic oracle/test output or a classified suite failure.",
-            "block_if": [
-                "No concrete bug/repro can be selected without live authorization.",
-                "The bugfix story cannot produce a candidate diff.",
-                "No deterministic oracle, targeted test, or classified full-suite result is available.",
-            ],
-        },
-        "dogfood-marathon-tui": {
-            "minimum_evidence": ["rendered_tui_frame", "key_interaction_video", "png-sequence"],
-            "done_when": "One continuous kitsoki-dev TUI recording shows the real arrow-key menus, the 15-case autonomous marathon, the serious exception decision, and the final report/deck evidence.",
-            "block_if": [
-                "The recorder owns a private case list instead of consuming the scenario run bundle.",
-                "The proof skips or fakes the TUI arrow-key choice widgets.",
-                "The video is too fast to understand without a fast-forward/cassette affordance or frame/chapter evidence.",
-                "The serious exception lacks an Issue reference, trace reference, warning affordance, or real decision question.",
-                "The capture is not attached back to the universal scenario run as video and PNG sequence evidence.",
-            ],
-        },
-        "docs-to-mcp-first-run": {
-            "minimum_evidence": ["browser_screenshot", "rendered_tui_frame", "session_trace", "navigation_trace", "checkpoint_rating", "key_interaction_video"],
-            "done_when": "A cold persona can move from docs/product-site material to a verified Studio MCP-backed scenario QA run with run, report, and deck paths.",
-            "block_if": [
-                "The docs path does not lead to a reusable story-owned scenario QA surface.",
-                "Studio MCP identity or story loadability cannot be verified before dispatch.",
-                "The run bundle, driver handoff, report, or deck path is missing from the evidence.",
-            ],
-        },
-        "agent-launch-experience": {
-            "minimum_evidence": ["session_trace", "rendered_tui_frame", "browser_screenshot", "checkpoint_rating", "review_notes", "key_interaction_video"],
-            "done_when": "The persona can launch a Kitsoki-backed agent run with visible profile/state parity and supported operator-question behavior.",
-            "block_if": [
-                "The selected story/profile/model boundary is not visible before live dispatch.",
-                "Web and TUI surfaces disagree about current state or next action.",
-                "A needed operator question silently defaults instead of using operator-ask or recording a replay blocker.",
-            ],
-        },
-        "remote-worker-campaign": {
-            "minimum_evidence": ["session_trace", "command_output", "review_notes", "bug_report_markdown", "trace-replay"],
-            "done_when": "A bounded remote worker or arena batch has a readiness receipt, attached evidence, issue-pipeline routing, and refreshed campaign artifacts.",
-            "block_if": [
-                "Remote readiness, gh-agent readiness, watchdog state, or ticket repo cannot be verified before dispatch.",
-                "Worker placement does not leave a durable receipt naming worker, budget, scenarios, and run directory.",
-                "Credible findings bypass the evidence-backed issue/fix pipeline or local stabilization sink rules.",
-            ],
-        },
-        "campaign-rollup-review": {
-            "minimum_evidence": ["session_trace", "review_summary", "checkpoint_rating", "rrweb"],
-            "done_when": "The stakeholder rollup is regenerated from artifacts and conservatively reports coverage, evidence gaps, issue/fix state, cost, deck link, and next campaign slice.",
-            "block_if": [
-                "The summary relies on conversation memory instead of retained artifacts.",
-                "A failed evidence, validation, issue, or gh-agent gate is summarized as passed.",
-                "The Slidey deck claims coverage without playback media or an explicit blocker.",
-            ],
-        },
-        "prd-design": {
-            "minimum_evidence": ["session_trace", "prd_artifact", "design_artifact", "review_notes", "key_interaction_video"],
-            "done_when": "The PRD/design artifact cites real repo files or commands, is reviewably scoped, and exposes open questions.",
-            "block_if": [
-                "The planning/design path requires live LLM authorization and no cassette exists.",
-                "The artifact cannot be grounded in repository files or commands.",
-                "The design output cannot be captured as a durable artifact.",
-            ],
-        },
-        "feature-implementation": {
-            "minimum_evidence": ["session_trace", "implementation_diff", "targeted_test_result", "review_summary", "key_interaction_video"],
-            "done_when": "The implementation follows an accepted design slice and has a targeted deterministic test result or explicit blocker.",
-            "block_if": [
-                "No accepted design slice is available.",
-                "The implementation would require live LLM authorization without a cassette.",
-                "No diff or deterministic validation output can be captured.",
-            ],
-        },
-        "evidence-backed-product-bug": {
-            "minimum_evidence": ["bug_report_markdown", "screenshot_or_tui_png", "trace_reference", "reproduction_steps", "key_interaction_video"],
-            "done_when": "A product bug report includes expected vs actual behavior, reproduction context, visual/TUI evidence, and trace reference.",
-            "block_if": [
-                "No product issue, weakness, or confusing behavior was observed.",
-                "The evidence needed to reproduce the issue cannot be captured or safely redacted.",
-                "The report would rely on memory rather than trace or visual evidence.",
-            ],
-        },
-    }
-    return gates.get(scenario_id, {
-        "minimum_evidence": [],
-        "done_when": "The scenario has captured evidence or an explicit blocker.",
-        "block_if": ["The scenario cannot capture evidence under the current harness."],
-    })
-
-
-def leg_quality_gate(scenario_id: str, evidence_kinds: list[str], transport: str = "") -> dict:
-    gate = dict(scenario_quality_gate(scenario_id))
-    gate["block_if"] = list(gate.get("block_if", []))
-    if not evidence_kinds:
-        return gate
-    evidence_set = set(evidence_kinds)
-    minimum = [
-        kind for kind in gate.get("minimum_evidence", [])
-        if kind in evidence_set
-    ]
-    for kind in ["command_output", "trace-replay", "flow-fixture", "png-sequence", "rrweb"]:
-        if kind in evidence_set and kind not in minimum:
-            minimum.append(kind)
-    if not minimum:
-        minimum = list(evidence_kinds[: min(3, len(evidence_kinds))])
-    gate["minimum_evidence"] = minimum
-    if transport == "cli":
-        gate["done_when"] = (
-            gate.get("done_when", "")
-            + " For CLI legs, command_output must include the command line, cwd, exit code, stdout/stderr, and any trace reference needed to replay the result."
-        ).strip()
-    return gate
-
-
-def format_case_variants(case_variants: list[dict]) -> str:
-    if not case_variants:
-        return ""
-    lines = ["Case variants to rotate through across persona/target runs:"]
-    for variant in case_variants:
-        lines.append(
-            f"- {variant.get('id', 'case')}: \"{variant.get('utterance', '')}\"; "
-            f"setup: {variant.get('setup', '')}; success focus: {variant.get('success_focus', '')}"
-        )
-    return "\n".join(lines)
 
 
 def add_corpus_issue(issues: list[dict], severity: str, check_id: str, message: str, detail: str = "") -> None:
@@ -2635,423 +2241,6 @@ def validate_journey_corpus(personas: list[dict], scenarios: list[dict], github_
     }
 
 
-def build_assignment_scenario_task(target: dict, persona: dict, scenario: dict) -> dict:
-    repo = target["label"]
-    stack = target.get("stack", "unknown stack")
-    bug_query = target.get("bug_query", "")
-    persona_label = persona["label"]
-    risk_focus = ", ".join(persona.get("risk_focus", []))
-    base = {
-        "scenario": scenario["id"],
-        "label": scenario["label"],
-        "target": target["id"],
-        "persona": persona["id"],
-        "primary_story": scenario["primary_story"],
-        "required_mcp": scenario["required_mcp"],
-        "evidence": scenario["evidence"],
-        "success_criteria": scenario["success_criteria"],
-        "case_variants": scenario.get("case_variants", []),
-    }
-    prompts = {
-        "product-discovery": (
-            f"As a {persona_label}, start from the local Kitsoki product site and decide whether it credibly explains how to use Kitsoki on {repo} ({stack}). "
-            f"Focus on {risk_focus}. Capture the first confusing claim, missing prerequisite, or clear next action."
-        ),
-        "project-onboarding": (
-            f"Onboard {repo} using Kitsoki's documented project setup path. Confirm the generated project profile names plausible {stack} commands, repo files, and the next story to launch."
-        ),
-        "tui-slash-commands": (
-            "Act as a user who just read the external Codex and Claude Code slash-command docs, not Kitsoki docs. "
-            "In the TUI, type `/` at the beginning of the prompt, confirm a command menu appears, type letters to filter it, press Tab to accept the primary suggestion, then press Enter and verify the completed slash command runs."
-        ),
-        "bugfix": (
-            f"Use the target bug queue for {repo}: {bug_query}. Pick or simulate one concrete bug candidate from that queue, drive the bugfix story, and require deterministic oracle/test evidence before calling the fix credible."
-        ),
-        "dogfood-marathon-tui": (
-            "Start in the real kitsoki-dev TUI, ask `I want to do a dogfood marathon`, then type `start the marathon`. "
-            "Capture one continuous interactive session that uses real arrow-key choice widgets, visibly processes all 15 cataloged bugs, surfaces the serious exception as a real decision, and ends with the aggregate report and per-bug deck evidence."
-        ),
-        "prd-design": (
-            f"Turn one small improvement idea for {repo} into a PRD/design artifact. The idea should be grounded in {repo}'s stack ({stack}), existing project conventions, and the {persona_label} risk focus: {risk_focus}."
-        ),
-        "feature-implementation": (
-            f"Implement or dry-run a small accepted design slice for {repo}. Keep the change reviewable for a {persona_label}, and validate with targeted deterministic tests or an explicit blocker."
-        ),
-        "evidence-backed-product-bug": (
-            f"File a Kitsoki product bug discovered while working on {repo}. Include expected vs actual behavior, reproduction context, visual/TUI evidence, and a trace reference."
-        ),
-    }
-    prompt_parts = [prompts.get(scenario["id"], scenario["task"])]
-    variants = format_case_variants(scenario.get("case_variants", []))
-    if variants:
-        prompt_parts.append(variants)
-    base["task_prompt"] = "\n\n".join(prompt_parts)
-    base["evidence_dir"] = f"evidence/{target['id']}--{persona['id']}/{scenario['id']}"
-    base["bug_query"] = bug_query if scenario["id"] == "bugfix" else ""
-    return base
-
-
-def driver_harness(primary_story: str) -> str:
-    if primary_story == "product-site":
-        return "browser"
-    if "bugfix" in primary_story:
-        return "record-or-live-with-deterministic-oracle"
-    return "replay-or-record"
-
-
-def driver_visual_surface(primary_story: str, required_mcp: list[str]) -> str:
-    if "visual.open" in required_mcp and primary_story == "product-site":
-        return "web"
-    if "render.tui" in required_mcp or "session.open" in required_mcp:
-        return "tui"
-    if "visual.observe" in required_mcp:
-        return "web-or-tui"
-    return "artifact"
-
-
-def transport_profile(transport: str) -> dict:
-    try:
-        return persona_transport_profile(transport)
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-
-
-def compact_transport_profile(profile: dict) -> dict:
-    return persona_compact_transport_profile(profile)
-
-
-def transport_for_visual_surface(visual_surface: str, required_mcp: list[str]) -> str:
-    if visual_surface in TRANSPORT_PROFILES:
-        return visual_surface
-    if visual_surface == "web-or-tui":
-        return "web" if "visual.observe" in required_mcp and "render.tui" not in required_mcp else "tui"
-    if visual_surface == "artifact":
-        return "cli" if any(tool in required_mcp for tool in ["session.trace", "session.inspect", "session.status"]) else "tui"
-    return "tui"
-
-
-_TIER_NOTICES: list[str] = []
-CATALOG_TIERS = ("curated", "mined")
-
-
-def scenario_tier(scenario: dict) -> str:
-    """Return this scenario's corpus tier (see schema.json `tier`).
-
-    An explicit `tier` wins. Absent that, a scenario that declares
-    `transports` is treated as curated (it was reviewed enough to author a
-    real contract); everything else is treated as mined, matching the
-    inference `resolve_scenario_transports()` already used before `tier`
-    existed.
-    """
-    declared = scenario.get("tier")
-    if declared in CATALOG_TIERS:
-        return declared
-    return "curated" if scenario.get("transports") else "mined"
-
-
-def persona_tier(persona: dict) -> str:
-    """Return this persona's corpus tier (see scenario_tier)."""
-    declared = persona.get("tier")
-    if declared in CATALOG_TIERS:
-        return declared
-    return "curated" if persona.get("persona_lens") else "mined"
-
-
-def note_tier_synthesis(kind: str, entry_id: str, field: str, tier: str) -> None:
-    """Print + buffer a visible notice when a mined-tier entry's `field` is
-    being synthesized from defaults rather than authored.
-
-    Printed to stderr so it surfaces on any invocation path (CLI, story
-    `check`, live drive); also appended to a module-level buffer that
-    build_run_bundle() copies into run.json's `tier_notices` before writing
-    the bundle, so a reviewer can see synthesis history without re-running
-    anything. A no-op for tier=curated entries.
-    """
-    if tier != "mined":
-        return
-    message = f"{kind} {entry_id} is tier=mined: {field} synthesized from defaults"
-    print(f"[persona-qa] NOTICE: {message}", file=sys.stderr)
-    _TIER_NOTICES.append(message)
-
-
-def default_scenario_transports(scenario: dict) -> dict:
-    """Derive an implicit transports contract from a scenario's required_mcp.
-
-    Scenarios authored before the `transports` field existed, and every mined
-    scenario (generated from session transcripts rather than hand-authored),
-    don't declare it. This mirrors driver_visual_surface()'s existing
-    single-surface inference so a scenario missing the field keeps behaving
-    exactly as it did before --transport existed, and only gains additional
-    transports when it explicitly opts in via scenarios.json. Synthesizing
-    this contract for a tier=mined scenario prints and records a visible
-    notice -- see note_tier_synthesis().
-    """
-    note_tier_synthesis("scenario", scenario.get("id", "?"), "transports", scenario_tier(scenario))
-    surface = driver_visual_surface(scenario.get("primary_story", ""), scenario.get("required_mcp", []))
-    if surface == "web":
-        allowed = ["web"]
-    elif surface == "tui":
-        allowed = ["tui"]
-    elif surface == "web-or-tui":
-        allowed = ["tui", "web"]
-    elif surface == "artifact":
-        allowed = ["cli"] if "session.trace" in scenario.get("required_mcp", []) else []
-    else:
-        allowed = []
-    return {"allowed": allowed, "required": list(allowed), "overrides": {}}
-
-
-def resolve_scenario_transports(scenario: dict) -> dict:
-    """Normalize a scenario's transports contract, declared or derived."""
-    declared = scenario.get("transports")
-    if not declared:
-        return default_scenario_transports(scenario)
-    allowed = list(declared.get("allowed", []))
-    required = list(declared.get("required", allowed))
-    overrides = declared.get("overrides", {}) or {}
-    return {"allowed": allowed, "required": required, "overrides": overrides}
-
-
-def scenario_transport_leg(scenario: dict, transport: str) -> dict:
-    """Build a scenario view scoped to one transport leg.
-
-    Applies the scenario's per-transport `overrides` (required_mcp/evidence),
-    falling back to the scenario's base lists, and attaches the transport's
-    evidence contract (capture tool, evidence kind, proof level).
-    """
-    profile = transport_profile(transport)
-    contract = resolve_scenario_transports(scenario)
-    override = contract.get("overrides", {}).get(transport, {})
-    leg = dict(scenario)
-    leg["required_mcp"] = list(override.get("required_mcp", scenario.get("required_mcp", [])))
-    leg["evidence"] = list(override.get("evidence", scenario.get("evidence", [])))
-    leg["transport"] = transport
-    leg["visual_surface"] = profile["visual_surface"]
-    leg["transport_profile"] = compact_transport_profile(profile)
-    leg["transport_evidence_contract"] = profile["evidence_contract"]
-    # editor_evidence_contract is the opportunistic, stronger tier vscode legs
-    # can reach on top of the mandatory bridge-level floor above (see
-    # tools/persona_qa/transports.py). Only vscode carries one today; other
-    # transports simply omit the key.
-    editor_contract = profile.get("editor_evidence_contract")
-    if editor_contract:
-        leg["editor_evidence_contract"] = editor_contract
-    leg["leg_id"] = f"{scenario['id']}::{transport}"
-    return leg
-
-
-def scenario_transport_legs(scenario: dict, transports: list[str]) -> list[dict]:
-    """Expand one scenario into its scenario x transport legs.
-
-    Requested transports outside the scenario's allowed set are skipped
-    rather than erroring -- `--transport all` runs everything applicable to
-    each scenario, it does not force every scenario onto every transport.
-    """
-    allowed = resolve_scenario_transports(scenario).get("allowed", [])
-    applicable = [transport for transport in transports if transport in allowed]
-    return [scenario_transport_leg(scenario, transport) for transport in applicable]
-
-
-def leg_evidence_view(kinds: list[str], tracked_items: list[dict]) -> list[dict]:
-    """Build the evidence-contract view (kind/status/path/hint) for one leg.
-
-    `tracked_items` is the scenario-level evidence.json bookkeeping (still
-    scenario-scoped, not per-transport); kinds not yet tracked show as
-    missing rather than being dropped, so a per-transport evidence override
-    that names a kind the base scenario doesn't track still renders.
-    """
-    tracked = {item["kind"]: item for item in tracked_items}
-    return [
-        {
-            "kind": kind,
-            "status": tracked.get(kind, {}).get("status", "missing"),
-            "path": tracked.get(kind, {}).get("path", ""),
-            "capture_hint": evidence_capture_hint(kind),
-        }
-        for kind in kinds
-    ]
-
-
-def driver_action_sequence(required_mcp: list[str]) -> list[str]:
-    sequence = []
-    if "session.open" in required_mcp:
-        sequence.append("session.new or session.attach using the scenario primary_story")
-    if "render.tui" in required_mcp:
-        sequence.append("render.tui or render.tui_png before and after meaningful turns")
-    if "visual.open" in required_mcp:
-        sequence.append("visual.open for the scenario visual surface")
-    if "visual.observe" in required_mcp:
-        sequence.append("visual.observe before acting and when capturing evidence")
-    if "visual.act" in required_mcp:
-        sequence.append("visual.act using advertised action handles or natural persona actions")
-    if "session.inspect" in required_mcp:
-        sequence.append("session.status/session.world first; session.inspect only when targeted reads are insufficient")
-    if not sequence:
-        sequence.append("capture the named evidence artifacts and record findings")
-    return sequence
-
-
-def scenario_live_budget(run_json: dict, scenario_id: str) -> dict:
-    minutes = int(run_json.get("live_budget_minutes", 20))
-    remaining_action = "record_blocker"
-    if minutes == 0:
-        summary = (
-            "Live/model dispatch is disabled for this run. Use replay/cassette paths, "
-            "or record a blocker before any live call."
-        )
-    else:
-        summary = (
-            f"Spend at most {minutes} live minutes on this scenario. When the budget is "
-            "reached, stop live exploration, record the blocker or partial evidence, "
-            "and journal the attempt before moving to the next scenario."
-        )
-    return {
-        "scenario": scenario_id,
-        "max_live_minutes": minutes,
-        "remaining_action": remaining_action,
-        "summary": summary,
-        "blocker_title": "Live budget exhausted",
-        "blocker_summary": (
-            "The scenario reached its per-scenario live budget before enough proof evidence "
-            "could be captured. Preserve trace/frame evidence and continue with the next scenario."
-        ),
-    }
-
-
-def resolve_mcp_tools(capability: str, driver_manifest: Optional[dict] = None) -> list[str]:
-    manifest = driver_manifest or load_driver_manifest()
-    return list(manifest.get("_resolved_capabilities", {}).get(capability, []))
-
-
-def resolved_mcp_tools(capabilities: list[str], driver_manifest: Optional[dict] = None) -> list[str]:
-    tools: list[str] = []
-    for capability in capabilities:
-        for tool in resolve_mcp_tools(capability, driver_manifest):
-            if tool not in tools:
-                tools.append(tool)
-    return tools
-
-
-def driver_actions(scenario: dict, run_json: dict, evidence_items: list[dict], driver_manifest: Optional[dict] = None) -> list[dict]:
-    scenario_id = scenario["id"]
-    evidence_dir = scenario.get(
-        "evidence_dir",
-        f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}",
-    )
-    required_mcp = scenario.get("required_mcp", [])
-    open_tools = [
-        tool for tool in ["session.open", "visual.open"]
-        if tool in required_mcp
-    ] or ["session.status"]
-    read_tools = [
-        tool for tool in ["session.status", "render.tui", "visual.observe"]
-        if tool == "session.status" or tool in required_mcp
-    ]
-    act_tools = [
-        tool for tool in ["session.submit", "session.drive", "visual.act", "session.trace"]
-        if tool in {"session.submit", "session.trace"} or tool in required_mcp
-    ]
-    capture_tools = ["visual.observe", "render.tui", "session.trace"]
-    actions = [
-        {
-            "id": "open_surface",
-            "goal": "Open or attach the Kitsoki/product surface named by the scenario.",
-            "tools": open_tools,
-            "resolved_tools": resolved_mcp_tools(open_tools, driver_manifest),
-            "evidence": [],
-            "record": "Record the handle, URL, or reason this surface could not be opened.",
-        },
-        {
-            "id": "read_current_frame",
-            "goal": "Observe the exact operator-visible state before acting.",
-            "tools": read_tools,
-            "resolved_tools": resolved_mcp_tools(read_tools, driver_manifest),
-            "evidence": [
-                item["kind"]
-                for item in evidence_items
-                if item["kind"] in {"browser_screenshot", "rendered_tui_frame", "screenshot_or_tui_png"}
-            ],
-            "record": f"Save frame evidence under {evidence_dir}/ before evaluating usability.",
-        },
-        {
-            "id": "act_as_persona",
-            "goal": "Take the next natural persona action and preserve route/interaction evidence.",
-            "tools": act_tools,
-            "resolved_tools": resolved_mcp_tools(act_tools, driver_manifest),
-            "evidence": [
-                item["kind"]
-                for item in evidence_items
-                if item["kind"] in {"navigation_trace", "session_trace", "key_interaction_video", "trace_reference"}
-            ],
-            "record": "Prefer natural phrasing when route quality is under test; otherwise use deterministic action handles.",
-        },
-        {
-            "id": "capture_required_evidence",
-            "goal": "Attach every minimum-evidence slot or record the matching quality-gate blocker.",
-            "tools": capture_tools,
-            "resolved_tools": resolved_mcp_tools(capture_tools, driver_manifest),
-            "evidence": [item["kind"] for item in evidence_items],
-            "record": "Use attach commands for captured evidence; use blocker command for honest gaps.",
-        },
-        {
-            "id": "journal_attempt",
-            "goal": "Append the driver's actual attempt, tools used, evidence references, and blockers.",
-            "tools": ["story.driver_event", "tools/product-journey/run.py --record-driver-event"],
-            "resolved_tools": [],
-            "evidence": ["driver-journal.md"],
-            "record": "Journal the attempt even when the scenario only produced a blocker.",
-        },
-    ]
-    natural_utterances = scenario.get("natural_utterances", [])
-    if natural_utterances:
-        for action in actions:
-            if action["id"] == "act_as_persona":
-                action["natural_utterances"] = natural_utterances
-                action["record"] = (
-                    "Prefer the transcript-derived utterances when route quality is under test; "
-                    "otherwise use deterministic action handles."
-                )
-                break
-    return actions
-
-
-def media_kind(evidence_kind: str, artifact_path: str) -> str:
-    value = f"{evidence_kind} {artifact_path}".lower()
-    suffix = Path(artifact_path).suffix.lower()
-    if "video" in value or suffix in {".mp4", ".mov", ".webm", ".gif"}:
-        return "video"
-    if "screenshot" in value or "png" in value or suffix in {".png", ".jpg", ".jpeg", ".webp"}:
-        return "image"
-    if "trace" in value or suffix in {".jsonl", ".trace"}:
-        return "trace"
-    if suffix in {".md", ".txt", ".json", ".yaml", ".yml"}:
-        return "document"
-    return "artifact"
-
-
-def evidence_source(artifact_path: str, notes: str = "") -> str:
-    combined = f"{artifact_path} {notes}".lower()
-    if "demo placeholder" in combined or "deterministic placeholder" in combined:
-        return "demo"
-    if "cassette" in combined or artifact_path.startswith("cassette://") or "/cassettes/" in artifact_path:
-        return "cassette"
-    if artifact_path.startswith(("retained://", "image://")):
-        return "retained"
-    if artifact_path.startswith(("http://", "https://")):
-        return "external"
-    if artifact_path:
-        return "local"
-    return "unknown"
-
-
-def normalize_evidence_source(source: str, artifact_path: str, notes: str = "") -> str:
-    normalized = source.strip().lower() if source else evidence_source(artifact_path, notes)
-    if normalized not in EVIDENCE_SOURCES:
-        known = ", ".join(sorted(EVIDENCE_SOURCES))
-        raise SystemExit(f"Evidence source must be one of: {known}")
-    return normalized
-
-
 def is_proof_evidence(item: dict, run_dir: Optional[Path] = None) -> bool:
     if item.get("status") not in {"captured", "validated"}:
         return False
@@ -3095,13 +2284,6 @@ def is_playback_evidence(item: dict, run_dir: Optional[Path] = None) -> bool:
     )
 
 
-def scenario_playback_kind(scenario: dict) -> Optional[str]:
-    """The single playback-capable evidence kind a scenario declares in its
-    `evidence` list, or None if it declares zero or more than one."""
-    declared = sorted(PLAYBACK_EVIDENCE_KINDS & set(scenario.get("evidence", [])))
-    return declared[0] if len(declared) == 1 else None
-
-
 def missing_playback_evidence(
     run_json: dict,
     evidence_items: list[dict],
@@ -3136,77 +2318,6 @@ def missing_playback_evidence(
         else:
             missing.append(f"{scenario_id}/{kind}: not captured")
     return missing
-
-
-def build_media_manifest(run_json: dict, evidence: dict) -> dict:
-    items = []
-    for item in evidence.get("items", []):
-        artifact_path = item.get("path", "")
-        if item.get("status") not in {"captured", "validated"} or not artifact_path:
-            continue
-        kind = media_kind(item.get("kind", ""), artifact_path)
-        items.append({
-            "scenario": item.get("scenario", ""),
-            "evidence_kind": item.get("kind", ""),
-            "media_kind": kind,
-            "path": artifact_path,
-            "status": item.get("status", ""),
-            "source": normalize_evidence_source(item.get("source", ""), artifact_path, item.get("notes", "")),
-            "notes": item.get("notes", ""),
-            "playback": kind in {"video", "image"},
-        })
-    counts: dict[str, int] = {}
-    for item in items:
-        counts[item["media_kind"]] = counts.get(item["media_kind"], 0) + 1
-    return {
-        "run_id": run_json["run_id"],
-        "items": items,
-        "summary": {
-            "total": len(items),
-            "playback_items": sum(1 for item in items if item["playback"]),
-            "video": counts.get("video", 0),
-            "image": counts.get("image", 0),
-            "trace": counts.get("trace", 0),
-            "document": counts.get("document", 0),
-            "artifact": counts.get("artifact", 0),
-        },
-    }
-
-
-def playback_scene_for_item(item: dict) -> Optional[dict]:
-    path = item.get("path", "")
-    if not path:
-        return None
-    scenario = item.get("scenario", "")
-    evidence_kind = item.get("evidence_kind", "")
-    title = f"{scenario} / {evidence_kind}".strip(" /")
-    caption = item.get("notes", "") or path
-    suffix = Path(path).suffix.lower()
-    if item.get("media_kind") == "video":
-        scene = {
-            "type": "video",
-            "mode": "embedded",
-            "eyebrow": "Playback evidence",
-            "title": title,
-            "caption": caption,
-            "chapters": "auto",
-            "narration": f"Playback evidence for {title}.",
-        }
-        if suffix == ".json" or path.endswith(".rrweb.json"):
-            scene["rrweb"] = path
-        else:
-            scene["src"] = path
-        return scene
-    if item.get("media_kind") == "image":
-        return {
-            "type": "image",
-            "eyebrow": "Playback evidence",
-            "title": title,
-            "src": path,
-            "caption": caption,
-            "narration": f"Screenshot evidence for {title}.",
-        }
-    return None
 
 
 def playback_deck_scenes(media_manifest: Optional[dict], limit: Optional[int] = None) -> list[dict]:
@@ -3318,38 +2429,6 @@ def build_scenario_outcomes(run_json: dict, evidence: dict, findings: dict) -> d
     }
 
 
-def render_scenario_outcomes(outcomes: dict) -> str:
-    lines = [
-        "# Product journey scenario outcomes",
-        "",
-        f"- Run: `{outcomes['run_id']}`",
-        f"- Scenarios: {outcomes['summary']['scenarios']}",
-        f"- Started: {outcomes['summary']['started']}",
-        f"- With findings: {outcomes['summary']['with_findings']}",
-        f"- With issues or weaknesses: {outcomes['summary']['with_issues']}",
-        f"- With fixes: {outcomes['summary']['with_fixes']}",
-        f"- Blocked: {outcomes['summary'].get('blocked', 0)}",
-        "",
-    ]
-    for item in outcomes["items"]:
-        lines.extend([
-            f"## {item['label']}",
-            "",
-            f"- Scenario: `{item['scenario']}`",
-            f"- Stage: `{item['stage']}`",
-            f"- Story: `{item['primary_story']}`",
-            f"- Evidence: {item['present_evidence_count']} / {item['required_evidence_count']} ({item['evidence_status']}; proof {item.get('proof_evidence_count', 0)}, demo {item.get('demo_evidence_count', 0)})",
-            f"- Outcome: `{item['outcome']}`",
-            f"- Findings: strength={item['finding_counts']['strength']}, weakness={item['finding_counts']['weakness']}, issue={item['finding_counts']['issue']}, fix={item['finding_counts']['fix']}, blocked={item['finding_counts'].get('blocked', 0)}",
-            "",
-        ])
-        for finding in item["findings"]:
-            lines.append(f"- {finding['kind']}: {finding['title']} ({finding['status']})")
-        if item["findings"]:
-            lines.append("")
-    return "\n".join(lines) + "\n"
-
-
 def autonomous_fix_cli_command(run_dir_arg: str) -> str:
     return (
         "go run ./cmd/kitsoki gitops autonomous-fix --json "
@@ -3363,103 +2442,6 @@ def autonomous_fix_cli_command(run_dir_arg: str) -> str:
 
 def autonomous_watchdog_cli_command(run_dir_arg: str) -> str:
     return f"python3 tools/product-journey/run.py --autonomous-marathon-watchdog --run-dir {run_dir_arg}"
-
-
-def autonomous_fix_story_command() -> str:
-    return "autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<public-gh-agent-url>"
-
-
-def autonomous_watchdog_story_command() -> str:
-    return "autonomous_watchdog"
-
-
-def final_story_gate_commands() -> list[str]:
-    return [
-        autonomous_watchdog_story_command(),
-        autonomous_fix_story_command(),
-        "review",
-        "validate",
-    ]
-
-
-def attach_evidence_command(run_dir_arg: str, scenario_id: str, evidence_kind: str) -> str:
-    return (
-        "python3 tools/product-journey/run.py --attach-evidence "
-        f"--run-dir {run_dir_arg} "
-        f"--scenario {scenario_id} "
-        f"--evidence-kind {evidence_kind} "
-        "--evidence-path <path-or-retained-id> "
-        "--evidence-source <retained|external|local|cassette> "
-        f"--notes \"{evidence_capture_hint(evidence_kind)}\""
-    )
-
-
-def record_blocker_command(run_dir_arg: str, scenario_id: str) -> str:
-    return (
-        "python3 tools/product-journey/run.py --record-blocker "
-        f"--run-dir {run_dir_arg} "
-        f"--scenario {scenario_id} "
-        "--title <blocker-title> --summary <why-this-scenario-could-not-be-captured> "
-        "--evidence-path <trace-or-frame-path>"
-    )
-
-
-def journal_attempt_command(run_dir_arg: str, scenario_id: str) -> str:
-    return (
-        "python3 tools/product-journey/run.py --record-driver-event "
-        f"--run-dir {run_dir_arg} "
-        f"--scenario {scenario_id} "
-        "--dispatch-mode <replay|record|live> "
-        "--driver-status <attempted|captured|blocked|validated> "
-        "--mcp-tools <comma-separated-tools-used> "
-        "--evidence-refs <comma-separated-paths-or-retained-ids> "
-        "--blockers <comma-separated-blockers-if-any> "
-        "--summary <what-the-driver-actually-tried>"
-    )
-
-
-def evidence_artifact_path_template(evidence_dir: str, scenario_id: str, evidence_kind: str) -> str:
-    ext = EVIDENCE_FILE_EXTENSIONS.get(evidence_kind, "txt")
-    return f"{evidence_dir}/{scenario_id}-{evidence_kind}.{ext}"
-
-
-def capture_phase_capabilities(profile: dict, phase: str, required_mcp: list[str]) -> list[str]:
-    capabilities: list[str] = []
-    for capability in profile.get(f"{phase}_capabilities", []):
-        if capability not in capabilities:
-            capabilities.append(capability)
-    phase_extras = {
-        "open": ["session.open", "visual.open"],
-        "observe": ["render.tui", "visual.observe", "session.trace", "session.inspect", "session.status"],
-        "act": ["visual.act", "session.submit", "session.drive", "session.trace"],
-    }
-    for capability in phase_extras.get(phase, []):
-        if capability in required_mcp and capability not in capabilities:
-            capabilities.append(capability)
-    return capabilities
-
-
-def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, evidence_kind: str, profile: Optional[dict] = None) -> list[str]:
-    capabilities: list[str] = []
-    if profile is not None:
-        capabilities.extend(capture_phase_capabilities(profile, "observe", required_mcp))
-    if evidence_kind in {"rendered_tui_frame", "png-sequence"} or visual_surface == "tui":
-        if "render.tui" not in capabilities:
-            capabilities.append("render.tui")
-    if evidence_kind in {"browser_screenshot", "screenshot_or_tui_png", "key_interaction_video", "rrweb"} or visual_surface in {"web", "vscode", "web-or-tui"}:
-        if "visual.observe" not in capabilities:
-            capabilities.append("visual.observe")
-    if evidence_kind == "command_output" or visual_surface == "cli":
-        for capability in ["session.status", "session.trace"]:
-            if capability not in capabilities:
-                capabilities.append(capability)
-    if evidence_kind in {"session_trace", "trace_reference", "trace-replay", "flow-fixture", "navigation_trace", "ide_context_capture"}:
-        if "session.trace" not in capabilities:
-            capabilities.append("session.trace")
-    for capability in ["render.tui", "visual.observe", "session.trace", "session.inspect"]:
-        if capability in required_mcp and capability not in capabilities:
-            capabilities.append(capability)
-    return capabilities or ["session.status"]
 
 
 def leg_needs_live(leg: dict) -> bool:
@@ -3688,176 +2670,6 @@ def render_transport_suite(suite: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def capture_route_for_slot(
-    scenario: dict,
-    run_json: dict,
-    run_dir_arg: str,
-    evidence_kind: str,
-    required_mcp: list[str],
-    visual_surface: str,
-    driver_manifest: Optional[dict] = None,
-    leg: Optional[dict] = None,
-) -> dict:
-    scenario_id = scenario["id"]
-    leg_transport = (leg or {}).get("transport", "")
-    inferred_surface = visual_surface or driver_visual_surface(scenario.get("primary_story", ""), required_mcp)
-    route_transport = leg_transport or transport_for_visual_surface(inferred_surface, required_mcp)
-    profile = transport_profile(route_transport)
-    route_surface = profile.get("visual_surface", route_transport)
-    evidence_dir = scenario.get(
-        "evidence_dir",
-        f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}",
-    )
-    open_capabilities = capture_phase_capabilities(profile, "open", required_mcp) or ["session.status"]
-    observe_capabilities = capture_observe_capabilities(required_mcp, route_surface, evidence_kind, profile)
-    act_capabilities = capture_phase_capabilities(profile, "act", required_mcp) or ["session.trace"]
-    artifact_template = evidence_artifact_path_template(evidence_dir, scenario_id, evidence_kind)
-    route = {
-        "route_id": f"{scenario_id}::{route_surface or 'default'}::{evidence_kind}",
-        "scenario": scenario_id,
-        "evidence_kind": evidence_kind,
-        "primary_story": scenario["primary_story"],
-        "transport": route_transport,
-        "transport_profile": compact_transport_profile(profile),
-        "visual_surface": route_surface,
-        "harness": driver_harness(scenario["primary_story"]),
-        "dispatch_mode_arg": "<replay|record|live>",
-        "live_profile_arg": "<explicit-live-profile-if-record-or-live>",
-        "evidence_dir": evidence_dir,
-        "artifact_path_template": artifact_template,
-        "setup_entrypoint": {
-            "story_load_intent": f"load run_dir={run_dir_arg}",
-            "primary_session": (
-                f"session.new app={scenario['primary_story']} "
-                "harness=<replay|record|live> profile=<explicit-live-profile-if-record-or-live>"
-            ),
-            "preflight": profile.get(
-                "preflight",
-                "capture_preflight must pass before record/live dispatch; replay uses cassette/local fixtures only.",
-            ),
-        },
-        "open": {
-            "capabilities": open_capabilities,
-            "resolved_tools": resolved_mcp_tools(open_capabilities, driver_manifest),
-        },
-        "observe": {
-            "capabilities": observe_capabilities,
-            "resolved_tools": resolved_mcp_tools(observe_capabilities, driver_manifest),
-        },
-        "act": {
-            "capabilities": act_capabilities,
-            "resolved_tools": resolved_mcp_tools(act_capabilities, driver_manifest),
-        },
-        "recording": {
-            "start": "Start recording before the first persona action from this route.",
-            "stop": "Stop recording immediately after the target evidence slot and final frame are captured.",
-            "path_template": artifact_template,
-            "transport_rule": profile.get("recording_rule", ""),
-            "proof_source_required": "retained|external|local|cassette",
-            "no_substitution": "Do not attach demo, placeholder, synthetic, or unrelated media for this route.",
-        },
-        "commands": {
-            "attach": attach_evidence_command(run_dir_arg, scenario_id, evidence_kind),
-            "blocker": record_blocker_command(run_dir_arg, scenario_id),
-            "journal": journal_attempt_command(run_dir_arg, scenario_id),
-        },
-    }
-    if leg is not None:
-        route["leg_id"] = leg.get("leg_id", "")
-        route["transport_evidence_contract"] = leg.get("transport_evidence_contract", {})
-    else:
-        route["transport_evidence_contract"] = profile.get("evidence_contract", {})
-    return route
-
-
-def capture_routes_for_evidence(
-    scenario: dict,
-    run_json: dict,
-    run_dir_arg: str,
-    evidence_view: list[dict],
-    required_mcp: list[str],
-    visual_surface: str,
-    driver_manifest: Optional[dict] = None,
-    leg: Optional[dict] = None,
-) -> list[dict]:
-    return [
-        capture_route_for_slot(
-            scenario,
-            run_json,
-            run_dir_arg,
-            item["kind"],
-            required_mcp,
-            visual_surface,
-            driver_manifest,
-            leg,
-        )
-        for item in evidence_view
-        if item.get("kind")
-    ]
-
-
-def _execution_plan_step(
-    order: int,
-    scenario: dict,
-    run_json: dict,
-    run_dir_arg: str,
-    evidence_view: list[dict],
-    required_mcp: list[str],
-    driver_manifest: Optional[dict] = None,
-    leg: Optional[dict] = None,
-) -> dict:
-    attach_commands = [
-        attach_evidence_command(run_dir_arg, scenario["id"], item["kind"])
-        for item in evidence_view
-    ]
-    blocker_command = record_blocker_command(run_dir_arg, scenario["id"])
-    visual_surface = leg.get("visual_surface", leg["transport"]) if leg is not None else driver_visual_surface(scenario["primary_story"], required_mcp)
-    evidence_kinds = [item["kind"] for item in evidence_view if item.get("kind")]
-    quality_gate = (
-        leg_quality_gate(scenario["id"], evidence_kinds, leg.get("transport", ""))
-        if leg is not None else scenario_quality_gate(scenario["id"])
-    )
-    step = {
-        "order": order,
-        "scenario": scenario["id"],
-        "label": scenario["label"],
-        "stage": scenario["stage"],
-        "persona": run_json["persona"]["id"],
-        "project": run_json["project"]["id"],
-        "task": scenario["task"],
-        "task_prompt": scenario.get("task_prompt", scenario["task"]),
-        "natural_utterances": scenario.get("natural_utterances", []),
-        "case_variants": scenario.get("case_variants", []),
-        "primary_story": scenario["primary_story"],
-        "live_budget": scenario_live_budget(run_json, scenario["id"]),
-        "mcp_steps": [
-            {"tool": tool, "instruction": mcp_step(tool)}
-            for tool in required_mcp
-        ],
-        "evidence": evidence_view,
-        "success_criteria": scenario["success_criteria"],
-        "quality_gate": quality_gate,
-        "attach_commands": attach_commands,
-        "record_blocker_command": blocker_command,
-        "capture_routes": capture_routes_for_evidence(
-            scenario,
-            run_json,
-            run_dir_arg,
-            evidence_view,
-            required_mcp,
-            visual_surface,
-            driver_manifest,
-            leg,
-        ),
-    }
-    if leg is not None:
-        step["transport"] = leg["transport"]
-        step["leg_id"] = leg["leg_id"]
-        step["transport_profile"] = leg["transport_profile"]
-        step["transport_evidence_contract"] = leg["transport_evidence_contract"]
-    return step
-
-
 def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[list[str]] = None, driver_manifest: Optional[dict] = None) -> dict:
     """Build the execution plan's ordered steps.
 
@@ -3927,191 +2739,6 @@ def build_execution_plan(run_json: dict, evidence: dict, transports: Optional[li
     }
 
 
-def build_agent_brief(run_json: dict, evidence: dict, execution_plan: dict, driver_manifest: Optional[dict] = None) -> dict:
-    persona = run_json["persona"]
-    lens = persona_lens(persona)
-    driver_manifest = driver_manifest or load_driver_manifest()
-    missing_evidence = [
-        {"scenario": item["scenario"], "kind": item["kind"], "hint": evidence_capture_hint(item["kind"])}
-        for item in evidence.get("items", [])
-        if item.get("status") == "missing"
-    ]
-    return {
-        "run_id": run_json["run_id"],
-        "driver": driver_summary(driver_manifest),
-        "project": run_json["project"],
-        "persona": persona,
-        "mission": (
-            "Drive the product journey as this persona using the concrete tools named by the driver manifest. "
-            "Capture evidence, record concrete findings, and avoid treating planned steps as validated."
-        ),
-        "recommended_agent": ".agents/agents/product-journey-qa-driver.md",
-        "driver_plan": "driver-plan.json",
-        "driver_plan_markdown": "driver-plan.md",
-        "persona_contract": {
-            "id": persona["id"],
-            "label": persona["label"],
-            "description": persona["description"],
-            "surface_preference": persona.get("surface_preference", ""),
-            "risk_focus": persona.get("risk_focus", []),
-            "lens": lens,
-        },
-        "operating_rules": [
-            "Read the current visual or Kitsoki frame before choosing the next action.",
-            "Use natural persona phrasing; do not optimize only for the scripted happy path.",
-            "Prefer MCP evidence over prose claims: screenshots, session traces, TUI frames, diffs, oracle output, and videos.",
-            "Record strengths as well as weaknesses, issues, and fixes.",
-            "If a live LLM or paid service would be required, stop and record the blocker instead of calling it from an automated test.",
-            "Attach every useful artifact, then submit autonomous_fix when credible issue findings exist; the native gate runs the autonomous watchdog before filing or fixing. Review and validate through the story session. Use the CLI fallback commands only when the story session is unavailable.",
-            "Use scenario affordance names from the driver manifest; scenarios and findings should not depend on raw selectors.",
-        ],
-        "scenario_order": [
-            {
-                "id": step["scenario"],
-                "label": step["label"],
-                "task": step["task"],
-                "task_prompt": step.get("task_prompt", step["task"]),
-                "primary_story": step["primary_story"],
-                "mcp_tools": [mcp["tool"] for mcp in step["mcp_steps"]],
-                "resolved_mcp_tools": resolved_mcp_tools([mcp["tool"] for mcp in step["mcp_steps"]], driver_manifest),
-                "success_criteria": step["success_criteria"],
-                "evidence": [item["kind"] for item in step["evidence"]],
-                "natural_utterances": step.get("natural_utterances", []),
-                "case_variants": step.get("case_variants", []),
-                "quality_gate": step.get("quality_gate", scenario_quality_gate(step["scenario"])),
-                "live_budget": step.get("live_budget", scenario_live_budget(run_json, step["scenario"])),
-                "capture_routes": step.get("capture_routes", []),
-                **({
-                    "transport": step["transport"],
-                    "leg_id": step["leg_id"],
-                    "transport_profile": step.get("transport_profile", {}),
-                } if "transport" in step else {}),
-            }
-            for step in execution_plan.get("steps", [])
-        ],
-        "missing_evidence": missing_evidence,
-        "finalize_commands": execution_plan.get("finalize_commands", []),
-    }
-
-
-def _driver_plan_evidence_view(kinds: list[str], tracked_items: list[dict]) -> list[dict]:
-    view = leg_evidence_view(kinds, tracked_items)
-    for item in view:
-        item["playback_candidate"] = (
-            media_kind(item["kind"], item["path"]) in {"video", "image"}
-            or item["kind"] in {"browser_screenshot", "key_interaction_video", "screenshot_or_tui_png"}
-        )
-    return view
-
-
-def _driver_plan_entry(
-    scenario: dict,
-    run_json: dict,
-    run_dir_arg: str,
-    lens: dict,
-    step: dict,
-    required_mcp: list[str],
-    evidence_view: list[dict],
-    driver_action_scenario: dict,
-    driver_action_evidence: list[dict],
-    visual_surface: str,
-    driver_manifest: Optional[dict] = None,
-    leg: Optional[dict] = None,
-) -> dict:
-    scenario_id = scenario["id"]
-    capture_routes = capture_routes_for_evidence(
-        scenario,
-        run_json,
-        run_dir_arg,
-        evidence_view,
-        required_mcp,
-        visual_surface,
-        driver_manifest,
-        leg,
-    )
-    # vscode legs get ONE extra capture route for the opportunistic
-    # editor-level tier (tools/persona_qa/transports.py's
-    # editor_evidence_contract), on top of the mandatory bridge-level route
-    # capture_routes_for_evidence already emitted above. It is additive, not
-    # a replacement -- see docs/persona-qa.md and record_leg_result.star for
-    # how a missing editor-level route keeps a vscode leg at bridge-level
-    # (degraded-evidence) rather than failing outright.
-    editor_contract = (leg or {}).get("editor_evidence_contract")
-    if editor_contract:
-        editor_leg = dict(leg)
-        editor_leg["transport_evidence_contract"] = editor_contract
-        capture_routes = list(capture_routes) + [
-            capture_route_for_slot(
-                scenario,
-                run_json,
-                run_dir_arg,
-                editor_contract.get("evidence_kind", "ide_context_capture"),
-                required_mcp,
-                visual_surface,
-                driver_manifest,
-                editor_leg,
-            )
-        ]
-    entry = {
-        "scenario": scenario_id,
-        "label": scenario["label"],
-        "stage": scenario["stage"],
-        "primary_story": scenario["primary_story"],
-        "task_prompt": scenario.get("task_prompt", scenario["task"]),
-        "evidence_dir": scenario.get("evidence_dir", f"evidence/{run_json['project']['id']}--{run_json['persona']['id']}/{scenario_id}"),
-        "harness": driver_harness(scenario["primary_story"]),
-        "visual_surface": visual_surface,
-        "live_budget": scenario_live_budget(run_json, scenario_id),
-        "required_mcp": required_mcp,
-        "resolved_mcp_tools": resolved_mcp_tools(required_mcp, driver_manifest),
-        "action_sequence": driver_action_sequence(required_mcp),
-        "driver_actions": driver_actions(driver_action_scenario, run_json, driver_action_evidence, driver_manifest),
-        "capture_routes": capture_routes,
-        "persona_prompts": [
-            f"Act as {run_json['persona']['label']}: {run_json['persona']['description']}",
-            f"Risk focus: {', '.join(run_json['persona'].get('risk_focus', []))}",
-            f"Start from: {lens['starting_surface']}",
-            f"First skepticism check: {lens['first_question']}",
-            f"Escalate when: {lens['escalation_trigger']}",
-            f"Evidence emphasis: {lens['evidence_emphasis']}",
-            "Use natural operator phrasing where route quality or prompt quality is under test.",
-        ],
-        "natural_utterances": scenario.get("natural_utterances", []),
-        "case_variants": scenario.get("case_variants", []),
-        "persona_lens": lens,
-        "evidence": evidence_view,
-        "success_criteria": scenario["success_criteria"],
-        "quality_gate": (
-            leg_quality_gate(
-                scenario_id,
-                [item["kind"] for item in evidence_view if item.get("kind")],
-                leg.get("transport", ""),
-            )
-            if leg is not None else scenario_quality_gate(scenario_id)
-        ),
-        "attach_commands": step.get("attach_commands", []),
-        "record_finding_command": (
-            "python3 tools/product-journey/run.py --record-finding "
-            f"--run-dir {run_dir_arg} "
-            "--finding-kind <strength|weakness|issue|fix> "
-            f"--scenario {scenario_id} "
-            "--title <title> --summary <summary> --evidence-path <path-or-retained-id>"
-        ),
-        "record_blocker_command": step.get("record_blocker_command", (
-            record_blocker_command(run_dir_arg, scenario_id)
-        )),
-        "journal_command": journal_attempt_command(run_dir_arg, scenario_id),
-    }
-    if leg is not None:
-        entry["transport"] = leg["transport"]
-        entry["leg_id"] = leg["leg_id"]
-        entry["transport_profile"] = leg["transport_profile"]
-        entry["transport_evidence_contract"] = leg["transport_evidence_contract"]
-        if leg.get("editor_evidence_contract"):
-            entry["editor_evidence_contract"] = leg["editor_evidence_contract"]
-    return entry
-
-
 def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, transports: Optional[list[str]] = None, driver_manifest: Optional[dict] = None) -> dict:
     """Build the driver plan's per-scenario (or per-leg) dispatch contracts.
 
@@ -4171,302 +2798,6 @@ def build_driver_plan(run_json: dict, evidence: dict, execution_plan: dict, tran
             *final_story_gate_commands(),
         ],
     }
-
-
-def persona_lens(persona: dict) -> dict:
-    """Return this persona's driver lens: starting surface, first skepticism
-    check, evidence emphasis, escalation trigger, and finding bias.
-
-    The lens is now a cataloged field (personas.json `persona_lens`) for the
-    curated personas rather than a value computed only at runtime, so arena
-    and other read-only consumers of the catalog can see it too. Personas
-    that don't carry the field fall back to a lens synthesized from
-    surface_preference/risk_focus -- this is the same fallback shape the
-    hardcoded lookup used before the field existed. Synthesizing this lens
-    for a tier=mined persona prints and records a visible notice -- see
-    note_tier_synthesis().
-    """
-    declared = persona.get("persona_lens")
-    if isinstance(declared, dict) and declared:
-        return declared
-    note_tier_synthesis("persona", persona.get("id", "?"), "persona_lens", persona_tier(persona))
-    return {
-        "starting_surface": persona.get("surface_preference", "surface chosen by scenario"),
-        "first_question": f"What would a {persona.get('label', 'reviewer')} naturally try first, and what evidence proves the result?",
-        "evidence_emphasis": ", ".join(persona.get("risk_focus", [])) or "scenario minimum evidence",
-        "escalation_trigger": "the scenario cannot produce proof evidence or a clear blocker",
-        "finding_bias": "Tie findings to the persona risk focus and scenario success criteria.",
-    }
-
-
-def render_driver_plan(plan: dict) -> str:
-    driver = plan.get("driver", {})
-    lines = [
-        "# Product journey driver plan",
-        "",
-        f"- Run: `{plan['run_id']}`",
-        f"- Driver: `{plan['driver_agent']}`",
-        f"- Driving surface: `{driver.get('id', DEFAULT_DRIVER_ID)}` ({driver.get('label', '')})",
-        f"- Project: `{plan['project']['label']}`",
-        f"- Persona: `{plan['persona']['label']}`",
-        "",
-    ]
-    if driver.get("affordances"):
-        lines.extend(["## Driver Affordances", ""])
-        for name, selector in sorted(driver.get("affordances", {}).items()):
-            lines.append(f"- `{name}`: `{selector}`")
-        lines.append("")
-    for index, scenario in enumerate(plan["scenarios"], start=1):
-        heading = f"{index}. {scenario['label']}"
-        if scenario.get("transport"):
-            heading = f"{heading} ({scenario['transport']})"
-        lines.extend([
-            f"## {heading}",
-            "",
-            f"- Scenario: `{scenario['scenario']}`",
-            f"- Story: `{scenario['primary_story']}`",
-            f"- Harness: `{scenario['harness']}`",
-            f"- Visual surface: `{scenario['visual_surface']}`",
-            f"- Live budget: {scenario.get('live_budget', {}).get('summary', '')}",
-            f"- MCP: {', '.join(scenario['required_mcp'])}",
-            f"- MCP tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
-            f"- Evidence dir: `{scenario['evidence_dir']}`",
-        ])
-        contract = scenario.get("transport_evidence_contract")
-        profile = scenario.get("transport_profile", {})
-        if profile:
-            lines.append(
-                f"- Transport profile: `{profile.get('id', '')}` ({profile.get('label', '')}; "
-                f"{profile.get('level', '')})"
-            )
-        if contract:
-            lines.append(
-                f"- Transport evidence contract: `{scenario['transport']}` via {contract['primary_tool']} "
-                f"-> `{contract['evidence_kind']}` ({contract['level']})"
-            )
-        if profile.get("preflight"):
-            lines.append(f"- Preflight: {profile.get('preflight')}")
-        lines.extend([
-            "",
-            scenario["task_prompt"],
-            "",
-        ])
-        capture_routes = scenario.get("capture_routes", [])
-        if capture_routes:
-            lines.extend(["### Deterministic Capture Routes", ""])
-            for route in capture_routes[:8]:
-                lines.append(
-                    f"- `{route.get('route_id', '')}`: `{route.get('primary_story', '')}` "
-                    f"via `{route.get('transport', '')}`/`{route.get('visual_surface', '')}` -> "
-                    f"`{route.get('artifact_path_template', '')}`"
-                )
-            if len(capture_routes) > 8:
-                lines.append(f"- +{len(capture_routes) - 8} more route(s)")
-            lines.append("")
-        utterances = scenario.get("natural_utterances", [])
-        if utterances:
-            lines.extend(["### Transcript-Derived Utterances", ""])
-            for utterance in utterances:
-                lines.append(
-                    f"- \"{utterance.get('text', '')}\" "
-                    f"({utterance.get('source', '')}: {utterance.get('source_ref', '')})"
-                )
-            lines.append("")
-        variants = scenario.get("case_variants", [])
-        if variants:
-            if format_case_variants(variants) not in scenario.get("task_prompt", ""):
-                lines.extend(["### Case Variants", ""])
-                for variant in variants:
-                    lines.extend([
-                        f"- `{variant.get('id', 'case')}`: \"{variant.get('utterance', '')}\"",
-                        f"  - Setup: {variant.get('setup', '')}",
-                        f"  - Success focus: {variant.get('success_focus', '')}",
-                    ])
-                lines.append("")
-        lines.extend([
-            "### Action Sequence",
-            "",
-        ])
-        for action in scenario["action_sequence"]:
-            lines.append(f"- {action}")
-        lines.extend(["", "### Driver Actions", ""])
-        for action in scenario.get("driver_actions", []):
-            tools = ", ".join(action.get("tools", [])) or "(none)"
-            resolved_tools = ", ".join(action.get("resolved_tools", [])) or "(none)"
-            evidence_refs = ", ".join(action.get("evidence", [])) or "(none)"
-            lines.extend([
-                f"#### {action['id']}",
-                "",
-                f"- Goal: {action['goal']}",
-                f"- Tools: {tools}",
-                f"- MCP tools: {resolved_tools}",
-                f"- Evidence: {evidence_refs}",
-                f"- Record: {action['record']}",
-                "",
-            ])
-            action_utterances = action.get("natural_utterances", [])
-            if action_utterances:
-                lines.extend(["Transcript-derived utterances:", ""])
-                for utterance in action_utterances:
-                    lines.append(
-                        f"- \"{utterance.get('text', '')}\" "
-                        f"({utterance.get('source', '')}: {utterance.get('source_ref', '')})"
-                    )
-                lines.append("")
-        lines.extend(["", "### Persona Prompts", ""])
-        for prompt in scenario["persona_prompts"]:
-            lines.append(f"- {prompt}")
-        lens = scenario.get("persona_lens", {})
-        if lens:
-            lines.extend(["", "### Persona Lens", ""])
-            lines.append(f"- Starting surface: {lens.get('starting_surface', '')}")
-            lines.append(f"- First question: {lens.get('first_question', '')}")
-            lines.append(f"- Evidence emphasis: {lens.get('evidence_emphasis', '')}")
-            lines.append(f"- Escalation trigger: {lens.get('escalation_trigger', '')}")
-            lines.append(f"- Finding bias: {lens.get('finding_bias', '')}")
-        lines.extend(["", "### Evidence", ""])
-        for item in scenario["evidence"]:
-            playback = " playback" if item["playback_candidate"] else ""
-            path = item["path"] or "<path-or-retained-id>"
-            lines.append(f"- `{item['kind']}`{playback}: {path} - {item['capture_hint']}")
-        gate = scenario.get("quality_gate", {})
-        lines.extend(["", "### Minimum Proof", ""])
-        lines.append(f"- Done when: {gate.get('done_when', 'The scenario has captured evidence or an explicit blocker.')}")
-        minimum = gate.get("minimum_evidence", [])
-        if minimum:
-            lines.append(f"- Minimum evidence: {', '.join(f'`{item}`' for item in minimum)}")
-        block_if = gate.get("block_if", [])
-        if block_if:
-            lines.append("- Block if:")
-            for condition in block_if:
-                lines.append(f"  - {condition}")
-        lines.extend(["", "### Attach Commands", ""])
-        for command in scenario["attach_commands"]:
-            lines.append(f"```sh\n{command}\n```")
-        lines.extend(["", "### Finding Command", ""])
-        lines.append(f"```sh\n{scenario['record_finding_command']}\n```")
-        lines.extend(["", "### Blocker Command", ""])
-        lines.append(f"```sh\n{scenario['record_blocker_command']}\n```")
-        lines.extend(["", "### Journal Command", ""])
-        lines.append(f"```sh\n{scenario['journal_command']}\n```")
-        lines.extend(["", "### Success Criteria", ""])
-        for criterion in scenario["success_criteria"]:
-            lines.append(f"- {criterion}")
-        lines.append("")
-    lines.extend(["## Final Gates", ""])
-    for command in plan["final_gates"]:
-        lines.append(f"```sh\n{command}\n```")
-    return "\n".join(lines) + "\n"
-
-
-def render_agent_brief(brief: dict) -> str:
-    driver = brief.get("driver", {})
-    lines = [
-        "# Product journey QA agent brief",
-        "",
-        f"- Run: `{brief['run_id']}`",
-        f"- Driving surface: `{driver.get('id', DEFAULT_DRIVER_ID)}` ({driver.get('label', '')})",
-        f"- Project: `{brief['project']['label']}`",
-        f"- Persona: `{brief['persona_contract']['label']}`",
-        f"- Surface preference: `{brief['persona_contract']['surface_preference']}`",
-        f"- Risk focus: {', '.join(brief['persona_contract']['risk_focus'])}",
-        f"- Recommended driver: `{brief.get('recommended_agent', '.agents/agents/product-journey-qa-driver.md')}`",
-        f"- Driver plan: `{brief.get('driver_plan_markdown', 'driver-plan.md')}`",
-        "",
-    ]
-    lens = brief["persona_contract"].get("lens", {})
-    lines.extend(["## Persona Lens", ""])
-    if lens:
-        lines.extend([
-            f"- Starting surface: {lens.get('starting_surface', '')}",
-            f"- First question: {lens.get('first_question', '')}",
-            f"- Evidence emphasis: {lens.get('evidence_emphasis', '')}",
-            f"- Escalation trigger: {lens.get('escalation_trigger', '')}",
-            f"- Finding bias: {lens.get('finding_bias', '')}",
-        ])
-    else:
-        lines.append("- (not specified)")
-    lines.extend([
-        "",
-        "## Mission",
-        "",
-        brief["mission"],
-        "",
-        "## Operating Rules",
-        "",
-    ])
-    for rule in brief["operating_rules"]:
-        lines.append(f"- {rule}")
-    lines.extend(["", "## Driver Manifest", ""])
-    lines.append(f"- App kind: `{driver.get('app_kind', '')}`")
-    lines.append(f"- Manifest: `{driver.get('manifest_path', '')}`")
-    lines.append("")
-    lines.append("### Capability Tools")
-    lines.append("")
-    for capability, tools in sorted(driver.get("capabilities", {}).items()):
-        lines.append(f"- `{capability}`: {', '.join(f'`{tool}`' for tool in tools)}")
-    affordances = driver.get("affordances", {})
-    lines.extend(["", "### Affordances", ""])
-    if affordances:
-        for name, selector in sorted(affordances.items()):
-            lines.append(f"- `{name}`: `{selector}`")
-    else:
-        lines.append("- (none declared)")
-    notes = driver.get("notes", [])
-    if notes:
-        lines.extend(["", "### Driver Notes", ""])
-        for note in notes:
-            lines.append(f"- {note}")
-    lines.extend(["", "## Scenario Order", ""])
-    for index, scenario in enumerate(brief["scenario_order"], start=1):
-        lines.extend([
-            f"### {index}. {scenario['label']}",
-            "",
-            f"- Scenario: `{scenario['id']}`",
-            f"- Story: `{scenario['primary_story']}`",
-            f"- MCP tools: {', '.join(scenario['mcp_tools'])}",
-            f"- Resolved tools: {', '.join(scenario.get('resolved_mcp_tools', [])) or '(none)'}",
-            f"- Evidence: {', '.join(scenario['evidence'])}",
-            f"- Live budget: {scenario.get('live_budget', {}).get('summary', '')}",
-            f"- Capture routes: {len(scenario.get('capture_routes', []))}",
-            "",
-            scenario.get("task_prompt", scenario["task"]),
-            "",
-            "Success criteria:",
-        ])
-        for criterion in scenario["success_criteria"]:
-            lines.append(f"- {criterion}")
-        variants = scenario.get("case_variants", [])
-        if variants:
-            if format_case_variants(variants) not in scenario.get("task_prompt", ""):
-                lines.extend(["", "Case variants:"])
-                for variant in variants:
-                    lines.append(f"- `{variant.get('id', 'case')}`: \"{variant.get('utterance', '')}\"")
-                    lines.append(f"  - Setup: {variant.get('setup', '')}")
-                    lines.append(f"  - Success focus: {variant.get('success_focus', '')}")
-        gate = scenario.get("quality_gate", {})
-        if gate:
-            lines.extend(["", "Minimum proof:"])
-            lines.append(f"- Done when: {gate.get('done_when', 'The scenario has captured evidence or an explicit blocker.')}")
-            minimum = gate.get("minimum_evidence", [])
-            if minimum:
-                lines.append(f"- Minimum evidence: {', '.join(f'`{item}`' for item in minimum)}")
-            block_if = gate.get("block_if", [])
-            if block_if:
-                lines.append("- Block if:")
-                for condition in block_if:
-                    lines.append(f"  - {condition}")
-        lines.append("")
-    lines.extend(["## Missing Evidence", ""])
-    if brief["missing_evidence"]:
-        for item in brief["missing_evidence"]:
-            lines.append(f"- `{item['scenario']}` / `{item['kind']}`: {item['hint']}")
-    else:
-        lines.append("- (none)")
-    lines.extend(["", "## Finalize", ""])
-    for command in brief["finalize_commands"]:
-        lines.append(f"```sh\n{command}\n```")
-    return "\n".join(lines) + "\n"
 
 
 def proof_gap_rows(run_json: dict, evidence: dict) -> list[dict]:
@@ -4620,198 +2951,6 @@ def build_driver_handoff(run_json: dict, metrics: dict, evidence: dict, review: 
     }
 
 
-def render_driver_handoff(handoff: dict) -> str:
-    lines = [
-        "# Product journey driver handoff",
-        "",
-        f"- Run: `{handoff['run_id']}`",
-        f"- Driver agent: `{handoff['driver_agent']}`",
-        f"- Run dir: `{handoff['run_dir']}`",
-        f"- Project: `{handoff['project']['label']}`",
-        f"- Persona: `{handoff['persona']['label']}`",
-        f"- Review: `{handoff['status']['review_status']}`",
-        f"- Evidence: {handoff['status']['present_evidence_count']} / {handoff['status']['required_evidence_count']}",
-        f"- Proof evidence: {handoff['status'].get('proof_evidence_count', 0)} attached; minimum proof {handoff['status'].get('proof_minimum_evidence_count', 0)} / {handoff['status'].get('minimum_evidence_count', 0)}",
-        f"- Findings: {handoff['status']['findings_count']}",
-        "",
-        "## Operator Warning",
-        "",
-        handoff["operator_warning"],
-        "",
-        "## Suggested Driver Prompt",
-        "",
-        handoff["suggested_prompt"],
-        "",
-        "## Inputs",
-        "",
-    ]
-    for label, path in handoff["inputs"].items():
-        lines.append(f"- `{label}`: `{path}`")
-    lines.extend(["", "## Dispatch Modes", ""])
-    for mode in handoff["dispatch_modes"]:
-        lines.append(f"- `{mode['mode']}`: {mode['description']}")
-    lines.extend(["", "## Missing Evidence", ""])
-    if handoff["missing_evidence"]:
-        for item in handoff["missing_evidence"][:25]:
-            lines.append(f"- `{item['scenario']}` / `{item['kind']}`: {item['hint']}")
-    else:
-        lines.append("- (none)")
-    lines.extend(["", "## Missing Proof Evidence", ""])
-    if handoff.get("missing_proof_evidence"):
-        for row in handoff["missing_proof_evidence"][:25]:
-            missing = ", ".join(f"`{kind}`" for kind in row.get("missing_proof_evidence", []))
-            lines.append(
-                f"- `{row['scenario']}`: proof {row.get('proof_minimum_evidence_count', 0)} / "
-                f"{row.get('minimum_evidence_count', 0)} (captured {row.get('captured_minimum_evidence_count', 0)}); missing {missing}"
-            )
-            for slot in row.get("slots", []):
-                lines.append(f"  - `{slot.get('kind', '')}`: {slot.get('capture_hint', '')}")
-                route = slot.get("capture_route", {}) if isinstance(slot.get("capture_route", {}), dict) else {}
-                if route:
-                    lines.append(
-                        f"    - Route `{route.get('route_id', '')}` opens `{route.get('primary_story', '')}` "
-                        f"via `{route.get('visual_surface', '')}` and records `{route.get('artifact_path_template', '')}`"
-                    )
-                lines.append(f"    ```sh\n    {slot.get('attach_command', '')}\n    ```")
-    else:
-        lines.append("- (none)")
-    lines.extend(["", "## Finalize", ""])
-    for command in handoff["finalize_commands"]:
-        lines.append(f"```sh\n{command}\n```")
-    return "\n".join(lines) + "\n"
-
-
-def render_execution_plan(plan: dict) -> str:
-    lines = [
-        "# Product journey execution plan",
-        "",
-        f"- Run: `{plan['run_id']}`",
-        f"- Project: `{plan['project']['label']}`",
-        f"- Persona: `{plan['persona']['label']}`",
-        f"- Scenarios: {plan['summary']['scenario_count']}",
-        f"- Evidence slots: {plan['summary']['evidence_count']}",
-    ]
-    if plan["summary"].get("transports"):
-        lines.append(f"- Transports: {', '.join(plan['summary']['transports'])}")
-        lines.append(f"- Legs: {plan['summary'].get('leg_count', len(plan['steps']))}")
-    lines.append("")
-    for step in plan["steps"]:
-        heading = f"{step['order']}. {step['label']}"
-        if step.get("transport"):
-            heading = f"{heading} ({step['transport']})"
-        lines.extend([
-            f"## {heading}",
-            "",
-            f"- Scenario: `{step['scenario']}`",
-            f"- Story: `{step['primary_story']}`",
-            f"- Stage: `{step['stage']}`",
-        ])
-        contract = step.get("transport_evidence_contract")
-        if contract:
-            lines.append(
-                f"- Transport evidence contract: `{step['transport']}` via {contract['primary_tool']} "
-                f"-> `{contract['evidence_kind']}` ({contract['level']})"
-            )
-        lines.extend([
-            "",
-            step["task"],
-            "",
-            "Driver prompt:",
-            "",
-            step.get("task_prompt", step["task"]),
-            "",
-            "### MCP Steps",
-            "",
-        ])
-        for mcp in step["mcp_steps"]:
-            lines.append(f"- `{mcp['tool']}`: {mcp['instruction']}")
-        lines.extend(["", "### Evidence", ""])
-        for evidence in step["evidence"]:
-            status = evidence["status"]
-            path = evidence["path"] or "<path-or-retained-id>"
-            lines.append(f"- `{evidence['kind']}` ({status}): {path} - {evidence['capture_hint']}")
-        lines.extend(["", "### Attach Commands", ""])
-        for command in step["attach_commands"]:
-            lines.append(f"```sh\n{command}\n```")
-        lines.extend(["", "### Blocker Command", ""])
-        lines.append(f"```sh\n{step['record_blocker_command']}\n```")
-        lines.extend(["", "### Success Criteria", ""])
-        for criterion in step["success_criteria"]:
-            lines.append(f"- {criterion}")
-        lines.append("")
-    lines.extend(["## Finalize", ""])
-    for command in plan["finalize_commands"]:
-        lines.append(f"```sh\n{command}\n```")
-    return "\n".join(lines) + "\n"
-
-
-def write_json(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def read_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def driver_manifest_path(path_or_id: str) -> Path:
-    value = (path_or_id or DEFAULT_DRIVER_ID).strip()
-    candidate = Path(value)
-    if candidate.is_absolute() or candidate.parent != Path("."):
-        return candidate if candidate.is_absolute() else PROJECT_ROOT / candidate
-    if candidate.suffix:
-        return DRIVERS_DIR / candidate
-    return DRIVERS_DIR / f"{candidate.name}.json"
-
-
-def normalize_capability_tools(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value] if value else []
-    if isinstance(value, list):
-        tools = []
-        for item in value:
-            if not isinstance(item, str) or not item:
-                raise SystemExit("Driver manifest capability values must be non-empty strings or string arrays")
-            tools.append(item)
-        return tools
-    raise SystemExit("Driver manifest capability values must be non-empty strings or string arrays")
-
-
-def load_driver_manifest(path_or_id: str = "") -> dict:
-    path = driver_manifest_path(path_or_id)
-    if not path.is_file():
-        raise SystemExit(f"Driver manifest not found: {path}")
-    manifest = read_json(path)
-    manifest["_path"] = str(path)
-    capabilities = manifest.get("capabilities", {})
-    if not isinstance(capabilities, dict):
-        raise SystemExit(f"Driver manifest {path} must contain a capabilities object")
-    manifest["_resolved_capabilities"] = {
-        capability: normalize_capability_tools(value)
-        for capability, value in capabilities.items()
-    }
-    return manifest
-
-
-def driver_summary(manifest: dict) -> dict:
-    return {
-        "id": manifest.get("id", ""),
-        "label": manifest.get("label", ""),
-        "app_kind": manifest.get("app_kind", ""),
-        "manifest_path": manifest.get("_path", ""),
-        "capabilities": manifest.get("_resolved_capabilities", {}),
-        "affordances": manifest.get("affordances", {}),
-        "evidence_contract": manifest.get("evidence_contract", {}),
-        "notes": manifest.get("notes", []),
-        "oracles": manifest.get("oracles", []),
-    }
-
-
-def driver_manifest_for_run_json(run_json: dict) -> dict:
-    driver = run_json.get("driver", {}) if isinstance(run_json, dict) else {}
-    manifest_ref = driver.get("manifest_path") or driver.get("id") or DEFAULT_DRIVER_ID
-    return load_driver_manifest(manifest_ref)
-
-
 def validate_driver_manifest(manifest: dict) -> dict:
     issues: list[dict] = []
     path = manifest.get("_path", "")
@@ -4872,13 +3011,6 @@ def validate_driver_manifest(manifest: dict) -> dict:
         "canonical_capabilities": CANONICAL_DRIVER_CAPABILITIES,
         "issues": issues,
     }
-
-
-def run_dir_from_arg(value: str) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path
 
 
 def run_dir_cli_arg(run_id: str) -> str:
@@ -4976,32 +3108,6 @@ def missing_local_artifact_refs(run_dir: Path, items: list[dict]) -> list[str]:
     return sorted(missing)
 
 
-def unattached_driver_evidence_refs(evidence: dict, driver_journal: dict) -> list[str]:
-    attached = {
-        (item.get("scenario", ""), item.get("path", ""))
-        for item in evidence.get("items", [])
-        if item.get("status") in {"captured", "validated"} and item.get("path")
-    }
-    missing = []
-    for event in driver_journal.get("items", []):
-        if event.get("status") not in {"captured", "validated"}:
-            continue
-        scenario = event.get("scenario", "")
-        for ref in event.get("evidence_refs", []):
-            if ref and (scenario, ref) not in attached:
-                missing.append(f"{event.get('id', 'driver-event')}/{scenario}:{ref}")
-    return sorted(missing)
-
-
-def open_weakness_findings(findings: dict) -> list[dict]:
-    return [
-        item for item in findings.get("items", [])
-        if item.get("kind") == "weakness"
-        and item.get("origin", "observed") != "seeded"
-        and item.get("status", "open") not in {"blocked", "fixed"}
-    ]
-
-
 def build_weakness_routes(run_json: dict, findings: dict) -> dict:
     scenarios = {
         scenario.get("id", ""): scenario
@@ -5047,41 +3153,6 @@ def build_weakness_routes(run_json: dict, findings: dict) -> dict:
         },
         "items": rows,
     }
-
-
-def render_weakness_routes(routes: dict) -> str:
-    lines = [
-        "# Product Journey PRD/design routes",
-        "",
-        f"- Run: `{routes.get('run_id', '')}`",
-        f"- Target pipeline: `{routes.get('target_pipeline', 'prd-design')}`",
-        f"- Target story: `{routes.get('target_story', 'stories/prd')}`",
-        f"- Open weaknesses routed: {routes.get('summary', {}).get('routed', 0)}",
-        "",
-    ]
-    items = routes.get("items", [])
-    if not items:
-        lines.append("No open observed weakness findings need PRD/design routing.")
-        return "\n".join(lines) + "\n"
-    lines.extend(["## Routes", ""])
-    for item in items:
-        lines.extend([
-            f"### {item.get('finding_id', '')}: {item.get('title', '')}",
-            "",
-            f"- Scenario: `{item.get('scenario', '')}` ({item.get('scenario_label', '')})",
-            f"- Persona: `{item.get('persona', '')}`",
-            f"- Severity: `{item.get('severity', '')}`",
-            f"- Evidence: `{item.get('evidence_path', '')}`",
-            f"- Target: `{item.get('target_story', 'stories/prd')}` / `{item.get('target_pipeline', 'prd-design')}`",
-            "",
-            item.get("summary", ""),
-            "",
-            "Suggested PRD idea:",
-            "",
-            f"> {item.get('suggested_idea', '')}",
-            "",
-        ])
-    return "\n".join(lines) + "\n"
 
 
 def build_prd_design_intake(run_json: dict, routes: dict) -> dict:
@@ -5139,51 +3210,6 @@ def build_prd_design_intake(run_json: dict, routes: dict) -> dict:
         },
         "items": items,
     }
-
-
-def render_prd_design_intake(intake: dict) -> str:
-    lines = [
-        "# Product Journey PRD/design intake",
-        "",
-        f"- Run: `{intake.get('run_id', '')}`",
-        f"- Target pipeline: `{intake.get('target_pipeline', 'prd-design')}`",
-        f"- Target story: `{intake.get('target_story', 'stories/prd')}`",
-        f"- Intake items: {intake.get('summary', {}).get('intake_count', 0)}",
-        "",
-    ]
-    items = intake.get("items", [])
-    if not items:
-        lines.append("No open observed weakness findings need PRD/design intake.")
-        return "\n".join(lines) + "\n"
-    lines.extend(["## Intake Items", ""])
-    for item in items:
-        lens = item.get("persona_lens", {})
-        slots = item.get("story_slots", {})
-        lines.extend([
-            f"### {item.get('intake_id', '')}: {item.get('title', '')}",
-            "",
-            f"- Finding: `{item.get('finding_id', '')}`",
-            f"- Scenario: `{item.get('scenario', '')}` ({item.get('scenario_label', '')})",
-            f"- Persona: `{item.get('persona', '')}`",
-            f"- Severity: `{item.get('severity', '')}`",
-            f"- Evidence: `{item.get('evidence_path', '')}`",
-            f"- Story: `{item.get('target_story', 'stories/prd')}` intent `{item.get('story_intent', 'start')}`",
-            f"- Upstream paths: `{slots.get('upstream_paths', '')}`",
-            "",
-            "Persona lens:",
-            "",
-            f"- Starting surface: {lens.get('starting_surface', '')}",
-            f"- First question: {lens.get('first_question', '')}",
-            f"- Evidence emphasis: {lens.get('evidence_emphasis', '')}",
-            f"- Escalation trigger: {lens.get('escalation_trigger', '')}",
-            f"- Finding bias: {lens.get('finding_bias', '')}",
-            "",
-            "PRD idea:",
-            "",
-            f"> {slots.get('idea', '')}",
-            "",
-        ])
-    return "\n".join(lines) + "\n"
 
 
 def update_derived_artifacts(run_dir: Path, publish_deck: Optional[Path] = None) -> None:
@@ -5336,288 +3362,6 @@ def prepare_driver_handoff(run_dir: Path, publish_deck: Optional[Path] = None) -
     return result
 
 
-def build_driver_contract_summary(driver_plan: dict, handoff: dict) -> str:
-    driver_scenarios = driver_plan.get("scenarios", [])
-    final_gates = driver_plan.get("final_gates", [])
-    missing_proof_evidence = handoff.get("missing_proof_evidence", [])
-    has_transport_axis = any(scenario.get("transport") for scenario in driver_scenarios)
-    unit_label = "transport checks" if has_transport_axis else "scenarios"
-    seen = set()
-    ordered_ids = []
-    for scenario in driver_scenarios:
-        scenario_id = scenario.get("scenario", "")
-        if scenario_id and scenario_id not in seen:
-            seen.add(scenario_id)
-            ordered_ids.append(scenario_id)
-    scenario_ids = ", ".join(
-        ordered_ids[:5]
-    )
-    if len(ordered_ids) > 5:
-        scenario_ids = f"{scenario_ids}, +{len(ordered_ids) - 5} more"
-    return (
-        f"Driver contract: {len(driver_scenarios)} {unit_label}"
-        f"{f' ({scenario_ids})' if scenario_ids else ''}; "
-        f"{len(missing_proof_evidence)} missing-proof rows; "
-        f"{len(final_gates)} final gates. Inspect last_result.driver_scenarios, "
-        "last_result.next_driver_capture_route, last_result.missing_proof_evidence, "
-        "and last_result.driver_final_gates."
-    )
-
-
-def next_driver_capture_slot(handoff: dict) -> dict:
-    for row in handoff.get("missing_proof_evidence", []):
-        scenario = row.get("scenario", "")
-        slots = row.get("slots", [])
-        if not scenario or not slots:
-            continue
-        slot = slots[0]
-        kind = slot.get("kind", "")
-        if kind:
-            return {"scenario": scenario, **slot}
-    return {}
-
-
-def next_driver_capture_route(handoff: dict) -> dict:
-    slot = next_driver_capture_slot(handoff)
-    route = slot.get("capture_route", {})
-    return route if isinstance(route, dict) else {}
-
-
-def next_driver_blocker_command(handoff: dict) -> str:
-    slot = next_driver_capture_slot(handoff)
-    scenario = slot.get("scenario", "")
-    if not scenario:
-        return ""
-    for row in handoff.get("missing_proof_evidence", []):
-        if row.get("scenario") == scenario:
-            return row.get("record_blocker_command", "")
-    return ""
-
-
-def build_next_driver_capture(handoff: dict) -> str:
-    slot = next_driver_capture_slot(handoff)
-    if slot:
-        scenario = slot.get("scenario", "")
-        kind = slot.get("kind", "")
-        hint = slot.get("capture_hint", "")
-        route = slot.get("capture_route", {}) if isinstance(slot.get("capture_route", {}), dict) else {}
-        route_id = route.get("route_id", "")
-        route_suffix = f" Route: {route_id}." if route_id else ""
-        if kind:
-            return f"Next capture: {scenario}/{kind}.{route_suffix} {hint}".strip()
-    return ""
-
-
-def summarize_run_bundle(run_dir: Path) -> dict:
-    run_json = read_json(run_dir / "run.json")
-    review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
-    driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {}
-    handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
-    driver_scenarios = []
-    for scenario in driver_plan.get("scenarios", []):
-        driver_scenarios.append({
-            "scenario": scenario.get("scenario", ""),
-            "label": scenario.get("label", ""),
-            "primary_story": scenario.get("primary_story", ""),
-            "task_prompt": scenario.get("task_prompt", ""),
-            "harness": scenario.get("harness", ""),
-            "visual_surface": scenario.get("visual_surface", ""),
-            "resolved_mcp_tools": scenario.get("resolved_mcp_tools", []),
-            "driver_actions": scenario.get("driver_actions", []),
-            "capture_routes": scenario.get("capture_routes", []),
-            "persona_lens": scenario.get("persona_lens", {}),
-            "evidence": scenario.get("evidence", []),
-            "quality_gate": scenario.get("quality_gate", {}),
-            "attach_commands": scenario.get("attach_commands", []),
-            "record_finding_command": scenario.get("record_finding_command", ""),
-            "record_blocker_command": scenario.get("record_blocker_command", ""),
-            "journal_command": scenario.get("journal_command", ""),
-            "success_criteria": scenario.get("success_criteria", []),
-        })
-    final_gates = driver_plan.get("final_gates", [])
-    missing_proof_evidence = handoff.get("missing_proof_evidence", [])
-    driver_contract_summary = build_driver_contract_summary(driver_plan, handoff)
-    return {
-        "status": "run_loaded",
-        "run_id": run_json["run_id"],
-        "run_dir": str(run_dir),
-        "project": run_json["project"]["id"],
-        "persona": run_json["persona"]["id"],
-        "seed": run_json.get("seed", ""),
-        "deck_path": str(run_dir / "deck.slidey.json"),
-        "execution_plan_path": str(run_dir / "execution-plan.md"),
-        "driver_plan_path": str(run_dir / "driver-plan.md"),
-        "driver_journal_path": str(run_dir / "driver-journal.md"),
-        "agent_brief_path": str(run_dir / "agent-brief.md"),
-        "driver_handoff_path": str(run_dir / "driver-handoff.md"),
-        "media_manifest_path": str(run_dir / "media-manifest.json"),
-        "scenario_outcomes_path": str(run_dir / "scenario-outcomes.md"),
-        "review_status": review.get("status", ""),
-        "review_summary": review.get("summary", ""),
-        "driver_scenarios": driver_scenarios,
-        "driver_final_gates": final_gates,
-        "missing_proof_evidence": missing_proof_evidence,
-        "driver_contract_summary": driver_contract_summary,
-        "next_driver_capture": build_next_driver_capture(handoff),
-        "next_driver_capture_route": next_driver_capture_route(handoff),
-        "next_driver_attach_command": next_driver_capture_slot(handoff).get("attach_command", ""),
-        "next_driver_blocker_command": next_driver_blocker_command(handoff),
-        "suggested_prompt": handoff.get("suggested_prompt", ""),
-    } | run_story_summary(run_dir)
-
-
-def run_story_summary(run_dir: Path) -> dict:
-    run_json = read_json(run_dir / "run.json") if (run_dir / "run.json").exists() else {}
-    metrics = read_json(run_dir / "metrics.json") if (run_dir / "metrics.json").exists() else {}
-    findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"summary": {}}
-    handoff = read_json(run_dir / "driver-handoff.json") if (run_dir / "driver-handoff.json").exists() else {}
-    driver_plan = read_json(run_dir / "driver-plan.json") if (run_dir / "driver-plan.json").exists() else {}
-    agent_brief = read_json(run_dir / "agent-brief.json") if (run_dir / "agent-brief.json").exists() else {}
-    review = read_json(run_dir / "review.json") if (run_dir / "review.json").exists() else {}
-    weakness_routes = read_json(run_dir / "weakness-routes.json") if (run_dir / "weakness-routes.json").exists() else {"summary": {}, "items": []}
-    prd_design_intake = read_json(run_dir / "prd-design-intake.json") if (run_dir / "prd-design-intake.json").exists() else {"summary": {}, "items": []}
-    control = read_json(autonomous_marathon_control_path(run_dir)) if autonomous_marathon_control_path(run_dir).exists() else {}
-    watchdog = read_json(autonomous_marathon_watchdog_path(run_dir)) if autonomous_marathon_watchdog_path(run_dir).exists() else {}
-    driver_dispatch = read_json(autonomous_driver_dispatch_path(run_dir)) if autonomous_driver_dispatch_path(run_dir).exists() else {}
-    campaign_worker = read_json(campaign_worker_receipt_path(run_dir)) if campaign_worker_receipt_path(run_dir).exists() else {}
-    finding_summary = findings.get("summary", {})
-    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
-    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
-    lens = agent_brief.get("persona_contract", {}).get("lens", {})
-    missing_proof_rows = handoff.get("missing_proof_evidence", [])
-    missing_proof_summary = []
-    for row in missing_proof_rows[:3]:
-        missing = ", ".join(row.get("missing_proof_evidence", []))
-        missing_proof_summary.append(f"{row.get('scenario', '')}: {missing}")
-    if len(missing_proof_rows) > 3:
-        missing_proof_summary.append(f"+{len(missing_proof_rows) - 3} more scenarios")
-    review_checks = review.get("checks", [])
-    actionable_review = [
-        check for check in review_checks
-        if check.get("status") in {"fail", "warn"}
-    ]
-    actionable_review.sort(key=lambda check: {"fail": 0, "warn": 1}.get(check.get("status"), 2))
-    review_backlog = []
-    for check in actionable_review[:4]:
-        detail = check.get("detail", "")
-        suffix = f" ({detail})" if detail else ""
-        review_backlog.append(f"{check.get('status', 'unknown')}: {check.get('id', 'check')}{suffix}")
-    if len(actionable_review) > 4:
-        review_backlog.append(f"+{len(actionable_review) - 4} more review checks")
-    gh_agent_fix_evidence = gh_agent_fix_evidence_links(gh_agent)
-    gh_agent_missing_evidence = gh_agent_missing_fix_evidence(gh_agent)
-    gh_agent_triage_evidence = gh_agent_triage_evidence_links(gh_agent)
-    gh_agent_missing_triage = gh_agent_missing_triage_evidence(gh_agent)
-    gh_agent_independent_verify = gh_agent_independent_verify_links(gh_agent)
-    gh_agent_missing_verify = gh_agent_missing_independent_verify(gh_agent)
-    missing_run_urls = gh_agent_missing_run_urls(gh_agent)
-    control_gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
-    control_driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
-    return {
-        "gh_agent_public_base_url": control_gh_agent.get("public_base_url", gh_agent.get("public_base_url", "")),
-        "autonomous_driver_live_profile": control_driver.get("live_profile", ""),
-        "persona_starting_surface": lens.get("starting_surface", ""),
-        "persona_first_question": lens.get("first_question", ""),
-        "persona_evidence_emphasis": lens.get("evidence_emphasis", ""),
-        "persona_escalation_trigger": lens.get("escalation_trigger", ""),
-        "persona_finding_bias": lens.get("finding_bias", ""),
-        "live_budget_minutes": run_json.get("live_budget_minutes", 0),
-        "scenario_count": metrics.get("scenario_count", 0),
-        "proof_evidence_count": metrics.get("proof_evidence_count", 0),
-        "demo_evidence_count": metrics.get("demo_evidence_count", 0),
-        "finding_total_count": sum(finding_summary.get(kind, 0) for kind in ["strength", "weakness", "issue", "fix"]),
-        "strength_count": finding_summary.get("strength", metrics.get("strength_count", 0)),
-        "weakness_count": finding_summary.get("weakness", metrics.get("weakness_count", 0)),
-        "issue_count": finding_summary.get("issue", metrics.get("issue_count", 0)),
-        "fix_count": finding_summary.get("fix", metrics.get("fix_count", 0)),
-        "blocked_count": finding_summary.get("blocked", metrics.get("blocked_count", 0)),
-        "weakness_route_count": weakness_routes.get("summary", {}).get("routed", len(weakness_routes.get("items", []))),
-        "weakness_route_summary": "; ".join(
-            f"{item.get('finding_id', '')}->{item.get('target_story', '')}"
-            for item in weakness_routes.get("items", [])[:4]
-            if isinstance(item, dict)
-        ),
-        "prd_design_intake_path": str(run_dir / "prd-design-intake.md") if (run_dir / "prd-design-intake.md").exists() else "",
-        "prd_design_intake_count": prd_design_intake.get("summary", {}).get("intake_count", len(prd_design_intake.get("items", []))),
-        "prd_design_intake_summary": "; ".join(
-            f"{item.get('finding_id', '')}->{item.get('target_story', '')} {item.get('story_intent', '')}"
-            for item in prd_design_intake.get("items", [])[:4]
-            if isinstance(item, dict)
-        ),
-        "missing_evidence_count": metrics.get("missing_evidence_count", handoff.get("status", {}).get("missing_evidence_count", 0)),
-        "missing_proof_evidence_count": handoff.get("status", {}).get("missing_proof_evidence_count", 0),
-        "proof_minimum_evidence_count": handoff.get("status", {}).get("proof_minimum_evidence_count", 0),
-        "minimum_evidence_count": handoff.get("status", {}).get("minimum_evidence_count", 0),
-        "missing_proof_summary": "; ".join(missing_proof_summary),
-        "driver_contract_summary": build_driver_contract_summary(driver_plan, handoff) if driver_plan else "",
-        "next_driver_capture": build_next_driver_capture(handoff),
-        "next_driver_capture_route": next_driver_capture_route(handoff),
-        "next_driver_attach_command": next_driver_capture_slot(handoff).get("attach_command", ""),
-        "next_driver_blocker_command": next_driver_blocker_command(handoff),
-        "review_passed_count": review.get("summary_counts", {}).get("passed", 0),
-        "review_failed_count": review.get("summary_counts", {}).get("failed", 0),
-        "review_warning_count": review.get("summary_counts", {}).get("warned", 0),
-        "review_total_count": review.get("summary_counts", {}).get("total", 0),
-        "review_backlog_summary": "; ".join(review_backlog),
-        "gh_agent_enqueue_status": gh_agent.get("enqueue_status", ""),
-        "gh_agent_enqueued_count": gh_agent.get("enqueued_count", 0),
-        "gh_agent_skipped_count": gh_agent.get("skipped_count", 0),
-        "gh_agent_job_summary": gh_agent.get("job_summary", ""),
-        "gh_agent_claim_status": gh_agent.get("claim_status", ""),
-        "gh_agent_claim_count": gh_agent.get("claim_count", 0),
-        "gh_agent_claim_summary": "; ".join(
-            str(item.get("comment_url", ""))
-            for item in gh_agent.get("claims", [])[:4]
-            if isinstance(item, dict) and item.get("comment_url")
-        ),
-        "gh_agent_drain_status": gh_agent.get("drain_status", ""),
-        "gh_agent_drained_count": gh_agent.get("drained_count", 0),
-        "gh_agent_done_count": gh_agent.get("done_count", 0),
-        "gh_agent_failed_count": gh_agent.get("failed_count", 0),
-        "gh_agent_active_count": gh_agent.get("active_count", 0),
-        "gh_agent_run_summary": gh_agent.get("run_summary", ""),
-        "gh_agent_fix_evidence_count": len(gh_agent_fix_evidence),
-        "gh_agent_missing_evidence_count": len(gh_agent_missing_evidence),
-        "gh_agent_fix_evidence_summary": summarize_gh_agent_fix_evidence(gh_agent),
-        "gh_agent_missing_evidence_summary": "; ".join(gh_agent_missing_evidence[:4]) + (f"; +{len(gh_agent_missing_evidence) - 4} more" if len(gh_agent_missing_evidence) > 4 else ""),
-        "gh_agent_triage_evidence_count": len(gh_agent_triage_evidence),
-        "gh_agent_missing_triage_count": len(gh_agent_missing_triage),
-        "gh_agent_triage_evidence_summary": "; ".join(gh_agent_triage_evidence[:4]) + (f"; +{len(gh_agent_triage_evidence) - 4} more" if len(gh_agent_triage_evidence) > 4 else ""),
-        "gh_agent_missing_triage_summary": "; ".join(gh_agent_missing_triage[:4]) + (f"; +{len(gh_agent_missing_triage) - 4} more" if len(gh_agent_missing_triage) > 4 else ""),
-        "gh_agent_independent_verify_count": len(gh_agent_independent_verify),
-        "gh_agent_missing_verify_count": len(gh_agent_missing_verify),
-        "gh_agent_independent_verify_summary": "; ".join(gh_agent_independent_verify[:4]) + (f"; +{len(gh_agent_independent_verify) - 4} more" if len(gh_agent_independent_verify) > 4 else ""),
-        "gh_agent_missing_verify_summary": "; ".join(gh_agent_missing_verify[:4]) + (f"; +{len(gh_agent_missing_verify) - 4} more" if len(gh_agent_missing_verify) > 4 else ""),
-        "gh_agent_missing_run_url_count": len(missing_run_urls),
-        "issue_closeout_status": issue_closeout.get("status", ""),
-        "issue_closeout_count": issue_closeout.get("count", 0),
-        "issue_closeout_summary": issue_closeout.get("summary", ""),
-        "autonomous_control_path": str(autonomous_marathon_control_path(run_dir)) if control else "",
-        "autonomous_control_markdown_path": str(autonomous_marathon_control_markdown_path(run_dir)) if control else "",
-        "autonomous_control_status": control.get("status", ""),
-        "autonomous_control_summary": autonomous_marathon_control_summary(control) if control else "",
-        "autonomous_watchdog_status": watchdog.get("autonomous_watchdog_status", ""),
-        "autonomous_watchdog_summary": watchdog.get("autonomous_watchdog_summary", ""),
-        "autonomous_watchdog_path": watchdog.get("autonomous_watchdog_path", str(autonomous_marathon_watchdog_path(run_dir)) if watchdog else ""),
-        "autonomous_watchdog_markdown_path": watchdog.get("autonomous_watchdog_markdown_path", str(autonomous_marathon_watchdog_markdown_path(run_dir)) if watchdog else ""),
-        "autonomous_watchdog_age_minutes": watchdog.get("heartbeat_age_minutes", 0),
-        "autonomous_driver_dispatch_path": str(autonomous_driver_dispatch_path(run_dir)) if driver_dispatch else "",
-        "autonomous_driver_dispatch_markdown_path": str(autonomous_driver_dispatch_markdown_path(run_dir)) if driver_dispatch else "",
-        "autonomous_driver_dispatch_status": driver_dispatch.get("status", ""),
-        "autonomous_driver_dispatch_summary": driver_dispatch.get("summary", ""),
-        "autonomous_driver_dispatch_trace": driver_dispatch.get("trace", ""),
-        "campaign_worker_backend": campaign_worker.get("backend", ""),
-        "campaign_worker_id": campaign_worker.get("worker_id", ""),
-        "campaign_worker_status": campaign_worker.get("status", ""),
-        "campaign_worker_ready_status": campaign_worker.get("ready_status", ""),
-        "campaign_worker_summary": campaign_worker_summary(campaign_worker) if campaign_worker else "",
-        "campaign_worker_receipt_path": str(campaign_worker_receipt_path(run_dir)) if campaign_worker else "",
-        "campaign_worker_receipt_markdown_path": str(campaign_worker_receipt_markdown_path(run_dir)) if campaign_worker else "",
-        "campaign_worker_imported_artifact_count": len(campaign_worker.get("imported_artifacts", [])),
-        "campaign_worker_artifact_import_status": campaign_worker.get("artifact_import_status", ""),
-    }
-
-
 def attach_evidence(
     run_dir: Path,
     scenario_id: str,
@@ -5728,63 +3472,6 @@ def record_blocker(
     )
 
 
-def kitsoki_cli_command() -> list[str]:
-    """Resolve the kitsoki CLI invocation for headless orchestration.
-
-    Defaults to `go run ./cmd/kitsoki` from the repo root; tests and installed
-    environments override with KITSOKI_BIN (a shell-split command prefix).
-    """
-    override = os.environ.get("KITSOKI_BIN", "").strip()
-    if override:
-        return shlex.split(override)
-    return ["go", "run", "./cmd/kitsoki"]
-
-
-def credible_issue_findings(findings: dict) -> list[dict]:
-    """Findings that must be filed when GitHub filing is requested: observed
-    (non-seeded) `issue` findings, including blocked scenarios."""
-    return [
-        item for item in findings.get("items", [])
-        if item.get("kind") == "issue" and item.get("origin", "observed") != "seeded"
-    ]
-
-
-def local_finding_ref(item: dict) -> dict:
-    """The `local_ticket` block a credible finding carries once it has been
-    filed to the default local-artifact sink (see `file_local_findings`).
-    Returns {} when the finding has no local ticket."""
-    ref = item.get("local_ticket")
-    return ref if isinstance(ref, dict) else {}
-
-
-def unfiled_credible_findings(findings: dict) -> list[str]:
-    """Credible issue findings resolved by NEITHER sink: no filed GitHub
-    issue and no local-artifact ticket. Filing to either sink satisfies the
-    `findings-filed` review/validate gate; only the GitHub-only autonomous
-    fix chain (gh-agent drain, close-out, autonomous-fix report) additionally
-    requires the GitHub sink specifically (see `credible_findings_requiring_github`)."""
-    return [
-        item.get("id", "")
-        for item in credible_issue_findings(findings)
-        if not item.get("github_issue", {}).get("url")
-        and not local_finding_ref(item).get("path")
-    ]
-
-
-def credible_findings_requiring_github(findings: dict) -> list[dict]:
-    """Credible issue findings not resolved via the local-artifact ticket
-    sink. Scopes the GitHub-only autonomous-fix gate chain (gh-agent drain,
-    fix/triage/verify evidence, run URLs, integration landing, issue
-    close-out, autonomous-fix report) so a campaign run that only used the
-    default local finding sink is never forced through GitHub filing/fixing
-    it never requested. Findings already filed to GitHub stay in this set so
-    their fix chain is still enforced."""
-    return [
-        item for item in credible_issue_findings(findings)
-        if not local_finding_ref(item).get("path")
-    ]
-
-
 def credible_issue_driver_receipt_gaps(
     findings: dict,
     driver_journal: dict,
@@ -5823,41 +3510,6 @@ def credible_issue_driver_receipt_gaps(
     return gaps
 
 
-def github_issue_ref(item: dict, fallback_repo: str) -> tuple[str, str, str, str]:
-    github_issue = item.get("github_issue", {}) or {}
-    url = str(github_issue.get("url", "")).strip()
-    repo = str(github_issue.get("repo", "") or fallback_repo).strip()
-    number = str(github_issue.get("number", "")).strip()
-    kind = "issue"
-    if (not repo or not number) and url:
-        parsed = urllib.parse.urlparse(url)
-        parts = [part for part in parsed.path.split("/") if part]
-        if parsed.netloc.lower() == "github.com" and len(parts) >= 4 and parts[2] in {"issues", "pull"}:
-            repo = repo or f"{parts[0]}/{parts[1]}"
-            number = number or parts[3]
-            if parts[2] == "pull":
-                kind = "pr"
-    return repo, number, kind, url
-
-
-def github_issue_evidence_assets(issue: dict) -> list[dict]:
-    raw = issue.get("evidence_assets", []) if isinstance(issue, dict) else []
-    if isinstance(raw, dict):
-        raw = [{"name": name, "url": url} for name, url in sorted(raw.items())]
-    out = []
-    for asset in raw or []:
-        if not isinstance(asset, dict):
-            continue
-        url = str(asset.get("url", "")).strip()
-        if not url:
-            continue
-        out.append({
-            "name": str(asset.get("name", "") or "evidence").strip(),
-            "url": url,
-        })
-    return out
-
-
 def filed_issue_evidence_lines(findings: dict) -> list[str]:
     lines = []
     items = findings.get("items", []) if isinstance(findings, dict) else []
@@ -5874,24 +3526,6 @@ def filed_issue_evidence_lines(findings: dict) -> list[str]:
                 f"{asset['name']}={asset['url']}"
             )
     return lines
-
-
-def filed_issue_evidence_links(findings: dict) -> list[str]:
-    links: list[str] = []
-    seen: set[str] = set()
-    items = findings.get("items", []) if isinstance(findings, dict) else []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        issue = item.get("github_issue", {}) if isinstance(item.get("github_issue", {}), dict) else {}
-        if not str(issue.get("url", "")).strip():
-            continue
-        for asset in github_issue_evidence_assets(issue):
-            url = asset["url"]
-            if url not in seen:
-                seen.add(url)
-                links.append(url)
-    return links
 
 
 def enqueue_gh_agent_fixes(run_dir: Path, ticket_repo: str, db_path: str, story: str) -> dict:
@@ -6058,447 +3692,6 @@ def record_gh_agent_findings_status(run_dir: Path, status: dict) -> None:
     write_json(findings_path, findings)
 
 
-def gh_agent_job_evidence_links(job: dict) -> list[str]:
-    links: list[str] = []
-    for asset in job.get("assets", []) or []:
-        if not isinstance(asset, dict):
-            continue
-        for key in ("url", "href", "path"):
-            value = str(asset.get(key, "")).strip()
-            if value:
-                links.append(value)
-                break
-    return links
-
-
-def gh_agent_asset_name(asset: dict) -> str:
-    return Path(str(asset.get("name") or asset.get("path") or asset.get("url") or "")).name
-
-
-def gh_agent_job_independent_verify_links(job: dict) -> list[str]:
-    links: list[str] = []
-    for asset in job.get("assets", []) or []:
-        if not isinstance(asset, dict):
-            continue
-        if gh_agent_asset_name(asset) != "independent-verify.md":
-            continue
-        for key in ("url", "href", "path"):
-            value = str(asset.get(key, "")).strip()
-            if value:
-                links.append(value)
-                break
-    return links
-
-
-def gh_agent_job_triage_evidence_links(job: dict) -> list[str]:
-    links: list[str] = []
-    for asset in job.get("assets", []) or []:
-        if not isinstance(asset, dict):
-            continue
-        if gh_agent_asset_name(asset) != "triage-verdict.md":
-            continue
-        for key in ("url", "href", "path"):
-            value = str(asset.get(key, "")).strip()
-            if value:
-                links.append(value)
-                break
-    return links
-
-
-def gh_agent_missing_fix_evidence(gh_agent: dict) -> list[str]:
-    missing: list[str] = []
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        if not gh_agent_job_evidence_links(job):
-            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
-    return missing
-
-
-def gh_agent_missing_triage_evidence(gh_agent: dict) -> list[str]:
-    missing: list[str] = []
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        if not gh_agent_job_triage_evidence_links(job):
-            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
-    return missing
-
-
-def gh_agent_triage_evidence_links(gh_agent: dict) -> list[str]:
-    links: list[str] = []
-    seen: set[str] = set()
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        for link in gh_agent_job_triage_evidence_links(job):
-            if link not in seen:
-                seen.add(link)
-                links.append(link)
-    return links
-
-
-def gh_agent_missing_run_urls(gh_agent: dict) -> list[str]:
-    missing: list[str] = []
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        if not str(job.get("run_url", "")).strip():
-            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
-    return missing
-
-
-def gh_agent_job_integration_branch(job: dict) -> str:
-    return str(job.get("integration_branch") or job.get("branch") or "").strip()
-
-
-def gh_agent_job_commit_sha(job: dict) -> str:
-    return str(job.get("commit_sha") or job.get("commit") or job.get("fixed_commit") or "").strip()
-
-
-def gh_agent_job_commit_url(job: dict) -> str:
-    return str(job.get("commit_url") or "").strip()
-
-
-def gh_agent_missing_integration_landing(gh_agent: dict) -> list[str]:
-    missing: list[str] = []
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        label = str(job.get("origin_ref") or job.get("job_id") or "unknown")
-        branch = gh_agent_job_integration_branch(job)
-        commit = gh_agent_job_commit_sha(job)
-        gaps = []
-        if not branch:
-            gaps.append("branch")
-        elif not branch.startswith("integration/"):
-            gaps.append(f"branch={branch}")
-        if not commit:
-            gaps.append("commit")
-        if gaps:
-            missing.append(f"{label} ({', '.join(gaps)})")
-    return missing
-
-
-def gh_agent_integration_landing_lines(gh_agent: dict) -> list[str]:
-    lines: list[str] = []
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        branch = gh_agent_job_integration_branch(job)
-        commit = gh_agent_job_commit_sha(job)
-        if not branch or not commit:
-            continue
-        line = f"{branch}@{commit}"
-        commit_url = gh_agent_job_commit_url(job)
-        if commit_url:
-            line += f" ({commit_url})"
-        lines.append(line)
-    return lines
-
-
-def gh_agent_fix_evidence_links(gh_agent: dict) -> list[str]:
-    links: list[str] = []
-    seen: set[str] = set()
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        for link in gh_agent_job_evidence_links(job):
-            if link not in seen:
-                seen.add(link)
-                links.append(link)
-    return links
-
-
-def gh_agent_missing_independent_verify(gh_agent: dict) -> list[str]:
-    missing: list[str] = []
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        if not gh_agent_job_independent_verify_links(job):
-            missing.append(str(job.get("origin_ref") or job.get("job_id") or "unknown"))
-    return missing
-
-
-def gh_agent_independent_verify_links(gh_agent: dict) -> list[str]:
-    links: list[str] = []
-    seen: set[str] = set()
-    for job in gh_agent.get("drained_jobs", []) or []:
-        if not isinstance(job, dict) or job.get("state") != "done":
-            continue
-        for link in gh_agent_job_independent_verify_links(job):
-            if link not in seen:
-                seen.add(link)
-                links.append(link)
-    return links
-
-
-def summarize_gh_agent_fix_evidence(gh_agent: dict) -> str:
-    links = gh_agent_fix_evidence_links(gh_agent)
-    if not links:
-        return ""
-    parts = links[:4]
-    if len(links) > 4:
-        parts.append(f"+{len(links) - 4} more")
-    return "; ".join(parts)
-
-
-def autonomous_fix_report_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-fix-report.md"
-
-
-def render_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[dict] = None, validation: Optional[dict] = None) -> str:
-    findings = read_json(run_dir / "findings.json") if (run_dir / "findings.json").exists() else {"items": []}
-    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
-    filing = findings.get("filing", {}) if isinstance(findings.get("filing", {}), dict) else {}
-    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
-    issue_items = [
-        item for item in findings.get("items", [])
-        if isinstance(item, dict) and item.get("github_issue", {}).get("url")
-    ]
-    lines = [
-        "# Autonomous Fix Report",
-        "",
-        f"- Run: `{run_dir.name}`",
-        f"- Ticket repo: `{status.get('ticket_repo', filing.get('ticket_repo', ''))}`",
-        f"- Status: `{status.get('autonomous_fix_status', status.get('status', ''))}`",
-        f"- Gates: {status.get('autonomous_gate_summary', '(not evaluated)')}",
-        f"- Independent verification: `{status.get('independent_verify_status', '')}` - {status.get('independent_verify_summary', '')}",
-        f"- Issue close-out: `{status.get('issue_closeout_status', '')}` ({int(status.get('issue_closeout_count', 0) or 0)} closed)",
-        "",
-        "## Autonomous Watchdog",
-        "",
-        f"- Status: `{status.get('autonomous_watchdog_status', '') or '(not checked)'}` - {status.get('autonomous_watchdog_summary', '')}",
-        f"- Age: {int(status.get('autonomous_watchdog_age_minutes', 0) or 0)} minute(s)",
-        f"- Report: {status.get('autonomous_watchdog_markdown_path', '') or '(not generated)'}",
-        "",
-        "## Hosted GH-agent",
-        "",
-        f"- Health: `{status.get('gh_agent_health_status', '') or '(not checked)'}` - {status.get('gh_agent_health_summary', '')}",
-        f"- Readiness: `{status.get('gh_agent_readiness_status', '') or '(not checked)'}` - {status.get('gh_agent_readiness_summary', '')}",
-        "",
-        "## Filed Issues",
-        "",
-    ]
-    if issue_items:
-        for item in issue_items:
-            issue = item.get("github_issue", {})
-            lines.append(f"- `{item.get('id', item.get('title', 'finding'))}`: {issue.get('url', '')}")
-            for asset in github_issue_evidence_assets(issue)[:4]:
-                lines.append(f"  - evidence `{asset['name']}`: {asset['url']}")
-    else:
-        lines.append("- (none)")
-    lines.extend([
-        "",
-        "## GH-agent Claims",
-        "",
-        f"- Claims: `{gh_agent.get('claim_status', status.get('gh_agent_claim_status', 'not requested'))}`",
-        f"- Claimed: {gh_agent.get('claim_count', status.get('gh_agent_claim_count', 0))}",
-    ])
-    claim_items = [item for item in gh_agent.get("claims", []) or [] if isinstance(item, dict)]
-    if claim_items:
-        for item in claim_items:
-            parts = [
-                item.get("issue_url", ""),
-                f"comment={item.get('comment_url', '')}" if item.get("comment_url") else "",
-                f"job={item.get('job_id', '')}" if item.get("job_id") else "",
-            ]
-            lines.append("- " + " · ".join(part for part in parts if part))
-    else:
-        lines.append("- (none)")
-    lines.extend([
-        "",
-        "## GH-agent Runs",
-        "",
-        (
-            f"- Queue: `{gh_agent.get('enqueue_status', 'not requested')}` "
-            f"(enqueued {gh_agent.get('enqueued_count', 0)}, skipped {gh_agent.get('skipped_count', 0)})"
-        ),
-        (
-            f"- Drain: `{gh_agent.get('drain_status', 'not requested')}` "
-            f"(drained {gh_agent.get('drained_count', 0)}, done {gh_agent.get('done_count', 0)}, "
-            f"failed {gh_agent.get('failed_count', 0)}, active {gh_agent.get('active_count', 0)})"
-        ),
-        "",
-    ])
-    jobs = [job for job in gh_agent.get("drained_jobs", []) or gh_agent.get("jobs", []) if isinstance(job, dict)]
-    if jobs:
-        for job in jobs:
-            label = job.get("origin_ref") or job.get("job_id") or "unknown"
-            lines.extend([
-                f"### {label}",
-                "",
-                f"- State: `{job.get('state', '')}`",
-                f"- Run URL: {job.get('run_url', '') or '(missing)'}",
-                f"- Integration branch: `{gh_agent_job_integration_branch(job) or '(missing)'}`",
-                f"- Commit: `{gh_agent_job_commit_sha(job) or '(missing)'}`",
-            ])
-            if gh_agent_job_commit_url(job):
-                lines.append(f"- Commit URL: {gh_agent_job_commit_url(job)}")
-            if job.get("incident_url"):
-                lines.append(f"- Incident: {job.get('incident_url')}")
-            if job.get("err_msg"):
-                lines.append(f"- Error: {job.get('err_msg')}")
-            evidence_links = gh_agent_job_evidence_links(job)
-            lines.append("- Evidence:")
-            if evidence_links:
-                lines.extend([f"  - {link}" for link in evidence_links])
-            else:
-                lines.append("  - (missing)")
-            lines.append("")
-    else:
-        lines.append("- (none)")
-    lines.extend([
-        "",
-        "## Issue Close-out",
-        "",
-        f"- Issue close-out: `{issue_closeout.get('status', status.get('issue_closeout_status', 'not run'))}`",
-        f"- Closed: {issue_closeout.get('count', status.get('issue_closeout_count', 0))}",
-    ])
-    if issue_closeout.get("summary"):
-        lines.append(f"- Summary: {issue_closeout.get('summary')}")
-    closeout_items = [item for item in issue_closeout.get("items", []) or [] if isinstance(item, dict)]
-    if closeout_items:
-        for item in closeout_items:
-            parts = [
-                item.get("issue_url", ""),
-                f"comment={item.get('comment_url', '')}" if item.get("comment_url") else "",
-                f"run={item.get('run_url', '')}" if item.get("run_url") else "",
-            ]
-            lines.append("- " + " · ".join(part for part in parts if part))
-    else:
-        lines.append("- (none)")
-    review_status = (review or {}).get("review_status", (review or {}).get("status", status.get("review_status", "")))
-    lines.extend([
-        "## Review",
-        "",
-        f"- Status: `{review_status}`",
-        f"- Summary: {(review or {}).get('summary', status.get('review_summary', ''))}",
-        "",
-        "## Validation",
-        "",
-        f"- Status: `{(validation or {}).get('status', status.get('validation_status', ''))}`",
-        f"- Issues: {(validation or {}).get('validation_issue_summary', status.get('validation_issue_summary', '')) or '(none)'}",
-        "",
-    ])
-    return "\n".join(lines)
-
-
-def write_autonomous_fix_report(run_dir: Path, status: dict, review: Optional[dict] = None, validation: Optional[dict] = None) -> Path:
-    path = autonomous_fix_report_path(run_dir)
-    path.write_text(render_autonomous_fix_report(run_dir, status, review, validation) + "\n", encoding="utf-8")
-    return path
-
-
-def missing_autonomous_fix_report_tokens(run_dir: Path, findings: dict) -> list[str]:
-    path = autonomous_fix_report_path(run_dir)
-    if not path.exists():
-        return ["autonomous-fix-report.md"]
-    text = path.read_text(encoding="utf-8")
-    gh_agent = findings.get("gh_agent", {}) if isinstance(findings.get("gh_agent", {}), dict) else {}
-    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
-    expected = [
-        item.get("github_issue", {}).get("url", "")
-        for item in findings.get("items", [])
-        if isinstance(item, dict) and item.get("github_issue", {}).get("url")
-    ]
-    expected.extend(filed_issue_evidence_links(findings))
-    expected.extend(
-        job.get("run_url", "")
-        for job in gh_agent.get("drained_jobs", [])
-        if isinstance(job, dict) and job.get("run_url")
-    )
-    for job in gh_agent.get("drained_jobs", []):
-        if not isinstance(job, dict):
-            continue
-        expected.extend([
-            gh_agent_job_integration_branch(job),
-            gh_agent_job_commit_sha(job),
-            gh_agent_job_commit_url(job),
-        ])
-    expected.extend(
-        link
-        for job in gh_agent.get("drained_jobs", [])
-        if isinstance(job, dict)
-        for link in gh_agent_job_evidence_links(job)
-    )
-    expected.extend(
-        item.get("comment_url", "")
-        for item in gh_agent.get("claims", []) or []
-        if isinstance(item, dict) and item.get("comment_url")
-    )
-    if gh_agent.get("claim_status"):
-        expected.append(f"Claims: `{gh_agent.get('claim_status')}`")
-    expected.extend(
-        item.get("comment_url", "")
-        for item in issue_closeout.get("items", []) or []
-        if isinstance(item, dict) and item.get("comment_url")
-    )
-    if issue_closeout.get("status"):
-        expected.append(f"Issue close-out: `{issue_closeout.get('status')}`")
-    expected.extend([
-        "## Autonomous Watchdog",
-        "## Hosted GH-agent",
-        "Health: `",
-        "Readiness: `",
-        "/healthz",
-        "/api/ready",
-    ])
-    watchdog_path = autonomous_marathon_watchdog_path(run_dir)
-    if watchdog_path.exists():
-        watchdog = read_json(watchdog_path)
-        if watchdog.get("autonomous_watchdog_status") or watchdog.get("status"):
-            expected.append(f"Status: `{watchdog.get('autonomous_watchdog_status', watchdog.get('status'))}`")
-        if watchdog.get("autonomous_watchdog_summary"):
-            expected.append(str(watchdog.get("autonomous_watchdog_summary")))
-        if watchdog.get("autonomous_watchdog_markdown_path"):
-            expected.append(str(watchdog.get("autonomous_watchdog_markdown_path")))
-    missing = [token for token in expected if token and token not in text]
-    if "Status: `(not checked)`" in text:
-        missing.append("autonomous_watchdog_status")
-    if "Report: (not generated)" in text:
-        missing.append("autonomous_watchdog_markdown_path")
-    if "Health: `(not checked)`" in text:
-        missing.append("gh_agent_health_status")
-    if "Readiness: `(not checked)`" in text:
-        missing.append("gh_agent_readiness_status")
-    if "Health: `pass`" not in text:
-        missing.append("gh_agent_health_status=pass")
-    if "Readiness: `pass`" not in text:
-        missing.append("gh_agent_readiness_status=pass")
-    return list(dict.fromkeys(missing))
-
-
-def issue_closeout_gate(findings: dict, gh_agent_requested: bool, credible_findings: list[dict]) -> tuple[bool, str]:
-    if not credible_findings or not gh_agent_requested:
-        return True, "issue close-out not required"
-    issue_closeout = findings.get("issue_closeout", {}) if isinstance(findings.get("issue_closeout", {}), dict) else {}
-    status = str(issue_closeout.get("status", "")).strip()
-    count = int(issue_closeout.get("count", 0) or 0)
-    errors = issue_closeout.get("errors", []) if isinstance(issue_closeout.get("errors", []), list) else []
-    if status != "closed":
-        return False, f"status={status or '(missing)'}, count={count}"
-    if count < len(credible_findings):
-        return False, f"closed={count}/{len(credible_findings)}"
-    if errors:
-        return False, "; ".join(str(item) for item in errors[:3])
-    return True, f"closed={count}/{len(credible_findings)}"
-
-
-def independent_verify_gate_from_summary(summary: dict, gh_agent_requested: bool, enqueued_count: int) -> tuple[bool, str]:
-    if not gh_agent_requested:
-        return True, "independent verification not required"
-    verified = int(summary.get("gh_agent_independent_verify_count", 0) or 0)
-    missing = int(summary.get("gh_agent_missing_verify_count", 0) or 0)
-    if enqueued_count <= 0:
-        return False, "no queued fix jobs"
-    if missing > 0:
-        return False, f"missing={missing}, verified={verified}/{enqueued_count}"
-    if verified < enqueued_count:
-        return False, f"verified={verified}/{enqueued_count}"
-    return True, f"verified={verified}/{enqueued_count}"
-
-
 def file_findings(
     run_dir: Path,
     ticket_repo: str,
@@ -6635,19 +3828,6 @@ def file_findings(
         update_derived_artifacts(run_dir, publish_deck=publish_deck)
     result.update(run_story_summary(run_dir))
     return result
-
-
-def local_finding_body(item: dict, run_dir: Path) -> str:
-    lines = [str(item.get("summary", "")).strip()]
-    lines.append("")
-    if item.get("scenario"):
-        lines.append(f"Scenario: {item['scenario']}")
-    if item.get("severity"):
-        lines.append(f"Severity: {item['severity']}")
-    if item.get("evidence_path"):
-        lines.append(f"Evidence: {item['evidence_path']}")
-    lines.append(f"Run bundle: {run_dir}")
-    return "\n".join(line for line in lines if line is not None).strip() + "\n"
 
 
 def file_local_findings(
@@ -6929,256 +4109,6 @@ def legacy_autonomous_fix_loop_cli_allowed() -> bool:
     )
 
 
-def autonomous_marathon_control_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-marathon-control.json"
-
-
-def autonomous_marathon_control_markdown_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-marathon-control.md"
-
-
-def autonomous_marathon_watchdog_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-marathon-watchdog.json"
-
-
-def autonomous_marathon_watchdog_markdown_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-marathon-watchdog.md"
-
-
-def render_autonomous_marathon_control(control: dict) -> str:
-    cadence = control.get("cadence", {})
-    watchdog = control.get("watchdog", {})
-    budget = control.get("budget", {})
-    driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
-    gh_agent = control.get("gh_agent", {})
-    gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
-    lines = [
-        "# Autonomous Marathon Control",
-        "",
-        f"- Run: `{control.get('run_id', '')}`",
-        f"- Status: `{control.get('status', '')}`",
-        f"- Driver mode: `{control.get('driver_mode', '')}`",
-        f"- Driver live profile: `{driver.get('live_profile', '') or '(not set)'}`",
-        f"- Cadence: every {cadence.get('hours', 0)} hour(s)",
-        f"- Next due: `{cadence.get('next_due_at', '')}`",
-        f"- Per-scenario live budget: {budget.get('per_scenario_live_minutes', 0)} minute(s)",
-        f"- Human role: {control.get('human_role', '')}",
-        f"- Heartbeat: every {watchdog.get('heartbeat_minutes', 0)} minute(s)",
-        f"- Watchdog: escalate after {watchdog.get('watchdog_minutes', 0)} minute(s)",
-        f"- Ticket repo: `{gitops.get('ticket_repo', '') or '(not set)'}`",
-        f"- Hosted gh-agent: `{gh_agent.get('public_base_url', '') or '(not set)'}`",
-        "",
-        "## Final Gates",
-        "",
-    ]
-    for gate in control.get("final_gates", []):
-        lines.append(f"- `{gate}`")
-    return "\n".join(lines) + "\n"
-
-
-def autonomous_marathon_control_summary(control: dict) -> str:
-    cadence = control.get("cadence", {})
-    budget = control.get("budget", {})
-    watchdog = control.get("watchdog", {})
-    return (
-        f"cadence={cadence.get('hours', 0)}h, "
-        f"next_due={cadence.get('next_due_at', '')}, "
-        f"budget={budget.get('per_scenario_live_minutes', 0)}m/scenario, "
-        f"heartbeat={watchdog.get('heartbeat_minutes', 0)}m, "
-        f"watchdog={watchdog.get('watchdog_minutes', 0)}m"
-    )
-
-
-def shell_command(parts: list[str]) -> str:
-    return " ".join(shlex.quote(str(part)) for part in parts)
-
-
-def gh_agent_health_url(public_base_url: str) -> str:
-    base = public_base_url.strip().rstrip("/")
-    if not base:
-        return ""
-    return f"{base}/healthz"
-
-
-def gh_agent_ready_url(public_base_url: str) -> str:
-    base = public_base_url.strip().rstrip("/")
-    if not base:
-        return ""
-    return f"{base}/api/ready"
-
-
-def check_gh_agent_health(public_base_url: str, timeout: float = 5.0) -> dict:
-    url = gh_agent_health_url(public_base_url)
-    if not url:
-        return {
-            "status": "fail",
-            "summary": "gh_agent_public_base_url is required",
-            "url": "",
-        }
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            body = resp.read(256).decode("utf-8", errors="replace").strip()
-            code = getattr(resp, "status", resp.getcode())
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {
-            "status": "fail",
-            "summary": f"{url}: {exc}",
-            "url": url,
-        }
-    if code == 200 and body == "ok":
-        return {
-            "status": "pass",
-            "summary": f"{url}: ok",
-            "url": url,
-            "http_status": code,
-        }
-    return {
-        "status": "fail",
-        "summary": f"{url}: expected HTTP 200 body ok, got HTTP {code} body {body!r}",
-        "url": url,
-        "http_status": code,
-    }
-
-
-def check_gh_agent_readiness(public_base_url: str, ticket_repo: str, timeout: float = 5.0) -> dict:
-    url = gh_agent_ready_url(public_base_url)
-    if not url:
-        return {
-            "status": "fail",
-            "summary": "gh_agent_public_base_url is required",
-            "url": "",
-        }
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
-            body = resp.read(4096).decode("utf-8", errors="replace")
-            code = getattr(resp, "status", resp.getcode())
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        return {
-            "status": "fail",
-            "summary": f"{url}: {exc}",
-            "url": url,
-        }
-    if code != 200:
-        return {
-            "status": "fail",
-            "summary": f"{url}: expected HTTP 200, got HTTP {code}",
-            "url": url,
-            "http_status": code,
-        }
-    try:
-        payload = json.loads(body)
-    except json.JSONDecodeError as exc:
-        return {
-            "status": "fail",
-            "summary": f"{url}: invalid JSON readiness payload ({exc})",
-            "url": url,
-            "http_status": code,
-        }
-    expected_repo = ticket_repo.strip()
-    actual_repo = str(payload.get("repo", "")).strip()
-    if payload.get("status") != "ready":
-        return {
-            "status": "fail",
-            "summary": f"{url}: status={payload.get('status', '')!r}",
-            "url": url,
-            "http_status": code,
-        }
-    if expected_repo and actual_repo != expected_repo:
-        return {
-            "status": "fail",
-            "summary": f"{url}: repo mismatch, expected {expected_repo}, got {actual_repo or '(empty)'}",
-            "url": url,
-            "http_status": code,
-        }
-    if payload.get("drain_enabled") is not True:
-        return {
-            "status": "fail",
-            "summary": f"{url}: drain loop is not enabled",
-            "url": url,
-            "http_status": code,
-        }
-    public_base = str(payload.get("public_base_url", "")).strip().rstrip("/")
-    expected_base = public_base_url.strip().rstrip("/")
-    if public_base and expected_base and public_base != expected_base:
-        return {
-            "status": "fail",
-            "summary": f"{url}: public_base_url mismatch, expected {expected_base}, got {public_base}",
-            "url": url,
-            "http_status": code,
-        }
-    worker = str(payload.get("worker", "")).strip()
-    return {
-        "status": "pass",
-        "summary": f"{url}: ready for {actual_repo or expected_repo} as {worker or '(unknown worker)'}",
-        "url": url,
-        "http_status": code,
-        "payload": payload,
-    }
-
-
-def invalid_autonomous_marathon_creation(
-    created_dir: Path,
-    run_json: dict,
-    summary: str,
-    validation_issue: str,
-    gate_summary: str,
-    ticket_repo: str,
-    gh_agent_public_base_url: str,
-    gh_agent_health: Optional[dict] = None,
-    gh_agent_readiness: Optional[dict] = None,
-    autonomous_driver_mode: str = "pending",
-    autonomous_driver_live_profile: str = "",
-) -> dict:
-    result = run_story_summary(created_dir)
-    result.update({
-        "status": "autonomous_marathon_invalid",
-        "autonomous_marathon_status": "autonomous_marathon_invalid",
-        "autonomous_marathon_summary": summary,
-        "autonomous_driver_mode": autonomous_driver_mode or "pending",
-        "autonomous_driver_live_profile": autonomous_driver_live_profile,
-        "autonomous_driver_status": "invalid",
-        "autonomous_driver_summary": summary,
-        "autonomous_driver_evidence_count": 0,
-        "autonomous_driver_issue_count": 0,
-        "run_id": run_json["run_id"],
-        "run_dir": str(created_dir),
-        "project": run_json["project"]["id"],
-        "persona": run_json["persona"]["id"],
-        "seed": run_json.get("seed", ""),
-        "deck_path": str(created_dir / "deck.slidey.json"),
-        "execution_plan_path": str(created_dir / "execution-plan.md"),
-        "driver_plan_path": str(created_dir / "driver-plan.md"),
-        "driver_journal_path": str(created_dir / "driver-journal.md"),
-        "agent_brief_path": str(created_dir / "agent-brief.md"),
-        "driver_handoff_path": str(created_dir / "driver-handoff.md"),
-        "media_manifest_path": str(created_dir / "media-manifest.json"),
-        "scenario_outcomes_path": str(created_dir / "scenario-outcomes.md"),
-        "ticket_repo": ticket_repo,
-        "gh_agent_public_base_url": gh_agent_public_base_url,
-        "gh_agent_health_status": (gh_agent_health or {}).get("status", ""),
-        "gh_agent_health_summary": (gh_agent_health or {}).get("summary", ""),
-        "gh_agent_readiness_status": (gh_agent_readiness or {}).get("status", ""),
-        "gh_agent_readiness_summary": (gh_agent_readiness or {}).get("summary", ""),
-        "autonomous_fix_status": "not_run",
-        "independent_verify_status": "not_run",
-        "independent_verify_summary": summary,
-        "autonomous_gate_summary": gate_summary,
-        "autonomous_control_path": "",
-        "autonomous_control_markdown_path": "",
-        "autonomous_control_status": "not_run",
-        "autonomous_control_summary": "",
-        "review_status": "not_run",
-        "review_summary": "",
-        "review_failed_count": 0,
-        "validation_status": "invalid",
-        "validation_errors": 1,
-        "validation_warnings": 0,
-        "validation_issue_summary": validation_issue,
-    })
-    result["autonomous_marathon_report_path"] = str(write_autonomous_marathon_report(created_dir, result))
-    return result
-
-
 def write_autonomous_marathon_control(
     run_dir: Path,
     run_json: dict,
@@ -7243,189 +4173,6 @@ def write_autonomous_marathon_control(
     write_json(autonomous_marathon_control_path(run_dir), control)
     autonomous_marathon_control_markdown_path(run_dir).write_text(render_autonomous_marathon_control(control), encoding="utf-8")
     return control
-
-
-def autonomous_marathon_cycle_seed(seed: str, checked: datetime.datetime) -> str:
-    base = (seed or "default").strip()
-    suffix = checked.strftime("%Y%m%dT%H%M%SZ")
-    if base.endswith(suffix):
-        return base
-    return f"{base}-cycle-{suffix}"
-
-
-def autonomous_marathon_due_params(run_json: dict, control: dict, checked: datetime.datetime) -> dict:
-    cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
-    budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
-    watchdog = control.get("watchdog", {}) if isinstance(control.get("watchdog", {}), dict) else {}
-    driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
-    gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
-    gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
-    scenarios = control.get("scenario_scope") or [
-        scenario.get("id", "")
-        for scenario in run_json.get("scenarios", [])
-        if isinstance(scenario, dict) and scenario.get("id")
-    ]
-    project = run_json.get("project", {}).get("id", "") if isinstance(run_json.get("project"), dict) else ""
-    persona = run_json.get("persona", {}).get("id", "") if isinstance(run_json.get("persona"), dict) else ""
-    return {
-        "project": project,
-        "persona": persona,
-        "seed": autonomous_marathon_cycle_seed(str(run_json.get("seed", "")), checked),
-        "scenarios": ",".join(str(item) for item in scenarios if str(item).strip()),
-        "live_budget_minutes": int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
-        "autonomous_driver_mode": str(control.get("driver_mode", "") or "pending"),
-        "autonomous_driver_live_profile": str(driver.get("live_profile", "") or control.get("driver_live_profile", "")),
-        "autonomous_cadence_hours": int(cadence.get("hours", 24) or 24),
-        "autonomous_heartbeat_minutes": int(watchdog.get("heartbeat_minutes", 15) or 15),
-        "autonomous_watchdog_minutes": int(watchdog.get("watchdog_minutes", 45) or 45),
-        "ticket_repo": str(gitops.get("ticket_repo", "")),
-        "gh_agent_public_base_url": str(gh_agent.get("public_base_url", "")),
-    }
-
-
-def autonomous_marathon_due_command(run_json: dict, control: dict, checked: datetime.datetime) -> list[str]:
-    params = autonomous_marathon_due_params(run_json, control, checked)
-    parts = [
-        "python3",
-        "tools/product-journey/run.py",
-        "--autonomous-marathon",
-        "--json-output",
-        "--report-invalid-autonomous-marathon",
-        "--project",
-        params["project"],
-        "--persona",
-        params["persona"],
-        "--seed",
-        params["seed"],
-        "--scenarios",
-        params["scenarios"],
-        "--live-budget-minutes",
-        params["live_budget_minutes"],
-        "--autonomous-driver-mode",
-        params["autonomous_driver_mode"],
-        "--autonomous-cadence-hours",
-        params["autonomous_cadence_hours"],
-        "--autonomous-heartbeat-minutes",
-        params["autonomous_heartbeat_minutes"],
-        "--autonomous-watchdog-minutes",
-        params["autonomous_watchdog_minutes"],
-        "--ticket-repo",
-        params["ticket_repo"],
-        "--gh-agent-public-base-url",
-        params["gh_agent_public_base_url"],
-    ]
-    if params.get("autonomous_driver_live_profile"):
-        parts.extend([
-            "--autonomous-driver-live-profile",
-            params["autonomous_driver_live_profile"],
-        ])
-    return [str(part) for part in parts]
-
-
-def autonomous_marathon_due_story_intent(run_json: dict, control: dict, checked: datetime.datetime) -> str:
-    parts = autonomous_marathon_due_command(run_json, control, checked)
-    values = {}
-    index = 0
-    while index < len(parts):
-        part = parts[index]
-        if part.startswith("--") and index + 1 < len(parts) and not parts[index + 1].startswith("--"):
-            values[part[2:].replace("-", "_")] = parts[index + 1]
-            index += 2
-            continue
-        index += 1
-    story_parts = [
-        "autonomous_marathon",
-        f"project={values.get('project', '')}",
-        f"persona={values.get('persona', '')}",
-        f"seed={values.get('seed', '')}",
-        f"scenarios={values.get('scenarios', '')}",
-        f"live_budget_minutes={values.get('live_budget_minutes', '')}",
-        f"autonomous_driver_mode={values.get('autonomous_driver_mode', '')}",
-    ]
-    if values.get("autonomous_driver_live_profile"):
-        story_parts.append(f"autonomous_driver_live_profile={values.get('autonomous_driver_live_profile', '')}")
-    story_parts.extend([
-        f"ticket_repo={values.get('ticket_repo', '')}",
-        f"gh_agent_public_base_url={values.get('gh_agent_public_base_url', '')}",
-    ])
-    return " ".join(story_parts).strip()
-
-
-def autonomous_marathon_due_item(run_dir: Path, control: dict, checked: datetime.datetime) -> dict:
-    run_json = read_json(run_dir / "run.json") if (run_dir / "run.json").exists() else {}
-    cadence = control.get("cadence", {}) if isinstance(control.get("cadence", {}), dict) else {}
-    budget = control.get("budget", {}) if isinstance(control.get("budget", {}), dict) else {}
-    driver = control.get("driver", {}) if isinstance(control.get("driver", {}), dict) else {}
-    gitops = control.get("gitops", {}) if isinstance(control.get("gitops", {}), dict) else {}
-    gh_agent = control.get("gh_agent", {}) if isinstance(control.get("gh_agent", {}), dict) else {}
-    status = str(control.get("status", ""))
-    driver_mode = str(control.get("driver_mode", ""))
-    next_due_value = str(cadence.get("next_due_at", ""))
-    item = {
-        "run_id": control.get("run_id", run_json.get("run_id", run_dir.name)),
-        "run_dir": str(run_dir),
-        "control_path": str(autonomous_marathon_control_path(run_dir)),
-        "status": status,
-        "driver_mode": driver_mode,
-        "autonomous_driver_live_profile": str(driver.get("live_profile", "") or control.get("driver_live_profile", "")),
-        "project": run_json.get("project", {}).get("id", "") if isinstance(run_json.get("project"), dict) else "",
-        "persona": run_json.get("persona", {}).get("id", "") if isinstance(run_json.get("persona"), dict) else "",
-        "seed": run_json.get("seed", ""),
-        "scenario_scope": control.get("scenario_scope", []),
-        "live_budget_minutes": int(budget.get("per_scenario_live_minutes", run_json.get("live_budget_minutes", 0)) or 0),
-        "ticket_repo": str(gitops.get("ticket_repo", "")),
-        "gh_agent_public_base_url": str(gh_agent.get("public_base_url", "")),
-        "next_due_at": next_due_value,
-        "minutes_until_due": 0,
-        "minutes_overdue": 0,
-        "blocked_reason": "",
-        "ignored_reason": "",
-        "next_command": "",
-        "next_story_intent": "",
-    }
-    if not run_json:
-        item["blocked_reason"] = "missing run.json"
-        return item
-    if status not in {"armed", "ready_for_driver"}:
-        item["ignored_reason"] = f"control status {status or '(empty)'} is not an active standing marathon"
-        return item
-    if not next_due_value:
-        item["blocked_reason"] = "missing cadence.next_due_at"
-        return item
-    try:
-        next_due = parse_iso_datetime(next_due_value)
-    except SystemExit:
-        item["blocked_reason"] = f"invalid cadence.next_due_at: {next_due_value}"
-        return item
-    delta_minutes = int((next_due - checked).total_seconds() // 60)
-    item["minutes_until_due"] = max(0, delta_minutes)
-    item["minutes_overdue"] = max(0, -delta_minutes)
-    if driver_mode == "pending":
-        item["blocked_reason"] = "pending driver mode still requires operator handoff; use replay, record, or live for unattended cadence"
-        return item
-    if driver_mode in {"record", "live"} and not item["autonomous_driver_live_profile"]:
-        item["blocked_reason"] = "record/live driver mode requires persisted autonomous_driver_live_profile for unattended cadence"
-        return item
-    if driver_mode in {"record", "live"}:
-        dispatch = read_json(autonomous_driver_dispatch_path(run_dir)) if autonomous_driver_dispatch_path(run_dir).exists() else {}
-        if dispatch.get("status") != "captured":
-            item["blocked_reason"] = "record/live driver has no captured autonomous-driver-dispatch receipt"
-            return item
-    if item["live_budget_minutes"] > 0 or driver_mode == "replay":
-        missing = []
-        if not item["ticket_repo"]:
-            missing.append("ticket_repo")
-        if not item["gh_agent_public_base_url"]:
-            missing.append("gh_agent_public_base_url")
-        if missing:
-            item["blocked_reason"] = "missing gitops config: " + ", ".join(missing)
-            return item
-    if checked < next_due:
-        return item
-    command_parts = autonomous_marathon_due_command(run_json, control, checked)
-    item["next_command"] = shell_command(command_parts)
-    item["next_story_intent"] = autonomous_marathon_due_story_intent(run_json, control, checked)
-    return item
 
 
 def autonomous_marathon_due(root: Path, checked_at: str = "", limit: int = 10) -> dict:
@@ -7594,46 +4341,6 @@ def autonomous_marathon_advance_due(
     return result
 
 
-def latest_driver_heartbeat(run_dir: Path) -> dict:
-    journal_path = run_dir / "driver-journal.json"
-    if not journal_path.exists():
-        return {}
-    journal = read_json(journal_path)
-    events = [
-        event for event in journal.get("items", [])
-        if isinstance(event, dict) and event.get("created_at")
-    ]
-    if not events:
-        return {}
-    return max(events, key=lambda event: parse_iso_datetime(str(event.get("created_at", ""))))
-
-
-def render_autonomous_marathon_watchdog(result: dict) -> str:
-    lines = [
-        "# Autonomous Marathon Watchdog",
-        "",
-        f"- Run: `{result.get('run_id', '')}`",
-        f"- Status: `{result.get('autonomous_watchdog_status', result.get('status', ''))}`",
-        f"- Summary: {result.get('autonomous_watchdog_summary', '')}",
-        f"- Checked at: `{result.get('checked_at', '')}`",
-        f"- Control: `{result.get('autonomous_control_path', '') or '(missing)'}`",
-        f"- Driver journal: `{result.get('driver_journal_path', '') or '(missing)'}`",
-        f"- Heartbeat: every {result.get('heartbeat_minutes', 0)} minute(s)",
-        f"- Watchdog: escalate after {result.get('watchdog_minutes', 0)} minute(s)",
-        f"- Latest heartbeat: `{result.get('latest_heartbeat_at', '') or '(none)'}`",
-        f"- Heartbeat age: {result.get('heartbeat_age_minutes', 0)} minute(s)",
-        f"- On missed heartbeat: `{result.get('on_missed_heartbeat', '')}`",
-        "",
-        "## Blocker",
-        "",
-    ]
-    if result.get("blocker_summary"):
-        lines.append(result["blocker_summary"])
-    else:
-        lines.append("No watchdog blocker is active.")
-    return "\n".join(lines) + "\n"
-
-
 def autonomous_marathon_watchdog(run_dir: Path, checked_at: str = "") -> dict:
     control_path = autonomous_marathon_control_path(run_dir)
     markdown_path = autonomous_marathon_watchdog_markdown_path(run_dir)
@@ -7717,26 +4424,6 @@ def autonomous_marathon_watchdog(run_dir: Path, checked_at: str = "") -> dict:
     return result
 
 
-def autonomous_marathon_report_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-marathon-report.md"
-
-
-def autonomous_driver_dispatch_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-driver-dispatch.json"
-
-
-def autonomous_driver_dispatch_markdown_path(run_dir: Path) -> Path:
-    return run_dir / "autonomous-driver-dispatch.md"
-
-
-def campaign_worker_receipt_path(run_dir: Path) -> Path:
-    return run_dir / "campaign-worker-receipt.json"
-
-
-def campaign_worker_receipt_markdown_path(run_dir: Path) -> Path:
-    return run_dir / "campaign-worker-receipt.md"
-
-
 def render_autonomous_driver_dispatch_receipt(receipt: dict) -> str:
     blockers = receipt.get("blockers", [])
     lines = [
@@ -7795,41 +4482,6 @@ def record_autonomous_driver_dispatch(
         encoding="utf-8",
     )
     return receipt
-
-
-def render_campaign_worker_receipt(receipt: dict) -> str:
-    lines = [
-        "# Campaign Worker Receipt",
-        "",
-        f"- Run: `{receipt.get('run_id', '')}`",
-        f"- Backend: `{receipt.get('backend', '')}`",
-        f"- Worker: `{receipt.get('worker_id', '')}`",
-        f"- Status: `{receipt.get('status', '')}`",
-        f"- Ready: `{receipt.get('ready_status', '')}` - {receipt.get('ready_summary', '')}",
-        f"- Scenario scope: `{', '.join(receipt.get('scenario_scope', [])) or '(none)'}`",
-        f"- Budget: `{receipt.get('budget_minutes', 0)}` min/scenario",
-        f"- Receipt source: `{receipt.get('receipt_source', '') or '(operator)'}`",
-        f"- Artifact import: `{receipt.get('artifact_import_status', '')}` - {receipt.get('artifact_import_summary', '')}",
-        f"- Recorded at: `{receipt.get('recorded_at', '')}`",
-        "",
-        "## Artifacts",
-        "",
-    ]
-    imported = receipt.get("imported_artifacts", [])
-    if imported:
-        lines.extend(f"- `{item}`" for item in imported)
-    else:
-        lines.append("- No imported artifacts were reported.")
-    lines.extend(["", "## Summary", "", receipt.get("summary", "") or "(none)"])
-    return "\n".join(lines) + "\n"
-
-
-def campaign_worker_summary(receipt: dict) -> str:
-    return (
-        f"{receipt.get('backend', '')}:{receipt.get('worker_id', '')} "
-        f"{receipt.get('status', '')}; ready={receipt.get('ready_status', '')}; "
-        f"artifacts={len(receipt.get('imported_artifacts', []))}"
-    )
 
 
 def record_campaign_worker_receipt(
@@ -8006,58 +4658,6 @@ def blocked_autonomous_driver_dispatch(run_dir: Path) -> dict:
     }
 
 
-def render_autonomous_marathon_report(run_dir: Path, result: dict) -> str:
-    lines = [
-        "# Autonomous Marathon Report",
-        "",
-        f"- Run: `{run_dir.name}`",
-        f"- Status: `{result.get('autonomous_marathon_status', result.get('status', ''))}`",
-        f"- Summary: {result.get('autonomous_marathon_summary', '')}",
-        f"- Autonomous driver: `{result.get('autonomous_driver_mode', 'pending')}` / `{result.get('autonomous_driver_status', 'pending')}`",
-        f"- Driver live profile: `{result.get('autonomous_driver_live_profile', '') or '(not set)'}`",
-        f"- Driver proof: {result.get('autonomous_driver_summary', '')}",
-        f"- Driver dispatch receipt: `{result.get('autonomous_driver_dispatch_markdown_path', '') or '(not generated)'}`",
-        f"- Driver dispatch trace: `{result.get('autonomous_driver_dispatch_trace', '') or '(not reported)'}`",
-        f"- Control: `{result.get('autonomous_control_path', '') or '(not generated)'}`",
-        f"- Control status: `{result.get('autonomous_control_status', '') or '(unknown)'}` - {result.get('autonomous_control_summary', '')}",
-        f"- Watchdog: `{result.get('autonomous_watchdog_status', '') or '(not checked)'}` - {result.get('autonomous_watchdog_summary', '')}",
-        f"- Watchdog report: `{result.get('autonomous_watchdog_markdown_path', '') or '(not generated)'}`",
-        f"- Driver handoff: `{result.get('driver_handoff_path', run_dir / 'driver-handoff.md')}`",
-        f"- Autonomous fix report: `{result.get('autonomous_fix_report_path', '') or '(not generated)'}`",
-        f"- Stats output: `{result.get('stats_output', '') or '(not generated)'}`",
-        "",
-        "## Gates",
-        "",
-        f"- Autonomous fix: `{result.get('autonomous_fix_status', 'not_run')}`",
-        f"- Autonomous gates: {result.get('autonomous_gate_summary', '(not run)')}",
-        f"- Review: `{result.get('review_status', '')}` ({result.get('review_failed_count', 0)} failed)",
-        f"- Validation: `{result.get('validation_status', '')}` ({result.get('validation_errors', 0)} errors)",
-        f"- Weakness routes: {result.get('weakness_route_count', 0)}",
-        f"- Stats gate: `{result.get('stats_gate_status', '')}` - {result.get('stats_gate_summary', '')}",
-        f"- Stats current run scanned: `{result.get('stats_current_run_scanned', '')}`",
-        f"- Stats: {result.get('stats_summary', '(not derived)')}",
-        "",
-        "## Next Driver Action",
-        "",
-    ]
-    next_attach = result.get("next_driver_attach_command", "")
-    next_blocker = result.get("next_driver_blocker_command", "")
-    if next_attach or next_blocker:
-        if next_attach:
-            lines.append(f"- Attach proof: `{next_attach}`")
-        if next_blocker:
-            lines.append(f"- Record blocker: `{next_blocker}`")
-    else:
-        lines.append("- No pending driver action is advertised by the handoff artifact.")
-    return "\n".join(lines)
-
-
-def write_autonomous_marathon_report(run_dir: Path, result: dict) -> Path:
-    path = autonomous_marathon_report_path(run_dir)
-    path.write_text(render_autonomous_marathon_report(run_dir, result) + "\n", encoding="utf-8")
-    return path
-
-
 def attach_autonomous_marathon_replay_driver(run_dir: Path, run_json: dict, publish_deck: Optional[Path]) -> dict:
     """Attach deterministic replay proof to a marathon run without live LLM work."""
     attached: list[dict] = []
@@ -8152,6 +4752,9 @@ def attach_autonomous_marathon_replay_driver(run_dir: Path, run_json: dict, publ
     }
 
 
+# TODO(carve): stays in run.py -- reads a monkeypatch-sensitive module
+# global (see tools/product-journey/README.md#module-layout); moving it would
+# silently stop observing test monkeypatches on the loaded run.py instance.
 def autonomous_marathon(
     catalog: dict,
     github_targets: dict,
@@ -8679,169 +5282,6 @@ def autonomous_marathon(
     return result
 
 
-def normalize_issue_title(value: str) -> str:
-    return " ".join(
-        "".join(ch.lower() if ch.isalnum() else " " for ch in value).split()
-    )
-
-
-def load_issue_state(path: str) -> dict[str, dict]:
-    if not path:
-        return {}
-    source = run_dir_from_arg(path)
-    if not source.exists():
-        raise SystemExit(f"--issue-state-file does not exist: {source}")
-    payload = read_json(source)
-    if isinstance(payload, dict) and isinstance(payload.get("issues"), list):
-        items = payload["issues"]
-    elif isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict):
-        items = []
-        for key, value in payload.items():
-            if isinstance(value, dict):
-                item = dict(value)
-                item.setdefault("url", key)
-                items.append(item)
-    else:
-        items = []
-    state: dict[str, dict] = {}
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        url = item.get("url") or item.get("html_url") or item.get("issue_url")
-        if url:
-            state[str(url)] = item
-        repo = item.get("repo", "")
-        number = item.get("number", "")
-        if repo and number:
-            state[f"https://github.com/{repo}/issues/{number}"] = item
-    return state
-
-
-def issue_marker_text(issue: dict) -> str:
-    chunks = [
-        str(issue.get("body", "")),
-        str(issue.get("resolution", "")),
-        str(issue.get("fixed_by", "")),
-    ]
-    for comment in issue.get("comments", []) or []:
-        if isinstance(comment, dict):
-            chunks.append(str(comment.get("body", "")))
-        else:
-            chunks.append(str(comment))
-    return "\n".join(chunks).lower()
-
-
-def issue_is_closed(issue: dict) -> bool:
-    return str(issue.get("state", issue.get("status", ""))).lower() in {"closed", "fixed", "resolved"}
-
-
-def issue_is_open(issue: dict) -> bool:
-    return str(issue.get("state", issue.get("status", ""))).lower() in {"open", "reopened"}
-
-
-def issue_has_fixed_marker(issue: dict) -> bool:
-    return "kitsoki-fixed-in" in issue_marker_text(issue)
-
-
-def derive_stats(root: Path, issue_state_file: str, similarity_threshold: float, similar_pair_limit: int, stats_output: str) -> dict:
-    issue_state = load_issue_state(issue_state_file)
-    run_findings: list[tuple[Path, dict]] = []
-    if root.exists():
-        for path in sorted(root.rglob("findings.json")):
-            if "stats" in path.parts:
-                continue
-            try:
-                findings = read_json(path)
-            except json.JSONDecodeError as exc:
-                raise SystemExit(f"Invalid findings JSON in {path}: {exc}")
-            run_findings.append((path.parent, findings))
-
-    credible: list[dict] = []
-    filed: list[dict] = []
-    fixed: list[dict] = []
-    reopened: list[dict] = []
-    unknown_state = 0
-    for run_dir, findings in run_findings:
-        for item in credible_issue_findings(findings):
-            entry = dict(item)
-            entry["run_dir"] = str(run_dir)
-            credible.append(entry)
-            github_issue = item.get("github_issue", {}) or {}
-            url = github_issue.get("url", "")
-            local_ticket_path = local_finding_ref(item).get("path", "")
-            if not url and not local_ticket_path:
-                continue
-            filed.append(entry)
-            if not url:
-                # Local-artifact-only ticket: filed, but there is no GitHub
-                # issue-state to reconcile fixed/reopened against.
-                continue
-            merged_issue = dict(github_issue)
-            if url in issue_state:
-                merged_issue.update(issue_state[url])
-            if not merged_issue.get("state") and not merged_issue.get("status"):
-                unknown_state += 1
-            has_marker = issue_has_fixed_marker(merged_issue)
-            if has_marker and issue_is_closed(merged_issue):
-                fixed.append(entry)
-            if has_marker and issue_is_open(merged_issue):
-                reopened.append(entry)
-
-    similar_pairs = []
-    titled = [
-        item for item in credible
-        if normalize_issue_title(str(item.get("title", "")))
-    ]
-    for index, left in enumerate(titled):
-        left_title = str(left.get("title", ""))
-        left_norm = normalize_issue_title(left_title)
-        for right in titled[index + 1:]:
-            right_title = str(right.get("title", ""))
-            right_norm = normalize_issue_title(right_title)
-            score = difflib.SequenceMatcher(None, left_norm, right_norm).ratio()
-            if score >= similarity_threshold:
-                similar_pairs.append({
-                    "score": round(score, 3),
-                    "left_title": left_title,
-                    "right_title": right_title,
-                    "left_issue_url": left.get("github_issue", {}).get("url", ""),
-                    "right_issue_url": right.get("github_issue", {}).get("url", ""),
-                    "left_run_dir": left.get("run_dir", ""),
-                    "right_run_dir": right.get("run_dir", ""),
-                })
-    similar_pairs.sort(key=lambda item: (-item["score"], item["left_title"], item["right_title"]))
-    visible_pairs = similar_pairs if similar_pair_limit < 0 else similar_pairs[:similar_pair_limit]
-    stats_summary = (
-        f"Derived product-journey stats: {len(credible)} found, {len(filed)} filed, "
-        f"{len(fixed)} fixed, {len(reopened)} reopened, {len(similar_pairs)} similar pair(s)."
-    )
-    result = {
-        "status": "stats_derived",
-        "stats_root": str(root),
-        "stats_output": "",
-        "runs_scanned": len(run_findings),
-        "run_dirs": [str(run_dir) for run_dir, _findings in run_findings],
-        "findings_found_count": len(credible),
-        "findings_filed_count": len(filed),
-        "issues_fixed_count": len(fixed),
-        "issues_reopened_count": len(reopened),
-        "issues_unknown_state_count": unknown_state,
-        "similar_pair_count": len(similar_pairs),
-        "similar_pairs_shown": len(visible_pairs),
-        "similar_pairs": visible_pairs,
-        "manual_stats_replaced": "yes",
-        "stats_summary": stats_summary,
-    }
-    if stats_output:
-        output_path = run_dir_from_arg(stats_output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        result["stats_output"] = str(output_path)
-        write_json(output_path, result)
-    return result
-
-
 def refresh_issue_state_cache(root: Path, issue_state_file: str, ticket_repo: str) -> dict:
     output = run_dir_from_arg(issue_state_file) if issue_state_file else root / "stats" / "issue-state.json"
     cmd = [
@@ -8916,10 +5356,6 @@ def record_driver_event(
     return event
 
 
-def split_csv(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
 def seed_demo_driver_journal(run_dir: Path, run_json: dict, evidence: dict) -> int:
     journal_path = run_dir / "driver-journal.json"
     journal = read_json(journal_path) if journal_path.exists() else build_driver_journal(run_json["run_id"], [])
@@ -8959,34 +5395,6 @@ def seed_demo_driver_journal(run_dir: Path, run_json: dict, evidence: dict) -> i
     write_json(journal_path, journal)
     (run_dir / "driver-journal.md").write_text(render_driver_journal(journal), encoding="utf-8")
     return added
-
-
-def demo_evidence_path(scenario: str, kind: str) -> str:
-    paths = {
-        "browser_screenshot": f"screens/{scenario}.png",
-        "screenshot_or_tui_png": f"screens/{scenario}.png",
-        "rendered_tui_frame": f"screens/{scenario}-tui.png",
-        "key_interaction_video": f"media/{scenario}-key-interaction.mp4",
-        "session_trace": f"traces/{scenario}.jsonl",
-        "trace_reference": f"traces/{scenario}.jsonl",
-        "navigation_trace": f"traces/{scenario}-navigation.json",
-        "page_url": f"artifacts/{scenario}-page-url.txt",
-        "checkpoint_rating": f"artifacts/{scenario}-checkpoint-rating.json",
-        "generated_config_diff": f"diffs/{scenario}-config.diff",
-        "candidate_diff": f"diffs/{scenario}-candidate.diff",
-        "implementation_diff": f"diffs/{scenario}-implementation.diff",
-        "onboarding_smoke_result": f"oracle-results/{scenario}-smoke.json",
-        "oracle_result": f"oracle-results/{scenario}-oracle.json",
-        "full_suite_result": f"oracle-results/{scenario}-full-suite.json",
-        "targeted_test_result": f"oracle-results/{scenario}-targeted-tests.json",
-        "prd_artifact": f"artifacts/{scenario}-prd.md",
-        "design_artifact": f"artifacts/{scenario}-design.md",
-        "review_notes": f"artifacts/{scenario}-review-notes.md",
-        "review_summary": f"artifacts/{scenario}-review-summary.md",
-        "bug_report_markdown": f"bug-reports/{scenario}.md",
-        "reproduction_steps": f"bug-reports/{scenario}-repro.md",
-    }
-    return paths.get(kind, f"artifacts/{scenario}-{kind}.txt")
 
 
 def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
@@ -9049,6 +5457,9 @@ def seed_demo_evidence(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     return result
 
 
+# TODO(carve): stays in run.py -- reads a monkeypatch-sensitive module
+# global (see tools/product-journey/README.md#module-layout); moving it would
+# silently stop observing test monkeypatches on the loaded run.py instance.
 def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     schema = read_json(SCHEMA)
     update_derived_artifacts(run_dir, publish_deck=None)
@@ -9566,194 +5977,9 @@ def review_run_bundle(run_dir: Path, publish_deck: Optional[Path]) -> dict:
     return result
 
 
-def add_validation_issue(issues: list[dict], severity: str, check_id: str, message: str, detail: str = "") -> None:
-    issues.append({
-        "severity": severity,
-        "id": check_id,
-        "message": message,
-        "detail": detail,
-    })
-
-
-def route_profile_validation_errors(route: dict, context: str, expected_transport: str = "") -> list[str]:
-    errors = []
-    route_transport = route.get("transport", "")
-    if not route_transport:
-        errors.append(f"{context}: missing transport")
-        return errors
-    if route_transport not in TRANSPORT_PROFILES:
-        errors.append(f"{context}: unknown transport={route_transport}")
-        return errors
-    if expected_transport and route_transport != expected_transport:
-        errors.append(f"{context}: route transport={route_transport}, expected={expected_transport}")
-    expected_profile = compact_transport_profile(transport_profile(route_transport))
-    actual_profile = route.get("transport_profile", {})
-    if actual_profile != expected_profile:
-        errors.append(f"{context}: transport_profile mismatch for {route_transport}")
-    expected_surface = expected_profile.get("visual_surface", route_transport)
-    if route.get("visual_surface") != expected_surface:
-        errors.append(f"{context}: visual_surface={route.get('visual_surface', '')}, expected={expected_surface}")
-    expected_contract = TRANSPORT_EVIDENCE_CONTRACTS[route_transport]
-    actual_contract = route.get("transport_evidence_contract", {})
-    if not actual_contract:
-        errors.append(f"{context}: missing transport_evidence_contract")
-    elif actual_contract != expected_contract:
-        errors.append(f"{context}: transport_evidence_contract mismatch for {route_transport}")
-    if route.get("setup_entrypoint", {}).get("preflight") != expected_profile.get("preflight", ""):
-        errors.append(f"{context}: preflight does not match transport profile")
-    if route.get("recording", {}).get("transport_rule") != expected_profile.get("recording_rule", ""):
-        errors.append(f"{context}: recording rule does not match transport profile")
-    return errors
-
-
-def validation_issue_summary(issues: list[dict], limit: int = 4) -> str:
-    if not issues:
-        return ""
-    severity_rank = {"error": 0, "warn": 1}
-    ordered = sorted(
-        issues,
-        key=lambda issue: (
-            severity_rank.get(issue.get("severity", ""), 2),
-            issue.get("id", ""),
-            issue.get("detail", ""),
-        ),
-    )
-    parts = []
-    for issue in ordered[:limit]:
-        severity = issue.get("severity", "issue")
-        check_id = issue.get("id", "unknown")
-        detail = issue.get("detail", "")
-        if len(detail) > 160:
-            detail = f"{detail[:157]}..."
-        parts.append(f"{severity}: {check_id} ({detail})" if detail else f"{severity}: {check_id}")
-    if len(ordered) > limit:
-        parts.append(f"+{len(ordered) - limit} more validation issues")
-    return "; ".join(parts)
-
-
-def validate_required_keys(data: dict, required: list[str], issues: list[dict], check_id: str, label: str) -> None:
-    missing = [key for key in required if key not in data]
-    if missing:
-        add_validation_issue(issues, "error", check_id, f"{label} is missing required keys", ", ".join(missing))
-
-
-def load_json_for_validation(path: Path, issues: list[dict]) -> dict:
-    if not path.exists():
-        add_validation_issue(issues, "error", "missing-json", "Required JSON file is missing", path.name)
-        return {}
-    try:
-        return read_json(path)
-    except json.JSONDecodeError as exc:
-        add_validation_issue(issues, "error", "invalid-json", "JSON file cannot be parsed", f"{path.name}: {exc}")
-        return {}
-
-
-def validate_final_commands(commands: list[str], issues: list[dict], check_id: str, label: str) -> None:
-    if not commands:
-        add_validation_issue(issues, "error", check_id, f"{label} has no final story-owned autonomous-fix/review/validation commands")
-        return
-    required = final_story_gate_commands()
-    missing = [
-        command for command in required
-        if command not in commands
-    ]
-    if missing:
-        add_validation_issue(issues, "error", check_id, f"{label} is missing final story-owned autonomous-fix/review/validation commands", ", ".join(missing))
-    fallback_tokens = ["--autonomous-fix-loop", "--review-run", "--validate-run"]
-    fallback_commands = [
-        command for command in commands
-        if any(token in command for token in fallback_tokens)
-    ]
-    if fallback_commands:
-        add_validation_issue(
-            issues,
-            "error",
-            check_id,
-            f"{label} exposes CLI fallback commands as primary final gates",
-            "; ".join(fallback_commands),
-        )
-
-
-def deck_scene_eyebrows(deck: dict) -> set[str]:
-    return {
-        scene.get("eyebrow", "")
-        for scene in deck.get("scenes", [])
-        if isinstance(scene, dict)
-    }
-
-
-def validate_slidey_deck_shape(deck: dict, media_manifest: dict, issues: list[dict]) -> None:
-    if not deck:
-        return
-    meta = deck.get("meta", {})
-    if not isinstance(meta, dict):
-        add_validation_issue(issues, "error", "deck-meta", "deck.slidey.json meta must be an object")
-        meta = {}
-    for key in ["title", "mode", "phase", "resolution"]:
-        if key not in meta:
-            add_validation_issue(issues, "error", "deck-meta", "deck.slidey.json meta is missing required keys", key)
-    if meta.get("mode") not in {"api", "pitch"}:
-        add_validation_issue(issues, "error", "deck-meta-mode", "deck.slidey.json meta.mode must be api or pitch", str(meta.get("mode", "")))
-    resolution = meta.get("resolution", {})
-    if not isinstance(resolution, dict) or not resolution.get("width") or not resolution.get("height"):
-        add_validation_issue(issues, "error", "deck-resolution", "deck.slidey.json meta.resolution must include width and height")
-
-    scenes = deck.get("scenes", [])
-    if not isinstance(scenes, list) or not scenes:
-        add_validation_issue(issues, "error", "deck-scenes", "deck.slidey.json scenes must be a non-empty list")
-        return
-    allowed_scene_types = {"title", "narrative", "video", "cards", "quote", "table", "image", "evidence"}
-    missing_scene_keys = []
-    invalid_scene_types = []
-    malformed_media = []
-    for index, scene in enumerate(scenes, start=1):
-        if not isinstance(scene, dict):
-            add_validation_issue(issues, "error", "deck-scene-shape", "deck.slidey.json scenes must be objects", f"scene={index}")
-            continue
-        if scene.get("type", "") not in allowed_scene_types:
-            invalid_scene_types.append(f"{index}:{scene.get('type', '')}")
-        if scene.get("type") == "title" and not scene.get("title"):
-            missing_scene_keys.append(f"{index}/title")
-        if scene.get("type") != "title" and "body" not in scene and "media" not in scene and "video" not in scene and "image" not in scene and "cards" not in scene and "items" not in scene and "rrweb" not in scene and "src" not in scene and "lede" not in scene:
-            missing_scene_keys.append(f"{index}/content")
-        if "media" in scene:
-            if not isinstance(scene.get("media"), list):
-                malformed_media.append(f"{index}:media-not-list")
-            else:
-                for media_index, media in enumerate(scene.get("media", []), start=1):
-                    if not isinstance(media, dict):
-                        malformed_media.append(f"{index}.{media_index}:media-not-object")
-                    elif not media.get("path") or not media.get("media_kind"):
-                        malformed_media.append(f"{index}.{media_index}:missing-path-or-kind")
-    if invalid_scene_types:
-        add_validation_issue(issues, "error", "deck-scene-type", "deck.slidey.json has unsupported scene types", ", ".join(invalid_scene_types))
-    if missing_scene_keys:
-        add_validation_issue(issues, "error", "deck-scene-required", "deck.slidey.json scenes are missing title or content", ", ".join(missing_scene_keys))
-    if malformed_media:
-        add_validation_issue(issues, "error", "deck-media-shape", "deck.slidey.json media entries are malformed", ", ".join(malformed_media))
-
-    manifest_playback_paths = {
-        item.get("path", "")
-        for item in media_manifest.get("items", [])
-        if item.get("playback") and item.get("path")
-    } if media_manifest else set()
-    deck_media_paths = {
-        media.get("path", "")
-        for scene in scenes
-        if isinstance(scene, dict)
-        for media in scene.get("media", [])
-        if isinstance(media, dict) and media.get("path")
-    }
-    standalone_playback_paths = {
-        scene.get("src") or scene.get("video") or scene.get("image") or scene.get("rrweb") or ""
-        for scene in scenes
-        if isinstance(scene, dict) and scene.get("eyebrow") == "Playback evidence"
-    }
-    missing_playback_paths = sorted(manifest_playback_paths - deck_media_paths - standalone_playback_paths)
-    if missing_playback_paths:
-        add_validation_issue(issues, "error", "deck-playback-coverage", "deck.slidey.json does not reference all playback manifest paths", ", ".join(missing_playback_paths))
-
-
+# TODO(carve): stays in run.py -- reads a monkeypatch-sensitive module
+# global (see tools/product-journey/README.md#module-layout); moving it would
+# silently stop observing test monkeypatches on the loaded run.py instance.
 def validate_run_bundle(run_dir: Path) -> dict:
     schema = read_json(SCHEMA)
     issues: list[dict] = []
@@ -11251,178 +7477,6 @@ def validate_matrix_bundle(matrix_dir: Path, strict_target_proof: bool = False) 
     }
 
 
-def render_matrix_summary(matrix: dict) -> str:
-    proof = matrix.get("target_proof", {})
-    proof_summary = proof.get("summary", {})
-    strict_ready = bool(proof) and proof_summary.get("failed", 0) == 0 and proof_summary.get("errors", 0) == 0
-    lines = [
-        "# Product journey GitHub matrix",
-        "",
-        f"- Matrix: `{matrix['matrix_id']}`",
-        f"- Seed: `{matrix['seed']}`",
-        f"- Targets: {matrix['target_count']}",
-        f"- Assignments: {matrix['assignment_count']}",
-        f"- Scenarios per assignment: {matrix['scenario_count']}",
-        "",
-        "## Selection Contract",
-        "",
-        f"- Host: {matrix['selection_contract']['host']}",
-        f"- License: {matrix['selection_contract'].get('license', 'not set')}",
-        f"- Open bug floor: {matrix['selection_contract']['open_bug_floor']}",
-        f"- Stargazer floor: {matrix['selection_contract'].get('stargazer_floor', 'not set')}",
-        f"- Refresh: {matrix['selection_contract']['refresh_note']}",
-        f"- Target proof: {proof.get('proof_id', 'not refreshed')}",
-        f"- Target proof checked: {proof.get('created_at', '')}",
-        f"- Strict sweep ready: {'yes' if strict_ready else 'no - run refresh-github-targets and validate with --strict-target-proof'}",
-        "",
-        "## Targets",
-        "",
-    ]
-    for target in matrix["targets"]:
-        selection_proof = target.get("selection_proof", {})
-        if selection_proof:
-            proof_line = (
-                f"{selection_proof.get('status')} - "
-                f"{selection_proof.get('open_bug_count')} open bugs "
-                f"(floor {selection_proof.get('open_bug_floor')}), "
-                f"{selection_proof.get('stargazers_count', 'unknown')} stars "
-                f"(floor {selection_proof.get('stargazer_floor', matrix['selection_contract'].get('stargazer_floor', 'unknown'))}, "
-                f"license {selection_proof.get('license', 'unknown')} via {selection_proof.get('license_source', 'unknown')}, "
-                f"checked {selection_proof.get('checked_at')})"
-            )
-        else:
-            proof_line = "not refreshed"
-        lines.extend([
-            f"### {target['label']}",
-            "",
-            f"- Repo: {target['repo']}",
-            f"- Stack: {target['stack']}",
-            f"- Bug query: {target['bug_query']}",
-            f"- Selection proof: {proof_line}",
-            f"- Status: {target['status']}",
-            f"- Notes: {target['notes']}",
-            "",
-        ])
-    lines.extend([
-        "## Assignments",
-        "",
-    ])
-    for assignment in matrix["assignments"]:
-        lines.append(
-            f"- `{assignment['id']}`: {assignment['target']['label']} as "
-            f"{assignment['persona']['label']} ({len(assignment['scenarios'])} scenarios) - "
-            f"`{assignment['emit_run_command']}`"
-        )
-        for task in assignment.get("scenario_tasks", [])[:2]:
-            lines.append(f"  - `{task['scenario']}`: {task['task_prompt']}")
-    lines.extend([
-        "",
-        "## Execution Loop",
-        "",
-        "1. Refresh each target's open bug count from its `bug_query` before a live scored sweep.",
-        "2. Create one product-journey run per assignment.",
-        "3. Drive scenarios through Kitsoki and visual MCP using the assigned persona.",
-        "4. Attach evidence, record findings, and run the review gate.",
-        "5. Review the per-run Slidey deck plus this matrix deck.",
-    ])
-    return "\n".join(lines) + "\n"
-
-
-def render_matrix_deck(matrix: dict) -> dict:
-    target_lines = [
-        (
-            f"{target['label']} - {target['stack']} - "
-            f"{target.get('selection_proof', {}).get('open_bug_count', 'unrefreshed')} bugs / floor {target['open_bug_floor']} - "
-            f"{target.get('selection_proof', {}).get('stargazers_count', 'unrefreshed')} stars / floor {matrix['selection_contract'].get('stargazer_floor', 'n/a')}"
-        )
-        for target in matrix["targets"]
-    ]
-    proof = matrix.get("target_proof", {})
-    proof_summary = proof.get("summary", {})
-    strict_ready = bool(proof) and proof_summary.get("failed", 0) == 0 and proof_summary.get("errors", 0) == 0
-    proof_lines = [
-        f"Proof: {proof.get('proof_id', 'not refreshed')}",
-        f"Checked: {proof.get('created_at', '')}",
-        f"Passed: {proof_summary.get('passed', 0)} / {proof_summary.get('targets', 0)}",
-        f"Failed: {proof_summary.get('failed', 0)}",
-        f"Errors: {proof_summary.get('errors', 0)}",
-        f"Bug floor: {proof_summary.get('open_bug_floor', matrix['selection_contract'].get('open_bug_floor', 'n/a'))}",
-        f"Star floor: {proof_summary.get('stargazer_floor', matrix['selection_contract'].get('stargazer_floor', 'n/a'))}",
-        f"Strict sweep ready: {'yes' if strict_ready else 'no - validate with --strict-target-proof before live scoring'}",
-    ]
-    assignment_lines = [
-        f"{assignment['target']['label']} / {assignment['persona']['label']}"
-        for assignment in matrix["assignments"][:16]
-    ]
-    scenario_lines = [
-        f"{scenario['label']}: {', '.join(scenario['required_mcp'])}"
-        for scenario in matrix["scenarios"]
-    ]
-    task_lines = []
-    for assignment in matrix["assignments"][:5]:
-        first_task = assignment.get("scenario_tasks", [{}])[0]
-        if first_task:
-            task_lines.append(f"{assignment['target']['label']} / {assignment['persona']['label']}: {first_task.get('task_prompt', '')}")
-    return {
-        "meta": {
-            "mode": "pitch",
-            "title": "Product Journey GitHub Matrix",
-            "phase": "planning",
-            "resolution": {"width": 1920, "height": 1080},
-        },
-        "scenes": [
-            {
-                "type": "title",
-                "title": "GitHub Product Journey Matrix",
-                "subtitle": f"{matrix['target_count']} repos · {matrix['assignment_count']} assignments",
-                "narration": "A repeatable no-LLM plan for natural product journey QA across popular GitHub projects.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Selection",
-                "title": "Popular GitHub repos with large bug queues",
-                "body": "\n".join(target_lines),
-                "narration": "Each target is selected for public GitHub usage, popularity, and a large bug-labeled issue corpus.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Target proof",
-                "title": "Bug corpus and popularity evidence",
-                "body": "\n".join(proof_lines),
-                "narration": "Current GitHub proof is optional for no-LLM planning, but required before claiming the live matrix satisfies the bug-count and popularity floors.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Personas",
-                "title": matrix["persona_mode"],
-                "body": "\n".join(assignment_lines),
-                "narration": "The matrix assigns personas deterministically so results are repeatable across reruns.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Scenarios",
-                "title": "MCP evidence contract",
-                "body": "\n".join(scenario_lines),
-                "narration": "Every assignment uses the same scenario set and evidence contract.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Task prompts",
-                "title": "Natural-use seeds",
-                "body": "\n".join(task_lines) if task_lines else "No assignment task prompts generated.",
-                "narration": "Each matrix assignment includes deterministic task prompts so natural-use runs are repeatable.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Execution",
-                "title": "From matrix to reviewable deck",
-                "body": "Create runs\nDrive Kitsoki and visual MCP\nAttach evidence\nRecord findings\nRun review gate\nReview per-run and matrix Slidey decks",
-                "narration": "The matrix is a planning artifact; each assignment still produces its own evidence-backed bundle.",
-            },
-        ],
-    }
-
-
 def collect_rollup_runs(matrix: dict, explicit_run_dirs: list[str]) -> list[Path]:
     explicit_run_dirs = [value for value in explicit_run_dirs if value]
     if explicit_run_dirs:
@@ -11542,235 +7596,6 @@ def summarize_quality_gates(evidence: dict, outcomes: dict, driver_plan: dict, r
     return rows
 
 
-def summarize_driver_action_contract(driver_plan: dict, schema: dict) -> dict:
-    required_ids = schema["driver_plan"].get("driver_action_ids", [])
-    required_keys = schema["driver_plan"].get("driver_action_required", [])
-    rows = []
-    invalid_rows = []
-    for index, scenario in enumerate(driver_plan.get("scenarios", []), start=1):
-        scenario_id = scenario.get("scenario", f"driver-scenario-{index}")
-        actions = scenario.get("driver_actions", [])
-        action_ids = [action.get("id", "") for action in actions]
-        missing_keys = []
-        journal_recordable = False
-        for action in actions:
-            action_id = action.get("id", "action")
-            for key in required_keys:
-                if key not in action:
-                    missing_keys.append(f"{action_id}/{key}")
-            if action_id == "journal_attempt":
-                journal_tools = " ".join(action.get("tools", []))
-                journal_recordable = (
-                    "story.driver_event" in journal_tools
-                    or "--record-driver-event" in journal_tools
-                ) and bool(action.get("record", "").strip())
-        order_matches = action_ids == required_ids
-        valid = order_matches and not missing_keys and journal_recordable
-        row = {
-            "scenario": scenario_id,
-            "action_count": len(actions),
-            "expected_action_count": len(required_ids),
-            "action_ids": action_ids,
-            "expected_action_ids": required_ids,
-            "order_matches": order_matches,
-            "missing_keys": missing_keys,
-            "journal_recordable": journal_recordable,
-            "valid": valid,
-        }
-        rows.append(row)
-        if not valid:
-            invalid_rows.append(row)
-    return {
-        "scenario_count": len(rows),
-        "valid_scenarios": len(rows) - len(invalid_rows),
-        "invalid_scenarios": len(invalid_rows),
-        "required_action_ids": required_ids,
-        "required_action_keys": required_keys,
-        "rows": rows,
-    }
-
-
-def aggregate_scenario_outcomes(runs: list[dict]) -> list[dict]:
-    by_scenario: dict[str, dict] = {}
-    for run in runs:
-        for outcome in run.get("scenario_outcomes", []):
-            scenario_id = outcome.get("scenario", "")
-            row = by_scenario.setdefault(scenario_id, {
-                "scenario": scenario_id,
-                "label": outcome.get("label", scenario_id),
-                "runs": 0,
-                "present_evidence_count": 0,
-                "required_evidence_count": 0,
-                "findings_count": 0,
-                "strength_count": 0,
-                "weakness_count": 0,
-                "issue_count": 0,
-                "fix_count": 0,
-                "blocked_count": 0,
-                "outcomes": {},
-            })
-            finding_counts = outcome.get("finding_counts", {})
-            row["runs"] += 1
-            row["present_evidence_count"] += outcome.get("present_evidence_count", 0)
-            row["required_evidence_count"] += outcome.get("required_evidence_count", 0)
-            row["strength_count"] += finding_counts.get("strength", 0)
-            row["weakness_count"] += finding_counts.get("weakness", 0)
-            row["issue_count"] += finding_counts.get("issue", 0)
-            row["fix_count"] += finding_counts.get("fix", 0)
-            row["blocked_count"] += finding_counts.get("blocked", 0)
-            row["findings_count"] += sum(finding_counts.get(kind, 0) for kind in ["strength", "weakness", "issue", "fix"])
-            outcome_name = outcome.get("outcome", "unknown")
-            row["outcomes"][outcome_name] = row["outcomes"].get(outcome_name, 0) + 1
-    return [by_scenario[key] for key in sorted(by_scenario)]
-
-
-def aggregate_persona_outcomes(runs: list[dict]) -> list[dict]:
-    by_persona: dict[str, dict] = {}
-    for run in runs:
-        persona = run.get("persona", {})
-        persona_id = persona.get("id", "unknown")
-        row = by_persona.setdefault(persona_id, {
-            "persona": persona_id,
-            "label": persona.get("label", persona_id),
-            "runs": 0,
-            "reviewed_runs": 0,
-            "ready_runs": 0,
-            "present_evidence_count": 0,
-            "required_evidence_count": 0,
-            "findings_count": 0,
-            "strength_count": 0,
-            "weakness_count": 0,
-            "issue_count": 0,
-            "fix_count": 0,
-            "blocked_count": 0,
-            "quality_gate_satisfied_runs": 0,
-            "quality_gate_total_runs": 0,
-            "quality_gate_blocked_runs": 0,
-            "proof_minimum_evidence_count": 0,
-            "minimum_evidence_count": 0,
-            "review_statuses": {},
-        })
-        row["runs"] += 1
-        row["reviewed_runs"] += 1 if run.get("review_status") != "not_reviewed" else 0
-        row["ready_runs"] += 1 if run.get("review_status") == "ready" else 0
-        row["present_evidence_count"] += run.get("present_evidence_count", 0)
-        row["required_evidence_count"] += run.get("required_evidence_count", 0)
-        row["findings_count"] += run.get("findings_count", 0)
-        row["strength_count"] += run.get("strength_count", 0)
-        row["weakness_count"] += run.get("weakness_count", 0)
-        row["issue_count"] += run.get("issue_count", 0)
-        row["fix_count"] += run.get("fix_count", 0)
-        row["blocked_count"] += run.get("blocked_count", 0)
-        status = run.get("review_status", "not_reviewed")
-        row["review_statuses"][status] = row["review_statuses"].get(status, 0) + 1
-        for gate in run.get("quality_gates", []):
-            row["quality_gate_total_runs"] += 1
-            row["quality_gate_satisfied_runs"] += 1 if gate.get("satisfied") else 0
-            row["quality_gate_blocked_runs"] += 1 if gate.get("blocked") else 0
-            row["proof_minimum_evidence_count"] += gate.get("proof_minimum_evidence_count", 0)
-            row["minimum_evidence_count"] += gate.get("minimum_evidence_count", 0)
-    return [by_persona[key] for key in sorted(by_persona)]
-
-
-def aggregate_quality_gates(runs: list[dict]) -> list[dict]:
-    by_scenario: dict[str, dict] = {}
-    for run in runs:
-        for gate in run.get("quality_gates", []):
-            scenario_id = gate.get("scenario", "")
-            row = by_scenario.setdefault(scenario_id, {
-                "scenario": scenario_id,
-                "label": gate.get("label", scenario_id),
-                "runs": 0,
-                "satisfied_runs": 0,
-                "blocked_runs": 0,
-                "present_minimum_evidence_count": 0,
-                "proof_minimum_evidence_count": 0,
-                "minimum_evidence_count": 0,
-                "missing_minimum_evidence": {},
-                "missing_proof_minimum_evidence": {},
-                "outcomes": {},
-            })
-            row["runs"] += 1
-            row["satisfied_runs"] += 1 if gate.get("satisfied") else 0
-            row["blocked_runs"] += 1 if gate.get("blocked") else 0
-            row["present_minimum_evidence_count"] += gate.get("present_minimum_evidence_count", 0)
-            row["proof_minimum_evidence_count"] += gate.get("proof_minimum_evidence_count", 0)
-            row["minimum_evidence_count"] += gate.get("minimum_evidence_count", 0)
-            outcome = gate.get("outcome", "not_started")
-            row["outcomes"][outcome] = row["outcomes"].get(outcome, 0) + 1
-            for evidence_kind in gate.get("missing_minimum_evidence", []):
-                row["missing_minimum_evidence"][evidence_kind] = row["missing_minimum_evidence"].get(evidence_kind, 0) + 1
-            for evidence_kind in gate.get("missing_proof_minimum_evidence", []):
-                row["missing_proof_minimum_evidence"][evidence_kind] = row["missing_proof_minimum_evidence"].get(evidence_kind, 0) + 1
-    return [by_scenario[key] for key in sorted(by_scenario)]
-
-
-def aggregate_driver_journal(runs: list[dict]) -> list[dict]:
-    by_scenario: dict[str, dict] = {}
-    for run in runs:
-        for event in run.get("driver_journal_events", []):
-            scenario_id = event.get("scenario", "")
-            if not scenario_id:
-                continue
-            row = by_scenario.setdefault(scenario_id, {
-                "scenario": scenario_id,
-                "events": 0,
-                "runs": set(),
-                "statuses": {},
-                "dispatch_modes": {},
-                "mcp_tools": {},
-                "evidence_refs": 0,
-                "blocked_events": 0,
-            })
-            row["events"] += 1
-            row["runs"].add(run.get("run_id", ""))
-            status = event.get("status", "attempted")
-            row["statuses"][status] = row["statuses"].get(status, 0) + 1
-            mode = event.get("dispatch_mode", "")
-            if mode:
-                row["dispatch_modes"][mode] = row["dispatch_modes"].get(mode, 0) + 1
-            for tool in event.get("mcp_tools", []):
-                row["mcp_tools"][tool] = row["mcp_tools"].get(tool, 0) + 1
-            row["evidence_refs"] += len(event.get("evidence_refs", []))
-            if status == "blocked" or event.get("blockers"):
-                row["blocked_events"] += 1
-    return [
-        {**row, "runs": len(row["runs"])}
-        for _, row in sorted(by_scenario.items())
-    ]
-
-
-def aggregate_missing_proof_evidence(quality_gates: list[dict], runs: list[dict]) -> list[dict]:
-    rows_by_key: dict[tuple[str, str], dict] = {}
-    for gate in quality_gates:
-        for evidence_kind, count in gate.get("missing_proof_minimum_evidence", {}).items():
-            rows_by_key[(gate.get("scenario", ""), evidence_kind)] = {
-                "scenario": gate.get("scenario", ""),
-                "label": gate.get("label", gate.get("scenario", "")),
-                "evidence_kind": evidence_kind,
-                "missing_runs": count,
-                "runs": gate.get("runs", 0),
-                "affected_runs": [],
-            }
-
-    for run in runs:
-        for gate in run.get("quality_gates", []):
-            scenario_id = gate.get("scenario", "")
-            for evidence_kind in gate.get("missing_proof_minimum_evidence", []):
-                row = rows_by_key.get((scenario_id, evidence_kind))
-                if row is None:
-                    continue
-                row["affected_runs"].append({
-                    "run_id": run.get("run_id", ""),
-                    "project": run.get("project", {}).get("id", ""),
-                    "persona": run.get("persona", {}).get("id", ""),
-                    "run_dir": run.get("run_dir", ""),
-                    "driver_handoff_path": run.get("driver_handoff_path", ""),
-                })
-
-    return sorted(rows_by_key.values(), key=lambda row: (-row["missing_runs"], row["scenario"], row["evidence_kind"]))
-
-
 def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
     matrix = read_json(matrix_dir / "matrix.json")
     run_dirs = collect_rollup_runs(matrix, explicit_run_dirs)
@@ -11832,264 +7657,6 @@ def build_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
             "deck": "rollup.slidey.json",
         },
     }
-
-
-def render_rollup_summary(rollup: dict) -> str:
-    summary = rollup["summary"]
-    lines = [
-        "# Product journey matrix rollup",
-        "",
-        f"- Matrix: `{rollup['matrix_id']}`",
-        f"- Runs found: {summary['runs_found']} / {summary['assignments']}",
-        f"- Reviewed runs: {summary['reviewed_runs']}",
-        f"- Ready runs: {summary['ready_runs']}",
-        f"- Evidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}",
-        f"- Findings: {summary['findings_count']} (strengths {summary['strength_count']}, weaknesses {summary['weakness_count']}, issues {summary['issue_count']}, fixes {summary['fix_count']}, blocked {summary.get('blocked_count', 0)})",
-        f"- Persona outcome rows: {summary.get('persona_outcomes', 0)}",
-        f"- Scenario outcome rows: {summary['scenario_outcomes']} ({summary['scenario_outcomes_with_findings']} with findings)",
-        f"- Driver journal: {summary.get('driver_journal_events', 0)} events across {summary.get('driver_journal_rows', 0)} scenarios ({summary.get('driver_journal_blocked_events', 0)} blocked, {summary.get('driver_journal_evidence_refs', 0)} evidence refs)",
-        f"- Quality gates: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)} satisfied, {summary.get('quality_gate_blocked_runs', 0)} blocked, proof evidence {summary.get('quality_gate_proof_minimum_evidence_count', 0)} / {summary.get('quality_gate_minimum_evidence_count', 0)} (captured {summary.get('quality_gate_present_minimum_evidence_count', 0)})",
-        f"- Missing proof evidence rows: {summary.get('missing_proof_evidence_rows', 0)} ({summary.get('quality_gate_missing_proof_evidence_count', 0)} missing run-slots)",
-        "",
-        "## Runs",
-        "",
-    ]
-    for run in rollup["runs"]:
-        lines.extend([
-            f"### {run['project'].get('label', run['project'].get('id', 'unknown'))} / {run['persona'].get('label', run['persona'].get('id', 'unknown'))}",
-            "",
-            f"- Run: `{run['run_id']}`",
-            f"- Review: {run['review_status']} - {run['review_summary']}",
-            f"- Evidence: {run['present_evidence_count']} / {run['required_evidence_count']}",
-            f"- Quality gates: {sum(1 for gate in run.get('quality_gates', []) if gate.get('satisfied'))} / {len(run.get('quality_gates', []))} satisfied",
-            f"- Findings: {run['findings_count']}",
-            f"- Deck: `{run['deck_path']}`",
-            f"- Execution plan: `{run['execution_plan_path']}`",
-            "",
-        ])
-    if not rollup["runs"]:
-        lines.append("- (no run bundles matched this matrix)")
-    lines.extend(["", "## Persona Outcomes", ""])
-    if rollup.get("persona_outcomes"):
-        for row in rollup["persona_outcomes"]:
-            status_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["review_statuses"].items()))
-            lines.extend([
-                f"### {row['label']}",
-                "",
-                f"- Persona: `{row['persona']}`",
-                f"- Runs: {row['runs']} (reviewed {row['reviewed_runs']}, ready {row['ready_runs']})",
-                f"- Evidence: {row['present_evidence_count']} / {row['required_evidence_count']}",
-                f"- Findings: {row['findings_count']} (strengths {row['strength_count']}, weaknesses {row['weakness_count']}, issues {row['issue_count']}, fixes {row['fix_count']}, blocked {row.get('blocked_count', 0)})",
-                f"- Quality gates: {row['quality_gate_satisfied_runs']} / {row['quality_gate_total_runs']} satisfied, {row['quality_gate_blocked_runs']} blocked",
-                f"- Proof evidence: {row['proof_minimum_evidence_count']} / {row['minimum_evidence_count']}",
-                f"- Review statuses: {status_counts or '(none)'}",
-                "",
-            ])
-    else:
-        lines.append("- (no persona outcomes found in matched runs)")
-    lines.extend(["", "## Scenario Outcomes", ""])
-    if rollup["scenario_outcomes"]:
-        for row in rollup["scenario_outcomes"]:
-            outcome_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["outcomes"].items()))
-            lines.extend([
-                f"### {row['label']}",
-                "",
-                f"- Scenario: `{row['scenario']}`",
-                f"- Runs: {row['runs']}",
-                f"- Evidence: {row['present_evidence_count']} / {row['required_evidence_count']}",
-                f"- Findings: {row['findings_count']} (strengths {row['strength_count']}, weaknesses {row['weakness_count']}, issues {row['issue_count']}, fixes {row['fix_count']}, blocked {row.get('blocked_count', 0)})",
-                f"- Outcomes: {outcome_counts or '(none)'}",
-                "",
-            ])
-    else:
-        lines.append("- (no scenario outcomes found in matched runs)")
-    lines.extend(["", "## Driver Journal", ""])
-    if rollup.get("driver_journal"):
-        for row in rollup["driver_journal"]:
-            status_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["statuses"].items()))
-            mode_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["dispatch_modes"].items()))
-            tool_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["mcp_tools"].items()))
-            lines.extend([
-                f"### {row['scenario']}",
-                "",
-                f"- Runs: {row['runs']}",
-                f"- Events: {row['events']}",
-                f"- Statuses: {status_counts or '(none)'}",
-                f"- Dispatch modes: {mode_counts or '(none)'}",
-                f"- Evidence refs: {row['evidence_refs']}",
-                f"- Blocked events: {row['blocked_events']}",
-                f"- MCP tools: {tool_counts or '(none recorded)'}",
-                "",
-            ])
-    else:
-        lines.append("- (no driver journal events found in matched runs)")
-    lines.extend(["", "## Quality Gates", ""])
-    if rollup.get("quality_gates"):
-        for row in rollup["quality_gates"]:
-            missing = ", ".join(f"{name}={count}" for name, count in sorted(row["missing_proof_minimum_evidence"].items()))
-            outcome_counts = ", ".join(f"{name}={count}" for name, count in sorted(row["outcomes"].items()))
-            lines.extend([
-                f"### {row['label']}",
-                "",
-                f"- Scenario: `{row['scenario']}`",
-                f"- Runs: {row['runs']}",
-                f"- Satisfied: {row['satisfied_runs']} / {row['runs']}",
-                f"- Blocked: {row['blocked_runs']}",
-                f"- Minimum proof evidence: {row['proof_minimum_evidence_count']} / {row['minimum_evidence_count']} (captured {row['present_minimum_evidence_count']})",
-                f"- Missing proof evidence: {missing or '(none)'}",
-                f"- Outcomes: {outcome_counts or '(none)'}",
-                "",
-            ])
-    else:
-        lines.append("- (no quality gate rows found in matched runs)")
-    lines.extend(["", "## Missing Proof Evidence", ""])
-    if rollup.get("missing_proof_evidence"):
-        for row in rollup["missing_proof_evidence"]:
-            lines.append(
-                f"- `{row['scenario']}` / `{row['evidence_kind']}`: missing in {row['missing_runs']} / {row['runs']} runs"
-            )
-            for run in row.get("affected_runs", [])[:5]:
-                lines.append(
-                    f"  - `{run.get('project', '')}` / `{run.get('persona', '')}`: "
-                    f"`{run.get('run_id', '')}`; handoff `{run.get('driver_handoff_path', '')}`"
-                )
-            if len(row.get("affected_runs", [])) > 5:
-                lines.append(f"  - +{len(row.get('affected_runs', [])) - 5} more runs")
-    else:
-        lines.append("- (none)")
-    return "\n".join(lines) + "\n"
-
-
-def render_rollup_deck(rollup: dict) -> dict:
-    summary = rollup["summary"]
-    run_lines = [
-        f"{run['project'].get('label', run['project'].get('id', 'unknown'))} / {run['persona'].get('label', run['persona'].get('id', 'unknown'))}: {run['review_status']} ({run['present_evidence_count']}/{run['required_evidence_count']} evidence)"
-        for run in rollup["runs"][:16]
-    ]
-    findings_body = (
-        f"Strengths: {summary['strength_count']}\n"
-        f"Weaknesses: {summary['weakness_count']}\n"
-        f"Issues: {summary['issue_count']}\n"
-        f"Fixes: {summary['fix_count']}\n"
-        f"Blocked: {summary.get('blocked_count', 0)}"
-    )
-    scenario_lines = [
-        f"{row['scenario']}: evidence {row['present_evidence_count']}/{row['required_evidence_count']}, findings {row['findings_count']}, outcomes {', '.join(f'{name}={count}' for name, count in sorted(row['outcomes'].items()))}"
-        for row in rollup["scenario_outcomes"][:12]
-    ]
-    persona_lines = [
-        f"{row['persona']}: runs {row['runs']}, ready {row['ready_runs']}, evidence {row['present_evidence_count']}/{row['required_evidence_count']}, proof {row['proof_minimum_evidence_count']}/{row['minimum_evidence_count']}, findings {row['findings_count']}"
-        for row in rollup.get("persona_outcomes", [])[:12]
-    ]
-    driver_lines = [
-        f"{row['scenario']}: events {row['events']}, runs {row['runs']}, statuses {', '.join(f'{name}={count}' for name, count in sorted(row['statuses'].items()))}, refs {row['evidence_refs']}, blocked {row['blocked_events']}"
-        for row in rollup.get("driver_journal", [])[:12]
-    ]
-    quality_gate_lines = [
-        f"{row['scenario']}: satisfied {row['satisfied_runs']}/{row['runs']}, proof evidence {row['proof_minimum_evidence_count']}/{row['minimum_evidence_count']}, blocked {row['blocked_runs']}"
-        for row in rollup.get("quality_gates", [])[:12]
-    ]
-    missing_proof_lines = [
-        (
-            f"{row['scenario']} / {row['evidence_kind']}: missing {row['missing_runs']}/{row['runs']} runs"
-            + (
-                f" - start {row.get('affected_runs', [{}])[0].get('project', '')}/"
-                f"{row.get('affected_runs', [{}])[0].get('persona', '')}"
-                if row.get("affected_runs") else ""
-            )
-        )
-        for row in rollup.get("missing_proof_evidence", [])[:16]
-    ]
-    return {
-        "meta": {
-            "mode": "pitch",
-            "title": "Product Journey Matrix Rollup",
-            "phase": "rollup",
-            "resolution": {"width": 1920, "height": 1080},
-        },
-        "scenes": [
-            {
-                "type": "title",
-                "title": "Product Journey Matrix Rollup",
-                "subtitle": f"{summary['runs_found']} / {summary['assignments']} runs",
-                "narration": "Aggregated product-journey evidence and findings across matrix assignments.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Coverage",
-                "title": "Evidence and readiness",
-                "body": f"Reviewed runs: {summary['reviewed_runs']}\nReady runs: {summary['ready_runs']}\nEvidence present: {summary['present_evidence_count']} / {summary['required_evidence_count']}\nProof evidence: {summary.get('quality_gate_proof_minimum_evidence_count', 0)} / {summary.get('quality_gate_minimum_evidence_count', 0)}\nQuality gates satisfied: {summary.get('quality_gate_satisfied_runs', 0)} / {summary.get('quality_gate_total_runs', 0)}\nMissing proof rows: {summary.get('missing_proof_evidence_rows', 0)}\nMissing assignments: {rollup['missing_assignment_count']}",
-                "narration": "This rollup shows whether the matrix has enough completed runs to review.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Runs",
-                "title": "Assignment status",
-                "body": "\n".join(run_lines) if run_lines else "No run bundles matched this matrix yet.",
-                "narration": "Each run links back to its own deck and execution plan in the rollup markdown.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Findings",
-                "title": "Strengths, weaknesses, issues, fixes",
-                "body": findings_body,
-                "narration": "Finding counts are aggregated from the per-run findings files.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Persona outcomes",
-                "title": "Cross-persona signals",
-                "body": "\n".join(persona_lines) if persona_lines else "No persona outcomes found in matched runs.",
-                "narration": "Persona outcome rollups show whether different natural-use lenses are producing different evidence, findings, and proof coverage.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Scenario outcomes",
-                "title": "Cross-run scenario signals",
-                "body": "\n".join(scenario_lines) if scenario_lines else "No scenario outcomes found in matched runs.",
-                "narration": "Scenario-level rollups show which journeys are repeatedly weak across natural-use assignments.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Driver journal",
-                "title": "Reusable driver attempts",
-                "body": "\n".join(driver_lines) if driver_lines else "No driver journal events found in matched runs.",
-                "narration": "Driver journal rollups show which scenarios the reusable driver actually attempted, captured, blocked, or validated.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Quality gates",
-                "title": "Cross-run proof coverage",
-                "body": "\n".join(quality_gate_lines) if quality_gate_lines else "No quality gate rows found in matched runs.",
-                "narration": "Quality gate rollups show which scenarios have enough proof-source minimum evidence to count as completed across the matrix.",
-            },
-            {
-                "type": "narrative",
-                "eyebrow": "Missing proof",
-                "title": "Evidence backlog",
-                "body": "\n".join(missing_proof_lines) if missing_proof_lines else "No missing proof evidence across reviewed runs.",
-                "narration": "The missing proof scene shows which evidence kinds still need live visual MCP or cassette-backed capture.",
-            },
-        ],
-    }
-
-
-def rollup_handoff_backlog_summary(rollup: dict, limit: int = 3) -> str:
-    lines = []
-    for row in rollup.get("missing_proof_evidence", [])[:limit]:
-        affected = row.get("affected_runs", [])
-        if affected:
-            first = affected[0]
-            lines.append(
-                f"{row.get('scenario', '')}/{row.get('evidence_kind', '')}: "
-                f"{first.get('project', '')}/{first.get('persona', '')} -> {first.get('driver_handoff_path', '')}"
-            )
-        else:
-            lines.append(f"{row.get('scenario', '')}/{row.get('evidence_kind', '')}: no affected run link")
-    remaining = len(rollup.get("missing_proof_evidence", [])) - limit
-    if remaining > 0:
-        lines.append(f"+{remaining} more proof rows in rollup.md")
-    return "; ".join(lines)
 
 
 def write_matrix_rollup(matrix_dir: Path, explicit_run_dirs: list[str]) -> dict:
@@ -12258,10 +7825,6 @@ def driver_replay_readiness_status(review_status: str) -> str:
 
 def cassette_replay_path(run_id: str, scenario_id: str, evidence_kind: str) -> str:
     return f"cassette://product-journey/{run_id}/{demo_evidence_path(scenario_id, evidence_kind)}"
-
-
-def scenario_minimum_evidence(scenario_id: str) -> list[str]:
-    return scenario_quality_gate(scenario_id).get("minimum_evidence", [])
 
 
 def render_driver_replay_smoke_summary(report: dict) -> str:
@@ -13292,51 +8855,6 @@ def build_dogfood_smoke(
     (dogfood_dir / "dogfood.md").write_text(render_dogfood_smoke_summary(report), encoding="utf-8")
     write_json(dogfood_dir / "deck.slidey.json", render_dogfood_smoke_deck(report))
     return report
-
-
-def render_journey(run_json: dict) -> str:
-    lines = [
-        "# Product journey dry run",
-        "",
-        f"- Run: `{run_json['run_id']}`",
-        f"- Mode: `{run_json['mode']}`",
-        f"- Project: `{run_json['project']['label']}`",
-        f"- Persona: `{run_json['persona']['label']}`",
-        "",
-        "## Stage Plan",
-        "",
-    ]
-    for stage in run_json["stages"]:
-        lines.append(f"- `{stage['id']}`: {stage['status']}")
-        if stage["scenarios"]:
-            lines.append(f"  - scenarios: {', '.join(stage['scenarios'])}")
-        for evidence in stage["evidence"]:
-            lines.append(f"  - evidence: {evidence}")
-    lines.extend([
-        "",
-        "## Scenarios",
-        "",
-    ])
-    for scenario in run_json["scenarios"]:
-        lines.append(f"### {scenario['label']}")
-        lines.append("")
-        lines.append(f"- Stage: `{scenario['stage']}`")
-        lines.append(f"- Story: `{scenario['primary_story']}`")
-        lines.append(f"- MCP: {', '.join(scenario['required_mcp'])}")
-        lines.append(f"- Evidence: {', '.join(scenario['evidence'])}")
-        lines.append("")
-        lines.append(scenario["task"])
-        lines.append("")
-    lines.extend([
-        "",
-        "## Next Evidence Needed",
-        "",
-        "- Visual MCP frames or browser screenshots for product discovery and docs/tutorial stages.",
-        "- Kitsoki session traces for onboarding, PRD/design, feature implementation, and bugfix paths.",
-        "- Oracle result JSON for every attempted project bug.",
-        "- Video clips or retained screenshot IDs for Slidey playback scenes.",
-    ])
-    return "\n".join(lines) + "\n"
 
 
 def render_deck(
