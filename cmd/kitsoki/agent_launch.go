@@ -11,8 +11,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/baseskills"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/webconfig"
@@ -78,6 +80,19 @@ type standaloneCodexAgent struct {
 	SandboxMode                 string
 	MCPServers                  map[string]any
 }
+
+type builtInAgentFrontmatter struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Model       string   `yaml:"model"`
+	Effort      string   `yaml:"effort"`
+	Tools       []string `yaml:"tools"`
+}
+
+// materializeBuiltInAgentLibrary is a seam for the embedded agent library. It
+// keeps freestanding launch independent of .codex/.kitsoki installation while
+// allowing unit tests to supply a tiny deterministic library.
+var materializeBuiltInAgentLibrary = baseskills.Materialize
 
 const (
 	codexBypassApprovalsAndSandboxFlag = "--dangerously-bypass-approvals-and-sandbox"
@@ -341,10 +356,16 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 }
 
 func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
-	agentPath, err := resolveStandaloneAgentFile(opts.AgentName, opts.AgentFile)
+	agentPath, renderedCleanup, err := resolveStandaloneAgentFile(opts.AgentName, opts.AgentFile)
 	if err != nil {
 		return agentLaunchPlan{}, err
 	}
+	cleanupRendered := true
+	defer func() {
+		if cleanupRendered && renderedCleanup != nil {
+			renderedCleanup()
+		}
+	}()
 	agent, err := loadStandaloneCodexAgent(agentPath)
 	if err != nil {
 		return agentLaunchPlan{}, err
@@ -455,6 +476,9 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	}
 	disableCodexShell := shouldDisableStandaloneCodexShell(opts.Mode, backend, opts.AgentName, agent)
 	var cleanups []func()
+	if renderedCleanup != nil {
+		cleanups = append(cleanups, renderedCleanup)
+	}
 	mcpServers := agent.MCPServers
 	if opts.Mode == launchModeCodeact {
 		mcpServers = decl.MCP.Servers
@@ -483,7 +507,7 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 			"Interactive Codex launch uses top-level `codex`, not `codex exec`, so it opens the TUI with the freestanding agent instructions as the initial prompt.",
 		}
 		futureNotes = append(futureNotes, standaloneLaunchFutureNotes(opts.Mode, disableCodexShell)...)
-		return agentLaunchPlan{
+		plan := agentLaunchPlan{
 			AgentFile:    agentPath,
 			Agent:        opts.AgentName,
 			Profile:      profileName,
@@ -502,14 +526,16 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 			cleanups:     cleanups,
 			LaunchPolicy: launchDecision,
 			FutureNotes:  futureNotes,
-		}, nil
+		}
+		cleanupRendered = false
+		return plan, nil
 	}
 	inv := host.TranslateAgentInvocationForBackend(planCtx, backend, cliArgs, task, workingDir)
 	if inv.Cleanup != nil {
 		cleanups = append(cleanups, inv.Cleanup)
 	}
 	command := append([]string{bin}, inv.Args...)
-	return agentLaunchPlan{
+	plan := agentLaunchPlan{
 		AgentFile:    agentPath,
 		Agent:        opts.AgentName,
 		Profile:      profileName,
@@ -529,7 +555,9 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		cleanups:     cleanups,
 		LaunchPolicy: launchDecision,
 		FutureNotes:  standaloneLaunchFutureNotes(opts.Mode, disableCodexShell),
-	}, nil
+	}
+	cleanupRendered = false
+	return plan, nil
 }
 
 func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
@@ -811,9 +839,10 @@ func resolveStandaloneLaunchWorkingDir(dir string) (string, error) {
 	return filepath.Abs(dir)
 }
 
-func resolveStandaloneAgentFile(agentName, explicit string) (string, error) {
+func resolveStandaloneAgentFile(agentName, explicit string) (string, func(), error) {
 	if strings.TrimSpace(explicit) != "" {
-		return filepath.Abs(explicit)
+		path, err := filepath.Abs(explicit)
+		return path, nil, err
 	}
 	candidates := []string{
 		filepath.Join(".kitsoki", "agents", agentName+".local.toml"),
@@ -829,10 +858,88 @@ func resolveStandaloneAgentFile(agentName, explicit string) (string, error) {
 	}
 	for _, candidate := range candidates {
 		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
-			return filepath.Abs(candidate)
+			path, absErr := filepath.Abs(candidate)
+			return path, nil, absErr
 		}
 	}
-	return "", fmt.Errorf("freestanding agent %q not found; pass --app for a story agents: entry or --agent-file for a .codex/agents/*.toml file", agentName)
+	path, cleanup, err := renderBuiltInStandaloneCodexAgent(agentName)
+	if err == nil {
+		return path, cleanup, nil
+	}
+	return "", nil, fmt.Errorf("freestanding agent %q not found in project overrides or the embedded Kitsoki agent library; pass --app for a story agents: entry or --agent-file for a .codex/agents/*.toml file: %w", agentName, err)
+}
+
+func renderBuiltInStandaloneCodexAgent(agentName string) (string, func(), error) {
+	root, err := materializeBuiltInAgentLibrary(context.Background())
+	if err != nil {
+		return "", nil, fmt.Errorf("materialize embedded agent library: %w", err)
+	}
+	sourcePath := filepath.Join(root, "agents", agentName+".md")
+	raw, err := os.ReadFile(sourcePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil, fmt.Errorf("embedded agent %q not found", agentName)
+		}
+		return "", nil, fmt.Errorf("read embedded agent %q: %w", agentName, err)
+	}
+	front, instructions, err := parseBuiltInAgentMarkdown(raw)
+	if err != nil {
+		return "", nil, fmt.Errorf("parse embedded agent %q: %w", agentName, err)
+	}
+	if front.Name != "" && front.Name != agentName {
+		return "", nil, fmt.Errorf("embedded agent %q declares name %q", agentName, front.Name)
+	}
+	if strings.TrimSpace(instructions) == "" {
+		return "", nil, fmt.Errorf("embedded agent %q has no instructions", agentName)
+	}
+
+	dir, err := os.MkdirTemp("", "kitsoki-agent-launch-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create rendered agent directory: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, agentName+".toml")
+	if err := os.WriteFile(path, []byte(renderBuiltInAgentTOML(agentName, front, instructions)), 0o600); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("write rendered agent: %w", err)
+	}
+	return path, cleanup, nil
+}
+
+func parseBuiltInAgentMarkdown(raw []byte) (builtInAgentFrontmatter, string, error) {
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	if !strings.HasPrefix(text, "---\n") {
+		return builtInAgentFrontmatter{}, "", fmt.Errorf("missing YAML frontmatter")
+	}
+	end := strings.Index(text[4:], "\n---\n")
+	if end < 0 {
+		return builtInAgentFrontmatter{}, "", fmt.Errorf("unterminated YAML frontmatter")
+	}
+	end += 4
+	var front builtInAgentFrontmatter
+	if err := yaml.Unmarshal([]byte(text[4:end]), &front); err != nil {
+		return builtInAgentFrontmatter{}, "", err
+	}
+	return front, strings.TrimSpace(text[end+5:]), nil
+}
+
+func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, instructions string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "name = %s\n", launchTOMLString(firstLaunchNonEmpty(front.Name, agentName)))
+	if strings.TrimSpace(front.Description) != "" {
+		fmt.Fprintf(&b, "description = %s\n", launchTOMLString(front.Description))
+	}
+	if strings.TrimSpace(front.Model) != "" {
+		fmt.Fprintf(&b, "model = %s\n", launchTOMLString(front.Model))
+	}
+	if strings.TrimSpace(front.Effort) != "" {
+		fmt.Fprintf(&b, "model_reasoning_effort = %s\n", launchTOMLString(front.Effort))
+	}
+	fmt.Fprintf(&b, "developer_instructions = %s\n\n", launchTOMLString(instructions))
+	// Packaged agents are Studio-MCP contracts. Rendering this server only for
+	// the isolated launch keeps normal Codex sessions untouched.
+	b.WriteString("[mcp_servers.kitsoki]\ncommand = \"kitsoki\"\nargs = [\"mcp\"]\n")
+	return b.String()
 }
 
 func loadStandaloneCodexAgent(path string) (standaloneCodexAgent, error) {
