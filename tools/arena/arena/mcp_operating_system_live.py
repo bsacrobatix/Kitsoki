@@ -78,6 +78,8 @@ CLAUDE_STRICT_MCP_TOOLS: tuple[str, ...] = (
     "mcp__kitsoki_strict__workspace_teardown",
     "mcp__kitsoki_strict__workspace_codeact",
 )
+CLAUDE_STRUCTURED_OUTPUT_TOOL = "StructuredOutput"
+CLAUDE_ALLOWED_TOOLS: tuple[str, ...] = (*CLAUDE_STRICT_MCP_TOOLS, CLAUDE_STRUCTURED_OUTPUT_TOOL)
 FORBIDDEN_CLAUDE_TOOL_NAMES = {"bash", "read", "write", "edit", "glob", "grep"}
 FORBIDDEN_MCP_TOOL_TOKENS = ("host_run", "host_patch", "worktree", "vcs")
 
@@ -420,9 +422,12 @@ class ClaudeCLIDispatcher:
             "--no-session-persistence",
             "--mcp-config", str(config_path),
             "--strict-mcp-config",
-            "--tools", ",".join(CLAUDE_STRICT_MCP_TOOLS),
-            # Claude's --tools is variadic. Delimit options so the fixed card
-            # prompt is positional instead of being swallowed as another tool.
+            # --tools controls only Claude built-ins. Disable those entirely;
+            # MCP authorization is a separate --allowedTools permission list.
+            "--tools", "",
+            "--allowedTools", ",".join(CLAUDE_ALLOWED_TOOLS),
+            # Both --tools and --allowedTools are variadic. Delimit options so
+            # the fixed card prompt is positional instead of another tool.
             "--",
             strict_card_prompt(request),
         ]
