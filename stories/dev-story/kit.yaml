@@ -80,6 +80,10 @@ root:
     - host.ide.get_diagnostics
     - host.ide.open_file
     - host.ide.open_diff
+    - host.proposal.publish
+    - host.dev.profile_setup
+    - host.dev.onboarding
+    - host.decomposition.update
     - host.agent.converse
     - host.chat.resolve
     - host.chat.transcript

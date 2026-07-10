@@ -51,6 +51,11 @@ source:
           id: old-dev-story-project-dev
           version: 0.1.0
           title: Old generated dev-story instance
+        hosts:
+          - host.proposal.publish
+          - host.dev.profile_setup
+          - host.dev.onboarding
+          - host.decomposition.update
 
         imports:
           core:
