@@ -6,7 +6,7 @@ app:
   license: "CC0"
 
 hosts:
-  - host.run
+  - host.product_journey.run
   - host.agent.task
 
 agents:

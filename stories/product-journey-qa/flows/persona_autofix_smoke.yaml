@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       persona_product_journey_autofix_smoke:
         data:
@@ -26,7 +26,7 @@ turns:
       persona_autofix_smoke_summary: persona replay autonomous issue-to-fix smoke passed
       persona_autofix_smoke_exit_code: 0
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: persona_product_journey_autofix_smoke }
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Persona autofix smoke[\\s\\S]*passed[\\s\\S]*Status[\\s\\S]*persona_autofix_smoke_checked"
 

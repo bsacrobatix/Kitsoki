@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       capture_product_journey_preflight:
         data:
@@ -30,7 +30,7 @@ turns:
       capture_preflight_status: passed
       capture_preflight_failed: 0
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: capture_product_journey_preflight }
 
   - intent:
@@ -59,6 +59,6 @@ turns:
       gh_agent_missing_evidence_summary: "gh_agent_public_base_url is required before live-budgeted autonomous marathon"
       review_status: not_run
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*Autonomous driver[\\s\\S]*pending / invalid[\\s\\S]*Validation issues[\\s\\S]*gh-agent-public-base-url"
-    expect_no_host_calls: [host.run]
+    expect_no_host_calls: [host.product_journey.run]
 
 expect_no_errors: true

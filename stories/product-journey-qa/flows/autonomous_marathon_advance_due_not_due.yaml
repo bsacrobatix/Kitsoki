@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       autonomous_product_journey_marathon_advance_due:
         data:
@@ -49,12 +49,10 @@ turns:
       run_dir: ""
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_not_due[\\s\\S]*Marathon due[\\s\\S]*0 due, 1 upcoming,[\\s\\S]*0 blocked, 0 ignored[\\s\\S]*Due advance[\\s\\S]*autonomous_marathon_not_due: No due marathon[\\s\\S]*advanced"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args:
           call: autonomous_product_journey_marathon_advance_due
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --autonomous-marathon-advance-due
             - --json-output
             - --report-invalid-autonomous-marathon

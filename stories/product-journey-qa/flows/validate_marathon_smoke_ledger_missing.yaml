@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       validate_autonomous_marathon_smoke_ledger:
         data:
@@ -38,7 +38,7 @@ turns:
       marathon_smoke_ledger_validation_path: ""
       marathon_smoke_ledger_validation_markdown_path: ""
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: validate_autonomous_marathon_smoke_ledger }
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Marathon ledger validation[\\s\\S]*invalid: ledger path missing[\\s\\S]*cycles=0, min=1[\\s\\S]*Status[\\s\\S]*marathon_smoke_ledger_validated"
 

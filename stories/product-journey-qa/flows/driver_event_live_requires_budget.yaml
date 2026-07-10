@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       load_product_journey_run:
         data:
@@ -45,7 +45,7 @@ turns:
       live_budget_minutes: 0
       run_dir: .artifacts/product-journey/run-live-guard
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: load_product_journey_run }
 
   - intent:
@@ -90,7 +90,7 @@ turns:
       driver_journal_path: .artifacts/product-journey/run-live-guard/driver-journal.md
       driver_handoff_path: .artifacts/product-journey/run-live-guard/driver-handoff.md
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: record_product_journey_driver_event }
 
 expect_no_errors: true

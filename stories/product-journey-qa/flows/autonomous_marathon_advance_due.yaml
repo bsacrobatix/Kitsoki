@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       autonomous_product_journey_marathon_advance_due:
         data:
@@ -24,7 +24,7 @@ host_handlers:
             autonomous_due_total_count: 2
             autonomous_due_next_run_id: run-due
             autonomous_due_next_run_dir: .artifacts/product-journey/run-due
-            autonomous_due_next_command: "python3 tools/product-journey/run.py --autonomous-marathon --json-output --report-invalid-autonomous-marathon --project vscode --persona core-maintainer --seed due-seed-cycle-20260702T010000Z --scenarios bugfix --live-budget-minutes 6 --autonomous-driver-mode replay --autonomous-cadence-hours 24 --autonomous-heartbeat-minutes 15 --autonomous-watchdog-minutes 45 --ticket-repo owner/repo --gh-agent-public-base-url https://agent.example"
+            autonomous_due_next_command: "host.product_journey.run --autonomous-marathon --json-output --report-invalid-autonomous-marathon --project vscode --persona core-maintainer --seed due-seed-cycle-20260702T010000Z --scenarios bugfix --live-budget-minutes 6 --autonomous-driver-mode replay --autonomous-cadence-hours 24 --autonomous-heartbeat-minutes 15 --autonomous-watchdog-minutes 45 --ticket-repo owner/repo --gh-agent-public-base-url https://agent.example"
             autonomous_due_next_story_intent: "autonomous_marathon project=vscode persona=core-maintainer seed=due-seed-cycle-20260702T010000Z scenarios=bugfix live_budget_minutes=6 autonomous_driver_mode=replay ticket_repo=owner/repo gh_agent_public_base_url=https://agent.example"
             autonomous_due_next_minutes_overdue: 60
             autonomous_due_advance_status: autonomous_marathon_advanced
@@ -110,12 +110,10 @@ turns:
       validation_errors: 0
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_valid[\\s\\S]*Due advance[\\s\\S]*autonomous_marathon_advanced: Advanced due marathon[\\s\\S]*run-due into run-advanced: autonomous_marathon_valid[\\s\\S]*Due source[\\s\\S]*\\.artifacts/product-journey/run-due[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass[\\s\\S]*gh_agent=pass[\\s\\S]*independent_verify=pass[\\s\\S]*review=pass[\\s\\S]*validation=pass[\\s\\S]*Stats gate[\\s\\S]*pass: pass; current run scanned yes"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args:
           call: autonomous_product_journey_marathon_advance_due
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --autonomous-marathon-advance-due
             - --json-output
             - --report-invalid-autonomous-marathon

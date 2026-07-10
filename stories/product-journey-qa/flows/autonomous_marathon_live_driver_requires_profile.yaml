@@ -31,6 +31,6 @@ turns:
       validation_issue_summary: live-profile-required
       review_status: not_run
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon[\\s\\S]*autonomous_marathon_invalid[\\s\\S]*Autonomous driver[\\s\\S]*live / invalid[\\s\\S]*Driver live profile[\\s\\S]*\\(not set\\)[\\s\\S]*Validation issues[\\s\\S]*live-profile-required"
-    expect_no_host_calls: [host.run, host.agent.task]
+    expect_no_host_calls: [host.product_journey.run, host.agent.task]
 
 expect_no_errors: true

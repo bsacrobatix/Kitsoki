@@ -76,12 +76,10 @@ states:
                 review_status: ""
                 review_summary: ""
                 status: "dogfood_smoking"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: dogfood_product_journey_smoke
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --gate
                   - dogfood
                   - --json-output
@@ -137,12 +135,10 @@ states:
                 driver_replay_review_ready_count: 0
                 driver_replay_review_needs_evidence_count: 0
                 status: "driver_replay_smoking"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: driver_replay_product_journey_smoke
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --gate
                   - driver-replay
                   - --json-output
@@ -197,12 +193,10 @@ states:
                 driver_replay_review_ready_count: 0
                 driver_replay_review_needs_evidence_count: 0
                 status: "driver_replay_sweeping"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: driver_replay_product_journey_sweep
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --driver-replay-sweep
                   - --json-output
                   - --seed
@@ -246,12 +240,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "creating"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: emit_product_journey_run
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --emit-run
                   - --json-output
                   - --project

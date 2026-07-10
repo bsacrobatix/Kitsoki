@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       driver_replay_product_journey_sweep:
         data:
@@ -59,7 +59,7 @@ turns:
       validation_warnings: 0
       validation_issue_summary: ""
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: driver_replay_product_journey_sweep }
     expect_view_matches: "DOGFOOD SMOKE CREATED[\\s\\S]*driver-[\\s\\S]*replay-sweep\\.slidey\\.json[\\s\\S]*Driver replay scenario[\\s\\S]*passed[\\s\\S]*Driver replay persona[\\s\\S]*hobbyist-contributor[\\s\\S]*Driver replay evidence[\\s\\S]*30[\\s\\S]*Driver replay coverage[\\s\\S]*6 / 6 playback[\\s\\S]*Driver replay readiness[\\s\\S]*needs_evidence \\(0 ready, 6 need evidence\\)"
 

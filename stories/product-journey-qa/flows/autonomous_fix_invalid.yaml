@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       load_product_journey_run:
         data:
@@ -127,7 +127,7 @@ turns:
       run_id: run-999
       run_dir: .artifacts/product-journey/run-999
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: load_product_journey_run }
 
   - intent:
@@ -138,7 +138,7 @@ turns:
       autonomous_watchdog_status: autonomous_watchdog_ok
       autonomous_watchdog_age_minutes: 10
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_marathon_watchdog }
 
   - intent:
@@ -172,7 +172,7 @@ turns:
       validation_issue_summary: gh-agent-fix-evidence
     expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_invalid[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=fail, independent_verify=fail,[\\s\\S]*review=fail, validation=fail[\\s\\S]*Independent verify[\\s\\S]*fail: missing=1, verified=0/1[\\s\\S]*GH-agent evidence[\\s\\S]*0 attached; 1 missing[\\s\\S]*Validation[\\s\\S]*invalid"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_fix }
 
 expect_no_errors: true

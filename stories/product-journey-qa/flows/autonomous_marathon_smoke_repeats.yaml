@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       autonomous_product_journey_marathon_smoke:
         data:
@@ -52,7 +52,7 @@ turns:
       autonomous_marathon_smoke_report_path: .artifacts/product-journey/marathon-smokes/fixture-repeats/autonomous-marathon-smoke.json
       autonomous_marathon_smoke_report_markdown_path: .artifacts/product-journey/marathon-smokes/fixture-repeats/autonomous-marathon-smoke.md
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_marathon_smoke }
     expect_view_matches: "PRODUCT JOURNEY QA[\\s\\S]*Autonomous marathon smoke[\\s\\S]*passed[\\s\\S]*Marathon smoke coverage[\\s\\S]*gears-rust; cycles=2[\\s\\S]*personas=5[\\s\\S]*scenarios=3[\\s\\S]*runs=10[\\s\\S]*filed=30[\\s\\S]*fixed=30[\\s\\S]*landed=30[\\s\\S]*flawless=10/10[\\s\\S]*Marathon smoke ledger[\\s\\S]*autonomous-marathon-smoke.md[\\s\\S]*Status[\\s\\S]*autonomous_marathon_smoke_checked"
 

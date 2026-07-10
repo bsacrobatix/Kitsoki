@@ -6,7 +6,7 @@ initial_state: idle
 # product-journey evidence, issue/fix, stats, and deck gates.
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_product_journey_run:
         data:
@@ -46,8 +46,8 @@ host_handlers:
             missing_proof_summary: "docs-to-mcp-first-run: browser_screenshot, rendered_tui_frame; agent-launch-experience: session_trace"
             driver_contract_summary: "Driver contract: 4 scenarios (docs-to-mcp-first-run, agent-launch-experience, remote-worker-campaign, campaign-rollup-review); 4 missing-proof rows; 4 final gates."
             next_driver_capture: "Next capture: docs-to-mcp-first-run/browser_screenshot."
-            next_driver_attach_command: "python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/campaign-run-1 --scenario docs-to-mcp-first-run --evidence-kind browser_screenshot --evidence-path <path> --evidence-source <retained|external|local|cassette>"
-            next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/campaign-run-1 --scenario docs-to-mcp-first-run --title <blocker-title> --summary <summary> --evidence-path <path>"
+            next_driver_attach_command: "host.product_journey.run --attach-evidence --run-dir .artifacts/product-journey/campaign-run-1 --scenario docs-to-mcp-first-run --evidence-kind browser_screenshot --evidence-path <path> --evidence-source <retained|external|local|cassette>"
+            next_driver_blocker_command: "host.product_journey.run --record-blocker --run-dir .artifacts/product-journey/campaign-run-1 --scenario docs-to-mcp-first-run --title <blocker-title> --summary <summary> --evidence-path <path>"
       attach_product_journey_evidence:
         data:
           ok: true
@@ -82,8 +82,8 @@ host_handlers:
             missing_proof_summary: "agent-launch-experience: session_trace"
             driver_contract_summary: "Driver contract: 4 scenarios; 3 missing-proof rows; 4 final gates."
             next_driver_capture: "Next capture: agent-launch-experience/session_trace."
-            next_driver_attach_command: "python3 tools/product-journey/run.py --attach-evidence --run-dir .artifacts/product-journey/campaign-run-1 --scenario agent-launch-experience --evidence-kind session_trace --evidence-path <path> --evidence-source <retained|external|local|cassette>"
-            next_driver_blocker_command: "python3 tools/product-journey/run.py --record-blocker --run-dir .artifacts/product-journey/campaign-run-1 --scenario agent-launch-experience --title <blocker-title> --summary <summary> --evidence-path <path>"
+            next_driver_attach_command: "host.product_journey.run --attach-evidence --run-dir .artifacts/product-journey/campaign-run-1 --scenario agent-launch-experience --evidence-kind session_trace --evidence-path <path> --evidence-source <retained|external|local|cassette>"
+            next_driver_blocker_command: "host.product_journey.run --record-blocker --run-dir .artifacts/product-journey/campaign-run-1 --scenario agent-launch-experience --title <blocker-title> --summary <summary> --evidence-path <path>"
             evidence_source: retained
       record_campaign_worker_receipt:
         data:
@@ -271,7 +271,7 @@ turns:
       run_scenario_count: 4
     expect_view_matches: "RUN CREATED[\\s\\S]*Campaign[\\s\\S]*planning[\\s\\S]*Scenario scope[\\s\\S]*docs-to-mcp-first-run[\\s\\S]*campaign-rollup-review[\\s\\S]*campaign_attach[\\s\\S]*campaign_issue_fix[\\s\\S]*campaign_deck_refresh"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_product_journey_run }
 
   - intent:
@@ -292,7 +292,7 @@ turns:
       proof_evidence_count: 1
       issue_count: 1
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: attach_product_journey_evidence }
 
   - intent:
@@ -320,7 +320,7 @@ turns:
       campaign_worker_receipt_markdown_path: .artifacts/product-journey/campaign-run-1/campaign-worker-receipt.md
     expect_view_matches: "RUN CREATED[\\s\\S]*Campaign worker[\\s\\S]*vm / qa-vm-1 / ready[\\s\\S]*Worker readiness[\\s\\S]*pass[\\s\\S]*Worker receipt[\\s\\S]*campaign-worker-[\\s\\S]*receipt\\.md"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: record_campaign_worker_receipt }
 
   - intent:
@@ -343,7 +343,7 @@ turns:
       independent_verify_status: pass
       validation_status: valid
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_fix }
 
   - intent:
@@ -360,7 +360,7 @@ turns:
       stats_filed_count: 1
       stats_fixed_count: 1
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: derive_product_journey_stats }
 
   - intent:
@@ -375,7 +375,7 @@ turns:
       deck_path: .artifacts/product-journey/campaign-run-1/deck.slidey.json
     expect_view_matches: "RUN CREATED[\\s\\S]*Campaign[\\s\\S]*refreshing_deck[\\s\\S]*Deck[\\s\\S]*deck\\.slidey\\.json[\\s\\S]*Review checks[\\s\\S]*21 / 24 passed"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: review_product_journey_run }
 
 expect_no_errors: true

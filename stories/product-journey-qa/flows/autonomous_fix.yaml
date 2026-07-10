@@ -3,7 +3,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       load_product_journey_run:
         data:
@@ -150,7 +150,7 @@ turns:
       gh_agent_public_base_url: https://agent.example
     expect_view_matches: "RUN CREATED[\\s\\S]*autonomous_fix ticket_repo=owner/repo gh_agent_public_base_url=<url>[\\s\\S]*file_findings ticket_repo=owner/repo"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: load_product_journey_run }
 
   - intent:
@@ -162,7 +162,7 @@ turns:
       autonomous_watchdog_age_minutes: 10
     expect_view_matches: "RUN CREATED[\\s\\S]*Marathon watchdog[\\s\\S]*autonomous_watchdog_ok[\\s\\S]*heartbeat age 10m"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: autonomous_product_journey_marathon_watchdog }
 
   - intent:
@@ -207,7 +207,7 @@ turns:
       validation_errors: 0
     expect_view_matches: "RUN CREATED[\\s\\S]*Autonomous fix[\\s\\S]*autonomous_fix_valid[\\s\\S]*Autonomous report[\\s\\S]*autonomous-fix-report.md[\\s\\S]*Autonomous gates[\\s\\S]*filing=pass, gh_agent=pass, independent_verify=pass,[\\s\\S]*review=pass, validation=pass[\\s\\S]*Independent verify[\\s\\S]*pass: verified=2/2[\\s\\S]*Issue close-out[\\s\\S]*closed: closed 2[\\s\\S]*Marathon watchdog[\\s\\S]*autonomous_watchdog_ok[\\s\\S]*heartbeat age 10m[\\s\\S]*Issue filing[\\s\\S]*findings_filed: filed 2[\\s\\S]*GH-agent health[\\s\\S]*pass: https://agent.example/healthz[\\s\\S]*GH-agent readiness[\\s\\S]*pass: https://agent.example/api/ready[\\s\\S]*GH-agent claims[\\s\\S]*claimed: claimed 2[\\s\\S]*GH-agent drain[\\s\\S]*drained: drained 2, done 2, failed 0, active 0[\\s\\S]*GH-agent evidence[\\s\\S]*4 attached; 0 missing; triage 2 attached / 0 missing[\\s\\S]*triage-verdict.md[\\s\\S]*Review checks[\\s\\S]*25 / 25 passed[\\s\\S]*Validation[\\s\\S]*valid"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args:
           call: autonomous_product_journey_fix
           cmd: go

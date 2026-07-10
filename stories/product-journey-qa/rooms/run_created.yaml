@@ -216,12 +216,10 @@ states:
                 autonomous_driver_issue_count: submitted.issue_count
                 autonomous_driver_dispatch_trace: submitted.trace
               on_error: driver_dispatch_failed
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: record_autonomous_product_journey_driver_dispatch
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --record-autonomous-driver-dispatch
                   - --json-output
                   - --run-dir
@@ -263,12 +261,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "attaching"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: attach_product_journey_evidence
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --attach-evidence
                   - --json-output
                   - --run-dir
@@ -341,12 +337,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "campaign_attaching"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: attach_product_journey_evidence
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --attach-evidence
                   - --json-output
                   - --run-dir
@@ -417,12 +411,10 @@ states:
                 campaign_status: "worker_receipt"
                 campaign_summary: "Recording the campaign worker readiness receipt and imported artifact references."
                 status: "campaign_worker_recording"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: record_campaign_worker_receipt
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --campaign-worker
                   - --json-output
                   - --run-dir
@@ -479,12 +471,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "recording_finding"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: record_product_journey_finding
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --record-finding
                   - --json-output
                   - --run-dir
@@ -557,12 +547,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "recording_blocker"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: record_product_journey_blocker
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --record-blocker
                   - --json-output
                   - --run-dir
@@ -702,12 +690,10 @@ states:
                 gh_agent_independent_verify_summary: ""
                 gh_agent_missing_verify_summary: ""
                 status: "filing_findings"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: file_product_journey_findings
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --file-findings
                   - --json-output
                   - --run-dir
@@ -847,12 +833,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "running_autonomous_marathon"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: autonomous_product_journey_marathon_finalize
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --autonomous-marathon
                   - --json-output
                   - --report-invalid-autonomous-marathon
@@ -1020,12 +1004,10 @@ states:
                 autonomous_watchdog_markdown_path: ""
                 autonomous_watchdog_age_minutes: 0
                 status: "checking_autonomous_watchdog"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: autonomous_product_journey_marathon_watchdog
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --autonomous-marathon-watchdog
                   - --json-output
                   - --report-blocked-autonomous-watchdog
@@ -1165,7 +1147,7 @@ states:
                 gh_agent_independent_verify_summary: ""
                 gh_agent_missing_verify_summary: ""
                 status: "running_autonomous_fix"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: autonomous_product_journey_fix
               with:
                 cmd: go
@@ -1317,12 +1299,10 @@ states:
                 validation_errors: 0
                 validation_warnings: 0
                 validation_issue_summary: ""
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: file_local_product_journey_findings
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --file-local-findings
                   - --json-output
                   - --run-dir
@@ -1409,12 +1389,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "deriving_stats"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: derive_product_journey_stats
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --stats
                   - --json-output
                   - --stats-root
@@ -1489,12 +1467,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "recording_driver_event"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: record_product_journey_driver_event
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --record-driver-event
                   - --json-output
                   - --run-dir
@@ -1562,12 +1538,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "seeding_demo"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: seed_product_journey_demo
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --seed-demo-evidence
                   - --json-output
                   - --run-dir
@@ -1622,12 +1596,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "reviewing"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: review_product_journey_run
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --review-run
                   - --json-output
                   - --run-dir
@@ -1697,12 +1669,10 @@ states:
                 validation_warnings: 0
                 validation_issue_summary: ""
                 status: "preparing_handoff"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: prepare_product_journey_driver_handoff
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --driver-handoff
                   - --json-output
                   - --run-dir
@@ -1753,12 +1723,10 @@ states:
           effects:
             - set:
                 status: "validating"
-            - invoke: host.run
+            - invoke: host.product_journey.run
               id: validate_product_journey_run
               with:
-                cmd: python3
                 args:
-                  - tools/product-journey/run.py
                   - --validate-run
                   - --json-output
                   - --run-dir

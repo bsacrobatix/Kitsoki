@@ -8,7 +8,7 @@ initial_world:
   gh_agent_public_base_url: https://agent.example
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       autonomous_product_journey_marathon_create:
         data:
@@ -82,12 +82,10 @@ turns:
       validation_errors: 0
     expect_view_matches: "RUN CREATED[\\s\\S]*Ticket repo[\\s\\S]*bsacrobatix/Kitsoki[\\s\\S]*GH-agent health[\\s\\S]*pass: https://agent.example/healthz[\\s\\S]*GH-agent readiness[\\s\\S]*pass: https://agent.example/api/ready"
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args:
           call: autonomous_product_journey_marathon_create
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --autonomous-marathon
             - --json-output
             - --report-invalid-autonomous-marathon
