@@ -18,7 +18,7 @@ func capsuleWorkspaceCmd() *cobra.Command {
 	return cmd
 }
 func capsuleWorkspaceManager(project string) (*control.Manager, error) {
-	m, _, err := newCapsuleManager(project, "local")
+	m, _, err := newCapsuleManager(project, "local", []string{"*"})
 	return m, err
 }
 func capsuleWorkspaceCreateCmd() *cobra.Command {

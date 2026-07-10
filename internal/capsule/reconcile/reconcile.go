@@ -95,6 +95,9 @@ func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
 	if req.Operation == "" {
 		return Plan{}, fmt.Errorf("capsule reconcile: operation is required")
 	}
+	if !ValidOperation(req.Operation) {
+		return Plan{}, fmt.Errorf("capsule reconcile: unsupported operation %q", req.Operation)
+	}
 	observed, err := r.VCS.Observe(ctx, req.Workspace, req.TargetRef, req.Generation)
 	if err != nil {
 		return Plan{}, err
@@ -179,6 +182,18 @@ func (r Reconciler) classify(ctx context.Context, workspace string, o ObservedRe
 	}
 	return Diverged, nil
 }
+
+// ValidOperation reports whether an operation is part of the fixed local
+// reconciliation vocabulary. Unknown names must never gain a default effect.
+func ValidOperation(op Operation) bool {
+	switch op {
+	case Integrate, Refresh, Promote, Publish:
+		return true
+	default:
+		return false
+	}
+}
+
 func effect(op Operation) string {
 	if op == Publish {
 		return "remote_publish"

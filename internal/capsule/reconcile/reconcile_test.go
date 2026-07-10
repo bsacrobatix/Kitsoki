@@ -61,6 +61,12 @@ func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 		t.Fatal("stale plan accepted")
 	}
 }
+func TestPlanRejectsUnknownOperation(t *testing.T) {
+	dir := capsuletest.Open(t, "clean-repo")
+	if _, err := (Reconciler{VCS: Git{}}).Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Operation("invent"), Generation: 1}); err == nil {
+		t.Fatal("unknown operation was accepted")
+	}
+}
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

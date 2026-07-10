@@ -34,7 +34,7 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(envSpec), 0o755))
 	require.NoError(t, os.WriteFile(envSpec, []byte("schema: capsule-environment/v1\nid: ci\nnetwork: none\n"), 0o644))
 	root := filepath.Join(project, ".capsules", "workspaces")
-	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit", "local_reconcile"}}}
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit", "local_reconcile"}, Branches: []string{"main"}}}
 	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent", ProjectID: "fixture"})
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -74,6 +74,9 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 		Workspace control.Handle `json:"workspace"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(contentText(committed)), &committedHandle))
+	deniedPlan, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.plan", Arguments: map[string]any{"workspace": committedHandle.Workspace, "operation": "integrate", "target": "release"}})
+	require.NoError(t, err)
+	require.True(t, deniedPlan.IsError, "ungranted branch must not be reconciled")
 	planned, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.plan", Arguments: map[string]any{"workspace": committedHandle.Workspace, "operation": "integrate", "target": "main"}})
 	require.NoError(t, err)
 	require.False(t, planned.IsError, contentText(planned))

@@ -18,6 +18,7 @@ import (
 // Capsule handles, never the server checkout or arbitrary host tools.
 func capsuleMCPCommand() *cobra.Command {
 	var project, pipeline, executor, owner string
+	var branches []string
 	cmd := &cobra.Command{
 		Use:   "mcp",
 		Short: "Start a project-scoped Capsule MCP server",
@@ -29,7 +30,7 @@ This is the coding-agent MCP surface; it is intentionally separate from the
 general-purpose Studio MCP server.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			manager, projectID, err := newCapsuleManager(project, executor)
+			manager, projectID, err := newCapsuleManager(project, executor, branches)
 			if err != nil {
 				return err
 			}
@@ -48,10 +49,11 @@ general-purpose Studio MCP server.`,
 	cmd.Flags().StringVar(&pipeline, "pipeline", "", "declared pipeline name (reserved for Capsule CI registration)")
 	cmd.Flags().StringVar(&executor, "executor", "synthetic", "allowed executor provider (synthetic is currently implemented)")
 	cmd.Flags().StringVar(&owner, "owner", "mcp-agent", "immutable lease owner recorded on created workspaces")
+	cmd.Flags().StringSliceVar(&branches, "branch", nil, "allowed local reconciliation target branch (repeatable; omitted denies sync)")
 	return cmd
 }
 
-func newCapsuleManager(project, executor string) (*control.Manager, string, error) {
+func newCapsuleManager(project, executor string, branches []string) (*control.Manager, string, error) {
 	root, err := filepath.Abs(project)
 	if err != nil {
 		return nil, "", err
@@ -92,7 +94,7 @@ func newCapsuleManager(project, executor string) (*control.Manager, string, erro
 		Grant: control.ScopeGrant{
 			ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot},
 			Definitions: definitionIDs, Executors: allowedProviders,
-			Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write"},
+			Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write"}, Branches: branches,
 		},
 	}
 	return manager, filepath.Base(root), nil
