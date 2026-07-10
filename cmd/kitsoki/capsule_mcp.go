@@ -92,7 +92,7 @@ func newCapsuleManager(project, executor string) (*control.Manager, string, erro
 		Grant: control.ScopeGrant{
 			ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot},
 			Definitions: definitionIDs, Executors: allowedProviders,
-			Effects: []string{"exec", "vcs_commit", "local_reconcile"},
+			Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write"},
 		},
 	}
 	return manager, filepath.Base(root), nil
