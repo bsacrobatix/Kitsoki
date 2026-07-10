@@ -162,6 +162,10 @@ states:
           sandbox:
             min_strength: supervised
             degrade: warn
+            # Claude's interactive login is tied to the operator's home. Keep
+            # it only for this explicitly live fixer; settings are still
+            # limited to project/local by the CLI invocation.
+            auth_home: inherit
             resources:
               timeout: "30m"
               activity_timeout: "90s"

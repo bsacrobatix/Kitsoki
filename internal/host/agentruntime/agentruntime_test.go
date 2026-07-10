@@ -56,6 +56,24 @@ func TestSupervisedUsesTempHomeAndAllowlistedEnv(t *testing.T) {
 	}
 }
 
+func TestSupervisedCanExplicitlyInheritHomeForProviderAuth(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture is Unix-only")
+	}
+	running, _, err := NewSupervised().Launch(context.Background(), LaunchSpec{
+		Command: "/bin/sh", Args: []string{"-c", "printf '%s' \"$HOME\""},
+		Env: []string{"PATH=" + os.Getenv("PATH"), "HOME=/provider-login"},
+		Min: StrengthSupervised, InheritHome: true,
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	res, err := running.Wait(context.Background())
+	if err != nil || res.Stdout != "/provider-login" {
+		t.Fatalf("home = %q, err=%v", res.Stdout, err)
+	}
+}
+
 func TestSupervisedKillsProcessGroupOnTimeout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is Unix-only")

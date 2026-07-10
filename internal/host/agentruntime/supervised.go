@@ -90,7 +90,7 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 	cmd := exec.CommandContext(runCtx, spec.Command, spec.Args...)
 	cmd.Dir = spec.Dir
 	cmd.Stdin = spec.Stdin
-	cmd.Env = supervisedEnv(spec.Env, home, cache)
+	cmd.Env = supervisedEnv(spec.Env, home, cache, spec.InheritHome)
 	applyProcessGroup(cmd)
 	applyResourceLimits(cmd, spec.Resources)
 
@@ -226,7 +226,7 @@ func supervisedDegradations(spec LaunchSpec) []string {
 	return out
 }
 
-func supervisedEnv(base []string, home, cache string) []string {
+func supervisedEnv(base []string, home, cache string, inheritHome bool) []string {
 	keep := map[string]bool{
 		"PATH":               true,
 		"TMPDIR":             true,
@@ -237,16 +237,18 @@ func supervisedEnv(base []string, home, cache string) []string {
 	out := make([]string, 0, len(keep)+8)
 	for _, kv := range base {
 		k, _, ok := strings.Cut(kv, "=")
-		if ok && (keep[k] || allowedProviderEnv(k)) {
+		if ok && (keep[k] || (inheritHome && k == "HOME") || allowedProviderEnv(k)) {
 			out = append(out, kv)
 		}
 	}
-	out = append(out,
-		"HOME="+home,
-		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
-		"XDG_CACHE_HOME="+cache,
-		"XDG_DATA_HOME="+filepath.Join(home, ".local", "share"),
-	)
+	if !inheritHome {
+		out = append(out,
+			"HOME="+home,
+			"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
+			"XDG_CACHE_HOME="+cache,
+			"XDG_DATA_HOME="+filepath.Join(home, ".local", "share"),
+		)
+	}
 	return out
 }
 
