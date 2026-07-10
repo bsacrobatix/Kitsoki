@@ -22,6 +22,7 @@ import (
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/harness"
+	"kitsoki/internal/orchestrator"
 )
 
 // failingLive is a live harness that fails loudly if RunTurn is ever called.
@@ -398,4 +399,15 @@ harness_profiles:
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `unknown --profile "missing"`)
+}
+
+func TestNewDriveLiveHarness_ClaudeNativeProfileUsesSubscriptionCLI(t *testing.T) {
+	h, err := newDriveLiveHarness(driveCmdConfig{appPath: cloakAppPath}, &orchestrator.HarnessProfile{
+		Name:    "claude-native",
+		Backend: "claude",
+		Model:   "opus",
+	})
+	require.NoError(t, err)
+	_, ok := h.(*harness.ClaudeCLIHarness)
+	require.True(t, ok, "native Claude profiles must not demand a direct API credential")
 }

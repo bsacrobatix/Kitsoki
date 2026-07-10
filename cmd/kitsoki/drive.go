@@ -26,6 +26,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/harness"
+	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
@@ -418,6 +419,19 @@ func newDriveLiveHarness(cfg driveCmdConfig, activeProfile *orchestrator.Harness
 	if activeProfile != nil {
 		env = activeProfile.Env
 		model = activeProfile.Model
+		// A named native-Claude profile is subscription-backed: route through
+		// the Claude CLI, which owns that login, rather than requiring a direct
+		// Anthropic API credential before the CLI is ever invoked.
+		if activeProfile.Backend == "claude" && len(env) == 0 {
+			profile := host.ActiveProfile{
+				Name:     activeProfile.Name,
+				Provider: host.Provider{Backend: activeProfile.Backend, Model: model},
+			}
+			claudeExec := func(ctx context.Context, bin string, args []string, stdin, workingDir string) (string, error) {
+				return host.RunClaudeOneShotForHarness(host.WithActiveProfile(ctx, profile), bin, args, stdin, workingDir)
+			}
+			return harness.NewClaudeCLI(def, harness.ClaudeCLIConfig{Model: model, Exec: claudeExec})
+		}
 	}
 	client, _, err := newLiveClientWithEnv(env)
 	if err != nil {
