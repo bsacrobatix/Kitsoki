@@ -133,6 +133,12 @@ world:
   live_budget_minutes:  { type: int, default: 0 }   # caller override for run.py --live-budget-minutes; 0 = run.py's own default (20)
   mode:                 { type: string, default: "catalog" } # catalog | adhoc
   pause:                { type: string, default: "auto" } # auto (default: drain every leg without an operator turn) | each-leg (opt-out: pause at `recording` for an explicit "next transport")
+  # P2.10 "parallel legs via arena" (opt-in): "true" hands the resolved legs
+  # to arena's persona-qa job type (rooms/parallel.yaml) instead of the
+  # serial execute -> judge -> recording loop rooms/plan.yaml routes to by
+  # default ("false"). Always zero-LLM-spend -- see
+  # tools/arena/scripts/run_scenario_qa_legs_parallel.py's scope note.
+  parallel:             { type: string, default: "false" }
   request_status:       { type: object, default: {} }
 
   # ── run bundle ─────────────────────────────────────────────────────────
@@ -167,6 +173,14 @@ world:
   # computed deterministically by scripts/plan_legs.star and surfaced up
   # front by rooms/plan.yaml + rooms/execute.yaml before any leg is driven.
   live_authorization_summary: { type: list, default: [] }
+  # P2.10 "parallel legs via arena": transient -- rooms/parallel.yaml's own
+  # host.run bind, consumed by the SAME turn's record_leg_result invoke
+  # (legs_batch: input) and never read anywhere else.
+  parallel_records:     { type: list, default: [] }
+  # Dedicated resolved-marker so rooms/parallel.yaml can defer its
+  # `emit_intent: legs_drained` guard until record_leg_result's bind lands
+  # -- mirrors plan_status; see record_leg_result.star's own comment.
+  record_status:        { type: object, default: {} }
   leg_index:            { type: int, default: 0 }
   leg_count:            { type: int, default: 0 }
   current_leg:          { type: object, default: {} }
@@ -244,6 +258,7 @@ intents:
       profile:      { type: string, required: false }  # harness profile for the driver's nested LIVE sessions (e.g. claude-native)
       live_budget_minutes: { type: int, required: false }  # override run.py's default per-scenario live budget (20 min)
       pause:        { type: string, required: false }  # auto (default) drains every leg automatically; each-leg pauses at `recording` for an explicit "next transport"
+      parallel:     { type: string, required: false }  # "true" hands the resolved legs to arena's persona-qa job type instead of the serial loop (P2.10, zero-LLM-spend)
   preview:
     description: "Preview the deterministic scenario x transport suite without creating a run bundle or launching capture."
     synonyms:
@@ -263,6 +278,9 @@ intents:
     priority: 1
   legs_ready:
     description: "(internal) the run bundle and per-transport legs resolved; enter the per-leg loop."
+    priority: 1
+  legs_ready_parallel:
+    description: "(internal) the run bundle and per-transport legs resolved with parallel=true; hand them to arena's persona-qa job type."
     priority: 1
   legs_unresolved:
     description: "(internal) no legs resolved for this scenario/transport combination."

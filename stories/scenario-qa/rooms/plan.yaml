@@ -38,6 +38,12 @@
 #     continuing the cascade from there. A guard over a plain scalar (already
 #     declared with some default, e.g. an int) never errors, so it would
 #     decide immediately against STALE pre-bind data instead of waiting.
+#
+# world.parallel (P2.10 "parallel legs via arena", opt-in via `check ...
+# parallel=true`) routes the SAME resolved legs to rooms/parallel.yaml
+# instead of rooms/execute.yaml -- see that room's header comment for the
+# arena fold seam. Default ("false") is unchanged: the serial execute ->
+# judge -> recording loop this file has always routed to.
 
 states:
 
@@ -133,18 +139,26 @@ states:
           live_authorization_summary: live_authorization_summary
         on_error: idle
       # plan_status.resolved (see app.yaml's comment) errors pre-bind, so
-      # this pair of guards correctly defers until plan_legs's bind lands
+      # this triple of guards correctly defers until plan_legs's bind lands
       # instead of deciding immediately against stale leg_count/legs.
-      - when: "world.plan_status.resolved == true && world.leg_count > 0"
+      # `world.parallel` (P2.10 "parallel legs via arena", opt-in via `check
+      # ... parallel=true`) is a plain scalar with an always-fresh default
+      # ("false"), so it never needs the same pre-bind deferral trick --
+      # only the plan_status/leg_count read does.
+      - when: "world.plan_status.resolved == true && world.leg_count > 0 && world.parallel != 'true'"
         set:
           status: "executing"
           leg_index: 0
         emit_intent: legs_ready
+      - when: "world.plan_status.resolved == true && world.leg_count > 0 && world.parallel == 'true'"
+        emit_intent: legs_ready_parallel
       - when: "world.plan_status.resolved == true && world.leg_count == 0"
         emit_intent: legs_unresolved
     on:
       legs_ready:
         - target: execute
+      legs_ready_parallel:
+        - target: parallel
       legs_unresolved:
         - target: idle
           effects:

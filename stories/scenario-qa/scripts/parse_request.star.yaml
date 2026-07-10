@@ -7,6 +7,7 @@ inputs:
   default_profile:             { type: string, required: false }
   default_live_budget_minutes: { type: int, required: false }
   default_pause:               { type: string, required: false }
+  default_parallel:            { type: string, required: false }
 
 outputs:
   scenario_ref:         { type: string }
@@ -18,5 +19,6 @@ outputs:
   live_profile:         { type: string }
   live_budget_minutes:  { type: int }
   pause:                { type: string }
+  parallel:             { type: string }
   mode:                 { type: string }
   request_status:       { type: object }

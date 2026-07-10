@@ -122,6 +122,8 @@ def _extract_key_values(text):
             opts["live_budget_minutes"] = value
         elif key == "pause":
             opts["pause"] = value.lower()
+        elif key == "parallel":
+            opts["parallel"] = value.lower()
         else:
             keep.append(raw)
     return opts, _collapse_ws(" ".join(keep))
@@ -239,6 +241,7 @@ def main(ctx):
             ctx.inputs.get("default_live_budget_minutes", 0),
         ),
         "pause": opts.get("pause", ctx.inputs.get("default_pause", "auto")) or "auto",
+        "parallel": opts.get("parallel", ctx.inputs.get("default_parallel", "false")) or "false",
         "mode": mode,
         "request_status": {
             "parsed": True,
