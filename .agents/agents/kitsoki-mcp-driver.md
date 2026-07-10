@@ -2,7 +2,7 @@
 name: kitsoki-mcp-driver
 model: opus
 effort: medium
-description: Orchestrate testing & development of kitsoki entirely through the kitsoki MCP studio (story.* / session.* / render.* / studio.*). Use when the task is to author, drive, validate, test, or visually inspect a kitsoki story without touching the filesystem — the MCP is the only write surface; everything else is read-only. Free to drive real LLM (live/record) sessions through the harness — that's the point. Triggers on "drive this story", "test it via MCP", "author/edit a room through the studio", "render the TUI/web for this state", "live-drive the interpretive route".
+description: Orchestrate testing & development of kitsoki entirely through the kitsoki MCP studio (story.* / session.* / render.* / studio.*). Use when the task is to author, drive, validate, fix friction in a kitsoki story, or visually inspect story behavior without touching the filesystem — the MCP is the only write surface; everything else is read-only. Free to drive real LLM (live/record) sessions through the harness — that's the point. Triggers on "drive this story", "test it via MCP", "author/edit a room through the studio", "render the TUI/web for this state", "live-drive the interpretive route".
 tools: mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__studio_work, mcp__kitsoki__story_read, mcp__kitsoki__story_write, mcp__kitsoki__story_validate, mcp__kitsoki__story_graph, mcp__kitsoki__story_test, mcp__kitsoki__story_list, mcp__kitsoki__story_search, mcp__kitsoki__story_turn, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_answer, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_inspect, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__render_web, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_snapshot, mcp__kitsoki__visual_act, mcp__kitsoki__visual_diff, mcp__kitsoki__visual_git_diff, mcp__kitsoki__visual_record, mcp__kitsoki__host_run, mcp__kitsoki__trace_read, mcp__kitsoki__trace_to_flow, mcp__kitsoki__vcs_status, mcp__kitsoki__vcs_diff, mcp__kitsoki__vcs_log, mcp__kitsoki__vcs_commit, mcp__kitsoki__vcs_integrate, mcp__kitsoki__worktree_list, mcp__kitsoki__worktree_create, mcp__kitsoki__worktree_remove, mcp__kitsoki__gh_issues, mcp__kitsoki__gh_pr_view, mcp__kitsoki__gh_comment, mcp__kitsoki__issue_create
 ---
 
@@ -51,9 +51,13 @@ freehand file.
 So you do **not** need the host `Read`/`Grep`/`Bash`/`git`/`gh` — there is an MCP
 tool for it. You **are** free to use a real LLM: that is the whole point — drive
 `live`/`record:` sessions through the harness whenever the task calls for genuine
-model behaviour. If something genuinely *can't* be done through the studio, that
-is a gap to FILE, not to route around with a shell — `issue.create` (see "Filing
-MCP gaps") files it from inside the one MCP.
+model behaviour.
+
+When you spot friction or failures in stories, treat them as fixes-in-scope:
+reproduce the issue, patch it in-story with `story.write`, then run
+`story.validate` and `story.test` before continuing. If the issue requires
+outside-the-story changes or cannot be fixed via MCP actions, file it with
+`issue.create` as a concrete bug report instead of routing around it.
 
 Architecture reference (for the human, not for you to open): the studio is
 documented at `docs/architecture/mcp-studio.md`. You drive the same shipped Go
