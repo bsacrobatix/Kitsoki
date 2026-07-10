@@ -1,5 +1,6 @@
 {
   "meta": {
+    "mode": "pitch",
     "title": "Kitsoki first run on Gears Rust",
     "resolution": {
       "width": 1920,
@@ -55,9 +56,10 @@
       "type": "video",
       "mode": "embedded",
       "title": "Real first-run web playback",
-      "src": "clips/gears-first-run-demo-rrweb.mp4",
-      "caption": "Rendered from .artifacts/product-journey/20260710T051031Z-gears-rust-core-maintainer-gears-first-run-real-20260710/evidence/gears-rust--core-maintainer/gears-first-run-web-demo/gears-first-run-web-demo.rrweb.json",
-      "narration": "The video shows the real web UI run. First, the provider setup path discovers a local harness profile. Then project onboarding creates the Gears Rust profile. The PRD chapter enters the PRD flow and receives a live model response. Finally, ticket search opens the live bug queue surface."
+      "rrweb": "assets/gears-first-run-demo/gears-first-run-web-demo.rrweb.json",
+      "chapters": "auto",
+      "caption": "Real rrweb DOM-session log captured from the first-run browser session; not a rendered MP4 placeholder.",
+      "narration": "This is the real rrweb playback from the browser session. First, the provider setup path discovers a local harness profile. Then project onboarding creates the Gears Rust profile. The PRD chapter enters the PRD flow and receives a live model response. Finally, ticket search opens the live bug queue surface."
     },
     {
       "type": "evidence",
