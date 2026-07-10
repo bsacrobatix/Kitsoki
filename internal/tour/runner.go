@@ -146,6 +146,15 @@ func advance(ctx context.Context, exec *executor, step TourStep) error {
 	}
 	if step.Advance == "route-match" {
 		if err := waitRouteChange(ctx, step.AdvanceRoute, 15*time.Second); err != nil {
+			// HomeView exposes session-creation failures in place. Preserve that
+			// concrete cause instead of collapsing every failed new-session click
+			// into a route timeout, so storyboard authors can fix the real flow
+			// or cassette issue.
+			var startError string
+			const startErrorJS = `(() => { const e = document.querySelector('[data-testid="new-session-error"]'); return e ? (e.textContent || '').trim() : ''; })()`
+			if readErr := chromedp.Run(ctx, chromedp.Evaluate(startErrorJS, &startError)); readErr == nil && startError != "" {
+				return fmt.Errorf("new session failed: %s", startError)
+			}
 			return err
 		}
 	}
