@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -46,6 +47,7 @@ except ModuleNotFoundError:  # Direct ``python3 tools/arena/arena/<script>.py`` 
 LIVE_SCHEMA = "mcp_operating_system_live_calibration/v1"
 AUTH_SCHEMA = "mcp_operating_system_live_calibration_request/v1"
 HARD_CAP_USD = 25.0
+MAX_PROVIDER_DIAGNOSTIC_CHARS = 1200
 STRICT_PROFILE = "strict"
 LIVE_ENVIRONMENT_FLAG = "KITSOKI_MCP_OS_LIVE"
 GENERIC_PROVIDER = "generic-command"
@@ -95,6 +97,30 @@ CLAUDE_RESPONSE_SCHEMA: dict[str, Any] = {
 
 class CalibrationError(ValueError):
     """A refused calibration setup, record, or provider response."""
+
+    def __init__(self, message: str, *, diagnostic: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.diagnostic = diagnostic
+
+
+def _safe_provider_text(value: object) -> str:
+    """Persist only a bounded scrubbed provider diagnostic, never raw output."""
+    text = str(value or "").replace("\x00", "")
+    text = re.sub(r"(?i)\bbearer\s+[^\s,;]+", "Bearer [redacted]", text)
+    text = re.sub(r"(?i)\b(api[_-]?key|token|authorization|password|secret)\s*([=:])\s*[^\s,;]+", r"\1\2[redacted]", text)
+    text = re.sub(r"\b(?:sk|ak|rk)-[A-Za-z0-9_-]{8,}\b", "[redacted-key]", text)
+    return text[:MAX_PROVIDER_DIAGNOSTIC_CHARS]
+
+
+def _process_diagnostic(adapter: str, completed: subprocess.CompletedProcess[str]) -> dict[str, Any]:
+    """Return a receipt-safe process failure summary without command or prompt."""
+    return {
+        "adapter": adapter,
+        "returncode": completed.returncode,
+        "stderr": _safe_provider_text(completed.stderr),
+        "stdout": _safe_provider_text(completed.stdout),
+        "truncated_at_chars": MAX_PROVIDER_DIAGNOSTIC_CHARS,
+    }
 
 
 class Dispatcher(Protocol):
@@ -173,7 +199,10 @@ class SubprocessDispatcher:
         )
         if completed.returncode != 0:
             # stderr is provider-controlled and can contain credentials.
-            raise CalibrationError(f"provider command exited {completed.returncode}")
+            raise CalibrationError(
+                f"provider command exited {completed.returncode}",
+                diagnostic=_process_diagnostic("generic-command", completed),
+            )
         try:
             response = json.loads(completed.stdout)
         except json.JSONDecodeError as exc:
@@ -406,7 +435,10 @@ class ClaudeCLIDispatcher:
             check=False,
         )
         if completed.returncode != 0:
-            raise CalibrationError(f"Claude CLI exited {completed.returncode}")
+            raise CalibrationError(
+                f"Claude CLI exited {completed.returncode}",
+                diagnostic=_process_diagnostic(CLAUDE_CLI_PROVIDER, completed),
+            )
         events, envelope = _stream_events(completed.stdout)
         if envelope.get("is_error") is True:
             raise CalibrationError("Claude CLI returned an unsuccessful result envelope")
@@ -739,8 +771,15 @@ def run_calibration(
             if safety != "pass":
                 terminal = "unsafe-result"
         except Exception as exc:  # A dispatch failure is a terminal safety boundary, not a retry opportunity.
+            diagnostic = getattr(exc, "diagnostic", None)
+            if not isinstance(diagnostic, dict):
+                diagnostic = {
+                    "adapter": checked.provider,
+                    "error": _safe_provider_text(str(exc)),
+                    "truncated_at_chars": MAX_PROVIDER_DIAGNOSTIC_CHARS,
+                }
             record.update({
-                "trace": None,
+                "trace": {"provider_diagnostic": diagnostic},
                 "cost": {"cost_usd": 0.0, "aggregate_spent_usd": spent, "aggregate_remaining_usd": round(HARD_CAP_USD - spent, 6)},
                 "receipt": {
                     "status": "provider-error",
@@ -748,6 +787,7 @@ def run_calibration(
                     "provider": checked.provider,
                     "model": checked.model,
                     "error_kind": type(exc).__name__,
+                    "provider_diagnostic": diagnostic,
                 },
             })
             terminal = "provider-error"

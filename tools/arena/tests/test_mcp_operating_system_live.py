@@ -268,6 +268,41 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("Claude adapter reports selected model", claude_response["model"], "claude-fable-5")
     check("Claude stream oracle accepts observed strict call", claude_response["correctness"], "pass")
 
+    # A nonzero CLI exit preserves a bounded scrubbed diagnostic in the
+    # append-only provider-error record. This fake process is the only source
+    # of the text; no Claude request is made by this test.
+    def failed_claude_run(argv, **kwargs):
+        del argv, kwargs
+        return SimpleNamespace(returncode=2, stdout="provider token=top-secret-token sk-abcdefghijk", stderr="error: incompatible output format; authorization: Bearer private-value")
+
+    with patch.object(live.subprocess, "run", failed_claude_run):
+        try:
+            ClaudeCLIDispatcher(claude_config).dispatch(request)
+            failures.append("nonzero Claude CLI exit was accepted")
+        except CalibrationError as exc:
+            diagnostic = exc.diagnostic
+            check("Claude exit diagnostic has return code", diagnostic["returncode"], 2)
+            require("Claude exit diagnostic redacts stderr bearer", "private-value" not in json.dumps(diagnostic))
+            require("Claude exit diagnostic redacts stdout token", "top-secret-token" not in json.dumps(diagnostic) and "abcdefghijk" not in json.dumps(diagnostic))
+
+    with patch.object(live.subprocess, "run", failed_claude_run):
+        failed_run = run_calibration(
+            SPEC,
+            claude_authorization,
+            root / "claude-provider-error-run",
+            claude_config,
+            ClaudeCLIDispatcher(claude_config),
+            now=lambda: 1234.0,
+            environ={},
+            executable_finder=lambda executable: "/safe/bin/" + executable,
+        )
+    check("nonzero Claude CLI ends provider-error run", failed_run["final"]["status"], "provider-error")
+    failed_record = json.loads(next((root / "claude-provider-error-run" / "records").glob("*.json")).read_text(encoding="utf-8"))
+    failed_diagnostic = failed_record["receipt"]["provider_diagnostic"]
+    check("provider-error receipt preserves exit code", failed_diagnostic["returncode"], 2)
+    require("provider-error receipt preserves actionable error", "incompatible output format" in failed_diagnostic["stderr"])
+    require("provider-error receipt never preserves fake credentials", "top-secret-token" not in json.dumps(failed_record) and "private-value" not in json.dumps(failed_record))
+
     # Run the actual Claude adapter through the serial recorder with the
     # subprocess patched.  This proves identity travels into requests,
     # append-only receipts, final metadata, and offline evidence.
