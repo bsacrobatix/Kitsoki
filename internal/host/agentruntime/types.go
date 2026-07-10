@@ -87,12 +87,17 @@ func ParseDegradePolicy(s string) (DegradePolicy, bool) {
 }
 
 type ResourcePolicy struct {
-	Timeout  time.Duration
-	Memory   int64
-	CPUs     float64
-	PIDs     int
-	FileSize int64
-	FDs      int
+	// Timeout is the absolute wall-clock limit for a run. ActivityTimeout is
+	// the shorter liveness limit: any stdout/stderr activity renews it. This is
+	// deliberately separate so an agent making visible stream-json progress is
+	// not killed merely because a repair takes longer than a single turn.
+	Timeout         time.Duration
+	ActivityTimeout time.Duration
+	Memory          int64
+	CPUs            float64
+	PIDs            int
+	FileSize        int64
+	FDs             int
 }
 
 type LaunchSpec struct {

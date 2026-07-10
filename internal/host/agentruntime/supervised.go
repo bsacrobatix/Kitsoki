@@ -13,6 +13,25 @@ import (
 
 type Supervised struct{}
 
+// activityBuffer retains command output while non-blockingly notifying the
+// waiter that the child made progress. Claude's stream-json is written to
+// stdout, so this turns real trace activity into a renewable liveness signal.
+type activityBuffer struct {
+	bytes.Buffer
+	activity chan<- struct{}
+}
+
+func (b *activityBuffer) Write(p []byte) (int, error) {
+	n, err := b.Buffer.Write(p)
+	if n > 0 && b.activity != nil {
+		select {
+		case b.activity <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
 func NewSupervised() *Supervised { return &Supervised{} }
 
 func (s *Supervised) Name() string { return "supervised" }
@@ -63,7 +82,10 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 	applyProcessGroup(cmd)
 	applyResourceLimits(cmd, spec.Resources)
 
-	var stdout, stderr bytes.Buffer
+	activity := make(chan struct{}, 1)
+	var stdout, stderr activityBuffer
+	stdout.activity = activity
+	stderr.activity = activity
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	start := time.Now()
@@ -94,17 +116,54 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 		go func() { done <- cmd.Wait() }()
 		var waitErr error
 		killed := false
-		select {
-		case waitErr = <-done:
-		case <-waitCtx.Done():
-			killed = true
-			killProcessGroup(cmd)
-			waitErr = <-done
-		case <-runCtx.Done():
-			killed = true
-			killProcessGroup(cmd)
-			waitErr = <-done
+		var activityTimer *time.Timer
+		var activityC <-chan time.Time
+		if spec.Resources.ActivityTimeout > 0 {
+			activityTimer = time.NewTimer(spec.Resources.ActivityTimeout)
+			activityC = activityTimer.C
+			defer activityTimer.Stop()
 		}
+		for {
+			select {
+			case waitErr = <-done:
+				goto finished
+			case <-activity:
+				if activityTimer != nil {
+					if !activityTimer.Stop() {
+						select {
+						case <-activityTimer.C:
+						default:
+						}
+					}
+					activityTimer.Reset(spec.Resources.ActivityTimeout)
+				}
+			case <-activityC:
+				// stdout and the timer can become ready together. Prefer the
+				// observed output: it was produced before the liveness decision
+				// and must renew the deadline rather than losing a race to it.
+				select {
+				case <-activity:
+					activityTimer.Reset(spec.Resources.ActivityTimeout)
+					continue
+				default:
+				}
+				killed = true
+				killProcessGroup(cmd)
+				waitErr = <-done
+				goto finished
+			case <-waitCtx.Done():
+				killed = true
+				killProcessGroup(cmd)
+				waitErr = <-done
+				goto finished
+			case <-runCtx.Done():
+				killed = true
+				killProcessGroup(cmd)
+				waitErr = <-done
+				goto finished
+			}
+		}
+	finished:
 		exitCode := 0
 		if waitErr != nil {
 			if ee, ok := waitErr.(*exec.ExitError); ok {

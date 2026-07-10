@@ -389,7 +389,7 @@ func TestAgentDecide_SandboxPassedToRuntime(t *testing.T) {
 			"repo":         "read_only",
 			"network":      "model_only",
 			"resources": map[string]any{
-				"timeout": "2m",
+				"timeout": "2m", "activity_timeout": "45s",
 			},
 		},
 	})
@@ -409,6 +409,9 @@ func TestAgentDecide_SandboxPassedToRuntime(t *testing.T) {
 	seen := fake.Seen[0]
 	if seen.Resources.Timeout != 2*time.Minute {
 		t.Fatalf("runtime timeout = %v, want 2m", seen.Resources.Timeout)
+	}
+	if seen.Resources.ActivityTimeout != 45*time.Second {
+		t.Fatalf("runtime activity timeout = %v, want 45s", seen.Resources.ActivityTimeout)
 	}
 	if seen.Repo != agentruntime.RepoReadOnly {
 		t.Fatalf("runtime repo policy = %q, want read_only", seen.Repo)
