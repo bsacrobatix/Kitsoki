@@ -655,6 +655,8 @@ var onboardingInstanceHosts = []string{
 	"host.diff.open",
 	"host.run",
 	"host.starlark.run",
+	"host.session_mining.run",
+	"host.ui_qa.run",
 	"host.proposal.publish",
 	"host.dev.profile_setup",
 	"host.dev.onboarding",

@@ -56,6 +56,8 @@ source:
           - host.dev.profile_setup
           - host.dev.onboarding
           - host.decomposition.update
+          - host.session_mining.run
+          - host.ui_qa.run
 
         imports:
           core:
