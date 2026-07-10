@@ -10,6 +10,7 @@ app:
 
 hosts:
   - host.agent.ask
+  - host.run
   - host.starlark.run
 
 world:
@@ -50,3 +51,7 @@ states:
           inputs: {}
         bind:
           result: result
+      - invoke: host.run
+        with:
+          cmd: python3
+          script: scripts/probe.py

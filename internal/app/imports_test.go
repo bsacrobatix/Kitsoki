@@ -50,7 +50,7 @@ func TestImports_ParentFold(t *testing.T) {
 }
 
 // TestImports_PromptPathsRebasedToChildDir verifies that relative
-// `prompt:`, `schema:`, and Starlark `script:` args in an imported child's effects are
+// `prompt:`, `schema:`, and executable/Starlark `script:` args in an imported child's effects are
 // rewritten to absolute paths rooted at the child's own directory.
 //
 // At runtime, host.agent.ask_with_mcp's resolvePromptPath joins
@@ -78,40 +78,50 @@ func TestImports_PromptPathsRebasedToChildDir(t *testing.T) {
 	require.True(t, ok, "c.work_executing should exist")
 	require.NotEmpty(t, work.OnEnter, "c.work_executing should have on_enter")
 
-	var promptArg, schemaArg, scriptArg string
+	var promptArg, schemaArg, starlarkScriptArg, runScriptArg string
 	for _, eff := range work.OnEnter {
 		if eff.Invoke == "host.agent.ask" {
 			promptArg, _ = eff.With["prompt"].(string)
 			schemaArg, _ = eff.With["schema"].(string)
 		}
 		if eff.Invoke == "host.starlark.run" {
-			scriptArg, _ = eff.With["script"].(string)
+			starlarkScriptArg, _ = eff.With["script"].(string)
+		}
+		if eff.Invoke == "host.run" {
+			runScriptArg, _ = eff.With["script"].(string)
 		}
 	}
 	require.NotEmpty(t, promptArg, "prompt arg should be set on the host.agent.ask invoke")
-	require.NotEmpty(t, scriptArg, "script arg should be set on the host.starlark.run invoke")
+	require.NotEmpty(t, starlarkScriptArg, "script arg should be set on the host.starlark.run invoke")
+	require.NotEmpty(t, runScriptArg, "script arg should be set on the host.run invoke")
 
 	// The rewritten path must be absolute.
 	require.True(t, filepath.IsAbs(promptArg),
 		"prompt arg must be rebased to absolute; got %q", promptArg)
 	require.True(t, filepath.IsAbs(schemaArg),
 		"schema arg must be rebased to absolute; got %q", schemaArg)
-	require.True(t, filepath.IsAbs(scriptArg),
-		"script arg must be rebased to absolute; got %q", scriptArg)
+	require.True(t, filepath.IsAbs(starlarkScriptArg),
+		"starlark script arg must be rebased to absolute; got %q", starlarkScriptArg)
+	require.True(t, filepath.IsAbs(runScriptArg),
+		"host.run script arg must be rebased to absolute; got %q", runScriptArg)
 
 	// And it must point at the CHILD's directory, not the parent's.
 	require.Contains(t, promptArg, "/imports_prompt_rebase/child/prompts/work.md",
 		"prompt must resolve under the child's directory; got %q", promptArg)
 	require.Contains(t, schemaArg, "/imports_prompt_rebase/child/schemas/result.json",
 		"schema must resolve under the child's directory; got %q", schemaArg)
-	require.Contains(t, scriptArg, "/imports_prompt_rebase/child/scripts/probe.star",
-		"script must resolve under the child's directory; got %q", scriptArg)
+	require.Contains(t, starlarkScriptArg, "/imports_prompt_rebase/child/scripts/probe.star",
+		"starlark script must resolve under the child's directory; got %q", starlarkScriptArg)
+	require.Contains(t, runScriptArg, "/imports_prompt_rebase/child/scripts/probe.py",
+		"host.run script must resolve under the child's directory; got %q", runScriptArg)
 
 	// The rebased file must actually exist on disk (sanity).
 	_, statErr := os.Stat(promptArg)
 	require.NoError(t, statErr, "rebased prompt file must exist on disk")
-	_, statErr = os.Stat(scriptArg)
+	_, statErr = os.Stat(starlarkScriptArg)
 	require.NoError(t, statErr, "rebased starlark script file must exist on disk")
+	_, statErr = os.Stat(runScriptArg)
+	require.NoError(t, statErr, "rebased host.run script file must exist on disk")
 }
 
 // TestImports_StateRewriting asserts that child state bodies have their

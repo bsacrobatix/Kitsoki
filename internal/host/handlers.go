@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -108,6 +109,9 @@ func WorkspaceManagerGetHandler(ctx context.Context, args map[string]any) (Resul
 //     matter what shell metacharacters it contains.  Each element is
 //     coerced to its string form (numbers/bools become their decimal/`true`
 //     representation, nil becomes the empty string).
+//   - script       (string, optional): app-relative script path inserted as
+//     argv[0] before args. Imported-story paths are rebased by the loader, so
+//     the child script is used even when KITSOKI_APP_DIR names the parent app.
 //   - cwd          (string, optional): working directory
 //   - timeout      (number|string, optional): wall-clock cap on the child
 //     process.  A bare number is seconds (e.g. 120); a string is parsed as a
@@ -174,6 +178,13 @@ func RunHandler(ctx context.Context, args map[string]any) (Result, error) {
 		if err != nil {
 			return Result{Error: fmt.Sprintf("host.run: %v", err)}, nil
 		}
+	}
+	if rawScript, hasScript := args["script"]; hasScript {
+		script, ok := rawScript.(string)
+		if !ok || strings.TrimSpace(script) == "" {
+			return Result{Error: fmt.Sprintf("host.run: script must be a non-empty string, got %T", rawScript)}, nil
+		}
+		argv = append([]string{resolveRunScriptPath(ctx, script)}, argv...)
 	}
 	cwd, _ := args["cwd"].(string)
 
@@ -292,6 +303,24 @@ func RunHandler(ctx context.Context, args map[string]any) (Result, error) {
 	}
 
 	return res, nil
+}
+
+// resolveRunScriptPath makes host.run's explicit script path story-relative.
+// Imported effects already arrive with an absolute, child-rooted path because
+// app.rebaseEffectPaths rewrites with.script while folding the import. Direct
+// stories retain a relative path, so use the per-orchestrator renderer root
+// first and the legacy process-global app dir only as a compatibility fallback.
+func resolveRunScriptPath(ctx context.Context, script string) string {
+	if filepath.IsAbs(script) {
+		return script
+	}
+	if pr := PromptRendererFromCtx(ctx); pr != nil && strings.TrimSpace(pr.RootDir()) != "" {
+		return filepath.Join(pr.RootDir(), script)
+	}
+	if appDir := strings.TrimSpace(os.Getenv(AppDirEnv)); appDir != "" {
+		return filepath.Join(appDir, script)
+	}
+	return script
 }
 
 // lastNonEmptyLine returns the last line of s that contains non-whitespace,
