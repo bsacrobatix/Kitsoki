@@ -332,7 +332,7 @@ func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a 
 	if s.ciLauncher == nil {
 		return capsuleErr(fmt.Errorf("capsule ci: no story launcher is configured")), nil, nil
 	}
-	service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Provider: executor.NewFakeProvider("local"), Launcher: s.ciLauncher(filepath.Join(project, pipeline.Story))}
+	service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewBuiltinExecutors(), Launcher: s.ciLauncher(filepath.Join(project, pipeline.Story))}
 	digest, err := capsuleStoryDigest(filepath.Join(project, pipeline.Story))
 	if err != nil {
 		return capsuleErr(err), nil, nil

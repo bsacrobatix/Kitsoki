@@ -1,8 +1,9 @@
 # Runtime: portable capsule environments and executors
 
 **Status:** v1 in progress. Environment definitions/locks, host and fake-remote
-executor contracts, and CLI/MCP environment operations ship locally. Arena
-adoption, a production remote worker, and project migrations remain.
+executor contracts, pipeline-selected CLI/MCP placement, and environment
+operations ship locally. Arena adoption, a production remote worker, and
+project migrations remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)

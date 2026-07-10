@@ -40,6 +40,11 @@ only a matching `capsule-ci-verdict/v1` object in `world.ci_verdict`. A story
 that cannot complete safely must emit `needs_input`; the reference
 `stories/capsule-ci` does exactly that until a project composes its checks.
 
+Pipeline `executor:` is an immutable placement selection: `host`/`local` runs
+through the host provider and `remote-fake` exercises the identical remote
+worker protocol without a network. A production remote-worker name must be
+injected by the project’s launching process; a story cannot select one itself.
+
 The optional `--verdict file.json` run input is for an explicit external story
 adapter. It is not an authority bypass: the verdict still has to match the
 envelope and promotion eligibility is derived from its outcome and evidence.

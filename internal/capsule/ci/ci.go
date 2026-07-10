@@ -179,11 +179,26 @@ func ValidateVerdict(v Verdict, expected executor.Envelope, contract ResultContr
 type Launcher interface {
 	Launch(context.Context, executor.Prepared) (Verdict, error)
 }
+
+// ExecutorSelector chooses a named checked-in pipeline placement. The selector
+// is injected at the front door so stories cannot swap providers or acquire
+// remote authority while running.
+type ExecutorSelector interface {
+	Select(context.Context, string) (executor.Provider, error)
+}
+
+type ExecutorSelectorFunc func(context.Context, string) (executor.Provider, error)
+
+func (f ExecutorSelectorFunc) Select(ctx context.Context, name string) (executor.Provider, error) {
+	return f(ctx, name)
+}
+
 type Service struct {
 	ProjectRoot string
 	Jobs        artifactjob.Store
 	Env         environment.Resolver
 	Provider    executor.Provider
+	Executors   ExecutorSelector
 	Launcher    Launcher
 }
 type RunRequest struct {
@@ -234,7 +249,7 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	return p, e, err
 }
 func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
-	if s.Jobs == nil || s.Provider == nil || s.Launcher == nil {
+	if s.Jobs == nil || (s.Provider == nil && s.Executors == nil) || s.Launcher == nil {
 		return RunResult{}, fmt.Errorf("capsule ci: jobs, provider, and launcher are required")
 	}
 	p, envelope, err := s.Plan(ctx, req)
@@ -250,12 +265,22 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
-	prepared, err := s.Provider.Prepare(ctx, envelope)
+	provider := s.Provider
+	if s.Executors != nil {
+		provider, err = s.Executors.Select(ctx, p.Executor)
+		if err != nil {
+			return RunResult{}, err
+		}
+	}
+	if provider == nil {
+		return RunResult{}, fmt.Errorf("capsule ci: no provider for executor %q", p.Executor)
+	}
+	prepared, err := provider.Prepare(ctx, envelope)
 	if err != nil {
 		return RunResult{}, err
 	}
 	var verdict Verdict
-	execution, runErr := s.Provider.Run(ctx, prepared, func(ctx context.Context, prepared executor.Prepared) (executor.Result, error) {
+	execution, runErr := provider.Run(ctx, prepared, func(ctx context.Context, prepared executor.Prepared) (executor.Result, error) {
 		v, e := s.Launcher.Launch(ctx, prepared)
 		if e != nil {
 			return executor.Result{}, e
