@@ -1145,9 +1145,10 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 
 	// idle.on_enter now auto-starts once ticket_id is set (goal-seeker/
 	// punch-list headless drivers only reliably get one prompt turn), so
-	// kickoff lands at review_task_awaiting_reply instead of a separate
-	// waiting cycle.
+	// kickoff lands at review_task_awaiting_reply instead of parking
+	// at idle for a separate explicit `start`.
 	step("kickoff", "core__go_implementation", "core.impl.review_task_awaiting_reply")
+	step("review_task → wait", "core__impl__proceed", "core.impl.review_task_awaiting_reply")
 	step("review_task → write", "core__impl__accept", "core.impl.write_code_awaiting_reply")
 	step("write → wait", "core__impl__proceed", "core.impl.write_code_awaiting_reply")
 	step("write → test", "core__impl__accept", "core.impl.test_awaiting_reply")
@@ -1220,6 +1221,7 @@ func TestDogfoodSmoke_ImplHandoffRefusesUncommittedWork(t *testing.T) {
 	// auto-starts once ticket_id is set, so kickoff lands at
 	// review_task_awaiting_reply instead of parking at idle.
 	step("kickoff", "core__go_implementation", "core.impl.review_task_awaiting_reply")
+	step("review_task → wait", "core__impl__proceed", "core.impl.review_task_awaiting_reply")
 	step("review_task → write", "core__impl__accept", "core.impl.write_code_awaiting_reply")
 	step("write → wait", "core__impl__proceed", "core.impl.write_code_awaiting_reply")
 	step("write → test", "core__impl__accept", "core.impl.test_awaiting_reply")
