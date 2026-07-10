@@ -1,0 +1,17 @@
+schema: capsule-environment/v1
+id: ci
+source:
+  host_probe: true
+toolchains:
+  go: "1.25"
+lockfiles:
+  - go.sum
+  - tools/runstatus/pnpm-lock.yaml
+bootstrap:
+  command: bootstrap-workspace
+network: none
+caches:
+  - id: go-build
+    scope: project
+    mode: read_write
+sandbox: supervised
