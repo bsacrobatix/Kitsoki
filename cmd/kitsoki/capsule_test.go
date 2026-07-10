@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,5 +70,52 @@ func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("capsule markdown missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestCapsuleOpenCoreUsesManagedPathWithLegacyManifest(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "opened")
+	absDest, err := filepath.Abs(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if realDest, err := filepath.EvalSymlinks(filepath.Dir(absDest)); err == nil {
+		absDest = filepath.Join(realDest, filepath.Base(absDest))
+	}
+	out, err := execRoot(t, "capsule", "open", "clean-repo", "--dest", dest, "--json")
+	if err != nil {
+		t.Fatalf("capsule open: %v\n%s", err, out)
+	}
+	var manifest struct {
+		CapsuleName string `json:"capsule_name"`
+		Workspace   string `json:"workspace"`
+		TreeDigest  string `json:"tree_digest"`
+		Source      struct {
+			Synthetic bool   `json:"synthetic"`
+			Head      string `json:"head"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal([]byte(out), &manifest); err != nil {
+		t.Fatalf("manifest decode: %v\n%s", err, out)
+	}
+	if manifest.CapsuleName != "clean-repo" || manifest.Workspace != absDest || manifest.TreeDigest == "" || !manifest.Source.Synthetic || manifest.Source.Head == "" {
+		t.Fatalf("unexpected manifest %#v", manifest)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "capsule-manifest.json")); err != nil {
+		t.Fatalf("missing manifest: %v", err)
+	}
+	verify, err := execRoot(t, "capsule", "verify", dest)
+	if err != nil {
+		t.Fatalf("capsule verify: %v\n%s", err, verify)
+	}
+	if !strings.Contains(verify, "capsule clean-repo verification: ok") {
+		t.Fatalf("unexpected verify output:\n%s", verify)
+	}
+	closed, err := execRoot(t, "capsule", "close", dest)
+	if err != nil {
+		t.Fatalf("capsule close: %v\n%s", err, closed)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("workspace still exists or stat failed: %v", err)
 	}
 }

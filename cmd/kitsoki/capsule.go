@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/capsule"
+	"kitsoki/internal/capsule/control"
+	capsuleproject "kitsoki/internal/capsule/project"
 )
 
 func capsuleCmd() *cobra.Command {
@@ -107,7 +110,7 @@ func capsuleOpenCmd() *cobra.Command {
 		Short: "Materialize a capsule into a workspace",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			res, err := capsule.Open(cmd.Context(), args[0], capsule.OpenOptions{Dest: dest})
+			res, err := capsuleOpenManaged(cmd.Context(), args[0], dest)
 			if err != nil {
 				return err
 			}
@@ -126,6 +129,109 @@ func capsuleOpenCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dest, "dest", "", "destination directory (default: temp directory)")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print manifest JSON")
 	return cmd
+}
+
+func capsuleOpenManaged(ctx context.Context, ref, dest string) (capsule.OpenResult, error) {
+	if shouldUseLegacyCapsulePath(ref) {
+		return capsule.Open(ctx, ref, capsule.OpenOptions{Dest: dest})
+	}
+	projectRoot := capsuleListRepoRoot()
+	definitions := control.FileDefinitionStore{ProjectRoot: projectRoot}
+	def, err := definitions.Get(ctx, ref)
+	if err != nil {
+		return capsule.Open(ctx, ref, capsule.OpenOptions{Dest: dest})
+	}
+	if def.Source.Kind != control.SourceSynthetic {
+		return capsule.OpenResult{}, fmt.Errorf("capsule open: definition %q uses provider %q; use capsule workspace create for managed non-synthetic workspaces", def.ID, def.Source.Kind)
+	}
+	workspace, err := capsuleManagedOpenDest(def.ID, dest)
+	if err != nil {
+		return capsule.OpenResult{}, err
+	}
+	root := filepath.Dir(workspace)
+	id := filepath.Base(workspace)
+	if !validCapsuleManagedInstanceID(id) {
+		return capsule.Open(ctx, ref, capsule.OpenOptions{Dest: dest})
+	}
+	manager, err := capsuleproject.Open(projectRoot, nil)
+	if err != nil {
+		return capsule.OpenResult{}, err
+	}
+	manager.Instances = control.NewMemoryInstanceStore()
+	manager.Grant.WorkspaceRoots = []string{root}
+	handle, err := manager.Create(ctx, control.CreateRequest{ID: id, DefinitionID: def.ID, Owner: "capsule-cli", Provider: string(control.SourceSynthetic)})
+	if err != nil {
+		return capsule.OpenResult{}, err
+	}
+	path, err := manager.WorkspacePath(ctx, handle)
+	if err != nil {
+		return capsule.OpenResult{}, err
+	}
+	manifest, err := capsule.ReadManifest(path)
+	if err != nil {
+		return capsule.OpenResult{}, err
+	}
+	spec, specPath, err := capsule.Load(manifest.SpecPath)
+	if err != nil {
+		return capsule.OpenResult{}, err
+	}
+	return capsule.OpenResult{Spec: spec, SpecPath: specPath, Manifest: manifest}, nil
+}
+
+func shouldUseLegacyCapsulePath(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return ref == "" || strings.HasSuffix(ref, ".yaml") || strings.Contains(ref, string(filepath.Separator))
+}
+
+func capsuleManagedOpenDest(definitionID, dest string) (string, error) {
+	if strings.TrimSpace(dest) != "" {
+		return filepath.Abs(dest)
+	}
+	workspace, err := os.MkdirTemp("", "kitsoki-capsule-"+safeCapsuleInstanceID(definitionID)+"-")
+	if err != nil {
+		return "", fmt.Errorf("capsule: create temp workspace: %w", err)
+	}
+	if err := os.RemoveAll(workspace); err != nil {
+		return "", err
+	}
+	return workspace, nil
+}
+
+func safeCapsuleInstanceID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "workspace"
+	}
+	var b strings.Builder
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	out := strings.Trim(b.String(), ".-_")
+	if out == "" {
+		return "workspace"
+	}
+	return out
+}
+
+func validCapsuleManagedInstanceID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for i, r := range id {
+		ok := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-'
+		if !ok {
+			return false
+		}
+		if i == 0 && !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func collectCapsuleList(kind string) ([]capsuleListEntry, error) {
