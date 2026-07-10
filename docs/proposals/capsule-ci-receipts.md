@@ -194,6 +194,11 @@ of evidence.
   - Remaining: complete producer adoption for all lifecycle/environment/executor/policy facts and golden trace coverage.
 - [x] 1.2 Define capsule-ci-receipt/v1 JSON schema, canonicalizer, content hashing, and verification result
 - [ ] 1.3 Wire runtime/story producers and enforce secret/path redaction
+  - Shipped: shared trace validation rejects provider-unsafe `fields` and
+    `error` content, including secret/token/password/credential-style keys,
+    secret-looking inline values, and absolute host paths.
+  - Remaining: wire every runtime/story producer through this schema and add
+    producer-specific redaction fixtures.
 
 ## 2. Rebuild and consume
 - [x] 2.1 Add deterministic receipt builder over manifests, trace, artifact index, and typed verdict
@@ -205,6 +210,11 @@ of evidence.
 
 ## 3. Prove and document
 - [ ] 3.1 Add all golden traces above; assert byte-stable unsigned rebuild and old-reader compatibility
+  - Shipped: `internal/capsule/trace` has a byte-stable
+    `local-deterministic-pass`-style golden trace with lifecycle,
+    environment, CI-start, and verdict events, plus an old-reader projection.
+  - Remaining: add the LLM review, human park, sandbox degraded,
+    remote-signed, remote-tamper, retry, and legacy-incomplete goldens.
 - [x] 3.2 Tamper tests cover trace, artifact, source, story, environment, policy, signer, and accepted-attempt substitution
   - Shipped: receipt verification rejects trace/artifact/source/story/environment/policy/signer/signature tampering, and promotion gates reject a run record that substitutes a different accepted attempt behind a valid receipt id.
 - [x] 3.3 Add one no-LLM local and fake-remote end-to-end receipt used by a promotion-plan fixture
