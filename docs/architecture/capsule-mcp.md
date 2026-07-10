@@ -15,8 +15,9 @@ The exposed effect families are intentionally distinct:
 - environment lock persistence requires `env_write`;
 - project-scoped disk hygiene planning is read-only, while applying cleanup
   requires `cleanup` and returns only project-relative paths;
-- local reconciliation requires `local_reconcile` and uses a stable plan/apply
-  digest, and may target only a branch granted at server startup; and
+- local reconciliation requires `local_reconcile`, may target only a branch
+  granted at server startup, and keeps sync conflict work inside server-owned
+  plan digests plus project-relative `.capsules/sync/` artifacts; and
 - remote publication remains absent unless the server is started with a future
   explicit `remote_publish` grant and provider; remote CI execution is available
   only when the checked-in CI config names a remote executor and the launching
@@ -35,6 +36,11 @@ kitsoki capsule mcp --project /path/to/project --branch staging/local
 Omitting `--branch` still permits workspace and CI operations but denies all
 `capsule.sync.plan` calls. A required promotion gate additionally verifies the
 persisted receipt, its run projection, and its exact candidate source digest.
+Diverged plans continue through `capsule.sync.conflicts`,
+`capsule.sync.integration`, and `capsule.sync.continue`; these tools never
+accept host paths, and continuation apply requires resolver decision,
+independent lost-work review, and validation receipt inputs before updating the
+target ref.
 
 `capsule.cleanup.plan` is available as a safe read-only operation for ongoing
 CI hygiene. `capsule.cleanup.apply` requires the startup `cleanup` effect and
