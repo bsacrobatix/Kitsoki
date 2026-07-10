@@ -152,15 +152,21 @@ all accept only server-owned plan digests and return only project-relative
 artifact paths.
 
 For credential-free local development and tests, `capsule sync apply` can inject
-a local bare-remote publisher:
+a local bare-remote fetcher/publisher:
 
 ```sh
+kitsoki capsule sync fetch \
+  --workspace <workspace> \
+  --local-bare-remote /path/to/origin.git \
+  --remote origin \
+  --branch main
 kitsoki capsule sync apply --plan <digest> --local-bare-remote /path/to/origin.git
 ```
 
-That provider checks the live bare-remote ref still matches the plan's expected
-target before pushing the candidate commit. Production Git/PR publication is a
-separate provider/grant path.
+The fetcher updates only the named remote-tracking ref. The publisher checks
+the live bare-remote ref still matches the plan's expected target before
+pushing the candidate commit. Production Git/PR publication is a separate
+provider/grant path.
 
 See [Capsule CI receipts](../../tracing/capsule-ci-receipts.md).
 
