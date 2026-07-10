@@ -200,7 +200,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --native-ghagent-smoke
+                  - --gate
+                  - ghagent
                   - --json-output
                 cwd: "."
               bind:
@@ -227,7 +228,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --autonomous-fix-smoke
+                  - --gate
+                  - autonomous-fix
                   - --json-output
                 cwd: "."
               bind:
@@ -254,7 +256,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --persona-autofix-smoke
+                  - --gate
+                  - persona-autofix
                   - --json-output
                 cwd: "."
               bind:
@@ -293,7 +296,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --autonomous-marathon-smoke
+                  - --gate
+                  - autonomous-marathon
                   - --autonomous-marathon-smoke-repeats
                   - "{{ slots.repeats ?? 1 }}"
                   - --json-output
@@ -338,7 +342,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --validate-marathon-smoke-ledger
+                  - --gate
+                  - marathon-ledger
                   - --marathon-smoke-ledger
                   - "{{ slots.marathon_smoke_ledger ?? world.autonomous_marathon_smoke_report_path }}"
                   - --min-marathon-smoke-cycles
@@ -1037,7 +1042,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --dogfood-smoke
+                  - --gate
+                  - dogfood
                   - --json-output
                   - --seed
                   - "{{ slots.seed ?? world.seed }}"
@@ -1097,7 +1103,8 @@ states:
                 cmd: python3
                 args:
                   - tools/product-journey/run.py
-                  - --driver-replay-smoke
+                  - --gate
+                  - driver-replay
                   - --json-output
                   - --seed
                   - "{{ slots.seed ?? world.seed }}"

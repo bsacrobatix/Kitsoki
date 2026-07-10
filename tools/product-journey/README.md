@@ -112,6 +112,71 @@ It fails closed when webshot capture is broken, Studio MCP `studio.ping` is not
 healthy, the provider-quota state file is malformed, or an active quota
 cooldown window would make unattended capture waste spend.
 
+## Gates
+
+Every deterministic no-LLM check below (`--dogfood-smoke`, `--driver-replay-smoke`,
+`--native-ghagent-smoke`, `--autonomous-fix-smoke`, `--persona-autofix-smoke`,
+`--autonomous-marathon-smoke`, `--validate-marathon-smoke-ledger`, and
+`--driver-smoke`) is a `--gate` gate. `--gate` is the one verb; each `--*-smoke`
+flag above is now a **deprecated alias** that forwards to `--gate <name>` and
+prints a one-line deprecation notice to stderr (never stdout, so JSON callers
+keep parsing clean) before running the same check:
+
+```sh
+python3 tools/product-journey/run.py --gate <name>[,<name>...] [--json-output]
+python3 tools/product-journey/run.py --gate all [--json-output]
+```
+
+| Gate name             | Deprecated alias                    | What it proves |
+| ---------------------- | ------------------------------------ | --------------- |
+| `driver-manifest`      | `--driver-smoke` (took the id/path as its own value; now use `--driver <id-or-path>`) | A driver manifest shape-checks without launching the target app. |
+| `dogfood`               | `--dogfood-smoke`                    | The full matrix-to-rollup artifact loop composes end to end. |
+| `driver-replay`         | `--driver-replay-smoke`              | One cassette-backed scenario replay, with attach/journal/review/validation. |
+| `ghagent`               | `--native-ghagent-smoke`             | Native gh-agent enqueue/drain composes through kitsoki commands. |
+| `autonomous-fix`        | `--autonomous-fix-smoke`             | The full autonomous issue-filing + gh-agent fix envelope. |
+| `persona-autofix`       | `--persona-autofix-smoke`            | A persona replay bundle enters the native autonomous-fix gate and publishes fix evidence. |
+| `autonomous-marathon`   | `--autonomous-marathon-smoke`        | The standing-loop shell (file/fix/land one issue per scenario per persona per cycle). |
+| `marathon-ledger`       | `--validate-marathon-smoke-ledger`   | A previously retained marathon ledger still matches its run bundles. |
+
+`--gate all` runs every gate above **except `marathon-ledger`**, which validates
+an existing `--marathon-smoke-ledger` artifact rather than running a
+self-contained check, so it has nothing to do without that input; select it by
+name with `--marathon-smoke-ledger <path>` when you need it.
+`driver-replay-sweep` and `capture-preflight` are related no-LLM checks that
+stay as their own flags (not part of `--gate`): `driver-replay-sweep` runs the
+`driver-replay` check for every scenario in one pass, and `capture-preflight`
+checks the capture toolchain itself rather than a product-journey artifact
+contract.
+
+**Uniform result shape.** Every gate's JSON payload keeps its existing
+fields (each gate has always had its own `status`, and several have gate-
+specific ids/paths callers already bind on) and additively gains three new
+top-level keys so every gate has one shared contract instead of a fresh one
+per flag:
+
+- `gate` — the gate name (e.g. `"dogfood"`).
+- `gate_status` — always `"pass"` or `"fail"`, normalized from whatever
+  vocabulary the underlying check used internally (`"passed"`, `"ok"`,
+  `"valid"`, …). This is the one field to check regardless of which gate ran.
+- `readiness_status` — `"ready"` / `"needs_evidence"` for gates that have a
+  review-readiness concept (`driver-replay` today), or `"not_applicable"` for
+  gates that don't (everything else). This replaces having to remember which
+  smoke flag's JSON does and doesn't carry `readiness_status` — it's always
+  present now.
+
+Requesting exactly one gate prints that gate's payload as a single JSON object
+(unchanged shape, plus the three keys above), so existing `stdout_json.<field>`
+bindings keep working unmodified. Requesting more than one gate (a comma list
+or `all`) wraps them:
+
+```json
+{"status": "pass", "gates": [{"gate": "dogfood", "gate_status": "pass", ...}, ...]}
+```
+
+The process exits non-zero if any requested gate's `gate_status` is `"fail"`,
+after running every requested gate (so `--gate all` always shows you the full
+picture instead of stopping at the first failure).
+
 Emit a repeatable 10-repo GitHub planning matrix:
 
 ```sh
@@ -128,7 +193,7 @@ python3 tools/product-journey/run.py --validate-matrix \
 Prove the no-LLM end-to-end artifact loop in one command:
 
 ```sh
-python3 tools/product-journey/run.py --dogfood-smoke --seed demo
+python3 tools/product-journey/run.py --gate dogfood --seed demo
 ```
 
 This creates a 10-repo matrix, turns the first deterministic assignment into a
@@ -202,8 +267,8 @@ evaluating whether the product is adoption-ready.
 Prove one reusable-driver scenario loop with cassette-backed proof evidence:
 
 ```sh
-python3 tools/product-journey/run.py --driver-replay-smoke --seed demo
-python3 tools/product-journey/run.py --driver-replay-smoke \
+python3 tools/product-journey/run.py --gate driver-replay --seed demo
+python3 tools/product-journey/run.py --gate driver-replay \
   --smoke-scenario project-onboarding \
   --seed demo
 python3 tools/product-journey/run.py --driver-replay-sweep --seed demo
@@ -219,12 +284,11 @@ must pass and the `driver-evidence-linked` check must be satisfied for the
 captured scenario. Scenarios without a playback-capable minimum-evidence slot
 will still expose the missing playback proof in review; that is a contract gap
 to fix before calling that scenario representative.
-Use `--driver-replay-sweep` when you want a single no-LLM gate that every
-scenario can replay with cassette-backed proof evidence, a linked driver
-journal, clean validation, and at least one playback item for the generated
-Slidey deck. In smoke and sweep JSON, `status=passed` means the deterministic
-replay contract passed; `readiness_status=ready|needs_evidence` is the separate
-review-readiness signal to use before autonomous scheduling or landing.
+Use `--driver-replay-sweep` when you want the `driver-replay` check to run for
+every scenario in one pass with cassette-backed proof evidence, a linked
+driver journal, clean validation, and at least one playback item for the
+generated Slidey deck. See [Gates](#gates) for the shared `gate_status` /
+`readiness_status` JSON contract these share with every other `--gate`.
 
 This writes `.artifacts/product-journey/matrices/<matrix-id>/` with
 `matrix.json`, `matrix.md`, and `deck.slidey.json`. The source target list lives
@@ -300,7 +364,7 @@ python3 tools/product-journey/run.py --validate-matrix \
 
 `--validate-run --json-output` and `--validate-matrix --json-output` include a
 `validation_issue_summary` field that lists the first error or warning check IDs.
-The `--dogfood-smoke --json-output` path exposes separate run and matrix issue
+The `--gate dogfood --json-output` path exposes separate run and matrix issue
 summaries so the Kitsoki story can show why warning counts are non-zero.
 
 This writes `.artifacts/product-journey/<run-id>/` with `run.json`,
@@ -371,7 +435,7 @@ path. A valid bundle should be directly usable by the driver.
 `--review-run` includes the same contract as a hard review check and writes a
 `Driver contract` Slidey scene, so human review can spot drift in the reusable
 open/observe/act/capture/journal loop without opening the raw JSON.
-Use `--driver-replay-smoke --smoke-scenario <scenario-id>` before a live pass
+Use `--gate driver-replay --smoke-scenario <scenario-id>` before a live pass
 when you want a cheap proof that the attach commands, driver journal refs, media
 manifest, review checks, and validation gates still compose around one
 cassette-backed scenario.
@@ -382,8 +446,8 @@ Product-journey resolves abstract capabilities through a driver manifest in
 `tools/product-journey/drivers/`. `kitsoki-mcp` is the default and preserves the
 existing Kitsoki Studio MCP / visual MCP tool mapping. Pass `--driver <id-or-path>`
 to `--emit-run` or `--emit-matrix` to generate bundles for another surface, and
-use `--driver-smoke <id-or-path>` to validate a manifest without launching the
-target app.
+use `--gate driver-manifest --driver <id-or-path>` to validate a manifest
+without launching the target app.
 
 A manifest must provide `id`, `label`, `app_kind`, and a `capabilities` map for
 the canonical keys in `schema.json` (`visual.open`, `visual.observe`,
@@ -428,7 +492,7 @@ that surface are encoded in the manifest rather than left as tribal knowledge:
 Validate it like any other manifest:
 
 ```sh
-python3 tools/product-journey/run.py --driver-smoke claude-in-chrome
+python3 tools/product-journey/run.py --gate driver-manifest --driver claude-in-chrome
 python3 tools/product-journey/claude_in_chrome_driver_test.py
 ```
 
@@ -617,16 +681,19 @@ bundle readiness.
 To prove the next hop without GitHub credentials or LLM cost:
 
 ```sh
-python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
-python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
-python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
-python3 tools/product-journey/run.py --autonomous-marathon-smoke --json-output
-python3 tools/product-journey/run.py --autonomous-marathon-smoke \
+python3 tools/product-journey/run.py --gate ghagent --json-output
+python3 tools/product-journey/run.py --gate autonomous-fix --json-output
+python3 tools/product-journey/run.py --gate persona-autofix --json-output
+python3 tools/product-journey/run.py --gate autonomous-marathon --json-output
+python3 tools/product-journey/run.py --gate autonomous-marathon \
   --autonomous-marathon-smoke-repeats 2 --json-output
-python3 tools/product-journey/run.py --validate-marathon-smoke-ledger \
+python3 tools/product-journey/run.py --gate marathon-ledger \
   --marathon-smoke-ledger .artifacts/product-journey/marathon-smokes/<id>/autonomous-marathon-smoke.json \
   --min-marathon-smoke-cycles 2 \
   --json-output
+# Or run several/all of the gates above in one pass:
+python3 tools/product-journey/run.py --gate ghagent,autonomous-fix,persona-autofix,autonomous-marathon --json-output
+python3 tools/product-journey/run.py --gate all --json-output
 ```
 
 The native smoke creates a temporary product-journey bundle with a filed issue,
@@ -655,7 +722,7 @@ single-cycle ledger when the proof requires many complete cycles. It also routes
 observed weakness findings into `weakness-routes.json` / `weakness-routes.md`
 for `stories/prd` and derives found/filed/fixed stats from issue state so
 manual stats are not part of the loop. Use
-`--validate-marathon-smoke-ledger` to re-check that retained ledger later; it
+`--gate marathon-ledger` to re-check that retained ledger later; it
 fails closed if the JSON/Markdown ledger, per-persona run bundle, cycle
 coverage, report, deck, review, validation, filed/fixed counts, or landing proof
 no longer line up.
@@ -770,9 +837,15 @@ python3 tools/product-journey/run.py \
 
 By default this writes:
 
-- `.artifacts/product-journey-eval/<generated-at>/report.json`
-- `.artifacts/product-journey-eval/<generated-at>/deck.slidey.json`
-- `.artifacts/product-journey-eval/<generated-at>/report.md`
+- `.artifacts/product-journey/eval/<generated-at>/report.json`
+- `.artifacts/product-journey/eval/<generated-at>/deck.slidey.json`
+- `.artifacts/product-journey/eval/<generated-at>/report.md`
+
+This shares the `.artifacts/product-journey/` artifact root with run bundles
+(`.artifacts/product-journey/<run-id>/`) instead of a separate
+`product-journey-eval/` tree; the `eval/` subdirectory is what tells
+`--prune-runs` and a human glance apart from a run bundle. Pass explicit
+`--report`/`--deck`/`--markdown` to write anywhere else.
 
 Use `--run-checks` only when you want to refresh local oracle evidence while
 building the report. The default report uses the catalog's current validated
@@ -937,5 +1010,5 @@ python3 tools/product-journey/run.py --prune-runs --keep 12 --apply  # delete
 - `docs/decks/product-journey-eval.slidey.json` stores the hand-refined,
   proof-ready narrative reference. Report generation links to it and does not
   overwrite it.
-- `.artifacts/product-journey-eval/<generated-at>/deck.slidey.json` is the
+- `.artifacts/product-journey/eval/<generated-at>/deck.slidey.json` is the
   generated companion deck for a specific structured report run.

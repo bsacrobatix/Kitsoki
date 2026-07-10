@@ -146,7 +146,7 @@ changes:
     depends_on: ["unify-contract", "unify-corpora"]
     acceptance:
       - "the plan/persona-qa-arena-ui-scale branch's plugins/persona_qa.py + tests + spec are landed on this base (verified, hardened), registered in plugins/__init__.py, and `arena plugins` lists persona-qa"
-      - "drive_command (non-live) runs product-journey's no-LLM path (emit-run + --driver-replay-smoke or equivalent) inside the cell; live mode dispatches the product-journey-qa-driver headlessly and is gated behind --live"
+      - "drive_command (non-live) runs product-journey's no-LLM path (emit-run + --gate driver-replay or equivalent) inside the cell; live mode dispatches the product-journey-qa-driver headlessly and is gated behind --live"
       - "score() reads the bundle's review.json via the unify-contract bridge — never stdout"
       - "a persona-qa JobSpec (targets_from + persona axis via unify-corpora) enumerates cells and completes a no-LLM sweep through `arena run` with concurrency >= 2 over FakeBackend in tests"
     gate:

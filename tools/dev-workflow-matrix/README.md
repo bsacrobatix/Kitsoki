@@ -32,7 +32,7 @@ make dev-workflow-matrix
 runnable, no-LLM proof today onto a plain invocation (`go run ./cmd/kitsoki
 test flows <app.yaml>` for the `prd` / `bugfix` / `dev-story` / `deliver`
 story flow suites, plus one `tools/product-journey/run.py
---driver-replay-smoke` pass as a `journey-verdict` experience-class pilot),
+--gate driver-replay` pass as a `journey-verdict` experience-class pilot),
 runs it, and writes one `schemas/completion-state.schema.json`-conformant
 verdict JSON per cell into a verdicts directory — keyed by `(workflow,
 surface, repo, check_type)` via `axis.workflow`/`axis.surface`/`target_id`/
