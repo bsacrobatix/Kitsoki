@@ -122,6 +122,18 @@ a publish plan carries the `remote_publish` effect and cannot apply through the
 local Git reconciler. A remote publication provider must be explicitly granted
 and injected before a publish plan can be applied.
 
+When a stored plan is diverged, materialize the deterministic conflict input
+for a resolver/reviewer story before attempting continuation:
+
+```sh
+kitsoki capsule sync conflicts --plan <digest>
+```
+
+The command writes a `capsule-sync-conflict/v1` artifact under
+`.capsules/sync/` with the merge base, candidate/target changed paths, overlap
+paths, required story inputs, and continuation token. Managed integration
+instance creation and continuation apply remain separate runtime work.
+
 For credential-free local development and tests, `capsule sync apply` can inject
 a local bare-remote publisher:
 

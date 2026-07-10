@@ -64,3 +64,9 @@ Sync and promotion traces join the same evidence stream through
 operation/class, target ref, candidate commit, old/new target where relevant,
 and the conflict continuation token when deterministic apply must pause for a
 story resolver and independent lost-work review.
+
+For a diverged stored plan, `kitsoki capsule sync conflicts --plan <digest>`
+materializes a `capsule-sync-conflict/v1` artifact under `.capsules/sync/`.
+The artifact records the merge base, candidate/target changed paths, overlap
+paths, required resolver/reviewer/validation inputs, and the continuation token
+that story traces must later reference.
