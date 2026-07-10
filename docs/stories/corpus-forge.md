@@ -53,3 +53,18 @@ go run ./cmd/kitsoki test flows stories/corpus-forge/app.yaml
 
 The flow suite exercises a calibration receipt, proof rejection, and a heldout
 receipt. It intentionally does not prove a benchmark result or invoke an LLM.
+
+The hermetic Studio/MCP dogfood test uses
+`capsules/corpus-forge-red-green`: its `HEAD~1` ref makes the argv-only
+`/bin/test -f fixed.txt` oracle fail, while `HEAD` makes it pass. On macOS,
+where `/usr/bin/sandbox-exec` is available, run it with:
+
+```sh
+go test ./cmd/kitsoki -run TestCorpusForgeDogfoodOverMCP -count=1
+```
+
+It uses a generated `corpus-runtime/v1` config, real local-Git fixture opening,
+the platform network-denying sandbox, and FileStore. It does not use a flow
+stub, network, or LLM. The second MCP session deliberately attempts to freeze
+the calibration candidate as heldout and must be rejected from the durable
+receipt registry.
