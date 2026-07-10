@@ -130,6 +130,15 @@ exists, rebases the workspace branch onto that target, runs the optional gate
 inside the workspace, imports the branch into the primary checkout as a temporary
 `capsule/<id>-land` branch, and fast-forwards the local target ref.
 
+Before rebasing, the helper verifies that every object reachable from the
+freshly fetched target is readable inside the capsule. It repeats the
+clean-checkout/object verification after rebase, after the gate, and for the
+temporary landing ref before updating the target. This makes a stale or broken
+clone object store fail before target movement. Once the target update succeeds,
+the command reports a successful merge even if best-effort temporary-ref cleanup
+or requested teardown has a problem; those follow-up failures are warnings, not
+a false report that the landing failed.
+
 For non-`main` targets such as `staging/local`, the primary checkout can stay on
 `main`; the helper updates the target branch ref without touching the primary
 working tree.
