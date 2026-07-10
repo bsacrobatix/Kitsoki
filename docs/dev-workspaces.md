@@ -88,9 +88,13 @@ definitions enable it automatically; custom project definitions should record
 their own bootstrap policy.
 
 Bootstrap prepares embed-only story/SPA assets, installs the runstatus
-dependencies, and warms the Go build cache. `create --bootstrap` is the normal
-path when a workspace will run `go run ./cmd/kitsoki`, Playwright specs, or web
-UI tooling. Pure documentation edits usually do not need it.
+dependencies, and warms the Go build cache. In Capsule CI this is also declared
+in `.kitsoki/environments/ci.yaml` as `bootstrap.command: bootstrap-workspace`
+with project-scoped `go-build` and `runstatus-node-modules` cache grants, so
+story CI, remote workers, and local managed workspaces share the same setup
+contract. `create --bootstrap` is the normal path when a workspace will run
+`go run ./cmd/kitsoki`, Playwright specs, or web UI tooling. Pure documentation
+edits usually do not need it.
 
 If the source checkout has a gitignored `.kitsoki.local.yaml`, bootstrap copies
 it into the managed clone before running the Make target. This keeps local
