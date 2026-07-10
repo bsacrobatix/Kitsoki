@@ -25,6 +25,16 @@
 #     decides on its own initiative to open a brand new LIVE session without
 #     real authorization.
 #
+# P2.11 (vscode editor-level evidence): a vscode leg is bridge-level by
+# default (visual.open kind=vscode -- a runstatus webview stand-in, never a
+# genuine editor) and stays "degraded-evidence" even once the mandatory
+# bridge-level post-drive recapture is present (`_vscode_bridge_only`),
+# UNLESS drive_result also reports `post_drive_editor_evidence_ref` -- a
+# post-drive host.ide.* `ide.context_captured` trace event proving a REAL
+# editor was linked and queried during this drive. Only that opportunistic
+# tier unlocks a genuine "pass"; see tools/persona_qa/transports.py's
+# editor_evidence_contract and docs/persona-qa.md.
+#
 # Interface (authoritative in record_leg_result.star.yaml):
 #   inputs:  leg (object), drive_result (object), judge_result (object),
 #            live_profile (string, optional)
@@ -58,34 +68,67 @@ def _lacks_evidence(drive):
 
 
 def _vscode_missing_post_drive(leg, drive):
-    # vscode legs are bridge-level proof (see _evidence_level below) and the
-    # driver's transport-pin preflight (product-journey-qa-driver.md) only
-    # proves the bridge is REACHABLE before the scenario is driven -- it does
-    # NOT prove the scenario's operator-visible outcome, because the rest of
-    # the leg is usually driven through a different surface (session.submit /
-    # a live text turn) that advances the SAME session to a new state (e.g.
-    # landing -> s2). Without a second vscode capture taken AFTER that drive,
-    # bound to the post-drive session_handle, the only vscode evidence on file
-    # is the pre-drive snapshot -- proof the bridge existed, not proof of the
-    # scenario outcome. Require drive_result.post_drive_evidence_ref (see
-    # drive_leg.md / drive_leg_result.json) before a vscode leg can be scored
-    # anything other than degraded-evidence. This is the deterministic
-    # backstop for the same rule the driver/judge prompts are told in prose.
+    # vscode legs are AT LEAST bridge-level proof (see _evidence_level below)
+    # and the driver's transport-pin preflight (product-journey-qa-driver.md)
+    # only proves the bridge is REACHABLE before the scenario is driven -- it
+    # does NOT prove the scenario's operator-visible outcome, because the rest
+    # of the leg is usually driven through a different surface
+    # (session.submit / a live text turn) that advances the SAME session to a
+    # new state (e.g. landing -> s2). Without a second vscode capture taken
+    # AFTER that drive, bound to the post-drive session_handle, the only
+    # vscode evidence on file is the pre-drive snapshot -- proof the bridge
+    # existed, not proof of the scenario outcome. Require
+    # drive_result.post_drive_evidence_ref (see drive_leg.md /
+    # drive_leg_result.json) before a vscode leg can be scored anything other
+    # than degraded-evidence. This is the deterministic backstop for the same
+    # rule the driver/judge prompts are told in prose. This is the FLOOR
+    # check only -- see _vscode_evidence_gap for the editor-level tier that
+    # gates a genuine "pass".
     if leg.get("transport", "") != "vscode":
         return False
     return drive.get("post_drive_evidence_ref", "") == ""
 
 
-def _evidence_level(leg):
+def _vscode_bridge_only(leg, drive):
+    # Even once the bridge-level floor above is satisfied, a vscode leg with
+    # ONLY bridge-level evidence (visual.open kind=vscode -- the runstatus
+    # webview stand-in, never a genuine editor; see
+    # tools/persona_qa/transports.py's evidence_contract) is not what a user
+    # selecting transport=vscode reasonably expects: editor-level proof that
+    # a REAL VS Code editor showed the outcome. Editor-level evidence
+    # (post_drive_editor_evidence_ref -- a post-drive host.ide.*
+    # ide.context_captured trace event, see editor_evidence_contract) is
+    # opportunistic: it only exists when a real editor was linked AND the
+    # driven primary_story actually queried it. Until that's present, the leg
+    # stays honestly degraded rather than reporting a "pass" the bridge alone
+    # cannot support -- this is the deterministic backstop for
+    # docs/persona-qa.md's "bridge-level proof unless a future native editor
+    # integration raises the contract" note.
+    if leg.get("transport", "") != "vscode":
+        return False
+    if drive.get("post_drive_evidence_ref", "") == "":
+        return False  # _vscode_missing_post_drive already covers this case
+    return drive.get("post_drive_editor_evidence_ref", "") == ""
+
+
+def _evidence_level(leg, drive):
     # Every leg carries its own transport_evidence_contract (plan_legs.star
     # read it straight off driver-plan.json / carried it through the ad-hoc
     # draft) -- prefer that. Falls back to a bare transport-id lookup mirroring
     # tools/product-journey/run.py's TRANSPORT_EVIDENCE_CONTRACTS (schema.json's
     # authoritative source) so a leg missing the contract dict (e.g. an older
-    # recording) still gets labeled. vscode is always "bridge-level" -- the IDE
-    # bridge stub/recording path, never a genuine editor (see
-    # docs/persona-qa.md) -- never mistake it for
-    # editor-level coverage in the report.
+    # recording) still gets labeled.
+    #
+    # vscode is the one transport whose recorded level is dynamic, not fixed
+    # by the static contract: it starts at "bridge-level" (the IDE bridge
+    # stub/recording path, never a genuine editor by itself) and is promoted
+    # to "editor-level" for THIS recorded leg only when drive_result actually
+    # carries a post_drive_editor_evidence_ref -- proof a real editor was
+    # linked and queried during this specific drive (see
+    # editor_evidence_contract / _vscode_bridge_only above). Never mistake a
+    # bare bridge capture for editor-level coverage in the report.
+    if leg.get("transport", "") == "vscode" and drive.get("post_drive_editor_evidence_ref", "") != "":
+        return "editor-level"
     contract = _d(leg.get("transport_evidence_contract"))
     if contract.get("level", "") != "":
         return contract["level"]
@@ -156,6 +199,8 @@ def _cause(leg, drive, judge, verdict, unauthorized_live, live_profile):
             reasons.append("no evidence captured for this leg")
         elif _vscode_missing_post_drive(leg, drive):
             reasons.append("vscode leg missing post-drive capture (preflight only proves bridge reachability, not the driven-forward state)")
+        elif _vscode_bridge_only(leg, drive):
+            reasons.append("vscode leg is bridge-level only (visual.open kind=vscode proves the bridge, not a real editor) -- no post-drive host.ide.* editor-level capture (post_drive_editor_evidence_ref) was reported; see docs/persona-qa.md")
 
     if len(reasons) == 0:
         judge_summary = str(judge.get("summary", "")).strip()
@@ -215,6 +260,8 @@ def main(ctx):
         verdict = "degraded-evidence"
     if verdict != "unjudged" and _vscode_missing_post_drive(leg, drive):
         verdict = "degraded-evidence"
+    if verdict != "unjudged" and _vscode_bridge_only(leg, drive):
+        verdict = "degraded-evidence"
     if verdict != "unjudged" and unauthorized_live:
         verdict = "degraded-evidence"
 
@@ -224,13 +271,14 @@ def main(ctx):
         "scenario":                leg.get("scenario", ""),
         "transport":               leg.get("transport", ""),
         "visual_surface":          leg.get("visual_surface", ""),
-        "evidence_level":          _evidence_level(leg),
+        "evidence_level":          _evidence_level(leg, drive),
         "natural_utterance_count": natural["count"],
         "natural_utterance_example": natural["example"],
         "natural_utterance_sources": natural["sources"],
         "driver_status":           drive.get("status", "unattempted"),
         "evidence_refs":           drive.get("evidence_refs", []),
         "post_drive_evidence_ref": drive.get("post_drive_evidence_ref", ""),
+        "post_drive_editor_evidence_ref": drive.get("post_drive_editor_evidence_ref", ""),
         "harness_used":            drive.get("harness_used", ""),
         "playback_path":           _playback_path(leg, drive),
         "playback_caption":        leg.get("playback_caption", drive.get("playback_caption", "")),

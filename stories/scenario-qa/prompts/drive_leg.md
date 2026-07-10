@@ -145,6 +145,32 @@ everything else about the scenario worked. So, for `vscode` legs:
    substituting the preflight frame for it. The record-keeping gate scores
    any vscode leg missing `post_drive_evidence_ref` as `degraded-evidence`
    regardless of what else was captured.
+5. **Also attempt the opportunistic editor-level tier** (the leg's
+   `editor_evidence_contract`, see `transport_evidence_contract` /
+   `editor_evidence_contract` on the leg above). Bridge-level (step 3) proves
+   the runstatus-webview stand-in reflects the driven state; it is NOT a
+   genuine editor. After step 3, call `session.trace` against the SAME
+   session handle you just drove forward and look for a POST-drive
+   `ide.context_captured` event (the trace kind `host.ide.get_open_editors` /
+   `get_diagnostics` / `get_selection` calls append) whose payload has
+   `connected: true`. This event only exists when a REAL VS Code + kitsoki
+   extension was linked to the kitsoki process AND the leg's driven
+   `primary_story` itself issued one of those `host.ide.*` calls while
+   advancing the leg (not every story does — e.g. `stories/bugfix`'s
+   `validating` room does, most others don't yet). If you find one, persist
+   its JSON under `evidence_dir` (e.g. `NN-postdrive-ide-context.json`) and
+   report its path as `post_drive_editor_evidence_ref` plus the
+   session_handle/turn it came from as `post_drive_editor_trace_ref`. **This
+   step is opportunistic, not mandatory**: when no live VS Code editor is
+   attached (replay/CI, or any environment without a real editor link) or the
+   driven story never calls `host.ide.*`, no such event will exist — leave
+   both fields empty and report the leg normally at bridge-level. Never
+   fabricate an `ide.context_captured`-shaped record from something else
+   (e.g. `get_open_editors` called against a story that doesn't wire it into
+   the trace, or a stale PRE-drive event) — a vscode leg that never reaches
+   editor-level proof is honestly scored `degraded-evidence` even when its
+   bridge-level capture and the rest of the scenario are otherwise clean;
+   that is expected, not a failure of your drive.
 
 When you finish, **report — do not grade**. Submit:
 
@@ -153,8 +179,10 @@ When you finish, **report — do not grade**. Submit:
   "status": "attempted | captured | blocked | degraded-evidence",
   "evidence_refs": ["<path-or-retained-id>", "..."],
   "frames_dir": "<directory of captured frames, if any>",
-  "post_drive_evidence_ref": "<path-or-retained-id of the POST-drive vscode capture; vscode legs only, empty if not captured>",
-  "post_drive_session_handle": "<live session_handle the post-drive capture was taken against; vscode legs only>",
+  "post_drive_evidence_ref": "<path-or-retained-id of the POST-drive vscode BRIDGE capture; vscode legs only, empty if not captured>",
+  "post_drive_session_handle": "<live session_handle the post-drive bridge capture was taken against; vscode legs only>",
+  "post_drive_editor_evidence_ref": "<path-or-retained-id of the POST-drive host.ide.* ide.context_captured trace event; vscode legs only, empty when no real editor was linked/queried -- opportunistic, do not fabricate>",
+  "post_drive_editor_trace_ref": "<session_handle/turn the ide.context_captured event was read from; vscode legs only>",
   "harness_used": "replay | live | (empty if no primary_story session.new was needed)",
   "profile_used": "<the profile actually passed to a live session.new call, empty otherwise>",
   "blockers": ["<honest blocker, if any — a replay-miss hard error goes here verbatim>"],

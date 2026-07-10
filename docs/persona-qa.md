@@ -134,10 +134,29 @@ Each transport check carries:
 - A no-substitution policy: demo, placeholder, synthetic, or unrelated media
   cannot satisfy proof.
 
-VS Code checks are bridge-level proof unless a future native editor integration
-raises the contract. CLI checks are terminal-level proof: command transcript,
-exit code, cwd, and trace references, not visual state. TUI and web checks are
-frame-level proof by default.
+VS Code checks are bridge-level proof by default (`visual.open kind=vscode` —
+a runstatus-webview stand-in, never a genuine editor window) and carry a
+second, opportunistic **editor-level** tier on top of that floor: when a real
+VS Code + kitsoki extension is linked to the kitsoki process (the same
+`internal/ide.Link` the TUI's `/ide` command drives) AND the leg's driven
+`primary_story` itself issues a `host.ide.get_open_editors` /
+`get_diagnostics` / `get_selection` call while advancing (not every story
+does — `stories/bugfix`'s `validating` room does), that call appends a
+`ide.context_captured` trace event proving a real editor was queried. A
+post-drive capture of that event (`post_drive_editor_evidence_ref`, see
+`tools/persona_qa/transports.py`'s `editor_evidence_contract`) is what
+`scripts/record_leg_result.star` requires before a `vscode` leg can score a
+genuine `pass`; a leg with only the mandatory bridge-level recapture stays
+`degraded-evidence` with an explicit `cause`, because a bridge-only capture
+is not what a user selecting `transport=vscode` reasonably expects. Real
+pixel-level proof of the VS Code window itself (a screenshot of the actual
+editor UI) is NOT attainable deterministically today — the dev-workflows
+matrix's Mode A investigation found it needs a real extension
+launch+packaging harness no story host call can reach — so that remaining
+gap stays honestly unimplemented rather than faked; see the filed local
+ticket under `.artifacts/issues/bugs`. CLI checks are terminal-level proof:
+command transcript, exit code, cwd, and trace references, not visual state.
+TUI and web checks are frame-level proof by default.
 
 ## Authorization & Harness (fail-closed)
 

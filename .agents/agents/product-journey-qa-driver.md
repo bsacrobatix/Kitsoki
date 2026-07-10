@@ -113,6 +113,28 @@ structured result — see `stories/scenario-qa/prompts/drive_leg.md` — and its
 recording gate scores a `vscode` leg missing that field as
 `degraded-evidence` even when the rest of the report looks clean.)
 
+**Opportunistically reach for editor-level proof on top of the bridge.** The
+bridge-level capture above (`visual.open kind=vscode`) is a runstatus-webview
+stand-in, never a genuine editor — label it accordingly and never claim
+editor-level coverage from it alone. After the mandatory post-drive bridge
+recapture, ALSO check `session.trace` on the same session handle for a
+post-drive `ide.context_captured` event (emitted by `host.ide.get_open_editors`
+/ `get_diagnostics` / `get_selection`) with `connected: true` — proof a REAL
+VS Code + kitsoki extension was linked and actually queried during this
+drive. This only exists when both a real editor is attached AND the leg's
+driven `primary_story` itself issues a `host.ide.*` call while advancing (not
+every story does today — e.g. `stories/bugfix`'s `validating` room does).
+When found, persist it and report its path as `post_drive_editor_evidence_ref`
+(`stories/scenario-qa`'s structured result — see `drive_leg.md`). This tier
+is opportunistic, not mandatory: with no live editor attached (replay/CI, the
+common case) or a story that never queries `host.ide.*`, none will exist —
+report the leg honestly at bridge-level rather than fabricating one. The
+recording gate now treats bridge-level-only vscode legs (post-drive bridge
+capture present, no editor-level capture) as `degraded-evidence` too — a
+bridge-only leg is not what a user selecting `transport=vscode` reasonably
+expects, and only a leg that also reports `post_drive_editor_evidence_ref`
+can keep a genuine pass.
+
 Otherwise (no transport pin — the general product-journey-qa case), choose
 the cheapest manifest capability that proves the next claim:
 
