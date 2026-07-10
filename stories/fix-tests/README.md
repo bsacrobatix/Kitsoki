@@ -85,6 +85,16 @@ loop runs `world.quick_test_cmd` when set, otherwise it falls back to
 `world.full_test_timeout_seconds` defaults to `1200`. `world.max_cycles`
 defaults to `3`.
 
+The standalone `make fix-tests` entry point supplies `make test` explicitly as
+both gates with a 1200-second timeout. That prevents the repository's normal
+test suite from being incorrectly killed by the story's intentionally short
+default quick-loop budget. Supply a faster reproducer when one is known:
+
+```sh
+make fix-tests FIX_TESTS_QUICK_TEST_CMD='go test -short ./internal/foo' \
+  FIX_TESTS_QUICK_TIMEOUT_SECONDS=180
+```
+
 All of these can be overridden via the `start` intent's slots, e.g. with a
 custom driver:
 
