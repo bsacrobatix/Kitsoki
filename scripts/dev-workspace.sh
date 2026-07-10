@@ -24,7 +24,7 @@ usage:
   scripts/dev-workspace.sh bootstrap <workspace>
   scripts/dev-workspace.sh status <workspace|id> [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh commit <workspace|id> --message MESSAGE [--repo REPO] [--root ROOT] [--json]
-  scripts/dev-workspace.sh merge <workspace|id> [--repo REPO] [--root ROOT] [--branch BRANCH] [--target TARGET] [--gate CMD] [--teardown]
+  scripts/dev-workspace.sh merge <workspace|id> [--repo REPO] [--root ROOT] [--branch BRANCH] [--target TARGET] [--gate CMD] [--replace-landing] [--teardown]
   scripts/dev-workspace.sh recover <workspace|id> [--repo REPO] [--root ROOT] [--discard-incomplete]
   scripts/dev-workspace.sh close <workspace|id> [--repo REPO] [--root ROOT] [--force]
   scripts/dev-workspace.sh teardown <workspace|id> [--repo REPO] [--root ROOT] [--force]
@@ -765,6 +765,7 @@ cmd_merge() {
   local target=""
   local gate=""
   local teardown=0
+  local replace_landing=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --repo) repo="${2:?--repo requires a value}"; shift 2 ;;
@@ -773,6 +774,7 @@ cmd_merge() {
       --target|--onto) target="${2:?--target requires a value}"; shift 2 ;;
       --gate) gate="${2:?--gate requires a value}"; shift 2 ;;
       --teardown) teardown=1; shift ;;
+      --replace-landing) replace_landing=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *)
         [ -z "$ref" ] || die "merge: unexpected argument: $1"
@@ -858,8 +860,15 @@ cmd_merge() {
   if git -C "$repo" rev-parse --verify --quiet "$landing_branch" >/dev/null; then
     if git -C "$repo" merge-base --is-ancestor "$landing_branch" "$target_base"; then
       git -C "$repo" branch -D "$landing_branch" >/dev/null
+    elif [ "$replace_landing" = "1" ]; then
+      # A previous attempt may have created the transport ref and then lost a
+      # race while rebasing the managed workspace onto an advanced target. The
+      # workspace branch, freshly rebased and gated above, is authoritative;
+      # explicitly replacing this disposable transport ref is safe and avoids
+      # stranding an otherwise clean workspace.
+      git -C "$repo" branch -D "$landing_branch" >/dev/null
     else
-      die "merge: landing branch already exists and is not merged: $landing_branch"
+      die "merge: landing branch already exists and is not merged: $landing_branch (rerun with --replace-landing after reviewing the workspace)"
     fi
   fi
   git -C "$repo" fetch --no-tags "$path" "$branch:refs/heads/$landing_branch"
