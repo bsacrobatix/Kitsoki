@@ -27,7 +27,16 @@ func TestPlanClassifiesDivergedCapsule(t *testing.T) {
 	if p.Class != Diverged || p.Digest == "" {
 		t.Fatalf("plan %#v", p)
 	}
-	if _, err := r.Apply(context.Background(), p, ""); err == nil {
+	if p.Continuation == nil {
+		t.Fatal("diverged plan did not include continuation")
+	}
+	if p.Continuation.Schema != "capsule-sync-continuation/v1" || p.Continuation.Token == "" {
+		t.Fatalf("continuation %#v", p.Continuation)
+	}
+	if got := strings.Join(p.Continuation.RequiredInputs, ","); got != "resolver_decision,independent_lost_work_review,validation_receipt" {
+		t.Fatalf("required inputs %s", got)
+	}
+	if _, err := r.Apply(context.Background(), p, ""); err == nil || !strings.Contains(err.Error(), p.Continuation.Token) {
 		t.Fatal("diverged apply succeeded")
 	}
 }

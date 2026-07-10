@@ -42,17 +42,29 @@ type ObservedRefs struct {
 	Generation    uint64 `json:"generation"`
 }
 type Plan struct {
-	ID             string       `json:"id"`
-	Digest         string       `json:"digest"`
+	ID             string        `json:"id"`
+	Digest         string        `json:"digest"`
+	Operation      Operation     `json:"operation"`
+	Class          Class         `json:"class"`
+	Workspace      string        `json:"workspace"`
+	TargetRef      string        `json:"target_ref"`
+	Candidate      string        `json:"candidate"`
+	Expected       ObservedRefs  `json:"expected"`
+	Continuation   *Continuation `json:"continuation,omitempty"`
+	RequiredGate   string        `json:"required_gate,omitempty"`
+	RequiredEffect string        `json:"required_effect"`
+	CreatedAt      time.Time     `json:"created_at"`
+}
+type Continuation struct {
+	Schema         string       `json:"schema"`
+	Token          string       `json:"token"`
+	Reason         string       `json:"reason"`
 	Operation      Operation    `json:"operation"`
 	Class          Class        `json:"class"`
-	Workspace      string       `json:"workspace"`
 	TargetRef      string       `json:"target_ref"`
 	Candidate      string       `json:"candidate"`
 	Expected       ObservedRefs `json:"expected"`
-	RequiredGate   string       `json:"required_gate,omitempty"`
-	RequiredEffect string       `json:"required_effect"`
-	CreatedAt      time.Time    `json:"created_at"`
+	RequiredInputs []string     `json:"required_inputs"`
 }
 type ApplyResult struct {
 	PlanDigest string `json:"plan_digest"`
@@ -111,6 +123,9 @@ func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
 		return Plan{}, err
 	}
 	p := Plan{Operation: req.Operation, Class: class, Workspace: req.Workspace, TargetRef: req.TargetRef, Candidate: observed.WorkspaceHead, Expected: observed, RequiredGate: req.RequiredGate, RequiredEffect: effect(req.Operation), CreatedAt: r.now()}
+	if class == Diverged {
+		p.Continuation = conflictContinuation(p)
+	}
 	p.ID = "plan-" + shortHash([]byte(strings.Join([]string{string(p.Operation), p.Workspace, p.TargetRef, p.Candidate}, "\x00")))
 	p.Digest = planDigest(p)
 	return p, nil
@@ -126,7 +141,11 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 		return ApplyResult{}, fmt.Errorf("capsule reconcile: dirty workspace cannot apply")
 	}
 	if p.Class == Diverged {
-		return ApplyResult{}, fmt.Errorf("capsule reconcile: diverged plan requires integration conflict continuation")
+		token := ""
+		if p.Continuation != nil {
+			token = ": " + p.Continuation.Token
+		}
+		return ApplyResult{}, fmt.Errorf("capsule reconcile: diverged plan requires integration conflict continuation%s", token)
 	}
 	if p.RequiredGate != "" {
 		if r.Gates == nil {
@@ -213,6 +232,24 @@ func RequiredEffect(op Operation) string {
 		return "remote_publish"
 	}
 	return "local_reconcile"
+}
+func conflictContinuation(p Plan) *Continuation {
+	tokenInput := strings.Join([]string{string(p.Operation), p.TargetRef, p.Candidate, p.Expected.Target, p.Expected.WorkspaceHead, fmt.Sprint(p.Expected.Generation)}, "\x00")
+	return &Continuation{
+		Schema:    "capsule-sync-continuation/v1",
+		Token:     "cont-" + shortHash([]byte(tokenInput)),
+		Reason:    "workspace and target histories diverged; deterministic apply requires a resolved integration result",
+		Operation: p.Operation,
+		Class:     p.Class,
+		TargetRef: p.TargetRef,
+		Candidate: p.Candidate,
+		Expected:  p.Expected,
+		RequiredInputs: []string{
+			"resolver_decision",
+			"independent_lost_work_review",
+			"validation_receipt",
+		},
+	}
 }
 func (r Reconciler) now() time.Time {
 	if r.Now != nil {
