@@ -1,0 +1,17 @@
+states:
+  draft:
+    description: "Drafting the artifact"
+    on_enter:
+      - set:
+          artifact_path: "{{ '.artifacts/' + world.node_id + '/brief.md' }}"
+          status: "drafted"
+    view: "Drafting {{ world.artifact_path }}."
+    on:
+      next:
+        - target: done
+          effects:
+            - set: { status: "complete" }
+      restart:
+        - target: gather
+      look:
+        - target: draft

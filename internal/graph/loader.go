@@ -127,14 +127,36 @@ type fileEdgeField struct {
 	NestsUnder  bool   `yaml:"nests_under"`
 }
 
+type fileMaterializeParam struct {
+	ID      string   `yaml:"id"`
+	Type    string   `yaml:"type"`
+	Default any      `yaml:"default"`
+	Values  []string `yaml:"values"`
+}
+
+type fileArtifactDecl struct {
+	Schema       string `yaml:"schema"`
+	Format       string `yaml:"format"`
+	Presentation string `yaml:"presentation"`
+}
+
+type fileMaterializeDecl struct {
+	Story        string                 `yaml:"story"`
+	ContextEdges []string               `yaml:"context_edges"`
+	Params       []fileMaterializeParam `yaml:"params"`
+	Gates        []string               `yaml:"gates"`
+}
+
 type fileTypeDef struct {
-	ID             string          `yaml:"id"`
-	Schema         string          `yaml:"schema"`
-	Extends        string          `yaml:"extends"`
-	DerivesFrom    *string         `yaml:"derives_from"`
-	Summary        string          `yaml:"summary"`
-	RequiredFields []string        `yaml:"required_fields"`
-	EdgeFields     []fileEdgeField `yaml:"edge_fields"`
+	ID             string               `yaml:"id"`
+	Schema         string               `yaml:"schema"`
+	Extends        string               `yaml:"extends"`
+	DerivesFrom    *string              `yaml:"derives_from"`
+	Summary        string               `yaml:"summary"`
+	RequiredFields []string             `yaml:"required_fields"`
+	EdgeFields     []fileEdgeField      `yaml:"edge_fields"`
+	Artifact       *fileArtifactDecl    `yaml:"artifact"`
+	Materialize    *fileMaterializeDecl `yaml:"materialize"`
 }
 
 func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
@@ -143,6 +165,31 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 		Schema:         SchemaPin(ft.Schema),
 		Summary:        ft.Summary,
 		RequiredFields: ft.RequiredFields,
+	}
+	if ft.Artifact != nil {
+		def.Artifact = &ArtifactDecl{
+			Schema:       SchemaPin(ft.Artifact.Schema),
+			Format:       ft.Artifact.Format,
+			Presentation: ft.Artifact.Presentation,
+		}
+	}
+	if ft.Materialize != nil {
+		md := &MaterializeDecl{
+			Story: ft.Materialize.Story,
+			Gates: ft.Materialize.Gates,
+		}
+		for _, e := range ft.Materialize.ContextEdges {
+			md.ContextEdges = append(md.ContextEdges, EdgeField(e))
+		}
+		for _, p := range ft.Materialize.Params {
+			md.Params = append(md.Params, MaterializeParamDecl{
+				ID:      p.ID,
+				Type:    p.Type,
+				Default: p.Default,
+				Values:  p.Values,
+			})
+		}
+		def.Materialize = md
 	}
 	var warning string
 	switch {
