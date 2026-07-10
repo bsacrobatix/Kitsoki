@@ -50,12 +50,11 @@ states:
           {% endfor %}
         when: "len(world.live_authorization_summary) > 0"
     on_enter:
-      - invoke: host.run
+      - invoke: host.product_journey.run
         id: run_arena_persona_qa_legs
         with:
-          cmd: python3
+          script: tools/arena/scripts/run_scenario_qa_legs_parallel.py
           args:
-            - tools/arena/scripts/run_scenario_qa_legs_parallel.py
             - --legs-json
             - "{{ world.legs }}"
             - --project

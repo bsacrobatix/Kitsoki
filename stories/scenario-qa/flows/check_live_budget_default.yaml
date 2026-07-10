@@ -11,7 +11,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -48,12 +48,10 @@ turns:
     expect_world:
       last_error: "No transport checks resolved for this scenario/transport combination — check scenario/transport values."
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args:
           call: emit_scenario_qa_run
-          cmd: python3
           args:
-            - tools/product-journey/run.py
             - --emit-run
             - --scenario-qa-workspace
             - --project

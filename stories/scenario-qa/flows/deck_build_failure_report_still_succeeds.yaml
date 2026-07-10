@@ -15,7 +15,7 @@
 #     "Review deck" artifact line reads "(failed — see below)" instead of a
 #     stale "(building…)" or a bare deck path that was never actually built.
 #
-# Only host.run/host.agent.task are stubbed (matching persona_qa_demo.yaml's
+# Only host.product_journey.run/host.agent.task are stubbed (matching persona_qa_demo.yaml's
 # approach) so build_report.star's REAL fs.write + deck_error handling runs,
 # not a mocked stand-in.
 
@@ -24,7 +24,7 @@ app: ../app.yaml
 initial_state: idle
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -55,7 +55,7 @@ host_handlers:
       # Simulates run.py --scenario-qa-report crashing/exiting non-zero
       # (e.g. the deck-shape validator rejecting a malformed leg) BEFORE it
       # ever reaches its own report.md/deck.slidey.json writes. No
-      # stdout_json — host.run's best-effort JSON envelope parse only fires
+      # stdout_json — host.product_journey.run's best-effort JSON envelope parse only fires
       # on a trailing JSON value, and this stdout has none, so deck_path
       # never binds.
       build_scenario_qa_deck:
@@ -103,7 +103,7 @@ turns:
       report_path: "/repo/.artifacts/product-journey/scenario-qa-deck-fail-run/report.md"
       report_summary: "1 / 1 transport checks passed."
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
@@ -117,7 +117,7 @@ turns:
         args: { call: judge_leg }
       - handler: host.starlark.run
         args: { call: record_leg_result }
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: build_scenario_qa_deck }
       - handler: host.starlark.run
         args: { call: build_report }

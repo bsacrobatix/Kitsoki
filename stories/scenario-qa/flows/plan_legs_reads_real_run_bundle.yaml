@@ -2,7 +2,7 @@
 # `check` through a real studio MCP session bounced plan → on_error → idle
 # because scripts/plan_legs.star's ctx.fs.read of the run bundle's
 # driver-plan.json resolved against the WRONG root (the story's own directory,
-# stories/scenario-qa/, instead of the repo root where host.run's run.py
+# stories/scenario-qa/, instead of the repo root where host.product_journey.run's run.py
 # actually wrote .artifacts/product-journey/<run_id>/driver-plan.json).
 #
 # Every other flow fixture in this story stubs host.starlark.run entirely by
@@ -19,7 +19,7 @@
 # loud miss instead of silently succeeding.
 #
 # transport=all (2 legs) with pause=each-leg so the loop pauses at `recording`
-# after leg 0 without ever reaching build_report/host.run's deck step —
+# after leg 0 without ever reaching build_report/host.product_journey.run's deck step —
 # record_leg_result and pick_leg touch only world state (no ctx.fs), so no
 # further cassette interactions are needed to prove the fix. (pause=each-leg
 # is an explicit opt-out here, not the default: this fixture only wants to
@@ -33,7 +33,7 @@ initial_state: idle
 starlark_inspect_cassette: ../cassettes/plan_legs_reads_real_run_bundle.inspect.yaml
 
 host_handlers:
-  host.run:
+  host.product_journey.run:
     by_call:
       emit_scenario_qa_run:
         data:
@@ -87,7 +87,7 @@ turns:
       degraded_count: 0
       last_error: ""
     expect_host_calls:
-      - handler: host.run
+      - handler: host.product_journey.run
         args: { call: emit_scenario_qa_run }
       - handler: host.starlark.run
         args: { call: plan_legs }
