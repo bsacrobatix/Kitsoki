@@ -6,8 +6,9 @@ are available through Capsule CLI/MCP. The native `development` compatibility
 provider preserves the existing protected rebase/gate workflow. `publish` is now
 guarded behind an explicit remote publisher provider instead of local ref
 mutation. Conflict plans now carry structured continuation tokens and required
-story inputs; integration-instance materialization, continuation apply, and the
-remote publish provider remain.
+story inputs; a credential-free local bare-remote publish provider ships for
+tests/local development. Integration-instance materialization, continuation
+apply, fetch parity, and the production remote publish provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -191,6 +192,8 @@ operations.
   - Remaining: materialize managed integration instances and conflict file/tree artifacts.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
 - [ ] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
+  - Shipped: local bare-remote publish provider with live remote-ref lease check and no credential surface.
+  - Remaining: explicit fetch-provider parity and production remote-provider split.
 - [ ] 2.4 Add production git/PR provider with separate read/external-write grants and secret-reference injection
 
 ## 3. Adopt and retire duplication

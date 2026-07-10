@@ -122,6 +122,71 @@ func TestPublishRequiresExplicitProvider(t *testing.T) {
 		t.Fatalf("publish mutated local main: %s", got)
 	}
 }
+func TestLocalBareRemotePublisherPublishesWithRemoteLease(t *testing.T) {
+	dir := capsuletest.Open(t, "clean-repo")
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, "", "init", "--bare", remote)
+	runGit(t, dir, "push", remote, "main:refs/heads/main")
+	runGit(t, dir, "checkout", "-b", "candidate")
+	if err := os.WriteFile(filepath.Join(dir, "publish-local.txt"), []byte("publish"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "publish-local.txt")
+	runGit(t, dir, "commit", "-m", "publish local")
+
+	r := Reconciler{VCS: Git{}, Publisher: LocalBareRemotePublisher{Remote: remote}}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Publish, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := r.Apply(context.Background(), p, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Applied || result.NewTarget != p.Candidate {
+		t.Fatalf("publish result %#v", result)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, remote, "rev-parse", "refs/heads/main")); got != p.Candidate {
+		t.Fatalf("remote main = %s, want %s", got, p.Candidate)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, dir, "rev-parse", "main")); got != p.Expected.Target {
+		t.Fatalf("local main mutated: %s", got)
+	}
+}
+func TestLocalBareRemotePublisherRejectsStaleRemote(t *testing.T) {
+	dir := capsuletest.Open(t, "clean-repo")
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, "", "init", "--bare", remote)
+	runGit(t, dir, "push", remote, "main:refs/heads/main")
+	runGit(t, dir, "checkout", "-b", "candidate")
+	if err := os.WriteFile(filepath.Join(dir, "candidate.txt"), []byte("candidate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "candidate.txt")
+	runGit(t, dir, "commit", "-m", "candidate")
+
+	r := Reconciler{VCS: Git{}, Publisher: LocalBareRemotePublisher{Remote: remote}}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Publish, Generation: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	other := filepath.Join(t.TempDir(), "other")
+	runGit(t, "", "clone", remote, other)
+	if err := os.WriteFile(filepath.Join(other, "remote.txt"), []byte("remote"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "remote.txt")
+	runGit(t, other, "commit", "-m", "remote advance")
+	runGit(t, other, "push", "origin", "main:refs/heads/main")
+
+	if _, err := r.Apply(context.Background(), p, ""); err == nil || !strings.Contains(err.Error(), "stale remote ref") {
+		t.Fatalf("expected stale remote ref, got %v", err)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, remote, "rev-parse", "refs/heads/main")); got == p.Candidate {
+		t.Fatalf("stale publish updated remote to candidate")
+	}
+}
 func TestPlanRejectsUnknownOperation(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	if _, err := (Reconciler{VCS: Git{}}).Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Operation("invent"), Generation: 1}); err == nil {

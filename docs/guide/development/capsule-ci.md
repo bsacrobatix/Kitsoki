@@ -122,6 +122,17 @@ a publish plan carries the `remote_publish` effect and cannot apply through the
 local Git reconciler. A remote publication provider must be explicitly granted
 and injected before a publish plan can be applied.
 
+For credential-free local development and tests, `capsule sync apply` can inject
+a local bare-remote publisher:
+
+```sh
+kitsoki capsule sync apply --plan <digest> --local-bare-remote /path/to/origin.git
+```
+
+That provider checks the live bare-remote ref still matches the plan's expected
+target before pushing the candidate commit. Production Git/PR publication is a
+separate provider/grant path.
+
 See [Capsule CI receipts](../../tracing/capsule-ci-receipts.md).
 
 ## Ongoing Cleanup

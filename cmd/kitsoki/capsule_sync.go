@@ -68,7 +68,7 @@ func capsuleSyncPlanCmd() *cobra.Command {
 }
 
 func capsuleSyncApplyCmd() *cobra.Command {
-	var project, digest, gateReceipt string
+	var project, digest, gateReceipt, localBareRemote string
 	var jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "apply",
@@ -93,7 +93,11 @@ func capsuleSyncApplyCmd() *cobra.Command {
 			if instance.Generation != stored.Plan.Expected.Generation {
 				return fmt.Errorf("capsule sync: stale workspace generation")
 			}
-			result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: root}}).Apply(cmd.Context(), stored.Plan, gateReceipt)
+			reconciler := reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: root}}
+			if localBareRemote != "" {
+				reconciler.Publisher = reconcile.LocalBareRemotePublisher{Remote: localBareRemote}
+			}
+			result, err := reconciler.Apply(cmd.Context(), stored.Plan, gateReceipt)
 			if err != nil {
 				return err
 			}
@@ -107,6 +111,7 @@ func capsuleSyncApplyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&digest, "plan", "", "plan digest")
 	cmd.Flags().StringVar(&gateReceipt, "gate-receipt", "", "required CI receipt id")
+	cmd.Flags().StringVar(&localBareRemote, "local-bare-remote", "", "credential-free local bare Git remote for publish plans")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("plan")
 	return cmd
