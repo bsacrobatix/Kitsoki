@@ -13,7 +13,7 @@ import (
 
 func capsuleSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "sync", Short: "Plan and apply stale-safe Capsule reconciliation"}
-	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncFetchCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd(), capsuleSyncContinueCmd())
+	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncFetchCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd(), capsuleSyncContinueCmd(), capsuleSyncAbortCmd())
 	return cmd
 }
 
@@ -242,6 +242,36 @@ func capsuleSyncContinueCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("resolver-decision")
 	_ = cmd.MarkFlagRequired("lost-work-review")
 	_ = cmd.MarkFlagRequired("validation-receipt")
+	return cmd
+}
+
+func capsuleSyncAbortCmd() *cobra.Command {
+	var project, digest string
+	var preserve, jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "abort",
+		Short: "Abort a managed sync continuation and optionally preserve a patch artifact",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := filepath.Abs(project)
+			if err != nil {
+				return err
+			}
+			stored, err := (reconcile.FilePlanStore{ProjectRoot: root}).Get(digest)
+			if err != nil {
+				return err
+			}
+			result, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).AbortContinuation(cmd.Context(), reconcile.AbortContinuationRequest{Plan: stored.Plan, ProjectRoot: root, Preserve: preserve})
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, map[string]any{"ok": true, "result": result}, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&digest, "plan", "", "plan digest")
+	cmd.Flags().BoolVar(&preserve, "preserve", true, "write an abort patch artifact before removing the integration instance")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("plan")
 	return cmd
 }
 

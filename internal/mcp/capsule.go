@@ -74,6 +74,7 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.conflicts", Description: "Materialize project-scoped structured conflict inputs for a diverged server-owned reconciliation plan. Returns project-relative artifact paths only."}, s.syncConflicts)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.integration", Description: "Materialize a project-scoped managed integration instance for a diverged server-owned reconciliation plan. Returns project-relative paths only."}, s.syncIntegration)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.continue", Description: "Apply a resolved managed integration instance after resolver, independent lost-work review, and validation evidence are supplied."}, s.syncContinue)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.abort", Description: "Abort a managed sync continuation and optionally preserve a project-relative patch artifact before cleanup."}, s.syncAbort)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.sync.apply", Description: "Apply a previously returned reconciliation plan only if all observed refs and the workspace generation are unchanged. Required CI gate evidence is checked before promotion."}, s.syncApply)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.plan", Description: "Build the sealed environment and story envelope for an allowed project pipeline and workspace handle."}, s.ciPlan)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.run", Description: "Run the declared project CI story through the Capsule executor and return its typed verdict. A story can pass, fail, or park; it cannot self-authorize promotion."}, s.ciRun)
@@ -147,6 +148,10 @@ type capsuleSyncContinueArgs struct {
 	ResolverDecision  string `json:"resolver_decision"`
 	LostWorkReview    string `json:"lost_work_review"`
 	ValidationReceipt string `json:"validation_receipt"`
+}
+type capsuleSyncAbortArgs struct {
+	PlanDigest string `json:"plan_digest"`
+	Preserve   bool   `json:"preserve"`
 }
 type capsuleCIArgs struct {
 	Workspace control.Handle `json:"workspace"`
@@ -415,6 +420,26 @@ func (s *CapsuleServer) syncContinue(ctx context.Context, _ *mcpsdk.CallToolRequ
 		return capsuleErr(err), nil, nil
 	}
 	return nil, map[string]any{"ok": true, "result": result, "workspace": next}, nil
+}
+func (s *CapsuleServer) syncAbort(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleSyncAbortArgs) (*mcpsdk.CallToolResult, any, error) {
+	s.mu.Lock()
+	storedPlan, ok := s.plans[a.PlanDigest]
+	s.mu.Unlock()
+	if !ok {
+		return capsuleErr(fmt.Errorf("capsule sync: plan %q not found", a.PlanDigest)), nil, nil
+	}
+	in, err := s.manager.Status(ctx, storedPlan.handle)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	if in.Lease.Owner != s.owner {
+		return capsuleErr(control.ErrDenied), nil, nil
+	}
+	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).AbortContinuation(ctx, reconcile.AbortContinuationRequest{Plan: storedPlan.plan, ProjectRoot: s.manager.Grant.ProjectRoot, Preserve: a.Preserve})
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "result": result}, nil
 }
 func (s *CapsuleServer) ciPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCIArgs) (*mcpsdk.CallToolResult, any, error) {
 	_, _, envelope, err := s.planCI(ctx, a.Workspace, a.Pipeline)

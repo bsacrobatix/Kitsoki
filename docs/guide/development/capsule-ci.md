@@ -134,6 +134,7 @@ kitsoki capsule sync continue \
   --resolver-decision <artifact> \
   --lost-work-review <artifact> \
   --validation-receipt <receipt>
+kitsoki capsule sync abort --plan <digest> --preserve
 ```
 
 The command writes a `capsule-sync-conflict/v1` artifact under
@@ -147,9 +148,11 @@ continuation apply verifies the resolver decision, independent lost-work review,
 validation receipt, unchanged original refs/generation, and that the resolved
 commit preserves both candidate and target histories before updating the target.
 Agents limited to Capsule MCP use `capsule.sync.conflicts`,
-`capsule.sync.integration`, and `capsule.sync.continue` for the same operations;
-all accept only server-owned plan digests and return only project-relative
-artifact paths.
+`capsule.sync.integration`, `capsule.sync.continue`, and `capsule.sync.abort`
+for the same operations; all accept only server-owned plan digests and return
+only project-relative artifact paths. Abort removes the managed integration
+instance and, when requested, preserves a `.capsules/sync/<token>.abort.patch`
+artifact before cleanup.
 
 For credential-free local development and tests, `capsule sync apply` can inject
 a local bare-remote fetcher/publisher:

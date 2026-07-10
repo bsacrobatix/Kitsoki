@@ -37,10 +37,11 @@ Omitting `--branch` still permits workspace and CI operations but denies all
 `capsule.sync.plan` calls. A required promotion gate additionally verifies the
 persisted receipt, its run projection, and its exact candidate source digest.
 Diverged plans continue through `capsule.sync.conflicts`,
-`capsule.sync.integration`, and `capsule.sync.continue`; these tools never
-accept host paths, and continuation apply requires resolver decision,
-independent lost-work review, and validation receipt inputs before updating the
-target ref.
+`capsule.sync.integration`, `capsule.sync.continue`, and `capsule.sync.abort`;
+these tools never accept host paths. Continuation apply requires resolver
+decision, independent lost-work review, and validation receipt inputs before
+updating the target ref; abort can preserve a project-relative patch artifact
+before removing the managed integration instance.
 
 `capsule.cleanup.plan` is available as a safe read-only operation for ongoing
 CI hygiene. `capsule.cleanup.apply` requires the startup `cleanup` effect and
