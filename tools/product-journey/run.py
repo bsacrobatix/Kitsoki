@@ -2198,7 +2198,10 @@ def validate_autonomous_workflow_docs(issues: list[dict]) -> None:
             "kitsoki gitops autonomous-fix",
             "gh-agent",
             "independent-verify.md",
-            "--persona-autofix-smoke",
+            # Matches both the deprecated "--persona-autofix-smoke" flag and
+            # the canonical "--gate persona-autofix" it forwards to, so this
+            # check does not force docs to keep citing a deprecated flag.
+            "persona-autofix",
             "persona_autofix_smoke",
         ]
         missing = [token for token in required_tokens if token not in text]
@@ -13890,10 +13893,19 @@ def build_report_payload(catalog: dict, generated_at: str, run_checks: bool) -> 
 
 
 def report_paths(generated_at: str, report_arg: str, deck_arg: str, markdown_arg: str) -> tuple[Path, Path, Path]:
+    """Paths for --mode report output.
+
+    Nested under .artifacts/product-journey/eval/<generated-at>/, a sibling of
+    the run-bundle root (.artifacts/product-journey/<run-id>/) rather than a
+    separate .artifacts/product-journey-eval/ tree, so eval reports and run
+    bundles share one artifact root and --prune-runs can tell them apart by
+    directory name instead of by timestamp-vs-run-id naming convention alone.
+    Explicit --report/--deck/--markdown always win; only the defaults move.
+    """
     run_id = generated_at.lower().replace(":", "-")
     for ch in ("/", "\\", " "):
         run_id = run_id.replace(ch, "-")
-    base = ARTIFACT_ROOT / run_id
+    base = ARTIFACT_ROOT / "eval" / run_id
     return (
         Path(report_arg) if report_arg else base / "report.json",
         Path(deck_arg) if deck_arg else base / "deck.slidey.json",
@@ -13930,12 +13942,13 @@ def prune_runs(keep: int, dry_run: bool) -> dict:
     Smoke iterations pile up hundreds of timestamped run dirs directly under
     .artifacts/product-journey/. This keeps anything whose name contains
     ``-final`` (curated keepers) plus the newest ``keep`` run dirs, and removes
-    the rest. The matrices/, dogfood/, and target-proofs/ subtrees are never
-    touched. Dry-run by default so callers see what would go before it goes.
+    the rest. The matrices/, dogfood/, target-proofs/, and eval/ subtrees are
+    never touched. Dry-run by default so callers see what would go before it
+    goes.
     """
     import shutil
 
-    protected_names = {"matrices", "dogfood", "target-proofs"}
+    protected_names = {"matrices", "dogfood", "target-proofs", "eval"}
     run_dirs = [
         path
         for path in ARTIFACT_ROOT.iterdir()
@@ -13988,7 +14001,19 @@ def main() -> None:
     parser.add_argument("--run-log", action="store_true", help="Force a timestamped run log entry")
     parser.add_argument("--emit-run", action="store_true", help="Write a no-LLM run artifact bundle and Slidey deck")
     parser.add_argument("--driver", default="", help="Driver manifest id or path for --emit-run/--emit-matrix")
-    parser.add_argument("--driver-smoke", default="", help="Validate a driver manifest id/path without launching the target")
+    parser.add_argument("--driver-smoke", default="", help="Deprecated; use --gate driver-manifest --driver <id-or-path>. Validate a driver manifest id/path without launching the target")
+    parser.add_argument(
+        "--gate",
+        default="",
+        help=(
+            "Comma-separated gate name(s), or 'all', to run one or more deterministic no-LLM gates "
+            "with uniform gate_status (pass/fail) + readiness_status JSON/exit-code semantics. Names: "
+            "driver-manifest (uses --driver), dogfood, driver-replay (uses --smoke-scenario/--smoke-persona), "
+            "ghagent, autonomous-fix, persona-autofix, autonomous-marathon (uses --autonomous-marathon-smoke-repeats), "
+            "marathon-ledger (uses --marathon-smoke-ledger; not included in 'all', needs an existing ledger). "
+            "Replaces the deprecated --*-smoke flags; see tools/product-journey/README.md#gates."
+        ),
+    )
     parser.add_argument("--scenarios", default="", help="Comma-separated scenario ids to include with --emit-run")
     parser.add_argument(
         "--transport",
@@ -14001,16 +14026,16 @@ def main() -> None:
     )
     parser.add_argument("--transport-suite", action="store_true", help="Preview scenario x transport checks without creating a run bundle")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
-    parser.add_argument("--dogfood-smoke", action="store_true", help="Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
-    parser.add_argument("--driver-replay-smoke", action="store_true", help="Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
+    parser.add_argument("--dogfood-smoke", action="store_true", help="Deprecated; use --gate dogfood. Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
+    parser.add_argument("--driver-replay-smoke", action="store_true", help="Deprecated; use --gate driver-replay. Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
     parser.add_argument("--driver-replay-sweep", action="store_true", help="Run deterministic no-LLM driver replay smokes for every scenario")
     parser.add_argument("--capture-preflight", action="store_true", help="Run no-LLM capture-toolchain preflight checks")
-    parser.add_argument("--native-ghagent-smoke", action="store_true", help="Run no-LLM native gh-agent enqueue/drain smoke through kitsoki commands")
-    parser.add_argument("--autonomous-fix-smoke", action="store_true", help="Run no-LLM full autonomous issue filing and gh-agent fix smoke")
-    parser.add_argument("--persona-autofix-smoke", action="store_true", help="Run no-LLM persona replay issue-to-fix smoke through the gitops autonomous gate")
-    parser.add_argument("--autonomous-marathon-smoke", action="store_true", help="Run no-LLM scoped persona-QA marathon smoke through native autonomous fix and stats")
-    parser.add_argument("--autonomous-marathon-smoke-repeats", type=int, default=1, help="Number of full active-persona cycles for --autonomous-marathon-smoke")
-    parser.add_argument("--validate-marathon-smoke-ledger", action="store_true", help="Validate a retained autonomous marathon smoke JSON ledger")
+    parser.add_argument("--native-ghagent-smoke", action="store_true", help="Deprecated; use --gate ghagent. Run no-LLM native gh-agent enqueue/drain smoke through kitsoki commands")
+    parser.add_argument("--autonomous-fix-smoke", action="store_true", help="Deprecated; use --gate autonomous-fix. Run no-LLM full autonomous issue filing and gh-agent fix smoke")
+    parser.add_argument("--persona-autofix-smoke", action="store_true", help="Deprecated; use --gate persona-autofix. Run no-LLM persona replay issue-to-fix smoke through the gitops autonomous gate")
+    parser.add_argument("--autonomous-marathon-smoke", action="store_true", help="Deprecated; use --gate autonomous-marathon. Run no-LLM scoped persona-QA marathon smoke through native autonomous fix and stats")
+    parser.add_argument("--autonomous-marathon-smoke-repeats", type=int, default=1, help="Number of full active-persona cycles for --gate autonomous-marathon")
+    parser.add_argument("--validate-marathon-smoke-ledger", action="store_true", help="Deprecated; use --gate marathon-ledger. Validate a retained autonomous marathon smoke JSON ledger")
     parser.add_argument("--marathon-smoke-ledger", default="", help="Path to autonomous-marathon-smoke.json for --validate-marathon-smoke-ledger")
     parser.add_argument("--min-marathon-smoke-cycles", type=int, default=1, help="Minimum cycle_count required when validating a retained autonomous marathon smoke ledger")
     parser.add_argument("--report-invalid-marathon-smoke-ledger", action="store_true", help="Print invalid retained-ledger validation JSON instead of exiting early")
@@ -14196,20 +14221,8 @@ def main() -> None:
     scenarios = active_scenarios(all_scenarios)
     github_targets = load_github_targets(GITHUB_TARGETS)
 
-    if args.driver_smoke:
-        result = validate_driver_manifest(load_driver_manifest(args.driver_smoke))
-        if args.json_output:
-            print(json.dumps(result, sort_keys=True))
-        else:
-            print(f"Driver smoke: {result['status']}")
-            print(f"Driver: {result['driver']['id']} ({result['driver']['label']})")
-            print(f"Manifest: {result['driver']['manifest_path']}")
-            for issue in result["issues"]:
-                print(f"- {issue['severity']}: {issue['id']}: {issue['detail']}")
-        if result["status"] != "ok":
-            raise SystemExit(1)
-        append_log(f"Validated driver manifest {result['driver']['id']}")
-        return
+    # --driver-smoke (deprecated) and --gate driver-manifest are handled by the
+    # unified gate dispatcher below, alongside the other --*-smoke gates.
 
     if args.transport_suite:
         scenario_filter = args.scenarios or args.scenario or ""
@@ -14287,105 +14300,120 @@ def main() -> None:
             raise SystemExit(1)
         return
 
-    if args.native_ghagent_smoke:
-        result = native_ghagent_smoke()
-        if args.json_output:
-            print(json.dumps(result, sort_keys=True))
-            append_log(f"Ran native gh-agent smoke: {result['status']}")
-            if result["status"] != "passed":
-                raise SystemExit(1)
-            return
-        print(f"Native gh-agent smoke: {result['status']}")
-        print(result["summary"])
-        if result["output"]:
-            print(result["output"])
-        append_log(f"Ran native gh-agent smoke: {result['status']}")
-        if result["status"] != "passed":
-            raise SystemExit(1)
-        return
+    # --- Unified gate dispatcher -------------------------------------------------
+    # Replaces the 8 overlapping --*-smoke flags (--driver-smoke, --dogfood-smoke,
+    # --driver-replay-smoke, --native-ghagent-smoke, --autonomous-fix-smoke,
+    # --persona-autofix-smoke, --autonomous-marathon-smoke,
+    # --validate-marathon-smoke-ledger) with one --gate <name>[,<name>...]|all
+    # verb. Every gate's JSON payload additively gains "gate" (the gate name),
+    # "gate_status" ("pass"/"fail"), and "readiness_status" (the gate's own
+    # value, or "not_applicable" when the gate has no readiness concept) so
+    # callers get one uniform pass/fail + readiness shape without losing any
+    # existing field a story/tool already binds on. The deprecated flags below
+    # keep working: each sets --driver (for --driver-smoke's value) and
+    # forwards into the same gate names, printing a one-line deprecation
+    # notice to stderr (never stdout, so JSON callers keep parsing clean).
+    _GATE_OLD_FLAGS = {
+        "driver-manifest": "--driver-smoke",
+        "dogfood": "--dogfood-smoke",
+        "driver-replay": "--driver-replay-smoke",
+        "ghagent": "--native-ghagent-smoke",
+        "autonomous-fix": "--autonomous-fix-smoke",
+        "persona-autofix": "--persona-autofix-smoke",
+        "autonomous-marathon": "--autonomous-marathon-smoke",
+        "marathon-ledger": "--validate-marathon-smoke-ledger",
+    }
+    # marathon-ledger is excluded from 'all': it validates a previously
+    # written --marathon-smoke-ledger artifact rather than running a
+    # self-contained check, so it has nothing to do without that input.
+    _GATE_ALL_ORDER = [
+        "driver-manifest",
+        "dogfood",
+        "driver-replay",
+        "ghagent",
+        "autonomous-fix",
+        "persona-autofix",
+        "autonomous-marathon",
+    ]
 
-    if args.autonomous_fix_smoke:
-        result = autonomous_fix_smoke()
-        if args.json_output:
-            print(json.dumps(result, sort_keys=True))
-            append_log(f"Ran autonomous fix smoke: {result['status']}")
-            if result["status"] != "passed":
-                raise SystemExit(1)
-            return
-        print(f"Autonomous fix smoke: {result['status']}")
-        print(result["summary"])
-        if result["output"]:
-            print(result["output"])
-        append_log(f"Ran autonomous fix smoke: {result['status']}")
-        if result["status"] != "passed":
-            raise SystemExit(1)
-        return
+    def _gate_envelope(name: str, payload: dict, ok: bool) -> dict:
+        envelope = dict(payload)
+        envelope["gate"] = name
+        envelope["gate_status"] = "pass" if ok else "fail"
+        envelope.setdefault("readiness_status", "not_applicable")
+        return envelope
 
-    if args.persona_autofix_smoke:
-        result = persona_autofix_smoke()
-        if args.json_output:
-            print(json.dumps(result, sort_keys=True))
-            append_log(f"Ran persona autofix smoke: {result['status']}")
-            if result["status"] != "passed":
-                raise SystemExit(1)
-            return
-        print(f"Persona autofix smoke: {result['status']}")
-        print(result["summary"])
-        if result["output"]:
-            print(result["output"])
-        append_log(f"Ran persona autofix smoke: {result['status']}")
-        if result["status"] != "passed":
-            raise SystemExit(1)
-        return
+    def _run_gate(name: str):
+        """Run one deterministic gate. Returns (json_payload, ok, human_lines, log_line)."""
+        if name == "driver-manifest":
+            result = validate_driver_manifest(load_driver_manifest(args.driver))
+            ok = result["status"] == "ok"
+            human_lines = [
+                f"Driver manifest: {result['status']}",
+                f"Driver: {result['driver']['id']} ({result['driver']['label']})",
+                f"Manifest: {result['driver']['manifest_path']}",
+                *[f"- {issue['severity']}: {issue['id']}: {issue['detail']}" for issue in result["issues"]],
+            ]
+            return result, ok, human_lines, f"Validated driver manifest {result['driver']['id']}"
 
-    if args.autonomous_marathon_smoke:
-        result = autonomous_marathon_smoke(args.autonomous_marathon_smoke_repeats)
-        if args.json_output:
-            print(json.dumps(result, sort_keys=True))
-            append_log(f"Ran autonomous marathon smoke: {result['status']}")
-            if result["status"] != "passed":
-                raise SystemExit(1)
-            return
-        print(f"Autonomous marathon smoke: {result['status']}")
-        print(result["summary"])
-        if result.get("report_path"):
-            print(f"Ledger JSON: {result['report_path']}")
-        if result.get("report_markdown_path"):
-            print(f"Ledger Markdown: {result['report_markdown_path']}")
-        if result["output"]:
-            print(result["output"])
-        append_log(f"Ran autonomous marathon smoke: {result['status']}")
-        if result["status"] != "passed":
-            raise SystemExit(1)
-        return
+        if name == "ghagent":
+            result = native_ghagent_smoke()
+            ok = result["status"] == "passed"
+            human_lines = [f"Native gh-agent smoke: {result['status']}", result["summary"]]
+            if result["output"]:
+                human_lines.append(result["output"])
+            return result, ok, human_lines, f"Ran native gh-agent smoke: {result['status']}"
 
-    if args.validate_marathon_smoke_ledger:
-        if not args.marathon_smoke_ledger and not args.report_invalid_marathon_smoke_ledger:
-            raise SystemExit("--validate-marathon-smoke-ledger requires --marathon-smoke-ledger")
-        result = validate_marathon_smoke_ledger(args.marathon_smoke_ledger, args.min_marathon_smoke_cycles)
-        if args.json_output:
-            print(json.dumps(result, sort_keys=True))
-            append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
-            if result["status"] != "valid" and not args.report_invalid_marathon_smoke_ledger:
-                raise SystemExit(1)
-            return
-        print(f"Autonomous marathon smoke ledger: {result['status']}")
-        print(result["summary"])
-        print(f"Ledger JSON: {result['ledger_path']}")
-        print(f"Ledger Markdown: {result['ledger_markdown_path']}")
-        if result["issues"]:
+        if name == "autonomous-fix":
+            result = autonomous_fix_smoke()
+            ok = result["status"] == "passed"
+            human_lines = [f"Autonomous fix smoke: {result['status']}", result["summary"]]
+            if result["output"]:
+                human_lines.append(result["output"])
+            return result, ok, human_lines, f"Ran autonomous fix smoke: {result['status']}"
+
+        if name == "persona-autofix":
+            result = persona_autofix_smoke()
+            ok = result["status"] == "passed"
+            human_lines = [f"Persona autofix smoke: {result['status']}", result["summary"]]
+            if result["output"]:
+                human_lines.append(result["output"])
+            return result, ok, human_lines, f"Ran persona autofix smoke: {result['status']}"
+
+        if name == "autonomous-marathon":
+            result = autonomous_marathon_smoke(args.autonomous_marathon_smoke_repeats)
+            ok = result["status"] == "passed"
+            human_lines = [f"Autonomous marathon smoke: {result['status']}", result["summary"]]
+            if result.get("report_path"):
+                human_lines.append(f"Ledger JSON: {result['report_path']}")
+            if result.get("report_markdown_path"):
+                human_lines.append(f"Ledger Markdown: {result['report_markdown_path']}")
+            if result["output"]:
+                human_lines.append(result["output"])
+            return result, ok, human_lines, f"Ran autonomous marathon smoke: {result['status']}"
+
+        if name == "marathon-ledger":
+            if not args.marathon_smoke_ledger and not args.report_invalid_marathon_smoke_ledger:
+                raise SystemExit("--gate marathon-ledger requires --marathon-smoke-ledger")
+            result = validate_marathon_smoke_ledger(args.marathon_smoke_ledger, args.min_marathon_smoke_cycles)
+            # --report-invalid-marathon-smoke-ledger asks for the invalid JSON
+            # back with a clean (non-raising) exit so callers can bind the
+            # failure evidence themselves; preserve that as this gate's ok.
+            ok = result["status"] == "valid" or args.report_invalid_marathon_smoke_ledger
+            human_lines = [
+                f"Autonomous marathon smoke ledger: {result['status']}",
+                result["summary"],
+                f"Ledger JSON: {result['ledger_path']}",
+                f"Ledger Markdown: {result['ledger_markdown_path']}",
+            ]
             for issue in result["issues"]:
                 detail = f" ({issue['detail']})" if issue.get("detail") else ""
-                print(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
-        append_log(f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}")
-        if result["status"] != "valid" and not args.report_invalid_marathon_smoke_ledger:
-            raise SystemExit(1)
-        return
+                human_lines.append(f"- {issue['severity']}: {issue['id']}: {issue['message']}{detail}")
+            return result, ok, human_lines, f"Validated autonomous marathon smoke ledger {Path(args.marathon_smoke_ledger).name}: {result['status']}"
 
-    if args.dogfood_smoke:
-        report = build_dogfood_smoke(catalog, github_targets, personas, scenarios, args.seed)
-        if args.json_output:
-            print(json.dumps({
+        if name == "dogfood":
+            report = build_dogfood_smoke(catalog, github_targets, personas, scenarios, args.seed)
+            payload = {
                 "status": report["status"],
                 "dogfood_id": report["dogfood_id"],
                 "dogfood_dir": report["dogfood_dir"],
@@ -14414,35 +14442,30 @@ def main() -> None:
                 "matrix_validation_status": report["validation"]["matrix"]["status"],
                 "matrix_validation_warnings": report["validation"]["matrix"]["warnings"],
                 "matrix_validation_issue_summary": report["validation"]["matrix"].get("validation_issue_summary", ""),
-            }, sort_keys=True))
-            append_log(f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}")
-            if report["status"] != "passed":
-                raise SystemExit(1)
-            return
-        print(f"Product journey dogfood smoke: {report['dogfood_id']}")
-        print(f"Status: {report['status']}")
-        print(f"Artifacts: {report['dogfood_dir']}")
-        print(f"Summary: {report['artifacts']['summary']}")
-        print(f"Smoke deck: {report['artifacts']['deck']}")
-        print(f"Matrix: {report['matrix']['matrix_dir']}")
-        print(f"Run: {report['run']['run_dir']}")
-        print(f"Run deck: {report['run']['deck_path']}")
-        print(f"Rollup deck: {report['rollup']['deck_path']}")
-        print(f"Corpus validation: {report['corpus_validation']['status']} ({report['corpus_validation']['warnings']} warnings)")
-        print(f"Review: {report['review']['summary']}")
-        print(f"Run validation: {report['validation']['run']['status']} ({report['validation']['run']['warnings']} warnings)")
-        print(f"Matrix validation: {report['validation']['matrix']['status']} ({report['validation']['matrix']['warnings']} warnings)")
-        append_log(f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}")
-        if report["status"] != "passed":
-            raise SystemExit(1)
-        return
+            }
+            ok = report["status"] == "passed"
+            human_lines = [
+                f"Product journey dogfood smoke: {report['dogfood_id']}",
+                f"Status: {report['status']}",
+                f"Artifacts: {report['dogfood_dir']}",
+                f"Summary: {report['artifacts']['summary']}",
+                f"Smoke deck: {report['artifacts']['deck']}",
+                f"Matrix: {report['matrix']['matrix_dir']}",
+                f"Run: {report['run']['run_dir']}",
+                f"Run deck: {report['run']['deck_path']}",
+                f"Rollup deck: {report['rollup']['deck_path']}",
+                f"Corpus validation: {report['corpus_validation']['status']} ({report['corpus_validation']['warnings']} warnings)",
+                f"Review: {report['review']['summary']}",
+                f"Run validation: {report['validation']['run']['status']} ({report['validation']['run']['warnings']} warnings)",
+                f"Matrix validation: {report['validation']['matrix']['status']} ({report['validation']['matrix']['warnings']} warnings)",
+            ]
+            return payload, ok, human_lines, f"Ran product journey dogfood smoke {report['dogfood_id']}: {report['status']}"
 
-    if args.driver_replay_smoke:
-        report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed, args.smoke_scenario, args.smoke_persona)
-        if args.json_output:
+        if name == "driver-replay":
+            report = build_driver_replay_smoke(catalog, github_targets, personas, scenarios, args.seed, args.smoke_scenario, args.smoke_persona)
             reviewed = report["review"]
             validation = report["validation"]
-            print(json.dumps({
+            payload = {
                 "status": report["status"],
                 "readiness_status": report["readiness_status"],
                 "smoke_id": report["smoke_id"],
@@ -14471,24 +14494,83 @@ def main() -> None:
                 "validation_status": validation.get("status"),
                 "validation_warnings": validation.get("warnings"),
                 "validation_issue_summary": validation.get("validation_issue_summary", ""),
-            }, sort_keys=True))
-            append_log(f"Ran product journey driver replay smoke {report['smoke_id']}: {report['status']}")
-            if report["status"] != "passed":
-                raise SystemExit(1)
-            return
-        print(f"Product journey driver replay smoke: {report['smoke_id']}")
-        print(f"Status: {report['status']}")
-        print(f"Readiness: {report['readiness_status']}")
-        print(f"Persona: {report['persona']['label']}")
-        print(f"Artifacts: {report['smoke_dir']}")
-        print(f"Summary: {report['artifacts']['summary']}")
-        print(f"Smoke deck: {report['artifacts']['deck']}")
-        print(f"Run: {report['run']['run_dir']}")
-        print(f"Run deck: {report['run']['deck_path']}")
-        print(f"Review: {report['review']['summary']}")
-        print(f"Validation: {report['validation']['status']} ({report['validation']['warnings']} warnings)")
-        append_log(f"Ran product journey driver replay smoke {report['smoke_id']}: {report['status']}")
-        if report["status"] != "passed":
+            }
+            ok = report["status"] == "passed"
+            human_lines = [
+                f"Product journey driver replay smoke: {report['smoke_id']}",
+                f"Status: {report['status']}",
+                f"Readiness: {report['readiness_status']}",
+                f"Persona: {report['persona']['label']}",
+                f"Artifacts: {report['smoke_dir']}",
+                f"Summary: {report['artifacts']['summary']}",
+                f"Smoke deck: {report['artifacts']['deck']}",
+                f"Run: {report['run']['run_dir']}",
+                f"Run deck: {report['run']['deck_path']}",
+                f"Review: {report['review']['summary']}",
+                f"Validation: {report['validation']['status']} ({report['validation']['warnings']} warnings)",
+            ]
+            return payload, ok, human_lines, f"Ran product journey driver replay smoke {report['smoke_id']}: {report['status']}"
+
+        raise SystemExit(f"Unknown --gate name: {name} (choices: {', '.join(sorted(_GATE_OLD_FLAGS))}, all)")
+
+    _requested_gates: list[str] = []
+    _legacy_gate_flags = [
+        ("driver_smoke", "driver-manifest", True),
+        ("dogfood_smoke", "dogfood", False),
+        ("driver_replay_smoke", "driver-replay", False),
+        ("native_ghagent_smoke", "ghagent", False),
+        ("autonomous_fix_smoke", "autonomous-fix", False),
+        ("persona_autofix_smoke", "persona-autofix", False),
+        ("autonomous_marathon_smoke", "autonomous-marathon", False),
+        ("validate_marathon_smoke_ledger", "marathon-ledger", False),
+    ]
+    for attr, gate_name, is_value_style in _legacy_gate_flags:
+        value = getattr(args, attr)
+        if not value:
+            continue
+        if is_value_style and not args.driver:
+            args.driver = value
+        print(f"[deprecated] {_GATE_OLD_FLAGS[gate_name]} is deprecated; use --gate {gate_name} instead.", file=sys.stderr)
+        if gate_name not in _requested_gates:
+            _requested_gates.append(gate_name)
+    if args.gate:
+        for token in args.gate.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if token == "all":
+                for gate_name in _GATE_ALL_ORDER:
+                    if gate_name not in _requested_gates:
+                        _requested_gates.append(gate_name)
+                continue
+            if token not in _GATE_OLD_FLAGS:
+                raise SystemExit(f"Unknown --gate name: {token} (choices: {', '.join(sorted(_GATE_OLD_FLAGS))}, all)")
+            if token not in _requested_gates:
+                _requested_gates.append(token)
+
+    if _requested_gates:
+        gate_results = []
+        overall_ok = True
+        for gate_name in _requested_gates:
+            payload, ok, human_lines, log_line = _run_gate(gate_name)
+            envelope = _gate_envelope(gate_name, payload, ok)
+            overall_ok = overall_ok and ok
+            if args.json_output:
+                gate_results.append(envelope)
+            else:
+                print(f"Gate: {gate_name} ({envelope['gate_status']})")
+                for line in human_lines:
+                    print(line)
+            append_log(log_line)
+        if args.json_output:
+            if len(gate_results) == 1:
+                print(json.dumps(gate_results[0], sort_keys=True))
+            else:
+                print(json.dumps({
+                    "status": "pass" if overall_ok else "fail",
+                    "gates": gate_results,
+                }, sort_keys=True))
+        if not overall_ok:
             raise SystemExit(1)
         return
 

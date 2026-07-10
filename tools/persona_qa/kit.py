@@ -208,7 +208,8 @@ def cmd_emit_run(args: argparse.Namespace) -> int:
 def cmd_replay_smoke(args: argparse.Namespace) -> int:
     cfg = qa_config.load_config(args.config or None, repo_root=REPO_ROOT)
     runner_args = [
-        "--driver-replay-smoke",
+        "--gate",
+        "driver-replay",
         "--project",
         args.project,
         "--smoke-persona",

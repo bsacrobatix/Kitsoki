@@ -19,7 +19,7 @@ Scope (WS-F F1 exit: "start with the cells that have real runnable proofs
 today"): the four story flow suites the plan names directly — `prd`,
 `bugfix`, `dev-story` (covers onboarding), and `deliver` (the
 decompose→implement chain per WS-B) — plus one product-journey
-`--driver-replay-smoke` pass as a first `journey-verdict`
+`--gate driver-replay` pass as a first `journey-verdict`
 (experience-class) pilot, plus a `routing` check running the dev-story
 no-LLM routing-tier suite (`kitsoki test routing`). The legacy
 landing_freeform/landing_proposal fixtures this check exercises were
@@ -114,11 +114,12 @@ CHECKS: list[CheckDef] = [
         command=[
             "python3",
             "tools/product-journey/run.py",
-            "--driver-replay-smoke",
+            "--gate",
+            "driver-replay",
             "--smoke-scenario",
             "bugfix",
         ],
-        summary="product-journey driver-replay smoke (bugfix scenario, vscode-surfaced driver)",
+        summary="product-journey driver-replay gate (bugfix scenario, vscode-surfaced driver)",
     ),
 ]
 
@@ -144,14 +145,15 @@ def _flow_suite_verdict(proc: "subprocess.CompletedProcess[str]") -> tuple[str, 
 def _driver_replay_smoke_verdict(
     proc: "subprocess.CompletedProcess[str]", repo_root: Path
 ) -> tuple[str, str, str, list[str]]:
-    """(verdict, health, summary, evidence_refs) for a --driver-replay-smoke run.
+    """(verdict, health, summary, evidence_refs) for a --gate driver-replay run.
 
-    `--driver-replay-smoke` prints an `Artifacts: <smoke_dir>` line (see
-    `tools/product-journey/run.py`'s CLI handler); `build_driver_replay_smoke`
-    always writes its report to `<smoke_dir>/driver-replay-smoke.json`
-    (`report["artifacts"]["report"]`), so this derives the report path from
-    that one stdout line rather than re-implementing the freshest-dir lookup.
-    If nothing legible is found, this is an infra signal, not a model result.
+    `--gate driver-replay` (deprecated alias: `--driver-replay-smoke`) prints
+    an `Artifacts: <smoke_dir>` line (see `tools/product-journey/run.py`'s
+    gate dispatcher); `build_driver_replay_smoke` always writes its report to
+    `<smoke_dir>/driver-replay-smoke.json` (`report["artifacts"]["report"]`),
+    so this derives the report path from that one stdout line rather than
+    re-implementing the freshest-dir lookup. If nothing legible is found, this
+    is an infra signal, not a model result.
     """
     if proc.returncode != 0:
         tail = (proc.stdout or proc.stderr or "").strip().splitlines()

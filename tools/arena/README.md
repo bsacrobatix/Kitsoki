@@ -437,7 +437,7 @@ Next (see design doc): **P1** a *pool* of VM hosts + completion-state polling
 lists both). One cell = one `(target, persona, scenario)` triple:
 
 - **Non-live** drives the existing deterministic
-  `tools/product-journey/run.py --driver-replay-smoke` path — cassette-backed
+  `tools/product-journey/run.py --gate driver-replay` path — cassette-backed
   evidence, zero LLM spend, real run bundle on disk (`review.json`,
   `scenario-outcomes.json`, `driver-handoff.json`, decks).
 - **Live** (gated behind `--live`, cost-bearing, never run in CI) instead emits

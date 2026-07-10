@@ -44,11 +44,11 @@ It is intentionally no-LLM:
 - `matrix` calls `tools/product-journey/run.py --emit-matrix --json-output` to
   create the 10-repo GitHub assignment plan. Pass `target_proof_file=...` after
   `refresh_targets` when the matrix should embed current GitHub proof.
-- `dogfood_smoke` calls `tools/product-journey/run.py --dogfood-smoke
+- `dogfood_smoke` calls `tools/product-journey/run.py --gate dogfood
   --json-output` to prove the no-LLM artifact loop from matrix creation through
   assignment run, seeded evidence, review, validation, rollup, and Slidey decks.
 - `driver_replay_smoke` calls `tools/product-journey/run.py
-  --driver-replay-smoke --json-output` to prove one reusable-driver scenario
+  --gate driver-replay --json-output` to prove one reusable-driver scenario
   with cassette-backed proof evidence, linked driver journal refs, media
   manifest coverage, review, validation, and a compact Slidey smoke deck. Pass
   `scenario=project-onboarding`, `scenario=prd-design`, or another scenario id
@@ -57,12 +57,12 @@ It is intentionally no-LLM:
   --driver-replay-sweep --json-output` to run the same replay proof for every
   product-journey scenario and summarize playback/validation coverage.
 - `persona_autofix_smoke` calls `tools/product-journey/run.py
-  --persona-autofix-smoke --json-output` to prove that a persona replay bundle
+  --gate persona-autofix --json-output` to prove that a persona replay bundle
   with an observed issue finding enters the native `kitsoki gitops
   autonomous-fix` gate and produces filed issue, gh-agent run, fix evidence,
   and `independent-verify.md` artifacts without live GitHub or LLM work.
 - `autonomous_marathon_smoke` calls `tools/product-journey/run.py
-  --autonomous-marathon-smoke --json-output` to prove the standing-loop shell
+  --gate autonomous-marathon --json-output` to prove the standing-loop shell
   across the core `core-use-cases` scope (`project-onboarding`, `prd-design`,
   and `bugfix`) for every active curated persona: scoped persona runs, replayed
   driver proof, target/persona/lens preservation in the driver and brief
@@ -77,9 +77,11 @@ It is intentionally no-LLM:
   `validate_marathon_smoke_ledger min_cycles=<n>` when a proof must show many
   completed cycles, not just a single retained sweep. The underlying CLI
   validator is
-  `tools/product-journey/run.py --validate-marathon-smoke-ledger
+  `tools/product-journey/run.py --gate marathon-ledger
   --marathon-smoke-ledger <path> --min-marathon-smoke-cycles <n>
-  --json-output`.
+  --json-output`. Every gate's JSON gains uniform `gate`/`gate_status`/
+  `readiness_status` keys on top of its existing fields; see
+  `tools/product-journey/README.md#gates`.
 - `rollup` calls `tools/product-journey/run.py --rollup-matrix --json-output`
   to create or refresh the matrix-level Slidey deck from reviewed run bundles.
 - `validate_matrix` calls `tools/product-journey/run.py --validate-matrix
