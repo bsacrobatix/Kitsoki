@@ -47,13 +47,10 @@ Start with the cheap gates before live capture:
 python3 tools/product-journey/run.py --validate-corpus --json-output
 python3 tools/product-journey/run.py --capture-preflight --json-output
 python3 tools/product-journey/run.py --driver-replay-sweep --seed demo --json-output
-python3 tools/product-journey/run.py --native-ghagent-smoke --json-output
-python3 tools/product-journey/run.py --autonomous-fix-smoke --json-output
-python3 tools/product-journey/run.py --persona-autofix-smoke --json-output
-python3 tools/product-journey/run.py --autonomous-marathon-smoke --json-output
-python3 tools/product-journey/run.py --autonomous-marathon-smoke \
+python3 tools/product-journey/run.py --gate ghagent,autonomous-fix,persona-autofix,autonomous-marathon --json-output
+python3 tools/product-journey/run.py --gate autonomous-marathon \
   --autonomous-marathon-smoke-repeats 2 --json-output
-python3 tools/product-journey/run.py --validate-marathon-smoke-ledger \
+python3 tools/product-journey/run.py --gate marathon-ledger \
   --marathon-smoke-ledger .artifacts/product-journey/marathon-smokes/<id>/autonomous-marathon-smoke.json \
   --min-marathon-smoke-cycles 2 --json-output
 GOCACHE=/private/tmp/kitsoki-gocache go run ./cmd/kitsoki test flows stories/product-journey-qa/app.yaml
@@ -74,9 +71,11 @@ returns HTTP 200 with body `ok`, then checks
 `<gh_agent_public_base_url>/api/ready` and refuses handoff unless the hosted
 agent reports `status=ready`, the same `ticket_repo`, and an enabled drain loop.
 
-Use `--driver-replay-smoke --smoke-scenario <scenario-id>` when narrowing a
-single scenario. Use `--dogfood-smoke` when checking matrix-to-rollup artifact
-composition.
+Use `--gate driver-replay --smoke-scenario <scenario-id>` when narrowing a
+single scenario. Use `--gate dogfood` when checking matrix-to-rollup artifact
+composition. See `tools/product-journey/README.md#gates` for the full gate
+list and the shared `gate_status`/`readiness_status` JSON contract; the
+`--*-smoke` flag names above are deprecated aliases that still work.
 
 `--autonomous-marathon` writes `autonomous-marathon-control.json` and
 `autonomous-marathon-control.md` beside the run. Those artifacts record cadence,
@@ -278,8 +277,7 @@ When refining the pipeline:
    this skill.
 3. Add or update a deterministic flow/cassette/replay check.
 4. Re-run `--validate-corpus`, `--driver-replay-sweep`,
-   `--native-ghagent-smoke`, `--autonomous-fix-smoke`,
-   `--persona-autofix-smoke`, `--autonomous-marathon-smoke`, and
+   `--gate ghagent,autonomous-fix,persona-autofix,autonomous-marathon`, and
    product-journey story flows.
 5. Commit only the product-journey slice, leaving unrelated workspace dirt
    untouched.
