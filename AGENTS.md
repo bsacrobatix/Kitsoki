@@ -155,6 +155,8 @@ have prevented a missed scenario ownership rule.
 
 Automated testing should never use a real LLM or incur costs - mock agents via cassettes should be used in all cases.  Tests which require real LLM must be gated and only done when specifically requested and required - never automatically or without checking first.
 
+Do not introduce new Python by default. Prefer Go for product/runtime code, Starlark for story glue, and shell/Node only when they are the established local surface. Treat new `.py` files as exceptions that need a strong repo-local justification, a tracked entry in `policy/python-exceptions.tsv`, and a matching `make test` pass through the Python policy gate. Editing existing Python is acceptable when the task is explicitly in an existing Python-owned subsystem, but do not expand Python's footprint casually and do not check in a new `.py` file without first adding its exception entry and justification.
+
 Use hermetic capsules for reusable repository/workspace fixtures. Prefer `capsules/<name>/capsule.yaml` plus `internal/capsuletest.Open(t, "<name>")` over ad hoc `git init` setup in tests, story fixtures, and agent validation. Only keep bespoke temp repos when the behavior under test is the repository creation/bootstrap process itself or the exact git command sequence. When adding or migrating these fixtures, use the `.agents/skills/capsules/SKILL.md` project skill.
 
 use dependency injection patterns wherever relevant.

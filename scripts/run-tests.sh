@@ -2,7 +2,7 @@
 #
 # run-tests.sh — concise runner for the full kitsoki test suite.
 #
-# Runs seven suites and NEVER bails early — every failure across all is
+# Runs eight suites and NEVER bails early — every failure across all is
 # collected before we exit:
 #   1. go test $KITSOKI_GO_TEST_FLAGS ./...
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
@@ -15,6 +15,8 @@
 #                                      warning when pnpm/node_modules absent)
 #   6. demo media contract            (no-LLM product-site/deck media layout)
 #   7. session-mining no-LLM invariants
+#   8. python file policy             (no new .py files without an explicit
+#                                      repo-tracked exception + justification)
 #
 # Output contract:
 #   - success → one terse line per suite, plus the report path.
@@ -105,6 +107,7 @@ media_skipped=0
 mining_failures=0
 mining_skipped=0
 mining_total=0
+python_policy_failures=0
 declare -a MINING_FAILED
 VITEST_OUT="$TMP/vitest.out"
 
@@ -362,6 +365,15 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Suite 8: Python file policy (no new .py without explicit justification)
+# ---------------------------------------------------------------------------
+section "python file policy"
+run_timed "$PYTHON_TIMEOUT_SECONDS" "python file policy" bash "$ROOT/scripts/check-python-files.sh" >"$TMP/python-policy.out" 2>&1
+python_policy_rc=$?
+cat "$TMP/python-policy.out" >>"$REPORT"
+[ "$python_policy_rc" -ne 0 ] && python_policy_failures=1
+
+# ---------------------------------------------------------------------------
 # Report rotation
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC2012
@@ -370,7 +382,7 @@ ls -1t "$REPORT_DIR"/test-*.log 2>/dev/null | tail -n +$((KEEP + 1)) | while rea
 # ---------------------------------------------------------------------------
 # Console summary
 # ---------------------------------------------------------------------------
-total_failures=$((go_failures + starlark_failures + flow_failures + vitest_failures + features_failures + media_failures + mining_failures))
+total_failures=$((go_failures + starlark_failures + flow_failures + vitest_failures + features_failures + media_failures + mining_failures + python_policy_failures))
 
 if [ "$total_failures" -eq 0 ]; then
 	printf '%s✓%s %s   %s%d packages%s\n' "$GREEN" "$RST" "$GO_TEST_LABEL" "$DIM" "$go_pkgs_total" "$RST"
@@ -396,6 +408,7 @@ if [ "$total_failures" -eq 0 ]; then
 	else
 		printf '%s✓%s session-mining  %s%d suites%s\n' "$GREEN" "$RST" "$DIM" "$mining_total" "$RST"
 	fi
+	printf '%s✓%s python policy\n' "$GREEN" "$RST"
 	printf '%s✓ all tests passed%s   %s· report: %s%s\n' "$BOLD$GREEN" "$RST" "$DIM" "$REPORT" "$RST"
 	exit 0
 fi
@@ -487,6 +500,12 @@ if [ "$mining_failures" -gt 0 ]; then
 		printf '\n%s%s%s\n' "$YELLOW" "$t" "$RST"
 		sed 's/^/  /' "$TMP/mining-$(basename "$t").out"
 	done
+fi
+
+# --- Python file policy failures --------------------------------------------
+if [ "$python_policy_failures" -gt 0 ]; then
+	printf '\n%s✗ python file policy%s — undeclared or stale Python exceptions found:\n' "$BOLD$RED" "$RST"
+	sed 's/^/  /' "$TMP/python-policy.out"
 fi
 
 printf '\n%s✗ %d failure group(s)%s   %s· full report: %s%s\n' \
