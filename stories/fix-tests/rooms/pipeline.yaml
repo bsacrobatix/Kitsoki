@@ -101,51 +101,11 @@ states:
         id: run_initial
         background: true
         with:
-          cmd: python3
+          cmd: bash
           args:
-            - "-c"
-            - |
-              import os
-              import signal
-              import subprocess
-              import sys
-
-              cmd = sys.argv[1]
-              timeout = int(float(sys.argv[2]))
-              label = sys.argv[3]
-              print("bounded %s: %s (timeout %ss)" % (label, cmd, timeout), flush=True)
-              proc = subprocess.Popen(
-                  ["bash", "-lc", cmd],
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  start_new_session=True,
-              )
-              try:
-                  out, _ = proc.communicate(timeout=timeout)
-                  if out:
-                      print(out, end="")
-                  sys.exit(proc.returncode)
-              except subprocess.TimeoutExpired:
-                  try:
-                      os.killpg(proc.pid, signal.SIGTERM)
-                  except ProcessLookupError:
-                      pass
-                  try:
-                      out, _ = proc.communicate(timeout=5)
-                  except subprocess.TimeoutExpired:
-                      try:
-                          os.killpg(proc.pid, signal.SIGKILL)
-                      except ProcessLookupError:
-                          pass
-                      out, _ = proc.communicate()
-                  if out:
-                      print(out, end="")
-                  print("\nTIMEOUT: %s exceeded %ss: %s" % (label, timeout, cmd))
-                  sys.exit(124)
+            - "-lc"
             - "{{ world.effective_quick_test_cmd }}"
-            - "{{ world.quick_test_timeout_seconds }}"
-            - quick gate
+          timeout: "{{ world.quick_test_timeout_seconds }}s"
           cwd: "{{ world.workdir }}"
         bind:
           last_job_id: job_id
@@ -242,51 +202,11 @@ states:
         id: verify_run
         background: true
         with:
-          cmd: python3
+          cmd: bash
           args:
-            - "-c"
-            - |
-              import os
-              import signal
-              import subprocess
-              import sys
-
-              cmd = sys.argv[1]
-              timeout = int(float(sys.argv[2]))
-              label = sys.argv[3]
-              print("bounded %s: %s (timeout %ss)" % (label, cmd, timeout), flush=True)
-              proc = subprocess.Popen(
-                  ["bash", "-lc", cmd],
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  start_new_session=True,
-              )
-              try:
-                  out, _ = proc.communicate(timeout=timeout)
-                  if out:
-                      print(out, end="")
-                  sys.exit(proc.returncode)
-              except subprocess.TimeoutExpired:
-                  try:
-                      os.killpg(proc.pid, signal.SIGTERM)
-                  except ProcessLookupError:
-                      pass
-                  try:
-                      out, _ = proc.communicate(timeout=5)
-                  except subprocess.TimeoutExpired:
-                      try:
-                          os.killpg(proc.pid, signal.SIGKILL)
-                      except ProcessLookupError:
-                          pass
-                      out, _ = proc.communicate()
-                  if out:
-                      print(out, end="")
-                  print("\nTIMEOUT: %s exceeded %ss: %s" % (label, timeout, cmd))
-                  sys.exit(124)
+            - "-lc"
             - "{{ world.effective_quick_test_cmd }}"
-            - "{{ world.quick_test_timeout_seconds }}"
-            - quick gate
+          timeout: "{{ world.quick_test_timeout_seconds }}s"
           cwd: "{{ world.workdir }}"
         bind:
           last_job_id: job_id
@@ -331,51 +251,11 @@ states:
         id: full_verify_run
         background: true
         with:
-          cmd: python3
+          cmd: bash
           args:
-            - "-c"
-            - |
-              import os
-              import signal
-              import subprocess
-              import sys
-
-              cmd = sys.argv[1]
-              timeout = int(float(sys.argv[2]))
-              label = sys.argv[3]
-              print("bounded %s: %s (timeout %ss)" % (label, cmd, timeout), flush=True)
-              proc = subprocess.Popen(
-                  ["bash", "-lc", cmd],
-                  stdout=subprocess.PIPE,
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  start_new_session=True,
-              )
-              try:
-                  out, _ = proc.communicate(timeout=timeout)
-                  if out:
-                      print(out, end="")
-                  sys.exit(proc.returncode)
-              except subprocess.TimeoutExpired:
-                  try:
-                      os.killpg(proc.pid, signal.SIGTERM)
-                  except ProcessLookupError:
-                      pass
-                  try:
-                      out, _ = proc.communicate(timeout=5)
-                  except subprocess.TimeoutExpired:
-                      try:
-                          os.killpg(proc.pid, signal.SIGKILL)
-                      except ProcessLookupError:
-                          pass
-                      out, _ = proc.communicate()
-                  if out:
-                      print(out, end="")
-                  print("\nTIMEOUT: %s exceeded %ss: %s" % (label, timeout, cmd))
-                  sys.exit(124)
+            - "-lc"
             - "{{ world.test_cmd }}"
-            - "{{ world.full_test_timeout_seconds }}"
-            - full gate
+          timeout: "{{ world.full_test_timeout_seconds }}s"
           cwd: "{{ world.workdir }}"
         bind:
           last_job_id: job_id
