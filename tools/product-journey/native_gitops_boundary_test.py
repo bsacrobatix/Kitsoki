@@ -66,7 +66,7 @@ def main():
         docs_body = (
             "Use `autonomous_fix ticket_repo=<owner/repo> gh_agent_public_base_url=<url>` "
             "as the story-owned full loop through `kitsoki gitops autonomous-fix`; gh-agent "
-            "runs include independent-verify.md proof. Run --persona-autofix-smoke and "
+            "runs include independent-verify.md proof. Run --gate persona-autofix and "
             "persona_autofix_smoke gates.\n"
         )
         good_room = (

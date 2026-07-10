@@ -80,7 +80,7 @@ states:
         - target: .
           effects:
             - set:
-                dry_run: "{% if world.dry_run %}false{% else %}true{% endif %}"
+                dry_run: "{{ !world.dry_run }}"
       look:
         - target: .
       quit:

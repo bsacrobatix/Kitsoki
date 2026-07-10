@@ -3200,7 +3200,11 @@ def playback_scene_for_item(item: dict) -> Optional[dict]:
     return None
 
 
-def playback_deck_scenes(media_manifest: Optional[dict], limit: int = 6) -> list[dict]:
+def playback_deck_scenes(media_manifest: Optional[dict], limit: Optional[int] = None) -> list[dict]:
+    # validate_run_bundle's deck-playback-coverage check requires the deck to
+    # reference every media-manifest item marked playback=True, so this must
+    # emit a scene for each one (no truncation) unless a caller explicitly
+    # asks for a bounded preview via `limit`.
     if media_manifest is None:
         return []
     scenes = []
@@ -3210,7 +3214,7 @@ def playback_deck_scenes(media_manifest: Optional[dict], limit: int = 6) -> list
         scene = playback_scene_for_item(item)
         if scene is not None:
             scenes.append(scene)
-        if len(scenes) >= limit:
+        if limit is not None and len(scenes) >= limit:
             break
     return scenes
 
@@ -3449,10 +3453,47 @@ def capture_observe_capabilities(required_mcp: list[str], visual_surface: str, e
     return capabilities or ["session.status"]
 
 
+def leg_needs_live(leg: dict) -> bool:
+    """Deterministic proxy for "this leg's flow needs interpretive behavior a
+    cassette can't replay" — mirrors
+    stories/scenario-qa/scripts/plan_legs.star's `_needs_live` so the preview
+    path (`--transport-suite`) and the `check` legs it previews agree on when
+    a leg needs a live authorization note. `natural_utterances` (free-text
+    phrasing a cassette can't cover) is the strongest signal; a `harness`
+    hint containing "live" is the other. Preview legs always come from a
+    catalog scenario (there is no ad-hoc/free-text mode here), so unlike the
+    Starlark version there is no `mode == "adhoc"` fallback to mirror.
+    """
+    utterances = leg.get("natural_utterances", [])
+    if isinstance(utterances, list) and len(utterances) > 0:
+        return True
+    harness = leg.get("harness", "")
+    if isinstance(harness, str) and "live" in harness:
+        return True
+    return False
+
+
+def leg_live_authorization_note(leg: dict, live_profile: str) -> str:
+    """Mirrors plan_legs.star's `_live_authorization_note`: empty when the
+    leg doesn't need live drive, an authorized note when `live_profile` is
+    set, otherwise a warning that the leg will run replay-only and missing
+    cassettes will surface as degraded-evidence with a stated cause."""
+    transport = leg.get("transport", "")
+    if not leg_needs_live(leg):
+        return ""
+    if live_profile:
+        return f"leg {transport}: live drive authorized (profile={live_profile})."
+    return (
+        f"leg {transport}: needs `profile=<name>` for live drive — will run "
+        "replay-only; missing cassettes will be reported as degraded-evidence with cause."
+    )
+
+
 def build_transport_suite(
     scenarios: list[dict],
     transports: list[str],
     driver_manifest: Optional[dict] = None,
+    live_profile: str = "",
 ) -> dict:
     """Describe the deterministic scenario x transport plan without artifacts.
 
@@ -3466,6 +3507,7 @@ def build_transport_suite(
     requested = list(transports or TRANSPORT_IDS)
     scenario_rows = []
     all_legs = []
+    live_authorization_summary: list[str] = []
     skipped_total: dict[str, int] = {transport: 0 for transport in requested}
     for scenario in scenarios:
         contract = resolve_scenario_transports(scenario)
@@ -3484,6 +3526,9 @@ def build_transport_suite(
                 profile,
             )
             act_capabilities = capture_phase_capabilities(profile, "act", leg["required_mcp"]) or ["session.trace"]
+            live_authorization_note = leg_live_authorization_note(leg, live_profile)
+            if live_authorization_note and not live_profile:
+                live_authorization_summary.append(live_authorization_note)
             row = {
                 "leg_id": leg["leg_id"],
                 "scenario": scenario["id"],
@@ -3498,6 +3543,8 @@ def build_transport_suite(
                 "evidence": leg["evidence"],
                 "evidence_contract": contract_details,
                 "quality_gate": leg_quality_gate(scenario["id"], leg["evidence"], leg["transport"]),
+                "needs_live_hint": leg_needs_live(leg),
+                "live_authorization_note": live_authorization_note,
                 "entrypoints": {
                     "open": {
                         "capabilities": open_capabilities,
@@ -3560,6 +3607,8 @@ def build_transport_suite(
                 if count
             },
         },
+        "live_profile": live_profile,
+        "live_authorization_summary": live_authorization_summary,
         "scenarios": scenario_rows,
         "legs": all_legs,
     }
@@ -3574,10 +3623,19 @@ def render_transport_suite(suite: dict) -> str:
         f"- Requested transports: {', '.join(summary.get('requested_transports', []))}",
         f"- Planned transport checks: {summary.get('leg_count', 0)}",
         f"- Driver: {suite.get('driver', {}).get('id', '')}",
-        "",
-        "## Transport Profiles",
+        f"- Live profile: {suite.get('live_profile', '') or '(not set)'}",
         "",
     ]
+    live_authorization_summary = suite.get("live_authorization_summary", [])
+    if live_authorization_summary:
+        lines.extend(["## Live Authorization", ""])
+        for note in live_authorization_summary:
+            lines.append(f"- {note}")
+        lines.append("")
+    lines.extend([
+        "## Transport Profiles",
+        "",
+    ])
     for profile in suite.get("transport_profiles", []):
         lines.append(
             f"- `{profile.get('id', '')}` ({profile.get('label', '')}): "
@@ -3613,6 +3671,8 @@ def render_transport_suite(suite: dict) -> str:
                 f"- Act: {', '.join(entrypoints.get('act', {}).get('capabilities', []))}",
                 f"- Minimum evidence: {', '.join(leg.get('quality_gate', {}).get('minimum_evidence', []))}",
             ])
+            if leg.get("live_authorization_note"):
+                lines.append(f"- Live authorization: {leg['live_authorization_note']}")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -13913,27 +13973,129 @@ def report_paths(generated_at: str, report_arg: str, deck_arg: str, markdown_arg
     )
 
 
+def render_report_markdown(payload: dict) -> str:
+    lines = [
+        f"# {payload['title']}",
+        "",
+        f"- Program: {payload['program']}",
+        f"- Generated: {payload['generated_at']}",
+        f"- Catalog: `{payload['catalog']}`",
+        f"- Reference deck: `{payload['reference_deck']}`",
+        "",
+        payload["summary"],
+        "",
+        "## Targets",
+        "",
+    ]
+    for target in payload["targets"]:
+        lines.append(f"- `{target['id']}` ({target.get('stack', '')}): {target.get('status', '')} - {target.get('notes', '')}")
+    lines.extend([
+        "",
+        "## Perspectives",
+        "",
+    ])
+    for perspective in payload["perspectives"]:
+        lines.append(f"- `{perspective['id']}` ({perspective.get('owner', '')}): {perspective.get('status', '')} - {perspective.get('description', '')}")
+    lines.extend([
+        "",
+        "## Checks",
+        "",
+    ])
+    if payload["checks"]:
+        for target_id, check in payload["checks"].items():
+            lines.append(f"- `{target_id}`: {check.get('status', check)}")
+    else:
+        lines.append("- (not refreshed for this report; pass --run-checks to refresh local oracle evidence)")
+    lines.extend([
+        "",
+        "## Next steps",
+        "",
+    ])
+    for step in payload["next_steps"]:
+        lines.append(f"- [{step['status']}] {step['label']}: {step['detail']}")
+    return "\n".join(lines) + "\n"
+
+
+def render_report_deck(payload: dict) -> dict:
+    target_lines = [
+        f"{target['id']}: {target.get('status', '')} ({target.get('stack', '')})"
+        for target in payload["targets"]
+    ]
+    perspective_lines = [
+        f"{perspective['id']}: {perspective.get('status', '')} - owner {perspective.get('owner', '')}"
+        for perspective in payload["perspectives"]
+    ]
+    if payload["checks"]:
+        check_lines = [
+            f"{target_id}: {check.get('status', check)}"
+            for target_id, check in payload["checks"].items()
+        ]
+    else:
+        check_lines = ["Not refreshed for this report; pass --run-checks to refresh local oracle evidence."]
+    next_step_lines = [
+        f"[{step['status']}] {step['label']}: {step['detail']}"
+        for step in payload["next_steps"]
+    ]
+    return {
+        "meta": {
+            "mode": "pitch",
+            "title": payload["title"],
+            "phase": "product-journey-eval",
+            "resolution": {"width": 1920, "height": 1080},
+        },
+        "scenes": [
+            {
+                "type": "title",
+                "title": payload["title"],
+                "subtitle": payload["program"],
+                "narration": payload["summary"],
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Targets",
+                "title": f"{len(payload['targets'])} project lanes",
+                "body": "\n".join(target_lines) or "No targets in catalog.",
+                "narration": "Every project lane the catalog currently tracks, with its validation status.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Perspectives",
+                "title": f"{len(payload['perspectives'])} evaluator perspectives",
+                "body": "\n".join(perspective_lines) or "No perspectives in catalog.",
+                "narration": "The owning perspectives the catalog is evaluated from.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Checks",
+                "title": "Local oracle evidence",
+                "body": "\n".join(check_lines),
+                "narration": "Structured check results captured for this report, if --run-checks was requested.",
+            },
+            {
+                "type": "narrative",
+                "eyebrow": "Next steps",
+                "title": "Open follow-ups",
+                "body": "\n".join(next_step_lines) or "No open follow-ups.",
+                "narration": "Remaining and completed follow-up items tracked for this report.",
+            },
+        ],
+    }
+
+
 def write_report(catalog: dict, generated_at: str, report_path: Path, deck_path: Path, markdown_path: Path, run_checks: bool) -> None:
     payload = build_report_payload(catalog, generated_at, run_checks)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-    builder = ROOT / "tools" / "report-deck" / "deterministic_deck.py"
-    result = shell([
-        sys.executable,
-        str(builder),
-        "--kind",
-        "product-journey",
-        "--input",
-        str(report_path),
-        "--out",
-        str(deck_path),
-        "--markdown",
-        str(markdown_path),
-    ], ROOT)
-    if result.returncode != 0:
-        raise SystemExit(result.stdout + result.stderr)
-    print(result.stdout.strip())
+    deck_path.parent.mkdir(parents=True, exist_ok=True)
+    write_json(deck_path, render_report_deck(payload))
+
+    markdown_path.parent.mkdir(parents=True, exist_ok=True)
+    markdown_path.write_text(render_report_markdown(payload), encoding="utf-8")
+
+    print(f"Report: {report_path}")
+    print(f"Deck: {deck_path}")
+    print(f"Markdown: {markdown_path}")
 
 
 def prune_runs(keep: int, dry_run: bool) -> dict:
@@ -13942,13 +14104,23 @@ def prune_runs(keep: int, dry_run: bool) -> dict:
     Smoke iterations pile up hundreds of timestamped run dirs directly under
     .artifacts/product-journey/. This keeps anything whose name contains
     ``-final`` (curated keepers) plus the newest ``keep`` run dirs, and removes
-    the rest. The matrices/, dogfood/, target-proofs/, and eval/ subtrees are
-    never touched. Dry-run by default so callers see what would go before it
-    goes.
+    the rest. The matrices/, dogfood/, target-proofs/, eval/, marathon-smokes/,
+    and preflights/ subtrees are never touched — every non-run-bundle sibling
+    directory under ARTIFACT_ROOT (see MATRIX_ROOT/TARGET_PROOF_ROOT/
+    DOGFOOD_ROOT/PREFLIGHT_ROOT and the eval/ report root) must be listed here
+    or it silently gets swept up with the timestamped run dirs. Dry-run by
+    default so callers see what would go before it goes.
     """
     import shutil
 
-    protected_names = {"matrices", "dogfood", "target-proofs", "eval"}
+    protected_names = {
+        "matrices",
+        "dogfood",
+        "target-proofs",
+        "eval",
+        "marathon-smokes",
+        "preflights",
+    }
     run_dirs = [
         path
         for path in ARTIFACT_ROOT.iterdir()
@@ -14025,6 +14197,7 @@ def main() -> None:
         ),
     )
     parser.add_argument("--transport-suite", action="store_true", help="Preview scenario x transport checks without creating a run bundle")
+    parser.add_argument("--live-profile", default="", help="With --transport-suite, the explicit live backend profile authorizing live drive for legs that need it (natural_utterances/live harness); omit to preview the same replay-only warning `check` legs surface")
     parser.add_argument("--emit-matrix", action="store_true", help="Write a no-LLM 10-repo GitHub journey matrix")
     parser.add_argument("--dogfood-smoke", action="store_true", help="Deprecated; use --gate dogfood. Run a deterministic no-LLM matrix-to-rollup smoke and write review artifacts")
     parser.add_argument("--driver-replay-smoke", action="store_true", help="Deprecated; use --gate driver-replay. Run a deterministic no-LLM one-scenario driver replay smoke with cassette evidence")
@@ -14232,6 +14405,7 @@ def main() -> None:
             selected_scenarios,
             selected_transports,
             load_driver_manifest(args.driver or ""),
+            live_profile=args.live_profile,
         )
         if args.json_output:
             print(json.dumps(suite, sort_keys=True))
