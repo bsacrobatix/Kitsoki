@@ -5,7 +5,9 @@ fast-forward checks and receipt-to-candidate gate binding are available through
 Capsule CLI/MCP. The native `development` compatibility provider preserves the
 existing protected rebase/gate workflow. `publish` is now guarded behind an
 explicit remote publisher provider instead of local ref mutation. Conflict
-integration and the remote publish provider remain.
+plans now carry structured continuation tokens and required story inputs;
+integration-instance materialization, continuation apply, and the remote publish
+provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -185,6 +187,8 @@ operations.
 
 ## 2. Conflict and remote seams
 - [ ] 2.1 Create integration instances and structured conflict/continuation artifacts
+  - Shipped: diverged plans include `capsule-sync-continuation/v1` tokens plus required resolver/reviewer/validation inputs.
+  - Remaining: materialize managed integration instances and conflict file/tree artifacts.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
 - [ ] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
 - [ ] 2.4 Add production git/PR provider with separate read/external-write grants and secret-reference injection
