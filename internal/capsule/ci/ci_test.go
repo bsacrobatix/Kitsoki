@@ -189,6 +189,59 @@ func TestFileRunStoreListSkipsReceiptSidecars(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreIndexProjectsReceiptAndDigestSummary(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	job := artifactjob.Job{ID: "job", Status: artifactjob.StatusDone, Story: "stories/capsule-ci/app.yaml", WorkspaceInstanceID: "workspace-1"}
+	result := RunResult{
+		Job: job,
+		Envelope: executor.Envelope{
+			Digest:       "sha256:envelope",
+			SourceDigest: "sha256:source",
+			StoryDigest:  "sha256:story",
+			Environment:  environment.Lock{Digest: "sha256:env"},
+		},
+		Verdict: Verdict{Pipeline: "change", Outcome: "passed", PromotionEligible: true},
+	}
+	if err := store.Write(RunRecord{JobID: "job", Result: result, ReceiptID: "sha256:receipt", ReceiptVerification: "valid"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, ".capsules", "ci")
+	if err := os.WriteFile(filepath.Join(dir, "job.receipt.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "job.trace.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	index, err := store.Index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.Schema != RunIndexSchema || len(index.Runs) != 1 {
+		t.Fatalf("index %#v", index)
+	}
+	run := index.Runs[0]
+	if run.ReceiptID != "sha256:receipt" || run.ReceiptVerification != "valid" || !run.PromotionEligible {
+		t.Fatalf("receipt projection %#v", run)
+	}
+	if run.SourceDigest != "sha256:source" || run.StoryDigest != "sha256:story" || run.EnvironmentDigest != "sha256:env" || run.EnvelopeDigest != "sha256:envelope" {
+		t.Fatalf("digest projection %#v", run)
+	}
+	if run.TracePath != ".capsules/ci/job.trace.json" || run.ReceiptPath != ".capsules/ci/job.receipt.json" {
+		t.Fatalf("sidecar projection %#v", run)
+	}
+}
+
+func TestFileRunStoreIndexEmptyRunsSlice(t *testing.T) {
+	index, err := (FileRunStore{ProjectRoot: t.TempDir()}).Index()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.Runs == nil || len(index.Runs) != 0 {
+		t.Fatalf("runs %#v", index.Runs)
+	}
+}
+
 func TestFileRunStoreCancelParksOrRunningJob(t *testing.T) {
 	store := FileRunStore{ProjectRoot: t.TempDir()}
 	if err := store.Write(RunRecord{JobID: "job-cancel", Result: RunResult{Job: artifactjob.Job{ID: "job-cancel", Status: artifactjob.StatusAwaitingInput}, Verdict: Verdict{Outcome: "needs_input"}}}); err != nil {
