@@ -259,6 +259,7 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     enabled_tools = argv[argv.index("--tools") + 1]
     require("Claude argv permits only explicit strict MCP tools", enabled_tools.split(",") == list(live.CLAUDE_STRICT_MCP_TOOLS))
     require("Claude argv excludes generic shell/filesystem tools", not any(token in enabled_tools.lower() for token in ("bash", "host_run", "worktree", "vcs")))
+    check("Claude argv delimits variadic tools before prompt", argv[-2], "--")
     generated_config = json.loads(Path(request["runtime"]["mcp_config_path"]).read_text(encoding="utf-8"))
     strict_server = generated_config["mcpServers"]["kitsoki_strict"]
     check("generated MCP config launches strict Studio profile", strict_server["args"], ["run", "./cmd/kitsoki", "mcp", "--operating-profile", "strict", "--stories-dir", "./stories", "--db", request["runtime"]["db_path"]])
