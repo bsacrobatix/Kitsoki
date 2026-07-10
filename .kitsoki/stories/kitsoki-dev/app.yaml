@@ -211,7 +211,7 @@ world:
   # after picking a GitHub row, so downstream close-out knows the selected
   # ticket is remote. ticket_github_repo feeds the selector's GitHub section.
   ticket_repo:  { type: string, default: "" }
-  ticket_github_repo: { type: string, default: "origin" }
+  ticket_github_repo: { type: string, default: "constructorfabric/Kitsoki" }
   # Default local destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.

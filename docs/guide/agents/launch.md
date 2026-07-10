@@ -67,9 +67,37 @@ Story-backed launch uses `--app` plus `--agent`. The agent comes from that
 story's top-level `agents:` block and supplies the persona, cwd, tools, model,
 effort, and provider name.
 
-Freestanding launch omits `--app` and resolves `.codex/agents/<name>.toml` from
-the current project, or the file passed with `--agent-file`. The file supplies
-developer instructions, model, effort, and optional `[mcp_servers.*]` blocks.
+Freestanding launch omits `--app` and resolves an agent from the current
+project, or the file passed with `--agent-file`. Resolution is deterministic:
+`.kitsoki/agents/<name>.local.toml`, `.kitsoki/agents/<name>.toml`,
+`.codex/agents/<name>.local.toml`, `.codex/agents/<name>.toml`, then the same
+two `.codex/agents/` names under `~`. The file supplies developer instructions,
+model, effort, and optional `[mcp_servers.*]` blocks.
+
+Use `extends = "path/to/parent.toml"` to keep a community or project prompt
+managed while specializing it. A child may set
+`developer_instructions_append = "..."`; that text is appended to its resolved
+parent instructions. Child scalar fields and MCP servers override parent values
+by name. A cycle is rejected. Put a personal route in the ignored
+`.kitsoki/agents/<name>.local.toml`, not in the shared base file.
+
+For example, the Kitsoki project layer routes ordinary Kitsoki findings to
+`constructorfabric/Kitsoki`, while a developer-local layer can route their
+local dogfood handoffs to `bsacrobatix/Kitsoki`:
+
+```toml
+# .kitsoki/agents/kitsoki-mcp-driver.local.toml
+extends = "kitsoki-mcp-driver.toml"
+developer_instructions_append = """
+For my local findings, file with issue.create using sink \"github\" and repo
+\"bsacrobatix/Kitsoki\". Keep confirmed engine or Studio MCP issues at
+\"constructorfabric/Kitsoki\".
+"""
+```
+
+A `gears-rust` project can use the same pattern: route defects in its own
+`gears-dev` story to `bsacrobatix/gears-rust`, while routing a confirmed
+Kitsoki engine or Studio MCP defect to `constructorfabric/Kitsoki`.
 
 For freestanding Codex agents, `[mcp_servers.*]` blocks are materialized into
 the same `--mcp-config` shape Claude uses, then translated into Codex

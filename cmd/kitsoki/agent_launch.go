@@ -68,13 +68,15 @@ type agentLaunchPlan struct {
 }
 
 type standaloneCodexAgent struct {
-	Name                  string
-	Description           string
-	DeveloperInstructions string
-	Model                 string
-	Effort                string
-	SandboxMode           string
-	MCPServers            map[string]any
+	Name                        string
+	Description                 string
+	DeveloperInstructions       string
+	DeveloperInstructionsAppend string
+	Extends                     string
+	Model                       string
+	Effort                      string
+	SandboxMode                 string
+	MCPServers                  map[string]any
 }
 
 const (
@@ -814,10 +816,16 @@ func resolveStandaloneAgentFile(agentName, explicit string) (string, error) {
 		return filepath.Abs(explicit)
 	}
 	candidates := []string{
+		filepath.Join(".kitsoki", "agents", agentName+".local.toml"),
+		filepath.Join(".kitsoki", "agents", agentName+".toml"),
+		filepath.Join(".codex", "agents", agentName+".local.toml"),
 		filepath.Join(".codex", "agents", agentName+".toml"),
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		candidates = append(candidates, filepath.Join(home, ".codex", "agents", agentName+".toml"))
+		candidates = append(candidates,
+			filepath.Join(home, ".codex", "agents", agentName+".local.toml"),
+			filepath.Join(home, ".codex", "agents", agentName+".toml"),
+		)
 	}
 	for _, candidate := range candidates {
 		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
@@ -828,21 +836,126 @@ func resolveStandaloneAgentFile(agentName, explicit string) (string, error) {
 }
 
 func loadStandaloneCodexAgent(path string) (standaloneCodexAgent, error) {
-	raw, err := os.ReadFile(path)
+	return loadStandaloneCodexAgentChain(path, nil)
+}
+
+func loadStandaloneCodexAgentChain(path string, seen map[string]bool) (standaloneCodexAgent, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return standaloneCodexAgent{}, err
+	}
+	if seen == nil {
+		seen = map[string]bool{}
+	}
+	if seen[abs] {
+		return standaloneCodexAgent{}, fmt.Errorf("agent extends cycle at %s", abs)
+	}
+	seen[abs] = true
+	defer delete(seen, abs)
+	raw, err := os.ReadFile(abs)
 	if err != nil {
 		return standaloneCodexAgent{}, fmt.Errorf("read agent file: %w", err)
 	}
 	agent, err := parseStandaloneCodexAgentTOML(string(raw))
 	if err != nil {
-		return standaloneCodexAgent{}, fmt.Errorf("parse agent file %s: %w", path, err)
+		return standaloneCodexAgent{}, fmt.Errorf("parse agent file %s: %w", abs, err)
+	}
+	if strings.TrimSpace(agent.Extends) != "" {
+		parentPath := expandStandaloneAgentPath(agent.Extends, filepath.Dir(abs))
+		parent, parentErr := loadStandaloneCodexAgentChain(parentPath, seen)
+		if parentErr != nil {
+			return standaloneCodexAgent{}, fmt.Errorf("load parent agent %s: %w", parentPath, parentErr)
+		}
+		agent = mergeStandaloneCodexAgents(parent, agent)
 	}
 	if strings.TrimSpace(agent.DeveloperInstructions) == "" {
-		return standaloneCodexAgent{}, fmt.Errorf("agent file %s must set developer_instructions", path)
+		return standaloneCodexAgent{}, fmt.Errorf("agent file %s must set developer_instructions", abs)
 	}
 	if strings.TrimSpace(agent.Name) == "" {
-		agent.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		agent.Name = strings.TrimSuffix(strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs)), ".local")
 	}
 	return agent, nil
+}
+
+func expandStandaloneAgentPath(path, baseDir string) string {
+	path = os.ExpandEnv(strings.TrimSpace(path))
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(baseDir, path)
+	}
+	return filepath.Clean(path)
+}
+
+func mergeStandaloneCodexAgents(parent, child standaloneCodexAgent) standaloneCodexAgent {
+	merged := parent
+	if child.Name != "" {
+		merged.Name = child.Name
+	}
+	if child.Description != "" {
+		merged.Description = child.Description
+	}
+	if child.DeveloperInstructions != "" {
+		merged.DeveloperInstructions = child.DeveloperInstructions
+	}
+	if child.Model != "" {
+		merged.Model = child.Model
+	}
+	if child.Effort != "" {
+		merged.Effort = child.Effort
+	}
+	if child.SandboxMode != "" {
+		merged.SandboxMode = child.SandboxMode
+	}
+	if child.DeveloperInstructionsAppend != "" {
+		merged.DeveloperInstructions = strings.TrimSpace(merged.DeveloperInstructions) + "\n\n" + strings.TrimSpace(child.DeveloperInstructionsAppend)
+	}
+	merged.Extends = child.Extends
+	if parent.MCPServers != nil || child.MCPServers != nil {
+		merged.MCPServers = map[string]any{}
+		for name, server := range parent.MCPServers {
+			merged.MCPServers[name] = cloneStandaloneMCPServer(server)
+		}
+		for name, server := range child.MCPServers {
+			parentServer, hasParent := merged.MCPServers[name]
+			if hasParent {
+				merged.MCPServers[name] = mergeStandaloneMCPServer(parentServer, server)
+			} else {
+				merged.MCPServers[name] = cloneStandaloneMCPServer(server)
+			}
+		}
+	}
+	return merged
+}
+
+func cloneStandaloneMCPServer(server any) any {
+	fields, ok := server.(map[string]any)
+	if !ok {
+		return server
+	}
+	clone := make(map[string]any, len(fields))
+	for key, value := range fields {
+		clone[key] = value
+	}
+	return clone
+}
+
+func mergeStandaloneMCPServer(parent, child any) any {
+	merged, ok := cloneStandaloneMCPServer(parent).(map[string]any)
+	if !ok {
+		return cloneStandaloneMCPServer(child)
+	}
+	childFields, ok := child.(map[string]any)
+	if !ok {
+		return cloneStandaloneMCPServer(child)
+	}
+	for key, value := range childFields {
+		merged[key] = value
+	}
+	return merged
 }
 
 func parseStandaloneCodexAgentTOML(src string) (standaloneCodexAgent, error) {
@@ -905,6 +1018,10 @@ func parseStandaloneCodexAgentTOML(src string) (standaloneCodexAgent, error) {
 			agent.Description = parseLaunchTOMLString(val)
 		case "developer_instructions":
 			agent.DeveloperInstructions = parseLaunchTOMLString(val)
+		case "developer_instructions_append":
+			agent.DeveloperInstructionsAppend = parseLaunchTOMLString(val)
+		case "extends":
+			agent.Extends = parseLaunchTOMLString(val)
 		case "model":
 			agent.Model = parseLaunchTOMLString(val)
 		case "model_reasoning_effort":
