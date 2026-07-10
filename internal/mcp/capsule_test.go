@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
@@ -97,4 +99,69 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(contentText(applied)), &integrated))
 	require.Greater(t, integrated.Workspace.Generation, committedHandle.Workspace.Generation)
+}
+
+func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {
+	project := t.TempDir()
+	ciDir := filepath.Join(project, ".capsules", "ci")
+	require.NoError(t, os.MkdirAll(ciDir, 0o755))
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		job := string(rune('a' + i))
+		run := filepath.Join(ciDir, job+".run.json")
+		trace := filepath.Join(ciDir, job+".trace.json")
+		require.NoError(t, os.WriteFile(run, []byte(job), 0o644))
+		require.NoError(t, os.WriteFile(trace, []byte(job+" trace"), 0o644))
+		when := now.Add(time.Duration(i) * time.Minute)
+		require.NoError(t, os.Chtimes(run, when, when))
+		require.NoError(t, os.Chtimes(trace, when, when))
+	}
+	cacheDir := filepath.Join(project, ".capsules", "cache", "old")
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "blob"), []byte("cache"), 0o644))
+
+	manager := &control.Manager{Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{filepath.Join(project, ".capsules", "workspaces")}}}
+	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent", ProjectID: "fixture"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	cs := connectCapsule(ctx, t, srv)
+
+	planned, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.cleanup.plan", Arguments: map[string]any{"keep_runs": 1, "include_capsule_cache": true}})
+	require.NoError(t, err)
+	require.False(t, planned.IsError, contentText(planned))
+	require.NotContains(t, contentText(planned), project, "cleanup plan must not leak host paths")
+	var planBody struct {
+		Plan struct {
+			Schema     string `json:"schema"`
+			Project    string `json:"project"`
+			Candidates []struct {
+				Path string `json:"path"`
+			} `json:"candidates"`
+		} `json:"plan"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(planned)), &planBody))
+	require.Equal(t, "capsule-hygiene-plan/v1", planBody.Plan.Schema)
+	require.Equal(t, "fixture", planBody.Plan.Project)
+	require.Len(t, planBody.Plan.Candidates, 5)
+	for _, candidate := range planBody.Plan.Candidates {
+		require.False(t, filepath.IsAbs(candidate.Path), "candidate path should be project-relative: %s", candidate.Path)
+		require.True(t, strings.HasPrefix(candidate.Path, ".capsules/"), "candidate path should remain scoped: %s", candidate.Path)
+	}
+
+	denied, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.cleanup.apply", Arguments: map[string]any{"keep_runs": 1, "include_capsule_cache": true}})
+	require.NoError(t, err)
+	require.True(t, denied.IsError, "cleanup apply must require explicit cleanup effect")
+	require.FileExists(t, filepath.Join(ciDir, "a.run.json"))
+
+	manager.Grant.Effects = []string{"cleanup"}
+	allowed, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.cleanup.apply", Arguments: map[string]any{"keep_runs": 1, "include_capsule_cache": true}})
+	require.NoError(t, err)
+	require.False(t, allowed.IsError, contentText(allowed))
+	require.NotContains(t, contentText(allowed), project, "cleanup result must not leak host paths")
+	require.NoFileExists(t, filepath.Join(ciDir, "a.run.json"))
+	require.NoFileExists(t, filepath.Join(ciDir, "a.trace.json"))
+	require.NoFileExists(t, filepath.Join(ciDir, "b.run.json"))
+	require.NoFileExists(t, filepath.Join(ciDir, "b.trace.json"))
+	require.FileExists(t, filepath.Join(ciDir, "c.run.json"))
+	require.NoDirExists(t, cacheDir)
 }

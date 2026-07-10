@@ -13,6 +13,8 @@ The exposed effect families are intentionally distinct:
 
 - FS, declared execution, and local commit affect one managed workspace;
 - environment lock persistence requires `env_write`;
+- project-scoped disk hygiene planning is read-only, while applying cleanup
+  requires `cleanup` and returns only project-relative paths;
 - local reconciliation requires `local_reconcile` and uses a stable plan/apply
   digest, and may target only a branch granted at server startup; and
 - remote publication remains absent unless the server is started with a future
@@ -33,3 +35,9 @@ kitsoki capsule mcp --project /path/to/project --branch staging/local
 Omitting `--branch` still permits workspace and CI operations but denies all
 `capsule.sync.plan` calls. A required promotion gate additionally verifies the
 persisted receipt, its run projection, and its exact candidate source digest.
+
+`capsule.cleanup.plan` is available as a safe read-only operation for ongoing
+CI hygiene. `capsule.cleanup.apply` requires the startup `cleanup` effect and
+is limited to project Capsule state such as old `.capsules/ci` run sidecars and
+explicitly requested `.capsules/cache` entries. It does not clear host-global
+build caches; operators use the CLI for that broader maintenance path.

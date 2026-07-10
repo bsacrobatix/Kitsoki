@@ -3,11 +3,11 @@
 **Status:** v1 in progress. A local vertical slice now ships: scoped native
 workspaces/MCP, self+pinned sources, environment locks, story-native CI,
 canonical receipts, local ref plans, host/fake/configured-HTTPS remote
-executors, cleanup planning, and run-index status projection (see
-`docs/guide/development/capsule-ci.md`). Native lifecycle compatibility is now
-the agent-facing path; story workspace-contract migration, conflict
-continuations, production remote publication, container adoption, and full
-adoption remain below.
+executors, cleanup planning/apply, MCP-scoped hygiene, and run-index status
+projection (see `docs/guide/development/capsule-ci.md`). Native lifecycle
+compatibility is now the agent-facing path; story workspace-contract
+migration, conflict continuations, production remote publication, container
+adoption, and full adoption remain below.
 **Kind:**   epic
 **Slices:** 5 (all have partial substrate; none is fully retired)
 
