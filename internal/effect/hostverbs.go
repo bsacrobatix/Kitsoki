@@ -213,6 +213,23 @@ var builtinVerbTable = map[string]verbEffect{
 			"project":      {class: Read, deterministic: true},
 			"apply":        {class: Write, deterministic: true},
 			"presentation": {class: Read, deterministic: true},
+			"propose":      {class: Write, deterministic: true},
+			"authorize":    {class: Write, deterministic: true},
+			"withdraw":     {class: Write, deterministic: true},
+		},
+	},
+
+	// host.demo — mockup/demo packet pipeline (create-mockup.mjs,
+	// record-tour.mjs, demo-doctor.mjs) exec'd via a resolved script root.
+	// create writes generated mockup assets deterministically from its
+	// manifest; record spawns a live browser capture (timing-dependent
+	// output); doctor only reads artifacts and reports.
+	"host.demo": {
+		class: Write, deterministic: false, // fallback for an unrecognised op
+		ops: map[string]opEffect{
+			"create": {class: Write, deterministic: true},
+			"record": {class: Write, deterministic: false},
+			"doctor": {class: Read, deterministic: true},
 		},
 	},
 }
