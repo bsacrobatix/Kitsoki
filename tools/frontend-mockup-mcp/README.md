@@ -17,6 +17,8 @@ The server exposes:
   later to render a demo video.
 - `mockup_demo_doctor` and `mockup_record_tour` (below) to validate and
   refresh a mockup → slidey deck demo packet, driven by a demo manifest.
+- `mockup_create` (below) to generate a self-contained mockup from a scenario
+  spec instead of hand-editing HTML.
 - `mockup_close` to end the local browser session.
 
 Stagehand LLM calls are routed through `kitsoki agent ask` using
@@ -115,8 +117,94 @@ loudly on any flag; finish by running demo-doctor and propagating its
 failure. Exits 0 with a JSON summary (`{ ok, tourSet, dwellOverrides,
 doctor }`) on success.
 
+The `slidey capture --tours` step can run for minutes (browser launch plus
+one capture per tour). Its child stdout/stderr are streamed straight through
+to `record-tour.mjs`'s own **stderr** as they're written, so a healthy run and
+a hung one are distinguishable by watching stderr live; the process's stdout
+stays reserved for the final JSON summary, so piping/parsing stdout (e.g. from
+`mockup_record_tour`, or a subprocess caller) is unaffected.
+
 The tour<->scene matching and slidey shellout helpers are shared between both
 scripts (and the MCP tools) in `lib/demo-manifest.mjs`.
+
+## `create-mockup`
+
+```
+node scripts/create-mockup.mjs <scenario.mockup.json> <out.html> [--manifest] [--renderer <renderer.js>]
+```
+
+(also exposed as MCP tool `mockup_create`) — contract §7 item 2. Generates a
+fully self-contained mockup HTML from a **scenario spec**, killing the
+"mockup states are hand-edited code" friction: five stable zones (rail /
+intake / graph / inspector / timeline) with stable `data-testid`s, a
+`const states = {...}` data block wrapped in refreshable
+`<!-- mockup:states:begin/end -->` markers, and the
+`window.storyboard.setStep(id)` contract the rest of this tool (and
+demo-doctor's states check) already relies on.
+
+### Scenario spec (`*.mockup.json`, version 1)
+
+```json
+{
+  "version": 1,
+  "title": "Portal control room",
+  "tagline": "optional header subtitle",
+  "zones": {
+    "rail": { "heading": "Scenarios", "typeHeading": "Types", "scenarios": [["Name", "Sub"]], "types": ["segment", "persona"] },
+    "intake": { "heading": "Intake", "fields": ["Decision", "Claim", "Constraint"] },
+    "graph": { "projection": "graph-projection.json" },
+    "inspector": { "heading": "Inspector", "evidenceHeading": "Evidence" },
+    "timeline": { "heading": "Timeline" }
+  },
+  "states": {
+    "open": {
+      "group": "compliance",
+      "rail": { "active": 0, "decision": "...", "detail": "..." },
+      "intake": ["value 1", "value 2", "value 3"],
+      "graph": { "title": "...", "sub": "...", "state": "<graph-projection state/graph id>" },
+      "inspector": {
+        "headline": "...", "meaning": "...",
+        "metrics": [["label", "value"]],
+        "evidence": [["green|red|", "text", "meta"]],
+        "action": "..."
+      },
+      "timeline": { "steps": ["Step 1", "Step 2"], "done": 0 }
+    }
+  }
+}
+```
+
+- `zones` declares each zone's static shape (headings, the rail's scenario/type
+  lists, intake field labels, an optional `graph.projection` path resolved
+  against the scenario file's directory). `states.<id>` declares each state's
+  per-zone content -- the generated `render(key)` only ever touches
+  `document.getElementById(id).textContent`/`.innerHTML` and
+  `document.body.setAttribute(...)`, so it stays exercisable by a tiny
+  in-memory DOM stub in tests without a real browser.
+- `states.<id>.group` (optional) buckets states for `--manifest`'s one-tour
+  -per-group output; defaults to the rail scenario name at `rail.active`, or
+  `"tour"` if no rail is configured.
+- Graph wiring: if `zones.graph.projection` is set, either pass `--renderer
+  <renderer.js>` (embeds that file directly -- no slidey dependency; what
+  tests use) or let it resolve a slidey checkout via the SAME chain as the
+  demo manifest's `slidey` field (scenario's own `slidey` field → `SLIDEY_SRC`
+  env → `~/code/slidey`) and shell out to that checkout's own
+  `tools/graph-projection-sync.js` to inject the renderer + data blocks --
+  keeping the renderer's source of truth in slidey, not duplicated here.
+  Omitting `zones.graph.projection` entirely skips graph wiring; the mockup's
+  `drawGraph()` becomes a no-op.
+
+### `--manifest`
+
+Co-emits a starter `*.demo.json` manifest (schema above), one starter tour
+JSON per state group (each step's `id` is the state key, so
+`window.storyboard.setStep('<key>')` before-evals and deck narration
+`chapter` ids line up automatically), and a starter slidey deck -- with small
+default dwells (2500ms; override with `--dwell-ms`) so a first capture is
+fast. This makes `create-mockup` → `record-tour` → `demo-doctor` a closed
+loop with no hand-editing: `demo-doctor`'s states/deck-paths checks pass the
+moment `--manifest` is emitted, and freshness/chapters/estimate pass once
+`record-tour.mjs` has captured clips against the real target.
 
 Run `npm test` for the hermetic (no real slidey, no browser, no LLM) fixture
 suite in `test/`.
