@@ -76,7 +76,21 @@ func Apply(rootPath string, changesetID NodeID, dryRun bool) (*ApplyResult, erro
 		return nil, fmt.Errorf("graph apply: copy scratch tree: %w", err)
 	}
 
-	changedFiles, err := applyOperations(cat, cs.Operations, scratchRoot)
+	ops := cs.Operations
+	if !dryRun {
+		// Mark the changeset itself "notified" in the same commit as its
+		// operations (§3.3: "apply marks notified in the same commit" —
+		// today an applied changeset stayed "authorized", re-appliable, and
+		// a review queue couldn't tell applied from pending).
+		ops = append(append([]Operation{}, cs.Operations...), Operation{
+			Kind: OpModified,
+			Node: changesetID,
+			Changes: []FieldChange{
+				{Path: []string{"status"}, Before: ChangesetStatusAuthorized, After: ChangesetStatusNotified},
+			},
+		})
+	}
+	changedFiles, err := applyOperations(cat, ops, scratchRoot)
 	if err != nil {
 		return &ApplyResult{RejectReasons: []string{err.Error()}}, nil
 	}
