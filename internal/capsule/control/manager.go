@@ -113,6 +113,25 @@ func (m *Manager) Status(ctx context.Context, h Handle) (Instance, error) {
 	return in, nil
 }
 
+// List returns sanitized instance metadata; Instance.Path is intentionally
+// omitted from its JSON representation and remains manager authority.
+func (m *Manager) List(ctx context.Context) ([]Instance, error) {
+	if err := m.ready(); err != nil {
+		return nil, err
+	}
+	return m.Instances.List(ctx)
+}
+
+func (m *Manager) Definition(ctx context.Context, id string) (Definition, error) {
+	if err := m.ready(); err != nil {
+		return Definition{}, err
+	}
+	if !m.Grant.Allows("definition", id) {
+		return Definition{}, fmt.Errorf("%w: definition %q", ErrDenied, id)
+	}
+	return m.Definitions.Get(ctx, id)
+}
+
 func (m *Manager) Close(ctx context.Context, h Handle, owner string) error {
 	in, err := m.Status(ctx, h)
 	if err != nil {

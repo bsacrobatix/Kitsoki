@@ -290,11 +290,12 @@ func (s FileInstanceStore) Get(_ context.Context, id string) (Instance, error) {
 	if err != nil {
 		return Instance{}, err
 	}
-	var in Instance
-	if err := json.Unmarshal(raw, &in); err != nil {
+	var disk diskInstance
+	if err := json.Unmarshal(raw, &disk); err != nil {
 		return Instance{}, fmt.Errorf("capsule control: parse instance %q: %w", id, err)
 	}
-	return in, nil
+	disk.Instance.Path = disk.Path
+	return disk.Instance, nil
 }
 func (s FileInstanceStore) List(ctx context.Context) ([]Instance, error) {
 	dir := s.dir()
@@ -346,7 +347,7 @@ func (s FileInstanceStore) write(in Instance) error {
 	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
 		return err
 	}
-	raw, err := json.MarshalIndent(in, "", "  ")
+	raw, err := json.MarshalIndent(diskInstance{Instance: in, Path: in.Path}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -355,4 +356,12 @@ func (s FileInstanceStore) write(in Instance) error {
 		return err
 	}
 	return os.Rename(tmp, s.path(in.ID))
+}
+
+// diskInstance carries the machine-local path in the manager-owned index. The
+// public Instance JSON deliberately omits it; the disk index is not an MCP/API
+// response and must retain it to survive a process restart.
+type diskInstance struct {
+	Instance
+	Path string `json:"path"`
 }
