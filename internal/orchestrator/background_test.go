@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/clock"
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/jobs"
@@ -17,6 +18,60 @@ import (
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 )
+
+func TestTimeoutCancelJobStopsBackgroundWork(t *testing.T) {
+	def := &app.AppDef{
+		App:     app.AppMeta{ID: "timeout-cancel-job"},
+		Root:    "init",
+		Hosts:   []string{"host.test.block"},
+		World:   map[string]app.VarDef{"last_job_id": {Type: "string", Default: ""}},
+		Intents: map[string]app.Intent{"enter": {Title: "Enter"}},
+		States: map[string]*app.State{
+			"init": {View: app.LegacyView("init"), On: map[string][]app.Transition{"enter": {{Target: "working"}}}},
+			"working": {
+				View:    app.LegacyView("working"),
+				Timeout: &app.TimeoutDef{After: "1s", Target: "timed_out", CancelJob: true},
+				OnEnter: []app.Effect{{Invoke: "host.test.block", Background: true, Bind: map[string]string{"last_job_id": "job_id"}}},
+			},
+			"timed_out": {Terminal: true, View: app.LegacyView("timed out")},
+		},
+	}
+	m, err := machine.New(def)
+	require.NoError(t, err)
+	s, err := store.OpenMemory()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	jobStore, err := jobs.NewJobStore(s.DB())
+	require.NoError(t, err)
+	sched := jobs.NewScheduler(jobStore)
+	reg := host.NewRegistry()
+	started := make(chan struct{})
+	reg.Register("host.test.block", func(ctx context.Context, _ map[string]any) (host.Result, error) {
+		close(started)
+		<-ctx.Done()
+		return host.Result{}, ctx.Err()
+	})
+	clk := clock.NewFake(time.Unix(0, 0))
+	orch := orchestrator.New(def, m, s, &staticHarness{intentName: "enter"}, orchestrator.WithClock(clk), orchestrator.WithHostRegistry(reg), orchestrator.WithScheduler(sched), orchestrator.WithJobStore(jobStore))
+	sid, err := orch.NewSession(context.Background())
+	require.NoError(t, err)
+	_, err = orch.Turn(context.Background(), sid, "enter")
+	require.NoError(t, err)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background job did not start")
+	}
+	journey, err := orch.LoadJourney(sid)
+	require.NoError(t, err)
+	jobID, _ := journey.World.Vars["last_job_id"].(string)
+	require.NotEmpty(t, jobID)
+	clk.Advance(2 * time.Second)
+	require.Eventually(t, func() bool {
+		job, found := sched.Get(jobID)
+		return found && job.Status == jobs.JobCancelled
+	}, time.Second, time.Millisecond, "timeout must cancel the running background job")
+}
 
 // TestBackgroundJobEndToEnd verifies the full background-job lifecycle:
 //  1. A Turn that transitions INTO "lobby" fires lobby's on_enter: background:
