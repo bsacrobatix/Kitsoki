@@ -23,6 +23,9 @@ import (
 // Args (from the effect's with: block):
 //   - script (string, required): path to the .star file. Resolved to an absolute
 //     path by the loader at load time, so by dispatch it is absolute.
+//   - function (string, optional): exported function to call. Defaults to
+//     main; direct CLI and JSON-RPC callers may use this for provider-style
+//     scripts without wrapping every operation in a main function.
 //   - inputs (object, optional): the named inputs exposed to the script as
 //     ctx.inputs.<name>. Validated against the sidecar's inputs: block.
 //
@@ -208,14 +211,25 @@ func StarlarkRunHandler(ctx context.Context, args map[string]any) (Result, error
 		runCtx = starlarkhost.WithInspector(runCtx, starlarkhost.NewProductionInspector(root))
 	}
 
-	res, runErr := starlarkhost.Run(runCtx, starlarkhost.Params{
+	function, _ := args["function"].(string)
+	if function == "" {
+		function = "main"
+	}
+	params := starlarkhost.Params{
 		Script:       scriptPath,
 		Source:       src,
 		Sidecar:      sidecar,
 		Inputs:       inputs,
 		World:        worldSnapshot,
 		Capabilities: capabilities,
-	})
+	}
+	var res *starlarkhost.Result
+	var runErr error
+	if function == "main" {
+		res, runErr = starlarkhost.Run(runCtx, params)
+	} else {
+		res, runErr = starlarkhost.RunFunction(runCtx, params, function)
+	}
 	if runErr != nil {
 		if msg, isDomain := starlarkhost.AsDomainError(runErr); isDomain {
 			return Result{Error: fmt.Sprintf("host.starlark.run: %s", msg)}, nil

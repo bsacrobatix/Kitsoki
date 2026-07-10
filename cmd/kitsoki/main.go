@@ -170,6 +170,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(promptsCmd())
 	root.AddCommand(agentCmd())
 	root.AddCommand(agentServeCmd())
+	root.AddCommand(starlarkCmd())
 	root.AddCommand(migrateAgentCmd())
 	root.AddCommand(cassetteCmd())
 	root.AddCommand(evalCmd())

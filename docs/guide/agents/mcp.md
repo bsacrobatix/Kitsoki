@@ -17,11 +17,41 @@ page is the operational path.
 | Let a model edit code without Bash, Python, Node, or editor tools | `kitsoki mcp-codeact` | The model calls one `codeact_eval` tool; Kitsoki runs capability-scoped Starlark snippets. |
 | Launch a preconfigured Claude/Codex/Copilot agent | `kitsoki agent launch` | It resolves agent files, story `agents:`, profiles, MCP attachments, launch policy, CodeAct mode, and the backend argv. |
 | Make a deterministic story call from a script | `kitsoki agent <verb>` or `agent-serve` | Direct CLI/JSON-RPC access to `host.agent.*`; see [`cli.md`](cli.md). |
+| Run a story-provided deterministic script | `kitsoki starlark run` or `agent-serve` method `starlark.run` | Uses the script's `.star.yaml` sidecar and the same capability sandbox as a story effect. |
 
 Most Codex/Claude operator work starts with the Studio MCP. Use CodeAct when
 the task needs code actions but the model should not receive a general shell.
 Use `kitsoki agent launch` when you want Kitsoki to assemble the right backend
 command rather than hand-maintain each client's MCP flags.
+
+## Run Story Starlark Directly
+
+The direct runner is useful for a deterministic helper, a shell-free CI step,
+or a JSON-RPC client that needs the exact story implementation without starting
+an interactive session:
+
+```sh
+kitsoki starlark run stories/scenario-qa/scripts/plan_legs.star \
+  --inputs '{"run_dir":".artifacts/run"}' \
+  --world @world.json \
+  --capabilities '{"fs":{"read":[".artifacts/**"]}}'
+```
+
+`--inputs`, `--world`, and `--capabilities` accept inline JSON, `@file.json`,
+or `-` for stdin. The runner requires the sibling `.star.yaml` sidecar and
+prints the returned output object as JSON. `--function name` calls an exported
+function other than `main(ctx)`.
+
+The same request is available over the newline-delimited Unix-socket daemon:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"starlark.run","params":{"script":"/repo/scripts/plan_legs.star","inputs":{"run_dir":".artifacts/run"},"capabilities":{"fs":{"read":[".artifacts/**"]}}}}
+```
+
+This is the preferred replacement for a story helper launched through a Python
+shim: move deterministic logic into a `.star` script, grant only the required
+capabilities, and exercise it with the same flow/cassette path used in the
+story.
 
 ## Attach Studio MCP
 
