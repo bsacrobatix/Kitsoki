@@ -683,6 +683,10 @@ FIX_TESTS_QUICK_TEST_CMD ?= go test -short ./...
 FIX_TESTS_QUICK_TIMEOUT_SECONDS ?= 300
 FIX_TESTS_FULL_TIMEOUT_SECONDS ?= 1200
 FIX_TESTS_MAX_CYCLES ?= 3
+# This is only the outer session envelope. Agent liveness is governed by the
+# story's much shorter sandbox activity_timeout, so a real repair cannot sit
+# silently for this whole period.
+FIX_TESTS_SESSION_DRAIN_TIMEOUT ?= 90m
 fix-tests:
 	@command -v jq >/dev/null 2>&1 || { echo "error: jq is required for 'make fix-tests'" >&2; exit 1; }
 	@go build -o ./.kitsoki-fixtests $(PKG)
@@ -704,7 +708,7 @@ fix-tests:
 	 echo "fix-tests: quick gate: $(FIX_TESTS_QUICK_TEST_CMD) ($(FIX_TESTS_QUICK_TIMEOUT_SECONDS)s timeout)"; \
 	 echo "fix-tests: full gate: $(FIX_TESTS_TEST_CMD) ($(FIX_TESTS_FULL_TIMEOUT_SECONDS)s timeout)"; \
 	 echo "fix-tests: auto-fixing with claude (sonnet) — this may take a while…"; \
-	 out=$$(./.kitsoki-fixtests session continue --app $(FIX_TESTS_APP) --db "$$db" --id "$$sid" --intent start --mode one-shot --slots "$$slots"); \
+	 out=$$(./.kitsoki-fixtests session continue --app $(FIX_TESTS_APP) --db "$$db" --id "$$sid" --intent start --mode one-shot --drain-timeout "$(FIX_TESTS_SESSION_DRAIN_TIMEOUT)" --slots "$$slots"); \
 	 state=$$(printf '%s' "$$out" | jq -r .new_state); \
 	 echo; echo "fix-tests: final state = $$state"; \
 	 report=$$(find "$$report_dir" -maxdepth 1 -name 'report-*.md' -newer "$$marker" -print 2>/dev/null | head -1); \
