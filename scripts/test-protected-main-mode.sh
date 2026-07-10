@@ -237,6 +237,8 @@ git -C "$staging_repo/.capsules/staging/local" switch -q -c staging/local main
 printf '%s\n' staged >"$staging_repo/.capsules/staging/local/staged.txt"
 git -C "$staging_repo/.capsules/staging/local" add staged.txt
 git -C "$staging_repo/.capsules/staging/local" commit -q -m "staged change"
+git -C "$staging_repo" fetch -q "$staging_repo/.capsules/staging/local" staging/local:refs/heads/staging-candidate
+git -C "$staging_repo" update-ref refs/heads/staging/local "$(git -C "$staging_repo/.capsules/staging/local" rev-parse HEAD)"
 (
   cd "$staging_repo"
   scripts/merge-to-main.sh >"$tmp/staging.out"
@@ -246,6 +248,55 @@ assert_contains "$tmp/staging.out" "main ->"
   { echo "default staging gate did not run" >&2; exit 1; }
 [ "$(cat "$staging_repo/staged.txt")" = "staged" ] ||
   { echo "staging promotion did not update main" >&2; exit 1; }
+
+staging_race_repo="$tmp/staging-race-repo"
+git_init "$staging_race_repo"
+mkdir -p "$staging_race_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$staging_race_repo/scripts/merge-to-main.sh"
+chmod +x "$staging_race_repo/scripts/merge-to-main.sh"
+git -C "$staging_race_repo" add scripts/merge-to-main.sh
+git -C "$staging_race_repo" commit -q -m "add merge helper"
+commit_file "$staging_race_repo" base.txt base
+git -C "$staging_race_repo" branch -M main
+git -C "$staging_race_repo" branch staging/local
+mkdir -p "$staging_race_repo/.capsules/staging"
+git -C "$staging_race_repo" clone --no-local "$staging_race_repo" "$staging_race_repo/.capsules/staging/local" >/dev/null
+git -C "$staging_race_repo/.capsules/staging/local" remote rename origin source
+git -C "$staging_race_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$staging_race_repo/.capsules/staging/local" config user.email "test@example.invalid"
+touch "$staging_race_repo/.capsules/staging/local/.kitsoki-capsule"
+git -C "$staging_race_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+printf '%s\n' staged >"$staging_race_repo/.capsules/staging/local/staged.txt"
+git -C "$staging_race_repo/.capsules/staging/local" add staged.txt
+git -C "$staging_race_repo/.capsules/staging/local" commit -q -m "staged change"
+staging_snapshot="$(git -C "$staging_race_repo/.capsules/staging/local" rev-parse HEAD)"
+git -C "$staging_race_repo" fetch -q "$staging_race_repo/.capsules/staging/local" staging/local:refs/heads/staging-candidate
+git -C "$staging_race_repo" update-ref refs/heads/staging/local "$staging_snapshot"
+
+staging_advancer="$tmp/staging-advancer"
+git -C "$staging_race_repo" clone --no-local "$staging_race_repo" "$staging_advancer" >/dev/null
+git -C "$staging_advancer" config user.name "Test User"
+git -C "$staging_advancer" config user.email "test@example.invalid"
+git -C "$staging_advancer" switch -q -c staging/local origin/staging/local
+printf '%s\n' concurrent >"$staging_advancer/concurrent.txt"
+git -C "$staging_advancer" add concurrent.txt
+git -C "$staging_advancer" commit -q -m "concurrent staging advance"
+concurrent_staging="$(git -C "$staging_advancer" rev-parse HEAD)"
+git -C "$staging_race_repo" fetch -q "$staging_advancer" HEAD:refs/heads/staging-race-advance
+main_before_staging_race="$(git -C "$staging_race_repo" rev-parse main)"
+set +e
+(
+  cd "$staging_race_repo"
+  scripts/merge-to-main.sh --gate "git -C '$staging_race_repo' update-ref refs/heads/staging/local $concurrent_staging"
+) >"$tmp/staging-race.out" 2>&1
+staging_race_status=$?
+set -e
+[ "$staging_race_status" -ne 0 ] || { echo "staging race promotion should fail" >&2; exit 1; }
+assert_contains "$tmp/staging-race.out" "staging/local advanced during promotion gate"
+[ "$(git -C "$staging_race_repo" rev-parse main)" = "$main_before_staging_race" ] ||
+  { echo "staging race advanced main" >&2; exit 1; }
+[ "$(git -C "$staging_race_repo" rev-parse staging/local)" = "$concurrent_staging" ] ||
+  { echo "staging race clobbered concurrent staging advancement" >&2; exit 1; }
 
 race_repo="$tmp/race-repo"
 git_init "$race_repo"

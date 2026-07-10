@@ -64,6 +64,9 @@ goal_dir=""
 change_id=""
 goal_work=""
 goal_script=""
+staging_snapshot=""
+source_snapshot=""
+source_result=""
 
 usage() {
   cat >&2 <<EOF
@@ -194,6 +197,21 @@ if [ -n "$source_dir" ]; then
     echo "error: source dir $source_dir is on $source_branch, expected $branch" >&2
     exit 1
   fi
+  # A staging capsule is a snapshot of the primary staging ref, not an
+  # independent promotion source. Capture both ends before any potentially
+  # long-running rebase or gate so work merged into staging while the gate is
+  # running cannot be overwritten or accidentally promoted.
+  if [ "$branch" = "$DEFAULT_BRANCH" ]; then
+    staging_snapshot="$(git rev-parse --verify "$DEFAULT_BRANCH")" || {
+      echo "error: primary checkout has no $DEFAULT_BRANCH ref" >&2
+      exit 1
+    }
+    source_snapshot="$(git -C "$source_dir" rev-parse --verify HEAD)"
+    if [ "$source_snapshot" != "$staging_snapshot" ]; then
+      echo "error: staging capsule is stale: $source_dir is at $source_snapshot, primary $DEFAULT_BRANCH is at $staging_snapshot; refresh staging before promotion" >&2
+      exit 1
+    fi
+  fi
   source_dirty="$(git -C "$source_dir" status --porcelain --untracked-files=all | grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' || true)"
   if [ -n "$source_dirty" ]; then
     echo "error: source dir has uncommitted changes: $source_dir" >&2
@@ -214,13 +232,32 @@ if [ -n "$source_dir" ]; then
     (cd "$source_dir" && sh -c "$gate")
   fi
 
+  source_result="$(git -C "$source_dir" rev-parse --verify HEAD)"
+  if [ "$branch" = "$DEFAULT_BRANCH" ] && ! git -C "$source_dir" merge-base --is-ancestor "$source_snapshot" "$source_result"; then
+    echo "error: staging capsule changed incompatibly during rebase or gate: result $source_result does not contain source snapshot $source_snapshot" >&2
+    exit 1
+  fi
+
   import_branch="capsule/promote-$(safe_ref_fragment "$branch")"
   if git rev-parse --verify --quiet "$import_branch" >/dev/null; then
     git branch -D "$import_branch" >/dev/null
   fi
-  git fetch "$source_dir" "$branch:refs/heads/$import_branch"
+  # Fetch the exact post-gate object, rather than the moving branch name.
+  git fetch "$source_dir" "$source_result:refs/heads/$import_branch"
   if [ "$branch" = "$DEFAULT_BRANCH" ]; then
-    git fetch "$source_dir" "+$branch:refs/heads/$branch"
+    # This is the compare-and-swap. Do not use a force fetch here: it would
+    # overwrite staging work that arrived while the gate was running.
+    if ! git update-ref "refs/heads/$DEFAULT_BRANCH" "$source_result" "$staging_snapshot"; then
+      current_staging="$(git rev-parse --verify "$DEFAULT_BRANCH" 2>/dev/null || true)"
+      echo "error: $DEFAULT_BRANCH advanced during promotion gate (expected $staging_snapshot, found ${current_staging:-missing}); main was not changed" >&2
+      git branch -D "$import_branch" >/dev/null 2>&1 || true
+      exit 1
+    fi
+    if [ "$(git rev-parse --verify "$DEFAULT_BRANCH")" != "$source_result" ]; then
+      echo "error: $DEFAULT_BRANCH changed before main advancement; main was not changed" >&2
+      git branch -D "$import_branch" >/dev/null 2>&1 || true
+      exit 1
+    fi
   fi
   branch="$import_branch"
 elif [ "$force" != "1" ]; then
@@ -352,6 +389,17 @@ done
 printf '%s\n' "$files" | while IFS= read -r f; do
   [ -e "$f" ] && chmod u+w "$f" || true
 done
+
+# The update-ref above prevents an in-gate staging overwrite. Check again at
+# the last possible point so a later concurrent staging change cannot be
+# promoted under the wrong receipt.
+if [ -n "$staging_snapshot" ]; then
+  current_staging="$(git rev-parse --verify "$DEFAULT_BRANCH" 2>/dev/null || true)"
+  if [ "$current_staging" != "$source_result" ]; then
+    echo "error: $DEFAULT_BRANCH changed before main advancement (expected $source_result, found ${current_staging:-missing}); main was not changed" >&2
+    exit 1
+  fi
+fi
 
 merge_out=""
 set +e
