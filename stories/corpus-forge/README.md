@@ -6,9 +6,11 @@ selects them deterministically, independently proves RED at `baseline_ref` and
 GREEN at `fix_ref`, and freezes a `corpus-receipt.v1` record. It is intended for
 any Kitsoki story developer—not only the Kitsoki repository.
 
-It has no Python, shell, LLM, or network execution path. The only execution
-seam is an injected `host.corpus.prove` handler backed by a
-`corpusproof.Executor`; a missing executor fails closed. Candidate supplied
+Its story logic has no Python, shell, LLM, or network execution path. A
+production runtime executes only the declared argv oracle through its explicit
+network-denying sandbox; the only execution seam is an injected
+`host.corpus.prove` handler backed by a `corpusproof.Executor`, and a missing
+executor fails closed. Candidate supplied
 `verified_red` and `verified_green` fields are ignored and cannot admit a task.
 
 ## Lifecycle
