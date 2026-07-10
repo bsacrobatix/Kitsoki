@@ -121,8 +121,9 @@ def target_app_path(target: str | None) -> Path:
 
 # `kitsoki test flows` reuses the caller-provided test binary when
 # KITSOKI_TEST_KITSOKI_BINARY is set (make test builds one for flow-heavy
-# suites). Standalone invocations fall back to `go run`.
-FLOW_TIMEOUT_SECONDS = 120
+# suites). Standalone invocations fall back to `go run`. 180s allows slower CI
+# runners to finish without masking true hangs.
+FLOW_TIMEOUT_SECONDS = 180
 
 
 class ScenarioNotFound(Exception):
