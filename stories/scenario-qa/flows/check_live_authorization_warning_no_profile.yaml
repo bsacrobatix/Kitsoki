@@ -11,9 +11,13 @@
 # for REAL against a driver-plan.json fixture served by
 # starlark_inspect_cassette, exercising the actual
 # _needs_live/_live_authorization_note computation rather than a stubbed
-# stand-in. transport=all (2 legs, both carrying natural_utterances) so the
-# loop pauses at `recording` after leg 0 without reaching build_report/the
-# deck step, matching the reference fixture's scope boundary.
+# stand-in. transport=all (2 legs, both carrying natural_utterances) with
+# pause=each-leg so the loop pauses at `recording` after leg 0 without
+# reaching build_report/the deck step, matching the reference fixture's
+# scope boundary. (pause=each-leg is an explicit opt-out here, not the
+# default — see stories/scenario-qa/rooms/recording.yaml's header comment;
+# this fixture only wants to prove the live-authorization note, not
+# exercise the auto-drive loop.)
 
 test_kind: flow
 app: ../app.yaml
@@ -65,6 +69,7 @@ turns:
         persona: core-maintainer
         target: gears-rust
         seed: story-flow
+        pause: each-leg
         # profile intentionally omitted: this is the "no profile=" case.
     expect_state: recording
     expect_world:
@@ -73,6 +78,7 @@ turns:
       leg_count: 2
       leg_index: 0
       live_profile: ""
+      pause: each-leg
       live_authorization_summary:
         - "leg tui: needs `profile=<name>` for live drive — will run replay-only; missing cassettes will be reported as degraded-evidence with cause."
         - "leg web: needs `profile=<name>` for live drive — will run replay-only; missing cassettes will be reported as degraded-evidence with cause."
