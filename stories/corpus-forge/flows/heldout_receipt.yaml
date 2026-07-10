@@ -1,5 +1,6 @@
-# Heldout is a separate, deterministic freeze. Cross-receipt non-overlap is a
-# comparison-runner responsibility because Studio sessions are independent.
+# Heldout succeeds only when the configured receipt registry accepts it. The
+# registry itself owns cross-session cohort separation; this flow uses a
+# deterministic handler because flows never create a durable global store.
 test_kind: flow
 app: ../app.yaml
 initial_state: idle
@@ -16,6 +17,8 @@ host_handlers:
       proof:
         oracle_sha256: heldout-proof
         environment_fingerprint: fixture-v1
+  host.corpus.freeze_receipt:
+    data: {}
 turns:
   - intent: { name: start, slots: {} }
     expect_state: load

@@ -1,5 +1,5 @@
 app: { id: corpus-forge, version: 0.3.0, title: "Corpus Forge", author: Kitsoki, license: CC0 }
-hosts: [host.starlark.run, host.corpus.prove]
+hosts: [host.starlark.run, host.corpus.prove, host.corpus.freeze_receipt]
 world:
   # Intake adapters supply only the canonical corpus-case.v1 candidate list.
   # Imported verified_red/verified_green fields are neither required nor read.
