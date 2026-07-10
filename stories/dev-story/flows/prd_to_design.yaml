@@ -98,8 +98,8 @@ turns:
   # continue → the design intake, seeded with a pointer to the published
   # PRD. This is the PRD -> Design baton.
   - intent: { name: continue, slots: {} }
-    expect_state: design
     expect_world:
-      design_seed_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/example-cli.md"
+      design_seed_idea: ""
+      design_idea: "Author a design from the PRD at /tmp/kitsoki-prd-fixtures/example-cli.md"
 
 expect_no_errors: true

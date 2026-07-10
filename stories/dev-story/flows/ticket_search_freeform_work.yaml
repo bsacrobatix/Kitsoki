@@ -36,6 +36,6 @@ turns:
     expect_events:
       - kind: machine.say
         effect:
-          text: "Workbench request captured; dispatching the read-only landing agent for: we have a bunch of tickets saved in the repo itself we need to migrate to github"
+          text: "Processing this request in the workbench: we have a bunch of tickets saved in the repo itself we need to migrate to github"
 
 expect_no_errors: true
