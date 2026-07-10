@@ -21,6 +21,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/hygiene"
 	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
 )
@@ -72,6 +73,8 @@ func NewCapsuleServer(cfg CapsuleConfig) (*CapsuleServer, error) {
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.run", Description: "Run the declared project CI story through the Capsule executor and return its typed verdict. A story can pass, fail, or park; it cannot self-authorize promotion."}, s.ciRun)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.status", Description: "Read persisted Capsule CI run records without host paths or raw secrets."}, s.ciStatus)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.ci.cancel", Description: "Cancel a persisted running or parked Capsule CI job. Remote workers receive the same cancellation contract when configured."}, s.ciCancel)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.cleanup.plan", Description: "Plan project-scoped Capsule disk hygiene using project-relative paths only. This never deletes files or host-global caches."}, s.cleanupPlan)
+	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.cleanup.apply", Description: "Apply project-scoped Capsule disk hygiene when the startup grant includes the cleanup effect. Host-global caches are not deleted through MCP."}, s.cleanupApply)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.resolve", Description: "Resolve a declared environment using probes only; it never installs host tools or returns secrets."}, s.envResolve)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.lock", Description: "Resolve and persist a reviewable environment lock when this immutable grant allows environment writes."}, s.envLock)
 	mcpsdk.AddTool(s.mcpSrv, &mcpsdk.Tool{Name: "capsule.env.verify", Description: "Verify a saved environment lock against current probes without modifying the host."}, s.envVerify)
@@ -135,6 +138,10 @@ type capsuleCIArgs struct {
 }
 type capsuleCIStatusArgs struct {
 	Job string `json:"job,omitempty"`
+}
+type capsuleCleanupArgs struct {
+	KeepRuns            int  `json:"keep_runs,omitempty"`
+	IncludeCapsuleCache bool `json:"include_capsule_cache,omitempty"`
 }
 type capsuleEnvArgs struct {
 	ID string `json:"id"`
@@ -384,6 +391,35 @@ func (s *CapsuleServer) ciCancel(_ context.Context, _ *mcpsdk.CallToolRequest, a
 	}
 	return nil, map[string]any{"ok": true, "run": record}, nil
 }
+func (s *CapsuleServer) cleanupPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCleanupArgs) (*mcpsdk.CallToolResult, any, error) {
+	plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: s.manager.Grant.ProjectRoot, KeepRuns: a.KeepRuns, IncludeCapsuleCache: a.IncludeCapsuleCache})
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	out, err := s.projectCleanupPlan(plan)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "plan": out}, nil
+}
+func (s *CapsuleServer) cleanupApply(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCleanupArgs) (*mcpsdk.CallToolResult, any, error) {
+	if !s.manager.Grant.Allows("effect", "cleanup") {
+		return capsuleErr(fmt.Errorf("%w: cleanup", control.ErrDenied)), nil, nil
+	}
+	result, err := hygiene.Apply(ctx, hygiene.Options{ProjectRoot: s.manager.Grant.ProjectRoot, KeepRuns: a.KeepRuns, IncludeCapsuleCache: a.IncludeCapsuleCache})
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	plan, err := s.projectCleanupPlan(result.Plan)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	removed, err := s.projectCleanupCandidates(result.Removed)
+	if err != nil {
+		return capsuleErr(err), nil, nil
+	}
+	return nil, map[string]any{"ok": true, "result": map[string]any{"plan": plan, "removed": removed, "total_bytes": result.TotalBytes}}, nil
+}
 func (s *CapsuleServer) envResolve(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleEnvArgs) (*mcpsdk.CallToolResult, any, error) {
 	r := environment.Resolver{ProjectRoot: s.manager.Grant.ProjectRoot, Probe: environment.HostProbe()}
 	lock, err := r.Resolve(ctx, a.ID)
@@ -447,6 +483,53 @@ func (s *CapsuleServer) planCI(ctx context.Context, h control.Handle, name strin
 	service := ci.Service{ProjectRoot: project, Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}}
 	_, envelope, err := service.Plan(ctx, ci.RunRequest{Pipeline: name, Workspace: h, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: digest, Trigger: ci.Trigger{Kind: "local", RequestedPipeline: name}})
 	return in, pipeline, envelope, err
+}
+
+type capsuleCleanupCandidate struct {
+	ID     string `json:"id"`
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	Bytes  int64  `json:"bytes"`
+	Reason string `json:"reason"`
+	Safe   bool   `json:"safe"`
+}
+type capsuleCleanupPlan struct {
+	Schema     string                    `json:"schema"`
+	Project    string                    `json:"project"`
+	KeepRuns   int                       `json:"keep_runs"`
+	Candidates []capsuleCleanupCandidate `json:"candidates"`
+	TotalBytes int64                     `json:"total_bytes"`
+}
+
+func (s *CapsuleServer) projectCleanupPlan(plan hygiene.Plan) (capsuleCleanupPlan, error) {
+	candidates, err := s.projectCleanupCandidates(plan.Candidates)
+	if err != nil {
+		return capsuleCleanupPlan{}, err
+	}
+	project := s.projectID
+	if project == "" {
+		project = filepath.Base(s.manager.Grant.ProjectRoot)
+	}
+	return capsuleCleanupPlan{Schema: plan.Schema, Project: project, KeepRuns: plan.KeepRuns, Candidates: candidates, TotalBytes: plan.TotalBytes}, nil
+}
+func (s *CapsuleServer) projectCleanupCandidates(in []hygiene.Candidate) ([]capsuleCleanupCandidate, error) {
+	out := make([]capsuleCleanupCandidate, 0, len(in))
+	root := s.manager.Grant.ProjectRoot
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		root = real
+	}
+	for _, c := range in {
+		path := c.Path
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			path = real
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("capsule cleanup: refusing to expose path outside project: %s", c.Path)
+		}
+		out = append(out, capsuleCleanupCandidate{ID: c.ID, Kind: c.Kind, Path: filepath.ToSlash(rel), Bytes: c.Bytes, Reason: c.Reason, Safe: c.Safe})
+	}
+	return out, nil
 }
 func capsuleStoryDigest(path string) (string, error) {
 	raw, err := os.ReadFile(path)

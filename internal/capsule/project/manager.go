@@ -48,7 +48,7 @@ func Open(root string, branches []string) (*control.Manager, error) {
 			}
 		}
 	}
-	return &control.Manager{Definitions: definitions, Instances: control.FileInstanceStore{Root: roots[0]}, Providers: providers, Grant: control.ScopeGrant{ProjectRoot: abs, WorkspaceRoots: roots, Definitions: ids, Executors: executors, Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write"}, Branches: branches}}, nil
+	return &control.Manager{Definitions: definitions, Instances: control.FileInstanceStore{Root: roots[0]}, Providers: providers, Grant: control.ScopeGrant{ProjectRoot: abs, WorkspaceRoots: roots, Definitions: ids, Executors: executors, Effects: []string{"exec", "vcs_commit", "local_reconcile", "env_write", "cleanup"}, Branches: branches}}, nil
 }
 
 func contains(paths []string, candidate string) bool {

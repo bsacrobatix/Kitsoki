@@ -85,9 +85,10 @@ It exposes opaque workspace handles and project-relative filesystem paths. The
 agent cannot name arbitrary host paths, add a remote, obtain credentials, or
 widen effects. Available operations include workspace/FS/declared-command/local
 VCS actions, environment resolution, local reconciliation, and CI plan/run/
-status. `--branch` is required for each reconciliation target; omitting it
-denies synchronization while retaining the rest of the tool surface. Remote
-publication is intentionally not part of this grant.
+status, plus project-scoped cleanup planning/apply. `--branch` is required for
+each reconciliation target; omitting it denies synchronization while retaining
+the rest of the tool surface. Remote publication is intentionally not part of
+this grant.
 
 ## Environments and remote placement
 
@@ -148,3 +149,8 @@ kitsoki capsule cleanup apply --include-capsule-cache --include-go-build-cache
 The apply path removes only planned Capsule-managed project paths. Go build
 cache cleanup goes through `go clean -cache -testcache` rather than deleting an
 arbitrary directory, because that cache may live outside the project root.
+
+Agents limited to `kitsoki capsule mcp` use `capsule.cleanup.plan` for a
+path-redacted hygiene dry run and `capsule.cleanup.apply` when their immutable
+startup grant includes the `cleanup` effect. MCP cleanup intentionally stays
+inside the project Capsule tree and does not clear host-global Go caches.

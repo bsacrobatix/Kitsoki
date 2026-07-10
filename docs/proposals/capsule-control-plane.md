@@ -216,7 +216,7 @@ all consumers migrate.
 ## 2. Front doors
 - [ ] 2.1 Route existing `kitsoki capsule list|open|verify|close` through CapsuleManager without output regressions
 - [x] 2.2 Add `workspace create|status|commit|close` CLI verbs and JSON schemas
-- [x] 2.3 Add `kitsoki capsule mcp --project --pipeline --executor` plus an internal ephemeral-grant input and handle-scoped project/workspace/fs/exec/vcs tools
+- [x] 2.3 Add `kitsoki capsule mcp --project --pipeline --executor` plus an internal ephemeral-grant input and handle-scoped project/workspace/fs/exec/vcs/cleanup tools
 - [x] 2.4 Enforce symlink-safe FS confinement, declared-command/raw-argv policy, request-level narrowing, and secret redaction
 - [x] 2.5 Bind artifact-job/job_id when `capsule.ci.run` is registered by slice 4
 
