@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,6 +21,42 @@ import (
 type launcher func(context.Context, executor.Prepared) (Verdict, error)
 
 func (f launcher) Launch(ctx context.Context, p executor.Prepared) (Verdict, error) { return f(ctx, p) }
+
+type fixedJobStore struct {
+	id    artifactjob.JobID
+	inner *artifactjob.MemoryStore
+}
+
+func newFixedJobStore(id string) fixedJobStore {
+	return fixedJobStore{id: artifactjob.JobID(id), inner: artifactjob.NewMemoryStore()}
+}
+
+func (s fixedJobStore) Register(ctx context.Context, req artifactjob.RegisterRequest) (artifactjob.Job, error) {
+	req.ID = s.id
+	return s.inner.Register(ctx, req)
+}
+func (s fixedJobStore) BindRun(ctx context.Context, id artifactjob.JobID, sessionID string, runURL string, tracePath string) (artifactjob.Job, error) {
+	return s.inner.BindRun(ctx, id, sessionID, runURL, tracePath)
+}
+func (s fixedJobStore) Update(ctx context.Context, id artifactjob.JobID, update artifactjob.Update) (artifactjob.Job, error) {
+	return s.inner.Update(ctx, id, update)
+}
+func (s fixedJobStore) Attach(ctx context.Context, id artifactjob.JobID, sessionID string) (artifactjob.Job, error) {
+	return s.inner.Attach(ctx, id, sessionID)
+}
+func (s fixedJobStore) Get(ctx context.Context, id artifactjob.JobID) (artifactjob.Job, error) {
+	return s.inner.Get(ctx, id)
+}
+func (s fixedJobStore) List(ctx context.Context, filter artifactjob.ListFilter) ([]artifactjob.Job, error) {
+	return s.inner.List(ctx, filter)
+}
+func (s fixedJobStore) Archive(ctx context.Context, id artifactjob.JobID) (artifactjob.Job, error) {
+	return s.inner.Archive(ctx, id)
+}
+func (s fixedJobStore) SweepInterrupted(ctx context.Context, sessionID string) (int64, error) {
+	return s.inner.SweepInterrupted(ctx, sessionID)
+}
+
 func TestServiceRunsTypedStoryVerdictWithFakeExecutor(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)
@@ -74,6 +111,55 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	if result.Execution.ExecutionID == "" || result.Execution.ExecutionID[:7] != "remote-" {
 		t.Fatalf("selected execution %#v", result.Execution)
 	}
+}
+
+func TestServiceHostAndFakeRemoteProduceEquivalentStoryRun(t *testing.T) {
+	hostRoot := filepath.Join(t.TempDir(), "project")
+	requireFiles(t, hostRoot)
+	remoteRoot := filepath.Join(t.TempDir(), "project")
+	requireFiles(t, remoteRoot)
+	raw, err := os.ReadFile(filepath.Join(remoteRoot, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n    executor: remote-fake\n")...)
+	if err := os.WriteFile(filepath.Join(remoteRoot, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	launch := launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+		return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Summary: "equivalent", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+	})
+	run := func(root string) RunResult {
+		t.Helper()
+		service := Service{ProjectRoot: root, Jobs: newFixedJobStore("job-equivalence"), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: NewBuiltinExecutors(), Launcher: launch}
+		result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	host := normalizeEquivalentRun(run(hostRoot))
+	remote := normalizeEquivalentRun(run(remoteRoot))
+	if string(host.Job.Status) != string(artifactjob.StatusDone) || string(remote.Job.Status) != string(artifactjob.StatusDone) {
+		t.Fatalf("statuses host=%s remote=%s", host.Job.Status, remote.Job.Status)
+	}
+	if string(host.Verdict.Outcome) != "passed" || !host.Verdict.PromotionEligible {
+		t.Fatalf("host verdict %#v", host.Verdict)
+	}
+	if string(remote.Verdict.Outcome) != "passed" || !remote.Verdict.PromotionEligible {
+		t.Fatalf("remote verdict %#v", remote.Verdict)
+	}
+	if !reflect.DeepEqual(host.Verdict, remote.Verdict) || !reflect.DeepEqual(host.Execution, remote.Execution) || host.Envelope.Digest != remote.Envelope.Digest {
+		t.Fatalf("host=%#v\nremote=%#v", host, remote)
+	}
+}
+
+func normalizeEquivalentRun(result RunResult) RunResult {
+	result.Execution.ExecutionID = ""
+	result.Job.ID = ""
+	result.Job.CreatedAt = result.Job.CreatedAt.UTC()
+	result.Job.UpdatedAt = result.Job.CreatedAt
+	return result
 }
 
 func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testing.T) {
