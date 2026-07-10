@@ -28,3 +28,10 @@ promotion eligibility, receipt verification, digest bindings, and relative
 trace/receipt sidecar paths. Runstatus/provider publication can consume that
 projection on top of the same receipt schema; it must not introduce a second
 evidence format.
+
+Sync and promotion traces join the same evidence stream through
+`capsule.sync.planned`, `capsule.sync.applied`, `capsule.sync.stale`, and
+`capsule.sync.conflicted` facts. These events carry the plan digest,
+operation/class, target ref, candidate commit, old/new target where relevant,
+and the conflict continuation token when deterministic apply must pause for a
+story resolver and independent lost-work review.

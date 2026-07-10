@@ -1,13 +1,13 @@
 # Runtime: capsule ref sync and promotion
 
 **Status:** v1 in progress. Local typed plan/classify/apply with stale and
-fast-forward checks and receipt-to-candidate gate binding are available through
-Capsule CLI/MCP. The native `development` compatibility provider preserves the
-existing protected rebase/gate workflow. `publish` is now guarded behind an
-explicit remote publisher provider instead of local ref mutation. Conflict
-plans now carry structured continuation tokens and required story inputs;
-integration-instance materialization, continuation apply, and the remote publish
-provider remain.
+fast-forward checks, sync lifecycle facts, and receipt-to-candidate gate binding
+are available through Capsule CLI/MCP. The native `development` compatibility
+provider preserves the existing protected rebase/gate workflow. `publish` is now
+guarded behind an explicit remote publisher provider instead of local ref
+mutation. Conflict plans now carry structured continuation tokens and required
+story inputs; integration-instance materialization, continuation apply, and the
+remote publish provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -183,7 +183,7 @@ operations.
 - [x] 1.1 Define ObservedRefs, ReconcilePlan, plan hashing, operation/class enums, VCSProvider, RemoteProvider, and fakes
 - [x] 1.2 Implement deterministic observe/classify for local branches, protected refs, upstream refs, dirt, and overlap
 - [x] 1.3 Implement stale-safe prepare/apply/abort with compare-and-swap ref updates and idempotency keys
-- [ ] 1.4 Emit sync lifecycle facts and bind exact gate/CI receipt requirements
+- [x] 1.4 Emit sync lifecycle facts and bind exact gate/CI receipt requirements
 
 ## 2. Conflict and remote seams
 - [ ] 2.1 Create integration instances and structured conflict/continuation artifacts

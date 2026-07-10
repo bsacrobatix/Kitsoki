@@ -19,10 +19,17 @@ func TestPlanClassifiesDivergedCapsule(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, dir, "update-index", "--assume-unchanged", "peers/origin.git/refs/heads/main")
-	r := Reconciler{VCS: Git{}}
+	var events []Event
+	r := Reconciler{VCS: Git{}, Events: EventSinkFunc(func(_ context.Context, e Event) error {
+		events = append(events, e)
+		return nil
+	})}
 	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "origin/main", Operation: Refresh, Generation: 7})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != "capsule.sync.planned" || events[0].PlanDigest != p.Digest {
+		t.Fatalf("planned events %#v", events)
 	}
 	if p.Class != Diverged || p.Digest == "" {
 		t.Fatalf("plan %#v", p)
@@ -39,6 +46,9 @@ func TestPlanClassifiesDivergedCapsule(t *testing.T) {
 	if _, err := r.Apply(context.Background(), p, ""); err == nil || !strings.Contains(err.Error(), p.Continuation.Token) {
 		t.Fatal("diverged apply succeeded")
 	}
+	if len(events) != 2 || events[1].Kind != "capsule.sync.conflicted" || events[1].ContinuationToken != p.Continuation.Token {
+		t.Fatalf("conflicted events %#v", events)
+	}
 }
 func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
@@ -48,7 +58,11 @@ func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	}
 	runGit(t, dir, "add", "new.txt")
 	runGit(t, dir, "commit", "-m", "candidate")
-	r := Reconciler{VCS: Git{}, Gates: GateVerifierFunc(func(_ context.Context, receipt string, _ Plan) error {
+	var events []Event
+	r := Reconciler{VCS: Git{}, Events: EventSinkFunc(func(_ context.Context, e Event) error {
+		events = append(events, e)
+		return nil
+	}), Gates: GateVerifierFunc(func(_ context.Context, receipt string, _ Plan) error {
 		if receipt != "ok" {
 			return os.ErrPermission
 		}
@@ -67,8 +81,14 @@ func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	if _, err := r.Apply(context.Background(), p, "ok"); err != nil {
 		t.Fatal(err)
 	}
+	if !sawEvent(events, "capsule.sync.applied") {
+		t.Fatalf("missing applied event %#v", events)
+	}
 	if _, err := r.Apply(context.Background(), p, "ok"); err == nil {
 		t.Fatal("stale plan accepted")
+	}
+	if !sawEvent(events, "capsule.sync.stale") {
+		t.Fatalf("missing stale event %#v", events)
 	}
 }
 func TestPublishRequiresExplicitProvider(t *testing.T) {
@@ -118,6 +138,15 @@ func (p *recordingPublisher) Publish(_ context.Context, plan Plan, refs Observed
 	p.plan = plan
 	p.refs = refs
 	return ApplyResult{PlanDigest: plan.Digest, OldTarget: refs.Target, NewTarget: plan.Candidate, Applied: true}, nil
+}
+
+func sawEvent(events []Event, kind string) bool {
+	for _, event := range events {
+		if event.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
