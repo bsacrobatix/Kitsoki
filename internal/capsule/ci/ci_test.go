@@ -41,3 +41,18 @@ func requireFiles(t *testing.T, root string) {
 		}
 	}
 }
+
+func TestFileRunStorePersistsCompletedRun(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	want := RunRecord{JobID: "job-1", Result: RunResult{Job: artifactjob.Job{ID: "job-1"}, Verdict: Verdict{Schema: VerdictSchema, Outcome: "passed"}}}
+	if err := store.Write(want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Get("job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Result.Verdict.Outcome != "passed" {
+		t.Fatalf("record %#v", got)
+	}
+}
