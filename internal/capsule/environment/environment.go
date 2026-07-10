@@ -152,6 +152,11 @@ func Validate(d Definition) error {
 			return fmt.Errorf("capsule environment %q: invalid cache grant", d.ID)
 		}
 	}
+	for _, ref := range d.SecretRefs {
+		if !validSecretRef(ref) {
+			return fmt.Errorf("capsule environment %q: invalid secret ref %q", d.ID, ref)
+		}
+	}
 	return nil
 }
 
@@ -304,4 +309,16 @@ func sortedMapKeys(in map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+func validSecretRef(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	for i, r := range ref {
+		if r == '_' || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9' && i > 0) {
+			continue
+		}
+		return false
+	}
+	return true
 }

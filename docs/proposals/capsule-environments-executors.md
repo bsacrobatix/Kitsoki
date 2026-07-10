@@ -1,8 +1,9 @@
 # Runtime: portable capsule environments and executors
 
 **Status:** v1 in progress. Environment definitions/locks, host probe,
-pinned-image/devcontainer resolution, lockfile/bootstrap input hashing, host
-and fake-remote executor contracts, pipeline-selected CLI/MCP placement, and
+pinned-image/devcontainer resolution, lockfile/bootstrap input hashing,
+cache/secret-reference grant validation with lock redaction, host and
+fake-remote executor contracts, pipeline-selected CLI/MCP placement, and
 environment operations ship locally. The HTTPS remote-worker transport and
 checked-in `remotes:` project selection serialize sealed envelopes and typed
 results with header-only credential injection. Arena/container adoption and
@@ -216,7 +217,7 @@ decision.
 ## 1. Environment contract
 - [x] 1.1 Define environment schema, loader, lock schema, resolver DI seams, and content hashing
 - [x] 1.2 Implement host probe, image-digest/devcontainer resolution, lockfile/bootstrap hashing, and no-auto-install refusal
-- [ ] 1.3 Define cache and secret-reference grants; redact all serialized surfaces
+- [x] 1.3 Define cache and secret-reference grants; redact all serialized surfaces
 - [x] 1.4 Add env resolve|lock|verify CLI/MCP and compatibility host-current definition
 
 ## 2. Executor contract

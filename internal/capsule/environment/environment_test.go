@@ -124,3 +124,33 @@ func TestResolvePinsImageAndHashesDevcontainer(t *testing.T) {
 		t.Fatalf("devcontainer digest %q", dev.ImageDigest)
 	}
 }
+
+func TestResolveSerializesCacheGrantsAndRedactsSecretRefs(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".kitsoki", "environments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\ncaches:\n  - id: go-build\n    scope: project\n    mode: read_write\nsecret_refs: [CI_TOKEN]\n")
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := (Resolver{ProjectRoot: root, Probe: ToolProbeFunc(func(context.Context, string) (string, error) { return "", nil })}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lock.SecretRequired || len(lock.CacheKeys) != 1 || lock.CacheKeys[0] != "project:go-build" {
+		t.Fatalf("lock grants %#v", lock)
+	}
+	encoded, _ := json.Marshal(lock)
+	if strings.Contains(string(encoded), "CI_TOKEN") {
+		t.Fatalf("secret ref leaked into lock: %s", encoded)
+	}
+}
+
+func TestValidateRejectsInvalidSecretRefs(t *testing.T) {
+	err := Validate(Definition{Schema: Schema, ID: "ci", Source: Source{HostProbe: true}, SecretRefs: []string{"token-lower"}})
+	if err == nil || !strings.Contains(err.Error(), "invalid secret ref") {
+		t.Fatalf("expected invalid secret ref, got %v", err)
+	}
+}
