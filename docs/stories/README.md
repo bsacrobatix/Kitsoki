@@ -73,6 +73,10 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
 - **[`bugs.md`](bugs.md)** — filing story and kitsoki bug reports
   (`/meta story bug`, `kitsoki bug create`), the on-disk format, and
   target resolution.
+- **[`product-journey-qa.md`](product-journey-qa.md)** — the universal
+  persona/scenario QA campaign story: project-owned personas/scenarios, the
+  `campaign_*` product verbs, the local-vs-GitHub finding-sink policy, worker
+  backend receipts, and the Slidey rollup.
 
 ## See also
 

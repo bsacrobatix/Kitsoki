@@ -326,12 +326,15 @@ turns:
   - intent:
       name: campaign_issue_fix
       slots:
+        finding_sink: github
         ticket_repo: owner/repo
         gh_agent_public_base_url: https://agent.example
     expect_state: run_created
     expect_world:
       status: autonomous_fix_complete
       campaign_status: issue_fixing
+      campaign_finding_sink: github
+      filing_sink: github
       ticket_repo: owner/repo
       gh_agent_public_base_url: https://agent.example
       autonomous_fix_status: autonomous_fix_valid

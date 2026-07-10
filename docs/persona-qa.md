@@ -1,5 +1,14 @@
 # Persona QA
 
+> This page covers the narrow, single-scenario x transport-axis check
+> (`stories/scenario-qa`). For the full persona x scenario x standing-campaign
+> pipeline — project-owned catalogs, the `campaign_*` product verbs, the
+> local-vs-GitHub finding-sink policy, worker dispatch, and the Slidey rollup —
+> see [`stories/product-journey-qa.md`](stories/product-journey-qa.md) and
+> [`guide/development/agentic-qa-campaigns.md`](guide/development/agentic-qa-campaigns.md).
+> Both reuse this page's evidence contracts and `tools/product-journey`
+> runner.
+
 Persona QA is a Kitsoki story workflow, not a separate tool the operator should
 hunt for under `tools/`. The canonical surface is:
 

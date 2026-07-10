@@ -130,6 +130,15 @@ Use this rule:
   capture provenance. Demo, synthetic, placeholder, or unproven local rrweb
   clips must be recorded as blocked/missing evidence instead of committed as
   proof.
+- Standing QA-campaign rollup decks (`stories/product-journey-qa`
+  `campaign_deck_refresh`, see
+  [`../stories/product-journey-qa.md`](../stories/product-journey-qa.md)) are
+  generated per run under
+  `.artifacts/product-journey/<run-id>/deck.slidey.json` and stay there —
+  they are retained working evidence, not committed source. Promote a curated
+  campaign deck into `docs/decks/` only when it is non-private, has full
+  retained-proof media provenance, and is meant as a durable example (e.g. a
+  showcase deck), never as the live per-run rollup.
 - Generated deck renders, MP4s, HTML bundles, screenshots, and throwaway clips
   belong under `.artifacts/<deck-id>/` — with ONE exception:
   `docs/decks/bundled/<deck-id>.html`, the committed self-contained bundle

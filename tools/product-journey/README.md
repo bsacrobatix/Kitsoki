@@ -171,9 +171,14 @@ is:
    recorder case list.
 3. Capture evidence through the generated `capture_routes` and attach it back
    to the run.
-4. Route credible findings through the existing evidence-backed issue/fix
-   pipeline; keep local stabilization bugs under `.artifacts/issues/bugs`
-   unless the scenario's handoff boundary is GitHub.
+4. Route credible findings through `stories/product-journey-qa`'s
+   `campaign_issue_fix` intent (`--file-local-findings` /
+   `--file-findings`/`autonomous-fix` under the hood). It defaults to filing
+   local `.artifacts/issues/bugs` tickets (`finding_sink=local-artifact`) and
+   only files/fixes through GitHub on the explicit
+   `finding_sink=github ticket_repo=owner/repo` opt-in — see
+   `docs/stories/product-journey-qa.md` and
+   `docs/guide/development/agentic-qa-campaigns.md`.
 5. Regenerate review artifacts, stats, and the Slidey deck from retained run
    artifacts. A red evidence, validation, issue, or gh-agent gate keeps the
    campaign in `needs_evidence` or blocked state.

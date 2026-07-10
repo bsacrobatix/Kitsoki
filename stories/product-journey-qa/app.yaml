@@ -43,6 +43,8 @@ world:
   campaign_worker_receipt_markdown_path: { type: string, default: "" }
   campaign_worker_imported_artifact_count: { type: int, default: 0 }
   campaign_worker_artifact_import_status: { type: string, default: "" }
+  campaign_finding_sink: { type: string, default: "local-artifact" }
+  filing_sink: { type: string, default: "" }
   live_budget_minutes: { type: int, default: 20 }
   matrix_id:      { type: string, default: "" }
   matrix_dir:     { type: string, default: "" }
@@ -600,10 +602,11 @@ intents:
       gh_agent_asset_dir: { type: string, required: false }
       gh_agent_comment_mode: { type: string, required: false }
   campaign_issue_fix:
-    description: "Run the campaign issue-to-fix gate through evidence-backed filing and gh-agent repair."
-    examples: ["campaign issue fix", "campaign fix findings ticket_repo=owner/repo", "run campaign issue/fix"]
+    description: "File campaign findings through the declared finding-sink policy: local-artifact (default, no GitHub touched) or an explicit github opt-in with evidence-backed filing and gh-agent repair."
+    examples: ["campaign issue fix", "campaign issue fix finding_sink=local-artifact", "campaign fix findings finding_sink=github ticket_repo=owner/repo", "run campaign issue/fix"]
     priority: 81
     slots:
+      finding_sink: { type: string, required: false }
       ticket_repo: { type: string, required: false }
       gh_agent_db: { type: string, required: false }
       gh_agent_story: { type: string, required: false }
