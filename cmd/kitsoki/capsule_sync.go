@@ -13,7 +13,7 @@ import (
 
 func capsuleSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "sync", Short: "Plan and apply stale-safe Capsule reconciliation"}
-	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncConflictsCmd())
+	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd())
 	return cmd
 }
 
@@ -141,6 +141,39 @@ func capsuleSyncConflictsCmd() *cobra.Command {
 				return err
 			}
 			return capsuleWorkspaceWrite(cmd, map[string]any{"artifact": artifact, "path": filepath.ToSlash(rel)}, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&digest, "plan", "", "plan digest")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("plan")
+	return cmd
+}
+
+func capsuleSyncIntegrationCmd() *cobra.Command {
+	var project, digest string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "integration",
+		Short: "Materialize a managed integration instance for a diverged reconciliation plan",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := filepath.Abs(project)
+			if err != nil {
+				return err
+			}
+			stored, err := (reconcile.FilePlanStore{ProjectRoot: root}).Get(digest)
+			if err != nil {
+				return err
+			}
+			instance, path, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeIntegrationInstance(cmd.Context(), stored.Plan, root)
+			if err != nil {
+				return err
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, map[string]any{"instance": instance, "path": filepath.ToSlash(rel)}, jsonOut)
 		},
 	}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")

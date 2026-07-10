@@ -123,19 +123,24 @@ local Git reconciler. A remote publication provider must be explicitly granted
 and injected before a publish plan can be applied.
 
 When a stored plan is diverged, materialize the deterministic conflict input
-for a resolver/reviewer story before attempting continuation:
+and managed integration instance for a resolver/reviewer story before
+attempting continuation:
 
 ```sh
 kitsoki capsule sync conflicts --plan <digest>
+kitsoki capsule sync integration --plan <digest>
 ```
 
 The command writes a `capsule-sync-conflict/v1` artifact under
 `.capsules/sync/` with the merge base, candidate/target changed paths, overlap
-paths, required story inputs, and continuation token. Managed integration
-instance creation and continuation apply remain separate runtime work.
-Agents limited to Capsule MCP use `capsule.sync.conflicts` for the same
-operation; it accepts only a server-owned plan digest and returns only the
-project-relative artifact path.
+paths, required story inputs, and continuation token. The integration command
+creates `.capsules/sync/<token>.integration`, checks out the candidate on a
+resolution branch, attempts a no-commit target merge, and writes a
+`capsule-sync-integration/v1` artifact with project-relative paths and conflict
+status. Continuation apply remains separate runtime work. Agents limited to
+Capsule MCP use `capsule.sync.conflicts` and `capsule.sync.integration` for the
+same operations; both accept only server-owned plan digests and return only
+project-relative artifact paths.
 
 For credential-free local development and tests, `capsule sync apply` can inject
 a local bare-remote publisher:

@@ -178,6 +178,29 @@ func TestCapsuleMCPSyncConflictsMaterializesProjectRelativeArtifact(t *testing.T
 	require.False(t, filepath.IsAbs(conflictBody.Path), "artifact path must be project-relative")
 	require.True(t, strings.HasPrefix(conflictBody.Path, ".capsules/sync/"), "artifact path should stay inside Capsule state: %s", conflictBody.Path)
 	require.FileExists(t, filepath.Join(project, filepath.FromSlash(conflictBody.Path)))
+
+	integration, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.sync.integration", Arguments: map[string]any{"plan_digest": planBody.Plan.Digest}})
+	require.NoError(t, err)
+	require.False(t, integration.IsError, contentText(integration))
+	require.NotContains(t, contentText(integration), project, "integration result must not leak host paths")
+	var integrationBody struct {
+		Path     string `json:"path"`
+		Instance struct {
+			Schema       string `json:"schema"`
+			PlanDigest   string `json:"plan_digest"`
+			InstancePath string `json:"instance_path"`
+			State        string `json:"state"`
+		} `json:"instance"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(integration)), &integrationBody))
+	require.Equal(t, "capsule-sync-integration/v1", integrationBody.Instance.Schema)
+	require.Equal(t, planBody.Plan.Digest, integrationBody.Instance.PlanDigest)
+	require.False(t, filepath.IsAbs(integrationBody.Path), "integration artifact path must be project-relative")
+	require.False(t, filepath.IsAbs(integrationBody.Instance.InstancePath), "integration instance path must be project-relative")
+	require.True(t, strings.HasPrefix(integrationBody.Path, ".capsules/sync/"), "integration artifact should stay inside Capsule state: %s", integrationBody.Path)
+	require.True(t, strings.HasPrefix(integrationBody.Instance.InstancePath, ".capsules/sync/"), "integration instance should stay inside Capsule state: %s", integrationBody.Instance.InstancePath)
+	require.FileExists(t, filepath.Join(project, filepath.FromSlash(integrationBody.Path)))
+	require.DirExists(t, filepath.Join(project, filepath.FromSlash(integrationBody.Instance.InstancePath)))
 }
 
 func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {

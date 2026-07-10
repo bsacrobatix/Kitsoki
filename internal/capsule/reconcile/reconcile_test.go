@@ -82,6 +82,44 @@ func TestMaterializeConflictArtifactForDivergedPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMaterializeIntegrationInstanceForDivergedPlan(t *testing.T) {
+	dir := capsuletest.Open(t, "rebase-conflict-ready")
+	if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".kitsoki-capsule\ncapsule-manifest.json\n.capsules/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := Reconciler{VCS: Git{}}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Refresh, Generation: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Class != Diverged {
+		t.Fatalf("class %s", p.Class)
+	}
+	instance, path, err := r.MaterializeIntegrationInstance(context.Background(), p, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.Schema != IntegrationInstanceSchema || instance.PlanDigest != p.Digest || instance.ContinuationToken != p.Continuation.Token {
+		t.Fatalf("instance %#v", instance)
+	}
+	if instance.State != "conflicted" || !contains(instance.ConflictPaths, "file.txt") {
+		t.Fatalf("conflict instance %#v", instance)
+	}
+	if filepath.IsAbs(instance.InstancePath) || filepath.Base(path) != p.Continuation.Token+".integration.json" {
+		t.Fatalf("paths instance=%s artifact=%s", instance.InstancePath, path)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(instance.InstancePath), ".git")); err != nil {
+		t.Fatal(err)
+	}
+	again, againPath, err := r.MaterializeIntegrationInstance(context.Background(), p, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if againPath != path || again.InstancePath != instance.InstancePath {
+		t.Fatalf("non-idempotent rematerialize: %#v %s", again, againPath)
+	}
+}
 func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	runGit(t, dir, "checkout", "-b", "candidate")
@@ -240,6 +278,15 @@ func (p *recordingPublisher) Publish(_ context.Context, plan Plan, refs Observed
 func sawEvent(events []Event, kind string) bool {
 	for _, event := range events {
 		if event.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func contains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
 			return true
 		}
 	}
