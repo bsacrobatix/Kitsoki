@@ -943,6 +943,30 @@ intents:
     # instead of leaning on the over-broad bare form.
     examples: ["idea", "new idea", "ad hoc", "draft proposal", "i have an idea", "work on a proposal", "new proposal", "write a proposal", "design proposal", "start a design", "use the design workflow", "amend existing proposal", "proposal ready for review", "human review proposal", "resolve proposal questions", "tighten proposal narration", "audit this proposal", "fold decisions back into the design", "make this proposal terse and clear", "what should i include in a proposal"]
     priority: 50
+  idea_brief:
+    title: "Capture Feature Idea"
+    description: "Start the design pipeline from a bare feature idea. Preserve the operator's whole idea as the brief; do not send it to the general workbench or require a ticket."
+    examples: []
+    synonyms:
+      - "make a feature {brief}"
+      - "make me a feature {brief}"
+      - "add a capability {brief}"
+      - "add a new capability {brief}"
+      - "build a feature {brief}"
+      - "create a feature {brief}"
+      - "ship a feature {brief}"
+      - "we need a feature {brief}"
+      - "we need a capability {brief}"
+      - "i want a feature {brief}"
+      - "i want a capability {brief}"
+      - "let's build a feature {brief}"
+      - "please add a capability {brief}"
+    # Higher than operational verbs (ship/deploy, implement, ticket search):
+    # the explicit multi-word `feature` / `capability` boundary wins even when
+    # the brief itself mentions a ticket or implementation.
+    priority: 99
+    slots:
+      brief: { type: string, required: true, description: "The operator's feature idea, retained verbatim as the design brief." }
   go_code_review:
     title: "Code Review"
     description: "Review a teammate's PR."
@@ -1008,7 +1032,7 @@ intents:
   go_deploy:
     title: "Deploy"
     description: "Open the deploy room."
-    examples: [deploy, "ship it"]
+    examples: [deploy, "ship this release", "deploy a release"]
     priority: 28
   go_observability:
     title: "Observability"
@@ -1504,7 +1528,9 @@ intents:
   go_implementation:
     title: "Implement"
     description: "Hand off to the implementation sub-story for the picked task."
-    examples: ["implement task", "implementation", "work on task"]
+    # Do not use bare `implementation`: it steals an otherwise explicit
+    # feature/capability idea whose brief merely mentions implementation.
+    examples: ["implement task", "implement selected task", "work on selected task"]
     priority: 55
   go_cypilot:
     title: "Cypilot"
@@ -1601,6 +1627,10 @@ intents:
       # required forces the semantic router to fall through to the LLM
       # router so the operator's free-text message is captured whole.
       message: { type: string, required: true }
+  design_seeded_idea:
+    description: "Internal: advance a captured landing feature idea through the normal design intake."
+    examples: []
+    priority: 1
   ready:
     title: "Check Brief"
     description: "Run the brief quality check — if the brief passes, advance to draft; otherwise show what's missing."

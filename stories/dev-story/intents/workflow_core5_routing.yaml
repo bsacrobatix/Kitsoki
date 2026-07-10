@@ -62,14 +62,14 @@ fixtures:
     intent: { name: go_implementation }
     inputs:
       - "implement task"
-  - id: implement-noun-phrase
+  - id: implement-selected-task
     intent: { name: go_implementation }
     inputs:
-      - "implementation"
+      - "implement selected task"
   - id: implement-work-on-task
     intent: { name: go_implementation }
     inputs:
-      - "work on task"
+      - "work on selected task"
 
   # ── Decompose -> implement (deliver, the decompose-vs-direct alternative) ─
   - id: deliver-explicit
