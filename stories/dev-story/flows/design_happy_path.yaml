@@ -75,19 +75,16 @@ host_handlers:
         confidence:          0.82
         needs_clarification: false
         follow_up_questions: []
-  host.run:
+  host.starlark.run:
     by_call:
       publish:
         data:
-          ok: true
-          exit_code: 0
-          stdout: '{"design_file":"docs/proposals/working-folder-primitive.md","ticket_id":"F-2026-06-11T120000Z-working-folder-primitive","ticket_path":"issues/features/F-2026-06-11T120000Z-working-folder-primitive.md","ticket_title":"Working folder primitive","ticket_url":"docs/proposals/working-folder-primitive.md"}'
-          stdout_json:
+          result:
             design_file: "docs/proposals/working-folder-primitive.md"
-            ticket_id:     "F-2026-06-11T120000Z-working-folder-primitive"
-            ticket_path:   "issues/features/F-2026-06-11T120000Z-working-folder-primitive.md"
-            ticket_title:  "Working folder primitive"
-            ticket_url:    "docs/proposals/working-folder-primitive.md"
+            ticket_id: "F-2026-06-11T120000Z-working-folder-primitive"
+            ticket_path: "issues/features/F-2026-06-11T120000Z-working-folder-primitive.md"
+            ticket_title: "Working folder primitive"
+            ticket_url: "docs/proposals/working-folder-primitive.md"
       roadmap_ledger_proposal_published:
         data:
           ok: true
@@ -199,7 +196,7 @@ turns:
         item_id: "proposal/working-folder-primitive"
         changed: true
     expect_host_calls:
-      - handler: host.run
+      - handler: host.starlark.run
         args: { call: "publish" }
       - handler: host.run
         args: { call: "roadmap_ledger_proposal_published" }

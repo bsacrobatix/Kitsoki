@@ -1095,7 +1095,7 @@ flowchart TD
 
     subgraph P6["room: proposal_publish (no LLM)"]
       direction TB
-      pub["publish_design.py<br/>deterministic move + archive"]:::det
+      pub["publish_design.star<br/>host.proposal.publish"]:::det
       out[/"docs/proposals/&lt;slug&gt;.md<br/>+ archived 001–004"/]:::art
       pub --> out
     end
@@ -1121,7 +1121,7 @@ Read it as the §12.2 inversion in practice:
   *same* discovery room (interviewer + brief-writer) are deliberately
   separate conversations with separate jobs.
 - **The glue between agents is deterministic and recorded.** Slug
-  uniqueness (`design_workspace.star`) and publish (`publish_design.py`)
+  uniqueness (`design_workspace.star`) and publish (`publish_design.star`)
   are plain `host.run` scripts, not LLM calls; the human gates resolve
   *enumerated* intents recorded as `GateDecided`. Nothing an agent emits
   advances the pipeline until a deterministic step or a declared gate

@@ -495,6 +495,7 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.workspace_manager.get", WorkspaceManagerGetHandler)
 	r.Register("host.run", RunHandler)
 	r.Register("host.punch.verify", PunchVerifyHandler)
+	r.Register("host.proposal.publish", ProposalPublishHandler)
 	r.Register("host.agent.ask", AgentAskHandler)
 	r.Register("host.transport.post", TransportPostHandler)
 	r.Register("host.jobs.answer_clarification", AnswerClarificationHandler)

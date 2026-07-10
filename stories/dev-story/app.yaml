@@ -90,6 +90,7 @@ hosts:
   - host.inbox.add
   - host.agent.ask
   - host.run
+  - host.proposal.publish
   # ── Design pipeline (rooms/design*.yaml) ───────────────────────
   # 4-stage pipeline: intake → search (decide ×2) → refine (task + decide) →
   # draft+publish (task + run). The brief is scaffolded in the refine room via
