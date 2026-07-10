@@ -13,7 +13,7 @@ import (
 
 func capsuleSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "sync", Short: "Plan and apply stale-safe Capsule reconciliation"}
-	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd(), capsuleSyncContinueCmd())
+	cmd.AddCommand(capsuleSyncPlanCmd(), capsuleSyncApplyCmd(), capsuleSyncFetchCmd(), capsuleSyncConflictsCmd(), capsuleSyncIntegrationCmd(), capsuleSyncContinueCmd())
 	return cmd
 }
 
@@ -114,6 +114,33 @@ func capsuleSyncApplyCmd() *cobra.Command {
 	cmd.Flags().StringVar(&localBareRemote, "local-bare-remote", "", "credential-free local bare Git remote for publish plans")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("plan")
+	return cmd
+}
+
+func capsuleSyncFetchCmd() *cobra.Command {
+	var workspace, remotePath, remoteName, branch string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "fetch",
+		Short: "Fetch one branch from a credential-free local bare remote",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root, err := filepath.Abs(workspace)
+			if err != nil {
+				return err
+			}
+			result, err := (reconcile.LocalBareRemoteFetcher{Remote: remotePath, RemoteName: remoteName}).Fetch(cmd.Context(), root, branch)
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, map[string]any{"ok": true, "result": result}, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&workspace, "workspace", ".", "workspace path")
+	cmd.Flags().StringVar(&remotePath, "local-bare-remote", "", "credential-free local bare Git remote")
+	cmd.Flags().StringVar(&remoteName, "remote", "origin", "remote tracking namespace")
+	cmd.Flags().StringVar(&branch, "branch", "main", "branch to fetch")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("local-bare-remote")
 	return cmd
 }
 

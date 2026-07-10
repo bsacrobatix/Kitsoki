@@ -8,9 +8,9 @@ guarded behind an explicit remote publisher provider instead of local ref
 mutation. Conflict plans now carry structured continuation tokens, required
 story inputs, `capsule-sync-conflict/v1` path/tree artifacts, managed
 `capsule-sync-integration/v1` integration instances, and continuation apply
-from resolved integration commits; a credential-free local bare-remote publish
-provider ships for tests/local development. Story-level resolver UX, fetch
-parity, and the production remote publish provider remain.
+from resolved integration commits; credential-free local bare-remote fetch and
+publish providers ship for tests/local development. Story-level resolver UX and
+the production remote publish provider remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -194,9 +194,8 @@ operations.
 - [ ] 2.2 Add story-facing resolver/reviewer inputs; require independent lost-work verdict before continuation
   - Shipped: runtime continuation apply refuses to proceed without resolver decision, independent lost-work review, and validation receipt inputs.
   - Remaining: wire the git-ops/dev-story resolver and reviewer rooms to these inputs.
-- [ ] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
-  - Shipped: local bare-remote publish provider with live remote-ref lease check and no credential surface.
-  - Remaining: explicit fetch-provider parity and production remote-provider split.
+- [x] 2.3 Implement local bare-remote provider and credential-free fetch/publish tests
+  - Shipped: local bare-remote fetch provider updates a named remote-tracking ref without credentials; local bare-remote publish provider checks the live remote-ref lease before pushing.
 - [ ] 2.4 Add production git/PR provider with separate read/external-write grants and secret-reference injection
 
 ## 3. Adopt and retire duplication

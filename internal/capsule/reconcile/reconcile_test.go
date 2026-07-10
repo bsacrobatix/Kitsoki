@@ -267,6 +267,33 @@ func TestLocalBareRemotePublisherPublishesWithRemoteLease(t *testing.T) {
 		t.Fatalf("local main mutated: %s", got)
 	}
 }
+
+func TestLocalBareRemoteFetcherUpdatesRemoteTrackingRef(t *testing.T) {
+	dir := capsuletest.Open(t, "clean-repo")
+	remote := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, "", "init", "--bare", remote)
+	runGit(t, dir, "push", remote, "main:refs/heads/main")
+	other := filepath.Join(t.TempDir(), "other")
+	runGit(t, "", "clone", remote, other)
+	if err := os.WriteFile(filepath.Join(other, "remote.txt"), []byte("remote"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, other, "add", "remote.txt")
+	runGit(t, other, "commit", "-m", "remote advance")
+	runGit(t, other, "push", "origin", "main:refs/heads/main")
+
+	result, err := (LocalBareRemoteFetcher{Remote: remote, RemoteName: "origin"}).Fetch(context.Background(), dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Fetched || result.TargetRef != "refs/remotes/origin/main" || result.NewTarget == "" || result.NewTarget == result.OldTarget {
+		t.Fatalf("fetch result %#v", result)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, dir, "rev-parse", "refs/remotes/origin/main")); got != result.NewTarget {
+		t.Fatalf("remote-tracking ref = %s, want %s", got, result.NewTarget)
+	}
+}
+
 func TestLocalBareRemotePublisherRejectsStaleRemote(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	remote := filepath.Join(t.TempDir(), "origin.git")
