@@ -102,6 +102,7 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.decomposition.update": {class: Write, deterministic: true},
 	"host.product_journey.run":  {class: External, deterministic: false},
 	"host.bakeoff.run":          {class: External, deterministic: false},
+	"host.session_mining.run":   {class: External, deterministic: false},
 	"host.slidey.render":        {class: Write, deterministic: true},
 	"host.contact_sheet":        {class: Write, deterministic: true},
 	"host.video.frame":          {class: Write, deterministic: true},

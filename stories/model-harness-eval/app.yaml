@@ -7,6 +7,7 @@ app:
 
 hosts:
   - host.agent.task
+  - host.session_mining.run
 
 agents:
   reporter:
@@ -14,7 +15,7 @@ agents:
     model: claude-sonnet-4-6
     tools: [Read, Grep, Glob, Bash, Edit, Write]
     bash_profile:
-      commands: [bash, go, mkdir, python3, sed, find, rg]
+      commands: [bash, go, mkdir, sed, find, rg]
 
 world:
   question:        { type: string, default: "" }
