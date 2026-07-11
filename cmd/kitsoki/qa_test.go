@@ -128,13 +128,40 @@ func TestJourneyDeckKeepsDemoOriginPending(t *testing.T) {
 	freeze.Replay.Status = "passed"
 	deck := journeyDeck(p, freeze, "digest")
 	scenes, ok := deck["scenes"].([]any)
-	if !ok || len(scenes) < 2 {
+	if !ok || len(scenes) != 8 {
 		t.Fatal("expected proof deck scenes")
 	}
-	evidence := scenes[1].(map[string]any)
+	evidence := scenes[2].(map[string]any)
 	items := evidence["items"].([]any)
-	if got := items[0].(map[string]any)["status"]; got != "pending" {
+	if got := items[1].(map[string]any)["status"]; got != "pending" {
 		t.Fatalf("demo origin status = %v, want pending", got)
+	}
+}
+
+func TestJourneyDeckCarriesSourceControlledProof(t *testing.T) {
+	p := &journeyPack{ID: "demo/onboarding", Title: "Demo"}
+	p.Story.App = ".kitsoki/stories/demo/app.yaml"
+	p.Story.Entry = "core.landing"
+	p.Proof.OriginPrompt = "Show me the safe next step."
+	p.Proof.OriginRun = "Claude native · 12s · $0.01"
+	p.Proof.Response = []string{"Run make test."}
+	p.Proof.Delivered = []string{"Published tutorial."}
+	p.Proof.Boundaries = []string{"No files changed."}
+	var freeze journeyFreezeReceipt
+	freeze.Origin.Kind = "real"
+	freeze.Origin.Trace = ".artifacts/origin.jsonl"
+	freeze.Replay.Flow = ".kitsoki/qa/flows/accepted.yaml"
+	freeze.Replay.Status = "passed"
+	deck := journeyDeck(p, freeze, "digest")
+	scenes := deck["scenes"].([]any)
+	if got := scenes[1].(map[string]any)["lede"]; got != p.Proof.OriginPrompt {
+		t.Fatalf("origin prompt = %v", got)
+	}
+	if got := scenes[2].(map[string]any)["items"].([]any)[0].(map[string]any)["detail"]; got != p.Proof.OriginRun {
+		t.Fatalf("origin run = %v", got)
+	}
+	if got := scenes[3].(map[string]any)["items"].([]any)[0].(map[string]any)["detail"]; got != p.Proof.Response[0] {
+		t.Fatalf("response proof = %v", got)
 	}
 }
 
