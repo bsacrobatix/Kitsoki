@@ -91,7 +91,7 @@ type CompiledToolProfile struct {
 func DefaultOperatingSystemPolicySpec() OperatingSystemPolicySpec {
 	strictTools := []string{
 		"evidence.record", "gate.catalog", "gate.run", "objective.close", "objective.get", "objective.open", "objective.reopen", "objective.update", "policy.authorize_mutation", "receipt.list",
-		"session.explain", "studio.diagnose", "trace.explain",
+		"session.answer", "session.close", "session.explain", "session.inspect", "session.new", "session.status", "session.submit", "session.trace", "session.world", "studio.diagnose", "trace.explain",
 		"workspace.codeact", "workspace.commit", "workspace.create", "workspace.list", "workspace.merge", "workspace.patch", "workspace.read", "workspace.search", "workspace.status", "workspace.teardown", "workspace.write",
 	}
 	spec := OperatingSystemPolicySpec{
@@ -118,6 +118,10 @@ func DefaultOperatingSystemPolicySpec() OperatingSystemPolicySpec {
 			{Tool: "gate.run", Contains: "never accepts a command string"},
 			{Tool: "studio.diagnose", Contains: "Read-only attachment diagnosis"},
 			{Tool: "session.explain", Contains: "Read-only bounded explanation"},
+			{Tool: "session.new", Contains: "Open a new driving session"},
+			{Tool: "session.submit", Contains: "Submit a chosen intent"},
+			{Tool: "session.status", Contains: "Compact, overflow-proof snapshot"},
+			{Tool: "session.trace", Contains: "Read the handle's JSONL trace events"},
 			{Tool: "trace.explain", Contains: "Read-only bounded explanation"},
 		},
 		Benchmark: BenchmarkPolicyExpectation{CorpusVersion: "mcp-os-replay-v1"},

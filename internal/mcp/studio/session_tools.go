@@ -71,38 +71,21 @@ func driveAsyncAfter(ms int) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }
 
-// registerSessionTools wires the session.* and render.* tools onto the server.
-// Called from NewServer after the story.* tools so they share one registry.
-func (srv *Server) registerSessionTools() {
+// registerStrictSessionDriverTools exposes the small direct-submit control loop
+// needed to supervise a session from the strict operating-system profile. It
+// intentionally excludes free-text session.drive and the broader legacy
+// session/render toolbox: strict callers select explicit intents, poll bounded
+// state, retain trace evidence, and answer an attached operator question.
+func (srv *Server) registerStrictSessionDriverTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.new",
 		Description: "Open a new driving session for a story. {story_path, harness?:replay|live, cassette?, host_cassette?, trace?, profile?}. Defaults to harness:replay (no LLM); a replay miss is a hard error, never a silent live call. cassette is a routing recording; host_cassette stubs host.* calls. profile selects a configured harness backend (synthetic, codex, …) for a live session. initial_world seeds story world vars for a headless parameterized drive. Returns {handle, state}.",
 	}, srv.handleSessionNew)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "session.attach",
-		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, host_cassette?, trace?, profile?}. Returns {handle, state}.",
-	}, srv.handleSessionAttach)
-
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "session.drive",
-		Description: "Submit FREE TEXT to a driving handle; it is routed through the orchestrator turn loop (the one interpretive seam). {handle, input, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world; read it on demand with session.world or session.inspect.",
-	}, srv.handleSessionDrive)
-
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.submit",
 		Description: "Submit a chosen intent (a menu pick) directly, with no routing. {handle, intent, slots?, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
 	}, srv.handleSessionSubmit)
-
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "session.drive_operation",
-		Description: "Drive the active autonomous/supervised operation handle without routing free text. {handle, cols?, rows?, async_after_ms?}. Returns {operation_drive, outcome, frame} when settled, or {running}; when running is returned, poll session.status until running disappears. Stops at terminal/waiting handles, manual-only policies, clarification/rejection, or when no safe driver intent exists.",
-	}, srv.handleSessionDriveOperation)
-
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "session.continue",
-		Description: "Supply missing slots for a pending clarification. {handle, slots, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
-	}, srv.handleSessionContinue)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.answer",
@@ -115,11 +98,6 @@ func (srv *Server) registerSessionTools() {
 	}, srv.handleSessionStatus)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "session.teleport",
-		Description: "Reacquire an inbox notification by teleporting the session to its saved target. {handle, notification_id, cols?, rows?}. Marks the notification read and returns {outcome, frame}.",
-	}, srv.handleSessionTeleport)
-
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.inspect",
 		Description: "Read-only snapshot of a driving handle: {handle, omit_world?, max_value_len?} → {state, world, allowed_intents, last_view, async, jobs[], notifications[], pending_drives[], backgrounded_chats[], operator_questions[], mining_proposals[], last_turns[]}. Never advances the machine. omit_world:true drops the world map entirely; max_value_len:N truncates each world value to N chars (with '…' marker). For one value (not the whole map) prefer session.world.",
 	}, srv.handleSessionInspect)
@@ -130,11 +108,6 @@ func (srv *Server) registerSessionTools() {
 	}, srv.handleSessionWorld)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "session.command",
-		Description: "Run a TUI slash command against a driving handle and return the rendered frame. {handle, command, cols?, rows?}. Rejects slash commands that require async terminal side effects.",
-	}, srv.handleSessionCommand)
-
-	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.trace",
 		Description: "Read the handle's JSONL trace events. {handle, since?, until?, limit?, truncate_payload?, kinds?} → {events[], last_turn}. since/until filter by turn number; limit keeps the last N; truncate_payload:N caps each event payload to N chars (defaults to 500 when unset; pass 0 to disable); kinds filters to specific event kinds. Read-only.",
 	}, srv.handleSessionTrace)
@@ -143,6 +116,43 @@ func (srv *Server) registerSessionTools() {
 		Name:        "session.close",
 		Description: "Close a driving session and release its trace-path exclusive lock so the same trace path can be reopened. {handle} → {ok, handle}. Without this, a stale live session squats its trace-path flock for the server-process lifetime and bricks any rerun on that path.",
 	}, srv.handleSessionClose)
+}
+
+// registerSessionTools wires the complete legacy session.* and render.* toolbox
+// onto the server. Called from NewServer after story.* tools so they share one
+// registry.
+func (srv *Server) registerSessionTools() {
+	srv.registerStrictSessionDriverTools()
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.attach",
+		Description: "Co-drive an existing keyed session via the external-attach bridge. {story_path, key, harness?, cassette?, host_cassette?, trace?, profile?}. Returns {handle, state}.",
+	}, srv.handleSessionAttach)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.drive",
+		Description: "Submit FREE TEXT to a driving handle; it is routed through the orchestrator turn loop (the one interpretive seam). {handle, input, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world; read it on demand with session.world or session.inspect.",
+	}, srv.handleSessionDrive)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.drive_operation",
+		Description: "Drive the active autonomous/supervised operation handle without routing free text. {handle, cols?, rows?, async_after_ms?}. Returns {operation_drive, outcome, frame} when settled, or {running}; when running is returned, poll session.status until running disappears. Stops at terminal/waiting handles, manual-only policies, clarification/rejection, or when no safe driver intent exists.",
+	}, srv.handleSessionDriveOperation)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.continue",
+		Description: "Supply missing slots for a pending clarification. {handle, slots, cols?, rows?, async_after_ms?}. Returns {outcome, frame}, {awaiting_operator}, or {running}; when running is returned, poll session.status until running disappears. The frame does NOT carry world — read it with session.world (one value or the key list) or session.inspect (full snapshot).",
+	}, srv.handleSessionContinue)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.teleport",
+		Description: "Reacquire an inbox notification by teleporting the session to its saved target. {handle, notification_id, cols?, rows?}. Marks the notification read and returns {outcome, frame}.",
+	}, srv.handleSessionTeleport)
+
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name:        "session.command",
+		Description: "Run a TUI slash command against a driving handle and return the rendered frame. {handle, command, cols?, rows?}. Rejects slash commands that require async terminal side effects.",
+	}, srv.handleSessionCommand)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "render.tui",

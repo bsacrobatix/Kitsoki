@@ -51,6 +51,13 @@ The strict profile deliberately omits `host.run` and `host.patch`, and it does
 not create raw git worktrees. Those are containment decisions, not aliases: a
 tool absent from the profile cannot be reached by changing the prompt.
 
+Strict nevertheless retains a bounded direct-submit session-driver loop:
+`session.new`, `session.submit`, `session.answer`, `session.status`,
+`session.inspect`, `session.world`, `session.trace`, and `session.close`.
+It exists so an attached agent can run and observe the strict pipeline itself;
+it does not expose free-text `session.drive`, story authoring, or a raw host
+execution path.
+
 ## Profiles and migration boundary
 
 `strict` is the default. `escape` is a separate, receipt-bearing exception
