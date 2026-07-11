@@ -205,6 +205,28 @@ func TestGraphHandler_Find_LimitOffsetTruncated(t *testing.T) {
 	}
 }
 
+func TestGraphHandler_Find_NegativeLimitRejected(t *testing.T) {
+	_, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "find",
+		"catalog_path": readsFixturePath,
+		"limit":        -1,
+	})
+	if err == nil {
+		t.Fatalf("GraphHandler(find limit=-1): expected error, got nil")
+	}
+}
+
+func TestGraphHandler_Find_NegativeOffsetRejected(t *testing.T) {
+	_, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "find",
+		"catalog_path": readsFixturePath,
+		"offset":       -1,
+	})
+	if err == nil {
+		t.Fatalf("GraphHandler(find offset=-1): expected error, got nil")
+	}
+}
+
 func TestGraphHandler_Find_DeterministicOrdering(t *testing.T) {
 	first, err := GraphHandler(context.Background(), map[string]any{
 		"op":           "find",
