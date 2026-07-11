@@ -121,6 +121,10 @@ type WorkspaceCreateInput struct {
 	ID          string `json:"id"`
 	Branch      string `json:"branch"`
 	SessionID   string `json:"session_id,omitempty"`
+	// Bootstrap defaults to true. Bounded callers that neither run Go nor
+	// browser tooling may explicitly opt out so their disposable workspace
+	// teardown does not carry bootstrap-only dependencies.
+	Bootstrap   *bool  `json:"bootstrap,omitempty"`
 }
 
 type WorkspaceActionInput struct {
@@ -140,7 +144,11 @@ func (s *ManagedWorkspaceService) Create(ctx context.Context, input WorkspaceCre
 	}
 	out, err := s.mutate(ctx, input.ObjectiveID, ManagedWorkspace{ID: input.ID, ObjectiveID: input.ObjectiveID}, func() (WorkspaceSnapshot, WorkspaceSnapshot, error) {
 		before := WorkspaceSnapshot{Workspace: ManagedWorkspace{ID: input.ID, ObjectiveID: input.ObjectiveID}}
-		args := []string{"create", "--id", input.ID, "--branch", input.Branch, "--bootstrap", "--json"}
+		args := []string{"create", "--id", input.ID, "--branch", input.Branch}
+		if input.Bootstrap == nil || *input.Bootstrap {
+			args = append(args, "--bootstrap")
+		}
+		args = append(args, "--json")
 		if input.SessionID != "" {
 			args = append(args, "--session-id", input.SessionID)
 		}

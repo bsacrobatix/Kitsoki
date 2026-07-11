@@ -945,6 +945,13 @@ def run_calibration(
                 card["objective_id"] = f"mcp-os-cal-{index:02d}-{case_id}"
                 card["branch"] = f"agent/{card['workspace_id']}"
             card = _expand_card_plan(card, {key: value for key, value in card.items() if key in {"workspace_id", "objective_id", "branch"} and isinstance(value, str)})
+            # Calibration cards exercise only the managed lifecycle and fixed
+            # Go gates; they never run Go or Playwright inside their nested
+            # clone. Avoid bootstrap-only dependency trees so teardown stays
+            # bounded and is itself meaningfully calibrated.
+            for step in card.get("plan", []):
+                if isinstance(step, dict) and step.get("tool") == "workspace.create" and isinstance(step.get("arguments"), dict):
+                    step["arguments"]["bootstrap"] = False
             runtime = _strict_runtime(root, index, case_id, config)
             workspace_id = card.get("workspace_id")
             if isinstance(workspace_id, str) and (Path(runtime["workspace_root"]) / workspace_id).exists():
