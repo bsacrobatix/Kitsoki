@@ -7,9 +7,11 @@ fake-remote executor contracts, pipeline-selected CLI/MCP placement, and
 environment operations ship locally. The HTTPS remote-worker transport and
 checked-in `remotes:` project selection serialize sealed envelopes and typed
 results with header-only credential injection. The Arena-style container
-adapter now consumes `completion-state/v1` through a no-Docker fake backend, and
-repo-history capsules project environment/executor metadata. Real Docker
-placement and final docs trimming remain.
+adapter now consumes `completion-state/v1` through both a no-Docker fake backend
+and a Docker backend that runs `capsule worker run` against a mounted workspace;
+the CI executor catalog accepts an injected production `container` provider
+while keeping the no-Docker `container-fake` test lane. Repo-history capsules
+project environment/executor metadata. Final Arena docs trimming remains.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -246,6 +248,11 @@ decision.
     and hidden oracles until real Docker provider adoption moves behind the
     common Go executor.
 - [ ] 3.4 Update environment/executor/Arena docs; trim/delete this proposal
+  - Shipped: Capsule CI docs now describe host, fake-remote,
+    fake-container, Docker worker entrypoint, and repo-history environment
+    projection.
+  - Remaining: fold the final Arena-specific extraction notes into the Arena
+    guide, then delete this proposal once downstream docs no longer need it.
 ```
 
 ## Verification

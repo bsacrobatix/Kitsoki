@@ -66,6 +66,16 @@ No-LLM flow fixtures cover pass, fail, park, review pass, and budget exhaustion.
 Runtime tests run the same story contract through host, fake remote, and fake
 container placements.
 
+The optional LLM review room is also covered without live model spend:
+`llm-review-cassette.yaml` replays the `host.agent.decide` call from a host
+cassette, binds the schema-bounded review verdict, and then follows the same
+adjudication path as a real review.
+
+Generated project wrappers are tested separately: they must park honestly across
+host, fake remote, and fake container placements, and the runtime rejects any
+wrapper verdict whose source, story, environment, or envelope digest differs
+from the sealed envelope.
+
 ## Agent authority
 
 Reviewer and writer rooms should receive explicit toolboxes. A writer that
@@ -73,6 +83,11 @@ modifies code should receive only the Capsule MCP workspace handle for the
 leased workspace unless the story deliberately grants more authority. Remote
 publish, PR creation, and protected-branch promotion are separate grants and
 are not implied by a green CI verdict.
+
+The no-LLM writer proof uses the Capsule MCP server directly: the writer-visible
+tool catalog contains only `capsule.*` tools, mutation goes through
+`capsule.fs.write`, local history goes through `capsule.vcs.commit`, and raw
+argv is denied unless the immutable startup grant includes `raw_exec`.
 
 ## GitHub ingress
 

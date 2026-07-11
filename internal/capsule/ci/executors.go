@@ -14,6 +14,7 @@ import (
 // name; it is never inferred from story input.
 type BuiltinExecutors struct {
 	Host          executor.Provider
+	Container     executor.Provider
 	FakeRemote    executor.Provider
 	FakeContainer executor.Provider
 }
@@ -35,6 +36,10 @@ func (e BuiltinExecutors) Select(_ context.Context, name string) (executor.Provi
 	case "remote-fake":
 		if e.FakeRemote != nil {
 			return e.FakeRemote, nil
+		}
+	case "container":
+		if e.Container != nil {
+			return e.Container, nil
 		}
 	case "container-fake":
 		if e.FakeContainer != nil {

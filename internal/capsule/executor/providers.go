@@ -1,9 +1,15 @@
 package executor
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -64,6 +70,150 @@ type ContainerBackend interface {
 	Describe(context.Context) (Capabilities, error)
 	Run(context.Context, Prepared, Task, EventSink) (Result, CompletionState, error)
 	Cancel(context.Context, string) error
+}
+
+type DockerRunner interface {
+	Run(context.Context, []string) (ContainerRunOutput, error)
+}
+
+type ContainerRunOutput struct {
+	ExitCode int
+	Stdout   string
+	Stderr   string
+}
+
+type DockerRunnerFunc func(context.Context, []string) (ContainerRunOutput, error)
+
+func (f DockerRunnerFunc) Run(ctx context.Context, argv []string) (ContainerRunOutput, error) {
+	return f(ctx, argv)
+}
+
+type execDockerRunner struct{}
+
+func (execDockerRunner) Run(ctx context.Context, argv []string) (ContainerRunOutput, error) {
+	if len(argv) == 0 {
+		return ContainerRunOutput{}, fmt.Errorf("capsule executor: docker argv is required")
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	exit := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exit = ee.ExitCode()
+		} else {
+			return ContainerRunOutput{}, err
+		}
+	}
+	return ContainerRunOutput{ExitCode: exit, Stdout: stdout.String(), Stderr: stderr.String()}, nil
+}
+
+type WorkspacePathResolver func(context.Context, Prepared) (string, error)
+
+type DockerBackend struct {
+	Context       string
+	Image         string
+	Command       []string
+	WorkspacePath WorkspacePathResolver
+	Runner        DockerRunner
+}
+
+type dockerResultFile struct {
+	Result          Result          `json:"result"`
+	CompletionState CompletionState `json:"completion_state"`
+}
+
+func NewDockerBackend(workspace WorkspacePathResolver) *DockerBackend {
+	return &DockerBackend{WorkspacePath: workspace, Runner: execDockerRunner{}}
+}
+func (b *DockerBackend) Describe(context.Context) (Capabilities, error) {
+	return Capabilities{ID: "docker", Placements: []string{"container"}, Isolation: "container", Networks: []string{"none", "replay"}, Cancellable: false}, nil
+}
+func (b *DockerBackend) Run(ctx context.Context, p Prepared, _ Task, sink EventSink) (Result, CompletionState, error) {
+	if b.WorkspacePath == nil {
+		return Result{}, CompletionState{}, fmt.Errorf("capsule executor: docker workspace resolver is required")
+	}
+	workspace, err := b.WorkspacePath(ctx, p)
+	if err != nil {
+		return Result{}, CompletionState{}, err
+	}
+	workspace, err = filepath.Abs(workspace)
+	if err != nil {
+		return Result{}, CompletionState{}, err
+	}
+	resultsDir, err := os.MkdirTemp("", "kitsoki-capsule-docker-*")
+	if err != nil {
+		return Result{}, CompletionState{}, err
+	}
+	defer os.RemoveAll(resultsDir)
+	envelopePath := filepath.Join(resultsDir, "envelope.json")
+	envelopeRaw, err := json.MarshalIndent(p.Envelope, "", "  ")
+	if err != nil {
+		return Result{}, CompletionState{}, err
+	}
+	if err := os.WriteFile(envelopePath, envelopeRaw, 0o600); err != nil {
+		return Result{}, CompletionState{}, err
+	}
+	image := strings.TrimSpace(b.Image)
+	if image == "" {
+		image = p.Envelope.Environment.ImageDigest
+	}
+	if image == "" {
+		return Result{}, CompletionState{}, fmt.Errorf("capsule executor: docker image is required")
+	}
+	command := append([]string(nil), b.Command...)
+	if len(command) == 0 {
+		command = []string{"kitsoki", "capsule", "worker", "run", "--envelope", "/results/envelope.json", "--result", "/results/result.json"}
+	}
+	argv := []string{"docker"}
+	if strings.TrimSpace(b.Context) != "" {
+		argv = append(argv, "--context", b.Context)
+	}
+	argv = append(argv, "run", "--rm", "-v", workspace+":/workspace", "-v", resultsDir+":/results", "-w", "/workspace", image)
+	argv = append(argv, command...)
+	if sink != nil {
+		_ = sink.Emit(ctx, Event{Kind: "capsule.executor.started", EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+	}
+	runner := b.Runner
+	if runner == nil {
+		runner = execDockerRunner{}
+	}
+	run, err := runner.Run(ctx, argv)
+	if err != nil {
+		if sink != nil {
+			_ = sink.Emit(ctx, Event{Kind: "capsule.executor.failed", EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+		}
+		return Result{}, CompletionState{}, fmt.Errorf("capsule executor: docker run: %w", err)
+	}
+	state := CompletionState{Schema: CompletionStateSchema, Outcome: "passed"}
+	result := Result{ExitCode: run.ExitCode, Artifacts: []string{"completion-state:" + p.ID}, Provider: map[string]string{"docker_stdout": run.Stdout, "docker_stderr": run.Stderr}}
+	if raw, readErr := os.ReadFile(filepath.Join(resultsDir, "result.json")); readErr == nil {
+		var decoded dockerResultFile
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return result, state, fmt.Errorf("capsule executor: decode docker result: %w", err)
+		}
+		result = decoded.Result
+		state = decoded.CompletionState
+		if state.Schema == "" {
+			state.Schema = CompletionStateSchema
+		}
+	} else if run.ExitCode != 0 {
+		state.Outcome = "failed"
+		state.Reason = "docker command exited non-zero without result.json"
+	}
+	if sink != nil {
+		kind := "capsule.executor.finished"
+		if run.ExitCode != 0 || state.Outcome == "failed" {
+			kind = "capsule.executor.failed"
+		}
+		_ = sink.Emit(ctx, Event{Kind: kind, EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+	}
+	return result, state, nil
+}
+func (*DockerBackend) Cancel(context.Context, string) error {
+	return fmt.Errorf("capsule executor: docker cancellation is not implemented")
 }
 
 type ContainerProvider struct {

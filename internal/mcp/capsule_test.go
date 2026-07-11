@@ -107,6 +107,58 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	require.Greater(t, integrated.Workspace.Generation, committedHandle.Workspace.Generation)
 }
 
+func TestCapsuleMCPOnlyWriterUsesScopedTools(t *testing.T) {
+	project := t.TempDir()
+	spec := filepath.Join(project, "capsules", "clean", "capsule.yaml")
+	require.NoError(t, os.MkdirAll(filepath.Dir(spec), 0o755))
+	require.NoError(t, os.WriteFile(spec, []byte("name: clean\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644))
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit"}}}
+	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "writer", ProjectID: "fixture"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	cs := connectCapsule(ctx, t, srv)
+
+	tools, err := cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	require.NotEmpty(t, tools.Tools)
+	for _, tool := range tools.Tools {
+		require.True(t, strings.HasPrefix(tool.Name, "capsule."), "writer received non-capsule tool %q", tool.Name)
+	}
+
+	created, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.workspace.create", Arguments: map[string]any{"id": "writer-run", "definition": "clean"}})
+	require.NoError(t, err)
+	require.False(t, created.IsError, contentText(created))
+	var createdBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(created)), &createdBody))
+	require.NotContains(t, contentText(created), project)
+
+	rawDenied, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.exec.run", Arguments: map[string]any{"workspace": createdBody.Workspace, "argv": []string{"sh", "-c", "pwd"}}})
+	require.NoError(t, err)
+	require.True(t, rawDenied.IsError, "raw argv should require an explicit raw_exec grant")
+
+	written, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.fs.write", Arguments: map[string]any{"workspace": createdBody.Workspace, "path": "change.txt", "contents": "changed by capsule mcp\n"}})
+	require.NoError(t, err)
+	require.False(t, written.IsError, contentText(written))
+	var writtenBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(written)), &writtenBody))
+
+	status, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.status", Arguments: map[string]any{"workspace": writtenBody.Workspace}})
+	require.NoError(t, err)
+	require.False(t, status.IsError, contentText(status))
+	require.Contains(t, contentText(status), "change.txt")
+	require.NotContains(t, contentText(status), project, "status must not leak the host project path")
+
+	committed, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.commit", Arguments: map[string]any{"workspace": writtenBody.Workspace, "message": "writer change"}})
+	require.NoError(t, err)
+	require.False(t, committed.IsError, contentText(committed))
+	require.NotContains(t, contentText(committed), project)
+}
+
 func TestCapsuleMCPSyncConflictsMaterializesProjectRelativeArtifact(t *testing.T) {
 	project := t.TempDir()
 	spec := filepath.Join(project, "capsules", "clean", "capsule.yaml")

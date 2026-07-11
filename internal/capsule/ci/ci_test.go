@@ -113,6 +113,34 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	}
 }
 
+func TestServiceSelectsInjectedContainerExecutor(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n    executor: container\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	builtins := NewBuiltinExecutors()
+	builtins.Container = executor.NewContainerProvider(executor.NewFakeContainerBackend())
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: builtins, Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+		return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+	})}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Execution.ExecutionID == "" || result.Execution.ExecutionID[:10] != "container-" {
+		t.Fatalf("selected execution %#v", result.Execution)
+	}
+	if result.Execution.Provider["completion_state_outcome"] != "passed" {
+		t.Fatalf("container provider facts %#v", result.Execution.Provider)
+	}
+}
+
 func TestServiceHostAndFakeRemoteProduceEquivalentStoryRun(t *testing.T) {
 	hostRoot := filepath.Join(t.TempDir(), "project")
 	requireFiles(t, hostRoot)

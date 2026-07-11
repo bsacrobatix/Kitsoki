@@ -50,8 +50,9 @@ that cannot complete safely must emit `needs_input`; the reference
 
 Pipeline `executor:` is an immutable placement selection: `host`/`local` runs
 through the host provider, `remote-fake` exercises the identical remote-worker
-protocol without a network, and `container-fake` exercises the Arena-style
-container completion-state adapter without requiring Docker. A production
+protocol without a network, `container-fake` exercises the Arena-style
+container completion-state adapter without requiring Docker, and `container`
+selects a caller-injected production container provider. A production
 remote-worker name must be declared in the checked-in `remotes:` map; a story
 cannot select or add one itself. The shipped `HTTPRemoteWorker` adapter accepts
 only HTTPS endpoints, sends the sealed envelope to the worker, receives a
@@ -64,19 +65,45 @@ fixture on `host`, `remote-fake`, and `container-fake`: all placements consume
 the same sealed envelope, emit the same typed verdict, and park with
 `needs_input` rather than fabricating a green gate before a project-specific
 composition exists. The container adapter carries the shared
-`completion-state/v1` metadata that Arena cells already use; real Docker
-placement remains an edge backend behind that provider seam.
+`completion-state/v1` metadata that Arena cells already use. The real Docker
+backend follows Arena's model: mount the workspace at `/workspace`, mount an
+executor result directory at `/results`, run a pinned image, and consume
+`/results/result.json` containing the normalized executor result plus
+`completion-state/v1`. Its default entrypoint is:
+
+```sh
+kitsoki capsule worker run \
+  --envelope /results/envelope.json \
+  --result /results/result.json
+```
+
+The Docker provider receives a workspace-path resolver from the caller; host
+paths stay out of the sealed envelope.
 
 The reference story now exposes the intended room graph directly: prepare,
 deterministic checks, schema-bounded review, bounded writer/refine, and
 adjudication. Its default direct-run path still parks until a project wrapper
 composes concrete checks or a cassette-backed reviewer.
 
+The cassette-backed review fixture uses `host.agent.decide` with
+`schemas/review-verdict.json` and `prompts/review.md`, but the flow replays the
+agent response from `flows/cassettes/llm-review.cassette.yaml`. That keeps the
+review path traceable and schema-bounded without invoking a live LLM in tests.
+
+Generated project wrappers are covered separately from the reference story:
+offline service tests run the wrapper through host, fake remote, and fake
+container placements and reject a wrapper that emits mismatched digest fields.
+
 GitHub ingress is an adapter around the same contract. A pull-request webhook
 normalizes to `Trigger{kind:"pull_request", provider:"github", ...}` and the
 check-run publisher projects a `capsule-ci-verdict/v1` run result to a GitHub
 check conclusion. The adapter does not define a second pipeline result or call
 GitHub from automated tests.
+
+The Capsule MCP writer proof is also offline: a test-visible writer receives
+only `capsule.*` tools, edits through `capsule.fs.write`, inspects local status,
+commits through `capsule.vcs.commit`, and is denied raw argv without the
+explicit `raw_exec` effect.
 
 Example remote placement:
 
