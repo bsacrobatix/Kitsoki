@@ -47,6 +47,13 @@ JSON via the `submit` tool.
    `{{ args.quick_test_cmd }}` (or a narrower `go test ./path/...`) to check
    your work before submitting. The story will run the full acceptance command
    before review.
+   **Do not run a broad, slow, or silent command in this agent turn.** The
+   agent has a short stream-activity watchdog; use only a focused check that
+   completes promptly, and leave `{{ args.test_cmd }}` plus long calibration,
+   integration, feature, and full-suite commands to the deterministic story
+   gates. If the failure is environmental or a focused check cannot complete
+   promptly, submit `needs_decision: true` with the exact blocker instead of
+   waiting on it.
 4. **Immediately call `submit` after a focused verification passes.** Do not
    keep investigating dependency-manager internals, alternate implementations,
    or unrelated failure groups after you have a correct minimal change and
