@@ -217,6 +217,7 @@ states:
           working_dir: "{{ world.workdir }}"
           args:
             ticket_id:       "{{ world.ticket_id }}"
+            ticket_title:    "{{ world.ticket_title }}"
             artifact_title:  "{{ world.validate_artifact.summary_title }}"
             artifact_body:   "{{ world.validate_artifact.summary_markdown }}"
         bind:
