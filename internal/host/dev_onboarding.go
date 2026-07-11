@@ -551,9 +551,11 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 	ciEnvRel := filepath.Join(".kitsoki", "environments", "ci.yaml")
 	ciConfigRel := filepath.Join(".kitsoki", "ci.yaml")
 	ciStoryRel := filepath.Join(".kitsoki", "stories", "capsule-ci", "app.yaml")
+	developmentCapsuleRel := filepath.Join(".kitsoki", "capsules", "development.yaml")
 	files := map[string]string{
 		filepath.Join(root, ".gitignore"):                                         onboardingGitignore(root),
 		filepath.Join(root, ".kitsoki.yaml"):                                      onboardingConfigYAML(),
+		filepath.Join(root, developmentCapsuleRel):                                onboardingDevelopmentCapsuleYAML(),
 		filepath.Join(root, ciEnvRel):                                             onboardingCapsuleEnvironmentYAML(root),
 		filepath.Join(root, ciConfigRel):                                          onboardingCapsuleCIYAML(),
 		filepath.Join(root, ciStoryRel):                                           onboardingCapsuleCIStoryYAML(),
@@ -571,7 +573,7 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 			writes = append(writes, path)
 		}
 	}
-	return map[string]any{"status": "applied", "target_path": root, "config_path": filepath.Join(root, ".kitsoki.yaml"), "ci_environment_path": filepath.Join(root, ciEnvRel), "ci_config_path": filepath.Join(root, ciConfigRel), "ci_story_path": filepath.Join(root, ciStoryRel), "profile_path": filepath.Join(root, ".kitsoki", "project-profile.yaml"), "instance_path": filepath.Join(root, instanceRel), "gitignore_path": filepath.Join(root, ".gitignore"), "profile_validation": validationData, "writes": writes}, nil
+	return map[string]any{"status": "applied", "target_path": root, "config_path": filepath.Join(root, ".kitsoki.yaml"), "development_capsule_path": filepath.Join(root, developmentCapsuleRel), "ci_environment_path": filepath.Join(root, ciEnvRel), "ci_config_path": filepath.Join(root, ciConfigRel), "ci_story_path": filepath.Join(root, ciStoryRel), "profile_path": filepath.Join(root, ".kitsoki", "project-profile.yaml"), "instance_path": filepath.Join(root, instanceRel), "gitignore_path": filepath.Join(root, ".gitignore"), "profile_validation": validationData, "writes": writes}, nil
 }
 
 func stringsToAny(values []string) []any {
@@ -641,6 +643,10 @@ func onboardingCapsuleEnvironmentYAML(root string) string {
 	}
 	b.WriteString("network: none\ncaches:\n  - id: project-build\n    scope: project\n    mode: read_write\nsandbox: supervised\n")
 	return b.String()
+}
+
+func onboardingDevelopmentCapsuleYAML() string {
+	return "schema: capsule-definition/v1\nid: development\ndescription: Project development workspace managed by Kitsoki Capsule.\nsource:\n  kind: self\npolicy:\n  network: none\n"
 }
 
 func onboardingCapsuleCIYAML() string {
@@ -732,7 +738,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 		"stack":       map[string]any{"kind": kind, "languages": languages},
 		"testing":     map[string]any{"mechanisms": []any{map[string]any{"kind": "unit", "runner": "command", "command": stringValue(data, "test_command")}, map[string]any{"kind": "build", "runner": "command", "command": stringValue(data, "build_command")}}},
 		"conventions": map[string]any{"source": "project"},
-		"kitsoki":     map[string]any{"story": "dev-story", "story_pack": "core-engineering", "enabled_stories": []any{"setup", "bugfix", "design", "implementation", "review"}, "instance": map[string]any{"id": stringValue(data, "project_id") + "-dev", "path": ".kitsoki/stories/" + stringValue(data, "project_id") + "-dev/app.yaml", "bindings": map[string]any{"ticket": "host.local_files.ticket", "vcs": "host.git", "ci": "host.local", "workspace": "host.git_worktree", "transport": "host.append_to_file"}}},
+		"kitsoki":     map[string]any{"story": "dev-story", "story_pack": "core-engineering", "enabled_stories": []any{"setup", "bugfix", "design", "implementation", "review"}, "instance": map[string]any{"id": stringValue(data, "project_id") + "-dev", "path": ".kitsoki/stories/" + stringValue(data, "project_id") + "-dev/app.yaml", "bindings": map[string]any{"ticket": "host.local_files.ticket", "vcs": "host.git", "ci": "host.local", "workspace": "host.capsule_workspace", "transport": "host.append_to_file"}}},
 		"onboarding":  map[string]any{"base_story": "dev-story", "story_pack": "core-engineering", "recording_policy": "no-llm-only"},
 		"setup_plan":  map[string]any{"writes": []any{}, "verifications": []any{}}, "readiness": map[string]any{"status": "not-run"},
 	}
@@ -757,7 +763,7 @@ var onboardingInstanceHosts = []string{
 	"host.gh.ticket.transition",
 	"host.git",
 	"host.local",
-	"host.git_worktree",
+	"host.capsule_workspace",
 	"host.append_to_file",
 	"host.inbox.add",
 	"host.agent.ask",
@@ -793,6 +799,6 @@ func onboardingInstanceYAML(data map[string]any) string {
 	for _, host := range onboardingInstanceHosts {
 		fmt.Fprintf(&b, "  - %s\n", host)
 	}
-	b.WriteString("\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: declared\n    host_bindings:\n      ticket: host.local_files.ticket\n      vcs: host.git\n      ci: host.local\n      workspace: host.git_worktree\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n  build_cmd: { type: string, default: \"\" }\n  test_cmd: { type: string, default: \"\" }\n\nroot: core\n")
+	b.WriteString("\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: declared\n    host_bindings:\n      ticket: host.local_files.ticket\n      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n  build_cmd: { type: string, default: \"\" }\n  test_cmd: { type: string, default: \"\" }\n\nroot: core\n")
 	return b.String()
 }

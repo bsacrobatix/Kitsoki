@@ -4,8 +4,10 @@
 and scoped Capsule MCP now cover definitions, lease/generation handles, safe
 FS/exec/VCS, synthetic/self/pinned providers, and the `development`/`staging`
 compatibility providers behind the native lifecycle. Host adoption and
-story-contract migration have started via `host.capsule_workspace`; generic
-clone lifecycle and full story rebinding remain.
+story-contract migration have started via `host.capsule_workspace`; generated
+foreign-project onboarding now emits a default `development` definition and
+binds workspace calls to the Capsule host, with trace-visible diagnostics on
+every call. Generic clone lifecycle and full story rebinding remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 
@@ -234,8 +236,18 @@ all consumers migrate.
 ## 3. Migrate and document
 - [x] 3.1 Add dev-workspace-script adapter and a parity suite for create/bootstrap/status/commit/merge/teardown metadata
 - [ ] 3.2 Route iface.workspace through the manager; rebind one generated foreign-project instance and Kitsoki dogfood
-  - Shipped: `host.capsule_workspace` manager-backed host surface and docs.
-  - Remaining: migrate story `workspace` contracts off `name`/`base`/`sync`.
+  - Shipped: `host.capsule_workspace` manager-backed host surface, generated
+    foreign-project onboarding rebinding, and generated
+    `.kitsoki/capsules/development.yaml` with `source.kind: self`.
+  - Shipped: host returns include `diagnostics` for both success and domain
+    error paths, so `harness.returned` / `host_error.data` traces show handler,
+    op, repo, definition, id, generation, path, provider, state, branch/head,
+    dirty flag, VCS status failures, and remediation hints.
+  - Shipped: transitional `status` and non-mutating `sync` ops let imported
+    dev-story contracts reach the manager while the YAML interface is migrated.
+  - Remaining: migrate Kitsoki dogfood/core story `workspace` contracts off
+    dynamic `name`/`base` args, remove the default-definition compatibility
+    behavior, and run a green Kitsoki dogfood through the rebinding.
 - [ ] 3.3 Move generic clone lifecycle into the native provider; reduce scripts to Kitsoki hooks/compat wrappers
 - [ ] 3.4 Update capsule, host, MCP, and onboarding docs; trim/delete this proposal
 ```

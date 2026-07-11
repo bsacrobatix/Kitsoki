@@ -12,20 +12,7 @@ import (
 
 func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
 	project := t.TempDir()
-	spec := filepath.Join(project, ".kitsoki", "capsules", "clean.yaml")
-	if err := os.MkdirAll(filepath.Dir(spec), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(spec, []byte("schema: capsule-definition/v1\nid: clean\nsource:\n  kind: synthetic\n  synthetic_spec: capsules/clean/capsule.yaml\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	legacySpec := filepath.Join(project, "capsules", "clean", "capsule.yaml")
-	if err := os.MkdirAll(filepath.Dir(legacySpec), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(legacySpec, []byte("name: clean\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeSyntheticCapsuleDefinition(t, project, "clean")
 
 	ctx := context.Background()
 	created, err := host.CapsuleWorkspaceHandler(ctx, map[string]any{
@@ -43,6 +30,12 @@ func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
 	}
 	if created.Data["id"] != "run" {
 		t.Fatalf("id: %v", created.Data["id"])
+	}
+	if created.Data["ok"] != true {
+		t.Fatalf("created ok: %v", created.Data)
+	}
+	if created.Data["diagnostics"] == nil {
+		t.Fatalf("created diagnostics missing: %v", created.Data)
 	}
 	path, _ := created.Data["path"].(string)
 	wantRoot := filepath.Join(project, ".capsules", "workspaces")
@@ -75,6 +68,27 @@ func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
 		t.Fatalf("state: %v", got.Data["state"])
 	}
 
+	for _, op := range []string{"status", "sync"} {
+		status, err := host.CapsuleWorkspaceHandler(ctx, map[string]any{
+			"op":    op,
+			"repo":  project,
+			"id":    "run",
+			"owner": "agent",
+		})
+		if err != nil {
+			t.Fatalf("%s infra: %v", op, err)
+		}
+		if status.Error != "" {
+			t.Fatalf("%s domain: %s", op, status.Error)
+		}
+		if status.Data["path"] != path || status.Data["diagnostics"] == nil {
+			t.Fatalf("%s diagnostics/path: %v", op, status.Data)
+		}
+		if op == "sync" && status.Data["log"] == "" {
+			t.Fatalf("sync log missing: %v", status.Data)
+		}
+	}
+
 	closed, err := host.CapsuleWorkspaceHandler(ctx, map[string]any{
 		"op":    "close",
 		"repo":  project,
@@ -89,5 +103,68 @@ func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
 	}
 	if closed.Data["ok"] != true {
 		t.Fatalf("close: %v", closed.Data)
+	}
+	if closed.Data["closed"] != true || closed.Data["diagnostics"] == nil {
+		t.Fatalf("close diagnostics: %v", closed.Data)
+	}
+}
+
+func TestCapsuleWorkspace_CreateDefaultsToDevelopmentDefinition(t *testing.T) {
+	project := t.TempDir()
+	writeSyntheticCapsuleDefinition(t, project, "development")
+
+	created, err := host.CapsuleWorkspaceHandler(context.Background(), map[string]any{
+		"op":    "create",
+		"repo":  project,
+		"id":    "legacy-contract",
+		"owner": "agent",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if created.Error != "" {
+		t.Fatalf("domain: %s", created.Error)
+	}
+	if created.Data["definition"] != "development" {
+		t.Fatalf("definition: %v", created.Data["definition"])
+	}
+	diagnostics, _ := created.Data["diagnostics"].(map[string]any)
+	if diagnostics["definition_defaulted"] != true {
+		t.Fatalf("definition_defaulted missing: %v", diagnostics)
+	}
+}
+
+func TestCapsuleWorkspace_ErrorCarriesDiagnostics(t *testing.T) {
+	result, err := host.CapsuleWorkspaceHandler(context.Background(), map[string]any{
+		"op":   "create",
+		"repo": t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if result.Error == "" {
+		t.Fatalf("expected domain error: %v", result.Data)
+	}
+	diagnostics, _ := result.Data["diagnostics"].(map[string]any)
+	if diagnostics["hint"] == "" || diagnostics["handler"] != "host.capsule_workspace" {
+		t.Fatalf("diagnostics: %v", diagnostics)
+	}
+}
+
+func writeSyntheticCapsuleDefinition(t *testing.T, project, id string) {
+	t.Helper()
+	spec := filepath.Join(project, ".kitsoki", "capsules", id+".yaml")
+	if err := os.MkdirAll(filepath.Dir(spec), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spec, []byte("schema: capsule-definition/v1\nid: "+id+"\nsource:\n  kind: synthetic\n  synthetic_spec: capsules/"+id+"/capsule.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	legacySpec := filepath.Join(project, "capsules", id, "capsule.yaml")
+	if err := os.MkdirAll(filepath.Dir(legacySpec), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacySpec, []byte("name: "+id+"\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

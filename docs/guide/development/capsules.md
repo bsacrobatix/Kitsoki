@@ -29,6 +29,14 @@ The shipped v1 is intentionally narrow and local-only:
   sources, and the Kitsoki development compatibility provider all share opaque
   handles, generation checks, lifecycle facts, and least-authority FS/exec/VCS
   operations.
+- `host.capsule_workspace` is the story-facing Capsule workspace provider for
+  generated project instances. Onboarding writes
+  `.kitsoki/capsules/development.yaml` with `source.kind: self` and binds
+  imported dev-story `workspace` calls to the Capsule host. Each
+  create/get/status/sync/commit/close return includes a `diagnostics` map, and
+  domain errors preserve the same map in `host_error.data`, so traces show the
+  failing op, repo, definition, id, path, state, VCS status, and remediation
+  hint.
 - Pinned Git sources populate a content-addressed bare cache under
   `.capsules/cache/git-sources/<commit>.git` before materializing a workspace.
   Subsequent materializations of the same full commit clone from the cache

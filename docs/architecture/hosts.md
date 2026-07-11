@@ -59,7 +59,7 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.agent.converse`](#hostagentconverse) | Free-form conversational Claude session with permission_mode control. |
 | [`host.transport.post`](#hosttransportpost) | Post a message to a registered transport (TUI / Jira / Bitbucket). |
 | [`host.workspace_manager.get`](#hostworkspace_managerget) | Load a structured workspace context (repos, issue, PRs). |
-| [`host.capsule_workspace`](#hostcapsule_workspace-workspace-interface) | `workspace` provider: checked-in Capsule definitions create/get/commit/close under `.capsules/workspaces/<id>`. |
+| [`host.capsule_workspace`](#hostcapsule_workspace-workspace-interface) | `workspace` provider: checked-in Capsule definitions create/get/status/sync/commit/close under `.capsules/workspaces/<id>`. |
 | [`host.git_worktree`](#hostgit_worktree-compatibility-workspace-interface) | Compatibility `workspace` provider: legacy `name/base/sync` contract backed by the development Capsule provider plus linked-worktree cleanup. |
 | [`host.jobs.answer_clarification`](#hostjobsanswer_clarification) | Resume a paused background job with the user's answer. |
 | [`host.chat.resolve`](#hostchatresolve) | Get-or-create a persistent chat thread for a `(app, room, scope_key)`. |
@@ -1316,18 +1316,25 @@ definitions and materializes the workspace under the project-managed
 `.capsules/workspaces` root; branch, source, bootstrap, and scope policy come
 from the definition rather than from ad hoc story arguments.
 
-The handler dispatches `create` / `get` / `commit` / `close` via the `op` arg.
-It should be granted to agents when the desired authority is "manage Capsule
-workspaces in this project" rather than "run general git plumbing". A scoped MCP
-agent can receive only the Capsule MCP server; an in-story agent can receive
-this host binding for the same least-authority lifecycle.
+The handler dispatches `create` / `get` / `status` / `sync` / `commit` /
+`close` via the `op` arg. It should be granted to agents when the desired
+authority is "manage Capsule workspaces in this project" rather than "run
+general git plumbing". A scoped MCP agent can receive only the Capsule MCP
+server; an in-story agent can receive this host binding for the same
+least-authority lifecycle.
+
+Every return, including domain errors, carries `diagnostics` in `Result.Data`.
+The orchestrator records that map in `harness.returned` and mirrors it in
+`host_error.data` on failures, so a trace shows the handler, op, repo,
+definition, workspace id, generation, path, provider, state, branch/head,
+dirty flag, low-level VCS status error when present, and a remediation hint.
 
 `create` args:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | string | yes | Workspace identity and instance key. |
-| `definition` | string | yes | Checked-in Capsule definition id, for example `development`, `staging`, or a story-specific fixture. |
+| `definition` | string | no | Checked-in Capsule definition id, for example `development`, `staging`, or a story-specific fixture. Empty defaults to `development` during the story-contract migration. |
 | `repo` | string | no | Project root. Empty means resolve the current git top-level. |
 | `owner` | string | no | Logical owner for close/lease semantics. Defaults to `host`. |
 
@@ -1337,6 +1344,24 @@ this host binding for the same least-authority lifecycle.
 |---|---|---|---|
 | `id` | string | yes | Workspace identity. |
 | `repo` | string | no | Project root. |
+
+`status` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Workspace identity. |
+| `repo` | string | no | Project root. |
+
+`sync` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Workspace identity. |
+| `repo` | string | no | Project root. |
+
+`sync` is a transitional compatibility barrier for imported stories that still
+call `workspace.sync`. It verifies and reports the Capsule workspace status; it
+does not perform git remote synchronization.
 
 `commit` args:
 
@@ -1354,12 +1379,14 @@ this host binding for the same least-authority lifecycle.
 | `owner` | string | no | Must match the logical owner when the provider enforces ownership. |
 | `repo` | string | no | Project root. |
 
-Returns `ok`, `id`, `generation`, and `path` for create-like operations.
-`get` also returns `branch` and `state` from the persisted Capsule instance.
+Returns `ok`, `id`, `generation`, `path`, `branch`, `state`, `head`, `dirty`,
+and `diagnostics` for create/get/status/sync/commit operations where those
+fields are available. `close` returns `ok`, `id`, `closed`, and `diagnostics`.
 
-Stories that still need dynamic `name` / `base` arguments or the old `sync`
-operation should remain on `host.git_worktree` until their `host_interfaces`
-contract is migrated to checked-in definitions.
+Stories that still need dynamic `name` / `base` arguments can remain on
+`host.git_worktree` until their `host_interfaces` contract is migrated to
+checked-in definitions. New generated project instances bind `workspace` to
+`host.capsule_workspace` and emit `.kitsoki/capsules/development.yaml`.
 
 ## host.git_worktree (compatibility `workspace` interface)
 
