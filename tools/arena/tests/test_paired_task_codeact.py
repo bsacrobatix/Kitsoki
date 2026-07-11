@@ -120,19 +120,8 @@ missing_trace = runner.real_trace_metrics(str(tree / "absent.jsonl"), "gpt-5.4")
 check("missing studio trace is incomplete", missing_trace.get("measurement_status"), "incomplete")
 check("GPT-5.4 maps to a dedicated Kitsoki profile", runner.MODEL_TO_PROFILE.get("gpt-5.4"), "codex-gpt54")
 
-with tempfile.TemporaryDirectory(prefix="paired-go-run-launcher-") as td:
-    old_launcher_dir = os.environ.get("ARENA_KITSOKI_LAUNCHER_DIR")
-    os.environ["ARENA_KITSOKI_LAUNCHER_DIR"] = td
-    try:
-        launcher_dir = runner.ensure_kitsoki_binary()
-    finally:
-        if old_launcher_dir is None:
-            os.environ.pop("ARENA_KITSOKI_LAUNCHER_DIR", None)
-        else:
-            os.environ["ARENA_KITSOKI_LAUNCHER_DIR"] = old_launcher_dir
-    launcher = launcher_dir / "kitsoki"
-    require("Kitsoki launcher exists", launcher.exists())
-    require("Kitsoki launcher uses go run", "go run" in launcher.read_text(encoding="utf-8"))
+binary_dir = runner.ensure_kitsoki_binary()
+require("Kitsoki stable binary exists", (binary_dir / "kitsoki").exists())
 
 subscription_raw = runner.codex_output_metrics('{"usage":{"input_tokens":10,"output_tokens":2}}', "gpt-5.4")
 check("raw subscription USD is unavailable", subscription_raw.get("cost_usd"), None)
