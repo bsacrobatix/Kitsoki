@@ -148,6 +148,8 @@ func classifyHostErr(err error) string {
 		return CodeUnknownNode
 	case strings.Contains(msg, "unknown type") || strings.Contains(msg, "type") && strings.Contains(msg, "not found in registry"):
 		return CodeUnknownType
+	case strings.Contains(msg, "unknown edge"):
+		return CodeUnknownEdge
 	default:
 		return CodeValidation
 	}
