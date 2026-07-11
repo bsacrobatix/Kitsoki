@@ -208,6 +208,22 @@ with tempfile.TemporaryDirectory(prefix="paired-prewarm-") as td:
     check("external corpus prewarm succeeds", prewarm["ok"], True)
     check("external corpus prewarm uses declared install", captured, [["sh", "-lc", "npm install"]])
 
+prompt_args = argparse.Namespace(implementation_mode="agent_task")
+prompt = runner.build_kitsoki_prompt(
+    prompt_args,
+    {"id": "fixture", "archetype": "bugfix", "ticket": "fix"},
+    Path("/tmp/tree"),
+    "/tmp/trace.jsonl",
+    Path("/tmp/thread.md"),
+    "codex-gpt54",
+    "fixture-branch",
+    "true",
+    "codex",
+)
+require("Kitsoki prompt uses direct menu submission", "session.submit" in prompt)
+require("Kitsoki prompt gives post-worker continue example", 'intent: \"continue\"' in prompt)
+require("Kitsoki prompt polls status after every turn", "after EVERY settled turn call" in prompt)
+
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
     backend="codex",
