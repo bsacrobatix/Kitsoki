@@ -130,7 +130,6 @@ surface for forward compatibility:
 
 ```
 issues/bugs/*.md                   — kitsoki self-bugs
-issues/bugs/*/issue.md             — legacy nested local-bug shape
 issues/features/*.md               — kitsoki PRD-track features
 stories/*/issues/bugs/*.md         — per-story bugs (story authoring)
 stories/*/issues/features/*.md     — per-story features
@@ -148,7 +147,7 @@ the handler level (a future enhancement, see "Runtime gaps" below).
 For the supervised flow walks in `flows/`, the stubbed
 `host.local_github.ticket` returns canned local and GitHub rows; for the manual
 walkthrough below, the operator runs from the kitsoki repo root so the local
-side resolves `.artifacts/issues/*.md`, while the GitHub side resolves the
+side resolves `.artifacts/issues/bugs/*.md`, while the GitHub side resolves the
 symbolic `ticket_github_repo: origin`.
 
 ---
