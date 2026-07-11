@@ -12,11 +12,13 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerGraphTools registers the seven-tool read family (plan §3.3)
-// against srv, closing over deps. mode gates future write-tool
-// registration (P4) — today it's a no-op since no write tools exist yet,
-// but the parameter and the switch below are the forward-compatible gating
-// point P4 hangs propose/authorize/apply/withdraw/changeset-mutate off of.
+// registerGraphTools registers the read family (plan §3.3, now eight tools
+// with graph.changeset) against srv, closing over deps, then mode-gates the
+// P4 write family (plan §3.4): graph.propose/withdraw/apply/authorize are
+// registered in propose and steward mode, never in read mode — an MCP
+// client shouldn't see tools/list entries it can never call (plan §3.1).
+// graph.changeset is read-only and registered in every mode alongside the
+// rest of the read family.
 //
 // This function (and registerFeedbackTools) is deliberately a free function
 // taking (srv, deps, mode) rather than a Server method, so P6's studio
@@ -30,12 +32,13 @@ func registerGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
 	registerGraphNeighborsTool(srv, deps)
 	registerGraphTypeTool(srv, deps)
 	registerGraphImpactTool(srv, deps)
+	registerGraphChangesetTool(srv, deps)
 
 	switch mode {
-	case ModeRead, ModePropose, ModeSteward:
-		// No write tools exist in P2 in any mode. P4 adds a branch here
-		// that skips propose/authorize/apply/withdraw/changeset-mutate
-		// registration when mode == ModeRead.
+	case ModePropose, ModeSteward:
+		registerGraphWriteTools(srv, deps)
+	case ModeRead:
+		// Write tools intentionally not registered in read mode.
 	}
 }
 
@@ -177,16 +180,16 @@ type graphOpenArgs struct {
 }
 
 type graphOpenOK struct {
-	OK        bool           `json:"ok"`
-	Catalog   string         `json:"catalog"`
-	Head      map[string]any `json:"head"`
-	NodeCount int            `json:"node_count"`
-	Types     []any          `json:"types"`
-	Lint      map[string]any `json:"lint"`
+	OK         bool           `json:"ok"`
+	Catalog    string         `json:"catalog"`
+	Head       map[string]any `json:"head"`
+	NodeCount  int            `json:"node_count"`
+	Types      []any          `json:"types"`
+	Lint       map[string]any `json:"lint"`
 	Changesets map[string]any `json:"changesets"`
-	Feedback  map[string]any `json:"feedback"`
-	Guide     string         `json:"guide"`
-	Truncated bool           `json:"truncated,omitempty"`
+	Feedback   map[string]any `json:"feedback"`
+	Guide      string         `json:"guide"`
+	Truncated  bool           `json:"truncated,omitempty"`
 }
 
 func registerGraphOpenTool(srv *mcpsdk.Server, deps *Deps) {
@@ -807,6 +810,105 @@ func handleGraphType(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	for k, v := range res.Data {
 		out[k] = v
 	}
+	return okResult(out), nil
+}
+
+// ─── graph.changeset ───
+
+const graphChangesetInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
+    "op": {"type": "string", "enum": ["list", "get", "touching"], "description": "list: every changeset's lifecycle summary + status counts. get: one changeset's parsed operations (requires id). touching: changesets whose operations reference a node (requires node)."},
+    "id": {"type": "string", "description": "Changeset node id. Required when op is \"get\"."},
+    "node": {"type": "string", "description": "Node id to reverse-index. Required when op is \"touching\"."}
+  },
+  "required": ["op"],
+  "additionalProperties": false
+}`
+
+type graphChangesetArgs struct {
+	Catalog string `json:"catalog,omitempty"`
+	Op      string `json:"op"`
+	ID      string `json:"id,omitempty"`
+	Node    string `json:"node,omitempty"`
+}
+
+// registerGraphChangesetTool wires graph.changeset — a read-only wrapper
+// around the already-implemented host.graph.changeset op (list/get/touching
+// changeset lifecycle reads), registered in every mode alongside the rest
+// of the read family (unlike propose/withdraw/apply/authorize, which are
+// P4's actual write surface).
+func registerGraphChangesetTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.changeset",
+		Description: "Read changeset lifecycle state: list every changeset (+ status counts), get one changeset's parsed operations, or find every changeset touching a given node id.",
+		InputSchema: json.RawMessage(graphChangesetInputSchema),
+	}, recorded(deps, "graph.changeset", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphChangeset(ctx, deps, req)
+	}))
+}
+
+func handleGraphChangeset(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphChangesetArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.changeset: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	switch args.Op {
+	case "list", "get", "touching":
+	default:
+		return errorResult(NewError(CodeValidation, "graph.changeset: `op` must be one of list|get|touching, got "+args.Op, "")), nil
+	}
+	if args.Op == "get" && args.ID == "" {
+		return errorResult(NewError(CodeValidation, "graph.changeset: op \"get\" requires `id`", "")), nil
+	}
+	if args.Op == "touching" && args.Node == "" {
+		return errorResult(NewError(CodeValidation, "graph.changeset: op \"touching\" requires `node`", "")), nil
+	}
+
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	hostArgs := map[string]any{"catalog_path": path, "action": args.Op}
+	if args.ID != "" {
+		hostArgs["changeset_id"] = args.ID
+	}
+	if args.Node != "" {
+		hostArgs["node_id"] = args.Node
+	}
+	res, err := deps.Registry.Invoke(ctx, "host.graph.changeset", hostArgs)
+	if err != nil {
+		return hostErrResult("graph.changeset", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.changeset: "+res.Error, "")), nil
+	}
+
+	out := map[string]any{"ok": true, "catalog": alias}
+	for k, v := range res.Data {
+		out[k] = v
+	}
+
+	truncated := false
+	for _, key := range []string{"changesets", "touching"} {
+		list, ok := out[key].([]any)
+		if !ok {
+			continue
+		}
+		for !fitsBudget(out, BudgetGraphChangeset) && len(list) > 0 {
+			list = list[:len(list)-1]
+			out[key] = list
+			truncated = true
+		}
+	}
+	if truncated {
+		out["truncated"] = true
+	}
+
 	return okResult(out), nil
 }
 

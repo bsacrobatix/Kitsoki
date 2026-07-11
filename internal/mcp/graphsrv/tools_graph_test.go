@@ -291,14 +291,13 @@ func TestGraphServer_ImpactWrapsQuery(t *testing.T) {
 
 // TestGraphServer_ToolsListByteCeiling is the golden byte-ceiling test
 // (graph-mcp-plan.md §3.7): serializes the tools/list response and asserts
-// it stays comfortably under a concrete, measured ceiling. All 9 tools (7
-// read + feedback.report/feedback.list) are registered now. Measured actual
-// size as of this test: 8630 bytes. The plan's own ballpark is ~24KB for a
-// similarly sized ~15-tool family; this package registers 9, so a 16KB
-// ceiling (~1.85x the measured size, comfortable headroom for schema/
-// description growth without being so loose it stops catching a real
-// regression) is the documented, defensible number here.
-const toolsListByteCeiling = 16 * 1024
+// it stays comfortably under a concrete, measured ceiling. Default mode
+// (propose) now registers 14 tools: 8 read (7 + graph.changeset) + 4 write
+// (propose/withdraw/apply/authorize) + 2 feedback. The plan's own ballpark
+// is ~24KB for a similarly sized ~15-tool family; a 24KB ceiling (generous
+// headroom for schema/description growth without being so loose it stops
+// catching a real regression) is the documented number here.
+const toolsListByteCeiling = 24 * 1024
 
 func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
@@ -308,8 +307,8 @@ func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(res.Tools) != 9 {
-		t.Fatalf("expected 9 tools (7 read + 2 feedback), got %d: %+v", len(res.Tools), toolNames(res.Tools))
+	if len(res.Tools) != 14 {
+		t.Fatalf("expected 14 tools (8 read + 4 write + 2 feedback) in default (propose) mode, got %d: %+v", len(res.Tools), toolNames(res.Tools))
 	}
 	b, err := json.Marshal(res.Tools)
 	if err != nil {
@@ -318,6 +317,44 @@ func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	t.Logf("measured tools/list size: %d bytes (ceiling %d)", len(b), toolsListByteCeiling)
 	if len(b) > toolsListByteCeiling {
 		t.Fatalf("tools/list serialized to %d bytes, want <= %d", len(b), toolsListByteCeiling)
+	}
+}
+
+func TestGraphServer_ToolsListModeGating(t *testing.T) {
+	cases := []struct {
+		mode  string
+		count int
+	}{
+		{graphsrv.ModeRead, 10},    // 8 read + 2 feedback, no write tools
+		{graphsrv.ModePropose, 14}, // + propose/withdraw/apply/authorize
+		{graphsrv.ModeSteward, 14},
+	}
+	for _, tc := range cases {
+		t.Run(tc.mode, func(t *testing.T) {
+			cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}, Mode: tc.mode})
+			defer done()
+			res, err := cs.ListTools(context.Background(), &mcpsdk.ListToolsParams{})
+			if err != nil {
+				t.Fatalf("ListTools: %v", err)
+			}
+			if len(res.Tools) != tc.count {
+				t.Fatalf("mode %s: expected %d tools, got %d: %+v", tc.mode, tc.count, len(res.Tools), toolNames(res.Tools))
+			}
+			names := map[string]bool{}
+			for _, tool := range res.Tools {
+				names[tool.Name] = true
+			}
+			if tc.mode == graphsrv.ModeRead {
+				for _, w := range []string{"graph.propose", "graph.withdraw", "graph.apply", "graph.authorize"} {
+					if names[w] {
+						t.Errorf("mode read: %s should not be registered", w)
+					}
+				}
+			}
+			if !names["graph.changeset"] {
+				t.Errorf("mode %s: graph.changeset should always be registered", tc.mode)
+			}
+		})
 	}
 }
 
