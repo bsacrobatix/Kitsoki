@@ -59,7 +59,7 @@
         <ChatTranscript
           class="surface__transcript"
           :transcript="store.chatEntries"
-          @rewind="onRewind"
+          @reroute="onReroute"
           @feedback="onFeedback"
         />
         <!-- Streaming thinking bubble: visible while a turn is in flight —
@@ -254,13 +254,15 @@ function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: s
   void runTurn(() => store.submitIntent(source!, sessionId.value!, name, slots, displayLabel));
 }
 
-// Rewind one CRR decision from its route-receipt chip: reverse the route and
-// re-dispatch the original utterance. Routes through runTurn so the in-flight
-// guard + error banner behave exactly like a normal turn; a non-rewindable
-// receipt never reaches here (the chip disables its control).
-function onRewind(decisionId: string): void {
+// Reroute one CRR decision from its route-receipt chip: reverse the route and
+// re-dispatch the original utterance under a selected class. Routes through
+// runTurn so the in-flight guard + error banner behave exactly like a normal
+// turn.
+function onReroute(decisionId: string, newClass: string): void {
   if (!source || !sessionId.value) return;
-  void runTurn(() => store.rewindRoute(source!, sessionId.value!, decisionId));
+  void runTurn(() =>
+    store.rewindRoute(source!, sessionId.value!, decisionId, newClass, "operator reroute")
+  );
 }
 
 // Routing-feedback thumbs up/down (WS-C C4): fire-and-forget, no in-flight

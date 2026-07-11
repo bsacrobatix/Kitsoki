@@ -52,6 +52,7 @@ func TestRouteCommandRecordsAgainstSnapshot(t *testing.T) {
 	m.lastRoutedIntent = "look"
 	m.lastRoutedTier = "deterministic"
 	m.lastRoutedState = app.StatePath("foyer")
+	m.lastRoutedDecisionID = "session-route-3:1"
 
 	body, _, cmd := RouteCommand{}.Run(m, []string{"up"})
 	if cmd != nil {
@@ -70,6 +71,24 @@ func TestRouteCommandRecordsAgainstSnapshot(t *testing.T) {
 	}
 }
 
+// TestRouteCommandRerouteWiresAnAsyncRewind proves /route retry dispatches a
+// reroute command for the stored decision id rather than just printing help.
+func TestRouteCommandRerouteWiresAnAsyncRewind(t *testing.T) {
+	t.Parallel()
+	orch := testCloakOrchestrator(t)
+	m := NewRootModel(orch, app.SessionID("session-route-5"), "../../testdata/apps/cloak/app.yaml", "")
+	m.lastInput = "look around"
+	m.lastRoutedDecisionID = "session-route-5:1"
+
+	body, _, cmd := RouteCommand{}.Run(m, []string{"retry", "meta"})
+	if cmd == nil {
+		t.Fatal("expected reroute command to return an async tea.Cmd")
+	}
+	if !strings.Contains(body, "rerouting") {
+		t.Fatalf("expected reroute confirmation, got %q", body)
+	}
+}
+
 // TestSnapshotRoutedTurnNoop confirms an unresolved pipeline leaves the
 // lastRouted* fields untouched (a rejected/cancelled turn must not clobber
 // the previous turn's snapshot with empty values).
@@ -82,7 +101,7 @@ func TestSnapshotRoutedTurnNoop(t *testing.T) {
 	m.lastRoutedState = app.StatePath("foyer")
 
 	m.routing = newRoutingPipeline() // fresh, unresolved (winner == -1)
-	m.snapshotRoutedTurn()
+	m.snapshotRoutedTurn("")
 
 	if m.lastRoutedIntent != "look" {
 		t.Fatalf("unresolved pipeline must not clobber snapshot, got intent=%q", m.lastRoutedIntent)

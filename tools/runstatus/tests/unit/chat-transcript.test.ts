@@ -282,6 +282,10 @@ describe("ChatTranscript", () => {
               intent: "git.commit",
               reason: "user asked to save progress",
               confidence: 0.82,
+              alternatives: [
+                { class: "help", confidence: 0.25 },
+                { class: "meta_edit", confidence: 0.15 },
+              ],
               decision_id: "sess-1:7",
             },
           },
@@ -295,6 +299,10 @@ describe("ChatTranscript", () => {
     // …and the tier is marked "contextual" so it reads apart from a normal route.
     expect(chip.find(".chat-route-receipt__tier").text()).toBe("contextual");
     expect(chip.find(".chat-route-receipt__conf").text()).toBe("0.82");
+    expect(wrapper.find("[data-testid='route-actions']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-retry-intent']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-retry-room_request']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-alternatives']").exists()).toBe(true);
     // The decision id (the rewind target) rides in the tooltip.
     expect(chip.attributes("title")).toContain("sess-1:7");
     expect(chip.attributes("title")).toContain("git.commit");
@@ -321,6 +329,8 @@ describe("ChatTranscript", () => {
     const chip = wrapper.find("[data-testid='route-receipt']");
     expect(chip.exists()).toBe(true);
     expect(chip.find(".chat-route-receipt__target").text()).toBe("help");
+    expect(wrapper.find("[data-testid='route-actions']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-retry-meta_edit']").exists()).toBe(true);
     // The off-path chip and the route receipt coexist on the same role row.
     expect(wrapper.find("[data-testid='offramp-chip']").exists()).toBe(true);
   });
@@ -363,7 +373,7 @@ describe("ChatTranscript", () => {
     expect(given.text()).toContain("recorded");
   });
 
-  it("emits 'rewind' with the decision_id when the rewind control is clicked on a lane-class receipt", async () => {
+  it("emits 'reroute' with the decision_id and selected class when a route action is clicked", async () => {
     const wrapper = mount(ChatTranscript, {
       props: {
         transcript: [
@@ -380,19 +390,17 @@ describe("ChatTranscript", () => {
         ],
       },
     });
-    const btn = wrapper.find("[data-testid='route-rewind-btn']");
+    const btn = wrapper.find("[data-testid='route-retry-meta_edit']");
     expect(btn.exists()).toBe(true);
-    // A lane-class receipt is rewindable: the control is enabled.
-    expect(btn.attributes("disabled")).toBeUndefined();
     await btn.trigger("click");
-    const ev = wrapper.emitted("rewind");
+    const ev = wrapper.emitted("reroute");
     expect(ev).toBeTruthy();
-    // It carries exactly the receipt's decision id (the rewind target).
-    expect(ev![0]).toEqual(["sess-1:3"]);
+    // It carries the receipt's decision id plus the selected reroute class.
+    expect(ev![0]).toEqual(["sess-1:3", "meta_edit"]);
     wrapper.unmount();
   });
 
-  it("disables the rewind control for an intent-class receipt (not supported yet) and never emits", async () => {
+  it("keeps the reroute affordances visible on an intent-class receipt", () => {
     const wrapper = mount(ChatTranscript, {
       props: {
         transcript: [
@@ -409,15 +417,45 @@ describe("ChatTranscript", () => {
         ],
       },
     });
-    const btn = wrapper.find("[data-testid='route-rewind-btn']");
-    expect(btn.exists()).toBe(true);
-    // Intent-class rewind isn't recoverable yet: the control is disabled with an
-    // explanatory tooltip rather than letting the operator trigger a server error.
-    expect(btn.attributes("disabled")).toBeDefined();
-    expect(btn.attributes("title")).toContain("rewind not available for this route yet");
-    // Even a forced click (jsdom fires the handler) is a guarded no-op.
-    await btn.trigger("click");
-    expect(wrapper.emitted("rewind")).toBeFalsy();
+    expect(wrapper.find("[data-testid='route-actions']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-retry-help']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-retry-meta_edit']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='route-retry-room_request']").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("shows the parked fallback capsule when reroute preserved dirty work", () => {
+    const wrapper = mount(ChatTranscript, {
+      props: {
+        transcript: [
+          {
+            role: "agent",
+            text: "Workbench ready.",
+            contextRoute: {
+              class: "help",
+              target_lane: "help",
+              confidence: 0.7,
+              decision_id: "sess-1:3",
+            },
+            parkedWorkspace: {
+              source_workspace: "/tmp/workspaces/park-source",
+              recovery_workspace: "/tmp/workspaces/park-source-park-20260711T083617-64827",
+              recovery_branch: "agent/park-source-park-20260711T083617-64827",
+              recovery_commit: "0123456789abcdef0123456789abcdef01234567",
+              cleaned: true,
+              reason: "operator reroute",
+            },
+          },
+        ],
+      },
+    });
+    const parked = wrapper.find("[data-testid='parked-workspace']");
+    expect(parked.exists()).toBe(true);
+    expect(parked.text()).toContain("parked in");
+    expect(parked.text()).toContain("fallback capsule");
+    expect(parked.text()).toContain("0123456789ab");
+    expect(parked.attributes("title")).toContain("source cleaned");
+    expect(parked.attributes("title")).toContain("operator reroute");
     wrapper.unmount();
   });
 

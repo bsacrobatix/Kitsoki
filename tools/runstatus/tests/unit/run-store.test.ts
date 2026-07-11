@@ -578,7 +578,7 @@ describe("useRunStore — write-side actions", () => {
   });
 
   // ---- rewindRoute ----
-  // The route-receipt chip's rewind affordance drives store.rewindRoute, which
+  // The route-receipt chip's reroute affordance drives store.rewindRoute, which
   // reverses one CRR decision and applies the re-dispatched turn. It must call
   // the source's rewindRoute with the decision id, push a "rewound" marker, and
   // thread the re-dispatched turn through applyTurnResult.
@@ -1267,6 +1267,7 @@ describe("useRunStore — applyTurnResult threads the CRR route receipt", () => 
         class: "intent",
         intent: "git.commit",
         confidence: 0.82,
+        alternatives: [{ class: "help", confidence: 0.25 }],
         decision_id: "sess-1:7",
       },
     };
@@ -1278,6 +1279,30 @@ describe("useRunStore — applyTurnResult threads the CRR route receipt", () => 
     // reaches the ChatTranscript component.
     const lastChat = store.chatEntries[store.chatEntries.length - 1];
     expect(lastChat!.contextRoute?.decision_id).toBe("sess-1:7");
+  });
+
+  it("carries parked_workspace onto the agent bubble so the fallback capsule badge renders", () => {
+    const store = useRunStore();
+    const result: TurnResult = {
+      mode: "transitioned",
+      state: "workbench",
+      view: "Workbench ready.",
+      turn_number: 8,
+      parked_workspace: {
+        source_workspace: "/tmp/workspaces/park-source",
+        recovery_workspace: "/tmp/workspaces/park-source-park-20260711T083617-64827",
+        recovery_branch: "agent/park-source-park-20260711T083617-64827",
+        recovery_commit: "0123456789abcdef0123456789abcdef01234567",
+        cleaned: true,
+        reason: "operator reroute",
+      },
+    };
+    store.applyTurnResult(result);
+    const agent = store.transcript.find((e) => e.role === "agent");
+    expect(agent).toBeDefined();
+    expect(agent!.parkedWorkspace).toEqual(result.parked_workspace);
+    const lastChat = store.chatEntries[store.chatEntries.length - 1];
+    expect(lastChat!.parkedWorkspace?.recovery_branch).toContain("agent/park-source-park");
   });
 
   it("leaves contextRoute unset for a non-contextual turn", () => {

@@ -223,6 +223,24 @@ from_staging_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin
 [ "$(cat "$from_staging_workspace/feature.txt")" = "two" ] || fail "default create did not start from staging branch"
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$from_staging_workspace" >/dev/null
 
+park_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id park-source --branch agent/park-source --json)"
+park_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$park_json")"
+printf 'parked work\n' >"$park_workspace/README.md"
+printf 'untracked park\n' >"$park_workspace/parked.txt"
+park_result="$("$dev_workspace" park --repo "$source_repo" --root "$root" --session-id sess-park --json "$park_workspace")"
+park_recovery="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["recovery_workspace"])' <<<"$park_result")"
+park_commit="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["recovery_commit"])' <<<"$park_result")"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["parked"])' <<<"$park_result")" = "True" ] || fail "park did not report a parked workspace"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["cleaned"])' <<<"$park_result")" = "True" ] || fail "park did not report cleaning the source workspace"
+[ "$(cat "$park_workspace/README.md")" = "one" ] || fail "park did not clean the source workspace back to HEAD"
+[ ! -e "$park_workspace/parked.txt" ] || fail "park did not remove the source untracked file"
+[ -d "$park_recovery/.git" ] || fail "park did not create a recovery workspace"
+[ "$(cat "$park_recovery/README.md")" = "parked work" ] || fail "park did not preserve the tracked change in the recovery workspace"
+[ "$(cat "$park_recovery/parked.txt")" = "untracked park" ] || fail "park did not preserve the untracked file in the recovery workspace"
+[ "$(git -C "$park_recovery" rev-parse HEAD)" = "$park_commit" ] || fail "park JSON commit did not match the recovery workspace HEAD"
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$park_workspace" >/dev/null
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$park_recovery" >/dev/null
+
 # A Studio MCP server can itself run inside an agent capsule. That clone tracks
 # staging/local as source/staging/local and intentionally has no local
 # staging/local branch. Nested workspace creation and merge must preserve that

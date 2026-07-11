@@ -1566,7 +1566,8 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		newClass, _ := params["new_class"].(string)
 		reason, _ := params["reason"].(string)
-		out, err := entry.Driver.RewindRoute(ctx, decisionID, orchestrator.ContextRouteClass(newClass), reason)
+		workspacePath, _ := params["workspace_path"].(string)
+		out, err := entry.Driver.RewindRoute(ctx, decisionID, orchestrator.ContextRouteClass(newClass), reason, workspacePath)
 		if err != nil {
 			return nil, serverErr(err)
 		}

@@ -41,8 +41,8 @@
                after deterministic + embedding miss. The chip names the lane /
                intent it landed in and marks the tier as "contextual" so an
                operator can tell a CRR decision apart from a normal transition.
-               It also carries the stable decision_id (the rewind target) in its
-               title, ahead of the rewind control's RPC being exposed. -->
+               It also carries the stable decision_id (the reroute target) in its
+               title, ahead of the reroute control's RPC being exposed. -->
           <div
             v-if="entry.role === 'agent' && entry.contextRoute"
             class="chat-route-receipt"
@@ -59,25 +59,60 @@
               v-if="entry.contextRoute!.confidence"
               >{{ entry.contextRoute!.confidence.toFixed(2) }}</span
             >
-            <!-- Rewind affordance: reverse this one CRR decision and re-dispatch
-                 the original utterance. Disabled for an intent-class receipt —
-                 the engine can't yet recover the original intent from the
-                 journal, so we present a disabled control with an explanatory
-                 tooltip rather than letting the operator trigger a server error. -->
-            <button
-              type="button"
-              class="chat-route-receipt__rewind"
-              data-testid="route-rewind-btn"
-              :disabled="!canRewind(entry.contextRoute!)"
-              :title="
-                canRewind(entry.contextRoute!)
-                  ? `rewind this route (decision ${entry.contextRoute!.decision_id})`
-                  : 'rewind not available for this route yet'
-              "
-              @click="onRewind(entry.contextRoute!)"
+          </div>
+          <div
+            v-if="entry.role === 'agent' && entry.contextRoute"
+            class="chat-route-actions"
+            data-testid="route-actions"
+          >
+            <span class="chat-route-actions__label">retry as</span>
+            <div class="chat-route-actions__buttons">
+              <button
+                v-for="choice in routeChoices(entry.contextRoute!)"
+                :key="choice.class"
+                type="button"
+                class="chat-route-actions__btn"
+                :class="{ 'chat-route-actions__btn--selected': choice.class === entry.contextRoute!.class }"
+                :data-testid="`route-retry-${choice.class}`"
+                :title="choice.title"
+                @click="onReroute(entry.contextRoute!, choice.class)"
+              >
+                ↺ {{ choice.label }}
+              </button>
+            </div>
+            <div
+              v-if="routeAlternatives(entry.contextRoute!).length"
+              class="chat-route-actions__alternatives"
+              data-testid="route-alternatives"
             >
-              ↺ rewind
-            </button>
+              <span class="chat-route-actions__label">alternatives</span>
+              <div class="chat-route-actions__alt-list">
+                <span
+                  v-for="alt in routeAlternatives(entry.contextRoute!)"
+                  :key="routeAltKey(alt)"
+                  class="chat-route-actions__alt"
+                  :title="routeAltTitle(alt)"
+                >
+                  {{ routeAltLabel(alt) }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div
+            v-if="entry.role === 'agent' && entry.parkedWorkspace"
+            class="chat-parked-workspace"
+            data-testid="parked-workspace"
+            :title="parkedWorkspaceTitle(entry.parkedWorkspace!)"
+          >
+            <span class="chat-parked-workspace__label">
+              {{ parkedWorkspaceLabel(entry.parkedWorkspace!) }}
+            </span>
+            <span
+              v-if="entry.parkedWorkspace!.recovery_commit"
+              class="chat-parked-workspace__meta"
+            >
+              {{ entry.parkedWorkspace!.recovery_commit.slice(0, 12) }}
+            </span>
           </div>
         </div>
         <!-- The turn's preserved thinking/tool feed, collapsed by default so
@@ -214,7 +249,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick, onMounted, onBeforeUnmount } from "vue";
-import type { View, ContextRouteInfo } from "../types.js";
+import type {
+  View,
+  ContextRouteInfo,
+  ContextRouteAlt,
+  ParkedWorkspaceInfo,
+} from "../types.js";
 import type { StreamItem } from "../lib/activity.js";
 import type { RoutingInfo } from "../stores/run.js";
 import ActivityDisclosure from "./ActivityDisclosure.vue";
@@ -266,6 +306,8 @@ export interface ChatEntry {
    * resolved this turn (renders the "⤳ … · contextual" route receipt chip).
    */
   contextRoute?: ContextRouteInfo;
+  /** The fallback capsule/workspace used to preserve dirty work on reroute. */
+  parkedWorkspace?: ParkedWorkspaceInfo;
 }
 
 /** Tooltip: the full routing story in one line. */
@@ -284,16 +326,43 @@ function routingTitle(r: RoutingInfo): string {
  */
 function routeTarget(r: ContextRouteInfo): string {
   if (r.class === "intent" && r.intent) return r.intent;
-  return r.target_lane || r.class;
+  if (r.target_lane) {
+    if (r.target_lane === "work") return "workbench";
+    if (r.target_lane === "meta") return "meta";
+    return r.target_lane;
+  }
+  return routeClassLabel(r.class);
 }
 
-/** Tooltip: the full contextual-routing story + the decision id (rewind target). */
+/** Tooltip: the full contextual-routing story + the decision id (reroute target). */
 function routeReceiptTitle(r: ContextRouteInfo): string {
   const bits = [`contextually routed to "${routeTarget(r)}" (class: ${r.class})`];
   if (r.confidence) bits.push(`confidence ${r.confidence.toFixed(2)}`);
   if (r.reason) bits.push(`— ${r.reason}`);
+  if (routeAlternatives(r).length) {
+    bits.push(
+      `alternatives: ${routeAlternatives(r)
+        .map((alt) => routeAltLabel(alt))
+        .join(", ")}`
+    );
+  }
   bits.push(`[decision ${r.decision_id}]`);
   return bits.join(" ");
+}
+
+function parkedWorkspaceLabel(p: ParkedWorkspaceInfo): string {
+  const location = p.recovery_workspace ? ` ${p.recovery_workspace}` : "";
+  const branch = p.recovery_branch ? ` on ${p.recovery_branch}` : "";
+  return `parked in fallback capsule${location}${branch}`;
+}
+
+function parkedWorkspaceTitle(p: ParkedWorkspaceInfo): string {
+  const bits = [parkedWorkspaceLabel(p)];
+  if (p.source_workspace) bits.push(`from ${p.source_workspace}`);
+  if (p.recovery_commit) bits.push(`commit ${p.recovery_commit}`);
+  if (p.cleaned !== undefined) bits.push(p.cleaned ? "source cleaned" : "source preserved");
+  if (p.reason) bits.push(`reason: ${p.reason}`);
+  return bits.join(" · ");
 }
 
 const props = withDefaults(
@@ -308,27 +377,71 @@ const props = withDefaults(
   },
 );
 
-// 'rewind' is emitted with the receipt's decision_id when the operator clicks
-// the rewind affordance on a (rewindable) route receipt; the owning surface
-// drives the run store's rewindRoute action with it.
+// 'reroute' is emitted with the receipt's decision_id plus the selected class
+// when the operator clicks a reroute affordance on a route receipt; the owning
+// surface drives the run store's rewindRoute action with it.
 const emit = defineEmits<{
-  rewind: [decisionId: string];
+  reroute: [decisionId: string, newClass: string];
   feedback: [entry: ChatEntry, verdict: "up" | "down"];
 }>();
 
-/**
- * A CRR receipt is rewindable only for the lane classes the engine can reverse
- * today (help / room_request / meta_edit). An intent-class decision isn't yet
- * recoverable from the journal, so its rewind control is disabled with a tooltip.
- */
-function canRewind(r: ContextRouteInfo): boolean {
-  return !!r.decision_id && r.class !== "intent";
+interface RouteChoice {
+  class: string;
+  label: string;
+  title: string;
 }
 
-/** Emit the rewind request for a rewindable receipt (no-op when disabled). */
-function onRewind(r: ContextRouteInfo): void {
-  if (!canRewind(r)) return;
-  emit("rewind", r.decision_id);
+function routeClassLabel(cls: string): string {
+  switch (cls) {
+    case "intent":
+      return "intent";
+    case "help":
+      return "help";
+    case "room_request":
+      return "workbench";
+    case "meta_edit":
+      return "meta";
+    default:
+      return cls;
+  }
+}
+
+function routeChoiceTitle(r: ContextRouteInfo, cls: string): string {
+  return `retry this request as ${routeClassLabel(cls)} (decision ${r.decision_id})`;
+}
+
+function routeChoices(r: ContextRouteInfo): RouteChoice[] {
+  const classes = ["intent", "help", "room_request", "meta_edit"];
+  return classes.map((cls) => ({
+    class: cls,
+    label: routeClassLabel(cls),
+    title: routeChoiceTitle(r, cls),
+  }));
+}
+
+function routeAlternatives(r: ContextRouteInfo): ContextRouteAlt[] {
+  return Array.isArray(r.alternatives) ? r.alternatives : [];
+}
+
+function routeAltLabel(alt: ContextRouteAlt): string {
+  if (alt.class === "intent" && alt.intent) return alt.intent;
+  return routeClassLabel(alt.class);
+}
+
+function routeAltKey(alt: ContextRouteAlt): string {
+  return `${alt.class}:${alt.intent ?? ""}:${alt.confidence}`;
+}
+
+function routeAltTitle(alt: ContextRouteAlt): string {
+  const bits = [`alternative: ${routeAltLabel(alt)}`];
+  if (alt.confidence) bits.push(`confidence ${alt.confidence.toFixed(2)}`);
+  return bits.join(" ");
+}
+
+/** Emit the reroute request for a receipt choice. */
+function onReroute(r: ContextRouteInfo, newClass: string): void {
+  if (!r.decision_id || !newClass) return;
+  emit("reroute", r.decision_id, newClass);
 }
 
 /** Emit a routing-feedback verdict for a user turn's routing chip. */
@@ -639,30 +752,6 @@ watch(
 .chat-route-receipt__arrow {
   opacity: 0.7;
 }
-/* Rewind affordance: a compact text button that sits inside the receipt pill.
-   Disabled (intent-class receipts the engine can't yet reverse) it dims and
-   shows a not-allowed cursor, with the "not available yet" tooltip. */
-.chat-route-receipt__rewind {
-  font-family: inherit;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #115e59;
-  background: transparent;
-  border: 1px solid #5eead4;
-  border-radius: 999px;
-  padding: 0 6px;
-  margin-left: 2px;
-  cursor: pointer;
-}
-.chat-route-receipt__rewind:hover:not(:disabled) {
-  background: #99f6e4;
-}
-.chat-route-receipt__rewind:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
 .chat-route-receipt__target {
   font-weight: 700;
 }
@@ -678,6 +767,97 @@ watch(
 }
 .chat-route-receipt__conf {
   opacity: 0.75;
+}
+
+.chat-route-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 6px;
+}
+
+.chat-route-actions__label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #115e59;
+}
+
+.chat-route-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chat-route-actions__btn {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #115e59;
+  background: transparent;
+  border: 1px solid #5eead4;
+  border-radius: 999px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+
+.chat-route-actions__btn:hover {
+  background: #99f6e4;
+}
+
+.chat-route-actions__btn--selected {
+  background: #99f6e4;
+  border-color: #14b8a6;
+}
+
+.chat-route-actions__alternatives {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chat-route-actions__alt-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.chat-route-actions__alt {
+  font-size: 9.5px;
+  border: 1px solid #99f6e4;
+  border-radius: 999px;
+  padding: 0 6px;
+  color: #0f766e;
+  background: #ecfeff;
+}
+
+.chat-parked-workspace {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #7c2d12;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+}
+
+.chat-parked-workspace__label {
+  font-weight: 700;
+}
+
+.chat-parked-workspace__meta {
+  color: #9a3412;
+  opacity: 0.85;
 }
 
 .chat-role {

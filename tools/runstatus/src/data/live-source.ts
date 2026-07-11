@@ -629,23 +629,25 @@ export class LiveSource implements DataSource {
   }
 
   /**
-   * Rewind one CRR decision (the route-receipt chip's "rewind" affordance):
+   * Rewind one CRR decision (the route-receipt chip's reroute affordance):
    * reverse the route at decisionId and re-dispatch the original utterance,
    * optionally under newClass. Resolves with the re-dispatched turn. An
-   * intent-class rewind rejects server-side ("not yet implemented") — the chip
-   * disables the control for those receipts so this is the defensive path.
+   * intent-class rewind rejects server-side ("not yet implemented") until the
+   * journal can recover the accepted intent again.
    */
   rewindRoute(
     sessionId: string,
     decisionId: string,
     newClass?: string,
-    reason?: string
+    reason?: string,
+    workspacePath?: string
   ): Promise<TurnResult> {
     return this.client.post<TurnResult>("runstatus.session.rewind_route", {
       session_id: sessionId,
       decision_id: decisionId,
       ...(newClass ? { new_class: newClass } : {}),
       ...(reason ? { reason } : {}),
+      ...(workspacePath ? { workspace_path: workspacePath } : {}),
     });
   }
 

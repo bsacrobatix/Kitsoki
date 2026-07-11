@@ -28,6 +28,20 @@ const ownerSentinelFile = ".kitsoki-owner"
 
 const cloneSentinelFile = ".kitsoki-clone"
 
+// WorkspaceParkResult records a preserved dirty workspace and the committed
+// fallback capsule that now holds the work. When Parked is false the helper
+// treated the source as clean or non-git and left it unchanged.
+type WorkspaceParkResult struct {
+	OK               bool   `json:"ok"`
+	Parked           bool   `json:"parked"`
+	SourceWorkspace  string `json:"source_workspace"`
+	RecoveryWorkspace string `json:"recovery_workspace,omitempty"`
+	RecoveryBranch   string `json:"recovery_branch,omitempty"`
+	RecoveryCommit   string `json:"recovery_commit,omitempty"`
+	Cleaned          bool   `json:"cleaned,omitempty"`
+	Reason           string `json:"reason,omitempty"`
+}
+
 // writeOwnerSentinel records sid as the owning session of the worktree at path.
 // Empty sid is a no-op (callers that omit the session dimension leave no
 // sentinel — the short-circuit then treats an absent sentinel as shareable for
@@ -535,6 +549,56 @@ func devWorkspaceCreate(ctx context.Context, source, root, id, branch, base, ses
 		data["ok"] = true
 	}
 	return data, ""
+}
+
+// ParkWorkspace preserves the current dirty checkout in a committed fallback
+// capsule. Clean or non-git sources are treated as no-ops.
+func ParkWorkspace(ctx context.Context, workspace, sessionID, message string) (WorkspaceParkResult, error) {
+	absWorkspace, err := filepath.Abs(strings.TrimSpace(workspace))
+	if err != nil {
+		return WorkspaceParkResult{}, err
+	}
+	repo, repoErr := resolveWorktreeRepo(ctx, absWorkspace)
+	if repoErr != "" {
+		return WorkspaceParkResult{OK: true, Parked: false, SourceWorkspace: absWorkspace, Reason: "not a git checkout"}, nil
+	}
+	script, scriptErr := devWorkspaceScript(repo)
+	if scriptErr != "" {
+		return WorkspaceParkResult{}, fmt.Errorf("workspace.park: %s", scriptErr)
+	}
+	args := []string{"park", "--repo", repo, "--json"}
+	if strings.TrimSpace(sessionID) != "" {
+		args = append(args, "--session-id", sessionID)
+	}
+	if strings.TrimSpace(message) != "" {
+		args = append(args, "--message", message)
+	}
+	args = append(args, absWorkspace)
+	stdout, stderr, code, err := cliExec(ctx, repo, script, args...)
+	if err != nil {
+		return WorkspaceParkResult{}, fmt.Errorf("workspace.park: exec: %v", err)
+	}
+	if code != 0 {
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(stdout)
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("script exited with code %d", code)
+		}
+		return WorkspaceParkResult{}, fmt.Errorf("workspace.park: %s", msg)
+	}
+	var out WorkspaceParkResult
+	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
+		return WorkspaceParkResult{}, fmt.Errorf("workspace.park: parse script JSON: %w", err)
+	}
+	if out.SourceWorkspace == "" {
+		out.SourceWorkspace = absWorkspace
+	}
+	if !out.OK {
+		out.OK = true
+	}
+	return out, nil
 }
 
 func devWorkspaceScript(source string) (string, string) {

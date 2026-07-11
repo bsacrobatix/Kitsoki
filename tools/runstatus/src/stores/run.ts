@@ -9,6 +9,7 @@ import type {
   View,
   HarnessProfileInfo,
   ContextRouteInfo,
+  ParkedWorkspaceInfo,
   OperationDriveSummary,
 } from "../types.js";
 import type { DataSource, ConnectionState } from "../data/source.js";
@@ -122,6 +123,8 @@ export interface TranscriptEntry {
    * the agent bubble; absent for deterministic/semantic/LLM turns.
    */
   contextRoute?: ContextRouteInfo;
+  /** Fallback capsule created while parking dirty work before reroute. */
+  parkedWorkspace?: ParkedWorkspaceInfo;
 }
 
 // StreamItem (the ordered feed shape) moved to lib/activity.ts so the meta
@@ -748,6 +751,9 @@ export const useRunStore = defineStore("run", () => {
         // Carry the CRR receipt so the bubble shows a "routed to … · contextual"
         // chip when the contextual-routing tier resolved this turn.
         ...(result.context_route ? { contextRoute: result.context_route } : {}),
+        // Parking is a reroute side effect; surface it alongside the route so
+        // the operator can verify where the dirty work landed.
+        ...(result.parked_workspace ? { parkedWorkspace: result.parked_workspace } : {}),
       });
     }
   }
@@ -1004,22 +1010,23 @@ export const useRunStore = defineStore("run", () => {
    * class). Pushes a small "rewound …" user marker, then applies the
    * re-dispatched turn so the transcript reflects the new route. Requires a
    * source that exposes rewindRoute (the live session); a source without it is a
-   * no-op (the chip hides the control there). Rejects (propagated to the caller)
-   * when the engine can't rewind that route — e.g. an intent-class decision.
+   * no-op. Rejects (propagated to the caller) when the engine can't rewind that
+   * route or the selected reroute class is unsupported.
    */
   async function rewindRoute(
     source: DataSource,
     sessionId: string,
     decisionId: string,
     newClass?: string,
-    reason?: string
+    reason?: string,
+    workspacePath?: string
   ): Promise<TurnResult | undefined> {
     if (!source.rewindRoute) return undefined;
     transcript.value.push({
       role: "user",
       text: `↺ rewound route ${decisionId}${newClass ? ` → ${newClass}` : ""}`,
     });
-    const result = await source.rewindRoute(sessionId, decisionId, newClass, reason);
+    const result = await source.rewindRoute(sessionId, decisionId, newClass, reason, workspacePath);
     applyTurnResult(result);
     return result;
   }
