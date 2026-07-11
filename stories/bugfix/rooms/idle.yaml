@@ -181,21 +181,22 @@ states:
           feature_branch: "fix/{{ world.ticket_id }}-{{ world.session_id }}"
           workdir:        ".capsules/workspaces/bf-{{ world.ticket_id }}-{{ world.session_id }}"
 
-      # Step 2: create the clone-backed capsule workspace on disk. `id:` pins
-      # the workspace identity; `base:` is the committish the workspace is cut
-      # from. Prefer an explicit `base_commit` (pin the tree to a specific commit
-      # — e.g. a bug's pre-fix baseline in a bake-off) and fall back to
-      # `base_branch` (which doubles as the PR target and defaults to "main").
-      # Keep these distinct: the cut-point and the PR base are not the same thing.
+      # Step 2: create the Capsule workspace on disk. `id:` pins the workspace
+      # identity; `definition:` names the checked-in Capsule definition that owns
+      # source/bootstrap/policy. The transitional name/base/session_id fields are
+      # still supplied for legacy bindings during the migration window, but
+      # Capsule-backed bindings ignore them and return the authoritative branch.
       - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage'"
         invoke: iface.workspace.create
         with:
           id:         "{{ world.workspace_id }}"
+          definition: "development"
           name:       "{{ world.feature_branch }}"
           base:       "{{ world.base_commit != '' ? world.base_commit : world.base_branch }}"
           session_id: "{{ world.session_id }}"
         bind:
-          workdir: path
+          workdir:        path
+          feature_branch: branch
         on_error: idle
 
       # Step 2t (triage mode): no isolated workspace — pin workdir to the current

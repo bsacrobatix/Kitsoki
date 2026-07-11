@@ -76,7 +76,7 @@ host_handlers:
           ok: true
           submitted:
             exit: "shipped"
-            worktree: ".worktrees/case-1"
+            worktree: ".capsules/workspaces/case-1"
             branch: "fix/case-1"
             deliverable_present: true
             oracle_pass: true

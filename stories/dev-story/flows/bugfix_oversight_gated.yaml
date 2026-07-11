@@ -18,7 +18,7 @@ initial_world:
   feature_branch: "fix/tkt-og-1"
 
 host_handlers:
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced", path: ".worktrees/tkt-og-1" }
   host.agent.task:
     data:

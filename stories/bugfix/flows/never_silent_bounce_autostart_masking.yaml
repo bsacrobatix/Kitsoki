@@ -41,12 +41,12 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
-  host.git_worktree:
+  host.capsule_workspace:
     by_op:
       create:
         data: { ok: true, log: "reused existing worktree" }
       sync:
-        error: "host.git_worktree: sync: worktree dir .worktrees/bf-TKT-904 is missing"
+        error: "host.capsule_workspace: sync: worktree dir .worktrees/bf-TKT-904 is missing"
   host.git:
     data: { ok: true, sha: "abc", diff: "" }
   host.local:
@@ -64,7 +64,7 @@ turns:
   - intent: { name: accept, slots: {} }
     expect_state: reproducing
     expect_world:
-      last_error: "host.git_worktree: sync: worktree dir .worktrees/bf-TKT-904 is missing"
+      last_error: "host.capsule_workspace: sync: worktree dir .worktrees/bf-TKT-904 is missing"
       bf_autostart_attempted: true
 
 expect_terminal: false

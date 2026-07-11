@@ -53,7 +53,7 @@ host_handlers:
     data: { ok: true, id: "ib-1" }
   host.git:
     data: { ok: true, sha: "abc", diff: "", state: "success", url: "", pr_id: "" }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "" }
   host.local:
     data: { ok: true, state: "success", log: "" }

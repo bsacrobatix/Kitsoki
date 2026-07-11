@@ -173,6 +173,10 @@ func Builtins() *Registry {
 
 	// Capsule-backed workspace contract. It is intentionally separate from the
 	// historical branch-argument worktree surface during migration.
+	r.Register("host.capsule_workspace", "list", Op{
+		Input:  fields(),
+		Output: fields("ok", "bool", "workspaces", "list", "diagnostics", "object"),
+	})
 	r.Register("host.capsule_workspace", "create", Op{
 		Input:  fields("id", "string", "definition", "string", "owner", "string"),
 		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "diagnostics", "object"),
@@ -196,6 +200,14 @@ func Builtins() *Registry {
 	r.Register("host.capsule_workspace", "close", Op{
 		Input:  fields("id", "string", "owner", "string"),
 		Output: fields("ok", "bool", "id", "string", "closed", "bool", "diagnostics", "object"),
+	})
+	r.Register("host.capsule_workspace", "cleanup_scan", Op{
+		Input:  fields("base", "string", "exclude", "string", "protected", "string"),
+		Output: fields("ok", "bool", "base", "string", "exclude", "string", "candidates", "list", "recommended_count", "int", "diagnostics", "object"),
+	})
+	r.Register("host.capsule_workspace", "cleanup_apply", Op{
+		Input:  fields("candidates", "list", "owner", "string"),
+		Output: fields("ok", "bool", "deleted", "list", "skipped", "list", "errors", "list", "diagnostics", "object"),
 	})
 
 	// transport -> host.append_to_file

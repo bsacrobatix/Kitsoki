@@ -68,11 +68,13 @@ states:
       - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != '' && !world.impl_provision_attempted"
         invoke: iface.workspace.create
         with:
-          id:   "{{ world.workspace_id }}"
-          name: "{{ world.feature_branch }}"
-          base: "{{ world.base_branch }}"
+          id:         "{{ world.workspace_id }}"
+          definition: "development"
+          name:       "{{ world.feature_branch }}"
+          base:       "{{ world.base_branch }}"
         bind:
-          workdir: path
+          workdir:        path
+          feature_branch: branch
         on_error: idle
       # Step 3: auto-start once provisioned. Mirrors stories/bugfix/rooms/
       # idle.yaml's own autostart (its Step 3) — a headless dispatcher

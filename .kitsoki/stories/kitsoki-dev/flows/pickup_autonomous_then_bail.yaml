@@ -28,7 +28,7 @@ initial_world:
   core__ticket_id:      "2026-05-14T103205Z-tui-view-render-before-bind"
   core__ticket_title:   "TUI view templates render BEFORE on_enter binds"
   core__thread:         "issues/bugs/2026-05-14T103205Z-tui-view-render-before-bind.md"
-  core__workdir:        ".worktrees/tui-view-render-before-bind"
+  core__workdir:        ".capsules/workspaces/tui-view-render-before-bind"
   core__workspace_id:   "ws-tui-view-render"
   core__base_branch:    "main"
   core__feature_branch: "fix/tui-view-render-before-bind"
@@ -55,7 +55,7 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced" }
   host.git:
     data: { ok: true, sha: "abc123", diff: "", url: "https://example/pr/103205", pr_id: "103205", state: "success", checks: "", comments: "" }

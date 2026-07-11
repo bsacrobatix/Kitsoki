@@ -25,7 +25,7 @@ initial_world:
   core__ticket_id:      "TKT-AUTO"
   core__ticket_title:   "Two-layer autonomous-advance smoke"
   core__thread:         "TKT-AUTO"
-  core__workdir:        ".worktrees/auto"
+  core__workdir:        ".capsules/workspaces/auto"
   core__workspace_id:   "ws-auto"
   core__base_branch:    "main"
   core__feature_branch: "fix/auto"
@@ -49,7 +49,7 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced" }
   host.git:
     data: { ok: true, sha: "abc123", diff: "", url: "https://example/pr/auto", pr_id: "auto", state: "success", checks: "", comments: "" }

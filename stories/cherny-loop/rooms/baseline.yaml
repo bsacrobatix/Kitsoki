@@ -19,16 +19,18 @@ states:
       # the operator's checkout. Mint it here (idempotent — re-launch / restart
       # reuses the same branch) and pin every downstream gate + maker call to its
       # cwd via cwd/working_dir. Reads still see the whole repo; writes are
-      # confined to .worktrees/<workspace_id>. A failed mint routes to
+      # confined to the capsule workspace. A failed mint routes to
       # workspace_error rather than letting the loop spend in the wrong tree.
       - invoke: iface.workspace.create
         id: "worktree"
         with:
-          id:   "{{ world.workspace_id }}"
-          name: "{{ world.workspace_branch }}"
-          base: "{{ world.workspace_base }}"
+          id:         "{{ world.workspace_id }}"
+          definition: "development"
+          name:       "{{ world.workspace_branch }}"
+          base:       "{{ world.workspace_base }}"
         bind:
           worktree_path: path
+          workspace_branch: branch
         on_error: workspace_error
       # Reset last turn's verdict, then run the checker on the UNCHANGED artifact
       # INSIDE the worktree (identical to HEAD on a fresh branch, so a RED

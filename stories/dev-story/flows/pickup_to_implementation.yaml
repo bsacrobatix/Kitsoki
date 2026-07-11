@@ -39,7 +39,7 @@ host_handlers:
       state:    "success"
       checks:   ""
       comments: ""
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "" }
   host.local:
     data: { ok: true, log: "PASS", state: "success", passed: 1, failed: 0 }

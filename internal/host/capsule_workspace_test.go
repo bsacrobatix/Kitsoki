@@ -68,6 +68,41 @@ func TestCapsuleWorkspace_CreateGetClose(t *testing.T) {
 		t.Fatalf("state: %v", got.Data["state"])
 	}
 
+	listed, err := host.CapsuleWorkspaceHandler(ctx, map[string]any{
+		"op":    "list",
+		"repo":  project,
+		"owner": "agent",
+	})
+	if err != nil {
+		t.Fatalf("list infra: %v", err)
+	}
+	if listed.Error != "" {
+		t.Fatalf("list domain: %s", listed.Error)
+	}
+	workspaces, _ := listed.Data["workspaces"].([]map[string]any)
+	if len(workspaces) != 1 || workspaces[0]["id"] != "run" || workspaces[0]["path"] != path {
+		t.Fatalf("list workspaces: %v", listed.Data["workspaces"])
+	}
+
+	cleanup, err := host.CapsuleWorkspaceHandler(ctx, map[string]any{
+		"op":    "cleanup_scan",
+		"repo":  project,
+		"owner": "agent",
+	})
+	if err != nil {
+		t.Fatalf("cleanup_scan infra: %v", err)
+	}
+	if cleanup.Error != "" {
+		t.Fatalf("cleanup_scan domain: %s", cleanup.Error)
+	}
+	candidates, _ := cleanup.Data["candidates"].([]map[string]any)
+	if len(candidates) != 1 || candidates[0]["id"] != "run" || candidates[0]["recommended"] == true {
+		t.Fatalf("cleanup candidates: %v", cleanup.Data["candidates"])
+	}
+	if cleanup.Data["recommended_count"] != 0 {
+		t.Fatalf("recommended_count: %v", cleanup.Data["recommended_count"])
+	}
+
 	for _, op := range []string{"status", "sync"} {
 		status, err := host.CapsuleWorkspaceHandler(ctx, map[string]any{
 			"op":    op,

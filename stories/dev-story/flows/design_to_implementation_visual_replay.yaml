@@ -44,7 +44,7 @@ host_handlers:
         data: { ok: true, path: ".artifacts/replay/04-review.md", message_id: "review#1" }
       implementation_progress_file:
         data: { ok: true, path: ".artifacts/replay/progress.yaml", message_id: "progress#1" }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "stub worktree provisioned", path: ".worktrees/impl-F-REPLAY-001-visualreplay" }
   host.git:
     data:

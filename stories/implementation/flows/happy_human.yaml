@@ -40,8 +40,8 @@ host_handlers:
   host.run:
     data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
 
-  # iface.workspace.* — prefix-fallback to host.git_worktree.
-  host.git_worktree:
+  # iface.workspace.* — prefix-fallback to host.capsule_workspace.
+  host.capsule_workspace:
     data: { ok: true, log: "synced" }
 
   # iface.vcs.* — prefix-fallback. Stub satisfies commit (sha), open_pr

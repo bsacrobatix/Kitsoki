@@ -261,7 +261,7 @@ files / git); parent stories rebind via `imports.<alias>.host_bindings`.
 | `ticket` | `search`, `get`, `comment`, `transition`, `list_mine` | `host.local_files.ticket` |
 | `vcs` | `branch`, `diff`, `commit`, `push`, `open_pr`, `pr_status`, `pr_comment` | `host.git` |
 | `ci` | `run_tests`, `build`, `remote_status` | `host.local` |
-| `workspace` | `list`, `get`, `create`, `sync` | `host.git_worktree` |
+| `workspace` | `list`, `get`, `create`, `sync` | `host.capsule_workspace` |
 | `transport` | `post` | `host.append_to_file` (kitsoki-dev appends to the local bug file) |
 | `inbox.add` | — | always-on bare host call, NOT an iface (per contract §2.6) |
 
@@ -282,7 +282,7 @@ in `internal/host/`.
 | `host.local_files.ticket` | Slice β (in flight) | `internal/host/localfiles_ticket.go` |
 | `host.git` | Slice β (in flight) | `internal/host/git_vcs.go` |
 | `host.local` | Slice β (in flight) | `internal/host/local_ci.go` |
-| `host.git_worktree` | Slice β (in flight) | `internal/host/git_worktree.go` |
+| `host.capsule_workspace` | Slice β (in flight) | `internal/host/git_worktree.go` |
 | `host.append_to_file` | Slice β (in flight) | `internal/host/append_file_transport.go` |
 | `host.inbox.add` | Slice β (in flight) | `internal/host/inbox_add.go` |
 | `host.agent.task` | agent-split Phase 8 | `internal/host/agent_task.go` |

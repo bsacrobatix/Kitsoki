@@ -25,7 +25,7 @@ kitsoki run stories/dev-story/app.yaml
 ```
 
 The defaults in `host_interfaces:` (host.local_files.ticket, host.git,
-host.local, host.git_worktree, host.append_to_file) make standalone
+host.local, host.capsule_workspace, host.append_to_file) make standalone
 runs work for smoke testing without an instance wrapper.
 
 ## Composition

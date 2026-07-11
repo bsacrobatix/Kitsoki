@@ -23,7 +23,7 @@ initial_world:
   core__ticket_title:   "scenarios/README.md says --warp but the boot-time flag path resolution is undocumented"
   core__ticket_url:     "stories/oregon-trail/issues/bugs/2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed.md"
   core__thread:         "stories/oregon-trail/issues/bugs/2026-05-14T120000Z-scenarios-readme-warp-flag-misnamed.md"
-  core__workdir:        ".worktrees/oregon-trail-warp-flag-readme"
+  core__workdir:        ".capsules/workspaces/oregon-trail-warp-flag-readme"
   core__workspace_id:   "ws-ot-warp-readme"
   core__base_branch:    "main"
   core__feature_branch: "docs/oregon-trail-warp-flag-readme"
@@ -37,7 +37,7 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced" }
   host.git:
     data:
