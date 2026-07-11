@@ -42,6 +42,9 @@ def require(label: str, condition: bool) -> None:
         failures.append(label)
 
 
+check("native runner root is source checkout", runner.default_kitsoki_root({}), REPO_ROOT)
+
+
 check("registry raw alias", runner.resolve_treatment_driver("single-briefed").name, "raw-codex")
 check("registry kitsoki alias", runner.resolve_treatment_driver("kitsoki").name, "kitsoki-mcp")
 check("registry codeact", runner.resolve_treatment_driver("codex-codeact").name, "codex-codeact")

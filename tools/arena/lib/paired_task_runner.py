@@ -28,7 +28,20 @@ try:
 except ModuleNotFoundError:
     sys.exit("paired_task_runner.py needs pyyaml")
 
-KITSOKI_ROOT = Path(os.environ.get("KITSOKI_ROOT", "/workspace/kitsoki")).resolve()
+def default_kitsoki_root(env: dict[str, str] | None = None) -> Path:
+    """Resolve the checkout in both container and native invocations.
+
+    Docker jobs set KITSOKI_ROOT to /workspace/kitsoki. Native calibration does
+    not, so falling back to that container-only path made the runner unable to
+    import its local pricing module before a cell even started.
+    """
+    configured = (env if env is not None else os.environ).get("KITSOKI_ROOT", "").strip()
+    if configured:
+        return Path(configured).resolve()
+    return Path(__file__).resolve().parents[3]
+
+
+KITSOKI_ROOT = default_kitsoki_root()
 DEFAULT_CORPUS = KITSOKI_ROOT / "tools/arena/corpus/cost-bench.manifest.yaml"
 BENCH = KITSOKI_ROOT / "tools/bugfix-bakeoff/external/bench.py"
 DRIVE_SH = KITSOKI_ROOT / "tools/mcp-drive/drive.sh"
