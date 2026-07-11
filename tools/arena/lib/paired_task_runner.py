@@ -369,19 +369,16 @@ def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
                 capture=True,
             ).stdout
         )
-        repo = meta.get("repo") or "."
-        if repo == ".":
-            # --no-hardlinks: inside the paired-task container, KITSOKI_ROOT is a
-            # read-only bind mount and `tree` lives on the container's own
-            # filesystem (e.g. /tmp) — a different device, so --local's default
-            # hardlinking fails with "Invalid cross-device link". Force copies.
-            run(
-                ["git", "clone", "--local", "--no-hardlinks", "--no-checkout", "-q", str(KITSOKI_ROOT), str(tree)],
-                cwd=KITSOKI_ROOT,
-            )
-        else:
-            run(["git", "clone", "-q", "--no-checkout", str(repo), str(tree)], cwd=KITSOKI_ROOT)
-        run(["git", "checkout", "-q", str(meta["baseline_sha"])], cwd=tree)
+        # Fetch only the frozen baseline commit. A regular clone retains later
+        # commits, including the benchmark's known fix SHA, which lets a worker
+        # read the answer from repository history rather than solve the task.
+        repo = str(meta.get("repo") or ".")
+        remote = str(KITSOKI_ROOT) if repo == "." else repo
+        baseline = str(meta["baseline_sha"])
+        run(["git", "init", "-q", str(tree)], cwd=KITSOKI_ROOT)
+        run(["git", "remote", "add", "origin", remote], cwd=tree)
+        run(["git", "fetch", "-q", "--depth", "1", "origin", baseline], cwd=tree)
+        run(["git", "checkout", "-q", "FETCH_HEAD"], cwd=tree)
         return
     raise SystemExit(f"cannot materialize oracle kind {oracle.get('kind')!r}")
 
