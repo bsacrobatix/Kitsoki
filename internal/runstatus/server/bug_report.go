@@ -35,6 +35,7 @@ import (
 	"kitsoki/internal/bugfile"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/bugreport"
+	"kitsoki/internal/capsule"
 	"kitsoki/internal/ghagent/bugdeck"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
@@ -462,6 +463,9 @@ func (s *Server) resolveBugRoot(params map[string]any) string {
 	}
 	if s.bugRoot != "" {
 		return s.bugRoot
+	}
+	if root := capsule.ManagedSourceRootFromCWD(); root != "" {
+		return root
 	}
 	if storyPath := strings.TrimSpace(stringParam(params, "story_path")); storyPath != "" {
 		if ep, ok := s.editorProvider(); ok {

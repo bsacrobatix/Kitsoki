@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode"
 
+	"kitsoki/internal/capsule"
+	"kitsoki/internal/kitrepo"
 	"kitsoki/internal/reportmeta"
 
 	"gopkg.in/yaml.v3"
@@ -187,10 +189,16 @@ func NormaliseTarget(target string) (string, error) {
 
 // ResolveTargetRoot returns the directory that <target-root>/issues/bugs
 // lives under. target is assumed already normalised. --target-dir always
-// wins; otherwise story => $PWD, kitsoki => $KITSOKI_REPO.
+// wins; otherwise a managed capsule workspace resolves to its source checkout
+// root, story falls back to the nearest git root (or current working directory
+// if there is no git root), and kitsoki falls back to the resolved kitsoki repo
+// root.
 func ResolveTargetRoot(target, targetDir string) (string, error) {
 	if targetDir != "" {
 		return targetDir, nil
+	}
+	if root := capsule.ManagedSourceRootFromCWD(); root != "" {
+		return root, nil
 	}
 	switch target {
 	case "story":
@@ -198,9 +206,12 @@ func ResolveTargetRoot(target, targetDir string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("resolve cwd: %w", err)
 		}
+		if top := gitToplevel(cwd); top != "" {
+			return top, nil
+		}
 		return cwd, nil
 	case "kitsoki":
-		repo := strings.TrimSpace(os.Getenv("KITSOKI_REPO"))
+		repo := strings.TrimSpace(kitrepo.Resolve())
 		if repo == "" {
 			return "", fmt.Errorf("--target kitsoki: kitsoki repo not found — run once from a kitsoki checkout to save it under ~/.kitsoki/repo, or pass --target-dir / set $KITSOKI_REPO")
 		}
@@ -222,6 +233,15 @@ func ReadShortGitSHA(root string) (string, error) {
 		return "", fmt.Errorf("empty git rev-parse output")
 	}
 	return sha, nil
+}
+
+func gitToplevel(dir string) string {
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // Record is the in-memory representation of a single bug, passed to

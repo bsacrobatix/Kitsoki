@@ -39,6 +39,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/capsule"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/testrunner"
@@ -420,6 +421,9 @@ func suppressDefaultLogging() func() {
 // is found it returns that story dir, and if there are no story dirs it falls
 // back to the process cwd. Empty means "let the server resolve per request".
 func resolveWebBugRoot(dirs []string) string {
+	if root := capsule.ManagedSourceRootFromCWD(); root != "" {
+		return root
+	}
 	if len(dirs) == 0 {
 		if cwd, err := os.Getwd(); err == nil {
 			return cwd

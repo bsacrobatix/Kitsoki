@@ -12,6 +12,9 @@ KITSOKI_PATH_APPEND := $(shell for d in $(KITSOKI_PATH_FALLBACKS); do [ -d "$$d"
 ifneq ($(strip $(KITSOKI_PATH_APPEND)),)
 export PATH := $(KITSOKI_CALLER_PATH):$(KITSOKI_PATH_APPEND)
 endif
+KITSOKI_BUILD_REVISION := $(shell git rev-parse HEAD 2>/dev/null || true)
+KITSOKI_BUILD_REVISION_SHORT := $(shell git rev-parse --short HEAD 2>/dev/null || true)
+KITSOKI_BUILD_LDFLAGS := -X kitsoki/internal/buildinfo.Revision=$(KITSOKI_BUILD_REVISION) -X kitsoki/internal/buildinfo.RevisionShort=$(KITSOKI_BUILD_REVISION_SHORT)
 # Default install dir: pick a location that's actually on PATH on both Linux and
 # macOS, instead of the per-OS ~/bin / ~/.local/bin guess (neither is reliably on
 # PATH, which left the binary unfindable). Resolution order:
@@ -153,7 +156,7 @@ check-deps:
 # always embeds a current SPA, the current story library, and the current agent
 # toolkit.
 build: check-deps web embed-stories embed-skills
-	go build -o $(BINARY) $(PKG)
+	go build -ldflags "$(KITSOKI_BUILD_LDFLAGS)" -o $(BINARY) $(PKG)
 	$(call codesign_adhoc,$(BINARY))
 
 # build-bin produces the binary the Playwright/VS Code demo specs SPAWN
@@ -166,7 +169,7 @@ build: check-deps web embed-stories embed-skills
 # ad-hoc re-sign) keeps the signature valid.
 build-bin: web embed-stories embed-skills
 	@mkdir -p bin
-	go build -o bin/kitsoki $(PKG)
+	go build -ldflags "$(KITSOKI_BUILD_LDFLAGS)" -o bin/kitsoki $(PKG)
 	$(call codesign_adhoc,bin/kitsoki)
 
 # build-lean — headless build for users who don't need the web UI. Unlike
@@ -175,12 +178,12 @@ build-bin: web embed-stories embed-skills
 # pattern matching, so the binary compiles and everything except `kitsoki web`
 # works. Toolkit + story library are still embedded. Change 4.6.
 build-lean: embed-stories embed-skills
-	go build -o $(BINARY) $(PKG)
+	go build -ldflags "$(KITSOKI_BUILD_LDFLAGS)" -o $(BINARY) $(PKG)
 	$(call codesign_adhoc,$(BINARY))
 
 install: check-deps web embed-stories embed-skills
 	@mkdir -p $(INSTALLDIR)
-	GOBIN=$(INSTALLDIR) go install $(PKG)
+	GOBIN=$(INSTALLDIR) go install -ldflags "$(KITSOKI_BUILD_LDFLAGS)" $(PKG)
 	@echo "installed $(BINARY) -> $(INSTALLDIR)/$(BINARY)"
 	@echo "smoke-checking installed $(BINARY) can load git-ops stories"
 	@log="$$(mktemp)"; \

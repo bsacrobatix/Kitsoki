@@ -238,7 +238,15 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the kitsoki version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("kitsoki %s\n", version)
+			if rev := strings.TrimSpace(buildinfo.Revision); rev != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "kitsoki %s\nrevision: %s\n", version, rev)
+				return
+			}
+			if rev := strings.TrimSpace(buildinfo.RevisionShort); rev != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "kitsoki %s\nrevision: %s\n", version, rev)
+				return
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "kitsoki %s\n", version)
 		},
 	}
 }
