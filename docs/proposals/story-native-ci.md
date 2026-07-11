@@ -334,6 +334,11 @@ project wrapper that imports only deterministic checks and adjudication.
     non-sandboxed live drivers can set `KITSOKI_AGENT_ACTIVITY_TIMEOUT=<duration>`
     to cancel stdout-inactive workers instead of leaving a dangling
     `agent.call.start`.
+  - Shipped follow-up: failed `capsule ci run` records now retain the terminal
+    error and `kitsoki capsule ci diagnose --job <job-id>` projects
+    `capsule-ci-run-diagnosis/v1` from the persisted run record plus trace
+    sidecar, including failure kind, executor event summary, evidence paths,
+    and copy-ready next commands.
   - Remaining: fix the VM driver/credential/env setup and re-run a gated
     remote CI proof to terminal verdict. The attempted run was Studio/Claude
     worker dogfood, not a deployed HTTPS Capsule worker proof.
@@ -345,7 +350,8 @@ project wrapper that imports only deterministic checks and adjudication.
     hosted publishers provide credentials and perform the actual GitHub write.
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal
   - Shipped: permanent `docs/stories/ci.md` now documents the story-native CI
-    contract, reference rooms, authority boundaries, and GitHub adapter model.
+    contract, reference rooms, authority boundaries, failure diagnosis, and
+    GitHub adapter model.
   - Remaining: migrate examples and delete this proposal after gated remote
     dogfood reaches a terminal verdict and GitHub network publication lands.
 ```

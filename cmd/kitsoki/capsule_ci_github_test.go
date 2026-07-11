@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kitsoki/internal/artifactjob"
@@ -66,5 +67,30 @@ func TestCapsuleCIGitHubCheckCommandProjectsRunRecord(t *testing.T) {
 	}
 	if check.Output.Summary == "" {
 		t.Fatalf("missing fallback summary %#v", check.Output)
+	}
+}
+
+func TestCapsuleCIDiagnoseCommandProjectsFailureEvidence(t *testing.T) {
+	root := t.TempDir()
+	result := ci.RunResult{
+		Job:      artifactjob.Job{ID: "job-fail", Status: artifactjob.StatusFailed},
+		Envelope: executor.Envelope{Digest: "sha256:envelope"},
+		Verdict:  ci.Verdict{Pipeline: "change", Outcome: "failed"},
+	}
+	if err := (ci.FileRunStore{ProjectRoot: root}).Write(ci.RunRecord{JobID: "job-fail", Result: result, DiagnosticError: "remote timeout"}); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, ".capsules", "ci")
+	if err := os.WriteFile(filepath.Join(dir, "job-fail.trace.json"), []byte(`{"schema":"capsule-ci-trace/v1","events":[{"kind":"capsule.executor.failed","at":"2026-07-11T00:00:00Z","job_id":"job-fail","envelope_digest":"sha256:envelope","fields":{"error_kind":"timeout","message":"deadline exceeded"}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := execRoot(t, "capsule", "ci", "diagnose", "--project", root, "--job", "job-fail", "--json=false")
+	if err != nil {
+		t.Fatalf("diagnose: %v\n%s", err, out)
+	}
+	for _, want := range []string{"failure_kind: executor_failed", "failure_summary: timeout", "terminal_error: remote timeout", "trace: .capsules/ci/job-fail.trace.json"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("diagnose output missing %q:\n%s", want, out)
+		}
 	}
 }

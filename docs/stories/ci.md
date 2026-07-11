@@ -105,3 +105,19 @@ kitsoki capsule ci github check --project . --job <job-id> --details-url <run-ur
 
 The output is the JSON a GitHub service would publish; credentials and network
 writes stay outside the story contract.
+
+## Failure diagnosis
+
+Every completed or failed Capsule CI run should leave a local run record under
+`.capsules/ci/`. Failed runs also persist the diagnostic trace even when no
+promotion receipt can be signed. Use:
+
+```sh
+kitsoki capsule ci diagnose --job <job-id>
+```
+
+The command projects the run, terminal error, executor failure kind, trace and
+receipt sidecars, and copy-ready follow-up commands into
+`capsule-ci-run-diagnosis/v1`. This is the first debugging surface for remote
+worker stalls, story verdict mismatches, and infra failures; raw traces remain
+the deeper evidence layer.

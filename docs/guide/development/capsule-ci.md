@@ -36,6 +36,7 @@ kitsoki capsule env resolve ci
 kitsoki capsule ci plan change --workspace change-1
 kitsoki capsule ci run change --workspace change-1
 kitsoki capsule ci status
+kitsoki capsule ci diagnose --job <job-id>
 kitsoki capsule ci cancel --job <job-id>
 kitsoki capsule cleanup plan --keep-runs 20
 kitsoki capsule workspace commit --id change-1 --message "Implement change"
@@ -89,6 +90,20 @@ The agent runner now writes `agent.process` start/no-output/finish breadcrumbs
 as `agent.stream` events, including redacted argv/env presence, pid, uid/root,
 sandbox posture, raw event count, and stderr/infra summary, so the next remote
 failure is diagnosable from the trace.
+
+Persisted Capsule CI runs are diagnosable without reading raw JSON by hand:
+
+```sh
+kitsoki capsule ci diagnose --job <job-id> --json=false
+```
+
+The diagnosis projection reads the run record and co-located trace sidecar,
+reports the terminal error, executor failure kind, last executor event, trace
+and receipt paths, and copy-ready next commands. The JSON form is
+`capsule-ci-run-diagnosis/v1` and is provider-safe: it keeps local evidence as
+artifact paths and summarizes only allowlisted executor fields such as
+execution id, transport, remote host, request id, status, duration, error kind,
+message, and exit code.
 
 The reference story now exposes the intended room graph directly: prepare,
 deterministic checks, schema-bounded review, bounded writer/refine, and

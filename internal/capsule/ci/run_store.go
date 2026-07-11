@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kitsoki/internal/artifactjob"
+	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
 const RunIndexSchema = "capsule-ci-run-index/v1"
@@ -24,6 +25,7 @@ type RunRecord struct {
 	Result              RunResult `json:"result"`
 	ReceiptID           string    `json:"receipt_id,omitempty"`
 	ReceiptVerification string    `json:"receipt_verification,omitempty"`
+	DiagnosticError     string    `json:"diagnostic_error,omitempty"`
 }
 
 type RunIndex struct {
@@ -62,6 +64,38 @@ type RunProjection struct {
 	ReceiptPath         string             `json:"receipt_path,omitempty"`
 	UpdatedAt           time.Time          `json:"updated_at,omitempty"`
 }
+
+const RunDiagnosisSchema = "capsule-ci-run-diagnosis/v1"
+
+// RunDiagnosis is the operator-facing, provider-safe failure summary for one
+// persisted Capsule CI run. It deliberately points at local artifacts instead of
+// copying raw logs into prompts or issue bodies.
+type RunDiagnosis struct {
+	Schema             string               `json:"schema"`
+	Run                RunProjection        `json:"run"`
+	TerminalError      string               `json:"terminal_error,omitempty"`
+	FailureKind        string               `json:"failure_kind,omitempty"`
+	FailureSummary     string               `json:"failure_summary,omitempty"`
+	ExecutorEventCount int                  `json:"executor_event_count"`
+	LastExecutorEvent  *TraceEventSummary   `json:"last_executor_event,omitempty"`
+	Timeline           []TraceEventSummary  `json:"timeline,omitempty"`
+	Artifacts          []DiagnosticArtifact `json:"artifacts,omitempty"`
+	NextCommands       []string             `json:"next_commands,omitempty"`
+}
+
+type TraceEventSummary struct {
+	Kind    string         `json:"kind"`
+	At      time.Time      `json:"at,omitempty"`
+	Outcome string         `json:"outcome,omitempty"`
+	Error   string         `json:"error,omitempty"`
+	Fields  map[string]any `json:"fields,omitempty"`
+}
+
+type DiagnosticArtifact struct {
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}
+
 type FileRunStore struct{ ProjectRoot string }
 
 func (s FileRunStore) Write(record RunRecord) error {
@@ -169,6 +203,37 @@ func (s FileRunStore) ProviderSummary(limit int) (ProviderSummary, error) {
 	return summary, nil
 }
 
+func (s FileRunStore) Diagnose(id string) (RunDiagnosis, error) {
+	record, err := s.Get(id)
+	if err != nil {
+		return RunDiagnosis{}, err
+	}
+	projection := s.Project(record)
+	diagnosis := RunDiagnosis{
+		Schema:        RunDiagnosisSchema,
+		Run:           projection,
+		TerminalError: record.DiagnosticError,
+	}
+	if projection.TracePath != "" {
+		diagnosis.Artifacts = append(diagnosis.Artifacts, DiagnosticArtifact{Kind: "trace", Path: projection.TracePath})
+		doc, err := readTraceDocument(filepath.Join(s.ProjectRoot, filepath.FromSlash(projection.TracePath)))
+		if err != nil {
+			diagnosis.FailureKind = "trace_unreadable"
+			diagnosis.FailureSummary = err.Error()
+		} else {
+			diagnosis.applyTrace(doc)
+		}
+	}
+	if projection.ReceiptPath != "" {
+		diagnosis.Artifacts = append(diagnosis.Artifacts, DiagnosticArtifact{Kind: "receipt", Path: projection.ReceiptPath})
+	}
+	if diagnosis.FailureKind == "" {
+		diagnosis.FailureKind, diagnosis.FailureSummary = inferRunFailure(record)
+	}
+	diagnosis.NextCommands = diagnosticNextCommands(projection, diagnosis)
+	return diagnosis, nil
+}
+
 func (s FileRunStore) Project(record RunRecord) RunProjection {
 	job := record.Result.Job
 	verdict := record.Result.Verdict
@@ -207,6 +272,121 @@ func (s FileRunStore) Project(record RunRecord) RunProjection {
 		}
 	}
 	return projection
+}
+
+func readTraceDocument(path string) (capsuletrace.Document, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return capsuletrace.Document{}, err
+	}
+	var doc capsuletrace.Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return capsuletrace.Document{}, err
+	}
+	return doc, nil
+}
+
+func (d *RunDiagnosis) applyTrace(doc capsuletrace.Document) {
+	for _, event := range doc.Events {
+		summary := TraceEventSummary{Kind: event.Kind, At: event.At, Outcome: event.Outcome, Error: event.Error, Fields: providerSafeSummaryFields(event.Fields)}
+		if strings.HasPrefix(event.Kind, "capsule.executor.") {
+			d.ExecutorEventCount++
+			copy := summary
+			d.LastExecutorEvent = &copy
+		}
+		if event.Kind == capsuletrace.KindExecutorFailed {
+			d.FailureKind = "executor_failed"
+			d.FailureSummary = firstNonEmpty(event.Error, stringField(event.Fields, "error_kind"), stringField(event.Fields, "message"), stringField(event.Fields, "status"))
+		}
+		if event.Kind == capsuletrace.KindCIVerdict && event.Outcome != "" && d.FailureKind == "" && event.Outcome != "passed" {
+			d.FailureKind = "verdict_" + event.Outcome
+			d.FailureSummary = "terminal verdict outcome " + event.Outcome
+		}
+		if len(d.Timeline) < 12 && interestingTraceEvent(event.Kind) {
+			d.Timeline = append(d.Timeline, summary)
+		}
+	}
+}
+
+func providerSafeSummaryFields(fields map[string]any) map[string]any {
+	out := map[string]any{}
+	for _, key := range []string{"execution_id", "transport", "remote_host", "request_id", "method", "path", "status", "duration_ms", "error_kind", "message", "completion_state_outcome", "exit_code"} {
+		if value, ok := fields[key]; ok {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func interestingTraceEvent(kind string) bool {
+	switch kind {
+	case capsuletrace.KindWorkspaceReady, capsuletrace.KindEnvironmentResolved, capsuletrace.KindExecutorPrepared, capsuletrace.KindExecutorStarted, capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed, capsuletrace.KindCIStarted, capsuletrace.KindCIVerdict:
+		return true
+	default:
+		return false
+	}
+}
+
+func inferRunFailure(record RunRecord) (string, string) {
+	if record.DiagnosticError != "" {
+		return "terminal_error", record.DiagnosticError
+	}
+	outcome := record.Result.Verdict.Outcome
+	if outcome != "" && outcome != "passed" {
+		return "verdict_" + outcome, "terminal verdict outcome " + outcome
+	}
+	status := record.Result.Job.Status
+	if status != "" && status != artifactjob.StatusDone {
+		return "job_" + string(status), "job status " + string(status)
+	}
+	return "", ""
+}
+
+func diagnosticNextCommands(run RunProjection, diagnosis RunDiagnosis) []string {
+	var out []string
+	if run.JobID != "" {
+		out = append(out, "go run ./cmd/kitsoki capsule ci status --job "+run.JobID)
+	}
+	if run.TracePath != "" {
+		out = append(out, "jq '.events[] | {kind, at, outcome, error, fields}' "+run.TracePath)
+	}
+	switch diagnosis.FailureKind {
+	case "executor_failed":
+		out = append(out, "go run ./cmd/kitsoki capsule ci summary --json=false")
+	case "trace_unreadable":
+		out = append(out, "ls -la .capsules/ci")
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringField(fields map[string]any, key string) string {
+	if fields == nil {
+		return ""
+	}
+	value, ok := fields[key]
+	if !ok {
+		return ""
+	}
+	switch v := value.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 // Cancel records a visible terminal cancel for a parked/running CI job. Active
