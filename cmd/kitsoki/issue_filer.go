@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/mcp/graphsrv"
 	studio "kitsoki/internal/mcp/studio"
 )
 
@@ -32,6 +33,25 @@ func ghIssueFiler(ctx context.Context, req studio.IssueRequest) (studio.IssueRes
 	}
 	url, _ := res.Data["url"].(string)
 	return studio.IssueResult{URL: url, Number: issueNumberFromURL(url)}, nil
+}
+
+// ghGraphIssueFiler adapts ghIssueFiler — which already matches
+// studio.IssueFiler's exact signature — to graphsrv.IssueFiler for the
+// graph-mcp/studio-mounted feedback.report github sink (P6). This is a real
+// (if trivial) adapter rather than a bare pass-through: Go's function-type
+// assignability requires identical parameter/return types, and
+// studio.IssueRequest/graphsrv.IssueRequest are distinct named types even
+// though their fields match field-for-field, so `ghIssueFiler` cannot be
+// passed directly where a graphsrv.IssueFiler is expected.
+func ghGraphIssueFiler(ctx context.Context, req graphsrv.IssueRequest) (graphsrv.IssueResult, error) {
+	res, err := ghIssueFiler(ctx, studio.IssueRequest{
+		Repo:   req.Repo,
+		Root:   req.Root,
+		Title:  req.Title,
+		Body:   req.Body,
+		Labels: req.Labels,
+	})
+	return graphsrv.IssueResult{URL: res.URL, Number: res.Number}, err
 }
 
 // issueNumberFromURL extracts the trailing issue number from an issue URL

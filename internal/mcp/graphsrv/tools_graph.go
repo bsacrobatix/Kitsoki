@@ -12,7 +12,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerGraphTools registers the read family (plan §3.3, now eight tools
+// RegisterGraphTools registers the read family (plan §3.3, now eight tools
 // with graph.changeset) against srv, closing over deps, then mode-gates the
 // P4 write family (plan §3.4): graph.propose/withdraw/apply/authorize are
 // registered in propose and steward mode, never in read mode — an MCP
@@ -20,11 +20,11 @@ import (
 // graph.changeset is read-only and registered in every mode alongside the
 // rest of the read family.
 //
-// This function (and registerFeedbackTools) is deliberately a free function
+// This function (and RegisterFeedbackTools) is deliberately a free function
 // taking (srv, deps, mode) rather than a Server method, so P6's studio
 // server can call it directly against its own mcpsdk.Server + Deps without
 // depending on this package's Server/NewServer/cobra plumbing.
-func registerGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
+func RegisterGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
 	registerGraphLintTool(srv, deps)
 	registerGraphOpenTool(srv, deps)
 	registerGraphGetTool(srv, deps)
@@ -43,9 +43,9 @@ func registerGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
 	}
 }
 
-// registerFeedbackTools registers feedback.report and feedback.list (plan
-// §3.6, local sink only) — see tools_feedback.go. Like registerGraphTools,
-// it's a free function so P6's studio mount can reuse it directly.
+// RegisterFeedbackTools registers feedback.report and feedback.list (plan
+// §3.6) — see tools_feedback.go. Like RegisterGraphTools, it's a free
+// function so P6's studio mount can reuse it directly.
 
 const graphLintInputSchema = `{
   "type": "object",
