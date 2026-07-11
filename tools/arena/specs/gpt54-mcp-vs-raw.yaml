@@ -25,6 +25,7 @@ variants:
     model: gpt-5.4
     effort: medium
     worker_profile: codex-gpt54
+    orchestrator_model: gpt-5.4
 
 axes:
   task:

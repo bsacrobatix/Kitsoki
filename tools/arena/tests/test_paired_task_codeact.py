@@ -78,6 +78,7 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
     plan = {
         "mode": "codeact",
         "agent": "kitsoki-codeact-driver",
+        "orchestrator_model": "gpt-5.4",
         "backend": "codex",
         "working_dir": str(tree),
         "tools": ["mcp__kitsoki-codeact__codeact_eval"],
@@ -147,6 +148,7 @@ spec = JobSpec.from_dict({
         "model": "gpt-5.5",
         "effort": "medium",
         "agent": "kitsoki-codeact-driver",
+        "orchestrator_model": "gpt-5.4",
         "capability_preset": "repo_patch",
     }],
     "axes": {"task": ["api-routing"]},
@@ -165,6 +167,7 @@ plugin = plugins.get("paired-task")
 argv = plugin.drive_command(cell, live=True)
 for flag, value in {
     "--agent": "kitsoki-codeact-driver",
+    "--orchestrator-model": "gpt-5.4",
     "--capability-preset": "repo_patch",
     "--live-gate-env": "ARENA_PAIRED_TASK_ENABLE_CODEX",
 }.items():
