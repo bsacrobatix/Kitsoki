@@ -1,9 +1,9 @@
 # empty_llm_verdict_skips_emit — skipped judge leaves llm_verdict empty.
 #
-# When the deterministic GREEN→RED repro gate fails, reproducing emits `refine`
-# before spending the LLM judge. In llm/llm_then_human mode that means
-# world.llm_verdict remains {}, so the confident-auto-fire guard must short
-# circuit before reading `.confidence`.
+# When the deterministic GREEN→RED repro gate fails because the authored test
+# is not RED, reproducing emits `refine` before spending the LLM judge. In
+# llm/llm_then_human mode that means world.llm_verdict remains {}, so the
+# confident-auto-fire guard must short circuit before reading `.confidence`.
 
 test_kind: flow
 app: ../app.yaml
@@ -34,7 +34,7 @@ host_handlers:
       ok: true
       submitted:
         summary_title:    "Reproducer authored a mis-scoped test"
-        summary_markdown: "The reproducer authored a regression test, but the deterministic GREEN to RED gate determines the baseline is already failing. This intentionally exercises the skipped LLM judge path where llm_verdict remains empty."
+        summary_markdown: "The reproducer authored a regression test, but the deterministic GREEN to RED gate determines that the test itself did not turn the otherwise clean baseline red. This intentionally exercises the skipped LLM judge path where llm_verdict remains empty."
         bug_verified:     true
         involved_components: [{ name: "bugfix", reason: "guard ordering" }]
         repro_command:    "go test ./..."
@@ -51,11 +51,11 @@ host_handlers:
           exit_code: 0
           stdout_json:
             ran:            true
-            baseline_green: false
-            test_red:       true
+            baseline_green: true
+            test_red:       false
             ok:             false
-            summary:        "baseline not green — judge skipped"
-            log:            "baseline exit 2, reproducer exit 1"
+            summary:        "reproducer test did not fail — judge skipped"
+            log:            "baseline exit 0, reproducer exit 0"
 
 turns:
   - intent: { name: start, slots: {} }
@@ -64,8 +64,8 @@ turns:
       abandon_reason: "reproducing_cycle_budget_exhausted"
       status: "abandoned"
       repro_gate_ok: false
-      repro_baseline_green: false
-      repro_test_red: true
+      repro_baseline_green: true
+      repro_test_red: false
       llm_verdict: {}
 
 expect_terminal: true
