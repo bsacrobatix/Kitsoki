@@ -184,6 +184,15 @@ states:
         bind:
           last_job_id: job_id
         on_complete:
+          # A failed/cancelled agent job has no Result.Data, hence no
+          # last_job_result.submitted. Handle that terminal status before
+          # dereferencing the acceptance artifact so an activity watchdog or
+          # provider failure cannot strand the session in *_executing.
+          - when: "world.last_job_status != 'done'"
+            set:
+              outcome: "blocked"
+          - when: "world.last_job_status != 'done'"
+            target: blocked
           - set:
               fix_artifact: "{{ world.last_job_result.submitted }}"
           - when: "world.last_job_result.submitted.needs_decision"
