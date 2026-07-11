@@ -145,7 +145,17 @@ func (s *ManagedWorkspaceService) Create(ctx context.Context, input WorkspaceCre
 	out, err := s.mutate(ctx, input.ObjectiveID, ManagedWorkspace{ID: input.ID, ObjectiveID: input.ObjectiveID}, func() (WorkspaceSnapshot, WorkspaceSnapshot, error) {
 		before := WorkspaceSnapshot{Workspace: ManagedWorkspace{ID: input.ID, ObjectiveID: input.ObjectiveID}}
 		args := []string{"create", "--id", input.ID, "--branch", input.Branch}
-		if input.Bootstrap == nil || *input.Bootstrap {
+		bootstrap := input.Bootstrap == nil || *input.Bootstrap
+		// MCP operating-system calibration workspaces only exercise a fixed
+		// managed lifecycle and registered Go gates. They are disposable and
+		// must remain cheap and reliably removable, so the strict calibration
+		// namespace never installs bootstrap-only dependencies. This is enforced
+		// server-side rather than trusting an agent to preserve the optional
+		// bootstrap argument in a tool call.
+		if strings.HasPrefix(input.ObjectiveID, "mcp-os-cal-") {
+			bootstrap = false
+		}
+		if bootstrap {
 			args = append(args, "--bootstrap")
 		}
 		args = append(args, "--json")
