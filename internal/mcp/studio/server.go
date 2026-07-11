@@ -282,6 +282,13 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 		// Legacy is the compatibility toolbox for direct library embeddings. The
 		// public CLI passes its strict default explicitly.
 		srv.registerLegacyToolbox()
+	} else if srv.operatingSystemProfile == StudioOperatingProfileStrict {
+		// Strict keeps the operating-system authority plane, but an MCP client
+		// must still be able to open and observe the constrained live session it
+		// is meant to supervise. Do not register the whole legacy session toolbox:
+		// this narrow driver plane has no free-text drive, authoring, host, VCS,
+		// or raw-worktree escape hatch.
+		srv.registerStrictSessionDriverTools()
 	} else if srv.operatingSystemProfile == StudioOperatingProfileEscape {
 		// Escape deliberately exposes only the audited host.run exception in
 		// addition to the operating-system plane; host.patch remains legacy-only.

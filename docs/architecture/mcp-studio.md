@@ -93,7 +93,8 @@ for `kitsoki mcp`; choose `legacy` or `escape` only when their explicit
 compatibility/exception authority is required:
 
 ```sh
-# Default: only the objective/workspace/CodeAct/gate/explain plane.
+# Default: the objective/workspace/CodeAct/gate/explain plane plus the narrow
+# direct-submit session-driver loop.
 kitsoki mcp
 
 # Explicit compatibility toolbox; existing story/session/host/vcs tools remain.
@@ -105,8 +106,13 @@ kitsoki mcp --operating-profile escape
 
 `strict` exposes `objective.*`, `evidence.record`, `receipt.list`,
 `workspace.*`, `workspace.codeact`, `gate.*`, `studio.diagnose`,
-`session.explain`, and `trace.explain` (plus liveness tools). It deliberately
-omits arbitrary `host.run`, `host.patch`, raw `worktree.*`, and `vcs.*` tools.
+`session.explain`, and `trace.explain` (plus liveness tools). It also exposes
+the bounded direct-submit session-driver loop: `session.new`, `session.submit`,
+`session.answer`, `session.status`, `session.inspect`, `session.world`,
+`session.trace`, and `session.close`. This lets an attached agent supervise a
+strict live pipeline without regaining free-text session driving or the legacy
+authoring toolbox. It deliberately omits arbitrary `host.run`, `host.patch`,
+raw `worktree.*`, and `vcs.*` tools.
 `workspace.create`/commit/merge/teardown delegate to
 `scripts/dev-workspace.sh`; they never reimplement git lifecycle logic. Every
 mutation is tied to an open objective and returns an additive receipt. A named

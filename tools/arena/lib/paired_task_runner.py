@@ -1021,7 +1021,7 @@ def build_kitsoki_prompt(
         "   control returns. Use the same async_after_ms value for EVERY later",
         "   session.submit in this cell. Then run this exact control loop: after EVERY",
         "   settled turn call session.status; if `running` is unexpectedly present,",
-        "   wait with host.run {cmd: \"sleep 15\"}, then call session.status once and",
+        "   wait 15 seconds without invoking another tool, then call session.status once and",
         "   compare `running.last_event_at_unix_micro`; use session.trace for the latest",
         "   agent.call.* events before deciding it is stalled. Never spin on bare status",
         "   polls or stop a live worker merely because its state is unchanged. If",
