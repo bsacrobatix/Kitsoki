@@ -692,8 +692,9 @@ FIX_TESTS_MAX_CYCLES ?= 3
 FIX_TESTS_SESSION_DRAIN_TIMEOUT ?= 90m
 fix-tests:
 	@command -v jq >/dev/null 2>&1 || { echo "error: jq is required for 'make fix-tests'" >&2; exit 1; }
-	@go build -o ./.kitsoki-fixtests $(PKG)
-	@tmpdir=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-fixtests.XXXXXX"); \
+	@fix_tests_gocache="$${KITSOKI_FIX_TESTS_GOCACHE:-$${GOCACHE:-$$(pwd)/.temp/go-build}}"; mkdir -p "$$fix_tests_gocache"; GOCACHE="$$fix_tests_gocache" go build -o ./.kitsoki-fixtests $(PKG)
+	@fix_tests_gocache="$${KITSOKI_FIX_TESTS_GOCACHE:-$${GOCACHE:-$$(pwd)/.temp/go-build}}"; mkdir -p "$$fix_tests_gocache"; export GOCACHE="$$fix_tests_gocache"; \
+	 tmpdir=$$(mktemp -d "$${TMPDIR:-/tmp}/kitsoki-fixtests.XXXXXX"); \
 	 db="$$tmpdir/session.db"; \
 	 marker="$$tmpdir/report-marker"; touch "$$marker"; \
 	 report_dir=.artifacts/fix-tests/runs/$$(date +%Y%m%dT%H%M%S)-$$$$; mkdir -p "$$report_dir"; \

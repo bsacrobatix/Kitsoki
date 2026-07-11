@@ -40,6 +40,16 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
 
+# A shared Go build cache is fast, but a concurrent workspace can prune or
+# replace entries while this broad suite is linking helper binaries. Keep the
+# default cache private to this checkout so parallel fix/test capsules cannot
+# turn cache corruption into a spurious package failure. Callers that
+# deliberately manage a cache may still supply GOCACHE explicitly.
+if [ -z "${GOCACHE:-}" ]; then
+	export GOCACHE="${KITSOKI_TEST_GOCACHE:-${KITSOKI_TEMP_ROOT:-$ROOT/.temp}/go-build}"
+fi
+mkdir -p "$GOCACHE"
+
 REPORT_DIR=".artifacts/test-reports"
 KEEP=8
 mkdir -p "$REPORT_DIR"
