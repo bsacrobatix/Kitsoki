@@ -22,6 +22,8 @@ from arena import mcp_operating_system_live as live  # noqa: E402
 from arena.mcp_operating_system_live import (  # noqa: E402
     CLAUDE_CLI_PROVIDER,
     CLAUDE_RESPONSE_SCHEMA,
+    CODEX_CLI_PROVIDER,
+    CodexCLIDispatcher,
     GENERIC_PROVIDER,
     HARD_CAP_USD,
     ClaudeCLIDispatcher,
@@ -123,7 +125,7 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
 
     # Aggregate reservation is denied before the fake dispatcher gets a request.
     try:
-        preflight(SPEC, authorization, config(3.0), environ=environment)
+        preflight(SPEC, authorization, config(5.0), environ=environment)
         failures.append("over-cap plan passed preflight")
     except CalibrationError as exc:
         require("preflight cap error names cap", "cap" in str(exc))
@@ -353,6 +355,43 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
             failures.append("Claude response without actual cost was accepted")
         except CalibrationError as exc:
             require("missing Claude cost fails closed", "total_cost_usd" in str(exc))
+
+    # Codex is the default live-calibration provider. It uses a scoped MCP
+    # registration and records native token usage; Codex CLI has no USD field,
+    # so the adapter must label its accounting as reservation-only instead of
+    # inventing a cost.
+    codex_authorization = root / "codex-authorization.json"
+    codex_authorization.write_text(json.dumps(auth(provider=CODEX_CLI_PROVIDER, model="gpt-5.4")), encoding="utf-8")
+    codex_config = ProviderConfig(command=("fake-codex",), model="gpt-5.4", credential_env=None, per_case_reserve_usd=4.0, provider=CODEX_CLI_PROVIDER)
+    codex_preflight = preflight(SPEC, codex_authorization, codex_config, environ={}, executable_finder=lambda executable: "/safe/bin/" + executable)
+    check("Codex preflight identifies CLI provider", codex_preflight.provider, CODEX_CLI_PROVIDER)
+    check("Codex preflight records selected model", codex_preflight.model, "gpt-5.4")
+    codex_request = copy.deepcopy(request)
+    codex_request.update({"provider": CODEX_CLI_PROVIDER, "model": "gpt-5.4", "max_cost_usd": 4.0, "aggregate_remaining_usd": HARD_CAP_USD})
+
+    def fake_codex_run(argv, **kwargs):
+        captured["codex_argv"] = argv
+        captured["codex_kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stderr="", stdout="\n".join((
+            json.dumps({"type": "thread.started", "thread_id": "codex-test"}),
+            json.dumps({"type": "item.started", "item": {"type": "mcp_tool_call", "server": "kitsoki_strict", "tool": "trace.explain", "arguments": {"path": "tools/arena/corpus/mcp-os/strict-traces/stalled-turn.jsonl", "observed_at_unix_micros": 1704067260000000}}}),
+            json.dumps({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "kitsoki_strict", "tool": "trace.explain", "arguments": {"path": "tools/arena/corpus/mcp-os/strict-traces/stalled-turn.jsonl", "observed_at_unix_micros": 1704067260000000}, "result": {"ok": True, "class": "stalled_or_unfinished_turn"}, "status": "completed"}}),
+            json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": json.dumps({"case_id": "trace-stalled-turn", "summary": "Observed bounded stalled-turn evidence."})}}),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10, "cached_input_tokens": 4, "output_tokens": 5, "reasoning_output_tokens": 2}}),
+        )))
+
+    with patch.object(live.subprocess, "run", fake_codex_run):
+        codex_response = CodexCLIDispatcher(codex_config).dispatch(codex_request)
+    codex_argv = captured["codex_argv"]
+    require("Codex argv uses exec JSON stream", codex_argv[:3] == ["fake-codex", "exec", "--json"])
+    require("Codex argv ignores ambient user config", "--ignore-user-config" in codex_argv and "--disable=apps" in codex_argv)
+    check("Codex argv pins selected model", codex_argv[codex_argv.index("-m") + 1], "gpt-5.4")
+    require("Codex argv registers only strict MCP server", any(arg == "mcp_servers.kitsoki_strict.enabled=true" for arg in codex_argv))
+    require("Codex argv uses closed final schema", "--output-schema" in codex_argv)
+    check("Codex oracle accepts observed strict call", codex_response["correctness"], "pass")
+    check("Codex records zero invented USD", codex_response["cost_usd"], 0.0)
+    check("Codex receipt labels unpriced accounting", codex_response["provider_receipt"]["billing"], "usd-unavailable-reservation-only")
+    check("Codex receipt preserves token usage", codex_response["provider_receipt"]["usage"]["output_tokens"], 5)
 
     # Card corpus drift fails before a provider subprocess is constructed.
     bad_cards = root / "bad-cards.json"
