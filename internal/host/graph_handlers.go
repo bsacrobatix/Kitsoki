@@ -404,11 +404,23 @@ func registryWire(cat *objectgraph.Catalog) []map[string]any {
 				for _, e := range def.Materialize.ContextEdges {
 					contextEdges = append(contextEdges, string(e))
 				}
+				checks := make([]map[string]any, 0, len(def.Materialize.Checks))
+				for _, c := range def.Materialize.Checks {
+					checks = append(checks, map[string]any{
+						"id":           c.ID,
+						"script":       c.Script,
+						"script_field": c.ScriptField,
+						"inputs":       c.Inputs,
+						"inputs_field": c.InputsField,
+						"capabilities": c.Capabilities,
+					})
+				}
 				artifact["materialize"] = map[string]any{
 					"story":         def.Materialize.Story,
 					"context_edges": contextEdges,
 					"params":        params,
 					"gates":         def.Materialize.Gates,
+					"checks":        checks,
 				}
 			}
 			entry["artifact"] = artifact

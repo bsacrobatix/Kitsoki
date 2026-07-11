@@ -33,6 +33,28 @@ type_registry:
   - id: no-artifact-type
     schema: graph-type/v0
     extends: core-node
+  # A work-item variant whose materialize: declares a gate check: each node
+  # names its own .star assertion (script_field) and parameterizes it
+  # (inputs_field) — the reusable-type/parameterized-assertion contract.
+  - id: checked-work-item
+    schema: graph-type/v0
+    extends: core-node
+    edge_fields:
+      - id: in_phase
+        target_type: phase
+        cardinality: one
+    artifact:
+      schema: pog/artifact/implementation-brief/v0
+      format: markdown
+      presentation: document
+    materialize:
+      story: story
+      context_edges: [in_phase]
+      gates: [gate]
+      checks:
+        - id: gate
+          script_field: check
+          inputs_field: check_inputs
 nodes:
   - schema: graph/phase/v0
     id: phase-one
@@ -60,3 +82,33 @@ nodes:
     title: Plain node
     status: active
     visibility: internal
+  - schema: graph/checked-work-item/v0
+    id: wi-check-pass
+    title: Checked work item whose assertion holds
+    status: active
+    visibility: internal
+    gate: "the verdict is yes"
+    check: checks/judge.star
+    check_inputs:
+      want: "yes"
+    edges:
+      in_phase: [phase-one]
+  - schema: graph/checked-work-item/v0
+    id: wi-check-fail
+    title: Checked work item whose assertion does not hold
+    status: active
+    visibility: internal
+    gate: "the verdict is yes"
+    check: checks/judge.star
+    check_inputs:
+      want: "no"
+    edges:
+      in_phase: [phase-one]
+  - schema: graph/checked-work-item/v0
+    id: wi-check-missing
+    title: Checked work item that never declared its assertion
+    status: active
+    visibility: internal
+    gate: "somebody eyeballed it"
+    edges:
+      in_phase: [phase-one]

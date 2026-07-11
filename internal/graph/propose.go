@@ -311,7 +311,9 @@ func commitScratchOperations(cat *Catalog, ops []Operation) (changedFiles []stri
 	if err != nil {
 		return nil, nil, []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}, nil
 	}
-	if issues := Lint(candidate); len(issues) > 0 {
+	// Error-severity only, same rationale as Apply's gate (apply.go):
+	// advisory warnings must not block a propose/commit.
+	if issues := ErrorIssues(Lint(candidate)); len(issues) > 0 {
 		return nil, issues, nil, nil
 	}
 

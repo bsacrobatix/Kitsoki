@@ -3,6 +3,7 @@ package graph
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Severity says whether a LintIssue is a hard failure or advisory. The zero
@@ -64,6 +65,7 @@ func Lint(cat *Catalog, opts ...LintOptions) []LintIssue {
 	issues = append(issues, lintCycles(cat)...) // covers area-cycle: part_of is Acyclic in the registry
 	issues = append(issues, lintVisibilityLeaks(cat)...)
 	issues = append(issues, lintOrphanFeature(cat)...)
+	issues = append(issues, lintMaterializeChecks(cat)...)
 	if opt.InitiativeScope {
 		issues = append(issues, lintInitiativeScope(cat)...)
 	}
@@ -353,6 +355,52 @@ func lintInitiativeScope(cat *Catalog) []LintIssue {
 		})
 	}
 	return issues
+}
+
+// lintMaterializeChecks reports every node whose effective type's
+// materialize: declaration carries a checks entry with script_field: but
+// which does not set that field — i.e. the type requires each node to bring
+// its own Starlark gate assertion and this node has none. SeverityWarning:
+// the materialize driver already fails such a node's job at the check stage
+// with the same message, so lint is the early nudge, not the enforcement
+// point.
+func lintMaterializeChecks(cat *Catalog) []LintIssue {
+	var issues []LintIssue
+	for _, id := range cat.SortedNodeIDs() {
+		node := cat.Nodes[id]
+		eff, ok := cat.Registry.Effective(node.TypeID)
+		if !ok || eff.Materialize == nil {
+			continue
+		}
+		for _, check := range eff.Materialize.Checks {
+			if check.ScriptField == "" {
+				continue
+			}
+			raw, has := node.Fields[check.ScriptField]
+			s, isStr := raw.(string)
+			if has && (!isStr || strings.TrimSpace(s) != "") {
+				continue
+			}
+			issues = append(issues, LintIssue{
+				Node: id, Kind: "missing-materialize-check", Severity: SeverityWarning,
+				Message: fmt.Sprintf("materialize check %q needs node field %q naming a .star assertion script", check.ID, check.ScriptField),
+			})
+		}
+	}
+	return issues
+}
+
+// ErrorIssues filters issues down to the error-severity subset — what a
+// caller that gates on lint (apply, CI) should actually block on, per the
+// Severity contract above (warnings are advisory).
+func ErrorIssues(issues []LintIssue) []LintIssue {
+	var out []LintIssue
+	for _, iss := range issues {
+		if iss.Severity != SeverityWarning {
+			out = append(out, iss)
+		}
+	}
+	return out
 }
 
 func setEqual(a, b map[NodeID]bool) bool {

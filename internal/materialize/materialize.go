@@ -69,6 +69,7 @@ type Binding struct {
 	ContextEdges []graph.EdgeField
 	Params       []graph.MaterializeParamDecl
 	Gates        []string
+	Checks       []graph.MaterializeCheckDecl
 	// ArtifactSchema/ArtifactFormat carry the type's artifact: declaration
 	// alongside the materialize: binding — used only to title/format the
 	// write-back artifact (writeback.go); ResolveBinding still errors if a
@@ -122,6 +123,7 @@ func ResolveBinding(cat *graph.Catalog, node *graph.Node) (*Binding, error) {
 		ContextEdges:   md.ContextEdges,
 		Params:         md.Params,
 		Gates:          md.Gates,
+		Checks:         md.Checks,
 		ArtifactSchema: string(eff.Artifact.Schema),
 		ArtifactFormat: eff.Artifact.Format,
 	}, nil
@@ -331,9 +333,13 @@ type Prepared struct {
 	// story-path key once absolutized).
 	Def          *app.AppDef
 	StoryAppPath string
-	// Stages is the story's room sequence (see RoomSequence); InitialWorld
-	// is the seed world (node_id + resolved params + the node's gate text).
+	// Stages is the story's room sequence (see RoomSequence) followed by
+	// one "check:<id>" stage per resolved gate check; NumRooms says where
+	// rooms end and checks begin. InitialWorld is the seed world (node_id +
+	// resolved params + the node's gate text).
 	Stages       []string
+	NumRooms     int
+	Checks       []ResolvedCheck
 	InitialWorld map[string]any
 }
 
@@ -380,6 +386,8 @@ func Prepare(req Request) (*Prepared, error) {
 	if len(roomSeq) == 0 {
 		return nil, fmt.Errorf("materialize: story %q has no rooms", binding.Story)
 	}
+	checks := ResolveChecks(node, binding.Checks)
+	allStages := append(append([]string{}, roomSeq...), CheckStages(checks)...)
 
 	initialWorld := map[string]any{"node_id": string(req.NodeID)}
 	for _, p := range binding.Params {
@@ -402,7 +410,9 @@ func Prepare(req Request) (*Prepared, error) {
 		ContextIDs:   contextIDs,
 		Def:          def,
 		StoryAppPath: storyAppPath,
-		Stages:       roomSeq,
+		Stages:       allStages,
+		NumRooms:     len(roomSeq),
+		Checks:       checks,
 		InitialWorld: initialWorld,
 	}, nil
 }
@@ -531,6 +541,7 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 		}
 
 		var writtenArtifacts []MaterializationArtifact
+		var checkResults []CheckResult
 		writeArtifactIfPresent := func(w map[string]any) {
 			path, _ := w["artifact_path"].(string)
 			if path == "" {
@@ -561,6 +572,7 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 				Story:     wb.Binding.Story,
 				Stages:    stageSnapshot(),
 				Artifacts: writtenArtifacts,
+				Checks:    checkResults,
 			})
 		}
 
@@ -605,7 +617,7 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 		heartbeat(0, "in-progress")
 		writeArtifactIfPresent(worldNow())
 
-		for i := 0; i < len(stages)-1; i++ {
+		for i := 0; i < p.NumRooms-1; i++ {
 			if err := drv.Next(ctx); err != nil {
 				heartbeat(i, "failed")
 				finalizeWriteback("failed")
@@ -618,12 +630,34 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 
 		finalWorld, err := drv.World(ctx)
 		if err != nil {
-			heartbeat(len(stages)-1, "failed")
+			heartbeat(p.NumRooms-1, "failed")
 			finalizeWriteback("failed")
 			return host.Result{Error: err.Error()}, nil
 		}
-		heartbeat(len(stages)-1, "complete")
+		heartbeat(p.NumRooms-1, "complete")
 		writeArtifactIfPresent(finalWorld)
+
+		// Gate checks run engine-side after the story's rooms: the sandboxed
+		// Starlark assertions judge whether the node's gate is actually met,
+		// and a false (or unjudgeable) verdict fails the job — the story
+		// cannot vouch for itself.
+		for j, rc := range p.Checks {
+			idx := p.NumRooms + j
+			heartbeat(idx, "in-progress")
+			result := RunCheck(ctx, wb.RepoRoot, rc)
+			checkResults = append(checkResults, result)
+			if !result.OK {
+				heartbeat(idx, "failed")
+				finalizeWriteback("failed")
+				reason := result.Error
+				if reason == "" {
+					reason = strings.Join(result.Reasons, "; ")
+				}
+				return host.Result{Error: fmt.Sprintf("materialize: gate check %q failed: %s", rc.ID, reason)}, nil
+			}
+			heartbeat(idx, "complete")
+		}
+
 		finalizeWriteback("complete")
 
 		artifactPath, _ := finalWorld["artifact_path"].(string)
@@ -632,6 +666,30 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 			"node_id":       string(p.Req.NodeID),
 			"artifact_path": artifactPath,
 			"world":         finalWorld,
+			"checks":        checkResultsWire(checkResults),
 		}}, nil
 	}
+}
+
+// checkResultsWire renders check results as plain JSON-ready maps for the
+// job result payload (host.Result.Data must round-trip through JSON).
+func checkResultsWire(results []CheckResult) []map[string]any {
+	out := make([]map[string]any, len(results))
+	for i, r := range results {
+		m := map[string]any{"id": r.ID, "script": r.Script, "ok": r.OK}
+		if r.ScriptSHA256 != "" {
+			m["script_sha256"] = r.ScriptSHA256
+		}
+		if len(r.Reasons) > 0 {
+			m["reasons"] = r.Reasons
+		}
+		if r.Error != "" {
+			m["error"] = r.Error
+		}
+		if r.Reproduce != "" {
+			m["reproduce"] = r.Reproduce
+		}
+		out[i] = m
+	}
+	return out
 }

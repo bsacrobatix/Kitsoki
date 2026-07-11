@@ -53,6 +53,10 @@ type MaterializationRecord struct {
 	Story     string
 	Stages    []Stage
 	Artifacts []MaterializationArtifact
+	// Checks are the recorded gate-check verdicts (script hash + reproduce
+	// command included) — the durable receipt that the node's gate was (or
+	// was not) machine-verified, and how to re-run the judgment.
+	Checks []CheckResult
 }
 
 // MaterializationArtifact is one `materialization.artifacts[]` entry —
@@ -123,13 +127,38 @@ func renderMaterializationValue(rec MaterializationRecord) map[string]any {
 	for i, a := range rec.Artifacts {
 		artifacts[i] = map[string]any{"kind": a.Kind, "title": a.Title, "path": a.Path, "produced_at": a.ProducedAt}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"job_id":    rec.JobID,
 		"status":    rec.Status,
 		"story":     rec.Story,
 		"stages":    stages,
 		"artifacts": artifacts,
 	}
+	if len(rec.Checks) > 0 {
+		checks := make([]any, len(rec.Checks))
+		for i, c := range rec.Checks {
+			entry := map[string]any{"id": c.ID, "script": c.Script, "ok": c.OK}
+			if c.ScriptSHA256 != "" {
+				entry["script_sha256"] = c.ScriptSHA256
+			}
+			if len(c.Reasons) > 0 {
+				reasons := make([]any, len(c.Reasons))
+				for j, r := range c.Reasons {
+					reasons[j] = r
+				}
+				entry["reasons"] = reasons
+			}
+			if c.Error != "" {
+				entry["error"] = c.Error
+			}
+			if c.Reproduce != "" {
+				entry["reproduce"] = c.Reproduce
+			}
+			checks[i] = entry
+		}
+		out["checks"] = checks
+	}
+	return out
 }
 
 // WriteMaterialization upserts nodeID's `materialization:` block in
