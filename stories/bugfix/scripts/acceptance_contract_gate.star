@@ -1,7 +1,12 @@
 def main(ctx):
     requirements = ctx.inputs["requirements"]
     artifact = ctx.inputs["artifact"]
-    changed_files = ctx.inputs["changed_files"]
+    changed_paths = ctx.inputs["changed_paths"]
+    changed_files = []
+    for path in changed_paths.split("\n"):
+        path = path.strip()
+        if path != "":
+            changed_files.append(path)
     coverage = artifact.get("acceptance_coverage", [])
     by_id = {}
     for item in coverage:
