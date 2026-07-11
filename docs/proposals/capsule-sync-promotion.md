@@ -13,8 +13,7 @@ artifact; credential-free local bare-remote fetch and publish providers ship for
 tests/local development. Story-level resolver UX and the production remote
 publish provider remain.
 **Kind:**   runtime
-**Epic:**   [capsule-ci.md](capsule-ci.md)
-**Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
+**Foundation:** [`../guide/development/capsule-ci.md`](../guide/development/capsule-ci.md)
 
 ## Why
 
