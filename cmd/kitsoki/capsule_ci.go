@@ -23,7 +23,7 @@ import (
 
 func capsuleCICmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "ci", Short: "Plan, run, and inspect story-native Capsule CI"}
-	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCISummaryCmd(), capsuleCICancelCmd(), capsuleCIGitHubCmd())
+	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCIDiagnoseCmd(), capsuleCISummaryCmd(), capsuleCICancelCmd(), capsuleCIGitHubCmd())
 	return cmd
 }
 func ciInputs(ctx context.Context, project, workspace, pipeline string) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, error) {
@@ -131,7 +131,7 @@ func persistCapsuleCIRunFailure(project string, result ci.RunResult, runErr erro
 		return runErr
 	}
 	tracePath, traceErr := record.PersistTrace(project, result)
-	writeErr := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result})
+	writeErr := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result, DiagnosticError: runErr.Error()})
 	if traceErr != nil && writeErr != nil {
 		return fmt.Errorf("%w (also failed to persist capsule ci diagnostic trace: %v; run record: %v)", runErr, traceErr, writeErr)
 	}
@@ -203,6 +203,55 @@ func capsuleCISummaryCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	return cmd
 }
+
+func capsuleCIDiagnoseCmd() *cobra.Command {
+	var project, job string
+	var jsonOut bool
+	cmd := &cobra.Command{Use: "diagnose", Short: "Summarize one persisted Capsule CI failure and its local evidence", RunE: func(cmd *cobra.Command, args []string) error {
+		diagnosis, err := (ci.FileRunStore{ProjectRoot: project}).Diagnose(job)
+		if err != nil {
+			return err
+		}
+		if jsonOut {
+			return capsuleWorkspaceWrite(cmd, diagnosis, true)
+		}
+		out := cmd.OutOrStdout()
+		fmt.Fprintf(out, "job: %s\n", diagnosis.Run.JobID)
+		fmt.Fprintf(out, "status: %s\n", diagnosis.Run.Status)
+		if diagnosis.Run.Pipeline != "" || diagnosis.Run.Outcome != "" {
+			fmt.Fprintf(out, "pipeline: %s\n", diagnosis.Run.Pipeline)
+			fmt.Fprintf(out, "outcome: %s\n", diagnosis.Run.Outcome)
+		}
+		if diagnosis.FailureKind != "" {
+			fmt.Fprintf(out, "failure_kind: %s\n", diagnosis.FailureKind)
+		}
+		if diagnosis.FailureSummary != "" {
+			fmt.Fprintf(out, "failure_summary: %s\n", diagnosis.FailureSummary)
+		}
+		if diagnosis.TerminalError != "" {
+			fmt.Fprintf(out, "terminal_error: %s\n", diagnosis.TerminalError)
+		}
+		if diagnosis.LastExecutorEvent != nil {
+			fmt.Fprintf(out, "last_executor_event: %s\n", diagnosis.LastExecutorEvent.Kind)
+		}
+		for _, artifact := range diagnosis.Artifacts {
+			fmt.Fprintf(out, "%s: %s\n", artifact.Kind, artifact.Path)
+		}
+		if len(diagnosis.NextCommands) > 0 {
+			fmt.Fprintln(out, "next_commands:")
+			for _, next := range diagnosis.NextCommands {
+				fmt.Fprintf(out, "  %s\n", next)
+			}
+		}
+		return nil
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&job, "job", "", "job id")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("job")
+	return cmd
+}
+
 func capsuleCICancelCmd() *cobra.Command {
 	var project, job string
 	var jsonOut bool

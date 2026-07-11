@@ -555,6 +555,52 @@ func TestFileRunStoreProviderSummaryUsesRunIndexEvidence(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreDiagnoseSummarizesFailureTrace(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	result := RunResult{
+		Job: artifactjob.Job{ID: "job-fail", Status: artifactjob.StatusFailed},
+		Envelope: executor.Envelope{
+			Digest:       "sha256:envelope",
+			SourceDigest: "sha256:source",
+			StoryDigest:  "sha256:story",
+			Environment:  environment.Lock{Digest: "sha256:environment"},
+		},
+		Verdict: Verdict{Pipeline: "change", Outcome: "failed"},
+	}
+	if err := store.Write(RunRecord{JobID: "job-fail", Result: result, DiagnosticError: "remote worker returned 502"}); err != nil {
+		t.Fatal(err)
+	}
+	tracePath := filepath.Join(root, ".capsules", "ci", "job-fail.trace.json")
+	raw := []byte(`{"schema":"capsule-ci-trace/v1","events":[
+{"kind":"capsule.executor.started","at":"2026-07-11T00:00:00Z","job_id":"job-fail","envelope_digest":"sha256:envelope","fields":{"execution_id":"remote-1","transport":"https","remote_host":"worker.example"}},
+{"kind":"capsule.executor.failed","at":"2026-07-11T00:00:01Z","job_id":"job-fail","envelope_digest":"sha256:envelope","fields":{"execution_id":"remote-1","status":502,"error_kind":"http_status","message":"bad gateway","token":"must-not-leak"}},
+{"kind":"capsule.ci.verdict","at":"2026-07-11T00:00:02Z","job_id":"job-fail","envelope_digest":"sha256:envelope","outcome":"failed"}
+]}`)
+	if err := os.WriteFile(tracePath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis, err := store.Diagnose("job-fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnosis.Schema != RunDiagnosisSchema || diagnosis.FailureKind != "executor_failed" || diagnosis.FailureSummary != "http_status" || diagnosis.TerminalError != "remote worker returned 502" {
+		t.Fatalf("diagnosis %#v", diagnosis)
+	}
+	if diagnosis.ExecutorEventCount != 2 || diagnosis.LastExecutorEvent == nil || diagnosis.LastExecutorEvent.Kind != "capsule.executor.failed" {
+		t.Fatalf("executor summary %#v", diagnosis)
+	}
+	if _, ok := diagnosis.LastExecutorEvent.Fields["token"]; ok {
+		t.Fatalf("unsafe field leaked: %#v", diagnosis.LastExecutorEvent.Fields)
+	}
+	if len(diagnosis.Artifacts) != 1 || diagnosis.Artifacts[0].Path != ".capsules/ci/job-fail.trace.json" {
+		t.Fatalf("artifacts %#v", diagnosis.Artifacts)
+	}
+	if len(diagnosis.NextCommands) == 0 || !strings.Contains(strings.Join(diagnosis.NextCommands, "\n"), "capsule ci status --job job-fail") {
+		t.Fatalf("next commands %#v", diagnosis.NextCommands)
+	}
+}
+
 func TestFileRunStoreIndexEmptyRunsSlice(t *testing.T) {
 	index, err := (FileRunStore{ProjectRoot: t.TempDir()}).Index()
 	if err != nil {
