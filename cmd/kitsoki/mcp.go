@@ -54,6 +54,58 @@ func studioImportResolver(storiesDir string) app.ImportResolver {
 	}
 }
 
+// studioKitTrialDeps assembles the cmd-layer seams the studio kit.* tools
+// need (studio.WithKitTrialDeps): the same resolver pair, project-checks
+// sweep, and extends resolver `kitsoki kit trial`/`kit update` wire for
+// the CLI verbs — so a lifecycle driven over MCP is the same computation
+// as one driven from the shell. checkProjectUpgrade stays in this package
+// (it is the CLI's project-tools sweep); only a closure crosses the seam.
+func studioKitTrialDeps() studio.KitTrialDeps {
+	return studio.KitTrialDeps{
+		BaseResolver:  buildImportResolver(),
+		PlainResolver: buildPlainImportResolver(),
+		ProjectChecks: func(ctx context.Context, projectRoot string, resolver app.ImportResolver) ([]kittrial.Check, error) {
+			rep, err := checkProjectUpgrade(ctx, projectUpgradeOptions{Target: projectRoot, Resolver: resolver})
+			if err != nil {
+				return nil, err
+			}
+			checks := make([]kittrial.Check, 0, len(rep.Checks))
+			for _, c := range rep.Checks {
+				checks = append(checks, kittrial.Check{ID: c.ID, Status: c.Status, Detail: c.Detail})
+			}
+			return checks, nil
+		},
+		Extends: func(ctx context.Context, projectRoot string) kitverify.ExtendsResolver {
+			return lockfileExtendsResolver(ctx, projectRoot)
+		},
+		ResolveEntry: resolveKitEntry,
+	}
+}
+
+// mcpOperatingSystemPaths resolves the trusted managed-workspace assets used
+// by the Studio operating-system plane. A downstream project intentionally
+// keeps its own process working directory for project config and story paths,
+// but it does not carry Kitsoki's scripts/dev-workspace.sh. The root command
+// canonicalizes --kitsoki-repo / $KITSOKI_REPO into the environment before the
+// MCP command runs, so a configured source checkout owns both the lifecycle
+// script and its .capsules/workspaces root; kitsokiRepo carries that value in.
+// KITSOKI_MCP_REPO_ROOT is a narrower override that takes precedence when set:
+// Codex currently starts stdio MCP servers from its own working directory even
+// when an MCP configuration includes cwd, and that env var keeps the
+// managed-workspace guard anchored to the intended checkout in that case.
+// Empty keeps the source-checkout development fallback relative to the
+// current working directory.
+func mcpOperatingSystemPaths(kitsokiRepo string) (workspaceRoot, workspaceScript string) {
+	root := strings.TrimSpace(os.Getenv("KITSOKI_MCP_REPO_ROOT"))
+	if root == "" {
+		root = strings.TrimSpace(kitsokiRepo)
+	}
+	if root == "" {
+		return filepath.Join(".capsules", "workspaces"), filepath.Join("scripts", "dev-workspace.sh")
+	}
+	return filepath.Join(root, ".capsules", "workspaces"), filepath.Join(root, "scripts", "dev-workspace.sh")
+}
+
 // studioHarnessBuilder is the production studio harness seam. Replay mode
 // delegates to studio.DefaultHarnessBuilder (a no-LLM ReplayHarness over the
 // recording). Live mode loads the driven story's def for prompt context and
@@ -250,10 +302,11 @@ docs land):
 			// remains the default because the replay decision is currently HOLD;
 			// strict is an explicit no-LLM preview and escape is an audited
 			// compatibility path.
+			workspaceRoot, workspaceScript := mcpOperatingSystemPaths(os.Getenv(kitrepo.EnvVar))
 			operatingServices, osErr := studio.NewOperatingSystemServices(
 				studio.StudioOperatingProfile(operatingProfile),
-				filepath.Join(".capsules", "workspaces"),
-				filepath.Join("scripts", "dev-workspace.sh"),
+				workspaceRoot,
+				workspaceScript,
 			)
 			if osErr != nil {
 				return fmt.Errorf("mcp: configure operating-system profile %q: %w", operatingProfile, osErr)

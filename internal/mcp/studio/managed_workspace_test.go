@@ -127,6 +127,47 @@ func TestWorkspaceProductionRunnerRequiresTrustedLifecycleScript(t *testing.T) {
 	}
 }
 
+type workspaceArgsRunner struct {
+	args []string
+}
+
+func (r *workspaceArgsRunner) Run(_ context.Context, _ string, args ...string) (WorkspaceCommandResult, error) {
+	r.args = append([]string(nil), args...)
+	return WorkspaceCommandResult{}, nil
+}
+
+func TestWorkspaceProductionCommandsPinTrustedRepoAndRoot(t *testing.T) {
+	repo := t.TempDir()
+	root := filepath.Join(repo, ".capsules", "workspaces")
+	script := filepath.Join(repo, "scripts", "dev-workspace.sh")
+	makeWorkspaceTestDir(t, root)
+	makeWorkspaceTestDir(t, filepath.Dir(script))
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := NewManagedWorkspaceService(root, script, nil, workspaceObjective(t, 1), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &workspaceArgsRunner{}
+	svc.runner = runner
+	if _, err := svc.runWorkspaceCommand(context.Background(), "status", "demo", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"status", "demo", "--json", "--repo", repo, "--root", root}
+	if strings.Join(runner.args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("workspace args = %#v, want %#v", runner.args, want)
+	}
+}
+
+func makeWorkspaceTestDir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkspaceToolsRegisterOnlyWhenExplicitlyRequested(t *testing.T) {
 	ctx := context.Background()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "workspace-contract-test", Version: "v1"}, nil)

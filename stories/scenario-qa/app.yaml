@@ -84,11 +84,16 @@ app:
 #                        agent using the kitsoki-ui-qa posture to grade it.
 #                        Stubbed by id under flow/no-LLM tests; never
 #                        fabricated — a failed dispatch is recorded honestly.
+#   host.run           — execute the already-planned product-journey command
+#                        for each transport leg. The journey rooms invoke this
+#                        boundary directly, so it must be part of the story's
+#                        explicit host contract (and is inherited by persona-qa).
 hosts:
   - host.run
   - host.product_journey.run
   - host.starlark.run
   - host.agent.task
+  - host.run
 
 # Personas. Both are thin attachment points for the real work: the driver
 # delegates to .agents/agents/product-journey-qa-driver.md's own transport

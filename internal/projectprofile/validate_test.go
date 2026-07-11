@@ -12,9 +12,20 @@ title: Gears Rust
 repo:
   root: "."
   vcs: git
+  default_branch: main
+  branch_pattern: "feature/{issue_id}-{slug}"
+  branch_issue_id: required
 stack:
   kind: rust
   languages: [rust]
+tracker:
+  provider: github
+  project: bsacrobatix/gears-rust
+pull_requests:
+  provider: github
+  repository: bsacrobatix/gears-rust
+  base_branch: main
+  template: .github/pull_request_template.md
 commands:
   build: "make build"
   test: "make test"
@@ -40,6 +51,38 @@ dev_story_profile:
   bugfix:
     build_cmd: "make build"
     test_cmd: "make test"
+goals:
+  onboarding:
+    statement: Make this checkout ready for deterministic dev-story work.
+    postconditions:
+      - id: tests-runnable
+        statement: The canonical tests run deterministically.
+        gate: required
+        verification: tests
+      - id: branch-policy-known
+        statement: The base branch and working-branch pattern are explicit.
+        gate: required
+        verification: branch-policy
+      - id: ticket-source-known
+        statement: The ticket provider and project are explicit.
+        gate: required
+        verification: ticket-source
+      - id: pr-policy-known
+        statement: The pull-request destination and template are explicit.
+        gate: required
+        verification: pr-policy
+  validation:
+    statement: Prove and improve dev-story against a stable independent corpus.
+    requires: [onboarding]
+    postconditions:
+      - id: reference-corpus-frozen
+        statement: Corpus Forge produced a frozen corpus receipt.
+        gate: advisory
+        verification: reference-corpus
+      - id: bug-to-pr-proven
+        statement: A developer can take a configured ticket through pull request creation.
+        gate: recommended
+        verification: bug-to-pr
 onboarding:
   base_story: dev-story
   base_story_title: Dev-story project workflow
@@ -56,6 +99,18 @@ onboarding:
       status: enabled
       summary: Drive a picked bug through fix and validation.
   expansion_policy: Add story ids after focused readiness checks pass.
+  resolutions:
+    - field: commands.test
+      value: make test
+      source: discovered
+      evidence: Makefile declares the test target.
+      update: ".kitsoki/project-profile.yaml#commands.test"
+    - field: repo.branch_pattern
+      value: "feature/{issue_id}-{slug}"
+      source: default
+      evidence: No project branch template was found.
+      update: ".kitsoki/project-profile.yaml#repo.branch_pattern"
+      notice: Could not determine the working-branch template; using feature/{issue_id}-{slug}.
   repo_patterns:
     - id: toolchain
       source: repo-files
@@ -69,6 +124,36 @@ onboarding:
   baseline_commit: d8513b0
   deterministic_flow: stories/dev-story/flows/init_rust_project.yaml
   recording_policy: gated-live-allowed
+setup_plan:
+  writes:
+    - path: .kitsoki/stories/gears-rust-dev/app.yaml
+      action: create
+      summary: Materialize the project-local dev-story wrapper.
+  verifications:
+    - id: tests
+      kind: tests
+      command: make test
+      gate: required
+    - id: branch-policy
+      kind: profile
+      fields: [repo.default_branch, repo.branch_pattern, repo.branch_issue_id]
+      gate: required
+    - id: ticket-source
+      kind: ticket
+      fields: [tracker.provider, tracker.project]
+      gate: required
+    - id: pr-policy
+      kind: pull-request
+      fields: [pull_requests.repository, pull_requests.base_branch, pull_requests.template]
+      gate: required
+    - id: reference-corpus
+      kind: corpus
+      command: kitsoki test flows stories/corpus-forge/app.yaml
+      gate: advisory
+    - id: bug-to-pr
+      kind: workflow
+      command: kitsoki test flows .kitsoki/stories/gears-rust-dev/app.yaml
+      gate: recommended
 `)
 	res, err := Validate(profile, "")
 	if err != nil {
@@ -76,6 +161,9 @@ onboarding:
 	}
 	if !res.OK {
 		t.Fatalf("profile should validate: schema=%v semantic=%v warnings=%v", res.Schema, res.Semantic, res.Warnings)
+	}
+	if len(res.Warnings) != 0 {
+		t.Fatalf("complete profile should not warn: %v", res.Warnings)
 	}
 }
 
@@ -113,6 +201,123 @@ kitsoki:
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("validation output missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestValidate_LegacyProfileWarnsWithoutGoalsOrResolutions(t *testing.T) {
+	profile := []byte(`schema: project-profile/v1
+id: legacy
+title: Legacy
+repo:
+  root: "."
+  vcs: git
+stack:
+  kind: generic
+commands:
+  build: "true"
+  test: "true"
+kitsoki:
+  story: dev-story
+  instance:
+    id: legacy-dev
+    path: .kitsoki/stories/legacy-dev/app.yaml
+    bindings:
+      ticket: host.local_files.ticket
+      vcs: host.git
+      ci: host.local
+      workspace: host.git_worktree
+      transport: host.append_to_file
+`)
+	res, err := Validate(profile, "")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("legacy profile should remain valid: schema=%v semantic=%v", res.Schema, res.Semantic)
+	}
+	joined := strings.Join(res.Warnings, "\n")
+	for _, want := range []string{"goals is missing", "onboarding.resolutions is missing"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("legacy warnings missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestValidate_RejectsBrokenGoalAndResolutionContracts(t *testing.T) {
+	profile := []byte(`schema: project-profile/v1
+id: broken-contract
+title: Broken Contract
+repo:
+  root: "."
+  vcs: git
+stack:
+  kind: generic
+commands:
+  build: "true"
+  test: "true"
+kitsoki:
+  story: dev-story
+  instance:
+    id: broken-contract-dev
+    path: .kitsoki/stories/broken-contract-dev/app.yaml
+    bindings:
+      ticket: host.local_files.ticket
+      vcs: host.git
+      ci: host.local
+      workspace: host.git_worktree
+      transport: host.append_to_file
+goals:
+  onboarding:
+    statement: Establish a measurable project setup.
+    postconditions:
+      - id: missing-reference
+        statement: This points nowhere.
+        gate: required
+        verification: does-not-exist
+      - id: weak-reference
+        statement: This required outcome points at an advisory check.
+        gate: required
+        verification: advisory-check
+onboarding:
+  resolutions:
+    - field: commands.test
+      value: "true"
+      source: discovered
+    - field: commands.test
+      value: "true"
+      source: operator
+    - field: repo.branch_pattern
+      value: "feature/{slug}"
+      source: default
+setup_plan:
+  writes:
+    - path: .kitsoki/stories/broken-contract-dev/app.yaml
+      action: create
+      summary: Materialize the wrapper.
+  verifications:
+    - id: advisory-check
+      kind: workflow
+      command: "true"
+      gate: advisory
+`)
+	res, err := Validate(profile, "")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if res.OK {
+		t.Fatal("broken goal and resolution contracts should fail semantic validation")
+	}
+	joined := strings.Join(res.Semantic, "\n")
+	for _, want := range []string{
+		`references unknown setup_plan.verifications id "does-not-exist"`,
+		`is required but verification "advisory-check" is advisory`,
+		`onboarding.resolutions field "commands.test" is declared more than once`,
+		`onboarding.resolutions[2].notice is required`,
+		`onboarding.resolutions[2].update is required`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("semantic output missing %q:\n%s", want, joined)
 		}
 	}
 }

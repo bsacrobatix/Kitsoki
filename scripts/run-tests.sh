@@ -159,7 +159,11 @@ fi
 if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
 	(
 		cd tools/runstatus || exit 2
-		run_timed "$VITEST_TIMEOUT_SECONDS" "runstatus vitest" pnpm test
+		# node_modules may be an immutable cache shared by multiple capsules.
+		# Invoking pnpm here revalidates its absolute workspace-state path and can
+		# try to purge that read-only cache; the validated package binary is the
+		# stable execution boundary after the Makefile's dependency restore.
+		run_timed "$VITEST_TIMEOUT_SECONDS" "runstatus vitest" ./node_modules/.bin/vitest run
 	) >"$VITEST_OUT" 2>&1 &
 	vitest_pid=$!
 else
@@ -316,7 +320,12 @@ collect_vitest
 # ---------------------------------------------------------------------------
 section "feature catalog"
 if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
-	run_timed "$FEATURES_TIMEOUT_SECONDS" "feature catalog" pnpm --dir tools/runstatus --silent features:check >"$TMP/features.out" 2>&1
+	(
+		cd tools/runstatus || exit 2
+		run_timed "$FEATURES_TIMEOUT_SECONDS" "feature catalog generate" ./node_modules/.bin/tsx scripts/features/generate.ts --check &&
+			run_timed "$FEATURES_TIMEOUT_SECONDS" "feature demo lint" ./node_modules/.bin/tsx scripts/features/lint-demos.ts &&
+			run_timed "$FEATURES_TIMEOUT_SECONDS" "feature tour-target lint" ./node_modules/.bin/tsx scripts/features/lint-tour-targets.ts
+	) >"$TMP/features.out" 2>&1
 	features_rc=$?
 	cat "$TMP/features.out" >>"$REPORT"
 	[ "$features_rc" -ne 0 ] && features_failures=1
@@ -332,7 +341,10 @@ section "demo media contract"
 if command -v node >/dev/null 2>&1 && command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
 	MEDIA_INDEX="$TMP/features-media"
 	mkdir -p "$MEDIA_INDEX"
-	if run_timed "$MEDIA_TIMEOUT_SECONDS" "demo media index" pnpm --dir tools/runstatus --silent exec tsx scripts/features/generate.ts --index --out "$MEDIA_INDEX" >"$TMP/media-index.out" 2>&1; then
+	if (
+		cd tools/runstatus || exit 2
+		run_timed "$MEDIA_TIMEOUT_SECONDS" "demo media index" ./node_modules/.bin/tsx scripts/features/generate.ts --index --out "$MEDIA_INDEX"
+	) >"$TMP/media-index.out" 2>&1; then
 		run_timed "$MEDIA_TIMEOUT_SECONDS" "demo media contract" node tools/site/scripts/check-media.mjs --index "$MEDIA_INDEX/features-index.json" >"$TMP/media.out" 2>&1
 		media_rc=$?
 		cat "$TMP/media-index.out" "$TMP/media.out" >>"$REPORT"

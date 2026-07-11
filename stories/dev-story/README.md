@@ -28,6 +28,76 @@ The defaults in `host_interfaces:` (host.local_files.ticket, host.git,
 host.local, host.capsule_workspace, host.append_to_file) make standalone
 runs work for smoke testing without an instance wrapper.
 
+## Project onboarding contract and updates
+
+Project onboarding generates a thin project-owned wrapper, not a fork of this
+directory. The wrapper imports `@kitsoki/dev-story`; project-specific commands
+and delivery policy live in `.kitsoki/project-profile.yaml` and are projected
+through `world_in`.
+
+The profile records two outcome contracts:
+
+- `goals.onboarding` requires a loadable wrapper, deterministic tests, an
+  applicable boot/probe/teardown dev-server path, explicit base/branch/ticket-ID
+  rules, a configured ticket source, and an explicit PR
+  destination/base/template policy.
+- `goals.validation` requires onboarding first, then a frozen calibration
+  `corpus-receipt.v1`, independent green evidence for every calibration case,
+  and a proven bug-ticket-to-PR path.
+
+Each postcondition points at a named `setup_plan.verifications` entry. Each
+managed discovery is also recorded in `onboarding.resolutions` with its value,
+source, evidence, update location, and—when Kitsoki had to guess—a user-facing
+default notice. `source: discovered` and `source: default` values may move on a
+refresh; `source: operator` is preserved. A manual value that differs from its
+last managed resolution is promoted to operator-owned on the next refresh.
+
+Refresh an existing profile with a dry run, then apply only after review:
+
+```sh
+kitsoki project-profile refresh --target /path/to/project
+kitsoki project-profile refresh --target /path/to/project --json
+kitsoki project-profile refresh --target /path/to/project --apply
+```
+
+The command validates the merged profile and never overwrites the wrapper.
+Identical onboarding, refresh, and readiness reruns are safe; an unchanged
+refresh apply reports `changed: false`.
+
+Base-story updates arrive independently through the `@kitsoki/dev-story`
+resolver:
+
+```sh
+# Normal downstream channel: install a new binary and run with no override.
+kitsoki run
+
+# One invocation, all @kitsoki stories from a source checkout.
+kitsoki --kitsoki-repo /absolute/path/to/Kitsoki run
+
+# Only dev-story from a source folder containing app.yaml.
+KITSOKI_KIT_DEV_DEV_STORY=/absolute/path/to/Kitsoki/stories/dev-story kitsoki run
+
+# Persist and later clear the same scoped development override.
+kitsoki kit dev dev-story --path /absolute/path/to/Kitsoki/stories/dev-story
+kitsoki kit dev dev-story --clear
+```
+
+Per-story overrides win over the repo-wide `--kitsoki-repo` /
+`KITSOKI_REPO` route, and repo-wide routes win over the embedded story. Clear
+development overrides before testing the newly installed binary's embedded
+copy. See
+[`docs/stories/dev-story-onboarding.md`](../../docs/stories/dev-story-onboarding.md)
+for the exact goal, provenance, readiness, source-resolution, and rerun
+contracts.
+
+For validation, the stable cases are **repo-history capsules** admitted by
+Corpus Forge as independently RED/GREEN-proved `corpus-case.v1` objects. Tune on
+a durable calibration `corpus-receipt.v1`; reserve a distinct, non-overlapping
+heldout receipt for promotion only. Today `repo-bakeoff`, Corpus Forge,
+`dogfood-marathon`, and `goal-seeker` are separate surfaces—there is no single
+shipped receipt-to-all-green optimizer—and the repo-bakeoff harness still needs
+a Kitsoki source checkout.
+
 ## Composition
 
 ```

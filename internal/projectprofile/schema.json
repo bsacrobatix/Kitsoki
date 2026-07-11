@@ -30,6 +30,14 @@
       }
     },
 
+    "goals": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+      "description": "Named story or lifecycle-phase goals. Each goal states measurable postconditions and points them at setup_plan.verifications by id.",
+      "additionalProperties": { "$ref": "#/$defs/goal" }
+    },
+
     "repo": {
       "type": "object",
       "additionalProperties": false,
@@ -38,6 +46,8 @@
         "root": { "type": "string", "description": "Absolute or repo-relative checkout root. '.' for the current repo." },
         "vcs": { "enum": ["git", "hg", "svn", "none"] },
         "default_branch": { "type": "string" },
+        "branch_pattern": { "type": "string", "description": "Normal working-branch template, for example feature/{issue_id}-{slug}." },
+        "branch_issue_id": { "enum": ["required", "optional", "forbidden", "unknown"], "description": "Whether normal working branches include a ticket or issue id." },
         "remote": { "type": "string", "description": "owner/repo or remote URL." },
         "monorepo": { "type": "boolean", "default": false }
       }
@@ -240,6 +250,18 @@
       "additionalProperties": true
     },
 
+    "pull_requests": {
+      "type": "object",
+      "description": "Where pull requests are opened and which project policy they follow.",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "description": "Pull-request provider, for example github, gitlab, bitbucket, local, or none." },
+        "repository": { "type": "string", "description": "Repository slug or URL where pull requests are opened." },
+        "base_branch": { "type": "string", "description": "Normal pull-request target branch." },
+        "template": { "type": "string", "description": "Repo-relative pull-request template path, or an empty string when the project has no template." }
+      }
+    },
+
     "rules": {
       "type": "array",
       "description": "Project rules the dev-story instance should honor — discovered from rules files, mined from sessions, or stated by the operator.",
@@ -439,6 +461,23 @@
           "contentMediaType": "text/markdown",
           "description": "How to expand from the focused starter story set."
         },
+        "resolutions": {
+          "type": "array",
+          "description": "Per-field onboarding provenance. The stored value is the last resolved value, allowing reruns to distinguish a managed value from an operator edit.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "value", "source"],
+            "properties": {
+              "field": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$", "description": "Dotted path to the canonical project-profile field." },
+              "value": { "description": "The last value onboarding resolved for this field." },
+              "source": { "enum": ["discovered", "default", "operator"], "description": "How the value was resolved." },
+              "evidence": { "type": "string", "contentMediaType": "text/markdown", "description": "Repo evidence or operator decision supporting the value." },
+              "update": { "type": "string", "minLength": 1, "description": "Exact file and field location the operator can update." },
+              "notice": { "type": "string", "minLength": 1, "contentMediaType": "text/markdown", "description": "User-facing explanation shown when onboarding had to use a default." }
+            }
+          }
+        },
         "repo_patterns": {
           "type": "array",
           "description": "Deterministic repo evidence used to adapt the starter story.",
@@ -519,11 +558,16 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "kind", "command", "gate"],
+            "required": ["id", "kind", "gate"],
+            "anyOf": [
+              { "required": ["command"] },
+              { "required": ["fields"] }
+            ],
             "properties": {
               "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-              "kind": { "enum": ["dev-server", "readiness", "build", "tests", "lint", "typecheck", "golden-path", "story", "artifact", "ui"] },
+              "kind": { "enum": ["dev-server", "readiness", "build", "tests", "lint", "typecheck", "golden-path", "story", "artifact", "ui", "profile", "ticket", "pull-request", "corpus", "workflow"] },
               "command": { "type": "string" },
+              "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "description": "Canonical project-profile fields inspected by a native or metadata verification." },
               "gate": { "enum": ["required", "advisory", "recommended"] }
             }
           }
@@ -546,7 +590,7 @@
             "required": ["id", "kind", "ok"],
             "properties": {
               "id": { "type": "string" },
-              "kind": { "enum": ["dev-server", "readiness", "build", "tests", "lint", "typecheck", "golden-path", "story", "artifact", "ui"] },
+              "kind": { "enum": ["dev-server", "readiness", "build", "tests", "lint", "typecheck", "golden-path", "story", "artifact", "ui", "profile", "ticket", "pull-request", "corpus", "workflow"] },
               "ok": { "type": "boolean" },
               "detail": { "type": "string" },
               "evidence": { "type": "array", "items": { "$ref": "#/$defs/media" } }
@@ -558,6 +602,32 @@
   },
 
   "$defs": {
+    "goal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "postconditions"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 1, "contentMediaType": "text/markdown", "description": "The outcome this story or phase exists to establish." },
+        "requires": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" }, "description": "Other named goals that must be satisfied first." },
+        "postconditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/postcondition" }
+        }
+      }
+    },
+    "postcondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "gate", "verification"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "statement": { "type": "string", "minLength": 1, "contentMediaType": "text/markdown" },
+        "gate": { "enum": ["required", "advisory", "recommended"] },
+        "verification": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "description": "Id of the setup_plan.verifications entry that measures this postcondition." },
+        "applicable": { "type": "boolean", "default": true, "description": "False records an explicit, reviewable not-applicable outcome instead of inventing a check." }
+      }
+    },
     "conventionDir": {
       "type": "object",
       "additionalProperties": false,

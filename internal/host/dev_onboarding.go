@@ -1,13 +1,19 @@
 package host
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,6 +46,12 @@ func DevOnboardingHandler(ctx context.Context, args map[string]any) (Result, err
 		return Result{Data: onboardingCustomizations(args)}, nil
 	case "readiness":
 		return Result{Data: onboardingReadiness(ctx, args)}, nil
+	case "refresh":
+		data, err := RefreshDevOnboardingProfile(stringValue(args, "target_path"), boolValue(args, "apply"))
+		if err != nil {
+			return Result{Error: err.Error()}, nil
+		}
+		return Result{Data: data}, nil
 	default:
 		return Result{Error: fmt.Sprintf("host.dev.onboarding: unknown op %q", stringValue(args, "op"))}, nil
 	}
@@ -70,31 +82,29 @@ func onboardingReadiness(ctx context.Context, args map[string]any) map[string]an
 	if err := yaml.Unmarshal(profileRaw, &profile); err != nil {
 		return onboardingReadinessError(result, "project profile is invalid: "+err.Error())
 	}
+	if validation, err := projectprofile.Validate(profileRaw, root); err != nil || !validation.OK {
+		detail := "project profile does not validate"
+		if err != nil {
+			detail += ": " + err.Error()
+		} else {
+			detail += ": " + strings.Join(append(validation.Schema, validation.Semantic...), "; ")
+		}
+		return onboardingReadinessError(result, detail)
+	}
 	checks := []any{}
 	projectID := stringValue(data, "project_id")
 	if projectID == "" {
 		projectID = stringValue(profile, "id")
 	}
 	instance := filepath.Join(root, ".kitsoki", "stories", onboardingSlug(projectID)+"-dev", "app.yaml")
-	checks = append(checks, onboardingStoryCheck(instance))
-	commands := onboardingMap(profile["commands"])
-	for _, check := range []struct {
-		id      string
-		command string
-	}{
-		{id: "tests", command: stringValue(commands, "test")},
-		{id: "build", command: stringValue(commands, "build")},
-	} {
-		if strings.TrimSpace(check.command) == "" {
-			continue
-		}
-		checks = append(checks, onboardingCommandCheck(ctx, root, check.id, check.command))
-	}
+	verifications := onboardingVerificationEntries(profile, instance)
 	status := "pass"
-	for _, raw := range checks {
-		if stringValue(onboardingMap(raw), "status") == "fail" {
+	for _, raw := range verifications {
+		verification := onboardingMap(raw)
+		check := onboardingRunVerification(ctx, root, profile, instance, verification)
+		checks = append(checks, check)
+		if onboardingCheckRequired(verification) && !boolValue(check, "ok") {
 			status = "fail"
-			break
 		}
 	}
 	result["checks"] = checks
@@ -108,45 +118,155 @@ func onboardingReadiness(ctx context.Context, args map[string]any) map[string]an
 		result["error"] = err.Error()
 		return result
 	}
-	profile["readiness"] = map[string]any{"status": status, "report": ".artifacts/kitsoki-readiness.json"}
-	if updated, err := yaml.Marshal(profile); err == nil {
-		if err := os.WriteFile(profilePath, updated, 0o644); err != nil {
-			result["status"] = "error"
-			result["ok"] = false
-			result["error"] = err.Error()
+	profile["readiness"] = map[string]any{"status": status, "checks": onboardingProfileReadinessChecks(checks)}
+	updated, err := yaml.Marshal(profile)
+	if err != nil {
+		return onboardingReadinessError(result, "marshal updated project profile: "+err.Error())
+	}
+	validation, err := projectprofile.Validate(updated, root)
+	if err != nil || !validation.OK {
+		detail := "readiness update would invalidate the project profile"
+		if err != nil {
+			detail += ": " + err.Error()
+		} else {
+			detail += ": " + strings.Join(append(validation.Schema, validation.Semantic...), "; ")
 		}
+		return onboardingReadinessError(result, detail)
+	}
+	if err := os.WriteFile(profilePath, updated, 0o644); err != nil {
+		result["status"] = "error"
+		result["ok"] = false
+		result["error"] = err.Error()
 	}
 	return result
+}
+
+func onboardingProfileReadinessChecks(checks []any) []any {
+	out := make([]any, 0, len(checks))
+	for _, raw := range checks {
+		check := onboardingMap(raw)
+		out = append(out, map[string]any{
+			"id": stringValue(check, "id"), "kind": stringValue(check, "kind"),
+			"ok": boolValue(check, "ok"), "detail": stringValue(check, "detail"),
+		})
+	}
+	return out
+}
+
+func onboardingVerificationEntries(profile map[string]any, instance string) []any {
+	setup := onboardingMap(profile["setup_plan"])
+	if configured, ok := setup["verifications"].([]any); ok && len(configured) > 0 {
+		wanted := onboardingGoalVerificationIDs(profile, "onboarding")
+		if len(wanted) == 0 {
+			return configured
+		}
+		filtered := []any{}
+		for _, raw := range configured {
+			if wanted[stringValue(onboardingMap(raw), "id")] {
+				filtered = append(filtered, raw)
+			}
+		}
+		return filtered
+	}
+	commands := onboardingMap(profile["commands"])
+	entries := []any{map[string]any{"id": "story-load", "kind": "story", "gate": "required", "fields": []any{"kitsoki.instance.path"}}}
+	for _, item := range []struct{ id, kind, command string }{
+		{id: "tests", kind: "tests", command: stringValue(commands, "test")},
+		{id: "build", kind: "build", command: stringValue(commands, "build")},
+	} {
+		if strings.TrimSpace(item.command) != "" {
+			entries = append(entries, map[string]any{"id": item.id, "kind": item.kind, "command": item.command, "gate": "required"})
+		}
+	}
+	_ = instance
+	return entries
+}
+
+func onboardingRunVerification(ctx context.Context, root string, profile map[string]any, instance string, verification map[string]any) map[string]any {
+	id := defaultString(stringValue(verification, "id"), "readiness")
+	kind := defaultString(stringValue(verification, "kind"), "readiness")
+	if kind == "story" {
+		return onboardingStoryCheck(instance)
+	}
+	if kind == "dev-server" {
+		if applicable, known := onboardingVerificationApplicable(profile, id); known && !applicable {
+			return map[string]any{"id": id, "kind": "dev-server", "ok": true, "status": "pass", "detail": "not applicable for this project profile"}
+		}
+		return onboardingDevServerCheck(ctx, root, profile, id)
+	}
+	if command := strings.TrimSpace(stringValue(verification, "command")); command != "" {
+		return onboardingCommandCheck(ctx, root, id, kind, command)
+	}
+	if fields := onboardingStrings(verification["fields"]); len(fields) > 0 {
+		return onboardingProfileFieldsCheck(profile, id, kind, fields)
+	}
+	return map[string]any{"id": id, "kind": kind, "ok": false, "status": "fail", "detail": "verification has no command, fields, or native check configuration"}
+}
+
+func onboardingGoalVerificationIDs(profile map[string]any, goalID string) map[string]bool {
+	goal := onboardingMap(onboardingMap(profile["goals"])[goalID])
+	items := onboardingAnyList(goal["postconditions"])
+	out := map[string]bool{}
+	for _, raw := range items {
+		if id := stringValue(onboardingMap(raw), "verification"); id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func onboardingVerificationApplicable(profile map[string]any, verificationID string) (bool, bool) {
+	goals := onboardingMap(profile["goals"])
+	for _, rawGoal := range goals {
+		for _, raw := range onboardingAnyList(onboardingMap(rawGoal)["postconditions"]) {
+			postcondition := onboardingMap(raw)
+			if stringValue(postcondition, "verification") != verificationID {
+				continue
+			}
+			value, present := postcondition["applicable"]
+			if !present {
+				return true, true
+			}
+			applicable, ok := value.(bool)
+			return applicable, ok
+		}
+	}
+	return true, false
+}
+
+func onboardingCheckRequired(verification map[string]any) bool {
+	return stringValue(verification, "gate") != "advisory" && stringValue(verification, "gate") != "recommended"
 }
 
 func onboardingReadinessError(result map[string]any, detail string) map[string]any {
 	result["status"] = "error"
 	result["ok"] = false
 	result["error"] = detail
-	result["checks"] = []any{map[string]any{"id": "readiness", "status": "fail", "detail": detail}}
+	result["checks"] = []any{map[string]any{"id": "readiness", "kind": "readiness", "ok": false, "status": "fail", "detail": detail}}
 	return result
 }
 
 func onboardingStoryCheck(path string) map[string]any {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return map[string]any{"id": "story-load", "status": "fail", "detail": err.Error()}
+		return map[string]any{"id": "story-load", "kind": "story", "ok": false, "status": "fail", "detail": err.Error()}
 	}
 	var document any
 	if err := yaml.Unmarshal(raw, &document); err != nil {
-		return map[string]any{"id": "story-load", "status": "fail", "detail": err.Error()}
+		return map[string]any{"id": "story-load", "kind": "story", "ok": false, "status": "fail", "detail": err.Error()}
 	}
-	return map[string]any{"id": "story-load", "status": "pass", "detail": "validated " + path}
+	return map[string]any{"id": "story-load", "kind": "story", "ok": true, "status": "pass", "detail": "validated " + path}
 }
 
-func onboardingCommandCheck(ctx context.Context, root, id, command string) map[string]any {
-	check := map[string]any{"id": id, "status": "pass", "detail": command}
+func onboardingCommandCheck(ctx context.Context, root, id, kind, command string) map[string]any {
+	check := map[string]any{"id": id, "kind": kind, "ok": true, "status": "pass", "detail": command}
 	commandCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(commandCtx, "sh", "-c", command)
 	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		check["ok"] = false
 		check["status"] = "fail"
 		check["detail"] = strings.TrimSpace(string(out))
 		if check["detail"] == "" {
@@ -154,6 +274,146 @@ func onboardingCommandCheck(ctx context.Context, root, id, command string) map[s
 		}
 	}
 	return check
+}
+
+func onboardingProfileFieldsCheck(profile map[string]any, id, kind string, fields []string) map[string]any {
+	missing := []string{}
+	for _, field := range fields {
+		value, ok := onboardingValueAt(profile, field)
+		if !ok || onboardingValueEmpty(value) {
+			missing = append(missing, field)
+		}
+	}
+	if len(missing) > 0 {
+		return map[string]any{"id": id, "kind": kind, "ok": false, "status": "fail", "detail": "missing project-profile fields: " + strings.Join(missing, ", ")}
+	}
+	return map[string]any{"id": id, "kind": kind, "ok": true, "status": "pass", "detail": "project-profile fields resolved: " + strings.Join(fields, ", ")}
+}
+
+func onboardingDevServerCheck(ctx context.Context, root string, profile map[string]any, id string) map[string]any {
+	components, _ := onboardingMap(profile["dev_server"])["components"].([]any)
+	if len(components) == 0 {
+		return map[string]any{"id": id, "kind": "dev-server", "ok": false, "status": "fail", "detail": "dev_server.components is not configured; add a boot command plus deterministic readiness probe in .kitsoki/project-profile.yaml"}
+	}
+	for _, raw := range components {
+		component := onboardingMap(raw)
+		name := defaultString(stringValue(component, "name"), "dev-server")
+		command := strings.TrimSpace(stringValue(component, "command"))
+		ready := onboardingMap(component["ready"])
+		if command == "" || stringValue(ready, "probe") == "" || stringValue(ready, "target") == "" {
+			return map[string]any{"id": id, "kind": "dev-server", "ok": false, "status": "fail", "detail": name + ": command and ready.probe/target are required"}
+		}
+		if err := onboardingProbeDevServer(ctx, root, component); err != nil {
+			return map[string]any{"id": id, "kind": "dev-server", "ok": false, "status": "fail", "detail": name + ": " + err.Error()}
+		}
+	}
+	return map[string]any{"id": id, "kind": "dev-server", "ok": true, "status": "pass", "detail": fmt.Sprintf("booted, probed, and stopped %d configured component(s)", len(components))}
+}
+
+func onboardingProbeDevServer(ctx context.Context, root string, component map[string]any) error {
+	command := stringValue(component, "command")
+	cwd := stringValue(component, "cwd")
+	if cwd == "" {
+		cwd = root
+	} else if !filepath.IsAbs(cwd) {
+		cwd = filepath.Join(root, cwd)
+	}
+	ready := onboardingMap(component["ready"])
+	timeout := time.Duration(onboardingInt(ready["timeout_ms"], 30000)) * time.Millisecond
+	interval := time.Duration(onboardingInt(ready["interval_ms"], 500)) * time.Millisecond
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var output bytes.Buffer
+	cmd := exec.CommandContext(probeCtx, "sh", "-c", "exec "+command)
+	cmd.Dir = cwd
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start %q: %w", command, err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
+	}()
+
+	for {
+		if ok, detail := onboardingProbeReady(probeCtx, cwd, ready, output.String()); ok {
+			return nil
+		} else if probeCtx.Err() != nil {
+			return fmt.Errorf("readiness probe timed out: %s", detail)
+		}
+		select {
+		case err := <-done:
+			if err == nil {
+				return fmt.Errorf("process exited before readiness; output: %s", strings.TrimSpace(output.String()))
+			}
+			return fmt.Errorf("process exited before readiness: %v; output: %s", err, strings.TrimSpace(output.String()))
+		case <-probeCtx.Done():
+			return fmt.Errorf("readiness probe timed out; output: %s", strings.TrimSpace(output.String()))
+		case <-time.After(interval):
+		}
+	}
+}
+
+func onboardingProbeReady(ctx context.Context, cwd string, ready map[string]any, logs string) (bool, string) {
+	probe := stringValue(ready, "probe")
+	target := stringValue(ready, "target")
+	expect := stringValue(ready, "expect")
+	switch probe {
+	case "http":
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return false, err.Error()
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return false, err.Error()
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+			return false, resp.Status
+		}
+		if expect != "" && !strings.Contains(resp.Status, expect) && !strings.Contains(string(body), expect) {
+			return false, "response did not contain " + expect
+		}
+		return true, resp.Status
+	case "tcp":
+		conn, err := net.DialTimeout("tcp", target, 2*time.Second)
+		if err != nil {
+			return false, err.Error()
+		}
+		_ = conn.Close()
+		return true, target
+	case "log":
+		matched, err := regexp.MatchString(target, logs)
+		if err != nil {
+			return false, err.Error()
+		}
+		return matched, "log pattern not observed"
+	case "command":
+		cmd := exec.CommandContext(ctx, "sh", "-c", target)
+		cmd.Dir = cwd
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return false, strings.TrimSpace(string(out))
+		}
+		if expect != "" && !strings.Contains(string(out), expect) {
+			return false, "probe output did not contain " + expect
+		}
+		return true, strings.TrimSpace(string(out))
+	default:
+		return false, "unsupported readiness probe " + probe
+	}
 }
 
 func onboardingCustomizations(args map[string]any) map[string]any {
@@ -168,9 +428,9 @@ func onboardingCustomizations(args map[string]any) map[string]any {
 	entries := onboardingCustomizationEntries(profile, root)
 	changed := []any{}
 	if action == "accept" || action == "refine" {
-		status := "accepted"
+		status := "applied"
 		if action == "refine" {
-			status = "needs-refinement"
+			status = "proposed"
 		}
 		for _, raw := range entries {
 			entry := onboardingMap(raw)
@@ -190,15 +450,15 @@ func onboardingCustomizations(args map[string]any) map[string]any {
 			}
 		}
 	}
-	counts := map[string]any{"pending": 0, "accepted": 0, "needs_refinement": 0}
+	counts := map[string]any{"pending": 0, "applied": 0, "proposed": 0}
 	for _, raw := range entries {
 		switch stringValue(onboardingMap(raw), "status") {
 		case "pending":
 			counts["pending"] = counts["pending"].(int) + 1
-		case "accepted":
-			counts["accepted"] = counts["accepted"].(int) + 1
-		case "needs-refinement", "needs_refinement":
-			counts["needs_refinement"] = counts["needs_refinement"].(int) + 1
+		case "applied":
+			counts["applied"] = counts["applied"].(int) + 1
+		case "proposed":
+			counts["proposed"] = counts["proposed"].(int) + 1
 		}
 	}
 	return map[string]any{"action": action, "updated": len(changed) > 0, "counts": counts, "entries": entries, "changed": changed, "ok": true}
@@ -253,21 +513,30 @@ func onboardingMap(value any) map[string]any {
 	if m, ok := value.(map[string]any); ok {
 		return m
 	}
+	if text, ok := value.(string); ok && strings.HasPrefix(strings.TrimSpace(text), "{") {
+		var out map[string]any
+		if json.Unmarshal([]byte(text), &out) == nil {
+			return out
+		}
+	}
 	return map[string]any{}
 }
 
 func discoverDevOnboarding(args map[string]any) map[string]any {
 	target := onboardingTarget(stringValue(args, "request"), stringValue(args, "workdir"), stringValue(args, "repo_root"))
+	starterStories := onboardingFocusedStarterStories()
 	pack := map[string]any{
-		"id": "core-engineering", "title": "Core engineering starter",
-		"summary": "Onboard the checkout and use the core engineering workflow.",
-		"stories": []any{"setup", "bugfix", "design", "implementation", "review"},
+		"id": "focused-engineering", "title": "Focused engineering starter",
+		"summary": "Focused first-run set: setup, bugfixing, repo-history capsules, PR refinement, and git operations.",
+		"stories": []any{"setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"},
 	}
 	base := map[string]any{
 		"target_path": target, "project_id": "", "project_title": "", "stack": "",
 		"dev_command": "", "test_command": "", "build_command": "", "conventions": "local defaults",
 		"repo_vcs": "none", "repo_default_branch": "", "repo_remote": "", "tracker": "none", "ticket_repo": "",
-		"starter_stories": []any{pack["stories"]}, "story_pack": pack["id"], "story_pack_title": pack["title"],
+		"repo_branch_pattern": "", "repo_branch_issue_id": "", "pr_provider": "", "pr_repository": "", "pr_base_branch": "", "pr_template": "",
+		"goals": map[string]any{}, "resolutions": []any{}, "default_notices": []any{},
+		"starter_stories": starterStories, "story_pack": pack["id"], "story_pack_title": pack["title"],
 		"story_pack_summary": pack["summary"], "story_packs": []any{pack}, "transcript_count": 0,
 		"transcript_sources": []any{}, "mining_recommendation": map[string]any{
 			"status": "no-transcripts-found", "sample": "recency", "first_pass_sample": 0,
@@ -304,6 +573,9 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 		}
 	}
 	vcs, branch, remote := onboardingGitInfo(target)
+	branchPattern, branchIssueID, branchSource, branchEvidence, branchNotice := onboardingBranchPolicy(target)
+	tracker, ticketProject, ticketSource, ticketEvidence, ticketNotice := onboardingTicketPolicy(target, remote)
+	prProvider, prRepository, prSource, prEvidence, prNotice, prTemplate, prTemplateSource, prTemplateEvidence, prTemplateNotice := onboardingPullRequestPolicy(target, remote)
 	base["project_id"], base["project_title"], base["stack"] = projectID, projectTitle, stack
 	base["dev_command"], base["test_command"], base["build_command"] = dev, test, build
 	base["conventions"] = "local defaults"
@@ -311,10 +583,64 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 		base["conventions"] = "project"
 	}
 	base["repo_vcs"], base["repo_default_branch"], base["repo_remote"] = vcs, branch, remote
-	if repo := onboardingGitHubRepo(remote); repo != "" {
-		base["tracker"], base["ticket_repo"] = "github", repo
+	base["repo_branch_pattern"], base["repo_branch_issue_id"] = branchPattern, branchIssueID
+	base["tracker"], base["ticket_repo"] = tracker, ticketProject
+	base["pr_provider"], base["pr_repository"], base["pr_base_branch"], base["pr_template"] = prProvider, prRepository, branch, prTemplate
+	devApplicable := onboardingDevServerApplicable(target, dev)
+	base["dev_server_applicable"] = devApplicable
+	base["goals"] = onboardingGoalContracts(devApplicable)
+	resolutions := []any{
+		onboardingResolution("commands.dev", dev, onboardingResolvedSource(dev, "discovered", "default"), onboardingCommandEvidence(target, "dev", stack), onboardingMissingNotice("development command", dev)),
+		onboardingResolution("commands.test", test, onboardingResolvedSource(test, "discovered", "default"), onboardingCommandEvidence(target, "test", stack), onboardingMissingNotice("test command", test)),
+		onboardingResolution("commands.build", build, onboardingResolvedSource(build, "discovered", "default"), onboardingCommandEvidence(target, "build", stack), onboardingMissingNotice("build command", build)),
+		onboardingResolution("repo.default_branch", branch, onboardingBranchResolutionSource(target), onboardingGitBranchEvidence(target, branch), onboardingDefaultNotice("default branch", branch, onboardingGitBranchDiscovered(target))),
+		onboardingResolution("repo.branch_pattern", branchPattern, branchSource, branchEvidence, branchNotice),
+		onboardingResolution("repo.branch_issue_id", branchIssueID, branchSource, branchEvidence, branchNotice),
+		onboardingResolution("tracker.provider", tracker, ticketSource, ticketEvidence, ticketNotice),
+		onboardingResolution("tracker.project", ticketProject, ticketSource, ticketEvidence, ticketNotice),
+		onboardingResolution("pull_requests.provider", prProvider, prSource, prEvidence, prNotice),
+		onboardingResolution("pull_requests.repository", prRepository, prSource, prEvidence, prNotice),
+		onboardingResolution("pull_requests.base_branch", branch, onboardingBranchResolutionSource(target), onboardingGitBranchEvidence(target, branch), onboardingDefaultNotice("pull-request base branch", branch, onboardingGitBranchDiscovered(target))),
+		onboardingResolution("pull_requests.template", prTemplate, prTemplateSource, prTemplateEvidence, prTemplateNotice),
 	}
+	base["resolutions"] = resolutions
+	base["default_notices"] = onboardingDefaultResolutions(resolutions)
 	return base
+}
+
+func onboardingFocusedStarterStories() []any {
+	return []any{
+		map[string]any{"id": "setup", "title": "Project setup", "source_story": "dev-story:onboarding", "status": "enabled", "summary": "Onboard the checkout, install project-local tooling, and run explicit readiness checks."},
+		map[string]any{"id": "bugfix", "title": "Bug fixing", "source_story": "bugfix", "status": "enabled", "summary": "Pick a bug, reproduce it, fix it, run project gates, and deliver it."},
+		map[string]any{"id": "repo-bakeoff", "title": "Repo-history capsules", "source_story": "repo-bakeoff", "status": "enabled", "summary": "Prepare historical RED/GREEN cases for a stable reference corpus."},
+		map[string]any{"id": "pr-refinement", "title": "PR refinement", "source_story": "pr-refinement", "status": "enabled", "summary": "Open or attach to a PR and drive review/CI feedback to completion."},
+		map[string]any{"id": "git-ops", "title": "Git operations", "source_story": "git-ops", "status": "enabled", "summary": "Use guarded branch, worktree, sync, commit, and integration operations."},
+	}
+}
+
+func onboardingGoalContracts(devApplicable bool) map[string]any {
+	return map[string]any{
+		"onboarding": map[string]any{
+			"statement": "Make this checkout ready for deterministic dev-story work.",
+			"postconditions": []any{
+				map[string]any{"id": "story-loadable", "statement": "The project-owned wrapper loads the current @kitsoki/dev-story contract.", "gate": "required", "verification": "story-load", "applicable": true},
+				map[string]any{"id": "tests-runnable", "statement": "Canonical project tests run deterministically.", "gate": "required", "verification": "tests", "applicable": true},
+				map[string]any{"id": "dev-server-runnable", "statement": "The development server can be booted, probed, and stopped deterministically when applicable.", "gate": "required", "verification": "dev-server", "applicable": devApplicable},
+				map[string]any{"id": "branch-policy-known", "statement": "The base branch, branch pattern, and ticket-ID rule are explicit.", "gate": "required", "verification": "branch-policy", "applicable": true},
+				map[string]any{"id": "ticket-source-known", "statement": "The ticket provider and project/repository locator are explicit.", "gate": "required", "verification": "ticket-source", "applicable": true},
+				map[string]any{"id": "pr-policy-known", "statement": "The pull-request destination, base branch, and template policy are explicit.", "gate": "required", "verification": "pr-policy", "applicable": true},
+			},
+		},
+		"validation": map[string]any{
+			"statement": "Prove and improve dev-story against a stable, independently verified corpus.",
+			"requires":  []any{"onboarding"},
+			"postconditions": []any{
+				map[string]any{"id": "reference-corpus-frozen", "statement": "Corpus Forge froze independently RED/GREEN-proved repo-history cases into a corpus-receipt.v1 calibration corpus.", "gate": "required", "verification": "reference-corpus", "applicable": true},
+				map[string]any{"id": "stable-corpus-green", "statement": "The dogfood and goal-seeker loop solves every calibration case without weakening heldout evidence.", "gate": "required", "verification": "optimization-loop", "applicable": true},
+				map[string]any{"id": "bug-to-pr-proven", "statement": "A developer can pick a configured bug ticket, work it, and open a policy-compliant pull request.", "gate": "required", "verification": "bug-to-pr", "applicable": true},
+			},
+		},
+	}
 }
 
 func onboardingTarget(request, workdir, repoRoot string) string {
@@ -487,13 +813,29 @@ func findOnboardingMetadata(target, projectID string) map[string]string {
 
 func onboardingGitInfo(root string) (string, string, string) {
 	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
-		return "none", "", ""
+		return "none", "main", ""
 	}
-	branch := onboardingGit(root, "symbolic-ref", "--short", "HEAD")
+	branch := strings.TrimPrefix(onboardingGit(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"), "origin/")
+	if branch == "" {
+		branch = onboardingGit(root, "config", "--get", "init.defaultBranch")
+	}
+	if branch == "" && onboardingGit(root, "show-ref", "--verify", "refs/heads/main") != "" {
+		branch = "main"
+	}
+	if branch == "" && onboardingGit(root, "show-ref", "--verify", "refs/heads/master") != "" {
+		branch = "master"
+	}
 	if branch == "" {
 		branch = "main"
 	}
 	return "git", branch, onboardingGit(root, "remote", "get-url", "origin")
+}
+
+func onboardingBranchResolutionSource(root string) string {
+	if onboardingGitBranchDiscovered(root) {
+		return "discovered"
+	}
+	return "default"
 }
 func onboardingGit(root string, args ...string) string {
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
@@ -509,6 +851,202 @@ func onboardingGitHubRepo(remote string) string {
 		return match[1]
 	}
 	return ""
+}
+
+func onboardingBranchPolicy(root string) (pattern, issueID, source, evidence, notice string) {
+	for _, rel := range []string{"CONTRIBUTING.md", "AGENTS.md", "README.md", filepath.Join("docs", "CONTRIBUTING.md")} {
+		raw, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			continue
+		}
+		match := regexp.MustCompile(`(?i)\b(feature|fix|bugfix|docs)/([A-Za-z0-9][A-Za-z0-9._{}<>-]*)`).FindStringSubmatch(string(raw))
+		if len(match) != 3 {
+			continue
+		}
+		pattern = strings.ToLower(match[1]) + "/{slug}"
+		issueID = "optional"
+		if regexp.MustCompile(`(?i)([A-Z][A-Z0-9]+-[0-9]+|issue[-_ ]?[0-9]+|#[0-9]+)`).MatchString(match[2]) {
+			pattern = strings.ToLower(match[1]) + "/{issue_id}-{slug}"
+			issueID = "required"
+		}
+		return pattern, issueID, "discovered", rel + " contains branch example " + match[0] + ".", ""
+	}
+	return "feature/{slug}", "optional", "default", "No branch naming example was found in the usual repository guidance files.", "Could not determine the project's branch naming policy; using feature/{slug} with an optional ticket id. Update .kitsoki/project-profile.yaml#repo.branch_pattern and #repo.branch_issue_id."
+}
+
+func onboardingTicketPolicy(root, remote string) (provider, project, source, evidence, notice string) {
+	if upstream := onboardingGit(root, "remote", "get-url", "upstream"); onboardingGitHubRepo(upstream) != "" {
+		remote = upstream
+	}
+	if repo := onboardingGitHubRepo(remote); repo != "" {
+		return "github", repo, "discovered", "The origin remote resolves to github.com/" + repo + ".", ""
+	}
+	for _, rel := range []string{"jira.yaml", "jira.yml", ".jira", filepath.Join(".config", "jira.yaml")} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			return "jira", "", "discovered", rel + " indicates Jira ticket intake.", "Ticket provider is Jira but no project key was discovered. Update .kitsoki/project-profile.yaml#tracker.project."
+		}
+	}
+	for _, rel := range []string{"issues", filepath.Join(".artifacts", "issues")} {
+		if info, err := os.Stat(filepath.Join(root, rel)); err == nil && info.IsDir() {
+			return "local", filepath.ToSlash(rel), "discovered", filepath.ToSlash(rel) + " contains local ticket artifacts.", ""
+		}
+	}
+	return "informal", "pasted", "default", "No GitHub, Jira, or local ticket source was found.", "Could not determine a ticket source; using informal/pasted intake. Update .kitsoki/project-profile.yaml#tracker.provider and #tracker.project."
+}
+
+func onboardingPullRequestPolicy(root, remote string) (provider, repository, source, evidence, notice, template, templateSource, templateEvidence, templateNotice string) {
+	if upstream := onboardingGit(root, "remote", "get-url", "upstream"); onboardingGitHubRepo(upstream) != "" {
+		remote = upstream
+	}
+	repository = onboardingGitHubRepo(remote)
+	if repository != "" {
+		provider, source = "github", "discovered"
+		evidence = "The origin remote resolves to github.com/" + repository + "."
+	} else if strings.TrimSpace(remote) != "" {
+		provider, repository, source = "other", remote, "discovered"
+		evidence = "The origin remote supplies the pull-request destination."
+	} else {
+		provider, repository, source = "local", "local", "default"
+		evidence = "No remote pull-request destination was found."
+		notice = "Could not determine where pull requests are opened; using local delivery. Update .kitsoki/project-profile.yaml#pull_requests.provider and #pull_requests.repository."
+	}
+	template = onboardingPullRequestTemplate(root)
+	if template != "" {
+		templateSource, templateEvidence = "discovered", template+" is the repository pull-request template."
+	} else {
+		template, templateSource = "none", "default"
+		templateEvidence = "No .github pull-request template or documented CONTRIBUTING.md PR template was found."
+		templateNotice = "No pull-request template was discovered; using an empty template policy. Update .kitsoki/project-profile.yaml#pull_requests.template."
+	}
+	return
+}
+
+func onboardingPullRequestTemplate(root string) string {
+	for _, rel := range []string{filepath.Join(".github", "pull_request_template.md"), filepath.Join(".github", "PULL_REQUEST_TEMPLATE.md"), filepath.Join("docs", "pull_request_template.md")} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	for _, dir := range []string{filepath.Join(root, ".github", "PULL_REQUEST_TEMPLATE"), filepath.Join(root, ".github", "pull_request_template")} {
+		matches, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+		if len(matches) > 0 {
+			sort.Strings(matches)
+			rel, _ := filepath.Rel(root, matches[0])
+			return filepath.ToSlash(rel)
+		}
+	}
+	if raw, err := os.ReadFile(filepath.Join(root, "CONTRIBUTING.md")); err == nil && regexp.MustCompile(`(?is)pull request.{0,160}(template|description)`).Match(raw) {
+		return "CONTRIBUTING.md#pull-request-process"
+	}
+	return ""
+}
+
+func onboardingResolution(field string, value any, source, evidence, notice string) map[string]any {
+	resolution := map[string]any{
+		"field": field, "value": value, "source": source, "evidence": evidence,
+		"update": ".kitsoki/project-profile.yaml#" + field,
+	}
+	if notice != "" {
+		resolution["notice"] = notice
+	}
+	return resolution
+}
+
+func onboardingDefaultResolutions(resolutions []any) []any {
+	out := []any{}
+	for _, raw := range resolutions {
+		resolution := onboardingMap(raw)
+		if source := stringValue(resolution, "source"); source == "default" || source == "unresolved" {
+			out = append(out, resolution)
+		}
+	}
+	return out
+}
+
+func onboardingResolvedSource(value, present, missing string) string {
+	if strings.TrimSpace(value) == "" {
+		return missing
+	}
+	return present
+}
+
+func onboardingMissingNotice(label, value string) string {
+	if strings.TrimSpace(value) != "" {
+		return ""
+	}
+	return "Could not determine the " + label + "; no unsafe command default was applied. Update .kitsoki/project-profile.yaml#commands."
+}
+
+func onboardingDefaultNotice(label, value string, discovered bool) string {
+	if discovered {
+		return ""
+	}
+	return "Could not determine the " + label + "; using " + value + ". Update the corresponding field in .kitsoki/project-profile.yaml."
+}
+
+func onboardingCommandEvidence(root, name, stack string) string {
+	if onboardingMakeTargets(root)[name] {
+		return "Makefile target " + name + "."
+	}
+	if raw, err := os.ReadFile(filepath.Join(root, "package.json")); err == nil {
+		var document map[string]any
+		if json.Unmarshal(raw, &document) == nil {
+			if _, ok := onboardingMap(document["scripts"])[name]; ok {
+				return "package.json scripts." + name + "."
+			}
+		}
+	}
+	for _, rel := range []string{"go.mod", "Cargo.toml", "pyproject.toml", "requirements.txt"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+			return rel + " and the " + stack + " conventional command."
+		}
+	}
+	return "No repository command evidence found."
+}
+
+func onboardingDevServerApplicable(root, command string) bool {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" {
+		return false
+	}
+	if regexp.MustCompile(`(^|\s)(npm|pnpm|yarn|bun)\s+run\s+(dev|serve|start)(\s|$)`).MatchString(command) {
+		return true
+	}
+	if strings.Contains(command, " server") || strings.Contains(command, " serve") || strings.Contains(command, " start") {
+		return true
+	}
+	if command == "make dev" || command == "make run" {
+		raw, err := os.ReadFile(filepath.Join(root, "Makefile"))
+		if err != nil {
+			return false
+		}
+		target := strings.TrimPrefix(command, "make ")
+		match := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(target) + `:([^\n]*)`).FindStringSubmatch(string(raw))
+		if len(match) == 2 {
+			return regexp.MustCompile(`(?i)\b(run|serve|server|start|web)\b`).MatchString(match[1])
+		}
+	}
+	return false
+}
+
+func onboardingGitBranchDiscovered(root string) bool {
+	if _, err := os.Stat(filepath.Join(root, ".git")); err != nil {
+		return false
+	}
+	if strings.TrimPrefix(onboardingGit(root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"), "origin/") != "" {
+		return true
+	}
+	if onboardingGit(root, "config", "--get", "init.defaultBranch") != "" {
+		return true
+	}
+	return onboardingGit(root, "show-ref", "--verify", "refs/heads/main") != "" || onboardingGit(root, "show-ref", "--verify", "refs/heads/master") != ""
+}
+
+func onboardingGitBranchEvidence(root, branch string) string {
+	if onboardingGitBranchDiscovered(root) {
+		return "Git remote/default-branch metadata identifies " + branch + "."
+	}
+	return "No remote HEAD, init.defaultBranch, main, or master ref identified a default branch."
 }
 
 func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any, error) {
@@ -528,13 +1066,19 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 		data["project_title"] = onboardingTitle(projectID)
 	}
 	if profileJSON != "" {
-		var profile map[string]any
-		if err := json.Unmarshal([]byte(profileJSON), &profile); err != nil {
+		var candidate map[string]any
+		if err := json.Unmarshal([]byte(profileJSON), &candidate); err != nil {
 			return nil, fmt.Errorf("profile_json: %w", err)
 		}
-		data["profile"] = profile
+		data["profile"] = candidate
 	}
-	profile := onboardingProfileDocument(data)
+	generated := onboardingProfileDocument(data)
+	profilePath := filepath.Join(root, ".kitsoki", "project-profile.yaml")
+	existing, err := onboardingReadProfile(profilePath)
+	if err != nil {
+		return nil, err
+	}
+	profile, preserved := mergeOnboardingProfile(generated, existing)
 	profileBytes, err := yaml.Marshal(profile)
 	if err != nil {
 		return nil, fmt.Errorf("marshal project profile: %w", err)
@@ -552,18 +1096,35 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 	ciConfigRel := filepath.Join(".kitsoki", "ci.yaml")
 	ciStoryRel := filepath.Join(".kitsoki", "stories", "capsule-ci", "app.yaml")
 	developmentCapsuleRel := filepath.Join(".kitsoki", "capsules", "development.yaml")
+	gitignorePath := filepath.Join(root, ".gitignore")
+	configPath := filepath.Join(root, ".kitsoki.yaml")
+	developmentCapsulePath := filepath.Join(root, developmentCapsuleRel)
+	ciEnvPath := filepath.Join(root, ciEnvRel)
+	ciConfigPath := filepath.Join(root, ciConfigRel)
+	ciStoryPath := filepath.Join(root, ciStoryRel)
+	instancePath := filepath.Join(root, instanceRel)
+	readmePath := filepath.Join(root, ".kitsoki", "stories", projectID+"-dev", "README.md")
 	files := map[string]string{
-		filepath.Join(root, ".gitignore"):                                         onboardingGitignore(root),
-		filepath.Join(root, ".kitsoki.yaml"):                                      onboardingConfigYAML(),
-		filepath.Join(root, developmentCapsuleRel):                                onboardingDevelopmentCapsuleYAML(),
-		filepath.Join(root, ciEnvRel):                                             onboardingCapsuleEnvironmentYAML(root),
-		filepath.Join(root, ciConfigRel):                                          onboardingCapsuleCIYAML(),
-		filepath.Join(root, ciStoryRel):                                           onboardingCapsuleCIStoryYAML(),
-		filepath.Join(root, ".kitsoki", "project-profile.yaml"):                   string(profileBytes),
-		filepath.Join(root, instanceRel):                                          onboardingInstanceYAML(data),
-		filepath.Join(root, ".kitsoki", "stories", projectID+"-dev", "README.md"): "# " + projectID + " dev-story\n\nGenerated by Kitsoki project onboarding.\n",
+		profilePath: string(profileBytes),
+	}
+	for path, content := range map[string]string{
+		gitignorePath:          onboardingGitignore(root),
+		configPath:             onboardingConfigYAML(),
+		developmentCapsulePath: onboardingDevelopmentCapsuleYAML(),
+		ciEnvPath:              onboardingCapsuleEnvironmentYAML(root),
+		ciConfigPath:           onboardingCapsuleCIYAML(),
+		ciStoryPath:            onboardingCapsuleCIStoryYAML(),
+		instancePath:           onboardingInstanceYAML(profile),
+		readmePath:             "# " + projectID + " dev-story\n\nGenerated once by Kitsoki project onboarding. The wrapper imports `@kitsoki/dev-story`, so base-story updates arrive through the configured binary or story-source override; project policy stays in `.kitsoki/project-profile.yaml`.\n",
+	} {
+		if _, statErr := os.Stat(path); statErr == nil {
+			preserved = append(preserved, filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator))))
+			continue
+		}
+		files[path] = content
 	}
 	writes := []any{}
+	unchanged := []any{}
 	for path, content := range files {
 		changed, err := writeOnboardingFile(path, content)
 		if err != nil {
@@ -571,9 +1132,36 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 		}
 		if changed {
 			writes = append(writes, path)
+		} else {
+			unchanged = append(unchanged, path)
 		}
 	}
-	return map[string]any{"status": "applied", "target_path": root, "config_path": filepath.Join(root, ".kitsoki.yaml"), "development_capsule_path": filepath.Join(root, developmentCapsuleRel), "ci_environment_path": filepath.Join(root, ciEnvRel), "ci_config_path": filepath.Join(root, ciConfigRel), "ci_story_path": filepath.Join(root, ciStoryRel), "profile_path": filepath.Join(root, ".kitsoki", "project-profile.yaml"), "instance_path": filepath.Join(root, instanceRel), "gitignore_path": filepath.Join(root, ".gitignore"), "profile_validation": validationData, "writes": writes}, nil
+	sort.Slice(writes, func(i, j int) bool { return fmt.Sprint(writes[i]) < fmt.Sprint(writes[j]) })
+	sort.Slice(unchanged, func(i, j int) bool { return fmt.Sprint(unchanged[i]) < fmt.Sprint(unchanged[j]) })
+	sort.Strings(preserved)
+	return map[string]any{
+		"status": "applied", "target_path": root, "config_path": configPath,
+		"development_capsule_path": developmentCapsulePath, "ci_environment_path": ciEnvPath,
+		"ci_config_path": ciConfigPath, "ci_story_path": ciStoryPath,
+		"profile_path": profilePath, "instance_path": instancePath, "gitignore_path": gitignorePath,
+		"profile_validation": validationData, "writes": writes, "unchanged": unchanged,
+		"preserved_overrides": stringsToAny(preserved), "defaults_used": onboardingDefaultResolutions(onboardingResolutionList(profile)),
+	}, nil
+}
+
+func onboardingReadProfile(path string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read existing project profile: %w", err)
+	}
+	profile := map[string]any{}
+	if err := yaml.Unmarshal(raw, &profile); err != nil {
+		return nil, fmt.Errorf("parse existing project profile: %w", err)
+	}
+	return profile, nil
 }
 
 func stringsToAny(values []string) []any {
@@ -731,18 +1319,437 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 	case strings.Contains(stack, "python"):
 		kind, languages = "python", []any{"python"}
 	}
-	return map[string]any{
-		"schema": "project-profile/v1", "id": stringValue(data, "project_id"), "title": stringValue(data, "project_title"),
-		"summary":     "Project-local Kitsoki dev-story binding.",
-		"commands":    map[string]any{"dev": stringValue(data, "dev_command"), "test": stringValue(data, "test_command"), "build": stringValue(data, "build_command")},
-		"repo":        map[string]any{"root": ".", "vcs": defaultString(stringValue(data, "repo_vcs"), "none"), "default_branch": stringValue(data, "repo_default_branch"), "remote": stringValue(data, "repo_remote")},
-		"stack":       map[string]any{"kind": kind, "languages": languages},
-		"testing":     map[string]any{"mechanisms": []any{map[string]any{"kind": "unit", "runner": "command", "command": stringValue(data, "test_command")}, map[string]any{"kind": "build", "runner": "command", "command": stringValue(data, "build_command")}}},
-		"conventions": map[string]any{"source": "project"},
-		"kitsoki":     map[string]any{"story": "dev-story", "story_pack": "core-engineering", "enabled_stories": []any{"setup", "bugfix", "design", "implementation", "review"}, "instance": map[string]any{"id": stringValue(data, "project_id") + "-dev", "path": ".kitsoki/stories/" + stringValue(data, "project_id") + "-dev/app.yaml", "bindings": map[string]any{"ticket": "host.local_files.ticket", "vcs": "host.git", "ci": "host.local", "workspace": "host.capsule_workspace", "transport": "host.append_to_file"}}},
-		"onboarding":  map[string]any{"base_story": "dev-story", "story_pack": "core-engineering", "recording_policy": "no-llm-only"},
-		"setup_plan":  map[string]any{"writes": []any{}, "verifications": []any{}}, "readiness": map[string]any{"status": "not-run"},
+	projectID := stringValue(data, "project_id")
+	devCommand := stringValue(data, "dev_command")
+	testCommand := stringValue(data, "test_command")
+	buildCommand := stringValue(data, "build_command")
+	defaultBranch := defaultString(stringValue(data, "repo_default_branch"), "main")
+	branchPattern := defaultString(stringValue(data, "repo_branch_pattern"), "feature/{slug}")
+	branchIssueID := defaultString(stringValue(data, "repo_branch_issue_id"), "optional")
+	trackerProvider := defaultString(stringValue(data, "tracker"), "informal")
+	trackerProject := stringValue(data, "ticket_repo")
+	if trackerProject == "" && trackerProvider == "informal" {
+		trackerProject = "pasted"
 	}
+	prProvider := defaultString(stringValue(data, "pr_provider"), "local")
+	prRepository := stringValue(data, "pr_repository")
+	if prRepository == "" && prProvider == "local" {
+		prRepository = "local"
+	}
+	prTemplate := stringValue(data, "pr_template")
+	if prTemplate == "" {
+		prTemplate = "none"
+	}
+	storyPack := defaultString(stringValue(data, "story_pack"), "focused-engineering")
+	starterStories := onboardingAnyList(data["starter_stories"])
+	if len(starterStories) == 0 {
+		starterStories = onboardingFocusedStarterStories()
+	}
+	enabledStories := onboardingStarterStoryIDs(starterStories)
+	resolutions := onboardingAnyList(data["resolutions"])
+	if len(resolutions) == 0 {
+		resolutions = onboardingResolutionsForProfile(data, map[string]any{
+			"commands.dev": devCommand, "commands.test": testCommand, "commands.build": buildCommand,
+			"repo.default_branch": defaultBranch, "repo.branch_pattern": branchPattern, "repo.branch_issue_id": branchIssueID,
+			"tracker.provider": trackerProvider, "tracker.project": trackerProject,
+			"pull_requests.provider": prProvider, "pull_requests.repository": prRepository,
+			"pull_requests.base_branch": defaultBranch, "pull_requests.template": prTemplate,
+		})
+	}
+	resolutions = onboardingSortedResolutions(resolutions)
+	goals := onboardingMap(data["goals"])
+	if len(goals) == 0 {
+		goals = onboardingGoalContracts(boolValue(data, "dev_server_applicable"))
+	}
+	// workspace binding targets host.capsule_workspace (not host.git_worktree):
+	// project development moved to managed clone-backed capsule workspaces, so
+	// generated dev-story instances should bind the same way.
+	bindings := map[string]any{"ticket": "host.local_files.ticket", "vcs": "host.git", "ci": "host.local", "workspace": "host.capsule_workspace", "transport": "host.append_to_file"}
+	if trackerProvider == "github" {
+		bindings["ticket"] = "host.local_github.ticket"
+	}
+	mechanisms := []any{}
+	if testCommand != "" {
+		mechanisms = append(mechanisms, map[string]any{"kind": "unit", "runner": "command", "command": testCommand})
+	}
+	if buildCommand != "" {
+		mechanisms = append(mechanisms, map[string]any{"kind": "build", "runner": "command", "command": buildCommand})
+	}
+	verifications := onboardingSetupVerifications(devCommand, testCommand, buildCommand, trackerProvider, prProvider)
+	profile := map[string]any{
+		"schema": "project-profile/v1", "id": stringValue(data, "project_id"), "title": stringValue(data, "project_title"),
+		"summary":           "Project-local Kitsoki dev-story binding.",
+		"commands":          map[string]any{"dev": devCommand, "test": testCommand, "build": buildCommand},
+		"repo":              map[string]any{"root": ".", "vcs": defaultString(stringValue(data, "repo_vcs"), "none"), "default_branch": defaultBranch, "remote": stringValue(data, "repo_remote"), "branch_pattern": branchPattern, "branch_issue_id": branchIssueID},
+		"stack":             map[string]any{"kind": kind, "languages": languages},
+		"testing":           map[string]any{"mechanisms": mechanisms},
+		"conventions":       map[string]any{"source": "project"},
+		"tracker":           map[string]any{"provider": trackerProvider, "project": trackerProject, "repo": trackerProject},
+		"pull_requests":     map[string]any{"provider": prProvider, "repository": prRepository, "base_branch": defaultBranch, "template": prTemplate},
+		"goals":             goals,
+		"kitsoki":           map[string]any{"story": "dev-story", "story_pack": storyPack, "enabled_stories": enabledStories, "instance": map[string]any{"id": projectID + "-dev", "path": ".kitsoki/stories/" + projectID + "-dev/app.yaml", "bindings": bindings}},
+		"dev_story_profile": map[string]any{"bugfix": map[string]any{"build_cmd": buildCommand, "test_cmd": testCommand}},
+		"onboarding": map[string]any{
+			"base_story": "dev-story", "base_story_title": "Dev-story project workflow",
+			"base_story_reason": "Default reusable engineering workflow selected from repository evidence.",
+			"story_pack":        storyPack, "starter_stories": starterStories,
+			"expansion_policy": "Keep the focused pack until onboarding readiness and project-local flows pass; expand with `kitsoki project-profile story-packs add <pack>`.",
+			"resolutions":      resolutions, "recording_policy": "no-llm-only",
+		},
+		"setup_plan": map[string]any{
+			"writes": []any{
+				map[string]any{"path": ".kitsoki/project-profile.yaml", "action": "merge", "summary": "Persist project goals, commands, and delivery policy."},
+				map[string]any{"path": ".kitsoki/stories/" + projectID + "-dev/app.yaml", "action": "create", "summary": "Create the thin @kitsoki/dev-story wrapper once."},
+				map[string]any{"path": ".kitsoki.yaml", "action": "merge", "summary": "Register the project profile and project-local story directory."},
+			},
+			"verifications": verifications,
+		},
+		"readiness": map[string]any{"status": "not-run"},
+	}
+	if candidate := onboardingMap(data["profile"]); len(candidate) > 0 {
+		profile, _ = mergeOnboardingProfile(profile, candidate)
+	}
+	return profile
+}
+
+func onboardingSetupVerifications(dev, test, build, trackerProvider, prProvider string) []any {
+	items := []any{map[string]any{"id": "story-load", "kind": "story", "fields": []any{"kitsoki.instance.path"}, "gate": "required"}}
+	if test != "" {
+		items = append(items, map[string]any{"id": "tests", "kind": "tests", "command": test, "gate": "required"})
+	} else {
+		items = append(items, map[string]any{"id": "tests", "kind": "profile", "fields": []any{"commands.test"}, "gate": "required"})
+	}
+	if build != "" {
+		items = append(items, map[string]any{"id": "build", "kind": "build", "command": build, "gate": "required"})
+	}
+	items = append(items, map[string]any{"id": "dev-server", "kind": "dev-server", "fields": []any{"dev_server.components"}, "gate": "required"})
+	items = append(items, map[string]any{"id": "branch-policy", "kind": "profile", "fields": []any{"repo.default_branch", "repo.branch_pattern", "repo.branch_issue_id"}, "gate": "required"})
+	ticketFields := []any{"tracker.provider"}
+	if trackerProvider == "github" || trackerProvider == "jira" || trackerProvider == "local" || trackerProvider == "informal" {
+		ticketFields = append(ticketFields, "tracker.project")
+	}
+	items = append(items, map[string]any{"id": "ticket-source", "kind": "ticket", "fields": ticketFields, "gate": "required"})
+	prFields := []any{"pull_requests.provider", "pull_requests.base_branch", "pull_requests.template"}
+	if prProvider != "none" {
+		prFields = append(prFields, "pull_requests.repository")
+	}
+	items = append(items, map[string]any{"id": "pr-policy", "kind": "pull-request", "fields": prFields, "gate": "required"})
+	items = append(items,
+		map[string]any{"id": "reference-corpus", "kind": "corpus", "fields": []any{"commands.test", "repo.vcs", "repo.default_branch"}, "gate": "required"},
+		map[string]any{"id": "optimization-loop", "kind": "workflow", "fields": []any{"commands.test", "kitsoki.story"}, "gate": "required"},
+		map[string]any{"id": "bug-to-pr", "kind": "workflow", "fields": []any{"commands.test", "tracker.provider", "pull_requests.repository", "pull_requests.base_branch"}, "gate": "required"},
+	)
+	_ = dev
+	return items
+}
+
+func onboardingResolutionsForProfile(data map[string]any, values map[string]any) []any {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]any, 0, len(keys))
+	for _, field := range keys {
+		value := values[field]
+		source := "discovered"
+		notice := ""
+		if onboardingProfileFieldWasDefaulted(data, field) {
+			source = "default"
+			notice = "Onboarding could not prove " + field + " from repository evidence; it used " + fmt.Sprint(value) + ". Update .kitsoki/project-profile.yaml#" + field + "."
+		}
+		out = append(out, onboardingResolution(field, value, source, "Deterministic onboarding input.", notice))
+	}
+	return out
+}
+
+func onboardingProfileFieldWasDefaulted(data map[string]any, field string) bool {
+	inputKey := map[string]string{
+		"commands.dev": "dev_command", "commands.test": "test_command", "commands.build": "build_command",
+		"repo.default_branch": "repo_default_branch", "repo.branch_pattern": "repo_branch_pattern", "repo.branch_issue_id": "repo_branch_issue_id",
+		"tracker.provider": "tracker", "tracker.project": "ticket_repo",
+		"pull_requests.provider": "pr_provider", "pull_requests.repository": "pr_repository",
+		"pull_requests.base_branch": "repo_default_branch", "pull_requests.template": "pr_template",
+	}[field]
+	return inputKey == "" || strings.TrimSpace(fmt.Sprint(data[inputKey])) == ""
+}
+
+func mergeOnboardingProfile(generated, existing map[string]any) (map[string]any, []string) {
+	if len(existing) == 0 {
+		return onboardingCloneMap(generated), nil
+	}
+	existing = onboardingCloneMap(existing)
+	if project, ok := onboardingValueAt(existing, "tracker.project"); !ok || onboardingValueEmpty(project) {
+		if legacy, legacyOK := onboardingValueAt(existing, "tracker.repo"); legacyOK && !onboardingValueEmpty(legacy) {
+			onboardingSetValueAt(existing, "tracker.project", legacy)
+		}
+	}
+	merged := onboardingCloneMap(generated)
+	onboardingMergeOverride(merged, existing)
+	generatedResolutions := onboardingResolutionList(generated)
+	existingResolutions := onboardingResolutionList(existing)
+	existingByField := map[string]map[string]any{}
+	for _, raw := range existingResolutions {
+		resolution := onboardingMap(raw)
+		if field := stringValue(resolution, "field"); field != "" {
+			existingByField[field] = resolution
+		}
+	}
+	managed := []any{}
+	seen := map[string]bool{}
+	preserved := []string{}
+	for _, raw := range generatedResolutions {
+		candidate := onboardingCloneMap(onboardingMap(raw))
+		field := stringValue(candidate, "field")
+		seen[field] = true
+		oldResolution, hadResolution := existingByField[field]
+		actual, hadActual := onboardingValueAt(existing, field)
+		operatorOwned := false
+		if hadResolution && stringValue(oldResolution, "source") == "operator" {
+			operatorOwned = true
+		}
+		if hadResolution && hadActual && !reflect.DeepEqual(actual, oldResolution["value"]) {
+			operatorOwned = true
+		}
+		if !hadResolution && hadActual && !onboardingValueEmpty(actual) {
+			operatorOwned = true
+		}
+		if operatorOwned {
+			candidate = onboardingCloneMap(oldResolution)
+			if len(candidate) == 0 {
+				candidate = onboardingResolution(field, actual, "operator", "Existing project-profile value predates managed onboarding provenance.", "")
+			}
+			candidate["source"] = "operator"
+			candidate["value"] = actual
+			delete(candidate, "notice")
+			preserved = append(preserved, field)
+		} else {
+			onboardingSetValueAt(merged, field, candidate["value"])
+		}
+		managed = append(managed, candidate)
+	}
+	for _, raw := range existingResolutions {
+		resolution := onboardingMap(raw)
+		if field := stringValue(resolution, "field"); field != "" && !seen[field] {
+			managed = append(managed, onboardingCloneMap(resolution))
+		}
+	}
+	sort.Slice(managed, func(i, j int) bool {
+		return stringValue(onboardingMap(managed[i]), "field") < stringValue(onboardingMap(managed[j]), "field")
+	})
+	onboardingBlock := onboardingMap(merged["onboarding"])
+	if onboardingBlock == nil {
+		onboardingBlock = map[string]any{}
+		merged["onboarding"] = onboardingBlock
+	}
+	onboardingBlock["resolutions"] = managed
+	sort.Strings(preserved)
+	return merged, preserved
+}
+
+func onboardingMergeOverride(base, override map[string]any) {
+	for key, value := range override {
+		if child, ok := value.(map[string]any); ok {
+			if target, ok := base[key].(map[string]any); ok {
+				onboardingMergeOverride(target, child)
+				continue
+			}
+		}
+		base[key] = onboardingCloneValue(value)
+	}
+}
+
+func onboardingCloneMap(value map[string]any) map[string]any {
+	if value == nil {
+		return map[string]any{}
+	}
+	return onboardingCloneValue(value).(map[string]any)
+}
+
+func onboardingCloneValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = onboardingCloneValue(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = onboardingCloneValue(item)
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func onboardingResolutionList(profile map[string]any) []any {
+	items, _ := onboardingMap(profile["onboarding"])["resolutions"].([]any)
+	return items
+}
+
+func onboardingSortedResolutions(items []any) []any {
+	out := make([]any, 0, len(items))
+	for _, raw := range items {
+		out = append(out, onboardingCloneMap(onboardingMap(raw)))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return stringValue(onboardingMap(out[i]), "field") < stringValue(onboardingMap(out[j]), "field")
+	})
+	return out
+}
+
+func onboardingValueAt(root map[string]any, path string) (any, bool) {
+	parts := strings.Split(path, ".")
+	var current any = root
+	for _, part := range parts {
+		mapping, ok := current.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current, ok = mapping[part]
+		if !ok {
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func onboardingSetValueAt(root map[string]any, path string, value any) {
+	parts := strings.Split(path, ".")
+	current := root
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := current[part].(map[string]any)
+		if !ok {
+			next = map[string]any{}
+			current[part] = next
+		}
+		current = next
+	}
+	current[parts[len(parts)-1]] = onboardingCloneValue(value)
+}
+
+func onboardingValueEmpty(value any) bool {
+	if value == nil {
+		return true
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed) == ""
+	case []any:
+		return len(typed) == 0
+	case map[string]any:
+		return len(typed) == 0
+	}
+	return false
+}
+
+func onboardingAnyList(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return typed
+	case []string:
+		out := make([]any, len(typed))
+		for index, item := range typed {
+			out[index] = item
+		}
+		return out
+	case string:
+		var out []any
+		if json.Unmarshal([]byte(typed), &out) == nil {
+			return out
+		}
+		return []any{}
+	default:
+		return []any{}
+	}
+}
+
+func onboardingStarterStoryIDs(stories []any) []any {
+	out := []any{}
+	for _, raw := range stories {
+		if id := stringValue(onboardingMap(raw), "id"); id != "" {
+			out = append(out, id)
+		} else if id, ok := raw.(string); ok && id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func onboardingStrings(value any) []string {
+	items := onboardingAnyList(value)
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := strings.TrimSpace(fmt.Sprint(item)); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func onboardingInt(value any, fallback int) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return fallback
+	}
+}
+
+// RefreshDevOnboardingProfile is the safe, deterministic update channel for an
+// already-onboarded checkout. It refreshes managed discoveries/defaults while
+// preserving operator-owned values and unrelated project policy. The dry run is
+// the default; callers must opt in to apply the validated merged profile.
+func RefreshDevOnboardingProfile(target string, apply bool) (map[string]any, error) {
+	if strings.TrimSpace(target) == "" {
+		target = "."
+	}
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target: %w", err)
+	}
+	discovered := discoverDevOnboarding(map[string]any{"request": abs, "workdir": abs, "repo_root": abs})
+	if detail := stringValue(discovered, "error"); detail != "" {
+		return nil, fmt.Errorf("discover project: %s", detail)
+	}
+	generated := onboardingProfileDocument(discovered)
+	profilePath := filepath.Join(abs, ".kitsoki", "project-profile.yaml")
+	existing, err := onboardingReadProfile(profilePath)
+	if err != nil {
+		return nil, err
+	}
+	merged, preserved := mergeOnboardingProfile(generated, existing)
+	raw, err := yaml.Marshal(merged)
+	if err != nil {
+		return nil, fmt.Errorf("marshal refreshed profile: %w", err)
+	}
+	validation, err := projectprofile.Validate(raw, abs)
+	if err != nil {
+		return nil, fmt.Errorf("validate refreshed profile: %w", err)
+	}
+	if !validation.OK {
+		return map[string]any{"ok": false, "profile_path": profilePath, "validation": map[string]any{"schema": stringsToAny(validation.Schema), "semantic": stringsToAny(validation.Semantic), "warnings": stringsToAny(validation.Warnings)}}, nil
+	}
+	oldRaw, _ := os.ReadFile(profilePath)
+	changed := string(oldRaw) != string(raw)
+	if apply && changed {
+		if _, err := writeOnboardingFile(profilePath, string(raw)); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{
+		"ok": true, "target": abs, "profile_path": profilePath, "changed": changed,
+		"applied": apply && changed, "profile": merged, "preserved_overrides": stringsToAny(preserved),
+		"defaults_used": onboardingDefaultResolutions(onboardingResolutionList(merged)),
+		"validation":    map[string]any{"warnings": stringsToAny(validation.Warnings)},
+	}, nil
 }
 
 func defaultString(value, fallback string) string {
@@ -793,14 +1800,44 @@ var onboardingInstanceHosts = []string{
 	"host.decomposition.update",
 }
 
-func onboardingInstanceYAML(data map[string]any) string {
-	id := stringValue(data, "project_id")
-	title := stringValue(data, "project_title")
+func onboardingInstanceYAML(profile map[string]any) string {
+	id := stringValue(profile, "id")
+	title := stringValue(profile, "title")
+	commands := onboardingMap(profile["commands"])
+	repo := onboardingMap(profile["repo"])
+	tracker := onboardingMap(profile["tracker"])
+	pullRequests := onboardingMap(profile["pull_requests"])
+	kitsoki := onboardingMap(profile["kitsoki"])
+	instance := onboardingMap(kitsoki["instance"])
+	bindings := onboardingMap(instance["bindings"])
+	ticketBinding := defaultString(stringValue(bindings, "ticket"), "host.local_files.ticket")
+	baseBranch := defaultString(stringValue(repo, "default_branch"), "main")
+	ticketProject := stringValue(tracker, "project")
+	if stringValue(tracker, "provider") != "github" {
+		ticketProject = ""
+	}
+	bugfixDestination := "open-pr"
+	if stringValue(pullRequests, "provider") == "local" || stringValue(pullRequests, "provider") == "none" {
+		bugfixDestination = "local-merge"
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "app:\n  id: %s-dev\n  version: 0.1.0\n  title: %q\n  author: Kitsoki\n  license: CC0\n\nhosts:\n", id, id+"-dev - work on "+title+" with Kitsoki")
 	for _, host := range onboardingInstanceHosts {
 		fmt.Fprintf(&b, "  - %s\n", host)
 	}
-	b.WriteString("\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: inherit\n    host_bindings:\n      ticket: host.local_files.ticket\n      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n  build_cmd: { type: string, default: \"\" }\n  test_cmd: { type: string, default: \"\" }\n\nroot: core\n")
+	b.WriteString("\nrouting:\n  free_form_fallback:\n    state: core.landing\n    intent: core__landing_capture\n\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: declared\n    host_bindings:\n")
+	fmt.Fprintf(&b, "      ticket: %s\n", ticketBinding)
+	// workspace binds to host.capsule_workspace (not host.git_worktree):
+	// project development moved to managed clone-backed capsule workspaces.
+	b.WriteString("      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      base_branch: \"{{ world.base_branch }}\"\n      ticket_repo: \"{{ world.ticket_repo }}\"\n      ticket_github_repo: \"{{ world.ticket_github_repo }}\"\n      bugfix_destination: \"{{ world.bugfix_destination }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n")
+	fmt.Fprintf(&b, "  base_branch: { type: string, default: %q }\n", baseBranch)
+	fmt.Fprintf(&b, "  branch_pattern: { type: string, default: %q }\n", stringValue(repo, "branch_pattern"))
+	fmt.Fprintf(&b, "  branch_issue_id: { type: string, default: %q }\n", stringValue(repo, "branch_issue_id"))
+	b.WriteString("  ticket_repo: { type: string, default: \"\" }\n")
+	fmt.Fprintf(&b, "  ticket_github_repo: { type: string, default: %q }\n", ticketProject)
+	fmt.Fprintf(&b, "  bugfix_destination: { type: string, default: %q }\n", bugfixDestination)
+	fmt.Fprintf(&b, "  pull_request_template: { type: string, default: %q }\n", stringValue(pullRequests, "template"))
+	fmt.Fprintf(&b, "  build_cmd: { type: string, default: %q }\n", stringValue(commands, "build"))
+	fmt.Fprintf(&b, "  test_cmd: { type: string, default: %q }\n\nroot: core\n", stringValue(commands, "test"))
 	return b.String()
 }

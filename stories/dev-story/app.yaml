@@ -677,17 +677,27 @@ world:
   init_project_title:    { type: string, default: "" }
   init_stack:            { type: string, default: "" }
   init_dev_command:      { type: string, default: "" }
+  init_dev_server_applicable: { type: bool, default: false }
   init_test_command:     { type: string, default: "" }
   init_build_command:    { type: string, default: "" }
   init_repo_vcs:         { type: string, default: "none" }
   init_repo_default_branch: { type: string, default: "" }
   init_repo_remote:      { type: string, default: "" }
+  init_repo_branch_pattern: { type: string, default: "" }
+  init_repo_branch_issue_id: { type: string, default: "" }
   init_conventions:      { type: string, default: "hybrid" }
   init_tracker:          { type: string, default: "none" }
   init_ticket_provider:  { type: string, default: "" }
   init_ticket_repo:      { type: string, default: "" }
-  init_story_pack:       { type: string, default: "core-engineering" }
-  init_story_pack_title: { type: string, default: "Core engineering starter" }
+  init_pr_provider:      { type: string, default: "" }
+  init_pr_repository:    { type: string, default: "" }
+  init_pr_base_branch:   { type: string, default: "" }
+  init_pr_template:      { type: string, default: "" }
+  init_goals:            { type: object, default: {} }
+  init_resolutions:      { type: list, default: [] }
+  init_default_notices:  { type: list, default: [] }
+  init_story_pack:       { type: string, default: "focused-engineering" }
+  init_story_pack_title: { type: string, default: "Focused engineering starter" }
   init_story_pack_summary: { type: string, default: "" }
   init_story_packs:      { type: list, default: [] }
   init_starter_stories:  { type: list, default: [] }

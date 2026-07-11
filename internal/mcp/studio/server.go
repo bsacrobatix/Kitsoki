@@ -385,8 +385,8 @@ type PingOK struct {
 	GoVersion  string `json:"go_version,omitempty"`  // Go toolchain version from build info
 	Executable string `json:"executable,omitempty"`  // resolved process path, useful when an MCP client is stale
 	WorkingDir string `json:"working_dir,omitempty"` // process cwd, useful when an MCP client is pointed at another checkout
-	Checkout   string `json:"checkout,omitempty"`    // current working tree HEAD, used to detect stale attached servers
-	Stale      bool   `json:"stale,omitempty"`       // true when revision differs from checkout
+	Checkout   string `json:"checkout,omitempty"`    // selected Kitsoki checkout HEAD, used to detect stale attached servers
+	Stale      bool   `json:"stale,omitempty"`       // true when revision differs from the selected Kitsoki checkout
 	ReloadHint string `json:"reload_hint,omitempty"` // operator-facing reconnect guidance when stale
 }
 
@@ -423,22 +423,37 @@ func buildPingOK() PingOK {
 		ok.Executable = exe
 	}
 	if wd, err := os.Getwd(); err == nil {
-		ok.WorkingDir = wd
-		ok.Checkout = pingGitOutput(wd, "rev-parse", "HEAD")
-		if ok.Revision == "" {
-			ok.Revision = ok.Checkout
+		ok = applyPingCheckoutIdentity(ok, wd, os.Getenv("KITSOKI_REPO"), pingGitOutput)
+	}
+	return ok
+}
+
+// applyPingCheckoutIdentity keeps the process working directory visible while
+// comparing build identity with the explicit Kitsoki source checkout when one
+// is configured. Studio commonly starts in a downstream project so project
+// config and relative story paths work there; comparing the Kitsoki binary's
+// revision with that downstream project's HEAD would report a false stale
+// attachment. gitOutput is injected for deterministic cross-repo coverage.
+func applyPingCheckoutIdentity(ok PingOK, workingDir, kitsokiRepo string, gitOutput func(string, ...string) string) PingOK {
+	ok.WorkingDir = workingDir
+	checkoutDir := strings.TrimSpace(kitsokiRepo)
+	if checkoutDir == "" {
+		checkoutDir = workingDir
+	}
+	ok.Checkout = gitOutput(checkoutDir, "rev-parse", "HEAD")
+	if ok.Revision == "" {
+		ok.Revision = ok.Checkout
+	}
+	if ok.Modified == "" {
+		if status := gitOutput(checkoutDir, "status", "--porcelain"); status != "" {
+			ok.Modified = "true"
+		} else if ok.Revision != "" {
+			ok.Modified = "false"
 		}
-		if ok.Modified == "" {
-			if status := pingGitOutput(wd, "status", "--porcelain"); status != "" {
-				ok.Modified = "true"
-			} else if ok.Revision != "" {
-				ok.Modified = "false"
-			}
-		}
-		if ok.Revision != "" && ok.Checkout != "" && ok.Revision != ok.Checkout {
-			ok.Stale = true
-			ok.ReloadHint = "Restart or reconnect the Kitsoki Studio MCP server for this checkout before calling workflow.create or workflow.launch."
-		}
+	}
+	if ok.Revision != "" && ok.Checkout != "" && ok.Revision != ok.Checkout {
+		ok.Stale = true
+		ok.ReloadHint = "Restart or reconnect the Kitsoki Studio MCP server for this checkout before calling workflow.create or workflow.launch."
 	}
 	return ok
 }

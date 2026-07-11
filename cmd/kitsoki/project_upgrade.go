@@ -163,6 +163,7 @@ func checkProjectUpgrade(ctx context.Context, opts projectUpgradeOptions) (proje
 	} else {
 		rep.ProfilePath = profilePath
 		rep.addCheck("project-profile", "ok", projectRelative(abs, profilePath))
+		rep.checkProjectProfileContract(profilePath)
 		if instancePath, detail := projectProfileInstancePath(abs, profilePath); instancePath != "" {
 			rep.InstancePath = instancePath
 			rep.addCheck("project-instance-pointer", "ok", detail)
@@ -205,6 +206,30 @@ func checkProjectUpgrade(ctx context.Context, opts projectUpgradeOptions) (proje
 	rep.checkMCP()
 	rep.finalizeNeedsUpgrade()
 	return rep, nil
+}
+
+func (rep *projectUpgradeReport) checkProjectProfileContract(profilePath string) {
+	raw, err := os.ReadFile(profilePath)
+	if err != nil {
+		rep.addCheck("profile-goals", "error", err.Error())
+		return
+	}
+	var profile map[string]any
+	if err := goyaml.Unmarshal(raw, &profile); err != nil {
+		rep.addCheck("profile-goals", "error", err.Error())
+		return
+	}
+	goals, _ := profile["goals"].(map[string]any)
+	onboarding, _ := profile["onboarding"].(map[string]any)
+	resolutions, _ := onboarding["resolutions"].([]any)
+	if len(goals) > 0 && len(resolutions) > 0 {
+		rep.addCheck("profile-goals", "ok", "goal contract and per-field resolutions are present")
+		return
+	}
+	rep.addCheck("profile-goals", "stale", "profile predates the goal/default-resolution contract")
+	rep.Hints = append(rep.Hints,
+		"Run `kitsoki project-profile refresh --target .` to review the merged candidate, then rerun with `--apply`; operator-owned fields and the project story wrapper are preserved.",
+	)
 }
 
 func applyProjectToolkit(ctx context.Context, rep *projectUpgradeReport) error {

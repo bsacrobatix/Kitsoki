@@ -118,6 +118,49 @@ For a source checkout or manual setup, the MCP registration has this shape:
 Use the generated `.mcp.json` when it exists; it is the source of truth for that
 project's story root.
 
+When the MCP server starts from a downstream project but must use stories and
+managed-workspace tooling from a Kitsoki source or staging checkout, select that
+checkout explicitly:
+
+```sh
+kitsoki --kitsoki-repo /absolute/path/to/Kitsoki \
+  mcp --stories-dir .kitsoki/stories
+```
+
+The equivalent manual MCP registration keeps the global flag before the
+subcommand:
+
+```json
+{
+  "mcpServers": {
+    "kitsoki": {
+      "command": "kitsoki",
+      "args": [
+        "--kitsoki-repo", "/absolute/path/to/Kitsoki",
+        "mcp", "--stories-dir", ".kitsoki/stories"
+      ]
+    }
+  }
+}
+```
+
+`--kitsoki-repo` (or `KITSOKI_REPO`) supplies both `@kitsoki/<name>` imports
+and the trusted managed-workspace assets under the selected checkout:
+`.capsules/workspaces` and `scripts/dev-workspace.sh`. The process still reads
+the downstream project's `.kitsoki.yaml` and story paths from its own working
+directory, while `workspace.*` lifecycle calls pin their `--repo` and `--root`
+arguments to the selected Kitsoki checkout. Point at the exact staging capsule
+that contains the changes being tested, not merely another Kitsoki checkout.
+`studio.ping` keeps `working_dir` set to the downstream project but compares the
+server build revision with this selected Kitsoki checkout, avoiding a false
+`stale: true` result caused by the downstream project's unrelated Git HEAD.
+
+A scoped override such as
+`KITSOKI_KIT_DEV_DEV_STORY=/path/to/stories/dev-story` changes only that story's
+import resolution. It is useful for CLI story validation, but it does not
+provide repository-level managed-workspace assets; use `--kitsoki-repo` or
+`KITSOKI_REPO` for Studio MCP startup.
+
 Claude Code reads the repo `.mcp.json` automatically in interactive sessions:
 
 ```sh
