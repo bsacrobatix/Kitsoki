@@ -69,14 +69,20 @@ class DockerBackend:
             cmd += ["-e", "DOCKER_HOST=unix:///var/run/docker.sock"]
         if os.environ.get("ARENA_CODEX_HOME_SRC"):
             cmd += ["-e", "CODEX_HOME=/workspace/codex-home"]
+        npm_cache = os.environ.get("ARENA_NPM_CACHE_SRC")
+        if npm_cache:
+            cmd += ["-v", f"{npm_cache}:/workspace/npm-cache", "-e", "NPM_CONFIG_CACHE=/workspace/npm-cache"]
         for name in (
             "ARENA_PAIRED_TASK_ENABLE_CODEX",
             "ARENA_CODEX_TIMEOUT_S",
             "ARENA_CLAUDE_TIMEOUT_S",
             "ARENA_CLAUDE_MAX_BUDGET_USD",
             "ARENA_PAIRED_TASK_WORK_ROOT",
+            "ARENA_PAIRED_TASK_PREWARM_TIMEOUT_S",
             "ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL",
             "ARENA_PAIRED_TASK_ORCHESTRATOR_BACKEND",
+            "NPM_CONFIG_PREFER_OFFLINE",
+            "NPM_CONFIG_FETCH_RETRIES",
             "CLAUDE_CODE_OAUTH_TOKEN",
             "SYNTHETIC_API_KEY",
             "ANTHROPIC_AUTH_TOKEN",
