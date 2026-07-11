@@ -175,6 +175,46 @@ func graphWithdrawRPC(params map[string]any) (any, *rpcError) {
 	}, nil
 }
 
+// graphRebaseRPC: {catalog_path, changeset_id} -> the bare sibling of
+// graphWithdrawRPC for the review queue's "rebase" action
+// (internal/graph.Rebase) — refreshes non-conflicting stale Before guards on
+// a proposed changeset and re-validates, per §3.3. Same graphRPCClock/actor-""
+// carrier gap as every other bare graph.* RPC here (see graphRPCClock's doc
+// comment): no ctx/actor seam on this carrier, so actor is always "".
+func graphRebaseRPC(params map[string]any) (any, *rpcError) {
+	catalogPath := graphStringParam(params, "catalog_path")
+	changesetID := graphStringParam(params, "changeset_id")
+	if catalogPath == "" || changesetID == "" {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.rebase: requires both 'catalog_path' and 'changeset_id'"}
+	}
+	clk, rerr := graphRPCClock()
+	if rerr != nil {
+		return nil, rerr
+	}
+	res, err := objectgraph.Rebase(catalogPath, objectgraph.NodeID(changesetID), "", clk)
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.rebase: " + err.Error()}
+	}
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	lintIssues := make([]any, len(res.LintIssues))
+	for i, iss := range res.LintIssues {
+		lintIssues[i] = iss.Error()
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	return map[string]any{
+		"rejected":       res.Rejected(),
+		"reject_reasons": rejectReasons,
+		"lint_issues":    lintIssues,
+		"changed_files":  changedFiles,
+	}, nil
+}
+
 // graphApplyRPC: {catalog_path, changeset_id[, dry_run]} -> the bare
 // "graph.apply" sibling of graph.propose/graph.authorize, so a portal review
 // queue can re-validate (dry_run) and commit an authorized changeset without

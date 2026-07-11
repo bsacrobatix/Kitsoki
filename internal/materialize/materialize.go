@@ -588,7 +588,24 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 			}
 			defer st.Close()
 
-			orch := orchestrator.New(p.Def, m, st, &noopHarness{})
+			// The private rig wires the same builtin host registry the web
+			// path gets from its registry-backed session (and `kitsoki
+			// turn` builds for itself — see cmd/kitsoki/turn.go): producer
+			// stories declare hosts: (host.run recorders/builders,
+			// host.graph status flips) and a rig without a registry turned
+			// every such invoke into a silent no-op, so `kitsoki graph
+			// materialize` ran the rooms but produced nothing. The
+			// orchestrator still enforces the story's hosts: allow-list at
+			// invoke time; stories that declare no hosts behave exactly as
+			// before.
+			hostReg := host.NewRegistry()
+			host.RegisterBuiltins(hostReg)
+			host.RegisterStarlarkBindings(hostReg, p.Def.StarlarkHostBindings)
+			if err := hostReg.ValidateAllowList(p.Def.Hosts); err != nil {
+				return host.Result{Error: fmt.Sprintf("materialize: validate story hosts: %v", err)}, nil
+			}
+
+			orch := orchestrator.New(p.Def, m, st, &noopHarness{}, orchestrator.WithHostRegistry(hostReg))
 
 			sid, err := orch.NewSession(ctx)
 			if err != nil {
