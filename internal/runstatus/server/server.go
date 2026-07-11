@@ -1931,6 +1931,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	case "graph.withdraw":
 		return graphWithdrawRPC(params)
 
+	case "graph.rebase":
+		return graphRebaseRPC(params)
+
 	// ── demo.* (A2, use-case-loop-plan §3.5): mockup/demo packet pipeline
 	// verbs, bare for the same caller-supplied-path reason as graph.* above.
 	case "demo.create":
