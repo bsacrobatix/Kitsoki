@@ -18,6 +18,12 @@ initial_world:
 host_handlers:
   host.local:
     data: { ok: true, passed: 1, failed: 0, log: "green" }
+  host.run:
+    data:
+      ok: true
+      exit_code: 0
+      stdout: ""
+      stdout_json: { dirty: false, files: "" }
   host.git:
     data: { ok: true, sha: "abc", diff: "", files: [] }
   host.agent.task:

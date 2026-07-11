@@ -251,30 +251,6 @@ states:
           implement_review_artifact: submitted
         on_error: idle
 
-      # Read the real diff, not a model-authored files_changed claim. Strict
-      # public contracts may name required source paths from the public ticket.
-      - invoke: iface.vcs.diff
-        with:
-          workdir: "{{ world.workdir }}"
-        bind:
-          acceptance_changed_files: files
-        on_error: idle
-
-      # Strict callers provide public, task-visible acceptance IDs. This is a
-      # deterministic shape gate: every ID needs a concrete test path and
-      # assertion receipt. It deliberately cannot see a hidden benchmark oracle.
-      - invoke: host.starlark.run
-        id: acceptance_contract_gate
-        with:
-          script: scripts/acceptance_contract_gate.star
-          inputs:
-            requirements: "{{ world.acceptance_contract }}"
-            artifact: "{{ world.implement_review_artifact }}"
-            changed_files: "{{ world.acceptance_changed_files }}"
-        bind:
-          acceptance_gate: gate
-        on_error: idle
-
       # ── Commit the test_author's work (lost-work guard) ────────────────
       # The test_author (above) writes/repairs tests directly in the maker
       # worktree, but NOTHING downstream commits them — `implementing` only
@@ -295,6 +271,47 @@ states:
           workdir:   "{{ world.workdir }}"
           message:   "test: {{ world.ticket_id }} — tests + fix repairs from testing phase"
           stage_all: true
+        on_error: idle
+
+      # Strict public contracts may name source paths from the public ticket.
+      # Read them from the committed range, *after* the lost-work commit above:
+      # `iface.vcs.diff` reports only an uncommitted worktree diff, so asking it
+      # here after a clean commit falsely reports no paths. Benchmark callers
+      # supply a public baseline SHA; normal strict callers fall back to the
+      # discrete fix tip (HEAD~1..HEAD).
+      - when: "len(world.acceptance_contract) > 0 && world.workdir != ''"
+        invoke: host.run
+        id: acceptance_contract_changed_paths
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set -e
+              BASE='{{ world.acceptance_base_sha }}'
+              if [ -n "$BASE" ] && git rev-parse --verify "$BASE^{commit}" >/dev/null 2>&1; then
+                git diff --name-only "$BASE...HEAD"
+              elif git rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
+                git diff --name-only HEAD~1 HEAD
+              fi
+          cwd: "{{ world.workdir }}"
+        bind:
+          acceptance_changed_paths: stdout
+        on_error: idle
+
+      # Strict callers provide public, task-visible acceptance IDs. This is a
+      # deterministic shape gate: every ID needs a concrete test path and
+      # assertion receipt. It deliberately cannot see a hidden benchmark oracle.
+      - invoke: host.starlark.run
+        id: acceptance_contract_gate
+        with:
+          script: scripts/acceptance_contract_gate.star
+          inputs:
+            requirements: "{{ world.acceptance_contract }}"
+            artifact: "{{ world.implement_review_artifact }}"
+            changed_paths: "{{ world.acceptance_changed_paths }}"
+        bind:
+          acceptance_gate: gate
         on_error: idle
 
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"

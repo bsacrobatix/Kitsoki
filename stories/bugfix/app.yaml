@@ -615,7 +615,11 @@ world:
   # with the empty default.
   acceptance_contract:       { type: list, default: [] }
   acceptance_gate:           { type: object, default: {} }
-  acceptance_changed_files:  { type: list, default: [] }
+  # Public baseline for strict acceptance path checks. The paired calibration
+  # runner supplies this task-visible revision; blank callers fall back to the
+  # discrete fix commit range in testing.yaml.
+  acceptance_base_sha:       { type: string, default: "" }
+  acceptance_changed_paths:  { type: string, default: "" }
   validate_artifact:         { type: object, default: {} }
   done_artifact:             { type: object, default: {} }
   fixed_in_commit:           { type: string, default: "" }  # short HEAD at close-out; posted to the issue before resolving
