@@ -12,7 +12,14 @@ import {
   matchToursToScenes,
   computeDwellOverrides
 } from "../lib/demo-manifest.mjs";
-import { cloneFixture, removeFixture, setFreshTimestamps, manifestPath } from "./helpers/fixture.mjs";
+import {
+  cloneFixture,
+  cloneRealAppFixture,
+  removeFixture,
+  setFreshTimestamps,
+  setFreshTimestampsRealApp,
+  manifestPath
+} from "./helpers/fixture.mjs";
 
 function withFixture(fn) {
   const dir = cloneFixture();
@@ -35,6 +42,33 @@ test("loadManifest resolves every relative path against the manifest's directory
     assert.equal(manifest.tours[0].outAbs, path.join(dir, "clips-real", "tour-a.rrweb.json"));
     assert.equal(manifest.airSec, 1.5);
   });
+});
+
+test("loadManifest: real-app manifest (no `mockup`) resolves `sources` and carries mode 'real-app'", () => {
+  const dir = cloneRealAppFixture();
+  setFreshTimestampsRealApp(dir);
+  try {
+    const manifest = loadManifest(manifestPath(dir));
+    assert.equal(manifest.mode, "real-app");
+    assert.equal(manifest.mockupAbs, undefined);
+    assert.deepEqual(manifest.sourcesAbs, [path.join(dir, "app-source.js")]);
+    assert.deepEqual(manifest.raw.states, ["a", "b"]);
+  } finally {
+    removeFixture(dir);
+  }
+});
+
+test("loadManifest: real-app manifest requires a non-empty `states` array", () => {
+  const dir = cloneRealAppFixture();
+  setFreshTimestampsRealApp(dir);
+  try {
+    const raw = JSON.parse(fs.readFileSync(manifestPath(dir), "utf8"));
+    delete raw.states;
+    fs.writeFileSync(manifestPath(dir), JSON.stringify(raw));
+    assert.throws(() => loadManifest(manifestPath(dir)), /missing required field: states/);
+  } finally {
+    removeFixture(dir);
+  }
 });
 
 test("loadManifest rejects an unsupported version", () => {
