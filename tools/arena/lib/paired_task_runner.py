@@ -10,6 +10,7 @@ only calls a live CLI when ARENA_PAIRED_TASK_ENABLE_CODEX=1 is set.
 from __future__ import annotations
 
 import argparse
+import traceback
 import json
 import os
 import shutil
@@ -1332,4 +1333,13 @@ def redact_cmd(cmd: list[str]) -> list[str]:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception:  # noqa: BLE001 - a cell runner must never leak a raw traceback to arena
+        traceback_text = traceback.format_exc()
+        raise SystemExit(emit(
+            verdict="blocked",
+            notes=f"runner exception: {first_line(traceback_text)}",
+            metrics={"measurement_status": "incomplete", "runner_traceback": traceback_text},
+            exit_code=0,
+        ))
