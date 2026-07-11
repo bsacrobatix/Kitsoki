@@ -121,9 +121,9 @@ container placements and reject a wrapper that emits mismatched digest fields.
 
 GitHub ingress is an adapter around the same contract. A pull-request webhook
 normalizes to `Trigger{kind:"pull_request", provider:"github", ...}` and the
-check-run publisher projects a `capsule-ci-verdict/v1` run result to a GitHub
-check conclusion. The adapter does not define a second pipeline result or call
-GitHub from automated tests.
+check-run adapter projects a `capsule-ci-verdict/v1` run result to a GitHub
+check conclusion. The adapter does not define a second pipeline result.
+Automated tests use local HTTP servers and never call GitHub.
 
 ```sh
 kitsoki capsule ci github trigger \
@@ -135,10 +135,19 @@ kitsoki capsule ci github check \
   --project . \
   --job 01K... \
   --details-url https://ci.example/runs/01K...
+
+GH_TOKEN=... kitsoki capsule ci github publish-check \
+  --project . \
+  --job 01K... \
+  --repo owner/repo \
+  --details-url https://ci.example/runs/01K...
 ```
 
-Those commands emit the JSON payloads that a hosted GitHub-agent or CI service
-can publish with its own repo-scoped credentials.
+`check` emits the JSON payload for offline inspection or an external publisher.
+`publish-check` is the explicit network boundary: it posts
+`POST /repos/{owner}/{repo}/check-runs` with `GH_TOKEN`/`GITHUB_TOKEN` or an
+operator-selected `--token-env`. The token is never serialized into the run
+record, trace, or command result.
 
 The Capsule MCP writer proof is also offline: a test-visible writer receives
 only `capsule.*` tools, edits through `capsule.fs.write`, inspects local status,

@@ -20,9 +20,10 @@ func capsuleCIGitHubCmd() *cobra.Command {
 
 These commands are pure adapters: they normalize GitHub webhook JSON into the
 standard Capsule CI trigger shape and project persisted Capsule CI run records
-into GitHub check-run JSON. They do not call GitHub.`,
+into GitHub check-run JSON. The publish-check command is the explicit network
+boundary and requires GitHub credentials.`,
 	}
-	cmd.AddCommand(capsuleCIGitHubTriggerCmd(), capsuleCIGitHubCheckCmd())
+	cmd.AddCommand(capsuleCIGitHubTriggerCmd(), capsuleCIGitHubCheckCmd(), capsuleCIGitHubPublishCheckCmd())
 	return cmd
 }
 
@@ -85,6 +86,60 @@ func capsuleCIGitHubCheckCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("job")
 	return cmd
+}
+
+func capsuleCIGitHubPublishCheckCmd() *cobra.Command {
+	var project, job, detailsURL, repo, tokenEnv, apiURL string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:   "publish-check",
+		Short: "Publish a Capsule CI run record as a GitHub check run",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			record, err := (ci.FileRunStore{ProjectRoot: project}).Get(job)
+			if err != nil {
+				return err
+			}
+			check, err := ci.BuildGitHubCheckRun(record.Result, detailsURL)
+			if err != nil {
+				return err
+			}
+			token, err := githubTokenFromEnv(tokenEnv)
+			if err != nil {
+				return err
+			}
+			publication, err := (ci.GitHubCheckPublisher{BaseURL: apiURL, Token: token}).PublishCheckRun(cmd.Context(), repo, check)
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, publication, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&job, "job", "", "Capsule CI job id")
+	cmd.Flags().StringVar(&repo, "repo", "", "GitHub repository owner/name")
+	cmd.Flags().StringVar(&detailsURL, "details-url", "", "GitHub check details URL")
+	cmd.Flags().StringVar(&tokenEnv, "token-env", "", "environment variable containing a GitHub token (default: GH_TOKEN, then GITHUB_TOKEN)")
+	cmd.Flags().StringVar(&apiURL, "api-url", "", "GitHub API base URL (default: https://api.github.com)")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("job")
+	_ = cmd.MarkFlagRequired("repo")
+	return cmd
+}
+
+func githubTokenFromEnv(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name != "" {
+		if token := strings.TrimSpace(os.Getenv(name)); token != "" {
+			return token, nil
+		}
+		return "", fmt.Errorf("capsule ci github: %s is not set", name)
+	}
+	for _, key := range []string{"GH_TOKEN", "GITHUB_TOKEN"} {
+		if token := strings.TrimSpace(os.Getenv(key)); token != "" {
+			return token, nil
+		}
+	}
+	return "", fmt.Errorf("capsule ci github: GH_TOKEN or GITHUB_TOKEN is required")
 }
 
 func readPayloadFile(cmd *cobra.Command, path string) ([]byte, error) {

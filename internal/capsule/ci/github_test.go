@@ -1,6 +1,10 @@
 package ci
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"kitsoki/internal/artifactjob"
@@ -58,5 +62,54 @@ func TestBuildGitHubCheckRunRejectsUnsupportedOutcome(t *testing.T) {
 	}, "")
 	if err == nil {
 		t.Fatal("expected unsupported outcome error")
+	}
+}
+
+func TestGitHubCheckPublisherPostsCheckRun(t *testing.T) {
+	var gotPath, gotAuth string
+	var got GitHubCheckRun
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":123,"html_url":"https://github.example/check/123","url":"https://api.github.example/check-runs/123"}`))
+	}))
+	defer srv.Close()
+
+	publication, err := (GitHubCheckPublisher{BaseURL: srv.URL, Token: "test-token", HTTPClient: srv.Client()}).PublishCheckRun(context.Background(), "owner/repo", GitHubCheckRun{
+		Name:       "Kitsoki Capsule CI / change",
+		HeadSHA:    "abc123",
+		Status:     "completed",
+		Conclusion: "success",
+		ExternalID: "job-1",
+		Output:     GitHubCheckOutput{Title: "passed", Summary: "ok"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/repos/owner/repo/check-runs" || gotAuth != "Bearer test-token" {
+		t.Fatalf("request path/auth path=%q auth=%q", gotPath, gotAuth)
+	}
+	if got.HeadSHA != "abc123" || got.Conclusion != "success" || got.ExternalID != "job-1" {
+		t.Fatalf("request payload %#v", got)
+	}
+	if publication.Schema != GitHubCheckPublicationSchema || publication.CheckID != 123 || publication.ExternalID != "job-1" {
+		t.Fatalf("publication %#v", publication)
+	}
+}
+
+func TestGitHubCheckPublisherRequiresExplicitAuthority(t *testing.T) {
+	if _, err := (GitHubCheckPublisher{BaseURL: "https://api.github.test"}).PublishCheckRun(context.Background(), "owner/repo", GitHubCheckRun{}); err == nil {
+		t.Fatal("expected missing token error")
+	}
+	if _, err := (GitHubCheckPublisher{BaseURL: "https://api.github.test", Token: "token"}).PublishCheckRun(context.Background(), "not-a-repo", GitHubCheckRun{}); err == nil {
+		t.Fatal("expected repo validation error")
 	}
 }

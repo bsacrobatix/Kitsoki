@@ -1,7 +1,14 @@
 package ci
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
 	"strings"
 )
 
@@ -87,6 +94,23 @@ type GitHubCheckRun struct {
 	Annotations []GitHubAnnotation `json:"annotations,omitempty"`
 }
 
+type GitHubCheckPublication struct {
+	Schema     string `json:"schema"`
+	Repo       string `json:"repo"`
+	CheckID    int64  `json:"check_id,omitempty"`
+	HTMLURL    string `json:"html_url,omitempty"`
+	APIURL     string `json:"api_url,omitempty"`
+	ExternalID string `json:"external_id,omitempty"`
+}
+
+const GitHubCheckPublicationSchema = "capsule-ci-github-check-publication/v1"
+
+type GitHubCheckPublisher struct {
+	BaseURL    string
+	Token      string
+	HTTPClient *http.Client
+}
+
 type GitHubCheckOutput struct {
 	Title   string `json:"title"`
 	Summary string `json:"summary"`
@@ -133,6 +157,85 @@ func BuildGitHubCheckRun(result RunResult, detailsURL string) (GitHubCheckRun, e
 			Summary: summary,
 		},
 	}, nil
+}
+
+func (p GitHubCheckPublisher) PublishCheckRun(ctx context.Context, repo string, check GitHubCheckRun) (GitHubCheckPublication, error) {
+	repo = strings.TrimSpace(repo)
+	if !validGitHubRepo(repo) {
+		return GitHubCheckPublication{}, fmt.Errorf("capsule ci github: repo must be owner/name")
+	}
+	token := strings.TrimSpace(p.Token)
+	if token == "" {
+		return GitHubCheckPublication{}, fmt.Errorf("capsule ci github: GitHub token is required")
+	}
+	base := strings.TrimSpace(p.BaseURL)
+	if base == "" {
+		base = "https://api.github.com"
+	}
+	endpoint, err := githubCheckRunsURL(base, repo)
+	if err != nil {
+		return GitHubCheckPublication{}, err
+	}
+	raw, err := json.Marshal(check)
+	if err != nil {
+		return GitHubCheckPublication{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
+	if err != nil {
+		return GitHubCheckPublication{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	client := p.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return GitHubCheckPublication{}, fmt.Errorf("capsule ci github: publish check run: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return GitHubCheckPublication{}, fmt.Errorf("capsule ci github: publish check run: %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var payload struct {
+		ID      int64  `json:"id"`
+		HTMLURL string `json:"html_url"`
+		URL     string `json:"url"`
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return GitHubCheckPublication{}, fmt.Errorf("capsule ci github: parse check-run response: %w", err)
+		}
+	}
+	return GitHubCheckPublication{
+		Schema:     GitHubCheckPublicationSchema,
+		Repo:       repo,
+		CheckID:    payload.ID,
+		HTMLURL:    payload.HTMLURL,
+		APIURL:     payload.URL,
+		ExternalID: check.ExternalID,
+	}, nil
+}
+
+func githubCheckRunsURL(base, repo string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", fmt.Errorf("capsule ci github: invalid API URL %q", base)
+	}
+	u.Path = path.Join(u.Path, "repos", repo, "check-runs")
+	return u.String(), nil
+}
+
+func validGitHubRepo(repo string) bool {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
+		return false
+	}
+	return true
 }
 
 func githubConclusion(outcome string) (string, error) {
