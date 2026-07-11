@@ -56,14 +56,18 @@ Before submitting:
   `summary_markdown` so the implementer can repair them on the next cycle.
 - `tests_added` must list new / modified test files. Reuse existing tests
   where possible; only add fresh ones if no existing test covers the bug.
-- **Check the test asserts the ticket's end-to-end OUTCOME, not a near-side
-  signal.** A green log is necessary but not sufficient: confirm the reproduction
-  actually asserts the observable deliverable the ticket promises (what the
-  caller / downstream / far side of the boundary receives), not merely that a
-  mechanism engaged (a header set, a code path hit, a wire format chosen). If the
-  test only checks the near-side signal while the ticket's real outcome could
-  still be broken, that is a `blocker` — the fix may be incomplete even though the
-  test is green. Name the missing far-side assertion in `blockers`.
+- **Make an acceptance-coverage matrix before you can say `passed`.** Extract
+  every independently observable promise from the ticket, then record in
+  `summary_markdown` a compact `promise → test file/assertion → observed result`
+  mapping for each one. A green test is necessary but not sufficient: it must
+  assert the observable deliverable the ticket promises (what the caller /
+  downstream / far side of the boundary receives), not merely that a mechanism
+  engaged (a header set, a code path hit, a wire format chosen). Do not collapse
+  distinct outcomes into one broad claim: for a UI ticket, a refreshed view,
+  visible narration/transcript, state/terminal status, and persisted data are
+  separate promises when the ticket names them. If any promise lacks a direct
+  assertion, set `status: failed`, add a `blocker` naming the missing assertion,
+  and send the work back for repair—even when all currently-run tests are green.
 - `blockers` are review-grade objections that must be fixed before the
   PR can advance.
 
@@ -71,4 +75,5 @@ Before submitting:
 
 Submit an `implement_review_artifact` (see `schemas/testing_artifact.json`).
 The `summary_markdown` should walk the reviewer through tests-added,
-tests-run results, and any blockers in plain prose.
+tests-run results, the required acceptance-coverage matrix, and any blockers in
+plain prose.

@@ -59,7 +59,11 @@ this loop until it is green, then submit:
 2. **Targeted test.** Run the test(s) that exercise this bug — the
    reproduction test and the package(s) you changed
    (e.g. `go test ./path/to/changed/pkg/...` or `-run <TestName>`). The
-   reproduction must now PASS where it failed before.
+   reproduction must now PASS where it failed before. For each independently
+   observable promise in the ticket, make sure there is a distinct assertion;
+   verifying a state transition or refreshed data alone does not prove a
+   required user-visible message, transcript entry, side effect, or terminal
+   state also occurred.
 3. **Don't break the neighbours.** Run the broader suite for the area you
    touched (the changed packages and any package that imports them). If your
    change made a previously-passing test fail, that is a regression — fix it

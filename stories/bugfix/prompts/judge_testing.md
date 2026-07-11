@@ -22,9 +22,13 @@ evidence is missing or self-contradictory, that is grounds for **refine** or
 
 ## Decision criteria
 
-- **accept** — `status` is `passed`, the reproduction test now produces
-  the expected outcome, no critical regressions surfaced, blocker list
-  is empty (or only contains minor / suggestion-level entries).
+- **accept** — `status` is `passed`, the artifact explicitly maps every
+  independently observable ticket promise to a direct regression assertion and
+  observed result, no critical regressions surfaced, and the blocker list is
+  empty (or only contains minor / suggestion-level entries). A generic claim
+  that the feature "works" or a single refreshed state/view is not enough when
+  the ticket also requires visible narration, transcript, side effect,
+  persistence, or terminal behavior.
 - **refine** — tests pass but the artifact has gaps: missing regression
   test, blocker the engineer dismissed without addressing, ambiguous
   failure logs. Cite the specific gap.

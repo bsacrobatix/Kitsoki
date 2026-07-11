@@ -58,7 +58,13 @@ Before submitting:
 ## Outcomes
 
 - `pass` — the bug's reproduction now produces the expected outcome and
-  no other regressions surfaced.
+  no other regressions surfaced. Before choosing `pass`, independently read
+  the ticket and the regression test: enumerate every observable promise in
+  `summary_markdown` and cite the assertion/evidence for each. A passing test
+  that verifies only one symptom is `fail_short`, with the unasserted promise
+  named in `next_action_hint`; do not let a refreshed state/view stand in for a
+  required user-visible message, transcript, side effect, persisted value, or
+  terminal state.
 - `fail_short` — a minor adjustment to the implementation will fix it
   (control returns to `implementing`).
 - `fail` — the fix is wrong; the proposal needs to be redrafted (control

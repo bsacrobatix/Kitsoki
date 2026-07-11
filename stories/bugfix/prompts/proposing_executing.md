@@ -46,6 +46,14 @@ Before submitting:
 - `confidence` is your own estimate in [0.0, 1.0]; under 0.3 is rejected
   downstream.
 - `reasoning` is the chain from evidence → cause → fix.
+- Before proposing, enumerate **every independently observable promise** in the
+  ticket (for example: rendered state, user-visible message/transcript,
+  persisted value, API result, terminal mode). A proposal that fixes one
+  visible symptom while leaving another stated outcome absent is incomplete.
+  Include that acceptance inventory and the planned assertion for each item in
+  `summary_markdown` so implementation and test review can audit it. Do not
+  collapse distinct UI/data/side-effect outcomes into a vague "the view
+  refreshes" claim.
 - Propose the **smallest, most local** change that addresses the root cause.
   Favour a narrow edit at the bug's own site over a broad change to shared or
   engine-level internals — the latter is far likelier to break unrelated
