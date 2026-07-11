@@ -92,9 +92,9 @@ argv is denied unless the immutable startup grant includes `raw_exec`.
 ## GitHub ingress
 
 GitHub is an adapter, not the CI engine. Pull-request webhook data normalizes
-to the standard `ci.Trigger` shape, and the check-run publisher projects the
-typed Capsule verdict to a GitHub check conclusion. Automated tests use the pure
-adapter contract and do not contact GitHub.
+to the standard `ci.Trigger` shape, and the check-run adapter projects the
+typed Capsule verdict to a GitHub check conclusion. Automated tests use pure
+projection plus a mocked HTTP publisher and do not contact GitHub.
 
 For local/offline adapter testing:
 
@@ -103,8 +103,20 @@ kitsoki capsule ci github trigger --payload payload.json --pipeline change
 kitsoki capsule ci github check --project . --job <job-id> --details-url <run-url>
 ```
 
-The output is the JSON a GitHub service would publish; credentials and network
-writes stay outside the story contract.
+For explicit publication:
+
+```sh
+GH_TOKEN=... kitsoki capsule ci github publish-check \
+  --project . \
+  --job <job-id> \
+  --repo owner/repo \
+  --details-url <run-url>
+```
+
+`check` emits the JSON a GitHub service would publish; `publish-check` owns the
+credentialed network write and returns
+`capsule-ci-github-check-publication/v1`. Credentials stay outside the story
+contract and are not written to traces or run records.
 
 ## Failure diagnosis
 

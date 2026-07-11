@@ -11,8 +11,8 @@ Cassette-backed LLM review fixtures now exercise the real `host.agent.decide`
 review seam without live model spend. A bounded two-instance VM dogfood reached
 real Claude Code / GLM-5.2 worker launch and exposed remote driver/auth/stall
 diagnostics gaps, so it is recorded as a blocker rather than a green remote CI
-proof. GitHub network publication, a completed gated remote dogfood, and final
-doc trimming remain.
+proof. GitHub check publication now has an explicit credentialed command seam.
+A completed gated remote dogfood and final doc trimming remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -346,14 +346,18 @@ project wrapper that imports only deterministic checks and adjudication.
   - Shipped: `kitsoki capsule ci github trigger` projects pull-request webhook
     JSON to the standard `ci.Trigger` contract, and
     `kitsoki capsule ci github check` projects a persisted Capsule CI run record
-    to a GitHub check-run payload. Both commands are pure/no-network adapters;
-    hosted publishers provide credentials and perform the actual GitHub write.
+    to a GitHub check-run payload.
+  - Shipped: `kitsoki capsule ci github publish-check` is the explicit network
+    boundary for check-run publication. It posts the projected payload to
+    `POST /repos/{owner}/{repo}/check-runs` using `GH_TOKEN`/`GITHUB_TOKEN` or
+    `--token-env`; automated coverage uses a local HTTP server and does not
+    contact GitHub.
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal
   - Shipped: permanent `docs/stories/ci.md` now documents the story-native CI
     contract, reference rooms, authority boundaries, failure diagnosis, and
-    GitHub adapter model.
+    GitHub adapter/publication model.
   - Remaining: migrate examples and delete this proposal after gated remote
-    dogfood reaches a terminal verdict and GitHub network publication lands.
+    dogfood reaches a terminal verdict.
 ```
 
 ## Open questions

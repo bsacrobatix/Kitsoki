@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,5 +94,50 @@ func TestCapsuleCIDiagnoseCommandProjectsFailureEvidence(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("diagnose output missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestCapsuleCIGitHubPublishCheckCommandPostsToGitHubAPI(t *testing.T) {
+	root := t.TempDir()
+	result := ci.RunResult{
+		Job: artifactjob.Job{ID: "job-1"},
+		Envelope: executor.Envelope{Trigger: map[string]any{
+			"head_sha": "abc123",
+		}},
+		Verdict: ci.Verdict{Pipeline: "change", Outcome: "passed", Summary: "ready"},
+	}
+	if err := (ci.FileRunStore{ProjectRoot: root}).Write(ci.RunRecord{JobID: "job-1", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	var gotPath, gotAuth string
+	var got ci.GitHubCheckRun
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":456,"html_url":"https://github.example/check/456","url":"https://api.github.example/repos/owner/repo/check-runs/456"}`))
+	}))
+	defer srv.Close()
+	t.Setenv("GH_TOKEN", "publish-token")
+	out, err := execRoot(t, "capsule", "ci", "github", "publish-check", "--project", root, "--job", "job-1", "--repo", "owner/repo", "--api-url", srv.URL, "--details-url", "https://runs.example/job-1")
+	if err != nil {
+		t.Fatalf("publish-check: %v\n%s", err, out)
+	}
+	if gotPath != "/repos/owner/repo/check-runs" || gotAuth != "Bearer publish-token" {
+		t.Fatalf("request path/auth path=%q auth=%q", gotPath, gotAuth)
+	}
+	if got.HeadSHA != "abc123" || got.Conclusion != "success" || got.DetailsURL != "https://runs.example/job-1" {
+		t.Fatalf("check payload %#v", got)
+	}
+	var publication ci.GitHubCheckPublication
+	if err := json.Unmarshal([]byte(out), &publication); err != nil {
+		t.Fatalf("decode publication: %v\n%s", err, out)
+	}
+	if publication.Schema != ci.GitHubCheckPublicationSchema || publication.CheckID != 456 || publication.ExternalID != "job-1" {
+		t.Fatalf("publication %#v", publication)
 	}
 }
