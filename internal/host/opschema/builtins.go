@@ -290,6 +290,10 @@ func registerGraphBuiltins(r *Registry) {
 			"status", "string", "operations", "list", "touching", "list",
 		),
 	})
+	r.Register("host.graph", "history", Op{
+		Input:  fields("catalog_path", "string", "id", "string", "since", "string", "limit", "int", "cursor", "string"),
+		Output: fields("entries", "list", "next_cursor", "string"),
+	})
 }
 
 // fields builds a map[string]FieldSpec from alternating name/type pairs, a

@@ -26,6 +26,7 @@
 //	type_census  {catalog_path[, type_id]}                        -> type decl+census, or all-types census
 //	changeset    {catalog_path, action: list|get|touching[,
 //	              changeset_id, node_id]}                         -> changeset lifecycle/reverse-index reads
+//	history      {catalog_path[, id, since, limit, cursor]}       -> merged changeset+git timeline (graph-mcp-plan.md §3.5 graph.history)
 //
 // get/find/neighbors/type_census/changeset are internal/host/graph_read_ops.go
 // — graph-mcp-plan.md §3.3's P1 read family (Workstream A). Every one of
@@ -129,8 +130,10 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphTypeCensusOp(args)
 	case "changeset":
 		return graphChangesetOp(args)
+	case "history":
+		return graphHistoryOp(ctx, args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, query, project, presentation, open, get, find, neighbors, type_census, changeset)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, query, project, presentation, open, get, find, neighbors, type_census, changeset, history)", op)
 	}
 }
 
