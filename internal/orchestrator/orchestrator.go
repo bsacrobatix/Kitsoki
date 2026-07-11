@@ -1267,6 +1267,29 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		)
 		return nil, fmt.Errorf("orchestrator: harness.RunTurn: %w", err)
 	}
+
+	// F4 (small-model routing instability): a bounded, deterministic
+	// re-prompt for a malformed transition call, applied BEFORE any of the
+	// routing/LLMToolCall trace events below so a rescued retry's params (not
+	// the original malformed attempt's) are what gets logged and parsed.
+	// Weaker models (Qwen3.6-27B in the GX10 study — see
+	// .artifacts/issues/bugs/2026-07-11-small-model-transition-args-instability.md)
+	// intermittently emit a structurally invalid transition tool call (slots
+	// double-encoded as a JSON string, a missing 'intent' field, ...) on the
+	// very first routing turn, in a DIFFERENT malformed shape each attempt —
+	// so a fixed per-shape coercion (like the existing R1
+	// double-encoded-JSON-string tolerance in toSlots) cannot cover the whole
+	// class. Give the harness a bounded number of chances to self-correct
+	// with the exact parse error fed back as a corrective system-prompt
+	// fragment — the same "tell the model what broke and let it retry" shape
+	// the decide verb's validator retry loop already uses for schema-invalid
+	// submissions. Bounded (maxMalformedTransitionRetries) so a persistently
+	// broken backend still fails fast rather than looping forever.
+	if _, probeErr := parseIntentCall(params); probeErr != nil {
+		params, _, probeErr = o.retryMalformedTransition(ctx, tl, in, params, probeErr)
+		_ = probeErr // final parseIntentCall below re-derives and reports this
+	}
+
 	tl.Debug(ctx, trace.EvTurnRouted,
 		slog.Duration("dur", harnessDur),
 		slog.String("outcome", "hit"),
@@ -1292,7 +1315,10 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 		"intent": extractIntentName(params),
 	}, turnNum)
 
-	// 4. Parse the intent call from params.
+	// 4. Parse the intent call from params. By this point
+	// retryMalformedTransition above has already given the harness bounded
+	// chances to self-correct a malformed transition call, so a parseErr here
+	// is either a non-retryable malformation or a retry-exhausted one.
 	call, parseErr := parseIntentCall(params)
 	if parseErr != nil {
 		return nil, fmt.Errorf("orchestrator: parse intent call: %w", parseErr)
@@ -2982,6 +3008,64 @@ func (o *Orchestrator) loadJourney(sid app.SessionID) (*store.JourneyState, erro
 	o.seedSessionID(js.World, sid)
 
 	return js, nil
+}
+
+// maxMalformedTransitionRetries bounds how many extra harness.RunTurn calls
+// retryMalformedTransition will spend trying to rescue a malformed transition
+// tool call. Small enough that a persistently broken backend/model still
+// fails the turn quickly (2 extra LLM calls, worst case), large enough to
+// absorb the "different malformed shape every attempt" behavior observed from
+// Qwen3.6-27B in the GX10 study (see
+// .artifacts/issues/bugs/2026-07-11-small-model-transition-args-instability.md).
+const maxMalformedTransitionRetries = 2
+
+// retryMalformedTransition re-invokes the harness up to
+// maxMalformedTransitionRetries times when its first transition tool call
+// failed to parse (missing/malformed 'intent', slots that don't coerce to a
+// map, ...), feeding the exact parse error back as a corrective
+// system-prompt fragment each time so the model can self-correct instead of
+// failing the whole turn on one malformed call. Returns the last params tried
+// (rescued or not), the successfully parsed call when a retry succeeded (zero
+// value otherwise — callers re-derive via parseIntentCall so this return is
+// advisory only), and the final parse error (nil on success).
+//
+// This is deliberately NOT a general "retry any harness error" loop: it only
+// fires when RunTurn itself succeeded (returned a params, not an error) but
+// the params failed to parse as a valid transition call — the exact F4
+// failure class. A harness-level error (timeout, refusal, ClarifyResponse)
+// is handled by the existing caller-side branches and is not retried here.
+func (o *Orchestrator) retryMalformedTransition(ctx context.Context, tl *trace.TurnLogger, in harness.TurnInput, params mcp.CallToolParams, parseErr error) (mcp.CallToolParams, intent.IntentCall, error) {
+	lastParams := params
+	lastErr := parseErr
+	for attempt := 1; attempt <= maxMalformedTransitionRetries && lastErr != nil; attempt++ {
+		tl.Debug(ctx, trace.EvTurnRouted,
+			slog.String("outcome", "malformed_transition_retry"),
+			slog.Int("attempt", attempt),
+			slog.String("error", lastErr.Error()),
+		)
+		retryIn := in
+		retryIn.SystemPrompt = strings.TrimSpace(in.SystemPrompt + "\n\n" + fmt.Sprintf(
+			"Your previous `transition` tool call could not be parsed (%s). "+
+				"Call `transition` again with a valid JSON object: `intent` must be a plain string "+
+				"(not empty, not JSON-encoded), and `slots` (if present) must be a JSON object, not "+
+				"a JSON-encoded string.", lastErr.Error()))
+		retryParams, runErr := o.harness.RunTurn(ctx, retryIn)
+		if runErr != nil {
+			// The harness itself failed on the retry (timeout, clarify,
+			// refusal, ...) — stop retrying and let the caller's normal
+			// harness-error handling take over on the ORIGINAL params/error,
+			// since a further wrapped error here would lose the caller's
+			// existing ClarifyResponse/error-type handling.
+			return lastParams, intent.IntentCall{}, parseErr
+		}
+		lastParams = retryParams
+		call, callErr := parseIntentCall(retryParams)
+		if callErr == nil {
+			return lastParams, call, nil
+		}
+		lastErr = callErr
+	}
+	return lastParams, intent.IntentCall{}, lastErr
 }
 
 // parseIntentCall extracts an IntentCall from the harness's CallToolParams.
