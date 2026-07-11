@@ -95,19 +95,72 @@ func AgentCallCtxFrom(ctx context.Context) AgentCallCtx {
 
 // agentUsageBox accumulates the token usage reported by the claude CLI
 // transport (runClaudeStreamJSON, or the buffered json envelope path) during a
-// single agent host call. The transport records the result event's usage here
-// via recordAgentUsage; appendAgentReturnedEvent reads it via agentUsageMeta
-// so the AgentReturned event carries per-invocation tokens without every verb
-// handler threading a ClaudeRun through its (sometimes deep) call tree.
+// single agent host call. The transport records each result event's usage
+// here via recordAgentUsage; appendAgentReturnedEvent reads it via
+// agentUsageMeta so the AgentReturned event carries per-invocation tokens
+// without every verb handler threading a ClaudeRun through its (sometimes
+// deep) call tree.
 //
-// The orchestrator installs one fresh box per host-call dispatch. Last write
-// wins, so a validator retry loop surfaces the final round's usage. The mutex
-// guards the subprocess-reader goroutine vs. the handler; in practice the
-// handler reads only after the claude call has returned.
+// The orchestrator installs one fresh box per host-call dispatch, but a
+// single host-call dispatch can itself make MULTIPLE provider requests: a
+// validator retry loop (decide/ask/task) issues several `claude --resume`
+// calls under one call_id, and host.agent.codeact's step loop issues one
+// claude call per step, all under one box. recordAgentUsage SUMS the known
+// numeric usage buckets across every call into this box instead of
+// overwriting, so the box's final usage/cost is the call's total spend, not
+// just its last retry/step. Before this fix, last-write-wins silently
+// discarded every retry/step but the final one — the root cause of the
+// "$0.006 for a $0.034 call" false-cheap accounting in
+// .context/2026-07-11-gx10-small-model-study-adversarial-review.md. The
+// mutex guards the subprocess-reader goroutine vs. the handler; in practice
+// the handler reads only after the claude call has returned.
 type agentUsageBox struct {
 	mu    sync.Mutex
 	usage map[string]any
 	cost  float64
+}
+
+// summableUsageKeys are the numeric usage fields recordAgentUsage sums across
+// retries/resumes/steps within one box. Any other key in a later usage map
+// (e.g. a string field a future transport might add) overwrites, matching the
+// historical last-write-wins behavior for non-numeric fields — only the
+// numeric spend buckets are load-bearing for cost/token accounting and must
+// never be dropped.
+var summableUsageKeys = []string{
+	"input_tokens",
+	"output_tokens",
+	"cache_creation_input_tokens",
+	"cache_read_input_tokens",
+	"total_tokens",
+}
+
+// sumUsage merges next into prev, summing every key in summableUsageKeys
+// (present in either map) and otherwise letting next's value win for any key
+// not in that list. prev may be nil (first call in a box's lifetime).
+func sumUsage(prev, next map[string]any) map[string]any {
+	if prev == nil {
+		out := make(map[string]any, len(next))
+		for k, v := range next {
+			out[k] = v
+		}
+		return out
+	}
+	out := make(map[string]any, len(prev)+len(next))
+	for k, v := range prev {
+		out[k] = v
+	}
+	summable := make(map[string]bool, len(summableUsageKeys))
+	for _, k := range summableUsageKeys {
+		summable[k] = true
+	}
+	for k, v := range next {
+		if summable[k] {
+			out[k] = usageInt64(out, k) + usageInt64(next, k)
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 type agentUsageBoxKey struct{}
@@ -123,9 +176,11 @@ func agentUsageBoxFrom(ctx context.Context) *agentUsageBox {
 	return b
 }
 
-// recordAgentUsage stores token usage + cost into the box in ctx, if one is
+// recordAgentUsage sums token usage + cost into the box in ctx, if one is
 // installed. No-op when no box is present (e.g. direct unit-test calls) or when
 // there's nothing to record, so the transport can call it unconditionally.
+// Summing (not overwriting) is what makes the box correct across a call's
+// internal retries/resumes/steps — see agentUsageBox's doc comment.
 func recordAgentUsage(ctx context.Context, usage map[string]any, cost float64) {
 	if usage == nil && cost == 0 {
 		return
@@ -136,10 +191,10 @@ func recordAgentUsage(ctx context.Context, usage map[string]any, cost float64) {
 	}
 	b.mu.Lock()
 	if usage != nil {
-		b.usage = usage
+		b.usage = sumUsage(b.usage, usage)
 	}
 	if cost != 0 {
-		b.cost = cost
+		b.cost += cost
 	}
 	b.mu.Unlock()
 }
