@@ -55,6 +55,8 @@ kit (internal/kitdev).`,
 	cmd.AddCommand(kitListCmd())
 	cmd.AddCommand(kitVerifyCmd())
 	cmd.AddCommand(kitUpdateCmd())
+	cmd.AddCommand(kitTrialCmd())
+	cmd.AddCommand(kitAcceptCmd())
 	cmd.AddCommand(kitRejectCmd())
 	cmd.AddCommand(kitDevCmd())
 	return cmd

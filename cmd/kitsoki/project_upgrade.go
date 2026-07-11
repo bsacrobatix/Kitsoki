@@ -21,6 +21,19 @@ import (
 type projectUpgradeOptions struct {
 	Target string
 	Apply  bool
+	// Resolver overrides the import resolver the checks load stories with.
+	// nil keeps the normal buildImportResolver() behaviour; `kit trial`
+	// injects a staged-pinned resolver so the same sweep judges a project
+	// against a staged kit candidate (internal/kittrial, S7).
+	Resolver app.ImportResolver
+}
+
+// resolver returns the effective import resolver for this check run.
+func (o projectUpgradeOptions) resolver() app.ImportResolver {
+	if o.Resolver != nil {
+		return o.Resolver
+	}
+	return buildImportResolver()
 }
 
 type projectUpgradeReport struct {
@@ -132,7 +145,7 @@ func checkProjectUpgrade(ctx context.Context, opts projectUpgradeOptions) (proje
 		rep.finalizeNeedsUpgrade()
 		return rep, nil
 	}
-	if _, err := app.SynthesizeRootWithResolver(cfg.Root.RootSpec(), abs, buildImportResolver()); err != nil {
+	if _, err := app.SynthesizeRootWithResolver(cfg.Root.RootSpec(), abs, opts.resolver()); err != nil {
 		rep.addCheck("implicit-root", "error", fmt.Sprintf("synthesize current dev-story root: %v", err))
 		rep.Hints = append(rep.Hints, "The project profile or root overrides no longer match the current dev-story contract.")
 	} else {
@@ -176,7 +189,7 @@ func checkProjectUpgrade(ctx context.Context, opts projectUpgradeOptions) (proje
 		}
 	}
 	if rep.InstancePath != "" {
-		if _, err := app.LoadWithResolver(rep.InstancePath, nil, buildImportResolver()); err != nil {
+		if _, err := app.LoadWithResolver(rep.InstancePath, nil, opts.resolver()); err != nil {
 			rep.addCheck("project-instance", "error", fmt.Sprintf("%s does not load against current dev-story: %v", projectRelative(abs, rep.InstancePath), err))
 			rep.Hints = append(rep.Hints, "Review the materialized instance before regenerating; `project-tools upgrade --apply` will not overwrite it.")
 		} else {
