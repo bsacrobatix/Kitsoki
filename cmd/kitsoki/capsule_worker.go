@@ -96,6 +96,7 @@ func capsuleWorkerRunCmd() *cobra.Command {
 				launchPolicy = host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{workspace}}
 			}
 			verdict, err := storylauncher.Launcher{StoryPath: storyPath, ProjectRoot: workspace, EventSink: sink, AgentBackend: agentBackend, AgentLaunchPolicy: launchPolicy}.Launch(cmd.Context(), prepared)
+			verdict = ci.NormalizeVerdict(verdict)
 			state := executor.CompletionState{Schema: executor.CompletionStateSchema, Outcome: "passed"}
 			if err == nil {
 				err = ci.ValidateVerdict(verdict, sealed, ci.ResultContract{})
