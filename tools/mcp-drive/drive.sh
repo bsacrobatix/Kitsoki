@@ -207,6 +207,7 @@ run_once() {
     local codex_mcp_args=()
     if [[ "${MCP_DRIVE_CODEX_CONFIG_MCP:-0}" != "1" ]]; then
       codex_mcp_args+=(-c mcp_servers.kitsoki.command=kitsoki)
+      codex_mcp_args+=(-c mcp_servers.kitsoki.enabled=true)
       codex_mcp_args+=(-c 'mcp_servers.kitsoki.args=["mcp","--stories-dir","stories"]')
       # A machine's own ~/.codex/config.toml may already declare mcp_servers.kitsoki
       # (pointing `cwd` at THAT machine's checkout, e.g. a developer's primary
