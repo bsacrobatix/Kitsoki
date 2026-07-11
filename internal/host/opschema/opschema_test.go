@@ -80,7 +80,7 @@ func TestBuiltins_MatchesDevStoryManifest(t *testing.T) {
 		"ticket":    "host.local_files.ticket",
 		"vcs":       "host.git",
 		"ci":        "host.local",
-		"workspace": "host.git_worktree",
+		"workspace": "host.capsule_workspace",
 		"transport": "host.append_to_file",
 	}
 

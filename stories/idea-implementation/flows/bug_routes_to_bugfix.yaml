@@ -8,8 +8,8 @@ initial_world:
   auto_triage: false
 
 host_handlers:
-  host.git_worktree:
-    data: { ok: true, path: ".worktrees/bf-bug-flowsess-flowsess", log: "" }
+  host.capsule_workspace:
+    data: { ok: true, id: "bug-flowsess", path: ".capsules/workspaces/bf-bug-flowsess-flowsess", branch: "fix/bug-flowsess-flowsess", state: "ready", head: "abc123", dirty: false, diagnostics: {} }
   host.git:
     data:
       ok: true
