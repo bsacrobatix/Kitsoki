@@ -132,6 +132,18 @@ subscription_raw = runner.codex_output_metrics('{"usage":{"input_tokens":10,"out
 check("raw subscription USD is unavailable", subscription_raw.get("cost_usd"), None)
 check("raw subscription cost basis is explicit", subscription_raw.get("cost_basis"), "subscription-unmetered")
 
+with tempfile.TemporaryDirectory(prefix="paired-result-target-") as td:
+    target = Path(td) / "nested" / "cell.json"
+    exit_code = runner.emit(
+        verdict="armed",
+        notes="fixture",
+        target=str(target),
+    )
+    check("result target exit code", exit_code, 0)
+    persisted = json.loads(target.read_text(encoding="utf-8"))
+    check("result target persists verdict", persisted.get("verdict"), "armed")
+    check("result target persists notes", persisted.get("notes"), "fixture")
+
 with tempfile.TemporaryDirectory(prefix="paired-subscription-trace-") as td:
     trace = Path(td) / "trace.jsonl"
     trace.write_text(json.dumps({
