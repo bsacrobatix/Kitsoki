@@ -432,11 +432,21 @@ story_override_prompt = runner.build_kitsoki_prompt(
 require("--story overrides the drive target", 'story_path: "stories/bugfix/app.yaml"' in story_override_prompt)
 require("Kitsoki prompt gives post-worker continue example", 'intent: \"continue\"' in prompt)
 require("Kitsoki prompt has the settled-turn control loop", "Then run this exact control loop" in prompt)
-require("Kitsoki prompt waits through a live worker turn", "async_after_ms: 300000" in prompt)
+require("Kitsoki prompt waits through the supervised worker bound", "async_after_ms: 900000" in prompt)
 require("Kitsoki prompt forbids rapid bare-status polling", "Never spin on bare status" in prompt)
 require("Kitsoki prompt has a bounded trace-aware stall rule", "three spaced (15s) checks" in prompt)
 require("Kitsoki prompt defers to an active supervised runtime", "Do NOT apply the three-check stall" in prompt)
 require("Kitsoki prompt marks the cell workspace as prepared", "workspace_prepared: true" in prompt)
+
+with tempfile.TemporaryDirectory(prefix="paired-runtime-trace-") as td:
+    trace = Path(td) / "trace.jsonl"
+    trace.write_text(json.dumps({"kind": "agent.runtime.start", "call_id": "live"}) + "\n", encoding="utf-8")
+    check("unclosed supervised runtime blocks a cell", runner.trace_has_unclosed_runtime(str(trace)), True)
+    with trace.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"kind": "agent.runtime.end", "call_id": "live"}) + "\n")
+    check("closed supervised runtime is terminal", runner.trace_has_unclosed_runtime(str(trace)), False)
+
+require("blocked dispatch skips external scoring", "external oracle skipped because live dispatch did not reach a terminal trace" in runner_source)
 
 bench_story = (REPO_ROOT / "stories" / "bench-bugfix" / "app.yaml").read_text(encoding="utf-8")
 require("bench forwards prepared workspace ownership into bugfix", "workspace_prepared: \"{{ world.workspace_prepared }}\"" in bench_story)

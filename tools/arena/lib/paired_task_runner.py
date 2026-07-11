@@ -312,7 +312,20 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         )
     baseline_ref = current_head(tree)
     dispatch = dispatch_worker(args, task, tree, trace_ref)
-    score = score_tree(task, tree)
+    # A nonterminal live MCP trace is not a candidate result. In particular,
+    # tearing down the orchestrator's temporary auth home while a supervised
+    # worker is still running kills that worker and can leave a partly-mutated
+    # tree that a hidden oracle would mislabel as an ordinary model failure.
+    # Fail closed and preserve the workdir/trace for diagnosis instead of
+    # spending a deterministic score on an invalid cell.
+    if dispatch.blocked:
+        score = {
+            "verdict": "blocked",
+            "evidence": "",
+            "notes": "external oracle skipped because live dispatch did not reach a terminal trace",
+        }
+    else:
+        score = score_tree(task, tree)
     metrics = dict(dispatch.metrics or {})
     metrics["prewarm_wall_s"] = prewarm["wall_s"]
     metrics.update(diff_stats(tree, baseline_ref))
@@ -904,9 +917,13 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     metrics["implementation_mode"] = args.implementation_mode or "agent_task"
     metrics["worker_profile"] = profile
     metrics["story_path"] = str(args.story or BENCH_BUGFIX_STORY)
+    nonterminal_runtime = trace_has_unclosed_runtime(trace_ref)
+    if nonterminal_runtime:
+        metrics["measurement_status"] = "incomplete"
+        notes += "; incomplete strict trace: supervised runtime has no terminal event"
     incomplete_measurement = metrics.get("measurement_status") == "incomplete"
     return {
-        "blocked": proc.returncode != 0 or incomplete_measurement,
+        "blocked": proc.returncode != 0 or incomplete_measurement or nonterminal_runtime,
         "notes": notes,
         "metrics": metrics,
     }
@@ -1016,7 +1033,8 @@ def build_kitsoki_prompt(
         "       escalate_low_value: true",
         "   (workspace_prepared true + workspace_id EMPTY ⇒ implementer edits the prepared workdir directly + commits. Leave automatic start unset: the explicit full_pipeline submission below is the one lifecycle entry.)",
         "3. Submit `full_pipeline` ONCE with **session.submit** (not session.drive),",
-        "   passing `async_after_ms: 300000` so a live worker turn settles before",
+        "   passing `async_after_ms: 900000` so a supervised live worker gets its full",
+        "   declared 15-minute bound to settle before control returns.",
         "   control returns. Use the same async_after_ms value for EVERY later",
         "   session.submit in this cell. Then run this exact control loop: after EVERY",
         "   settled turn call session.status; if `running` is unexpectedly present,",
@@ -1462,6 +1480,33 @@ def trace_event_count(trace_ref: str, needle: str) -> int:
         if needle in line:
             count += 1
     return count
+
+
+def trace_has_unclosed_runtime(trace_ref: str) -> bool:
+    """Return true when a strict trace records a runtime start without its end.
+
+    The runner owns the temporary authentication home for the MCP orchestrator.
+    Returning while such a worker is live tears that environment down and turns
+    a transport/lifecycle defect into a misleading candidate score. Match
+    events by call id so sequential workers are handled independently.
+    """
+    if not os.path.exists(trace_ref):
+        return False
+    starts: set[str] = set()
+    ends: set[str] = set()
+    for line in Path(trace_ref).read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            entry = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        call_id = str(entry.get("call_id") or "")
+        if not call_id:
+            continue
+        if entry.get("kind") == "agent.runtime.start":
+            starts.add(call_id)
+        elif entry.get("kind") == "agent.runtime.end":
+            ends.add(call_id)
+    return bool(starts - ends)
 
 
 def current_head(tree: Path) -> str:
