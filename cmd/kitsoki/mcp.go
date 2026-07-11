@@ -105,7 +105,6 @@ func mcpOperatingSystemPaths(kitsokiRepo string) (workspaceRoot, workspaceScript
 	}
 	return filepath.Join(root, ".capsules", "workspaces"), filepath.Join(root, "scripts", "dev-workspace.sh")
 }
-
 // studioHarnessBuilder is the production studio harness seam. Replay mode
 // delegates to studio.DefaultHarnessBuilder (a no-LLM ReplayHarness over the
 // recording). Live mode loads the driven story's def for prompt context and
