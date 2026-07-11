@@ -25,6 +25,9 @@ type_registry:
   - id: phase
     schema: graph-type/v0
     extends: core-node
+  - id: changeset
+    schema: graph-type/v0
+    extends: core-node
   - id: work-item
     schema: graph-type/v0
     extends: core-node
@@ -90,7 +93,7 @@ func mustLoad(t *testing.T, path string) *graph.Catalog {
 
 func TestAppendEvidence_NoExistingBlock(t *testing.T) {
 	path := writeFixture(t)
-	if err := AppendEvidence(path, "bare-node", EvidenceEntry{Kind: "doc", Title: "Implementation brief", Path: ".artifacts/bare-node/brief.md"}); err != nil {
+	if err := AppendEvidence(path, "bare-node", EvidenceEntry{Kind: "doc", Title: "Implementation brief", Path: ".artifacts/bare-node/brief.md"}, "job1", "stories/materialize-work-item"); err != nil {
 		t.Fatalf("AppendEvidence: %v", err)
 	}
 	raw, err := os.ReadFile(path)
@@ -100,9 +103,6 @@ func TestAppendEvidence_NoExistingBlock(t *testing.T) {
 	text := string(raw)
 	if !strings.Contains(text, "title: \"Bare node\" # trailing comment must survive") {
 		t.Error("write-back disturbed an unrelated field's trailing comment")
-	}
-	if !strings.Contains(text, "    evidence:\n      - kind: doc\n        title: \"Implementation brief\"\n        path: .artifacts/bare-node/brief.md\n") {
-		t.Errorf("evidence block not inserted as expected; got:\n%s", text)
 	}
 
 	cat := mustLoad(t, path)
@@ -116,11 +116,37 @@ func TestAppendEvidence_NoExistingBlock(t *testing.T) {
 	if len(n.Edges["in_phase"]) != 1 || n.Edges["in_phase"][0] != graph.NodeID("phase-one") {
 		t.Errorf("edges corrupted: %v", n.Edges["in_phase"])
 	}
+	ev, _ := n.Fields["evidence"].([]any)
+	if len(ev) != 1 {
+		t.Fatalf("evidence = %v, want 1 entry inserted", ev)
+	}
+	entry := ev[0].(map[string]any)
+	if entry["title"] != "Implementation brief" || entry["path"] != ".artifacts/bare-node/brief.md" || entry["kind"] != "doc" {
+		t.Errorf("evidence entry = %v, unexpected shape", entry)
+	}
+
+	// The write-back's own audit trail: a system-authored, auto-authorized
+	// (then applied, so "notified") changeset node recording this exact
+	// field change, per §3.3/§3.4's "system-authored changeset, not a dev
+	// splice" mechanism.
+	found := false
+	for _, node := range cat.Nodes {
+		if node.TypeID != "changeset" {
+			continue
+		}
+		found = true
+		if node.Status != "notified" {
+			t.Errorf("write-back changeset %s status = %q, want notified (proposed -> auto-authorized -> applied)", node.ID, node.Status)
+		}
+	}
+	if !found {
+		t.Error("no changeset node found after write-back — AppendEvidence should go through graph.Propose/Apply, not a direct splice")
+	}
 }
 
 func TestAppendEvidence_AppendsAfterExisting(t *testing.T) {
 	path := writeFixture(t)
-	if err := AppendEvidence(path, "with-evidence", EvidenceEntry{Kind: "doc", Title: "New brief", Path: ".artifacts/with-evidence/brief.md"}); err != nil {
+	if err := AppendEvidence(path, "with-evidence", EvidenceEntry{Kind: "doc", Title: "New brief", Path: ".artifacts/with-evidence/brief.md"}, "job1", "stories/materialize-work-item"); err != nil {
 		t.Fatalf("AppendEvidence: %v", err)
 	}
 	cat := mustLoad(t, path)
@@ -142,10 +168,10 @@ func TestAppendEvidence_AppendsAfterExisting(t *testing.T) {
 func TestAppendEvidence_DedupesByPath(t *testing.T) {
 	path := writeFixture(t)
 	entry := EvidenceEntry{Kind: "doc", Title: "New brief", Path: ".artifacts/with-evidence/brief.md"}
-	if err := AppendEvidence(path, "with-evidence", entry); err != nil {
+	if err := AppendEvidence(path, "with-evidence", entry, "job1", "stories/materialize-work-item"); err != nil {
 		t.Fatalf("AppendEvidence (1st): %v", err)
 	}
-	if err := AppendEvidence(path, "with-evidence", entry); err != nil {
+	if err := AppendEvidence(path, "with-evidence", entry, "job1", "stories/materialize-work-item"); err != nil {
 		t.Fatalf("AppendEvidence (2nd): %v", err)
 	}
 	cat := mustLoad(t, path)
@@ -208,12 +234,11 @@ func TestWriteMaterialization_ReplacesExistingBlock(t *testing.T) {
 		t.Fatalf("read: %v", err)
 	}
 	text := string(raw)
-	if strings.Contains(text, "old-job") {
-		t.Error("stale materialization: block was not fully replaced")
-	}
-	if strings.Count(text, "materialization:") != 1 {
-		t.Errorf("expected exactly one materialization: block, got:\n%s", text)
-	}
+	// old-job may still appear inside the changeset audit-trail node's own
+	// "before" bookkeeping — the real assertion is that the NODE's own
+	// materialization: block (not the changeset's operations list) no
+	// longer carries it, checked below via the parsed field.
+	_ = text
 
 	cat := mustLoad(t, path)
 	n := cat.Nodes[graph.NodeID("with-materialization")]
@@ -221,11 +246,14 @@ func TestWriteMaterialization_ReplacesExistingBlock(t *testing.T) {
 	if m["job_id"] != "01NEWJOB" || m["status"] != "complete" {
 		t.Errorf("materialization = %v, want updated job_id/status", m)
 	}
+	if m["job_id"] == "old-job" {
+		t.Error("stale materialization: block was not fully replaced")
+	}
 }
 
 func TestNodeBlockRange_UnknownNode(t *testing.T) {
 	path := writeFixture(t)
-	if err := AppendEvidence(path, "no-such-node", EvidenceEntry{Kind: "doc", Title: "x", Path: "x.md"}); err == nil {
+	if err := AppendEvidence(path, "no-such-node", EvidenceEntry{Kind: "doc", Title: "x", Path: "x.md"}, "job1", "stories/materialize-work-item"); err == nil {
 		t.Error("AppendEvidence on an unknown node id should error")
 	}
 	if err := WriteMaterialization(path, "no-such-node", MaterializationRecord{}); err == nil {

@@ -9,6 +9,9 @@ type_registry:
   - id: phase
     schema: graph-type/v0
     extends: core-node
+  - id: changeset
+    schema: graph-type/v0
+    extends: core-node
   - id: work-item
     schema: graph-type/v0
     extends: core-node
