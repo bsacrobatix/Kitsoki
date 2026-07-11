@@ -43,6 +43,20 @@ export function softRealpath(p) {
 /**
  * Load a *.demo.json manifest (contract §4), resolving every relative path
  * against the manifest file's directory.
+ *
+ * Two manifest modes, distinguished by which of `mockup` / `sources` is
+ * present (generalized for C2 — real-app demo packets, per
+ * ~/code/POG/.context/use-case-loop-plan.md §4 row C2):
+ *
+ *   - "mockup" mode (original): `mockup` names a generated static HTML file
+ *     that embeds `const states = { ... }`. checkStates parses that literal
+ *     out of the HTML; checkFreshness uses the mockup file's mtime as the
+ *     freshness baseline.
+ *   - "real-app" mode (new): `mockup` is absent; `states` is a manifest-
+ *     declared array of valid state/step ids (no HTML to parse — a live app
+ *     has no such artifact), and `sources` is a declared array of source
+ *     paths (e.g. the portal/story files the tour exercises) whose mtimes
+ *     form the freshness baseline in place of a single mockup file's mtime.
  */
 export function loadManifest(manifestPath) {
   const absManifestPath = path.resolve(manifestPath);
@@ -51,10 +65,20 @@ export function loadManifest(manifestPath) {
   if (raw.version !== 1) {
     throw new Error(`unsupported demo manifest version: ${JSON.stringify(raw.version)} (expected 1)`);
   }
-  if (!raw.mockup) throw new Error("manifest missing required field: mockup");
   if (!raw.deck) throw new Error("manifest missing required field: deck");
 
-  const mockupAbs = path.resolve(manifestDir, raw.mockup);
+  const mode = raw.mockup ? "mockup" : "real-app";
+  if (mode === "real-app") {
+    if (!Array.isArray(raw.sources) || raw.sources.length === 0) {
+      throw new Error("manifest missing required field: mockup, or sources (non-empty array) for a real-app manifest");
+    }
+    if (!Array.isArray(raw.states) || raw.states.length === 0) {
+      throw new Error("real-app manifest missing required field: states (non-empty array)");
+    }
+  }
+
+  const mockupAbs = raw.mockup ? path.resolve(manifestDir, raw.mockup) : undefined;
+  const sourcesAbs = mode === "real-app" ? raw.sources.map((s) => path.resolve(manifestDir, s)) : undefined;
   const deckAbs = path.resolve(manifestDir, raw.deck);
   const deckDir = path.dirname(deckAbs);
   const deckClipsRootAbs = raw.deckClipsRoot ? path.resolve(deckDir, raw.deckClipsRoot) : undefined;
@@ -71,7 +95,9 @@ export function loadManifest(manifestPath) {
     raw,
     path: absManifestPath,
     dir: manifestDir,
+    mode,
     mockupAbs,
+    sourcesAbs,
     deckAbs,
     deckDir,
     deckClipsRootAbs,

@@ -28,10 +28,20 @@ function failCheck(name, detail) {
 }
 
 function checkStates(manifest) {
-  const html = fs.readFileSync(manifest.mockupAbs, "utf8");
-  const stateKeys = parseObjectLiteralTopKeys(html, "states");
-  if (!stateKeys) {
-    return failCheck("states", `could not find "const states = { ... }" in ${manifest.mockupAbs}`);
+  let stateKeys;
+  if (manifest.mode === "real-app") {
+    // No generated HTML to parse for a live app — the manifest declares its
+    // valid state/step ids directly (contract §5 check 1, generalized).
+    stateKeys = Array.isArray(manifest.raw.states) ? manifest.raw.states : null;
+    if (!stateKeys) {
+      return failCheck("states", `real-app manifest ${manifest.path} is missing a "states" array`);
+    }
+  } else {
+    const html = fs.readFileSync(manifest.mockupAbs, "utf8");
+    stateKeys = parseObjectLiteralTopKeys(html, "states");
+    if (!stateKeys) {
+      return failCheck("states", `could not find "const states = { ... }" in ${manifest.mockupAbs}`);
+    }
   }
   const problems = [];
   for (const tour of manifest.tours) {
@@ -71,11 +81,31 @@ function checkDeckPaths(manifest) {
 }
 
 function checkFreshness(manifest) {
-  let mockupMtime;
-  try {
-    mockupMtime = fs.statSync(manifest.mockupAbs).mtimeMs;
-  } catch (err) {
-    return failCheck("freshness", `could not stat mockup ${manifest.mockupAbs} (${err.message})`);
+  // Freshness baseline: the mockup file's mtime in "mockup" mode, or the
+  // newest of the manifest's declared `sources` in "real-app" mode (no
+  // single generated file to compare against for a live app — contract §5
+  // check 3, generalized).
+  let baselineMtime;
+  let baselineLabel;
+  if (manifest.mode === "real-app") {
+    let newest = 0;
+    for (const srcAbs of manifest.sourcesAbs) {
+      try {
+        const mtime = fs.statSync(srcAbs).mtimeMs;
+        if (mtime > newest) newest = mtime;
+      } catch (err) {
+        return failCheck("freshness", `could not stat declared source ${srcAbs} (${err.message})`);
+      }
+    }
+    baselineMtime = newest;
+    baselineLabel = "declared sources";
+  } else {
+    try {
+      baselineMtime = fs.statSync(manifest.mockupAbs).mtimeMs;
+    } catch (err) {
+      return failCheck("freshness", `could not stat mockup ${manifest.mockupAbs} (${err.message})`);
+    }
+    baselineLabel = "the mockup";
   }
   const problems = [];
   for (const tour of manifest.tours) {
@@ -90,10 +120,10 @@ function checkFreshness(manifest) {
     const clipMtime = fs.statSync(tour.outAbs).mtimeMs;
     const tourMtime = fs.statSync(tour.tourAbs).mtimeMs;
     if (clipMtime < tourMtime) problems.push(`${tour.tour}: clip ${tour.out} is older than the tour file`);
-    if (clipMtime < mockupMtime) problems.push(`${tour.tour}: clip ${tour.out} is older than the mockup`);
+    if (clipMtime < baselineMtime) problems.push(`${tour.tour}: clip ${tour.out} is older than ${baselineLabel}`);
   }
   if (problems.length) return failCheck("freshness", problems.join("; "));
-  return pass("freshness", `${manifest.tours.length} clip(s) newer than their tour and the mockup`);
+  return pass("freshness", `${manifest.tours.length} clip(s) newer than their tour and ${baselineLabel}`);
 }
 
 function checkChapters(manifest, matches) {

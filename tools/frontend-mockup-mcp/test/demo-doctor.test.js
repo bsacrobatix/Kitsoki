@@ -6,8 +6,10 @@ import path from "node:path";
 import { runDoctor } from "../scripts/demo-doctor.mjs";
 import {
   cloneFixture,
+  cloneRealAppFixture,
   removeFixture,
   setFreshTimestamps,
+  setFreshTimestampsRealApp,
   touch,
   manifestPath,
   readManifestJSON,
@@ -59,6 +61,48 @@ test("demo-doctor: clean fixture passes all five checks", () => {
       ["states", "deck paths", "freshness", "chapters", "estimate"]
     );
   });
+});
+
+test("demo-doctor: clean real-app fixture (no mockup.html) passes all five checks", () => {
+  const dir = cloneRealAppFixture();
+  setFreshTimestampsRealApp(dir);
+  try {
+    const report = runDoctor(manifestPath(dir));
+    assert.equal(report.ok, true, JSON.stringify(report, null, 2));
+    for (const check of report.checks) assert.equal(check.ok, true, `${check.name}: ${check.detail}`);
+  } finally {
+    removeFixture(dir);
+  }
+});
+
+test("demo-doctor: real-app fixture fails 'states' when a tour targets an undeclared state", () => {
+  const dir = cloneRealAppFixture();
+  const raw = readManifestJSON(dir);
+  raw.states = ["a"]; // drop "b" — tour-b.json's setStep('b') is now undeclared
+  writeManifestJSON(dir, raw);
+  setFreshTimestampsRealApp(dir);
+  try {
+    const report = runDoctor(manifestPath(dir));
+    const check = checkByName(report, "states");
+    assert.equal(check.ok, false);
+    assert.match(check.detail, /not a states key/);
+  } finally {
+    removeFixture(dir);
+  }
+});
+
+test("demo-doctor: real-app fixture fails 'freshness' when a clip is older than a declared source", () => {
+  const dir = cloneRealAppFixture();
+  setFreshTimestampsRealApp(dir);
+  touch(path.join(dir, "app-source.js"), 20_000); // source edited after the clip was captured
+  try {
+    const report = runDoctor(manifestPath(dir));
+    const check = checkByName(report, "freshness");
+    assert.equal(check.ok, false);
+    assert.match(check.detail, /older than declared sources/);
+  } finally {
+    removeFixture(dir);
+  }
 });
 
 test("demo-doctor check 1 (states): FAILs when a tour's setStep target isn't a states key", () => {
