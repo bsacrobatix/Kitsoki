@@ -298,10 +298,8 @@ docs land):
 				}
 			}
 
-			// The operating-system graph is a server-held authority graph. Legacy
-			// remains the default because the replay decision is currently HOLD;
-			// strict is an explicit no-LLM preview and escape is an audited
-			// compatibility path.
+			// The operating-system graph is a server-held authority graph. Strict
+			// is the default; legacy and escape are explicit compatibility paths.
 			workspaceRoot, workspaceScript := mcpOperatingSystemPaths(os.Getenv(kitrepo.EnvVar))
 			operatingServices, osErr := studio.NewOperatingSystemServices(
 				studio.StudioOperatingProfile(operatingProfile),
@@ -361,8 +359,8 @@ docs land):
 		"default issue.create sink: local-artifact writes .artifacts/issues/bugs; github files through the native GitHub issue provider")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
-	cmd.Flags().StringVar(&operatingProfile, "operating-profile", string(studio.StudioOperatingProfileLegacy),
-		"Studio operating-system profile: legacy (default compatibility), strict (preview; replay decision hold), or escape (audited exception)")
+	cmd.Flags().StringVar(&operatingProfile, "operating-profile", string(studio.DefaultStudioOperatingProfile),
+		"Studio operating-system profile: strict (default), legacy (explicit compatibility), or escape (audited exception)")
 	cmd.Flags().StringArrayVar(&graphCatalogs, "catalog", nil,
 		"[alias=]path to a bound catalog for the mounted graph.*/feedback.* tool family; repeatable, first is default (mirrors `kitsoki mcp-graph --catalog`; omit to leave the family catalog-less, degrading every call to NO_CATALOG)")
 	cmd.Flags().BoolVar(&graphSteward, "graph-steward", false,

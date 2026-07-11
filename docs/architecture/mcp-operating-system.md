@@ -1,30 +1,33 @@
-# MCP operating system — controlled rollout architecture
+# MCP operating system — strict-default architecture
 
 The MCP operating system is a candidate control plane for agents that need a
-scoped change, proof, and durable evidence. It is not a replacement for the
-current Studio MCP toolbox yet, and it does not change the default
-`kitsoki-mcp-driver` profile.
+scoped change, proof, and durable evidence. Strict is the default Studio MCP
+profile; the older toolbox is available only through an explicit `legacy`
+profile selection.
 
 ## Rollout state
 
-**HOLD.** The only promotion candidate is `strict`, but its recorded replay
-matrix has a correctness failure for `trace-stalled-turn`. A safety pass is
-necessary but insufficient: every safety and correctness cell must pass before
-cost or latency can be compared. This is not permission to make strict default.
+**Operator-selected strict default; refreshed replay pending.** `kitsoki mcp`
+now starts strict unless an operator explicitly selects `legacy` or `escape`.
+The recorded replay below predates the strict lifecycle repairs, so it remains
+historical evidence rather than a current promotion record. This default also
+does **not** establish a model-quality advantage over raw Codex; the native
+GPT-5.4 comparison remains a tie on correctness with materially higher MCP
+time and token use.
 
 The decision is generated from
 [`tools/arena/specs/mcp-operating-system-replay.yaml`](../../tools/arena/specs/mcp-operating-system-replay.yaml)
 and enforced by
 [`internal/agentbench/mcp_operating_system_decision.go`](../../internal/agentbench/mcp_operating_system_decision.go).
 
-| Candidate | Safety | Correctness | Disposition |
+| Historical replay candidate | Safety | Correctness | Recorded disposition |
 |---|---:|---:|---|
 | `strict` | pass | fail (`trace-stalled-turn`) | hold |
 | `escape` | fail | pass | not promotable |
 | `legacy` | fail | pass | not promotable |
 
 The existing Studio MCP architecture remains documented in [MCP studio](mcp-studio.md).
-This page describes only the candidate and its rollout boundary.
+This page describes the default governance boundary and its explicit escapes.
 
 ## Proposed control plane
 
@@ -50,26 +53,11 @@ tool absent from the profile cannot be reached by changing the prompt.
 
 ## Profiles and migration boundary
 
-`strict` is the only profile that could ever become a default. `escape` is a
-separate, receipt-bearing exception path; `legacy` names the current toolbox
-surface for comparison and compatibility. Neither can be promoted because their
-replay safety failures remain visible.
-
-While the decision is HOLD:
-
-- existing clients continue using the existing Studio MCP registration and
-  `kitsoki-mcp-driver` unchanged;
-- `kitsoki-mcp-driver-operating-system` is a preview contract, not a default
-  attachment or production migration instruction;
-- strict profile work is limited to deterministic replay, schema, and
-  diagnostic work; and
-- no caller may silently fall back to `host.run`, `host.patch`, raw worktree
-  tools, or legacy when strict rejects an operation.
-
-After an eligible replay decision, final integration may register the profile,
-publish the canonical tool/default documentation, and offer an opt-in migration.
-An opt-in must open an objective, use a managed workspace, run named gates, and
-retain receipts. It is not a bulk conversion of existing MCP clients.
+`strict` is the default. `escape` is a separate, receipt-bearing exception
+path; `legacy` is an explicit compatibility toolbox. A strict rejection never
+silently falls back to `host.run`, `host.patch`, raw worktree tools, or legacy.
+An operator must choose the alternative profile deliberately and retain its
+exception evidence.
 
 ## Escape and rollback
 
@@ -78,11 +66,9 @@ proceed, use the separately authorized escape profile, and record the exception
 and resulting evidence. The escape result cannot become strict promotion
 evidence.
 
-The rollout is reversible: stop new opt-ins or registration, preserve managed
-workspace receipts and traces, return affected callers to the explicitly
-recorded legacy/default attachment, then repair the failing strict replay case
-and review the full hard-gate matrix again. Because the current decision is
-HOLD, there is no default change to roll back.
+The rollout is reversible: preserve managed-workspace receipts and traces, then
+return an affected client to an explicitly recorded `legacy` or `escape`
+attachment while the strict defect is repaired and replayed.
 
 ## Decision and live-calibration boundary
 
@@ -94,9 +80,10 @@ python3 tools/arena/arena/mcp_operating_system_report.py report \
   --out .artifacts/mcp-operating-system/replay
 ```
 
-The result must remain HOLD until `trace-stalled-turn` and every other strict
-safety/correctness cell pass. The derived report, JSON decision, and Slidey deck
-are evidence; none dispatches a provider call.
+The derived report, JSON decision, and Slidey deck are evidence; none dispatches
+a provider call. Regenerate the replay against the strict-default source before
+using it as a release gate. It is a governance gate, not a model-superiority
+claim.
 
 Live calibration is outside automated tests. It needs an operator to supply the
 exact authorization token `I_UNDERSTAND_LIVE_CALIBRATION`, a recorded budget of
@@ -107,7 +94,5 @@ authorization as a promotion.
 
 ## Ownership
 
-This document and the preview profiles describe rollout behavior. Final
-integration owns Studio tool registration, canonical `mcp-studio.md` and agent
-guide wording, and default driver profiles. Keeping ownership separate prevents
-a HOLD decision from becoming a default merely because a profile file exists.
+This document owns the default governance behavior; Studio registration and the
+canonical agent guide must remain aligned with it.

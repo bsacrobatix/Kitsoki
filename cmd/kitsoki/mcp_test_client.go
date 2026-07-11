@@ -16,6 +16,8 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
+
+	studio "kitsoki/internal/mcp/studio"
 )
 
 // mcpTestCmd starts a studio MCP server subprocess and drives it with the Go MCP
@@ -144,8 +146,8 @@ Examples:
 		"forwarded to the default server args as `kitsoki mcp --workspace <dir-or-app.yaml>`")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false,
 		"forwarded to the default server args as `kitsoki mcp --read-only`")
-	cmd.Flags().StringVar(&operatingProfile, "operating-profile", "",
-		"forwarded to the default server args as `kitsoki mcp --operating-profile <legacy|strict|escape>`")
+	cmd.Flags().StringVar(&operatingProfile, "operating-profile", string(studio.StudioOperatingProfileLegacy),
+		"forwarded to the test server as `kitsoki mcp --operating-profile <legacy|strict|escape>` (default legacy for generic toolbox tests)")
 	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second,
 		"overall timeout for server startup, initialize, and tool calls")
 	cmd.Flags().BoolVar(&listTools, "list-tools", true,

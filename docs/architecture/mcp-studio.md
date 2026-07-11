@@ -86,19 +86,18 @@ stubs, not `host_cassette` or Starlark cassette fields.
 
 `story.validate` and `story.test` are deterministic by construction.
 
-## Operating-system profiles (strict preview on hold)
+## Operating-system profiles (strict default)
 
-Studio now has an objective-backed operating-system plane. The replay decision
-is currently **HOLD** because strict fails the `trace-stalled-turn` correctness
-cell; therefore `legacy` remains the default and no client should describe
-strict as promoted. Select a profile when starting the server:
+Studio has an objective-backed operating-system plane. `strict` is the default
+for `kitsoki mcp`; choose `legacy` or `escape` only when their explicit
+compatibility/exception authority is required:
 
 ```sh
-# Default compatibility toolbox; existing story/session/host/vcs tools remain.
-kitsoki mcp --operating-profile legacy
+# Default: only the objective/workspace/CodeAct/gate/explain plane.
+kitsoki mcp
 
-# Explicit no-LLM preview: only the objective/workspace/CodeAct/gate/explain plane.
-kitsoki mcp --operating-profile strict
+# Explicit compatibility toolbox; existing story/session/host/vcs tools remain.
+kitsoki mcp --operating-profile legacy
 
 # Audited exception surface: strict plane plus host.run, never host.patch.
 kitsoki mcp --operating-profile escape
@@ -116,7 +115,7 @@ mutation is tied to an open objective and returns an additive receipt. A named
 Escape `host.run` requires an open objective plus an explicit mode and reason;
 it is an exception path, not a replacement for typed gates. See the durable
 [operating-system architecture](mcp-operating-system.md) and the replay
-[evaluation boundary](../testing/mcp-operating-system.md) for the hold evidence.
+[evaluation boundary](../testing/mcp-operating-system.md) for governance evidence.
 
 ## Tool surface
 
