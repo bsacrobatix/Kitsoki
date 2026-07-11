@@ -169,6 +169,9 @@ func graphFindOp(args map[string]any) (Result, error) {
 		}
 		limit = n
 	}
+	if limit < 0 {
+		return Result{}, fmt.Errorf("host.graph.find: %q must be >= 0, got %d", "limit", limit)
+	}
 	offset := 0
 	if rawOffset, ok := args["offset"]; ok {
 		n, err := graphIntArg(rawOffset)
@@ -176,6 +179,9 @@ func graphFindOp(args map[string]any) (Result, error) {
 			return Result{}, fmt.Errorf("host.graph.find: %q must be an integer: %w", "offset", err)
 		}
 		offset = n
+	}
+	if offset < 0 {
+		return Result{}, fmt.Errorf("host.graph.find: %q must be >= 0, got %d", "offset", offset)
 	}
 
 	var revIdx objectgraph.ReverseIndex
