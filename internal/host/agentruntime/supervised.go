@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,8 @@ type Supervised struct{}
 type activityBuffer struct {
 	data     bytes.Buffer
 	activity *activitySignal
+	semantic bool
+	pending []byte
 }
 
 type activitySignal struct {
@@ -37,9 +40,20 @@ func (s *activitySignal) touch() {
 func (b *activityBuffer) Write(p []byte) (int, error) {
 	n, err := b.data.Write(p)
 	if n > 0 && b.activity != nil {
-		b.activity.touch()
+		if b.semantic { b.touchSemantic(p[:n]) } else { b.activity.touch() }
 	}
 	return n, err
+}
+
+func (b *activityBuffer) touchSemantic(p []byte) {
+	b.pending = append(b.pending, p...)
+	for {
+		i := bytes.IndexByte(b.pending, '\n'); if i < 0 { return }
+		line := bytes.TrimSpace(b.pending[:i]); b.pending = b.pending[i+1:]
+		if len(line) == 0 { continue }
+		var event struct { Type string `json:"type"`; Subtype string `json:"subtype"` }
+		if json.Unmarshal(line, &event) != nil || event.Type != "system" || event.Subtype != "thinking_tokens" { b.activity.touch() }
+	}
 }
 
 func (b *activityBuffer) String() string { return b.data.String() }
@@ -98,6 +112,7 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 	activity.touch()
 	var stdout, stderr activityBuffer
 	stdout.activity = activity
+	stdout.semantic = spec.SemanticActivity
 	stderr.activity = activity
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
