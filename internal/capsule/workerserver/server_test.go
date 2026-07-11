@@ -45,6 +45,9 @@ func TestAuthenticatedWorkerMaterializesAndVerifiesPortableSource(t *testing.T) 
 		t.Fatal(err)
 	}
 	runner := func(ctx context.Context, workspace string, prepared executor.Prepared, _ string) (executor.Result, error) {
+		if prepared.ID == "remote-nonzero" {
+			return executor.Result{ExitCode: 7, VerdictArtifact: "verdict:failed"}, nil
+		}
 		verdict, err := (storylauncher.Launcher{StoryPath: filepath.Join(workspace, prepared.Envelope.StoryPath)}).Launch(ctx, prepared)
 		if err != nil {
 			return executor.Result{}, err
@@ -124,6 +127,21 @@ func TestAuthenticatedWorkerMaterializesAndVerifiesPortableSource(t *testing.T) 
 	}
 	if completed.Result.ExecutionID != prepared.ID || len(completed.Result.VerdictJSON) == 0 {
 		t.Fatalf("result = %+v", completed.Result)
+	}
+
+	nonzero := prepared
+	nonzero.ID = "remote-nonzero"
+	nonzeroBody, _ := json.Marshal(map[string]any{"prepared": nonzero})
+	nonzeroRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/capsules/run", bytes.NewReader(nonzeroBody))
+	nonzeroRequest.Header.Set("Authorization", "Bearer test-token")
+	nonzeroRequest.Header.Set("Content-Type", "application/json")
+	nonzeroResponse, err := client.Do(nonzeroRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonzeroRaw := readAndClose(t, nonzeroResponse)
+	if nonzeroResponse.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(nonzeroRaw, []byte("non-zero exit code 7")) || !bytes.Contains(nonzeroRaw, []byte(`"status":"failed"`)) {
+		t.Fatalf("nonzero run = %d: %s", nonzeroResponse.StatusCode, nonzeroRaw)
 	}
 
 	statusRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/capsules/executions/"+prepared.ID, nil)

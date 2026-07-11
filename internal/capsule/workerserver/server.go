@@ -378,6 +378,9 @@ func (s *Server) execute(ctx context.Context, prepared executor.Prepared, reqID 
 	if err != nil {
 		return s.fail(record, prepared, "running_story", err)
 	}
+	if result.ExitCode != 0 {
+		return s.fail(record, prepared, "running_story", fmt.Errorf("capsule worker: runner reported non-zero exit code %d", result.ExitCode))
+	}
 	result.ExecutionID = prepared.ID
 	if result.Provider == nil {
 		result.Provider = map[string]string{}

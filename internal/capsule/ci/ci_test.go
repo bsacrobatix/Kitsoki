@@ -563,7 +563,7 @@ func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testi
 			}
 			verdict := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: req.Prepared.Envelope.SourceDigest, StoryDigest: req.Prepared.Envelope.StoryDigest, EnvironmentDigest: req.Prepared.Envelope.Environment.Digest, EnvelopeDigest: req.Prepared.Envelope.Digest}
 			raw, _ := json.Marshal(verdict)
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": executor.Result{VerdictArtifact: "artifact:verdict", VerdictJSON: raw}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": executor.Result{VerdictArtifact: "artifact:verdict", VerdictJSON: raw}, "run": executor.ExecutionStatus{ExecutionID: req.Prepared.ID, Status: "completed", Stage: "terminal"}})
 		default:
 			http.NotFound(w, r)
 		}

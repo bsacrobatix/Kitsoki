@@ -129,6 +129,16 @@ func (w HTTPRemoteWorker) Run(ctx context.Context, prepared Prepared, _ Task, si
 			} else {
 				err = ExecutionError{Execution: workerStatus}
 			}
+		} else {
+			workerStatus, statusErr := normalizeExecutionStatus(response.Run, prepared.ID)
+			if statusErr != nil {
+				err = remoteCallError{Method: meta.Method, Path: meta.Path, Host: meta.Host, RequestID: meta.RequestID, Status: meta.Status, Duration: meta.Duration, Kind: "status", Body: sanitizeRemoteBody([]byte(response.Error)), Cause: statusErr}
+			} else if workerStatus.Status != "completed" || workerStatus.Stage != "terminal" || response.Result.ExitCode != 0 {
+				if workerStatus.Error == "" {
+					workerStatus.Error = "remote worker returned an unsuccessful completion"
+				}
+				err = ExecutionError{Execution: workerStatus}
+			}
 		}
 	}
 	if sink != nil {
