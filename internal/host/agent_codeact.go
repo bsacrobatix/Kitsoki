@@ -45,6 +45,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	kitsokimcp "kitsoki/internal/mcp"
 
@@ -114,6 +115,60 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 		schemaFn = fn
 	}
 
+	// From here on the call is committed to dispatch: emit the same
+	// agent.call.start / agent.call.complete / agent.call.error trace events
+	// task/ask/decide emit (via appendAgentCalledEvent/appendAgentReturnedEvent/
+	// appendAgentErrorEvent), so codeact calls are visible to any consumer that
+	// reads those event kinds (e.g. analyze.py, agentbench). Before this fix,
+	// host.agent.codeact emitted NONE of these — a codeact call was invisible
+	// to cost/token rollups that only look at agent.call.* events (the M1
+	// accounting gap in
+	// .context/2026-07-11-gx10-small-model-study-adversarial-review.md).
+	// callID is threaded onto ctx (and therefore into runCtx, which derives
+	// from ctx) so the per-step claude calls inside the loop tee their usage
+	// into the same box AgentReturned/AgentError read from at the end.
+	callID := newUUID()
+	callStart := time.Now()
+	ctx = WithCallID(ctx, callID)
+	runCtx = WithCallID(runCtx, callID)
+	appendAgentCalledEvent(ctx, callStart, callID, goal, AgentCalledPayload{
+		Verb:  "codeact",
+		Agent: agentName,
+		Model: agent.Model,
+		Input: marshalInput(map[string]any{"budget": budget, "capabilities": capabilityLabels}),
+	})
+
+	finish := func(res Result, err error) (Result, error) {
+		callEnd := time.Now()
+		durationMS := callEnd.Sub(callStart).Milliseconds()
+		if err != nil {
+			appendAgentErrorEvent(ctx, callEnd, callID, AgentErrorPayload{
+				Verb:       "codeact",
+				Agent:      agentName,
+				DurationMS: durationMS,
+				Error:      err.Error(),
+			})
+			return res, err
+		}
+		if res.Error != "" {
+			appendAgentErrorEvent(ctx, callEnd, callID, AgentErrorPayload{
+				Verb:       "codeact",
+				Agent:      agentName,
+				DurationMS: durationMS,
+				Error:      res.Error,
+			})
+			return res, nil
+		}
+		appendAgentReturnedEvent(ctx, callEnd, callID, AgentReturnedPayload{
+			Verb:       "codeact",
+			Agent:      agentName,
+			Model:      agent.Model,
+			DurationMS: durationMS,
+			Response:   marshalResponse(res.Data),
+		})
+		return res, nil
+	}
+
 	// Direct-API path: when the effect's resolved plugin is a builtin.local_llm
 	// transport (an OpenAI-compatible HTTP endpoint, e.g. GLM-5.2), drive the
 	// loop over HTTP via ApiCodeactAgent instead of forking claude -p per step.
@@ -126,18 +181,20 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 		if pluginName := AgentPluginNameFromCtx(ctx); reg.IsLocalLLM(pluginName) {
 			plug, perr := reg.Resolve(pluginName)
 			if perr != nil {
-				return Result{Error: fmt.Sprintf("host.agent.codeact: resolve api plugin %q: %v", pluginName, perr), FailureKind: FailureInfra}, nil
+				return finish(Result{Error: fmt.Sprintf("host.agent.codeact: resolve api plugin %q: %v", pluginName, perr), FailureKind: FailureInfra}, nil)
 			}
-			return runCodeactLoop(runCtx, worldArg, schemaFn, newApiCodeactAgent(ctx, plug, args, goal, budget, capabilityLabels), budget, capabilities)
+			res, err := runCodeactLoop(runCtx, worldArg, schemaFn, newApiCodeactAgent(ctx, plug, args, goal, budget, capabilityLabels), budget, capabilities)
+			return finish(res, err)
 		}
 	}
 
 	agentImpl, cleanup, err := newRealCodeactAgent(ctx, args, goal, budget, capabilityLabels)
 	if err != nil {
-		return Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureInfra}, nil
+		return finish(Result{Error: fmt.Sprintf("host.agent.codeact: %v", err), FailureKind: FailureInfra}, nil)
 	}
 	defer cleanup()
-	return runCodeactLoop(runCtx, worldArg, schemaFn, agentImpl, budget, capabilities)
+	res, err := runCodeactLoop(runCtx, worldArg, schemaFn, agentImpl, budget, capabilities)
+	return finish(res, err)
 }
 
 func codeactCapabilityContext(ctx context.Context, args map[string]any, worldArg map[string]any, capabilities starlarkhost.CapabilitySpec) (context.Context, error) {
