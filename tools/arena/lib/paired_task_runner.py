@@ -375,6 +375,15 @@ def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
         repo = str(meta.get("repo") or ".")
         remote = str(KITSOKI_ROOT) if repo == "." else repo
         baseline = str(meta["baseline_sha"])
+        if repo == ".":
+            # Local corpus metadata may use a convenient short SHA. Resolve it
+            # in the harness source repository before the isolated fetch; the
+            # resulting cell still receives only this one full baseline object.
+            baseline = run(
+                ["git", "rev-parse", f"{baseline}^{{commit}}"],
+                cwd=KITSOKI_ROOT,
+                capture=True,
+            ).stdout.strip()
         run(["git", "init", "-q", str(tree)], cwd=KITSOKI_ROOT)
         run(["git", "remote", "add", "origin", remote], cwd=tree)
         run(["git", "fetch", "-q", "--depth", "1", "origin", baseline], cwd=tree)

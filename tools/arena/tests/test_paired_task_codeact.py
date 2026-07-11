@@ -275,6 +275,33 @@ with tempfile.TemporaryDirectory(prefix="paired-shallow-baseline-") as td:
     check("external baseline fetches exactly one frozen commit", captured[3], ["git", "fetch", "-q", "--depth", "1", "origin", "baseline-sha"])
     require("external baseline does not full-clone future history", not any(cmd[:2] == ["git", "clone"] for cmd in captured))
 
+with tempfile.TemporaryDirectory(prefix="paired-local-shallow-baseline-") as td:
+    captured = []
+    original_run = runner.run
+
+    def fake_local_materialize_run(cmd, **_kwargs):
+        captured.append(cmd)
+        if cmd[:3] == ["python3", str(runner.BENCH), "meta"]:
+            return runner.subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({"repo": ".", "baseline_sha": "short-baseline"}),
+                stderr="",
+            )
+        if cmd[:2] == ["git", "rev-parse"]:
+            return runner.subprocess.CompletedProcess(cmd, 0, stdout="full-baseline\n", stderr="")
+        return runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    runner.run = fake_local_materialize_run
+    try:
+        runner.materialize_baseline(
+            {"oracle": {"kind": "external_bakeoff", "project": "fixture", "bug": "case"}},
+            Path(td) / "tree",
+        )
+    finally:
+        runner.run = original_run
+    require("local short SHA resolves in harness", ["git", "rev-parse", "short-baseline^{commit}"] in captured)
+    require("local shallow fetch receives resolved full SHA", ["git", "fetch", "-q", "--depth", "1", "origin", "full-baseline"] in captured)
+
 prompt_args = argparse.Namespace(implementation_mode="agent_task")
 prompt = runner.build_kitsoki_prompt(
     prompt_args,
