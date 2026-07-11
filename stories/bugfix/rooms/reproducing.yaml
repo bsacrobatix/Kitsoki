@@ -271,13 +271,17 @@ states:
           body:     "{{ world.repro_gate_summary }}\n\n{{ world.repro_gate_log }}"
           phase_id: "repro_gate_{{ world.ticket_id }}_{{ world.cycle }}"
 
-      # 1d. Deterministic refine: the GREEN→RED proof FAILED (baseline not green, or
-      #     the reproducer's test didn't fail). Bounce back to the reproducer with
-      #     the verdict as feedback BEFORE spending the LLM judge / maker budget.
-      #     With escalate_low_value on, the refine budget-exhaust handler turns the
-      #     terminal bounce into a needs-human escalation (a mis-scoped repro that
-      #     never arms the gate quits to a human instead of silently abandoning).
-      - when: "world.repro_gate_ran && !world.repro_gate_ok"
+      # 1d. A red baseline is a contaminated workspace/calibration input, not a
+      #     deficient reproduction. It cannot be repaired by asking the same
+      #     agent for another test, so fail closed with the gate diagnostic.
+      - when: "world.repro_gate_ran && !world.repro_baseline_green"
+        emit_intent: escalate_human
+        slots:
+          reason: "Strict reproduction gate found a contaminated baseline for {{ world.ticket_id }}. {{ world.repro_gate_summary }}\n\n{{ world.repro_gate_log }}"
+
+      # 1e. With a known-good baseline, a reproducer test that does not go RED
+      #     is actionable agent feedback and may use the bounded refine loop.
+      - when: "world.repro_gate_ran && world.repro_baseline_green && !world.repro_gate_ok"
         emit_intent: refine
         slots:
           feedback: "{{ world.repro_gate_summary }}"
@@ -316,6 +320,17 @@ states:
         slots:
           feedback: "{{ world.llm_verdict.reason }}"
     on:
+      # Internal strict baseline failure. Keep the operational distinction
+      # visible: this is a contaminated workspace/bad benchmark baseline, not
+      # an unverified product bug or an exhausted agent budget.
+      escalate_human:
+        - target: "@exit:needs-human"
+          effects:
+            - set:
+                needs_human_reason: "{{ slots.reason }}"
+                last_error:         "NEEDS HUMAN (reproducing baseline): {{ slots.reason }}"
+                status:             "needs-human"
+
       # `accept` advances to proposing. Examples include "continue" and
       # "proceed" so the LLM router maps the canonical user verbs here.
       # The transport.post is a side-effect of the decision — the

@@ -487,10 +487,12 @@ world:
   # Proves the GREEN(baseline)→RED(reproducer) legs DETERMINISTICALLY, off the
   # reproducer's OWN authored test (repro_command + repro_test_paths) and the
   # project test_cmd — no pre-supplied oracle, so it is leak-safe in a bake-off.
-  # Runs AFTER the reproducer agent, BEFORE the LLM judge: the LLM only assesses
-  # test QUALITY/APPLICABILITY once GREEN→RED is mechanically proven. The
-  # GREEN(fix) leg is proven later in the testing room. Empty test_cmd ⇒ the
-  # deterministic gate degrades to LLM-only (logged, never silent). See
+  # Runs after the reproducer agent, before the LLM judge. It proves GREEN→RED
+  # before the LLM assesses test QUALITY/APPLICABILITY. A baseline that is
+  # already RED is a contaminated workspace/calibration input and exits once;
+  # it must never trigger an identical reproducer retry. The GREEN(fix) leg is
+  # proven later in testing. Empty test_cmd ⇒ the deterministic gate degrades to
+  # LLM-only (logged, never silent). See
   # .context/green-red-green-repro-gate.md and flows/bugfix_green_red_green_gate.yaml.
   repro_baseline_green:   { type: bool,   default: false } # test_cmd was GREEN with the reproducer's test removed
   repro_test_red:         { type: bool,   default: false } # repro_command exits non-zero WITH the test present (RED)
