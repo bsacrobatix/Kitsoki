@@ -63,6 +63,11 @@ Examples:
 				FeedbackSink: feedbackSink,
 				JournalPath:  journalPath,
 				ClockFixed:   clockFixed,
+				// Always wired (mirrors cmd/kitsoki/mcp.go's studio.WithIssueFiler
+				// wiring): --feedback-sink github is what gates whether it's
+				// actually invoked at feedback.report call time, not whether the
+				// filer is configured.
+				IssueFiler: ghGraphIssueFiler,
 			})
 			if err != nil {
 				return err
@@ -75,7 +80,7 @@ Examples:
 	cmd.Flags().StringArrayVar(&catalogFlags, "catalog", nil, "[alias=]path to a bound catalog; repeatable, first is default (default: probe pog/catalog.yaml under cwd)")
 	cmd.Flags().StringVar(&mode, "mode", graphsrv.DefaultMode, "one of: read, propose, steward (gates future write-tool registration)")
 	cmd.Flags().StringVar(&actor, "actor", "", "actor name stamped on write-tool calls (authored_by/authorized_by) and checked for graph.withdraw's own-changeset gate in propose mode")
-	cmd.Flags().StringVar(&feedbackSink, "feedback-sink", graphsrv.FeedbackSinkLocal, "one of: local, catalog, github (P2 always writes locally; catalog/github record the choice but degrade to local-only)")
+	cmd.Flags().StringVar(&feedbackSink, "feedback-sink", graphsrv.FeedbackSinkLocal, "one of: local, catalog, github (local always writes; catalog proposes a changeset per the catalog's feedback_routing block; github files an issue via the native ticket provider; catalog/github degrade to local-only with a routing_errors entry when unconfigured/blocked)")
 	cmd.Flags().StringVar(&journalPath, "journal", "", "receipts JSONL path for write-tool calls (default: .artifacts/graph-mcp/receipts.jsonl next to the bound catalog's repo root)")
 	cmd.Flags().StringVar(&clockFixed, "clock-fixed", "", "RFC3339 timestamp to pin the server's clock to (also honors KITSOKI_GRAPH_CLOCK_FIXED)")
 	return cmd

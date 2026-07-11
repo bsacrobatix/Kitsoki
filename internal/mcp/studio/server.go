@@ -44,6 +44,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
 	starlarkhost "kitsoki/internal/host/starlark"
+	"kitsoki/internal/mcp/graphsrv"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -111,6 +112,27 @@ type Server struct {
 	// importResolver is the loader/test resolver used for @kitsoki/<name>
 	// imports. It is the MCP twin of the CLI's buildImportResolver seam.
 	importResolver app.ImportResolver
+	// graphCatalogSpecs are the studio-mounted graph.*/feedback.* tool
+	// family's --catalog bindings (graph-mcp plan §3.1 "studio second
+	// door", P6). Mirrors mcp-graph's own repeatable --catalog flag; see
+	// WithGraphCatalogs.
+	graphCatalogSpecs []string
+	// graphSteward opts the mounted graph family into steward mode
+	// (graph.authorize + live graph.apply). Default false = propose mode.
+	// See WithGraphSteward.
+	graphSteward bool
+	// graphActor is the actor name stamped on the mounted graph family's
+	// write-tool calls. See WithGraphActor.
+	graphActor string
+	// graphFeedbackSink is the mounted feedback.report's sink
+	// (local|catalog|github). Empty means local. See WithGraphFeedbackSink.
+	graphFeedbackSink string
+	// graphIssueFiler is the GitHub issue-filing seam the mounted
+	// feedback.report uses for --feedback-sink github. Independent of
+	// issueFiler (issue.create's own seam) — see graphsrv.IssueFiler's doc
+	// comment for why graphsrv defines its own type instead of importing
+	// this package's. See WithGraphIssueFiler.
+	graphIssueFiler graphsrv.IssueFiler
 }
 
 // ServerOption configures a studio Server at construction.
@@ -267,6 +289,13 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	if srv.operatingSystem != nil {
 		srv.registerOperatingSystemTools()
 	}
+	// The graph.*/feedback.* family (graph-mcp plan §3.1 "studio second
+	// door", P6) mounts unconditionally — even with zero bound catalogs —
+	// so its presence in tools/list is static; see registerGraphTools's
+	// doc comment (graph_tools.go) for why "always register, let
+	// NO_CATALOG speak for itself" was chosen over skipping registration
+	// when no --catalog was configured.
+	srv.registerGraphTools()
 
 	return srv
 }

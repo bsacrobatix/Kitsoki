@@ -31,6 +31,12 @@ type Config struct {
 	// ClockFixed is the --clock-fixed flag value (RFC3339), or empty.
 	ClockFixed string
 
+	// IssueFiler is the injectable GitHub issue-filing seam used when
+	// --feedback-sink github (plan §3.6 "Submit stage", P6). Nil disables
+	// the github sink: feedback.report degrades to local-only with a
+	// routing_errors entry rather than failing.
+	IssueFiler IssueFiler
+
 	// Registry, if set, is used instead of constructing a fresh
 	// host.Registry via host.NewRegistry()+host.RegisterBuiltins(). Tests
 	// use this to inject a registry pointed at fixture catalogs without
@@ -39,7 +45,7 @@ type Config struct {
 }
 
 // Deps bundles the resolved, request-independent state every graphsrv tool
-// handler closes over. registerGraphTools/registerFeedbackTools take a
+// handler closes over. RegisterGraphTools/RegisterFeedbackTools take a
 // *Deps rather than a *Config so P6's studio mount can build one directly
 // (no cobra flags involved) and reuse the exact same registration
 // functions.
@@ -55,6 +61,9 @@ type Deps struct {
 	// (via the `recorded` wrapper) appends to. feedback.report attaches
 	// a redacted snapshot of it as evidence.
 	Recorder *Recorder
+	// IssueFiler is the GitHub issue-filing seam for --feedback-sink
+	// github (P6). Nil means the github sink is unconfigured.
+	IssueFiler IssueFiler
 }
 
 // Server is the standalone stdio MCP server exposing mcp-graph's read
@@ -66,8 +75,8 @@ type Server struct {
 
 // NewServer constructs the mcp-graph server: resolves catalog bindings,
 // builds (or reuses) a host.Registry with the builtin host.graph.* ops
-// registered, and registers every tool via registerGraphTools /
-// registerFeedbackTools.
+// registered, and registers every tool via RegisterGraphTools /
+// RegisterFeedbackTools.
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.Mode == "" {
 		cfg.Mode = DefaultMode
@@ -107,6 +116,7 @@ func NewServer(cfg Config) (*Server, error) {
 		JournalPath:  cfg.JournalPath,
 		Clock:        clk,
 		Recorder:     NewRecorder(),
+		IssueFiler:   cfg.IssueFiler,
 	}
 
 	s := &Server{deps: deps}
@@ -115,8 +125,8 @@ func NewServer(cfg Config) (*Server, error) {
 		Version: "0.1.0",
 	}, nil)
 
-	registerGraphTools(s.mcpSrv, deps, cfg.Mode)
-	registerFeedbackTools(s.mcpSrv, deps)
+	RegisterGraphTools(s.mcpSrv, deps, cfg.Mode)
+	RegisterFeedbackTools(s.mcpSrv, deps)
 
 	return s, nil
 }

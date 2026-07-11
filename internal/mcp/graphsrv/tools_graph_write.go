@@ -14,7 +14,7 @@ import (
 // registerGraphWriteTools registers the P4 write family (plan §3.4):
 // graph.propose, graph.withdraw, graph.apply, graph.authorize.
 // graph.changeset (read-only, all modes) lives in tools_graph.go alongside
-// the other read tools. Called from registerGraphTools's mode switch — not
+// the other read tools. Called from RegisterGraphTools's mode switch — not
 // at all in read mode, per the plan §3.1 "an MCP client shouldn't see write
 // tools it can never call" tools/list economics rationale. graph.authorize
 // is still registered (but gated STEWARD_ONLY at runtime) in propose mode,

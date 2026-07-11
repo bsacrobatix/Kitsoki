@@ -109,15 +109,19 @@ func studioHarnessBuilder(mode studio.HarnessMode, recordingPath, storyPath stri
 //	  | kitsoki mcp --stories-dir ./stories
 func mcpCmd() *cobra.Command {
 	var (
-		storiesDir       string
-		dbPath           string
-		harnessType      string
-		workspace        string
-		flowPath         string
+		storiesDir              string
+		dbPath                  string
+		harnessType             string
+		workspace               string
+		flowPath                string
 		corpusRuntimeConfigPath string
-		issueSink        string
-		readOnly         bool
-		operatingProfile string
+		issueSink               string
+		readOnly                bool
+		operatingProfile        string
+		graphCatalogs           []string
+		graphSteward            bool
+		graphActor              string
+		graphFeedbackSink       string
 	)
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -264,6 +268,11 @@ docs land):
 				studio.WithIssueSink(issueSink),
 				studio.WithImportResolver(studioImportResolver(storiesDir)),
 				studio.WithOperatingSystemServices(studio.StudioOperatingProfile(operatingProfile), operatingServices),
+				studio.WithGraphCatalogs(graphCatalogs),
+				studio.WithGraphSteward(graphSteward),
+				studio.WithGraphActor(graphActor),
+				studio.WithGraphFeedbackSink(graphFeedbackSink),
+				studio.WithGraphIssueFiler(ghGraphIssueFiler),
 			}
 			if studioBugPrivacyChecker != nil {
 				srvOpts = append(srvOpts, studio.WithBugPrivacyChecker(studioBugPrivacyChecker))
@@ -301,6 +310,14 @@ docs land):
 		"omit the story-mutating tool (story.write); read + replay-driving tools stay available (the meta-mode Q&A surface)")
 	cmd.Flags().StringVar(&operatingProfile, "operating-profile", string(studio.StudioOperatingProfileLegacy),
 		"Studio operating-system profile: legacy (default compatibility), strict (preview; replay decision hold), or escape (audited exception)")
+	cmd.Flags().StringArrayVar(&graphCatalogs, "catalog", nil,
+		"[alias=]path to a bound catalog for the mounted graph.*/feedback.* tool family; repeatable, first is default (mirrors `kitsoki mcp-graph --catalog`; omit to leave the family catalog-less, degrading every call to NO_CATALOG)")
+	cmd.Flags().BoolVar(&graphSteward, "graph-steward", false,
+		"Grant graph.authorize and live graph.apply on the studio-mounted graph tool family (default: propose-only, per the graph-mcp plan's studio-second-door gate).")
+	cmd.Flags().StringVar(&graphActor, "graph-actor", "",
+		"actor name stamped on studio-mounted graph write-tool calls (mirrors `kitsoki mcp-graph --actor`)")
+	cmd.Flags().StringVar(&graphFeedbackSink, "graph-feedback-sink", "",
+		"one of: local, catalog, github — sink for the studio-mounted feedback.report (mirrors `kitsoki mcp-graph --feedback-sink`; default local)")
 	return cmd
 }
 

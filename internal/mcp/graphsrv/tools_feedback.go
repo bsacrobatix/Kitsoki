@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	objectgraph "kitsoki/internal/graph"
+	"kitsoki/internal/host"
 )
 
-// registerFeedbackTools registers feedback.report and feedback.list (plan
-// §3.6, local sink only). Like registerGraphTools, this is a free function
-// so P6's studio mount can reuse it directly.
-func registerFeedbackTools(srv *mcpsdk.Server, deps *Deps) {
+// RegisterFeedbackTools registers feedback.report and feedback.list (plan
+// §3.6). Like RegisterGraphTools, this is a free function so P6's studio
+// mount can reuse it directly.
+func RegisterFeedbackTools(srv *mcpsdk.Server, deps *Deps) {
 	registerFeedbackReportTool(srv, deps)
 	registerFeedbackListTool(srv, deps)
 }
@@ -96,6 +100,7 @@ type feedbackReportArgs struct {
 
 type routingErrorEntry struct {
 	Sink  string `json:"sink"`
+	Code  string `json:"code,omitempty"`
 	Error string `json:"error"`
 }
 
@@ -153,16 +158,6 @@ func handleFeedbackReport(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 
 	var routingErrors []routingErrorEntry
 	var routed []routedEntry
-
-	// --feedback-sink degrade warning: P2 only ever writes locally. If the
-	// operator asked for catalog/github, record that the choice degraded
-	// rather than silently ignoring it (plan §3.2).
-	if deps.FeedbackSink != "" && deps.FeedbackSink != FeedbackSinkLocal {
-		routingErrors = append(routingErrors, routingErrorEntry{
-			Sink:  deps.FeedbackSink,
-			Error: fmt.Sprintf("--feedback-sink=%s is not implemented yet (P6 work); this report was written to the local sink only", deps.FeedbackSink),
-		})
-	}
 
 	// Resolve the anchor catalog to find the repo root to anchor into.
 	// This never falls back to process cwd — see repoRootFor.
@@ -255,6 +250,31 @@ func handleFeedbackReport(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 	}
 
 	routed = append(routed, routedEntry{Sink: "local", Ref: reportID})
+
+	// Sink routing beyond local (plan §3.6 "Review stage"/"Submit stage").
+	// Evaluated at flag-time — i.e. whatever --feedback-sink the server was
+	// started with governs every feedback.report call, mirroring the local
+	// sink's always-on trigger point and the literal
+	// `--feedback-sink local|catalog|github` flag enum (a deliberate
+	// reading documented here the same way P4 documented "no CLI authorize
+	// subcommand": the plan never pins the trigger to authorize/apply
+	// time, and flag-time is the simpler, more literal reading of the
+	// enum).
+	switch deps.FeedbackSink {
+	case FeedbackSinkCatalog:
+		if r, rerr := routeFeedbackToCatalogSink(ctx, deps, path, reportID, args); rerr != nil {
+			routingErrors = append(routingErrors, *rerr)
+		} else {
+			routed = append(routed, r)
+		}
+	case FeedbackSinkGithub:
+		if r, rerr := routeFeedbackToGithubSink(ctx, deps, args, reportID); rerr != nil {
+			routingErrors = append(routingErrors, *rerr)
+		} else {
+			routed = append(routed, r)
+		}
+	}
+
 	out := feedbackReportOK{
 		OK:            true,
 		ReportID:      reportID,
@@ -263,6 +283,151 @@ func handleFeedbackReport(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		RoutingErrors: routingErrors,
 	}
 	return okResult(out), nil
+}
+
+// routeFeedbackToCatalogSink implements --feedback-sink catalog (plan §3.6
+// "Review stage"): the server *proposes* — never authorizes — a changeset
+// adding one new node of the catalog's declared feedback_routing.type. No
+// routing block, or a read-mode server, is a non-blocking degrade (a
+// routing_errors entry), never a hard failure — feedback.report must
+// remain ok:true always.
+func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID string, args feedbackReportArgs) (routedEntry, *routingErrorEntry) {
+	if deps.Mode == ModeRead {
+		return routedEntry{}, &routingErrorEntry{
+			Sink:  "catalog",
+			Code:  CodeReadOnlyMode,
+			Error: "server is running in --mode read; the catalog sink never proposes changes in read mode (this report was written to the local sink only)",
+		}
+	}
+
+	cat, err := objectgraph.LoadCatalog(path)
+	if err != nil {
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Error: "load catalog for feedback routing: " + err.Error()}
+	}
+	if cat.FeedbackRouting == nil {
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Error: "catalog declares no feedback_routing block; local-only"}
+	}
+	fr := cat.FeedbackRouting
+
+	// Node id/shape: After is a flat mapping (schema/id/title/status/
+	// visibility/edges + type-specific fields), never a nested
+	// {type,fields,edges} envelope — see internal/graph's buildNode/
+	// fileNode. The new node's own id is a fresh id derived from the
+	// report id (never the changeset's own cs-<n>, which Propose mints
+	// itself).
+	nodeID := "feedback-" + reportID
+	after := map[string]any{
+		"schema":     fmt.Sprintf("graph/%s/v0", fr.Type),
+		"id":         nodeID,
+		"title":      args.Title,
+		"status":     "draft",
+		"visibility": "internal",
+	}
+	// Field mapping (judgment call — feedback_routing.fields names field
+	// IDs only, never a value template): the FIRST declared field carries
+	// the report's title/summary text, so any taxonomy gets at least a
+	// human-readable line; a field literally named "report" or
+	// "report_id" (if the taxonomy declares one) additionally gets the
+	// report_id verbatim, for a durable dereference back to the JSONL/
+	// markdown record. Documented per the plan's own convention (the node
+	// carries `report: <report_id>` "for dereference").
+	for i, f := range fr.Fields {
+		if i == 0 {
+			after[f] = args.Title
+		}
+		if f == "report" || f == "report_id" {
+			after[f] = reportID
+		}
+	}
+	// Edge targets — a genuine plan gap, flagged rather than papered
+	// over: feedback_routing.edges names edge FIELD ids only (e.g.
+	// "filed_against"), never a target node id, and nothing in
+	// feedback.report's own args reliably supplies one either (anchor.node
+	// is producer-supplied, optional, and may name something unrelated to
+	// what the taxonomy wants linked). Writing a stub edge with a
+	// hallucinated or empty target would propose bad data into the review
+	// queue; instead this deliberately omits the `edges` key entirely.
+	// The node still lands for human review with its declared field(s)
+	// populated, and if the target type requires that edge, lint surfaces
+	// it as a normal, honest validation gap on the proposal rather than
+	// this code inventing a target.
+
+	hostArgs := map[string]any{
+		"catalog_path": path,
+		"title":        "feedback: " + args.Title,
+		"operations":   []any{map[string]any{"kind": "added", "after": after}},
+	}
+	// Deliberately NOT writeCtx(ctx, deps): per plan §3.6, "the server
+	// *proposes* — never auto-authorizes" for this exact case. Even in
+	// steward mode, this changeset must land in the review queue like any
+	// other proposal — so host.WithSteward is never set here, only actor
+	// identity (for authored_by / a later withdraw-own check).
+	proposeCtx := host.WithActor(ctx, deps.Actor)
+	res, err := deps.Registry.Invoke(proposeCtx, "host.graph.propose", hostArgs)
+	if err != nil {
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Error: "propose feedback changeset: " + err.Error()}
+	}
+	if res.Error != "" {
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Error: "propose feedback changeset: " + res.Error}
+	}
+	if rejected, _ := res.Data["rejected"].(bool); rejected {
+		rejectReasons, _ := res.Data["reject_reasons"].([]any)
+		lint, _ := res.Data["lint"].([]any)
+		parts := make([]string, 0, len(rejectReasons)+len(lint))
+		for _, r := range rejectReasons {
+			if s, ok := r.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		for _, l := range lint {
+			if s, ok := l.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Error: "propose feedback changeset rejected: " + strings.Join(parts, "; ")}
+	}
+
+	changesetID, _ := res.Data["changeset_id"].(string)
+	return routedEntry{Sink: "catalog", Ref: changesetID}, nil
+}
+
+// routeFeedbackToGithubSink implements --feedback-sink github (plan §3.6
+// "Submit stage"): files a GitHub issue via the injected IssueFiler seam. A
+// filing failure, or no configured filer, is a non-blocking degrade to
+// local-only.
+func routeFeedbackToGithubSink(ctx context.Context, deps *Deps, args feedbackReportArgs, reportID string) (routedEntry, *routingErrorEntry) {
+	if deps.IssueFiler == nil {
+		return routedEntry{}, &routingErrorEntry{
+			Sink:  "github",
+			Error: "--feedback-sink=github was requested but no GitHub issue filer is configured; this report was written to the local sink only",
+		}
+	}
+	result, err := deps.IssueFiler(ctx, IssueRequest{
+		Title:  args.Title,
+		Body:   composeFeedbackIssueBody(args, reportID),
+		Labels: []string{"feedback", "mcp-gap"},
+	})
+	if err != nil {
+		return routedEntry{}, &routingErrorEntry{Sink: "github", Error: err.Error()}
+	}
+	return routedEntry{Sink: "github", Ref: result.URL}, nil
+}
+
+// composeFeedbackIssueBody renders a feedback.report submission as GitHub
+// issue markdown. Kept local-catalog-content-free per the plan's risk
+// register ("never bake internal catalog content into report bodies routed
+// to public sinks") — only the caller-supplied report fields go in, never
+// e.g. catalog node bodies.
+func composeFeedbackIssueBody(args feedbackReportArgs, reportID string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Filed via kitsoki-graph-mcp `feedback.report` (report_id: `%s`).\n\n", reportID))
+	sb.WriteString("## Goal\n\n" + args.Goal + "\n\n")
+	sb.WriteString("## Why blocked\n\n" + args.WhyBlocked + "\n\n")
+	sb.WriteString("## Expected\n\n" + args.Expected + "\n\n")
+	if args.SuggestedTool != "" {
+		sb.WriteString("## Suggested tool\n\n" + args.SuggestedTool + "\n\n")
+	}
+	return sb.String()
 }
 
 // graphHeadSHAFor best-effort fetches the bound catalog's head rev via

@@ -28,8 +28,12 @@ func ValidateMode(mode string) error {
 }
 
 // FeedbackSink identifies where feedback.report attempts to route a report.
-// P2 implements only "local" — catalog/github are recorded but degrade to
-// local-only (plan §3.6).
+// "local" is always on regardless of this value (plan §3.6). "catalog"
+// proposes a changeset per the catalog's feedback_routing block (P6);
+// "github" files an issue via the injected IssueFiler (P6). Both degrade to
+// local-only with a routing_errors entry when unconfigured/blocked — the
+// sink is evaluated at feedback.report call ("flag") time, not at
+// authorize/apply time.
 const (
 	FeedbackSinkLocal   = "local"
 	FeedbackSinkCatalog = "catalog"
