@@ -31,6 +31,16 @@ story_dirs:
   - ./stories
 
 harness_profiles:
+  # Your native OpenAI Codex subscription (ambient auth — nothing to set).
+  # This makes a declared GPT-5.4 comparison cell resolve to the same worker
+  # model for every operator who has the Codex CLI available.
+  codex-gpt54:
+    backend: codex
+    model: gpt-5.4
+    models: [gpt-5.4]
+    effort: medium
+    efforts: [low, medium, high, xhigh, max]
+
   # Your native Anthropic Claude Code subscription (ambient auth — nothing to
   # set). claude supports a model selector (short names) and --effort.
   claude-native:
