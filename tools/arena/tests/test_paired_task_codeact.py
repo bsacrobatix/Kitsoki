@@ -239,6 +239,7 @@ with tempfile.TemporaryDirectory(prefix="paired-codex-home-") as td:
     check("isolated home is removed", private_home.exists(), False)
 
 require("raw Codex ignores user config", '"--ignore-user-config",' in runner_source)
+require("raw Codex uses an absolute checkout", "str(tree.resolve())," in runner_source)
 require("MCP driver uses ephemeral outer orchestration", "--ephemeral" in drive_source)
 require("MCP dispatch uses auth-only environment", "env, cleanup_auth_home = isolated_codex_env()" in runner_source)
 require("raw prompt carries isolation policy", "BENCHMARK ISOLATION:" in runner.build_prompt(argparse.Namespace(treatment="raw"), {"id": "fixture", "archetype": "bugfix", "ticket": "fix"}))
