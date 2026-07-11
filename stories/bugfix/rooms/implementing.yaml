@@ -103,14 +103,16 @@ states:
       - when: "world.workspace_id != '' && world.feature_branch != ''"
         invoke: iface.workspace.create
         with:
-          id:   "{{ world.workspace_id }}"
-          name: "{{ world.feature_branch }}"
-          base: "{{ world.base_commit != '' ? world.base_commit : world.base_branch }}"
+          id:         "{{ world.workspace_id }}"
+          definition: "development"
+          name:       "{{ world.feature_branch }}"
+          base:       "{{ world.base_commit != '' ? world.base_commit : world.base_branch }}"
         bind:
-          workdir: path
+          workdir:        path
+          feature_branch: branch
         on_error: idle
       # The iface.workspace.sync + iface.vcs.commit are the workspace-
-      # side write seams (instance bindings: host.git_worktree / host.git
+      # side write seams (instance bindings: host.capsule_workspace / host.git
       # in kitsoki-dev). Guarded on non-empty ids so dogfood walks
       # without an isolated worktree degrade to a narrative-only beat
       # instead of bouncing to idle via on_error.

@@ -32,10 +32,10 @@ host_handlers:
         data:
           ok: true
           exit_code: 0
-          stdout: '{"ok":true,"profile_json":"{\"commands\":{\"build\":\"make build\",\"dev\":\"make dev\",\"test\":\"make test\"},\"id\":\"acme-rust\",\"kitsoki\":{\"instance\":{\"bindings\":{\"ci\":\"host.local\",\"ticket\":\"host.local_files.ticket\",\"transport\":\"host.append_to_file\",\"vcs\":\"host.git\",\"workspace\":\"host.git_worktree\"},\"id\":\"acme-rust-dev\",\"path\":\".kitsoki/stories/acme-rust-dev/app.yaml\"},\"story\":\"dev-story\"},\"repo\":{\"root\":\".\",\"vcs\":\"git\"},\"schema\":\"project-profile/v1\",\"stack\":{\"kind\":\"rust\",\"languages\":[\"rust\"]},\"title\":\"Acme Rust\"}","schema":[],"semantic":[],"warnings":[]}'
+          stdout: '{"ok":true,"profile_json":"{\"commands\":{\"build\":\"make build\",\"dev\":\"make dev\",\"test\":\"make test\"},\"id\":\"acme-rust\",\"kitsoki\":{\"instance\":{\"bindings\":{\"ci\":\"host.local\",\"ticket\":\"host.local_files.ticket\",\"transport\":\"host.append_to_file\",\"vcs\":\"host.git\",\"workspace\":\"host.capsule_workspace\"},\"id\":\"acme-rust-dev\",\"path\":\".kitsoki/stories/acme-rust-dev/app.yaml\"},\"story\":\"dev-story\"},\"repo\":{\"root\":\".\",\"vcs\":\"git\"},\"schema\":\"project-profile/v1\",\"stack\":{\"kind\":\"rust\",\"languages\":[\"rust\"]},\"title\":\"Acme Rust\"}","schema":[],"semantic":[],"warnings":[]}'
           stdout_json:
             ok: true
-            profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.git_worktree"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
+            profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.capsule_workspace"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
             schema: []
             semantic: []
             warnings: []
@@ -92,7 +92,7 @@ host_handlers:
                   ticket: host.local_files.ticket
                   vcs: host.git
                   ci: host.local
-                  workspace: host.git_worktree
+                  workspace: host.capsule_workspace
                   transport: host.append_to_file
   host.starlark.run:
     by_call:
@@ -112,7 +112,7 @@ host_handlers:
         data:
           result:
             ok: true
-            profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.git_worktree"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
+            profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.capsule_workspace"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
             schema: []
             semantic: []
             warnings: []
@@ -167,7 +167,7 @@ turns:
         args: { call: validate_profile }
         times: 1
     expect_world:
-      init_profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.git_worktree"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
+      init_profile_json: '{"commands":{"build":"make build","dev":"make dev","test":"make test"},"id":"acme-rust","kitsoki":{"instance":{"bindings":{"ci":"host.local","ticket":"host.local_files.ticket","transport":"host.append_to_file","vcs":"host.git","workspace":"host.capsule_workspace"},"id":"acme-rust-dev","path":".kitsoki/stories/acme-rust-dev/app.yaml"},"story":"dev-story"},"repo":{"root":".","vcs":"git"},"schema":"project-profile/v1","stack":{"kind":"rust","languages":["rust"]},"title":"Acme Rust"}'
     # Regression pin: init_profile_validate's "OK/Schema/Semantic/Warnings" kv
     # block is gated by `when: "len(world.init_profile_validation) > 0"`. That
     # guard used to read `!= {}`, a map-literal comparison the expr whitelist

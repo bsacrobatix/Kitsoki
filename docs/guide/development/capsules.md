@@ -33,10 +33,13 @@ The shipped v1 is intentionally narrow and local-only:
   generated project instances. Onboarding writes
   `.kitsoki/capsules/development.yaml` with `source.kind: self` and binds
   imported dev-story `workspace` calls to the Capsule host. Each
-  create/get/status/sync/commit/close return includes a `diagnostics` map, and
-  domain errors preserve the same map in `host_error.data`, so traces show the
-  failing op, repo, definition, id, path, state, VCS status, and remediation
-  hint.
+  list/create/get/status/sync/commit/close/cleanup return includes a
+  `diagnostics` map, and domain errors preserve the same map in
+  `host_error.data`, so traces show the failing op, repo, definition, id, path,
+  state, VCS status, cleanup recommendation reason, and remediation hint.
+  `cleanup_scan` is conservative: it exposes active and dirty workspaces for
+  review but recommends only integrated or failed workspaces that are not dirty
+  and do not match protected branches.
 - Pinned Git sources populate a content-addressed bare cache under
   `.capsules/cache/git-sources/<commit>.git` before materializing a workspace.
   Subsequent materializations of the same full commit clone from the cache

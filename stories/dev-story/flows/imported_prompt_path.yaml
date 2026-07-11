@@ -56,7 +56,7 @@ host_handlers:
     data: { ok: true, id: "ib-1" }
   host.artifacts_dir:
     data: { ok: true, path: ".artifacts/implementation-flow-artifact.md", message_id: "artifact-1" }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced", path: "testdata/projects/cake" }
   host.local_files.ticket:
     by_op:

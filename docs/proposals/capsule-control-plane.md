@@ -5,9 +5,10 @@ and scoped Capsule MCP now cover definitions, lease/generation handles, safe
 FS/exec/VCS, synthetic/self/pinned providers, and the `development`/`staging`
 compatibility providers behind the native lifecycle. Host adoption and
 story-contract migration have started via `host.capsule_workspace`; generated
-foreign-project onboarding now emits a default `development` definition and
-binds workspace calls to the Capsule host, with trace-visible diagnostics on
-every call. Generic clone lifecycle and full story rebinding remain.
+foreign-project onboarding and the Kitsoki dev-story/bugfix/implementation
+workspace path now bind to the Capsule host, with trace-visible diagnostics on
+every call plus manager-owned list and cleanup operations for workspace hygiene.
+Generic clone lifecycle and full story rebinding remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 
@@ -239,15 +240,22 @@ all consumers migrate.
   - Shipped: `host.capsule_workspace` manager-backed host surface, generated
     foreign-project onboarding rebinding, and generated
     `.kitsoki/capsules/development.yaml` with `source.kind: self`.
+  - Shipped: Kitsoki's self-hosted wrapper plus the dev-story, bugfix,
+    implementation, and cherny-loop workspace interfaces now default to
+    `host.capsule_workspace`; workspace creates pass `definition: development`
+    explicitly and bind the manager-returned branch/path.
   - Shipped: host returns include `diagnostics` for both success and domain
     error paths, so `harness.returned` / `host_error.data` traces show handler,
     op, repo, definition, id, generation, path, provider, state, branch/head,
     dirty flag, VCS status failures, and remediation hints.
-  - Shipped: transitional `status` and non-mutating `sync` ops let imported
-    dev-story contracts reach the manager while the YAML interface is migrated.
-  - Remaining: migrate Kitsoki dogfood/core story `workspace` contracts off
-    dynamic `name`/`base` args, remove the default-definition compatibility
-    behavior, and run a green Kitsoki dogfood through the rebinding.
+  - Shipped: transitional `status` / non-mutating `sync`, deterministic `list`,
+    and conservative `cleanup_scan` / `cleanup_apply` ops let imported dev-story
+    contracts and cleanup rooms reach the manager while the YAML interface is
+    migrated. Cleanup candidates include recommendation reasons, dirty/protected
+    guards, and action metadata in trace-visible data.
+  - Remaining: migrate the non-dev-story wrappers still on legacy workspace
+    vocabulary, remove the default-definition compatibility behavior, and run a
+    green Kitsoki dogfood through the rebinding.
 - [ ] 3.3 Move generic clone lifecycle into the native provider; reduce scripts to Kitsoki hooks/compat wrappers
 - [ ] 3.4 Update capsule, host, MCP, and onboarding docs; trim/delete this proposal
 ```

@@ -40,7 +40,7 @@ host_handlers:
   # dirty tree would route to @exit:abandoned — see flows/handoff_refuses_dirty_tree.yaml.
   host.run:
     data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced" }
   host.git:
     data:

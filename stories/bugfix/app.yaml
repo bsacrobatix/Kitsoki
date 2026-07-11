@@ -83,7 +83,7 @@ hosts:
   - host.gh.ticket.transition
   # The ship-it tail import declares these; unioned at load so the imported
   # integrate/verify/cleanup rooms resolve their host bindings.
-  - host.git_worktree
+  - host.capsule_workspace
   - host.artifacts_dir
 
 # Persona table (agent-split proposal §3.5).
@@ -316,7 +316,7 @@ host_interfaces:
 
   # 2.4 workspace — per-task isolated workspace (scripted clone capsule by default).
   workspace:
-    description: "Working-copy manager. Local: scripted clone-backed capsule workspace."
+    description: "Working-copy manager. Prefer checked-in Capsule definitions; legacy bindings may still consume name/base."
     operations:
       list:
         input:  {}
@@ -325,15 +325,15 @@ host_interfaces:
         input:  { id: string }
         output: { id: string, path: string, branch: string, dirty: bool }
       create:
-        # `id` is the workspace identity; `name` is the branch; `base` is the
-        # branch/commit to root from. The default host delegates creation to
-        # scripts/dev-workspace.sh and returns the authoritative path.
-        input:  { id: string, name: string, base: string }
-        output: { ok: bool, path: string }
+        # `id` is the workspace identity; `definition` names the checked-in
+        # Capsule definition. `name`/`base` remain transitionally present for
+        # legacy bindings. Capsule bindings return the authoritative branch.
+        input:  { id: string, definition: string, name: string, base: string, session_id: string }
+        output: { ok: bool, path: string, branch: string }
       sync:
         input:  { id: string }
         output: { ok: bool, log: string }
-    default: host.git_worktree
+    default: host.capsule_workspace
 
   # 2.5 transport — out-of-band channel for checkpoint artifacts. For
   # kitsoki-dev this is `host.append_to_file` (appends a comment block to the

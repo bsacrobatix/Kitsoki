@@ -13,7 +13,7 @@ initial_world:
   workspace_branch:   already-green
 
 host_handlers:
-  host.git_worktree: { data: { ok: true, path: ".worktrees/already-green" } }
+  host.capsule_workspace: { data: { ok: true, path: ".capsules/workspaces/already-green" } }
   host.run: { data: { ok: true, exit_code: 0, stdout: "ok  ./..." } }
 
 turns:

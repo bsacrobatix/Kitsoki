@@ -19,7 +19,7 @@ initial_world:
   judge_confidence_threshold: 0.8
 
 host_handlers:
-  host.git_worktree:
+  host.capsule_workspace:
     data: { ok: true, log: "synced", path: ".worktrees/tkt-ol-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }

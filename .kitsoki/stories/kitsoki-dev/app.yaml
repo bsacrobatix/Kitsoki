@@ -98,7 +98,7 @@ hosts:
   - host.gh.ticket.transition
   - host.git
   - host.local
-  - host.git_worktree
+  - host.capsule_workspace
   - host.append_to_file
   # Bare hosts the chain calls directly.
   - host.inbox.add
@@ -177,7 +177,7 @@ imports:
       ticket:    host.local_github.ticket
       vcs:       host.git
       ci:        host.local
-      workspace: host.git_worktree
+      workspace: host.capsule_workspace
       transport: host.append_to_file
 
     # The dev-story hub already declares judge_mode +

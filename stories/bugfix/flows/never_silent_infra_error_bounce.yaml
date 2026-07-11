@@ -33,12 +33,12 @@ host_handlers:
     data: { ok: true, message_id: "msg-1" }
   host.inbox.add:
     data: { ok: true, id: "ib-1" }
-  host.git_worktree:
+  host.capsule_workspace:
     by_op:
       create:
         data: { ok: true, log: "reused existing worktree" }
       sync:
-        infra_error: "no handler registered for namespace host.git_worktree.sync"
+        infra_error: "no handler registered for namespace host.capsule_workspace.sync"
   host.git:
     data: { ok: true, sha: "abc", diff: "" }
   host.local:
@@ -53,7 +53,7 @@ turns:
   - intent: { name: accept, slots: {} }
     expect_state: idle
     expect_world:
-      last_error: "no handler registered for namespace host.git_worktree.sync"
+      last_error: "no handler registered for namespace host.capsule_workspace.sync"
     expect_view_matches: "Action failed"
 
 expect_terminal: false

@@ -1316,8 +1316,9 @@ definitions and materializes the workspace under the project-managed
 `.capsules/workspaces` root; branch, source, bootstrap, and scope policy come
 from the definition rather than from ad hoc story arguments.
 
-The handler dispatches `create` / `get` / `status` / `sync` / `commit` /
-`close` via the `op` arg. It should be granted to agents when the desired
+The handler dispatches `list` / `create` / `get` / `status` / `sync` /
+`commit` / `close` / `cleanup_scan` / `cleanup_apply` via the `op` arg. It
+should be granted to agents when the desired
 authority is "manage Capsule workspaces in this project" rather than "run
 general git plumbing". A scoped MCP agent can receive only the Capsule MCP
 server; an in-story agent can receive this host binding for the same
@@ -1328,6 +1329,16 @@ The orchestrator records that map in `harness.returned` and mirrors it in
 `host_error.data` on failures, so a trace shows the handler, op, repo,
 definition, workspace id, generation, path, provider, state, branch/head,
 dirty flag, low-level VCS status error when present, and a remediation hint.
+
+`list` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `repo` | string | no | Project root. |
+
+`list` returns stable, id-sorted workspace records with id, generation,
+definition, provider, state, owner, path when resolvable, branch/head, source
+ref, dirty flag, and any VCS status error.
 
 `create` args:
 
@@ -1382,6 +1393,33 @@ does not perform git remote synchronization.
 Returns `ok`, `id`, `generation`, `path`, `branch`, `state`, `head`, `dirty`,
 and `diagnostics` for create/get/status/sync/commit operations where those
 fields are available. `close` returns `ok`, `id`, `closed`, and `diagnostics`.
+
+`cleanup_scan` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `repo` | string | no | Project root. |
+| `exclude` | string | no | Case-insensitive substring filter against id/path/branch/state. |
+| `protected` | string | no | Comma-separated branch names that must not be recommended. |
+
+`cleanup_scan` returns reviewable Capsule candidates and a `recommended_count`.
+It recommends only integrated or failed workspaces that are not dirty and do not
+use a protected branch. Active, dirty, protected, and already-closed workspaces
+are still visible with a reason, so disk-pressure troubleshooting can separate
+"safe to close" from "needs operator review".
+
+`cleanup_apply` args:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `candidates` | list | yes | The candidate list returned by `cleanup_scan`. |
+| `owner` | string | no | Fallback owner when a candidate lacks owner metadata. |
+| `repo` | string | no | Project root. |
+
+`cleanup_apply` closes only candidates marked `recommended: true` and rechecks
+that the live Capsule state is still `integrated` or `failed`. It returns
+`deleted`, `skipped`, and `errors`, all mirrored into diagnostics for postmortem
+traces.
 
 Stories that still need dynamic `name` / `base` arguments can remain on
 `host.git_worktree` until their `host_interfaces` contract is migrated to

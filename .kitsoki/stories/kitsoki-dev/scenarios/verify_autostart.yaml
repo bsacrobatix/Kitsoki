@@ -44,7 +44,7 @@ state: core.bf.reproducing
 
 world:
   # Ticket (integration-smoke is the safest — never been driven, no
-  # stale .worktrees/ dir).
+  # stale .capsules/workspaces/ dir).
   core__ticket_id:    "2026-05-17T111838Z-integration-smoke-bug-picked-up-by-self-host"
   core__ticket_title: "integration smoke - bug picked up by self-hosted instance"
   core__ticket_url:   "issues/bugs/2026-05-17T111838Z-integration-smoke-bug-picked-up-by-self-host.md"
@@ -55,7 +55,7 @@ world:
   # if you bounce back to idle).
   core__bf__workspace_id:           "bf-2026-05-17T111838Z-integration-smoke-bug-picked-up-by-self-host"
   core__bf__feature_branch:         "fix/2026-05-17T111838Z-integration-smoke-bug-picked-up-by-self-host"
-  core__bf__workdir:                ".worktrees/bf-2026-05-17T111838Z-integration-smoke-bug-picked-up-by-self-host"
+  core__bf__workdir:                ".capsules/workspaces/bf-2026-05-17T111838Z-integration-smoke-bug-picked-up-by-self-host"
   core__bf__base_branch:            "main"
   core__bf__bf_autostart_attempted: true
   core__bf__bugfix_mode:            "full"

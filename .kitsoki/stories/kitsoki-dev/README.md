@@ -15,7 +15,7 @@ The app imports `stories/dev-story/` under the alias `core` and binds five
 | `ticket`    | `host.local_github.ticket`| shows local artifact tickets plus GitHub issues; routes selected close-out by source |
 | `vcs`       | `host.git`               | local git CLI — branch, commit, diff, push, open_pr, merge       |
 | `ci`        | `host.local`             | `go test ./...` and friends                                      |
-| `workspace` | `host.git_worktree`      | `.worktrees/<task>` per ticket                                   |
+| `workspace` | `host.capsule_workspace` | managed Capsule workspaces from `.kitsoki/capsules/development.yaml` |
 | `transport` | `host.append_to_file`    | appends `## Comment <iso> by <author>` blocks INTO the bug file  |
 
 For local artifact tickets, the bug file IS the conversation log — every
