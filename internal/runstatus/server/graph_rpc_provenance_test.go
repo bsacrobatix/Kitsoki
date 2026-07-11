@@ -39,7 +39,8 @@ func TestGraphProposeRPC_ProvenanceAlwaysStripped(t *testing.T) {
 		t.Fatalf("copy fixture: %v", err)
 	}
 
-	result, rerr := graphProposeRPC(map[string]any{
+	s := &Server{}
+	result, rerr := s.graphProposeRPC(map[string]any{
 		"catalog_path": dst,
 		"title":        "forged system-authored write via bare RPC",
 		"operations": []any{
