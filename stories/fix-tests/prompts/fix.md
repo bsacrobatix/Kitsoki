@@ -47,7 +47,11 @@ JSON via the `submit` tool.
    `{{ args.quick_test_cmd }}` (or a narrower `go test ./path/...`) to check
    your work before submitting. The story will run the full acceptance command
    before review.
-4. Submit the structured artifact.
+4. **Immediately call `submit` after a focused verification passes.** Do not
+   keep investigating dependency-manager internals, alternate implementations,
+   or unrelated failure groups after you have a correct minimal change and
+   proof for it. A task turn that ends without `submit` is a failed repair,
+   even when its working-tree change is correct.
 
 {% block spec_house_rules %}
 ## House rules (hard constraints)
