@@ -1034,6 +1034,16 @@ Trace events make the boundary auditable:
 - `agent.runtime.end` records exit code, whether Kitsoki killed the process
   tree, duration, and final diff byte count.
 
+CLI-backed launches also emit `agent.process` diagnostics in the trace stream:
+`start`, `no_output`, and `finish`. The `start` row records redacted argv,
+working directory, pid, uid/root/sandbox posture, provider env key names, and
+common env-key presence; `finish` records duration, exit/infra summary, and raw
+stream-event count. For direct non-sandboxed launches, set
+`KITSOKI_AGENT_ACTIVITY_TIMEOUT=90s` (or another duration) to cancel prolonged
+stdout inactivity and force a terminal `agent.call.error` instead of leaving an
+in-flight `agent.call.start`. Sandboxed launches should prefer
+`sandbox.resources.activity_timeout`.
+
 `degrade: fail` aborts before launch when no backend satisfies
 `min_strength`. `degrade: warn` may run the strongest available backend, but the
 trace must show the degradation; a degraded start must not look like a confined

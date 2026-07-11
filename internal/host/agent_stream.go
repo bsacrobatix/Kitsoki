@@ -28,7 +28,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -180,7 +182,35 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 		}
 		return s.runWithRuntime(ctx, args)
 	}
+	if activityTimeout := agentDirectActivityTimeout(); activityTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		ctx, stop := withAgentActivityTimeout(ctx, activityTimeout)
+		defer stop()
+		return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+	}
 	return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+}
+
+func agentDirectActivityTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("KITSOKI_AGENT_ACTIVITY_TIMEOUT"))
+	if raw == "" || raw == "0" || strings.EqualFold(raw, "off") || strings.EqualFold(raw, "false") {
+		return 0
+	}
+	if d, err := time.ParseDuration(raw); err == nil {
+		if d <= 0 {
+			return 0
+		}
+		return d
+	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds * float64(time.Second))
+	}
+	return 0
 }
 
 // appendClaudeMCPPermissionSettings adds a per-dispatch settings overlay that

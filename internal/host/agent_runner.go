@@ -518,9 +518,8 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	recordAgentUsage(ctx, resultUsage, resultCost)
 	if waitErr != nil {
 		if ctx.Err() != nil {
-			return ClaudeRun{}, parsedSID, ctx.Err()
-		}
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+			cr.Infra = ctx.Err()
+		} else if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			cr.ExitCode = exitErr.ExitCode()
 		} else {
 			cr.Infra = waitErr

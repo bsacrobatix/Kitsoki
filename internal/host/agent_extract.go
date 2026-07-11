@@ -264,6 +264,9 @@ func AgentExtractHandler(ctx context.Context, args map[string]any) (Result, erro
 	}
 
 	errStr := ""
+	if runErr != nil {
+		errStr = agentRunErrorMessage("extract", runErr, "")
+	}
 	if res.Error != "" {
 		errStr = res.Error
 	}
@@ -297,7 +300,12 @@ func AgentExtractHandler(ctx context.Context, args map[string]any) (Result, erro
 		})
 	}
 
-	return res, runErr
+	if runErr != nil {
+		res.Error = errStr
+		res.FailureKind = FailureInfra
+		return res, nil
+	}
+	return res, nil
 }
 
 // runExtract is the implementation extracted so tests can call it directly

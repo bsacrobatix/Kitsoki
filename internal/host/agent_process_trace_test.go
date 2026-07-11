@@ -70,3 +70,53 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"done","session_id"
 		t.Fatalf("finish raw_event_count = %v, want 2", seen["finish"]["raw_event_count"])
 	}
 }
+
+func TestAgentStreamerDirectActivityTimeoutEmitsFinish(t *testing.T) {
+	t.Setenv("KITSOKI_AGENT_ACTIVITY_TIMEOUT", "30ms")
+	t.Setenv("KITSOKI_AGENT_NO_OUTPUT_NOTICE_AFTER", "10ms")
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "silent-claude")
+	if err := os.WriteFile(bin, []byte(`#!/bin/sh
+sleep 5
+`), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	sink := &memSink{}
+	ctx := host.WithCallID(agentCtxForTest(sink), "silent-call")
+	cr, _, err := host.AgentStreamerRunExport(ctx, bin, []string{"-p"}, "prompt", dir)
+	if err != nil {
+		t.Fatalf("AgentStreamerRunExport returned Go error; want ClaudeRun.Infra: %v", err)
+	}
+	if cr.Infra == nil {
+		t.Fatalf("expected inactivity cancellation in ClaudeRun.Infra, got %#v", cr)
+	}
+
+	seen := map[string]map[string]any{}
+	for _, ev := range sink.events {
+		if ev.Kind != store.AgentStreamEvent {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal stream payload: %v", err)
+		}
+		if payload["type"] == "agent.process" {
+			subtype, _ := payload["subtype"].(string)
+			seen[subtype] = payload
+			if ev.CallID != "silent-call" {
+				t.Fatalf("agent.process event call_id = %q, want silent-call", ev.CallID)
+			}
+		}
+	}
+	if seen["start"] == nil || seen["no_output"] == nil || seen["finish"] == nil {
+		t.Fatalf("missing process diagnostics after activity timeout; seen=%v events=%v", seen, kinds(sink.events))
+	}
+	if severity, _ := seen["finish"]["severity"].(string); severity != "error" {
+		t.Fatalf("finish severity = %q, want error; payload=%#v", severity, seen["finish"])
+	}
+	if errText, _ := seen["finish"]["error"].(string); errText == "" {
+		t.Fatalf("finish missing error text: %#v", seen["finish"])
+	}
+}

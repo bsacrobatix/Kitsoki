@@ -244,7 +244,17 @@ func AgentConverseHandler(ctx context.Context, args map[string]any) (Result, err
 	durationMS := time.Since(callStart).Milliseconds()
 
 	if runErr != nil {
-		return Result{}, runErr
+		msg := agentRunErrorMessage("converse", runErr, cr.Stderr)
+		converseInputDesc := map[string]any{
+			"messages": []map[string]any{{"role": "user", "content": question}},
+		}
+		emitConverseJournal(ctx, callID, callStart, durationMS, agentNameFromArgs(args), agent.Model,
+			systemPrompt, question, converseInputDesc, "", msg)
+		return Result{
+			Error:       msg,
+			FailureKind: FailureInfra,
+			Data:        map[string]any{"session_id": sessionID},
+		}, nil
 	}
 
 	converseInputDesc := map[string]any{
@@ -493,7 +503,21 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	durationMS := time.Since(callStart).Milliseconds()
 
 	if runErr != nil {
-		return Result{}, runErr
+		msg := agentRunErrorMessage("converse", runErr, cr.Stderr)
+		converseInputDesc := map[string]any{
+			"messages": []map[string]any{{"role": "user", "content": question}},
+		}
+		emitConverseJournal(ctx, callID, callStart, durationMS, "", model,
+			systemPrompt, question, converseInputDesc, "", msg)
+		return Result{
+			Error:       msg,
+			FailureKind: FailureInfra,
+			Data: map[string]any{
+				"session_id":        claudeSID,
+				"chat_id":           chatID,
+				"claude_session_id": claudeSID,
+			},
+		}, nil
 	}
 
 	// Self-heal a stale/foreign resume id. A chat may hold a session id the
@@ -526,7 +550,21 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 			}.Run(ctx)
 			durationMS = time.Since(callStart).Milliseconds()
 			if runErr != nil {
-				return Result{}, runErr
+				msg := agentRunErrorMessage("converse", runErr, cr.Stderr)
+				converseInputDesc := map[string]any{
+					"messages": []map[string]any{{"role": "user", "content": question}},
+				}
+				emitConverseJournal(ctx, callID, callStart, durationMS, "", model,
+					systemPrompt, question, converseInputDesc, "", msg)
+				return Result{
+					Error:       msg,
+					FailureKind: FailureInfra,
+					Data: map[string]any{
+						"session_id":        claudeSID,
+						"chat_id":           chatID,
+						"claude_session_id": claudeSID,
+					},
+				}, nil
 			}
 		}
 	}
