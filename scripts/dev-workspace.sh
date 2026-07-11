@@ -1029,6 +1029,22 @@ cmd_merge() {
     echo "warning: merge landed but could not remove temporary branch $landing_branch" >&2
   fi
 
+  # Keep Kitsoki's long-lived staging capsule at the landed ref. Consumer
+  # targets still refresh defensively, but a successful branch landing should
+  # not leave the staging checkout knowingly stale. Generic repositories and
+  # projects without the managed staging capsule are unaffected.
+  if [ "$target" = "$DEFAULT_TARGET" ] &&
+    [ -d "$repo/.capsules/staging/local/.git" ] &&
+    [ -x "$repo/scripts/refresh-staging-local.sh" ]; then
+    echo "merge: refreshing managed staging capsule after landing" >&2
+    (cd "$repo" && scripts/refresh-staging-local.sh \
+      --skip-remote \
+      --staging-branch "$target" \
+      --staging-capsule "$repo/.capsules/staging/local" \
+      --gate "git diff --check") ||
+      die "merge: staging/local landed but its managed capsule could not be refreshed"
+  fi
+
   if [ "$teardown" = "1" ]; then
     if ! cmd_close --repo "$repo" --root "$root" "$path"; then
       echo "warning: merge landed but teardown failed for $path" >&2

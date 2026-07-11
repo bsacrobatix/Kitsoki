@@ -189,6 +189,12 @@ checks diff hygiene, validates the Capsule CI story, replays its flow fixtures,
 and runs focused short Go tests. Use `--gate` to replace it with a narrower or
 broader intentional gate.
 
+After a successful `staging/local` landing, the helper also refreshes the
+managed `.capsules/staging/local` checkout when it exists. If that refresh
+fails, the landing is reported as failed rather than silently leaving the
+long-lived staging capsule stale. Staging consumers still refresh defensively
+before running.
+
 `refresh-staging-local.sh` checks the selected remote main first. If local
 `main` is stale, it delegates to `sync-main-from-remote.sh`, prints the required
 remote-sync steps, and stops; complete that sync and rerun the refresh. Once
