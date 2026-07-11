@@ -260,6 +260,20 @@ func (r *Registry) TypeDef(id string) (TypeDef, bool) {
 	return def, ok
 }
 
+// All returns every registered TypeDef, sorted by ID for a deterministic
+// wire order — used by host.graph.project's registry passthrough (POG
+// use-case-loop-plan.md §4 row C1) so kit-served clients see the same
+// artifact:/materialize: declarations the dev-only splice route already
+// forwarded from the raw catalog YAML.
+func (r *Registry) All() []TypeDef {
+	out := make([]TypeDef, 0, len(r.defs))
+	for _, def := range r.defs {
+		out = append(out, def)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 
 // IsA reports whether typeID equals ancestorID or extends it (directly or
 // transitively) — the assignability check an edge target uses (an edge
