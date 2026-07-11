@@ -131,6 +131,25 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
 
 missing_trace = runner.real_trace_metrics(str(tree / "absent.jsonl"), "gpt-5.4")
 check("missing studio trace is incomplete", missing_trace.get("measurement_status"), "incomplete")
+
+prompt_args = argparse.Namespace(implementation_mode="agent_task", story="")
+prompt = runner.build_kitsoki_prompt(
+    prompt_args,
+    {
+        "id": "public-contract-fixture",
+        "archetype": "bugfix",
+        "ticket": "A visible error message must reach the operator.",
+        "acceptance_contract": [{"id": "visible-message", "description": "operator sees error"}],
+    },
+    Path("/tmp/fixture"),
+    "/tmp/fixture.jsonl",
+    Path("/tmp/thread.md"),
+    "codex-gpt54",
+    "paired-task-fixture",
+    "pnpm vitest run",
+    "codex",
+)
+require("public acceptance contract forwarded", 'acceptance_contract: [{"description": "operator sees error", "id": "visible-message"}]' in prompt)
 check("GPT-5.4 maps to a dedicated Kitsoki profile", runner.MODEL_TO_PROFILE.get("gpt-5.4"), "codex-gpt54")
 
 binary_dir = runner.ensure_kitsoki_binary()
