@@ -1,0 +1,962 @@
+schema: project-object-graph/seed-catalog/v0
+catalog:
+  id: kitsoki-catalog
+  title: kitsoki — product object graph
+  status: active
+  visibility: public
+  purpose: product-catalog
+  # Curated from docs/proposals/project-object-graph/seed-objects.yaml: the
+  # core product capabilities (not the demo/tour story features), with their
+  # requirements and use cases, re-rooted under a product node so per-repo
+  # portals and the POG program rollup read the same containment shape.
+  source_window:
+    branch: main
+    sampled_at: "2026-07-05"
+    inputs:
+      - id: source-seed-objects
+        kind: document
+        path: docs/proposals/project-object-graph/seed-objects.yaml
+      - id: source-readme
+        kind: document
+        path: README.md
+
+type_registry:
+  - id: core-node
+    schema: graph-type/v0
+    extends: null
+    summary: Shared envelope for every kitsoki product graph node.
+    required_fields:
+      - id
+      - schema
+      - title
+      - status
+      - visibility
+      - sources
+      - edges
+  - id: product
+    schema: graph-type/v0
+    extends: core-node
+    summary: The product root node.
+  - id: feature
+    schema: graph-type/v0
+    extends: core-node
+    summary: A shipped or planned product capability.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: requirements
+        target_type: requirement
+        cardinality: many
+      - id: use_cases
+        target_type: use-case
+        cardinality: many
+  - id: requirement
+    schema: graph-type/v0
+    extends: core-node
+    summary: Durable, testable statement a feature must satisfy.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: required_by
+        target_type: feature
+        cardinality: many
+      - id: motivated_by
+        target_type: use-case
+        cardinality: many
+  - id: use-case
+    schema: graph-type/v0
+    extends: core-node
+    summary: An actor scenario that motivates features and requirements.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: exercises
+        target_type: feature
+        cardinality: many
+      - id: acceptance
+        target_type: requirement
+        cardinality: many
+
+  # Deliverable layer — POG materialization-first taxonomy (2026-07-11):
+  # deliverable nodes are SPECS of real evidence/functionality artifacts
+  # (demos, docs, tutorials, test evidence); "work" is the act of
+  # materializing them, and a deliverable is REAL exactly when its latest
+  # materialize run's Starlark gate check passes. Status uses the derived
+  # EvidenceStatus vocabulary (missing | planned | in-progress | failed |
+  # verified | stale) — flipped by runs, never hand-curated. Spec-only here
+  # (no producer stories bound yet); the POG program repo carries the full
+  # contract these types graduate into.
+  - id: test-suite
+    schema: graph-type/v0
+    extends: core-node
+    summary: Recorded deterministic test/flow evidence; real when the recorded runs are clean.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: proves
+        target_type: requirement
+        cardinality: many
+    artifact:
+      schema: kitsoki/artifact/flow-evidence/v0
+      format: json
+      presentation: document
+  - id: demo
+    schema: graph-type/v0
+    extends: core-node
+    summary: A recorded demonstration packet (tours + rrweb clips) of a use case.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: demonstrates
+        target_type: use-case
+        cardinality: many
+    artifact:
+      schema: kitsoki/artifact/demo-packet/v0
+      format: json
+      presentation: media
+  - id: doc
+    schema: graph-type/v0
+    extends: core-node
+    summary: A generated document deliverable.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: documents
+        target_type: feature
+        cardinality: many
+    artifact:
+      schema: kitsoki/artifact/doc/v0
+      format: markdown
+      presentation: document
+  - id: tutorial
+    schema: graph-type/v0
+    extends: core-node
+    summary: A step-by-step walkthrough teaching a use case.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: teaches
+        target_type: use-case
+        cardinality: many
+    artifact:
+      schema: kitsoki/artifact/doc/v0
+      format: markdown
+      presentation: document
+  # The structured write primitive: system-authored writes (materialize
+  # write-backs, derived status flips) land as changeset nodes.
+  - id: changeset
+    schema: graph-type/v0
+    extends: core-node
+    summary: A reviewable, structured edit to this catalog; content writes are changesets, lifecycle flips are direct writes with provenance.
+
+nodes:
+  - schema: kitsoki/product/v0
+    id: product-kitsoki
+    title: kitsoki
+    status: active
+    visibility: public
+    summary: A conversational workflow engine built on one commitment - make
+      workflows as deterministic as possible, and confine the LLM to narrow,
+      identified, traceable decision points. The runtime is a YAML state
+      machine; the LLM is called for narrow sub-tasks and every decision is
+      recorded in the trace.
+    sources: [source-readme]
+    edges: {}
+
+  # --- features ------------------------------------------------------------
+  - schema: kitsoki/feature/v0
+    id: feature-operator-ask
+    title: "Operator questions forwarded from headless agents"
+    status: shipped
+    visibility: public
+    summary: "Dispatched agent questions become blocking operator UI questions
+      instead of silent empty-answer defaults."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-operator-ask-no-silent-default
+        - req-operator-ask-blocking-round-trip
+        - req-operator-ask-multi-select
+      use_cases:
+        - usecase-maintainer-answers-blocked-agent
+
+  - schema: kitsoki/feature/v0
+    id: feature-agent-actions
+    title: "Agent action transcripts"
+    status: shipped
+    visibility: public
+    summary: "Every agent call captures and replays its native tool-use stream as
+      typed action rows, guardrail arcs, waterfall timing, token/cost accrual, and
+      cassette-vs-live drift."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-agent-actions-byte-stable-stream
+      use_cases:
+        - usecase-maintainer-inspects-agent-call
+
+  - schema: kitsoki/feature/v0
+    id: feature-trace-introspection
+    title: "Decision-first trace detail"
+    status: shipped
+    visibility: public
+    summary: "Frozen traces expose observation filters, decision verdicts,
+      confidence, evidence, replay, tree, waterfall, and state-graph views."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-trace-introspection-decision-first
+      use_cases:
+        - usecase-maintainer-audits-frozen-run
+
+  - schema: kitsoki/feature/v0
+    id: feature-meta-mode
+    title: "Meta-mode edits and explains stories"
+    status: shipped
+    visibility: public
+    summary: "The running app can answer questions about kitsoki or a live story,
+      then edit story YAML and hot-reload the session with the change recorded in
+      the trace."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-meta-mode-story-aware-edit
+      use_cases:
+        - usecase-developer-edits-running-story
+
+  - schema: kitsoki/feature/v0
+    id: feature-dev-story-bugfix
+    title: "Bug triage to autonomous fix"
+    status: shipped
+    visibility: public
+    summary: "The dev-story routes a ticket through triage and into the autonomous
+      bugfix pipeline: reproduce, propose, implement, test, review, validate, and
+      open a PR."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-dev-story-bugfix-end-to-end
+      use_cases:
+        - usecase-developer-runs-bugfix-pipeline
+
+  - schema: kitsoki/feature/v0
+    id: feature-project-object-graph
+    title: "Project object graph"
+    status: proposed
+    visibility: public
+    summary: "Typed YAML project objects and typed edges make features,
+      requirements, proposals, plans, tests, evidence, and roadmap deltas walkable
+      by tools."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+        - req-project-objects-delta-roadmap
+        - req-project-objects-provenance
+      use_cases:
+        - usecase-product-owner-computes-roadmap-delta
+        - usecase-agent-mines-backlog-into-graph
+
+  - schema: kitsoki/feature/v0
+    id: feature-graph-viewer
+    title: "Project object graph viewer"
+    status: active
+    visibility: public
+    summary: "One Vue app over the object graph with two projections of the same
+      catalog - a catalog (list/detail/change-request) view and a Vue Flow + ELK
+      graph canvas with layer filtering, focus neighborhoods, and edge navigation."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-viewer-multi-actor-lenses
+        - req-viewer-permission-visibility
+        - req-viewer-full-graph-traversal
+      use_cases:
+        - usecase-pm-scans-roadmap-delta
+        - usecase-developer-traces-requirement-to-proof
+
+  - schema: kitsoki/feature/v0
+    id: feature-chat-stream
+    title: "Live agent streaming in chat"
+    status: shipped
+    visibility: public
+    summary: "While an agent turn runs, the main chat streams its reasoning and
+      tool calls live in a thinking bubble; when the turn finishes, the same
+      interleaved activity feed stays reviewable — collapsed inside the agent's
+      bubble, expandable to the exact feed you watched. The meta overlay renders
+      agent work with the same shared components."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-chat-stream-behavior
+
+  - schema: kitsoki/feature/v0
+    id: feature-story-editor
+    title: "The story editor"
+    status: shipped
+    visibility: public
+    summary: "The per-story editor surface: the BFS-ordered room list, room detail
+      with hook and domain model and IDE deep-link, the meta-chat column, and the
+      Agent Workbench's contract cards and cassette browser."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-story-editor-behavior
+
+  - schema: kitsoki/feature/v0
+    id: feature-web-inbox
+    title: "The async inbox"
+    status: shipped
+    visibility: public
+    summary: "A background host call launched from the chat composer completes
+      while you're elsewhere: the runtime auto-posts a completion notification over
+      SSE, the global inbox badge increments, a toast appears, and one click
+      teleports the session back to the originating room."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-web-inbox-behavior
+
+  - schema: kitsoki/feature/v0
+    id: feature-goal-seeker
+    title: "Goal-seeker — the loop that drives the plan through kitsoki itself"
+    status: shipped
+    visibility: public
+    summary: "goal-seeker is the generalized-usage stabilization loop, built as a
+      kitsoki story rather than an out-of-engine script. It imports punch-list for
+      the load -> drive -> verify -> report loop and ship-it for lost-work-safe
+      integrate -> verify -> cleanup, then adds an evaluate gate that reads a
+      bounded preamble over the plan's ledger and trace evidence and emits a
+      verdict: keep dispatching, or done. The whole loop is flow-tested with no LLM,
+      including adversarial cases (a false-done verdict, a worker self-reporting
+      green, a not-RED change) that must be rejected deterministically rather than
+      trusted."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-goal-seeker-behavior
+
+  - schema: kitsoki/feature/v0
+    id: feature-dynamic-workflows
+    title: "Dynamic workflows"
+    status: shipped
+    visibility: public
+    summary: "Dynamic workflows let the operator write one proposal-shaped goal,
+      create a deterministic workflow draft, validate it, launch it as a tracked
+      session, and export a starter story package plus flow/cassette artifacts. The
+      demo uses an existing proposal in docs/proposals as the source example."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-dynamic-workflows-behavior
+
+  - schema: kitsoki/feature/v0
+    id: feature-kitsoki-doctor
+    title: "kitsoki doctor — provider, toolkit, and MCP readiness at a glance"
+    status: shipped
+    visibility: public
+    summary: "`kitsoki doctor` runs a preflight over the things that make
+      onboarding silently fail elsewhere: provider/API-key presence, agent toolkit
+      installation, and MCP server registration. It reports readiness instead of
+      leaving a stranger to discover a broken setup mid-session. A top-level `init`
+      alias and tiered `--help` output round out a CLI that used to present 46 flat
+      commands with no on-ramp."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-kitsoki-doctor-behavior
+
+  - schema: kitsoki/feature/v0
+    id: feature-harness-picker
+    title: "The harness picker — pluggable operators, live"
+    status: shipped
+    visibility: public
+    summary: "kitsoki treats the LLM as a swappable operator. The run header
+      carries a provider / model / effort picker — claude-native, codex, and
+      synthetic backends — that takes effect on the next turn (substrate semantics,
+      not a mid-call swap). Each agent call is stamped with the exact profile,
+      model, and effort that produced it, shown inline on the trace row. The demo
+      asks each operator to identify itself and watches the per-call provenance
+      change as the picker switches — same recorded input, different operator,
+      auditable output."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      requirements:
+        - req-harness-picker-behavior
+
+  # --- requirements --------------------------------------------------------
+  - schema: kitsoki/requirement/v0
+    id: req-operator-ask-no-silent-default
+    title: "Headless agents must not silently answer their own operator questions"
+    status: satisfied
+    visibility: public
+    summary: "A dispatched agent question must block or be forwarded; empty auto-
+      resolution is forbidden for live operator workflows. Rationale:
+      AskUserQuestion in headless dispatched agents silently resolves with empty
+      answers, which can move a workflow through an unreviewed fork."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-operator-ask
+      motivated_by:
+        - usecase-maintainer-answers-blocked-agent
+
+  - schema: kitsoki/requirement/v0
+    id: req-operator-ask-blocking-round-trip
+    title: "Operator answer must unblock the exact parked agent question"
+    status: satisfied
+    visibility: public
+    summary: "The UI answer is keyed to the original question id and resumes that
+      parked agent turn only after the operator sends a complete answer."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-operator-ask
+      motivated_by:
+        - usecase-maintainer-answers-blocked-agent
+
+  - schema: kitsoki/requirement/v0
+    id: req-operator-ask-multi-select
+    title: "Forwarded questions support single-select and multi-select answers"
+    status: satisfied
+    visibility: public
+    summary: "Operator forwarding must preserve the agent's single-select or
+      multi-select answer shape and return the selected option set."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-operator-ask
+      motivated_by:
+        - usecase-maintainer-answers-blocked-agent
+
+  - schema: kitsoki/requirement/v0
+    id: req-agent-actions-byte-stable-stream
+    title: "Agent calls expose byte-stable tool-use transcripts"
+    status: satisfied
+    visibility: public
+    summary: "Agent task, decide, ask, and converse calls must expose the captured
+      tool-use stream with enough structure to replay, inspect, and compare it
+      deterministically."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-agent-actions
+      motivated_by:
+        - usecase-maintainer-inspects-agent-call
+
+  - schema: kitsoki/requirement/v0
+    id: req-trace-introspection-decision-first
+    title: "Trace detail must lead with decisions and provenance"
+    status: satisfied
+    visibility: public
+    summary: "Decision events must show verdict, confidence, evidence, and replay
+      affordances before raw trace payloads."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-trace-introspection
+      motivated_by:
+        - usecase-maintainer-audits-frozen-run
+
+  - schema: kitsoki/requirement/v0
+    id: req-meta-mode-story-aware-edit
+    title: "Running stories can be explained, edited, and hot-reloaded"
+    status: satisfied
+    visibility: public
+    summary: "Meta mode must support cross-app help, story-specific explanation,
+      story YAML edits, and in-place reload of an active session."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-meta-mode
+      motivated_by:
+        - usecase-developer-edits-running-story
+
+  - schema: kitsoki/requirement/v0
+    id: req-dev-story-bugfix-end-to-end
+    title: "Bugfix story must carry a ticket through reproducible delivery"
+    status: satisfied
+    visibility: public
+    summary: "The story must triage a ticket and then run the autonomous bugfix
+      sequence through reproduction, proposal, implementation, tests, review,
+      validation, and PR creation."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-dev-story-bugfix
+      motivated_by:
+        - usecase-developer-runs-bugfix-pipeline
+
+  - schema: kitsoki/requirement/v0
+    id: req-project-objects-data-primary
+    title: "Project objects are structured data, not markdown free text"
+    status: proposed
+    visibility: public
+    summary: "Features, requirements, use cases, proposals, changesets, tests, and
+      evidence must be schema-pinned records with markdown only inside typed fields.
+      Rationale: Tools must traverse and validate the project state without parsing
+      arbitrary prose conventions."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-agent-mines-backlog-into-graph
+
+  - schema: kitsoki/requirement/v0
+    id: req-project-objects-typed-edges
+    title: "Relationships use typed edge fields and resolvable ids"
+    status: proposed
+    visibility: public
+    summary: "Every relationship must be declared in a typed edge field with a
+      target node type, and catalog lint must reject dangling ids and invalid edge
+      targets."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-agent-mines-backlog-into-graph
+
+  - schema: kitsoki/requirement/v0
+    id: req-project-objects-delta-roadmap
+    title: "Roadmap is computed from current-state and desired-state graph deltas"
+    status: proposed
+    visibility: public
+    summary: "Roadmap views must be derived from durable desired/current objects
+      plus transient changesets, not maintained as prose or a parallel hand-authored
+      roadmap."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-product-owner-computes-roadmap-delta
+
+  - schema: kitsoki/requirement/v0
+    id: req-project-objects-provenance
+    title: "Graph nodes retain source provenance from proposals and context notes"
+    status: proposed
+    visibility: public
+    summary: "Nodes produced from backlog mining must carry structured source
+      references so reviewers can trace every requirement or use case back to its
+      proposal, feature catalog entry, or context note."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-project-object-graph
+      motivated_by:
+        - usecase-agent-mines-backlog-into-graph
+
+  - schema: kitsoki/requirement/v0
+    id: req-viewer-multi-actor-lenses
+    title: "Each actor role gets a lens onto its part of the lifecycle"
+    status: proposed
+    visibility: public
+    summary: "The viewer must let each actor kind (product manager, developer,
+      maintainer, agent) start from the layers that match its concerns -
+      capabilities and delta for PMs, proof and implementation for developers -
+      without forking into per-role apps. Rationale: PMs and developers care about
+      different lifecycle stages of the same objects; one shared graph with role
+      lenses keeps them coherent instead of maintaining parallel views of the
+      truth."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-pm-scans-roadmap-delta
+        - usecase-developer-traces-requirement-to-proof
+
+  - schema: kitsoki/requirement/v0
+    id: req-viewer-permission-visibility
+    title: "Visibility is permission-managed but the graph stays whole"
+    status: proposed
+    visibility: public
+    summary: "Every rendered object passes through the visibility model
+      (public/internal today, per-role permissions later); actors keep navigable
+      visibility across the full graph, and objects outside their permission are
+      absent from every projection rather than greyed out or leaked through edges.
+      Rationale: Shared decision 5 of the epic - one system holds public promo
+      surface and proprietary inner workings; the viewer is the first surface that
+      must enforce reachability filtering, not just node filtering."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-pm-scans-roadmap-delta
+
+  - schema: kitsoki/requirement/v0
+    id: req-viewer-full-graph-traversal
+    title: "Any object is reachable from any other by walking typed edges"
+    status: satisfied
+    visibility: public
+    summary: "From any selected object, incoming and outgoing edge groups are
+      walkable in both the catalog view and the graph canvas, and selection stays in
+      sync when switching projections."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-graph-viewer
+      motivated_by:
+        - usecase-developer-traces-requirement-to-proof
+
+  - schema: kitsoki/requirement/v0
+    id: req-chat-stream-behavior
+    title: "Live agent streaming in chat behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "Watch the agent think and act, streamed live into the conversation."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-chat-stream
+
+  - schema: kitsoki/requirement/v0
+    id: req-story-editor-behavior
+    title: "The story editor behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "Rooms, hooks, domain model, and the Agent Workbench — one inspector."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-story-editor
+
+  - schema: kitsoki/requirement/v0
+    id: req-web-inbox-behavior
+    title: "The async inbox behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "Background work notifies you when it lands — toast, badge, jump back."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-web-inbox
+
+  - schema: kitsoki/requirement/v0
+    id: req-goal-seeker-behavior
+    title: "Goal-seeker — the loop that drives the plan through kitsoki itself
+      behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "A kitsoki story that evaluates a decomposed plan, dispatches
+      workers, integrates green work, and loops until done."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-goal-seeker
+
+  - schema: kitsoki/requirement/v0
+    id: req-dynamic-workflows-behavior
+    title: "Dynamic workflows behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "Turn a proposal-shaped goal into a validated draft, a live session,
+      and an exportable starter base."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-dynamic-workflows
+
+  - schema: kitsoki/requirement/v0
+    id: req-kitsoki-doctor-behavior
+    title: "kitsoki doctor — provider, toolkit, and MCP readiness at a glance behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "One command reports whether your provider, agent toolkit, and MCP
+      registration are actually ready."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-kitsoki-doctor
+
+  - schema: kitsoki/requirement/v0
+    id: req-harness-picker-behavior
+    title: "The harness picker — pluggable operators, live behaves as documented"
+    status: satisfied
+    visibility: public
+    summary: "Switch provider, model, and reasoning effort from the run header;
+      every call is stamped with the operator that answered it."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      required_by:
+        - feature-harness-picker
+
+  # --- use cases -------------------------------------------------------------
+  - schema: kitsoki/use-case/v0
+    id: usecase-maintainer-answers-blocked-agent
+    title: "Maintainer answers a blocked implementation agent"
+    status: supported
+    visibility: public
+    summary: "Trigger: A dispatched bugfix or implementation agent reaches a
+      decision it cannot safely make alone. Outcome: The maintainer sees the exact
+      question and options, answers in web or TUI, and the parked agent resumes with
+      that answer recorded."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-operator-ask
+      acceptance:
+        - req-operator-ask-no-silent-default
+        - req-operator-ask-blocking-round-trip
+        - req-operator-ask-multi-select
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-maintainer-inspects-agent-call
+    title: "Maintainer inspects why an agent call behaved the way it did"
+    status: supported
+    visibility: public
+    summary: "Trigger: A run contains a costly, surprising, rejected, or drift-
+      prone agent call. Outcome: The maintainer opens the call transcript, sees each
+      tool call and guardrail step in order, and can compare deterministic replay
+      against live drift."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-agent-actions
+      acceptance:
+        - req-agent-actions-byte-stable-stream
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-maintainer-audits-frozen-run
+    title: "Maintainer audits a frozen run without spending model calls"
+    status: supported
+    visibility: public
+    summary: "Trigger: A recorded run needs review, explanation, or regression
+      comparison. Outcome: The maintainer filters the trace by observation kind,
+      opens a decision, reads the verdict and evidence, and inspects the same trace
+      through tree, waterfall, and state-graph views."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-trace-introspection
+      acceptance:
+        - req-trace-introspection-decision-first
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-developer-edits-running-story
+    title: "Developer asks a running story to explain or edit itself"
+    status: supported
+    visibility: public
+    summary: "Trigger: A story needs explanation or a small change while a session
+      is running. Outcome: The developer asks meta mode for story context, requests
+      a YAML edit, and sees the live session reload against the changed story."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-meta-mode
+      acceptance:
+        - req-meta-mode-story-aware-edit
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-developer-runs-bugfix-pipeline
+    title: "Developer hands a selected bug to the autonomous fix pipeline"
+    status: supported
+    visibility: public
+    summary: "Trigger: A triage queue contains a fixable bug that should move
+      through implementation without ad hoc prompting. Outcome: The developer
+      selects the ticket, watches each deterministic room advance, and receives a
+      validated PR-ready fix with trace evidence."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-dev-story-bugfix
+      acceptance:
+        - req-dev-story-bugfix-end-to-end
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-product-owner-computes-roadmap-delta
+    title: "Product owner computes roadmap work from desired-state gaps"
+    status: proposed
+    visibility: public
+    summary: "Trigger: A strategic review identifies desired capabilities, shipped
+      capabilities, and proposal debt across docs/proposals and .context. Outcome:
+      The product owner sees a computed work graph with dependencies, ready sets,
+      evidence gaps, and transient changesets needed to close the gap."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-project-object-graph
+      acceptance:
+        - req-project-objects-delta-roadmap
+        - req-project-objects-typed-edges
+        - req-project-objects-provenance
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-agent-mines-backlog-into-graph
+    title: "Agent converts proposal backlog and context notes into graph objects"
+    status: proposed
+    visibility: public
+    summary: "Trigger: The repo contains many proposals plus transient .context
+      notes that describe features, requirements, decisions, and cleanup work in
+      prose. Outcome: The agent emits typed feature, requirement, use-case,
+      proposal, evidence, and change nodes with source refs and edges, then
+      deterministic lint reports gaps for human review."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-project-object-graph
+      acceptance:
+        - req-project-objects-data-primary
+        - req-project-objects-typed-edges
+        - req-project-objects-provenance
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-pm-scans-roadmap-delta
+    title: "Product manager reviews the open roadmap delta"
+    status: supported
+    visibility: public
+    summary: "Trigger: A planning pass needs to answer what work is open, why it
+      exists, and which capability gaps it closes. Outcome: The PM filters to the
+      delta layer, walks proposals and work items back to the requirements and use
+      cases that motivate them, and never has to read implementation-level objects
+      to do it."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-graph-viewer
+      acceptance:
+        - req-viewer-multi-actor-lenses
+        - req-viewer-permission-visibility
+
+  - schema: kitsoki/use-case/v0
+    id: usecase-developer-traces-requirement-to-proof
+    title: "Developer traces a requirement to its implementation and proof"
+    status: supported
+    visibility: public
+    summary: "Trigger: A developer picks up a change and needs to see what already
+      implements or verifies the touched requirements. Outcome: The developer
+      focuses the requirement in the graph canvas, expands the neighborhood, and
+      lands on the implementing code paths and verifying evidence without leaving
+      the viewer."
+    sources: [source-seed-objects]
+    edges:
+      part_of:
+        - product-kitsoki
+      exercises:
+        - feature-graph-viewer
+      acceptance:
+        - req-viewer-full-graph-traversal
+  # --- deliverables (evidence/functionality nodes) --------------------------
+  - schema: kitsoki/test-suite/v0
+    id: ts-materialize-package
+    title: Materialize package test suite (gate checks + host-verb rig)
+    status: verified
+    visibility: public
+    summary: go test ./internal/materialize — covers the engine-run Starlark
+      gate-check stages (pass/fail/unresolved), the sandbox fs-root pinning,
+      and the private drive rig's host registry (producer stories' host.run
+      invokes are real, not silent no-ops). Verified on every kitsoki landing
+      via the standard test gate.
+    sources: [source-readme]
+    edges:
+      part_of: [product-kitsoki]
+      proves: []
+  - schema: kitsoki/demo/v0
+    id: demo-object-graph-portal
+    title: Recorded demo — the object-graph kit UI over a real catalog
+    status: missing
+    visibility: public
+    summary: Spec of a captured demo packet showing /graph served from the
+      @kitsoki/object-graph kit against a real catalog. Does not exist yet;
+      sits in the derived work queue until captured.
+    sources: [source-readme]
+    edges:
+      part_of: [product-kitsoki]
+      demonstrates: []
