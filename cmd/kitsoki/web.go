@@ -315,11 +315,28 @@ authentication.`,
 			}
 			bugRoot := resolveWebBugRoot(dirs)
 			bugPrivacyResolver := bugPrivacyCheckerResolverFromConfig(cfg, bugRoot, bugPrivacyRuntime)
+			// materializeRoot is deliberately NOT bugRoot: a materialize
+			// binding's `story:` path (e.g. "stories/materialize-work-item")
+			// is always repo-root-relative, the same convention --kits-dir/
+			// --stories-dir already use — but bugRoot's .git-ancestor walk
+			// (resolveWebBugRoot) falls back to the story dir ITSELF when no
+			// .git is found above it (e.g. a disposable checkout with no
+			// .git at all), which silently doubled the story dir into
+			// materialize job story paths ("stories/stories/<story>/app.yaml"
+			// — discovered via POG's C1 Chromium journey gate). The process
+			// cwd is always the right root here; kitsoki web is only ever
+			// invoked from the repo root (every gate script, this cmd's own
+			// --kits-dir/--stories-dir flags, and internal/materialize's own
+			// docs all assume it).
+			materializeRoot, err := os.Getwd()
+			if err != nil {
+				materializeRoot = "."
+			}
 			srv := server.NewMulti(registry,
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(bugRoot),
 				server.WithWorkflowRoot(bugRoot),
-				server.WithMaterializeRoot(bugRoot),
+				server.WithMaterializeRoot(materializeRoot),
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
 				server.WithImproveTicketProvider(improveProvider),
