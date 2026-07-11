@@ -780,7 +780,7 @@ def ensure_kitsoki_binary() -> Path:
     The paired-task image is built ONCE (Dockerfile.paired-task), but the repo
     checkout is bind-mounted at container-RUN time — whatever's on the host at
     that moment, not what was baked into the image. So the binary has to be
-    built at run time, not image-build time. `make build-bin` writes to the
+    built at run time, not image-build time. The direct `go build` writes to the
     checkout's own (gitignored) bin/, which lives on the host side of the bind
     mount, so a build here is naturally cached across ephemeral `--rm`
     containers as long as they share the same mounted checkout — no cp of a
@@ -794,9 +794,15 @@ def ensure_kitsoki_binary() -> Path:
     binary = KITSOKI_ROOT / "bin" / "kitsoki"
     if binary.exists():
         return binary.parent
-    run(["make", "build-bin"], cwd=KITSOKI_ROOT)
+    # `make build-bin` first runs the embed-story staging target. In a managed
+    # workspace bootstrap has already staged those trees, and that deliberately
+    # non-idempotent target exits nonzero before Go is reached. The arena only
+    # needs the CLI at this point, so build it directly and keep the cell's
+    # control plane independent of workspace bootstrap state.
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    run(["go", "build", "-o", str(binary), "./cmd/kitsoki"], cwd=KITSOKI_ROOT)
     if not binary.exists():
-        raise RuntimeError("make build-bin did not produce bin/kitsoki")
+        raise RuntimeError("go build did not produce bin/kitsoki")
     return binary.parent
 
 
