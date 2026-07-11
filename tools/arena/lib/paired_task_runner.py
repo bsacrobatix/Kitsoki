@@ -174,7 +174,7 @@ def main(argv: list[str] | None = None) -> int:
     corpus_path = Path(args.corpus)
     task = load_task(args.task, corpus_path)
     if args.arm_only:
-        return arm_task(task)
+        return arm_task(task, args.target)
     return run_live(args, task)
 
 
@@ -190,7 +190,7 @@ def load_task(task_id: str, corpus_path: Path) -> dict[str, Any]:
     sys.exit(f"unknown corpus task {task_id!r} in {corpus_path}")
 
 
-def arm_task(task: dict[str, Any]) -> int:
+def arm_task(task: dict[str, Any], target: str) -> int:
     oracle = task.get("oracle") or {}
     kind = oracle.get("kind")
     started = time.monotonic()
@@ -207,6 +207,7 @@ def arm_task(task: dict[str, Any]) -> int:
             evidence_refs=[task_ref(task)],
             trace_ref="",
             notes=f"arm github_content red={red} green={green}",
+            target=target,
         )
     if kind == "external_bakeoff":
         cmd = [
@@ -229,6 +230,7 @@ def arm_task(task: dict[str, Any]) -> int:
             evidence_refs=[task_ref(task)],
             trace_ref="",
             notes=first_line(proc.stdout + "\n" + proc.stderr),
+            target=target,
             exit_code=0 if proc.returncode == 0 else 1,
         )
     if kind == "bugswarm_fail_pass_pair":
@@ -243,9 +245,10 @@ def arm_task(task: dict[str, Any]) -> int:
             evidence_refs=[task_ref(task)],
             trace_ref="",
             notes=f"arm bugswarm_fail_pass_pair red={red} green={green} image_tag={image_tag}",
+            target=target,
             exit_code=0 if red and green else 1,
         )
-    return emit(verdict="blocked", notes=f"unknown oracle kind {kind!r}", exit_code=2)
+    return emit(verdict="blocked", notes=f"unknown oracle kind {kind!r}", target=target, exit_code=2)
 
 
 def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
@@ -270,6 +273,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
             evidence_refs=[task_ref(task)],
             trace_ref=container_path(trace_ref),
             notes=f"baseline materialization failed: {exc}",
+            target=args.target,
             exit_code=0,
         )
     if not prewarm["ok"]:
@@ -284,6 +288,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
             trace_ref=container_path(trace_ref),
             notes=f"deterministic prewarm failed: {prewarm['note']}",
             metrics={"prewarm_wall_s": prewarm["wall_s"]},
+            target=args.target,
             exit_code=0,
         )
     baseline_ref = current_head(tree)
@@ -322,6 +327,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         trace_ref=dispatch.trace_ref or container_path(trace_ref),
         notes=notes,
         metrics=metrics,
+        target=args.target,
         exit_code=0,
     )
 
@@ -1098,6 +1104,7 @@ def emit(
     trace_ref: str = "",
     notes: str = "",
     metrics: dict[str, Any] | None = None,
+    target: str = "",
     exit_code: int = 0,
 ) -> int:
     payload = {
@@ -1111,7 +1118,12 @@ def emit(
     }
     if metrics:
         payload["metrics"] = metrics
-    print(json.dumps(payload, sort_keys=True))
+    serialized = json.dumps(payload, sort_keys=True)
+    if target:
+        output = Path(target)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(serialized + "\n", encoding="utf-8")
+    print(serialized)
     return exit_code
 
 
