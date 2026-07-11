@@ -69,7 +69,7 @@ source_repo="$tmp/source"
 mkdir -p "$source_repo"
 git -C "$source_repo" init --quiet --initial-branch=main
 write_merge_helper "$source_repo"
-printf '.kitsoki.local.yaml\n.bootstrap-tempdir\n' >"$source_repo/.gitignore"
+printf '.kitsoki.local.yaml\n.bootstrap-tempdir\n.artifacts/\n' >"$source_repo/.gitignore"
 cat >"$source_repo/Makefile" <<'MK'
 bootstrap-workspace:
 	@printf '%s\n' "$(TEMP_DIR)" > .bootstrap-tempdir
@@ -148,6 +148,21 @@ create_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id
 workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$create_json")"
 [ -d "$workspace/.git" ] || fail "create did not produce a git workspace"
 [ -f "$workspace/.kitsoki-capsule" ] || fail "missing capsule sentinel"
+
+# Teardown is the final safety net for old writers: flat tickets and the retired
+# <id>/issue.md shape must be imported into the source checkout before removal.
+legacy_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id legacy-ticket --branch agent/legacy-ticket --json)"
+legacy_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$legacy_json")"
+mkdir -p "$legacy_workspace/.artifacts/issues/bugs/legacy-nested" "$legacy_workspace/.artifacts/issues/bugs/legacy-flat.artifacts"
+printf '%s\n' '# nested ticket' >"$legacy_workspace/.artifacts/issues/bugs/legacy-nested/issue.md"
+printf '%s\n' 'nested evidence' >"$legacy_workspace/.artifacts/issues/bugs/legacy-nested/trace.json"
+printf '%s\n' '# flat ticket' >"$legacy_workspace/.artifacts/issues/bugs/legacy-flat.md"
+printf '%s\n' 'flat evidence' >"$legacy_workspace/.artifacts/issues/bugs/legacy-flat.artifacts/trace.json"
+"$dev_workspace" close --repo "$source_repo" --root "$root" "$legacy_workspace" >/dev/null
+[ -f "$source_repo/.artifacts/issues/bugs/legacy-nested.md" ] || fail "close lost nested legacy ticket"
+[ -f "$source_repo/.artifacts/issues/bugs/legacy-nested.artifacts/trace.json" ] || fail "close lost nested legacy evidence"
+[ -f "$source_repo/.artifacts/issues/bugs/legacy-flat.md" ] || fail "close lost flat workspace ticket"
+[ -f "$source_repo/.artifacts/issues/bugs/legacy-flat.artifacts/trace.json" ] || fail "close lost flat ticket evidence"
 [ -f "$workspace/capsule-manifest.json" ] || fail "missing capsule manifest"
 [ -f "$workspace/.kitsoki-clone" ] || fail "missing clone sentinel"
 [ "$(git -C "$workspace" branch --show-current)" = "agent/case-1" ] || fail "workspace branch mismatch"
@@ -194,6 +209,7 @@ json_bootstrap_workspace="$(python3 -c 'import json,sys; print(json.load(sys.std
 printf 'local scratch\n' >"$source_repo/untracked-primary.txt"
 printf 'two\n' >"$workspace/feature.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$workspace" --message 'add feature' >/dev/null
+git -C "$workspace" log -1 --format=%B | grep -Fq 'Signed-off-by: Kitsoki Agent <agent@kitsoki.dev>' || fail "commit omitted required DCO sign-off"
 "$dev_workspace" merge --repo "$source_repo" --root "$root" "$workspace" --teardown >/dev/null
 [ ! -e "$workspace" ] || fail "merge --teardown left workspace behind"
 [ ! -e "$source_repo/feature.txt" ] || fail "default merge should not modify primary main working tree"

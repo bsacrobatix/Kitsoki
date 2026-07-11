@@ -420,6 +420,89 @@ workspace_dirty() {
   [ -n "$(git -C "$path" status --porcelain)" ]
 }
 
+import_workspace_issue_file() {
+  local src="$1"
+  local dst="$2"
+  mkdir -p "$(dirname "$dst")"
+  if [ -e "$dst" ]; then
+    cmp -s "$src" "$dst" || {
+      echo "error: close: refusing to overwrite a different source-checkout ticket: $dst" >&2
+      return 1
+    }
+    return 0
+  fi
+  cp -p "$src" "$dst"
+  echo "preserved workspace ticket: $dst"
+}
+
+workspace_artifact_matches() {
+  local src="$1"
+  local dst="$2"
+  if [ -f "$src" ] && [ -f "$dst" ]; then
+    cmp -s "$src" "$dst"
+    return
+  fi
+  if [ -d "$src" ] && [ -d "$dst" ]; then
+    diff -qr "$src" "$dst" >/dev/null
+    return
+  fi
+  return 1
+}
+
+# Older filing paths could leave durable tickets inside an ignored workspace
+# artifact tree. Preserve both the canonical flat shape and the retired
+# <id>/issue.md shape before teardown so ignored evidence cannot disappear.
+import_workspace_issues() {
+  local path="$1"
+  local repo="$2"
+  local src_root="$path/.artifacts/issues"
+  local dst_root="$repo/.artifacts/issues"
+  local kind entry id child sidecar
+  [ -d "$src_root" ] || return 0
+
+  for kind in bugs features epics; do
+    [ -d "$src_root/$kind" ] || continue
+    mkdir -p "$dst_root/$kind"
+    for entry in "$src_root/$kind"/*; do
+      [ -e "$entry" ] || continue
+      if [ -f "$entry" ] && [[ "$entry" == *.md ]]; then
+        import_workspace_issue_file "$entry" "$dst_root/$kind/$(basename "$entry")" || return 1
+        continue
+      fi
+      if [ -d "$entry" ] && [ -f "$entry/issue.md" ]; then
+        id="$(basename "$entry")"
+        import_workspace_issue_file "$entry/issue.md" "$dst_root/$kind/$id.md" || return 1
+        sidecar="$dst_root/$kind/$id.artifacts"
+        for child in "$entry"/*; do
+          [ -e "$child" ] || continue
+          [ "$(basename "$child")" = "issue.md" ] && continue
+          mkdir -p "$sidecar"
+          if [ -e "$sidecar/$(basename "$child")" ]; then
+            if ! workspace_artifact_matches "$child" "$sidecar/$(basename "$child")"; then
+              echo "error: close: refusing to overwrite source-checkout ticket evidence: $sidecar/$(basename "$child")" >&2
+              return 1
+            fi
+            continue
+          fi
+          cp -Rp "$child" "$sidecar/"
+        done
+        continue
+      fi
+      if [ -d "$entry" ] && [[ "$entry" == *.artifacts ]]; then
+        if [ -e "$dst_root/$kind/$(basename "$entry")" ]; then
+          if ! workspace_artifact_matches "$entry" "$dst_root/$kind/$(basename "$entry")"; then
+            echo "error: close: refusing to merge ambiguous source-checkout ticket evidence: $dst_root/$kind/$(basename "$entry")" >&2
+            return 1
+          fi
+          continue
+        fi
+        cp -Rp "$entry" "$dst_root/$kind/"
+      fi
+    done
+  done
+  rm -rf "$src_root"
+}
+
 # A local clone may share objects with its source repository. Before using a
 # ref fetched after workspace creation, make the failure mode explicit here
 # rather than letting rebase (or a later primary-checkout fetch) discover a
@@ -751,7 +834,7 @@ cmd_commit() {
     die "commit: workspace has no changes"
   fi
   git -C "$path" add -A
-  git -C "$path" commit -m "$message"
+  git -C "$path" commit --signoff -m "$message"
   local sha
   sha="$(git -C "$path" rev-parse HEAD)"
   if [ "$json" = "1" ]; then
@@ -959,6 +1042,10 @@ cmd_close() {
   ensure_not_initializing close "$root" "$path"
   ensure_managed_workspace "$path"
   ensure_under_root_or_forced "$root" "$path" "$force"
+  if ! import_workspace_issues "$path" "$repo"; then
+    echo "error: close: workspace tickets were not safely preserved; keeping workspace: $path" >&2
+    return 1
+  fi
   if [ "$force" != "1" ] && workspace_dirty "$path"; then
     die "close: workspace has uncommitted changes: $path"
   fi

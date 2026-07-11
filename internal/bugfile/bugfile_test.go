@@ -3,7 +3,9 @@ package bugfile
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveTargetRootPrefersManagedSourceCheckout(t *testing.T) {
@@ -58,5 +60,43 @@ func TestResolveTargetRootPrefersManagedSourceCheckout(t *testing.T) {
 	}
 	if gotKitsoki != sourceRoot {
 		t.Fatalf("ResolveTargetRoot kitsoki = %q, want %q", gotKitsoki, sourceRoot)
+	}
+}
+
+func TestCreateDoesNotOverwriteDifferentReportInSameSecond(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 11, 2, 3, 4, 0, time.UTC)
+	base := CreateRequest{
+		Target: "kitsoki", Title: "Critical feedback collision", Body: "first report",
+		TargetDir: root, Now: now,
+	}
+	firstID, _, firstPath, err := Create(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := base
+	second.Body = "second report"
+	secondID, _, secondPath, err := Create(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstID == secondID || firstPath == secondPath {
+		t.Fatalf("different reports collided at %s", firstPath)
+	}
+	if secondID != firstID+"-2" {
+		t.Fatalf("second id = %q, want %q", secondID, firstID+"-2")
+	}
+	firstBody, _ := os.ReadFile(firstPath)
+	secondBody, _ := os.ReadFile(secondPath)
+	if !strings.Contains(string(firstBody), "first report") || !strings.Contains(string(secondBody), "second report") {
+		t.Fatalf("report bodies were not preserved: first=%q second=%q", firstBody, secondBody)
+	}
+
+	retryID, _, retryPath, err := Create(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retryID != firstID || retryPath != firstPath {
+		t.Fatalf("exact retry = (%q, %q), want (%q, %q)", retryID, retryPath, firstID, firstPath)
 	}
 }

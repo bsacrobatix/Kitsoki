@@ -2,6 +2,7 @@ package host_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,74 @@ func TestLocalFilesTicket_Search_EmptyRootIsEmptyList(t *testing.T) {
 	tickets, _ := res.Data["tickets"].([]map[string]any)
 	if len(tickets) != 0 {
 		t.Fatalf("expected 0, got %d", len(tickets))
+	}
+}
+
+func TestLocalFilesTicket_ManagedCapsuleUsesSourceCheckoutForFullLifecycle(t *testing.T) {
+	sourceRoot := t.TempDir()
+	sourceTickets := filepath.Join(sourceRoot, ".artifacts", "issues", "bugs")
+	if err := os.MkdirAll(sourceTickets, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceTickets, "2026-07-11-source-ticket.md"), []byte(sampleBug), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	manifest := map[string]any{
+		"source": map[string]any{"repo": sourceRoot},
+	}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "capsule-manifest.json"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workspace); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+
+	search, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op": "search", "root": ".artifacts",
+	})
+	if err != nil || search.Error != "" {
+		t.Fatalf("search: infra=%v domain=%s", err, search.Error)
+	}
+	rows, _ := search.Data["tickets"].([]map[string]any)
+	if len(rows) != 1 {
+		t.Fatalf("search rows = %v, want source ticket", rows)
+	}
+	wantPath := filepath.Join(sourceTickets, "2026-07-11-source-ticket.md")
+	if rows[0]["path"] != filepath.ToSlash(wantPath) {
+		t.Fatalf("ticket path = %v, want %s", rows[0]["path"], wantPath)
+	}
+
+	comment, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op": "comment", "root": ".artifacts", "id": "2026-07-11-source-ticket", "body": "source checkout comment",
+	})
+	if err != nil || comment.Error != "" {
+		t.Fatalf("comment: infra=%v domain=%s", err, comment.Error)
+	}
+	transition, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op": "transition", "root": ".artifacts", "id": "2026-07-11-source-ticket", "to": "resolved",
+	})
+	if err != nil || transition.Error != "" {
+		t.Fatalf("transition: infra=%v domain=%s", err, transition.Error)
+	}
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "source checkout comment") || !strings.Contains(string(got), "status: resolved") {
+		t.Fatalf("source ticket was not mutated through full lifecycle:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".artifacts")); !os.IsNotExist(err) {
+		t.Fatalf("capsule-local artifact path should not be created, stat err=%v", err)
 	}
 }
 

@@ -123,32 +123,22 @@ walkthrough".
 
 ---
 
-## ticket_globs — what the multi-glob covers
+## Ticket sources
 
-The instance world key `ticket_globs:` documents the FULL scan
-surface for forward compatibility:
+`kitsoki-dev` presents one active local pile and the configured GitHub remote in
+the same picker:
 
 ```
-issues/bugs/*.md                   — kitsoki self-bugs
-issues/features/*.md               — kitsoki PRD-track features
-stories/*/issues/bugs/*.md         — per-story bugs (story authoring)
-stories/*/issues/features/*.md     — per-story features
+.artifacts/issues/bugs/*.md       — local developer bugs
+.artifacts/issues/features/*.md   — local feature tickets
+.artifacts/issues/epics/*.md      — local epics
+origin                             — GitHub issues for the repository remote
 ```
 
-A bug filed via `/meta story bug` against `stories/cloak/` would
-land at `stories/cloak/issues/bugs/<id>.md` and is reachable from
-the same `kitsoki-dev` app — only the file path differs. This is
-what "devstory oversees kitsoki AND its stories" means in practice
-(proposal §5.4).
-
-**Today the `host.local_files.ticket` handler reads literally
-`<root>/issues/bugs/*.md`** — the multi-glob isn't yet honoured at
-the handler level (a future enhancement, see "Runtime gaps" below).
-For the supervised flow walks in `flows/`, the stubbed
-`host.local_github.ticket` returns canned local and GitHub rows; for the manual
-walkthrough below, the operator runs from the kitsoki repo root so the local
-side resolves `.artifacts/issues/bugs/*.md`, while the GitHub side resolves the
-symbolic `ticket_github_repo: origin`.
+When the process runs in a managed capsule, the relative `.artifacts` root is
+anchored at the source checkout recorded in `capsule-manifest.json`. Search,
+get, comments, and transitions therefore operate on the same durable ticket
+that web, TUI, Studio, and `kitsoki bug create --sink local-artifact` write.
 
 ---
 
@@ -170,25 +160,24 @@ bug file to the bugfix pipeline:
 $ kitsoki bug create --target kitsoki \
     --title "TUI view renders before on_enter binds" \
     --body "Expected: first frame shows bound values. Actual: '(pending)'." \
+    --sink local-artifact \
     --severity med
-issues/bugs/2026-05-15T0407Z-tui-view-renders-before-on-enter-binds.md
+.artifacts/issues/bugs/2026-05-15T0407Z-tui-view-renders-before-on-enter-binds.md
 
 $ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
 # in the TUI: > tickets → > search "tui view" → > pick <id> → > bugfix → > start …
 ```
 
-The first command writes a markdown file under `$KITSOKI_REPO/issues/bugs/`
+The first command writes a markdown file under
+`$KITSOKI_REPO/.artifacts/issues/bugs/`
 with the frontmatter schema documented in
 [`docs/stories/bugs.md`](../../../docs/stories/bugs.md) (and mirrored in
 [`../../../issues/README.md`](../../../issues/README.md)). The second command
 boots this instance, whose composite ticket provider shows that local
 artifact under the Local section and GitHub issues under the GitHub section.
 
-Two pre-seeded examples ship in `issues/bugs/` for the Phase 3
-acceptance smoke (one "view-render-before-bind", one
-"glamour caps prose") so the walkthrough works without filing a fresh
-bug first; either path (real `bug create` or one of the seeds) is
-equivalent from the pipeline's perspective.
+Committed `issues/bugs/` files are archive/fixture data and are not part of the
+active `kitsoki-dev` local queue.
 
 ### Phase 1 — pick up the bug
 
@@ -326,39 +315,18 @@ audit trail, and resolution record, in one Markdown file.**
 ## Runtime gaps — what blocks the FULLY-real PoC today
 
 The four flow fixtures in this directory pass deterministically.
-The manual walkthrough above works end-to-end against the real
-on-disk seeds with the existing host handlers, with three known
-caveats:
+The manual walkthrough above works end-to-end against the active local and
+remote providers. Historical implementation notes:
 
-1. **`world_in:` doesn't interpolate `env.PWD`.** The instance
-   world declares `repo_root` and `ticket_globs` for forward
-   compatibility, but the expression engine (`internal/expr/`) has
-   no `env.*` namespace today. The handler falls back to
-   `$KITSOKI_TICKETS_ROOT` then to `os.Getwd()`, so running from
-   the repo root works. A future enhancement could expose env vars
-   via the expr `Env` struct (low cost, ~10 lines) and surface them
-   to `world_in:` projections.
-
-2. **`host.local_files.ticket` scans `<root>/issues/bugs/` only.**
-   The multi-glob in `world.ticket_globs` is documented but not yet
-   honoured at the handler — it lists `issues/bugs/`,
-   `issues/features/`, `stories/*/issues/bugs/`,
-   `stories/*/issues/features/`, but only the first is read today.
-   The handler accepts a `globs` arg shape ready for the
-   enhancement; the ticket rooms just need to pass
-   `world.ticket_globs` through to `iface.ticket.search.args`.
-
-3. **~~`/meta kitsoki bug` doesn't emit a file yet.~~ Resolved.**
+1. **~~`/meta kitsoki bug` doesn't emit a file yet.~~ Resolved.**
    The bug-filing CLI (`kitsoki bug create`) ships on main and
-   `/meta kitsoki bug` writes to `$KITSOKI_REPO/issues/bugs/`;
-   `/meta story bug` writes to `<app-dir>/issues/bugs/`. Both use the
-   same on-disk format documented in [`docs/stories/bugs.md`](../../../docs/stories/bugs.md).
+   local filing surfaces write to the source checkout's
+   `.artifacts/issues/bugs/`. Both use the same on-disk format documented in
+   [`docs/stories/bugs.md`](../../../docs/stories/bugs.md).
    The self-hosted loop reads + transitions the file the producer wrote;
    the loop is now closed end-to-end.
 
-A fourth latent issue we surfaced while building this phase:
-
-4. **`emit_intent:` expressions weren't being world-prefix
+2. **`emit_intent:` expressions weren't being world-prefix
    rewritten across imports.** When the bugfix story was folded
    under dev-story and then again under kitsoki-dev, the
    `emit_intent: "{{ world.llm_verdict.intent }}"` template still

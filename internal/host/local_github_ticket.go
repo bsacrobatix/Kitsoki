@@ -67,6 +67,7 @@ func localGitHubTicketList(ctx context.Context, args map[string]any, op string) 
 		for _, row := range githubTickets {
 			row["source"] = "github"
 		}
+		localTickets = removeMigratedLocalTickets(localTickets, githubTickets)
 	}
 
 	tickets := make([]map[string]any, 0, len(localTickets)+len(githubTickets))
@@ -84,6 +85,26 @@ func localGitHubTicketList(ctx context.Context, args map[string]any, op string) 
 		"provider_errors":      providerErrors,
 		"ticket_source_counts": map[string]any{"local": len(localTickets), "github": len(githubTickets)},
 	}}, nil
+}
+
+func removeMigratedLocalTickets(localTickets, githubTickets []map[string]any) []map[string]any {
+	migrated := make(map[string]struct{})
+	for _, row := range githubTickets {
+		legacyID := strings.TrimSpace(fmt.Sprint(row["legacy_id"]))
+		if legacyID != "" {
+			migrated[legacyID] = struct{}{}
+		}
+	}
+	if len(migrated) == 0 {
+		return localTickets
+	}
+	out := localTickets[:0]
+	for _, row := range localTickets {
+		if _, found := migrated[strings.TrimSpace(fmt.Sprint(row["id"]))]; !found {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func localGitHubTicketGet(ctx context.Context, args map[string]any) (Result, error) {
