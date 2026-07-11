@@ -35,6 +35,46 @@ Add a capsule whenever an upgrade bug is fixed. Prefer the smallest project
 state that reproduces the old shape: config/profile, stale generated story,
 ticket fixture, PR fixture, or previously solved bug.
 
+## Kit Lifecycle Upgrades (S7)
+
+For a kit a project imports but does not own, the two-gate doctrine now runs
+through the staged lifecycle (`docs/proposals/kit-lifecycle.md`):
+
+```sh
+kitsoki kit update <name>   # stage a semver-gated candidate; kits.lock untouched
+kitsoki kit trial <name>    # judge it; failures become the migration worklist
+kitsoki kit accept <name>   # promote fail-closed on the trial receipt
+```
+
+- **Deterministic gate:** `kit trial`'s contract, frozen-replay, and
+  onboarding gates ARE the CI-safe check — kit conformance plus every
+  consumer flow fixture replayed against both the locked and staged trees
+  under `KITSOKI_CASSETTE_STRICT=1` (a cassette miss fails closed; the
+  receipt reports measured per-gate spend, so "zero LLM" is observed, not
+  assumed). The same tools ride the studio MCP as `kit.status` /
+  `kit.update` / `kit.trial` / `kit.accept` / `kit.reject`, and
+  `story.test` / `story.validate` take `staged: true` for a per-call
+  staged resolution.
+- **Live smoke:** operator-approved live runs map to the trial's
+  `baseline_live` lane. No-cost oracles validate by replay immediately;
+  live oracles (red_green, agent_eval) queue as `pending_approval` and are
+  only ever run at an operator's explicit request, with the outcome
+  recorded in the validation ledger (`.kitsoki/qa/validation-ledger.yaml`)
+  so an already-validated case is SKIPPED on every re-trial instead of
+  re-spending.
+
+The reusable fixture is `capsules/kit-update-pair/capsule.yaml`: a consumer
+project shaped to lock widget v1 while upstream ships v2 with a renamed
+intent (compat hint) and a new required host. Run:
+
+```sh
+go test ./cmd/kitsoki -run TestKitLifecycle -count=1
+go run ./cmd/kitsoki capsule verify kit-update-pair
+```
+
+then follow the capsule's README to exercise update → trial → accept by
+hand.
+
 ## Live LLM Smoke
 
 Live story upgrade smoke runs are manual and must be explicitly requested by an
