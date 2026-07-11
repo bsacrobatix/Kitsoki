@@ -32,6 +32,24 @@ different workspace setup.
 
 ## Local lifecycle
 
+For the fast pre-staging path, use:
+
+```sh
+make capsule-ci-quick
+```
+
+This is the default gate for a managed workspace landing in `staging/local`
+when no explicit `--gate` is supplied. It is deterministic and does not invoke
+an LLM: it validates the declared story, replays checked-in flow/cassette
+fixtures, runs focused short tests, and checks diff hygiene.
+
+LLM review is a separate, explicit, spend-bearing policy decision. Configure an
+allowed profile, positive budget, and unavailable-model fallback, and run it
+only after this no-spend gate is green. Review prompts should inspect test
+deletion, disabled or skipped coverage, weakened assertions, and changed test
+scope. A failed or unavailable review is not promotion evidence, and ordinary
+branch landing must never spend implicitly.
+
 ```sh
 kitsoki capsule workspace create --id change-1 --definition development --owner developer
 kitsoki capsule env resolve ci

@@ -182,6 +182,13 @@ make site-dev-staging
 make install-staging
 ```
 
+When a workspace is merged to `staging/local` without an explicit `--gate`,
+`dev-workspace.sh` automatically runs `make capsule-ci-quick` when the target
+repository declares that target. The gate is deterministic and no-spend: it
+checks diff hygiene, validates the Capsule CI story, replays its flow fixtures,
+and runs focused short Go tests. Use `--gate` to replace it with a narrower or
+broader intentional gate.
+
 `refresh-staging-local.sh` checks the selected remote main first. If local
 `main` is stale, it delegates to `sync-main-from-remote.sh`, prints the required
 remote-sync steps, and stops; complete that sync and rerun the refresh. Once

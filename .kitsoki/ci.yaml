@@ -9,7 +9,9 @@ cleanup:
 pipelines:
   change:
     story: stories/capsule-ci/app.yaml
-    triggers: [local]
+    # Normalized ingress labels used by local landing and staging-target
+    # adapters. GitHub remains an adapter, not the CI definition.
+    triggers: [local, branch_update, pull_request, staging]
     environment: ci
     executor: host
     mode: one-shot

@@ -343,7 +343,10 @@ STAGING_CAPSULE ?= .capsules/staging/local
 STAGING_REFRESH_GATE ?= git diff --check
 STAGING_GIT_ENV := GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true GIT_MERGE_AUTOEDIT=no GIT_PAGER=cat
 
-.PHONY: ensure-staging-capsule refresh-staging staging-ready test-staging web-dev-staging install-staging site-dev-staging
+.PHONY: capsule-ci-quick ensure-staging-capsule refresh-staging staging-ready test-staging web-dev-staging install-staging site-dev-staging
+capsule-ci-quick:
+	@bash scripts/capsule-ci-quick-gate.sh
+
 ensure-staging-capsule:
 	@test -f "$(STAGING_CAPSULE)/.kitsoki-capsule" -o -f "$(STAGING_CAPSULE)/.kitsoki-clone" || { \
 		echo "error: staging capsule not found at $(STAGING_CAPSULE)" >&2; \

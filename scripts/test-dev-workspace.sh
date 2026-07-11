@@ -76,6 +76,9 @@ bootstrap-workspace:
 	@echo "bootstrap output"
 
 bootstrap-worktree: bootstrap-workspace
+
+capsule-ci-quick:
+	@true
 MK
 printf 'one\n' >"$source_repo/README.md"
 printf 'harness_profiles:\n  local:\n    backend: codex\n' >"$source_repo/.kitsoki.local.yaml"
@@ -210,11 +213,13 @@ printf 'local scratch\n' >"$source_repo/untracked-primary.txt"
 printf 'two\n' >"$workspace/feature.txt"
 "$dev_workspace" commit --repo "$source_repo" --root "$root" "$workspace" --message 'add feature' >/dev/null
 git -C "$workspace" log -1 --format=%B | grep -Fq 'Signed-off-by: Kitsoki Agent <agent@kitsoki.dev>' || fail "commit omitted required DCO sign-off"
-"$dev_workspace" merge --repo "$source_repo" --root "$root" "$workspace" --teardown >/dev/null
+default_merge_log="$tmp/default-merge.log"
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$workspace" --teardown >"$default_merge_log" 2>&1
 [ ! -e "$workspace" ] || fail "merge --teardown left workspace behind"
 [ ! -e "$source_repo/feature.txt" ] || fail "default merge should not modify primary main working tree"
 [ "$(git -C "$source_repo" show staging/local:feature.txt)" = "two" ] || fail "merge did not fast-forward staging/local"
 [ "$(git -C "$source_repo" show staging/local:staged-baseline.txt)" = "staged baseline" ] || fail "merge dropped existing staging baseline"
+grep -Fq "using default staging gate: make capsule-ci-quick" "$default_merge_log" || fail "default staging merge did not select capsule-ci-quick"
 [ "$(git -C "$source_repo" branch --show-current)" = "main" ] || fail "default merge moved primary checkout off main"
 rm "$source_repo/untracked-primary.txt"
 
