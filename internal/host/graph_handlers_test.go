@@ -30,6 +30,57 @@ func TestGraphHandler_Project(t *testing.T) {
 	}
 }
 
+// TestGraphHandler_Project_RegistryCarriesArtifactMaterialize is the C1
+// regression test for the kit-mode gap this passthrough closes: before it,
+// host.graph.project's response had no "registry" key at all, so a
+// kit-served portal (unlike the Vite-dev-only /api/catalog splice route)
+// never saw a type's artifact:/materialize: declaration — the Materialize
+// button/gates checklist silently never rendered outside `npm run dev`.
+func TestGraphHandler_Project_RegistryCarriesArtifactMaterialize(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "project",
+		"catalog_path": "../materialize/testdata/catalog.yaml",
+		"graph_id":     "test-registry",
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(project): %v", err)
+	}
+	registry, ok := res.Data["registry"].([]map[string]any)
+	if !ok {
+		t.Fatalf("expected result.Data[\"registry\"] as []map[string]any, got %T", res.Data["registry"])
+	}
+	var workItem map[string]any
+	for _, entry := range registry {
+		if entry["id"] == "work-item" {
+			workItem = entry
+			break
+		}
+	}
+	if workItem == nil {
+		t.Fatalf("no \"work-item\" entry in registry passthrough: %v", registry)
+	}
+	artifact, ok := workItem["artifact"].(map[string]any)
+	if !ok {
+		t.Fatalf("work-item registry entry missing artifact: %v", workItem)
+	}
+	materialize, ok := artifact["materialize"].(map[string]any)
+	if !ok {
+		t.Fatalf("work-item artifact missing materialize: %v", artifact)
+	}
+	if materialize["story"] != "story" {
+		t.Errorf("materialize.story = %v, want %q", materialize["story"], "story")
+	}
+	gates, _ := materialize["gates"].([]string)
+	if len(gates) != 2 || gates[0] != "gate" || gates[1] != "owner" {
+		t.Errorf("materialize.gates = %v, want [gate owner]", materialize["gates"])
+	}
+	for _, entry := range registry {
+		if entry["id"] == "core-node" {
+			t.Error("core-node should be filtered out of the registry passthrough, matching vite.config.ts's dev route")
+		}
+	}
+}
+
 func TestGraphHandler_Load(t *testing.T) {
 	res, err := GraphHandler(context.Background(), map[string]any{
 		"op":           "load",

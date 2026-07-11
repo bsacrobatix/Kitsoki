@@ -329,6 +329,7 @@ func graphProjectOp(args map[string]any) (Result, error) {
 
 	overlayPath := graphStringArg(args, "overlay_path")
 	var wire appgraph.KitsokiGraph
+	var registryCat *objectgraph.Catalog
 	if overlayPath != "" {
 		current, err := objectgraph.LoadCatalog(catalogPath)
 		if err != nil {
@@ -339,14 +340,89 @@ func graphProjectOp(args map[string]any) (Result, error) {
 			return Result{}, err
 		}
 		wire = objectCatalogDiffGraph(current, desired, graphID)
+		registryCat = desired
 	} else {
 		cat, err := objectgraph.LoadCatalog(catalogPath)
 		if err != nil {
 			return Result{}, err
 		}
 		wire = objectCatalogGraph(cat, graphID)
+		registryCat = cat
 	}
-	return Result{Data: map[string]any{"graph": wire}}, nil
+	return Result{Data: map[string]any{"graph": wire, "registry": registryWire(registryCat)}}, nil
+}
+
+// registryWire builds the type-registry passthrough kit-mode clients need to
+// render artifact:/materialize: declarations (node-artifact-materialization
+// plan, and the use-case-loop plan's C1 Materialize button) — before this,
+// only the POG portal's Vite-dev-only /api/catalog splice route
+// (vite.config.ts) forwarded this, so a real kitsoki-served kit build never
+// saw a type's artifact/materialize contract at all (registry was silently
+// absent, not merely different). Field-for-field mirrors
+// vite.config.ts's own registry mapping so both topologies render
+// identically, minus vite's audience-kind filter (host.graph.project has no
+// audience concept — kit-mode callers that need public-only projection
+// already do it client-side, see App.vue's projectAudience).
+func registryWire(cat *objectgraph.Catalog) []map[string]any {
+	defs := cat.Registry.All()
+	out := make([]map[string]any, 0, len(defs))
+	for _, def := range defs {
+		if def.ID == "core-node" {
+			continue
+		}
+		edgeFields := make([]map[string]any, 0, len(def.EdgeFields))
+		for _, f := range def.EdgeFields {
+			edgeFields = append(edgeFields, map[string]any{
+				"id":      string(f.ID),
+				"targets": []string{f.TargetType},
+				"summary": "",
+			})
+		}
+		entry := map[string]any{
+			"id":          def.ID,
+			"summary":     def.Summary,
+			"extends":     nilIfEmpty(def.Extends),
+			"edge_fields": edgeFields,
+		}
+		if def.Artifact != nil {
+			artifact := map[string]any{
+				"schema":       string(def.Artifact.Schema),
+				"format":       def.Artifact.Format,
+				"presentation": def.Artifact.Presentation,
+			}
+			if def.Materialize != nil {
+				params := make([]map[string]any, 0, len(def.Materialize.Params))
+				for _, p := range def.Materialize.Params {
+					params = append(params, map[string]any{
+						"id":      p.ID,
+						"type":    p.Type,
+						"default": p.Default,
+						"values":  p.Values,
+					})
+				}
+				contextEdges := make([]string, 0, len(def.Materialize.ContextEdges))
+				for _, e := range def.Materialize.ContextEdges {
+					contextEdges = append(contextEdges, string(e))
+				}
+				artifact["materialize"] = map[string]any{
+					"story":         def.Materialize.Story,
+					"context_edges": contextEdges,
+					"params":        params,
+					"gates":         def.Materialize.Gates,
+				}
+			}
+			entry["artifact"] = artifact
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 // ─── wire-graph projection (moved from the deleted
