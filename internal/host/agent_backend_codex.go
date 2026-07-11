@@ -326,14 +326,17 @@ func joinCodexPrompt(a, b string) string {
 // kitsoki-registered MCP tool the prompt asks for) appears to "not exist" and the
 // model fakes the call in prose. Phrased producer-neutrally — it names no
 // specific server so it holds for the validator, operator-ask, and write-mode
-// bridges alike.
+// bridges alike. The exact `submit` query matters: a generic instruction left
+// GPT-5.4 inspecting the filesystem for a schema instead of discovering the
+// already-attached validator, which burned a whole live bug-fix turn.
 const codexMCPToolSearchPreamble = "TOOL ACCESS (codex): Some tools provided to you — including the " +
 	"`submit` tool used to submit your final result — are NOT listed in your " +
-	"default tool set. They are reachable only via the `tool_search` tool. " +
-	"BEFORE you conclude that a tool the task asks for (e.g. `submit`) is " +
-	"unavailable, you MUST call `tool_search` to locate it, then call it. Never " +
-	"emulate such a tool by printing its name or its arguments as text — a " +
-	"printed call does nothing."
+	"default tool set. They are reachable only via the `tool_search` tool. If " +
+	"your task needs a structured result, your FIRST tool-discovery action MUST " +
+	"be `tool_search` with query `submit`; call the returned validator `submit` " +
+	"tool to hand off the result. Do this BEFORE searching the filesystem for " +
+	"schemas or deciding `submit` is unavailable. Never emulate such a tool by " +
+	"printing its name or its arguments as text — a printed call does nothing."
 
 const codexAppsFeature = "apps"
 

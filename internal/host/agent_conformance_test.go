@@ -399,6 +399,9 @@ command = "/bin/codex-app"
 		if !strings.Contains(inv.Stdin, "tool_search") {
 			t.Errorf("codex stdin missing the MCP tool-search discovery preamble; got %q", inv.Stdin)
 		}
+		if !strings.Contains(inv.Stdin, "query `submit`") {
+			t.Errorf("codex stdin must direct structured workers to discover validator submit first; got %q", inv.Stdin)
+		}
 		if strings.Contains(inv.Stdin, "SYS-PROMPT") {
 			t.Errorf("codex stdin must not contain replacing system prompt; got %q", inv.Stdin)
 		}
