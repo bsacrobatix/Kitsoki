@@ -339,15 +339,6 @@ host_interfaces:
       cleanup_apply:
         input:  { candidates: list }
         output: { ok: bool, deleted: list, skipped: list, errors: list }
-      clone_create:
-        input:  { id: string, name: string, base: string, root: string, session_id: string }
-        output: { ok: bool, id: string, path: string, branch: string, root: string }
-      clone_cleanup_scan:
-        input:  { root: string, min_age_hours: string, exclude: string }
-        output: { ok: bool, root: string, min_age_hours: float, exclude: string, candidates: list, recommended_count: int }
-      clone_cleanup_apply:
-        input:  { root: string, candidates: list }
-        output: { ok: bool, deleted: list, skipped: list, errors: list }
     default: host.capsule_workspace
 
   transport:

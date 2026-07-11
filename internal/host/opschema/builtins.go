@@ -178,7 +178,7 @@ func Builtins() *Registry {
 		Output: fields("ok", "bool", "workspaces", "list", "diagnostics", "object"),
 	})
 	r.Register("host.capsule_workspace", "create", Op{
-		Input:  fields("id", "string", "definition", "string", "owner", "string"),
+		Input:  fields("id", "string", "definition", "string", "name", "string", "base", "string", "session_id", "string", "owner", "string"),
 		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "diagnostics", "object"),
 	})
 	r.Register("host.capsule_workspace", "get", Op{

@@ -264,7 +264,7 @@ func runRealDispatch(ctx context.Context, root string, route Route, job *jobs.GH
 	}
 	commitSHA := jobReplayCommitSHA(job.JobID)
 	var landErr error
-	if succeeded {
+	if succeeded && mode == HarnessLive {
 		if _, statErr := os.Stat(worktreeAbs); statErr == nil {
 			commitSHA, landErr = landFeatureBranch(ctx, root, route, job, integrationBranch)
 		}
