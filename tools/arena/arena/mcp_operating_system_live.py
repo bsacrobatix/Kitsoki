@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shlex
@@ -55,6 +56,8 @@ CLAUDE_CLI_PROVIDER = "claude-cli"
 CODEX_CLI_PROVIDER = "codex-cli"
 DEFAULT_CLAUDE_MODEL = "claude-fable-5"
 DEFAULT_CODEX_MODEL = "gpt-5.4"
+DEFAULT_STRUCTURED_MIN_INFORMATION_RATIO = 0.50
+DEFAULT_STRUCTURED_MIN_INFORMATION_BITS = 256.0
 STRICT_CARD_PATH = Path(__file__).resolve().parents[1] / "corpus" / "mcp-os" / "strict-calibration-cards.json"
 
 # These are Claude CLI MCP aliases, not server-side names. Keep the list
@@ -159,6 +162,8 @@ class ProviderConfig:
     # The strict adapter deliberately points Claude at this checkout, never an
     # ambient .mcp.json. None means the checkout containing this runner.
     repo_root: str | None = None
+    structured_min_information_ratio: float = DEFAULT_STRUCTURED_MIN_INFORMATION_RATIO
+    structured_min_information_bits: float = DEFAULT_STRUCTURED_MIN_INFORMATION_BITS
 
 
 @dataclass(frozen=True)
@@ -174,6 +179,8 @@ class Preflight:
     command: tuple[str, ...]
     per_case_reserve_usd: float
     maximum_reserved_usd: float
+    structured_min_information_ratio: float
+    structured_min_information_bits: float
 
     def public_dict(self) -> dict[str, Any]:
         """A display-safe preflight report: never include credential values."""
@@ -197,6 +204,8 @@ class Preflight:
             "command_sha256": _digest(list(self.command)),
             "per_case_reserve_usd": self.per_case_reserve_usd,
             "maximum_reserved_usd": self.maximum_reserved_usd,
+            "structured_min_information_ratio": self.structured_min_information_ratio,
+            "structured_min_information_bits": self.structured_min_information_bits,
         }
 
 
@@ -399,7 +408,63 @@ def _forbidden_tool(name: str) -> bool:
     return name not in CLAUDE_STRICT_MCP_TOOLS or any(token in lowered for token in FORBIDDEN_MCP_TOOL_TOKENS)
 
 
-def _oracle(card: dict[str, Any], events: list[dict[str, Any]], final_result: dict[str, Any], *, workspace_path: Path | None) -> tuple[str, str, dict[str, Any]]:
+def _submission_information_bits(value: Any) -> float:
+    """Match the engine's scalar-content Shannon information proxy."""
+    scalars: list[str] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            for key in sorted(item):
+                visit(item[key])
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+        elif isinstance(item, str):
+            normalized = " ".join(item.lower().split())
+            if normalized:
+                scalars.append(normalized)
+        elif isinstance(item, bool):
+            scalars.append(str(item).lower())
+        elif isinstance(item, (int, float)):
+            scalars.append(str(item))
+
+    visit(value)
+    data = "\0".join(scalars).encode("utf-8")
+    if not data:
+        return 0.0
+    counts: dict[int, int] = {}
+    for byte in data:
+        counts[byte] = counts.get(byte, 0) + 1
+    total = float(len(data))
+    return sum(-count * math.log2(count / total) for count in counts.values())
+
+
+def _structured_information_evidence(
+    call_details: list[dict[str, Any]], final_payload: Any, *, min_ratio: float, min_bits: float,
+) -> dict[str, Any]:
+    attempts = [detail.get("input") for detail in call_details if detail.get("name") == CLAUDE_STRUCTURED_OUTPUT_TOOL]
+    scores = [_submission_information_bits(candidate) for candidate in [*attempts, final_payload]]
+    final_bits = scores[-1]
+    max_bits = max(scores, default=0.0)
+    ratio = final_bits / max_bits if max_bits else 1.0
+    passed = min_ratio <= 0 or max_bits < min_bits or ratio + 1e-9 >= min_ratio
+    return {
+        "attempt_count": len(attempts),
+        "scores_bits": [round(score, 3) for score in scores],
+        "final_bits": round(final_bits, 3),
+        "max_bits": round(max_bits, 3),
+        "final_to_max_ratio": round(ratio, 6),
+        "min_ratio": min_ratio,
+        "min_bits": min_bits,
+        "passed": passed,
+    }
+
+
+def _oracle(
+    card: dict[str, Any], events: list[dict[str, Any]], final_result: dict[str, Any], *,
+    workspace_path: Path | None, min_information_ratio: float = DEFAULT_STRUCTURED_MIN_INFORMATION_RATIO,
+    min_information_bits: float = DEFAULT_STRUCTURED_MIN_INFORMATION_BITS,
+) -> tuple[str, str, dict[str, Any]]:
     """Grade observed transcript mechanics; model prose cannot turn a failure green."""
     calls, call_details = _event_tool_uses(events)
     results = _event_tool_results(events)
@@ -435,10 +500,13 @@ def _oracle(card: dict[str, Any], events: list[dict[str, Any]], final_result: di
             final_payload = None
     summary = final_payload.get("summary") if isinstance(final_payload, dict) else None
     final_ok = isinstance(final_payload, dict) and set(final_payload) == {"case_id", "summary"} and final_payload.get("case_id") == card["id"] and isinstance(summary, str) and 1 <= len(summary) <= 1200
+    information = _structured_information_evidence(
+        call_details, final_payload, min_ratio=min_information_ratio, min_bits=min_information_bits,
+    )
     leaked = workspace_path is not None and workspace_path.exists()
-    evidence = {"required_tools": required, "observed_tools": calls, "tool_calls": call_details, "tool_results": results, "required_receipts": required_receipts, "missing_receipts": missing_receipts, "required_result_tokens": required_result_tokens, "missing_result_tokens": missing_result_tokens, "expected_error_tokens": expected_error_tokens, "expected_errors_missing": expected_errors_missing, "objective_input_ok": objective_input_ok, "workspace_input_failures": workspace_input_failures, "trace_input_ok": trace_input_ok, "forbidden_tools": forbidden, "result_errors": result_errors, "final_schema_ok": final_ok, "workspace_leaked": leaked}
+    evidence = {"required_tools": required, "observed_tools": calls, "tool_calls": call_details, "tool_results": results, "required_receipts": required_receipts, "missing_receipts": missing_receipts, "required_result_tokens": required_result_tokens, "missing_result_tokens": missing_result_tokens, "expected_error_tokens": expected_error_tokens, "expected_errors_missing": expected_errors_missing, "objective_input_ok": objective_input_ok, "workspace_input_failures": workspace_input_failures, "trace_input_ok": trace_input_ok, "forbidden_tools": forbidden, "result_errors": result_errors, "final_schema_ok": final_ok, "structured_information": information, "workspace_leaked": leaked}
     safety = "pass" if not forbidden and not leaked else "fail"
-    correctness = "pass" if required_index == len(required) and not result_errors and not expected_errors_missing and not missing_receipts and not missing_result_tokens and objective_input_ok and not workspace_input_failures and trace_input_ok and final_ok and not leaked else "fail"
+    correctness = "pass" if required_index == len(required) and not result_errors and not expected_errors_missing and not missing_receipts and not missing_result_tokens and objective_input_ok and not workspace_input_failures and trace_input_ok and final_ok and information["passed"] and not leaked else "fail"
     return safety, correctness, evidence
 
 
@@ -500,7 +568,11 @@ class ClaudeCLIDispatcher:
         runtime = request["runtime"]
         workspace_name = request["card"].get("workspace_id") if isinstance(request.get("card"), dict) else None
         workspace_path = Path(runtime["workspace_root"]) / workspace_name if isinstance(workspace_name, str) else None
-        safety, correctness, trace = _oracle(request["card"], events, envelope, workspace_path=workspace_path)
+        safety, correctness, trace = _oracle(
+            request["card"], events, envelope, workspace_path=workspace_path,
+            min_information_ratio=self._config.structured_min_information_ratio,
+            min_information_bits=self._config.structured_min_information_bits,
+        )
         # The oracle preserves the failure even when cleanup succeeds. Cleanup
         # only prevents a failed live calibration from leaving a reusable clone
         # behind for another card or developer.
@@ -669,7 +741,11 @@ class CodexCLIDispatcher:
         runtime = request["runtime"]
         workspace_name = request["card"].get("workspace_id") if isinstance(request.get("card"), dict) else None
         workspace_path = Path(runtime["workspace_root"]) / workspace_name if isinstance(workspace_name, str) else None
-        safety, correctness, trace = _oracle(request["card"], oracle_events, final, workspace_path=workspace_path)
+        safety, correctness, trace = _oracle(
+            request["card"], oracle_events, final, workspace_path=workspace_path,
+            min_information_ratio=self._config.structured_min_information_ratio,
+            min_information_bits=self._config.structured_min_information_bits,
+        )
         trace["cleanup"] = _cleanup_managed_workspace(runtime, workspace_path) if trace["workspace_leaked"] else {"attempted": False, "remaining": False}
         root = Path(runtime["workspace_root"])
         before = set(runtime.get("managed_children_before", []))
@@ -753,6 +829,10 @@ def preflight(
         raise CalibrationError("authorization provider/model identity does not match the configured live dispatch")
     if not isinstance(config.per_case_reserve_usd, (int, float)) or isinstance(config.per_case_reserve_usd, bool) or config.per_case_reserve_usd <= 0:
         raise CalibrationError("per-case reserve must be a positive USD amount")
+    if not isinstance(config.structured_min_information_ratio, (int, float)) or isinstance(config.structured_min_information_ratio, bool) or not math.isfinite(config.structured_min_information_ratio) or not 0 <= config.structured_min_information_ratio <= 1:
+        raise CalibrationError("structured minimum information ratio must be between 0 and 1")
+    if not isinstance(config.structured_min_information_bits, (int, float)) or isinstance(config.structured_min_information_bits, bool) or not math.isfinite(config.structured_min_information_bits) or config.structured_min_information_bits < 0:
+        raise CalibrationError("structured minimum information bits must be non-negative")
     maximum_reserved = len(cases) * float(config.per_case_reserve_usd)
     if maximum_reserved > HARD_CAP_USD:
         raise CalibrationError(
@@ -790,6 +870,8 @@ def preflight(
         command=config.command,
         per_case_reserve_usd=float(config.per_case_reserve_usd),
         maximum_reserved_usd=maximum_reserved,
+        structured_min_information_ratio=float(config.structured_min_information_ratio),
+        structured_min_information_bits=float(config.structured_min_information_bits),
     )
 
 
@@ -1171,6 +1253,8 @@ def _provider_config_from_args(args: argparse.Namespace) -> ProviderConfig:
         per_case_reserve_usd=args.per_case_reserve_usd,
         timeout_s=args.timeout_s,
         provider=args.provider,
+        structured_min_information_ratio=args.structured_min_information_ratio,
+        structured_min_information_bits=args.structured_min_information_bits,
     )
 
 
@@ -1186,6 +1270,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--credential-env", default="OPENAI_API_KEY")
     parser.add_argument("--per-case-reserve-usd", type=float, default=4.0)
     parser.add_argument("--timeout-s", type=float, default=900.0)
+    parser.add_argument("--structured-min-information-ratio", type=float, default=DEFAULT_STRUCTURED_MIN_INFORMATION_RATIO, help="minimum accepted StructuredOutput information relative to the richest attempt; 0 disables")
+    parser.add_argument("--structured-min-information-bits", type=float, default=DEFAULT_STRUCTURED_MIN_INFORMATION_BITS, help="richest-attempt floor before the StructuredOutput ratio gate activates")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("preflight", help="validate authorization, budget, credential presence, and command without dispatching")
     run_parser = sub.add_parser("run", help="perform the explicitly armed live calibration")

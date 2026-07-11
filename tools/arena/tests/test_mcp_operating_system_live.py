@@ -274,6 +274,22 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("Claude adapter reports selected model", claude_response["model"], "claude-fable-5")
     check("Claude stream oracle accepts observed strict call", claude_response["correctness"], "pass")
 
+    # A degraded model can make a rich, schema-invalid StructuredOutput call,
+    # then end the run with a tiny schema-valid placeholder. The transcript
+    # oracle must compare all attempts rather than trusting the final shape.
+    collapsed_events = [
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "mcp__kitsoki_strict__trace_explain", "input": {"path": "tools/arena/corpus/mcp-os/strict-traces/stalled-turn.jsonl", "observed_at_unix_micros": 1704067260000000}}]}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_result", "tool_use_id": "tool-1", "content": "{\"ok\":true,\"class\":\"stalled_or_unfinished_turn\"}"}]}},
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "StructuredOutput", "input": {"case_id": "trace-stalled-turn", "summary": "Detailed evidence from the trace identifies the unfinished turn, preserves the observed tool sequence, and explains the bounded corrective action. " * 12, "extra": "schema-invalid field"}}]}},
+        {"type": "result", "result": json.dumps({"case_id": "trace-stalled-turn", "summary": "done"})},
+    ]
+    _, collapsed_correctness, collapsed_trace = live._oracle(request["card"], collapsed_events, collapsed_events[-1], workspace_path=None)
+    check("information collapse fails workflow oracle", collapsed_correctness, "fail")
+    check("information collapse is explicit evidence", collapsed_trace["structured_information"]["passed"], False)
+    require("information evidence records final below max", collapsed_trace["structured_information"]["final_to_max_ratio"] < 0.5)
+    _, disabled_correctness, _ = live._oracle(request["card"], collapsed_events, collapsed_events[-1], workspace_path=None, min_information_ratio=0)
+    check("ratio zero disables workflow information gate", disabled_correctness, "pass")
+
     # A nonzero CLI exit preserves a bounded scrubbed diagnostic in the
     # append-only provider-error record. This fake process is the only source
     # of the text; no Claude request is made by this test.

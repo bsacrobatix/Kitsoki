@@ -251,8 +251,10 @@ func agentDecideHandlerOnce(ctx context.Context, args map[string]any) (Result, e
 			// so post_cmd never runs unsandboxed inside mcp-validator. The decide
 			// handler runs post_cmd itself via RunValidatorSandboxed (below).
 			schemaOnlyOpts := validatorOptions{
-				MaxRetries:    vopts.MaxRetries,
-				StateFilePath: validatorStateFilePath,
+				MaxRetries:          vopts.MaxRetries,
+				MinInformationRatio: vopts.MinInformationRatio,
+				MinInformationBits:  vopts.MinInformationBits,
+				StateFilePath:       validatorStateFilePath,
 			}
 			// Add the state file path to vopts so the sandbox loop can read state.
 			vopts.StateFilePath = validatorStateFilePath
