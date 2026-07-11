@@ -69,6 +69,13 @@ type journeyPack struct {
 		EvidenceFreshness  string `yaml:"evidence_freshness"`
 		DegradedEvidence   string `yaml:"degraded_evidence"`
 	} `yaml:"gate"`
+	Proof struct {
+		OriginPrompt string   `yaml:"origin_prompt"`
+		OriginRun    string   `yaml:"origin_run"`
+		Response     []string `yaml:"response"`
+		Delivered    []string `yaml:"delivered"`
+		Boundaries   []string `yaml:"boundaries"`
+	} `yaml:"proof"`
 }
 
 func qaCmd() *cobra.Command {
@@ -851,26 +858,59 @@ func replaceGeneratedRegion(text, generated string) string {
 	return text + "\n\n" + generated + "\n"
 }
 
-// journeyDeck is deliberately small and proof-first. It never presents a
-// demo/replay origin as an accepted real journey; the origin is an evidence row
-// reviewers can inspect before promotion.
+// journeyDeck is proof-first. It never presents a demo/replay origin as an
+// accepted real journey; the origin is an evidence row reviewers can inspect
+// before promotion. Projects may supply concise run evidence under proof in
+// their journey manifest; that evidence remains source-controlled and is
+// carried into the generated, published deck.
 func journeyDeck(p *journeyPack, freeze journeyFreezeReceipt, digest string) map[string]any {
 	originStatus := "pending"
 	if freeze.Origin.Kind == "real" {
 		originStatus = "done"
 	}
+	originRun := p.Proof.OriginRun
+	if originRun == "" {
+		originRun = "Inspect the recorded origin trace for provider and timing details."
+	}
+	originPrompt := p.Proof.OriginPrompt
+	if originPrompt == "" {
+		originPrompt = "The accepted user request is preserved in the recorded origin trace."
+	}
+	response := proofItems(p.Proof.Response, "The captured response is retained in the origin trace and replay fixture.")
+	delivered := proofItems(p.Proof.Delivered, "Journey source, replay fixture, tutorial, deck, and tour are published together.")
+	boundaries := proofItems(p.Proof.Boundaries, "A real origin is required; replay and publication must use captured deterministic evidence.")
 	return map[string]any{
 		"meta": map[string]any{"mode": "pitch", "title": p.Title, "resolution": map[string]any{"width": 1920, "height": 1080}},
 		"scenes": []any{
-			map[string]any{"type": "title", "title": p.Title, "subtitle": p.ID, "narration": "A deterministic journey-pack proof summary."},
-			map[string]any{"type": "evidence", "title": "Replay provenance", "caption": "The release gate recomputes these digests before publication.", "items": []any{
+			map[string]any{"type": "title", "eyebrow": "Kitsoki journey release", "title": p.Title, "subtitle": "A real origin, deterministic replay, and published operator evidence", "narration": "An evidence-led release record."},
+			map[string]any{"type": "narrative", "eyebrow": "What was exercised", "lede": originPrompt, "body": "The journey entered " + p.Story.Entry + " through " + p.Story.App + ". The accepted run was constrained to the published journey scope before its trace was frozen for replay."},
+			map[string]any{"type": "evidence", "title": "Real-origin receipt", "caption": "The origin is the one place where provider work is permitted; publication is gated on a real trace.", "items": []any{
+				map[string]any{"label": "Run receipt", "status": originStatus, "detail": originRun},
+				map[string]any{"label": "Origin trace", "status": originStatus, "detail": freeze.Origin.Kind + " origin: " + freeze.Origin.Trace},
+				map[string]any{"label": "Journey entry", "status": "done", "detail": p.Story.Entry + " in " + p.Story.App},
+			}},
+			map[string]any{"type": "objectives", "title": "Captured response evidence", "caption": "These are the concrete next actions preserved from the accepted origin response.", "items": response},
+			map[string]any{"type": "evidence", "title": "Replay and release verification", "caption": "The release gate recomputes source digests before publication.", "items": []any{
 				map[string]any{"label": "Origin", "status": originStatus, "detail": freeze.Origin.Kind + " origin: " + freeze.Origin.Trace},
 				map[string]any{"label": "Replay", "status": "done", "detail": freeze.Replay.Status + ": " + freeze.Replay.Flow},
 				map[string]any{"label": "Journey digest", "status": "done", "detail": digest},
 			}},
+			map[string]any{"type": "objectives", "title": "What shipped", "caption": "These outputs are generated from the journey pack and published only after the release receipt passes.", "items": delivered},
+			map[string]any{"type": "objectives", "title": "Explicit boundaries", "caption": "The deck distinguishes the real origin from inexpensive deterministic replay and does not imply unperformed work.", "items": boundaries},
 			map[string]any{"type": "narrative", "eyebrow": "Publication posture", "lede": "Real once, replay often", "body": "A demo origin validates artifact shape but cannot publish a successful journey. The release receipt requires a real origin, replay, tutorial, deck, and tour evidence.", "narration": "The pack keeps demo and real proof visibly distinct."},
 		},
 	}
+}
+
+func proofItems(values []string, fallback string) []any {
+	if len(values) == 0 {
+		values = []string{fallback}
+	}
+	items := make([]any, 0, len(values))
+	for i, value := range values {
+		items = append(items, map[string]any{"label": fmt.Sprintf("Evidence %d", i+1), "status": "done", "detail": value})
+	}
+	return items
 }
 
 func validateJourneyDeck(cmd *cobra.Command, path string) error {
