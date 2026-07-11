@@ -147,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", default="")
     parser.add_argument("--agent", default="")
     parser.add_argument("--worker-profile", default="")
+    parser.add_argument("--orchestrator-model", default="")
     parser.add_argument("--implementation-mode", default="")
     parser.add_argument("--capability-preset", default="")
     parser.add_argument("--capability-presets-json", default="")
@@ -713,7 +714,10 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
             "metrics": zero_metrics(action_surface="kitsoki-studio-mcp"),
         }
 
-    orchestrator_model = os.environ.get("ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL", "gpt-5.5")
+    # A paired comparison must not accidentally use a newer orchestrator than
+    # its declared worker/model axis.  Special studies can name an explicit
+    # orchestrator model, but the safe default is the cell's own model.
+    orchestrator_model = args.orchestrator_model or os.environ.get("ARENA_PAIRED_TASK_ORCHESTRATOR_MODEL") or model
     orchestrator_backend = os.environ.get("ARENA_PAIRED_TASK_ORCHESTRATOR_BACKEND") or _orchestrator_backend_for(orchestrator_model)
 
     thread = Path(trace_ref).with_suffix(".thread.md")
