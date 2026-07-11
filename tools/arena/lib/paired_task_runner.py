@@ -21,7 +21,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import yaml  # type: ignore
@@ -529,6 +529,9 @@ def dispatch_single_prompt_codex(args: argparse.Namespace, task: dict[str, Any],
         "--dangerously-bypass-approvals-and-sandbox",
         "-s",
         "danger-full-access",
+        "--ignore-user-config",
+        "--ephemeral",
+        "--json",
     ]
     if args.model:
         cmd.extend(["--model", args.model])
@@ -538,9 +541,21 @@ def dispatch_single_prompt_codex(args: argparse.Namespace, task: dict[str, Any],
         # effort is part of the matched cell contract and must reach raw Codex.
         cmd.extend(["--config", f'model_reasoning_effort="{args.effort}"'])
     cmd.append(prompt)
-    proc = subprocess.run(cmd, cwd=tree, text=True, capture_output=True, timeout=int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "900")))
+    env, cleanup_auth_home = isolated_codex_env()
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=tree,
+            text=True,
+            capture_output=True,
+            timeout=int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "900")),
+            env=env,
+        )
+    finally:
+        cleanup_auth_home()
     Path(trace_ref).write_text(json.dumps({
         "cmd": redact_cmd(cmd),
+        "environment_isolation": codex_isolation_metadata(),
         "returncode": proc.returncode,
         "stdout_tail": proc.stdout[-4000:],
         "stderr_tail": proc.stderr[-4000:],
@@ -700,6 +715,56 @@ def _orchestrator_backend_for(model: str) -> str:
     return "claude"
 
 
+def codex_auth_source() -> Path:
+    """Return the one credential file permitted in a paired live cell."""
+    configured = os.environ.get("CODEX_HOME", "").strip()
+    codex_home = Path(configured) if configured else Path.home() / ".codex"
+    auth = codex_home / "auth.json"
+    if not auth.is_file():
+        raise SystemExit(
+            "Codex paired-task isolation needs auth.json in CODEX_HOME (or ~/.codex); "
+            "run `codex login` before enabling a live cell"
+        )
+    return auth
+
+
+def isolated_codex_env(*, source_auth: Path | None = None, base_env: dict[str, str] | None = None) -> tuple[dict[str, str], Callable[[], None]]:
+    """Create an auth-only disposable HOME/CODEX_HOME for a live cell.
+
+    The operator's normal CODEX_HOME includes history, local configuration, and
+    memories that can contaminate a paired evaluation. Codex subscription auth
+    needs only auth.json, so the temporary home is created outside the task
+    workspace and removed as soon as the outer process exits.
+    """
+    auth = source_auth or codex_auth_source()
+    if not auth.is_file():
+        raise SystemExit(f"Codex paired-task isolation auth file is missing: {auth}")
+    root = Path(tempfile.mkdtemp(prefix="kitsoki-paired-codex-home-"))
+    codex_home = root / ".codex"
+    codex_home.mkdir(mode=0o700)
+    target_auth = codex_home / "auth.json"
+    shutil.copy2(auth, target_auth)
+    target_auth.chmod(0o600)
+    env = dict(base_env if base_env is not None else os.environ)
+    env["HOME"] = str(root)
+    env["CODEX_HOME"] = str(codex_home)
+
+    def cleanup() -> None:
+        shutil.rmtree(root, ignore_errors=True)
+
+    return env, cleanup
+
+
+def codex_isolation_metadata() -> dict[str, Any]:
+    """Non-secret provenance retained in each cell record."""
+    return {
+        "mode": "auth-only-temporary-home",
+        "credential_files": ["auth.json"],
+        "operator_codex_home_forwarded": False,
+        "temporary_home_removed_after_cell": True,
+    }
+
+
 def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path, trace_ref: str) -> dict[str, Any]:
     """Drive the REAL kitsoki bugfix pipeline (stories/bench-bugfix/app.yaml) via
     a headless codex orchestrator + the studio MCP — the same live-delegation
@@ -738,7 +803,14 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     prompt_file = Path(trace_ref).with_suffix(".prompt.md")
     prompt_file.write_text(prompt, encoding="utf-8")
 
-    env = dict(os.environ)
+    try:
+        env, cleanup_auth_home = isolated_codex_env()
+    except SystemExit as exc:
+        return {
+            "blocked": True,
+            "notes": str(exc),
+            "metrics": zero_metrics(action_surface="kitsoki-studio-mcp"),
+        }
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
     env["MCP_DRIVE_BACKEND"] = orchestrator_backend
     env["MCP_DRIVE_MODEL"] = orchestrator_model
@@ -754,24 +826,28 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
 
     cmd = [str(DRIVE_SH), "--prompt-file", str(prompt_file)]
     try:
-        proc = subprocess.run(
-            cmd,
-            cwd=KITSOKI_ROOT,
-            text=True,
-            capture_output=True,
-            env=env,
-            timeout=int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "1800")),
-        )
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "blocked": True,
-            "notes": f"drive.sh timed out after {exc.timeout}s",
-            "metrics": zero_metrics(action_surface="kitsoki-studio-mcp", studio_mcp_trace_ref=container_path(trace_ref)),
-        }
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=KITSOKI_ROOT,
+                text=True,
+                capture_output=True,
+                env=env,
+                timeout=int(os.environ.get("ARENA_CODEX_TIMEOUT_S", "1800")),
+            )
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "blocked": True,
+                "notes": f"drive.sh timed out after {exc.timeout}s",
+                "metrics": zero_metrics(action_surface="kitsoki-studio-mcp", studio_mcp_trace_ref=container_path(trace_ref)),
+            }
+    finally:
+        cleanup_auth_home()
 
     drive_log = Path(trace_ref).with_suffix(".drive-log.json")
     drive_log.write_text(json.dumps({
         "cmd": redact_cmd(cmd),
+        "environment_isolation": codex_isolation_metadata(),
         "returncode": proc.returncode,
         "stdout_tail": proc.stdout[-4000:],
         "stderr_tail": proc.stderr[-4000:],
@@ -853,7 +929,7 @@ def build_kitsoki_prompt(
     tool = (lambda dotted: dotted) if orchestrator_backend == "codex" else (
         lambda dotted: "mcp__kitsoki__" + dotted.replace(".", "_")
     )
-    ticket_title = f"{task['id']} ({task['archetype']}): {task.get('ticket', '')}"
+    ticket_title = benchmark_ticket_title(task)
     return "\n".join([
         "Drive ONE kitsoki bug-fix pipeline cell to completion via the kitsoki studio MCP.",
         f"The fix MUST be generated by the live worker model inside the session (profile "
@@ -988,6 +1064,7 @@ def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
 def build_prompt(args: argparse.Namespace, task: dict[str, Any]) -> str:
     return "\n".join([
         "You are fixing one benchmark task in a checked-out repository baseline.",
+        benchmark_isolation_instruction(),
         "Do not ask questions. Make the smallest correct change and run focused checks if obvious.",
         f"Task id: {task['id']}",
         f"Archetype: {task['archetype']}",
@@ -995,6 +1072,18 @@ def build_prompt(args: argparse.Namespace, task: dict[str, Any]) -> str:
         "",
         str(task.get("ticket", "")),
     ])
+
+
+def benchmark_isolation_instruction() -> str:
+    return (
+        "BENCHMARK ISOLATION: work only inside the provided checkout. Do not inspect "
+        "operator homes, credentials, Codex/Claude state, memories, other repositories, "
+        "or any path outside this checkout."
+    )
+
+
+def benchmark_ticket_title(task: dict[str, Any]) -> str:
+    return f"{benchmark_isolation_instruction()}\n\n{task['id']} ({task['archetype']}): {task.get('ticket', '')}"
 
 
 def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:

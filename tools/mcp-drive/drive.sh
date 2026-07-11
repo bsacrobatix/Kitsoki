@@ -252,6 +252,7 @@ run_once() {
       --model "$MODEL" \
       --dangerously-bypass-approvals-and-sandbox \
       --ignore-user-config \
+      --ephemeral \
       --disable=shell_tool \
       --disable=apps \
       --skip-git-repo-check \

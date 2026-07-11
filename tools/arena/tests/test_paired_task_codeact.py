@@ -48,6 +48,7 @@ check("registry codeact", runner.resolve_treatment_driver("codex-codeact").name,
 check("registry unknown", runner.resolve_treatment_driver("not-a-treatment"), None)
 
 drive_source = (REPO_ROOT / "tools" / "mcp-drive" / "drive.sh").read_text(encoding="utf-8")
+runner_source = (ARENA_ROOT / "lib" / "paired_task_runner.py").read_text(encoding="utf-8")
 require("MCP driver skips unset forwarded environment", 'if [[ -n "${!_fwd-}" ]]; then' in drive_source)
 require("MCP driver does not override CODEX_HOME with empty value", 'mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}' not in drive_source)
 
@@ -198,10 +199,12 @@ json.loads(argv[argv.index("--capability-presets-json") + 1])
 with tempfile.TemporaryDirectory(prefix="paired-raw-effort-") as td:
     trace = Path(td) / "raw.jsonl"
     captured: list[str] = []
+    captured_env: dict[str, str] = {}
     original_run = runner.subprocess.run
 
-    def fake_run(cmd, **_kwargs):
+    def fake_run(cmd, **kwargs):
         captured.extend(cmd)
+        captured_env.update(kwargs.get("env") or {})
         return runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     runner.subprocess.run = fake_run
@@ -215,6 +218,27 @@ with tempfile.TemporaryDirectory(prefix="paired-raw-effort-") as td:
     finally:
         runner.subprocess.run = original_run
     require("raw Codex effort is explicit", 'model_reasoning_effort="medium"' in captured)
+    require("raw Codex uses a private HOME", captured_env.get("HOME") not in {"", os.environ.get("HOME", "")})
+    require("raw Codex uses an auth-only CODEX_HOME", captured_env.get("CODEX_HOME", "").endswith("/.codex"))
+
+with tempfile.TemporaryDirectory(prefix="paired-codex-home-") as td:
+    source = Path(td) / "source" / "auth.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"token":"test-only"}', encoding="utf-8")
+    env, cleanup = runner.isolated_codex_env(source_auth=source, base_env={"PATH": "/bin"})
+    private_home = Path(env["HOME"])
+    private_codex_home = Path(env["CODEX_HOME"])
+    check("isolated home is not source parent", private_home == source.parent, False)
+    check("isolated CODEX_HOME holds auth only", sorted(p.name for p in private_codex_home.iterdir()), ["auth.json"])
+    check("isolated env preserves PATH", env["PATH"], "/bin")
+    check("isolation metadata never forwards operator home", runner.codex_isolation_metadata()["operator_codex_home_forwarded"], False)
+    cleanup()
+    check("isolated home is removed", private_home.exists(), False)
+
+require("raw Codex ignores user config", '"--ignore-user-config",' in runner_source)
+require("MCP driver uses ephemeral outer orchestration", "--ephemeral" in drive_source)
+require("MCP dispatch uses auth-only environment", "env, cleanup_auth_home = isolated_codex_env()" in runner_source)
+require("raw prompt carries isolation policy", "BENCHMARK ISOLATION:" in runner.build_prompt(argparse.Namespace(treatment="raw"), {"id": "fixture", "archetype": "bugfix", "ticket": "fix"}))
 
 with tempfile.TemporaryDirectory(prefix="paired-cleanup-") as td:
     tree = Path(td) / "node_modules" / "nested"
