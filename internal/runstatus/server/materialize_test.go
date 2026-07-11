@@ -10,7 +10,9 @@ package server_test
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,7 +24,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/app"
+	"kitsoki/internal/machine"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
+	"kitsoki/internal/store"
 )
 
 // materializeCatalogCopy copies testdata/materialize-catalog.yaml into a
@@ -62,7 +68,15 @@ func pogRepoRoot(t *testing.T) string {
 func newMaterializeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	root := pogRepoRoot(t)
-	ts := httptest.NewServer(server.NewMulti(newStubProvider(), server.WithMaterializeRoot(root)).Handler())
+	// The stub provider implements SeededSessionProvider, so materializeStart
+	// will try the web-session drive path first; failing the seed here pins
+	// these tests to the private-rig fallback (the CLI / no-registry path).
+	// TestMaterialize_Start_DrivesWebSession covers the seeded path.
+	p := newStubProvider()
+	p.seededFn = func(context.Context, string, map[string]any) (string, error) {
+		return "", errors.New("stub: no live sessions")
+	}
+	ts := httptest.NewServer(server.NewMulti(p, server.WithMaterializeRoot(root)).Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }
@@ -181,19 +195,23 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 		assert.True(t, g.Passed)
 	}
 
-	// Stage frames are best-effort: the pilot story is deterministic and can
-	// finish before this test's GET reaches the stream endpoint (the
-	// documented Subscribe-after-Start race — see materialize_stream.go's
-	// package doc), in which case Subscribe replays only the single terminal
-	// JobEvent and no per-room frames precede it. When stage frames DO show
-	// up, they must be valid room ids in the pilot story's order.
+	// Stage frames are guaranteed regardless of when the EventSource
+	// connects: the handler replays the server's accumulated snapshot on
+	// connect (see materialize_stream.go's late-subscriber paragraph), so
+	// even a stream opened after the deterministic pilot finished must show
+	// every stage reaching "complete" — the stuck-pill regression this
+	// replay exists to prevent. Emits are monotonic per stage, so the last
+	// frame per stage is its high-water status.
 	wantOrder := map[string]int{"gather": 0, "draft": 1, "verify": 2, "done": 3}
-	last := -1
+	lastStatus := map[string]string{}
 	for _, sf := range stageFrames {
-		idx, ok := wantOrder[sf.StageID]
+		_, ok := wantOrder[sf.StageID]
 		require.True(t, ok, "unexpected stage id %q", sf.StageID)
-		assert.GreaterOrEqual(t, idx, last, "stage frames must not regress: got %q after index %d", sf.StageID, last)
-		last = idx
+		lastStatus[sf.StageID] = sf.Status
+	}
+	require.Len(t, lastStatus, len(wantOrder), "every stage should have at least one frame (snapshot replay)")
+	for id, status := range lastStatus {
+		assert.Equal(t, "complete", status, "stage %s should end complete", id)
 	}
 
 	// The terminal artifact/status/done sequence always fires, regardless of
@@ -260,8 +278,138 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 	catalogText := string(catalogRaw)
 	assert.Contains(t, catalogText, "path: .artifacts/wi-ready/brief.md", "evidence entry not written back")
 	assert.Contains(t, catalogText, "materialization:", "materialization: block not written back")
-	assert.Contains(t, catalogText, "job_id: \""+start.JobID+"\"")
+	// The changeset-based write-back (yaml.Node tree edit) emits plain
+	// scalars, not the old splice's quoted strings — assert unquoted.
+	assert.Contains(t, catalogText, "job_id: "+start.JobID)
 	assert.Contains(t, catalogText, "status: complete")
+}
+
+// TestMaterialize_Start_DrivesWebSession covers the seeded web-session path:
+// when the provider can seed a live session for the bound story,
+// graph.materialize.start drives THAT session (not a private rig) and
+// returns its session_id, so the SPA's /#/s/<id> trace and /#/s/<id>/chat
+// transcript routes can observe the drive. The stub provider here builds a
+// real orchestrator rig per NewSessionSeeded — the in-process equivalent of
+// the `kitsoki web` registry's NewSessionSeeded.
+func TestMaterialize_Start_DrivesWebSession(t *testing.T) {
+	root := pogRepoRoot(t)
+	catalogPath := materializeCatalogCopy(t)
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(root, ".artifacts", "wi-ready")) })
+
+	p := newStubProvider()
+	var seededPaths []string
+	p.seededFn = func(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error) {
+		seededPaths = append(seededPaths, storyPath)
+
+		def, err := app.Load(storyPath)
+		if err != nil {
+			return "", err
+		}
+		m, err := machine.New(def)
+		if err != nil {
+			return "", err
+		}
+		st, err := store.OpenMemory()
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(func() { _ = st.Close() })
+
+		orch := orchestrator.New(def, m, st, nil)
+		sid, err := orch.NewSession(ctx)
+		if err != nil {
+			return "", err
+		}
+
+		sink, err := store.OpenJSONL(filepath.Join(t.TempDir(), "run.jsonl"))
+		if err != nil {
+			return "", err
+		}
+		t.Cleanup(func() { _ = sink.Close() })
+		live := server.NewLiveSession(sink, def, string(sid), string(orch.InitialState()))
+		orch.SetEventSink(live)
+
+		if err := orch.RunInitialOnEnter(ctx, sid); err != nil {
+			return "", err
+		}
+		if err := orch.PatchWorld(ctx, sid, initialWorld); err != nil {
+			return "", err
+		}
+
+		id := "web-session-" + string(sid)
+		p.putEntry(id, server.Entry{
+			Source: live,
+			Driver: server.OrchestratorDriver{Orch: orch, SID: sid},
+		})
+		return id, nil
+	}
+
+	ts := httptest.NewServer(server.NewMulti(p, server.WithMaterializeRoot(root)).Handler())
+	t.Cleanup(ts.Close)
+
+	var start struct {
+		JobID     string `json:"job_id"`
+		SessionID string `json:"session_id"`
+	}
+	rpcCall(t, ts, "graph.materialize.start", map[string]any{
+		"catalog": catalogPath,
+		"node_id": "wi-ready",
+		"params":  map[string]any{"depth": 2, "audience": "internal"},
+	}, &start)
+
+	require.NotEmpty(t, start.JobID)
+	require.NotEmpty(t, start.SessionID, "seeded path should return the web session id")
+	require.Len(t, seededPaths, 1)
+	assert.True(t, filepath.IsAbs(seededPaths[0]), "story path handed to the provider must be absolute, got %q", seededPaths[0])
+
+	// The stream's terminal done frame doubles as the job-finished wait.
+	frames := readMaterializeStreamFrames(t, ts, start.JobID)
+	stageComplete := map[string]bool{}
+	var sawDone bool
+	for _, f := range frames {
+		if f.Type == "stage" && f.Status == "complete" {
+			stageComplete[f.StageID] = true
+		}
+		if f.Type == "done" {
+			sawDone = true
+		}
+		if f.Type == "error" {
+			t.Fatalf("unexpected error frame: %s", f.Message)
+		}
+	}
+	require.True(t, sawDone)
+	for _, id := range []string{"gather", "draft", "verify", "done"} {
+		assert.True(t, stageComplete[id], "stage %s should complete", id)
+	}
+
+	// .status carries the same session_id for a client that reloads mid-run.
+	var status struct {
+		Status    string `json:"status"`
+		SessionID string `json:"session_id"`
+	}
+	rpcCall(t, ts, "graph.materialize.status", map[string]any{"job_id": start.JobID}, &status)
+	assert.Equal(t, start.SessionID, status.SessionID)
+
+	// The drive went through the REGISTERED session: its trace (what the
+	// SPA's RunView/chat render) shows the turns, proving the viewer link
+	// has something to open.
+	var trace struct {
+		Events []map[string]any `json:"events"`
+	}
+	rpcCall(t, ts, "runstatus.session.trace", map[string]any{"session_id": start.SessionID}, &trace)
+	assert.NotEmpty(t, trace.Events, "the web session's trace should record the drive")
+
+	// And the write-back still landed (same handler as the private path).
+	deadline := time.Now().Add(2 * time.Second)
+	var artifactErr error
+	for {
+		_, artifactErr = os.Stat(filepath.Join(root, ".artifacts", "wi-ready", "brief.md"))
+		if artifactErr == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.NoError(t, artifactErr, "materialize job should have written the artifact to disk")
 }
 
 // TestMaterialize_Start_RejectsUnmetGates confirms the "rejects with the

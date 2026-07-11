@@ -300,6 +300,23 @@ func (d OrchestratorDriver) SubmitDirect(ctx context.Context, intent string, slo
 	return d.Orch.SubmitDirect(ctx, d.SID, intent, slots)
 }
 
+// WorldReader is an optional [Driver] extension: a read of the session's
+// current world vars without advancing a turn — the counterpart of
+// Driver.PatchWorld's write. The graph.materialize.* web-session drive path
+// (materialize.go's materializeStart) requires it to check artifact_path
+// after each room; kept off the core Driver interface so read-only and
+// white-box test drivers need not implement it. The live registry's tracking
+// wrapper forwards it (same convention as WorkLister / ChatShower).
+type WorldReader interface {
+	CurrentWorld(ctx context.Context) (map[string]any, error)
+}
+
+// CurrentWorld implements [WorldReader] by replaying the session's world
+// off the event log (Orchestrator.CurrentWorld).
+func (d OrchestratorDriver) CurrentWorld(context.Context) (map[string]any, error) {
+	return d.Orch.CurrentWorld(d.SID).Vars, nil
+}
+
 func (d OrchestratorDriver) ContinueTurn(ctx context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	return d.Orch.ContinueTurn(ctx, d.SID, slots)
 }

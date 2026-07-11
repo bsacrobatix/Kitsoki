@@ -417,6 +417,13 @@ func (d *trackingDriver) SetHarnessSelection(profile, model, effort string) erro
 	return nil
 }
 
+func (d *trackingDriver) CurrentWorld(ctx context.Context) (map[string]any, error) {
+	if wr, ok := d.Driver.(server.WorldReader); ok {
+		return wr.CurrentWorld(ctx)
+	}
+	return nil, fmt.Errorf("session driver exposes no world reader")
+}
+
 func (d *trackingDriver) ListWork(ctx context.Context) (server.SessionWork, error) {
 	if wl, ok := d.Driver.(server.WorkLister); ok {
 		return wl.ListWork(ctx)
