@@ -24,26 +24,14 @@
 #   $ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml \
 #       --warp scenarios/autonomous_ready.yaml
 #
-# # ticket_globs — multi-glob coverage
+# # Local and remote ticket source
 #
-# The local-files ticket provider scans `<repo_root>/issues/bugs/*.md`. This
-# instance sets `repo_root` to `.artifacts`, so local developer iterations read
-# `.artifacts/issues/bugs/*.md` and do not create committed ticket files.
-# for files matching the bug frontmatter schema (docs/stories/bugs.md).
-# The `ticket_globs:` world key documents the FULL set of paths a
-# future multi-glob provider scan will cover:
-#
-#   issues/bugs/*.md                   — kitsoki self-bugs
-#   issues/features/*.md               — kitsoki PRD-track features
-#   stories/*/issues/bugs/*.md         — per-story bugs (story authoring)
-#   stories/*/issues/features/*.md     — per-story features
-#
-# A bug filed via `/meta story bug` against `stories/oregon-trail/`
-# lands at `stories/oregon-trail/issues/bugs/<id>.md` and is reachable
-# from this same app — the multi-glob is what "devstory oversees
-# kitsoki AND its stories" means in practice. (Wave 3.5: extend the
-# provider to honour ticket_globs literally; current handler reads
-# `<repo_root>/issues/bugs/` only.)
+# The local-files side scans `<repo_root>/issues/{bugs,features,epics}/*.md`.
+# This instance sets `repo_root` to `.artifacts`, giving one active local pile
+# under the source checkout. When this story runs inside a managed capsule,
+# relative ticket roots resolve against the manifest's source checkout rather
+# than the disposable clone. The GitHub side resolves the repository's `origin`
+# remote and appears in the same picker.
 #
 # # transport — the bug file IS the conversation log
 #
@@ -203,21 +191,18 @@ imports:
 #
 # `repo_root` is wired: dev-story threads it into `iface.ticket.*` calls as
 # the `root` arg, which the local-files provider honours
-# (args.root → $KITSOKI_TICKETS_ROOT → cwd); host.gh.ticket ignores it.
-# `ticket_globs` remains forward-compat only — the provider reads
-# `<root>/issues/bugs/*.md` literally; a future enhancement would accept
-# it as a multi-glob scan list.
+# (args.root -> $KITSOKI_TICKETS_ROOT -> cwd); relative roots inside managed
+# capsules are anchored at the source checkout. host.gh.ticket ignores it.
 world:
-  # Provider-pointing keys. repo_root reaches iface.ticket.* via the
-  # dev-story rooms' `root:` passthrough; ticket_globs is still unwired.
+  # Provider-pointing key. repo_root reaches iface.ticket.* via the
+  # dev-story rooms' `root:` passthrough.
   repo_root:    { type: string, default: ".artifacts" }
-  ticket_globs: { type: string, default: "issues/bugs/*.md,issues/features/*.md,stories/*/issues/bugs/*.md,stories/*/issues/features/*.md" }
 
   # ticket_repo is intentionally empty for local artifact iteration. It is set
   # after picking a GitHub row, so downstream close-out knows the selected
   # ticket is remote. ticket_github_repo feeds the selector's GitHub section.
   ticket_repo:  { type: string, default: "" }
-  ticket_github_repo: { type: string, default: "constructorfabric/Kitsoki" }
+  ticket_github_repo: { type: string, default: "origin" }
   # Default local destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.

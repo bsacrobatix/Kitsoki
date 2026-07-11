@@ -396,12 +396,42 @@ func ManagedSourceRootFromCWD() string {
 	return ManagedSourceRootFromPath(cwd)
 }
 
+// ManagedSourcePathFromCWD maps path from a managed capsule workspace to the
+// equivalent location under its recorded source checkout. Relative paths keep
+// their relationship to the current working directory. It returns an empty
+// string when cwd is not inside a managed capsule or path escapes the workspace.
+func ManagedSourcePathFromCWD(path string) string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	workspace, sourceRoot := managedWorkspaceAndSourceFromPath(cwd)
+	if workspace == "" || sourceRoot == "" {
+		return ""
+	}
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(cwd, candidate)
+	}
+	candidate = filepath.Clean(candidate)
+	rel, err := filepath.Rel(workspace, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	return filepath.Clean(filepath.Join(sourceRoot, rel))
+}
+
 // ManagedSourceRootFromPath walks upward from start until it finds a managed
 // capsule workspace manifest and returns the recorded source checkout path.
 func ManagedSourceRootFromPath(start string) string {
+	_, sourceRoot := managedWorkspaceAndSourceFromPath(start)
+	return sourceRoot
+}
+
+func managedWorkspaceAndSourceFromPath(start string) (string, string) {
 	start = filepath.Clean(strings.TrimSpace(start))
 	if start == "" {
-		return ""
+		return "", ""
 	}
 	for cur := start; ; {
 		if isWorkspace(cur) {
@@ -414,14 +444,14 @@ func ManagedSourceRootFromPath(start string) string {
 						}
 					}
 					if fi, statErr := os.Stat(root); statErr == nil && fi.IsDir() {
-						return root
+						return cur, root
 					}
 				}
 			}
 		}
 		parent := filepath.Dir(cur)
 		if parent == cur {
-			return ""
+			return "", ""
 		}
 		cur = parent
 	}

@@ -12,6 +12,8 @@ package bugfile
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -129,7 +131,6 @@ func Create(req CreateRequest) (id string, relPath string, absPath string, err e
 		return "", "", "", fmt.Errorf("mkdir %s: %w", bugsDir, err)
 	}
 	filename := Filename(now, req.Title)
-	full := filepath.Join(bugsDir, filename)
 
 	rec := Record{
 		ID:         strings.TrimSuffix(filename, ".md"),
@@ -162,9 +163,40 @@ func Create(req CreateRequest) (id string, relPath string, absPath string, err e
 		}
 	}
 
-	content := RenderMarkdown(rec)
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		return "", "", "", fmt.Errorf("write %s: %w", full, err)
+	var full string
+	baseID := rec.ID
+	for attempt := 1; ; attempt++ {
+		if attempt == 1 {
+			rec.ID = baseID
+		} else {
+			rec.ID = fmt.Sprintf("%s-%d", baseID, attempt)
+		}
+		filename = rec.ID + ".md"
+		full = filepath.Join(bugsDir, filename)
+		content := []byte(RenderMarkdown(rec))
+		file, openErr := os.OpenFile(full, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if openErr == nil {
+			if _, writeErr := file.Write(content); writeErr != nil {
+				_ = file.Close()
+				_ = os.Remove(full)
+				return "", "", "", fmt.Errorf("write %s: %w", full, writeErr)
+			}
+			if closeErr := file.Close(); closeErr != nil {
+				_ = os.Remove(full)
+				return "", "", "", fmt.Errorf("close %s: %w", full, closeErr)
+			}
+			break
+		}
+		if !errors.Is(openErr, os.ErrExist) {
+			return "", "", "", fmt.Errorf("create %s: %w", full, openErr)
+		}
+		existing, readErr := os.ReadFile(full)
+		if readErr != nil {
+			return "", "", "", fmt.Errorf("read existing %s: %w", full, readErr)
+		}
+		if bytes.Equal(existing, content) {
+			break
+		}
 	}
 
 	rel, relErr := filepath.Rel(root, full)

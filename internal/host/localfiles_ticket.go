@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"kitsoki/internal/capsule"
 )
 
 // LocalFilesTicketHandler implements host.local_files.ticket (prefix-fallback).
@@ -75,19 +77,29 @@ func LocalFilesTicketHandler(ctx context.Context, args map[string]any) (Result, 
 }
 
 // resolveTicketsRoot resolves the directory under which `issues/bugs/`
-// lives.  Order of precedence: args.root → $KITSOKI_TICKETS_ROOT → cwd.
+// lives. Order of precedence: args.root -> $KITSOKI_TICKETS_ROOT -> cwd.
+// Relative roots inside a managed capsule are anchored at the recorded source
+// checkout, so readers and mutators use the same durable ticket pile as filers.
 func resolveTicketsRoot(args map[string]any) (string, error) {
-	if v, _ := args["root"].(string); v != "" {
-		return v, nil
+	root, _ := args["root"].(string)
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv("KITSOKI_TICKETS_ROOT"))
 	}
-	if v := os.Getenv("KITSOKI_TICKETS_ROOT"); v != "" {
-		return v, nil
+	if root == "" {
+		root = "."
+	}
+	if filepath.IsAbs(root) {
+		return filepath.Clean(root), nil
+	}
+	if sourcePath := capsule.ManagedSourcePathFromCWD(root); sourcePath != "" {
+		return sourcePath, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return "", fmt.Errorf("resolve cwd: %w", err)
 	}
-	return cwd, nil
+	return filepath.Clean(filepath.Join(cwd, root)), nil
 }
 
 // ticketKindDirs enumerates the issues/* subdirectories scanned by the

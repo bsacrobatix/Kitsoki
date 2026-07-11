@@ -93,8 +93,8 @@ In the TUI, run:
 With `--ticket-repo`, `/bug` stores scrubbed TUI evidence under
 `.artifacts/bug-reports/<id>/`, uploads it as GitHub release assets, and links it
 from the GitHub issue. Without `--ticket-repo`, it writes a local
-`issues/bugs/<id>.md` plus sibling `<id>.artifacts/`; only choose that local path
-when the user explicitly wants a local fixture.
+`.artifacts/issues/bugs/<id>.md` plus sibling `<id>.artifacts/` in the source
+checkout. Managed capsule workspaces never own the durable ticket.
 
 ### Hosted GitHub Agent Deck
 
@@ -250,8 +250,9 @@ Before claiming the bug is filed, verify the artifact path that matters:
   `## Context` / `## Trace` sections, link `trace.redacted.jsonl` and
   `world.redacted.json` sidecars under `.artifacts/mcp-issues/`, and keep the
   fenced `kitsoki` metadata block.
-- Local path: confirm `issues/bugs/<id>.md` exists and its sibling
-  `<id>.artifacts/` contains the expected evidence; the markdown frontmatter
+- Local path: confirm `.artifacts/issues/bugs/<id>.md` exists in the source
+  checkout and its sibling `<id>.artifacts/` contains the expected evidence;
+  the markdown frontmatter
   should include the same engine and story runtime metadata.
 - Hosted deck path: confirm `kitsoki gh-agent deck` printed the public deck URL
   and, when `--comment` was used, the issue has the comment.

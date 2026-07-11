@@ -501,7 +501,7 @@ func ghIssueSummary(raw map[string]any) map[string]any {
 			}
 		}
 	}
-	return map[string]any{
+	out := map[string]any{
 		"id":       num,
 		"title":    title,
 		"status":   strings.ToLower(state),
@@ -521,6 +521,14 @@ func ghIssueSummary(raw map[string]any) map[string]any {
 		// also lifts the legacy_id out of the ```kitsoki metadata block).
 		"source": "github",
 	}
+	if body, _ := raw["body"].(string); body != "" {
+		if meta := ghParseMetadata(body); meta != nil {
+			if legacyID, _ := meta["legacy_id"].(string); strings.TrimSpace(legacyID) != "" {
+				out["legacy_id"] = strings.TrimSpace(legacyID)
+			}
+		}
+	}
+	return out
 }
 
 // ghClassifyType derives a kitsoki ticket type (bug | feature | epic) from a

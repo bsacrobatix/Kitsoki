@@ -133,3 +133,62 @@ func TestLocalGitHubTicket_GetRoutesBySource(t *testing.T) {
 		t.Fatalf("remote data = %v", remoteRes.Data)
 	}
 }
+
+func TestLocalGitHubTicket_SearchDeduplicatesMigratedLocalTicket(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	root := seedTicketsRoot(t, map[string]string{
+		"2026-07-08T10-local-one.md": sampleBug,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"items": []map[string]any{{
+			"number": 205, "title": "Esc in foyer hangs the TUI", "state": "open",
+			"html_url": "https://github.com/o/r/issues/205",
+			"body":     "```kitsoki\nlegacy_id: 2026-07-08T10-local-one\n```",
+		}}})
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := host.LocalGitHubTicketHandler(context.Background(), map[string]any{
+		"op": "search", "root": root, "repo": "o/r", "limit": 25,
+	})
+	if err != nil || res.Error != "" {
+		t.Fatalf("search: infra=%v domain=%s", err, res.Error)
+	}
+	tickets, _ := res.Data["tickets"].([]map[string]any)
+	if len(tickets) != 1 || tickets[0]["source"] != "github" {
+		t.Fatalf("tickets = %v, want only migrated GitHub identity", tickets)
+	}
+	if res.Data["local_count"] != 0 || res.Data["github_count"] != 1 {
+		t.Fatalf("counts = local %v github %v", res.Data["local_count"], res.Data["github_count"])
+	}
+}
+
+func TestLocalGitHubTicket_SearchKeepsLocalRowsWhenGitHubFails(t *testing.T) {
+	t.Setenv("GH_TOKEN", "test-token")
+	root := seedTicketsRoot(t, map[string]string{
+		"2026-07-08T10-local-one.md": sampleBug,
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"upstream unavailable"}`, http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	restoreAPI := host.SetGitHubAPIForTest(srv.URL, srv.Client())
+	defer restoreAPI()
+
+	res, err := host.LocalGitHubTicketHandler(context.Background(), map[string]any{
+		"op": "search", "root": root, "repo": "o/r", "limit": 25,
+	})
+	if err != nil || res.Error != "" {
+		t.Fatalf("search: infra=%v domain=%s", err, res.Error)
+	}
+	tickets, _ := res.Data["tickets"].([]map[string]any)
+	if len(tickets) != 1 || tickets[0]["source"] != "local" {
+		t.Fatalf("tickets = %v, want available local row", tickets)
+	}
+	errors, _ := res.Data["provider_errors"].([]string)
+	if len(errors) != 1 || !strings.HasPrefix(errors[0], "github: ") {
+		t.Fatalf("provider_errors = %v, want visible GitHub warning", errors)
+	}
+}

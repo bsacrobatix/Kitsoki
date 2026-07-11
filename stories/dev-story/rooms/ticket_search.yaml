@@ -12,6 +12,35 @@
 
 states:
 
+  ticket_pick_error:
+    description: "Ticket details could not be loaded; show the provider error and return to search."
+    relevant_world: [ticket_id, ticket_source_ref, last_error]
+    view:
+      - banner:
+          text: "TICKET FETCH FAILED"
+          subtitle: "The selected local or remote ticket was not loaded"
+          color: "#DC2626"
+      - heading: "Ticket fetch failed"
+      - prose: "{{ world.last_error|default:'(no provider error detail)' }}"
+      - kv:
+          pairs:
+            Ticket: '{{ world.ticket_id|default:"(none)" }}'
+            Source: '{{ world.ticket_source_ref|default:"(unknown)" }}'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "back to tickets", intent: go_back, hint: "refresh local and GitHub tickets, then retry" }
+            - { label: "go_main", intent: go_main, hint: "return to the engineering workbench" }
+            - { label: "look", intent: look, hint: "re-render the provider error" }
+    on:
+      go_back:
+        - target: ticket_search
+      go_main:
+        - target: landing
+      look:
+        - target: .
+
   ticket_search:
     description: "Browse tickets — pick one, then `continue` into the bugfix pipeline."
     relevant_world: [ticket_query, ticket_results, ticket_id, ticket_title, oversight_mode]
@@ -279,7 +308,7 @@ states:
                 ticket_legacy_id: legacy_id
                 ticket_source_ref: url
                 thread: url
-              on_error: idle
+              on_error: ticket_pick_error
             - set:
                 ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : 'local' }}"
                 ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '' }}"
@@ -490,7 +519,7 @@ states:
                 ticket_legacy_id: legacy_id
                 ticket_source_ref: url
                 thread: url
-              on_error: ticket_searching
+              on_error: ticket_pick_error
             - set:
                 ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : 'local' }}"
                 ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '' }}"

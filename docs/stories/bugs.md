@@ -156,10 +156,10 @@ verification are documented in
 and the web surface in [`../tui/web-ui.md`](../tui/web-ui.md).
 
 The filename is `<UTC-timestamp>-<slug>.md`. Slug is the title
-lowercased, ASCII-only, hyphenated, truncated to 60 characters. Two
-bugs filed in the same second with the same title produce the same
-filename, and the second `WriteFile` silently overwrites the first —
-intentional, so an agent retry after a transient error is idempotent.
+lowercased, ASCII-only, hyphenated, truncated to 60 characters. An exact retry
+is idempotent and returns the existing file. A different report with the same
+title in the same second receives a numeric suffix (`-2`, `-3`, ...), so filing
+never silently overwrites feedback.
 
 ---
 
