@@ -146,9 +146,10 @@ func (srv *Server) handleWorkflowLaunch(
 			return buildToolError(ErrBadRequest, "workflow.launch: "+werr.Error()), nil, nil
 		}
 		handle, herr := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
-			Mode:           HarnessReplay,
+			Mode:           workflowLaunchHarnessMode(receipt.ModelPolicy.Harness),
 			StoryPath:      filepath.Join(receipt.AppPath, "app.yaml"),
 			TracePath:      receipt.TracePath,
+			Profile:        strings.TrimSpace(receipt.ModelPolicy.Profile),
 			InitialWorld:   initialWorld,
 			ImportResolver: srv.importResolver,
 		})
@@ -168,6 +169,7 @@ func (srv *Server) handleWorkflowLaunch(
 		"at":              time.Now().UTC(),
 		"app_path":        receipt.AppPath,
 		"manifest_path":   receipt.ManifestPath,
+		"model_policy":    receipt.ModelPolicy,
 		"trace_path":      receipt.TracePath,
 		"session_id":      receipt.SessionID,
 		"session_handle":  receipt.SessionHandle,
@@ -191,6 +193,19 @@ func (srv *Server) handleWorkflowLaunch(
 		}
 	}
 	return nil, receipt, nil
+}
+
+func workflowLaunchHarnessMode(policyHarness string) HarnessMode {
+	switch strings.TrimSpace(policyHarness) {
+	case string(HarnessReplay):
+		return HarnessReplay
+	default:
+		// Dynamic-workflow manifests use "live" for the normal worker posture and
+		// "ladder" when the punch-list story should apply its per-call fallback
+		// ladder. Both require a live Studio session; only an explicit replay
+		// policy should install replay fail-closed host.agent handlers.
+		return HarnessLive
+	}
 }
 
 func (srv *Server) handleWorkflowStatus(

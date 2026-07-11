@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/dynamicworkflow"
+	"kitsoki/internal/harness"
 	studio "kitsoki/internal/mcp/studio"
+	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/testrunner"
 )
 
@@ -24,6 +26,10 @@ func TestWorkflowCreateValidateExport(t *testing.T) {
 	res, err := callTool(ctx, cs, "workflow.create", map[string]any{
 		"goal": "implement dynamic workflows",
 		"slug": "mcp-dwf-test",
+		"defaults": map[string]any{
+			"harness":             "replay",
+			"require_trace_model": false,
+		},
 	})
 	require.NoError(t, err)
 	require.False(t, res.IsError, "workflow.create errored: %s", contentText(res))
@@ -191,7 +197,7 @@ func TestWorkflowExportPreservesResearchDriveOnlyManifest(t *testing.T) {
 
 func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T) {
 	ctx := context.Background()
-	srv, _ := newReplayServer(t)
+	srv, _ := newWorkflowLaunchServer(t)
 	cs := connectInProcess(ctx, t, srv)
 
 	cases := []struct {
@@ -219,7 +225,14 @@ func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			created := createWorkflowForTest(t, ctx, cs, tc.goal, tc.slug)
+			created := createWorkflowForTestWithArgs(t, ctx, cs, map[string]any{
+				"goal": tc.goal,
+				"slug": tc.slug,
+				"defaults": map[string]any{
+					"harness":             "replay",
+					"require_trace_model": false,
+				},
+			})
 			launch, err := callTool(ctx, cs, "workflow.launch", map[string]any{
 				"workflow_id": created.WorkflowID,
 			})
@@ -264,24 +277,6 @@ func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T)
 			require.Contains(t, contentText(next), tc.wantFrame)
 			require.NotContains(t, contentText(next), `"state":"needs_human"`)
 
-			drive, err := callTool(ctx, cs, "session.submit", map[string]any{
-				"handle": launched.SessionHandle,
-				"intent": "next_item",
-				"cols":   100,
-				"rows":   30,
-			})
-			require.NoError(t, err)
-			require.False(t, drive.IsError, "session.submit drive errored: %s", contentText(drive))
-
-			trace, err := callTool(ctx, cs, "session.trace", map[string]any{
-				"handle": launched.SessionHandle,
-			})
-			require.NoError(t, err)
-			require.False(t, trace.IsError, "session.trace errored: %s", contentText(trace))
-			require.Contains(t, contentText(trace), "harness_ladder")
-			require.Contains(t, contentText(trace), "synthetic-claude")
-			require.Contains(t, contentText(trace), "hf:zai-org/GLM-5.2")
-
 			exportDir := filepath.Join(t.TempDir(), "exported", tc.slug)
 			export, err := callTool(ctx, cs, "workflow.export", map[string]any{
 				"workflow_id": created.WorkflowID,
@@ -314,12 +309,70 @@ func TestWorkflowLaunchStartsGeneratedCoverageAndResearchWorkflows(t *testing.T)
 	}
 }
 
+func TestWorkflowLaunchUsesReceiptModelPolicyForStudioSession(t *testing.T) {
+	ctx := context.Background()
+	var builtModes []studio.HarnessMode
+	sess := studio.NewStudioSession(func(mode studio.HarnessMode, recordingPath, storyPath string) (harness.Harness, error) {
+		builtModes = append(builtModes, mode)
+		if mode == studio.HarnessLive {
+			return stubReplayHarness{}, nil
+		}
+		return harness.NewReplay(recordingPath)
+	})
+	sess.SetHarnessProfiles(map[string]orchestrator.HarnessProfile{
+		"codex-native": {Name: "codex-native", Backend: "codex", Model: "gpt-5.5"},
+	}, "codex-native")
+	srv := studio.NewServer(sess)
+	cs := connectInProcess(ctx, t, srv)
+
+	created := createWorkflowForTest(t, ctx, cs,
+		"fix the workflow launch harness mismatch with a dynamic workflow",
+		"mcp-live-policy-launch",
+	)
+	require.Equal(t, "live", created.ModelPolicy.Harness)
+	require.Equal(t, "codex-native", created.ModelPolicy.Profile)
+
+	launch, err := callTool(ctx, cs, "workflow.launch", map[string]any{
+		"workflow_id": created.WorkflowID,
+	})
+	require.NoError(t, err)
+	require.False(t, launch.IsError, "workflow.launch errored: %s", contentText(launch))
+	var launched dynamicworkflow.Receipt
+	require.NoError(t, json.Unmarshal([]byte(contentText(launch)), &launched))
+	require.NotEmpty(t, launched.SessionHandle)
+	require.Contains(t, builtModes, studio.HarnessLive,
+		"workflow.launch must open the Studio session with the receipt's live model policy, not replay")
+	sh, err := sess.ResolveSession(launched.SessionHandle)
+	require.NoError(t, err)
+	require.Equal(t, studio.HarnessLive, sh.Mode)
+}
+
+func newWorkflowLaunchServer(t *testing.T) (*studio.Server, *studio.StudioSession) {
+	t.Helper()
+	sess := studio.NewStudioSession(func(mode studio.HarnessMode, recordingPath, storyPath string) (harness.Harness, error) {
+		if mode == studio.HarnessLive {
+			return stubReplayHarness{}, nil
+		}
+		return harness.NewReplay(recordingPath)
+	})
+	sess.SetHarnessProfiles(map[string]orchestrator.HarnessProfile{
+		"codex-native":     {Name: "codex-native", Backend: "codex", Model: "gpt-5.5"},
+		"synthetic-claude": {Name: "synthetic-claude", Backend: "claude", Model: "hf:zai-org/GLM-5.2"},
+	}, "codex-native")
+	return studio.NewServer(sess), sess
+}
+
 func createWorkflowForTest(t *testing.T, ctx context.Context, cs *mcpsdk.ClientSession, goal, slug string) dynamicworkflow.Receipt {
 	t.Helper()
-	res, err := callTool(ctx, cs, "workflow.create", map[string]any{
+	return createWorkflowForTestWithArgs(t, ctx, cs, map[string]any{
 		"goal": goal,
 		"slug": slug,
 	})
+}
+
+func createWorkflowForTestWithArgs(t *testing.T, ctx context.Context, cs *mcpsdk.ClientSession, args map[string]any) dynamicworkflow.Receipt {
+	t.Helper()
+	res, err := callTool(ctx, cs, "workflow.create", args)
 	require.NoError(t, err)
 	require.False(t, res.IsError, "workflow.create errored: %s", contentText(res))
 	var receipt dynamicworkflow.Receipt

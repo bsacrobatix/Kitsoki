@@ -89,8 +89,11 @@ The Studio MCP server exposes the same receipt shape via:
 `workflow.launch` validates the draft, opens a studio session over
 `app/app.yaml`, and returns the tracked receipt with `session_id`,
 `session_handle`, `trace_path`, the relative session route (`/s/<id>`), and the
-runnable command. The receipt also carries `events_path`, the lifecycle log
-written alongside the draft.
+runnable command. The Studio session uses the receipt's `model_policy`: explicit
+`replay` remains no-LLM replay, and live/ladder workflow policies open a live
+session with the configured profile so generated worker items can actually run.
+The receipt also carries `events_path`, the lifecycle log written alongside the
+draft.
 
 `studio.ping` reports both the server build revision and the checkout `HEAD`.
 When they differ it returns `stale: true` plus a reload hint. `workflow.create`

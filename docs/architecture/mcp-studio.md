@@ -204,8 +204,11 @@ package, validates it, and can open a tracked studio session over the generated
 | `workflow.export` | `{workflow_id, target?, allow_base_story?} → {receipt}` | copy the draft to a reusable story package, starter flow/cassette artifacts, and an export report |
 
 The receipt carries the draft path, manifest path, launch basis, trace path,
-the lifecycle event log, and, after `workflow.launch`, the studio `session_id`
-/ handle plus the relative runstatus session route (`/s/<id>`). The trace path
+model policy, the lifecycle event log, and, after `workflow.launch`, the studio
+`session_id` / handle plus the relative runstatus session route (`/s/<id>`).
+`workflow.launch` opens that Studio session with the receipt's configured
+worker posture: `model_policy.harness: replay` stays replay, while live and
+ladder policies open a live session with `model_policy.profile`. The trace path
 and launch command are the fallback anchors when no browser origin is
 available. `workflow.export` writes the promoted `README.md`, starter flow
 fixture, optional starter cassette, and `export-report.json` beside the
