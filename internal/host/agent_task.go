@@ -428,7 +428,7 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 		// burns the cell timeout, and produces no trace usage. Restart the next
 		// attempt as a fresh non-interactive exec instead; the task prompt and
 		// validator MCP are both rebuilt from this stable call context.
-		if AgentBackendFromContext(ctx).Name() == "codex" && cr.ExitCode != 0 && returnedSID == "" {
+		if AgentBackendFromContext(ctx).Name() == "codex" && cr.ExitCode != 0 {
 			firstRun = true
 		}
 
