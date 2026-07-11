@@ -132,6 +132,26 @@ bugs:
       context values needed for tracing, but detach caller cancellation so only
       the scheduler's explicit Cancel operation terminates the background job.
 
+  - id: bug16
+    ticket_ref: issues/bugs/1187.md
+    title: "Studio resolver hard-errors when --stories-dir lacks a library story"
+    severity: P1
+    component: mcp
+    fix_sha: 2437a23da
+    baseline_sha: 2170566c
+    fix_source: .
+    oracle_test: testdata/bug16.go
+    oracle_match: "TestRepro_StoriesDirFallsThroughForMissingLibraryStory|TestRepro_StoriesDirStillOverridesWhenPresent"
+    oracle:
+      target: cmd/kitsoki/resolver_bug1187_oracle_test.go
+      run: 'go test ./cmd/kitsoki/ -run "{match}" -count=1'
+    ticket: |
+      When `kitsoki mcp --stories-dir <project stories>` loads a downstream
+      story that imports a library story such as `@kitsoki/dev-story`, the
+      resolver must fall through to the Kitsoki library if that library story
+      is absent from the project stories directory. Project stories that do
+      exist in `--stories-dir` must continue to override the library.
+
 treatments: [kitsoki, single]
 
 run:
