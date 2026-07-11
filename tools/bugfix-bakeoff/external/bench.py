@@ -296,8 +296,14 @@ def materialize(tree, dest, node_modules=None):
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
     else:
-        shutil.copytree(tree, dest, dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("node_modules", ".git"))
+        # Repo-history exports are plain directories, not Git checkouts. They
+        # may contain ignored build caches produced while the baseline command
+        # ran (notably `.artifacts/go` in Kitsoki). Those are neither source nor
+        # oracle input and copying them into the scorer's second scratch tree
+        # can exhaust disk before the deterministic GREEN leg runs.
+        shutil.copytree(tree, dest, dirs_exist_ok=True, ignore=shutil.ignore_patterns(
+            "node_modules", ".git", ".artifacts", ".cache", ".temp", "__pycache__",
+        ))
     nm = node_modules or os.environ.get("QS_NODE_MODULES") or (tree / "node_modules")
     nm = Path(nm)
     if nm.exists():
