@@ -762,6 +762,7 @@ var onboardingInstanceHosts = []string{
 	"host.gh.ticket.comment",
 	"host.gh.ticket.transition",
 	"host.git",
+	"host.git_worktree",
 	"host.local",
 	"host.capsule_workspace",
 	"host.append_to_file",
