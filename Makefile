@@ -314,7 +314,7 @@ web-clean:
 # compiles cold (slow enough to blow past short test timeouts). Run this once
 # from inside a new dev workspace before `go run ./cmd/kitsoki` or any
 # Playwright spec.
-bootstrap-workspace: embed-stories web
+bootstrap-workspace: embed-stories embed-skills web
 	@$(MAKE) --no-print-directory runstatus-deps-if-needed
 	@echo "bootstrap-workspace: warming shared Go build cache at $(KITSOKI_GOCACHE) (first compile is slow)…"
 	@GOCACHE="$(KITSOKI_GOCACHE)" go run $(PKG) --help >/dev/null
