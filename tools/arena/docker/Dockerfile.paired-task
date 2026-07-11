@@ -19,6 +19,14 @@ RUN apt-get update \
       jq \
  && rm -rf /var/lib/apt/lists/*
 
+# Bugfix stories commit their verified repair before downstream testing and
+# validation. Arena cells are disposable, but Git still requires an identity;
+# without one the first otherwise-good implementation bounces to idle after
+# consuming the worker call. This identity belongs only to the hermetic image,
+# never to a developer checkout or a candidate repository.
+RUN git config --system user.name "Kitsoki Arena" \
+ && git config --system user.email "arena@kitsoki.local"
+
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get update \
  && apt-get install -y --no-install-recommends nodejs \

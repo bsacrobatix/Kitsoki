@@ -32,6 +32,11 @@ def check(label: str, got, want) -> None:
         failures.append(f"{label}: got {got!r}, want {want!r}")
 
 
+paired_task_dockerfile = (HERE.parent / "docker" / "Dockerfile.paired-task").read_text(encoding="utf-8")
+check("paired task image has disposable Git author", "git config --system user.name \"Kitsoki Arena\"" in paired_task_dockerfile, True)
+check("paired task image has disposable Git email", "git config --system user.email \"arena@kitsoki.local\"" in paired_task_dockerfile, True)
+
+
 SPEC = {
     "job_type": "bugfix",
     "targets": [{"id": "query-string", "label": "qs", "stack": "javascript"}],
