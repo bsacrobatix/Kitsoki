@@ -251,7 +251,10 @@ prompt = runner.build_kitsoki_prompt(
 )
 require("Kitsoki prompt uses direct menu submission", "session.submit" in prompt)
 require("Kitsoki prompt gives post-worker continue example", 'intent: \"continue\"' in prompt)
-require("Kitsoki prompt polls status after every turn", "after EVERY settled turn call" in prompt)
+require("Kitsoki prompt has the settled-turn control loop", "Then run this exact control loop" in prompt)
+require("Kitsoki prompt waits through a live worker turn", "async_after_ms: 300000" in prompt)
+require("Kitsoki prompt forbids rapid bare-status polling", "Never spin on bare status" in prompt)
+require("Kitsoki prompt has a bounded trace-aware stall rule", "three spaced (15s) checks" in prompt)
 
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
