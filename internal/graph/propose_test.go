@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kitsoki/internal/clock"
 )
 
 // copySingleFileFixture copies a single-file catalog (not a bundle dir) into
@@ -36,7 +38,7 @@ func TestPropose_SingleFileCatalogCommitsCleanly(t *testing.T) {
 		Operations: []map[string]any{
 			{"kind": "added", "after": map[string]any{"schema": "graph/requirement/v0", "id": "req-new", "title": "New requirement", "status": "draft", "visibility": "internal"}},
 		},
-	})
+	}, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestPropose_SingleFileCatalogCommitsCleanly(t *testing.T) {
 		t.Fatalf("changeset node %q not found after propose on a single-file catalog", res.ChangesetID)
 	}
 
-	authRes, err := Authorize(root, res.ChangesetID)
+	authRes, err := Authorize(root, res.ChangesetID, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
 	}
@@ -60,7 +62,7 @@ func TestPropose_SingleFileCatalogCommitsCleanly(t *testing.T) {
 		t.Fatalf("expected authorize to succeed, got rejected: %+v", authRes)
 	}
 
-	applyRes, err := Apply(root, res.ChangesetID, false)
+	applyRes, err := Apply(root, res.ChangesetID, false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestPropose_AppendsChangesetNode(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
@@ -144,7 +146,7 @@ func TestPropose_RejectsImmediateStaleBefore(t *testing.T) {
 				},
 			},
 		},
-	})
+	}, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
@@ -173,7 +175,7 @@ func TestPropose_RejectsAddingExistingNode(t *testing.T) {
 		Operations: []map[string]any{
 			{"kind": "added", "after": map[string]any{"schema": "graph/requirement/v0", "id": "req-one", "title": "dup", "status": "draft", "visibility": "public"}},
 		},
-	})
+	}, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
@@ -191,7 +193,7 @@ func TestAuthorize_FlipsProposedToAuthorized(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Authorize(root, "change-auth")
+	res, err := Authorize(root, "change-auth", "", clock.Real())
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
 	}
@@ -225,7 +227,7 @@ func TestAuthorize_RejectsNonProposedStatus(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Authorize(root, "change-already-auth")
+	res, err := Authorize(root, "change-already-auth", "", clock.Real())
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
 	}
@@ -236,7 +238,7 @@ func TestAuthorize_RejectsNonProposedStatus(t *testing.T) {
 
 func TestAuthorize_RejectsUnknownChangeset(t *testing.T) {
 	root := copyBundleFixture(t)
-	res, err := Authorize(root, "does-not-exist")
+	res, err := Authorize(root, "does-not-exist", "", clock.Real())
 	if err != nil {
 		t.Fatalf("Authorize: %v", err)
 	}
@@ -254,7 +256,7 @@ func TestApply_MarksNotifiedInSameCommit(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Apply(root, "change-notify", false)
+	res, err := Apply(root, "change-notify", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -276,7 +278,7 @@ func TestApply_MarksNotifiedInSameCommit(t *testing.T) {
 	// Re-applying a now-"notified" (not "authorized") changeset must be
 	// rejected — this is what makes the review queue able to tell applied
 	// from pending.
-	res2, err := Apply(root, "change-notify", false)
+	res2, err := Apply(root, "change-notify", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("re-Apply: %v", err)
 	}
@@ -294,7 +296,7 @@ func TestWithdraw_FlipsProposedToWithdrawn(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Withdraw(root, "change-withdraw")
+	res, err := Withdraw(root, "change-withdraw", "", clock.Real())
 	if err != nil {
 		t.Fatalf("Withdraw: %v", err)
 	}
@@ -311,7 +313,7 @@ func TestWithdraw_FlipsProposedToWithdrawn(t *testing.T) {
 	}
 
 	// A withdrawn changeset must not be authorizable or appliable.
-	if res2, _ := Authorize(root, "change-withdraw"); !res2.Rejected() {
+	if res2, _ := Authorize(root, "change-withdraw", "", clock.Real()); !res2.Rejected() {
 		t.Error("expected authorize on a withdrawn changeset to be rejected")
 	}
 }
@@ -325,7 +327,7 @@ func TestWithdraw_RejectsNotifiedChangeset(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Withdraw(root, "change-notified")
+	res, err := Withdraw(root, "change-notified", "", clock.Real())
 	if err != nil {
 		t.Fatalf("Withdraw: %v", err)
 	}
@@ -348,7 +350,7 @@ func TestPropose_SystemAuthoredAllowlistedFieldAutoAuthorizes(t *testing.T) {
 			},
 		},
 		Provenance: map[string]any{"job_id": "job-1", "story": "materialize-work-item"},
-	})
+	}, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
@@ -374,7 +376,7 @@ func TestPropose_SystemAuthoredNonAllowlistedFieldStaysProposed(t *testing.T) {
 			},
 		},
 		Provenance: map[string]any{"job_id": "job-1", "story": "materialize-work-item"},
-	})
+	}, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}

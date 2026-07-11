@@ -6,8 +6,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"kitsoki/internal/clock"
 )
 
 // ApplyResult reports what happened attempting to apply a changeset.
@@ -44,7 +47,18 @@ func (r *ApplyResult) Rejected() bool {
 // dryRun previews the result (ChangedFiles reflects what WOULD change)
 // without committing, and does not require the changeset to be in
 // "authorized" status.
-func Apply(rootPath string, changesetID NodeID, dryRun bool) (*ApplyResult, error) {
+//
+// actor is accepted for seam consistency with Propose/Authorize (plan §3.4
+// item 1) but currently unused: Apply stamps only applied_at, not an actor
+// field. clk (nil defaults to clock.Real()) stamps applied_at (RFC3339 UTC)
+// into the changeset node's Fields map, in the same synthetic
+// "notified"-flip operation Apply already appends on a real (non-dry-run)
+// apply.
+func Apply(rootPath string, changesetID NodeID, dryRun bool, actor string, clk clock.Clock) (*ApplyResult, error) {
+	_ = actor
+	if clk == nil {
+		clk = clock.Real()
+	}
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("graph apply: load %s: %w", rootPath, err)
@@ -88,6 +102,7 @@ func Apply(rootPath string, changesetID NodeID, dryRun bool) (*ApplyResult, erro
 			Node: changesetID,
 			Changes: []FieldChange{
 				{Path: []string{"status"}, Before: ChangesetStatusAuthorized, After: ChangesetStatusNotified},
+				{Path: []string{"fields", "applied_at"}, After: clk.Now().UTC().Format(time.RFC3339)},
 			},
 		})
 	}

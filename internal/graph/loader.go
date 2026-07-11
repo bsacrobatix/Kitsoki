@@ -40,6 +40,56 @@ type Catalog struct {
 	// name its own membership/scope type+field vocabulary without touching
 	// Go.
 	LintHints *LintHints
+
+	// WritePolicy optionally overrides Propose's D9 auto-authorize allowlist
+	// (autoAuthorizeFieldRoots in propose.go) via a top-level `write_policy:`
+	// catalog block. A catalog that declares none falls back to the
+	// hardcoded Go constant — same extensibility shape as LintHints/Hints().
+	WritePolicy *WritePolicy
+
+	// FeedbackRouting optionally names the parse-and-expose-only
+	// `feedback_routing:` catalog block (graph-mcp plan §3.4) a later stage
+	// consumes to route evidence/feedback writes to the right node/edge
+	// shape. Unused by any check today; validated for shape only.
+	FeedbackRouting *FeedbackRouting
+}
+
+// WritePolicy is the optional `write_policy:` catalog-level block.
+type WritePolicy struct {
+	// AutoAuthorizeFieldRoots names the Fields[...] roots (plus the bare
+	// "status" path) a system-authored (Provenance-carrying) changeset may
+	// touch and still self-authorize (D9). Mirrors propose.go's
+	// autoAuthorizeFieldRoots constant.
+	AutoAuthorizeFieldRoots []string `yaml:"auto_authorize_field_roots"`
+}
+
+// DefaultWritePolicy returns the pre-D9-generalization hardcoded allowlist,
+// used whenever a catalog declares no `write_policy:` block.
+func DefaultWritePolicy() WritePolicy {
+	roots := make([]string, 0, len(autoAuthorizeFieldRoots))
+	for root := range autoAuthorizeFieldRoots {
+		roots = append(roots, root)
+	}
+	sort.Strings(roots)
+	return WritePolicy{AutoAuthorizeFieldRoots: roots}
+}
+
+// WritePolicyOrDefault returns c.WritePolicy, or DefaultWritePolicy() when
+// the catalog declared none.
+func (c *Catalog) WritePolicyOrDefault() WritePolicy {
+	if c.WritePolicy != nil {
+		return *c.WritePolicy
+	}
+	return DefaultWritePolicy()
+}
+
+// FeedbackRouting is the optional `feedback_routing:` catalog-level block:
+// parsed and shape-validated, but not yet consulted by any check (plan
+// §3.4 item 4 — "parse-and-expose only ... later stages consume it").
+type FeedbackRouting struct {
+	Type   string   `yaml:"type"`
+	Fields []string `yaml:"fields"`
+	Edges  []string `yaml:"edges"`
 }
 
 // LintHints is the optional `lint_hints:` catalog-level block.
@@ -255,11 +305,13 @@ type fileNode struct {
 }
 
 type fileSingleCatalog struct {
-	Schema       string         `yaml:"schema"`
-	Catalog      map[string]any `yaml:"catalog"`
-	TypeRegistry []fileTypeDef  `yaml:"type_registry"`
-	LintHints    *LintHints     `yaml:"lint_hints"`
-	Nodes        []fileNode     `yaml:"nodes"`
+	Schema          string           `yaml:"schema"`
+	Catalog         map[string]any   `yaml:"catalog"`
+	TypeRegistry    []fileTypeDef    `yaml:"type_registry"`
+	LintHints       *LintHints       `yaml:"lint_hints"`
+	WritePolicy     *WritePolicy     `yaml:"write_policy"`
+	FeedbackRouting *FeedbackRouting `yaml:"feedback_routing"`
+	Nodes           []fileNode       `yaml:"nodes"`
 }
 
 // --- loading ------------------------------------------------------------
@@ -297,6 +349,8 @@ func loadSingleFile(path string) (*Catalog, error) {
 		return nil, err
 	}
 	cat.LintHints = file.LintHints
+	cat.WritePolicy = file.WritePolicy
+	cat.FeedbackRouting = file.FeedbackRouting
 	return cat, nil
 }
 

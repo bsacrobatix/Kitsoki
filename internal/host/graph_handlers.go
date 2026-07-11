@@ -57,11 +57,38 @@ package host
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"time"
 
 	appgraph "kitsoki/internal/app/graph"
+	"kitsoki/internal/clock"
 	objectgraph "kitsoki/internal/graph"
 )
+
+// getenvGraphClockFixed is a tiny indirection seam (matching
+// internal/host/diff_open.go's getenvDifftool pattern) so tests can pin
+// KITSOKI_GRAPH_CLOCK_FIXED without depending on the real process
+// environment.
+var getenvGraphClockFixed = func() string { return os.Getenv("KITSOKI_GRAPH_CLOCK_FIXED") }
+
+// graphResolveClock resolves the effective clock a host.graph write op
+// (propose/authorize/apply/withdraw) stamps with: KITSOKI_GRAPH_CLOCK_FIXED
+// (an RFC3339 timestamp), parsed once per call and erroring on an invalid
+// value, wins when set; otherwise the ctx-injected clock (ClockFromContext,
+// which itself defaults to clock.Real()) is used. This keeps gate checks
+// deterministic (plan's "no wall-clock nondeterminism in gates" constraint)
+// without requiring every caller to inject a fake clock via ctx.
+func graphResolveClock(ctx context.Context) (clock.Clock, error) {
+	if fixed := getenvGraphClockFixed(); fixed != "" {
+		t, err := time.Parse(time.RFC3339, fixed)
+		if err != nil {
+			return nil, fmt.Errorf("KITSOKI_GRAPH_CLOCK_FIXED=%q: invalid RFC3339 timestamp: %w", fixed, err)
+		}
+		return clock.NewFake(t.UTC()), nil
+	}
+	return ClockFromContext(ctx), nil
+}
 
 // GraphHandler implements the host.graph.* multi-op verb (S5).
 func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
@@ -74,13 +101,13 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 	case "diff":
 		return graphDiffOp(args)
 	case "apply":
-		return graphApplyOp(args)
+		return graphApplyOp(ctx, args)
 	case "propose":
-		return graphProposeOp(args)
+		return graphProposeOp(ctx, args)
 	case "authorize":
-		return graphAuthorizeOp(args)
+		return graphAuthorizeOp(ctx, args)
 	case "withdraw":
-		return graphWithdrawOp(args)
+		return graphWithdrawOp(ctx, args)
 	case "query":
 		return graphQueryOp(args)
 	case "project":
@@ -195,13 +222,17 @@ func graphDiffOp(args map[string]any) (Result, error) {
 
 // graphApplyOp: {catalog_path, changeset_id[, dry_run]} -> internal/graph.Apply's
 // result: a dry-run-first, all-or-nothing changeset application.
-func graphApplyOp(args map[string]any) (Result, error) {
+func graphApplyOp(ctx context.Context, args map[string]any) (Result, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	changesetID := graphStringArg(args, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.apply: requires both catalog_path and changeset_id")
 	}
-	res, err := objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolArg(args, "dry_run"))
+	clk, err := graphResolveClock(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	res, err := objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolArg(args, "dry_run"), ActorFromContext(ctx), clk)
 	if err != nil {
 		return Result{}, err
 	}
@@ -231,7 +262,7 @@ func graphApplyOp(args map[string]any) (Result, error) {
 // internal/graph.ParseChangeset). provenance, when present, marks the
 // changeset system-authored for the D9 auto-authorize allowlist
 // (internal/graph.Propose).
-func graphProposeOp(args map[string]any) (Result, error) {
+func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	if catalogPath == "" {
 		return Result{}, fmt.Errorf("host.graph.propose: missing required arg %q", "catalog_path")
@@ -244,12 +275,16 @@ func graphProposeOp(args map[string]any) (Result, error) {
 		}
 	}
 	provenance, _ := args["provenance"].(map[string]any)
+	clk, err := graphResolveClock(ctx)
+	if err != nil {
+		return Result{}, err
+	}
 	res, err := objectgraph.Propose(catalogPath, objectgraph.ProposeInput{
 		Title:      graphStringArg(args, "title"),
 		Visibility: graphStringArg(args, "visibility"),
 		Operations: ops,
 		Provenance: provenance,
-	})
+	}, ActorFromContext(ctx), clk)
 	if err != nil {
 		return Result{}, err
 	}
@@ -274,13 +309,17 @@ func graphProposeOp(args map[string]any) (Result, error) {
 // lifecycle flip (internal/graph.Authorize). Same rejected/reject_reasons/
 // lint_issues/changed_files shape as graphApplyOp for a consistent client
 // contract across the two lifecycle-writing ops.
-func graphAuthorizeOp(args map[string]any) (Result, error) {
+func graphAuthorizeOp(ctx context.Context, args map[string]any) (Result, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	changesetID := graphStringArg(args, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.authorize: requires both catalog_path and changeset_id")
 	}
-	res, err := objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID))
+	clk, err := graphResolveClock(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	res, err := objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
 	if err != nil {
 		return Result{}, err
 	}
@@ -307,13 +346,17 @@ func graphAuthorizeOp(args map[string]any) (Result, error) {
 // graphWithdrawOp: {catalog_path, changeset_id} -> the review queue's
 // "clean up a rejected proposal" action (internal/graph.Withdraw). Same
 // result shape as graphAuthorizeOp.
-func graphWithdrawOp(args map[string]any) (Result, error) {
+func graphWithdrawOp(ctx context.Context, args map[string]any) (Result, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	changesetID := graphStringArg(args, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.withdraw: requires both catalog_path and changeset_id")
 	}
-	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID))
+	clk, err := graphResolveClock(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
 	if err != nil {
 		return Result{}, err
 	}

@@ -3,6 +3,9 @@ package graph
 import (
 	"fmt"
 	"os"
+	"time"
+
+	"kitsoki/internal/clock"
 )
 
 // ProposeInput is the payload for Propose: a candidate changeset's title and
@@ -57,19 +60,22 @@ var autoAuthorizeFieldRoots = map[string]bool{
 	"evidence":        true,
 }
 
-func isAutoAuthorizablePath(path []string) bool {
+func isAutoAuthorizablePath(path []string, roots map[string]bool) bool {
 	if len(path) == 1 && path[0] == "status" {
 		return true
 	}
 	if len(path) == 2 && path[0] == "fields" {
-		return autoAuthorizeFieldRoots[path[1]]
+		return roots[path[1]]
 	}
 	return false
 }
 
 // allOpsAutoAuthorizable reports whether every operation in ops is a
 // "modified" op whose every field change targets an allowlisted path (D9).
-func allOpsAutoAuthorizable(ops []Operation) bool {
+// roots is the effective allowlist: cat.WritePolicyOrDefault()'s declared
+// auto_authorize_field_roots, or the hardcoded autoAuthorizeFieldRoots
+// fallback when the catalog declares no write_policy block.
+func allOpsAutoAuthorizable(ops []Operation, roots map[string]bool) bool {
 	if len(ops) == 0 {
 		return false
 	}
@@ -78,12 +84,24 @@ func allOpsAutoAuthorizable(ops []Operation) bool {
 			return false
 		}
 		for _, ch := range op.Changes {
-			if !isAutoAuthorizablePath(ch.Path) {
+			if !isAutoAuthorizablePath(ch.Path, roots) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// writePolicyRootsSet resolves cat's effective auto-authorize allowlist
+// (D9 generalization, plan §3.4 item 3) into the map shape
+// isAutoAuthorizablePath/allOpsAutoAuthorizable consult.
+func writePolicyRootsSet(cat *Catalog) map[string]bool {
+	policy := cat.WritePolicyOrDefault()
+	roots := make(map[string]bool, len(policy.AutoAuthorizeFieldRoots))
+	for _, r := range policy.AutoAuthorizeFieldRoots {
+		roots[r] = true
+	}
+	return roots
 }
 
 // rawOpsToAny adapts the wire shape ([]map[string]any) Propose's callers
@@ -130,7 +148,17 @@ func nextChangesetID(cat *Catalog) NodeID {
 // and flipping a changeset's own status via a changeset would be infinite
 // regress — so Propose is the sole writer of new changeset nodes, and
 // Authorize (below) is the sole writer of the proposed->authorized flip.
-func Propose(rootPath string, input ProposeInput) (*ProposeResult, error) {
+//
+// actor and clk are the D9-generalization-adjacent stamps seam (plan §3.4):
+// actor (optional — "" skips the authored_by stamp) and clk (nil defaults
+// to clock.Real()) stamp the new changeset node's Fields with created_at
+// (always, RFC3339 UTC) and authored_by (when actor is non-empty), with
+// zero type_registry/schema migration — see Node.Fields' free-form-map
+// doc comment.
+func Propose(rootPath string, input ProposeInput, actor string, clk clock.Clock) (*ProposeResult, error) {
+	if clk == nil {
+		clk = clock.Real()
+	}
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("graph propose: load %s: %w", rootPath, err)
@@ -155,7 +183,7 @@ func Propose(rootPath string, input ProposeInput) (*ProposeResult, error) {
 		visibility = "internal"
 	}
 	status := ChangesetStatusProposed
-	if input.Provenance != nil && allOpsAutoAuthorizable(cs.Operations) {
+	if input.Provenance != nil && allOpsAutoAuthorizable(cs.Operations, writePolicyRootsSet(cat)) {
 		status = ChangesetStatusAuthorized
 	}
 
@@ -166,6 +194,10 @@ func Propose(rootPath string, input ProposeInput) (*ProposeResult, error) {
 		"status":     status,
 		"visibility": visibility,
 		"operations": rawOpsToAny(input.Operations),
+		"created_at": clk.Now().UTC().Format(time.RFC3339),
+	}
+	if actor != "" {
+		nodeMap["authored_by"] = actor
 	}
 	if input.Provenance != nil {
 		nodeMap["provenance"] = input.Provenance
@@ -194,7 +226,15 @@ func Propose(rootPath string, input ProposeInput) (*ProposeResult, error) {
 // directly rather than through another changeset: flipping a changeset's
 // own status via a changeset would be infinite regress (see Propose's doc
 // comment). On an unauthenticated localhost /rpc this is honor-system.
-func Authorize(rootPath string, changesetID NodeID) (*ApplyResult, error) {
+//
+// actor and clk stamp the flip's authorized_at (always, RFC3339 UTC) and
+// authorized_by (when actor is non-empty) into the changeset node's Fields
+// map, alongside the status change, in the same commit — see Propose's doc
+// comment for the stamps seam.
+func Authorize(rootPath string, changesetID NodeID, actor string, clk clock.Clock) (*ApplyResult, error) {
+	if clk == nil {
+		clk = clock.Real()
+	}
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("graph authorize: load %s: %w", rootPath, err)
@@ -216,13 +256,18 @@ func Authorize(rootPath string, changesetID NodeID) (*ApplyResult, error) {
 		}}, nil
 	}
 
+	changes := []FieldChange{
+		{Path: []string{"status"}, Before: ChangesetStatusProposed, After: ChangesetStatusAuthorized},
+		{Path: []string{"fields", "authorized_at"}, After: clk.Now().UTC().Format(time.RFC3339)},
+	}
+	if actor != "" {
+		changes = append(changes, FieldChange{Path: []string{"fields", "authorized_by"}, After: actor})
+	}
 	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
 		{
-			Kind: OpModified,
-			Node: changesetID,
-			Changes: []FieldChange{
-				{Path: []string{"status"}, Before: ChangesetStatusProposed, After: ChangesetStatusAuthorized},
-			},
+			Kind:    OpModified,
+			Node:    changesetID,
+			Changes: changes,
 		},
 	})
 	if err != nil {
@@ -241,7 +286,13 @@ func Authorize(rootPath string, changesetID NodeID) (*ApplyResult, error) {
 // "notified") changeset to "withdrawn" — the review queue's "clean up a
 // rejected proposal" action (§3.3). Like Authorize, this is a direct write,
 // not a second changeset.
-func Withdraw(rootPath string, changesetID NodeID) (*ApplyResult, error) {
+//
+// actor and clk are accepted for seam consistency with Propose/Authorize/
+// Apply (plan §3.4 item 1) but currently unused: withdraw stamps no
+// fields per the plan's stamp list (created_at/authored_by,
+// authorized_at/authorized_by, applied_at only).
+func Withdraw(rootPath string, changesetID NodeID, actor string, clk clock.Clock) (*ApplyResult, error) {
+	_, _ = actor, clk
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
 		return nil, fmt.Errorf("graph withdraw: load %s: %w", rootPath, err)

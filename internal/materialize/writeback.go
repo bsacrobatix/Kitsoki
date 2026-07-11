@@ -31,6 +31,7 @@ package materialize
 import (
 	"fmt"
 
+	"kitsoki/internal/clock"
 	"kitsoki/internal/graph"
 )
 
@@ -98,7 +99,7 @@ func proposeAndApply(catalogPath, nodeID, title, fieldKey string, after any, job
 			},
 		},
 		Provenance: provenance(jobID, story),
-	})
+	}, "materialize", clock.Real())
 	if err != nil {
 		return fmt.Errorf("materialize: writeback: propose %s.%s: %w", nodeID, fieldKey, err)
 	}
@@ -108,7 +109,7 @@ func proposeAndApply(catalogPath, nodeID, title, fieldKey string, after any, job
 	if res.Status != "authorized" {
 		return fmt.Errorf("materialize: writeback: propose %s.%s did not auto-authorize (status %q) — D9 allowlist gap?", nodeID, fieldKey, res.Status)
 	}
-	applyRes, err := graph.Apply(catalogPath, res.ChangesetID, false)
+	applyRes, err := graph.Apply(catalogPath, res.ChangesetID, false, "materialize", clock.Real())
 	if err != nil {
 		return fmt.Errorf("materialize: writeback: apply %s.%s changeset %s: %w", nodeID, fieldKey, res.ChangesetID, err)
 	}
