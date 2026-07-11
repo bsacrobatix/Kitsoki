@@ -251,6 +251,15 @@ states:
           implement_review_artifact: submitted
         on_error: idle
 
+      # Read the real diff, not a model-authored files_changed claim. Strict
+      # public contracts may name required source paths from the public ticket.
+      - invoke: iface.vcs.diff
+        with:
+          workdir: "{{ world.workdir }}"
+        bind:
+          acceptance_changed_files: files
+        on_error: idle
+
       # Strict callers provide public, task-visible acceptance IDs. This is a
       # deterministic shape gate: every ID needs a concrete test path and
       # assertion receipt. It deliberately cannot see a hidden benchmark oracle.
@@ -261,6 +270,7 @@ states:
           inputs:
             requirements: "{{ world.acceptance_contract }}"
             artifact: "{{ world.implement_review_artifact }}"
+            changed_files: "{{ world.acceptance_changed_files }}"
         bind:
           acceptance_gate: gate
         on_error: idle

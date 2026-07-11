@@ -19,7 +19,7 @@ host_handlers:
   host.local:
     data: { ok: true, passed: 1, failed: 0, log: "green" }
   host.git:
-    data: { ok: true, sha: "abc", diff: "" }
+    data: { ok: true, sha: "abc", diff: "", files: [] }
   host.agent.task:
     data:
       submitted:
