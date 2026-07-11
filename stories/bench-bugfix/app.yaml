@@ -78,6 +78,7 @@ imports:
       build_cmd:       "{{ world.build_cmd }}"
       gate_command:    "{{ world.gate_command }}"
       acceptance_contract: "{{ world.acceptance_contract }}"
+      acceptance_base_sha: "{{ world.acceptance_base_sha }}"
       bf_autostart_attempted: "{{ world.bf_autostart_attempted }}"
       # Autonomous benchmark/dogfood runs want ACTIVE escalation: quit early to
       # needs-human on a mis-scoped reproduction / low-confidence proposal / budget
@@ -127,6 +128,7 @@ world:
   # reproduction); the hidden oracle is NEVER exposed to the pipeline.
   gate_command:    { type: string, default: "" }
   acceptance_contract: { type: list, default: [] }
+  acceptance_base_sha: { type: string, default: "" }
   # true ⇒ bf.idle does NOT auto-derive workspace_id/feature_branch/workdir or
   # auto-create a worktree (which would clobber the pre-prepared workdir and try
   # to create a worktree in the wrong repo). The driver seeds workdir +
