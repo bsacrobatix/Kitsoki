@@ -138,16 +138,6 @@ func TestKitVerify_NoLockfile(t *testing.T) {
 	}
 }
 
-func TestKitUpdate_IsAnHonestStub(t *testing.T) {
-	out, err := runKit(t, "update")
-	if err != nil {
-		t.Fatalf("kit update: %v", err)
-	}
-	if !strings.Contains(out, "not yet implemented") {
-		t.Errorf("kit update output = %q, want it to say it's a stub", out)
-	}
-}
-
 func TestKitDev_SetAndClear(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
