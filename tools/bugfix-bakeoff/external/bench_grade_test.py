@@ -977,8 +977,9 @@ def test_score_cli_exits_zero_on_failed_verdict():
     cell look like a transient error to drive_cell.sh's run_with_retry, which
     then burned the whole docker+host backoff ladder (~hours) on an
     already-successful score."""
-    for run_cmd, want_oracle, want_quality in (("false", False, "failed"),
-                                               ("true", True, "solved")):
+    for run_cmd, want_oracle, want_quality, want_tail in (
+            ("printf oracle-failed >&2; false", False, "failed", "oracle-failed"),
+            ("true", True, "solved", "")):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "oracles").mkdir()
@@ -1011,9 +1012,30 @@ def test_score_cli_exits_zero_on_failed_verdict():
             res = json.loads(out.read_text())
             assert res["outcome"]["oracle_pass"] is want_oracle, res["outcome"]
             assert res["outcome"]["quality"] == want_quality, res["outcome"]
+            evidence = res["evidence"]["oracle"]
+            assert evidence["command"] == run_cmd
+            assert evidence["exit_code"] == (0 if want_oracle else 1)
+            assert evidence["output_tail"] == want_tail
+            assert evidence["truncated"] is False
     # The in-process function still surfaces the verdict for verify().
     # (oracle_pass=False ⇒ returns 1) — covered implicitly by verify()'s
     # RED/GREEN logic; here we only guard the CLI exit contract.
+
+
+def test_command_evidence_is_bounded_and_redacts_common_secrets():
+    result = subprocess.CompletedProcess(
+        args=["oracle"],
+        returncode=1,
+        stdout="A" * 20 + " token=should-not-appear",
+        stderr=" password:also-not-visible",
+    )
+    evidence = bench.command_evidence(result, "oracle", limit=24)
+    assert evidence["command"] == "oracle"
+    assert evidence["exit_code"] == 1
+    assert evidence["truncated"] is True
+    assert "should-not-appear" not in evidence["output_tail"]
+    assert "also-not-visible" not in evidence["output_tail"]
+    assert "[REDACTED]" in evidence["output_tail"]
 
 
 def _write_trace(path, events):

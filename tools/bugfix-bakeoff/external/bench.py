@@ -39,7 +39,7 @@ manifest.yaml): project.{repo,install,test_cmd,oracle.{target,run}} and
 bugs[].{baseline_sha,fix_sha,fix_source,oracle_test,oracle_match}. To add a new
 repo, drop in a manifest + the isolated oracle test files — no code changes.
 """
-import argparse, json, os, shutil, subprocess, sys, tempfile, urllib.parse, urllib.request
+import argparse, json, os, re, shutil, subprocess, sys, tempfile, urllib.parse, urllib.request
 from pathlib import Path
 
 try:
@@ -241,6 +241,31 @@ def sh(cmd, cwd, env=None, quiet=False):
     if not quiet and r.returncode != 0:
         sys.stderr.write(r.stdout[-2000:] + r.stderr[-2000:])
     return r
+
+
+_ORACLE_SECRET = re.compile(
+    r"(?im)\b(api[_-]?key|access[_-]?token|authorization|password|secret|token)"
+    r"(\s*[:=]\s*)([^\s,;]+)"
+)
+
+
+def command_evidence(result, command, limit=4000):
+    """Return bounded, redacted post-run evidence for a deterministic command.
+
+    This is written only by the scorer, after the candidate has completed; it
+    must never be included in a candidate prompt.  Keeping the last part of
+    the output gives an operator enough context to distinguish an oracle
+    mismatch from a compile or harness failure after the scratch tree is
+    removed, while avoiding an unbounded result artifact.
+    """
+    output = (result.stdout or "") + (result.stderr or "")
+    output = _ORACLE_SECRET.sub(r"\1\2[REDACTED]", output)
+    return {
+        "command": command,
+        "exit_code": result.returncode,
+        "output_tail": output[-limit:],
+        "truncated": len(output) > limit,
+    }
 
 
 def materialize(tree, dest, node_modules=None):
@@ -1820,6 +1845,12 @@ def score(m, bug, tree, out, candidate, treatment, trace=None, candidates_path=N
                     "adjudicated": False,
                     "adjudication_note": "",
                 },
+                # The oracle is intentionally hidden from the candidate, but a
+                # finished calibration needs enough deterministic evidence to
+                # diagnose a fail after its private scratch tree is deleted.
+                # This result is a post-run operator artifact, never prompt
+                # material. Keep it bounded and redact common credential forms.
+                "evidence": {"oracle": command_evidence(oracle_r, run_cmd)},
                 "compliance": {"rate": None, "note": "not measured by the external grader"},
                 "metrics": {
                     "cost_usd": tm["cost_usd"],
