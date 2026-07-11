@@ -108,6 +108,53 @@ func TestAgentTask_InlineAgentContract(t *testing.T) {
 	}
 }
 
+// TestAgentTask_CodexMissingSubmitRetriesFreshExec covers the live-Codex
+// failure mode where a worker finishes its first exec without calling submit.
+// Codex's `exec resume` can then wait interactively with no prompt, leaving the
+// enclosing task marked running forever. The acceptance retry must start a
+// fresh exec with the rejection nudge instead.
+func TestAgentTask_CodexMissingSubmitRetriesFreshExec(t *testing.T) {
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "ok.schema.json")
+	if err := os.WriteFile(schemaPath, []byte(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`), 0o644); err != nil {
+		t.Fatalf("write schema: %v", err)
+	}
+
+	var calls [][]string
+	runner := func(_ context.Context, args []string, _, _ string) (host.ClaudeRun, error) {
+		calls = append(calls, append([]string(nil), args...))
+		return host.ClaudeRun{Stdout: `{"type":"thread.started","thread_id":"worker-thread"}`}, nil
+	}
+	ctx := host.WithAgents(context.Background(), map[string]host.Agent{
+		"worker": {SystemPrompt: "do work", Model: "gpt-5.4", Tools: []string{"Read", "Write"}},
+	})
+	ctx = host.WithAgentBackendForTest(ctx, host.NewCodexBackendForTest())
+	ctx = host.WithCodexRunner(ctx, runner)
+
+	res, err := host.AgentTaskHandler(ctx, map[string]any{
+		"agent":       "worker",
+		"working_dir": dir,
+		"context":     map[string]any{"prompt": "make the change"},
+		"acceptance":  map[string]any{"schema": schemaPath, "max_retries": 2},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(res.Error, "acceptance failed after 2 attempt") {
+		t.Fatalf("missing-submit retry should exhaust cleanly, got Result.Error: %s", res.Error)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("runner calls = %d, want 2", len(calls))
+	}
+	second := strings.Join(calls[1], " ")
+	if strings.Contains(second, " resume ") || strings.Contains(second, "--resume") {
+		t.Fatalf("retry after missing Codex submit must be a fresh exec, args=%v", calls[1])
+	}
+	if !strings.Contains(second, "exec") {
+		t.Fatalf("retry must invoke codex exec, args=%v", calls[1])
+	}
+}
+
 func TestAgentTask_SlideyMCPOnlyContract(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -212,6 +212,16 @@ states:
         once: true
         with:
           agent: implementer
+          # The implementer is a write-capable live subprocess. Supervision
+          # gives strict MCP an explicit runtime terminal event and a bounded
+          # failure instead of an opaque indefinitely-running implementation
+          # phase when a provider exits without a valid submit.
+          sandbox:
+            min_strength: supervised
+            degrade: warn
+            resources:
+              timeout: "15m"
+              activity_timeout: "90s"
           working_dir: "{{ world.workdir }}"
           acceptance:
             schema: schemas/implementing_artifact.json
