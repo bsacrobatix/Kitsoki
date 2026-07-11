@@ -260,13 +260,11 @@ func TestGraphServer_ImpactWrapsQuery(t *testing.T) {
 
 // TestGraphServer_ToolsListByteCeiling is the golden byte-ceiling test
 // (graph-mcp-plan.md §3.7): serializes the tools/list response and asserts
-// it stays comfortably under a concrete, measured ceiling. This P2 step
-// registers the 7-tool read family only (feedback.report/feedback.list are
-// still TODO-stubbed, see registerFeedbackTools) — once they land, this
-// count should become 9 and the ceiling can be re-measured, but 16KB
-// already gives headroom against the plan's own ~24KB ballpark for a
-// similarly sized ~15-tool family.
-const toolsListByteCeiling = 16 * 1024
+// it stays comfortably under a concrete, measured ceiling. All 9 tools (7
+// read + feedback.report/feedback.list) are registered now; 24KB gives
+// headroom against the plan's own ~24KB ballpark for a similarly sized
+// ~15-tool family, and the actual measured size is well under it.
+const toolsListByteCeiling = 24 * 1024
 
 func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
@@ -276,8 +274,8 @@ func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(res.Tools) != 7 {
-		t.Fatalf("expected 7 read tools (feedback tools are still TODO), got %d: %+v", len(res.Tools), toolNames(res.Tools))
+	if len(res.Tools) != 9 {
+		t.Fatalf("expected 9 tools (7 read + 2 feedback), got %d: %+v", len(res.Tools), toolNames(res.Tools))
 	}
 	b, err := json.Marshal(res.Tools)
 	if err != nil {

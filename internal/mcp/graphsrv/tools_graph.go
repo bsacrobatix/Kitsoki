@@ -40,22 +40,8 @@ func registerGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
 }
 
 // registerFeedbackTools registers feedback.report and feedback.list (plan
-// §3.6, local sink only). Like registerGraphTools, this is a free function
-// so P6's studio mount can reuse it directly.
-func registerFeedbackTools(srv *mcpsdk.Server, deps *Deps) {
-	// TODO(P2 next step): feedback.report — local JSONL + markdown bundle
-	// under <bound-catalog-repo-root>/.artifacts/graph-mcp/ (git
-	// toplevel walk from the catalog path, NOT process cwd — see plan's
-	// red-team amendment #7). ULID report_id (check go.mod for an
-	// existing dependency before adding github.com/oklog/ulid/v2).
-	// (kind, normalized-title) server-side dedupe. Always returns
-	// ok:true; sink failures surface as routing_errors, never a tool
-	// error.
-	// TODO(P2 next step): feedback.list — {limit?, kind?} listing from
-	// the same local sink.
-	_ = srv
-	_ = deps
-}
+// §3.6, local sink only) — see tools_feedback.go. Like registerGraphTools,
+// it's a free function so P6's studio mount can reuse it directly.
 
 const graphLintInputSchema = `{
   "type": "object",
@@ -102,9 +88,9 @@ func registerGraphLintTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.lint",
 		Description: "Report catalog lint issues (dangling edges, missing required fields, etc). Wraps the existing lint engine op.",
 		InputSchema: json.RawMessage(graphLintInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.lint", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphLint(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphLint(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -206,9 +192,9 @@ func registerGraphOpenTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.open",
 		Description: "Catalog overview: head, node count, per-type census, lint summary, changeset lifecycle counts, feedback pending count, and a short orientation guide. Call this first.",
 		InputSchema: json.RawMessage(graphOpenInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.open", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphOpen(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -235,6 +221,14 @@ func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	lint, _ := res.Data["lint"].(map[string]any)
 	changesets, _ := res.Data["changesets"].(map[string]any)
 	feedback, _ := res.Data["feedback"].(map[string]any)
+	if feedback == nil {
+		feedback = map[string]any{}
+	}
+	// The engine op only stubs feedback.pending at 0 (it doesn't know
+	// about the local sink, which lives in this package). Overwrite it
+	// here with the real pending count from the local sink now that
+	// feedback.report/feedback.list exist.
+	feedback["pending"] = pendingFeedbackCount(path)
 	guide, _ := res.Data["guide"].(string)
 	nodeCount, _ := res.Data["node_count"].(int)
 
@@ -323,9 +317,9 @@ func registerGraphGetTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.get",
 		Description: "Fetch full node envelopes (fields, edges, refs_in) by id. Unknown ids come back in `missing` with nearest-id suggestions instead of failing the whole call.",
 		InputSchema: json.RawMessage(graphGetInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.get", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphGet(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphGet(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -545,9 +539,9 @@ func registerGraphFindTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.find",
 		Description: "Search nodes by type/status/visibility/edge/field/text. Paginates via an opaque cursor (next_cursor); catalog_changed:true means the bound catalog changed since the cursor was minted, so pagination restarted from the top rather than silently skewing.",
 		InputSchema: json.RawMessage(graphFindInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.find", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphFind(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphFind(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -690,9 +684,9 @@ func registerGraphNeighborsTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.neighbors",
 		Description: "Walk edges from a node (in/out/both, 1-3 hops) and return the edge triples plus a deduplicated summary of the nodes reached.",
 		InputSchema: json.RawMessage(graphNeighborsInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.neighbors", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphNeighbors(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphNeighbors(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -778,9 +772,9 @@ func registerGraphTypeTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.type",
 		Description: "Explain one type's schema, ancestry, and edge vocabulary (+ instance count), or list every registered type when type_id is omitted.",
 		InputSchema: json.RawMessage(graphTypeInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.type", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphType(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphType(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -838,9 +832,9 @@ func registerGraphImpactTool(srv *mcpsdk.Server, deps *Deps) {
 		Name:        "graph.impact",
 		Description: "Predict what retyping or removing a node would break: its type explanation, every inbound reference, and (with to_type) which of those refs would become type-incompatible. Call before retype/remove; propose will reject what this predicts.",
 		InputSchema: json.RawMessage(graphImpactInputSchema),
-	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	}, recorded(deps, "graph.impact", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphImpact(ctx, deps, req)
-	})
+	}))
 }
 
 func handleGraphImpact(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
