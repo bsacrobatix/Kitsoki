@@ -62,3 +62,34 @@ func AcceptedTree(e *kitlock.Entry) (dir string, ok bool) {
 	}
 	return "", false
 }
+
+// VerifiedTreeDir looks for a LIVE directory holding exactly the pinned
+// bytes: it resolves source through each candidate resolver in turn and
+// returns the first resolved directory whose content hash matches wantHash.
+// Live-first resolution matters for kits that import sibling stories by
+// relative path (dev-story's Phase A layout imports ../bugfix and friends):
+// the content-addressed tree cache snapshots only the kit directory, so a
+// cache-resolved tree cannot load them — but a hash-verified live checkout
+// can, with identical content guarantees. Callers fall back to the cache
+// when no live candidate matches (source moved on since staging).
+//
+// Git-tier pins (a recorded commit) never need this: the commit cache
+// materializes the whole repository, so relative imports resolve inside it.
+func VerifiedTreeDir(source, importerDir, wantHash string, resolvers []app.ImportResolver) (string, bool) {
+	if wantHash == "" {
+		return "", false
+	}
+	for _, r := range resolvers {
+		appPath, err := app.ResolveSource(source, importerDir, r)
+		if err != nil {
+			continue
+		}
+		dir := filepath.Dir(appPath)
+		hash, err := kitgit.DirTreeHash(dir)
+		if err != nil || hash != wantHash {
+			continue
+		}
+		return dir, true
+	}
+	return "", false
+}

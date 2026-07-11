@@ -86,3 +86,28 @@ func buildImportResolver() app.ImportResolver {
 		return kitstage.ParseSelector(os.Getenv(kitstage.EnvStaged))(name)
 	})
 }
+
+// buildPlainImportResolver is buildImportResolver minus every per-kit
+// override (kit-dev, staged): $KITSOKI_REPO then the embedded library. The
+// trial engine passes it as a live-verification candidate so the LOCKED leg
+// of a cross-version replay can find the accepted bytes even while a
+// kit-dev override points the same name at the candidate checkout
+// (kitstage.VerifiedTreeDir hash-checks every candidate, so resolver choice
+// can never pin wrong content — only fail to find it).
+func buildPlainImportResolver() app.ImportResolver {
+	full := buildImportResolver()
+	return func(name, importerDir string, override bool) (string, error) {
+		if override {
+			repo := os.Getenv(kitrepo.EnvVar)
+			if repo == "" {
+				return "", nil
+			}
+			candidate := filepath.Join(repo, "stories", name, "app.yaml")
+			if _, err := os.Stat(candidate); err != nil {
+				return "", nil // plain candidate absent; VerifiedTreeDir tries the next resolver
+			}
+			return candidate, nil
+		}
+		return full(name, importerDir, false)
+	}
+}
