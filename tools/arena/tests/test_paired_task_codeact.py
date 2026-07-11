@@ -243,6 +243,8 @@ require("raw Codex uses an absolute checkout", "str(tree.resolve())," in runner_
 require("MCP driver uses ephemeral outer orchestration", "--ephemeral" in drive_source)
 require("MCP dispatch uses auth-only environment", "env, cleanup_auth_home = isolated_codex_env()" in runner_source)
 require("raw prompt carries isolation policy", "BENCHMARK ISOLATION:" in runner.build_prompt(argparse.Namespace(treatment="raw"), {"id": "fixture", "archetype": "bugfix", "ticket": "fix"}))
+check("paired task explicit public test command wins", runner.test_cmd_for({"test_cmd": "pnpm vitest run", "oracle": {}}), "pnpm vitest run")
+check("paired task without a suite skips strict suite gate", runner.test_cmd_for({"oracle": {}}), "")
 
 with tempfile.TemporaryDirectory(prefix="paired-cleanup-") as td:
     tree = Path(td) / "node_modules" / "nested"
