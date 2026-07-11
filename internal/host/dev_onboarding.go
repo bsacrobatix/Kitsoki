@@ -800,6 +800,6 @@ func onboardingInstanceYAML(data map[string]any) string {
 	for _, host := range onboardingInstanceHosts {
 		fmt.Fprintf(&b, "  - %s\n", host)
 	}
-	b.WriteString("\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: declared\n    host_bindings:\n      ticket: host.local_files.ticket\n      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n  build_cmd: { type: string, default: \"\" }\n  test_cmd: { type: string, default: \"\" }\n\nroot: core\n")
+	b.WriteString("\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: inherit\n    host_bindings:\n      ticket: host.local_files.ticket\n      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n  build_cmd: { type: string, default: \"\" }\n  test_cmd: { type: string, default: \"\" }\n\nroot: core\n")
 	return b.String()
 }
