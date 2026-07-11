@@ -321,6 +321,21 @@ func TestGraphHandler_Neighbors_UnknownNode(t *testing.T) {
 	}
 }
 
+func TestGraphHandler_Neighbors_UnknownEdge(t *testing.T) {
+	_, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "neighbors",
+		"catalog_path": readsFixturePath,
+		"id":           "req-alpha",
+		"edges":        []any{"not-a-real-edge"},
+	})
+	if err == nil {
+		t.Fatal("expected error for an unknown edge field")
+	}
+	if !strings.Contains(err.Error(), "unknown edge") {
+		t.Fatalf("expected an 'unknown edge' error, got: %v", err)
+	}
+}
+
 func TestGraphHandler_Neighbors_DepthOutOfRange(t *testing.T) {
 	_, err := GraphHandler(context.Background(), map[string]any{
 		"op":           "neighbors",

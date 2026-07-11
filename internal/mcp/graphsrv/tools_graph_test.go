@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -217,6 +218,36 @@ func TestGraphServer_NeighborsUnknownNode(t *testing.T) {
 	}
 }
 
+func TestGraphServer_NeighborsUnknownEdge(t *testing.T) {
+	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
+	defer done()
+
+	m, isErr := callTool(t, cs, "graph.neighbors", map[string]any{"id": "req-alpha", "edges": []string{"not-a-real-edge"}})
+	if !isErr {
+		t.Fatalf("expected an error for an unknown edge field, got %+v", m)
+	}
+	if code, _ := m["code"].(string); code != graphsrv.CodeUnknownEdge {
+		t.Fatalf("code = %v, want %s", m["code"], graphsrv.CodeUnknownEdge)
+	}
+	errMsg, _ := m["error"].(string)
+	if !strings.Contains(errMsg, "acceptance") {
+		t.Fatalf("expected the error to list the known edge vocabulary, got %q", errMsg)
+	}
+}
+
+func TestGraphServer_TypeUnknownTypeID(t *testing.T) {
+	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
+	defer done()
+
+	m, isErr := callTool(t, cs, "graph.type", map[string]any{"type_id": "not-a-real-type"})
+	if !isErr {
+		t.Fatalf("expected an error for an unknown type_id, got %+v", m)
+	}
+	if code, _ := m["code"].(string); code != graphsrv.CodeUnknownType {
+		t.Fatalf("code = %v, want %s", m["code"], graphsrv.CodeUnknownType)
+	}
+}
+
 func TestGraphServer_TypeExplainAndList(t *testing.T) {
 	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
 	defer done()
@@ -261,10 +292,13 @@ func TestGraphServer_ImpactWrapsQuery(t *testing.T) {
 // TestGraphServer_ToolsListByteCeiling is the golden byte-ceiling test
 // (graph-mcp-plan.md §3.7): serializes the tools/list response and asserts
 // it stays comfortably under a concrete, measured ceiling. All 9 tools (7
-// read + feedback.report/feedback.list) are registered now; 24KB gives
-// headroom against the plan's own ~24KB ballpark for a similarly sized
-// ~15-tool family, and the actual measured size is well under it.
-const toolsListByteCeiling = 24 * 1024
+// read + feedback.report/feedback.list) are registered now. Measured actual
+// size as of this test: 8630 bytes. The plan's own ballpark is ~24KB for a
+// similarly sized ~15-tool family; this package registers 9, so a 16KB
+// ceiling (~1.85x the measured size, comfortable headroom for schema/
+// description growth without being so loose it stops catching a real
+// regression) is the documented, defensible number here.
+const toolsListByteCeiling = 16 * 1024
 
 func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
@@ -281,6 +315,7 @@ func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal tools/list: %v", err)
 	}
+	t.Logf("measured tools/list size: %d bytes (ceiling %d)", len(b), toolsListByteCeiling)
 	if len(b) > toolsListByteCeiling {
 		t.Fatalf("tools/list serialized to %d bytes, want <= %d", len(b), toolsListByteCeiling)
 	}

@@ -151,6 +151,37 @@ func TestGraphServer_NoCatalogBound(t *testing.T) {
 	}
 }
 
+func TestGraphServer_NoCatalogBound_LiveServer(t *testing.T) {
+	// Unlike TestGraphServer_NoCatalogBound (which asserts against
+	// CatalogSet directly because touching global cwd felt risky), t.Chdir
+	// (Go 1.24+) chdirs for the duration of this test only and restores
+	// automatically on cleanup, so we can safely exercise the live-server
+	// NO_CATALOG path end-to-end: no --catalog flags, and cwd has no
+	// pog/catalog.yaml to probe.
+	t.Chdir(t.TempDir())
+
+	cs, done := connectGraphServer(t, graphsrv.Config{})
+	defer done()
+
+	res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+		Name:      "graph.lint",
+		Arguments: map[string]any{},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(graph.lint): %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("expected NO_CATALOG error with no bound catalog, got %+v", res.StructuredContent)
+	}
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("StructuredContent is not a map: %T", res.StructuredContent)
+	}
+	if code, _ := m["code"].(string); code != graphsrv.CodeNoCatalog {
+		t.Fatalf("code = %v, want %s", m["code"], graphsrv.CodeNoCatalog)
+	}
+}
+
 func TestGraphServer_ToolSchemasHaveNoBooleanLeaves(t *testing.T) {
 	// Regression guard mirroring internal/mcp/studio/tool_schema_test.go:
 	// a reflected Go `any` field renders as bare `true`/`false` in JSON

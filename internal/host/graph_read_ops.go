@@ -368,6 +368,18 @@ func graphNeighborsOp(args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if len(edgeFieldStrs) > 0 {
+		known := graphAllEdgeFieldIDs(cat)
+		knownSet := make(map[string]bool, len(known))
+		for _, k := range known {
+			knownSet[k] = true
+		}
+		for _, e := range edgeFieldStrs {
+			if !knownSet[e] {
+				return Result{}, fmt.Errorf("host.graph.neighbors: unknown edge %q (known: %v)", e, known)
+			}
+		}
+	}
 	edgeKinds := make([]objectgraph.EdgeField, len(edgeFieldStrs))
 	for i, e := range edgeFieldStrs {
 		edgeKinds[i] = objectgraph.EdgeField(e)
@@ -778,6 +790,27 @@ func graphOpenTypeCensus(cat *objectgraph.Catalog) []any {
 		})
 	}
 	return rows
+}
+
+// graphAllEdgeFieldIDs returns the sorted, deduplicated union of every edge
+// field ID declared across the whole type registry — the vocabulary
+// UNKNOWN_EDGE errors list (graph.neighbors' `edges` filter names a field
+// that must exist somewhere in the registry, not necessarily on the root
+// node's own type, since direction="in"/"both" can walk edges declared on
+// other types that merely point at the root).
+func graphAllEdgeFieldIDs(cat *objectgraph.Catalog) []string {
+	seen := map[string]bool{}
+	for _, def := range cat.Registry.All() {
+		for _, f := range def.EdgeFields {
+			seen[string(f.ID)] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // graphEdgeVocabLine renders a type's declared edge fields as one
