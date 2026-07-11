@@ -12,6 +12,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/app/graph"
+	"kitsoki/internal/kitstage"
 	"kitsoki/internal/testrunner"
 )
 
@@ -51,7 +52,7 @@ func (srv *Server) registerStoryTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "story.validate",
-		Description: "Load and validate the story (app.Load). Returns {ok, errors[]} where each error is {file, line, column, message} — the exact load-time invariant set kitsoki run enforces. {dir?} defaults to the bound workspace.",
+		Description: "Load and validate the story (app.Load). Returns {ok, errors[]} where each error is {file, line, column, message} — the exact load-time invariant set kitsoki run enforces. {dir?, staged?}: dir defaults to the bound workspace; staged=true resolves staged kit-update candidates for this call only.",
 	}, srv.handleStoryValidate)
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
@@ -61,7 +62,7 @@ func (srv *Server) registerStoryTools() {
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "story.test",
-		Description: "Run the story's deterministic flow fixtures (testrunner.RunFlows — no LLM, replay/cassette honored). {dir?, flows?, recording?, allow_missing_recording?, fail_fast?, verbose?, json?, trace_out?, detailed?}: flows overrides the default <dir>/flows/*.yaml glob. Returns a per-fixture pass/fail report (per-fixture failure_count only; pass detailed=true for full failure strings).",
+		Description: "Run the story's deterministic flow fixtures (testrunner.RunFlows — no LLM, replay/cassette honored). {dir?, flows?, recording?, allow_missing_recording?, fail_fast?, verbose?, json?, trace_out?, detailed?, staged?}: flows overrides the default <dir>/flows/*.yaml glob; staged=true resolves staged kit-update candidates for this call only. Returns a per-fixture pass/fail report (per-fixture failure_count only; pass detailed=true for full failure strings).",
 	}, srv.handleStoryTest)
 }
 
@@ -105,6 +106,11 @@ type StoryValidateArgs struct {
 	// Dir overrides the workspace dir to validate (optional; defaults to the
 	// bound workspace handle). May be a story directory or an app.yaml path.
 	Dir string `json:"dir,omitempty"`
+	// Staged resolves kits with a staged update candidate (kitsoki kit
+	// update) to the candidate's pinned tree FOR THIS CALL ONLY — the
+	// long-lived server's resolver and environment are never mutated.
+	// Kits without a staged entry resolve normally.
+	Staged bool `json:"staged,omitempty"`
 }
 
 // StoryValidateOK is the story.validate result: the structured load-time
@@ -186,6 +192,11 @@ type StoryTestArgs struct {
 	// false (default) only a per-fixture failure COUNT is returned, keeping the
 	// MCP payload small; set true to see *why* a fixture failed.
 	Detailed bool `json:"detailed,omitempty"`
+	// Staged resolves kits with a staged update candidate (kitsoki kit
+	// update) to the candidate's pinned tree FOR THIS CALL ONLY — the
+	// long-lived server's resolver and environment are never mutated.
+	// Kits without a staged entry resolve normally.
+	Staged bool `json:"staged,omitempty"`
 }
 
 // StoryTestOK is the story.test result: the per-fixture pass/fail report.
@@ -274,7 +285,7 @@ func (srv *Server) handleStoryValidate(
 	if rerr != nil {
 		return rerr, nil, nil
 	}
-	return nil, validateStory(appPath, srv.importResolver), nil
+	return nil, validateStory(appPath, srv.callResolver(args.Staged)), nil
 }
 
 // handleStoryGraph computes the story graph views. The mode is selected by the
@@ -336,7 +347,7 @@ func (srv *Server) handleStoryTest(
 		Verbose:               args.Verbose,
 		JSONOut:               args.JSON,
 		TracePath:             args.TraceOut,
-		ImportResolver:        srv.importResolver,
+		ImportResolver:        srv.callResolver(args.Staged),
 	})
 	if err != nil {
 		return buildToolError(ErrBadRequest, fmt.Sprintf("run flows: %v", err)), nil, nil
@@ -520,6 +531,20 @@ func safeJoin(root, rel string) (string, error) {
 		return "", fmt.Errorf("path %q escapes the workspace", rel)
 	}
 	return joined, nil
+}
+
+// callResolver returns the import resolver one story.* call should use:
+// the server's long-lived resolver, wrapped with staged-candidate
+// resolution (kitstage.WrapResolver, select-all posture — kits without a
+// staged entry fall through) when the caller passed staged:true. The wrap
+// is strictly per-call: the server's resolver and process environment are
+// never mutated, so concurrent calls without staged:true keep accepted
+// resolution.
+func (srv *Server) callResolver(staged bool) app.ImportResolver {
+	if !staged {
+		return srv.importResolver
+	}
+	return kitstage.WrapResolver(srv.importResolver, kitstage.SelectAll)
 }
 
 // ── shared wrappers over shipped functions ────────────────────────────────────
