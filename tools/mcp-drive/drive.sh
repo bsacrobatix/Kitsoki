@@ -245,6 +245,7 @@ run_once() {
       codex exec "${codex_tool_search_preamble}"$'\n\n---\n\n'"$PROMPT" \
       --model "$MODEL" \
       --dangerously-bypass-approvals-and-sandbox \
+      --ignore-user-config \
       --disable=shell_tool \
       --disable=apps \
       --skip-git-repo-check \
