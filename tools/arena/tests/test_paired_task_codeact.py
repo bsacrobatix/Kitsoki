@@ -255,6 +255,10 @@ require("Kitsoki prompt has the settled-turn control loop", "Then run this exact
 require("Kitsoki prompt waits through a live worker turn", "async_after_ms: 300000" in prompt)
 require("Kitsoki prompt forbids rapid bare-status polling", "Never spin on bare status" in prompt)
 require("Kitsoki prompt has a bounded trace-aware stall rule", "three spaced (15s) checks" in prompt)
+require("Kitsoki prompt marks the cell workspace as prepared", "workspace_prepared: true" in prompt)
+
+bench_story = (REPO_ROOT / "stories" / "bench-bugfix" / "app.yaml").read_text(encoding="utf-8")
+require("bench forwards prepared workspace ownership into bugfix", "workspace_prepared: \"{{ world.workspace_prepared }}\"" in bench_story)
 
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
