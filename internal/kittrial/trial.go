@@ -136,6 +136,12 @@ type Options struct {
 	KitName     string
 	// BaseResolver resolves everything that is not the kit under trial.
 	BaseResolver app.ImportResolver
+	// Resolvers are the candidate resolvers live-verified tree resolution
+	// tries, in order, for BOTH legs (see VerifiedTreeDir). Defaults to
+	// [BaseResolver]. The CLI also passes an overrides-skipping variant so
+	// the LOCKED leg can find the old bytes when a kit-dev override points
+	// the name at the new ones.
+	Resolvers []app.ImportResolver
 	// Flow passes through to every fixture replay (verbosity etc.); its
 	// ImportResolver is overridden per leg.
 	Flow testrunner.FlowOptions
@@ -166,11 +172,33 @@ func Run(ctx context.Context, opts Options) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	stagedDir, err := kitstage.ResolveTree(staged)
-	if err != nil {
-		return nil, err
+	liveResolvers := opts.Resolvers
+	if len(liveResolvers) == 0 && opts.BaseResolver != nil {
+		liveResolvers = []app.ImportResolver{opts.BaseResolver}
 	}
-	acceptedDir, acceptedOK := kitstage.AcceptedTree(locked)
+	// Both legs prefer a LIVE, hash-verified directory over the tree-cache
+	// snapshot: identical content guarantees, but relative sibling imports
+	// (dev-story's ../bugfix layout) still resolve. Git-tier pins skip this
+	// — the commit cache holds the whole repository.
+	stagedDir := ""
+	if staged.Commit == "" {
+		if dir, ok := kitstage.VerifiedTreeDir(staged.Source, opts.ProjectRoot, staged.TreeHash, liveResolvers); ok {
+			stagedDir = dir
+		}
+	}
+	if stagedDir == "" {
+		stagedDir, err = kitstage.ResolveTree(staged)
+		if err != nil {
+			return nil, err
+		}
+	}
+	acceptedDir, acceptedOK := "", false
+	if locked != nil && locked.Commit == "" {
+		acceptedDir, acceptedOK = kitstage.VerifiedTreeDir(locked.Source, opts.ProjectRoot, locked.TreeHash, liveResolvers)
+	}
+	if !acceptedOK {
+		acceptedDir, acceptedOK = kitstage.AcceptedTree(locked)
+	}
 	instances := kitstage.InstanceApps(opts.ProjectRoot)
 
 	t := &trialRun{

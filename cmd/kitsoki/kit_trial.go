@@ -86,6 +86,7 @@ Exit codes: 0 trial ready or partial (pending approvals / warnings only),
 				ProjectRoot:  targetAbs,
 				KitName:      name,
 				BaseResolver: buildImportResolver(),
+				Resolvers:    []app.ImportResolver{buildImportResolver(), buildPlainImportResolver()},
 				Flow:         testrunner.FlowOptions{FailFast: failFast, Verbose: verbose},
 				Extends:      lockfileExtendsResolver(cmd.Context(), targetAbs),
 				ProjectChecks: func(ctx context.Context, resolver app.ImportResolver) ([]kittrial.Check, error) {
