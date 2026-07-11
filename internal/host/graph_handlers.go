@@ -16,6 +16,21 @@
 //	apply        {catalog_path, changeset_id[, dry_run]}         -> apply result
 //	project      {catalog_path[, overlay_path], graph_id}        -> kitsoki.graph/v1 wire graph
 //	presentation {...; kit-injected _kit_dir}                    -> starlark-served presentation data
+//	get          {catalog_path, ids[1..20][, fields]}             -> full node envelopes + refs_in
+//	find         {catalog_path[, type, status, visibility, edge,
+//	              no_inbound, no_outbound, field, text, limit,
+//	              offset, count_only]}                            -> {total, rows, truncated}
+//	neighbors    {catalog_path, id[, direction, edges, depth,
+//	              limit]}                                         -> edge triples + summary rows
+//	type_census  {catalog_path[, type_id]}                        -> type decl+census, or all-types census
+//	changeset    {catalog_path, action: list|get|touching[,
+//	              changeset_id, node_id]}                         -> changeset lifecycle/reverse-index reads
+//
+// get/find/neighbors/type_census/changeset are internal/host/graph_read_ops.go
+// — graph-mcp-plan.md §3.3's P1 read family (Workstream A). Every one of
+// them resolves edges exclusively through Node.EdgeTargets against the
+// registry decl, never the raw Edges map, so storage:top_level edge fields
+// (e.g. a change node's depends_on) are never silently invisible.
 //
 // Deleted on extraction: internal/app/graph/objectcatalog.go — its
 // ObjectCatalogGraph/ObjectCatalogDiffGraph logic now lives inline in the
@@ -72,8 +87,18 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphProjectOp(args)
 	case "presentation":
 		return graphPresentationOp(ctx, args)
+	case "get":
+		return graphGetOp(args)
+	case "find":
+		return graphFindOp(args)
+	case "neighbors":
+		return graphNeighborsOp(args)
+	case "type_census":
+		return graphTypeCensusOp(args)
+	case "changeset":
+		return graphChangesetOp(args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, query, project, presentation)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, query, project, presentation, get, find, neighbors, type_census, changeset)", op)
 	}
 }
 
@@ -576,7 +601,6 @@ func graphPresentationOp(ctx context.Context, args map[string]any) (Result, erro
 	return StarlarkBindingHandler(scriptPath)(ctx, args)
 }
 
-
 func graphQueryOp(args map[string]any) (Result, error) {
 	cat, err := loadCatalogArg(args)
 	if err != nil {
@@ -716,4 +740,3 @@ func graphQueryImpact(cat *objectgraph.Catalog, targetID string, toType string) 
 		"incompatible_refs": incompatibleRefs,
 	}}, nil
 }
-
