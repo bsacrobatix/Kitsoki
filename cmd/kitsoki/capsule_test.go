@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,13 +92,26 @@ func TestCapsuleListCoreJSONUsesManagedDefinitions(t *testing.T) {
 }
 
 func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
+	jsonOut, err := execRoot(t, "capsule", "list", "--kind", "repo-history", "--json")
+	if err != nil {
+		t.Fatalf("capsule list --json: %v\n%s", err, jsonOut)
+	}
+	var payload struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("capsule list JSON decode: %v\n%s", err, jsonOut)
+	}
+
 	out, err := execRoot(t, "capsule", "list", "--kind", "repo-history", "--markdown")
 	if err != nil {
 		t.Fatalf("capsule list --markdown: %v\n%s", err, out)
 	}
+	// The repo-history corpus grows over time (bugfix-bakeoff adds fixtures),
+	// so the count is cross-checked against --json rather than hardcoded.
 	for _, want := range []string{
 		"# Repo History Capsules",
-		"Capsules: **10**",
+		fmt.Sprintf("Capsules: **%d**", payload.Count),
 		"`repo-history/query-string/qs1`",
 		"internal/capsule/pinned-git",
 		"repo-history-query-string",
