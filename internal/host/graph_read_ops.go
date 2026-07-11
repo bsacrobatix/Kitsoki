@@ -46,8 +46,8 @@ func graphGetOp(args map[string]any) (Result, error) {
 
 	revIdx := objectgraph.BuildReverseIndex(cat)
 
-	var nodes []any
-	var missing []any
+	nodes := []any{}
+	missing := []any{}
 	for _, id := range ids {
 		node, ok := cat.Nodes[objectgraph.NodeID(id)]
 		if !ok {

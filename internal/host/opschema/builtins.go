@@ -18,6 +18,16 @@ package opschema
 // unregistered handler as "cannot check", not a failure). Growing this table
 // per-handler as kits actually reuse them is left to follow-up work — see
 // the S4 PR description.
+//
+// Deliberate scope expansion (graph-mcp plan P1, Workstream D "verify
+// closure"): registerGraphBuiltins below adds every host.graph.* op
+// (internal/host/graph_handlers.go + graph_read_ops.go) even though
+// host.graph is not one of dev-story's five host_interfaces defaults — the
+// object-graph kit (kits/object-graph) is a second real consumer of this
+// table, and closing kit verify's op-shape-checking gap for it was the
+// explicit P1 deliverable. opschema_test.go's dev-story-specific drift check
+// only cross-checks the five dev-story handlers above; it does not (and
+// should not) assert anything about host.graph.
 func Builtins() *Registry {
 	r := NewRegistry()
 
@@ -167,7 +177,113 @@ func Builtins() *Registry {
 		Output: fields("ok", "bool", "message_id", "string"),
 	})
 
+	registerGraphBuiltins(r)
+
 	return r
+}
+
+// registerGraphBuiltins registers every host.graph.* op (graph-mcp plan P1
+// verify closure, Workstream D): the object-graph kit's "graph" interface
+// binds default: host.graph and declares its operations against these
+// entries so CheckInterfaceOpShapes actually checks host.graph op shapes —
+// before this, host.graph had zero opschema entries and every declared op
+// silently skipped shape checking (registry.Lookup miss reads as
+// "unregistered handler, cannot check", not a failure). See
+// internal/host/graph_handlers.go (load/lint/diff/apply/propose/authorize/
+// withdraw/query/project/presentation) and internal/host/graph_read_ops.go
+// (get/find/neighbors/type_census/changeset — the P1 read ops) for the
+// concrete Result{Data: ...} shapes these mirror.
+func registerGraphBuiltins(r *Registry) {
+	r.Register("host.graph", "load", Op{
+		Input:  fields("catalog_path", "string", "overlay_path", "string"),
+		Output: fields("node_count", "int", "node_ids", "list", "warnings", "list"),
+	})
+	r.Register("host.graph", "lint", Op{
+		Input:  fields("catalog_path", "string"),
+		Output: fields("issues", "list", "issue_count", "int", "clean", "bool"),
+	})
+	r.Register("host.graph", "diff", Op{
+		Input:  fields("catalog_path", "string", "overlay_path", "string"),
+		Output: fields("nodes", "list"),
+	})
+	r.Register("host.graph", "apply", Op{
+		Input: fields("catalog_path", "string", "changeset_id", "string", "dry_run", "bool"),
+		Output: fields(
+			"rejected", "bool", "reject_reasons", "list", "lint_issues", "list", "changed_files", "list",
+		),
+	})
+	r.Register("host.graph", "propose", Op{
+		Input: fields(
+			"catalog_path", "string", "title", "string", "operations", "list",
+			"visibility", "string", "provenance", "object", "validate_only", "bool",
+		),
+		Output: fields(
+			"changeset_id", "string", "status", "string", "lint", "list", "rejected", "bool",
+			"guard_fills", "list", "validated_only", "bool", "reject_reasons", "list",
+		),
+	})
+	r.Register("host.graph", "authorize", Op{
+		Input: fields("catalog_path", "string", "changeset_id", "string"),
+		Output: fields(
+			"rejected", "bool", "reject_reasons", "list", "lint_issues", "list", "changed_files", "list",
+		),
+	})
+	r.Register("host.graph", "withdraw", Op{
+		Input: fields("catalog_path", "string", "changeset_id", "string"),
+		Output: fields(
+			"rejected", "bool", "reject_reasons", "list", "lint_issues", "list", "changed_files", "list",
+		),
+	})
+	r.Register("host.graph", "project", Op{
+		Input:  fields("catalog_path", "string", "overlay_path", "string", "graph_id", "string"),
+		Output: fields("graph", "object", "registry", "list"),
+	})
+	r.Register("host.graph", "presentation", Op{
+		Input:  fields(),
+		Output: fields("layers", "list"),
+	})
+	r.Register("host.graph", "query", Op{
+		Input: fields("catalog_path", "string", "mode", "string", "target", "string", "to_type", "string"),
+		Output: fields(
+			"references", "list", "type_id", "string", "schema", "string", "extends", "string",
+			"summary", "string", "required_fields", "list", "edge_fields", "list", "ancestry", "list",
+			"node_id", "string", "current_type", "string", "explain_type", "object", "incompatible_refs", "list",
+		),
+	})
+	r.Register("host.graph", "get", Op{
+		Input:  fields("catalog_path", "string", "ids", "list", "fields", "list"),
+		Output: fields("nodes", "list", "missing", "list"),
+	})
+	r.Register("host.graph", "find", Op{
+		Input: fields(
+			"catalog_path", "string", "type", "string", "status", "list", "visibility", "string",
+			"edge", "object", "no_inbound", "object", "no_outbound", "object", "field", "object",
+			"text", "string", "limit", "int", "offset", "int", "count_only", "bool",
+		),
+		Output: fields("total", "int", "rows", "list", "truncated", "bool"),
+	})
+	r.Register("host.graph", "neighbors", Op{
+		Input: fields(
+			"catalog_path", "string", "id", "string", "direction", "string",
+			"edges", "list", "depth", "int", "limit", "int",
+		),
+		Output: fields("triples", "list", "rows", "list"),
+	})
+	r.Register("host.graph", "type_census", Op{
+		Input: fields("catalog_path", "string", "type_id", "string"),
+		Output: fields(
+			"type_id", "string", "schema", "string", "extends", "string", "summary", "string",
+			"required_fields", "list", "edge_fields", "list", "ancestry", "list",
+			"instance_count", "int", "status_breakdown", "object", "types", "list",
+		),
+	})
+	r.Register("host.graph", "changeset", Op{
+		Input: fields("catalog_path", "string", "action", "string", "changeset_id", "string", "node_id", "string"),
+		Output: fields(
+			"changesets", "list", "status_counts", "object", "id", "string", "title", "string",
+			"status", "string", "operations", "list", "touching", "list",
+		),
+	})
 }
 
 // fields builds a map[string]FieldSpec from alternating name/type pairs, a

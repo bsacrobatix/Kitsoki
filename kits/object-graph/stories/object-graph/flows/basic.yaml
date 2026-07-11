@@ -39,5 +39,33 @@ turns:
       lint_clean: true
       issue_count: 0
 
+  - intent: { name: query }
+    expect_state: queried
+    expect_world:
+      query_type_id: feature
+
+  - intent: { name: get }
+    expect_state: fetched
+    expect_world:
+      get_missing: []
+
+  - intent: { name: find }
+    expect_state: found
+    expect_world:
+      find_total: 1
+
+  - intent: { name: neighbors }
+    expect_state: neighbored
+
+  - intent: { name: census }
+    expect_state: censused
+    expect_world:
+      census_instance_count: 1
+
+  - intent: { name: changesets }
+    expect_state: changesetlisted
+    expect_world:
+      changeset_status_counts: {}
+
   - intent: { name: finish }
     expect_state: __exit__done
