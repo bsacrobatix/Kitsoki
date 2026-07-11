@@ -110,6 +110,21 @@ check-run publisher projects a `capsule-ci-verdict/v1` run result to a GitHub
 check conclusion. The adapter does not define a second pipeline result or call
 GitHub from automated tests.
 
+```sh
+kitsoki capsule ci github trigger \
+  --event pull_request \
+  --payload payload.json \
+  --pipeline change
+
+kitsoki capsule ci github check \
+  --project . \
+  --job 01K... \
+  --details-url https://ci.example/runs/01K...
+```
+
+Those commands emit the JSON payloads that a hosted GitHub-agent or CI service
+can publish with its own repo-scoped credentials.
+
 The Capsule MCP writer proof is also offline: a test-visible writer receives
 only `capsule.*` tools, edits through `capsule.fs.write`, inspects local status,
 commits through `capsule.vcs.commit`, and is denied raw argv without the

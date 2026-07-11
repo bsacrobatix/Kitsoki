@@ -37,6 +37,10 @@ func NormalizeGitHubPullRequestTrigger(event GitHubPullRequestEvent, pipeline st
 	if event.Number <= 0 {
 		return Trigger{}, fmt.Errorf("capsule ci github: pull request number is required")
 	}
+	repo := strings.TrimSpace(event.Repository.FullName)
+	if repo == "" {
+		return Trigger{}, fmt.Errorf("capsule ci github: repository full_name is required")
+	}
 	headSHA := strings.TrimSpace(event.PullRequest.Head.SHA)
 	if headSHA == "" {
 		headSHA = strings.TrimSpace(event.After)
@@ -44,17 +48,29 @@ func NormalizeGitHubPullRequestTrigger(event GitHubPullRequestEvent, pipeline st
 	if headSHA == "" {
 		return Trigger{}, fmt.Errorf("capsule ci github: head sha is required")
 	}
+	headRef := strings.TrimSpace(event.PullRequest.Head.Ref)
+	if headRef == "" {
+		return Trigger{}, fmt.Errorf("capsule ci github: head ref is required")
+	}
+	baseRef := strings.TrimSpace(event.PullRequest.Base.Ref)
+	if baseRef == "" {
+		return Trigger{}, fmt.Errorf("capsule ci github: base ref is required")
+	}
 	actor := strings.TrimSpace(event.Sender.Login)
 	if actor == "" {
 		actor = strings.TrimSpace(event.PullRequest.User.Login)
 	}
+	action := strings.TrimSpace(event.Action)
+	if action == "" {
+		action = "unknown"
+	}
 	return Trigger{
 		Kind:              "pull_request",
 		Provider:          "github",
-		EventID:           fmt.Sprintf("%s#%d:%s", event.Repository.FullName, event.Number, strings.TrimSpace(event.Action)),
+		EventID:           fmt.Sprintf("%s#%d:%s", repo, event.Number, action),
 		Actor:             actor,
-		Ref:               event.PullRequest.Head.Ref,
-		BaseRef:           event.PullRequest.Base.Ref,
+		Ref:               headRef,
+		BaseRef:           baseRef,
 		HeadSHA:           headSHA,
 		RequestedPipeline: pipeline,
 	}, nil
@@ -89,18 +105,17 @@ func BuildGitHubCheckRun(result RunResult, detailsURL string) (GitHubCheckRun, e
 	if strings.TrimSpace(headSHA) == "" {
 		return GitHubCheckRun{}, fmt.Errorf("capsule ci github: envelope trigger head_sha is required")
 	}
-	conclusion := "neutral"
-	switch result.Verdict.Outcome {
-	case "passed":
-		conclusion = "success"
-	case "failed":
-		conclusion = "failure"
-	case "infra_failed":
-		conclusion = "action_required"
-	case "cancelled":
-		conclusion = "cancelled"
-	case "needs_input":
-		conclusion = "neutral"
+	conclusion, err := githubConclusion(result.Verdict.Outcome)
+	if err != nil {
+		return GitHubCheckRun{}, err
+	}
+	summary := strings.TrimSpace(result.Verdict.Summary)
+	if summary == "" {
+		summary = githubCheckSummary(result.Verdict)
+	}
+	title := result.Verdict.Outcome
+	if title == "" {
+		title = "unknown"
 	}
 	name := "Kitsoki Capsule CI"
 	if result.Verdict.Pipeline != "" {
@@ -111,11 +126,40 @@ func BuildGitHubCheckRun(result RunResult, detailsURL string) (GitHubCheckRun, e
 		HeadSHA:    headSHA,
 		Status:     "completed",
 		Conclusion: conclusion,
-		DetailsURL: detailsURL,
+		DetailsURL: strings.TrimSpace(detailsURL),
 		ExternalID: string(result.Job.ID),
 		Output: GitHubCheckOutput{
-			Title:   result.Verdict.Outcome,
-			Summary: result.Verdict.Summary,
+			Title:   title,
+			Summary: summary,
 		},
 	}, nil
+}
+
+func githubConclusion(outcome string) (string, error) {
+	switch outcome {
+	case "passed":
+		return "success", nil
+	case "failed":
+		return "failure", nil
+	case "infra_failed":
+		return "action_required", nil
+	case "cancelled":
+		return "cancelled", nil
+	case "needs_input":
+		return "neutral", nil
+	default:
+		return "", fmt.Errorf("capsule ci github: unsupported verdict outcome %q", outcome)
+	}
+}
+
+func githubCheckSummary(v Verdict) string {
+	if len(v.Checks) == 0 {
+		return "Capsule CI produced no check details."
+	}
+	var b strings.Builder
+	b.WriteString("| check | kind | outcome |\n|---|---|---|\n")
+	for _, check := range v.Checks {
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", check.ID, check.Kind, check.Outcome)
+	}
+	return b.String()
 }

@@ -23,7 +23,7 @@ import (
 
 func capsuleCICmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "ci", Short: "Plan, run, and inspect story-native Capsule CI"}
-	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCISummaryCmd(), capsuleCICancelCmd())
+	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIStatusCmd(), capsuleCISummaryCmd(), capsuleCICancelCmd(), capsuleCIGitHubCmd())
 	return cmd
 }
 func ciInputs(ctx context.Context, project, workspace, pipeline string) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, error) {
