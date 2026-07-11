@@ -2,8 +2,8 @@
 // resolve, lock, list, and dev-override kit dependencies. `kit verify` is
 // S4's full contract-check + no-LLM conformance-flow runner (it supersedes
 // the narrower lockfile-hash stub S2 originally shipped here — see PR #126
-// and #127's flagged decisions). `kit update` remains a documented stub;
-// S7 (lifecycle) builds it out for real.
+// and #127's flagged decisions). `kit update`/`kit reject` are S7's staging
+// half (kit_update.go, internal/kitstage); trial/accept follow.
 package main
 
 import (
@@ -42,19 +42,31 @@ A kit source is one of:
 
 'kit add' resolves a source, checks any --version constraint against the
 resolved kit's own app.version:, and records (source, version, commit,
-tree-hash) in the lockfile. 'kit list' reads it back. 'kit verify' runs the
-full S4 contract-check + no-LLM conformance-flow suite against a kit
-directory. 'kit update' is a stub — semver-gated re-resolution is S7.
-'kit dev' overrides one kit's resolution with a local checkout for
-development, generalizing the --kitsoki-repo / $KITSOKI_REPO override to a
-single named kit (internal/kitdev).`,
+tree-hash, constraint) in the lockfile. 'kit list' reads it back. 'kit
+verify' runs the full S4 contract-check + no-LLM conformance-flow suite
+against a kit directory. 'kit update' re-resolves a locked kit and STAGES
+the result as an update candidate (kits.staged.lock + upgrade plan) without
+touching the accepted lock; 'kit reject' drops the candidate. 'kit dev'
+overrides one kit's resolution with a local checkout for development,
+generalizing the --kitsoki-repo / $KITSOKI_REPO override to a single named
+kit (internal/kitdev).`,
 	}
 	cmd.AddCommand(kitAddCmd())
 	cmd.AddCommand(kitListCmd())
 	cmd.AddCommand(kitVerifyCmd())
 	cmd.AddCommand(kitUpdateCmd())
+	cmd.AddCommand(kitRejectCmd())
 	cmd.AddCommand(kitDevCmd())
 	return cmd
+}
+
+// absTarget resolves a --target flag value to an absolute project root.
+func absTarget(target string) (string, error) {
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve --target: %w", err)
+	}
+	return abs, nil
 }
 
 func kitAddCmd() *cobra.Command {
@@ -81,13 +93,22 @@ func kitAddCmd() *cobra.Command {
 				}
 			}
 
-			entry, err := resolveKitEntry(cmd.Context(), source, targetAbs, constraint)
+			entry, resolvedDir, err := resolveKitEntry(cmd.Context(), source, targetAbs, constraint)
 			if err != nil {
 				return err
 			}
 			// Record the constraint so `kit update` (S7) has a semver gate to
 			// re-resolve against; see kitlock.Entry.Constraint.
 			entry.Constraint = constraint
+			// Snapshot non-git resolutions into the content-addressed tree
+			// cache so a future `kit update` can diff the accepted bytes
+			// against a candidate even after the source directory mutates
+			// (git-tier sources are already pinned in the commit cache).
+			if entry.Commit == "" {
+				if _, _, err := kitgit.MaterializeTree(resolvedDir); err != nil {
+					return fmt.Errorf("snapshot resolved kit tree: %w", err)
+				}
+			}
 
 			lockPath := kitlock.Path(targetAbs)
 			lf, err := kitlock.Load(lockPath)
@@ -299,7 +320,7 @@ func verifyKitLockfile(cmd *cobra.Command, target string) error {
 	ok := true
 	for _, name := range lf.SortedNames() {
 		locked := lf.Kits[name]
-		resolved, err := resolveKitEntry(cmd.Context(), locked.Source, targetAbs, "")
+		resolved, _, err := resolveKitEntry(cmd.Context(), locked.Source, targetAbs, "")
 		if err != nil {
 			ok = false
 			fmt.Fprintf(out, "%s: ERROR %v\n", name, err)
@@ -375,18 +396,6 @@ func printVerifyReport(out interface{ Write([]byte) (int, error) }, report *kitv
 	}
 }
 
-func kitUpdateCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "update [name]",
-		Short: "Re-resolve a locked kit against its version constraint (not yet implemented)",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "kit update: not yet implemented — semver-gated re-resolution + migration worklist land in S7 (lifecycle). For now, re-run `kitsoki kit add` with the new source/version to update a lock entry.")
-			return nil
-		},
-	}
-}
-
 func kitDevCmd() *cobra.Command {
 	var (
 		path  string
@@ -438,43 +447,46 @@ how ~/.kitsoki/repo persists the repo-wide override (internal/kitrepo).`,
 
 // resolveKitEntry resolves source (git+ or any other tier) and builds the
 // lockfile Entry it should produce, validating an optional version
-// constraint along the way.
-func resolveKitEntry(ctx context.Context, source, importerDir, constraint string) (*kitlock.Entry, error) {
+// constraint along the way. resolvedDir is the on-disk kit root the entry
+// was resolved from — the seam `kit update` uses to snapshot and diff the
+// candidate's bytes.
+func resolveKitEntry(ctx context.Context, source, importerDir, constraint string) (entry *kitlock.Entry, resolvedDir string, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if url, ref, ok := kitgit.ParseSource(source); ok {
 		res, err := kitgit.Materialize(ctx, kitgit.DefaultRunner, url, ref)
 		if err != nil {
-			return nil, fmt.Errorf("resolve %q: %w", source, err)
+			return nil, "", fmt.Errorf("resolve %q: %w", source, err)
 		}
 		appPath := filepath.Join(res.Root, "app.yaml")
 		def, err := app.LoadWithResolver(appPath, nil, buildImportResolver())
 		if err != nil {
-			return nil, fmt.Errorf("load resolved kit manifest %s: %w", appPath, err)
+			return nil, "", fmt.Errorf("load resolved kit manifest %s: %w", appPath, err)
 		}
 		if err := checkConstraint(def.App.Version, constraint); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return &kitlock.Entry{Source: source, Version: def.App.Version, Commit: res.Commit, TreeHash: res.TreeHash}, nil
+		return &kitlock.Entry{Source: source, Version: def.App.Version, Commit: res.Commit, TreeHash: res.TreeHash}, res.Root, nil
 	}
 
 	appPath, err := app.ResolveSource(source, importerDir, buildImportResolver())
 	if err != nil {
-		return nil, fmt.Errorf("resolve %q: %w", source, err)
+		return nil, "", fmt.Errorf("resolve %q: %w", source, err)
 	}
 	def, err := app.LoadWithResolver(appPath, nil, buildImportResolver())
 	if err != nil {
-		return nil, fmt.Errorf("load resolved kit manifest %s: %w", appPath, err)
+		return nil, "", fmt.Errorf("load resolved kit manifest %s: %w", appPath, err)
 	}
 	if err := checkConstraint(def.App.Version, constraint); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	treeHash, err := kitgit.DirTreeHash(filepath.Dir(appPath))
+	kitDir := filepath.Dir(appPath)
+	treeHash, err := kitgit.DirTreeHash(kitDir)
 	if err != nil {
-		return nil, fmt.Errorf("hash resolved kit directory: %w", err)
+		return nil, "", fmt.Errorf("hash resolved kit directory: %w", err)
 	}
-	return &kitlock.Entry{Source: source, Version: def.App.Version, TreeHash: treeHash}, nil
+	return &kitlock.Entry{Source: source, Version: def.App.Version, TreeHash: treeHash}, kitDir, nil
 }
 
 func checkConstraint(version, constraint string) error {
