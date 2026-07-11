@@ -524,13 +524,13 @@ world:
   # against a stale workspace (the loop the dogfood walkthrough hit
   # on 2026-05-18 — see rooms/idle.yaml's on_enter comment).
   bf_autostart_attempted: { type: bool, default: false }
-  # Explicit opt-in for a caller-prepared workspace identity: when true, the
-  # Step-0w isolation guard (rooms/idle.yaml) keeps a seeded workspace_id /
-  # feature_branch / workdir instead of clearing them for re-derivation.
+  # Explicit opt-in for a caller-prepared workspace identity: when true, idle
+  # keeps a seeded workspace_id / feature_branch / workdir and never derives or
+  # creates a replacement workspace, including after a refinement re-entry.
   # Auditable and default-off: a headless caller must SAY it prepared the
   # checkout; silently seeded identities still get re-derived into
   # .capsules/workspaces/bf-*. Autostart's other steps (thread derivation, start) run
-  # normally — unlike bf_autostart_attempted, this only affects identity.
+  # normally — unlike bf_autostart_attempted, this only affects workspace identity.
   workspace_prepared:     { type: bool, default: false }
   # User-facing oversight policy. judge_mode remains the compatibility switch
   # consumed by existing checkpoint rooms; oversight_mode selects operation
