@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/buildinfo"
 	"kitsoki/internal/reportmeta"
 )
 
@@ -53,4 +54,31 @@ states:
 	require.True(t, strings.HasPrefix(fields["story_checksum_sha256"], "sha256:"), fields["story_checksum_sha256"])
 	require.Contains(t, fields["public_stories_json"], `"name":"bug"`)
 	require.Contains(t, fields["public_stories_json"], `"checksum_sha256":"sha256:`)
+}
+
+func TestCapturePrefersStampedBuildInfoRevision(t *testing.T) {
+	oldVersion := buildinfo.Version
+	oldRevision := buildinfo.Revision
+	oldRevisionShort := buildinfo.RevisionShort
+	t.Cleanup(func() {
+		buildinfo.Version = oldVersion
+		buildinfo.Revision = oldRevision
+		buildinfo.RevisionShort = oldRevisionShort
+	})
+
+	buildinfo.Version = "buildinfo-version"
+	buildinfo.Revision = "1234567890abcdef1234567890abcdef12345678"
+	buildinfo.RevisionShort = "1234567"
+
+	snap := reportmeta.Capture(t.TempDir(), nil)
+	require.Equal(t, "buildinfo-version", snap.Engine.Version)
+	require.Equal(t, "1234567890abcdef1234567890abcdef12345678", snap.Engine.Revision)
+	require.Equal(t, "1234567", snap.Engine.RevisionShort)
+
+	fields := map[string]string{}
+	for _, f := range snap.Fields() {
+		fields[f.Key] = f.Value
+	}
+	require.Equal(t, "1234567890abcdef1234567890abcdef12345678", fields["engine_revision"])
+	require.Equal(t, "1234567", fields["engine_revision_short"])
 }

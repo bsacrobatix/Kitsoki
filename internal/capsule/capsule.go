@@ -386,6 +386,47 @@ func ReadManifest(workspace string) (Manifest, error) {
 	return m, nil
 }
 
+// ManagedSourceRootFromCWD returns the source checkout recorded by the nearest
+// managed capsule workspace above the current working directory.
+func ManagedSourceRootFromCWD() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return ManagedSourceRootFromPath(cwd)
+}
+
+// ManagedSourceRootFromPath walks upward from start until it finds a managed
+// capsule workspace manifest and returns the recorded source checkout path.
+func ManagedSourceRootFromPath(start string) string {
+	start = filepath.Clean(strings.TrimSpace(start))
+	if start == "" {
+		return ""
+	}
+	for cur := start; ; {
+		if isWorkspace(cur) {
+			manifest, err := ReadManifest(cur)
+			if err == nil {
+				if root := strings.TrimSpace(manifest.Source.Repo); root != "" {
+					if !filepath.IsAbs(root) {
+						if abs, absErr := filepath.Abs(root); absErr == nil {
+							root = abs
+						}
+					}
+					if fi, statErr := os.Stat(root); statErr == nil && fi.IsDir() {
+						return root
+					}
+				}
+			}
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return ""
+		}
+		cur = parent
+	}
+}
+
 func writeManifest(workspace string, manifest Manifest) error {
 	b, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {

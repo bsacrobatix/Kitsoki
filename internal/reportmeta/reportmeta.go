@@ -168,17 +168,23 @@ func AppendFence(body string, s Snapshot) string {
 }
 
 func captureEngine(root string) Engine {
-	out := Engine{Version: strings.TrimSpace(buildinfo.Version)}
+	out := Engine{
+		Version:       strings.TrimSpace(buildinfo.Version),
+		Revision:      strings.TrimSpace(buildinfo.Revision),
+		RevisionShort: strings.TrimSpace(buildinfo.RevisionShort),
+	}
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		if out.Version == "" && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
 			out.Version = bi.Main.Version
 		}
-		for _, setting := range bi.Settings {
-			switch setting.Key {
-			case "vcs.revision":
-				out.Revision = strings.TrimSpace(setting.Value)
-			case "vcs.modified":
-				out.Dirty = strings.TrimSpace(setting.Value)
+		if out.Revision == "" {
+			for _, setting := range bi.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					out.Revision = strings.TrimSpace(setting.Value)
+				case "vcs.modified":
+					out.Dirty = strings.TrimSpace(setting.Value)
+				}
 			}
 		}
 	}

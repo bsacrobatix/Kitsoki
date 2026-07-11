@@ -13,8 +13,10 @@
 // is grep-friendly and survives without any database.
 //
 // `<target-root>` resolves to:
-//   - the current working directory (or --target-dir) for `--target story`
-//   - $KITSOKI_REPO       (or --target-dir) for `--target kitsoki`
+//   - the managed workspace's source checkout root when running inside a
+//     capsule-backed workspace
+//   - the current checkout root / resolved kitsoki repo otherwise
+//   - --target-dir always wins when provided
 package main
 
 import (
@@ -70,8 +72,8 @@ func bugCmd() *cobra.Command {
 Local bugs are stored as markdown files under <target-root>/issues/bugs/
 or <target-root>/.artifacts/issues/bugs/, one file per report, named
 "<UTC timestamp>-<slug>.md". The <target-root> is the running app's directory
-for story bugs (--target story) and $KITSOKI_REPO for engine bugs
-(--target kitsoki).
+when launched from the repo root, or the source checkout recorded for a
+managed capsule workspace.
 
 The agent (/meta story bug or /meta kitsoki bug) calls this
 subcommand to record what the user described; humans grep or edit
@@ -183,11 +185,10 @@ func bugCreateCmd() *cobra.Command {
 
 Target resolution:
   --sink local-project:
-    --target story    writes under <--target-dir | $PWD>/issues/bugs/
-    --target kitsoki  writes under <--target-dir | $KITSOKI_REPO>/issues/bugs/
-                      (errors if neither flag nor env is set)
+    --target story    writes under the source checkout's issues/bugs/
+    --target kitsoki  writes under the source checkout's issues/bugs/
   --sink local-artifact:
-    writes the same markdown format under <resolved-target-root>/.artifacts/issues/bugs/
+    writes the same markdown format under the source checkout's .artifacts/issues/bugs/
   --sink github:
     files on --github <owner/repo>
 
@@ -229,15 +230,18 @@ resolved target-root. Exit 1 on error.`,
 				return err
 			}
 			var localRoot, displayPrefix string
-			privacyRoot := bugPrivacyFollowUpRoot(targetDir)
+			privacyRoot, _, err := resolveBugLocalRoot(normTarget, targetDir, bugSinkLocalProject)
+			if err != nil {
+				return err
+			}
 			privacyDisplayPrefix := ""
 			if sinkMode != bugSinkGitHub {
 				localRoot, displayPrefix, err = resolveBugLocalRoot(normTarget, targetDir, sinkMode)
 				if err != nil {
 					return err
 				}
+				privacyRoot = localRoot
 				if sinkMode == bugSinkLocalArtifact {
-					privacyRoot = localRoot
 					privacyDisplayPrefix = displayPrefix
 				}
 			}
@@ -408,16 +412,6 @@ func prefixBugPrivacyFollowUp(privacy bugprivacy.Result, prefix string) bugpriva
 	}
 	privacy.FollowUpPath = displayBugPath(prefix, privacy.FollowUpPath)
 	return privacy
-}
-
-func bugPrivacyFollowUpRoot(targetDir string) string {
-	if strings.TrimSpace(targetDir) != "" {
-		return targetDir
-	}
-	if cwd, err := os.Getwd(); err == nil {
-		return cwd
-	}
-	return "."
 }
 
 func cliPrivacyFollowUpSuffix(privacy bugprivacy.Result) string {

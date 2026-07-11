@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"kitsoki/internal/buildinfo"
 )
 
 func readFile(path string) (string, error) {
@@ -44,6 +46,22 @@ func TestCLI_Version(t *testing.T) {
 	}
 	if !strings.Contains(out, "version") {
 		t.Errorf("--help output does not mention version subcommand:\n%s", out)
+	}
+}
+
+func TestCLI_VersionIncludesStampedRevision(t *testing.T) {
+	oldRevision := buildinfo.Revision
+	t.Cleanup(func() {
+		buildinfo.Revision = oldRevision
+	})
+	buildinfo.Revision = "1234567890abcdef1234567890abcdef12345678"
+
+	out, err := execRoot(t, "version")
+	if err != nil {
+		t.Fatalf("version: %v", err)
+	}
+	if !strings.Contains(out, buildinfo.Revision) {
+		t.Fatalf("version output missing stamped revision:\n%s", out)
 	}
 }
 
