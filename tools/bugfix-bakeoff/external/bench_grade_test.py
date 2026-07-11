@@ -43,6 +43,22 @@ def test_decide_quality():
     assert dq(False, True, True) == "failed"
 
 
+def test_materialize_plain_export_skips_generated_caches():
+    with tempfile.TemporaryDirectory() as td:
+        source = Path(td) / "source"
+        dest = Path(td) / "dest"
+        source.mkdir()
+        (source / "main.go").write_text("package demo\n")
+        generated = source / ".artifacts" / "go"
+        generated.mkdir(parents=True)
+        (generated / "cache.bin").write_text("not benchmark input")
+
+        bench.materialize(source, dest)
+
+        assert (dest / "main.go").exists()
+        assert not (dest / ".artifacts").exists(), "generated cache must not enter scoring scratch"
+
+
 def test_aggregate_tolerates_bench_cell():
     # A bench.py-shaped cell: None metrics, unmeasured compliance.
     cell = {
@@ -159,7 +175,7 @@ def test_resolve_repo_dir_accepts_meta_repo_subdir_or_standalone_checkout():
         assert "repo_subdir does not exist" in resolved["errors"][0]
 
 
-def test_repo_history_capsule_catalog_has_the_promoted_ten():
+def test_repo_history_capsule_catalog_has_the_promoted_fifteen():
     projects = ["query-string", "gears-rust", "kitsoki"]
     manifests = bench.load_project_manifests(projects)
     capsules = [
@@ -168,8 +184,8 @@ def test_repo_history_capsule_catalog_has_the_promoted_ten():
         for bug in bench.selected_bugs(m)
     ]
     ids = {item["id"] for item in capsules}
-    assert len(capsules) == 10
-    assert {"query-string/qs1", "gears-rust/bug1", "kitsoki/bug9"} <= ids
+    assert len(capsules) == 15
+    assert {"query-string/qs1", "gears-rust/bug1", "kitsoki/bug9", "kitsoki/bug18", "kitsoki/bug19"} <= ids
     gears = next(item for item in capsules if item["id"] == "gears-rust/bug1")
     assert gears["capsule_ref"] == "repo-history/gears-rust/bug1"
     assert gears["kind"] == "repo-history"
