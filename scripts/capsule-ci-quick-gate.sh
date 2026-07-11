@@ -5,6 +5,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+echo "capsule-ci-quick: preparing embedded story assets"
+make embed-stories >/dev/null
 echo "capsule-ci-quick: checking diff hygiene"
 git diff --check
 echo "capsule-ci-quick: validating Capsule CI story"
