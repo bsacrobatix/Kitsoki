@@ -537,7 +537,10 @@ def dispatch_single_prompt_codex(args: argparse.Namespace, task: dict[str, Any],
         "codex",
         "exec",
         "-C",
-        str(tree),
+        # The runner invokes Codex with cwd=tree. `tree` can be relative in a
+        # native run, so -C must be absolute rather than resolving it a second
+        # time beneath the already-selected cwd.
+        str(tree.resolve()),
         "--skip-git-repo-check",
         "--dangerously-bypass-approvals-and-sandbox",
         "-s",
