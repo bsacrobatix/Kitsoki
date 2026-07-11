@@ -343,6 +343,9 @@ states:
             min_strength: supervised
             repo: read_only
             network: model_only
+            # The live reviewer uses the same operator-scoped Claude login as
+            # the fixer. Without this it fails before submitting a verdict.
+            auth_home: inherit
             resources:
               timeout: "8m"
           args:
@@ -355,19 +358,32 @@ states:
         bind:
           last_job_id: job_id
         on_complete:
-          - set:
+          # A provider/login/validator failure has no submitted review
+          # artifact. Handle it before dereferencing submitted.* so a failed
+          # review cannot strand the session in reviewing_executing.
+          - when: "world.last_job_status != 'done' || len(world.last_job_result.submitted) == 0"
+            set:
+              outcome: "blocked"
+              review_reason: "Review agent did not produce a verdict."
+          - when: "world.last_job_status != 'done' || len(world.last_job_result.submitted) == 0"
+            target: blocked
+          # Targets do not short-circuit the rest of an on_complete effect
+          # list, so every submitted.* access below must be guarded as well.
+          - when: "world.last_job_status == 'done' && len(world.last_job_result.submitted) > 0"
+            set:
               review_artifact: "{{ world.last_job_result.submitted }}"
               review_ok:       "{{ world.last_job_result.submitted.pass }}"
               review_reason:   "{{ world.last_job_result.submitted.reason }}"
               review_feedback: "{{ world.last_job_result.submitted.pass ? '' : world.last_job_result.submitted.reason }}"
-          - when: "world.last_job_result.submitted.pass == false && world.cycle >= world.max_cycles"
+          - when: "world.last_job_status == 'done' && len(world.last_job_result.submitted) > 0 && world.last_job_result.submitted.pass == false && world.cycle >= world.max_cycles"
             set: { outcome: "review_failed" }
-          - say: "Review gate → {% if world.last_job_result.submitted.pass == true %}PASS{% else %}FAIL{% endif %}: {{ world.last_job_result.submitted.reason }}"
-          - when: "world.last_job_result.submitted.pass == true"
+          - when: "world.last_job_status == 'done' && len(world.last_job_result.submitted) > 0"
+            say: "Review gate → {% if world.last_job_result.submitted.pass == true %}PASS{% else %}FAIL{% endif %}: {{ world.last_job_result.submitted.reason }}"
+          - when: "world.last_job_status == 'done' && len(world.last_job_result.submitted) > 0 && world.last_job_result.submitted.pass == true"
             target: done_clean
-          - when: "world.last_job_result.submitted.pass == false && world.cycle < world.max_cycles"
+          - when: "world.last_job_status == 'done' && len(world.last_job_result.submitted) > 0 && world.last_job_result.submitted.pass == false && world.cycle < world.max_cycles"
             target: fixing_executing
-          - when: "world.last_job_result.submitted.pass == false && world.cycle >= world.max_cycles"
+          - when: "world.last_job_status == 'done' && len(world.last_job_result.submitted) > 0 && world.last_job_result.submitted.pass == false && world.cycle >= world.max_cycles"
             target: done_review_failed
     on:
       look:
