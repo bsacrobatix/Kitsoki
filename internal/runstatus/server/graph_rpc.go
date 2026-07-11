@@ -6,8 +6,32 @@
 package server
 
 import (
+	"fmt"
+	"os"
+	"time"
+
+	"kitsoki/internal/clock"
 	objectgraph "kitsoki/internal/graph"
 )
+
+// graphRPCClock resolves the effective clock these bare RPC write ops
+// (graph.propose/authorize/withdraw/apply) stamp with: KITSOKI_GRAPH_CLOCK_FIXED
+// wins when set (RFC3339, parsed once per call), else clock.Real(). This
+// carrier has no ctx/host.Registry actor-injection seam (a known gap: the
+// plan flags "third write carrier ... no journal/host.Registry/actor" —
+// graph.propose/authorize/apply/withdraw here always stamp with actor ""),
+// but the clock-fixed determinism guarantee still applies for gate checks
+// that exercise this RPC surface directly.
+func graphRPCClock() (clock.Clock, *rpcError) {
+	if fixed := os.Getenv("KITSOKI_GRAPH_CLOCK_FIXED"); fixed != "" {
+		t, err := time.Parse(time.RFC3339, fixed)
+		if err != nil {
+			return nil, &rpcError{Code: codeServerError, Message: fmt.Sprintf("KITSOKI_GRAPH_CLOCK_FIXED=%q: invalid RFC3339 timestamp: %v", fixed, err)}
+		}
+		return clock.NewFake(t.UTC()), nil
+	}
+	return clock.Real(), nil
+}
 
 func graphStringParam(params map[string]any, key string) string {
 	s, _ := params[key].(string)
@@ -41,12 +65,16 @@ func graphProposeRPC(params map[string]any) (any, *rpcError) {
 			ops = append(ops, m)
 		}
 	}
+	clk, rerr := graphRPCClock()
+	if rerr != nil {
+		return nil, rerr
+	}
 	res, err := objectgraph.Propose(catalogPath, objectgraph.ProposeInput{
 		Title:      graphStringParam(params, "title"),
 		Visibility: graphStringParam(params, "visibility"),
 		Operations: ops,
 		Provenance: graphMapParam(params, "provenance"),
-	})
+	}, "", clk)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.propose: " + err.Error()}
 	}
@@ -77,7 +105,11 @@ func graphAuthorizeRPC(params map[string]any) (any, *rpcError) {
 	if catalogPath == "" || changesetID == "" {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.authorize: requires both 'catalog_path' and 'changeset_id'"}
 	}
-	res, err := objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID))
+	clk, rerr := graphRPCClock()
+	if rerr != nil {
+		return nil, rerr
+	}
+	res, err := objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID), "", clk)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.authorize: " + err.Error()}
 	}
@@ -110,7 +142,11 @@ func graphWithdrawRPC(params map[string]any) (any, *rpcError) {
 	if catalogPath == "" || changesetID == "" {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.withdraw: requires both 'catalog_path' and 'changeset_id'"}
 	}
-	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID))
+	clk, rerr := graphRPCClock()
+	if rerr != nil {
+		return nil, rerr
+	}
+	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID), "", clk)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.withdraw: " + err.Error()}
 	}
@@ -145,7 +181,11 @@ func graphApplyRPC(params map[string]any) (any, *rpcError) {
 	if catalogPath == "" || changesetID == "" {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.apply: requires both 'catalog_path' and 'changeset_id'"}
 	}
-	res, err := objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolParam(params, "dry_run"))
+	clk, rerr := graphRPCClock()
+	if rerr != nil {
+		return nil, rerr
+	}
+	res, err := objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolParam(params, "dry_run"), "", clk)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.apply: " + err.Error()}
 	}

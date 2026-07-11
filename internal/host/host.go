@@ -343,6 +343,32 @@ func ClockFromContext(ctx context.Context) clock.Clock {
 	return clock.Real()
 }
 
+// ─── Actor context ───────────────────────────────────────────────────────────
+
+// actorKey is the unexported context key for an injected operator identity
+// (graph-mcp plan §3.4's stamps seam). Deliberately separate from
+// internal/runstatus/server's actorCtxKey, which is scoped to unrelated
+// story-author slots.author injection.
+type actorKey struct{}
+
+// WithActor injects an operator identity string into ctx so that
+// host.graph.propose/authorize/apply handlers can stamp authored_by/
+// authorized_by without threading an explicit param through every call
+// site above the host.graph dispatch boundary.
+func WithActor(ctx context.Context, actor string) context.Context {
+	return context.WithValue(ctx, actorKey{}, actor)
+}
+
+// ActorFromContext retrieves the injected actor from ctx.
+// Returns "" when no actor has been injected (stamps that key off actor
+// non-empty are simply skipped).
+func ActorFromContext(ctx context.Context) string {
+	if a, ok := ctx.Value(actorKey{}).(string); ok {
+		return a
+	}
+	return ""
+}
+
 // RequestClarification is the high-level helper that handler authors call to
 // pause the job and ask the user a question. It:
 //  1. Calls jc.Store.RequestClarification to write the schema to the DB and

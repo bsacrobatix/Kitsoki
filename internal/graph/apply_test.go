@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"kitsoki/internal/clock"
 )
 
 // copyBundleFixture copies testdata/apply/bundle into a fresh temp dir so
@@ -63,7 +65,7 @@ func TestApply_Added(t *testing.T) {
         status: draft
         visibility: public
 `)
-	res, err := Apply(root, "change-add", false)
+	res, err := Apply(root, "change-add", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -92,7 +94,7 @@ func TestApply_Modified(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Apply(root, "change-mod", false)
+	res, err := Apply(root, "change-mod", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -123,7 +125,7 @@ func TestApply_ModifiedStaleGuardRejects(t *testing.T) {
           before: satisfied
           after: closed
 `)
-	res, err := Apply(root, "change-mod-stale", false)
+	res, err := Apply(root, "change-mod-stale", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -159,7 +161,7 @@ func TestApply_Removed(t *testing.T) {
         schema: graph/requirement/v0
         title: Requirement one
 `)
-	res, err := Apply(root, "change-rm", false)
+	res, err := Apply(root, "change-rm", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -182,7 +184,7 @@ func TestApply_Renamed(t *testing.T) {
       from: req-one
       to: req-one-renamed
 `)
-	res, err := Apply(root, "change-rename", false)
+	res, err := Apply(root, "change-rename", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -226,7 +228,7 @@ func TestApply_RejectsUnauthorizedStatus(t *testing.T) {
           before: draft
           after: satisfied
 `)
-	res, err := Apply(root, "change-proposed", false)
+	res, err := Apply(root, "change-proposed", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -235,7 +237,7 @@ func TestApply_RejectsUnauthorizedStatus(t *testing.T) {
 	}
 
 	// Dry-run should still preview it despite the status.
-	res, err = Apply(root, "change-proposed", true)
+	res, err = Apply(root, "change-proposed", true, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply dry-run: %v", err)
 	}
@@ -262,7 +264,7 @@ func TestApply_RejectsOnPostApplyLintFailure(t *testing.T) {
         edges:
           required_by: [feature-does-not-exist]
 `)
-	res, err := Apply(root, "change-bad-edge", false)
+	res, err := Apply(root, "change-bad-edge", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -292,7 +294,7 @@ func TestApply_RejectsAddingExistingNode(t *testing.T) {
         status: draft
         visibility: public
 `)
-	res, err := Apply(root, "change-dup", false)
+	res, err := Apply(root, "change-dup", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -311,7 +313,7 @@ func TestApply_Retyped(t *testing.T) {
       from_type: requirement
       to_type: feature
 `)
-	res, err := Apply(root, "change-retype-fail", false)
+	res, err := Apply(root, "change-retype-fail", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -335,7 +337,7 @@ func TestApply_Retyped(t *testing.T) {
       from_type: requirement
       to_type: program
 `)
-	res, err = Apply(root, "change-retype-success", false)
+	res, err = Apply(root, "change-retype-success", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -368,7 +370,7 @@ func TestApply_RegistryTypeModified(t *testing.T) {
           before: null
           after: "Updated summary"
 `)
-	res, err := Apply(root, "change-reg-mod", false)
+	res, err := Apply(root, "change-reg-mod", false, "", clock.Real())
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
