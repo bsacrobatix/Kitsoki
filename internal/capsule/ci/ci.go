@@ -1,16 +1,21 @@
 package ci
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -63,6 +68,7 @@ type ResultContract struct {
 type Remote struct {
 	Endpoint      string `yaml:"endpoint" json:"endpoint"`
 	CredentialEnv string `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
+	CAFile        string `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
 }
 type ReceiptPolicy struct {
 	RequireSignature bool   `yaml:"require_signature,omitempty" json:"require_signature,omitempty"`
@@ -113,7 +119,15 @@ func Load(project string) (Config, error) {
 		return Config{}, fmt.Errorf("capsule ci: read %s: %w", path, err)
 	}
 	var cfg Config
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("capsule ci: parse %s: %w", path, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return Config{}, fmt.Errorf("capsule ci: parse %s: multiple YAML documents are not allowed", path)
+		}
 		return Config{}, fmt.Errorf("capsule ci: parse %s: %w", path, err)
 	}
 	if err := Validate(project, cfg); err != nil {
@@ -145,6 +159,15 @@ func Validate(project string, cfg Config) error {
 		if remote.CredentialEnv != "" && !validEnvName(remote.CredentialEnv) {
 			return fmt.Errorf("capsule ci remote %q: invalid credential env", name)
 		}
+		if remote.CAFile != "" {
+			clean := filepath.Clean(remote.CAFile)
+			if filepath.IsAbs(remote.CAFile) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+				return fmt.Errorf("capsule ci remote %q: ca_file must be project-relative", name)
+			}
+			if _, err := os.Stat(filepath.Join(project, clean)); err != nil {
+				return fmt.Errorf("capsule ci remote %q: ca_file: %w", name, err)
+			}
+		}
 	}
 	for name, p := range cfg.Pipelines {
 		if err := validateCleanupPolicy("pipeline "+name+" cleanup", p.Cleanup); err != nil {
@@ -175,6 +198,12 @@ func Validate(project string, cfg Config) error {
 		if p.Agents.Policy == "allow" && (len(p.Agents.Profiles) == 0 || p.Agents.MaxCostUSD <= 0 || p.Agents.OnUnavailable == "") {
 			return fmt.Errorf("capsule ci pipeline %q: allowed agents require profiles, budget, and fallback", name)
 		}
+		if p.Agents.Policy != "" && p.Agents.Policy != "allow" && p.Agents.Policy != "deny" {
+			return fmt.Errorf("capsule ci pipeline %q: invalid agent policy %q", name, p.Agents.Policy)
+		}
+		if err := validateResultContract(p.Result); err != nil {
+			return fmt.Errorf("capsule ci pipeline %q: %w", name, err)
+		}
 		if p.Executor != "" && !isBuiltinExecutor(p.Executor) {
 			if _, ok := cfg.Remotes[p.Executor]; !ok {
 				return fmt.Errorf("capsule ci pipeline %q: executor %q is not configured", name, p.Executor)
@@ -184,11 +213,17 @@ func Validate(project string, cfg Config) error {
 	return nil
 }
 func ValidateVerdict(v Verdict, expected executor.Envelope, contract ResultContract) error {
+	if err := validateResultContract(contract); err != nil {
+		return err
+	}
 	if v.Schema != VerdictSchema {
 		return fmt.Errorf("capsule ci: verdict schema %q", v.Schema)
 	}
 	if v.Pipeline == "" || v.Outcome == "" {
 		return fmt.Errorf("capsule ci: verdict pipeline and outcome are required")
+	}
+	if pipeline, _ := expected.Trigger["requested_pipeline"].(string); pipeline != "" && v.Pipeline != pipeline {
+		return fmt.Errorf("capsule ci: verdict pipeline %q does not match sealed pipeline %q", v.Pipeline, pipeline)
 	}
 	switch v.Outcome {
 	case "passed", "failed", "needs_input", "cancelled", "infra_failed":
@@ -217,7 +252,50 @@ func ValidateVerdict(v Verdict, expected executor.Envelope, contract ResultContr
 	if v.PromotionEligible != derived {
 		return fmt.Errorf("capsule ci: promotion eligibility is derived, not caller-controlled")
 	}
+	if !contractAllowsOutcome(contract, v.Outcome) {
+		return fmt.Errorf("capsule ci: verdict outcome %q is outside the pipeline result contract", v.Outcome)
+	}
 	return nil
+}
+
+func validateResultContract(contract ResultContract) error {
+	if contract.Schema != "" && contract.Schema != VerdictSchema {
+		return fmt.Errorf("capsule ci: result schema %q, want %q", contract.Schema, VerdictSchema)
+	}
+	seen := map[string]string{}
+	for _, group := range []struct {
+		name     string
+		outcomes []string
+	}{
+		{name: "pass_exits", outcomes: contract.PassExits},
+		{name: "fail_exits", outcomes: contract.FailExits},
+		{name: "park_exits", outcomes: contract.ParkExits},
+	} {
+		for _, outcome := range group.outcomes {
+			if outcome != "passed" && outcome != "failed" && outcome != "needs_input" && outcome != "cancelled" && outcome != "infra_failed" {
+				return fmt.Errorf("capsule ci: result %s contains invalid outcome %q", group.name, outcome)
+			}
+			if prior, duplicate := seen[outcome]; duplicate {
+				return fmt.Errorf("capsule ci: result outcome %q appears in both %s and %s", outcome, prior, group.name)
+			}
+			seen[outcome] = group.name
+		}
+	}
+	return nil
+}
+
+func contractAllowsOutcome(contract ResultContract, outcome string) bool {
+	if len(contract.PassExits) == 0 && len(contract.FailExits) == 0 && len(contract.ParkExits) == 0 {
+		return true
+	}
+	switch outcome {
+	case "passed":
+		return contains(contract.PassExits, outcome)
+	case "needs_input":
+		return contains(contract.ParkExits, outcome)
+	default:
+		return contains(contract.FailExits, outcome)
+	}
 }
 
 // Launcher is a story adapter. Production adapters start the selected Kitsoki
@@ -247,15 +325,51 @@ type Service struct {
 	Executors   ExecutorSelector
 	Launcher    Launcher
 	Hygiene     HygienePlanner
+	Observer    RunObserver
+	Now         func() time.Time
 }
+
+const (
+	RunStageRequested  = "requested"
+	RunStagePreparing  = "preparing"
+	RunStageRunning    = "running"
+	RunStageCollecting = "collecting"
+	RunStageFinished   = "finished"
+	RunStageFailed     = "failed"
+)
+
+// RunObservation is a durable lifecycle checkpoint emitted before executor
+// side effects, after preparation, after every executor event, and at terminal
+// completion. The observer is injected so CLI and MCP front doors can share the
+// same persistence without coupling the CI service to a filesystem layout.
+type RunObservation struct {
+	Result          RunResult `json:"result"`
+	DiagnosticError string    `json:"diagnostic_error,omitempty"`
+}
+
+type RunObserver interface {
+	Observe(context.Context, RunObservation) error
+}
+
+type RunObserverFunc func(context.Context, RunObservation) error
+
+func (f RunObserverFunc) Observe(ctx context.Context, observation RunObservation) error {
+	return f(ctx, observation)
+}
+
 type HygienePlanner interface {
 	PlanHygiene(context.Context, CleanupPolicy) (HygieneReport, error)
 }
 type HygieneReport struct {
-	Schema      string `json:"schema,omitempty"`
-	Candidates  int    `json:"candidates"`
-	TotalBytes  int64  `json:"total_bytes"`
-	EvidenceRef string `json:"evidence_ref,omitempty"`
+	Schema            string `json:"schema,omitempty"`
+	Candidates        int    `json:"candidates"`
+	TotalBytes        int64  `json:"total_bytes"`
+	EvidenceRef       string `json:"evidence_ref,omitempty"`
+	DiskKnown         bool   `json:"disk_known,omitempty"`
+	DiskCapacityBytes int64  `json:"disk_capacity_bytes,omitempty"`
+	DiskFreeBytes     int64  `json:"disk_free_bytes,omitempty"`
+	DiskMinimumBytes  int64  `json:"disk_minimum_bytes,omitempty"`
+	DiskBelowMinimum  bool   `json:"disk_below_minimum,omitempty"`
 }
 type HygienePlannerFunc func(context.Context, CleanupPolicy) (HygieneReport, error)
 
@@ -277,6 +391,12 @@ type RunResult struct {
 	Verdict   Verdict           `json:"verdict"`
 	Execution executor.Result   `json:"execution"`
 	Events    []executor.Event  `json:"events,omitempty"`
+	Pipeline  string            `json:"pipeline,omitempty"`
+	Executor  string            `json:"executor,omitempty"`
+	Stage     string            `json:"stage,omitempty"`
+	StartedAt time.Time         `json:"started_at,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitempty"`
+	Terminal  bool              `json:"terminal,omitempty"`
 }
 
 func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.Envelope, error) {
@@ -297,8 +417,22 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	if req.Trigger.Kind == "" {
 		req.Trigger.Kind = "local"
 	}
+	if req.Trigger.RequestedPipeline == "" {
+		req.Trigger.RequestedPipeline = req.Pipeline
+	}
+	if req.Trigger.RequestedPipeline != req.Pipeline {
+		return Pipeline{}, executor.Envelope{}, fmt.Errorf("capsule ci: trigger requested pipeline %q, run selected %q", req.Trigger.RequestedPipeline, req.Pipeline)
+	}
 	if !contains(p.Triggers, req.Trigger.Kind) {
 		return Pipeline{}, executor.Envelope{}, fmt.Errorf("capsule ci: trigger %q not allowed", req.Trigger.Kind)
+	}
+	if req.Trigger.Provider == "github" {
+		if req.Trigger.Kind != "pull_request" {
+			return Pipeline{}, executor.Envelope{}, fmt.Errorf("capsule ci: unsupported GitHub trigger kind %q", req.Trigger.Kind)
+		}
+		if req.Trigger.HeadSHA != req.SourceDigest {
+			return Pipeline{}, executor.Envelope{}, fmt.Errorf("capsule ci: GitHub head sha %q does not match workspace source %q", req.Trigger.HeadSHA, req.SourceDigest)
+		}
 	}
 	envID := p.Environment
 	if envID == "" {
@@ -309,7 +443,7 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	if err != nil {
 		return Pipeline{}, executor.Envelope{}, err
 	}
-	e, err := executor.Seal(executor.Envelope{JobID: "pending", ProjectID: filepath.Base(s.ProjectRoot), DefinitionDigest: req.DefinitionDigest, Instance: req.Workspace, SourceDigest: req.SourceDigest, StoryPath: p.Story, StoryDigest: req.StoryDigest, Environment: lock, Trigger: triggerMap(req.Trigger), Policy: executor.Policy{Network: defaultNetwork(p.Permissions.Network), MinimumSandbox: lock.Sandbox, ExternalWrite: defaultExternal(p.Permissions.ExternalWrite)}})
+	e, err := executor.Seal(executor.Envelope{JobID: "pending", ProjectID: filepath.Base(s.ProjectRoot), DefinitionDigest: req.DefinitionDigest, Instance: req.Workspace, SourceDigest: req.SourceDigest, StoryPath: p.Story, StoryDigest: req.StoryDigest, Environment: lock, Trigger: triggerMap(req.Trigger), Policy: executor.Policy{Network: defaultNetwork(p.Permissions.Network), MinimumSandbox: lock.Sandbox, ExternalWrite: defaultExternal(p.Permissions.ExternalWrite), Agents: executor.AgentPolicy{Policy: defaultAgentPolicy(p.Agents.Policy), Profiles: append([]string(nil), p.Agents.Profiles...), MaxCostUSD: p.Agents.MaxCostUSD, OnUnavailable: p.Agents.OnUnavailable}}})
 	return p, e, err
 }
 func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
@@ -324,30 +458,67 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err != nil {
 		return RunResult{}, err
 	}
+	result := RunResult{Job: job, Envelope: envelope, Pipeline: req.Pipeline, Executor: p.Executor, StartedAt: job.CreatedAt}
+	if result.StartedAt.IsZero() {
+		result.StartedAt = s.now()
+	}
 	envelope.JobID = string(job.ID)
-	envelope, err = executor.Seal(envelope)
+	// Plan seals the provisional "pending" job identity. Clear that digest
+	// before deliberately changing the identity; Seal rejects stale digests so
+	// providers cannot accidentally accept a mutated envelope as a fresh one.
+	envelope.Digest = ""
+	sealed, err := executor.Seal(envelope)
 	if err != nil {
-		return RunResult{}, err
+		result.Envelope = envelope
+		return s.failRegistered(ctx, result, err)
+	}
+	envelope = sealed
+	result.Envelope = envelope
+	if result, err = s.observe(ctx, result, RunStageRequested, false, nil); err != nil {
+		return s.failWithoutObservation(ctx, result, fmt.Errorf("capsule ci: persist requested checkpoint: %w", err))
 	}
 	provider := s.Provider
 	if s.Executors != nil {
 		provider, err = s.Executors.Select(ctx, p.Executor)
 		if err != nil {
-			return RunResult{}, err
+			return s.failRegistered(ctx, result, err)
 		}
 	}
 	if provider == nil {
-		return RunResult{}, fmt.Errorf("capsule ci: no provider for executor %q", p.Executor)
+		return s.failRegistered(ctx, result, fmt.Errorf("capsule ci: no provider for executor %q", p.Executor))
+	}
+	result, err = s.observe(ctx, result, RunStagePreparing, false, nil)
+	if err != nil {
+		return s.failWithoutObservation(ctx, result, fmt.Errorf("capsule ci: persist preparing checkpoint: %w", err))
 	}
 	prepared, err := provider.Prepare(ctx, envelope)
 	if err != nil {
-		return RunResult{}, err
+		return s.failRegistered(ctx, result, err)
 	}
 	var verdict Verdict
 	var events []executor.Event
+	result.Execution.ExecutionID = prepared.ID
+	result, err = s.observe(ctx, result, RunStageRunning, false, nil)
+	if err != nil {
+		return s.failWithoutObservation(ctx, result, fmt.Errorf("capsule ci: persist running checkpoint: %w", err))
+	}
+	var eventMu sync.Mutex
+	var observerErr error
 	sink := executor.EventSinkFunc(func(_ context.Context, event executor.Event) error {
+		if event.At.IsZero() {
+			event.At = s.now()
+		}
+		eventMu.Lock()
+		defer eventMu.Unlock()
 		events = append(events, event)
-		return nil
+		result.Events = append([]executor.Event(nil), events...)
+		checkpoint := result
+		if _, persistErr := s.observe(ctx, checkpoint, RunStageRunning, false, nil); persistErr != nil {
+			if observerErr == nil {
+				observerErr = fmt.Errorf("capsule ci: persist executor event: %w", persistErr)
+			}
+		}
+		return observerErr
 	})
 	execution, runErr := provider.Run(ctx, prepared, func(ctx context.Context, prepared executor.Prepared) (executor.Result, error) {
 		if s.Launcher == nil {
@@ -367,6 +538,19 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		verdict = v
 		return executor.Result{VerdictArtifact: "verdict:" + hashVerdict(v), VerdictJSON: raw}, nil
 	}, sink)
+	eventMu.Lock()
+	result.Events = append([]executor.Event(nil), events...)
+	eventMu.Unlock()
+	result.Execution = execution
+	if result.Execution.ExecutionID == "" {
+		result.Execution.ExecutionID = prepared.ID
+	}
+	eventMu.Lock()
+	persistErr := observerErr
+	eventMu.Unlock()
+	if runErr == nil && persistErr != nil {
+		runErr = persistErr
+	}
 	if runErr == nil && len(execution.VerdictJSON) > 0 {
 		if err := json.Unmarshal(execution.VerdictJSON, &verdict); err != nil {
 			runErr = fmt.Errorf("capsule ci: parse executor verdict: %w", err)
@@ -390,21 +574,113 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		}
 	}
 	status := artifactjob.StatusDone
-	if runErr != nil || verdict.Outcome == "infra_failed" {
+	if verdict.Outcome == "infra_failed" {
 		status = artifactjob.StatusFailed
 	}
 	if verdict.Outcome == "needs_input" {
 		status = artifactjob.StatusAwaitingInput
 	}
-	summary := verdict.Summary
-	if updated, updateErr := s.Jobs.Update(ctx, job.ID, artifactjob.Update{Status: &status, Summary: &summary, TerminalArtifactHandle: &execution.VerdictArtifact}); updateErr == nil {
-		job = updated
-	}
+	result.Verdict = verdict
 	if runErr != nil {
-		return RunResult{Job: job, Envelope: envelope, Verdict: verdict, Execution: execution, Events: events}, runErr
+		return s.failRegistered(ctx, result, runErr)
 	}
-	job, _ = s.Jobs.Get(ctx, job.ID)
-	return RunResult{Job: job, Envelope: envelope, Verdict: verdict, Execution: execution, Events: events}, nil
+	summary := verdict.Summary
+	updated, updateErr := s.Jobs.Update(ctx, job.ID, artifactjob.Update{Status: &status, Summary: &summary, TerminalArtifactHandle: &execution.VerdictArtifact})
+	if updateErr != nil {
+		return s.failRegistered(ctx, result, fmt.Errorf("capsule ci: update terminal job: %w", updateErr))
+	}
+	result.Job = updated
+	result, observeErr := s.observe(ctx, result, RunStageFinished, true, nil)
+	if observeErr != nil {
+		return result, fmt.Errorf("capsule ci: persist terminal checkpoint: %w", observeErr)
+	}
+	return result, nil
+}
+
+func (s Service) failRegistered(ctx context.Context, result RunResult, runErr error) (RunResult, error) {
+	status := artifactjob.StatusFailed
+	stage := RunStageFailed
+	if errors.Is(runErr, context.Canceled) {
+		status = artifactjob.StatusCancelled
+		stage = RunStageFinished
+		result.Verdict = cancelledVerdict(result, runErr)
+	}
+	summary := runErr.Error()
+	result.Job.Status = status
+	if result.Job.ID != "" {
+		if updated, err := s.Jobs.Update(ctx, result.Job.ID, artifactjob.Update{Status: &status, Summary: &summary}); err == nil {
+			result.Job = updated
+		} else {
+			runErr = fmt.Errorf("%w (also failed to update job: %v)", runErr, err)
+		}
+	}
+	observed, observeErr := s.observe(ctx, result, stage, true, runErr)
+	if observeErr != nil {
+		return observed, fmt.Errorf("%w (also failed to persist terminal checkpoint: %v)", runErr, observeErr)
+	}
+	return observed, runErr
+}
+
+func (s Service) failWithoutObservation(ctx context.Context, result RunResult, runErr error) (RunResult, error) {
+	status := artifactjob.StatusFailed
+	stage := RunStageFailed
+	if errors.Is(runErr, context.Canceled) {
+		status = artifactjob.StatusCancelled
+		stage = RunStageFinished
+		result.Verdict = cancelledVerdict(result, runErr)
+	}
+	summary := runErr.Error()
+	result.Job.Status = status
+	if result.Job.ID != "" {
+		if updated, err := s.Jobs.Update(ctx, result.Job.ID, artifactjob.Update{Status: &status, Summary: &summary}); err == nil {
+			result.Job = updated
+		}
+	}
+	result.Stage, result.Terminal, result.UpdatedAt = stage, true, s.now()
+	return result, runErr
+}
+
+func cancelledVerdict(result RunResult, cause error) Verdict {
+	summary := "Capsule CI execution was cancelled."
+	if cause != nil && cause.Error() != "" {
+		summary = cause.Error()
+	}
+	return Verdict{
+		Schema:            VerdictSchema,
+		Pipeline:          result.Pipeline,
+		Outcome:           "cancelled",
+		Summary:           summary,
+		Checks:            []Check{},
+		PromotionEligible: false,
+		SourceDigest:      result.Envelope.SourceDigest,
+		StoryDigest:       result.Envelope.StoryDigest,
+		EnvironmentDigest: result.Envelope.Environment.Digest,
+		EnvelopeDigest:    result.Envelope.Digest,
+	}
+}
+
+func (s Service) observe(ctx context.Context, result RunResult, stage string, terminal bool, runErr error) (RunResult, error) {
+	result.Stage = stage
+	result.Terminal = terminal
+	result.UpdatedAt = s.now()
+	if result.StartedAt.IsZero() {
+		result.StartedAt = result.UpdatedAt
+	}
+	if s.Observer == nil {
+		return result, nil
+	}
+	diagnostic := ""
+	if runErr != nil {
+		diagnostic = runErr.Error()
+	}
+	return result, s.Observer.Observe(ctx, RunObservation{Result: result, DiagnosticError: diagnostic})
+}
+
+func (s Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 func contains(in []string, want string) bool {
 	for _, v := range in {
@@ -413,6 +689,13 @@ func contains(in []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func defaultAgentPolicy(value string) string {
+	if value == "" {
+		return "deny"
+	}
+	return value
 }
 func defaultNetwork(v string) string {
 	if v == "" {

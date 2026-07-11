@@ -5,7 +5,7 @@
 #   tools/bugfix-bakeoff/external/drive_cell.sh \
 #       --project <project> --bug <bug> --candidate <candidate> --score
 #
-# which prepares the baseline worktree, drives the kitsoki bugfix pipeline LIVE
+# which prepares a native pinned Capsule baseline, drives the kitsoki bugfix pipeline LIVE
 # under the candidate's harness profile (the worker model), grades the fix against
 # the hidden oracle, and writes .artifacts/external-bakeoff/results/cells/
 # <project>-<bug>-<candidate>-kitsoki.json by default.

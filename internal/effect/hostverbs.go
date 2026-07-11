@@ -74,6 +74,10 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.chat.drive":         {class: Write, deterministic: false},
 
 	"host.git_worktree": {class: Write, deterministic: true},
+	// host.capsule_ci.project_checks executes the project's declared local
+	// test/build commands. Those commands may write build outputs and their
+	// result depends on the checked-out source and toolchain state.
+	"host.capsule_ci.project_checks": {class: Write, deterministic: false},
 	"host.capsule_workspace": {
 		class: Write, deterministic: true,
 		ops: map[string]opEffect{
@@ -103,21 +107,21 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.ide.open_diff":        {class: Write, deterministic: true},
 	"host.diff.open":            {class: Write, deterministic: true},
 
-	"host.starlark.run":         {class: Write, deterministic: true},
+	"host.starlark.run":          {class: Write, deterministic: true},
 	"host.corpus.prove":          {class: Write, deterministic: true},
 	"host.corpus.freeze_receipt": {class: Write, deterministic: true},
-	"host.punch.verify":         {class: Read, deterministic: true},
-	"host.proposal.publish":     {class: Write, deterministic: true},
-	"host.dev.profile_setup":    {class: Write, deterministic: true},
-	"host.dev.onboarding":       {class: Write, deterministic: true},
-	"host.decomposition.update": {class: Write, deterministic: true},
-	"host.product_journey.run":  {class: External, deterministic: false},
-	"host.bakeoff.run":          {class: External, deterministic: false},
-	"host.session_mining.run":   {class: External, deterministic: false},
+	"host.punch.verify":          {class: Read, deterministic: true},
+	"host.proposal.publish":      {class: Write, deterministic: true},
+	"host.dev.profile_setup":     {class: Write, deterministic: true},
+	"host.dev.onboarding":        {class: Write, deterministic: true},
+	"host.decomposition.update":  {class: Write, deterministic: true},
+	"host.product_journey.run":   {class: External, deterministic: false},
+	"host.bakeoff.run":           {class: External, deterministic: false},
+	"host.session_mining.run":    {class: External, deterministic: false},
 	"host.ui_qa.run":             {class: External, deterministic: false},
-	"host.slidey.render":        {class: Write, deterministic: true},
-	"host.contact_sheet":        {class: Write, deterministic: true},
-	"host.video.frame":          {class: Write, deterministic: true},
+	"host.slidey.render":         {class: Write, deterministic: true},
+	"host.contact_sheet":         {class: Write, deterministic: true},
+	"host.video.frame":           {class: Write, deterministic: true},
 
 	// host.git — 7 ops, per-op tiers: local mutations (branch/commit) are
 	// Write; anything that reaches GitHub (push/open_pr/pr_comment) is

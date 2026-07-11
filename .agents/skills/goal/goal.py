@@ -679,7 +679,9 @@ def main(argv=None):
         picked = ready_set(ledger, k=args.k)
         print(json.dumps([{"change_id": r["change_id"], "title": r["title"],
                            "pipeline": r["pipeline"], "scope": r["scope_globs"],
-                           "worktree": f".worktrees/gu-{r['change_id']}"} for r in picked], indent=2))
+                           "workspace_id": f"gu-{r['change_id']}",
+                           "workspace_path": f".capsules/workspaces/gu-{r['change_id']}"}
+                          for r in picked], indent=2))
         return 0
 
     if args.cmd == "preamble":

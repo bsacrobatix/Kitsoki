@@ -89,8 +89,8 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(ciStory), "outcome: needs_input") || strings.Contains(string(ciStory), "outcome: passed") {
-		t.Fatalf("ci story should park without default pass:\n%s", ciStory)
+	if !strings.Contains(string(ciStory), "host.capsule_ci.project_checks") || strings.Contains(string(ciStory), "outcome: passed") {
+		t.Fatalf("ci story should run project-profile checks without fabricating a pass:\n%s", ciStory)
 	}
 	instance, err := os.ReadFile(filepath.Join(root, ".kitsoki/stories/example-dev/app.yaml"))
 	if err != nil {

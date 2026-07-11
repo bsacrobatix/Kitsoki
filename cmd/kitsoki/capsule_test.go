@@ -17,7 +17,7 @@ func TestCapsuleListIncludesCoreAndRepoHistoryCapsules(t *testing.T) {
 		"clean-repo [core]",
 		"repo-history/query-string/qs1 [repo-history]",
 		"executor: internal/capsule",
-		"executor: bugfix-bakeoff",
+		"executor: internal/capsule/pinned-git",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("capsule list missing %q:\n%s", want, out)
@@ -48,7 +48,7 @@ func TestCapsuleListRepoHistoryJSON(t *testing.T) {
 	}
 	for _, entry := range payload.Capsules {
 		if entry.Ref == "repo-history/gears-rust/bug1" {
-			if entry.Kind != "repo-history" || entry.Executor != "bugfix-bakeoff" || entry.Environment != "repo-history-gears-rust" {
+			if entry.Kind != "repo-history" || entry.Executor != repoHistoryCapsuleMaterializer || entry.Environment != "repo-history-gears-rust" {
 				t.Fatalf("unexpected gears-rust entry: %+v", entry)
 			}
 			return
@@ -99,7 +99,7 @@ func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
 		"# Repo History Capsules",
 		"Capsules: **10**",
 		"`repo-history/query-string/qs1`",
-		"bugfix-bakeoff",
+		"internal/capsule/pinned-git",
 		"repo-history-query-string",
 	} {
 		if !strings.Contains(out, want) {

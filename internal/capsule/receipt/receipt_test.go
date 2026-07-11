@@ -22,7 +22,14 @@ func (fakeSigner) Verify(b []byte, s string) error {
 	return nil
 }
 func validInput() BuildInput {
-	e, _ := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "story", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: executor.Policy{Network: "none"}})
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		panic(err)
+	}
+	e, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "story", StoryDigest: "sha256:story", Environment: lock, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		panic(err)
+	}
 	v := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []ci.Check{{ID: "tests", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:tests"}}}, PromotionEligible: true, SourceDigest: e.SourceDigest, StoryDigest: e.StoryDigest, EnvironmentDigest: e.Environment.Digest, EnvelopeDigest: e.Digest}
 	return BuildInput{Job: artifactjob.Job{ID: "job"}, Envelope: e, Verdict: v, Artifacts: []Artifact{{Handle: "b"}, {Handle: "a"}}, TraceDigest: "sha256:trace"}
 }

@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # drive_cell.sh — run ONE external bake-off cell end-to-end from the manifest.
 #
-# Codifies the live-drive recipe (worktree prep + every load-bearing initial_world
-# knob + the headless MCP delegation) so a cell is one command instead of a
+# Codifies the live-drive recipe (Capsule workspace prep + every load-bearing
+# initial_world knob + the headless MCP delegation) so a cell is one command instead of a
 # hand-assembled prompt. COST-BEARING (real LLM) — operator-run, never in CI.
 #
-#   drive_cell.sh --project <name> --bug <id> --candidate <key> [--score] [--no-drive] [--no-docker-score]
+#   drive_cell.sh --project <name> --bug <id> --candidate <key> [--score] [--no-drive] [--no-docker-score] [--keep-workspace]
 #                 [--repo-dir <local-checkout>] [--completion-state <path>]
 #
-#   --score      after the drive, grade the worktree with bench.py + extract cost
-#   --no-drive   only prepare the worktree + print the prompt (free; for inspection)
+#   --score      after the drive, grade the workspace with bench.py + extract cost
+#   --no-drive   only prepare the workspace + print the prompt (free; for inspection)
 #   --no-docker-score  force host-based scoring (docker default)
+#   --keep-workspace  pin a scored workspace for explicit debugging instead of closing it
 #
 # Reads projects/<name>/manifest.yaml (per-bug facts via `bench.py meta --bug`) and
-# candidates.yaml (the model/profile axis). Clones the repo ONCE into a cache and
-# reuses node_modules across cells. The worker model is whatever the candidate's
+# candidates.yaml (the model/profile axis). Materialization is delegated to a
+# pinned native Capsule definition and every Git mutation stays behind Capsule's
+# declared-command boundary. The worker model is whatever the candidate's
 # profile selects (codex-native → GPT-5.5, synthetic-claude → GLM-5.2); the
 # orchestrator (default GPT-5.5) only clicks the pipeline forward.
 set -euo pipefail
@@ -22,11 +24,20 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE" && git rev-parse --show-toplevel)"
 CACHE="${EXTERNAL_BAKEOFF_CACHE:-$REPO_ROOT/.artifacts/external-bakeoff}"      # gitignored work area
+CAPSULE_PROJECT="${EXTERNAL_BAKEOFF_CAPSULE_PROJECT:-$REPO_ROOT/.capsules/projects/external-bakeoff}"
 MAX_ATTEMPTS="${MCP_DRIVE_MAX_ATTEMPTS:-12}"
 BACKOFF_BASE="${MCP_DRIVE_BACKOFF_BASE:-10}"
 BACKOFF_MAX="${MCP_DRIVE_BACKOFF_MAX:-600}"
 
-project=""; bug=""; cand=""; repo_dir=""; completion_state=""; do_score=0; no_drive=0; orch="${MCP_DRIVE_MODEL:-gpt-5.5}"; use_docker_score="${EXTERNAL_BAKEOFF_USE_DOCKER_SCORE:-1}"
+capsule_workspace_cli() {
+  if [[ -n "${KITSOKI_CAPSULE_BIN:-}" ]]; then
+    "$KITSOKI_CAPSULE_BIN" capsule workspace "$@"
+    return
+  fi
+  (cd "$REPO_ROOT" && go run ./cmd/kitsoki capsule workspace "$@")
+}
+
+project=""; bug=""; cand=""; repo_dir=""; completion_state=""; do_score=0; no_drive=0; keep_workspace=0; orch="${MCP_DRIVE_MODEL:-gpt-5.5}"; use_docker_score="${EXTERNAL_BAKEOFF_USE_DOCKER_SCORE:-1}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project) project="$2"; shift 2;;
@@ -36,13 +47,18 @@ while [[ $# -gt 0 ]]; do
     --completion-state) completion_state="$2"; shift 2;;
     --orchestrator) orch="$2"; shift 2;;
     --no-docker-score) use_docker_score=0; shift;;
+    --keep-workspace) keep_workspace=1; shift;;
     --score) do_score=1; shift;;
     --no-drive) no_drive=1; shift;;
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
 [[ -n "$project" && -n "$bug" && -n "$cand" ]] || {
-  echo "usage: drive_cell.sh --project <name> --bug <id> --candidate <key> [--repo-dir <local-checkout>] [--score] [--no-drive] [--no-docker-score] [--completion-state <path>]" >&2; exit 2; }
+  echo "usage: drive_cell.sh --project <name> --bug <id> --candidate <key> [--repo-dir <local-checkout>] [--score] [--no-drive] [--no-docker-score] [--keep-workspace] [--completion-state <path>]" >&2; exit 2; }
+if [[ "$keep_workspace" == 1 && "$do_score" != 1 ]]; then
+  echo "--keep-workspace is a debug override for scored cells; use --no-drive for a prepared handoff" >&2
+  exit 2
+fi
 
 is_retryable_error() {
   local payload="$1"
@@ -134,10 +150,10 @@ for c in d["candidates"]:
 profile="$(cand_field profile)"; short="$(cand_field short)"
 [[ -n "$profile" ]] || { echo "unknown candidate '$cand' in candidates.yaml" >&2; exit 2; }
 # Key every per-cell path/identifier by project too, so two projects that reuse a
-# bug id (e.g. both define "bug9") can't collide on the same worktree/trace/branch.
+# bug id (e.g. both define "bug9") can't collide on the same workspace/trace/branch.
 cellkey="$project-$bug-$cand"
 
-# --- fail fast (before any clone/spend) ---------------------------------------
+# --- fail fast (before any materialization/spend) -----------------------------
 # local_only projects drive against an explicit local checkout. kitsoki-self can
 # default to this repository; external/private repos must use --repo-dir or one
 # of the manifest's generic repo_envs.
@@ -148,45 +164,179 @@ local_only=""
 # ticket_id + ticket_title; no ticket file). One line, quotes stripped.
 desc="$(printf '%s — %s' "$title" "$(printf '%s' "$ticket" | tr '\n' ' ' | sed 's/  */ /g')" | sed 's/"/\\"/g')"
 
-# --- source repo: clone (remote) or the local checkout (local_only) -----------
-if [[ -n "$local_only" ]]; then
+# --- immutable source authority ------------------------------------------------
+if [[ -n "$local_only" || -n "$repo_dir" ]]; then
   repo_path_args=(repo-path --project "$project")
   [[ -n "$repo_dir" ]] && repo_path_args+=(--repo-dir "$repo_dir")
   repo_path_json="$CACHE/preflight/$cellkey-repo-path.json"; repo_path_err="$repo_path_json.err"; mkdir -p "$(dirname "$repo_path_json")"
   if ! python3 "$HERE/bench.py" "${repo_path_args[@]}" >"$repo_path_json" 2>"$repo_path_err"; then
-    echo "[cell] project '$project' is local_only; pass --repo-dir <checkout-or-meta-root> or set one of the manifest repo_envs." >&2
+    echo "[cell] could not resolve the declared source checkout for '$project'; pass --repo-dir <checkout-or-meta-root> or set one of the manifest repo_envs." >&2
     cat "$repo_path_json" >&2 2>/dev/null || true
     cat "$repo_path_err" >&2 2>/dev/null || true
     exit 2
   fi
-  src="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("path",""))' "$repo_path_json")"
-  # Drive against a worktree of the target checkout; the baseline must be a real
-  # commit there. No clone, no install — language toolchains are cached locally;
-  # a nested package install can still run at score time via oracle.setup.
-  git -C "$src" cat-file -e "${baseline}^{commit}" 2>/dev/null || {
-    echo "[cell] baseline '$baseline' is not a commit in the local repo ($src)." >&2; exit 2; }
+  source_ref="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("path",""))' "$repo_path_json")"
 else
-  src="$CACHE/clone/$project"
-  if [[ ! -d "$src/.git" ]]; then
-    echo "[cell] cloning $repo -> $src" >&2
-    mkdir -p "$(dirname "$src")"
-    git clone -q "$repo" "$src"
-  fi
-  git -C "$src" cat-file -e "$baseline" 2>/dev/null || git -C "$src" fetch -q origin "$baseline"
-  if [[ ! -d "$src/node_modules" ]]; then
-    echo "[cell] $install (once) in $src" >&2
-    ( cd "$src" && git checkout -q "$baseline" && eval "$install" )
-  fi
+  source_ref="$repo"
 fi
+
+# The sentinel-owned child project is a real Capsule control plane: definitions are
+# immutable, instances carry leases + generations, and Git source caching stays
+# behind the pinned provider. Hash the source as well as the cell so a manifest
+# retarget cannot silently reacquire an older checkout with the same display key.
+capsule_project="$CAPSULE_PROJECT"
+workspace_identity="$(python3 -c 'import hashlib,re,sys
+raw=":".join(sys.argv[1:])
+slug=re.sub(r"[^A-Za-z0-9._-]+","-",sys.argv[1]).strip("-.")[:72] or "cell"
+print("cell-"+slug+"-"+hashlib.sha256(raw.encode()).hexdigest()[:16])' "$cellkey" "$source_ref" "$baseline")"
+definition_id="$workspace_identity"
+capsule_owner="external-bakeoff-$cellkey"
+branch="bench-$project-$bug-$short"
+base_branch="bench-base-$project-$bug-$short"
+definition_path="$capsule_project/.kitsoki/capsules/$definition_id.yaml"
+mkdir -p "$CACHE/capsule-logs"
+python3 - "$capsule_project/.kitsoki-capsule-project" "$REPO_ROOT" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = {
+    "schema": "capsule-project/v1",
+    "kind": "external-bakeoff",
+    "parent_project": os.path.realpath(sys.argv[2]),
+    "managed_by": "tools/bugfix-bakeoff/external/drive_cell.sh",
+}
+if path.parent.is_symlink():
+    raise SystemExit(
+        f"refusing Capsule project root {path.parent}: expected a real directory, not a symlink"
+    )
+if path.is_symlink():
+    raise SystemExit(
+        f"refusing Capsule project sentinel {path}: expected a regular non-symlink file"
+    )
+if path.exists():
+    if not path.is_file():
+        raise SystemExit(
+            f"refusing Capsule project sentinel {path}: expected a regular non-symlink file"
+        )
+    try:
+        current = json.loads(path.read_text())
+    except Exception as exc:
+        raise SystemExit(f"refusing malformed Capsule project sentinel {path}: {exc}")
+    for field in ("schema", "kind", "parent_project", "managed_by"):
+        if current.get(field) != expected[field]:
+            raise SystemExit(
+                f"refusing Capsule project sentinel {path}: {field}="
+                f"{current.get(field)!r}, want {expected[field]!r}"
+            )
+else:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(expected, indent=2) + "\n")
+PY
+mkdir -p "$(dirname "$definition_path")"
+python3 - "$definition_path" "$definition_id" "$source_ref" "$baseline" "$project" "$bug" "$cand" "$base_branch" "$branch" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, definition_id, source_ref, baseline, project, bug, candidate, base_branch, branch = sys.argv[1:]
+definition = {
+    "schema": "capsule-definition/v1",
+    "id": definition_id,
+    "description": f"External bake-off cell {project}/{bug}/{candidate} at its immutable baseline.",
+    "source": {"kind": "pinned", "ref": source_ref, "commit": baseline},
+    "policy": {
+        "network": "none",
+        "commands": {
+            "prepare_base": {
+                "argv": ["git", "branch", base_branch, baseline],
+                "timeout": "30s",
+            },
+            "prepare_branch": {
+                "argv": ["git", "switch", "-c", branch, baseline],
+                "timeout": "30s",
+            },
+            "debug_pin": {
+                "argv": ["touch", ".kitsoki-capsule-pin"],
+                "timeout": "10s",
+            },
+        },
+    },
+}
+Path(path).write_text(json.dumps(definition, indent=2) + "\n")
+PY
+
+create_json="$CACHE/capsule-logs/$cellkey-create.json"
+create_err="$create_json.err"
+if ! run_with_retry "capsule workspace create --project $capsule_project --id $workspace_identity" "$create_json" "$create_err" \
+  capsule_workspace_cli create --project "$capsule_project" --id "$workspace_identity" \
+  --definition "$definition_id" --owner "$capsule_owner" --json; then
+  echo "[cell] Capsule materialization failed; see $create_json and $create_err" >&2
+  exit 2
+fi
+cell_rel="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("path",""))' "$create_json")"
+capsule_generation="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("generation",0))' "$create_json")"
+capsule_provider="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("provider",""))' "$create_json")"
+[[ "$capsule_provider" == "git" ]] || {
+  echo "[cell] Capsule returned provider '$capsule_provider', want native git" >&2; exit 2; }
+case "$cell_rel" in
+  ""|/*|..|../*) echo "[cell] Capsule returned an invalid project-relative workspace path: $cell_rel" >&2; exit 2;;
+esac
+cell="$capsule_project/$cell_rel"
+[[ -d "$cell/.git" && -f "$cell/.kitsoki-capsule" && -f "$cell/capsule-manifest.json" ]] || {
+  echo "[cell] Capsule workspace is missing its checkout or ownership sentinels: $cell" >&2; exit 2; }
+
+current_head="$(git -C "$cell" rev-parse HEAD)"
+current_branch="$(git -C "$cell" branch --show-current)"
+current_dirty="$(git -C "$cell" status --porcelain)"
+if [[ "$current_head" != "$baseline" || -n "$current_dirty" ]]; then
+  echo "[cell] refusing to overwrite existing candidate work in managed Capsule $workspace_identity." >&2
+  echo "[cell] score/resume that workspace, or close it through 'kitsoki capsule workspace close' and choose a new cell attempt." >&2
+  exit 2
+fi
+if ! git -C "$cell" show-ref --verify --quiet "refs/heads/$base_branch"; then
+  exec_json="$CACHE/capsule-logs/$cellkey-prepare-base.json"
+  exec_err="$exec_json.err"
+  if ! capsule_workspace_cli exec --project "$capsule_project" --id "$workspace_identity" \
+    --generation "$capsule_generation" --owner "$capsule_owner" --command prepare_base --json \
+    >"$exec_json" 2>"$exec_err"; then
+    echo "[cell] Capsule base preparation failed; see $exec_json and $exec_err" >&2
+    exit 2
+  fi
+  capsule_generation="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("generation",0))' "$exec_json")"
+fi
+if [[ -z "$current_branch" ]]; then
+  exec_json="$CACHE/capsule-logs/$cellkey-prepare-branch.json"
+  exec_err="$exec_json.err"
+  if ! capsule_workspace_cli exec --project "$capsule_project" --id "$workspace_identity" \
+    --generation "$capsule_generation" --owner "$capsule_owner" --command prepare_branch --json \
+    >"$exec_json" 2>"$exec_err"; then
+    echo "[cell] Capsule branch preparation failed; see $exec_json and $exec_err" >&2
+    exit 2
+  fi
+  capsule_generation="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("generation",0))' "$exec_json")"
+  current_branch="$(git -C "$cell" branch --show-current)"
+fi
+if [[ "$current_branch" != "$branch" ]]; then
+  echo "[cell] managed Capsule branch mismatch: got '$current_branch', want '$branch'" >&2
+  exit 2
+fi
+
+# Remote projects retain their dependency install in the managed cell so a
+# prepared no-drive handoff and the later live drive see the same exact tree.
+# local_only projects keep their established toolchain/oracle setup behavior.
+if [[ -z "$local_only" && ! -d "$cell/node_modules" ]]; then
+  echo "[cell] $install in managed Capsule $workspace_identity" >&2
+  (cd "$cell" && eval "$install")
+fi
+src="$cell"
 
 # Keep drive_cell and the repo-bakeoff story on the same readiness contract. For
 # `--no-drive`, report preflight failures but still prepare the inspection prompt;
-# real drives fail here before a worktree or MCP session is created.
-preflight_args=(preflight --project "$project" --bug "$bug" --candidate "$cand")
-[[ -n "${repo_dir:-}" ]] && preflight_args+=(--repo-dir "$repo_dir")
-if [[ -n "$local_only" && -z "${repo_dir:-}" ]]; then
-  preflight_args+=(--repo-dir "$src")
-fi
+# real drives fail here before an MCP session is created.
+preflight_args=(preflight --project "$project" --bug "$bug" --candidate "$cand" --repo-dir "$src")
 preflight_json="$CACHE/preflight/$cellkey.json"; preflight_err="$preflight_json.err"; mkdir -p "$(dirname "$preflight_json")"
 if ! run_with_retry "preflight --project $project --bug $bug --candidate $cand" "$preflight_json" "$preflight_err" python3 "$HERE/bench.py" "${preflight_args[@]}"; then
   if [[ "$no_drive" == 1 ]]; then
@@ -197,20 +347,7 @@ if ! run_with_retry "preflight --project $project --bug $bug --candidate $cand" 
   fi
 fi
 
-# --- per-cell worktree at baseline on its own branch --------------------------
-cell="$CACHE/cells/$cellkey"
-branch_suffix="$(python3 -c 'import hashlib,sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:8])' "$cell")"
-branch="bench-$project-$bug-$short-$branch_suffix"
-git -C "$src" worktree prune
-if [[ -d "$cell" ]]; then
-  git -C "$cell" reset --hard -q "$baseline"; git -C "$cell" clean -fdq
-else
-  git -C "$src" worktree add -q --detach "$cell" "$baseline"
-fi
-git -C "$cell" checkout -q -B "$branch"
-# Link a prebuilt node_modules only for cloned JS repos; local_only repos have
-# their toolchain in place (and a root node_modules symlink would be wrong here).
-[[ -z "$local_only" && -d "$src/node_modules" ]] && ln -sfn "$src/node_modules" "$cell/node_modules"
+# --- per-cell managed Capsule at baseline on its own branch -------------------
 if [[ "${BAKEOFF_CLAUDE_ALLOW_VALIDATOR:-0}" == "1" ]]; then
   mkdir -p "$cell/.claude"
   cat >"$cell/.claude/settings.local.json" <<'JSON'
@@ -252,7 +389,7 @@ The fix MUST be generated by the live worker model inside the session (profile
        workdir: "$cell"
        workspace_id: ""
        feature_branch: "$branch"
-       base_branch: "$branch"
+       base_branch: "$base_branch"
        bugfix_mode: "full"
        judge_mode: "llm"
        test_cmd: "$test_cmd"
@@ -280,7 +417,7 @@ EOF
 )"
 pf="$CACHE/drive-prompts/$cellkey.md"; mkdir -p "$(dirname "$pf")"; printf '%s\n' "$prompt" > "$pf"
 prep="$CACHE/prepared/$cellkey.json"; mkdir -p "$(dirname "$prep")"
-python3 - "$prep" "$project" "$bug" "$cand" "$profile" "$src" "$cell" "$branch" "$baseline" "$trace" "$thread_file" "$pf" "$preflight_json" "$CACHE/results/cells/$cellkey-kitsoki.json" <<'PY'
+python3 - "$prep" "$project" "$bug" "$cand" "$profile" "$src" "$cell" "$branch" "$baseline" "$trace" "$thread_file" "$pf" "$preflight_json" "$CACHE/results/cells/$cellkey-kitsoki.json" "$capsule_project" "$workspace_identity" "$definition_id" "$capsule_owner" "$capsule_generation" "$base_branch" "$capsule_provider" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -288,12 +425,53 @@ from pathlib import Path
 keys = [
     "project", "bug", "candidate", "profile", "repo_dir", "worktree",
     "branch", "baseline_sha", "trace", "thread", "prompt", "preflight",
-    "score_result",
+    "score_result", "capsule_project", "capsule_workspace_id",
+    "capsule_definition_id", "capsule_owner", "capsule_generation",
+    "base_branch", "capsule_provider",
 ]
-Path(sys.argv[1]).write_text(json.dumps(dict(zip(keys, sys.argv[2:])), indent=2) + "\n")
+payload = dict(zip(keys, sys.argv[2:]))
+payload["workspace"] = payload["worktree"]
+payload["workspace_provider"] = "pinned"
+payload["capsule_generation"] = int(payload["capsule_generation"])
+Path(sys.argv[1]).write_text(json.dumps(payload, indent=2) + "\n")
 PY
 echo "[cell] project=$project bug=$bug candidate=$cand profile=$profile" >&2
-echo "[cell] worktree=$cell branch=$branch trace=$trace" >&2
+echo "[cell] capsule=$workspace_identity generation=$capsule_generation workspace=$cell branch=$branch trace=$trace" >&2
+
+record_workspace_cleanup() {
+  local status="$1"
+  local receipt="${2:-}"
+  local error_path="${3:-}"
+  python3 - "$prep" "$status" "$receipt" "$error_path" <<'PY'
+import datetime
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text())
+status, receipt_path, error_path = sys.argv[2:]
+payload["workspace_cleanup"] = status
+payload["workspace_cleanup_at"] = datetime.datetime.now(
+    datetime.timezone.utc
+).isoformat().replace("+00:00", "Z")
+if receipt_path:
+    payload["workspace_cleanup_receipt"] = receipt_path
+    receipt = json.loads(Path(receipt_path).read_text())
+    if status == "closed":
+        payload["capsule_close_generation"] = int(receipt["generation"])
+    elif status == "kept-debug":
+        payload["capsule_generation"] = int(receipt["generation"])
+if error_path:
+    payload["workspace_cleanup_error_path"] = error_path
+    if os.path.exists(error_path):
+        payload["workspace_cleanup_error"] = Path(error_path).read_text()[-4096:].strip()
+tmp = path.with_suffix(path.suffix + ".tmp")
+tmp.write_text(json.dumps(payload, indent=2) + "\n")
+tmp.replace(path)
+PY
+}
 
 if [[ "$no_drive" == 1 ]]; then echo "[cell] --no-drive: prompt at $pf"; echo "[cell] prepared metadata at $prep"; exit 0; fi
 
@@ -342,6 +520,7 @@ if [[ "$do_score" == 1 ]]; then
     python3 "$HERE/bench.py" pending \
       --project "$project" --bug "$bug" --candidate "$cand" --reason "$reason" \
       --out "$out"
+    record_workspace_cleanup "retained-incomplete" "" "$err"
     echo "[cell] wrote pending result -> $out" >&2
     exit 1
   fi
@@ -359,8 +538,8 @@ if [[ "$do_score" == 1 ]]; then
     printf '%s\n' "$p"
   }
 
-  # Reuse the cloned JS node_modules for scoring; local_only repos install (if any)
-  # via the manifest's per-bug oracle.setup inside the scratch tree.
+  # Reuse dependencies from the managed Capsule for scoring; local_only repos
+  # install (if any) via the manifest's per-bug oracle.setup in the scratch tree.
   bench_host=(
     python3 "$HERE/bench.py" score
     --project "$project"
@@ -423,6 +602,50 @@ if [[ "$do_score" == 1 ]]; then
     run_with_retry "host score --project $project --bug $bug --candidate $cand" "$host_score_log" "$host_score_err" "${bench_host[@]}" || true
   fi
 
+  if ! python3 - "$out" "$project" "$bug" "$cand" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+payload = json.loads(path.read_text())
+if payload.get("project") != sys.argv[2] or payload.get("bug") != sys.argv[3] or payload.get("candidate") != sys.argv[4]:
+    raise SystemExit("score result identity does not match the cell")
+if (payload.get("outcome") or {}).get("quality") not in {"solved", "partial", "failed"}:
+    raise SystemExit("score result has no completed quality verdict")
+PY
+  then
+    record_workspace_cleanup "retained-score-failure" "" "$host_score_err"
+    echo "[cell] score did not produce a durable, identity-matched result; workspace retained for diagnosis" >&2
+    exit 1
+  fi
+
   echo "[cell] cost: $(python3 "$HERE/bench.py" cost --trace "$trace")"
-  echo "[cell] verdict: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["outcome"]["quality"])' "$out" 2>/dev/null || echo "?")"
+  echo "[cell] verdict: $(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["outcome"]["quality"])' "$out")"
+
+  if [[ "$keep_workspace" == 1 ]]; then
+    pin_json="$CACHE/capsule-logs/$cellkey-debug-pin.json"
+    pin_err="$pin_json.err"
+    if ! capsule_workspace_cli exec --project "$capsule_project" --id "$workspace_identity" \
+      --generation "$capsule_generation" --owner "$capsule_owner" --command debug_pin --json \
+      >"$pin_json" 2>"$pin_err"; then
+      record_workspace_cleanup "debt" "" "$pin_err"
+      echo "[cell] failed to pin debug workspace; cleanup debt recorded in $prep" >&2
+      exit 1
+    fi
+    record_workspace_cleanup "kept-debug" "$pin_json" ""
+    echo "[cell] debug override: kept and pinned managed workspace $cell" >&2
+  else
+    close_json="$CACHE/capsule-logs/$cellkey-close.json"
+    close_err="$close_json.err"
+    if ! capsule_workspace_cli close --project "$capsule_project" --id "$workspace_identity" \
+      --generation "$capsule_generation" --owner "$capsule_owner" --json \
+      >"$close_json" 2>"$close_err"; then
+      record_workspace_cleanup "debt" "" "$close_err"
+      echo "[cell] score is durable, but Capsule close failed; cleanup debt recorded in $prep and $close_err" >&2
+      exit 1
+    fi
+    record_workspace_cleanup "closed" "$close_json" ""
+    echo "[cell] closed managed Capsule workspace after durable grading -> $close_json" >&2
+  fi
 fi

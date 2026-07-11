@@ -1,11 +1,13 @@
 package environment
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,6 +98,33 @@ type Resolver struct {
 	Now         func() time.Time
 }
 
+// Verifier re-resolves an environment from the exact materialized source and
+// refuses any difference from the lock sealed by the controller. Probe and
+// image resolution are injected so workers can prove the environment they can
+// actually provide instead of trusting controller-local observations.
+type Verifier struct {
+	Probe  ToolProbe
+	Images ImageResolver
+}
+
+// Verify checks both the lock's internal integrity and every input that can be
+// re-resolved from the worker's materialized source. Image-backed definitions
+// require an image resolver; workers must not silently accept a controller's
+// tag-to-digest resolution without independently observing it.
+func (v Verifier) Verify(ctx context.Context, projectRoot string, expected Lock) error {
+	if err := ValidateLock(expected); err != nil {
+		return err
+	}
+	observed, err := (Resolver{ProjectRoot: projectRoot, Probe: v.Probe, Images: v.Images}).Resolve(ctx, expected.ID)
+	if err != nil {
+		return fmt.Errorf("capsule environment %q: worker verification: %w", expected.ID, err)
+	}
+	if observed.Digest != expected.Digest {
+		return fmt.Errorf("capsule environment %q: worker lock mismatch: got %s, want %s", expected.ID, observed.Digest, expected.Digest)
+	}
+	return nil
+}
+
 func Load(projectRoot, id string) (Definition, error) {
 	root, err := filepath.Abs(projectRoot)
 	if err != nil {
@@ -107,7 +136,15 @@ func Load(projectRoot, id string) (Definition, error) {
 		return Definition{}, fmt.Errorf("capsule environment: read %s: %w", path, err)
 	}
 	var d Definition
-	if err := yaml.Unmarshal(raw, &d); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&d); err != nil {
+		return Definition{}, fmt.Errorf("capsule environment: parse %s: %w", path, err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return Definition{}, fmt.Errorf("capsule environment: parse %s: multiple YAML documents are not allowed", path)
+		}
 		return Definition{}, fmt.Errorf("capsule environment: parse %s: %w", path, err)
 	}
 	d.DefinitionPath = path
@@ -205,6 +242,7 @@ func (r Resolver) Resolve(ctx context.Context, id string) (Lock, error) {
 			if err != nil {
 				return Lock{}, fmt.Errorf("capsule environment %q: probe %s: %w", d.ID, name, err)
 			}
+			observed = normalizeToolchainVersion(name, observed)
 			want := d.Toolchains[name]
 			if want != "" && !strings.Contains(strings.TrimPrefix(observed, "v"), strings.TrimPrefix(want, "v")) {
 				return Lock{}, fmt.Errorf("capsule environment %q: toolchain %s mismatch: got %q, want %q", d.ID, name, observed, want)
@@ -227,12 +265,77 @@ func (r Resolver) Resolve(ctx context.Context, id string) (Lock, error) {
 		lock.CacheKeys = append(lock.CacheKeys, cache.Scope+":"+cache.ID)
 	}
 	sort.Strings(lock.CacheKeys)
+	return SealLock(lock)
+}
+
+// SealLock validates and content-addresses a fully resolved environment lock.
+// It exists for alternate resolver implementations as well as the built-in
+// Resolver; callers must not hand an internally inconsistent lock to an
+// execution envelope and rely on a remote worker to discover that later.
+func SealLock(lock Lock) (Lock, error) {
+	lock.Digest = ""
+	if err := validateLockFields(lock); err != nil {
+		return Lock{}, err
+	}
 	lock.Digest = lockDigest(lock)
 	return lock, nil
 }
+
+// ValidateLock verifies both the lock vocabulary and its content digest.
+func ValidateLock(lock Lock) error {
+	digest := lock.Digest
+	sealed, err := SealLock(lock)
+	if err != nil {
+		return err
+	}
+	if digest == "" || digest != sealed.Digest {
+		return fmt.Errorf("capsule environment: invalid or tampered sealed lock")
+	}
+	return nil
+}
+
+func validateLockFields(lock Lock) error {
+	if lock.Schema != LockSchema {
+		return fmt.Errorf("capsule environment: lock schema %q, want %q", lock.Schema, LockSchema)
+	}
+	if strings.TrimSpace(lock.ID) == "" {
+		return fmt.Errorf("capsule environment: lock id is required")
+	}
+	if strings.TrimSpace(lock.DefinitionDigest) == "" {
+		return fmt.Errorf("capsule environment %q: lock definition digest is required", lock.ID)
+	}
+	if lock.Network != "none" && lock.Network != "replay" && lock.Network != "live" {
+		return fmt.Errorf("capsule environment %q: invalid locked network %q", lock.ID, lock.Network)
+	}
+	switch lock.Sandbox {
+	case "none", "supervised", "process", "container", "vm", "hermetic":
+	default:
+		return fmt.Errorf("capsule environment %q: invalid locked sandbox %q", lock.ID, lock.Sandbox)
+	}
+	if lock.ImageDigest != "" && !strings.Contains(lock.ImageDigest, "@sha256:") {
+		return fmt.Errorf("capsule environment %q: image digest is not pinned", lock.ID)
+	}
+	for name, version := range lock.Toolchains {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(version) == "" {
+			return fmt.Errorf("capsule environment %q: invalid locked toolchain", lock.ID)
+		}
+	}
+	for _, input := range lock.Lockfiles {
+		if input.Path == "" || filepath.IsAbs(input.Path) || strings.HasPrefix(filepath.Clean(input.Path), "..") || strings.TrimSpace(input.Digest) == "" {
+			return fmt.Errorf("capsule environment %q: invalid locked input %q", lock.ID, input.Path)
+		}
+	}
+	for _, key := range lock.CacheKeys {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("capsule environment %q: invalid locked cache key", lock.ID)
+		}
+	}
+	return nil
+}
+
 func WriteLock(projectRoot string, lock Lock) (string, error) {
-	if lock.Schema != LockSchema || lock.Digest == "" {
-		return "", fmt.Errorf("capsule environment: invalid lock")
+	if err := ValidateLock(lock); err != nil {
+		return "", err
 	}
 	path := filepath.Join(projectRoot, ".kitsoki", "environments", lock.ID+".lock.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -256,8 +359,8 @@ func ReadLock(path string) (Lock, error) {
 	if err := json.Unmarshal(raw, &lock); err != nil {
 		return Lock{}, err
 	}
-	if lock.Schema != LockSchema || lock.Digest != lockDigest(lock) {
-		return Lock{}, fmt.Errorf("capsule environment: invalid or tampered lock")
+	if err := ValidateLock(lock); err != nil {
+		return Lock{}, err
 	}
 	return lock, nil
 }
@@ -309,6 +412,32 @@ func sortedMapKeys(in map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func normalizeToolchainVersion(name, observed string) string {
+	observed = strings.TrimSpace(observed)
+	fields := strings.Fields(observed)
+	if name == "go" {
+		for _, field := range fields {
+			field = strings.Trim(field, " ,;()[]")
+			if strings.HasPrefix(field, "go") && len(field) > 2 && field[2] >= '0' && field[2] <= '9' {
+				return field
+			}
+		}
+	}
+	for _, field := range fields {
+		field = strings.Trim(field, " ,;()[]")
+		candidate := strings.TrimPrefix(field, "v")
+		if candidate != "" && candidate[0] >= '0' && candidate[0] <= '9' && strings.Contains(candidate, ".") {
+			if strings.HasPrefix(field, "v") {
+				return "v" + candidate
+			}
+			return candidate
+		}
+	}
+	// Unknown tool formats stay explicit. They may make a lock machine-specific,
+	// which is safer than guessing away a meaningful capability difference.
+	return observed
 }
 func validSecretRef(ref string) bool {
 	if ref == "" {

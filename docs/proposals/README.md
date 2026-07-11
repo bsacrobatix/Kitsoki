@@ -113,7 +113,12 @@ thought.
   trace-backed receipts/attestations
   ([`capsule-ci-receipts.md`](capsule-ci-receipts.md)). The design explicitly
   reuses artifact jobs, toolboxes/sandboxing, execution-mode deciders, Arena
-  placement, and GitHub-agent ingress rather than duplicating them.
+  placement, and GitHub-agent ingress rather than duplicating them. The story
+  slice is shipped except for one terminal deployed-worker proof; the
+  environment slice also retains worker-root retention and standalone
+  image-resolution posture.
+  Control-plane migration, production ref publication, and richer receipt
+  producers/goldens/consumers remain active.
 - [`kits.md`](kits.md) — **epic.** Kits: named, semver-versioned, distributable bundles of stories with a standardized shape (interface contracts, onboarding, data-management schemas, conformance fixtures), declared by a `kit.yaml` manifest compiled onto the shipped import/interface/profile machinery. Adds the deliberately-deferred versioning enforcement (resolution tiers + lockfile), deterministic conformance (contract checks + the base kit's no-LLM flow suite run against extensions), and a rev-absorption lifecycle so upstream standards (e.g. an ISO 9001 / ISO 14001 pack over a base management-system kit) evolve through re-extension / re-composition / re-parameterization, never copy-and-edit migration. Prior art: cypilot kits (`constructorfabric/studio-kit-sdlc`). Nothing implemented yet; slices sketched but not cut.
 - [`contextual-room-routing.md`](contextual-room-routing.md) — **runtime.** make the final LLM routing tier classify unmatched room input as exactly one of: explicit intent with slots, read-only help, in-room free-form request, or room-scoped meta edit. Adds persistent room chat lanes, route receipts, and one-decision rewind so operators can correct a bad routing choice. Builds on the in-progress ad-hoc structured-plan workbench and existing meta modes. Runtime slices shipped; web receipt/rewind plumbing and intent-class rewind exist. Remaining work is switch-route ergonomics, TUI parity for receipt/rewind controls, and optional extra flow fixtures.
 - `operation-scoped-world.md` — **shipped and retired.** The operation overlay, explicit commit/draft/discard effects, tracing events, and first GitOps `sync_main` adoption live in [`../stories/state-machine.md`](../stories/state-machine.md#operation-scoped-world), [`../embedded/app-schema.md`](../embedded/app-schema.md#operation--abandonable-task-local-world), and [`../tracing/trace-format.md`](../tracing/trace-format.md#operation-events).

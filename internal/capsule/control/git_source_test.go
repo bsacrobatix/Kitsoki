@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	legacy "kitsoki/internal/capsule"
 	"kitsoki/internal/capsuletest"
 )
 
@@ -36,6 +37,19 @@ func TestGitSourceProviderClonesSelfAndPinnedCapsuleCommit(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(pinned.Path, instanceSentinel)); err != nil {
 		t.Fatal(err)
+	}
+	manifest, err := legacy.ReadManifest(pinned.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.CapsuleName != "pinned" || manifest.Workspace != pinned.Path || manifest.Source.Repo != project || manifest.Source.Commit != selfHead(head) || manifest.Source.Head != selfHead(head) {
+		t.Fatalf("manifest=%#v", manifest)
+	}
+	if err := os.WriteFile(filepath.Join(pinned.Path, instancePinSentinel), []byte("debugging\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if status := strings.TrimSpace(gitOut(t, pinned.Path, "status", "--porcelain")); status != "" {
+		t.Fatalf("Capsule metadata dirtied pinned workspace: %q", status)
 	}
 }
 

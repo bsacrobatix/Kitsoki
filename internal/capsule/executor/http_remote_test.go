@@ -3,22 +3,27 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/capsule/control"
-	"kitsoki/internal/capsule/environment"
 )
 
 func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t *testing.T) {
-	var sawRun bool
+	var sawRun, sawValidate bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/capsules/capabilities":
-			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": Capabilities{ID: "remote", Placements: []string{"remote"}, Networks: []string{"none"}, Cancellable: true}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": Capabilities{ID: "remote", Placements: []string{"remote"}, Isolation: "supervised", Networks: []string{"none"}, Cancellable: true}})
+		case "/v1/capsules/validate":
+			sawValidate = true
+			w.WriteHeader(http.StatusNoContent)
 		case "/v1/capsules/run":
 			sawRun = true
 			if got := r.Header.Get("X-Kitsoki-Request-ID"); !strings.HasPrefix(got, "req-") {
@@ -36,10 +41,13 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": Result{ExitCode: 0, VerdictArtifact: "artifact:verdict", VerdictJSON: []byte(`{"schema":"capsule-ci-verdict/v1"}`), Artifacts: []string{"b", "a"}}})
 		case "/v1/capsules/executions/run/1":
-			if r.Method != http.MethodDelete {
+			status := "running"
+			if r.Method == http.MethodDelete {
+				status = "cancelling"
+			} else if r.Method != http.MethodGet {
 				t.Errorf("method %s", r.Method)
 			}
-			w.WriteHeader(http.StatusNoContent)
+			_ = json.NewEncoder(w).Encode(map[string]any{"run": ExecutionStatus{ExecutionID: "run/1", Status: status, Stage: "story"}})
 		default:
 			http.NotFound(w, r)
 		}
@@ -50,11 +58,11 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 	if err != nil || capabilities.ID != "remote" {
 		t.Fatalf("capabilities %#v: %v", capabilities, err)
 	}
-	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: Policy{Network: "none"}})
-	if err != nil {
-		t.Fatal(err)
+	prepared := testHTTPPrepared(t, "run/1")
+	if err := worker.AcceptPrepared(context.Background(), prepared); err != nil || !sawValidate {
+		t.Fatalf("worker-side no-spend validation: %v saw=%t", err, sawValidate)
 	}
-	result, err := worker.Run(context.Background(), Prepared{ID: "run/1", Envelope: envelope}, func(context.Context, Prepared) (Result, error) {
+	result, err := worker.Run(context.Background(), prepared, func(context.Context, Prepared) (Result, error) {
 		t.Fatal("remote worker must not run the local task")
 		return Result{}, nil
 	}, nil)
@@ -63,6 +71,44 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 	}
 	if err := worker.Cancel(context.Background(), "run/1"); err != nil {
 		t.Fatal(err)
+	}
+	status, err := worker.Status(context.Background(), "run/1")
+	if err != nil || status.Schema != ExecutionStatusSchema || status.Status != "running" {
+		t.Fatalf("status %#v: %v", status, err)
+	}
+}
+
+func TestHTTPRemoteWorkerImportsWorkerFailureTimeline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": "environment mismatch",
+			"run": ExecutionStatus{
+				ExecutionID: "run-failed",
+				Status:      "failed",
+				Stage:       "verify_environment",
+				Error:       "environment mismatch",
+				Events:      []Event{{Kind: "capsule.worker.environment.verifying", ExecutionID: "run-failed", Outcome: "running"}, {Kind: "capsule.worker.failed", ExecutionID: "run-failed", Outcome: "failed", Error: "environment mismatch"}},
+			},
+		})
+	}))
+	defer server.Close()
+	worker := HTTPRemoteWorker{Endpoint: "https://worker.invalid", Client: rewriteClient(t, server)}
+	prepared := testHTTPPrepared(t, "run-failed")
+	var events []Event
+	_, err := worker.Run(context.Background(), prepared, nil, EventSinkFunc(func(_ context.Context, event Event) error {
+		events = append(events, event)
+		return nil
+	}))
+	var executionErr ExecutionError
+	if !errors.As(err, &executionErr) || executionErr.Execution.Stage != "verify_environment" {
+		t.Fatalf("expected typed execution error, got %T %v", err, err)
+	}
+	if len(events) != 4 || events[1].Kind != "capsule.worker.environment.verifying" || events[2].Kind != "capsule.worker.failed" || events[3].Kind != "capsule.executor.failed" {
+		t.Fatalf("events %#v", events)
+	}
+	if events[3].Fields["worker_stage"] != "verify_environment" || events[3].Fields["error_kind"] != "execution" {
+		t.Fatalf("terminal fields %#v", events[3].Fields)
 	}
 }
 
@@ -73,11 +119,12 @@ func TestHTTPRemoteWorkerErrorIncludesBoundedRemoteDiagnostics(t *testing.T) {
 	}))
 	defer server.Close()
 	worker := HTTPRemoteWorker{Endpoint: "https://worker.invalid", Client: rewriteClient(t, server)}
-	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: Policy{Network: "none"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = worker.Run(context.Background(), Prepared{ID: "run/1", Envelope: envelope}, nil, nil)
+	prepared := testHTTPPrepared(t, "run/1")
+	var events []Event
+	_, err := worker.Run(context.Background(), prepared, nil, EventSinkFunc(func(_ context.Context, event Event) error {
+		events = append(events, event)
+		return nil
+	}))
 	if err == nil {
 		t.Fatal("expected remote error")
 	}
@@ -90,6 +137,55 @@ func TestHTTPRemoteWorkerErrorIncludesBoundedRemoteDiagnostics(t *testing.T) {
 	if strings.Contains(msg, "super-secret") {
 		t.Fatalf("error leaked secret body: %s", msg)
 	}
+	if len(events) != 2 || events[0].Kind != "capsule.executor.started" || events[1].Kind != "capsule.executor.failed" {
+		t.Fatalf("events %#v", events)
+	}
+	failed := events[1]
+	if failed.At.IsZero() || failed.Outcome != "failed" || failed.Error != "remote executor request failed" {
+		t.Fatalf("failed event %#v", failed)
+	}
+	for _, key := range []string{"method", "path", "status", "request_id", "duration_ms", "error_kind", "message"} {
+		if _, ok := failed.Fields[key]; !ok {
+			t.Fatalf("failed event missing %s: %#v", key, failed.Fields)
+		}
+	}
+	if failed.Fields["path"] != "v1/capsules/run" || failed.Fields["request_id"] != "worker-request-1" || failed.Fields["error_kind"] != "status" {
+		t.Fatalf("structured fields %#v", failed.Fields)
+	}
+	if strings.Contains(fmt.Sprint(failed.Fields), "super-secret") {
+		t.Fatalf("event fields leaked secret: %#v", failed.Fields)
+	}
+}
+
+func TestHTTPRemoteWorkerEnforcesOverallTimeoutWithInjectedTransport(t *testing.T) {
+	worker := HTTPRemoteWorker{
+		Endpoint: "https://worker.invalid",
+		Client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			<-request.Context().Done()
+			return nil, request.Context().Err()
+		})},
+		Timeouts: HTTPTimeouts{Connect: time.Second, ResponseHeader: time.Second, Overall: 20 * time.Millisecond},
+	}
+	prepared := testHTTPPrepared(t, "run-timeout")
+	started := time.Now()
+	var events []Event
+	_, err := worker.Run(context.Background(), prepared, nil, EventSinkFunc(func(_ context.Context, event Event) error {
+		events = append(events, event)
+		return nil
+	}))
+	if err == nil || !strings.Contains(err.Error(), "kind=transport") {
+		t.Fatalf("expected structured transport timeout, got %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("timeout was not bounded: %s", elapsed)
+	}
+	if len(events) != 2 || events[1].Fields["error_kind"] != "transport" || events[1].At.IsZero() {
+		t.Fatalf("events %#v", events)
+	}
+	defaults := (HTTPRemoteWorker{}).EffectiveTimeouts()
+	if defaults.Connect <= 0 || defaults.ResponseHeader <= 0 || defaults.Overall <= 0 {
+		t.Fatalf("unbounded defaults %#v", defaults)
+	}
 }
 
 func rewriteClient(t *testing.T, server *httptest.Server) *http.Client {
@@ -100,6 +196,20 @@ func rewriteClient(t *testing.T, server *httptest.Server) *http.Client {
 		request.URL.Host = strings.TrimPrefix(server.URL, "http://")
 		return transport.RoundTrip(request)
 	})}
+}
+
+func testHTTPPrepared(t *testing.T, id string) Prepared {
+	t.Helper()
+	envelope, err := Seal(Envelope{
+		JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def",
+		Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source",
+		StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: testEnvironmentLock(t),
+		Policy: Policy{Network: "none"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Prepared{ID: id, Envelope: envelope, Placement: "remote", Applied: envelope.Policy}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

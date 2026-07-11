@@ -5,17 +5,20 @@ pinned-image/devcontainer resolution, lockfile/bootstrap input hashing,
 cache/secret-reference grant validation with lock redaction, host and
 fake-remote executor contracts, pipeline-selected CLI/MCP placement, and
 environment operations ship locally. The HTTPS remote-worker transport and
-checked-in `remotes:` project selection serialize sealed envelopes and typed
-results with header-only credential injection. The Arena-style container
+checked-in `remotes:` project selection now include an authenticated HTTPS
+worker, exact clean-commit Git-bundle upload/cache, worker-side source and full
+story-closure verification, durable worker run/trace records, bounded
+controller deadlines, project-relative private-CA configuration, and
+header-only credential injection. The Arena-style container
 adapter now consumes `completion-state/v1` through both a no-Docker fake backend
 and a Docker backend that runs `capsule worker run` against a mounted workspace;
 the CI executor catalog accepts an injected production `container` provider
 while keeping the no-Docker `container-fake` test lane. Repo-history capsules
-project environment/executor metadata. Final Arena docs trimming remains.
-A bounded VM dogfood of the Studio/Claude worker path reached real GLM-5.2
-worker launch but stalled before any provider stream or terminal verdict; it is
-not counted as remote-worker completion. The deployed HTTPS Capsule worker proof
-and final Arena docs trimming remain.
+project environment/executor metadata, and the permanent Capsule CI/Arena docs
+describe the shared boundary. Bounded worker-root source/run retention and an
+explicit standalone-worker image-resolution posture now ship. Only the terminal
+gated run against a deployed HTTPS worker remains before this proposal can be
+deleted.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -236,6 +239,14 @@ decision.
 - [x] 2.2 Implement host provider with declared commands, sandbox/applied-policy reporting, and artifact collection
 - [x] 2.3 Adapt/extract Arena container backend and completion-state handling; prove local container parity
 - [x] 2.4 Implement remote one-shot protocol and fake streaming worker; add one real remote adapter only after offline conformance is green
+  - Shipped: the production adapter negotiates authenticated HTTPS
+    capabilities, uploads one content-addressed Git bundle on a cache miss,
+    submits the sealed envelope, imports the worker event timeline, and accepts
+    only the normalized typed result. The worker verifies source HEAD/bundle
+    complete story closure, and a worker-local re-resolution of the sealed
+    environment lock before launching a confined subprocess. It persists
+    stage/event records and exposes provider-neutral status/two-phase
+    cancellation endpoints.
 
 ## 3. Adopt and document
 - [x] 3.1 Express Kitsoki bootstrap and runstatus cache as environment hooks/cache grants
@@ -243,24 +254,26 @@ decision.
 - [x] 3.3 Migrate one repo-history capsule and one foreign onboarded project
   - Shipped: foreign project onboarding now writes a project-local
     `.kitsoki/environments/ci.yaml`, `.kitsoki/ci.yaml`, and minimal
-    `.kitsoki/stories/capsule-ci/app.yaml` wrapper that parks honestly until
-    checks are composed.
-  - Shipped: repo-history capsule records now include a
+    `.kitsoki/stories/capsule-ci/app.yaml` wrapper that runs declared project
+    test/build commands and parks honestly when none are declared.
+  - Shipped: repo-history capsule records include a
     `capsule-environment/v1` projection, verifier-only oracle overlay metadata,
     a container executor contract, and the shared `completion-state/v1`
-    materializer result. The harness remains the materializer for pinned repos
-    and hidden oracles until real Docker provider adoption moves behind the
-    common Go executor.
+    result. External bake-off cells now materialize their exact baseline through
+    an artifact-local native Capsule project and `pinned` source definition;
+    the harness remains only the manifest, hidden-oracle, drive, and grading
+    adapter. Prepared handoffs retain Capsule project/id/owner/generation and
+    are rejected when their sentinel, definition, manifest, or baseline does
+    not agree.
 - [ ] 3.4 Update environment/executor/Arena docs; trim/delete this proposal
-  - Shipped: Capsule CI docs now describe host, fake-remote,
-    fake-container, Docker worker entrypoint, and repo-history environment
-    projection.
-  - Attempted: a two-instance VM dogfood used the external bakeoff worker path
-    with Claude Code / GLM-5.2 and reached real process launch. It did not
-    exercise a deployed HTTPS Capsule worker service and did not complete a
-    typed remote verdict; keep this proposal open until that proof exists.
-  - Remaining: fold the final Arena-specific extraction notes into the Arena
-    guide, then delete this proposal once downstream docs no longer need it.
+  - Shipped: Capsule CI and Arena docs now describe host, fake-remote,
+    fake-container, Docker/HTTPS worker entrypoints, source transport,
+    worker evidence, and repo-history environment projection.
+  - Shipped: bounded worker-root source/run retention, source-cache handoff
+    protection, and a standalone worker that refuses image-backed locks unless
+    the deployment injects an independent resolver.
+  - Remaining: run the already-scheduled two bounded deployed-HTTPS-worker
+    jobs to terminal typed verdicts/receipts, then delete this proposal.
 ```
 
 ## Verification

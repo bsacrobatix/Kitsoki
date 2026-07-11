@@ -2,6 +2,10 @@ schema: capsule-ci/v1
 project_profile: .kitsoki/project-profile.yaml
 default_environment: ci
 
+cleanup:
+  keep_runs: 20
+  require_hygiene_check: true
+
 pipelines:
   change:
     story: stories/capsule-ci/app.yaml
@@ -11,8 +15,10 @@ pipelines:
     mode: one-shot
     required: true
     permissions:
-      network: none
-      external_write: deny
+      # Host execution is an explicitly trusted local compatibility lane. Use
+      # container or a remotely enforced worker for none/replay confinement.
+      network: live
+      external_write: allow
     agents:
       policy: deny
     result:

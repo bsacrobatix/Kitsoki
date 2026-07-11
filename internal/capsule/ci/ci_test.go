@@ -3,6 +3,8 @@ package ci
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,11 +13,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
 type launcher func(context.Context, executor.Prepared) (Verdict, error)
@@ -25,6 +29,15 @@ func (f launcher) Launch(ctx context.Context, p executor.Prepared) (Verdict, err
 type fixedJobStore struct {
 	id    artifactjob.JobID
 	inner *artifactjob.MemoryStore
+}
+
+// fixtureBuiltinExecutors models a test-owned contained host so parity tests
+// can exercise one sealed none-network envelope across fake placements. The
+// production HostProvider intentionally advertises only live network.
+func fixtureBuiltinExecutors() BuiltinExecutors {
+	builtins := NewBuiltinExecutors()
+	builtins.Host.(*executor.HostProvider).Cap.Networks = []string{"none"}
+	return builtins
 }
 
 func newFixedJobStore(id string) fixedJobStore {
@@ -73,7 +86,14 @@ func TestServiceRunsTypedStoryVerdictWithFakeExecutor(t *testing.T) {
 }
 
 func TestValidateVerdictRejectsDigestMismatchAndCallerControlledPromotion(t *testing.T) {
-	envelope, _ := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "story", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: executor.Policy{Network: "none"}})
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "story", StoryDigest: "sha256:story", Environment: lock, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	valid := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: envelope.SourceDigest, StoryDigest: envelope.StoryDigest, EnvironmentDigest: envelope.Environment.Digest, EnvelopeDigest: envelope.Digest}
 	if err := ValidateVerdict(valid, envelope, ResultContract{}); err != nil {
 		t.Fatal(err)
@@ -90,6 +110,82 @@ func TestValidateVerdictRejectsDigestMismatchAndCallerControlledPromotion(t *tes
 	}
 }
 
+func TestValidateVerdictBindsPipelineAndDeclaredOutcomeContract(t *testing.T) {
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "story", StoryDigest: "sha256:story", Environment: lock, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contract := ResultContract{Schema: VerdictSchema, PassExits: []string{"passed"}, FailExits: []string{"failed"}, ParkExits: []string{"needs_input"}}
+	valid := Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: envelope.SourceDigest, StoryDigest: envelope.StoryDigest, EnvironmentDigest: envelope.Environment.Digest, EnvelopeDigest: envelope.Digest}
+	if err := ValidateVerdict(valid, envelope, contract); err != nil {
+		t.Fatal(err)
+	}
+	wrongPipeline := valid
+	wrongPipeline.Pipeline = "other"
+	if err := ValidateVerdict(wrongPipeline, envelope, contract); err == nil || !strings.Contains(err.Error(), "sealed pipeline") {
+		t.Fatalf("expected pipeline binding rejection, got %v", err)
+	}
+	wrongOutcome := valid
+	wrongOutcome.Outcome = "infra_failed"
+	wrongOutcome.PromotionEligible = false
+	if err := ValidateVerdict(wrongOutcome, envelope, contract); err == nil || !strings.Contains(err.Error(), "result contract") {
+		t.Fatalf("expected contract outcome rejection, got %v", err)
+	}
+}
+
+func TestLoadRejectsUnknownCapsuleCIFields(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	path := filepath.Join(root, ".kitsoki", "ci.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\n    permisssions:\n      network: none\n")...)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "permisssions") {
+		t.Fatalf("expected unknown-field rejection, got %v", err)
+	}
+}
+
+func TestPlanBindsGitHubTriggerToExactWorkspaceSourceAndPipeline(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	ciPath := filepath.Join(root, ".kitsoki", "ci.yaml")
+	raw, err := os.ReadFile(ciPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = []byte(strings.Replace(string(raw), "triggers: [local]", "triggers: [local, pull_request]", 1))
+	if err := os.WriteFile(ciPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{ProjectRoot: root, Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}}
+	req := RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "0123456789012345678901234567890123456789", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "pull_request", Provider: "github", HeadSHA: "0123456789012345678901234567890123456789", RequestedPipeline: "change"}}
+	_, envelope, err := service.Plan(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := envelope.Trigger["provider"]; got != "github" {
+		t.Fatalf("sealed trigger provider = %#v", got)
+	}
+	req.Trigger.HeadSHA = "ffffffffffffffffffffffffffffffffffffffff"
+	if _, _, err := service.Plan(context.Background(), req); err == nil || !strings.Contains(err.Error(), "does not match workspace source") {
+		t.Fatalf("expected source mismatch, got %v", err)
+	}
+	req.Trigger.HeadSHA = req.SourceDigest
+	req.Trigger.RequestedPipeline = "nightly"
+	if _, _, err := service.Plan(context.Background(), req); err == nil || !strings.Contains(err.Error(), "trigger requested pipeline") {
+		t.Fatalf("expected pipeline mismatch, got %v", err)
+	}
+}
+
 func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)
@@ -101,7 +197,7 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: NewBuiltinExecutors(), Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: fixtureBuiltinExecutors(), Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
 		return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
 	})}
 	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
@@ -116,7 +212,7 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 func TestServiceRunFailureReturnsFailedJobAndExecutorEvents(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)
-	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: NewBuiltinExecutors(), Launcher: launcher(func(context.Context, executor.Prepared) (Verdict, error) {
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: fixtureBuiltinExecutors(), Launcher: launcher(func(context.Context, executor.Prepared) (Verdict, error) {
 		return Verdict{}, io.ErrUnexpectedEOF
 	})}
 	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
@@ -130,6 +226,111 @@ func TestServiceRunFailureReturnsFailedJobAndExecutorEvents(t *testing.T) {
 		t.Fatalf("events %#v", result.Events)
 	}
 }
+
+func TestServiceProjectsCancelledExecutionAsCancelledTerminal(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	service := Service{
+		ProjectRoot: root,
+		Jobs:        artifactjob.NewMemoryStore(),
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Provider:    executor.NewFakeProvider("fake"),
+		Launcher:    launcher(func(context.Context, executor.Prepared) (Verdict, error) { return Verdict{}, context.Canceled }),
+	}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if result.Job.Status != artifactjob.StatusCancelled || result.Stage != RunStageFinished || !result.Terminal || result.Verdict.Outcome != "cancelled" || result.Verdict.EnvelopeDigest != result.Envelope.Digest {
+		t.Fatalf("cancelled result %#v", result)
+	}
+}
+
+func TestServicePreservesRegisteredRunAndCheckpointsPrepareFailure(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	provider := &failureInjectionProvider{prepareErr: io.ErrUnexpectedEOF}
+	var stages []string
+	service := Service{
+		ProjectRoot: root,
+		Jobs:        newFixedJobStore("job-prepare-failure"),
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Provider:    provider,
+		Observer: RunObserverFunc(func(_ context.Context, observation RunObservation) error {
+			stages = append(stages, observation.Result.Stage)
+			return nil
+		}),
+	}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err == nil || !strings.Contains(err.Error(), io.ErrUnexpectedEOF.Error()) {
+		t.Fatalf("expected injected prepare failure, got %v", err)
+	}
+	if result.Job.ID != "job-prepare-failure" || result.Job.Status != artifactjob.StatusFailed || result.Envelope.JobID != "job-prepare-failure" || result.Envelope.Digest == "" {
+		t.Fatalf("registered result was lost: %#v", result)
+	}
+	if result.Stage != RunStageFailed || !result.Terminal || provider.ran {
+		t.Fatalf("lifecycle result=%#v provider=%#v", result, provider)
+	}
+	wantStages := []string{RunStageRequested, RunStagePreparing, RunStageFailed}
+	if !reflect.DeepEqual(stages, wantStages) {
+		t.Fatalf("stages=%v want=%v", stages, wantStages)
+	}
+}
+
+func TestServiceDoesNotExecuteWhenRunningCheckpointCannotPersist(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	provider := &failureInjectionProvider{}
+	service := Service{
+		ProjectRoot: root,
+		Jobs:        newFixedJobStore("job-observer-failure"),
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Provider:    provider,
+		Observer: RunObserverFunc(func(_ context.Context, observation RunObservation) error {
+			if observation.Result.Stage == RunStageRunning {
+				return io.ErrClosedPipe
+			}
+			return nil
+		}),
+	}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err == nil || !strings.Contains(err.Error(), "persist running checkpoint") {
+		t.Fatalf("expected checkpoint error, got %v", err)
+	}
+	if provider.ran {
+		t.Fatal("provider ran after the pre-execution checkpoint failed")
+	}
+	if result.Job.ID != "job-observer-failure" || result.Job.Status != artifactjob.StatusFailed || result.Stage != RunStageFailed || !result.Terminal {
+		t.Fatalf("result %#v", result)
+	}
+}
+
+type failureInjectionProvider struct {
+	prepareErr error
+	ran        bool
+	cap        executor.Capabilities
+}
+
+func (p *failureInjectionProvider) Describe(context.Context) (executor.Capabilities, error) {
+	if p.cap.ID != "" {
+		return p.cap, nil
+	}
+	return executor.Capabilities{ID: "injected", Placements: []string{"fake"}, Isolation: "supervised", Networks: []string{"none"}}, nil
+}
+
+func (p *failureInjectionProvider) Prepare(_ context.Context, envelope executor.Envelope) (executor.Prepared, error) {
+	if p.prepareErr != nil {
+		return executor.Prepared{}, p.prepareErr
+	}
+	return executor.Prepared{ID: "injected-prepared", Envelope: envelope, Placement: "fake", Applied: envelope.Policy}, nil
+}
+
+func (p *failureInjectionProvider) Run(context.Context, executor.Prepared, executor.Task, executor.EventSink) (executor.Result, error) {
+	p.ran = true
+	return executor.Result{}, nil
+}
+
+func (*failureInjectionProvider) Cancel(context.Context, string) error { return nil }
 
 func TestServiceSelectsInjectedContainerExecutor(t *testing.T) {
 	root := t.TempDir()
@@ -177,7 +378,7 @@ func TestServiceHostAndFakeRemoteProduceEquivalentStoryRun(t *testing.T) {
 	})
 	run := func(root string) RunResult {
 		t.Helper()
-		service := Service{ProjectRoot: root, Jobs: newFixedJobStore("job-equivalence"), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: NewBuiltinExecutors(), Launcher: launch}
+		service := Service{ProjectRoot: root, Jobs: newFixedJobStore("job-equivalence"), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: fixtureBuiltinExecutors(), Launcher: launch}
 		result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
 		if err != nil {
 			t.Fatal(err)
@@ -215,7 +416,7 @@ func TestServiceAddsRequiredHygieneCheckToVerdict(t *testing.T) {
 		ProjectRoot: root,
 		Jobs:        artifactjob.NewMemoryStore(),
 		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
-		Executors:   NewBuiltinExecutors(),
+		Executors:   fixtureBuiltinExecutors(),
 		Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
 			return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
 		}),
@@ -254,7 +455,7 @@ func TestServiceHygieneDebtBlocksPromotion(t *testing.T) {
 		ProjectRoot: root,
 		Jobs:        artifactjob.NewMemoryStore(),
 		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
-		Executors:   NewBuiltinExecutors(),
+		Executors:   fixtureBuiltinExecutors(),
 		Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
 			return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
 		}),
@@ -324,7 +525,9 @@ func TestServiceAcceptsTypedVerdictFromRemoteWorkerWithoutLocalLauncher(t *testi
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/capsules/capabilities":
-			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": executor.Capabilities{ID: "remote", Placements: []string{"remote"}, Networks: []string{"none"}, Cancellable: true}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": executor.Capabilities{ID: "remote", Placements: []string{"remote"}, Isolation: "supervised", Networks: []string{"none"}, Cancellable: true}})
+		case "/v1/capsules/validate":
+			w.WriteHeader(http.StatusNoContent)
 		case "/v1/capsules/run":
 			if got := r.Header.Get("Authorization"); got != "Bearer secret-token" {
 				t.Errorf("authorization %q", got)
@@ -601,6 +804,134 @@ func TestFileRunStoreDiagnoseSummarizesFailureTrace(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreDiagnoseLatestDetectsStallAndOpenExecutorSpan(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	old := time.Now().UTC().Add(-time.Hour)
+	if err := store.Write(RunRecord{JobID: "job-old", Result: RunResult{Job: artifactjob.Job{ID: "job-old", Status: artifactjob.StatusDone}, UpdatedAt: old.Add(-time.Hour), Terminal: true}}); err != nil {
+		t.Fatal(err)
+	}
+	result := RunResult{Job: artifactjob.Job{ID: "job-running", Status: artifactjob.StatusRunning, WorkspaceInstanceID: "workspace-1"}, Pipeline: "change", Stage: RunStageRunning, StartedAt: old.Add(-time.Minute), UpdatedAt: old, Terminal: false, Envelope: executor.Envelope{Digest: "sha256:envelope"}, Execution: executor.Result{ExecutionID: "remote-1"}}
+	if err := store.Write(RunRecord{JobID: "job-running", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	tracePath := filepath.Join(root, ".capsules", "ci", "job-running.trace.json")
+	raw := []byte(fmt.Sprintf(`{"schema":"capsule-ci-trace/v1","events":[{"kind":"capsule.executor.started","at":%q,"job_id":"job-running","envelope_digest":"sha256:envelope","outcome":"running","fields":{"execution_id":"remote-1","request_id":"req-1"}}]}`, old.Format(time.RFC3339Nano)))
+	if err := os.WriteFile(tracePath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis, err := store.DiagnoseLatest(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnosis.Run.JobID != "job-running" || !diagnosis.Stalled || !diagnosis.ExecutorSpanOpen || diagnosis.LastExecutorEvent == nil {
+		t.Fatalf("diagnosis %#v", diagnosis)
+	}
+	if diagnosis.LastActivityAt.IsZero() || !strings.Contains(diagnosis.StallReason, "no durable activity") {
+		t.Fatalf("stall details %#v", diagnosis)
+	}
+}
+
+func TestFileRunStoreDiagnosisConsumesProviderSafeWorkerAgentBreadcrumbs(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	now := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	lastActivity := now.Add(-5 * time.Minute)
+	result := RunResult{Job: artifactjob.Job{ID: "job-agent-stall", Status: artifactjob.StatusRunning}, Pipeline: "change", Stage: RunStageRunning, StartedAt: lastActivity.Add(-time.Minute), UpdatedAt: lastActivity, Execution: executor.Result{ExecutionID: "remote-agent-1"}}
+	if err := store.Write(RunRecord{JobID: "job-agent-stall", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	callRef := "sha256:" + strings.Repeat("a", 24)
+	status := executor.ExecutionStatus{
+		Schema:      executor.ExecutionStatusSchema,
+		ExecutionID: "remote-agent-1",
+		Status:      "running",
+		Stage:       "running_story",
+		UpdatedAt:   lastActivity,
+		Agent: &executor.AgentDiagnostics{
+			Schema:         executor.AgentDiagnosticsSchema,
+			TraceState:     "ok",
+			ObservedAt:     now,
+			LastActivityAt: lastActivity,
+			StallHint:      "process_no_output",
+			ActiveCalls:    []executor.AgentCallStatus{{CallRef: callRef, Verb: "task", Backend: "claude", Phase: "process_no_output", StartedAt: lastActivity.Add(-time.Minute), LastActivityAt: lastActivity}},
+			Breadcrumbs:    []executor.AgentBreadcrumb{{At: lastActivity, Kind: "process_no_output", CallRef: callRef, Backend: "claude", Severity: "warn", DurationMS: 240000}},
+		},
+		Cleanup: &executor.WorkerCleanupDiagnostics{Schema: executor.WorkerCleanupDiagnosticsSchema, Outcome: "completed", CompletedAt: now.Add(-time.Hour), RunsRemoved: 2, SourcesRemoved: 1, ReclaimedBytes: 4096},
+	}
+	if _, err := store.RecordExecutorStatus("job-agent-stall", status); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis, err := store.DiagnoseAt("job-agent-stall", now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !diagnosis.Stalled || diagnosis.Agent == nil || diagnosis.Agent.StallHint != "process_no_output" || len(diagnosis.Agent.Breadcrumbs) != 1 {
+		t.Fatalf("diagnosis = %#v", diagnosis)
+	}
+	if !diagnosis.LastActivityAt.Equal(lastActivity) || !strings.Contains(diagnosis.StallReason, "agent process_no_output") {
+		t.Fatalf("stall details = %#v", diagnosis)
+	}
+	if diagnosis.WorkerCleanup == nil || diagnosis.WorkerCleanup.ReclaimedBytes != 4096 {
+		t.Fatalf("cleanup diagnostics = %#v", diagnosis.WorkerCleanup)
+	}
+}
+
+func TestFileRunStoreDiagnoseFlagsTerminalUnclosedExecutorSpan(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	updated := time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC)
+	result := RunResult{Job: artifactjob.Job{ID: "job-terminal", Status: artifactjob.StatusFailed}, Pipeline: "change", Stage: RunStageFailed, UpdatedAt: updated, Terminal: true, Envelope: executor.Envelope{Digest: "sha256:envelope"}, Execution: executor.Result{ExecutionID: "remote-1"}}
+	if err := store.Write(RunRecord{JobID: "job-terminal", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	tracePath := filepath.Join(root, ".capsules", "ci", "job-terminal.trace.json")
+	raw := []byte(`{"schema":"capsule-ci-trace/v1","events":[{"kind":"capsule.executor.started","at":"2026-07-11T00:59:00Z","job_id":"job-terminal","envelope_digest":"sha256:envelope","fields":{"execution_id":"remote-1"}}]}`)
+	if err := os.WriteFile(tracePath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis, err := store.DiagnoseAt("job-terminal", updated, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnosis.FailureKind != "executor_span_unclosed" || !diagnosis.ExecutorSpanOpen || diagnosis.Stalled {
+		t.Fatalf("diagnosis %#v", diagnosis)
+	}
+}
+
+func TestFileRunStoreDiagnoseShowsWorkerSourceTimelineAndClosesCancelledSpan(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	updated := time.Date(2026, 7, 11, 6, 0, 0, 0, time.UTC)
+	result := RunResult{Job: artifactjob.Job{ID: "job-cancelled", Status: artifactjob.StatusCancelled}, Pipeline: "change", Stage: RunStageFinished, UpdatedAt: updated, Terminal: true, Envelope: executor.Envelope{Digest: "sha256:envelope"}, Execution: executor.Result{ExecutionID: "remote-1"}, Verdict: Verdict{Outcome: "cancelled"}}
+	if err := store.Write(RunRecord{JobID: "job-cancelled", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	doc := capsuletrace.NewDocument(
+		capsuletrace.Event{Kind: capsuletrace.KindExecutorStarted, At: updated.Add(-4 * time.Second), JobID: "job-cancelled", EnvelopeDigest: "sha256:envelope", Fields: map[string]any{"execution_id": "remote-1"}},
+		capsuletrace.Event{Kind: capsuletrace.KindExecutorSourceReady, At: updated.Add(-3 * time.Second), JobID: "job-cancelled", EnvelopeDigest: "sha256:envelope", Fields: map[string]any{"execution_id": "remote-1", "source_cache": "hit", "bundle_digest": "sha256:bundle"}},
+		capsuletrace.Event{Kind: capsuletrace.KindWorkerStoryStarted, At: updated.Add(-2 * time.Second), JobID: "job-cancelled", EnvelopeDigest: "sha256:envelope", Fields: map[string]any{"execution_id": "remote-1", "worker_stage": "running_story"}},
+		capsuletrace.Event{Kind: capsuletrace.KindExecutorCancelled, At: updated, JobID: "job-cancelled", EnvelopeDigest: "sha256:envelope", Outcome: "cancelled", Fields: map[string]any{"execution_id": "remote-1", "worker_status": "cancelled"}},
+	)
+	raw, err := capsuletrace.MarshalDocument(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".capsules", "ci", "job-cancelled.trace.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis, err := store.DiagnoseAt("job-cancelled", updated.Add(time.Hour), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnosis.ExecutorSpanOpen || len(diagnosis.Timeline) != 4 {
+		t.Fatalf("diagnosis %#v", diagnosis)
+	}
+	if diagnosis.Timeline[1].Fields["source_cache"] != "hit" || diagnosis.Timeline[2].Fields["worker_stage"] != "running_story" {
+		t.Fatalf("timeline %#v", diagnosis.Timeline)
+	}
+}
+
 func TestFileRunStoreIndexEmptyRunsSlice(t *testing.T) {
 	index, err := (FileRunStore{ProjectRoot: t.TempDir()}).Index()
 	if err != nil {
@@ -622,5 +953,60 @@ func TestFileRunStoreCancelParksOrRunningJob(t *testing.T) {
 	}
 	if got.Result.Job.Status != artifactjob.StatusCancelled || got.Result.Verdict.Outcome != "cancelled" {
 		t.Fatalf("cancel %#v", got)
+	}
+}
+
+func TestFileRunStoreRejectsTraversalJobIDs(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	for _, id := range []string{"../outside", "nested/job", "", strings.Repeat("a", 129)} {
+		if err := store.Write(RunRecord{JobID: id}); err == nil {
+			t.Fatalf("Write accepted %q", id)
+		}
+		if _, err := store.Get(id); err == nil {
+			t.Fatalf("Get accepted %q", id)
+		}
+		if _, err := store.Cancel(id); err == nil {
+			t.Fatalf("Cancel accepted %q", id)
+		}
+		if _, err := store.RecordExecutorStatus(id, executor.ExecutionStatus{}); err == nil {
+			t.Fatalf("RecordExecutorStatus accepted %q", id)
+		}
+	}
+}
+
+func TestFileRunStoreProjectsTwoPhaseRemoteCancellationTruthfully(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	result := RunResult{Job: artifactjob.Job{ID: "job-remote", Status: artifactjob.StatusRunning}, Pipeline: "change", Stage: RunStageRunning, Execution: executor.Result{ExecutionID: "remote-1"}, Envelope: executor.Envelope{SourceDigest: "source", StoryDigest: "story", Environment: environment.Lock{Digest: "environment"}, Digest: "envelope"}}
+	if err := store.Write(RunRecord{JobID: "job-remote", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	requested, err := store.RecordExecutorStatus("job-remote", executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, ExecutionID: "remote-1", Status: "cancelling", Stage: "cancellation_requested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requested.Result.Job.Status != artifactjob.StatusInterrupted || requested.Result.Terminal || requested.Result.Verdict.Outcome == "cancelled" {
+		t.Fatalf("cancellation request was projected as terminal: %#v", requested)
+	}
+	terminal, err := store.RecordExecutorStatus("job-remote", executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, ExecutionID: "remote-1", Status: "cancelled", Stage: "terminal"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Result.Job.Status != artifactjob.StatusCancelled || !terminal.Result.Terminal || terminal.Result.Verdict.Outcome != "cancelled" || terminal.Result.Verdict.PromotionEligible {
+		t.Fatalf("terminal cancellation %#v", terminal)
+	}
+}
+
+func TestFileRunStoreDoesNotPromoteRemoteCompletedExecutionBeforeCollection(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	result := RunResult{Job: artifactjob.Job{ID: "job-remote", Status: artifactjob.StatusRunning}, Pipeline: "change", Stage: RunStageRunning, Execution: executor.Result{ExecutionID: "remote-1"}}
+	if err := store.Write(RunRecord{JobID: "job-remote", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	record, err := store.RecordExecutorStatus("job-remote", executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, ExecutionID: "remote-1", Status: "completed", Stage: "terminal", Result: executor.Result{ExecutionID: "remote-1", VerdictJSON: []byte(`{"outcome":"passed"}`)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Result.Job.Status != artifactjob.StatusInterrupted || record.Result.Stage != RunStageCollecting || record.Result.Terminal || record.Result.Verdict.PromotionEligible {
+		t.Fatalf("uncollected execution was promoted: %#v", record)
 	}
 }

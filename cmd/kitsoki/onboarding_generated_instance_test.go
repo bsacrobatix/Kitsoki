@@ -8,9 +8,28 @@ import (
 	"strings"
 	"testing"
 
+	"kitsoki/internal/app"
+	"kitsoki/internal/basestories"
 	"kitsoki/internal/host"
 	"kitsoki/internal/kitrepo"
 )
+
+func TestEmbeddedDevStoryDoesNotExposeLegacyWorkspaceHost(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	root, err := basestories.Materialize(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	def, err := app.Load(filepath.Join(root, "dev-story", "app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range def.Hosts {
+		if name == "host.git_worktree" {
+			t.Fatalf("embedded dev-story still exposes legacy workspace host; hosts=%v", def.Hosts)
+		}
+	}
+}
 
 func TestOnboardingGeneratedDevStoryInstanceValidates(t *testing.T) {
 	// Hermetic: force the embedded-library @kitsoki/dev-story resolution

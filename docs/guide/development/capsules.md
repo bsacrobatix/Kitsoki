@@ -10,10 +10,11 @@ substrate grows:
 - **Core fixture capsules** live under `capsules/<name>/capsule.yaml` and are
   opened by `internal/capsule`, `internal/capsuletest`, and `kitsoki capsule`.
 - **Repo-history capsules** are historical bug capsules consumed by
-  `stories/repo-bakeoff` and `tools/bugfix-bakeoff/external`. They remain
-  harness-executed while their verifier contracts migrate, but the generic
-  control plane now has the source-cache and verifier-overlay primitives they
-  need.
+  `stories/repo-bakeoff` and `tools/bugfix-bakeoff/external`. Their manifests
+  and hidden-oracle grading remain evaluation concerns, but source checkout is
+  a native pinned-Git Capsule under the parent project's managed
+  `.capsules/projects/` tree. The bakeoff code is an evaluation adapter, not a
+  second workspace materializer or executor.
 
 The shipped v1 is intentionally narrow and local-only:
 
@@ -102,7 +103,7 @@ manifest and CLI output. Probes are shell commands run inside the workspace with
 ## CLI
 
 List every capsule known in the current Kitsoki checkout, including
-repo-history capsules whose executor is the external bake-off harness:
+repo-history evaluation manifests materialized through pinned Capsules:
 
 ```sh
 go run ./cmd/kitsoki capsule list

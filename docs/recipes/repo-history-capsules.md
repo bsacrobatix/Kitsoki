@@ -3,9 +3,11 @@
 Repo-history capsules are reusable historical bug cases for dev-story
 onboarding and the `repo-bakeoff` path. They are capsules in the same Kitsoki
 sense as the synthetic fixtures under `capsules/`: named, reusable repository
-states with deterministic verification. The current executor is the
-repo-history harness, because core `kitsoki capsule open` still only
-materializes local synthetic fixtures.
+states with deterministic verification. Native Capsule's immutable pinned-Git
+materializer owns candidate workspace creation and lifecycle. The repo-history
+harness is an evaluation adapter—not a CI runtime or control plane—and retains
+only the corpus manifests, hidden-oracle verification, scoring, cost accounting,
+and report generation.
 
 Each promoted capsule comes from one bug row under
 `tools/bugfix-bakeoff/external/projects/<project>/manifest.yaml` plus its
@@ -16,7 +18,11 @@ fix:
 2. RED: at `baseline_sha`, overlay only the hidden oracle and require failure.
 3. GREEN: from that same baseline, overlay only the real maintainer fix source
    from `fix_sha` and require the oracle to pass.
-4. GREEN: score a candidate worktree with the same hidden oracle.
+4. GREEN: score a candidate workspace with the same hidden oracle.
+
+The retired mechanism is the harness-owned clone/worktree materializer. Do not
+reintroduce it: `capsule workspace` owns materialization, identity, leases,
+generation checks, execution, and cleanup; stories and Capsule CI own CI runs.
 
 The promoted corpus currently has ten repo-history capsules:
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -55,6 +56,41 @@ func TestManagerLeaseIdempotencyAndStaleHandle(t *testing.T) {
 		t.Fatal("stale handle succeeded")
 	} else if got := fmt.Sprint(err); got == "" {
 		t.Fatal("missing stale error")
+	}
+}
+
+func TestManagerOwnerBoundGrantRejectsGuessedHandle(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	p := &provider{name: "synthetic"}
+	store := NewMemoryInstanceStore()
+	base := &Manager{
+		Definitions: defs{"clean": {ID: "clean", Schema: DefinitionSchema, Source: Source{Kind: SourceSynthetic, SyntheticSpec: "x"}, Digest: "sha256:x"}},
+		Instances:   store,
+		Providers:   map[string]WorkspaceProvider{"synthetic": p},
+		Grant:       ScopeGrant{Owner: "owner-a", ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"workspace_manage"}},
+	}
+	h, err := base.Create(context.Background(), CreateRequest{ID: "owned", DefinitionID: "clean", Owner: "owner-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := *base
+	other.Grant = base.Grant.Clone()
+	other.Grant.Owner = "owner-b"
+	if _, err := other.Status(context.Background(), h); err == nil || !strings.Contains(err.Error(), ErrDenied.Error()) {
+		t.Fatalf("other owner status error = %v, want denied", err)
+	}
+	if _, err := base.StatusOwned(context.Background(), h, "owner-b"); err == nil || !strings.Contains(err.Error(), ErrDenied.Error()) {
+		t.Fatalf("explicit other owner status error = %v, want denied", err)
+	}
+	if _, err := other.Create(context.Background(), CreateRequest{ID: "wrong-owner", DefinitionID: "clean", Owner: "owner-a"}); err == nil || !strings.Contains(err.Error(), ErrDenied.Error()) {
+		t.Fatalf("mismatched create owner error = %v, want denied", err)
+	}
+	readOnly := *base
+	readOnly.Grant = base.Grant.Clone()
+	readOnly.Grant.Effects = nil
+	if _, err := readOnly.Create(context.Background(), CreateRequest{ID: "no-capability", DefinitionID: "clean", Owner: "owner-a"}); err == nil || !strings.Contains(err.Error(), "workspace_manage") {
+		t.Fatalf("read-only scoped create error = %v, want workspace_manage denial", err)
 	}
 }
 

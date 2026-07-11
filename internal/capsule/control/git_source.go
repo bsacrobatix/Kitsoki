@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,11 +14,16 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	legacy "kitsoki/internal/capsule"
 )
 
 var fullCommit = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-const instanceSentinel = ".kitsoki-capsule"
+const (
+	instanceSentinel    = ".kitsoki-capsule"
+	instancePinSentinel = ".kitsoki-capsule-pin"
+)
 
 // GitSourceProvider materializes project-self and pinned Git definitions into
 // manager-owned workspaces. It never receives credentials; a future remote
@@ -79,6 +85,10 @@ func (p GitSourceProvider) Create(ctx context.Context, def Definition, in Instan
 		return MaterializedWorkspace{}, err
 	}
 	branch, _ := runGit(ctx, in.Path, "branch", "--show-current")
+	if err := excludeGitSourceMetadata(in.Path); err != nil {
+		_ = os.RemoveAll(in.Path)
+		return MaterializedWorkspace{}, err
+	}
 	if err := os.WriteFile(filepath.Join(in.Path, instanceSentinel), []byte(in.ID+"\n"), 0o644); err != nil {
 		_ = os.RemoveAll(in.Path)
 		return MaterializedWorkspace{}, err
@@ -88,7 +98,62 @@ func (p GitSourceProvider) Create(ctx context.Context, def Definition, in Instan
 		_ = os.RemoveAll(in.Path)
 		return MaterializedWorkspace{}, err
 	}
+	if err := writeGitSourceManifest(in.Path, source, def, in, strings.TrimSpace(head), strings.TrimSpace(branch)); err != nil {
+		_ = os.RemoveAll(in.Path)
+		return MaterializedWorkspace{}, err
+	}
 	return MaterializedWorkspace{Path: in.Path, SourceRef: def.Source.Ref, Head: strings.TrimSpace(head), Branch: strings.TrimSpace(branch), VerifierOverlays: verifierOverlays}, nil
+}
+
+func excludeGitSourceMetadata(workspace string) error {
+	exclude := filepath.Join(workspace, ".git", "info", "exclude")
+	file, err := os.OpenFile(exclude, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("git source: open local excludes: %w", err)
+	}
+	_, writeErr := fmt.Fprintf(file, "\n/%s\n/%s\n/%s\n", instanceSentinel, instancePinSentinel, legacy.ManifestFile)
+	closeErr := file.Close()
+	if writeErr != nil {
+		return fmt.Errorf("git source: write local excludes: %w", writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("git source: close local excludes: %w", closeErr)
+	}
+	return nil
+}
+
+func writeGitSourceManifest(workspace, source string, def Definition, in Instance, head, branch string) error {
+	network := strings.TrimSpace(def.Policy.Network)
+	if network == "" {
+		network = "none"
+	}
+	manifest := legacy.Manifest{
+		CapsuleName: def.ID,
+		SpecPath:    def.LegacyPath,
+		Workspace:   workspace,
+		OpenedAt:    in.CreatedAt,
+		Source: legacy.ManifestSource{
+			Repo:   source,
+			Commit: def.Source.Commit,
+			Head:   head,
+			Branch: branch,
+		},
+		Network: network,
+		Environment: map[string]string{
+			"definition_digest": def.Digest,
+			"provider":          "git",
+			"workspace_id":      in.ID,
+			"owner":             in.Lease.Owner,
+		},
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return fmt.Errorf("git source: encode capsule manifest: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, legacy.ManifestFile), append(raw, '\n'), 0o644); err != nil {
+		return fmt.Errorf("git source: write capsule manifest: %w", err)
+	}
+	return nil
 }
 func (GitSourceProvider) Close(_ context.Context, in Instance) error {
 	if strings.TrimSpace(in.Path) == "" {

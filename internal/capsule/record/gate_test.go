@@ -14,10 +14,14 @@ import (
 
 func TestPromotionGateRequiresMatchingVerifiedCandidateReceipt(t *testing.T) {
 	root := t.TempDir()
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	envelope, err := executor.Seal(executor.Envelope{
 		JobID: "job", ProjectID: "p", DefinitionDigest: "sha256:def",
 		Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "candidate",
-		StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"},
+		StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: lock,
 		Policy: executor.Policy{Network: "none"},
 	})
 	if err != nil {

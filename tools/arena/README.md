@@ -52,6 +52,34 @@ A missing or malformed file is reported as an explicit
 `infra:completion-state-malformed`) — stdout/stderr infra-signal regexing (e.g.
 `"connection refused"`) survives ONLY as a fallback for when the file is absent.
 
+### Capsule CI executor parity
+
+Capsule CI reuses Arena's `ContainerBackend` and
+`completion-state/v1` boundary rather than defining a second container-result
+protocol. Its production container provider mounts the prepared Capsule source
+at `/workspace`, mounts an executor-owned result directory at `/results`, and
+runs:
+
+```sh
+kitsoki capsule worker run \
+  --envelope /results/envelope.json \
+  --result /results/result.json \
+  --workspace /workspace \
+  --trace /results/story-trace.jsonl
+```
+
+`/results/result.json` carries both the normalized Capsule executor result and
+the same `completion-state/v1` object Arena uses to distinguish completed work
+from infrastructure failure. `container-fake` exercises that adapter in normal
+tests; an injected Docker backend owns real container placement. Arena remains
+the multi-cell scheduler, while one Capsule CI run owns its sealed story,
+environment, source, policy, trace, and receipt.
+
+The Docker backend enforces `network: none` with Docker's `--network none`.
+It advertises `replay` only when the embedding deployment supplies a named,
+externally supervised replay network; the default adapter does not claim replay
+while silently using Docker's ordinary bridge network.
+
 ## The check-type contract (WS-G G1)
 
 A matrix/arena cell declares a **check suite**, not one verdict shape. Every
