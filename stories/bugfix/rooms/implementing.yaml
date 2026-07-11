@@ -220,6 +220,7 @@ states:
             args:
               ticket_id:        "{{ world.ticket_id }}"
               ticket_title:     "{{ world.ticket_title }}"
+              ticket_body:      "{{ world.ticket_body }}"
               workdir:          "{{ world.workdir }}"
               fix_description:  "{{ world.propose_fix_artifact.fix_description }}"
               root_cause:       "{{ world.propose_fix_artifact.root_cause }}"

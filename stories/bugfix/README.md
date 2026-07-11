@@ -202,6 +202,7 @@ in `app.yaml`'s `world:` block so the child loads standalone for tests.
 | `ticket_source_mode` | string | Tells triage where the report lives. Values: `local` \| `remote` \| `freeform`. | `local` |
 | `ticket_source_ref` | string | Local markdown path, remote issue URL/ref, or free-form complaint label used as the report source. | `""` |
 | `ticket_body` | string | Remote issue body, pre-read local issue body, or free-form operator complaint. If set without `ticket_id`, `idle` synthesizes a complaint id and autostarts. | `""` |
+| `acceptance_contract` | list | Optional caller-visible strict requirements. Each needs a test receipt; `required_paths` must occur in the committed range and `required_diff_contains` may require public literal source evidence. Never use this to encode a hidden oracle. | `[]` |
 | `thread` | string | The transport's thread identifier (file path / Jira key / chat ID). | `""` |
 | `audit_actor` | string | Reporting actor written into the close-out `kitsoki-bugfix-audit` receipt. | `kitsoki` |
 | `audit_mode` | string | Reporting mode written into the close-out receipt; headless drivers can override with a run-class such as `headless-remote`. | `autonomous` |

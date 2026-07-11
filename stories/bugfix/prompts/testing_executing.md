@@ -3,6 +3,17 @@
 You are reviewing the implementation of the fix for **{{ args.ticket_id }}** —
 *{{ args.ticket_title }}*.
 
+{% if args.ticket_body %}## Public ticket details
+
+```markdown
+{{ args.ticket_body }}
+```
+
+The acceptance matrix must cover explicit compatibility/API statements in this
+report, not only the implementation's chosen abstraction.
+
+{% endif %}
+
 The proposed fix was:
 
 > {{ args.fix_summary }}
