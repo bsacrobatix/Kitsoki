@@ -101,7 +101,7 @@ func capsuleCIRunCmd() *cobra.Command {
 		service := ci.Service{ProjectRoot: project, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: project, Probe: environment.HostProbe()}, Executors: ci.NewConfiguredExecutors(cfg), Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project)}
 		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: mustFileDigest(filepath.Join(project, p.Story)), Trigger: ci.Trigger{Kind: "local", RequestedPipeline: args[0]}})
 		if err != nil {
-			return err
+			return persistCapsuleCIRunFailure(project, result, err)
 		}
 		signer, err := capsuleFakeReceiptSigner(fakeReceiptSigner)
 		if err != nil {
@@ -124,6 +124,24 @@ func capsuleCIRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	_ = cmd.MarkFlagRequired("workspace")
 	return cmd
+}
+
+func persistCapsuleCIRunFailure(project string, result ci.RunResult, runErr error) error {
+	if result.Job.ID == "" {
+		return runErr
+	}
+	tracePath, traceErr := record.PersistTrace(project, result)
+	writeErr := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result})
+	if traceErr != nil && writeErr != nil {
+		return fmt.Errorf("%w (also failed to persist capsule ci diagnostic trace: %v; run record: %v)", runErr, traceErr, writeErr)
+	}
+	if traceErr != nil {
+		return fmt.Errorf("%w (also failed to persist capsule ci diagnostic trace: %v)", runErr, traceErr)
+	}
+	if writeErr != nil {
+		return fmt.Errorf("%w (diagnostic trace: %s; also failed to persist run record: %v)", runErr, tracePath, writeErr)
+	}
+	return fmt.Errorf("%w (diagnostic trace: %s)", runErr, tracePath)
 }
 
 func capsuleCIHygienePlanner(project string) ci.HygienePlanner {

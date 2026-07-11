@@ -113,6 +113,24 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	}
 }
 
+func TestServiceRunFailureReturnsFailedJobAndExecutorEvents(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: NewBuiltinExecutors(), Launcher: launcher(func(context.Context, executor.Prepared) (Verdict, error) {
+		return Verdict{}, io.ErrUnexpectedEOF
+	})}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err == nil {
+		t.Fatal("expected run error")
+	}
+	if result.Job.Status != artifactjob.StatusFailed {
+		t.Fatalf("status=%s result=%#v", result.Job.Status, result)
+	}
+	if len(result.Events) != 2 || result.Events[0].Kind != "capsule.executor.started" || result.Events[1].Kind != "capsule.executor.failed" {
+		t.Fatalf("events %#v", result.Events)
+	}
+}
+
 func TestServiceSelectsInjectedContainerExecutor(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)

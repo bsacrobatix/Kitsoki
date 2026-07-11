@@ -21,6 +21,9 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": Capabilities{ID: "remote", Placements: []string{"remote"}, Networks: []string{"none"}, Cancellable: true}})
 		case "/v1/capsules/run":
 			sawRun = true
+			if got := r.Header.Get("X-Kitsoki-Request-ID"); !strings.HasPrefix(got, "req-") {
+				t.Errorf("request id %q", got)
+			}
 			if got := r.Header.Get("Authorization"); got != "Bearer token" {
 				t.Errorf("authorization %q", got)
 			}
@@ -60,6 +63,32 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 	}
 	if err := worker.Cancel(context.Background(), "run/1"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHTTPRemoteWorkerErrorIncludesBoundedRemoteDiagnostics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Kitsoki-Request-ID", "worker-request-1")
+		http.Error(w, "worker failed token=super-secret because setup missing", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	worker := HTTPRemoteWorker{Endpoint: "https://worker.invalid", Client: rewriteClient(t, server)}
+	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = worker.Run(context.Background(), Prepared{ID: "run/1", Envelope: envelope}, nil, nil)
+	if err == nil {
+		t.Fatal("expected remote error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"kind=status", "host=worker.invalid", "status=502 Bad Gateway", "request_id=worker-request-1", "body=worker failed token=<redacted>"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error missing %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "super-secret") {
+		t.Fatalf("error leaked secret body: %s", msg)
 	}
 }
 

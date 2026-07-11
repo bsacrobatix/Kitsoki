@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"kitsoki/internal/capsule/ci"
+	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/receipt"
 	capsuletrace "kitsoki/internal/capsule/trace"
 )
@@ -28,21 +29,17 @@ func Persist(project string, result ci.RunResult) (Stored, error) {
 	return PersistWithOptions(project, result, PersistOptions{})
 }
 
+func PersistTrace(project string, result ci.RunResult) (string, error) {
+	path, _, err := writeTrace(project, result)
+	return path, err
+}
+
 func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions) (Stored, error) {
 	if result.Job.ID == "" {
 		return Stored{}, fmt.Errorf("capsule record: job id is required")
 	}
-	dir := filepath.Join(project, ".capsules", "ci")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return Stored{}, err
-	}
-	trace := runTrace(result)
-	raw, err := capsuletrace.MarshalDocument(trace)
+	tracePath, raw, err := writeTrace(project, result)
 	if err != nil {
-		return Stored{}, err
-	}
-	tracePath := filepath.Join(dir, string(result.Job.ID)+".trace.json")
-	if err := os.WriteFile(tracePath, append(raw, '\n'), 0o600); err != nil {
 		return Stored{}, err
 	}
 	sum := sha256.Sum256(raw)
@@ -62,7 +59,7 @@ func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions
 	if verification.Status != "valid" {
 		return Stored{}, fmt.Errorf("capsule record: receipt %s", verification.Status)
 	}
-	receiptPath := filepath.Join(dir, string(result.Job.ID)+".receipt.json")
+	receiptPath := filepath.Join(project, ".capsules", "ci", string(result.Job.ID)+".receipt.json")
 	encoded, err := json.MarshalIndent(built, "", "  ")
 	if err != nil {
 		return Stored{}, err
@@ -71,6 +68,26 @@ func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions
 		return Stored{}, err
 	}
 	return Stored{Receipt: built, Verification: verification, TracePath: tracePath, ReceiptPath: receiptPath}, nil
+}
+
+func writeTrace(project string, result ci.RunResult) (string, []byte, error) {
+	if result.Job.ID == "" {
+		return "", nil, fmt.Errorf("capsule record: job id is required")
+	}
+	dir := filepath.Join(project, ".capsules", "ci")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", nil, err
+	}
+	trace := runTrace(result)
+	raw, err := capsuletrace.MarshalDocument(trace)
+	if err != nil {
+		return "", nil, err
+	}
+	tracePath := filepath.Join(dir, string(result.Job.ID)+".trace.json")
+	if err := os.WriteFile(tracePath, append(raw, '\n'), 0o600); err != nil {
+		return "", nil, err
+	}
+	return tracePath, raw, nil
 }
 
 func runTrace(result ci.RunResult) capsuletrace.Document {
@@ -115,9 +132,37 @@ func runTrace(result ci.RunResult) capsuletrace.Document {
 			},
 		},
 		{Kind: capsuletrace.KindCIStarted, JobID: jobID, EnvelopeDigest: envelope.Digest},
-		{Kind: capsuletrace.KindCIVerdict, JobID: jobID, EnvelopeDigest: envelope.Digest, Outcome: result.Verdict.Outcome},
 	}
+	for _, event := range result.Events {
+		if converted, ok := executorTraceEvent(jobID, event); ok {
+			events = append(events, converted)
+		}
+	}
+	events = append(events, capsuletrace.Event{Kind: capsuletrace.KindCIVerdict, JobID: jobID, EnvelopeDigest: envelope.Digest, Outcome: result.Verdict.Outcome})
 	return capsuletrace.NewDocument(events...)
+}
+
+func executorTraceEvent(jobID string, event executor.Event) (capsuletrace.Event, bool) {
+	switch event.Kind {
+	case capsuletrace.KindExecutorStarted, capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed:
+		return capsuletrace.Event{Kind: event.Kind, JobID: jobID, EnvelopeDigest: event.EnvelopeDigest, Fields: executorTraceFields(event)}, true
+	default:
+		return capsuletrace.Event{}, false
+	}
+}
+
+func executorTraceFields(event executor.Event) map[string]any {
+	fields := map[string]any{}
+	if event.ExecutionID != "" {
+		fields["execution_id"] = event.ExecutionID
+	}
+	for key, value := range event.Fields {
+		fields[key] = value
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return fields
 }
 
 func signByPolicy(project string, r receipt.Receipt, signer receipt.Signer) (receipt.Receipt, error) {
