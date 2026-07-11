@@ -8,8 +8,11 @@ GitHub trigger/check adapter ship. Onboarding now emits a checked-in CI
 manifest, environment definition, and minimal project CI story wrapper.
 Project-wrapper parity/digest fixtures and a Capsule-MCP-only writer proof ship.
 Cassette-backed LLM review fixtures now exercise the real `host.agent.decide`
-review seam without live model spend. GitHub network publication, gated remote
-dogfood, and final doc trimming remain.
+review seam without live model spend. A bounded two-instance VM dogfood reached
+real Claude Code / GLM-5.2 worker launch and exposed remote driver/auth/stall
+diagnostics gaps, so it is recorded as a blocker rather than a green remote CI
+proof. GitHub network publication, a completed gated remote dogfood, and final
+doc trimming remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -315,12 +318,28 @@ project wrapper that imports only deterministic checks and adjudication.
 ## 3. Adopt and document
 - [x] 3.1 Extend onboarding to generate `.kitsoki/ci.yaml`, environment definition, and a minimal project CI wrapper from project-profile commands
 - [ ] 3.2 Dogfood Kitsoki's focused validation + review story locally, then through a fake and one gated real remote executor
+  - Attempted: two bounded VM live-driver runs against `query-string` (`qs1`,
+    `qs2`) with candidate `glm-5.2` / profile `synthetic-claude`. Both created
+    real Kitsoki live sessions and launched Claude Code workers with
+    `hf:zai-org/GLM-5.2`, then stalled after `agent.call.start` with no
+    provider stream, completion, or terminal story transition. Evidence is
+    summarized in `.artifacts/capsule-ci-remote-dogfood/2026-07-11/summary.md`
+    and the copied traces beside it.
+  - Shipped follow-up: the Claude subprocess runner now emits `agent.process`
+    `agent.stream` breadcrumbs for start/no-output/finish with redacted argv,
+    provider env key names, common env-key presence, pid, uid/root/sandbox
+    posture, raw event count, and stderr/infra summary. This makes the next
+    remote stall diagnosable directly from the trace instead of appearing as a
+    dangling `agent.call.start`.
+  - Remaining: fix the VM driver/credential/env setup and re-run a gated
+    remote CI proof to terminal verdict. The attempted run was Studio/Claude
+    worker dogfood, not a deployed HTTPS Capsule worker proof.
 - [x] 3.3 Add GitHub trigger/check adapter consuming the same pipeline/result contract
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal
   - Shipped: permanent `docs/stories/ci.md` now documents the story-native CI
     contract, reference rooms, authority boundaries, and GitHub adapter model.
   - Remaining: migrate examples and delete this proposal after gated remote
-    dogfood and GitHub network publication land.
+    dogfood reaches a terminal verdict and GitHub network publication lands.
 ```
 
 ## Open questions

@@ -14,7 +14,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -376,6 +378,44 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		finish(nil, startErr.Error())
 		return ClaudeRun{Infra: startErr}, "", nil
 	}
+	processStart := time.Now()
+	appendAgentProcessNotice(ctx, processStart, storeAgentNotice{
+		Subtype:         "start",
+		Severity:        "info",
+		Text:            "agent subprocess started",
+		Backend:         backend.Name(),
+		Bin:             bin,
+		WorkingDir:      inv.WorkingDir,
+		Args:            sanitizeAgentArgs(inv.Args),
+		PID:             cmd.Process.Pid,
+		ProviderEnvKeys: providerEnvKeys(ctx),
+		EnvPresent:      diagnosticEnvPresence(cmd.Env),
+		UID:             os.Getuid(),
+		IsRoot:          os.Getuid() == 0,
+		IsSandbox:       envBool(cmd.Env, "IS_SANDBOX"),
+	})
+	var noOutputOnce sync.Once
+	stopNoOutput := make(chan struct{})
+	if after := agentNoOutputNoticeAfter(); after > 0 {
+		go func(pid int, started time.Time, threshold time.Duration) {
+			select {
+			case <-time.After(threshold):
+				appendAgentProcessNotice(ctx, time.Now(), storeAgentNotice{
+					Subtype:    "no_output",
+					Severity:   "warn",
+					Text:       fmt.Sprintf("agent subprocess has produced no stdout after %s", threshold),
+					Backend:    backend.Name(),
+					PID:        pid,
+					DurationMS: time.Since(started).Milliseconds(),
+				})
+			case <-stopNoOutput:
+			}
+		}(cmd.Process.Pid, processStart, after)
+	}
+	stopNoOutputFn := func() {
+		noOutputOnce.Do(func() { close(stopNoOutput) })
+	}
+	defer stopNoOutputFn()
 
 	// Read stdout line by line, emitting an event per parseable JSON
 	// line and accumulating text content + the final reply string.
@@ -415,6 +455,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 		seenThinking  map[string]bool
 	)
 	for scanner.Scan() {
+		stopNoOutputFn()
 		noteAgentActivity(ctx)
 		line := scanner.Text()
 		rawLines.WriteString(line)
@@ -471,6 +512,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	scanErr := scanner.Err()
 
 	waitErr := cmd.Wait()
+	stopNoOutputFn()
 
 	cr := ClaudeRun{Stderr: se.String(), RawEvents: rawEvents, Usage: resultUsage, CostUSD: resultCost}
 	recordAgentUsage(ctx, resultUsage, resultCost)
@@ -487,6 +529,27 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	if scanErr != nil && cr.Infra == nil {
 		cr.Infra = fmt.Errorf("read stream-json stdout: %w", scanErr)
 	}
+	finishNotice := storeAgentNotice{
+		Subtype:       "finish",
+		Severity:      "info",
+		Text:          "agent subprocess finished",
+		Backend:       backend.Name(),
+		PID:           cmd.Process.Pid,
+		DurationMS:    time.Since(processStart).Milliseconds(),
+		ExitCode:      cr.ExitCode,
+		RawEventCount: len(rawEvents),
+	}
+	if cr.Infra != nil {
+		finishNotice.Severity = "error"
+		finishNotice.Error = cr.Infra.Error()
+	}
+	if strings.TrimSpace(cr.Stderr) != "" {
+		finishNotice.Error = strings.TrimSpace(onelinePreview(cr.Stderr, 240))
+		if cr.ExitCode != 0 {
+			finishNotice.Severity = "error"
+		}
+	}
+	appendAgentProcessNotice(ctx, time.Now(), finishNotice)
 
 	// Synthesize the final reply text. Prefer the `result` event's
 	// `result` field; fall back to the accumulated assistant text
@@ -506,6 +569,140 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	cr.Stdout = strings.TrimRight(reply, "\n")
 	finish(cr.Usage, cr.Stderr+" "+cr.Stdout)
 	return cr, parsedSID, nil
+}
+
+func appendAgentProcessNotice(ctx context.Context, ts time.Time, notice storeAgentNotice) {
+	notice.Type = "agent.process"
+	if notice.Text == "" {
+		switch notice.Subtype {
+		case "start":
+			notice.Text = "agent subprocess started"
+		case "no_output":
+			notice.Text = "agent subprocess produced no stdout before the diagnostic threshold"
+		case "finish":
+			notice.Text = "agent subprocess finished"
+		default:
+			notice.Text = "agent subprocess diagnostic"
+		}
+	}
+	appendAgentNoticeEvent(ctx, ts, notice)
+}
+
+func agentNoOutputNoticeAfter() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("KITSOKI_AGENT_NO_OUTPUT_NOTICE_AFTER"))
+	if raw == "" {
+		return 30 * time.Second
+	}
+	if raw == "0" || strings.EqualFold(raw, "off") || strings.EqualFold(raw, "false") {
+		return 0
+	}
+	if d, err := time.ParseDuration(raw); err == nil {
+		if d < 0 {
+			return 0
+		}
+		return d
+	}
+	if seconds, err := strconv.ParseFloat(raw, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds * float64(time.Second))
+	}
+	return 30 * time.Second
+}
+
+func sanitizeAgentArgs(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 0; i < len(out); i++ {
+		a := out[i]
+		switch a {
+		case "--mcp-config", "--settings", "--config":
+			if i+1 < len(out) {
+				out[i+1] = redactPathLikeArg(out[i+1])
+				i++
+			}
+			continue
+		case "--system-prompt", "--append-system-prompt":
+			if i+1 < len(out) {
+				out[i+1] = "<redacted-text>"
+				i++
+			}
+			continue
+		}
+		for _, prefix := range []string{"--mcp-config=", "--settings=", "--config="} {
+			if strings.HasPrefix(a, prefix) {
+				k, _, _ := strings.Cut(a, "=")
+				out[i] = k + "=<redacted-path>"
+			}
+		}
+		for _, prefix := range []string{"--system-prompt=", "--append-system-prompt="} {
+			if strings.HasPrefix(a, prefix) {
+				k, _, _ := strings.Cut(a, "=")
+				out[i] = k + "=<redacted-text>"
+			}
+		}
+	}
+	return out
+}
+
+func redactPathLikeArg(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return v
+	}
+	if strings.HasPrefix(v, "/") || strings.HasPrefix(v, ".") || strings.Contains(v, string(os.PathSeparator)) {
+		return "<redacted-path>"
+	}
+	return "<redacted>"
+}
+
+func providerEnvKeys(ctx context.Context) []string {
+	env := AgentProviderEnvFromCtx(ctx)
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func diagnosticEnvPresence(env []string) map[string]bool {
+	keys := []string{
+		"ANTHROPIC_API_KEY",
+		"ANTHROPIC_AUTH_TOKEN",
+		"ANTHROPIC_BASE_URL",
+		"IS_SANDBOX",
+		"SYNTHETIC_API_KEY",
+	}
+	out := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		out[k] = envContainsKey(env, k)
+	}
+	return out
+}
+
+func envContainsKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func envBool(env []string, key string) bool {
+	prefix := key + "="
+	for _, kv := range env {
+		if strings.HasPrefix(kv, prefix) {
+			v := strings.TrimSpace(strings.TrimPrefix(kv, prefix))
+			return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+		}
+	}
+	return false
 }
 
 func quotaFinishOnce(reservation *quotaReservation) func(map[string]any, string) {

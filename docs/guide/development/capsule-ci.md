@@ -80,6 +80,16 @@ kitsoki capsule worker run \
 The Docker provider receives a workspace-path resolver from the caller; host
 paths stay out of the sealed envelope.
 
+Remote dogfood status: the offline remote contract and fake remote/container
+lanes are covered without LLM spend. A July 2026 two-instance VM dogfood of the
+Studio/Claude worker path reached real Claude Code launch with GLM-5.2 but
+stalled before provider stream or terminal story verdict, so it is evidence of
+the launch path and of a remaining remote-driver blocker, not a green CI proof.
+The agent runner now writes `agent.process` start/no-output/finish breadcrumbs
+as `agent.stream` events, including redacted argv/env presence, pid, uid/root,
+sandbox posture, raw event count, and stderr/infra summary, so the next remote
+failure is diagnosable from the trace.
+
 The reference story now exposes the intended room graph directly: prepare,
 deterministic checks, schema-bounded review, bounded writer/refine, and
 adjudication. Its default direct-run path still parks until a project wrapper
