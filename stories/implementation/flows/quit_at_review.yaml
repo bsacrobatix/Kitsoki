@@ -36,6 +36,7 @@ host_handlers:
         summary_markdown: "Stub artifact."
         scope:            "small."
         acceptance_criteria: ["criterion one"]
+        report_path:      ".artifacts/implementation/TKT-QUIT/code-report.md"
         affected_files:   ["x.go"]
         confidence:       0.6
         reasoning:        "stub."

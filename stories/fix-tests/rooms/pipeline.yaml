@@ -141,6 +141,7 @@ states:
           - kv:
               pairs:
                 "Last fix": '{{ world.fix_artifact.summary_title|default:"(pending — fixer running)" }}'
+                "Cycle report": '{{ world.fix_artifact.report_path|default:"(not written)" }}'
         choices:
           - heading: "Actions"
           - list:
@@ -570,6 +571,7 @@ states:
           - code: '{{ world.fix_artifact.summary_markdown|default:"(the fixer or a test run errored before producing an artifact — see the linked test report)" }}'
           - kv:
               pairs:
+                "Cycle report": '{{ world.fix_artifact.report_path|default:"(not written)" }}'
                 Report: '{{ world.report_path|default:"(pending)" }}'
         choices:
           - heading: "Actions"

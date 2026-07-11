@@ -21,7 +21,11 @@ Follow the `kitsoki-story-authoring` skill:
 3. Write **no-LLM** coverage under the touched story's `flows/` or the relevant deterministic test. Seed artifacts/cassettes so tests never call a live LLM.
 4. Run the focused validation and report the exact command.
 5. Write a unified diff artifact for the authored changes and return its path as `diff_path`. Prefer `.artifacts/session-mining/<job>/author.diff` when the job id is available from the selected item/source plan. The diff must be a real unified diff of the changes you made; do not summarize a diff in prose.
+6. After the first useful diagnosis, create a durable authoring report beside
+   the diff (prefer `.artifacts/session-mining/<job>/author-report.md`) and
+   update it during edits and validation. It records the selected improvement,
+   changed files, exact no-LLM gate, outcome, and any remaining limitation.
 
 {% block spec_project_context %}{% endblock %}
 
-Do **not** create commits — the operator owns commits. Return `artifact_kind`, `files_changed`, `files_changed_display`, `diff_path`, `applied_improvements`, `flow_files`, `validation`, `flows_green` (true only if focused validation actually passed), and a `summary_markdown`.
+Do **not** create commits — the operator owns commits. Return `artifact_kind`, `files_changed`, `files_changed_display`, `diff_path`, `report_path`, `applied_improvements`, `flow_files`, `validation`, `flows_green` (true only if focused validation actually passed), and a compact `summary_markdown` that points to the report.

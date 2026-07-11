@@ -29,6 +29,7 @@ host_handlers:
           submitted:
             summary_title:      "Fix off-by-one in Add()"
             summary_markdown:   "TestFoo expected 2 but Add() returned 1; corrected the off-by-one."
+            report_path:        ".artifacts/fix-tests/cycle-1-report.md"
             files_changed:      ["internal/foo/foo.go"]
             fixed_tests:        ["TestFoo"]
             remaining_failures: []

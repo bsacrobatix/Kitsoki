@@ -21,6 +21,7 @@ states:
             "Flows green": '{{ world.author_artifact.flows_green|default:"(pending)" }}'
             "Files changed": '{{ world.author_artifact.files_changed_display|default:"(pending)" }}'
             Diff: '{{ world.author_artifact.diff_path|default:"(pending)" }}'
+            Report: '{{ world.author_artifact.report_path|default:"(pending)" }}'
       - prose: "Validation gate: GREEN - {{ world.author_artifact.validation|default:\"focused flow validation passed\" }}"
         when: "world.author_artifact.flows_green == true"
       - prose: "Validation gate: NOT GREEN - {{ world.author_artifact.validation|default:\"focused flow validation has not passed yet\" }}"

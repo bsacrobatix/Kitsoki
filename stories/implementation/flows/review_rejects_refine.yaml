@@ -44,6 +44,7 @@ host_handlers:
         summary_markdown: "Change the rate-limit window from 60s to 10s; update test fixture."
         scope:            "Single constant; one test."
         acceptance_criteria: ["Window is 10s in the default config."]
+        report_path:      ".artifacts/implementation/TKT-RATE/code-report.md"
         affected_files:   ["internal/ratelimit/window.go"]
         confidence:       0.78
         reasoning:        "Mechanical constant change."

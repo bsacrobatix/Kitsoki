@@ -92,6 +92,13 @@ Worker briefs should include:
 - where to write review artifacts under `.context/` or `.artifacts/`;
 - whether live LLM use is allowed. Default to no real LLM in tests.
 
+For a long-running implementation worker, also give a report path under
+`.artifacts/` or `.context/` and require it to write the report after the first
+useful diagnosis, updating it during implementation and validation. The final
+structured response should return that path plus compact status facts, not a
+large required prose report. The supervisor should inspect the file before
+accepting the receipt.
+
 Keep the supervisor role separate from the worker role. The supervisor checks
 the receipt, trace, diff, untracked files, and gates. Do not accept a worker's
 claim of success without independent verification.

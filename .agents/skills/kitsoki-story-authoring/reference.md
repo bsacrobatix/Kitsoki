@@ -643,6 +643,11 @@ Checklist when adding/editing a prompt:
 - [ ] An overlay extends the base via `{% extends "@story/<path>" %}` — never
       duplicate the base prompt.
 - [ ] Verify the surface: `kitsoki prompts spec <app.yaml>`.
+- [ ] For a long-running write-capable agent, give it a deterministic
+      `.artifacts/<run>/...report.md` destination, require an early write plus
+      incremental updates, and return `report_path` with only a compact
+      checkpoint note. Do not require its full prose report in the final schema
+      response; add a no-LLM flow that proves the path reaches the view.
 
 When a request is about a project-specific gap a `spec_` section covers, fix it
 by **specializing that block in an overlay** (`--prompt-overlay` or the

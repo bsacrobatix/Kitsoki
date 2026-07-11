@@ -49,6 +49,7 @@ host_handlers:
         summary_markdown: "Adds the /healthz route + a handler that returns 200."
         scope:            "Single route + handler + test."
         acceptance_criteria: ["GET /healthz returns 200 OK."]
+        report_path:      ".artifacts/implementation/TKT-HEALTH/code-report.md"
         affected_files:   ["internal/server/healthz.go", "internal/server/healthz_test.go"]
         confidence:       0.8
         reasoning:        "Standard handler pattern; one route registration."

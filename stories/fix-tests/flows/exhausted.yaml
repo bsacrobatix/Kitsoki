@@ -25,6 +25,7 @@ host_handlers:
           submitted:
             summary_title:      "Attempted fix"
             summary_markdown:   "Adjusted the handler but the failure persists; needs deeper investigation."
+            report_path:        ".artifacts/fix-tests/cycle-1-report.md"
             files_changed:      ["internal/foo/foo.go"]
             fixed_tests:        []
             remaining_failures: ["TestFoo"]

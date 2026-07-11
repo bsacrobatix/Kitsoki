@@ -71,6 +71,7 @@ initial_world:
     files_changed: ["stories/dev-story-mining/rooms/prepare.yaml", "stories/dev-story-mining/scripts/plan_sources.star", "stories/dev-story-mining/scripts/plan_sources.star.yaml", "stories/dev-story-mining/flows/happy_human.yaml"]
     files_changed_display: "4 files: prepare room, Starlark planner, sidecar, happy_human flow"
     diff_path: "stories/dev-story-mining/demo-artifacts/author.diff"
+    report_path: "stories/dev-story-mining/demo-artifacts/author-report.md"
     applied_improvements: ["Added deterministic Claude/Codex source matrix before mining", "Recorded Codex pre-model hook limitation as an explicit policy caveat", "Pinned progressive determinism ladder into the story flow"]
     flows_green:   true
     validation: "kitsoki test flows stories/dev-story-mining/app.yaml"

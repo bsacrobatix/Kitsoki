@@ -12,8 +12,13 @@
     },
     "summary_markdown": {
       "type": "string",
-      "minLength": 80,
-      "description": "Markdown narrative of the edits applied — what changed in each file and why. Posted to the transport at the testing checkpoint."
+      "minLength": 1,
+      "description": "Compact checkpoint note. The durable implementation narrative lives at report_path."
+    },
+    "report_path": {
+      "type": "string",
+      "minLength": 4,
+      "description": "Workspace-relative report written during implementation, under .artifacts/bugfix/."
     },
     "files_changed": {
       "type": "array",

@@ -67,6 +67,17 @@ reproduce the issue, patch it in-story with `story.write`, then run
 outside-the-story changes or cannot be fixed via MCP actions, file it with
 `issue.create` as a concrete bug report instead of routing around it.
 
+## Durable implementation handoffs
+
+For a long-running implementation or repair turn, create or require a durable
+report in the managed workspace's `.artifacts/` area as soon as there is useful
+diagnosis, and update it while work and validation proceed. Return and inspect
+the report path with compact structured status/facts. Do not make a large prose
+field in the agent's final structured response the only required handoff: a
+late response can fail after correct work has already been done. Keep this rule
+out of short read-only routing and judge calls, where a compact inline verdict
+is the right surface.
+
 Architecture reference (for the human, not for you to open): the studio is
 documented at `docs/architecture/mcp-studio.md`. You drive the same shipped Go
 APIs `kitsoki run`/`/editor` use, so what you observe can't disagree with them.
