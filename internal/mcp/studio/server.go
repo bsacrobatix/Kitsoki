@@ -133,6 +133,10 @@ type Server struct {
 	// comment for why graphsrv defines its own type instead of importing
 	// this package's. See WithGraphIssueFiler.
 	graphIssueFiler graphsrv.IssueFiler
+	// kitDeps carries the cmd-layer seams the kit lifecycle tools need
+	// (kit_tools.go). The zero value degrades: kit.update/kit.trial report
+	// the missing seam structurally instead of running with wrong resolution.
+	kitDeps KitTrialDeps
 }
 
 // ServerOption configures a studio Server at construction.
@@ -310,6 +314,7 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 
 func (srv *Server) registerLegacyToolbox() {
 	srv.registerStoryTools()
+	srv.registerKitTools()
 	srv.registerStorySearchTools()
 	srv.registerStoryTurnTool()
 	srv.registerWorkflowTools()
@@ -513,6 +518,9 @@ const (
 	// ErrIssueUnavailable — issue.create was called with sink=github on a studio
 	// with no issue filer wired (started without GitHub filing).
 	ErrIssueUnavailable = "ISSUE_UNAVAILABLE"
+	// ErrKitUnavailable — a kit lifecycle tool needing a cmd-layer seam
+	// (WithKitTrialDeps) was called on a studio built without one.
+	ErrKitUnavailable = "KIT_UNAVAILABLE"
 )
 
 // buildToolError wraps a code + message into a CallToolResult with IsError=true.
