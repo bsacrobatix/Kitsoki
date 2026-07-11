@@ -85,6 +85,22 @@ func TestServiceRunsTypedStoryVerdictWithFakeExecutor(t *testing.T) {
 	}
 }
 
+func TestServiceDerivesPromotionEligibilityAtUntrustedStoryBoundary(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	service := Service{ProjectRoot: root, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Provider: executor.NewFakeProvider("fake"), Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+		// A story JSON object omits this bool and therefore decodes it as false.
+		return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+	})}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Verdict.PromotionEligible {
+		t.Fatalf("runtime did not derive promotion eligibility: %#v", result.Verdict)
+	}
+}
+
 func TestValidateVerdictRejectsDigestMismatchAndCallerControlledPromotion(t *testing.T) {
 	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
 	if err != nil {

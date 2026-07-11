@@ -258,6 +258,16 @@ func ValidateVerdict(v Verdict, expected executor.Envelope, contract ResultContr
 	return nil
 }
 
+// NormalizeVerdict makes promotion eligibility a runtime-derived field. Story
+// YAML/JSON decodes an omitted bool as false, so validation alone cannot tell
+// omission from a caller-supplied false. Every untrusted story boundary calls
+// this before the strict validator; persisted receipts still validate the
+// normalized value and therefore cannot forge promotion through a true value.
+func NormalizeVerdict(v Verdict) Verdict {
+	v.PromotionEligible = verdictDerivedPromotion(v)
+	return v
+}
+
 func validateResultContract(contract ResultContract) error {
 	if contract.Schema != "" && contract.Schema != VerdictSchema {
 		return fmt.Errorf("capsule ci: result schema %q, want %q", contract.Schema, VerdictSchema)
@@ -528,6 +538,7 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		if e != nil {
 			return executor.Result{}, e
 		}
+		v = NormalizeVerdict(v)
 		if e = ValidateVerdict(v, prepared.Envelope, p.Result); e != nil {
 			return executor.Result{}, e
 		}
@@ -555,6 +566,7 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		if err := json.Unmarshal(execution.VerdictJSON, &verdict); err != nil {
 			runErr = fmt.Errorf("capsule ci: parse executor verdict: %w", err)
 		}
+		verdict = NormalizeVerdict(verdict)
 	}
 	if runErr == nil {
 		verdict, runErr = s.applyHygienePolicy(ctx, p, verdict)
