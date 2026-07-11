@@ -28,10 +28,17 @@ func mcpGraphCmd() *cobra.Command {
 		Use:   "mcp-graph",
 		Short: "Run the stdio MCP server for the project object graph (read family + feedback)",
 		Long: `mcp-graph exposes kitsoki's project-object-graph read family (graph.open,
-graph.get, graph.find, graph.neighbors, graph.type, graph.lint, graph.impact)
-and feedback channel (feedback.report, feedback.list) as a standalone stdio
-MCP server. Write tools (propose/authorize/apply/withdraw/changeset-mutate)
-are not part of this stage.
+graph.get, graph.find, graph.neighbors, graph.type, graph.lint, graph.impact,
+graph.changeset), write family (graph.propose, graph.withdraw, graph.apply,
+graph.authorize), and feedback channel (feedback.report, feedback.list) as a
+standalone stdio MCP server.
+
+--mode gates the write family: "read" registers no write tools at all;
+"propose" registers propose/withdraw/apply(dry-run only)/authorize(rejected
+as steward-only); "steward" additionally allows a real apply and authorize.
+Every write-tool call (propose/withdraw/apply/authorize) is appended to a
+receipts journal (.artifacts/graph-mcp/receipts.jsonl next to the bound
+catalog's repo root, or --journal's path).
 
 Every tool call is bound to one of the catalogs named by --catalog; a tool's
 "catalog" argument selects among bound aliases and never accepts a raw
@@ -67,9 +74,9 @@ Examples:
 	}
 	cmd.Flags().StringArrayVar(&catalogFlags, "catalog", nil, "[alias=]path to a bound catalog; repeatable, first is default (default: probe pog/catalog.yaml under cwd)")
 	cmd.Flags().StringVar(&mode, "mode", graphsrv.DefaultMode, "one of: read, propose, steward (gates future write-tool registration)")
-	cmd.Flags().StringVar(&actor, "actor", "", "actor name stamped on future write-tool calls (P4)")
+	cmd.Flags().StringVar(&actor, "actor", "", "actor name stamped on write-tool calls (authored_by/authorized_by) and checked for graph.withdraw's own-changeset gate in propose mode")
 	cmd.Flags().StringVar(&feedbackSink, "feedback-sink", graphsrv.FeedbackSinkLocal, "one of: local, catalog, github (P2 always writes locally; catalog/github record the choice but degrade to local-only)")
-	cmd.Flags().StringVar(&journalPath, "journal", "", "receipts JSONL path for future write-tool calls (P4); accepted now for forward compat")
+	cmd.Flags().StringVar(&journalPath, "journal", "", "receipts JSONL path for write-tool calls (default: .artifacts/graph-mcp/receipts.jsonl next to the bound catalog's repo root)")
 	cmd.Flags().StringVar(&clockFixed, "clock-fixed", "", "RFC3339 timestamp to pin the server's clock to (also honors KITSOKI_GRAPH_CLOCK_FIXED)")
 	return cmd
 }

@@ -61,4 +61,14 @@ const (
 	BudgetGraphGetTotal  = 24 * 1024 // graph.get: overall per-call budget
 	BudgetGraphFindPage  = 8 * 1024  // graph.find: per-page budget
 	BudgetGraphNeighbors = 10 * 1024 // graph.neighbors budget
+
+	// P4 write-tool budgets: these responses are small (a changeset id,
+	// status, a handful of guard-fills/changed-files) — 8KB matches
+	// BudgetGraphFindPage's "generous cap for a page-shaped response"
+	// convention rather than re-deriving a tighter number per tool.
+	BudgetGraphPropose   = 8 * 1024 // graph.propose
+	BudgetGraphChangeset = 8 * 1024 // graph.changeset
+	BudgetGraphWithdraw  = 8 * 1024 // graph.withdraw
+	BudgetGraphApply     = 8 * 1024 // graph.apply
+	BudgetGraphAuthorize = 8 * 1024 // graph.authorize
 )

@@ -2,11 +2,12 @@ package graphsrv
 
 import "fmt"
 
-// Server modes gate write-tool registration (plan §3.2). P2 has no write
-// tools at all — the read family and feedback channel exist in every mode —
-// so today this only needs to be a correct, forward-compatible mechanism
-// for P4 to hang propose/authorize/apply/withdraw/changeset-mutate
-// registration off of.
+// Server modes gate write-tool registration (plan §3.2): the read family,
+// graph.changeset, and the feedback channel exist in every mode; the P4
+// write family (graph.propose/withdraw/apply/authorize) is registered only
+// in propose and steward mode (never read), and graph.apply's real
+// (non-dry-run) path plus graph.authorize additionally require steward mode
+// at runtime even when registered.
 const (
 	ModeRead    = "read"
 	ModePropose = "propose"

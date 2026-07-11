@@ -44,10 +44,29 @@ const (
 	// mode-gating wires against a stable name.
 	CodeReadOnlyMode = "READ_ONLY_MODE"
 
-	// CodeStewardOnly: reserved for P4/P5 — a steward-only write tool
-	// call arrived while the server was started with --mode propose (not
-	// steward). Nothing raises this yet.
+	// CodeStewardOnly: a steward-only write tool call (graph.authorize
+	// always; graph.apply with dry_run:false) arrived while the server
+	// was started with --mode read or --mode propose (not steward).
 	CodeStewardOnly = "STEWARD_ONLY"
+
+	// CodeCatalogLintBlocked: a write op (propose/apply) was rejected
+	// because it would introduce a NEW error-severity lint issue not
+	// already present in the catalog's baseline (guards.go's lint-diff
+	// gate, hazard guard #3). Pre-existing catalog dirt never triggers
+	// this — only issues the write itself would add.
+	CodeCatalogLintBlocked = "CATALOG_LINT_BLOCKED"
+
+	// CodeNeedsCanonicalization: a write op was rejected because a file
+	// backing the catalog isn't in yaml.v3's canonical re-marshal form
+	// (guards.go's checkCanonical, hazard guard #4) — writing through it
+	// would silently reflow a hand-wrapped block scalar. Canonicalize the
+	// file out-of-band before retrying.
+	CodeNeedsCanonicalization = "NEEDS_CANONICALIZATION"
+
+	// CodeNotYourChangeset: a propose-mode caller tried to withdraw a
+	// changeset authored by a different actor. Steward mode skips this
+	// check — stewards can withdraw anything.
+	CodeNotYourChangeset = "NOT_YOUR_CHANGESET"
 )
 
 // defaultIfStuck is the standing advertisement of the feedback channel:
