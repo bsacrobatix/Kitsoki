@@ -52,6 +52,16 @@ type Catalog struct {
 	// consumes to route evidence/feedback writes to the right node/edge
 	// shape. Unused by any check today; validated for shape only.
 	FeedbackRouting *FeedbackRouting
+
+	// ContentDigest is a fingerprint of every real on-disk file backing this
+	// catalog, computed once at load time (buildCatalog, via
+	// computeContentDigest in guards.go). Propose/Authorize/Withdraw/Apply
+	// re-compute this immediately before copying scratch changes back over
+	// the real catalog (commitWithCAS) and compare — a mismatch means a
+	// concurrent writer landed in the load->scratch->copy-back window
+	// (hazard guard #2, plan §3.4 red-team amendment #2), and the whole
+	// operation is retried against a fresh load instead of clobbering it.
+	ContentDigest string
 }
 
 // WritePolicy is the optional `write_policy:` catalog-level block.
@@ -497,6 +507,12 @@ func buildCatalog(rootPath string, schema SchemaPin, typeDefs []fileTypeDef, sou
 		cat.Nodes[node.ID] = node
 		cat.NodeFile[node.ID] = src.file
 	}
+
+	digest, err := computeContentDigest(cat)
+	if err != nil {
+		return nil, fmt.Errorf("graph: content digest %s: %w", rootPath, err)
+	}
+	cat.ContentDigest = digest
 
 	return cat, nil
 }

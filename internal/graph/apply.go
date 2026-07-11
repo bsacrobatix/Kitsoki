@@ -2,6 +2,7 @@ package graph
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -59,36 +60,62 @@ func Apply(rootPath string, changesetID NodeID, dryRun bool, actor string, clk c
 	if clk == nil {
 		clk = clock.Real()
 	}
+	// File-level CAS (hazard guard #2): each attempt does a fresh
+	// LoadCatalog (capturing a fresh ContentDigest) and only commits if the
+	// real catalog's content hasn't moved since; a mismatch retries the
+	// whole operation (bounded) rather than clobbering a concurrent write.
+	for attempt := 1; attempt <= casMaxAttempts; attempt++ {
+		res, retry, err := applyOnce(rootPath, changesetID, dryRun, clk)
+		if retry {
+			continue
+		}
+		return res, err
+	}
+	return &ApplyResult{RejectReasons: []string{
+		fmt.Sprintf("CONFLICT: %s changed concurrently during apply, exceeded %d retry attempts", rootPath, casMaxAttempts),
+	}}, nil
+}
+
+func applyOnce(rootPath string, changesetID NodeID, dryRun bool, clk clock.Clock) (res *ApplyResult, retry bool, err error) {
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
-		return nil, fmt.Errorf("graph apply: load %s: %w", rootPath, err)
+		return nil, false, fmt.Errorf("graph apply: load %s: %w", rootPath, err)
+	}
+	// Canonicality pre-check (hazard guard #4): refuse to write through a
+	// file yaml.v3 would reflow on next re-marshal.
+	if reasons := checkCanonical(cat); len(reasons) > 0 {
+		return &ApplyResult{RejectReasons: reasons}, false, nil
 	}
 	csNode, ok := cat.Nodes[changesetID]
 	if !ok {
-		return nil, fmt.Errorf("graph apply: changeset %q not found in catalog", changesetID)
+		return nil, false, fmt.Errorf("graph apply: changeset %q not found in catalog", changesetID)
 	}
 	cs, err := ParseChangeset(csNode)
 	if err != nil {
-		return nil, fmt.Errorf("graph apply: %w", err)
+		return nil, false, fmt.Errorf("graph apply: %w", err)
 	}
 	if !dryRun && cs.Status != ChangesetStatusAuthorized {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("changeset %q has status %q, must be %q to apply (pass dryRun to preview an unauthorized changeset)", cs.NodeID, cs.Status, ChangesetStatusAuthorized),
-		}}, nil
+		}}, false, nil
 	}
 	if reasons := ValidateChangeset(cs, cat); len(reasons) > 0 {
-		return &ApplyResult{RejectReasons: reasons}, nil
+		return &ApplyResult{RejectReasons: reasons}, false, nil
 	}
+
+	// Lint-diff gate baseline (hazard guard #3): computed on cat BEFORE any
+	// operation is applied, so pre-existing catalog dirt never blocks.
+	baseline := ErrorIssues(Lint(cat))
 
 	tmpDir, err := os.MkdirTemp("", "kitsoki-graph-apply-*")
 	if err != nil {
-		return nil, fmt.Errorf("graph apply: mktemp: %w", err)
+		return nil, false, fmt.Errorf("graph apply: mktemp: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	scratchRoot, err := copyCatalogTree(rootPath, tmpDir, cat)
 	if err != nil {
-		return nil, fmt.Errorf("graph apply: copy scratch tree: %w", err)
+		return nil, false, fmt.Errorf("graph apply: copy scratch tree: %w", err)
 	}
 
 	ops := cs.Operations
@@ -108,31 +135,36 @@ func Apply(rootPath string, changesetID NodeID, dryRun bool, actor string, clk c
 	}
 	changedFiles, err := applyOperations(cat, ops, scratchRoot)
 	if err != nil {
-		return &ApplyResult{RejectReasons: []string{err.Error()}}, nil
+		return &ApplyResult{RejectReasons: []string{err.Error()}}, false, nil
 	}
 
 	candidate, err := LoadCatalog(scratchRoot)
 	if err != nil {
-		return &ApplyResult{RejectReasons: []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}}, nil
+		return &ApplyResult{RejectReasons: []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}}, false, nil
 	}
 	// Only error-severity issues reject an apply: SeverityWarning is
 	// documented as advisory (lint.go), so a warning — e.g. a work item
 	// that has not yet declared its materialize gate check — must not brick
 	// every subsequent catalog write (including materialize's own
 	// system-authored write-backs, which are exactly how such a node records
-	// that its check failed).
-	if issues := ErrorIssues(Lint(candidate)); len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, nil
+	// that its check failed). And only NEW error issues (not present in
+	// baseline) block — pre-existing dirt no longer deadlocks writes
+	// (hazard guard #3).
+	if issues := newErrorIssues(baseline, ErrorIssues(Lint(candidate))); len(issues) > 0 {
+		return &ApplyResult{LintIssues: issues}, false, nil
 	}
 
 	if dryRun {
-		return &ApplyResult{Applied: false, ChangedFiles: changedFiles}, nil
+		return &ApplyResult{Applied: false, ChangedFiles: changedFiles}, false, nil
 	}
 
-	if err := commitChangedFiles(rootPath, scratchRoot, changedFiles); err != nil {
-		return nil, fmt.Errorf("graph apply: %w", err)
+	if err := commitWithCAS(cat, scratchRoot, changedFiles); err != nil {
+		if errors.Is(err, errCASConflict) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("graph apply: %w", err)
 	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, nil
+	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
 }
 
 // commitChangedFiles copies each of changedFiles (relative to scratchRoot,
@@ -193,16 +225,11 @@ func copyCatalogTree(rootPath, tmpDir string, cat *Catalog) (string, error) {
 		return dst, nil
 	}
 
-	files := map[string]bool{}
-	for _, f := range cat.NodeFile {
-		files[f] = true
+	files, err := catalogFiles(cat)
+	if err != nil {
+		return "", err
 	}
-	for _, extra := range []string{"catalog.yaml", "type_registry.yaml", "sources.yaml"} {
-		if _, err := os.Stat(filepath.Join(rootPath, extra)); err == nil {
-			files[filepath.Join(rootPath, extra)] = true
-		}
-	}
-	for f := range files {
+	for _, f := range files {
 		rel, err := filepath.Rel(rootPath, f)
 		if err != nil {
 			return "", err

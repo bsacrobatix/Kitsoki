@@ -1,7 +1,11 @@
 package graph
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -154,10 +158,11 @@ func parseOperation(m map[string]any) (Operation, error) {
 		if nodeID == "" {
 			return Operation{}, fmt.Errorf("removed op missing \"node\"")
 		}
-		before, ok := m["before"].(map[string]any)
-		if !ok {
-			return Operation{}, fmt.Errorf("removed op %q missing \"before\" mapping", nodeID)
-		}
+		// "before" may be omitted — hazard guard #5's server-side
+		// guard-fill (fillGuards, called by Propose before
+		// ValidateChangeset) fills the live node's full mapping in when
+		// absent, so this is no longer a parse-time error.
+		before, _ := m["before"].(map[string]any)
 		return Operation{Kind: kind, Node: NodeID(nodeID), Before: before}, nil
 	case OpRenamed:
 		from, _ := m["from"].(string)
@@ -241,14 +246,27 @@ func ValidateChangeset(cs *Changeset, cat *Catalog) []string {
 				continue
 			}
 			for _, ch := range op.Changes {
-				current := readNodePath(node, ch.Path)
+				current := readNodePath(cat, node, ch.Path)
 				if ch.Before != nil && !valuesEqual(current, ch.Before) {
 					reasons = append(reasons, fmt.Sprintf("op %d (modified): node %q path %v is stale: catalog has %v, changeset expected %v", i, op.Node, ch.Path, current, ch.Before))
 				}
 			}
 		case OpRemoved:
-			if _, exists := cat.Nodes[op.Node]; !exists {
+			node, exists := cat.Nodes[op.Node]
+			if !exists {
 				reasons = append(reasons, fmt.Sprintf("op %d (removed): node %q does not exist", i, op.Node))
+				continue
+			}
+			// Stale-guard (hazard guard #5 extends the existing "modified"
+			// guard to "removed"): op.Before, whether caller-supplied or
+			// server-filled by fillGuards, must match the live node's full
+			// mapping — a removal whose precondition no longer matches the
+			// catalog (someone else already changed/removed it) is
+			// rejected the same way a stale "modified" Before is.
+			if len(op.Before) > 0 {
+				if mismatches := nodeMatchesBefore(cat, node, op.Before); len(mismatches) > 0 {
+					reasons = append(reasons, fmt.Sprintf("op %d (removed): node %q is stale: %s", i, op.Node, strings.Join(mismatches, "; ")))
+				}
 			}
 		case OpRenamed:
 			if _, exists := cat.Nodes[op.From]; !exists {
@@ -413,8 +431,15 @@ func cloneRegistry(r *Registry) *Registry {
 
 
 // readNodePath reads the current value at a FieldChange-style path off a
-// live Node, for the stale-guard comparison in ValidateChangeset.
-func readNodePath(node *Node, path []string) any {
+// live Node, for the stale-guard comparison in ValidateChangeset (and
+// fillGuards' guard-fill). cat is required to resolve the node's type-
+// registry edge-field declarations: an "edges" path MUST be read via
+// Node.EdgeTargets against the decl, never node.Edges directly, or a
+// storage: top_level edge (e.g. change.depends_on, which lives in
+// Fields, not Edges) would silently read back as empty/nil even when
+// populated — exactly the top_level-edge conformance hazard the hard
+// constraint on edge resolution exists to prevent.
+func readNodePath(cat *Catalog, node *Node, path []string) any {
 	if len(path) == 0 {
 		return nil
 	}
@@ -431,6 +456,9 @@ func readNodePath(node *Node, path []string) any {
 		if len(path) != 2 {
 			return nil
 		}
+		if decl, ok := edgeFieldDecl(cat, node, path[1]); ok {
+			return node.EdgeTargets(decl)
+		}
 		return node.Edges[EdgeField(path[1])]
 	case "fields":
 		if len(path) != 2 {
@@ -442,11 +470,221 @@ func readNodePath(node *Node, path []string) any {
 	}
 }
 
+// edgeFieldDecl looks up the EdgeFieldDecl for node's type + the named edge
+// field, via cat.Registry's effective type — the single place readNodePath/
+// nodeToMap must go through to read an edge field correctly regardless of
+// its declared storage (Edges map vs top_level Fields).
+func edgeFieldDecl(cat *Catalog, node *Node, field string) (EdgeFieldDecl, bool) {
+	if cat == nil || cat.Registry == nil {
+		return EdgeFieldDecl{}, false
+	}
+	eff, ok := cat.Registry.Effective(node.TypeID)
+	if !ok {
+		return EdgeFieldDecl{}, false
+	}
+	for _, decl := range eff.EdgeFields {
+		if string(decl.ID) == field {
+			return decl, true
+		}
+	}
+	return EdgeFieldDecl{}, false
+}
+
 // valuesEqual is a pragmatic stale-guard comparison (string rendering, not a
 // deep-equal) — good enough to catch "someone else already changed this
 // field" without needing a full YAML-value equality library for v1.
 func valuesEqual(a, b any) bool {
 	return fmt.Sprint(a) == fmt.Sprint(b)
+}
+
+// nodeToMap materializes a live Node back into the wire-mapping shape a
+// changeset operation's After/Before mappings use (the approximate inverse
+// of buildNode) — used by OpRemoved's guard-fill/stale-guard. Comparison-
+// canonical: uses exactly the same field reads (readNodePath/EdgeTargets)
+// the stale-guard elsewhere in this file compares against, so a filled
+// Before is guaranteed to satisfy valuesEqual against a subsequent
+// unmodified read. Edge fields are read via Node.EdgeTargets against the
+// registry decl (never the raw Edges map), so a storage: top_level edge
+// (e.g. change.depends_on) round-trips correctly.
+func nodeToMap(cat *Catalog, node *Node) map[string]any {
+	m := map[string]any{
+		"id":         string(node.ID),
+		"schema":     string(node.Schema),
+		"title":      node.Title,
+		"status":     node.Status,
+		"visibility": string(node.Visibility),
+	}
+	if len(node.Sources) > 0 {
+		srcs := make([]any, len(node.Sources))
+		for i, s := range node.Sources {
+			srcs[i] = string(s)
+		}
+		m["sources"] = srcs
+	}
+	if len(node.Fields) > 0 {
+		fields := make(map[string]any, len(node.Fields))
+		for k, v := range node.Fields {
+			fields[k] = v
+		}
+		m["fields"] = fields
+	}
+	if eff, ok := cat.Registry.Effective(node.TypeID); ok && len(eff.EdgeFields) > 0 {
+		edges := map[string]any{}
+		for _, decl := range eff.EdgeFields {
+			targets := node.EdgeTargets(decl)
+			if len(targets) == 0 {
+				continue
+			}
+			ts := make([]any, len(targets))
+			for i, t := range targets {
+				ts[i] = string(t)
+			}
+			edges[string(decl.ID)] = ts
+		}
+		if len(edges) > 0 {
+			m["edges"] = edges
+		}
+	}
+	return m
+}
+
+// nodeMatchesBefore compares a live node against a caller- or
+// fillGuards-supplied "before" mapping (OpRemoved's stale-guard), field by
+// field, via the same comparison-canonical reads nodeToMap uses. Returns a
+// human-readable mismatch description per differing key; empty means the
+// node still matches.
+func nodeMatchesBefore(cat *Catalog, node *Node, before map[string]any) []string {
+	current := nodeToMap(cat, node)
+	var mismatches []string
+	for key, want := range before {
+		got := current[key]
+		if !valuesEqual(got, want) {
+			mismatches = append(mismatches, fmt.Sprintf("field %q: catalog has %v, changeset expected %v", key, got, want))
+		}
+	}
+	sort.Strings(mismatches)
+	return mismatches
+}
+
+// GuardFill records one precondition Propose filled in on the caller's
+// behalf (hazard guard #5, plan §3.4 red-team amendment #5) because the
+// wire payload omitted it. A "modified" fill echoes the actual field path
+// and comparison-canonical value asserted; a "removed" fill echoes only a
+// digest of the full node mapping filled into the operation's Before
+// (sha256 + sorted field-name list), not the full content, to keep the
+// echo small.
+type GuardFill struct {
+	Node   NodeID
+	Path   []string // set for a "modified" fill; nil for a "removed" fill
+	Value  any      // "modified" fill: the filled value
+	SHA    string   // "removed" fill: sha256 of the filled full-node mapping
+	Fields []string // "removed" fill: sorted keys present in the filled mapping
+}
+
+// fillGuards mutates cs.Operations in place, filling any omitted
+// precondition from the live catalog:
+//   - "modified" changes with a nil Before get it filled from
+//     readNodePath(cat, node, path) — echoed as a GuardFill{Node,Path,Value}.
+//   - "removed" ops with an empty Before get the live node's full mapping
+//     filled via nodeToMap — echoed as a GuardFill{Node,SHA,Fields} digest,
+//     not the full content.
+//
+// A node that does not exist is left alone (ValidateChangeset will reject
+// it with a clearer "does not exist" reason). Filled values are
+// comparison-canonical: exactly what valuesEqual/nodeMatchesBefore compare,
+// so a filled Before always matches an unmodified read of the same node.
+func fillGuards(cs *Changeset, cat *Catalog) []GuardFill {
+	var fills []GuardFill
+	for i := range cs.Operations {
+		op := &cs.Operations[i]
+		switch op.Kind {
+		case OpModified:
+			node, ok := cat.Nodes[op.Node]
+			if !ok {
+				continue
+			}
+			for j := range op.Changes {
+				ch := &op.Changes[j]
+				if ch.Before != nil {
+					continue
+				}
+				val := readNodePath(cat, node, ch.Path)
+				ch.Before = val
+				fills = append(fills, GuardFill{Node: op.Node, Path: append([]string{}, ch.Path...), Value: val})
+			}
+		case OpRemoved:
+			node, ok := cat.Nodes[op.Node]
+			if !ok || len(op.Before) > 0 {
+				continue
+			}
+			full := nodeToMap(cat, node)
+			op.Before = full
+			sha, fields := digestNodeMap(full)
+			fills = append(fills, GuardFill{Node: op.Node, SHA: sha, Fields: fields})
+		}
+	}
+	return fills
+}
+
+// digestNodeMap produces the {sha, field list} echo GuardFill uses for a
+// "removed" op's server-filled full-node Before mapping, keeping the echo
+// small (a digest, not the full content) per hazard guard #5's spec.
+func digestNodeMap(m map[string]any) (sha string, fields []string) {
+	fields = make([]string, 0, len(m))
+	for k := range m {
+		fields = append(fields, k)
+	}
+	sort.Strings(fields)
+	h := sha256.New()
+	for _, k := range fields {
+		fmt.Fprintf(h, "%s=%v\n", k, m[k])
+	}
+	return hex.EncodeToString(h.Sum(nil)), fields
+}
+
+// opsToRaw converts typed Operations back into the wire-map shape
+// ParseChangeset/parseOperation decode (the inverse conversion) — needed so
+// Propose can persist guard-filled operations (fillGuards mutates the typed
+// Before values in place) into the changeset node's stored `operations`
+// field, not just the caller's original un-filled wire payload.
+func opsToRaw(ops []Operation) []map[string]any {
+	out := make([]map[string]any, len(ops))
+	for i, op := range ops {
+		m := map[string]any{"kind": string(op.Kind)}
+		switch op.Kind {
+		case OpAdded, OpRegistryTypeAdded:
+			m["after"] = op.After
+		case OpModified, OpRegistryTypeModified:
+			m["node"] = string(op.Node)
+			changes := make([]any, len(op.Changes))
+			for j, ch := range op.Changes {
+				path := make([]any, len(ch.Path))
+				for k, p := range ch.Path {
+					path[k] = p
+				}
+				cm := map[string]any{"path": path, "after": ch.After}
+				if ch.Before != nil {
+					cm["before"] = ch.Before
+				}
+				changes[j] = cm
+			}
+			m["changes"] = changes
+		case OpRemoved:
+			m["node"] = string(op.Node)
+			if op.Before != nil {
+				m["before"] = op.Before
+			}
+		case OpRenamed:
+			m["from"] = string(op.From)
+			m["to"] = string(op.To)
+		case OpRetyped:
+			m["node"] = string(op.Node)
+			m["from_type"] = op.FromType
+			m["to_type"] = op.ToType
+		}
+		out[i] = m
+	}
+	return out
 }
 
 func isFieldSatisfied(node *Node, fieldName string) bool {
