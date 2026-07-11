@@ -228,14 +228,20 @@ func graphFindOp(args map[string]any) (Result, error) {
 		return Result{Data: map[string]any{"total": total, "rows": []any{}, "truncated": false}}, nil
 	}
 
-	end := offset + limit
-	truncated := false
 	if offset > total {
 		offset = total
 	}
-	if end > total {
-		end = total
-	} else if end < total {
+	// Compute end without offset+limit arithmetic: both offset and limit are
+	// caller-controlled (offset via an opaque-but-unsigned pagination cursor,
+	// limit via the tool arg) and can be adversarially large, so a naive
+	// `offset + limit` can overflow int and wrap negative, producing an
+	// invalid slice expression below. Comparing against `remaining` (which is
+	// bounded by total, not attacker input) avoids the overflow entirely.
+	remaining := total - offset
+	end := total
+	truncated := false
+	if limit < remaining {
+		end = offset + limit
 		truncated = true
 	}
 	page := matches[offset:end]

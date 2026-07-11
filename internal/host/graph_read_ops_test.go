@@ -256,6 +256,42 @@ func TestGraphHandler_Find_NegativeOffsetRejected(t *testing.T) {
 	}
 }
 
+func TestGraphHandler_Find_HugeOffsetAndLimitDoNotOverflowOrPanic(t *testing.T) {
+	// offset/limit are caller-controlled (offset via an unsigned opaque
+	// pagination cursor, limit via a plain tool arg with no maximum), so an
+	// adversarial huge value must not overflow the offset+limit slice-bounds
+	// arithmetic and panic the server. Regression test for the int-overflow
+	// slice-bounds bug in graphFindOp.
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "find",
+		"catalog_path": readsFixturePath,
+		"offset":       9223372036854775800,
+		"limit":        25,
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(find huge offset): %v", err)
+	}
+	data := res.Data
+	rows, _ := data["rows"].([]any)
+	if len(rows) != 0 {
+		t.Fatalf("rows = %v, want empty (offset past end)", rows)
+	}
+
+	res, err = GraphHandler(context.Background(), map[string]any{
+		"op":           "find",
+		"catalog_path": readsFixturePath,
+		"offset":       0,
+		"limit":        9223372036854775800,
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(find huge limit): %v", err)
+	}
+	data = res.Data
+	if truncated, _ := data["truncated"].(bool); truncated {
+		t.Fatalf("truncated = true, want false when limit vastly exceeds total")
+	}
+}
+
 func TestGraphHandler_Find_DeterministicOrdering(t *testing.T) {
 	first, err := GraphHandler(context.Background(), map[string]any{
 		"op":           "find",
