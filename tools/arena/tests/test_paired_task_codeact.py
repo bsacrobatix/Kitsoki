@@ -198,6 +198,17 @@ for flag, value in {
     require(f"{flag} threaded", flag in argv and argv[argv.index(flag) + 1] == value)
 require("capability presets threaded", "--capability-presets-json" in argv)
 json.loads(argv[argv.index("--capability-presets-json") + 1])
+require("no target/variant story meta -> no --story flag threaded (default preserved)", "--story" not in argv)
+
+story_spec = JobSpec.from_dict({
+    "job_type": "paired-task",
+    "targets": [{"id": "fixture", "story": "stories/bugfix/app.yaml"}],
+    "variants": [{"id": "kitsoki-gpt55", "treatment": "kitsoki", "backend": "codex", "model": "gpt-5.5"}],
+    "axes": {"task": ["api-routing"]},
+})
+story_cell = story_spec.cells()[0]
+story_argv = plugin.drive_command(story_cell, live=True)
+require("--story threaded from target.meta", "--story" in story_argv and story_argv[story_argv.index("--story") + 1] == "stories/bugfix/app.yaml")
 
 with tempfile.TemporaryDirectory(prefix="paired-raw-effort-") as td:
     trace = Path(td) / "raw.jsonl"
@@ -357,6 +368,21 @@ prompt = runner.build_kitsoki_prompt(
     "codex",
 )
 require("Kitsoki prompt uses direct menu submission", "session.submit" in prompt)
+require("Kitsoki prompt with no --story defaults to bench-bugfix", 'story_path: "' + str(runner.BENCH_BUGFIX_STORY) in prompt)
+require("build_kitsoki_prompt tolerates a Namespace with no story attr set", True)  # the call above didn't raise
+
+story_override_prompt = runner.build_kitsoki_prompt(
+    argparse.Namespace(implementation_mode="agent_task", story="stories/bugfix/app.yaml"),
+    {"id": "fixture", "archetype": "bugfix", "ticket": "fix"},
+    Path("/tmp/tree"),
+    "/tmp/trace.jsonl",
+    Path("/tmp/thread.md"),
+    "codex-gpt54",
+    "fixture-branch",
+    "true",
+    "codex",
+)
+require("--story overrides the drive target", 'story_path: "stories/bugfix/app.yaml"' in story_override_prompt)
 require("Kitsoki prompt gives post-worker continue example", 'intent: \"continue\"' in prompt)
 require("Kitsoki prompt has the settled-turn control loop", "Then run this exact control loop" in prompt)
 require("Kitsoki prompt waits through a live worker turn", "async_after_ms: 300000" in prompt)

@@ -88,7 +88,7 @@ class BugfixPlugin:
                     "--completion-state", state_path]
         # Paid path: drive a candidate then score it (drive_cell.sh handles both).
         drive = f"{KITSOKI_MNT}/tools/bugfix-bakeoff/external/drive_cell.sh"
-        return [
+        argv = [
             "bash", drive,
             "--project", project,
             "--bug", bug,
@@ -96,6 +96,10 @@ class BugfixPlugin:
             "--completion-state", state_path,
             "--score",
         ]
+        story = cell.target.meta.get("story") or cell.variant.meta.get("story")
+        if story:
+            argv.extend(["--story", str(story)])
+        return argv
 
     def score(self, cell: Cell, *, exit_code: int, stdout: str, stderr: str) -> CellResult:
         result = CellResult(
