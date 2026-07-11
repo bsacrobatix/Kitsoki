@@ -38,6 +38,10 @@ func TestPersistBuildsReceiptAndTrace(t *testing.T) {
 func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	run := validRunResult("job", "sha256:source")
 	run.Execution.ExecutionID = "exec-1"
+	run.Events = []executor.Event{
+		{Kind: capsuletrace.KindExecutorStarted, EnvelopeDigest: run.Envelope.Digest, ExecutionID: "exec-1", Fields: map[string]any{"transport": "https", "remote_host": "worker.example"}},
+		{Kind: capsuletrace.KindExecutorFinished, EnvelopeDigest: run.Envelope.Digest, ExecutionID: "exec-1", Fields: map[string]any{"transport": "https", "remote_host": "worker.example"}},
+	}
 	run.Envelope.Environment.CacheKeys = []string{"project:runstatus"}
 	run.Envelope.Environment.SecretRequired = true
 	run.Envelope.Policy = executor.Policy{Network: "replay", MinimumSandbox: "workspace", ExternalWrite: "deny"}
@@ -50,6 +54,9 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	run.Verdict.StoryDigest = sealed.StoryDigest
 	run.Verdict.EnvironmentDigest = sealed.Environment.Digest
 	run.Verdict.EnvelopeDigest = sealed.Digest
+	for i := range run.Events {
+		run.Events[i].EnvelopeDigest = sealed.Digest
+	}
 
 	out, err := Persist(t.TempDir(), run)
 	if err != nil {
@@ -71,7 +78,7 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	if err := capsuletrace.ValidateDocument(doc); err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Events) != 5 {
+	if len(doc.Events) != 7 {
 		t.Fatalf("events %#v", doc.Events)
 	}
 	wantKinds := []string{
@@ -79,6 +86,8 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 		capsuletrace.KindEnvironmentResolved,
 		capsuletrace.KindExecutorPrepared,
 		capsuletrace.KindCIStarted,
+		capsuletrace.KindExecutorStarted,
+		capsuletrace.KindExecutorFinished,
 		capsuletrace.KindCIVerdict,
 	}
 	for i, want := range wantKinds {
@@ -93,6 +102,10 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	policy := doc.Events[2].Fields
 	if policy["network"] != "replay" || policy["minimum_sandbox"] != "workspace" || policy["external_write"] != "deny" {
 		t.Fatalf("policy fields %#v", policy)
+	}
+	started := doc.Events[4].Fields
+	if started["execution_id"] != "exec-1" || started["remote_host"] != "worker.example" {
+		t.Fatalf("executor event fields %#v", started)
 	}
 	if strings.Contains(trimmed, "/Users/") || strings.Contains(strings.ToLower(trimmed), "secret_required") {
 		t.Fatalf("trace leaked unsafe content: %s", trimmed)

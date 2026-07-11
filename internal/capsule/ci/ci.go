@@ -276,6 +276,7 @@ type RunResult struct {
 	Envelope  executor.Envelope `json:"envelope"`
 	Verdict   Verdict           `json:"verdict"`
 	Execution executor.Result   `json:"execution"`
+	Events    []executor.Event  `json:"events,omitempty"`
 }
 
 func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.Envelope, error) {
@@ -343,6 +344,11 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		return RunResult{}, err
 	}
 	var verdict Verdict
+	var events []executor.Event
+	sink := executor.EventSinkFunc(func(_ context.Context, event executor.Event) error {
+		events = append(events, event)
+		return nil
+	})
 	execution, runErr := provider.Run(ctx, prepared, func(ctx context.Context, prepared executor.Prepared) (executor.Result, error) {
 		if s.Launcher == nil {
 			return executor.Result{}, fmt.Errorf("capsule ci: no local launcher is configured")
@@ -360,7 +366,7 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		}
 		verdict = v
 		return executor.Result{VerdictArtifact: "verdict:" + hashVerdict(v), VerdictJSON: raw}, nil
-	}, nil)
+	}, sink)
 	if runErr == nil && len(execution.VerdictJSON) > 0 {
 		if err := json.Unmarshal(execution.VerdictJSON, &verdict); err != nil {
 			runErr = fmt.Errorf("capsule ci: parse executor verdict: %w", err)
@@ -391,12 +397,14 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		status = artifactjob.StatusAwaitingInput
 	}
 	summary := verdict.Summary
-	_, _ = s.Jobs.Update(ctx, job.ID, artifactjob.Update{Status: &status, Summary: &summary, TerminalArtifactHandle: &execution.VerdictArtifact})
+	if updated, updateErr := s.Jobs.Update(ctx, job.ID, artifactjob.Update{Status: &status, Summary: &summary, TerminalArtifactHandle: &execution.VerdictArtifact}); updateErr == nil {
+		job = updated
+	}
 	if runErr != nil {
-		return RunResult{Job: job, Envelope: envelope, Execution: execution}, runErr
+		return RunResult{Job: job, Envelope: envelope, Verdict: verdict, Execution: execution, Events: events}, runErr
 	}
 	job, _ = s.Jobs.Get(ctx, job.ID)
-	return RunResult{Job: job, Envelope: envelope, Verdict: verdict, Execution: execution}, nil
+	return RunResult{Job: job, Envelope: envelope, Verdict: verdict, Execution: execution, Events: events}, nil
 }
 func contains(in []string, want string) bool {
 	for _, v := range in {

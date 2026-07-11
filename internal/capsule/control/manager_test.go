@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -68,5 +69,54 @@ func TestManagerUsesOnlyGrantedDevelopmentWorkspaceRoot(t *testing.T) {
 	}
 	if _, err := m.workspaceRoot(Definition{Source: Source{Kind: SourceDevWorkspaceScript, Development: DevelopmentSource{Root: ".capsules/not-granted"}}}); err == nil {
 		t.Fatal("ungranted development root was accepted")
+	}
+}
+
+func TestManagerCloseRemovesIncompleteFailedWorkspaceWithoutProviderSentinel(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	path := filepath.Join(workspaceRoot, "partial")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "partial.txt"), []byte("leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewMemoryInstanceStore()
+	created, err := store.Create(context.Background(), Instance{
+		ID:               "partial",
+		DefinitionID:     "clean",
+		DefinitionDigest: "sha256:def",
+		Provider:         "synthetic",
+		Path:             path,
+		State:            StateFailed,
+		Generation:       1,
+		Lease:            Lease{Owner: "agent"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &provider{name: "synthetic"}
+	m := &Manager{
+		Definitions: defs{"clean": {ID: "clean", Schema: DefinitionSchema, Source: Source{Kind: SourceSynthetic, SyntheticSpec: "x"}, Digest: "sha256:def"}},
+		Instances:   store,
+		Providers:   map[string]WorkspaceProvider{"synthetic": p},
+		Grant:       ScopeGrant{ProjectRoot: root, WorkspaceRoots: []string{workspaceRoot}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}},
+	}
+	if err := m.Close(context.Background(), Handle{ID: created.ID, Generation: created.Generation}, "agent"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("partial workspace still exists or unexpected stat error: %v", err)
+	}
+	if p.calls != 0 {
+		t.Fatalf("provider close/create should not be called for incomplete cleanup, calls=%d", p.calls)
+	}
+	closed, err := store.Get(context.Background(), "partial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.State != StateClosed {
+		t.Fatalf("state=%s", closed.State)
 	}
 }

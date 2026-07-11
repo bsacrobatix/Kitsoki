@@ -161,18 +161,45 @@ func (m *Manager) Close(ctx context.Context, h Handle, owner string) error {
 	if in.Lease.Owner != owner {
 		return fmt.Errorf("%w: instance %q", ErrLeaseConflict, h.ID)
 	}
-	provider := m.Providers[in.Provider]
-	if provider == nil {
-		return fmt.Errorf("capsule control: provider %q is not configured", in.Provider)
-	}
-	if err := provider.Close(ctx, in); err != nil {
-		return err
+	switch in.State {
+	case StateMaterializing, StateFailed:
+		if err := m.removeIncompleteWorkspace(in); err != nil {
+			return err
+		}
+	default:
+		provider := m.Providers[in.Provider]
+		if provider == nil {
+			return fmt.Errorf("capsule control: provider %q is not configured", in.Provider)
+		}
+		if err := provider.Close(ctx, in); err != nil {
+			return err
+		}
 	}
 	in, err = m.Instances.CompareAndSwap(ctx, h.ID, h.Generation, func(cur *Instance) error { cur.State = StateClosed; return nil })
 	if err != nil {
 		return err
 	}
 	return m.emit(ctx, "capsule.workspace.closed", in)
+}
+
+func (m *Manager) removeIncompleteWorkspace(in Instance) error {
+	if strings.TrimSpace(in.Path) == "" {
+		return nil
+	}
+	path := in.Path
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	for _, root := range m.Grant.WorkspaceRoots {
+		cleanRoot := root
+		if real, err := filepath.EvalSymlinks(cleanRoot); err == nil {
+			cleanRoot = real
+		}
+		if rel, err := filepath.Rel(cleanRoot, path); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+			return os.RemoveAll(path)
+		}
+	}
+	return fmt.Errorf("%w: incomplete instance path is outside grant", ErrDenied)
 }
 
 func (m *Manager) ready() error {
