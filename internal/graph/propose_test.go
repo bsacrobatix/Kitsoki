@@ -382,3 +382,135 @@ func TestPropose_SystemAuthoredNonAllowlistedFieldStaysProposed(t *testing.T) {
 		t.Errorf("status = %q, want proposed (title is not an allowlisted auto-authorize field)", res.Status)
 	}
 }
+
+func TestRebase_RefreshesStaleBeforeAndSucceeds(t *testing.T) {
+	root := copyBundleFixture(t)
+	writeChangeset(t, root, "change-rebase", ChangesetStatusProposed, `    - kind: modified
+      node: req-one
+      changes:
+        - path: [status]
+          before: draft
+          after: satisfied
+`)
+
+	// Simulate someone else advancing req-one's status while this changeset
+	// sat in the review queue — the changeset's own Before ("draft") is now
+	// stale.
+	reqPath := filepath.Join(root, "nodes", "requirements.yaml")
+	raw, err := os.ReadFile(reqPath)
+	if err != nil {
+		t.Fatalf("read requirements.yaml: %v", err)
+	}
+	drifted := strings.Replace(string(raw), "status: draft", "status: in-review", 1)
+	if drifted == string(raw) {
+		t.Fatal("fixture setup: expected to find 'status: draft' in requirements.yaml")
+	}
+	if err := os.WriteFile(reqPath, []byte(drifted), 0o644); err != nil {
+		t.Fatalf("write drifted requirements.yaml: %v", err)
+	}
+
+	// Before the rebase, authorize+apply would still nominally succeed
+	// (Authorize/Apply don't re-run ValidateChangeset's stale-guard against
+	// the live catalog the way Propose does) — but a fresh Propose replay of
+	// the same operations would now be rejected as stale, which is exactly
+	// the review-queue scenario Rebase exists to fix.
+	res, err := Rebase(root, "change-rebase")
+	if err != nil {
+		t.Fatalf("Rebase: %v", err)
+	}
+	if res.Rejected() {
+		t.Fatalf("expected rebase to succeed (non-conflicting refresh), got rejected: %+v", res)
+	}
+	if !res.Applied {
+		t.Fatal("expected Applied=true")
+	}
+
+	cat, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	cs, err := ParseChangeset(cat.Nodes["change-rebase"])
+	if err != nil {
+		t.Fatalf("ParseChangeset: %v", err)
+	}
+	if len(cs.Operations) != 1 || len(cs.Operations[0].Changes) != 1 {
+		t.Fatalf("unexpected operations shape after rebase: %+v", cs.Operations)
+	}
+	if got := cs.Operations[0].Changes[0].Before; got != "in-review" {
+		t.Errorf("Before = %v, want refreshed to %q", got, "in-review")
+	}
+	if got := cs.Operations[0].Changes[0].After; got != "satisfied" {
+		t.Errorf("After = %v, want unchanged %q", got, "satisfied")
+	}
+	// The changeset's own status must be untouched by rebase (still proposed).
+	if cat.Nodes["change-rebase"].Status != ChangesetStatusProposed {
+		t.Errorf("status = %q, want still proposed (rebase must not authorize)", cat.Nodes["change-rebase"].Status)
+	}
+
+	// A re-validate-on-open (what the review queue would do next) now
+	// passes, since Before matches the live catalog.
+	if reasons := ValidateChangeset(cs, cat); len(reasons) > 0 {
+		t.Errorf("expected no stale-Before reasons after rebase, got: %v", reasons)
+	}
+
+	// The refreshed changeset still authorizes and applies cleanly, and its
+	// own After ("satisfied") is what lands, not the drifted "in-review".
+	if authRes, _ := Authorize(root, "change-rebase"); authRes.Rejected() {
+		t.Fatalf("expected authorize to succeed after rebase, got rejected: %+v", authRes)
+	}
+	applyRes, err := Apply(root, "change-rebase", false)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if applyRes.Rejected() {
+		t.Fatalf("expected apply to succeed after rebase, got rejected: %+v", applyRes)
+	}
+	final, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("final reload: %v", err)
+	}
+	if final.Nodes["req-one"].Status != "satisfied" {
+		t.Errorf("req-one status = %q, want satisfied", final.Nodes["req-one"].Status)
+	}
+}
+
+func TestRebase_RejectsWhenNothingStale(t *testing.T) {
+	root := copyBundleFixture(t)
+	writeChangeset(t, root, "change-fresh", ChangesetStatusProposed, `    - kind: modified
+      node: req-one
+      changes:
+        - path: [status]
+          before: draft
+          after: satisfied
+`)
+	res, err := Rebase(root, "change-fresh")
+	if err != nil {
+		t.Fatalf("Rebase: %v", err)
+	}
+	if !res.Rejected() {
+		t.Fatal("expected rebase to report nothing-to-refresh when Before already matches the live catalog")
+	}
+}
+
+func TestRebase_RejectsNonProposedStatus(t *testing.T) {
+	root := copyBundleFixture(t)
+	writeChangeset(t, root, "change-authed", ChangesetStatusAuthorized, `    - kind: modified
+      node: req-one
+      changes:
+        - path: [status]
+          before: draft
+          after: satisfied
+`)
+	reqPath := filepath.Join(root, "nodes", "requirements.yaml")
+	raw, _ := os.ReadFile(reqPath)
+	drifted := strings.Replace(string(raw), "status: draft", "status: in-review", 1)
+	os.WriteFile(reqPath, []byte(drifted), 0o644)
+
+	res, err := Rebase(root, "change-authed")
+	if err != nil {
+		t.Fatalf("Rebase: %v", err)
+	}
+	if !res.Rejected() {
+		t.Fatal("expected rebase to reject an already-authorized changeset (rebase is proposed-only)")
+	}
+}
