@@ -43,6 +43,7 @@ hosts:
   # listed here even though bugfix_exit is pinned to open-PR below (the
   # room still runs on_enter regardless of the exit slot).
   - host.ide.get_diagnostics
+  - host.capsule_workspace
 
 imports:
   bf:

@@ -46,6 +46,7 @@ hosts:
   - host.git
   - host.local
   - host.git_worktree
+  - host.capsule_workspace
   - host.append_to_file
   - host.inbox.add
   - host.agent.ask
