@@ -547,6 +547,17 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 			}, nil
 		}
 
+		// A Codex exec that exits successfully without calling the validator's
+		// submit tool has no usable continuation turn. `codex exec resume` is
+		// interactive in this case: it can park with no prompt and leave the
+		// enclosing host call permanently running even though the subprocess
+		// already finished. Start the bounded acceptance retry as a fresh exec
+		// with the nudge below instead. A successful validator submission still
+		// breaks above, so normal one-shot tasks are unchanged.
+		if AgentBackendFromContext(ctx).Name() == "codex" {
+			firstRun = true
+		}
+
 		// Nudge the LLM with the rejection reason on subsequent turns.
 		if rejectedReason != "" {
 			contextPrompt = "The previous submission was rejected. Reason: " + rejectedReason + "\nPlease try again."
