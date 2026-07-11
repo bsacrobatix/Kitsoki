@@ -44,6 +44,8 @@ hosts:
   # room still runs on_enter regardless of the exit slot).
   - host.ide.get_diagnostics
   - host.capsule_workspace
+  # bf's strict public acceptance-contract checker (77302c39c).
+  - host.starlark.run
 
 imports:
   bf:
