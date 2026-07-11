@@ -392,6 +392,7 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("Codex records zero invented USD", codex_response["cost_usd"], 0.0)
     check("Codex receipt labels unpriced accounting", codex_response["provider_receipt"]["billing"], "usd-unavailable-reservation-only")
     check("Codex receipt preserves token usage", codex_response["provider_receipt"]["usage"]["output_tokens"], 5)
+    require("strict Codex allowlist includes workspace list", "mcp__kitsoki_strict__workspace_list" in live.CLAUDE_STRICT_MCP_TOOLS)
 
     # Card corpus drift fails before a provider subprocess is constructed.
     bad_cards = root / "bad-cards.json"
