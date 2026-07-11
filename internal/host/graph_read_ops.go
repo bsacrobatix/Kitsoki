@@ -8,6 +8,9 @@ package host
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -697,4 +700,136 @@ func containsSubstring(haystack, needle string) bool {
 		return true
 	}
 	return strings.Contains(haystack, needle)
+}
+
+// graphOpenOp: {catalog_path} -> a catalog overview composing head
+// {rev,dirty}, node_count, per-type census (instance count + status
+// breakdown + one-line edge vocabulary), lint {clean,count}, changeset
+// lifecycle counts, a feedback {pending} stub, and a short guide string.
+// graph-mcp-plan.md §3.3: this is the ONE read tool with no pre-existing
+// engine op, so it lands here as a real host.graph.* op (never MCP-handler-
+// only logic) per the plan's "all capability lands as engine ops"
+// constraint. Byte-budget enforcement (≤2KB) and in-band truncation are the
+// MCP layer's job (internal/mcp/graphsrv), matching how graph.lint already
+// splits "engine composes full data, MCP tool truncates for the wire" — this
+// op always returns the full composition.
+func graphOpenOp(args map[string]any) (Result, error) {
+	cat, err := loadCatalogArg(args)
+	if err != nil {
+		return Result{}, err
+	}
+	catalogPath := graphStringArg(args, "catalog_path")
+
+	rev, dirty := graphHeadInfo(catalogPath)
+
+	issues := objectgraph.Lint(cat)
+	lint := map[string]any{"clean": len(issues) == 0, "count": len(issues)}
+
+	return Result{Data: map[string]any{
+		"head":       map[string]any{"rev": rev, "dirty": dirty},
+		"node_count": len(cat.Nodes),
+		"types":      graphOpenTypeCensus(cat),
+		"lint":       lint,
+		"changesets": graphChangesetStatusCounts(cat),
+		// feedback.pending is a stub until feedback.report/feedback.list
+		// (graph-mcp-plan.md §3.6) land the local sink this would read
+		// from; kept at 0 rather than omitted so callers can rely on the
+		// field's presence/shape now.
+		"feedback": map[string]any{"pending": 0},
+		"guide":    graphOpenGuide,
+	}}, nil
+}
+
+// graphOpenGuide is graph.open's ~6-line orientation string.
+const graphOpenGuide = `This catalog is served by kitsoki mcp-graph (read-only in this session).
+Use graph.find to search by type/status/field, graph.get to fetch full
+node envelopes by id, graph.neighbors to walk edges from a node.
+graph.type explains a type's schema and edge vocabulary; graph.impact
+predicts what a retype/remove would break — call it before proposing one.
+Stuck or missing something? Call feedback.report — it's non-blocking.`
+
+// graphOpenTypeCensus builds one census row per registered type (excluding
+// the synthetic core-node root): instance_count, a status->count breakdown,
+// and a one-line edge vocabulary summary. Rows are in Registry.All()'s
+// deterministic (sorted-by-ID) order.
+func graphOpenTypeCensus(cat *objectgraph.Catalog) []any {
+	defs := cat.Registry.All()
+	rows := make([]any, 0, len(defs))
+	for _, def := range defs {
+		if def.ID == "core-node" {
+			continue
+		}
+		count := 0
+		statuses := map[string]any{}
+		for _, id := range cat.SortedNodeIDs() {
+			node := cat.Nodes[id]
+			if !cat.Registry.IsA(node.TypeID, def.ID) {
+				continue
+			}
+			count++
+			cur, _ := statuses[node.Status].(int)
+			statuses[node.Status] = cur + 1
+		}
+		rows = append(rows, map[string]any{
+			"id":             def.ID,
+			"instance_count": count,
+			"statuses":       statuses,
+			"edges":          graphEdgeVocabLine(def),
+		})
+	}
+	return rows
+}
+
+// graphEdgeVocabLine renders a type's declared edge fields as one
+// comma-joined "field->target_type(cardinality)" line, e.g.
+// "acceptance->usecase(many)". Empty string when the type declares no edge
+// fields.
+func graphEdgeVocabLine(def objectgraph.TypeDef) string {
+	if len(def.EdgeFields) == 0 {
+		return ""
+	}
+	parts := make([]string, len(def.EdgeFields))
+	for i, f := range def.EdgeFields {
+		parts[i] = fmt.Sprintf("%s->%s(%s)", f.ID, f.TargetType, f.Cardinality)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// graphChangesetStatusCounts counts changeset nodes by status — the
+// lifecycle-count half of graph.open, factored out of graphChangesetOp's
+// "list" action so both share one counting pass instead of drifting.
+func graphChangesetStatusCounts(cat *objectgraph.Catalog) map[string]any {
+	counts := map[string]any{}
+	for _, id := range cat.SortedNodeIDs() {
+		node := cat.Nodes[id]
+		if node.TypeID != "changeset" {
+			continue
+		}
+		cur, _ := counts[node.Status].(int)
+		counts[node.Status] = cur + 1
+	}
+	return counts
+}
+
+// graphHeadInfo best-effort resolves the git HEAD short SHA and dirty state
+// of the repo containing catalogPath. Both return values are "" / false on
+// any failure (not a git repo, git not on PATH, etc.) — head/dirty are
+// informational overview fields, never a hard requirement for graph.open to
+// succeed.
+func graphHeadInfo(catalogPath string) (rev string, dirty bool) {
+	dir := catalogPath
+	if fi, err := os.Stat(catalogPath); err == nil && !fi.IsDir() {
+		dir = filepath.Dir(catalogPath)
+	}
+	revOut, err := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return "", false
+	}
+	rev = strings.TrimSpace(string(revOut))
+	statusOut, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	if err != nil {
+		return rev, false
+	}
+	dirty = strings.TrimSpace(string(statusOut)) != ""
+	return rev, dirty
 }

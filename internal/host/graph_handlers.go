@@ -16,6 +16,7 @@
 //	apply        {catalog_path, changeset_id[, dry_run]}         -> apply result
 //	project      {catalog_path[, overlay_path], graph_id}        -> kitsoki.graph/v1 wire graph
 //	presentation {...; kit-injected _kit_dir}                    -> starlark-served presentation data
+//	open         {catalog_path}                                  -> catalog overview (graph-mcp-plan.md §3.3 graph.open)
 //	get          {catalog_path, ids[1..20][, fields]}             -> full node envelopes + refs_in
 //	find         {catalog_path[, type, status, visibility, edge,
 //	              no_inbound, no_outbound, field, text, limit,
@@ -116,6 +117,8 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphProjectOp(args)
 	case "presentation":
 		return graphPresentationOp(ctx, args)
+	case "open":
+		return graphOpenOp(args)
 	case "get":
 		return graphGetOp(args)
 	case "find":
@@ -127,7 +130,7 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 	case "changeset":
 		return graphChangesetOp(args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, query, project, presentation, get, find, neighbors, type_census, changeset)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, query, project, presentation, open, get, find, neighbors, type_census, changeset)", op)
 	}
 }
 

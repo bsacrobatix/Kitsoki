@@ -2,7 +2,12 @@ package graphsrv
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"strconv"
+	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -19,27 +24,12 @@ import (
 // depending on this package's Server/NewServer/cobra plumbing.
 func registerGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
 	registerGraphLintTool(srv, deps)
-
-	// TODO(P2 next step): graph.open — new host.graph.open engine op,
-	// catalog overview (head/rev/dirty, node_count, per-type census,
-	// edge vocabulary, lint summary, changeset lifecycle counts, feedback
-	// pending count, guide string). Budget: ≤2KB (BudgetGraphOpen).
-	// TODO(P2 next step): graph.get — wraps host.graph.get. missing[]
-	// nearest-id suggestions via internal/graph/neighbors.go's
-	// NearestIDs. Per-field 2KB cap (BudgetGraphGetField), single-field
-	// refetch 32KB cap (BudgetGraphGetSingle), ≤24KB/call overall
-	// (BudgetGraphGetTotal).
-	// TODO(P2 next step): graph.find — wraps host.graph.find; add cursor
-	// support (offset + filter-hash + catalog-hash) on top of P1's
-	// limit/offset; catalog_changed:true if the catalog hash moved since
-	// the cursor was minted. ≤8KB/page (BudgetGraphFindPage).
-	// TODO(P2 next step): graph.neighbors — wraps host.graph.neighbors.
-	// ≤10KB (BudgetGraphNeighbors).
-	// TODO(P2 next step): graph.type — wraps host.graph.query
-	// (mode:"explain-type"); one-line type list when type_id omitted.
-	// TODO(P2 next step): graph.impact — wraps host.graph.query
-	// (mode:"impact"); description notes "Call before retype/remove;
-	// propose will reject what this predicts."
+	registerGraphOpenTool(srv, deps)
+	registerGraphGetTool(srv, deps)
+	registerGraphFindTool(srv, deps)
+	registerGraphNeighborsTool(srv, deps)
+	registerGraphTypeTool(srv, deps)
+	registerGraphImpactTool(srv, deps)
 
 	switch mode {
 	case ModeRead, ModePropose, ModeSteward:
@@ -155,6 +145,734 @@ func handleGraphLint(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 		IssueCount: issueCount,
 		Issues:     kept,
 		Truncated:  truncated,
+	}
+	return okResult(out), nil
+}
+
+// classifyHostErr maps a host.graph.* Go error (never a Result.Error — those
+// are handler-shaped, this is the raw "unknown node req-x (nearest: [...])"
+// style error internal/host's ops return) to an mcp-graph error code. The
+// underlying error text already carries nearest-id suggestions / vocabulary
+// lists (see internal/host/graph_read_ops.go and graph_handlers.go), so it
+// doubles as the hint rather than being re-derived here.
+func classifyHostErr(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "unknown node") || strings.Contains(msg, "node") && strings.Contains(msg, "not found"):
+		return CodeUnknownNode
+	case strings.Contains(msg, "unknown type") || strings.Contains(msg, "type") && strings.Contains(msg, "not found in registry"):
+		return CodeUnknownType
+	default:
+		return CodeValidation
+	}
+}
+
+func hostErrResult(toolName string, err error) *mcpsdk.CallToolResult {
+	return errorResult(NewError(classifyHostErr(err), toolName+": "+err.Error(), ""))
+}
+
+// ─── graph.open ───
+
+const graphOpenInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {
+      "type": "string",
+      "description": "Bound catalog alias (omit to use the default catalog)."
+    }
+  },
+  "additionalProperties": false
+}`
+
+type graphOpenArgs struct {
+	Catalog string `json:"catalog,omitempty"`
+}
+
+type graphOpenOK struct {
+	OK        bool           `json:"ok"`
+	Catalog   string         `json:"catalog"`
+	Head      map[string]any `json:"head"`
+	NodeCount int            `json:"node_count"`
+	Types     []any          `json:"types"`
+	Lint      map[string]any `json:"lint"`
+	Changesets map[string]any `json:"changesets"`
+	Feedback  map[string]any `json:"feedback"`
+	Guide     string         `json:"guide"`
+	Truncated bool           `json:"truncated,omitempty"`
+}
+
+func registerGraphOpenTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.open",
+		Description: "Catalog overview: head, node count, per-type census, lint summary, changeset lifecycle counts, feedback pending count, and a short orientation guide. Call this first.",
+		InputSchema: json.RawMessage(graphOpenInputSchema),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphOpen(ctx, deps, req)
+	})
+}
+
+func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphOpenArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.open: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+	res, err := deps.Registry.Invoke(ctx, "host.graph.open", map[string]any{"catalog_path": path})
+	if err != nil {
+		return hostErrResult("graph.open", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.open: "+res.Error, "")), nil
+	}
+
+	head, _ := res.Data["head"].(map[string]any)
+	types, _ := res.Data["types"].([]any)
+	lint, _ := res.Data["lint"].(map[string]any)
+	changesets, _ := res.Data["changesets"].(map[string]any)
+	feedback, _ := res.Data["feedback"].(map[string]any)
+	guide, _ := res.Data["guide"].(string)
+	nodeCount, _ := res.Data["node_count"].(int)
+
+	out := graphOpenOK{
+		OK:         true,
+		Catalog:    alias,
+		Head:       head,
+		NodeCount:  nodeCount,
+		Types:      types,
+		Lint:       lint,
+		Changesets: changesets,
+		Feedback:   feedback,
+		Guide:      guide,
+	}
+
+	// Enforce the ≤2KB overview budget (BudgetGraphOpen): truncate the
+	// per-type census list in-band before giving up on the byte cap — the
+	// plan explicitly calls this out ("truncate per-type census / vocab
+	// listing if needed") rather than allowing graph.open to blow up on a
+	// large catalog.
+	for fitsBudget(out, BudgetGraphOpen) == false && len(out.Types) > 0 {
+		out.Types = out.Types[:len(out.Types)-1]
+		out.Truncated = true
+	}
+
+	return okResult(out), nil
+}
+
+// fitsBudget reports whether v's JSON encoding is within capBytes.
+func fitsBudget(v any, capBytes int) bool {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return true // don't loop forever over an unmarshalable value
+	}
+	return len(b) <= capBytes
+}
+
+// ─── graph.get ───
+
+const graphGetInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {
+      "type": "string",
+      "description": "Bound catalog alias (omit to use the default catalog)."
+    },
+    "ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "maxItems": 20,
+      "description": "Node ids to fetch (1-20)."
+    },
+    "view": {
+      "type": "string",
+      "enum": ["full"],
+      "description": "Envelope view. Only \"full\" is supported; omit for the default."
+    },
+    "fields": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Restrict returned fields to this list. Passing exactly one entry lifts the per-field truncation cap from 2KB to 32KB (single-field refetch)."
+    }
+  },
+  "required": ["ids"],
+  "additionalProperties": false
+}`
+
+type graphGetArgs struct {
+	Catalog string   `json:"catalog,omitempty"`
+	IDs     []string `json:"ids"`
+	View    string   `json:"view,omitempty"`
+	Fields  []string `json:"fields,omitempty"`
+}
+
+type graphGetOK struct {
+	OK        bool   `json:"ok"`
+	Catalog   string `json:"catalog"`
+	Nodes     []any  `json:"nodes"`
+	Missing   []any  `json:"missing"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+func registerGraphGetTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.get",
+		Description: "Fetch full node envelopes (fields, edges, refs_in) by id. Unknown ids come back in `missing` with nearest-id suggestions instead of failing the whole call.",
+		InputSchema: json.RawMessage(graphGetInputSchema),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphGet(ctx, deps, req)
+	})
+}
+
+func handleGraphGet(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphGetArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.get: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	if len(args.IDs) == 0 {
+		return errorResult(NewError(CodeValidation, "graph.get: `ids` requires at least 1 entry", "")), nil
+	}
+	if len(args.IDs) > 20 {
+		return errorResult(NewError(CodeValidation, "graph.get: `ids` accepts at most 20 entries, got "+strconv.Itoa(len(args.IDs)), "")), nil
+	}
+	if args.View != "" && args.View != "full" {
+		return errorResult(NewError(CodeValidation, "graph.get: `view` must be \"full\" if given, got "+args.View, "")), nil
+	}
+
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	hostArgs := map[string]any{"catalog_path": path, "ids": args.IDs}
+	if len(args.Fields) > 0 {
+		hostArgs["fields"] = args.Fields
+	}
+	res, err := deps.Registry.Invoke(ctx, "host.graph.get", hostArgs)
+	if err != nil {
+		return hostErrResult("graph.get", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.get: "+res.Error, "")), nil
+	}
+
+	nodes, _ := res.Data["nodes"].([]any)
+	missing, _ := res.Data["missing"].([]any)
+	truncated := false
+
+	// Per-field cap (2KB, or 32KB on a single-field refetch): truncate each
+	// field's serialized value in-band rather than dropping it.
+	fieldCap := BudgetGraphGetField
+	if len(args.Fields) == 1 {
+		fieldCap = BudgetGraphGetSingle
+	}
+	for _, n := range nodes {
+		node, ok := n.(map[string]any)
+		if !ok {
+			continue
+		}
+		fields, ok := node["fields"].(map[string]any)
+		if !ok {
+			continue
+		}
+		for k, v := range fields {
+			b, err := json.Marshal(v)
+			if err != nil {
+				continue
+			}
+			if len(b) > fieldCap {
+				out, did := TruncateString(string(b), fieldCap)
+				fields[k] = out
+				truncated = truncated || did
+			}
+		}
+	}
+
+	// Overall per-call budget (24KB): drop trailing nodes in-band if the
+	// per-field caps above weren't enough (many small-but-not-tiny fields
+	// across up to 20 nodes).
+	out := graphGetOK{OK: true, Catalog: alias, Nodes: nodes, Missing: missing}
+	for !fitsBudget(out, BudgetGraphGetTotal) && len(out.Nodes) > 1 {
+		out.Nodes = out.Nodes[:len(out.Nodes)-1]
+		truncated = true
+	}
+	out.Truncated = truncated
+
+	return okResult(out), nil
+}
+
+// ─── graph.find ───
+
+const graphFindInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
+    "type": {"type": "string", "description": "Restrict to nodes IsA this type id."},
+    "status": {"type": "array", "items": {"type": "string"}, "description": "Restrict to nodes whose status is one of these values."},
+    "visibility": {"type": "string", "description": "Restrict to nodes with this visibility."},
+    "edge": {
+      "type": "object",
+      "properties": {
+        "field": {"type": "string", "description": "Edge field id the node must carry."},
+        "to": {"type": "string", "description": "Optional: the edge must target this node id."}
+      },
+      "required": ["field"],
+      "additionalProperties": false
+    },
+    "no_inbound": {
+      "type": "object",
+      "properties": {"edge": {"type": "string", "description": "Optional edge field; omit to mean \"no inbound refs of any kind\"."}},
+      "additionalProperties": false
+    },
+    "no_outbound": {
+      "type": "object",
+      "properties": {"edge": {"type": "string", "description": "Optional edge field; omit to mean \"no outbound edges of any kind\"."}},
+      "additionalProperties": false
+    },
+    "field": {
+      "type": "object",
+      "properties": {
+        "key": {"type": "string", "description": "Field name to test."},
+        "equals": {"type": "string", "description": "Match if the field's string form equals this value."},
+        "contains": {"type": "string", "description": "Match if the field's string form contains this substring."}
+      },
+      "required": ["key"],
+      "additionalProperties": false
+    },
+    "text": {"type": "string", "description": "Case-sensitive substring match over id, title, and every field value."},
+    "view": {"type": "string", "enum": ["summary"], "description": "Row shape. Only \"summary\" is supported today."},
+    "limit": {"type": "integer", "minimum": 0, "description": "Max rows per page (default 25)."},
+    "cursor": {"type": "string", "description": "Opaque pagination cursor from a previous graph.find call's next_cursor."},
+    "count_only": {"type": "boolean", "description": "If true, return only the total count, no rows."}
+  },
+  "additionalProperties": false
+}`
+
+type graphFindArgs struct {
+	Catalog    string         `json:"catalog,omitempty"`
+	Type       string         `json:"type,omitempty"`
+	Status     []string       `json:"status,omitempty"`
+	Visibility string         `json:"visibility,omitempty"`
+	Edge       map[string]any `json:"edge,omitempty"`
+	NoInbound  map[string]any `json:"no_inbound,omitempty"`
+	NoOutbound map[string]any `json:"no_outbound,omitempty"`
+	Field      map[string]any `json:"field,omitempty"`
+	Text       string         `json:"text,omitempty"`
+	View       string         `json:"view,omitempty"`
+	Limit      *int           `json:"limit,omitempty"`
+	Cursor     string         `json:"cursor,omitempty"`
+	CountOnly  bool           `json:"count_only,omitempty"`
+}
+
+type graphFindOK struct {
+	OK             bool   `json:"ok"`
+	Catalog        string `json:"catalog"`
+	Total          int    `json:"total"`
+	Rows           []any  `json:"rows"`
+	NextCursor     string `json:"next_cursor,omitempty"`
+	CatalogChanged bool   `json:"catalog_changed,omitempty"`
+	Truncated      bool   `json:"truncated,omitempty"`
+}
+
+// findCursor is graph.find's opaque pagination token: an offset guarded by
+// a filter hash (did the caller change filters mid-pagination?) and a
+// catalog-content hash (did the bound catalog change under us?). Encoded as
+// base64url(json(...)) — opaque to callers, not meant to be hand-constructed.
+type findCursor struct {
+	Offset      int    `json:"o"`
+	FilterHash  string `json:"f"`
+	CatalogHash string `json:"c"`
+}
+
+func encodeFindCursor(c findCursor) string {
+	b, _ := json.Marshal(c)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+func decodeFindCursor(s string) (findCursor, error) {
+	var c findCursor
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return c, err
+	}
+	if err := json.Unmarshal(b, &c); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+// findFilterHash digests the filter-shaping arguments (everything except
+// pagination/count_only), so a cursor minted for one filter is detected as
+// stale if the caller silently changes filters between calls.
+func findFilterHash(args graphFindArgs) string {
+	key := map[string]any{
+		"type": args.Type, "status": args.Status, "visibility": args.Visibility,
+		"edge": args.Edge, "no_inbound": args.NoInbound, "no_outbound": args.NoOutbound,
+		"field": args.Field, "text": args.Text,
+	}
+	b, _ := json.Marshal(key)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// findCatalogHash best-effort digests the bound catalog's current content
+// shape (node ids + warnings, via host.graph.load) so graph.find can detect
+// "the catalog changed since this cursor was minted" without keeping any
+// server-side pagination state. Returns "" on any failure — callers treat
+// that as "unknown", which conservatively means "assume changed" wherever a
+// prior cursor claimed a specific hash.
+func findCatalogHash(ctx context.Context, deps *Deps, path string) string {
+	res, err := deps.Registry.Invoke(ctx, "host.graph.load", map[string]any{"catalog_path": path})
+	if err != nil {
+		return ""
+	}
+	b, err := json.Marshal(res.Data)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func registerGraphFindTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.find",
+		Description: "Search nodes by type/status/visibility/edge/field/text. Paginates via an opaque cursor (next_cursor); catalog_changed:true means the bound catalog changed since the cursor was minted, so pagination restarted from the top rather than silently skewing.",
+		InputSchema: json.RawMessage(graphFindInputSchema),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphFind(ctx, deps, req)
+	})
+}
+
+func handleGraphFind(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphFindArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.find: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	if args.View != "" && args.View != "summary" {
+		return errorResult(NewError(CodeValidation, "graph.find: `view` must be \"summary\" if given, got "+args.View, "")), nil
+	}
+
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	limit := 25
+	if args.Limit != nil {
+		limit = *args.Limit
+	}
+
+	fh := findFilterHash(args)
+	ch := findCatalogHash(ctx, deps, path)
+
+	offset := 0
+	catalogChanged := false
+	if args.Cursor != "" {
+		cur, err := decodeFindCursor(args.Cursor)
+		if err != nil {
+			return errorResult(NewError(CodeValidation, "graph.find: `cursor` is not a valid graph.find cursor", "omit cursor to start a fresh page")), nil
+		}
+		if cur.FilterHash != fh || ch == "" || cur.CatalogHash != ch {
+			catalogChanged = true
+			// offset stays 0: restart pagination from the top rather than
+			// silently returning a page computed against a stale offset.
+		} else {
+			offset = cur.Offset
+		}
+	}
+
+	hostArgs := map[string]any{
+		"catalog_path": path,
+		"limit":        limit,
+		"offset":       offset,
+		"count_only":   args.CountOnly,
+	}
+	if args.Type != "" {
+		hostArgs["type"] = args.Type
+	}
+	if len(args.Status) > 0 {
+		hostArgs["status"] = args.Status
+	}
+	if args.Visibility != "" {
+		hostArgs["visibility"] = args.Visibility
+	}
+	if args.Edge != nil {
+		hostArgs["edge"] = args.Edge
+	}
+	if args.NoInbound != nil {
+		hostArgs["no_inbound"] = args.NoInbound
+	}
+	if args.NoOutbound != nil {
+		hostArgs["no_outbound"] = args.NoOutbound
+	}
+	if args.Field != nil {
+		hostArgs["field"] = args.Field
+	}
+	if args.Text != "" {
+		hostArgs["text"] = args.Text
+	}
+
+	res, err := deps.Registry.Invoke(ctx, "host.graph.find", hostArgs)
+	if err != nil {
+		return hostErrResult("graph.find", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.find: "+res.Error, "")), nil
+	}
+
+	total, _ := res.Data["total"].(int)
+	rows, _ := res.Data["rows"].([]any)
+
+	out := graphFindOK{OK: true, Catalog: alias, Total: total, Rows: rows, CatalogChanged: catalogChanged}
+
+	// ≤8KB/page budget (BudgetGraphFindPage): truncate rows in-band before
+	// reaching the requested limit count if needed.
+	truncated := false
+	for !fitsBudget(out, BudgetGraphFindPage) && len(out.Rows) > 0 {
+		out.Rows = out.Rows[:len(out.Rows)-1]
+		truncated = true
+	}
+	out.Truncated = truncated
+
+	if offset+len(out.Rows) < total {
+		out.NextCursor = encodeFindCursor(findCursor{Offset: offset + len(out.Rows), FilterHash: fh, CatalogHash: ch})
+	}
+
+	return okResult(out), nil
+}
+
+// ─── graph.neighbors ───
+
+const graphNeighborsInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
+    "id": {"type": "string", "description": "Root node id to walk edges from."},
+    "direction": {"type": "string", "enum": ["in", "out", "both"], "description": "Edge direction to walk (default both)."},
+    "edges": {"type": "array", "items": {"type": "string"}, "description": "Restrict to these edge field ids (default: all)."},
+    "depth": {"type": "integer", "minimum": 1, "maximum": 3, "description": "BFS depth, 1-3 (default 1)."},
+    "limit": {"type": "integer", "minimum": 0, "description": "Max triples to return (default: unlimited)."},
+    "view": {"type": "string", "enum": ["summary"], "description": "Row shape for the summary rows. Only \"summary\" is supported today."}
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}`
+
+type graphNeighborsArgs struct {
+	Catalog   string   `json:"catalog,omitempty"`
+	ID        string   `json:"id"`
+	Direction string   `json:"direction,omitempty"`
+	Edges     []string `json:"edges,omitempty"`
+	Depth     *int     `json:"depth,omitempty"`
+	Limit     *int     `json:"limit,omitempty"`
+	View      string   `json:"view,omitempty"`
+}
+
+type graphNeighborsOK struct {
+	OK        bool   `json:"ok"`
+	Catalog   string `json:"catalog"`
+	Triples   []any  `json:"triples"`
+	Rows      []any  `json:"rows"`
+	Truncated bool   `json:"truncated,omitempty"`
+}
+
+func registerGraphNeighborsTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.neighbors",
+		Description: "Walk edges from a node (in/out/both, 1-3 hops) and return the edge triples plus a deduplicated summary of the nodes reached.",
+		InputSchema: json.RawMessage(graphNeighborsInputSchema),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphNeighbors(ctx, deps, req)
+	})
+}
+
+func handleGraphNeighbors(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphNeighborsArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.neighbors: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	if args.ID == "" {
+		return errorResult(NewError(CodeValidation, "graph.neighbors: `id` is required", "")), nil
+	}
+	if args.View != "" && args.View != "summary" {
+		return errorResult(NewError(CodeValidation, "graph.neighbors: `view` must be \"summary\" if given, got "+args.View, "")), nil
+	}
+
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	hostArgs := map[string]any{"catalog_path": path, "id": args.ID}
+	if args.Direction != "" {
+		hostArgs["direction"] = args.Direction
+	}
+	if len(args.Edges) > 0 {
+		hostArgs["edges"] = args.Edges
+	}
+	if args.Depth != nil {
+		hostArgs["depth"] = *args.Depth
+	}
+	if args.Limit != nil {
+		hostArgs["limit"] = *args.Limit
+	}
+
+	res, err := deps.Registry.Invoke(ctx, "host.graph.neighbors", hostArgs)
+	if err != nil {
+		return hostErrResult("graph.neighbors", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.neighbors: "+res.Error, "")), nil
+	}
+
+	triples, _ := res.Data["triples"].([]any)
+	rows, _ := res.Data["rows"].([]any)
+
+	out := graphNeighborsOK{OK: true, Catalog: alias, Triples: triples, Rows: rows}
+
+	// ≤10KB budget (BudgetGraphNeighbors): drop trailing triples first (the
+	// bulkier of the two lists), then trailing rows, in-band.
+	truncated := false
+	for !fitsBudget(out, BudgetGraphNeighbors) && (len(out.Triples) > 0 || len(out.Rows) > 0) {
+		if len(out.Triples) > 0 {
+			out.Triples = out.Triples[:len(out.Triples)-1]
+		} else {
+			out.Rows = out.Rows[:len(out.Rows)-1]
+		}
+		truncated = true
+	}
+	out.Truncated = truncated
+
+	return okResult(out), nil
+}
+
+// ─── graph.type ───
+
+const graphTypeInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
+    "type_id": {"type": "string", "description": "Type id to explain. Omit to list every registered type."}
+  },
+  "additionalProperties": false
+}`
+
+type graphTypeArgs struct {
+	Catalog string `json:"catalog,omitempty"`
+	TypeID  string `json:"type_id,omitempty"`
+}
+
+func registerGraphTypeTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.type",
+		Description: "Explain one type's schema, ancestry, and edge vocabulary (+ instance count), or list every registered type when type_id is omitted.",
+		InputSchema: json.RawMessage(graphTypeInputSchema),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphType(ctx, deps, req)
+	})
+}
+
+func handleGraphType(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphTypeArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.type: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	hostArgs := map[string]any{"catalog_path": path}
+	if args.TypeID != "" {
+		hostArgs["type_id"] = args.TypeID
+	}
+	res, err := deps.Registry.Invoke(ctx, "host.graph.type_census", hostArgs)
+	if err != nil {
+		return hostErrResult("graph.type", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.type: "+res.Error, "")), nil
+	}
+
+	out := map[string]any{"ok": true, "catalog": alias}
+	for k, v := range res.Data {
+		out[k] = v
+	}
+	return okResult(out), nil
+}
+
+// ─── graph.impact ───
+
+const graphImpactInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
+    "id": {"type": "string", "description": "Node id to assess."},
+    "to_type": {"type": "string", "description": "If retyping to this type id, also report incompatible inbound refs."}
+  },
+  "required": ["id"],
+  "additionalProperties": false
+}`
+
+type graphImpactArgs struct {
+	Catalog string `json:"catalog,omitempty"`
+	ID      string `json:"id"`
+	ToType  string `json:"to_type,omitempty"`
+}
+
+func registerGraphImpactTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name:        "graph.impact",
+		Description: "Predict what retyping or removing a node would break: its type explanation, every inbound reference, and (with to_type) which of those refs would become type-incompatible. Call before retype/remove; propose will reject what this predicts.",
+		InputSchema: json.RawMessage(graphImpactInputSchema),
+	}, func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphImpact(ctx, deps, req)
+	})
+}
+
+func handleGraphImpact(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphImpactArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.impact: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+	if args.ID == "" {
+		return errorResult(NewError(CodeValidation, "graph.impact: `id` is required", "")), nil
+	}
+	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	hostArgs := map[string]any{"catalog_path": path, "mode": "impact", "target": args.ID}
+	if args.ToType != "" {
+		hostArgs["to_type"] = args.ToType
+	}
+	res, err := deps.Registry.Invoke(ctx, "host.graph.query", hostArgs)
+	if err != nil {
+		return hostErrResult("graph.impact", err), nil
+	}
+	if res.Error != "" {
+		return errorResult(NewError(CodeValidation, "graph.impact: "+res.Error, "")), nil
+	}
+
+	out := map[string]any{"ok": true, "catalog": alias}
+	for k, v := range res.Data {
+		out[k] = v
 	}
 	return okResult(out), nil
 }

@@ -471,3 +471,66 @@ func TestGraphHandler_Changeset_UnknownAction(t *testing.T) {
 		t.Fatal("expected error for unknown changeset action")
 	}
 }
+
+func TestGraphHandler_Open(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "open",
+		"catalog_path": readsFixturePath,
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(open): %v", err)
+	}
+	if _, ok := res.Data["head"].(map[string]any); !ok {
+		t.Fatalf("expected head, got %v", res.Data["head"])
+	}
+	nodeCount, ok := res.Data["node_count"].(int)
+	if !ok || nodeCount == 0 {
+		t.Fatalf("expected a non-zero node_count, got %v", res.Data["node_count"])
+	}
+	types, ok := res.Data["types"].([]any)
+	if !ok || len(types) == 0 {
+		t.Fatalf("expected a non-empty per-type census, got %v", res.Data["types"])
+	}
+	// change declares depends_on as a storage:top_level edge field — the
+	// same conformance case get/find/neighbors already prove. Confirm
+	// graph.open's edge-vocabulary line for "change" surfaces depends_on
+	// too, i.e. it was built via EdgeTargets/registry decls, not by
+	// peeking node.Edges directly (which would show nothing for a
+	// top_level field).
+	var changeRow map[string]any
+	for _, row := range types {
+		r, _ := row.(map[string]any)
+		if r["id"] == "change" {
+			changeRow = r
+		}
+	}
+	if changeRow == nil {
+		t.Fatalf("expected a census row for type \"change\", got %v", types)
+	}
+	if vocab, _ := changeRow["edges"].(string); !strings.Contains(vocab, "depends_on") {
+		t.Errorf("change type's edge vocabulary = %q, want it to mention depends_on", vocab)
+	}
+	lint, ok := res.Data["lint"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected a lint summary, got %v", res.Data["lint"])
+	}
+	if _, ok := lint["clean"].(bool); !ok {
+		t.Fatalf("expected lint.clean to be a bool, got %v", lint["clean"])
+	}
+	if _, ok := res.Data["changesets"].(map[string]any); !ok {
+		t.Fatalf("expected changeset lifecycle counts, got %v", res.Data["changesets"])
+	}
+	if guide, _ := res.Data["guide"].(string); guide == "" {
+		t.Fatalf("expected a non-empty guide string, got %v", res.Data["guide"])
+	}
+}
+
+func TestGraphHandler_Open_UnknownCatalogPathErrors(t *testing.T) {
+	_, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "open",
+		"catalog_path": "testdata/does-not-exist.yaml",
+	})
+	if err == nil {
+		t.Fatal("expected an error for a nonexistent catalog_path")
+	}
+}
