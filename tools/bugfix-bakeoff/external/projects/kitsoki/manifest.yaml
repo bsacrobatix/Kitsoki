@@ -172,6 +172,26 @@ bugs:
       object must return a visible failure rather than advancing with an empty
       artifact. Add focused tests and run `go test ./internal/host -count=1`.
 
+  - id: bug18
+    ticket_ref: issues/bugs/2026-06-03T121406Z-bf-silent-onerror-bounce-and-autostart-latch.md
+    title: "on_error redirects silently hide the host failure from the operator"
+    severity: P1
+    component: orchestrator
+    fix_sha: 65f8f218
+    baseline_sha: 422c83b2357e18127c530bb45f6ca3da30a35722
+    fix_source: .
+    oracle_test: testdata/bug18.go
+    oracle_match: "TestRepro_OnErrorRedirectSurfacesFailure"
+    oracle:
+      target: internal/orchestrator/on_error_banner_oracle_test.go
+      run: 'go test ./internal/orchestrator/ -run {match} -count=1'
+    ticket: |
+      A host-call failure redirected through `on_error` must be visible in the
+      rendered destination view. A destination room that does not itself render
+      `world.last_error` must still show a concise failure banner, rather than
+      silently bouncing the operator to an apparently normal screen.
+      Add focused tests and run `go test ./internal/orchestrator -count=1`.
+
 treatments: [kitsoki, single]
 
 run:
