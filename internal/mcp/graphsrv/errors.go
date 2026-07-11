@@ -1,0 +1,78 @@
+// Package graphsrv implements the dedicated "kitsoki mcp-graph" stdio MCP
+// server (graph-mcp plan §3, stage P2). Every tool in this package invokes
+// host.graph.* engine ops exclusively through a host.Registry — never
+// internal/graph directly (the "all capability lands as engine ops" hard
+// constraint, plan §1).
+package graphsrv
+
+// This file is the single error-code vocabulary for mcp-graph. P2 defines
+// the codes its read family and feedback channel actually raise; P4/P5/P6
+// extend this vocabulary as write tools, catalog/github feedback sinks, and
+// the studio mount are added. Do not invent per-handler ad hoc error
+// strings — add a new named constant here instead.
+const (
+	// CodeNoCatalog: the server started with no bound catalog (no
+	// --catalog flag and no pog/catalog.yaml found under server cwd at
+	// startup). Every tool call returns this until the server is
+	// restarted with a valid --catalog.
+	CodeNoCatalog = "NO_CATALOG"
+
+	// CodeUnknownCatalog: a tool call's `catalog` argument didn't match
+	// any bound alias. The hint lists the bound aliases.
+	CodeUnknownCatalog = "UNKNOWN_CATALOG"
+
+	// CodeUnknownNode: a requested node id doesn't exist in the bound
+	// catalog. The hint carries nearest-id suggestions where available.
+	CodeUnknownNode = "UNKNOWN_NODE"
+
+	// CodeUnknownType: a requested type id doesn't exist in the bound
+	// catalog's type registry.
+	CodeUnknownType = "UNKNOWN_TYPE"
+
+	// CodeUnknownEdge: a requested edge field doesn't exist on the
+	// relevant type. The hint lists that type's edge vocabulary.
+	CodeUnknownEdge = "UNKNOWN_EDGE"
+
+	// CodeValidation: a tool call's arguments failed shape/semantic
+	// validation (including "raw filesystem path passed as `catalog`").
+	// error/hint should name the offending argument.
+	CodeValidation = "VALIDATION"
+
+	// CodeReadOnlyMode: reserved for P4 — a write tool call arrived while
+	// the server was started with --mode read. Nothing raises this yet
+	// (P2 has no write tools), but the constant is defined now so P4's
+	// mode-gating wires against a stable name.
+	CodeReadOnlyMode = "READ_ONLY_MODE"
+
+	// CodeStewardOnly: reserved for P4/P5 — a steward-only write tool
+	// call arrived while the server was started with --mode propose (not
+	// steward). Nothing raises this yet.
+	CodeStewardOnly = "STEWARD_ONLY"
+)
+
+// defaultIfStuck is the standing advertisement of the feedback channel:
+// every error payload names it, per the plan's "the channel is advertised
+// at the moment of friction, in every error payload" requirement.
+const defaultIfStuck = "Call feedback.report (kind: tool_gap/data_gap/doc_gap/bug/other) to leave a durable record of what blocked you — it's non-blocking and always local."
+
+// ErrorPayload is the teaching-shaped error envelope every mcp-graph tool
+// returns on failure: {ok:false, code, error, hint, if_stuck}.
+type ErrorPayload struct {
+	OK      bool   `json:"ok"`
+	Code    string `json:"code"`
+	Error   string `json:"error"`
+	Hint    string `json:"hint,omitempty"`
+	IfStuck string `json:"if_stuck"`
+}
+
+// NewError builds a teaching-shaped error payload. hint may be empty when
+// there's nothing more specific to say than the error message itself.
+func NewError(code, message, hint string) *ErrorPayload {
+	return &ErrorPayload{
+		OK:      false,
+		Code:    code,
+		Error:   message,
+		Hint:    hint,
+		IfStuck: defaultIfStuck,
+	}
+}
