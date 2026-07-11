@@ -196,6 +196,7 @@ states:
             args:
               ticket_id:       "{{ world.ticket_id }}"
               ticket_title:    "{{ world.ticket_title }}"
+              ticket_body:     "{{ world.ticket_body }}"
               workdir:         "{{ world.workdir }}"
               build_log:       "{{ world.ci_log }}"
               review_body:     "{{ world.implement_review_artifact.summary_markdown }}"

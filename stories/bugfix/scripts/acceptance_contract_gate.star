@@ -2,6 +2,7 @@ def main(ctx):
     requirements = ctx.inputs["requirements"]
     artifact = ctx.inputs["artifact"]
     changed_paths = ctx.inputs["changed_paths"]
+    changed_diff = ctx.inputs["changed_diff"]
     changed_files = []
     for path in changed_paths.split("\n"):
         path = path.strip()
@@ -21,6 +22,13 @@ def main(ctx):
         for required_path in requirement.get("required_paths", []):
             if required_path not in changed_files:
                 missing.append(requirement_id + "@" + required_path)
+        # `required_diff_contains` is an optional, public source-evidence
+        # clause. It is deliberately a list of literal strings rather than a
+        # test/oracle hook: callers may name compatibility terms from their
+        # visible ticket, while the hidden scorer remains unavailable here.
+        for expected in requirement.get("required_diff_contains", []):
+            if expected != "" and expected not in changed_diff:
+                missing.append(requirement_id + "~" + expected)
     summary = "all public acceptance requirements have direct assertion receipts"
     if missing:
         summary = "missing direct assertion receipts for: " + ", ".join(missing)

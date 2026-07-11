@@ -974,6 +974,7 @@ def build_kitsoki_prompt(
         lambda dotted: "mcp__kitsoki__" + dotted.replace(".", "_")
     )
     ticket_title = benchmark_ticket_title(task)
+    ticket_body = benchmark_ticket_body(task)
     acceptance_contract = task.get("acceptance_contract") or []
     acceptance_line = (
         f"       acceptance_contract: {json.dumps(acceptance_contract, sort_keys=True)}"
@@ -997,9 +998,10 @@ def build_kitsoki_prompt(
         f'   - profile: "{profile}"',
         f'   - trace: "{trace_ref}"',
         "   - initial_world:",
-        f'       ticket_id: "{task["id"]}"',
-        f'       thread: "{thread}"',
-        f'       ticket_title: "{ticket_title}"',
+        f"       ticket_id: {json.dumps(str(task['id']))}",
+        f"       thread: {json.dumps(str(thread))}",
+        f"       ticket_title: {json.dumps(ticket_title)}",
+        f"       ticket_body: {json.dumps(ticket_body)}",
         f'       workdir: "{tree}"',
         '       workspace_id: ""',
         '       workspace_prepared: true',
@@ -1127,7 +1129,7 @@ def build_prompt(args: argparse.Namespace, task: dict[str, Any]) -> str:
         f"Archetype: {task['archetype']}",
         f"Treatment: {args.treatment}",
         "",
-        str(task.get("ticket", "")),
+        public_ticket_text(task),
     ])
 
 
@@ -1141,6 +1143,25 @@ def benchmark_isolation_instruction() -> str:
 
 def benchmark_ticket_title(task: dict[str, Any]) -> str:
     return f"{benchmark_isolation_instruction()}\n\n{task['id']} ({task['archetype']}): {task.get('ticket', '')}"
+
+
+def benchmark_ticket_body(task: dict[str, Any]) -> str:
+    """Return the optional public report supplied by a paired task.
+
+    This is deliberately task data, not a lookup of a future fix or a hidden
+    oracle. The raw and MCP treatments receive identical text, so a detailed
+    filed issue can express its observable/API contract without biasing either
+    arm or exposing the scorer's regression test.
+    """
+    return str(task.get("ticket_body") or "").strip()
+
+
+def public_ticket_text(task: dict[str, Any]) -> str:
+    title = str(task.get("ticket") or "").strip()
+    body = benchmark_ticket_body(task)
+    if title and body:
+        return f"{title}\n\n## Public bug report\n\n{body}"
+    return title or body
 
 
 def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:

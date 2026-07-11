@@ -3,6 +3,17 @@
 You are validating the applied fix for **{{ args.ticket_id }}** —
 *{{ args.ticket_title }}* against the full environment.
 
+{% if args.ticket_body %}## Public ticket details
+
+```markdown
+{{ args.ticket_body }}
+```
+
+Reject a result whose public compatibility/API terms are not evidenced by the
+committed change and focused tests.
+
+{% endif %}
+
 The review found:
 
 > {{ args.review_body }}

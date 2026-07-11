@@ -132,6 +132,30 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
 missing_trace = runner.real_trace_metrics(str(tree / "absent.jsonl"), "gpt-5.4")
 check("missing studio trace is incomplete", missing_trace.get("measurement_status"), "incomplete")
 
+public_ticket_task = {
+    "id": "public-ticket-fixture",
+    "archetype": "bugfix_test_repair",
+    "ticket": "The post-command validator loses its declared working directory.",
+    "ticket_body": "The public contract requires Cwd and a separate infrastructure-error channel.",
+    "acceptance_contract": [{"id": "cwd", "description": "Preserve the declared working directory."}],
+}
+prompt_args = argparse.Namespace(treatment="raw-codex", implementation_mode="agent_task", story="")
+raw_prompt = runner.build_prompt(prompt_args, public_ticket_task)
+require("raw prompt contains complete public ticket", public_ticket_task["ticket_body"] in raw_prompt)
+kitsoki_prompt = runner.build_kitsoki_prompt(
+    prompt_args,
+    public_ticket_task,
+    Path("/tmp/public-ticket-tree"),
+    "/tmp/public-ticket-trace.jsonl",
+    Path("/tmp/public-ticket-thread.md"),
+    "codex-gpt54",
+    "paired-task-public-ticket",
+    "go test ./internal/host -count=1",
+    "codex",
+)
+require("MCP prompt contains complete public ticket", json.dumps(public_ticket_task["ticket_body"]) in kitsoki_prompt)
+require("MCP prompt retains public acceptance contract", "acceptance_contract:" in kitsoki_prompt)
+
 prompt_args = argparse.Namespace(implementation_mode="agent_task", story="")
 prompt = runner.build_kitsoki_prompt(
     prompt_args,

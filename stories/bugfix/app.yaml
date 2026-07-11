@@ -620,6 +620,10 @@ world:
   # discrete fix commit range in testing.yaml.
   acceptance_base_sha:       { type: string, default: "" }
   acceptance_changed_paths:  { type: string, default: "" }
+  # Unified=0 committed diff for public source-evidence clauses. It never
+  # contains a benchmark oracle; callers may only require strings stated in
+  # their public ticket/contract.
+  acceptance_changed_diff:   { type: string, default: "" }
   validate_artifact:         { type: object, default: {} }
   done_artifact:             { type: object, default: {} }
   fixed_in_commit:           { type: string, default: "" }  # short HEAD at close-out; posted to the issue before resolving

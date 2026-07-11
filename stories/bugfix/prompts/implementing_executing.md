@@ -3,6 +3,17 @@
 You are implementing the fix for **{{ args.ticket_id }}** — *{{ args.ticket_title }}*
 inside the managed workspace at `{{ args.workdir }}`.
 
+{% if args.ticket_body %}## Public ticket details
+
+```markdown
+{{ args.ticket_body }}
+```
+
+Treat explicit API/compatibility statements here as binding alongside the
+proposal. Do not replace a named public contract with an invented equivalent.
+
+{% endif %}
+
 The proposing room produced this proposal:
 
 > {{ args.fix_description }}
