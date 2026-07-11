@@ -26,8 +26,17 @@ states:
       - init_repo_vcs
       - init_repo_default_branch
       - init_repo_remote
+      - init_repo_branch_pattern
+      - init_repo_branch_issue_id
       - init_ticket_provider
       - init_ticket_repo
+      - init_pr_provider
+      - init_pr_repository
+      - init_pr_base_branch
+      - init_pr_template
+      - init_goals
+      - init_resolutions
+      - init_default_notices
       - init_story_pack
       - init_story_pack_title
       - init_story_pack_summary
@@ -96,15 +105,25 @@ states:
           init_project_title: "result.project_title"
           init_stack:         "result.stack"
           init_dev_command:   "result.dev_command"
+          init_dev_server_applicable: "result.dev_server_applicable"
           init_test_command:  "result.test_command"
           init_build_command: "result.build_command"
           init_repo_vcs:      "result.repo_vcs"
           init_repo_default_branch: "result.repo_default_branch"
           init_repo_remote:   "result.repo_remote"
+          init_repo_branch_pattern: "result.repo_branch_pattern"
+          init_repo_branch_issue_id: "result.repo_branch_issue_id"
           init_conventions:   "result.conventions"
           init_tracker:       "result.tracker"
           init_ticket_provider: "result.tracker"
           init_ticket_repo:   "result.ticket_repo"
+          init_pr_provider:   "result.pr_provider"
+          init_pr_repository: "result.pr_repository"
+          init_pr_base_branch: "result.pr_base_branch"
+          init_pr_template:   "result.pr_template"
+          init_goals:         "result.goals"
+          init_resolutions:   "result.resolutions"
+          init_default_notices: "result.default_notices"
           init_story_pack:    "result.story_pack"
           init_story_pack_title: "result.story_pack_title"
           init_story_pack_summary: "result.story_pack_summary"
@@ -253,8 +272,9 @@ states:
           color:    "#14B8A6"
       - prose: >
           Review the project profile Kitsoki discovered. Accepting writes the
-          local Kitsoki config, project profile, and story instance into the
-          target checkout; feedback is recorded before another discovery pass.
+          local Kitsoki config and profile, creating the thin story wrapper only
+          when it is absent. Reruns merge managed discoveries while preserving
+          operator-owned values and project story customizations.
       - kv:
           pairs:
             Target:      "{{ world.init_target_path|default:world.repo_root|default:world.workdir|default:'.' }}"
@@ -262,6 +282,18 @@ states:
             ID:          "{{ world.init_project_id|default:'(not yet inferred)' }}"
             Stack:       "{{ world.init_stack|default:'(not yet inferred)' }}"
             Status:      "{{ world.init_profile_status }}"
+      - heading: "Goal"
+      - prose: "{{ world.init_goals.onboarding.statement|default:'Make this checkout ready for deterministic dev-story work.' }}"
+      - template: |
+          {% for item in world.init_goals.onboarding.postconditions %}- {{ item.id }}: {{ item.statement }}{% if !item.applicable %} (not applicable){% endif %}
+          {% endfor %}
+        when: "world.init_goals.onboarding.postconditions"
+      - heading: "Validation enables"
+      - prose: "{{ world.init_goals.validation.statement|default:'Prove and improve dev-story against a stable reference corpus.' }}"
+      - template: |
+          {% for item in world.init_goals.validation.postconditions %}- {{ item.id }}: {{ item.statement }}
+          {% endfor %}
+        when: "world.init_goals.validation.postconditions"
       - heading: "Commands"
       - kv:
           pairs:
@@ -273,13 +305,32 @@ states:
           pairs:
             VCS:            "{{ world.init_repo_vcs|default:'none' }}"
             Default branch: "{{ world.init_repo_default_branch|default:'(none)' }}"
+            Branch pattern: "{{ world.init_repo_branch_pattern|default:'(not yet inferred)' }}"
+            Ticket ID rule: "{{ world.init_repo_branch_issue_id|default:'(not yet inferred)' }}"
             Remote:         "{{ world.init_repo_remote|default:'(none)' }}"
+      - heading: "Tickets and pull requests"
+      - kv:
+          pairs:
+            Ticket source: "{{ world.init_ticket_provider|default:'informal' }}"
+            Ticket project: "{{ world.init_ticket_repo|default:'pasted' }}"
+            PR provider: "{{ world.init_pr_provider|default:'local' }}"
+            PR repository: "{{ world.init_pr_repository|default:'local' }}"
+            PR base: "{{ world.init_pr_base_branch|default:world.init_repo_default_branch|default:'main' }}"
+            PR template: "{{ world.init_pr_template|default:'none' }}"
+      - heading: "Defaults used — review these"
+        when: "len(world.init_default_notices) > 0"
+      - template: |
+          {% for item in world.init_default_notices %}- {{ item.notice }}
+            Value: {{ item.value }}
+            Update: {{ item.update }}
+          {% endfor %}
+        when: "len(world.init_default_notices) > 0"
       - heading: "Setup"
       - kv:
           pairs:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
-            Ticket provider: "{% if world.init_ticket_provider == 'github' %}GitHub Issues ({{ world.init_ticket_repo|default:'repo not detected' }}){% else %}local markdown / pasted reports{% endif %}"
+            Ticket provider: "{% if world.init_ticket_provider == 'github' %}GitHub Issues ({{ world.init_ticket_repo|default:'repo not detected' }}){% elif world.init_ticket_provider == 'local' %}local markdown / pasted reports{% else %}{{ world.init_ticket_provider|default:'informal' }} ({{ world.init_ticket_repo|default:'pasted' }}){% endif %}"
             Capability: "{% if world.init_ticket_provider == 'github' && world.init_ticket_repo != '' %}full{% else %}good{% endif %}"
             Transcripts: "{{ world.init_transcript_count|default:0 }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
@@ -973,6 +1024,7 @@ states:
               project_title: "{{ world.init_project_title }}"
               stack: "{{ world.init_stack }}"
               dev_command: "{{ world.init_dev_command }}"
+              dev_server_applicable: "{{ world.init_dev_server_applicable }}"
               test_command: "{{ world.init_test_command }}"
               build_command: "{{ world.init_build_command }}"
               conventions: "{{ world.init_conventions }}"
@@ -981,6 +1033,15 @@ states:
               repo_vcs: "{{ world.init_repo_vcs }}"
               repo_default_branch: "{{ world.init_repo_default_branch }}"
               repo_remote: "{{ world.init_repo_remote }}"
+              repo_branch_pattern: "{{ world.init_repo_branch_pattern }}"
+              repo_branch_issue_id: "{{ world.init_repo_branch_issue_id }}"
+              pr_provider: "{{ world.init_pr_provider }}"
+              pr_repository: "{{ world.init_pr_repository }}"
+              pr_template: "{{ world.init_pr_template }}"
+              story_pack: "{{ world.init_story_pack }}"
+              starter_stories: "{{ world.init_starter_stories }}"
+              goals: "{{ world.init_goals }}"
+              resolutions: "{{ world.init_resolutions }}"
           capabilities:
             host:
               verbs: [host.dev.onboarding]
@@ -1221,6 +1282,7 @@ states:
       - init_customization_result
       - init_customization_ok
       - init_customization_output
+      - init_default_notices
     view:
       - banner:
           text:     "PROJECT ONBOARDING"
@@ -1244,6 +1306,26 @@ states:
           {% for path in world.init_apply_result.writes %}- {{ path }}
           {% endfor %}
         when: "world.init_apply_result.writes"
+      - heading: "Unchanged"
+        when: "world.init_apply_result.unchanged"
+      - template: |
+          {% for path in world.init_apply_result.unchanged %}- {{ path }}
+          {% endfor %}
+        when: "world.init_apply_result.unchanged"
+      - heading: "Preserved operator fields"
+        when: "world.init_apply_result.preserved_overrides"
+      - template: |
+          {% for field in world.init_apply_result.preserved_overrides %}- {{ field }}
+          {% endfor %}
+        when: "world.init_apply_result.preserved_overrides"
+      - heading: "Defaults still in use"
+        when: "world.init_apply_result.defaults_used"
+      - template: |
+          {% for item in world.init_apply_result.defaults_used %}- {{ item.field }} = {{ item.value }}
+            {{ item.notice }}
+            Update: {{ item.update }}
+          {% endfor %}
+        when: "world.init_apply_result.defaults_used"
       - heading: "Readiness"
         when: "world.init_readiness_result.status != ''"
       - kv:
@@ -1272,6 +1354,9 @@ states:
             - label:  "readiness"
               hint:   "run declared post-apply checks and update the profile readiness summary"
               intent: run_readiness
+            - label:  "reoptimize"
+              hint:   "rediscover repo policy and safely merge managed profile fields"
+              intent: init_discovered
             - label:  "workbench"
               hint:   "return to the dev-story workbench"
               intent: go_main
@@ -1298,6 +1383,17 @@ states:
                 init_readiness_ok: false
                 init_readiness_output: ""
                 init_profile_status: "checking-readiness"
+                last_error: ""
+      init_discovered:
+        - target: init_discover
+          effects:
+            - set:
+                init_discovery: {}
+                init_discovery_error: ""
+                init_run_ok: false
+                init_profile_status: "discovering"
+                init_apply_result: {}
+                init_readiness_result: {}
                 last_error: ""
       go_main:
         - target: landing

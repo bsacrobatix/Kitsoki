@@ -77,6 +77,7 @@ type WorkspaceReceipt struct {
 
 type ManagedWorkspaceService struct {
 	root       string
+	repo       string
 	scriptPath string
 	runner     WorkspaceCommandRunner
 	objectives *ObjectiveService
@@ -97,8 +98,10 @@ func NewManagedWorkspaceService(root, scriptPath string, runner WorkspaceCommand
 	// conventional <repo>/.capsules/workspaces root. Tests retain an injected
 	// runner and may use a synthetic script path; production always invokes an
 	// argv vector through exec.CommandContext, never a shell string.
+	var repoRoot string
 	if runner == nil {
-		expected := filepath.Join(filepath.Dir(filepath.Dir(absRoot)), "scripts", "dev-workspace.sh")
+		repoRoot = filepath.Dir(filepath.Dir(absRoot))
+		expected := filepath.Join(repoRoot, "scripts", "dev-workspace.sh")
 		scriptAbs, err := filepath.Abs(scriptPath)
 		if err != nil || filepath.Clean(scriptAbs) != filepath.Clean(expected) {
 			return nil, errors.New("production managed workspace service requires the checked-in scripts/dev-workspace.sh")
@@ -113,7 +116,7 @@ func NewManagedWorkspaceService(root, scriptPath string, runner WorkspaceCommand
 	if now == nil {
 		now = time.Now
 	}
-	return &ManagedWorkspaceService{root: filepath.Clean(absRoot), scriptPath: scriptPath, runner: runner, objectives: objectives, now: now, workspaces: map[string]ManagedWorkspace{}}, nil
+	return &ManagedWorkspaceService{root: filepath.Clean(absRoot), repo: repoRoot, scriptPath: scriptPath, runner: runner, objectives: objectives, now: now, workspaces: map[string]ManagedWorkspace{}}, nil
 }
 
 type WorkspaceCreateInput struct {
@@ -162,7 +165,7 @@ func (s *ManagedWorkspaceService) Create(ctx context.Context, input WorkspaceCre
 		if input.SessionID != "" {
 			args = append(args, "--session-id", input.SessionID)
 		}
-		res, err := s.runner.Run(ctx, s.scriptPath, args...)
+		res, err := s.runWorkspaceCommand(ctx, args...)
 		if err != nil {
 			return before, WorkspaceSnapshot{}, err
 		}
@@ -231,7 +234,7 @@ func (s *ManagedWorkspaceService) action(ctx context.Context, input WorkspaceAct
 		if verb == "merge" {
 			args = append(args, "--teardown")
 		}
-		res, err := s.runner.Run(ctx, s.scriptPath, args...)
+		res, err := s.runWorkspaceCommand(ctx, args...)
 		if err != nil {
 			return before, WorkspaceSnapshot{}, err
 		}
@@ -270,7 +273,7 @@ func (s *ManagedWorkspaceService) mutate(ctx context.Context, objectiveID string
 }
 
 func (s *ManagedWorkspaceService) status(ctx context.Context, info ManagedWorkspace) (WorkspaceSnapshot, error) {
-	res, err := s.runner.Run(ctx, s.scriptPath, "status", info.Path, "--json")
+	res, err := s.runWorkspaceCommand(ctx, "status", info.Path, "--json")
 	if err != nil {
 		return WorkspaceSnapshot{}, err
 	}
@@ -278,6 +281,18 @@ func (s *ManagedWorkspaceService) status(ctx context.Context, info ManagedWorksp
 		return WorkspaceSnapshot{}, commandFailure("status", res)
 	}
 	return WorkspaceSnapshot{Workspace: info, Output: res.Stdout, ExitCode: res.ExitCode}, nil
+}
+
+// runWorkspaceCommand pins production lifecycle operations to the trusted
+// repository and workspace root selected when the service was constructed.
+// Without these explicit arguments dev-workspace.sh would discover the
+// subprocess CWD, which may be a downstream project attached to Studio MCP.
+// Injected test runners keep their existing argument surface.
+func (s *ManagedWorkspaceService) runWorkspaceCommand(ctx context.Context, args ...string) (WorkspaceCommandResult, error) {
+	if s.repo != "" {
+		args = append(args, "--repo", s.repo, "--root", s.root)
+	}
+	return s.runner.Run(ctx, s.scriptPath, args...)
 }
 
 func (s *ManagedWorkspaceService) decodeWorkspace(objectiveID, output string) (ManagedWorkspace, error) {

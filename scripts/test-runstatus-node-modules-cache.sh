@@ -48,6 +48,7 @@ rm "$repo/tools/runstatus/node_modules"
 [ -L "$repo/tools/runstatus/node_modules" ] || fail "restore did not create a node_modules symlink"
 [ -e "$repo/tools/runstatus/node_modules/.bin/tsx" ] || fail "restored cache is missing tsx"
 (cd "$repo" && "$cache_script" valid) || fail "valid rejected restored node_modules"
+(cd "$repo/tools/runstatus" && ./node_modules/.bin/tsx) || fail "restored immutable cache binary was not directly executable"
 
 cat >"$repo/tools/runstatus/pnpm-lock.yaml" <<'YAML'
 lockfileVersion: '9.0'

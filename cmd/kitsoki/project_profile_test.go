@@ -184,3 +184,48 @@ onboarding:
 		}
 	}
 }
+
+func TestProjectProfileRefreshDryRunApplyAndIdempotentRerun(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.test/project\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dry, err := execRoot(t, "project-profile", "refresh", "--target", repo, "--json")
+	if err != nil {
+		t.Fatalf("refresh dry run: %v\n%s", err, dry)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(dry), &report); err != nil {
+		t.Fatalf("dry run json: %v\n%s", err, dry)
+	}
+	if report["changed"] != true || report["applied"] != false {
+		t.Fatalf("dry report = %#v", report)
+	}
+	profilePath := filepath.Join(repo, ".kitsoki", "project-profile.yaml")
+	if _, err := os.Stat(profilePath); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote profile: %v", err)
+	}
+
+	applied, err := execRoot(t, "project-profile", "refresh", "--target", repo, "--apply", "--json")
+	if err != nil {
+		t.Fatalf("refresh apply: %v\n%s", err, applied)
+	}
+	if _, err := os.Stat(profilePath); err != nil {
+		t.Fatalf("applied profile missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".kitsoki", "stories")); !os.IsNotExist(err) {
+		t.Fatalf("profile refresh must not overwrite/create story wrappers: %v", err)
+	}
+
+	again, err := execRoot(t, "project-profile", "refresh", "--target", repo, "--json")
+	if err != nil {
+		t.Fatalf("refresh rerun: %v\n%s", err, again)
+	}
+	report = map[string]any{}
+	if err := json.Unmarshal([]byte(again), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report["changed"] != false || report["applied"] != false {
+		t.Fatalf("rerun report = %#v", report)
+	}
+}

@@ -22,6 +22,7 @@ func projectProfileCmd() *cobra.Command {
 	}
 	cmd.AddCommand(projectProfileValidateCmd())
 	cmd.AddCommand(projectProfileStoryPacksCmd())
+	cmd.AddCommand(projectProfileRefreshCmd())
 	return cmd
 }
 

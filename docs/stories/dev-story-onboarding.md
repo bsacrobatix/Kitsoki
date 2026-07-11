@@ -14,6 +14,86 @@ write, and the whole walk is gated by no-LLM flow fixtures.
 
 ---
 
+## Goal, postcondition, and resolution contract
+
+Onboarding does not define success as "some files were written." The generated
+`.kitsoki/project-profile.yaml` records two named outcome contracts under
+`goals:`:
+
+| Goal | Required outcome |
+|---|---|
+| `onboarding` | The project wrapper loads the current `@kitsoki/dev-story`; the canonical tests run; an applicable dev server has a deterministic boot/probe/teardown path; branch naming and ticket-ID policy are explicit; the ticket source is explicit; and the PR destination, base, and template policy are explicit. |
+| `validation` | After onboarding, independently RED/GREEN-proved repo-history cases are frozen as a calibration `corpus-receipt.v1`; the calibration corpus is driven green without tuning on heldout evidence; and a developer can pick a configured bug ticket, work it, and open a policy-compliant PR. |
+
+This is the canonical project-specific way to document the goal of any story or
+lifecycle phase. `app.yaml` does not have a generic story-level `goal` field;
+story exits and their `requires:` keys describe composition handoffs, not the
+project outcome. Add a stable name under profile `goals:`, state the outcome,
+declare prerequisite goals, and point every measurable postcondition at a
+verification:
+
+```yaml
+goals:
+  onboarding:
+    statement: Make this checkout ready for deterministic dev-story work.
+    postconditions:
+      - id: tests-runnable
+        statement: Canonical project tests run deterministically.
+        gate: required
+        verification: tests
+        applicable: true
+  validation:
+    statement: Prove and improve dev-story against a stable corpus.
+    requires: [onboarding]
+    postconditions:
+      - id: reference-corpus-frozen
+        statement: Independently proved cases are frozen as a calibration receipt.
+        gate: required
+        verification: reference-corpus
+        applicable: true
+
+setup_plan:
+  verifications:
+    - id: tests
+      kind: tests
+      command: make test
+      gate: required
+    - id: reference-corpus
+      kind: corpus
+      command: ./scripts/verify-calibration-receipt
+      gate: required
+```
+
+The corpus verifier above is deliberately project-owned: until the receipt
+consumer described below ships, it must inspect the frozen receipt and its
+independent proof artifacts rather than treating the presence of profile fields
+as evidence that a corpus exists.
+
+Each goal contains measurable `postconditions`. A postcondition names a
+`setup_plan.verifications[].id`, declares whether it is required or advisory,
+and can set `applicable: false` for an explicit not-applicable result. The
+`validation` goal declares `requires: [onboarding]`; a passing onboarding
+readiness report therefore means the checkout is ready to enter validation,
+not that corpus optimization has already happened.
+
+Discovery also records every managed answer in `onboarding.resolutions`:
+
+| Field | Meaning |
+|---|---|
+| `field` / `value` | Canonical project-profile path and the last resolved value. |
+| `source: discovered` | Backed by deterministic repository evidence and safe to refresh when that evidence changes. |
+| `source: default` | Kitsoki could not prove the answer. The review and refresh output show a notice and the exact `.kitsoki/project-profile.yaml#<field>` location to edit. |
+| `source: operator` | Project policy chosen by a human. Reruns preserve it. |
+| `evidence` / `update` / `notice` | Why the value was chosen, where to change it, and the user-facing default warning when applicable. |
+
+The operator-source rule is deliberate: `discovered` and `default` fields are
+managed by deterministic refresh; `operator` fields are project policy and are
+never replaced by later discovery. Editing a managed field to a value different
+from its recorded resolution promotes that field to `source: operator` on the
+next apply/refresh. An operator may also mark the matching resolution entry
+`source: operator` explicitly. Keep its recorded `value` equal to the chosen
+field value so future reviews remain intelligible.
+
 ## The rooms
 
 ```mermaid
@@ -62,13 +142,13 @@ Two arcs from [`landing`](../../stories/dev-story/rooms/landing.yaml) reach
 The request can also preselect a named first-run story pack:
 
 ```text
-onboard ~/code/acme-api --pack core-engineering
+onboard ~/code/acme-api --pack focused-engineering
 ```
 
 Discovery emits the pack catalog and the selected pack into
 `init_story_packs`, `init_story_pack`, and `init_starter_stories`. The review
 room exposes a `story packs` menu before writes happen; selecting a pack updates
-the starter set in memory. The default `core-engineering` pack is `setup`,
+the starter set in memory. The default `focused-engineering` pack is `setup`,
 `bugfix`, `repo-bakeoff` (repo-history capsules), `pr-refinement`, and
 `git-ops`.
 
@@ -93,9 +173,10 @@ Onboarding also asks which ticket intake mode this project should start with:
 The selected provider is written into `.kitsoki/project-profile.yaml` and the
 generated `.kitsoki/stories/<id>-dev/app.yaml`. Choosing local mode keeps
 `iface.ticket` bound to `host.local_files.ticket`; choosing GitHub binds it to
-`host.gh.ticket` pinned by `world.ticket_repo`. No network call is made during
-discovery or apply; actual GitHub use happens later when the user searches or
-starts work from a link and has access.
+the composite `host.local_github.ticket`, with the configured repository in
+`world.ticket_github_repo`. No network call is made during discovery or apply;
+actual GitHub use happens later when the user searches or starts work from a
+link and has access.
 
 ## Local harness profile setup
 
@@ -193,6 +274,72 @@ New generated instances bind their workspace interface to
 old stories and traces, not the recommended lifecycle for newly onboarded
 projects.
 
+### Idempotent reruns and profile refresh
+
+Onboarding apply is create-once/merge-safe. Repeating it with the same discovery
+result produces no file writes. It preserves project-owned profile values and
+does not replace the thin `.kitsoki/stories/<id>-dev/app.yaml` wrapper after the
+wrapper exists. Readiness is also rerunnable: it re-executes the declared gates,
+replaces `.artifacts/kitsoki-readiness.json`, and refreshes the profile's
+`readiness:` result rather than appending stale status.
+
+For an already-onboarded checkout, use the explicit profile update channel.
+The first command is always a dry run:
+
+```sh
+kitsoki project-profile refresh --target /path/to/project
+kitsoki project-profile refresh --target /path/to/project --json
+```
+
+Review `preserved operator fields`, `defaults requiring review`, and the
+candidate profile. Then apply the validated merge:
+
+```sh
+kitsoki project-profile refresh --target /path/to/project --apply
+```
+
+Refresh updates only fields still owned by discovery/default provenance,
+preserves operator-owned and unrelated profile policy, validates the complete
+candidate before writing, and never regenerates the project wrapper. Repeating
+`--apply` without repository or policy changes reports `changed: false` and
+performs no write.
+
+### Base-story update channels
+
+The generated wrapper is intentionally thin: it continues to import
+`@kitsoki/dev-story`. Choose one source channel for that import; do not copy a
+new base story over the project-owned wrapper.
+
+| Use | Command or configuration | Scope |
+|---|---|---|
+| Released/staging binary | Install the new `kitsoki` binary, remove source overrides, then run normally. | Uses the `dev-story` embedded in that binary. This is the normal downstream update path. |
+| One source-checkout invocation | `kitsoki --kitsoki-repo /abs/path/to/Kitsoki run` | Resolves **all** `@kitsoki/<name>` imports from `/abs/path/to/Kitsoki/stories/<name>/app.yaml`. |
+| Repo-wide environment | `KITSOKI_REPO=/abs/path/to/Kitsoki kitsoki run` | Same repo-wide source override for the process and its children. |
+| One story, one process | `KITSOKI_KIT_DEV_DEV_STORY=/abs/path/to/Kitsoki/stories/dev-story kitsoki run` | Overrides only `@kitsoki/dev-story`; the path itself must contain `app.yaml`. |
+| One story, persisted | `kitsoki kit dev dev-story --path /abs/path/to/Kitsoki/stories/dev-story` | Persists the scoped override under `~/.kitsoki/kit-dev/`. |
+| Clear persisted story override | `kitsoki kit dev dev-story --clear` | Returns `dev-story` to the repo-wide or embedded source. |
+
+For this repository's staging checkout, the explicit folder route is:
+
+```sh
+kitsoki --kitsoki-repo /Users/brad/code/Kitsoki/.capsules/staging/local run
+```
+
+The equivalent story-scoped route is:
+
+```sh
+KITSOKI_KIT_DEV_DEV_STORY=/Users/brad/code/Kitsoki/.capsules/staging/local/stories/dev-story \
+  kitsoki run
+```
+
+Resolution precedence is the per-story environment override, then persisted
+`kit dev`, then `--kitsoki-repo` / `KITSOKI_REPO` (including a remembered
+source checkout), then the binary's embedded story. This matters when testing a
+new binary: an old per-story or repo-wide override can intentionally mask its
+embedded `dev-story`. Profile refresh and base-story resolution are independent
+channels; a new base story does not erase project policy, and a profile refresh
+does not change which base story is loaded.
+
 When deterministic discovery finds associated Claude/Codex transcript history,
 apply also writes `.context/kitsoki-session-mining-seed.md` and records a
 pending seed job in the profile's `mining` block. The generated `.kitsoki.yaml`
@@ -257,6 +404,64 @@ The story exposes that verifier as an explicit `readiness` action from
 onboarding flow, shows the failed check details, and lets the operator return to
 the applied result without turning a target-project failure into a Kitsoki
 runtime error.
+
+## Validation after onboarding
+
+Validation starts only after the `onboarding` postconditions are green. Its
+prerequisites are the facts needed to create isolated historical cases and to
+deliver a fresh bug safely:
+
+- canonical test/build commands and, when applicable, the dev-server command,
+  working directory, readiness probe, timeout, and teardown behavior;
+- repository identity, VCS, default/PR base branch, working-branch template,
+  and whether a ticket ID is required, optional, or forbidden in that template;
+- ticket provider plus its project/repository locator and a working search,
+  fetch, and pick path;
+- PR provider, destination repository, base branch, template policy, and a
+  working open-PR path;
+- local history containing the selected baseline/fix refs, a direct argv oracle
+  for each case, an isolated workspace root, durable receipt storage, and an
+  explicit harness/model/effort + trace policy for live drives.
+
+The generated `reference-corpus`, `optimization-loop`, and `bug-to-pr`
+verification entries establish that these prerequisites are present. They are
+not substitutes for a frozen receipt, per-case independent results, or a real PR
+URL. Before marking `goals.validation` green, extend or replace those entries
+with project-owned commands/artifact checks that verify the far-side evidence.
+
+The canonical reference-corpus path is:
+
+1. Define **repo-history capsules** from real fixed bugs with ticket text,
+   `baseline_sha`, `fix_sha`, and a hidden oracle that is RED at baseline and
+   GREEN with the maintainer fix. “Oracle capsules” is only a legacy alias.
+2. Run the no-cost repo-history preflight and RED/GREEN arming described in
+   [Repo History Training For A New Repo](../recipes/repo-history-training-new-repo.md).
+3. Admit canonical `corpus-case.v1` candidates through
+   [Corpus Forge](../../stories/corpus-forge/README.md). Its independent proof
+   freezes the selected cases as a durable `corpus-receipt.v1`.
+4. Freeze a **calibration** receipt for development and repeatable dogfood.
+   Freeze a separate **heldout** receipt in the same durable registry; candidate
+   overlap is rejected. Never inspect or tune prompts/story behavior on heldout
+   cases. Use heldout only for promotion measurement after calibration is green.
+5. Prove the configured bug-to-PR path on a fresh ticket using the recorded
+   branch and PR policy.
+
+The current pieces are real but not yet one command. `repo-bakeoff` prepares and
+scores repo-history cells, `dogfood-marathon` drives and independently verifies a
+queue, and `goal-seeker` supplies an outer evaluate/dispatch/integrate loop.
+There is **no single shipped corpus → dogfood → goal-seeker optimizer command**
+that consumes a `corpus-receipt.v1` and runs until every calibration case is
+green. Do not describe onboarding readiness as that result; orchestrate the
+three surfaces explicitly and retain each receipt, trace, independent oracle
+result, and integration record.
+
+There is also a portability boundary today: the `repo-bakeoff` harness and its
+`make history-smoke` helpers live under `tools/bugfix-bakeoff/external` and still
+need a Kitsoki source checkout. They are not installed as part of the downstream
+binary/toolkit. Corpus Forge's receipt contract is source-neutral, but the
+repo-history preparation commands must currently run from the Kitsoki checkout.
+See [Repo History Capsules](../recipes/repo-history-capsules.md) for the catalog
+and terminology.
 
 ## The external-target profile
 

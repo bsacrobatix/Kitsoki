@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestDevOnboardingDiscoverUsesProjectMetadata(t *testing.T) {
@@ -118,17 +120,15 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 
 func TestDevOnboardingReadinessRunsNativeChecksAndUpdatesProfile(t *testing.T) {
 	root := t.TempDir()
-	profileDir := filepath.Join(root, ".kitsoki")
-	instance := filepath.Join(profileDir, "stories", "example-dev", "app.yaml")
-	if err := os.MkdirAll(filepath.Dir(instance), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	profile := "schema: project-profile/v1\nid: example\ncommands:\n  test: true\n  build: ''\n"
-	if err := os.WriteFile(filepath.Join(profileDir, "project-profile.yaml"), []byte(profile), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(instance, []byte("app:\n  id: example-dev\n"), 0o644); err != nil {
-		t.Fatal(err)
+	apply, err := DevOnboardingHandler(context.Background(), map[string]any{
+		"op": "apply",
+		"data": map[string]any{
+			"target_path": root, "project_id": "example", "project_title": "Example",
+			"stack": "local project", "test_command": "true", "repo_vcs": "none",
+		},
+	})
+	if err != nil || stringValue(apply.Data, "status") != "applied" {
+		t.Fatalf("apply = %#v, %v", apply, err)
 	}
 	result, err := DevOnboardingHandler(context.Background(), map[string]any{
 		"op":   "readiness",
@@ -143,11 +143,11 @@ func TestDevOnboardingReadinessRunsNativeChecksAndUpdatesProfile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".artifacts", "kitsoki-readiness.json")); err != nil {
 		t.Fatalf("missing readiness report: %v", err)
 	}
-	updated, err := os.ReadFile(filepath.Join(profileDir, "project-profile.yaml"))
+	updated, err := os.ReadFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(updated), "status: pass") {
+	if !strings.Contains(string(updated), "status: pass") || !strings.Contains(string(updated), "kind: story") {
 		t.Fatalf("profile readiness missing:\n%s", updated)
 	}
 }
@@ -176,7 +176,103 @@ func TestDevOnboardingCustomizationsAcceptsPendingEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(updated), "status: accepted") {
+	if !strings.Contains(string(updated), "status: applied") {
 		t.Fatalf("accepted customization missing:\n%s", updated)
+	}
+}
+
+func TestDevOnboardingApplyIsIdempotentAndPreservesOperatorFields(t *testing.T) {
+	root := t.TempDir()
+	data := map[string]any{
+		"target_path": root, "project_id": "example", "project_title": "Example",
+		"stack": "go project", "test_command": "go test ./...", "build_command": "go build ./...",
+		"repo_vcs": "git", "repo_default_branch": "main", "repo_branch_pattern": "feature/{slug}",
+		"repo_branch_issue_id": "optional", "tracker": "informal", "ticket_repo": "pasted",
+		"pr_provider": "local", "pr_repository": "local", "pr_template": "none",
+	}
+	first, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": data})
+	if err != nil || stringValue(first.Data, "status") != "applied" {
+		t.Fatalf("first apply = %#v, %v", first, err)
+	}
+	profilePath := filepath.Join(root, ".kitsoki", "project-profile.yaml")
+	instancePath := filepath.Join(root, ".kitsoki", "stories", "example-dev", "app.yaml")
+	profileBefore, _ := os.ReadFile(profilePath)
+	instanceBefore, _ := os.ReadFile(instancePath)
+
+	second, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": data})
+	if err != nil || stringValue(second.Data, "status") != "applied" {
+		t.Fatalf("second apply = %#v, %v", second, err)
+	}
+	if writes := onboardingAnyList(second.Data["writes"]); len(writes) != 0 {
+		t.Fatalf("second apply writes = %#v, want none", writes)
+	}
+	profileAfter, _ := os.ReadFile(profilePath)
+	instanceAfter, _ := os.ReadFile(instancePath)
+	if string(profileBefore) != string(profileAfter) || string(instanceBefore) != string(instanceAfter) {
+		t.Fatal("identical rerun changed generated artifacts")
+	}
+
+	profile := map[string]any{}
+	if err := yaml.Unmarshal(profileAfter, &profile); err != nil {
+		t.Fatal(err)
+	}
+	onboardingMap(profile["commands"])["test"] = "make project-test"
+	manual, _ := yaml.Marshal(profile)
+	if err := os.WriteFile(profilePath, manual, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	third, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": data})
+	if err != nil || stringValue(third.Data, "status") != "applied" {
+		t.Fatalf("third apply = %#v, %v", third, err)
+	}
+	updated, _ := os.ReadFile(profilePath)
+	if !strings.Contains(string(updated), "test: make project-test") || !strings.Contains(string(updated), "source: operator") {
+		t.Fatalf("operator override was not preserved and marked:\n%s", updated)
+	}
+}
+
+func TestDevOnboardingReadinessBootsProbesAndStopsDevServer(t *testing.T) {
+	root := t.TempDir()
+	apply, err := DevOnboardingHandler(context.Background(), map[string]any{
+		"op": "apply",
+		"data": map[string]any{
+			"target_path": root, "project_id": "service", "project_title": "Service",
+			"stack": "go project", "dev_command": "run service", "dev_server_applicable": true, "test_command": "true",
+			"repo_vcs": "none",
+		},
+	})
+	if err != nil || stringValue(apply.Data, "status") != "applied" {
+		t.Fatalf("apply = %#v, %v", apply, err)
+	}
+	profilePath := filepath.Join(root, ".kitsoki", "project-profile.yaml")
+	raw, _ := os.ReadFile(profilePath)
+	profile := map[string]any{}
+	if err := yaml.Unmarshal(raw, &profile); err != nil {
+		t.Fatal(err)
+	}
+	profile["dev_server"] = map[string]any{"components": []any{map[string]any{
+		"name": "service", "role": "backend", "command": "sh -c 'echo READY; exec sleep 30'",
+		"ready": map[string]any{"probe": "log", "target": "READY", "timeout_ms": 3000, "interval_ms": 20},
+	}}}
+	updated, _ := yaml.Marshal(profile)
+	if err := os.WriteFile(profilePath, updated, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := DevOnboardingHandler(context.Background(), map[string]any{
+		"op": "readiness", "data": map[string]any{"target_path": root, "project_id": "service"},
+	})
+	if err != nil || stringValue(result.Data, "status") != "pass" {
+		t.Fatalf("readiness = %#v, %v", result, err)
+	}
+	found := false
+	for _, raw := range onboardingAnyList(result.Data["checks"]) {
+		check := onboardingMap(raw)
+		if stringValue(check, "id") == "dev-server" {
+			found = boolValue(check, "ok") && strings.Contains(stringValue(check, "detail"), "booted, probed, and stopped")
+		}
+	}
+	if !found {
+		t.Fatalf("dev-server proof missing: %#v", result.Data["checks"])
 	}
 }

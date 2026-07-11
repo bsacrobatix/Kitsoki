@@ -51,12 +51,48 @@ func TestMCPAttachEntry_OmitsEmptyStoriesDir(t *testing.T) {
 	assert.Equal(t, []any{"mcp"}, kit["args"], "no --stories-dir when dir is empty")
 }
 
+func TestMCPOperatingSystemPaths_ExplicitRepoRootSurvivesForeignCWD(t *testing.T) {
+	t.Setenv("KITSOKI_MCP_REPO_ROOT", "/workspace/kitsoki")
+	root, script := mcpOperatingSystemPaths("")
+	assert.Equal(t, "/workspace/kitsoki/.capsules/workspaces", root)
+	assert.Equal(t, "/workspace/kitsoki/scripts/dev-workspace.sh", script)
+}
+
 func TestShouldWriteMCPStartupError(t *testing.T) {
 	assert.False(t, shouldWriteMCPStartupError(nil))
 	assert.False(t, shouldWriteMCPStartupError(context.Canceled))
 	assert.False(t, shouldWriteMCPStartupError(fmt.Errorf("stdio peer closed: %w", context.Canceled)))
 	assert.True(t, shouldWriteMCPStartupError(errors.New("listen failed")))
 	assert.True(t, shouldWriteMCPStartupError(context.DeadlineExceeded))
+}
+
+func TestMCPOperatingSystemPathsUseKitsokiRepoOutsideProject(t *testing.T) {
+	kitsokiRepo := t.TempDir()
+	downstream := t.TempDir()
+	workspaceRoot := filepath.Join(kitsokiRepo, ".capsules", "workspaces")
+	workspaceScript := filepath.Join(kitsokiRepo, "scripts", "dev-workspace.sh")
+	require.NoError(t, os.MkdirAll(workspaceRoot, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(workspaceScript), 0o755))
+	require.NoError(t, os.WriteFile(workspaceScript, []byte("#!/bin/sh\n"), 0o755))
+
+	// Reproduce an attached MCP client starting the server in a downstream
+	// project which does not carry Kitsoki's repository lifecycle script.
+	t.Chdir(downstream)
+	gotRoot, gotScript := mcpOperatingSystemPaths(kitsokiRepo)
+	assert.Equal(t, workspaceRoot, gotRoot)
+	assert.Equal(t, workspaceScript, gotScript)
+	_, err := studio.NewOperatingSystemServices(
+		studio.StudioOperatingProfileLegacy,
+		gotRoot,
+		gotScript,
+	)
+	require.NoError(t, err, "explicit Kitsoki repo assets must work independently of downstream cwd")
+}
+
+func TestMCPOperatingSystemPathsKeepSourceCheckoutFallback(t *testing.T) {
+	workspaceRoot, workspaceScript := mcpOperatingSystemPaths("")
+	assert.Equal(t, filepath.Join(".capsules", "workspaces"), workspaceRoot)
+	assert.Equal(t, filepath.Join("scripts", "dev-workspace.sh"), workspaceScript)
 }
 
 // TestMCPCmd_Registered confirms `mcp` is wired into the root command tree and

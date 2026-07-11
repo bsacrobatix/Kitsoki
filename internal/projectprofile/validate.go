@@ -219,6 +219,39 @@ func validateSemantic(doc map[string]any, repoRoot string) ([]string, []string) 
 	if buildCmd == "" {
 		warnings = append(warnings, "commands.build is empty")
 	}
+
+	setup := mapAt(doc, "setup_plan")
+	verificationGates := map[string]string{}
+	if len(setup) > 0 {
+		writes, _ := setup["writes"].([]any)
+		if instancePath != "" && !writeListContains(writes, filepath.ToSlash(instancePath)) {
+			warnings = append(warnings, "setup_plan.writes does not mention kitsoki.instance.path")
+		}
+		verifications, _ := setup["verifications"].([]any)
+		for _, raw := range verifications {
+			verification := mapValue(raw)
+			verificationID := strings.TrimSpace(stringAt(verification, "id"))
+			if verificationID != "" {
+				verificationGates[verificationID] = strings.TrimSpace(stringAt(verification, "gate"))
+			}
+		}
+	}
+
+	goals := mapAt(doc, "goals")
+	if len(goals) == 0 {
+		warnings = append(warnings, "goals is missing; legacy profile has no explicit story or phase goal contract")
+	} else {
+		errs = append(errs, validateGoalVerifications(goals, verificationGates)...)
+	}
+
+	onboarding := mapAt(doc, "onboarding")
+	resolutions, _ := onboarding["resolutions"].([]any)
+	if len(resolutions) == 0 {
+		warnings = append(warnings, "onboarding.resolutions is missing; legacy profile has no per-field provenance or default-update guidance")
+	} else {
+		errs = append(errs, validateResolutions(resolutions)...)
+	}
+
 	if repoRoot != "" {
 		for _, rel := range []string{".kitsoki.yaml", filepath.FromSlash(instancePath)} {
 			if rel == "" {
@@ -231,15 +264,67 @@ func validateSemantic(doc map[string]any, repoRoot string) ([]string, []string) 
 		}
 	}
 
-	setup := mapAt(doc, "setup_plan")
-	if len(setup) > 0 {
-		writes, _ := setup["writes"].([]any)
-		if instancePath != "" && !writeListContains(writes, filepath.ToSlash(instancePath)) {
-			warnings = append(warnings, "setup_plan.writes does not mention kitsoki.instance.path")
+	return errs, warnings
+}
+
+func validateGoalVerifications(goals map[string]any, verificationGates map[string]string) []string {
+	goalIDs := make([]string, 0, len(goals))
+	for goalID := range goals {
+		goalIDs = append(goalIDs, goalID)
+	}
+	sort.Strings(goalIDs)
+
+	var errs []string
+	for _, goalID := range goalIDs {
+		goal := mapValue(goals[goalID])
+		postconditions, _ := goal["postconditions"].([]any)
+		for index, raw := range postconditions {
+			postcondition := mapValue(raw)
+			verificationID := strings.TrimSpace(stringAt(postcondition, "verification"))
+			if verificationID == "" {
+				continue // JSON Schema reports the missing or malformed reference.
+			}
+			postconditionID := strings.TrimSpace(stringAt(postcondition, "id"))
+			if postconditionID == "" {
+				postconditionID = fmt.Sprintf("postconditions[%d]", index)
+			}
+			verificationGate, ok := verificationGates[verificationID]
+			if !ok {
+				errs = append(errs, fmt.Sprintf("goals.%s postcondition %q references unknown setup_plan.verifications id %q", goalID, postconditionID, verificationID))
+				continue
+			}
+			if stringAt(postcondition, "gate") == "required" && verificationGate != "required" {
+				errs = append(errs, fmt.Sprintf("goals.%s postcondition %q is required but verification %q is %s", goalID, postconditionID, verificationID, verificationGate))
+			}
 		}
 	}
+	return errs
+}
 
-	return errs, warnings
+func validateResolutions(resolutions []any) []string {
+	seen := map[string]struct{}{}
+	var errs []string
+	for index, raw := range resolutions {
+		resolution := mapValue(raw)
+		field := strings.TrimSpace(stringAt(resolution, "field"))
+		if field != "" {
+			if _, exists := seen[field]; exists {
+				errs = append(errs, fmt.Sprintf("onboarding.resolutions field %q is declared more than once", field))
+			} else {
+				seen[field] = struct{}{}
+			}
+		}
+		if stringAt(resolution, "source") != "default" {
+			continue
+		}
+		if strings.TrimSpace(stringAt(resolution, "notice")) == "" {
+			errs = append(errs, fmt.Sprintf("onboarding.resolutions[%d].notice is required when source = \"default\"", index))
+		}
+		if strings.TrimSpace(stringAt(resolution, "update")) == "" {
+			errs = append(errs, fmt.Sprintf("onboarding.resolutions[%d].update is required when source = \"default\"", index))
+		}
+	}
+	return errs
 }
 
 func mapAt(m map[string]any, key string) map[string]any {
@@ -248,6 +333,11 @@ func mapAt(m map[string]any, key string) map[string]any {
 	}
 	v, _ := m[key].(map[string]any)
 	return v
+}
+
+func mapValue(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
 }
 
 func stringAt(m map[string]any, key string) string {

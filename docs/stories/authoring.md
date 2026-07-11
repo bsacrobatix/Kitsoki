@@ -5,6 +5,8 @@ How to write a kitsoki application. The companion documents:
 - [`state-machine.md`](state-machine.md) — the conceptual model.
 - [`story-style.md`](story-style.md) — typed views, action menus, and user
   messaging standards.
+- [`goals.md`](goals.md) — explicit story/phase goals, measurable
+  postconditions, onboarding provenance, and update channels.
 - `kitsoki docs app-schema` — the authoritative YAML reference.
 - [`testing.md`](../tracing/testing.md) — flow and intent fixtures.
 - [`hosts.md`](../architecture/hosts.md) — every built-in host handler.

@@ -27,6 +27,17 @@ Hard requirements:
 - `kitsoki.instance.bindings` must include `ticket`, `vcs`, `ci`, `workspace`, and `transport`.
 - Do not put project story customization under root `stories/`.
 - Preserve discovered `commands.dev`, `commands.test`, and `commands.build` unless repo evidence shows a better canonical command.
+- Preserve the top-level `goals` contract and keep every postcondition tied to
+  a `setup_plan.verifications[].id`. Goals describe outcomes; commands and
+  `fields` verifications provide deterministic evidence.
+- Preserve `repo.default_branch`, `repo.branch_pattern`, and
+  `repo.branch_issue_id` unless repository evidence supports a correction.
+- Include `pull_requests.provider`, `pull_requests.repository`,
+  `pull_requests.base_branch`, and `pull_requests.template` (`none` is the
+  explicit no-template value).
+- Preserve `onboarding.resolutions`. A field changed by operator feedback must
+  use `source: operator`; a `source: default` resolution must retain a clear
+  `notice` and exact `.kitsoki/project-profile.yaml#field.path` update location.
 - Prefer project/community conventions expressed as config values over custom story logic.
 - Include `dev_story_profile.docs`. For a generic project, default
   `publish_durable_path` to `.context/prd`, `design_durable_path` to
@@ -52,10 +63,14 @@ Hard requirements:
 - Include `setup_plan.writes` objects with `path`, `action`, and `summary` for
   `.kitsoki/project-profile.yaml`, `.kitsoki/stories/<id>-dev/app.yaml`,
   `.kitsoki.yaml`, and `.gitignore`.
-- Include `setup_plan.verifications` objects with `id`, `kind`, `command`, and
-  `gate` for story-load, tests, and build when commands are known.
+- Include `setup_plan.verifications` objects with `id`, `kind`, and `gate`, plus
+  `command` for executable checks or `fields` for native profile checks. Keep
+  the onboarding goal checks (`tests`, `dev-server`, `branch-policy`,
+  `ticket-source`, `pr-policy`) and validation prerequisite checks
+  (`reference-corpus`, `optimization-loop`, `bug-to-pr`).
 
 Use read-only tools if you need evidence from package manifests, Makefiles,
 README files, or existing project rules. Keep the profile concise and useful;
-do not invent CI, deployment, or framework details that are not visible in the
-checkout.
+do not invent CI, deployment, framework, branch, ticket, PR, or dev-server
+details that are not visible in the checkout. Keep an explicit default notice
+when no safe repository-derived answer exists.
