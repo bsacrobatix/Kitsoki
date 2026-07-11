@@ -779,26 +779,12 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
 
 
 def ensure_kitsoki_binary() -> Path:
-    """Provide a disposable `kitsoki` launcher without producing a binary.
-
-    Live arena cells need an executable named `kitsoki` because the Studio MCP
-    server is spawned by name. A small launcher delegates to `go run`, reusing
-    Go's cache while avoiding a stale `bin/kitsoki` artifact in the source tree.
-    """
-    launcher_dir = Path(os.environ.get(
-        "ARENA_KITSOKI_LAUNCHER_DIR",
-        str(KITSOKI_ROOT / ".artifacts" / "arena" / "go-run-launcher"),
-    ))
-    launcher_dir.mkdir(parents=True, exist_ok=True)
-    launcher = launcher_dir / "kitsoki"
-    launcher.write_text(
-        "#!/usr/bin/env sh\n"
-        "set -eu\n"
-        f"exec go run {str(KITSOKI_ROOT / 'cmd' / 'kitsoki')!r} \"$@\"\n",
-        encoding="utf-8",
-    )
-    launcher.chmod(0o700)
-    return launcher_dir
+    """Build a stable, workspace-local CLI for nested live MCP subprocesses."""
+    binary = KITSOKI_ROOT / "bin" / "kitsoki"
+    if not binary.exists():
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        run(["go", "build", "-o", str(binary), "./cmd/kitsoki"], cwd=KITSOKI_ROOT)
+    return binary.parent
 
 
 def test_cmd_for(task: dict[str, Any]) -> str:
