@@ -57,10 +57,10 @@ type ProposeResult struct {
 	// GuardFills lists every precondition Propose filled in on the
 	// caller's behalf (hazard guard #5): a "modified" change that omitted
 	// `before` got it filled from the live node (echoed as Node/Path/
-	// Value); a "removed" op that omitted `before` got the live node's
-	// full mapping filled in (echoed as Node/SHA/Fields, not the full
-	// content). Empty when every operation already carried explicit
-	// preconditions.
+	// Value); a "removed" or "retyped" op that omitted `before` got the
+	// live node's full mapping filled in (echoed as Node/SHA/Fields, not
+	// the full content). Empty when every operation already carried
+	// explicit preconditions.
 	GuardFills []GuardFill
 	// ValidatedOnly is true when Provenance-free ProposeInput.ValidateOnly
 	// was set: validation + scratch lint ran, but nothing was written, not
@@ -215,8 +215,8 @@ func proposeOnce(rootPath string, input ProposeInput, actor string, clk clock.Cl
 		return &ProposeResult{RejectReasons: []string{err.Error()}}, false, nil
 	}
 
-	// Guard-fill (hazard guard #5): a "modified" change or "removed" op
-	// that omitted its precondition gets it filled from the live node,
+	// Guard-fill (hazard guard #5): a "modified" change or a "removed"/
+	// "retyped" op that omitted its precondition gets it filled from the live node,
 	// mutating cs.Operations in place — the changeset persisted below
 	// carries the filled preconditions, not the caller's bare payload.
 	guardFills := fillGuards(cs, cat)

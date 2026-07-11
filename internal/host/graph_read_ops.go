@@ -563,7 +563,7 @@ func graphChangesetOp(args map[string]any) (Result, error) {
 		if nodeID == "" {
 			return Result{}, fmt.Errorf("host.graph.changeset: action %q requires %q", "touching", "node_id")
 		}
-		var touching []any
+		touching := []any{}
 		for _, id := range changesetIDs {
 			node := cat.Nodes[id]
 			cs, err := objectgraph.ParseChangeset(node)
