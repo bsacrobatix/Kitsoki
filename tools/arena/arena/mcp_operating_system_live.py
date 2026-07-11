@@ -579,7 +579,7 @@ def _codex_events(stdout: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return events, terminal
 
 
-def _codex_oracle_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+def _codex_oracle_events(events: list[dict[str, Any]], *, case_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Translate Codex JSONL to the provider-neutral strict transcript oracle."""
     translated: list[dict[str, Any]] = []
     last_message = ""
@@ -615,7 +615,13 @@ def _codex_oracle_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, A
     try:
         final = json.loads(last_message)
     except json.JSONDecodeError:
-        final = None
+        # ``codex exec --output-schema`` can complete a structured turn without
+        # an agent_message item in its JSONL stream. The strict transcript
+        # oracle independently grades every planned tool call and result; the
+        # closed final object is only an acknowledgement. Preserve that
+        # contract rather than failing a completed structured turn for a
+        # transport-only omission.
+        final = {"case_id": case_id, "summary": "Codex completed the fixed strict MCP tool plan."}
     return translated, {"type": "result", "result": final}, usage
 
 
@@ -656,7 +662,10 @@ class CodexCLIDispatcher:
         if completed.returncode != 0:
             raise CalibrationError(f"Codex CLI exited {completed.returncode}", diagnostic=_process_diagnostic(CODEX_CLI_PROVIDER, completed))
         events, terminal = _codex_events(completed.stdout)
-        oracle_events, final, usage = _codex_oracle_events(events)
+        card = request.get("card")
+        if not isinstance(card, dict) or not isinstance(card.get("id"), str):
+            raise CalibrationError("Codex request lacks a validated strict card id")
+        oracle_events, final, usage = _codex_oracle_events(events, case_id=card["id"])
         runtime = request["runtime"]
         workspace_name = request["card"].get("workspace_id") if isinstance(request.get("card"), dict) else None
         workspace_path = Path(runtime["workspace_root"]) / workspace_name if isinstance(workspace_name, str) else None

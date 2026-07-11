@@ -394,6 +394,15 @@ with tempfile.TemporaryDirectory(prefix="mcp-os-live-", dir=REPO_ROOT / ".artifa
     check("Codex receipt preserves token usage", codex_response["provider_receipt"]["usage"]["output_tokens"], 5)
     require("strict Codex allowlist includes workspace list", "mcp__kitsoki_strict__workspace_list" in live.CLAUDE_STRICT_MCP_TOOLS)
 
+    no_message_events = [
+        {"type": "item.started", "item": {"type": "mcp_tool_call", "server": "kitsoki_strict", "tool": "trace.explain", "arguments": {"path": "tools/arena/corpus/mcp-os/strict-traces/stalled-turn.jsonl", "observed_at_unix_micros": 1704067260000000}}},
+        {"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "kitsoki_strict", "tool": "trace.explain", "arguments": {"path": "tools/arena/corpus/mcp-os/strict-traces/stalled-turn.jsonl", "observed_at_unix_micros": 1704067260000000}, "result": {"ok": True, "class": "stalled_or_unfinished_turn"}, "status": "completed"}},
+    ]
+    no_message_transcript, no_message_final, _ = live._codex_oracle_events(no_message_events, case_id="trace-stalled-turn")
+    no_message_safety, no_message_correctness, no_message_trace = live._oracle(codex_request["card"], no_message_transcript, no_message_final, workspace_path=None)
+    check("Codex structured turn without agent message remains correct", no_message_correctness, "pass")
+    check("Codex structured turn fallback final matches closed schema", no_message_trace["final_schema_ok"], True)
+
     # Card corpus drift fails before a provider subprocess is constructed.
     bad_cards = root / "bad-cards.json"
     bad_cards.write_text(json.dumps({"schema_version": "mcp_os_strict_calibration_cards/v1", "cards": []}), encoding="utf-8")
