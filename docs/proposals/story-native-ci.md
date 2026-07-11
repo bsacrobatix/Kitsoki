@@ -5,8 +5,11 @@ verdict/envelope service, engine launcher, CLI, cancellation, run status,
 Capsule MCP CI tools, deterministic verdict construction, no-LLM
 pass/fail/park/budget flow fixtures, richer reference-story rooms, and a
 GitHub trigger/check adapter ship. Onboarding now emits a checked-in CI
-manifest, environment definition, and minimal project CI story wrapper. Real
-LLM/writer cassettes, GitHub network publication, and final doc trimming remain.
+manifest, environment definition, and minimal project CI story wrapper.
+Project-wrapper parity/digest fixtures and a Capsule-MCP-only writer proof ship.
+Cassette-backed LLM review fixtures now exercise the real `host.agent.decide`
+review seam without live model spend. GitHub network publication, gated remote
+dogfood, and final doc trimming remain.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -292,13 +295,22 @@ project wrapper that imports only deterministic checks and adjudication.
 ## 2. Reference composition
 - [x] 2.1 Scaffold stories/capsule-ci with typed views and prepare/check/review/refine/adjudicate rooms
 - [x] 2.2 Implement deterministic verdict builder and promotion-eligibility checks
-- [ ] 2.3 Add no-LLM flows for pass/fail/park/budget/remote-equivalence/digest mismatch
+- [x] 2.3 Add no-LLM flows for pass/fail/park/budget/remote-equivalence/digest mismatch
   - Shipped: reference-story no-LLM pass/fail/park fixtures with typed `capsule-ci-verdict/v1` assertions, runtime no-LLM tests for budget policy and digest-mismatch rejection, and a service-level host vs `remote-fake` equivalence proof over the same typed story verdict contract.
   - Shipped: reference-story budget exhaustion fixture and service-level host,
     fake-remote, and fake-container equivalence proof over the same typed story
     verdict contract.
-  - Remaining: project-wrapper-specific digest-mismatch story fixture.
-- [ ] 2.4 Add cassette-backed LLM review and Capsule-MCP-only writer fixture; prove no ambient tools are required
+  - Shipped: generated project-wrapper service fixtures now prove host,
+    fake-remote, and fake-container equivalence and reject mismatched digest
+    fields.
+- [x] 2.4 Add cassette-backed LLM review and Capsule-MCP-only writer fixture; prove no ambient tools are required
+  - Shipped: Capsule MCP writer proof lists the tool surface, asserts every
+    tool is `capsule.*`, edits through `capsule.fs.write`, commits through
+    `capsule.vcs.commit`, and proves raw argv is denied without `raw_exec`.
+  - Shipped: `stories/capsule-ci/flows/llm-review-cassette.yaml` replays
+    `host.agent.decide` through a cassette, binds the schema-bounded review
+    verdict, and then drives the normal adjudication path to a typed
+    `capsule-ci-verdict/v1`.
 
 ## 3. Adopt and document
 - [x] 3.1 Extend onboarding to generate `.kitsoki/ci.yaml`, environment definition, and a minimal project CI wrapper from project-profile commands
@@ -307,8 +319,8 @@ project wrapper that imports only deterministic checks and adjudication.
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal
   - Shipped: permanent `docs/stories/ci.md` now documents the story-native CI
     contract, reference rooms, authority boundaries, and GitHub adapter model.
-  - Remaining: migrate examples and delete this proposal after LLM/writer
-    fixtures plus the project-wrapper digest fixture land.
+  - Remaining: migrate examples and delete this proposal after gated remote
+    dogfood and GitHub network publication land.
 ```
 
 ## Open questions

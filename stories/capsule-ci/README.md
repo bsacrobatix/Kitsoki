@@ -11,6 +11,7 @@ executor selection, receipts, and promotion authorization. Optional LLM review
 and writer phases are ordinary project story rooms with explicit policies.
 
 No-LLM flow fixtures cover the base story's honest park behavior plus direct
-phase outcomes for pass, fail, and needs-input. These fixtures assert the
-`capsule-ci-verdict/v1` object that project compositions and the Capsule CI
-runtime consume.
+phase outcomes for pass, fail, and needs-input. A host cassette covers the
+optional `host.agent.decide` review seam without spending on a live LLM. These
+fixtures assert the `capsule-ci-verdict/v1` object that project compositions and
+the Capsule CI runtime consume.

@@ -19,9 +19,13 @@ world:
   ci_verdict: { type: object, default: {} }
   ci_outcome: { type: string, default: "" }
   ci_review: { type: object, default: {} }
+  ci_review_decision: { type: object, default: {} }
   ci_refine_feedback: { type: string, default: "" }
   ci_review_cycle: { type: int, default: 0 }
   ci_review_budget: { type: int, default: 2 }
+
+hosts:
+  - host.agent.decide
 
 intents:
   run:
@@ -38,6 +42,10 @@ intents:
     priority: 1
   review_passed:
     description: "Record that a schema-bounded review approved the checked change."
+    examples: []
+    priority: 1
+  review_cassette:
+    description: "Run the optional cassette-backed review room."
     examples: []
     priority: 1
   refine_requested:
@@ -216,6 +224,8 @@ states:
                     kind: llm_decision
                     outcome: passed
                     decision_ref: capsule-ci:review-cassette
+      review_cassette:
+        - target: llm_review_cassette
       refine_requested:
         - when: "world.ci_review_cycle >= world.ci_review_budget"
           target: parked
@@ -280,6 +290,70 @@ states:
                       kind: policy
                       outcome: failed
                       decision_ref: capsule-ci:budget
+                  promotion_eligible: false
+                  source_digest: "{{ world.ci_source.digest }}"
+                  story_digest: "{{ world.ci_trigger.story_digest }}"
+                  environment_digest: "{{ world.ci_environment.digest }}"
+                  envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+      look:
+        - target: .
+  llm_review_cassette:
+    relevant_world: [ci_review, ci_review_decision]
+    view:
+      - heading: "Cassette-backed review"
+      - prose: "This room exercises the same host.agent.decide seam that a real LLM review uses, but flow tests replay it from a cassette."
+      - kv:
+          pairs:
+            Outcome: "{{ world.ci_review_decision.outcome|default:'pending' }}"
+            Summary: "{{ world.ci_review_decision.summary|default:'' }}"
+    on_enter:
+      - invoke: host.agent.decide
+        once: true
+        id: capsule_ci_review
+        with:
+          prompt: prompts/review.md
+          schema: schemas/review-verdict.json
+        bind:
+          ci_review_decision: submitted
+        on_error: llm_review
+    on:
+      review_passed:
+        - when: "world.ci_review_decision.outcome == 'passed'"
+          target: adjudicate
+          effects:
+            - set:
+                ci_review:
+                  deterministic_check: "{{ world.ci_review.deterministic_check }}"
+                  review_check:
+                    id: review
+                    kind: llm_decision
+                    outcome: passed
+                    decision_ref: capsule-ci:review-cassette
+                    summary: "{{ world.ci_review_decision.summary }}"
+      refine_requested:
+        - target: refine_change
+          effects:
+            - increment: { ci_review_cycle: 1 }
+            - set: { ci_refine_feedback: "{{ slots.feedback }}" }
+      needs_input:
+        - target: parked
+          effects:
+            - set:
+                ci_outcome: "needs_input"
+                ci_verdict:
+                  schema: capsule-ci-verdict/v1
+                  pipeline: "{{ world.ci_pipeline }}"
+                  outcome: needs_input
+                  summary: "Cassette-backed review did not produce a passing decision."
+                  checks:
+                    - id: deterministic
+                      kind: deterministic
+                      outcome: passed
+                      evidence: ["capsule-ci:deterministic"]
+                    - id: review
+                      kind: llm_decision
+                      outcome: failed
+                      decision_ref: capsule-ci:review-cassette
                   promotion_eligible: false
                   source_digest: "{{ world.ci_source.digest }}"
                   story_digest: "{{ world.ci_trigger.story_digest }}"

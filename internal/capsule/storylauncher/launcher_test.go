@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,12 +137,130 @@ func TestReferenceStoryRunsEquivalentlyOnHostAndFakeRemote(t *testing.T) {
 	}
 }
 
+func TestGeneratedProjectWrapperRunsEquivalentlyAcrossExecutors(t *testing.T) {
+	run := func(executorName string) ci.RunResult {
+		t.Helper()
+		root := writeCIProject(t, executorName, generatedProjectCIStory(t, false))
+		story := filepath.Join(root, ".kitsoki", "stories", "capsule-ci", "app.yaml")
+		service := ci.Service{
+			ProjectRoot: root,
+			Jobs:        fixedStore("job-generated-wrapper"),
+			Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "", nil })},
+			Executors:   ci.NewBuiltinExecutors(),
+			Launcher:    Launcher{StoryPath: story},
+		}
+		result, err := service.Run(context.Background(), ci.RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: ci.Trigger{Kind: "local", RequestedPipeline: "change"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return normalizeStoryParityResult(result)
+	}
+	host := run("host")
+	remote := run("remote-fake")
+	container := run("container-fake")
+	if host.Verdict.Outcome != "needs_input" || remote.Verdict.Outcome != "needs_input" || container.Verdict.Outcome != "needs_input" {
+		t.Fatalf("generated wrapper should park honestly host=%#v remote=%#v container=%#v", host.Verdict, remote.Verdict, container.Verdict)
+	}
+	if !reflect.DeepEqual(host.Verdict, remote.Verdict) || !reflect.DeepEqual(host.Verdict, container.Verdict) || host.Envelope.Digest != remote.Envelope.Digest || host.Envelope.Digest != container.Envelope.Digest {
+		t.Fatalf("host=%#v\nremote=%#v\ncontainer=%#v", host, remote, container)
+	}
+}
+
+func TestGeneratedProjectWrapperDigestMismatchIsRejected(t *testing.T) {
+	root := writeCIProject(t, "host", generatedProjectCIStory(t, true))
+	story := filepath.Join(root, ".kitsoki", "stories", "capsule-ci", "app.yaml")
+	service := ci.Service{
+		ProjectRoot: root,
+		Jobs:        fixedStore("job-generated-mismatch"),
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "", nil })},
+		Executors:   ci.NewBuiltinExecutors(),
+		Launcher:    Launcher{StoryPath: story},
+	}
+	_, err := service.Run(context.Background(), ci.RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: ci.Trigger{Kind: "local", RequestedPipeline: "change"}})
+	if err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("expected digest mismatch, got %v", err)
+	}
+}
+
 func normalizeStoryParityResult(result ci.RunResult) ci.RunResult {
 	result.Execution.ExecutionID = ""
 	result.Job.ID = ""
 	result.Job.CreatedAt = time.Time{}
 	result.Job.UpdatedAt = time.Time{}
 	return result
+}
+
+func writeCIProject(t *testing.T, executorName string, storyRaw string) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "project")
+	files := map[string]string{
+		".kitsoki/environments/ci.yaml":        "schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\nnetwork: none\n",
+		".kitsoki/ci.yaml":                     "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/capsule-ci/app.yaml\n    triggers: [local]\n    executor: " + executorName + "\n    permissions:\n      network: none\n      external_write: deny\n    result:\n      schema: capsule-ci-verdict/v1\n",
+		".kitsoki/stories/capsule-ci/app.yaml": storyRaw,
+	}
+	for path, raw := range files {
+		full := filepath.Join(root, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func generatedProjectCIStory(t *testing.T, wrongDigest bool) string {
+	t.Helper()
+	sourceDigest := "{{ world.ci_source.digest }}"
+	if wrongDigest {
+		sourceDigest = "sha256:wrong"
+	}
+	return `app:
+  id: capsule-ci
+  version: 0.1.0
+  title: "Project Capsule CI"
+  author: "Kitsoki"
+  license: "CC0"
+world:
+  ci_job_id: { type: string, default: "" }
+  ci_pipeline: { type: string, default: "" }
+  ci_trigger: { type: object, default: {} }
+  ci_source: { type: object, default: {} }
+  ci_workspace: { type: object, default: {} }
+  ci_environment: { type: object, default: {} }
+  ci_policy: { type: object, default: {} }
+  ci_verdict: { type: object, default: {} }
+  ci_outcome: { type: string, default: "" }
+intents:
+  run:
+    description: "Validate the supplied Capsule CI envelope."
+    examples: [run, start]
+    priority: 90
+root: idle
+states:
+  idle:
+    view: [{ prose: "generated project wrapper" }]
+    on:
+      run:
+        - target: parked
+          effects:
+            - set:
+                ci_outcome: "needs_input"
+                ci_verdict:
+                  schema: capsule-ci-verdict/v1
+                  pipeline: "{{ world.ci_pipeline }}"
+                  outcome: needs_input
+                  summary: "Generated Capsule CI needs project-specific checks before it can pass."
+                  checks: []
+                  promotion_eligible: false
+                  source_digest: "` + sourceDigest + `"
+                  story_digest: "{{ world.ci_trigger.story_digest }}"
+                  environment_digest: "{{ world.ci_environment.digest }}"
+                  envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+  parked:
+    view: [{ prose: "parked" }]
+`
 }
 
 func repoRoot(t *testing.T) string {
