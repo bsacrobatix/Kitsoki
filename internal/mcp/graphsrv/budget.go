@@ -71,4 +71,8 @@ const (
 	BudgetGraphWithdraw  = 8 * 1024 // graph.withdraw
 	BudgetGraphApply     = 8 * 1024 // graph.apply
 	BudgetGraphAuthorize = 8 * 1024 // graph.authorize
+
+	// BudgetGraphHistory: graph.history's merged changeset+git timeline
+	// page — plan §3.5 ("≤4KB/page").
+	BudgetGraphHistory = 4 * 1024
 )
