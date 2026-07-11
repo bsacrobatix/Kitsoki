@@ -152,6 +152,26 @@ bugs:
       is absent from the project stories directory. Project stories that do
       exist in `--stories-dir` must continue to override the library.
 
+  - id: bug17
+    ticket_ref: issues/bugs/2026-06-03T121407Z-agent-decide-silent-abandon-empty-artifact.md
+    title: "Schema-invalid recovered decide verdict silently succeeds"
+    severity: P1
+    component: runtime
+    fix_sha: 82734e37
+    baseline_sha: f4f322eaf996ab4193491e993313b0a762e928d1
+    fix_source: .
+    oracle_test: testdata/bug17.go
+    oracle_match: "TestRepro_RecoveredCodeBlockMustSatisfySchema"
+    oracle:
+      target: internal/host/agent_decide_empty_artifact_oracle_test.go
+      run: 'go test ./internal/host/ -run {match} -count=1'
+    ticket: |
+      When host.agent.decide recovers fenced JSON after a model does not call
+      submit, it must validate that payload against the declared schema before
+      treating it as a successful verdict. An empty or schema-invalid recovered
+      object must return a visible failure rather than advancing with an empty
+      artifact. Add focused tests and run `go test ./internal/host -count=1`.
+
 treatments: [kitsoki, single]
 
 run:
