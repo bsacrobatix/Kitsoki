@@ -257,6 +257,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
 
     try:
         materialize_baseline(task, tree)
+        prewarm = prepare_live_tree(task, tree)
     except (Exception, SystemExit) as exc:  # noqa: BLE001 - report unsupported sources as cell results.
         return emit(
             verdict="blocked",
@@ -268,10 +269,25 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
             notes=f"baseline materialization failed: {exc}",
             exit_code=0,
         )
+    if not prewarm["ok"]:
+        if not args.keep_workdir:
+            cleanup_cell_workdir(tree)
+        return emit(
+            verdict="blocked",
+            cost_usd=0.0,
+            tokens=0,
+            wall_s=elapsed(started),
+            evidence_refs=[task_ref(task)],
+            trace_ref=container_path(trace_ref),
+            notes=f"deterministic prewarm failed: {prewarm['note']}",
+            metrics={"prewarm_wall_s": prewarm["wall_s"]},
+            exit_code=0,
+        )
     baseline_ref = current_head(tree)
     dispatch = dispatch_worker(args, task, tree, trace_ref)
     score = score_tree(task, tree)
     metrics = dict(dispatch.metrics or {})
+    metrics["prewarm_wall_s"] = prewarm["wall_s"]
     metrics.update(diff_stats(tree, baseline_ref))
     cost_usd = metrics.get("cost_usd")
     if not isinstance(cost_usd, (int, float)):
@@ -282,7 +298,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     verdict = score["verdict"]
     if dispatch.blocked:
         verdict = "blocked"
-    notes = "; ".join(part for part in [dispatch.notes, score.get("notes", "")] if part)
+    notes = "; ".join(part for part in [prewarm["note"], dispatch.notes, score.get("notes", "")] if part)
     evidence_refs = [task_ref(task), score.get("evidence", "")]
     if dispatch.launch_plan_ref:
         evidence_refs.append(dispatch.launch_plan_ref)
@@ -356,6 +372,39 @@ def materialize_baseline(task: dict[str, Any], tree: Path) -> None:
         run(["git", "checkout", "-q", str(meta["baseline_sha"])], cwd=tree)
         return
     raise SystemExit(f"cannot materialize oracle kind {oracle.get('kind')!r}")
+
+
+def prepare_live_tree(task: dict[str, Any], tree: Path) -> dict[str, Any]:
+    """Run the corpus-declared setup before either live treatment starts.
+
+    Preparation is deterministic harness work, not an agent choice.  It makes
+    both treatments start from the same ready baseline and fails closed before
+    a provider call when a project cannot be prepared.
+    """
+    oracle = task.get("oracle") or {}
+    if oracle.get("kind") != "external_bakeoff":
+        return {"ok": True, "note": "prewarm: not required", "wall_s": 0.0}
+    project = str(oracle["project"])
+    bug = str(oracle["bug"])
+    meta = json.loads(run(
+        ["python3", str(BENCH), "meta", "--project", project, "--bug", bug],
+        cwd=KITSOKI_ROOT,
+        capture=True,
+    ).stdout)
+    install = str(meta.get("install") or "").strip()
+    if not install:
+        return {"ok": True, "note": "prewarm: no install command", "wall_s": 0.0}
+    timeout_s = int(os.environ.get("ARENA_PAIRED_TASK_PREWARM_TIMEOUT_S", "300"))
+    started = time.monotonic()
+    try:
+        proc = subprocess.run(
+            ["sh", "-lc", install], cwd=tree, text=True, capture_output=True, timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "note": f"{install!r} timed out after {timeout_s}s", "wall_s": elapsed(started)}
+    if proc.returncode != 0:
+        return {"ok": False, "note": first_line(proc.stdout + "\n" + proc.stderr), "wall_s": elapsed(started)}
+    return {"ok": True, "note": f"prewarm: {install}", "wall_s": elapsed(started)}
 
 
 def materialize_bugswarm_baseline(task: dict[str, Any], tree: Path) -> None:

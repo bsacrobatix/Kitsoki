@@ -184,6 +184,30 @@ with tempfile.TemporaryDirectory(prefix="paired-cleanup-") as td:
     runner.cleanup_cell_workdir(Path(td) / "node_modules")
     check("cell cleanup removes read-only nested tree", (Path(td) / "node_modules").exists(), False)
 
+with tempfile.TemporaryDirectory(prefix="paired-prewarm-") as td:
+    captured: list[list[str]] = []
+    original_run = runner.run
+    original_subprocess_run = runner.subprocess.run
+
+    def fake_runner_run(cmd, **_kwargs):
+        return runner.subprocess.CompletedProcess(cmd, 0, stdout=json.dumps({"install": "npm install"}), stderr="")
+
+    def fake_prewarm_run(cmd, **_kwargs):
+        captured.append(cmd)
+        return runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    runner.run = fake_runner_run
+    runner.subprocess.run = fake_prewarm_run
+    try:
+        prewarm = runner.prepare_live_tree(
+            {"oracle": {"kind": "external_bakeoff", "project": "fixture", "bug": "case"}}, Path(td),
+        )
+    finally:
+        runner.run = original_run
+        runner.subprocess.run = original_subprocess_run
+    check("external corpus prewarm succeeds", prewarm["ok"], True)
+    check("external corpus prewarm uses declared install", captured, [["sh", "-lc", "npm install"]])
+
 missing_agent = argparse.Namespace(
     treatment="codex-codeact",
     backend="codex",
