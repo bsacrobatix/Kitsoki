@@ -22,9 +22,12 @@ evidence is missing or self-contradictory, that is grounds for **refine** or
 
 ## Decision criteria
 
-- **accept** — `outcome` is `pass`; the bug's reproduction in the full
-  environment now produces the expected outcome and the evidence in
-  `evidence.*` supports it.
+- **accept** — `outcome` is `pass`; the artifact identifies every independently
+  observable ticket promise and the evidence/assertion that proves each in the
+  full environment. A partial symptom (such as a refreshed view) is not proof
+  of a separately required narration/transcript, side effect, persistence, or
+  terminal behavior. The evidence in `evidence.*` must support the complete
+  inventory.
 - **refine** — `outcome` is `fail_short` (small follow-up needed) and
   the artifact's `next_action_hint` describes a clear next step. The
   pipeline returns to `validating_executing` with the hint as
