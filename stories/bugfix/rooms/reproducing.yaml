@@ -163,6 +163,16 @@ states:
         with:
           agent: reproducer
           working_dir: "{{ world.workdir }}"
+          # A live reproducer is allowed to be slow, but never unbounded. The
+          # supervised runtime records the timeout/cancel path in the trace so
+          # an MCP driver can distinguish a real failure from a silent session
+          # that remains running forever.
+          sandbox:
+            min_strength: supervised
+            degrade: warn
+            resources:
+              timeout: "15m"
+              activity_timeout: "90s"
           acceptance:
             schema: schemas/reproducing_artifact.json
           context:
