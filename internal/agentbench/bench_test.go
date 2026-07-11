@@ -419,6 +419,57 @@ func TestTerminalNeedsHumanCannotScoreAsPassed(t *testing.T) {
 	assertFailureContains(t, report.Failures, "reserved escalation exit")
 }
 
+// TestUsageSumsAcrossDistinctCallsNotMax pins the fix for bench.go's own
+// "max instead of sum" usage bug (distinct from the agent_event_sink.go
+// live-box fix): a trace with THREE distinct host.agent.* calls (three
+// call_ids, e.g. a decomposer call plus two reviewer resumes) must report
+// the SUM of their usage, not the single largest call's usage. Before this
+// fix, ScoreTrace's accumulateUsage ran metrics.InputTokens =
+// max(metrics.InputTokens, thisCall'sInputTokens) across the WHOLE trace, so
+// a trace with a $0.01 call and a $0.02 call reported $0.02 total, not
+// $0.03 — silently discarding the smaller call's spend entirely. See
+// "Agent-bench takes the maximum observed tokens/cost instead of summing
+// unique provider requests" in
+// .context/2026-07-11-gx10-small-model-study-adversarial-review.md.
+func TestUsageSumsAcrossDistinctCallsNotMax(t *testing.T) {
+	trace := writeTrace(t,
+		callStartEvent("2026-07-11T06:45:00Z", "decompose", "call-1", map[string]any{"verb": "codeact"}),
+		completeEventWithCallID("2026-07-11T06:45:05Z", "decompose", "call-1", map[string]any{
+			"meta": map[string]any{"cost_usd": 0.01, "usage": map[string]any{"input_tokens": 1000, "output_tokens": 100}},
+		}),
+		callStartEvent("2026-07-11T06:45:10Z", "review", "call-2", map[string]any{"verb": "decide"}),
+		completeEventWithCallID("2026-07-11T06:45:15Z", "review", "call-2", map[string]any{
+			"meta": map[string]any{"cost_usd": 0.02, "usage": map[string]any{"input_tokens": 2000, "output_tokens": 200}},
+		}),
+		callStartEvent("2026-07-11T06:45:20Z", "review", "call-3", map[string]any{"verb": "decide"}),
+		completeEventWithCallID("2026-07-11T06:45:25Z", "review", "call-3", map[string]any{
+			"meta": map[string]any{"cost_usd": 0.005, "usage": map[string]any{"input_tokens": 500, "output_tokens": 50}},
+		}),
+	)
+
+	report, err := ScoreTrace(trace, Case{ID: "usage-sum"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Metrics.InputTokens != 3500 {
+		t.Fatalf("input_tokens = %d, want 3500 (1000+2000+500, not max()=2000)", report.Metrics.InputTokens)
+	}
+	if report.Metrics.OutputTokens != 350 {
+		t.Fatalf("output_tokens = %d, want 350 (100+200+50, not max()=200)", report.Metrics.OutputTokens)
+	}
+	if got, want := report.Metrics.CostUSD, 0.035; got < want-0.0001 || got > want+0.0001 {
+		t.Fatalf("cost_usd = %v, want ~0.035 (0.01+0.02+0.005, not max()=0.02)", got)
+	}
+}
+
+// completeEventWithCallID builds an agent.call.complete trace event carrying
+// a call_id, pairing with callStartEvent for multi-call usage-summing tests.
+func completeEventWithCallID(ts, state, callID string, payload map[string]any) map[string]any {
+	ev := event(ts, "agent.call.complete", state, payload)
+	ev["call_id"] = callID
+	return ev
+}
+
 func TestStaleArtifactFromPriorAttemptIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "decomposition.yaml")

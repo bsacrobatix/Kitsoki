@@ -263,6 +263,32 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 	var authoritativeFinalState string
 	sawMachineState := false
 
+	// callUsage buckets accumulated usage PER call_id (the "" key catches
+	// events with no call_id, e.g. traces predating call_id propagation on
+	// agent.stream events). Within one call_id, later usage-bearing events
+	// legitimately repeat/refine the SAME call's own final number (a stream
+	// delta and its paired agent.call.complete both describing one call), so
+	// taking the max within a bucket is safe; but summing ACROSS distinct
+	// call_id buckets is required — multiple call_ids are multiple distinct
+	// provider requests (a validator retry loop's several `claude --resume`
+	// calls, or host.agent.codeact's per-step calls), and treating them as
+	// one running-max (the pre-fix behavior) silently reported only the
+	// single most-expensive call instead of the call's total spend. This is
+	// the review's "Agent-bench takes the maximum observed tokens/cost
+	// instead of summing unique provider requests" finding, fixed here to
+	// mirror the same call-summing internal/host/agent_event_sink.go now does
+	// live — see
+	// .context/2026-07-11-gx10-small-model-study-adversarial-review.md.
+	callUsage := map[string]*Metrics{}
+	usageBucket := func(callID string) *Metrics {
+		b := callUsage[callID]
+		if b == nil {
+			b = &Metrics{}
+			callUsage[callID] = b
+		}
+		return b
+	}
+
 	var first, last time.Time
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
@@ -322,7 +348,7 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 					recordSubmit(&metrics, verb)
 				}
 			}
-			accumulateUsage(&metrics, ev.Payload)
+			accumulateUsage(usageBucket(ev.CallID), ev.Payload)
 		}
 		switch ev.Kind {
 		case "agent.call.start":
@@ -330,11 +356,11 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 		case "agent.returned", "agent.call.returned", "agent.call.complete", "agent.call.end", "agent.task.complete":
 			metrics.AgentCallsFinished++
 			callTerminated[ev.CallID] = true
-			accumulateUsage(&metrics, ev.Payload)
+			accumulateUsage(usageBucket(ev.CallID), ev.Payload)
 		case "agent.error", "agent.call.error":
 			metrics.AgentCallsErrored++
 			callTerminated[ev.CallID] = true
-			accumulateUsage(&metrics, ev.Payload)
+			accumulateUsage(usageBucket(ev.CallID), ev.Payload)
 		}
 		if payloadHasSubmit(ev.Payload) {
 			recordSubmit(&metrics, verb)
@@ -347,6 +373,16 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 		metrics.FinalState = authoritativeFinalState
 	} else {
 		metrics.FinalState = fallbackFinalState
+	}
+	// Sum every call's own (max-within-call) usage bucket into the trace
+	// totals — see callUsage's doc comment above.
+	for _, b := range callUsage {
+		metrics.InputTokens += b.InputTokens
+		metrics.OutputTokens += b.OutputTokens
+		metrics.CacheCreationInputTokens += b.CacheCreationInputTokens
+		metrics.CacheReadInputTokens += b.CacheReadInputTokens
+		metrics.TotalTokens += b.TotalTokens
+		metrics.CostUSD += b.CostUSD
 	}
 	if !first.IsZero() && !last.IsZero() && last.After(first) {
 		metrics.WallSeconds = math.Round(last.Sub(first).Seconds()*1000) / 1000
