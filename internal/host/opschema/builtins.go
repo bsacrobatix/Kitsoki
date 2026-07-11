@@ -190,7 +190,7 @@ func Builtins() *Registry {
 // silently skipped shape checking (registry.Lookup miss reads as
 // "unregistered handler, cannot check", not a failure). See
 // internal/host/graph_handlers.go (load/lint/diff/apply/propose/authorize/
-// withdraw/query/project/presentation) and internal/host/graph_read_ops.go
+// withdraw/rebase/query/project/presentation) and internal/host/graph_read_ops.go
 // (get/find/neighbors/type_census/changeset — the P1 read ops) for the
 // concrete Result{Data: ...} shapes these mirror.
 func registerGraphBuiltins(r *Registry) {
@@ -229,6 +229,12 @@ func registerGraphBuiltins(r *Registry) {
 		),
 	})
 	r.Register("host.graph", "withdraw", Op{
+		Input: fields("catalog_path", "string", "changeset_id", "string"),
+		Output: fields(
+			"rejected", "bool", "reject_reasons", "list", "lint_issues", "list", "changed_files", "list",
+		),
+	})
+	r.Register("host.graph", "rebase", Op{
 		Input: fields("catalog_path", "string", "changeset_id", "string"),
 		Output: fields(
 			"rejected", "bool", "reject_reasons", "list", "lint_issues", "list", "changed_files", "list",

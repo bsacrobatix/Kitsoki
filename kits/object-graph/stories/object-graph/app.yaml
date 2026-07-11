@@ -44,6 +44,9 @@ host_interfaces:
       withdraw:
         input: { catalog_path: string, changeset_id: string }
         output: { rejected: bool, reject_reasons: list, lint_issues: list, changed_files: list }
+      rebase:
+        input: { catalog_path: string, changeset_id: string }
+        output: { rejected: bool, reject_reasons: list, lint_issues: list, changed_files: list }
       project:
         input: { catalog_path: string, overlay_path: string, graph_id: string }
         output: { graph: object }
