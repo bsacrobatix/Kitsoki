@@ -162,15 +162,16 @@ states:
           workdir: ""
 
       # Step 1: derive workspace identity from ticket_id. Skipped in triage
-      # mode — triage is read-only against the current tree, so it needs no
-      # isolated workspace (and creating one would be wasted side-effect).
+      # mode and for an explicit caller-prepared workspace — the latter owns
+      # its identity across re-entry/refinement, so do not replace it after a
+      # reproducer retry clears bf_autostart_attempted.
       #
       # The workspace id and branch include world.session_id, so concurrent
       # sessions on the same ticket get distinct clone-backed capsule workspaces
       # under .capsules/workspaces/. The host response is bound back into
       # world.workdir below, so the script remains the source of truth for the
       # actual path.
-      - when: "world.ticket_id != '' && world.workspace_id == '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage'"
+      - when: "world.ticket_id != '' && world.workspace_id == '' && !world.bf_autostart_attempted && !world.workspace_prepared && world.bugfix_mode != 'triage'"
         set:
           # Append world.session_id so two concurrent sessions on the SAME
           # ticket resolve to DISTINCT workdir/branch/workspace ids — otherwise
@@ -186,7 +187,7 @@ states:
       # source/bootstrap/policy. The transitional name/base/session_id fields are
       # still supplied for legacy bindings during the migration window, but
       # Capsule-backed bindings ignore them and return the authoritative branch.
-      - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != '' && !world.bf_autostart_attempted && world.bugfix_mode != 'triage'"
+      - when: "world.ticket_id != '' && world.feature_branch != '' && world.workdir != '' && !world.bf_autostart_attempted && !world.workspace_prepared && world.bugfix_mode != 'triage'"
         invoke: iface.workspace.create
         with:
           id:         "{{ world.workspace_id }}"
