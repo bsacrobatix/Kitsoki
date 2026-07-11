@@ -340,8 +340,8 @@ replay no-ops; they index the receipt and promotion artifacts.
 
 ### Agent event kinds
 
-Every agent call produces exactly two events: `agent.call.start` and
-`agent.call.complete` (or `agent.call.error` on failure).  These events are **no-ops
+Every agent call produces one `agent.call.start` and exactly one terminal
+`agent.call.complete` or `agent.call.error`. These events are **no-ops
 for replay** — `BuildJourney` ignores them — but they carry the response and
 agent metadata for audit and the runstatus SPA. Large prompts and responses
 (>1KB) are written to sidecar files under the configured prompts directory and
@@ -350,9 +350,9 @@ payloads remain inline.
 
 | Kind                   | When written                                               |
 |------------------------|------------------------------------------------------------|
-| `agent.call.start`    | After `Agent.Ask` returns (so cassette `episode_id` / `match_idx` from `resp.Meta` are available). |
+| `agent.call.start`    | At dispatch time, before launching the external agent/transport. |
 | `agent.call.complete` | After schema validation passes; carries `Submission` + `Meta`. |
-| `agent.call.error`    | When `Agent.Ask` returns an error, or schema validation fails, or a sub-event constraint fires. |
+| `agent.call.error`    | When the agent transport/stream fails, returns an infrastructure error, schema validation fails, or a sub-event constraint fires. |
 
 **`agent.call.start` payload fields:**
 
@@ -389,6 +389,24 @@ payloads remain inline.
 
 For the full agent plugin contract (transports, lifecycle, auth/secrets, and
 sub-events), see [`docs/architecture/agent-plugin.md`](../architecture/agent-plugin.md).
+
+**`agent.process` diagnostics:**
+
+External CLI-backed agent calls also emit `agent.stream` rows whose payload
+`type` is `agent.process`. They are not replay actions; they are live-process
+breadcrumbs for diagnosis:
+
+| `subtype` | Meaning |
+|---|---|
+| `start` | The subprocess was spawned. Payload includes backend, redacted argv, working directory, pid, uid/root/sandbox posture, provider env key names, and common env-key presence booleans. |
+| `no_output` | The process produced no stdout before the diagnostic threshold. This is a warning only; it does not kill the process. |
+| `finish` | The subprocess exited or was cancelled/killed. Payload includes exit code, duration, raw stream-event count, stderr/infra summary, and `severity:error` for failed exits. |
+
+For direct non-sandboxed CLI launches, `KITSOKI_AGENT_ACTIVITY_TIMEOUT=<duration>`
+turns prolonged stdout inactivity into cancellation. The handler then writes the
+matching `agent.call.error`, so a live trace does not end with a dangling
+`agent.call.start`. Sandboxed launches use `sandbox.resources.activity_timeout`
+for the same policy.
 
 ### Agent-action transcript sidecar
 

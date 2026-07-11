@@ -417,6 +417,7 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 			SessionID:  parentSessionID,
 			Sandbox:    sandbox,
 		}.Run(ctx)
+		attemptDurationMS := time.Since(callStart).Milliseconds()
 		// H5: capture the claude session ID returned from system.init so
 		// --resume works correctly across iterations (mirrors decide's pattern).
 		if returnedSID != "" {
@@ -433,10 +434,57 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 		}
 
 		if runErr != nil {
-			return Result{}, runErr
+			errMsg := agentRunErrorMessage("task", runErr, cr.Stderr)
+			slog.InfoContext(ctx, "agent.task.complete",
+				"call_id", callID,
+				"model", agent.Model,
+				"duration_ms", attemptDurationMS,
+				"task_trace_id", taskTraceID,
+				"error", errMsg,
+			)
+			appendAgentErrorEvent(ctx, time.Now(), callID, AgentErrorPayload{
+				Verb:       "task",
+				Agent:      agentName,
+				DurationMS: attemptDurationMS,
+				Error:      errMsg,
+				Meta:       ladderMetaFields(ctx, FailureInfra),
+			})
+			return Result{
+				Error:       errMsg,
+				FailureKind: FailureInfra,
+				Data: map[string]any{
+					"task_trace_id": taskTraceID,
+					"replay_mode":   string(replayMode),
+				},
+			}, nil
 		}
 		if cr.Infra != nil {
-			return Result{Error: fmt.Sprintf("host.agent.task: claude exec failed: %v", cr.Infra), FailureKind: FailureInfra}, nil
+			errMsg := fmt.Sprintf("host.agent.task: claude exec failed: %v", cr.Infra)
+			if s := strings.TrimSpace(cr.Stderr); s != "" {
+				errMsg = fmt.Sprintf("%s\nstderr: %s", errMsg, s)
+			}
+			slog.InfoContext(ctx, "agent.task.complete",
+				"call_id", callID,
+				"model", agent.Model,
+				"duration_ms", attemptDurationMS,
+				"task_trace_id", taskTraceID,
+				"error", errMsg,
+			)
+			appendAgentErrorEvent(ctx, time.Now(), callID, AgentErrorPayload{
+				Verb:       "task",
+				Agent:      agentName,
+				DurationMS: attemptDurationMS,
+				Error:      errMsg,
+				Meta:       ladderMetaFields(ctx, FailureInfra),
+			})
+			return Result{
+				Error:       errMsg,
+				FailureKind: FailureInfra,
+				Data: map[string]any{
+					"task_trace_id": taskTraceID,
+					"replay_mode":   string(replayMode),
+				},
+			}, nil
 		}
 
 		// Observe tool calls in the output for tracing.

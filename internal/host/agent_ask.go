@@ -332,7 +332,21 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	durationMS := time.Since(callStart).Milliseconds()
 
 	if runErr != nil {
-		return Result{}, runErr
+		errMsg := agentRunErrorMessage("ask", runErr, cr.Stderr)
+		slog.InfoContext(ctx, "agent.ask.complete",
+			"call_id", callID,
+			"agent", agent.Model,
+			"model", agent.Model,
+			"duration_ms", durationMS,
+			"error", errMsg,
+		)
+		appendAgentErrorEvent(ctx, time.Now(), callID, AgentErrorPayload{
+			Verb:       "ask",
+			Agent:      agentNameFromArgs(args),
+			DurationMS: durationMS,
+			Error:      errMsg,
+		})
+		return Result{Error: errMsg, FailureKind: FailureInfra}, nil
 	}
 
 	var errMsg string

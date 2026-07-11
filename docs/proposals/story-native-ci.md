@@ -329,8 +329,11 @@ project wrapper that imports only deterministic checks and adjudication.
     `agent.stream` breadcrumbs for start/no-output/finish with redacted argv,
     provider env key names, common env-key presence, pid, uid/root/sandbox
     posture, raw event count, and stderr/infra summary. This makes the next
-    remote stall diagnosable directly from the trace instead of appearing as a
-    dangling `agent.call.start`.
+    remote stall diagnosable directly from the trace. Stream/context failures
+    now close the parent span with `agent.call.error`, and direct
+    non-sandboxed live drivers can set `KITSOKI_AGENT_ACTIVITY_TIMEOUT=<duration>`
+    to cancel stdout-inactive workers instead of leaving a dangling
+    `agent.call.start`.
   - Remaining: fix the VM driver/credential/env setup and re-run a gated
     remote CI proof to terminal verdict. The attempted run was Studio/Claude
     worker dogfood, not a deployed HTTPS Capsule worker proof.
