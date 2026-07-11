@@ -175,19 +175,27 @@ func Builtins() *Registry {
 	// historical branch-argument worktree surface during migration.
 	r.Register("host.capsule_workspace", "create", Op{
 		Input:  fields("id", "string", "definition", "string", "owner", "string"),
-		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string"),
+		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "diagnostics", "object"),
 	})
 	r.Register("host.capsule_workspace", "get", Op{
 		Input:  fields("id", "string"),
-		Output: fields("id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string"),
+		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "diagnostics", "object"),
+	})
+	r.Register("host.capsule_workspace", "status", Op{
+		Input:  fields("id", "string"),
+		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "diagnostics", "object"),
+	})
+	r.Register("host.capsule_workspace", "sync", Op{
+		Input:  fields("id", "string"),
+		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "log", "string", "diagnostics", "object"),
 	})
 	r.Register("host.capsule_workspace", "commit", Op{
 		Input:  fields("id", "string", "message", "string"),
-		Output: fields("ok", "bool", "id", "string", "generation", "int"),
+		Output: fields("ok", "bool", "id", "string", "generation", "int", "path", "string", "branch", "string", "state", "string", "head", "string", "dirty", "bool", "diagnostics", "object"),
 	})
 	r.Register("host.capsule_workspace", "close", Op{
 		Input:  fields("id", "string", "owner", "string"),
-		Output: fields("ok", "bool", "id", "string"),
+		Output: fields("ok", "bool", "id", "string", "closed", "bool", "diagnostics", "object"),
 	})
 
 	// transport -> host.append_to_file

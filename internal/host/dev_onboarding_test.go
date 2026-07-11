@@ -49,7 +49,7 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	if result.Error != "" || result.Data["status"] != "applied" {
 		t.Fatalf("apply = %#v", result)
 	}
-	for _, path := range []string{".kitsoki.yaml", ".kitsoki/environments/ci.yaml", ".kitsoki/ci.yaml", ".kitsoki/stories/capsule-ci/app.yaml", ".kitsoki/project-profile.yaml", ".kitsoki/stories/example-dev/app.yaml"} {
+	for _, path := range []string{".kitsoki.yaml", ".kitsoki/capsules/development.yaml", ".kitsoki/environments/ci.yaml", ".kitsoki/ci.yaml", ".kitsoki/stories/capsule-ci/app.yaml", ".kitsoki/project-profile.yaml", ".kitsoki/stories/example-dev/app.yaml"} {
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
 			t.Fatalf("missing %s: %v", path, err)
 		}
@@ -60,6 +60,16 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	}
 	if !strings.Contains(string(profile), "schema: project-profile/v1") {
 		t.Fatalf("profile missing schema:\n%s", profile)
+	}
+	if !strings.Contains(string(profile), "workspace: host.capsule_workspace") || strings.Contains(string(profile), "workspace: host.git_worktree") {
+		t.Fatalf("profile workspace binding not migrated:\n%s", profile)
+	}
+	developmentCapsule, err := os.ReadFile(filepath.Join(root, ".kitsoki/capsules/development.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(developmentCapsule), "schema: capsule-definition/v1") || !strings.Contains(string(developmentCapsule), "kind: self") {
+		t.Fatalf("development capsule definition missing schema or self source:\n%s", developmentCapsule)
 	}
 	ciEnv, err := os.ReadFile(filepath.Join(root, ".kitsoki/environments/ci.yaml"))
 	if err != nil {
@@ -81,6 +91,13 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	}
 	if !strings.Contains(string(ciStory), "outcome: needs_input") || strings.Contains(string(ciStory), "outcome: passed") {
 		t.Fatalf("ci story should park without default pass:\n%s", ciStory)
+	}
+	instance, err := os.ReadFile(filepath.Join(root, ".kitsoki/stories/example-dev/app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(instance), "host.capsule_workspace") || strings.Contains(string(instance), "host.git_worktree") {
+		t.Fatalf("instance workspace binding not migrated:\n%s", instance)
 	}
 	gitignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if err != nil {
