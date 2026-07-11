@@ -51,6 +51,10 @@ type Deps struct {
 	FeedbackSink string
 	JournalPath  string
 	Clock        clock.Clock
+	// Recorder is the last-10-call ring buffer every registered tool
+	// (via the `recorded` wrapper) appends to. feedback.report attaches
+	// a redacted snapshot of it as evidence.
+	Recorder *Recorder
 }
 
 // Server is the standalone stdio MCP server exposing mcp-graph's read
@@ -102,6 +106,7 @@ func NewServer(cfg Config) (*Server, error) {
 		FeedbackSink: cfg.FeedbackSink,
 		JournalPath:  cfg.JournalPath,
 		Clock:        clk,
+		Recorder:     NewRecorder(),
 	}
 
 	s := &Server{deps: deps}
