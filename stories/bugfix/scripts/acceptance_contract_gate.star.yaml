@@ -1,0 +1,5 @@
+inputs:
+  requirements: { type: list, required: true }
+  artifact: { type: object, required: true }
+outputs:
+  gate: { type: object }

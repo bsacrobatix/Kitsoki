@@ -42,6 +42,13 @@ Before submitting:
 
 ## Constraints
 
+{% if args.acceptance_contract %}
+- **Strict public acceptance contract:** {{ args.acceptance_contract }}. Add an
+  `acceptance_coverage` item for every requirement ID, each with the exact
+  `test_path` and direct `assertion` that proves it. The story deterministically
+  rejects a passed artifact that omits an ID or leaves either field empty.
+{% endif %}
+
 - **Read the CI result and log honestly.** `status` is `passed` only when the
   runner returned success, the bug reproduction now passes, and no *unexpected*
   regression occurred. A framework may report an explicitly expected / known
