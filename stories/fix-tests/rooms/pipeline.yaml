@@ -168,7 +168,10 @@ states:
             auth_home: inherit
             resources:
               timeout: "30m"
-              activity_timeout: "90s"
+              # Three minutes allows one focused inspection/verification
+              # round, while still surfacing a silent provider/tool turn far
+              # sooner than the 30-minute completion deadline.
+              activity_timeout: "3m"
           acceptance:
             schema: schemas/fix_artifact.json
             max_retries: 3
