@@ -390,10 +390,10 @@ func (d *trackingDriver) Teleport(ctx context.Context, notificationID string) (*
 	return d.Driver.Teleport(ctx, notificationID)
 }
 
-func (d *trackingDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error) {
+func (d *trackingDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string, workspacePath string) (*orchestrator.TurnOutcome, error) {
 	d.reg.beginTurn(d.id)
 	defer d.reg.endTurn(d.id)
-	return d.Driver.RewindRoute(ctx, decisionID, newClass, reason)
+	return d.Driver.RewindRoute(ctx, decisionID, newClass, reason, workspacePath)
 }
 
 func (d *trackingDriver) HarnessProfiles() []orchestrator.ProfileInfo {

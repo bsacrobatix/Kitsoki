@@ -361,7 +361,7 @@
             :transcript="store.chatEntries"
             :suppressed-media-handles="suppressedMediaHandles"
             :suppressed-media-labels="suppressedMediaLabels"
-            @rewind="onRewind"
+            @reroute="onReroute"
             @feedback="onFeedback"
           />
           <!-- Streaming thinking bubble: visible while a turn is in flight -->
@@ -1612,13 +1612,21 @@ function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: s
   );
 }
 
-// Rewind one CRR decision from its route-receipt chip (re-dispatch under the
-// journaled class). Routes through runTurn for the same in-flight guard +
-// error-banner behaviour as a normal turn; the chip disables the control for
-// non-rewindable (intent-class) receipts so it never reaches here.
-function onRewind(decisionId: string): void {
+// Reroute one CRR decision from its route-receipt chip (re-dispatch under a
+// selected class). Routes through runTurn for the same in-flight guard +
+// error-banner behaviour as a normal turn.
+function onReroute(decisionId: string, newClass: string): void {
   if (!source) return;
-  void runTurn(() => store.rewindRoute(source!, props.sessionId, decisionId));
+  void runTurn(() =>
+    store.rewindRoute(
+      source!,
+      props.sessionId,
+      decisionId,
+      newClass,
+      "operator reroute",
+      focusedChat.value?.pty?.workspace_path
+    )
+  );
 }
 
 function onDriveOperation(): void {

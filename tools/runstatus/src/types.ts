@@ -345,11 +345,13 @@ export interface TurnResult {
    * The contextual-routing receipt for a turn the CRR (contextual-routing)
    * tier resolved — absent for deterministic/semantic/LLM turns. Carries the
    * matched class/intent, the contextual confidence, and a stable decision_id
-   * ("<session_id>:<turn>") that is the rewind target. Surfaced as the route
+   * ("<session_id>:<turn>") used as the reroute target. Surfaced as the route
    * receipt chip on the agent bubble. See internal/orchestrator
    * ContextRouteReceipt and docs/architecture/semantic-routing.md §7.
    */
   context_route?: ContextRouteInfo;
+  /** Present when rerouting preserved dirty work in a fallback capsule. */
+  parked_workspace?: ParkedWorkspaceInfo;
   /** Present on runstatus.session.drive_operation responses. */
   operation_drive?: OperationDriveSummary;
 }
@@ -358,7 +360,8 @@ export interface TurnResult {
  * ContextRouteInfo is the wire shape of the orchestrator's
  * ContextRouteReceipt: the queryable record of one contextual-routing
  * decision. `class` is one of intent | help | room_request | meta_edit;
- * `target_lane` names the lane a non-intent class landed in.
+ * `target_lane` names the lane a non-intent class landed in; `alternatives`
+ * carries the lower-confidence route options when the router surfaced them.
  */
 export interface ContextRouteInfo {
   class: string;
@@ -367,5 +370,21 @@ export interface ContextRouteInfo {
   confidence: number;
   target_chat_id?: string;
   target_lane?: string;
+  alternatives?: ContextRouteAlt[];
   decision_id: string;
+}
+
+export interface ParkedWorkspaceInfo {
+  source_workspace?: string;
+  recovery_workspace?: string;
+  recovery_branch?: string;
+  recovery_commit?: string;
+  cleaned?: boolean;
+  reason?: string;
+}
+
+export interface ContextRouteAlt {
+  class: string;
+  intent?: string;
+  confidence: number;
 }

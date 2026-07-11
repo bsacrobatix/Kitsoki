@@ -86,7 +86,7 @@ func (routingFrameDriver) DismissNotification(context.Context, string) error { r
 func (routingFrameDriver) Teleport(context.Context, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
-func (routingFrameDriver) RewindRoute(context.Context, string, orchestrator.ContextRouteClass, string) (*orchestrator.TurnOutcome, error) {
+func (routingFrameDriver) RewindRoute(context.Context, string, orchestrator.ContextRouteClass, string, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
 func (routingFrameDriver) RecordRoutingFeedback(context.Context, string, string, string, string, orchestrator.RoutingFeedbackVerdict) error {

@@ -251,16 +251,16 @@ export interface DataSource {
    * Rewind one contextual-routing (CRR) decision: reverse the route identified
    * by decisionId and re-dispatch the original utterance, optionally under a new
    * class. Returns the re-dispatched turn. Live session only; sources without an
-   * orchestrator omit it (the route-receipt rewind control stays hidden).
-   * The engine reverses the lane classes today; an intent-class rewind rejects
-   * with a "not yet implemented" error, so the chip disables the control for
-   * intent receipts up front.
+   * orchestrator omit it. The engine reverses the lane classes today; an intent-
+   * class rewind rejects with a "not yet implemented" error until the journal
+   * can recover the accepted intent again.
    */
   rewindRoute?(
     sessionId: string,
     decisionId: string,
     newClass?: string,
-    reason?: string
+    reason?: string,
+    workspacePath?: string
   ): Promise<TurnResult>;
 
   /**

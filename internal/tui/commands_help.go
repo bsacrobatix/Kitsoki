@@ -30,6 +30,7 @@ func (HelpCommand) Run(m RootModel, _ []string) (string, RootModel, tea.Cmd) {
 			{"/stories", "open the story selector and launch another story"},
 			{"/bug [description]", "file a bug report with scrubbed TUI transcript evidence"},
 			{"/route up|down", "record a thumbs up/down verdict on the last routed turn"},
+			{"/route retry <intent|help|workbench|meta>", "reroute the last routed turn to a different class"},
 			{"/ideas <text>", "jot an idea to ideas.md without interrupting the conversation"},
 			{"/chat show <id>", "show focused async chat context without attaching"},
 			{"/intents [<n>]", "print available intents; <n> dispatches by index"},

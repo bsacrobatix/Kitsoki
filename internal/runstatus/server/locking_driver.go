@@ -145,11 +145,11 @@ func (d *lockingDriver) ShowChat(ctx context.Context, chatID string, sinceSeq in
 // RewindRoute re-baselines the session via a snapshot and re-dispatches a turn,
 // so it mutates session state and must serialise under the same writer lock as
 // the other turn-driving methods (rather than being promoted unlocked).
-func (d *lockingDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error) {
+func (d *lockingDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string, workspacePath string) (*orchestrator.TurnOutcome, error) {
 	var out *orchestrator.TurnOutcome
 	err := d.lock(ctx, func() error {
 		var e error
-		out, e = d.Driver.RewindRoute(ctx, decisionID, newClass, reason)
+		out, e = d.Driver.RewindRoute(ctx, decisionID, newClass, reason, workspacePath)
 		return e
 	})
 	return out, err

@@ -348,9 +348,10 @@ type RootModel struct {
 	// command reads (WS-C C4 routing-dissatisfaction substrate; see
 	// docs/testing/routing-tuning.md). Empty lastRoutedIntent means no turn
 	// has resolved yet this session (or the last turn was a slash command).
-	lastRoutedIntent string
-	lastRoutedTier   string
-	lastRoutedState  app.StatePath
+	lastRoutedIntent     string
+	lastRoutedTier       string
+	lastRoutedState      app.StatePath
+	lastRoutedDecisionID string
 
 	// inputHistory is an in-memory, per-session ring of past prompt
 	// submissions (oldest at index 0, newest at the end). Up/Down arrows
@@ -1370,7 +1371,7 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.routing.markHit(tm.Tier, tm.Intent, hitDetailFor(tm), tm.Confidence, tm.Tier == TierLLM)
 			if m.transcript.hasLive() {
 				m.transcript.FinalizeLive(m.routing.renderResolved())
-				m.snapshotRoutedTurn()
+				m.snapshotRoutedTurn("")
 			}
 		case RoutingAmbiguousMsg:
 			m.transcript.UpdateLive(ir.r.RoutingResolved(blocks.Resolved{
@@ -1904,13 +1905,16 @@ func (m *RootModel) appendHistory(input string) {
 // submitInput, so a `/route up|down` typed after that reset must read a
 // snapshot, not the live (possibly already-reset) pipeline. A no-op when
 // the pipeline never resolved (e.g. the turn was rejected/cancelled).
-func (m *RootModel) snapshotRoutedTurn() {
+func (m *RootModel) snapshotRoutedTurn(decisionID string) {
 	if !m.routing.resolved() {
 		return
 	}
 	m.lastRoutedIntent = m.routing.intent
 	m.lastRoutedTier = m.routing.winnerTier()
 	m.lastRoutedState = m.currentState
+	if decisionID != "" {
+		m.lastRoutedDecisionID = decisionID
+	}
 }
 
 // historyNavigating reports whether the user is currently walking
@@ -2080,6 +2084,8 @@ const (
 	// pendingDeterministic means the input matched a menu entry locally; the
 	// async work is the post-transition effect dispatch (host calls, etc.).
 	pendingDeterministic
+	// pendingReroute means the user is rewinding a prior routing decision.
+	pendingReroute
 )
 
 type asyncTurnResult struct {
@@ -2858,7 +2864,11 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 				m.routing.resolveFromProvenance(routedBy, matchType, conf, intentFromEvents(out.Events))
 			}
 			m.transcript.FinalizeLive(m.routing.renderResolved())
-			m.snapshotRoutedTurn()
+			decisionID := ""
+			if out.ContextRoute != nil {
+				decisionID = out.ContextRoute.DecisionID
+			}
+			m.snapshotRoutedTurn(decisionID)
 		}
 		// If the new view declares an interactive choice widget,
 		// open it FIRST so we can strip the choice element from the
@@ -2893,6 +2903,12 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 
 		// Update location.
 		m = m.updateLocation(out)
+		if out.ContextRoute != nil && out.ContextRoute.DecisionID != "" {
+			m.lastRoutedDecisionID = out.ContextRoute.DecisionID
+			if out.ContextRoute.Intent != "" {
+				m.lastRoutedIntent = out.ContextRoute.Intent
+			}
+		}
 
 		// Auto-print the intents block at end of turn when /intents
 		// auto on was issued. The block follows the agent body so the
@@ -5008,6 +5024,8 @@ func (m RootModel) View() string {
 		caption := "thinking… (Ctrl+C to cancel)"
 		if m.pendingKind == pendingDeterministic {
 			caption = "running…  (Ctrl+C to cancel)"
+		} else if m.pendingKind == pendingReroute {
+			caption = "rerouting… (Ctrl+C to cancel)"
 		}
 		indicator := lipgloss.NewStyle().
 			Foreground(colorMuted).

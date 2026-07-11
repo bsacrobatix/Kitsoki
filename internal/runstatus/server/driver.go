@@ -89,7 +89,7 @@ type Driver interface {
 	// meta_edit), in which case the engine reuses the journaled class; an
 	// intent-class rewind is not yet recoverable from the journal and returns an
 	// explicit error the surface presents gracefully (a disabled control), not a 500.
-	RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error)
+	RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string, workspacePath string) (*orchestrator.TurnOutcome, error)
 
 	// RecordRoutingFeedback journals an operator's up/down verdict on a
 	// previously-routed turn (WS-C C4: the routing-dissatisfaction substrate).
@@ -892,8 +892,8 @@ func (d OrchestratorDriver) Teleport(ctx context.Context, notificationID string)
 // The engine reverses the CRR decision at decisionID and re-dispatches the
 // original utterance under newClass; class=intent returns a not-yet-implemented
 // error (the original intent isn't recoverable from TurnStarted alone).
-func (d OrchestratorDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string) (*orchestrator.TurnOutcome, error) {
-	return d.Orch.RewindRoute(ctx, d.SID, decisionID, newClass, reason)
+func (d OrchestratorDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string, workspacePath string) (*orchestrator.TurnOutcome, error) {
+	return d.Orch.RewindRoute(ctx, d.SID, decisionID, newClass, reason, workspacePath)
 }
 
 // RecordRoutingFeedback delegates to Orchestrator.RecordRoutingFeedback,
@@ -974,6 +974,9 @@ type turnResult struct {
 	// matched class/intent, the contextual confidence, and a stable DecisionID
 	// so the web surface can show a "routed to … · contextual" receipt chip.
 	ContextRoute *contextRouteInfo `json:"context_route,omitempty"`
+	// ParkedWorkspace records a fallback capsule that preserved dirty work
+	// before the reroute. Nil when no parking was needed.
+	ParkedWorkspace *parkedWorkspaceInfo `json:"parked_workspace,omitempty"`
 	// OperationDrive is present only on runstatus.session.drive_operation
 	// responses. It preserves the bounded driver result so web surfaces can tell
 	// the operator whether the drive completed, parked at a checkpoint, or hit a
@@ -986,13 +989,29 @@ type turnResult struct {
 // so an operator can see (and, in a later slice, rewind) the route. The
 // DecisionID is "<session_id>:<turn_number>", the stable rewind target.
 type contextRouteInfo struct {
-	Class        string  `json:"class"`
-	Intent       string  `json:"intent,omitempty"`
-	Reason       string  `json:"reason,omitempty"`
-	Confidence   float64 `json:"confidence"`
-	TargetChatID string  `json:"target_chat_id,omitempty"`
-	TargetLane   string  `json:"target_lane,omitempty"`
-	DecisionID   string  `json:"decision_id"`
+	Class        string            `json:"class"`
+	Intent       string            `json:"intent,omitempty"`
+	Reason       string            `json:"reason,omitempty"`
+	Confidence   float64           `json:"confidence"`
+	TargetChatID string            `json:"target_chat_id,omitempty"`
+	TargetLane   string            `json:"target_lane,omitempty"`
+	Alternatives []contextRouteAlt `json:"alternatives,omitempty"`
+	DecisionID   string            `json:"decision_id"`
+}
+
+type contextRouteAlt struct {
+	Class      string  `json:"class"`
+	Intent     string  `json:"intent,omitempty"`
+	Confidence float64 `json:"confidence"`
+}
+
+type parkedWorkspaceInfo struct {
+	SourceWorkspace   string `json:"source_workspace,omitempty"`
+	RecoveryWorkspace string `json:"recovery_workspace,omitempty"`
+	RecoveryBranch    string `json:"recovery_branch,omitempty"`
+	RecoveryCommit    string `json:"recovery_commit,omitempty"`
+	Cleaned           bool   `json:"cleaned,omitempty"`
+	Reason            string `json:"reason,omitempty"`
 }
 
 type operationDriveResult struct {
@@ -1061,7 +1080,25 @@ func newTurnResult(out *orchestrator.TurnOutcome, resolver Driver) turnResult {
 			Confidence:   cr.Confidence,
 			TargetChatID: cr.TargetChatID,
 			TargetLane:   cr.TargetLane,
+			Alternatives: make([]contextRouteAlt, 0, len(cr.Alternatives)),
 			DecisionID:   cr.DecisionID,
+		}
+		for _, alt := range cr.Alternatives {
+			tr.ContextRoute.Alternatives = append(tr.ContextRoute.Alternatives, contextRouteAlt{
+				Class:      string(alt.Class),
+				Intent:     alt.Intent,
+				Confidence: alt.Confidence,
+			})
+		}
+	}
+	if parked := out.ParkedWorkspace; parked != nil {
+		tr.ParkedWorkspace = &parkedWorkspaceInfo{
+			SourceWorkspace:   parked.SourceWorkspace,
+			RecoveryWorkspace: parked.RecoveryWorkspace,
+			RecoveryBranch:    parked.RecoveryBranch,
+			RecoveryCommit:    parked.RecoveryCommit,
+			Cleaned:           parked.Cleaned,
+			Reason:            parked.Reason,
 		}
 	}
 	if resolver != nil {

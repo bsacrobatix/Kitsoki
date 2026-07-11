@@ -25,6 +25,7 @@ usage:
   scripts/dev-workspace.sh status <workspace|id> [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh commit <workspace|id> --message MESSAGE [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh merge <workspace|id> [--repo REPO] [--root ROOT] [--branch BRANCH] [--target TARGET] [--gate CMD] [--replace-landing] [--teardown]
+  scripts/dev-workspace.sh park <workspace|id> [--repo REPO] [--root ROOT] [--session-id SID] [--message MESSAGE] [--json]
   scripts/dev-workspace.sh recover <workspace|id> [--repo REPO] [--root ROOT] [--discard-incomplete]
   scripts/dev-workspace.sh close <workspace|id> [--repo REPO] [--root ROOT] [--force]
   scripts/dev-workspace.sh teardown <workspace|id> [--repo REPO] [--root ROOT] [--force]
@@ -501,6 +502,18 @@ import_workspace_issues() {
     done
   done
   rm -rf "$src_root"
+}
+
+clean_parked_workspace_source() {
+  local path="$1"
+  git -C "$path" reset --hard HEAD >/dev/null
+  git -C "$path" clean -fd \
+    -e "$CAPSULE_SENTINEL" \
+    -e "$CLONE_SENTINEL" \
+    -e capsule-manifest.json \
+    -e .kitsoki-dev-workspace.json \
+    -e .kitsoki-owner \
+    -e "$LOCAL_CONFIG" >/dev/null
 }
 
 # A local clone may share objects with its source repository. Before using a
@@ -1016,6 +1029,139 @@ cmd_merge() {
   echo "merged: $branch -> $target"
 }
 
+cmd_park() {
+  local repo="."
+  local root=""
+  local ref=""
+  local session_id=""
+  local message=""
+  local json=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --repo) repo="${2:?--repo requires a value}"; shift 2 ;;
+      --root) root="${2:?--root requires a value}"; shift 2 ;;
+      --session-id|--session_id) session_id="${2:?--session-id requires a value}"; shift 2 ;;
+      --message|-m) message="${2:?--message requires a value}"; shift 2 ;;
+      --json) json=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        [ -z "$ref" ] || die "park: unexpected argument: $1"
+        ref="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$ref" ] || die "park: workspace path or id is required"
+  repo="$(repo_root "$repo")"
+  root="$(resolve_root "$repo" "$root")"
+  local path
+  path="$(workspace_path "$repo" "$root" "$ref")"
+  local abs_path current_branch target base source_id stamp recovery_id recovery_branch recovery_workspace script_path
+  abs_path="$(abs_path "$path")"
+  if ! git -C "$abs_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [ "$json" = "1" ]; then
+      python3 - "$abs_path" <<'PY'
+import json
+import sys
+print(json.dumps({
+    "ok": True,
+    "parked": False,
+    "source_workspace": sys.argv[1],
+    "reason": "not a git checkout",
+}, indent=2, sort_keys=True))
+PY
+    else
+      echo "parked: false"
+      echo "reason: not a git checkout"
+    fi
+    return 0
+  fi
+  if ! workspace_dirty "$abs_path"; then
+    if [ "$json" = "1" ]; then
+      python3 - "$abs_path" <<'PY'
+import json
+import sys
+print(json.dumps({
+    "ok": True,
+    "parked": False,
+    "source_workspace": sys.argv[1],
+    "reason": "workspace is clean",
+}, indent=2, sort_keys=True))
+PY
+    else
+      echo "parked: false"
+      echo "reason: workspace is clean"
+    fi
+    return 0
+  fi
+
+  root="$(manifest_value "$abs_path" root "$root")"
+  current_branch="$(git -C "$abs_path" branch --show-current 2>/dev/null || true)"
+  base="$(manifest_value "$abs_path" base "${current_branch:-HEAD}")"
+  target="$(manifest_value "$abs_path" target "$DEFAULT_TARGET")"
+  source_id="$(workspace_id_from_path "$abs_path")"
+  [ -n "$source_id" ] || source_id="$(basename "$abs_path")"
+  stamp="$(date +%Y%m%dT%H%M%S)"
+  recovery_id="$(safe_ref_fragment "${source_id}-park-${stamp}-$$")"
+  recovery_branch="agent/$recovery_id"
+  recovery_workspace="$root/$recovery_id"
+  script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  local patch_file untracked_file untracked_tar create_json recovery_commit park_message
+  patch_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park.patch.XXXXXX")"
+  untracked_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-untracked.XXXXXX")"
+  untracked_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-untracked.XXXXXX.tar")"
+  park_message="${message:-chore: park rerouted work from $source_id}"
+
+  git -C "$abs_path" diff --binary HEAD >"$patch_file"
+  git -C "$abs_path" ls-files --others --exclude-standard -z >"$untracked_file"
+  if [ -s "$untracked_file" ]; then
+    tar -C "$abs_path" --null --files-from="$untracked_file" -cf "$untracked_tar"
+  fi
+
+  if ! create_json="$("$script_path" create --repo "$repo" --root "$root" --id "$recovery_id" --branch "$recovery_branch" --base "$base" --target "$target" --session-id "$session_id" --json --no-bootstrap 2>/dev/null)"; then
+    rm -f "$patch_file" "$untracked_file" "$untracked_tar"
+    die "park: could not create recovery capsule"
+  fi
+  recovery_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$create_json")"
+  if [ -s "$patch_file" ]; then
+    git -C "$recovery_workspace" apply --index --binary "$patch_file"
+  fi
+  if [ -s "$untracked_file" ]; then
+    tar -C "$recovery_workspace" -xf "$untracked_tar"
+  fi
+  if ! "$script_path" commit "$recovery_workspace" --message "$park_message" >/dev/null; then
+    rm -f "$patch_file" "$untracked_file" "$untracked_tar"
+    die "park: could not commit recovery capsule"
+  fi
+  recovery_commit="$(git -C "$recovery_workspace" rev-parse HEAD)"
+  clean_parked_workspace_source "$abs_path"
+
+  rm -f "$patch_file" "$untracked_file" "$untracked_tar"
+  if [ "$json" = "1" ]; then
+    python3 - "$abs_path" "$recovery_workspace" "$recovery_branch" "$recovery_commit" "$park_message" <<'PY'
+import json
+import sys
+source_workspace, recovery_workspace, recovery_branch, recovery_commit, reason = sys.argv[1:]
+print(json.dumps({
+    "ok": True,
+    "parked": True,
+    "source_workspace": source_workspace,
+    "recovery_workspace": recovery_workspace,
+    "recovery_branch": recovery_branch,
+    "recovery_commit": recovery_commit,
+    "cleaned": True,
+    "reason": reason,
+}, indent=2, sort_keys=True))
+PY
+  else
+    echo "parked: true"
+    echo "source: $abs_path"
+    echo "recovery: $recovery_workspace"
+    echo "branch: $recovery_branch"
+    echo "commit: $recovery_commit"
+  fi
+}
+
 cmd_close() {
   local repo="."
   local root=""
@@ -1118,6 +1264,7 @@ main() {
     status) shift; cmd_status "$@" ;;
     commit) shift; cmd_commit "$@" ;;
     merge|land) shift; cmd_merge "$@" ;;
+    park) shift; cmd_park "$@" ;;
     recover) shift; cmd_recover "$@" ;;
     close|teardown) shift; cmd_close "$@" ;;
     -h|--help|"") usage; [ -n "$cmd" ] || exit 1 ;;
