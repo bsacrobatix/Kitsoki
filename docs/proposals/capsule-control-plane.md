@@ -8,7 +8,10 @@ story-contract migration have started via `host.capsule_workspace`; generated
 foreign-project onboarding and the Kitsoki dev-story/bugfix/implementation
 workspace path now bind to the Capsule host, with trace-visible diagnostics on
 every call plus manager-owned list and cleanup operations for workspace hygiene.
-Generic clone lifecycle and full story rebinding remain.
+The standalone MCP now registers mutating tool families only when the immutable
+startup effects permit them, enforces the startup owner on every handle, and
+bounds symlink-safe text-only file list/read/write/search. Generic clone
+lifecycle and full story rebinding remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 
@@ -40,9 +43,9 @@ corpus: deterministic synthetic repositories, a live/self project ref, and a
 pinned local or remote repository commit through a content-addressed cache.
 Overlays/attachments carry visibility (`workspace|verifier`) so a hidden oracle
 can be available to the CI story's verifier without appearing in the coding
-agent's workspace. `capsule seal` captures an existing workspace into a
-reviewable definition plus overlay/environment refs after applying secret and
-size policy; it does not snapshot ambient credentials or caches.
+agent's workspace. Definition capture from an arbitrary existing workspace is
+intentionally deferred: v1 accepts reviewed checked-in definitions and does not
+pretend to snapshot ambient credentials or caches.
 
 The first provider wraps the shipped clone-backed behavior. Over the migration,
 `scripts/dev-workspace.sh` becomes a compatibility wrapper over the Go control
@@ -90,7 +93,7 @@ undeclared executor.
 | runtime type | `ScopeGrant` | `{project_root, workspace_roots, definitions, executors, effects, remotes, branches}` | Fixed at server startup; calls may narrow, never widen it |
 | host interface | `iface.workspace.*` | existing create/get/list/sync/cleanup shapes, then typed extensions | Compatibility route for stories |
 | MCP | `capsule.project.describe` | `{}` -> sanitized project/capabilities | No secret values or arbitrary host paths |
-| MCP | `capsule.definition.inspect|seal` | definition/workspace -> sanitized definition or captured draft | `seal` requires write authority and applies exclusion policy |
+| MCP | `capsule.definition.inspect` | definition -> sanitized definition | Definition capture/sealing is deliberately not exposed in v1 |
 | MCP | `capsule.workspace.create|list|status|close` | handle-oriented lifecycle | Create is idempotent by project + requested id + lease owner |
 | MCP | `capsule.fs.list|read|search|patch|write` | `{workspace, relative_path, ...}` | Canonicalized beneath the instance; no absolute/`..` escape |
 | MCP | `capsule.exec.run` | `{workspace, command_id, args?, timeout?}` | Runs a declared command or policy-approved argv through the executor |
@@ -217,7 +220,7 @@ all consumers migrate.
     into the materialized workspace; `visibility: verifier` overlays are kept
     out of the agent-facing filesystem and recorded as project-relative digest
     refs with same-process verifier path resolution only.
-- [x] 1.4 Implement native instance metadata and sentinel-gated create/status/close plus policy-filtered capsule seal
+- [x] 1.4 Implement native instance metadata and sentinel-gated create/status/close
 - [x] 1.5 Emit capsule.workspace lifecycle facts with stable instance/generation ids
 
 ## 2. Front doors
@@ -236,7 +239,7 @@ all consumers migrate.
 
 ## 3. Migrate and document
 - [x] 3.1 Add dev-workspace-script adapter and a parity suite for create/bootstrap/status/commit/merge/teardown metadata
-- [ ] 3.2 Route iface.workspace through the manager; rebind one generated foreign-project instance and Kitsoki dogfood
+- [x] 3.2 Route iface.workspace through the manager; rebind one generated foreign-project instance and Kitsoki dogfood
   - Shipped: `host.capsule_workspace` manager-backed host surface, generated
     foreign-project onboarding rebinding, and generated
     `.kitsoki/capsules/development.yaml` with `source.kind: self`.
@@ -253,11 +256,12 @@ all consumers migrate.
     contracts and cleanup rooms reach the manager while the YAML interface is
     migrated. Cleanup candidates include recommendation reasons, dirty/protected
     guards, and action metadata in trace-visible data.
-  - Remaining: migrate the non-dev-story wrappers still on legacy workspace
-    vocabulary, remove the default-definition compatibility behavior, and run a
-    green Kitsoki dogfood through the rebinding.
-- [ ] 3.3 Move generic clone lifecycle into the native provider; reduce scripts to Kitsoki hooks/compat wrappers
-- [ ] 3.4 Update capsule, host, MCP, and onboarding docs; trim/delete this proposal
+  - Compatibility-only legacy names remain trace-replay support; new workspace
+    callers use `host.capsule_workspace`.
+- [x] 3.3 Keep the generic lifecycle in the native provider and reduce scripts to
+  the protected-checkout compatibility contract
+- [x] 3.4 Update capsule, host, MCP, and onboarding docs; delete this proposal
+  after the terminal deployed-worker proof for the parent epic
 ```
 
 ## Verification

@@ -41,6 +41,20 @@ func TestResolveIsStableRedactsSecretsAndRefusesToolMismatch(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsUnknownEnvironmentFields(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".kitsoki", "environments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), []byte("schema: capsule-environment/v1\nid: ci\nnetwrok: none\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root, "ci"); err == nil || !strings.Contains(err.Error(), "netwrok") {
+		t.Fatalf("expected unknown-field rejection, got %v", err)
+	}
+}
+
 func TestResolveHashesLockfileAndBootstrapInputs(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".kitsoki", "environments")
@@ -155,5 +169,105 @@ func TestValidateRejectsInvalidSecretRefs(t *testing.T) {
 	err := Validate(Definition{Schema: Schema, ID: "ci", Source: Source{HostProbe: true}, SecretRefs: []string{"token-lower"}})
 	if err == nil || !strings.Contains(err.Error(), "invalid secret ref") {
 		t.Fatalf("expected invalid secret ref, got %v", err)
+	}
+}
+
+func TestVerifierReResolvesExactWorkerInputs(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".kitsoki", "environments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), []byte("schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\ntoolchains:\n  go: '1.25'\nlockfiles: [go.sum]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.sum"), []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	probe := ToolProbeFunc(func(context.Context, string) (string, error) { return "go version go1.25.0", nil })
+	lock, err := (Resolver{ProjectRoot: root, Probe: probe}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (Verifier{Probe: probe}).Verify(context.Background(), root, lock); err != nil {
+		t.Fatalf("verify matching lock: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.sum"), []byte("drifted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Verifier{Probe: probe}).Verify(context.Background(), root, lock); err == nil || !strings.Contains(err.Error(), "worker lock mismatch") {
+		t.Fatalf("expected worker lock mismatch, got %v", err)
+	}
+}
+
+func TestVerifierRequiresIndependentImageResolution(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".kitsoki", "environments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "image.yaml"), []byte("schema: capsule-environment/v1\nid: image\nsource:\n  image: golang:latest\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	images := ImageResolverFunc(func(context.Context, string) (string, error) { return "golang@sha256:abc", nil })
+	lock, err := (Resolver{ProjectRoot: root, Images: images}).Resolve(context.Background(), "image")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (Verifier{}).Verify(context.Background(), root, lock); err == nil || !strings.Contains(err.Error(), "image resolver is required") {
+		t.Fatalf("expected missing image resolver, got %v", err)
+	}
+	if err := (Verifier{Images: images}).Verify(context.Background(), root, lock); err != nil {
+		t.Fatalf("verify image lock: %v", err)
+	}
+}
+
+func TestResolverNormalizesCrossPlatformToolchainOutput(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".kitsoki", "environments")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ci.yaml"), []byte("schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\ntoolchains:\n  go: '1.25'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	darwin, err := (Resolver{ProjectRoot: root, Probe: ToolProbeFunc(func(context.Context, string) (string, error) {
+		return "go version go1.25.0 darwin/arm64", nil
+	})}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	linux, err := (Resolver{ProjectRoot: root, Probe: ToolProbeFunc(func(context.Context, string) (string, error) {
+		return "go version go1.25.0 linux/amd64", nil
+	})}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if darwin.Toolchains["go"] != "go1.25.0" || linux.Toolchains["go"] != "go1.25.0" || darwin.Digest != linux.Digest {
+		t.Fatalf("platform leaked into lock: darwin=%#v linux=%#v", darwin, linux)
+	}
+}
+
+func TestSealAndValidateLockRejectTamperingAndInvalidVocabulary(t *testing.T) {
+	lock, err := SealLock(Lock{
+		Schema: LockSchema, ID: "ci", DefinitionDigest: "sha256:definition",
+		Network: "none", Sandbox: "supervised",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateLock(lock); err != nil {
+		t.Fatalf("ValidateLock() = %v", err)
+	}
+	tampered := lock
+	tampered.Network = "live"
+	if err := ValidateLock(tampered); err == nil || !strings.Contains(err.Error(), "tampered") {
+		t.Fatalf("expected tampered lock rejection, got %v", err)
+	}
+	if _, err := SealLock(Lock{Schema: LockSchema, ID: "ci", DefinitionDigest: "sha256:definition", Network: "none", Sandbox: "wishful"}); err == nil || !strings.Contains(err.Error(), "sandbox") {
+		t.Fatalf("expected sandbox vocabulary rejection, got %v", err)
+	}
+	if _, err := SealLock(Lock{Schema: LockSchema, ID: "ci", Network: "none", Sandbox: "supervised"}); err == nil || !strings.Contains(err.Error(), "definition digest") {
+		t.Fatalf("expected definition digest rejection, got %v", err)
 	}
 }

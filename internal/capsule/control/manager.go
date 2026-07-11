@@ -35,6 +35,12 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 	if strings.TrimSpace(req.Owner) == "" {
 		return Handle{}, fmt.Errorf("capsule control: owner is required")
 	}
+	if m.Grant.Owner != "" && req.Owner != m.Grant.Owner {
+		return Handle{}, fmt.Errorf("%w: lease owner", ErrDenied)
+	}
+	if m.Grant.Owner != "" && !m.Grant.Allows("effect", "workspace_manage") {
+		return Handle{}, fmt.Errorf("%w: workspace_manage", ErrDenied)
+	}
 	if !m.Grant.Allows("definition", req.DefinitionID) {
 		return Handle{}, fmt.Errorf("%w: definition %q", ErrDenied, req.DefinitionID)
 	}
@@ -131,6 +137,26 @@ func (m *Manager) Status(ctx context.Context, h Handle) (Instance, error) {
 	if in.Generation != h.Generation {
 		return Instance{}, fmt.Errorf("%w: instance %q", ErrStale, h.ID)
 	}
+	if m.Grant.Owner != "" && in.Lease.Owner != m.Grant.Owner {
+		return Instance{}, fmt.Errorf("%w: instance %q is owned by another lease", ErrDenied, h.ID)
+	}
+	return in, nil
+}
+
+// StatusOwned verifies both opaque-handle freshness and lease ownership. It is
+// the common guard for front doors that do not already bind an owner into the
+// manager's immutable ScopeGrant.
+func (m *Manager) StatusOwned(ctx context.Context, h Handle, owner string) (Instance, error) {
+	if strings.TrimSpace(owner) == "" {
+		return Instance{}, fmt.Errorf("capsule control: owner is required")
+	}
+	in, err := m.Status(ctx, h)
+	if err != nil {
+		return Instance{}, err
+	}
+	if in.Lease.Owner != owner {
+		return Instance{}, fmt.Errorf("%w: instance %q is owned by another lease", ErrDenied, h.ID)
+	}
 	return in, nil
 }
 
@@ -160,6 +186,9 @@ func (m *Manager) Close(ctx context.Context, h Handle, owner string) error {
 	}
 	if in.Lease.Owner != owner {
 		return fmt.Errorf("%w: instance %q", ErrLeaseConflict, h.ID)
+	}
+	if m.Grant.Owner != "" && !m.Grant.Allows("effect", "workspace_manage") {
+		return fmt.Errorf("%w: workspace_manage", ErrDenied)
 	}
 	switch in.State {
 	case StateMaterializing, StateFailed:

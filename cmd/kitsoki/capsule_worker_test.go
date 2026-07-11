@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"kitsoki/internal/capsule/control"
@@ -13,6 +14,13 @@ import (
 
 func TestCapsuleWorkerRunWritesExecutorResult(t *testing.T) {
 	root := t.TempDir()
+	environmentPath := filepath.Join(root, ".kitsoki", "environments", "ci.yaml")
+	if err := os.MkdirAll(filepath.Dir(environmentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(environmentPath, []byte("schema: capsule-environment/v1\nid: ci\nnetwork: none\nsandbox: supervised\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	story := filepath.Join(root, "app.yaml")
 	raw := `app:
   id: worker-ci
@@ -60,7 +68,11 @@ states:
 	if err := os.WriteFile(story, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: story, StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
+	lock, err := (environment.Resolver{ProjectRoot: root}).Resolve(t.Context(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "app.yaml", StoryDigest: "sha256:story", Environment: lock, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +82,7 @@ states:
 	if err := os.WriteFile(envelopePath, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := execRoot(t, "capsule", "worker", "run", "--envelope", envelopePath, "--result", resultPath)
+	out, err := execRoot(t, "capsule", "worker", "run", "--envelope", envelopePath, "--result", resultPath, "--workspace", root)
 	if err != nil {
 		t.Fatalf("worker run: %v\n%s", err, out)
 	}
@@ -87,5 +99,18 @@ states:
 	}
 	if result.CompletionState.Outcome != "passed" || len(result.Result.VerdictJSON) == 0 {
 		t.Fatalf("result %#v", result)
+	}
+}
+
+func TestWorkerPassEnvCapabilitiesAndLogsExposeNamesNotValues(t *testing.T) {
+	t.Setenv("SYNTHETIC_API_KEY", "super-secret-worker-token")
+	t.Setenv("EMPTY_WORKER_SECRET", "")
+	refs := capsuleWorkerPresentEnvRefs([]string{"SYNTHETIC_API_KEY", "EMPTY_WORKER_SECRET", "SYNTHETIC_API_KEY", "MISSING_SECRET"})
+	if len(refs) != 1 || refs[0] != "SYNTHETIC_API_KEY" {
+		t.Fatalf("environment refs %#v", refs)
+	}
+	redacted := redactWorkerEnvValues("failed with super-secret-worker-token", refs)
+	if strings.Contains(redacted, "super-secret-worker-token") || !strings.Contains(redacted, "<redacted:SYNTHETIC_API_KEY>") {
+		t.Fatalf("redacted log %q", redacted)
 	}
 }

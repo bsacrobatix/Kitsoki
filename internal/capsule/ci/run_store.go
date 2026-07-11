@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/capsule/executor"
 	capsuletrace "kitsoki/internal/capsule/trace"
 )
 
@@ -21,11 +22,12 @@ const ProviderSummarySchema = "capsule-ci-provider-summary/v1"
 // this record makes the completed envelope/verdict recoverable without a new
 // registry schema.
 type RunRecord struct {
-	JobID               string    `json:"job_id"`
-	Result              RunResult `json:"result"`
-	ReceiptID           string    `json:"receipt_id,omitempty"`
-	ReceiptVerification string    `json:"receipt_verification,omitempty"`
-	DiagnosticError     string    `json:"diagnostic_error,omitempty"`
+	JobID               string                    `json:"job_id"`
+	Result              RunResult                 `json:"result"`
+	ReceiptID           string                    `json:"receipt_id,omitempty"`
+	ReceiptVerification string                    `json:"receipt_verification,omitempty"`
+	DiagnosticError     string                    `json:"diagnostic_error,omitempty"`
+	ExecutorStatus      *executor.ExecutionStatus `json:"executor_status,omitempty"`
 }
 
 type RunIndex struct {
@@ -62,25 +64,35 @@ type RunProjection struct {
 	EnvironmentDigest   string             `json:"environment_digest,omitempty"`
 	TracePath           string             `json:"trace_path,omitempty"`
 	ReceiptPath         string             `json:"receipt_path,omitempty"`
+	Stage               string             `json:"stage,omitempty"`
+	StartedAt           time.Time          `json:"started_at,omitempty"`
 	UpdatedAt           time.Time          `json:"updated_at,omitempty"`
+	Terminal            bool               `json:"terminal,omitempty"`
 }
 
 const RunDiagnosisSchema = "capsule-ci-run-diagnosis/v1"
+const DefaultStallAfter = 2 * time.Minute
 
 // RunDiagnosis is the operator-facing, provider-safe failure summary for one
 // persisted Capsule CI run. It deliberately points at local artifacts instead of
 // copying raw logs into prompts or issue bodies.
 type RunDiagnosis struct {
-	Schema             string               `json:"schema"`
-	Run                RunProjection        `json:"run"`
-	TerminalError      string               `json:"terminal_error,omitempty"`
-	FailureKind        string               `json:"failure_kind,omitempty"`
-	FailureSummary     string               `json:"failure_summary,omitempty"`
-	ExecutorEventCount int                  `json:"executor_event_count"`
-	LastExecutorEvent  *TraceEventSummary   `json:"last_executor_event,omitempty"`
-	Timeline           []TraceEventSummary  `json:"timeline,omitempty"`
-	Artifacts          []DiagnosticArtifact `json:"artifacts,omitempty"`
-	NextCommands       []string             `json:"next_commands,omitempty"`
+	Schema             string                             `json:"schema"`
+	Run                RunProjection                      `json:"run"`
+	TerminalError      string                             `json:"terminal_error,omitempty"`
+	FailureKind        string                             `json:"failure_kind,omitempty"`
+	FailureSummary     string                             `json:"failure_summary,omitempty"`
+	ExecutorEventCount int                                `json:"executor_event_count"`
+	LastExecutorEvent  *TraceEventSummary                 `json:"last_executor_event,omitempty"`
+	LastActivityAt     time.Time                          `json:"last_activity_at,omitempty"`
+	ExecutorSpanOpen   bool                               `json:"executor_span_open,omitempty"`
+	Stalled            bool                               `json:"stalled,omitempty"`
+	StallReason        string                             `json:"stall_reason,omitempty"`
+	Agent              *executor.AgentDiagnostics         `json:"agent,omitempty"`
+	WorkerCleanup      *executor.WorkerCleanupDiagnostics `json:"worker_cleanup,omitempty"`
+	Timeline           []TraceEventSummary                `json:"timeline,omitempty"`
+	Artifacts          []DiagnosticArtifact               `json:"artifacts,omitempty"`
+	NextCommands       []string                           `json:"next_commands,omitempty"`
 }
 
 type TraceEventSummary struct {
@@ -99,8 +111,8 @@ type DiagnosticArtifact struct {
 type FileRunStore struct{ ProjectRoot string }
 
 func (s FileRunStore) Write(record RunRecord) error {
-	if record.JobID == "" {
-		return fmt.Errorf("capsule ci: job id is required")
+	if err := validateRunID(record.JobID); err != nil {
+		return err
 	}
 	dir := filepath.Join(s.ProjectRoot, ".capsules", "ci")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -110,9 +122,12 @@ func (s FileRunStore) Write(record RunRecord) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, record.JobID+".run.json"), append(raw, '\n'), 0o600)
+	return writeAtomic(filepath.Join(dir, record.JobID+".run.json"), append(raw, '\n'), 0o600)
 }
 func (s FileRunStore) Get(id string) (RunRecord, error) {
+	if err := validateRunID(id); err != nil {
+		return RunRecord{}, err
+	}
 	raw, err := os.ReadFile(filepath.Join(s.ProjectRoot, ".capsules", "ci", id+".run.json"))
 	if os.IsNotExist(err) {
 		raw, err = os.ReadFile(filepath.Join(s.ProjectRoot, ".capsules", "ci", id+".json"))
@@ -150,8 +165,25 @@ func (s FileRunStore) List() ([]RunRecord, error) {
 		}
 		out = append(out, record)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].JobID > out[j].JobID })
+	sort.Slice(out, func(i, j int) bool {
+		left, right := out[i].Result.UpdatedAt, out[j].Result.UpdatedAt
+		if !left.Equal(right) {
+			return left.After(right)
+		}
+		return out[i].JobID > out[j].JobID
+	})
 	return out, nil
+}
+
+func (s FileRunStore) Latest() (RunRecord, error) {
+	records, err := s.List()
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if len(records) == 0 {
+		return RunRecord{}, fmt.Errorf("capsule ci: no persisted runs")
+	}
+	return records[0], nil
 }
 
 func (s FileRunStore) Index() (RunIndex, error) {
@@ -204,6 +236,18 @@ func (s FileRunStore) ProviderSummary(limit int) (ProviderSummary, error) {
 }
 
 func (s FileRunStore) Diagnose(id string) (RunDiagnosis, error) {
+	return s.DiagnoseAt(id, time.Now().UTC(), DefaultStallAfter)
+}
+
+func (s FileRunStore) DiagnoseLatest(stallAfter time.Duration) (RunDiagnosis, error) {
+	record, err := s.Latest()
+	if err != nil {
+		return RunDiagnosis{}, err
+	}
+	return s.DiagnoseAt(record.JobID, time.Now().UTC(), stallAfter)
+}
+
+func (s FileRunStore) DiagnoseAt(id string, now time.Time, stallAfter time.Duration) (RunDiagnosis, error) {
 	record, err := s.Get(id)
 	if err != nil {
 		return RunDiagnosis{}, err
@@ -213,6 +257,19 @@ func (s FileRunStore) Diagnose(id string) (RunDiagnosis, error) {
 		Schema:        RunDiagnosisSchema,
 		Run:           projection,
 		TerminalError: record.DiagnosticError,
+	}
+	if record.ExecutorStatus != nil {
+		if record.ExecutorStatus.Agent != nil && executor.ValidateAgentDiagnostics(*record.ExecutorStatus.Agent) == nil {
+			agent := *record.ExecutorStatus.Agent
+			diagnosis.Agent = &agent
+			if agent.LastActivityAt.After(diagnosis.LastActivityAt) {
+				diagnosis.LastActivityAt = agent.LastActivityAt
+			}
+		}
+		if record.ExecutorStatus.Cleanup != nil && executor.ValidateWorkerCleanupDiagnostics(*record.ExecutorStatus.Cleanup) == nil {
+			cleanup := *record.ExecutorStatus.Cleanup
+			diagnosis.WorkerCleanup = &cleanup
+		}
 	}
 	if projection.TracePath != "" {
 		diagnosis.Artifacts = append(diagnosis.Artifacts, DiagnosticArtifact{Kind: "trace", Path: projection.TracePath})
@@ -230,6 +287,7 @@ func (s FileRunStore) Diagnose(id string) (RunDiagnosis, error) {
 	if diagnosis.FailureKind == "" {
 		diagnosis.FailureKind, diagnosis.FailureSummary = inferRunFailure(record)
 	}
+	diagnosis.detectStall(record, now, stallAfter)
 	diagnosis.NextCommands = diagnosticNextCommands(projection, diagnosis)
 	return diagnosis, nil
 }
@@ -243,7 +301,7 @@ func (s FileRunStore) Project(record RunRecord) RunProjection {
 		Status:              job.Status,
 		Story:               job.Story,
 		Workspace:           string(job.WorkspaceInstanceID),
-		Pipeline:            verdict.Pipeline,
+		Pipeline:            firstNonEmpty(verdict.Pipeline, record.Result.Pipeline),
 		Outcome:             verdict.Outcome,
 		PromotionEligible:   verdict.PromotionEligible,
 		ReceiptID:           record.ReceiptID,
@@ -254,6 +312,12 @@ func (s FileRunStore) Project(record RunRecord) RunProjection {
 		EnvironmentDigest:   envDigest,
 		UpdatedAt:           job.UpdatedAt,
 	}
+	if !record.Result.UpdatedAt.IsZero() {
+		projection.UpdatedAt = record.Result.UpdatedAt
+	}
+	projection.Stage = record.Result.Stage
+	projection.StartedAt = record.Result.StartedAt
+	projection.Terminal = runResultTerminal(record.Result)
 	if projection.SourceDigest == "" {
 		projection.SourceDigest = record.Result.Envelope.SourceDigest
 	}
@@ -287,16 +351,36 @@ func readTraceDocument(path string) (capsuletrace.Document, error) {
 }
 
 func (d *RunDiagnosis) applyTrace(doc capsuletrace.Document) {
+	open := map[string]int{}
 	for _, event := range doc.Events {
 		summary := TraceEventSummary{Kind: event.Kind, At: event.At, Outcome: event.Outcome, Error: event.Error, Fields: providerSafeSummaryFields(event.Fields)}
-		if strings.HasPrefix(event.Kind, "capsule.executor.") {
+		if strings.HasPrefix(event.Kind, "capsule.executor.") || strings.HasPrefix(event.Kind, "capsule.worker.") {
 			d.ExecutorEventCount++
 			copy := summary
 			d.LastExecutorEvent = &copy
 		}
+		if event.At.After(d.LastActivityAt) {
+			d.LastActivityAt = event.At
+		}
+		executionID := stringField(event.Fields, "execution_id")
+		if executionID == "" {
+			executionID = "unknown"
+		}
+		switch event.Kind {
+		case capsuletrace.KindExecutorStarted:
+			open[executionID]++
+		case capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed, capsuletrace.KindExecutorCancelled:
+			if open[executionID] > 0 {
+				open[executionID]--
+			}
+		}
 		if event.Kind == capsuletrace.KindExecutorFailed {
 			d.FailureKind = "executor_failed"
 			d.FailureSummary = firstNonEmpty(event.Error, stringField(event.Fields, "error_kind"), stringField(event.Fields, "message"), stringField(event.Fields, "status"))
+		}
+		if event.Kind == capsuletrace.KindWorkerFailed && d.FailureKind == "" {
+			d.FailureKind = "worker_failed"
+			d.FailureSummary = firstNonEmpty(event.Error, stringField(event.Fields, "worker_stage"), stringField(event.Fields, "stage"), stringField(event.Fields, "message"))
 		}
 		if event.Kind == capsuletrace.KindCIVerdict && event.Outcome != "" && d.FailureKind == "" && event.Outcome != "passed" {
 			d.FailureKind = "verdict_" + event.Outcome
@@ -306,11 +390,61 @@ func (d *RunDiagnosis) applyTrace(doc capsuletrace.Document) {
 			d.Timeline = append(d.Timeline, summary)
 		}
 	}
+	for _, count := range open {
+		if count > 0 {
+			d.ExecutorSpanOpen = true
+			break
+		}
+	}
+}
+
+func (d *RunDiagnosis) detectStall(record RunRecord, now time.Time, stallAfter time.Duration) {
+	if d.LastActivityAt.IsZero() {
+		d.LastActivityAt = record.Result.UpdatedAt
+	}
+	if d.LastActivityAt.IsZero() {
+		d.LastActivityAt = record.Result.Job.UpdatedAt
+	}
+	if runResultTerminal(record.Result) {
+		if d.ExecutorSpanOpen {
+			d.FailureKind = "executor_span_unclosed"
+			d.FailureSummary = "executor started without a matching finished or failed event"
+		}
+		return
+	}
+	if stallAfter <= 0 {
+		stallAfter = DefaultStallAfter
+	}
+	if d.LastActivityAt.IsZero() || now.Before(d.LastActivityAt.Add(stallAfter)) {
+		return
+	}
+	d.Stalled = true
+	if d.Agent != nil && d.Agent.StallHint != "" {
+		d.StallReason = fmt.Sprintf("agent %s; no provider-safe activity for %s while stage is %s", d.Agent.StallHint, now.Sub(d.LastActivityAt).Round(time.Second), record.Result.Stage)
+	} else {
+		d.StallReason = fmt.Sprintf("no durable activity for %s while stage is %s", now.Sub(d.LastActivityAt).Round(time.Second), record.Result.Stage)
+	}
+	if d.FailureKind == "" {
+		d.FailureKind = "stalled"
+		d.FailureSummary = d.StallReason
+	}
+}
+
+func runResultTerminal(result RunResult) bool {
+	if result.Terminal {
+		return true
+	}
+	switch result.Job.Status {
+	case artifactjob.StatusDone, artifactjob.StatusFailed, artifactjob.StatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func providerSafeSummaryFields(fields map[string]any) map[string]any {
 	out := map[string]any{}
-	for _, key := range []string{"execution_id", "transport", "remote_host", "request_id", "method", "path", "status", "duration_ms", "error_kind", "message", "completion_state_outcome", "exit_code"} {
+	for _, key := range []string{"stage", "terminal", "execution_id", "transport", "remote_host", "request_id", "method", "path", "status", "duration_ms", "error_kind", "message", "completion_state_outcome", "exit_code", "worker_request_id", "worker_status", "worker_stage", "source_digest", "bundle_digest", "bundle_bytes", "source_cache"} {
 		if value, ok := fields[key]; ok {
 			out[key] = value
 		}
@@ -322,8 +456,11 @@ func providerSafeSummaryFields(fields map[string]any) map[string]any {
 }
 
 func interestingTraceEvent(kind string) bool {
+	if strings.HasPrefix(kind, "capsule.executor.source.") || strings.HasPrefix(kind, "capsule.worker.") {
+		return true
+	}
 	switch kind {
-	case capsuletrace.KindWorkspaceReady, capsuletrace.KindEnvironmentResolved, capsuletrace.KindExecutorPrepared, capsuletrace.KindExecutorStarted, capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed, capsuletrace.KindCIStarted, capsuletrace.KindCIVerdict:
+	case capsuletrace.KindWorkspaceReady, capsuletrace.KindEnvironmentResolved, capsuletrace.KindExecutorPrepared, capsuletrace.KindExecutorStarted, capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed, capsuletrace.KindExecutorCancelled, capsuletrace.KindCIStarted, capsuletrace.KindCIVerdict:
 		return true
 	default:
 		return false
@@ -350,6 +487,9 @@ func diagnosticNextCommands(run RunProjection, diagnosis RunDiagnosis) []string 
 	if run.JobID != "" {
 		out = append(out, "go run ./cmd/kitsoki capsule ci status --job "+run.JobID)
 	}
+	if diagnosis.Stalled || diagnosis.ExecutorSpanOpen {
+		out = append(out, "go run ./cmd/kitsoki capsule ci doctor "+run.Pipeline+" --workspace "+run.Workspace+" --json=false")
+	}
 	if run.TracePath != "" {
 		out = append(out, "jq '.events[] | {kind, at, outcome, error, fields}' "+run.TracePath)
 	}
@@ -360,6 +500,34 @@ func diagnosticNextCommands(run RunProjection, diagnosis RunDiagnosis) []string 
 		out = append(out, "ls -la .capsules/ci")
 	}
 	return out
+}
+
+func writeAtomic(path string, raw []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -389,26 +557,114 @@ func stringField(fields map[string]any, key string) string {
 	}
 }
 
-// Cancel records a visible terminal cancel for a parked/running CI job. Active
-// remote providers receive the same request through ExecutorProvider.Cancel;
-// this local store path makes cancellation durable even when no worker remains.
+// Cancel records a visible terminal cancel for an already parked local CI job.
+// Running remote jobs must use their durable ExecutionController; writing a
+// local terminal state before the worker confirms cancellation would lie.
 func (s FileRunStore) Cancel(id string) (RunRecord, error) {
+	if err := validateRunID(id); err != nil {
+		return RunRecord{}, err
+	}
 	record, err := s.Get(id)
 	if err != nil {
 		return RunRecord{}, err
 	}
 	switch record.Result.Job.Status {
-	case artifactjob.StatusRunning, artifactjob.StatusAwaitingInput, artifactjob.StatusInterrupted:
+	case artifactjob.StatusAwaitingInput:
 	default:
 		return RunRecord{}, fmt.Errorf("capsule ci: job %s cannot be cancelled from %s", id, record.Result.Job.Status)
 	}
 	record.Result.Job.Status = artifactjob.StatusCancelled
 	record.Result.Verdict.Outcome = "cancelled"
 	record.Result.Verdict.PromotionEligible = false
+	record.Result.Stage = RunStageFinished
+	record.Result.Terminal = true
+	record.Result.UpdatedAt = time.Now().UTC()
+	record.Result.Job.UpdatedAt = record.Result.UpdatedAt
 	if err := s.Write(record); err != nil {
 		return RunRecord{}, err
 	}
 	return record, nil
+}
+
+// RecordExecutorStatus persists the latest durable worker fact and projects it
+// conservatively onto the controller run. A remote "completed" execution is
+// not a completed CI run until the controller validates/collects its verdict
+// and receipt, so recovery leaves it interrupted at the collecting stage.
+func (s FileRunStore) RecordExecutorStatus(id string, status executor.ExecutionStatus) (RunRecord, error) {
+	if err := validateRunID(id); err != nil {
+		return RunRecord{}, err
+	}
+	record, err := s.Get(id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if status.Schema != executor.ExecutionStatusSchema || status.ExecutionID == "" || status.ExecutionID != record.Result.Execution.ExecutionID || status.Status == "" {
+		return RunRecord{}, fmt.Errorf("capsule ci: invalid executor status for job %s", id)
+	}
+	if status.Agent != nil {
+		if err := executor.ValidateAgentDiagnostics(*status.Agent); err != nil {
+			return RunRecord{}, fmt.Errorf("capsule ci: invalid executor agent diagnostics for job %s", id)
+		}
+	}
+	if status.Cleanup != nil {
+		if err := executor.ValidateWorkerCleanupDiagnostics(*status.Cleanup); err != nil {
+			return RunRecord{}, fmt.Errorf("capsule ci: invalid executor cleanup diagnostics for job %s", id)
+		}
+	}
+	copy := status
+	record.ExecutorStatus = &copy
+	now := status.UpdatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	record.Result.UpdatedAt = now
+	record.Result.Job.UpdatedAt = now
+	switch status.Status {
+	case "running":
+		record.Result.Job.Status = artifactjob.StatusRunning
+		record.Result.Stage = RunStageRunning
+		record.Result.Terminal = false
+	case "cancelling":
+		record.Result.Job.Status = artifactjob.StatusInterrupted
+		record.Result.Stage = RunStageRunning
+		record.Result.Terminal = false
+	case "cancelled":
+		record.Result.Job.Status = artifactjob.StatusCancelled
+		record.Result.Verdict = cancelledVerdict(record.Result, fmt.Errorf("remote execution %s cancelled", status.ExecutionID))
+		record.Result.Stage = RunStageFinished
+		record.Result.Terminal = true
+	case "failed":
+		record.Result.Job.Status = artifactjob.StatusFailed
+		record.Result.Stage = RunStageFailed
+		record.Result.Terminal = true
+		if record.DiagnosticError == "" {
+			record.DiagnosticError = firstNonEmpty(status.Error, "remote execution failed")
+		}
+	case "completed":
+		if !record.Result.Terminal {
+			record.Result.Job.Status = artifactjob.StatusInterrupted
+			record.Result.Stage = RunStageCollecting
+		}
+	default:
+		return RunRecord{}, fmt.Errorf("capsule ci: unsupported executor status %q", status.Status)
+	}
+	if err := s.Write(record); err != nil {
+		return RunRecord{}, err
+	}
+	return record, nil
+}
+
+func validateRunID(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" || len(id) > 128 {
+		return fmt.Errorf("capsule ci: invalid job id")
+	}
+	for _, r := range id {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
+			return fmt.Errorf("capsule ci: invalid job id")
+		}
+	}
+	return nil
 }
 
 func (s FileRunStore) rel(path string) string {

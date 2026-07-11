@@ -641,7 +641,7 @@ func onboardingCapsuleEnvironmentYAML(root string) string {
 			fmt.Fprintf(&b, "  - %s\n", rel)
 		}
 	}
-	b.WriteString("network: none\ncaches:\n  - id: project-build\n    scope: project\n    mode: read_write\nsandbox: supervised\n")
+	b.WriteString("network: live\ncaches:\n  - id: project-build\n    scope: project\n    mode: read_write\nsandbox: supervised\n")
 	return b.String()
 }
 
@@ -650,7 +650,7 @@ func onboardingDevelopmentCapsuleYAML() string {
 }
 
 func onboardingCapsuleCIYAML() string {
-	return "schema: capsule-ci/v1\nproject_profile: .kitsoki/project-profile.yaml\ndefault_environment: ci\n\npipelines:\n  change:\n    story: .kitsoki/stories/capsule-ci/app.yaml\n    triggers: [local]\n    environment: ci\n    executor: host\n    mode: one-shot\n    required: true\n    permissions:\n      network: none\n      external_write: deny\n    agents:\n      policy: deny\n    cleanup:\n      keep_runs: 20\n      require_hygiene_check: true\n    result:\n      schema: capsule-ci-verdict/v1\n      pass_exits: [passed]\n      fail_exits: [failed]\n      park_exits: [needs_input]\n"
+	return "schema: capsule-ci/v1\nproject_profile: .kitsoki/project-profile.yaml\ndefault_environment: ci\n\npipelines:\n  change:\n    story: .kitsoki/stories/capsule-ci/app.yaml\n    triggers: [local]\n    environment: ci\n    executor: host\n    mode: one-shot\n    required: true\n    permissions:\n      # Host execution is an explicitly trusted local compatibility lane.\n      # Choose container or a remotely enforced worker for none/replay.\n      network: live\n      external_write: allow\n    agents:\n      policy: deny\n    cleanup:\n      keep_runs: 20\n      require_hygiene_check: true\n    result:\n      schema: capsule-ci-verdict/v1\n      pass_exits: [passed]\n      fail_exits: [failed]\n      park_exits: [needs_input]\n"
 }
 
 func onboardingCapsuleCIStoryYAML() string {
@@ -672,6 +672,9 @@ world:
   ci_verdict: { type: object, default: {} }
   ci_outcome: { type: string, default: "" }
 
+hosts:
+  - host.capsule_ci.project_checks
+
 intents:
   run:
     description: "Validate the supplied Capsule CI envelope."
@@ -689,30 +692,28 @@ states:
     relevant_world: [ci_pipeline, ci_job_id]
     view:
       - heading: "Capsule CI"
-      - prose: "This generated CI story parks until the project composes deterministic checks."
+      - prose: "Run the test and build commands declared by the checked-in project profile."
     on:
       run:
-        - target: parked
+        - target: project_checks
           effects:
-            - set:
-                ci_outcome: "needs_input"
-                ci_verdict:
-                  schema: capsule-ci-verdict/v1
-                  pipeline: "{{ world.ci_pipeline }}"
-                  outcome: needs_input
-                  summary: "Generated Capsule CI needs project-specific checks before it can pass."
-                  checks: []
-                  promotion_eligible: false
-                  source_digest: "{{ world.ci_source.digest }}"
-                  story_digest: "{{ world.ci_trigger.story_digest }}"
-                  environment_digest: "{{ world.ci_environment.digest }}"
-                  envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+            - invoke: host.capsule_ci.project_checks
+              with:
+                workdir: "{{ world.ci_workspace.path }}"
+                job_id: "{{ world.ci_job_id }}"
+                pipeline: "{{ world.ci_pipeline }}"
+                source_digest: "{{ world.ci_source.digest }}"
+                story_digest: "{{ world.ci_trigger.story_digest }}"
+                environment_digest: "{{ world.ci_environment.digest }}"
+                envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+              bind:
+                ci_verdict: verdict
       look:
         - target: .
-  parked:
+  project_checks:
     view:
-      - heading: "Needs input"
-      - prose: "Add deterministic checks or review rooms, then rerun Capsule CI."
+      - heading: "Project checks complete"
+      - prose: "The typed verdict and evidence come from the project profile's declared commands."
 `
 }
 

@@ -2,9 +2,12 @@ package ci
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"kitsoki/internal/capsule/executor"
 )
@@ -56,9 +59,11 @@ var _ ExecutorSelector = BuiltinExecutors{}
 // names only; credential values are read at request time and stay out of
 // envelopes, traces, and receipts.
 type ConfiguredExecutors struct {
-	Builtins BuiltinExecutors
-	Remotes  map[string]Remote
-	Client   *http.Client
+	Builtins    BuiltinExecutors
+	Remotes     map[string]Remote
+	Client      *http.Client
+	Source      executor.SourceBundler
+	ProjectRoot string
 }
 
 func NewConfiguredExecutors(cfg Config) ConfiguredExecutors {
@@ -73,7 +78,29 @@ func (e ConfiguredExecutors) Select(ctx context.Context, name string) (executor.
 	if !ok {
 		return nil, fmt.Errorf("capsule ci: executor %q is not configured", name)
 	}
-	worker := executor.HTTPRemoteWorker{Endpoint: remote.Endpoint, Client: e.Client}
+	client := e.Client
+	if remote.CAFile != "" {
+		if client != nil {
+			return nil, fmt.Errorf("capsule ci: remote %q cannot combine ca_file with an injected HTTP client", name)
+		}
+		root := e.ProjectRoot
+		if root == "" {
+			root = "."
+		}
+		raw, err := os.ReadFile(filepath.Join(root, filepath.Clean(remote.CAFile)))
+		if err != nil {
+			return nil, fmt.Errorf("capsule ci: read remote %q CA: %w", name, err)
+		}
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(raw) {
+			return nil, fmt.Errorf("capsule ci: remote %q ca_file has no PEM certificate", name)
+		}
+		client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}}}
+	}
+	worker := executor.HTTPRemoteWorker{Endpoint: remote.Endpoint, Client: client, Source: e.Source}
 	if remote.CredentialEnv != "" {
 		env := remote.CredentialEnv
 		worker.Credential = func(context.Context) (string, error) {

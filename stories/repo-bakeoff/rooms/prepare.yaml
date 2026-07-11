@@ -1,6 +1,6 @@
 # prepare — DETERMINISTIC, FREE, and REAL. First call `bench.py preflight` to
 # catch setup blockers (local checkout, candidate profile, commits, oracles), then
-# call `bench.py verify`: clone the project at each bug's baseline, overlay the
+# call `bench.py verify` against a managed baseline, overlay the
 # regression test the real PR shipped, and prove it is RED at baseline / GREEN at
 # the real fix. Finally call `prepare_handoffs.sh`, which runs `drive_cell.sh
 # --no-drive` for the selected matrix and audits the prepared MCP prompts for
@@ -24,7 +24,7 @@ states:
             Armed:   '{% if world.verify_log != "" %}yes{% else %}no{% endif %}'
             Handoffs: '{% if world.handoffs_ready %}ready{% else %}pending{% endif %}'
             Handoff audit: "{{ world.handoff_audit_markdown }}"
-      - prose: "bench.py preflight checks repo/candidate readiness before bench.py verify clones each baseline, overlays the PR's regression test, and confirms RED@baseline / GREEN@real-fix. Then prepare_handoffs.sh writes no-drive worktrees/prompts and audits them for missing files and hidden-oracle leaks. Deterministic and free — it proves the bake-off is valid before any cost is incurred."
+      - prose: "bench.py preflight checks repo/candidate readiness before bench.py verify arms each managed baseline, overlays the PR's regression test, and confirms RED@baseline / GREEN@real-fix. Then prepare_handoffs.sh writes no-drive Capsule metadata/prompts and audits them for missing files and hidden-oracle leaks. Deterministic and free — it proves the evaluation is valid before any cost is incurred."
       - choice:
           mode: single
           prompt: "Actions"

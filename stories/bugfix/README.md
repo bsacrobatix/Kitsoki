@@ -274,17 +274,17 @@ workspace: host.workspace_manager, transport: host.jira_comment}`.
 
 Standalone Wave 1 needs every iface's default handler PLUS
 `host.inbox.add` and the agent verb handlers below. The flow fixtures
-stub them all with canned envelopes; Slice β ships the real handlers
-in `internal/host/`.
+stub them all with canned envelopes; the real handlers ship in
+`internal/host/`.
 
 | Handler | Status | File |
 |---|---|---|
-| `host.local_files.ticket` | Slice β (in flight) | `internal/host/localfiles_ticket.go` |
-| `host.git` | Slice β (in flight) | `internal/host/git_vcs.go` |
-| `host.local` | Slice β (in flight) | `internal/host/local_ci.go` |
-| `host.capsule_workspace` | Slice β (in flight) | `internal/host/git_worktree.go` |
-| `host.append_to_file` | Slice β (in flight) | `internal/host/append_file_transport.go` |
-| `host.inbox.add` | Slice β (in flight) | `internal/host/inbox_add.go` |
+| `host.local_files.ticket` | shipped | `internal/host/localfiles_ticket.go` |
+| `host.git` | shipped (legacy workspace compatibility) | `internal/host/git_vcs.go` |
+| `host.local` | shipped | `internal/host/local_ci.go` |
+| `host.capsule_workspace` | shipped | `internal/host/git_worktree.go` |
+| `host.append_to_file` | shipped | `internal/host/append_file_transport.go` |
+| `host.inbox.add` | shipped | `internal/host/inbox_add.go` |
 | `host.agent.task` | agent-split Phase 8 | `internal/host/agent_task.go` |
 | `host.agent.ask` | agent-split Phase 8 | `internal/host/agent_ask.go` |
 | `host.agent.decide` | agent-split Phase 8 | `internal/host/agent_decide.go` |

@@ -82,6 +82,13 @@ story.
 
 ## Attach Studio MCP
 
+Studio MCP and Capsule MCP serve different roles. Studio is the story authoring
+and driving surface below; Capsule MCP is the least-authority coding-agent
+surface for a single project/workspace. Do not give a coding agent this Studio
+configuration just to let it edit a repository. Use the Capsule-only launch
+profiles in [Capsule MCP authority boundary](../../architecture/capsule-mcp.md#launch-profiles)
+when it must create, edit, commit, or run CI inside a governed workspace.
+
 Onboarding writes `.mcp.json` and installs the `kitsoki-mcp-driver` agent:
 
 ```sh

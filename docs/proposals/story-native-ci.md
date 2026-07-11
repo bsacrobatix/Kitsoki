@@ -2,17 +2,17 @@
 
 **Status:** v1 in progress. `.kitsoki/ci.yaml`, the reference story, typed
 verdict/envelope service, engine launcher, CLI, cancellation, run status,
-Capsule MCP CI tools, deterministic verdict construction, no-LLM
+Capsule MCP CI tools, deterministic project-profile checks and verdict
+construction, sealed deny/allowlist/budget agent policy, no-LLM
 pass/fail/park/budget flow fixtures, richer reference-story rooms, and a
 GitHub trigger/check adapter ship. Onboarding now emits a checked-in CI
 manifest, environment definition, and minimal project CI story wrapper.
 Project-wrapper parity/digest fixtures and a Capsule-MCP-only writer proof ship.
-Cassette-backed LLM review fixtures now exercise the real `host.agent.decide`
-review seam without live model spend. A bounded two-instance VM dogfood reached
-real Claude Code / GLM-5.2 worker launch and exposed remote driver/auth/stall
-diagnostics gaps, so it is recorded as a blocker rather than a green remote CI
-proof. GitHub check publication now has an explicit credentialed command seam.
-A completed gated remote dogfood and final doc trimming remain.
+Cassette-backed LLM review fixtures exercise the real `host.agent.decide`
+review seam without live model spend. Durable readiness/checkpoint/diagnosis
+surfaces and the authenticated source-materializing HTTPS worker now ship.
+GitHub check publication has an explicit credentialed command seam. Only a
+completed gated deployed-worker dogfood remains before final deletion.
 **Kind:**   story
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -75,9 +75,13 @@ pipelines:
 Run it identically on either placement:
 
 ```sh
-kitsoki capsule ci run change --ref HEAD --executor local
-kitsoki capsule ci run change --ref HEAD --executor remote-ci
+kitsoki capsule ci doctor change --workspace change-1 --json=false
+kitsoki capsule ci run change --workspace change-1
 ```
+
+Placement is the pipeline's checked-in `executor:` selection; it is not a
+story-controlled or per-run authority override. Local and remote pipeline
+variants consume the same workspace/envelope/verdict contract.
 
 The runner creates or adopts a Capsule workspace, registers an artifact job,
 builds the execution envelope, starts the named story, and requires a
@@ -317,6 +321,11 @@ project wrapper that imports only deterministic checks and adjudication.
 
 ## 3. Adopt and document
 - [x] 3.1 Extend onboarding to generate `.kitsoki/ci.yaml`, environment definition, and a minimal project CI wrapper from project-profile commands
+  - Shipped: generated wrappers call the deterministic
+    `host.capsule_ci.project_checks` host, persist bounded command evidence,
+    pass/fail from declared test/build commands, and park when no commands are
+    declared. The same injected contract is proven on host, fake remote, and
+    fake container without forking real project commands.
 - [ ] 3.2 Dogfood Kitsoki's focused validation + review story locally, then through a fake and one gated real remote executor
   - Attempted: two bounded VM live-driver runs against `query-string` (`qs1`,
     `qs2`) with candidate `glm-5.2` / profile `synthetic-claude`. Both created
@@ -339,6 +348,11 @@ project wrapper that imports only deterministic checks and adjudication.
     `capsule-ci-run-diagnosis/v1` from the persisted run record plus trace
     sidecar, including failure kind, executor event summary, evidence paths,
     and copy-ready next commands.
+  - Shipped follow-up: `capsule ci doctor` provides a no-spend readiness gate;
+    requested/preparing/running/terminal records are durable and atomically
+    replaced; the HTTPS worker uploads/caches exact clean-commit bundles,
+    verifies full story closure, persists its own run/timeline, and exposes
+    status/cancellation.
   - Remaining: fix the VM driver/credential/env setup and re-run a gated
     remote CI proof to terminal verdict. The attempted run was Studio/Claude
     worker dogfood, not a deployed HTTPS Capsule worker proof.
@@ -347,6 +361,9 @@ project wrapper that imports only deterministic checks and adjudication.
     JSON to the standard `ci.Trigger` contract, and
     `kitsoki capsule ci github check` projects a persisted Capsule CI run record
     to a GitHub check-run payload.
+  - Shipped: `capsule ci plan|run --trigger <file|->` consumes that normalized
+    object, defaults/validates the requested pipeline, and keeps raw provider
+    payloads outside story world.
   - Shipped: `kitsoki capsule ci github publish-check` is the explicit network
     boundary for check-run publication. It posts the projected payload to
     `POST /repos/{owner}/{repo}/check-runs` using `GH_TOKEN`/`GITHUB_TOKEN` or
@@ -354,10 +371,11 @@ project wrapper that imports only deterministic checks and adjudication.
     contact GitHub.
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal
   - Shipped: permanent `docs/stories/ci.md` now documents the story-native CI
-    contract, reference rooms, authority boundaries, failure diagnosis, and
-    GitHub adapter/publication model.
-  - Remaining: migrate examples and delete this proposal after gated remote
-    dogfood reaches a terminal verdict.
+    contract, deterministic project wrapper, sealed agent authority,
+    readiness/failure diagnosis, and GitHub adapter/publication model;
+    `docs/guide/development/capsule-ci.md` owns the operator examples.
+  - Remaining: delete this proposal after gated remote dogfood reaches a
+    terminal verdict and receipt.
 ```
 
 ## Open questions

@@ -1,4 +1,11 @@
-# task-bakeoff — orchestrate a matrix task comparison, deck the report
+# task-bakeoff — deprecated orchestration stub
+
+> **Deprecated.** This story predates the native Capsule evaluation adapter and
+> refers to retired `bakeoff.yaml` / `prepare.sh` / `run_cell.sh` machinery.
+> Do not use it for CI, workspace lifecycle, or new comparisons. Use Capsule CI
+> for project validation and the `matrix-task-comparison` skill/Arena plus
+> `tools/bugfix-bakeoff/external` for an explicitly operator-run evaluation.
+> It remains temporarily for replay/history compatibility only.
 
 > Sibling: for an EXTERNAL repo (onboard a third-party project + fix real bugs), see [`stories/repo-bakeoff`](../repo-bakeoff/README.md) (wraps `tools/bugfix-bakeoff/external`).
 

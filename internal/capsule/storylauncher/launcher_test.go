@@ -15,6 +15,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/host"
 )
 
 func TestLauncherUsesStoryTerminalVerdict(t *testing.T) {
@@ -63,7 +64,11 @@ states:
 	if err := os.WriteFile(story, []byte(raw), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "app.yaml", StoryDigest: "sha256:story", Environment: lock, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +78,111 @@ states:
 	}
 	if got.Outcome != "passed" || got.EnvelopeDigest != envelope.Digest {
 		t.Fatalf("verdict %#v", got)
+	}
+}
+
+func TestApplyAgentPolicyFailsClosedAndSealsProfiles(t *testing.T) {
+	tests := []struct {
+		name       string
+		policy     executor.AgentPolicy
+		args       map[string]any
+		world      map[string]any
+		wantCalled bool
+		wantError  string
+	}{
+		{
+			name:      "deny is the default",
+			args:      map[string]any{"agent": "reviewer"},
+			wantError: "denied",
+		},
+		{
+			name:       "allowlisted profile reaches handler",
+			policy:     executor.AgentPolicy{Policy: "allow", Profiles: []string{"reviewer"}, MaxCostUSD: 1},
+			args:       map[string]any{"agent": "reviewer"},
+			wantCalled: true,
+		},
+		{
+			name:      "implicit profile is rejected",
+			policy:    executor.AgentPolicy{Policy: "allow", Profiles: []string{"reviewer"}, MaxCostUSD: 1},
+			args:      map[string]any{"provider": "reviewer"},
+			wantError: "explicit agent profile",
+		},
+		{
+			name:      "unlisted profile is rejected",
+			policy:    executor.AgentPolicy{Policy: "allow", Profiles: []string{"reviewer"}, MaxCostUSD: 1},
+			args:      map[string]any{"agent": "writer"},
+			wantError: "outside the sealed allowlist",
+		},
+		{
+			name:      "nested extract profile is sealed",
+			policy:    executor.AgentPolicy{Policy: "allow", Profiles: []string{"reviewer"}, MaxCostUSD: 1},
+			args:      map[string]any{"agent": "reviewer", "resolvers": []any{map[string]any{"llm": map[string]any{"agent": "writer"}}}},
+			wantError: "writer",
+		},
+		{
+			name:      "exhausted budget blocks dispatch",
+			policy:    executor.AgentPolicy{Policy: "allow", Profiles: []string{"reviewer"}, MaxCostUSD: 0.25},
+			args:      map[string]any{"agent": "reviewer"},
+			world:     map[string]any{"session_cost_usd": 0.25},
+			wantError: "exhausted",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := host.NewRegistry()
+			called := false
+			reg.Register("host.agent.decide", func(context.Context, map[string]any) (host.Result, error) {
+				called = true
+				return host.Result{Data: map[string]any{"ok": true}}, nil
+			})
+			if err := applyAgentPolicy(reg, tc.policy); err != nil {
+				t.Fatal(err)
+			}
+			handler, ok := reg.Get("host.agent.decide")
+			if !ok {
+				t.Fatal("guarded handler missing")
+			}
+			ctx := host.WithWorldSnapshot(context.Background(), tc.world)
+			result, err := handler(ctx, tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if called != tc.wantCalled {
+				t.Fatalf("handler called = %v, want %v", called, tc.wantCalled)
+			}
+			if tc.wantError != "" && !strings.Contains(result.Error, tc.wantError) {
+				t.Fatalf("error = %q, want substring %q", result.Error, tc.wantError)
+			}
+			if tc.wantError == "" && result.Error != "" {
+				t.Fatalf("unexpected error %q", result.Error)
+			}
+		})
+	}
+}
+
+func TestApplyHostEffectPolicyDeniesExternalHandlersAfterEmbedding(t *testing.T) {
+	registry := host.NewRegistry()
+	called := false
+	registry.Register("host.transport.post", func(context.Context, map[string]any) (host.Result, error) {
+		called = true
+		return host.Result{Data: map[string]any{"ok": true}}, nil
+	})
+	applyHostEffectPolicy(registry, executor.Policy{ExternalWrite: "deny"})
+	result, err := registry.Invoke(context.Background(), "host.transport.post", map[string]any{})
+	if err != nil || result.Error == "" || called {
+		t.Fatalf("denied external call result=%#v err=%v called=%t", result, err, called)
+	}
+
+	registry = host.NewRegistry()
+	registry.Register("host.transport.post", func(context.Context, map[string]any) (host.Result, error) {
+		called = true
+		return host.Result{Data: map[string]any{"ok": true}}, nil
+	})
+	called = false
+	applyHostEffectPolicy(registry, executor.Policy{ExternalWrite: "allow"})
+	result, err = registry.Invoke(context.Background(), "host.transport.post", map[string]any{})
+	if err != nil || result.Error != "" || !called {
+		t.Fatalf("allowed external call result=%#v err=%v called=%t", result, err, called)
 	}
 }
 
@@ -88,6 +198,7 @@ func TestReferenceStoryRunsEquivalentlyOnHostAndFakeRemote(t *testing.T) {
 		files := map[string]string{
 			".kitsoki/environments/ci.yaml":        "schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\nbootstrap:\n  command: bootstrap-workspace\nnetwork: none\ncaches:\n  - id: go-build\n    scope: project\n    mode: read_write\n  - id: runstatus-node-modules\n    scope: project\n    mode: read_write\n",
 			".kitsoki/ci.yaml":                     "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/capsule-ci/app.yaml\n    triggers: [local]\n    executor: " + executorName + "\n    permissions:\n      network: none\n      external_write: deny\n    result:\n      schema: capsule-ci-verdict/v1\n",
+			".kitsoki/project-profile.yaml":        "schema: project-profile/v1\nid: reference\ncommands:\n  test: fixture test\n  build: fixture build\n",
 			".kitsoki/stories/capsule-ci/app.yaml": string(storyRaw),
 		}
 		for path, raw := range files {
@@ -104,12 +215,14 @@ func TestReferenceStoryRunsEquivalentlyOnHostAndFakeRemote(t *testing.T) {
 	run := func(root string) ci.RunResult {
 		t.Helper()
 		story := filepath.Join(root, ".kitsoki", "stories", "capsule-ci", "app.yaml")
+		executors := ci.NewBuiltinExecutors()
+		executors.Host.(*executor.HostProvider).Cap.Networks = []string{"none"} // fixture: parity, not host confinement.
 		service := ci.Service{
 			ProjectRoot: root,
 			Jobs:        fixedStore("job-story-parity"),
 			Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "", nil })},
-			Executors:   ci.NewBuiltinExecutors(),
-			Launcher:    Launcher{StoryPath: story},
+			Executors:   executors,
+			Launcher:    projectCheckLauncher(story),
 		}
 		result, err := service.Run(context.Background(), ci.RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: ci.Trigger{Kind: "local", RequestedPipeline: "change"}})
 		if err != nil {
@@ -120,14 +233,14 @@ func TestReferenceStoryRunsEquivalentlyOnHostAndFakeRemote(t *testing.T) {
 	host := run(makeProject("host"))
 	remote := run(makeProject("remote-fake"))
 	container := run(makeProject("container-fake"))
-	if host.Verdict.Outcome != "needs_input" || host.Job.Status != artifactjob.StatusAwaitingInput {
-		t.Fatalf("host reference story should park honestly: %#v", host)
+	if host.Verdict.Outcome != "passed" || host.Job.Status != artifactjob.StatusDone {
+		t.Fatalf("host reference story should pass declared fixture checks: %#v", host)
 	}
-	if remote.Verdict.Outcome != "needs_input" || remote.Job.Status != artifactjob.StatusAwaitingInput {
-		t.Fatalf("remote reference story should park honestly: %#v", remote)
+	if remote.Verdict.Outcome != "passed" || remote.Job.Status != artifactjob.StatusDone {
+		t.Fatalf("remote reference story should pass declared fixture checks: %#v", remote)
 	}
-	if container.Verdict.Outcome != "needs_input" || container.Job.Status != artifactjob.StatusAwaitingInput {
-		t.Fatalf("container reference story should park honestly: %#v", container)
+	if container.Verdict.Outcome != "passed" || container.Job.Status != artifactjob.StatusDone {
+		t.Fatalf("container reference story should pass declared fixture checks: %#v", container)
 	}
 	if !reflect.DeepEqual(host.Verdict, remote.Verdict) || !reflect.DeepEqual(host.Execution, remote.Execution) || host.Envelope.Digest != remote.Envelope.Digest {
 		t.Fatalf("host=%#v\nremote=%#v", host, remote)
@@ -142,12 +255,14 @@ func TestGeneratedProjectWrapperRunsEquivalentlyAcrossExecutors(t *testing.T) {
 		t.Helper()
 		root := writeCIProject(t, executorName, generatedProjectCIStory(t, false))
 		story := filepath.Join(root, ".kitsoki", "stories", "capsule-ci", "app.yaml")
+		executors := ci.NewBuiltinExecutors()
+		executors.Host.(*executor.HostProvider).Cap.Networks = []string{"none"} // fixture: parity, not host confinement.
 		service := ci.Service{
 			ProjectRoot: root,
 			Jobs:        fixedStore("job-generated-wrapper"),
 			Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "", nil })},
-			Executors:   ci.NewBuiltinExecutors(),
-			Launcher:    Launcher{StoryPath: story},
+			Executors:   executors,
+			Launcher:    projectCheckLauncher(story),
 		}
 		result, err := service.Run(context.Background(), ci.RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: ci.Trigger{Kind: "local", RequestedPipeline: "change"}})
 		if err != nil {
@@ -158,8 +273,8 @@ func TestGeneratedProjectWrapperRunsEquivalentlyAcrossExecutors(t *testing.T) {
 	host := run("host")
 	remote := run("remote-fake")
 	container := run("container-fake")
-	if host.Verdict.Outcome != "needs_input" || remote.Verdict.Outcome != "needs_input" || container.Verdict.Outcome != "needs_input" {
-		t.Fatalf("generated wrapper should park honestly host=%#v remote=%#v container=%#v", host.Verdict, remote.Verdict, container.Verdict)
+	if host.Verdict.Outcome != "passed" || remote.Verdict.Outcome != "passed" || container.Verdict.Outcome != "passed" {
+		t.Fatalf("generated wrapper should run declared project checks host=%#v remote=%#v container=%#v", host.Verdict, remote.Verdict, container.Verdict)
 	}
 	if !reflect.DeepEqual(host.Verdict, remote.Verdict) || !reflect.DeepEqual(host.Verdict, container.Verdict) || host.Envelope.Digest != remote.Envelope.Digest || host.Envelope.Digest != container.Envelope.Digest {
 		t.Fatalf("host=%#v\nremote=%#v\ncontainer=%#v", host, remote, container)
@@ -169,12 +284,14 @@ func TestGeneratedProjectWrapperRunsEquivalentlyAcrossExecutors(t *testing.T) {
 func TestGeneratedProjectWrapperDigestMismatchIsRejected(t *testing.T) {
 	root := writeCIProject(t, "host", generatedProjectCIStory(t, true))
 	story := filepath.Join(root, ".kitsoki", "stories", "capsule-ci", "app.yaml")
+	executors := ci.NewBuiltinExecutors()
+	executors.Host.(*executor.HostProvider).Cap.Networks = []string{"none"} // fixture: reach the verdict mismatch assertion.
 	service := ci.Service{
 		ProjectRoot: root,
 		Jobs:        fixedStore("job-generated-mismatch"),
 		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "", nil })},
-		Executors:   ci.NewBuiltinExecutors(),
-		Launcher:    Launcher{StoryPath: story},
+		Executors:   executors,
+		Launcher:    projectCheckLauncher(story),
 	}
 	_, err := service.Run(context.Background(), ci.RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: ci.Trigger{Kind: "local", RequestedPipeline: "change"}})
 	if err == nil || !strings.Contains(err.Error(), "digest mismatch") {
@@ -196,6 +313,7 @@ func writeCIProject(t *testing.T, executorName string, storyRaw string) string {
 	files := map[string]string{
 		".kitsoki/environments/ci.yaml":        "schema: capsule-environment/v1\nid: ci\nsource:\n  host_probe: true\nnetwork: none\n",
 		".kitsoki/ci.yaml":                     "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: .kitsoki/stories/capsule-ci/app.yaml\n    triggers: [local]\n    executor: " + executorName + "\n    permissions:\n      network: none\n      external_write: deny\n    result:\n      schema: capsule-ci-verdict/v1\n",
+		".kitsoki/project-profile.yaml":        "schema: project-profile/v1\nid: generated\ncommands:\n  test: fixture test\n  build: fixture build\n",
 		".kitsoki/stories/capsule-ci/app.yaml": storyRaw,
 	}
 	for path, raw := range files {
@@ -232,6 +350,8 @@ world:
   ci_policy: { type: object, default: {} }
   ci_verdict: { type: object, default: {} }
   ci_outcome: { type: string, default: "" }
+hosts:
+  - host.capsule_ci.project_checks
 intents:
   run:
     description: "Validate the supplied Capsule CI envelope."
@@ -243,24 +363,32 @@ states:
     view: [{ prose: "generated project wrapper" }]
     on:
       run:
-        - target: parked
+        - target: project_checks
           effects:
-            - set:
-                ci_outcome: "needs_input"
-                ci_verdict:
-                  schema: capsule-ci-verdict/v1
-                  pipeline: "{{ world.ci_pipeline }}"
-                  outcome: needs_input
-                  summary: "Generated Capsule CI needs project-specific checks before it can pass."
-                  checks: []
-                  promotion_eligible: false
-                  source_digest: "` + sourceDigest + `"
-                  story_digest: "{{ world.ci_trigger.story_digest }}"
-                  environment_digest: "{{ world.ci_environment.digest }}"
-                  envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
-  parked:
-    view: [{ prose: "parked" }]
+            - invoke: host.capsule_ci.project_checks
+              with:
+                workdir: "{{ world.ci_workspace.path }}"
+                job_id: "{{ world.ci_job_id }}"
+                pipeline: "{{ world.ci_pipeline }}"
+                source_digest: "` + sourceDigest + `"
+                story_digest: "{{ world.ci_trigger.story_digest }}"
+                environment_digest: "{{ world.ci_environment.digest }}"
+                envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+              bind:
+                ci_verdict: verdict
+  project_checks:
+    view: [{ prose: "project checks" }]
 `
+}
+
+func projectCheckLauncher(story string) Launcher {
+	runner := host.CapsuleCICommandRunnerFunc(func(context.Context, string, string) (string, int, error) {
+		return "fixture passed\n", 0, nil
+	})
+	return Launcher{StoryPath: story, ConfigureHosts: func(reg *host.Registry) error {
+		reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandler(runner))
+		return nil
+	}}
 }
 
 func repoRoot(t *testing.T) string {

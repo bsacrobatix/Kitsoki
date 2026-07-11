@@ -533,6 +533,12 @@ host cassette), closing the no-LLM test loop inside the MCP: dogfood live →
 
 ### `vcs.*` / `worktree.*` — a structured git surface
 
+> **Legacy Studio compatibility only.** New repository implementation work,
+> workspace lifecycle, commits, synchronization, and Capsule CI must use the
+> project-scoped Capsule MCP server or the repository's managed workspace
+> script. This table documents replay/older Studio sessions; it is not the
+> prescriptive coding-agent surface.
+
 Git was the single biggest reason a driver shelled out: worktree lifecycle,
 status/diff/log, and the squash-merge that lands a fix. These cover it with
 structure (all git runs through `host.RunHandler` in argv mode — no shell), and

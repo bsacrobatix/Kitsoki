@@ -9,7 +9,7 @@ lockfiles:
   - tools/runstatus/pnpm-lock.yaml
 bootstrap:
   command: bootstrap-workspace
-network: none
+network: live
 caches:
   - id: go-build
     scope: project

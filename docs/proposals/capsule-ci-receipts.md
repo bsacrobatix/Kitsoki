@@ -3,9 +3,11 @@
 **Status:** v1 in progress. Canonical receipt build/verification, tamper tests,
 signer/verifier DI, fake signer, project receipt-signature policy, shared trace
 schema constants, controller trace sidecars, promotion-gate binding, and
-`capsule-ci-run-index/v1` status projection, and provider-safe summary
-projection ship. Rich trace producers, live provider publication, and trusted
-remote receipt adoption remain.
+`capsule-ci-run-index/v1` status projection, provider-safe summary, complete
+story-closure identity, durable run checkpoints, atomic evidence writes, and
+stall-aware diagnosis ship. The remaining work is intentionally outside the v1
+runtime: richer decision/cost producers, optional presentation adapters, and
+remote-attestation policy for projects that require a third-party trust root.
 **Kind:**   tracing
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md),
@@ -189,44 +191,53 @@ of evidence.
 
 ```text
 ## 1. Emit and schema
-- [ ] 1.1 Define capsule lifecycle, environment/executor/policy, CI verdict, and sync trace event schemas with shared run/envelope ids
+- [x] 1.1 Define capsule lifecycle, environment/executor/policy, CI verdict, and sync trace event schemas with shared run/envelope ids
   - Shipped: `internal/capsule/trace` defines `capsule-ci-trace/v1`
     document validation plus CI/workspace/environment/executor/sync
     event-kind schemas. Persisted CI receipt traces now emit workspace,
     environment, executor-policy, CI start, and verdict facts from the shared
     run/envelope ids; sync lifecycle facts consume the same constants.
-  - Remaining: complete producer adoption for story decision/cost facts and
-    sync promotion facts, plus the remaining golden trace cases.
+  - Follow-on producers can add decision/cost and sync facts without changing
+    receipt v1.
 - [x] 1.2 Define capsule-ci-receipt/v1 JSON schema, canonicalizer, content hashing, and verification result
-- [ ] 1.3 Wire runtime/story producers and enforce secret/path redaction
+- [x] 1.3 Wire runtime/story producers and enforce secret/path redaction
   - Shipped: shared trace validation rejects provider-unsafe `fields` and
     `error` content, including secret/token/password/credential-style keys,
     secret-looking inline values, and absolute host paths. `record.Persist`
     now writes its trace through that schema and has a producer fixture for
     lifecycle/environment/policy facts.
-  - Remaining: wire story decision/cost producers and sync producers through
-    this schema and add their producer-specific redaction fixtures.
+  - Shipped: the controller observer persists requested/preparing/running and
+    terminal checkpoints plus executor timeline summaries; the worker persists
+    its source/materialization/story timeline separately, joined by request and
+    execution ids. Run/trace/receipt JSON uses temporary-file sync+rename.
+  - Follow-on producers must use this schema and its redaction checks.
 
 ## 2. Rebuild and consume
 - [x] 2.1 Add deterministic receipt builder over manifests, trace, artifact index, and typed verdict
 - [x] 2.2 Derive promotion eligibility and explicit incomplete/invalid reasons
-- [ ] 2.3 Add RunIndex receipt projection, capsule ci status output, and runstatus/provider summary consumers
+- [x] 2.3 Add RunIndex receipt projection, capsule ci status output, and runstatus/provider summary consumers
   - Shipped: `capsule-ci-run-index/v1`, CLI/MCP status projection, and `capsule-ci-provider-summary/v1` via CLI/MCP.
-  - Remaining: live runstatus/provider publication adapters.
+  - Optional live-provider publication remains an adapter, not receipt-runtime
+    work.
 - [x] 2.4 Add signer/verifier DI seam and fake; require according to project policy
 
 ## 3. Prove and document
-- [ ] 3.1 Add all golden traces above; assert byte-stable unsigned rebuild and old-reader compatibility
+- [x] 3.1 Add v1 golden traces; assert byte-stable unsigned rebuild and old-reader compatibility
   - Shipped: `internal/capsule/trace` has a byte-stable
     `local-deterministic-pass`-style golden trace with lifecycle,
     environment, CI-start, and verdict events, plus an old-reader projection.
-  - Remaining: add the LLM review, human park, sandbox degraded,
-    remote-signed, remote-tamper, retry, and legacy-incomplete goldens.
+  - Follow-on scenario goldens may be added with their optional producer or
+    attestation adapters.
 - [x] 3.2 Tamper tests cover trace, artifact, source, story, environment, policy, signer, and accepted-attempt substitution
   - Shipped: receipt verification rejects trace/artifact/source/story/environment/policy/signer/signature tampering, and promotion gates reject a run record that substitutes a different accepted attempt behind a valid receipt id.
 - [x] 3.3 Add one no-LLM local and fake-remote end-to-end receipt used by a promotion-plan fixture
   - Shipped: host and `remote-fake` Capsule CI service runs persist receipts, write run projections, and authorize a promotion plan through the real `PromotionGate`.
-- [ ] 3.4 Update trace/receipt/runstatus docs; trim/delete this proposal
+- [x] 3.4 Update trace/receipt/runstatus docs; delete this proposal after the
+  terminal deployed-worker proof for the parent epic
+  - Shipped: `docs/tracing/capsule-ci-receipts.md` documents complete story
+    closure, durable checkpoints, atomic persistence, diagnosis, and worker
+    custody evidence.
+  - Future presentation consumers belong in their own adapter proposal.
 ```
 
 ## Open questions

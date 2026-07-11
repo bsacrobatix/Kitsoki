@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Run one bounded-context evaluation cycle of the goal-seeker — "is the goal done, and if not what's the next step?" — emitting a small {verdict, summary, next_instruction} JSON. Keeps the expensive orchestrator context bounded by driving a deterministic log/ledger/preamble (goal.py) and dispatching FRESH ephemeral evaluator + worker sub-agents that never accumulate history. Use when the user types /goal, wants to advance a declared GOAL (docs/goals/<slug>/), or dogfood the generalized-usage stabilization. Workers are kitsoki-mcp-driver / limited codex agents in .worktrees with a no-lost-work integrator.
+description: Run one bounded-context evaluation cycle of the goal-seeker — "is the goal done, and if not what's the next step?" — emitting a small {verdict, summary, next_instruction} JSON. Keeps the expensive orchestrator context bounded by driving a deterministic log/ledger/preamble (goal.py) and dispatching fresh ephemeral evaluator and worker agents that never accumulate history. Use when the user types /goal, wants to advance a declared goal under docs/goals, or dogfood generalized-usage stabilization. Workers use managed clone-backed Capsule workspaces with no-lost-work integration.
 ---
 
 # /goal — the goal-seeker
@@ -69,8 +69,15 @@ pointer each.
 4. **If not done — dispatch worker(s) for `next_instruction`.** For each item
    (they are guaranteed dep-satisfied and scope-disjoint — that's what
    `goal.py ready` selected):
-   - Create the per-change worktree off the integration base:
-     `git worktree add -b stabilize/gu-<id> .worktrees/gu-<id> stabilize/generalized-usage`
+   - Create the per-change managed workspace off the integration base:
+     ```sh
+     scripts/dev-workspace.sh create --id gu-<id> \
+       --branch stabilize/gu-<id> \
+       --base stabilize/generalized-usage \
+       --target stabilize/generalized-usage \
+       --bootstrap
+     scripts/dev-workspace.sh status gu-<id>
+     ```
    - Dispatch a **worker** (`kitsoki-mcp-driver` agent, or a tool-limited codex
      agent) with the change's `agent_brief` + `gate`. The worker drives the named
      `pipeline` (bugfix / implementation / docs) **through kitsoki** — dogfood: it
@@ -80,13 +87,15 @@ pointer each.
      worker) that re-runs the change's `gate.cmd` and appends a `review_summary`
      with the deterministic `gate.status`.
 
-5. **Integrate (serialized, no-lost-work).** Under a single merge lock, for each
-   `verified` change: rebase its branch onto `stabilize/generalized-usage`, re-run
-   its gate, and integrate only on green. Then append `{"kind":"integration",
-   "state":"integrated","sha":"…"}`. Remove the worktree **only after** an ancestry
-   check proves the SHA is reachable from the base. **Never force-delete an
-   unintegrated ref.** On rebase conflict: re-derive (or park-with-ref, logging a
-   `block`) — never discard committed work. See design §7.
+5. **Integrate (serialized, no-lost-work).** For each `verified` change, first
+   commit through `scripts/dev-workspace.sh commit gu-<id> --message "…"`, then
+   call `scripts/dev-workspace.sh merge gu-<id> --target
+   stabilize/generalized-usage --gate "<gate>" --teardown`. The helper owns the
+   target refresh, conflict stop, validation, integration, ancestry proof, and
+   teardown. Append `{"kind":"integration","state":"integrated","sha":"…"}`
+   only after it succeeds. On conflict, log a `block`, preserve the managed
+   workspace, resolve there, rerun the gate, and retry the helper; never discard
+   committed or dirty work.
 
 6. **Print the cycle's JSON verdict** and stop. The next `/goal` starts clean from
    the updated log.
@@ -94,7 +103,8 @@ pointer each.
 ## Roles (all communicate ONLY through the log)
 
 - **Evaluator** — opus / gpt-5.5 high, fresh each cycle, reads the preamble, emits JSON.
-- **Worker** — kitsoki-mcp-driver / limited codex, one per change, in `.worktrees/gu-<id>`, drives the pipeline, emits a summary.
+- **Worker** — kitsoki-mcp-driver / limited codex, one per managed Capsule
+  workspace, drives the pipeline, emits a summary.
 - **Reviewer** — independent, re-runs the gate, emits a `review_summary`.
 
 ## The no-lost-work guarantee (why work can't vanish)

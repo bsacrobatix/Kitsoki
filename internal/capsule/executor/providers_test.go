@@ -15,7 +15,13 @@ import (
 )
 
 func TestHostAndFakeRemoteProduceNormalizedParity(t *testing.T) {
-	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: Policy{Network: "none"}})
+	lock := testEnvironmentLock(t)
+	lock.Network = "live"
+	lock, err := environment.SealLock(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: lock, Policy: Policy{Network: "live", ExternalWrite: "allow"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +29,9 @@ func TestHostAndFakeRemoteProduceNormalizedParity(t *testing.T) {
 		return Result{ExitCode: 0, VerdictArtifact: "artifact:verdict", Artifacts: []string{"artifact:b", "artifact:a"}}, nil
 	}
 	host := NewHostProvider()
-	remote := NewRemoteProvider(NewFakeRemoteWorker())
+	worker := NewFakeRemoteWorker()
+	worker.Cap.Networks = []string{"live"}
+	remote := NewRemoteProvider(worker)
 	hp, err := host.Prepare(context.Background(), envelope)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +59,7 @@ func TestHostAndFakeRemoteProduceNormalizedParity(t *testing.T) {
 }
 
 func TestContainerProviderAdaptsCompletionState(t *testing.T) {
-	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: Policy{Network: "none"}})
+	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: testEnvironmentLock(t), Policy: Policy{Network: "none"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,9 +85,55 @@ func TestContainerProviderAdaptsCompletionState(t *testing.T) {
 	}
 }
 
+func TestProviderPrepareEnforcesMinimumSandboxWithoutDoctor(t *testing.T) {
+	envelope, err := Seal(Envelope{
+		JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def",
+		Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source",
+		StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story",
+		Environment: testEnvironmentLockWithSandbox(t, "container"), Policy: Policy{Network: "none"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := NewFakeContainerBackend()
+	providers := []struct {
+		name     string
+		provider Provider
+		wantErr  bool
+	}{
+		{name: "host", provider: NewHostProvider(), wantErr: true},
+		{name: "fake", provider: NewFakeProvider("fake"), wantErr: true},
+		{name: "remote", provider: NewRemoteProvider(NewFakeRemoteWorker()), wantErr: true},
+		{name: "container", provider: NewContainerProvider(container)},
+	}
+	for _, test := range providers {
+		t.Run(test.name, func(t *testing.T) {
+			if host, ok := test.provider.(*HostProvider); ok {
+				host.Cap.Networks = []string{"none"} // isolate the sandbox assertion.
+			}
+			_, err := test.provider.Prepare(context.Background(), envelope)
+			if test.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "below required sandbox") {
+					t.Fatalf("Prepare() error = %v, want sandbox rejection", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Prepare() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestDockerBackendBuildsArenaStyleContainerRun(t *testing.T) {
 	workspace := t.TempDir()
-	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env", ImageDigest: "alpine@sha256:123"}, Policy: Policy{Network: "none"}})
+	lock := testEnvironmentLock(t)
+	lock.ImageDigest = "alpine@sha256:123"
+	lock, err := environment.SealLock(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: lock, Policy: Policy{Network: "none"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +151,9 @@ func TestDockerBackendBuildsArenaStyleContainerRun(t *testing.T) {
 				CompletionState: CompletionState{Schema: CompletionStateSchema, Outcome: "passed", Artifacts: []string{"artifact:completion-state"}},
 			})
 			if err := os.WriteFile(filepath.Join(results, "result.json"), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(results, "story-trace.jsonl"), []byte("{}\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			return ContainerRunOutput{ExitCode: 0, Stdout: "ok\n"}, nil
@@ -120,12 +177,49 @@ func TestDockerBackendBuildsArenaStyleContainerRun(t *testing.T) {
 	if !slices.Contains(argv, "alpine@sha256:123") {
 		t.Fatalf("image missing from argv %#v", argv)
 	}
+	if !containsArgPair(argv, "--network", "none") {
+		t.Fatalf("network:none was not enforced in %#v", argv)
+	}
+	if !containsArgPair(argv, "--trace", "/results/story-trace.jsonl") {
+		t.Fatalf("worker trace output missing from %#v", argv)
+	}
 	if result.Provider["completion_state_schema"] != CompletionStateSchema || result.Provider["completion_state_outcome"] != "passed" {
 		t.Fatalf("completion-state provider facts %#v", result.Provider)
 	}
 	if !slices.Contains(result.Artifacts, "artifact:completion-state") {
 		t.Fatalf("completion-state artifact missing: %#v", result.Artifacts)
 	}
+	if !slices.Contains(result.Artifacts, "container:story-trace") {
+		t.Fatalf("story trace artifact missing: %#v", result.Artifacts)
+	}
+}
+
+func TestDockerBackendAdvertisesReplayOnlyWhenEnforced(t *testing.T) {
+	backend := NewDockerBackend(func(context.Context, Prepared) (string, error) { return t.TempDir(), nil })
+	capabilities, err := backend.Describe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(capabilities.Networks, []string{"none"}) {
+		t.Fatalf("default Docker networks = %v", capabilities.Networks)
+	}
+	backend.ReplayNetwork = "capsule-replay"
+	capabilities, err = backend.Describe(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(capabilities.Networks, []string{"none", "replay"}) {
+		t.Fatalf("configured Docker networks = %v", capabilities.Networks)
+	}
+}
+
+func containsArgPair(argv []string, key, value string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == key && argv[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 func dockerMountSource(t *testing.T, argv []string, dest string) string {

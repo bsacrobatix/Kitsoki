@@ -50,6 +50,8 @@ type capsuleListEntry struct {
 	LocalOnly   bool   `json:"local_only,omitempty"`
 }
 
+const repoHistoryCapsuleMaterializer = "internal/capsule/pinned-git"
+
 func capsuleListCmd() *cobra.Command {
 	var kind string
 	var jsonOut bool
@@ -387,7 +389,7 @@ func collectRepoHistoryCapsules(root string) ([]capsuleListEntry, error) {
 				Kind:        "repo-history",
 				Title:       title,
 				Path:        relCapsulePath(root, path),
-				Executor:    "bugfix-bakeoff",
+				Executor:    repoHistoryCapsuleMaterializer,
 				Environment: "repo-history-" + project,
 				Project:     project,
 				Bug:         bugID,

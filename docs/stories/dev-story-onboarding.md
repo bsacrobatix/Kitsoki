@@ -188,6 +188,11 @@ provider. The other defaults (`host.git`, `host.local`, `host.git_worktree`,
 `host.append_to_file`) let the instance run standalone with only the `kitsoki`
 binary present.
 
+New generated instances bind their workspace interface to
+`host.capsule_workspace`; `host.git_worktree` remains a compatibility alias for
+old stories and traces, not the recommended lifecycle for newly onboarded
+projects.
+
 When deterministic discovery finds associated Claude/Codex transcript history,
 apply also writes `.context/kitsoki-session-mining-seed.md` and records a
 pending seed job in the profile's `mining` block. The generated `.kitsoki.yaml`

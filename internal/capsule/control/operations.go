@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // FileEntry is a path-only directory listing. Paths are always relative to the
@@ -18,6 +20,7 @@ import (
 type FileEntry struct {
 	Path      string `json:"path"`
 	Directory bool   `json:"directory"`
+	Symlink   bool   `json:"symlink,omitempty"`
 	Size      int64  `json:"size,omitempty"`
 }
 type SearchMatch struct {
@@ -25,12 +28,79 @@ type SearchMatch struct {
 	Line int    `json:"line"`
 	Text string `json:"text"`
 }
-type CommandResult struct {
-	Handle   Handle `json:"workspace"`
-	ExitCode int    `json:"exit_code"`
-	Output   string `json:"output"`
-	TimedOut bool   `json:"timed_out,omitempty"`
+type SearchResult struct {
+	Matches       []SearchMatch `json:"matches"`
+	FilesExamined int           `json:"files_examined"`
+	BytesExamined int64         `json:"bytes_examined"`
+	SkippedFiles  int           `json:"skipped_files,omitempty"`
+	Truncated     bool          `json:"truncated,omitempty"`
 }
+
+const (
+	readMaxFileBytes      = 4 << 20
+	writeMaxFileBytes     = 4 << 20
+	commandMaxOutputBytes = 1 << 20
+	searchDefaultMatches  = 100
+	searchMaxMatches      = 500
+	searchMaxEntries      = 20_000
+	searchMaxFiles        = 10_000
+	searchMaxBytes        = 16 << 20
+	searchMaxFileBytes    = 1 << 20
+	searchMaxLineBytes    = 4 << 10
+)
+
+var ignoredSearchDirectories = map[string]bool{
+	".git":              true,
+	".kitsoki-verifier": true,
+	".cache":            true,
+	".gradle":           true,
+	".next":             true,
+	".venv":             true,
+	"__pycache__":       true,
+	"build":             true,
+	"coverage":          true,
+	"dist":              true,
+	"node_modules":      true,
+	"target":            true,
+	"vendor":            true,
+	"venv":              true,
+}
+
+type CommandResult struct {
+	Handle          Handle `json:"workspace"`
+	ExitCode        int    `json:"exit_code"`
+	Output          string `json:"output"`
+	OutputTruncated bool   `json:"output_truncated,omitempty"`
+	TimedOut        bool   `json:"timed_out,omitempty"`
+}
+
+// boundedCommandOutput retains a diagnostic prefix while reporting the byte
+// count accepted by io.Writer. A noisy project command therefore cannot grow
+// the Capsule server or CLI process without bound.
+type boundedCommandOutput struct {
+	buffer    bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func (b *boundedCommandOutput) Write(p []byte) (int, error) {
+	written := len(p)
+	remaining := b.limit - b.buffer.Len()
+	if remaining <= 0 {
+		b.truncated = b.truncated || written > 0
+		return written, nil
+	}
+	if len(p) > remaining {
+		_, _ = b.buffer.Write(p[:remaining])
+		b.truncated = true
+		return written, nil
+	}
+	_, _ = b.buffer.Write(p)
+	return written, nil
+}
+
+func (b *boundedCommandOutput) String() string { return b.buffer.String() }
+
 type VCSStatus struct {
 	Handle    Handle `json:"workspace"`
 	Branch    string `json:"branch"`
@@ -44,11 +114,48 @@ func (m *Manager) ReadFile(ctx context.Context, h Handle, relative string) ([]by
 	if err != nil {
 		return nil, err
 	}
-	return os.ReadFile(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("capsule fs: read target must be a regular file")
+	}
+	if info.Size() > readMaxFileBytes {
+		return nil, fmt.Errorf("capsule fs: file exceeds %d byte read limit", readMaxFileBytes)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(file, readMaxFileBytes+1))
+	closeErr := file.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	if len(raw) > readMaxFileBytes {
+		return nil, fmt.Errorf("capsule fs: file exceeds %d byte read limit", readMaxFileBytes)
+	}
+	if !utf8.Valid(raw) || bytes.IndexByte(raw, 0) >= 0 {
+		return nil, fmt.Errorf("capsule fs: binary file reads are not supported")
+	}
+	return raw, nil
 }
 
 func (m *Manager) ListFiles(ctx context.Context, h Handle, relative string) ([]FileEntry, error) {
-	path, err := m.resolve(ctx, h, relative, true)
+	root, err := m.WorkspacePath(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	path := ""
+	if strings.TrimSpace(relative) == "" || filepath.Clean(relative) == "." {
+		path = root
+	} else {
+		path, err = m.resolve(ctx, h, relative, true)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -58,60 +165,148 @@ func (m *Manager) ListFiles(ctx context.Context, h Handle, relative string) ([]F
 	}
 	out := make([]FileEntry, 0, len(entries))
 	for _, entry := range entries {
-		if entry.Name() == ".kitsoki-verifier" {
+		if entry.Name() == ".git" || entry.Name() == ".kitsoki-verifier" {
 			continue
 		}
 		info, e := entry.Info()
 		if e != nil {
 			return nil, e
 		}
-		out = append(out, FileEntry{Path: entry.Name(), Directory: entry.IsDir(), Size: info.Size()})
+		rel, e := filepath.Rel(root, filepath.Join(path, entry.Name()))
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, FileEntry{Path: filepath.ToSlash(rel), Directory: entry.IsDir(), Symlink: entry.Type()&os.ModeSymlink != 0, Size: info.Size()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }
 
-func (m *Manager) SearchFiles(ctx context.Context, h Handle, query string, limit int) ([]SearchMatch, error) {
+func (m *Manager) SearchFiles(ctx context.Context, h Handle, query string, limit int) (SearchResult, error) {
 	if strings.TrimSpace(query) == "" {
-		return nil, fmt.Errorf("capsule fs: query is required")
+		return SearchResult{}, fmt.Errorf("capsule fs: query is required")
 	}
 	root, err := m.WorkspacePath(ctx, h)
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
 	if limit <= 0 {
-		limit = 100
+		limit = searchDefaultMatches
 	}
-	var out []SearchMatch
+	if limit > searchMaxMatches {
+		limit = searchMaxMatches
+	}
+	result := SearchResult{Matches: []SearchMatch{}}
+	entries := 0
+	needle := []byte(query)
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
-		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".kitsoki-verifier") {
+		entries++
+		if entries > searchMaxEntries {
+			result.Truncated = true
+			return fs.SkipAll
+		}
+		if d.IsDir() && ignoredSearchDirectories[d.Name()] {
 			return filepath.SkipDir
 		}
 		if d.IsDir() {
 			return nil
 		}
-		raw, e := os.ReadFile(path)
-		if e != nil {
-			return e
+		if result.FilesExamined >= searchMaxFiles {
+			result.Truncated = true
+			return fs.SkipAll
 		}
-		for n, line := range strings.Split(string(raw), "\n") {
-			if strings.Contains(line, query) {
-				rel, _ := filepath.Rel(root, path)
-				out = append(out, SearchMatch{Path: filepath.ToSlash(rel), Line: n + 1, Text: line})
-				if len(out) >= limit {
+		result.FilesExamined++
+		if d.Type()&os.ModeSymlink != 0 {
+			result.SkippedFiles++
+			return nil
+		}
+		info, e := d.Info()
+		if e != nil || !info.Mode().IsRegular() || info.Size() > searchMaxFileBytes {
+			result.SkippedFiles++
+			return nil
+		}
+		if result.BytesExamined+info.Size() > searchMaxBytes {
+			result.Truncated = true
+			return fs.SkipAll
+		}
+		rel, e := filepath.Rel(root, path)
+		if e != nil {
+			result.SkippedFiles++
+			return nil
+		}
+		resolved, e := ResolveWorkspacePath(root, rel, true)
+		if e != nil {
+			result.SkippedFiles++
+			return nil
+		}
+		file, e := os.Open(resolved)
+		if e != nil {
+			result.SkippedFiles++
+			return nil
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(file, searchMaxFileBytes+1))
+		closeErr := file.Close()
+		if readErr != nil || closeErr != nil || len(raw) > searchMaxFileBytes {
+			result.SkippedFiles++
+			return nil
+		}
+		if result.BytesExamined+int64(len(raw)) > searchMaxBytes {
+			result.Truncated = true
+			return fs.SkipAll
+		}
+		result.BytesExamined += int64(len(raw))
+		if bytes.IndexByte(raw, 0) >= 0 || !utf8.Valid(raw) {
+			result.SkippedFiles++
+			return nil
+		}
+		for n, line := range bytes.Split(raw, []byte{'\n'}) {
+			if at := bytes.Index(line, needle); at >= 0 {
+				result.Matches = append(result.Matches, SearchMatch{Path: filepath.ToSlash(rel), Line: n + 1, Text: boundedSearchLine(line, at)})
+				if len(result.Matches) >= limit {
+					result.Truncated = true
 					return fs.SkipAll
 				}
 			}
 		}
 		return nil
 	})
-	return out, err
+	return result, err
+}
+
+func boundedSearchLine(line []byte, matchAt int) string {
+	if len(line) <= searchMaxLineBytes {
+		return string(line)
+	}
+	start := matchAt - searchMaxLineBytes/4
+	if start < 0 {
+		start = 0
+	}
+	if start+searchMaxLineBytes > len(line) {
+		start = len(line) - searchMaxLineBytes
+	}
+	end := start + searchMaxLineBytes
+	for start < end && !utf8.RuneStart(line[start]) {
+		start++
+	}
+	for end > start && !utf8.Valid(line[start:end]) {
+		end--
+	}
+	return string(line[start:end])
 }
 
 func (m *Manager) WriteFile(ctx context.Context, h Handle, relative string, contents []byte) (Handle, error) {
+	if m.Grant.Owner != "" && !m.Grant.Allows("effect", "fs_write") {
+		return Handle{}, fmt.Errorf("%w: fs_write", ErrDenied)
+	}
+	if len(contents) > writeMaxFileBytes {
+		return Handle{}, fmt.Errorf("capsule fs: contents exceed %d byte write limit", writeMaxFileBytes)
+	}
 	path, err := m.resolve(ctx, h, relative, false)
 	if err != nil {
 		return Handle{}, err
@@ -170,7 +365,7 @@ func (m *Manager) RunCommand(ctx context.Context, h Handle, commandID string, ra
 	}
 	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	cmd.Dir = path
-	var output bytes.Buffer
+	output := boundedCommandOutput{limit: commandMaxOutputBytes}
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err = cmd.Run()
@@ -188,7 +383,7 @@ func (m *Manager) RunCommand(ctx context.Context, h Handle, commandID string, ra
 	if markErr != nil {
 		return CommandResult{}, markErr
 	}
-	return CommandResult{Handle: next, ExitCode: exit, Output: output.String(), TimedOut: runCtx.Err() == context.DeadlineExceeded}, nil
+	return CommandResult{Handle: next, ExitCode: exit, Output: output.String(), OutputTruncated: output.truncated, TimedOut: runCtx.Err() == context.DeadlineExceeded}, nil
 }
 
 func (m *Manager) StatusVCS(ctx context.Context, h Handle) (VCSStatus, error) {
@@ -242,10 +437,16 @@ func (m *Manager) CommitVCS(ctx context.Context, h Handle, message string) (Hand
 	if _, err = git(ctx, path, "diff", "--cached", "--quiet"); err == nil {
 		return Handle{}, fmt.Errorf("capsule vcs: no staged changes")
 	}
-	if _, err = git(ctx, path, "commit", "-m", message); err != nil {
+	if _, err = git(ctx, path, "commit", "--signoff", "-m", message); err != nil {
 		return Handle{}, err
 	}
-	return m.mark(ctx, h, StateCommitted, "capsule.workspace.committed")
+	head, err := git(ctx, path, "rev-parse", "HEAD")
+	if err != nil {
+		return Handle{}, err
+	}
+	return m.markWith(ctx, h, StateCommitted, "capsule.workspace.committed", func(in *Instance) {
+		in.Head = strings.TrimSpace(head)
+	})
 }
 
 // MarkIntegrated advances lifecycle only after a reconciler completed its
@@ -286,14 +487,60 @@ func (m *Manager) resolve(ctx context.Context, h Handle, relative string, mustEx
 	if err != nil {
 		return "", err
 	}
-	return ResolveWorkspacePath(root, relative, mustExist)
+	path, err := ResolveWorkspacePath(root, relative, mustExist)
+	if err != nil {
+		return "", err
+	}
+	// Writes resolve with mustExist=false so a new path can be created. If the
+	// target already exists, resolve it again to prevent os.WriteFile from
+	// following a final symlink outside the workspace or into verifier assets.
+	if !mustExist {
+		if _, statErr := os.Lstat(path); statErr == nil {
+			path, err = ResolveWorkspacePath(root, relative, true)
+			if err != nil {
+				return "", err
+			}
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		} else {
+			realParent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
+			if parentErr != nil {
+				return "", parentErr
+			}
+			path = filepath.Join(realParent, filepath.Base(path))
+		}
+	}
+	if err := ensureAgentVisiblePath(root, path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func ensureAgentVisiblePath(root, path string) error {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("capsule fs: path escapes workspace")
+	}
+	for _, part := range strings.Split(filepath.Clean(rel), string(filepath.Separator)) {
+		if part == ".git" || part == ".kitsoki-verifier" {
+			return fmt.Errorf("%w: agent-hidden workspace path", ErrDenied)
+		}
+	}
+	return nil
 }
 func (m *Manager) mark(ctx context.Context, h Handle, state State, event string) (Handle, error) {
+	return m.markWith(ctx, h, state, event, nil)
+}
+
+func (m *Manager) markWith(ctx context.Context, h Handle, state State, event string, update func(*Instance)) (Handle, error) {
 	in, err := m.Instances.CompareAndSwap(ctx, h.ID, h.Generation, func(cur *Instance) error {
 		if cur.State == StateClosed {
 			return ErrInvalidState
 		}
 		cur.State = state
+		if update != nil {
+			update(cur)
+		}
 		return nil
 	})
 	if err != nil {

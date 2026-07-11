@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // HostProvider is the explicit host-current compatibility provider. It does
@@ -24,7 +25,11 @@ type HostProvider struct {
 }
 
 func NewHostProvider() *HostProvider {
-	return &HostProvider{Cap: Capabilities{ID: "host", Placements: []string{"host"}, Isolation: "supervised", Networks: []string{"none", "replay", "live"}, Cancellable: false}, prepared: map[string]Prepared{}}
+	// Ambient host execution has process supervision but no portable egress
+	// confinement. Advertise only the posture it can actually provide; projects
+	// requiring none/replay must select a container or externally confined
+	// remote worker.
+	return &HostProvider{Cap: Capabilities{ID: "host", Placements: []string{"host"}, Isolation: "supervised", Networks: []string{"live"}, Cancellable: false}, prepared: map[string]Prepared{}}
 }
 func (p *HostProvider) Describe(context.Context) (Capabilities, error) { return p.Cap, nil }
 func (p *HostProvider) Prepare(_ context.Context, e Envelope) (Prepared, error) {
@@ -32,8 +37,8 @@ func (p *HostProvider) Prepare(_ context.Context, e Envelope) (Prepared, error) 
 	if err != nil {
 		return Prepared{}, err
 	}
-	if !supports(p.Cap.Networks, sealed.Policy.Network) {
-		return Prepared{}, fmt.Errorf("capsule executor: host cannot satisfy network %s", sealed.Policy.Network)
+	if err := ValidateCapabilities(p.Cap, sealed.Policy); err != nil {
+		return Prepared{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -113,9 +118,13 @@ func (execDockerRunner) Run(ctx context.Context, argv []string) (ContainerRunOut
 type WorkspacePathResolver func(context.Context, Prepared) (string, error)
 
 type DockerBackend struct {
-	Context       string
-	Image         string
-	Command       []string
+	Context string
+	Image   string
+	Command []string
+	// ReplayNetwork is an operator-provisioned Docker network whose egress and
+	// replay behavior are enforced outside the container. An empty value means
+	// this backend truthfully advertises only network:none.
+	ReplayNetwork string
 	WorkspacePath WorkspacePathResolver
 	Runner        DockerRunner
 }
@@ -129,7 +138,11 @@ func NewDockerBackend(workspace WorkspacePathResolver) *DockerBackend {
 	return &DockerBackend{WorkspacePath: workspace, Runner: execDockerRunner{}}
 }
 func (b *DockerBackend) Describe(context.Context) (Capabilities, error) {
-	return Capabilities{ID: "docker", Placements: []string{"container"}, Isolation: "container", Networks: []string{"none", "replay"}, Cancellable: false}, nil
+	networks := []string{"none"}
+	if strings.TrimSpace(b.ReplayNetwork) != "" {
+		networks = append(networks, "replay")
+	}
+	return Capabilities{ID: "docker", Placements: []string{"container"}, Isolation: "container", Networks: networks, Cancellable: false}, nil
 }
 func (b *DockerBackend) Run(ctx context.Context, p Prepared, _ Task, sink EventSink) (Result, CompletionState, error) {
 	if b.WorkspacePath == nil {
@@ -165,16 +178,28 @@ func (b *DockerBackend) Run(ctx context.Context, p Prepared, _ Task, sink EventS
 	}
 	command := append([]string(nil), b.Command...)
 	if len(command) == 0 {
-		command = []string{"kitsoki", "capsule", "worker", "run", "--envelope", "/results/envelope.json", "--result", "/results/result.json"}
+		command = []string{"kitsoki", "capsule", "worker", "run", "--envelope", "/results/envelope.json", "--result", "/results/result.json", "--workspace", "/workspace", "--trace", "/results/story-trace.jsonl", "--observed-image", image}
 	}
 	argv := []string{"docker"}
 	if strings.TrimSpace(b.Context) != "" {
 		argv = append(argv, "--context", b.Context)
 	}
-	argv = append(argv, "run", "--rm", "-v", workspace+":/workspace", "-v", resultsDir+":/results", "-w", "/workspace", image)
+	argv = append(argv, "run", "--rm")
+	switch p.Envelope.Policy.Network {
+	case "none":
+		argv = append(argv, "--network", "none")
+	case "replay":
+		if strings.TrimSpace(b.ReplayNetwork) == "" {
+			return Result{}, CompletionState{}, fmt.Errorf("capsule executor: docker replay network is not configured")
+		}
+		argv = append(argv, "--network", b.ReplayNetwork)
+	default:
+		return Result{}, CompletionState{}, fmt.Errorf("capsule executor: docker network policy %q is unsupported", p.Envelope.Policy.Network)
+	}
+	argv = append(argv, "-v", workspace+":/workspace", "-v", resultsDir+":/results", "-w", "/workspace", image)
 	argv = append(argv, command...)
 	if sink != nil {
-		_ = sink.Emit(ctx, Event{Kind: "capsule.executor.started", EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+		_ = sink.Emit(ctx, Event{Kind: "capsule.executor.started", At: time.Now().UTC(), EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID, Outcome: "running"})
 	}
 	runner := b.Runner
 	if runner == nil {
@@ -183,7 +208,7 @@ func (b *DockerBackend) Run(ctx context.Context, p Prepared, _ Task, sink EventS
 	run, err := runner.Run(ctx, argv)
 	if err != nil {
 		if sink != nil {
-			_ = sink.Emit(ctx, Event{Kind: "capsule.executor.failed", EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+			_ = sink.Emit(ctx, Event{Kind: "capsule.executor.failed", At: time.Now().UTC(), EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID, Outcome: "failed", Error: err.Error()})
 		}
 		return Result{}, CompletionState{}, fmt.Errorf("capsule executor: docker run: %w", err)
 	}
@@ -203,12 +228,19 @@ func (b *DockerBackend) Run(ctx context.Context, p Prepared, _ Task, sink EventS
 		state.Outcome = "failed"
 		state.Reason = "docker command exited non-zero without result.json"
 	}
+	if info, traceErr := os.Stat(filepath.Join(resultsDir, "story-trace.jsonl")); traceErr == nil && info.Mode().IsRegular() {
+		result.Artifacts = append(result.Artifacts, "container:story-trace")
+	}
 	if sink != nil {
 		kind := "capsule.executor.finished"
 		if run.ExitCode != 0 || state.Outcome == "failed" {
 			kind = "capsule.executor.failed"
 		}
-		_ = sink.Emit(ctx, Event{Kind: kind, EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+		outcome := "passed"
+		if kind == "capsule.executor.failed" {
+			outcome = "failed"
+		}
+		_ = sink.Emit(ctx, Event{Kind: kind, At: time.Now().UTC(), EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID, Outcome: outcome, Fields: map[string]any{"exit_code": run.ExitCode, "completion_state_outcome": state.Outcome}})
 	}
 	return result, state, nil
 }
@@ -243,8 +275,8 @@ func (p *ContainerProvider) Prepare(ctx context.Context, e Envelope) (Prepared, 
 	if err != nil {
 		return Prepared{}, err
 	}
-	if !supports(cap.Networks, sealed.Policy.Network) {
-		return Prepared{}, fmt.Errorf("capsule executor: container backend cannot satisfy network %s", sealed.Policy.Network)
+	if err := ValidateCapabilities(cap, sealed.Policy); err != nil {
+		return Prepared{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -294,6 +326,14 @@ type RemoteWorker interface {
 	Run(context.Context, Prepared, Task, EventSink) (Result, error)
 	Cancel(context.Context, string) error
 }
+
+// PreparedAcceptor is the optional no-spend remote preflight seam. It lets a
+// durable worker validate the exact sealed prepared object before source upload
+// or story execution, catching protocol/version drift that a capability list
+// alone cannot prove.
+type PreparedAcceptor interface {
+	AcceptPrepared(context.Context, Prepared) error
+}
 type RemoteProvider struct {
 	Worker   RemoteWorker
 	mu       sync.Mutex
@@ -321,16 +361,21 @@ func (p *RemoteProvider) Prepare(ctx context.Context, e Envelope) (Prepared, err
 	if err != nil {
 		return Prepared{}, err
 	}
-	if !supports(cap.Networks, sealed.Policy.Network) {
-		return Prepared{}, fmt.Errorf("capsule executor: remote worker cannot satisfy network %s", sealed.Policy.Network)
+	if err := ValidateCapabilities(cap, sealed.Policy); err != nil {
+		return Prepared{}, err
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if out := p.prepared[sealed.Digest]; out.ID != "" {
-		return out, nil
+	out := p.prepared[sealed.Digest]
+	if out.ID == "" {
+		out = Prepared{ID: "remote-" + sealed.Digest[len(sealed.Digest)-12:], Envelope: sealed, Placement: first(cap.Placements, "remote"), Applied: sealed.Policy}
+		p.prepared[sealed.Digest] = out
 	}
-	out := Prepared{ID: "remote-" + sealed.Digest[len(sealed.Digest)-12:], Envelope: sealed, Placement: first(cap.Placements, "remote"), Applied: sealed.Policy}
-	p.prepared[sealed.Digest] = out
+	p.mu.Unlock()
+	if accepter, ok := p.Worker.(PreparedAcceptor); ok {
+		if err := accepter.AcceptPrepared(ctx, out); err != nil {
+			return Prepared{}, err
+		}
+	}
 	return out, nil
 }
 func (p *RemoteProvider) Run(ctx context.Context, prepared Prepared, task Task, sink EventSink) (Result, error) {
@@ -348,6 +393,25 @@ func (p *RemoteProvider) Cancel(ctx context.Context, id string) error {
 	}
 	return p.Worker.Cancel(ctx, id)
 }
+
+func (p *RemoteProvider) Status(ctx context.Context, id string) (ExecutionStatus, error) {
+	controller, ok := p.Worker.(ExecutionController)
+	if !ok {
+		return ExecutionStatus{}, fmt.Errorf("capsule executor: remote worker does not expose durable status")
+	}
+	return controller.Status(ctx, id)
+}
+
+func (p *RemoteProvider) RequestCancel(ctx context.Context, id string) (ExecutionStatus, error) {
+	controller, ok := p.Worker.(ExecutionController)
+	if !ok {
+		return ExecutionStatus{}, fmt.Errorf("capsule executor: remote worker does not expose durable cancellation")
+	}
+	return controller.RequestCancel(ctx, id)
+}
+
+var _ ExecutionController = (*RemoteProvider)(nil)
+
 func first(in []string, fallback string) string {
 	if len(in) > 0 {
 		return in[0]
@@ -407,7 +471,7 @@ func runTask(ctx context.Context, p Prepared, task Task, sink EventSink) (Result
 		return Result{}, fmt.Errorf("capsule executor: task is required")
 	}
 	if sink != nil {
-		_ = sink.Emit(ctx, Event{Kind: "capsule.executor.started", EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+		_ = sink.Emit(ctx, Event{Kind: "capsule.executor.started", At: time.Now().UTC(), EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID, Outcome: "running"})
 	}
 	out, err := task(ctx, p)
 	out.ExecutionID = p.ID
@@ -417,7 +481,13 @@ func runTask(ctx context.Context, p Prepared, task Task, sink EventSink) (Result
 		if err != nil {
 			kind = "capsule.executor.failed"
 		}
-		_ = sink.Emit(ctx, Event{Kind: kind, EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID})
+		outcome := "passed"
+		errorText := ""
+		if err != nil {
+			outcome = "failed"
+			errorText = err.Error()
+		}
+		_ = sink.Emit(ctx, Event{Kind: kind, At: time.Now().UTC(), EnvelopeDigest: p.Envelope.Digest, ExecutionID: p.ID, Outcome: outcome, Error: errorText})
 	}
 	return out, err
 }

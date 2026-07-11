@@ -2,7 +2,12 @@ package mcp_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +18,11 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/storydigest"
 	kitsokimcp "kitsoki/internal/mcp"
 )
 
@@ -28,6 +37,12 @@ func connectCapsule(ctx context.Context, t *testing.T, srv *kitsokimcp.CapsuleSe
 	t.Cleanup(func() { _ = cs.Close() })
 	return cs
 }
+
+type capsuleLauncherFunc func(context.Context, executor.Prepared) (ci.Verdict, error)
+
+func (f capsuleLauncherFunc) Launch(ctx context.Context, prepared executor.Prepared) (ci.Verdict, error) {
+	return f(ctx, prepared)
+}
 func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	project := t.TempDir()
 	spec := filepath.Join(project, "capsules", "clean", "capsule.yaml")
@@ -37,7 +52,7 @@ func TestCapsuleMCPUsesOpaqueFreshWorkspaceHandles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(envSpec), 0o755))
 	require.NoError(t, os.WriteFile(envSpec, []byte("schema: capsule-environment/v1\nid: ci\nnetwork: none\n"), 0o644))
 	root := filepath.Join(project, ".capsules", "workspaces")
-	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit", "local_reconcile"}, Branches: []string{"main"}}}
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"workspace_manage", "fs_write", "exec", "vcs_commit", "local_reconcile"}, Branches: []string{"main"}}}
 	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent", ProjectID: "fixture"})
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -113,7 +128,7 @@ func TestCapsuleMCPOnlyWriterUsesScopedTools(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(spec), 0o755))
 	require.NoError(t, os.WriteFile(spec, []byte("name: clean\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644))
 	root := filepath.Join(project, ".capsules", "workspaces")
-	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"exec", "vcs_commit"}}}
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"workspace_manage", "fs_write", "exec", "vcs_commit"}}}
 	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "writer", ProjectID: "fixture"})
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -146,14 +161,25 @@ func TestCapsuleMCPOnlyWriterUsesScopedTools(t *testing.T) {
 		Workspace control.Handle `json:"workspace"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(contentText(written)), &writtenBody))
+	preimage := sha256.Sum256([]byte("changed by capsule mcp\n"))
+	patched, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.fs.patch", Arguments: map[string]any{"workspace": writtenBody.Workspace, "path": "change.txt", "replacement": "patched by capsule mcp\n", "preimage_sha256": "sha256:" + hex.EncodeToString(preimage[:])}})
+	require.NoError(t, err)
+	require.False(t, patched.IsError, contentText(patched))
+	var patchedBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(patched)), &patchedBody))
+	rejectedPatch, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.fs.patch", Arguments: map[string]any{"workspace": patchedBody.Workspace, "path": "change.txt", "replacement": "not applied\n", "preimage_sha256": "sha256:wrong"}})
+	require.NoError(t, err)
+	require.True(t, rejectedPatch.IsError, "stale patch preimage was accepted")
 
-	status, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.status", Arguments: map[string]any{"workspace": writtenBody.Workspace}})
+	status, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.status", Arguments: map[string]any{"workspace": patchedBody.Workspace}})
 	require.NoError(t, err)
 	require.False(t, status.IsError, contentText(status))
 	require.Contains(t, contentText(status), "change.txt")
 	require.NotContains(t, contentText(status), project, "status must not leak the host project path")
 
-	committed, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.commit", Arguments: map[string]any{"workspace": writtenBody.Workspace, "message": "writer change"}})
+	committed, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.commit", Arguments: map[string]any{"workspace": patchedBody.Workspace, "message": "writer change"}})
 	require.NoError(t, err)
 	require.False(t, committed.IsError, contentText(committed))
 	require.NotContains(t, contentText(committed), project)
@@ -165,7 +191,7 @@ func TestCapsuleMCPSyncConflictsMaterializesProjectRelativeArtifact(t *testing.T
 	require.NoError(t, os.MkdirAll(filepath.Dir(spec), 0o755))
 	require.NoError(t, os.WriteFile(spec, []byte("name: clean\nsource:\n  synthetic: true\n  steps:\n    - action: write\n      path: initial.txt\n      content: initial\n    - action: commit\n      message: init\n"), 0o644))
 	root := filepath.Join(project, ".capsules", "workspaces")
-	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"local_reconcile"}, Branches: []string{"target"}}}
+	manager := &control.Manager{Definitions: control.FileDefinitionStore{ProjectRoot: project}, Instances: control.FileInstanceStore{Root: root}, Providers: map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}}, Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"workspace_manage", "local_reconcile"}, Branches: []string{"target"}}}
 	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent", ProjectID: "fixture"})
 	require.NoError(t, err)
 	ctx := context.Background()
@@ -277,7 +303,7 @@ func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {
 		job := string(rune('a' + i))
 		run := filepath.Join(ciDir, job+".run.json")
 		trace := filepath.Join(ciDir, job+".trace.json")
-		require.NoError(t, os.WriteFile(run, []byte(job), 0o644))
+		require.NoError(t, os.WriteFile(run, []byte(`{"result":{"job":{"status":"done"}}}`), 0o644))
 		require.NoError(t, os.WriteFile(trace, []byte(job+" trace"), 0o644))
 		when := now.Add(time.Duration(i) * time.Minute)
 		require.NoError(t, os.Chtimes(run, when, when))
@@ -315,13 +341,24 @@ func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {
 		require.True(t, strings.HasPrefix(candidate.Path, ".capsules/"), "candidate path should remain scoped: %s", candidate.Path)
 	}
 
-	denied, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.cleanup.apply", Arguments: map[string]any{"keep_runs": 1, "include_capsule_cache": true}})
+	tools, err := cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
 	require.NoError(t, err)
-	require.True(t, denied.IsError, "cleanup apply must require explicit cleanup effect")
+	require.NotContains(t, capsuleToolNames(tools), "capsule.cleanup.apply", "cleanup apply must not be registered without its effect")
 	require.FileExists(t, filepath.Join(ciDir, "a.run.json"))
 
 	manager.Grant.Effects = []string{"cleanup"}
-	allowed, err := cs.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.cleanup.apply", Arguments: map[string]any{"keep_runs": 1, "include_capsule_cache": true}})
+	tools, err = cs.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	require.NotContains(t, capsuleToolNames(tools), "capsule.cleanup.apply", "post-startup grant mutation widened the server")
+
+	allowedManager := &control.Manager{Grant: control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{filepath.Join(project, ".capsules", "workspaces")}, Effects: []string{"cleanup"}}}
+	allowedServer, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: allowedManager, Owner: "cleaner", ProjectID: "fixture"})
+	require.NoError(t, err)
+	allowedClient := connectCapsule(ctx, t, allowedServer)
+	allowedTools, err := allowedClient.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	require.Contains(t, capsuleToolNames(allowedTools), "capsule.cleanup.apply")
+	allowed, err := allowedClient.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.cleanup.apply", Arguments: map[string]any{"keep_runs": 1, "include_capsule_cache": true}})
 	require.NoError(t, err)
 	require.False(t, allowed.IsError, contentText(allowed))
 	require.NotContains(t, contentText(allowed), project, "cleanup result must not leak host paths")
@@ -331,6 +368,385 @@ func TestCapsuleMCPCleanupIsGrantScopedAndProjectRelative(t *testing.T) {
 	require.NoFileExists(t, filepath.Join(ciDir, "b.trace.json"))
 	require.FileExists(t, filepath.Join(ciDir, "c.run.json"))
 	require.NoDirExists(t, cacheDir)
+}
+
+func capsuleToolNames(result *mcpsdk.ListToolsResult) []string {
+	names := make([]string, 0, len(result.Tools))
+	for _, tool := range result.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func TestCapsuleMCPRegistersOnlyStartupGrantedToolFamilies(t *testing.T) {
+	project := t.TempDir()
+	writeCapsuleMCPSecurityFixture(t, project)
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{
+		Definitions: control.FileDefinitionStore{ProjectRoot: project},
+		Instances:   control.FileInstanceStore{Root: root},
+		Providers:   map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}},
+		Grant:       control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"workspace_manage"}},
+	}
+	srv, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "agent"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	client := connectCapsule(ctx, t, srv)
+	listed, err := client.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	names := capsuleToolNames(listed)
+	require.Contains(t, names, "capsule.workspace.create")
+	require.Contains(t, names, "capsule.fs.list")
+	for _, denied := range []string{"capsule.fs.write", "capsule.exec.run", "capsule.vcs.commit", "capsule.sync.plan", "capsule.ci.plan", "capsule.ci.run", "capsule.ci.cancel", "capsule.cleanup.apply", "capsule.env.lock"} {
+		require.NotContains(t, names, denied)
+	}
+
+	manager.Grant.Effects = append(manager.Grant.Effects, "fs_write", "exec", "vcs_commit", "local_reconcile", "ci_run", "cleanup", "env_write")
+	listed, err = client.ListTools(ctx, &mcpsdk.ListToolsParams{})
+	require.NoError(t, err)
+	require.Equal(t, names, capsuleToolNames(listed), "post-startup mutation changed the registered tool set")
+}
+
+func TestCapsuleMCPRejectsEveryGuessedHandleFromAnotherOwner(t *testing.T) {
+	project := t.TempDir()
+	writeCapsuleMCPSecurityFixture(t, project)
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{
+		Definitions: control.FileDefinitionStore{ProjectRoot: project},
+		Instances:   control.FileInstanceStore{Root: root},
+		Providers:   map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}},
+		Grant: control.ScopeGrant{
+			ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"},
+			Effects: []string{"workspace_manage", "fs_write", "exec", "vcs_commit", "local_reconcile", "ci_run"}, Branches: []string{"main"},
+		},
+	}
+	serverA, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "owner-a", Pipeline: "change", CIExecutor: "local"})
+	require.NoError(t, err)
+	serverB, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "owner-b", Pipeline: "change", CIExecutor: "host"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	clientA := connectCapsule(ctx, t, serverA)
+	clientB := connectCapsule(ctx, t, serverB)
+
+	created, err := clientA.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.workspace.create", Arguments: map[string]any{"id": "owned-by-a", "definition": "clean"}})
+	require.NoError(t, err)
+	require.False(t, created.IsError, contentText(created))
+	var createdBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(created)), &createdBody))
+	handle := createdBody.Workspace
+
+	requests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"capsule.workspace.status", map[string]any{"workspace": handle}},
+		{"capsule.workspace.close", map[string]any{"workspace": handle}},
+		{"capsule.fs.list", map[string]any{"workspace": handle, "path": ""}},
+		{"capsule.fs.read", map[string]any{"workspace": handle, "path": "initial.txt"}},
+		{"capsule.fs.write", map[string]any{"workspace": handle, "path": "stolen.txt", "contents": "no"}},
+		{"capsule.fs.search", map[string]any{"workspace": handle, "query": "initial"}},
+		{"capsule.exec.run", map[string]any{"workspace": handle, "command_id": "missing"}},
+		{"capsule.vcs.status", map[string]any{"workspace": handle}},
+		{"capsule.vcs.diff", map[string]any{"workspace": handle}},
+		{"capsule.vcs.commit", map[string]any{"workspace": handle, "message": "stolen"}},
+		{"capsule.sync.plan", map[string]any{"workspace": handle, "operation": "integrate", "target": "main"}},
+		{"capsule.ci.plan", map[string]any{"workspace": handle, "pipeline": "change"}},
+		{"capsule.ci.run", map[string]any{"workspace": handle, "pipeline": "change"}},
+	}
+	for _, request := range requests {
+		t.Run(request.name, func(t *testing.T) {
+			result, err := clientB.CallTool(ctx, &mcpsdk.CallToolParams{Name: request.name, Arguments: request.args})
+			require.NoError(t, err)
+			require.True(t, result.IsError, contentText(result))
+			require.Contains(t, contentText(result), "denied")
+		})
+	}
+	require.NoFileExists(t, filepath.Join(root, "owned-by-a", "stolen.txt"))
+
+	otherPipeline, err := clientA.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.ci.plan", Arguments: map[string]any{"workspace": handle, "pipeline": "other"}})
+	require.NoError(t, err)
+	require.True(t, otherPipeline.IsError)
+	require.Contains(t, contentText(otherPipeline), "denied")
+}
+
+func TestCapsuleMCPValidatesPipelineExecutorAndOwnerAtStartup(t *testing.T) {
+	project := t.TempDir()
+	writeCapsuleMCPSecurityFixture(t, project)
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{
+		Definitions: control.FileDefinitionStore{ProjectRoot: project},
+		Instances:   control.FileInstanceStore{Root: root},
+		Providers:   map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}},
+		Grant:       control.ScopeGrant{Owner: "owner", ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"ci_run"}},
+	}
+	_, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "other"})
+	require.Error(t, err)
+	_, err = kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "owner", CIExecutor: "host"})
+	require.Error(t, err)
+	_, err = kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "owner", Pipeline: "missing", CIExecutor: "host"})
+	require.Error(t, err)
+	_, err = kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "owner", Pipeline: "change", CIExecutor: "container"})
+	require.Error(t, err)
+	_, err = kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "owner", Pipeline: "change", CIExecutor: "local"})
+	require.NoError(t, err)
+}
+
+func TestCapsuleMCPRunPersistsObservableStoryClosure(t *testing.T) {
+	project := t.TempDir()
+	writeCapsuleMCPSecurityFixture(t, project)
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{
+		Definitions: control.FileDefinitionStore{ProjectRoot: project},
+		Instances:   control.FileInstanceStore{Root: root},
+		Providers:   map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}},
+		Grant: control.ScopeGrant{
+			ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"},
+			Effects: []string{"workspace_manage", "fs_write", "vcs_commit", "ci_run"},
+		},
+	}
+	launcher := capsuleLauncherFunc(func(_ context.Context, prepared executor.Prepared) (ci.Verdict, error) {
+		envelope := prepared.Envelope
+		return ci.Verdict{
+			Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", PromotionEligible: true,
+			Checks:            []ci.Check{{ID: "deterministic", Kind: "test", Outcome: "passed", Evidence: []string{"artifact:test"}}},
+			SourceDigest:      envelope.SourceDigest,
+			StoryDigest:       envelope.StoryDigest,
+			EnvironmentDigest: envelope.Environment.Digest,
+			EnvelopeDigest:    envelope.Digest,
+		}, nil
+	})
+	server, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{
+		Manager: manager, Owner: "runner", Pipeline: "change", CIExecutor: "local",
+		CILauncher: func(string) ci.Launcher { return launcher },
+	})
+	require.NoError(t, err)
+	ctx := context.Background()
+	client := connectCapsule(ctx, t, server)
+	created, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.workspace.create", Arguments: map[string]any{"id": "observable", "definition": "clean"}})
+	require.NoError(t, err)
+	require.False(t, created.IsError, contentText(created))
+	var createdBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(created)), &createdBody))
+
+	firstPlan, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.ci.plan", Arguments: map[string]any{"workspace": createdBody.Workspace, "pipeline": "change"}})
+	require.NoError(t, err)
+	require.False(t, firstPlan.IsError, contentText(firstPlan))
+	var first struct {
+		Envelope executor.Envelope `json:"envelope"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(firstPlan)), &first))
+	workspacePath, err := manager.WorkspacePath(ctx, createdBody.Workspace)
+	require.NoError(t, err)
+	closure, err := storydigest.Compute(workspacePath, "stories/ci/app.yaml")
+	require.NoError(t, err)
+	require.Equal(t, closure.Digest, first.Envelope.StoryDigest)
+
+	written, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.fs.write", Arguments: map[string]any{"workspace": createdBody.Workspace, "path": "stories/ci/prompts/review.md", "contents": "review v2\n"}})
+	require.NoError(t, err)
+	require.False(t, written.IsError, contentText(written))
+	var writtenBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(written)), &writtenBody))
+	committed, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.commit", Arguments: map[string]any{"workspace": writtenBody.Workspace, "message": "Update CI prompt"}})
+	require.NoError(t, err)
+	require.False(t, committed.IsError, contentText(committed))
+	var committedBody struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(committed)), &committedBody))
+	secondPlan, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.ci.plan", Arguments: map[string]any{"workspace": committedBody.Workspace, "pipeline": "change"}})
+	require.NoError(t, err)
+	require.False(t, secondPlan.IsError, contentText(secondPlan))
+	var second struct {
+		Envelope executor.Envelope `json:"envelope"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(secondPlan)), &second))
+	require.NotEqual(t, first.Envelope.StoryDigest, second.Envelope.StoryDigest, "prompt change did not alter the story closure digest")
+
+	run, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.ci.run", Arguments: map[string]any{"workspace": committedBody.Workspace, "pipeline": "change"}})
+	require.NoError(t, err)
+	require.False(t, run.IsError, contentText(run))
+	var runBody struct {
+		Result ci.RunResult `json:"result"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(run)), &runBody))
+	require.Equal(t, ci.RunStageFinished, runBody.Result.Stage)
+	require.True(t, runBody.Result.Terminal)
+	require.Equal(t, second.Envelope.StoryDigest, runBody.Result.Envelope.StoryDigest)
+
+	jobID := string(runBody.Result.Job.ID)
+	require.NotEmpty(t, jobID)
+	require.FileExists(t, filepath.Join(project, ".capsules", "ci", jobID+".run.json"))
+	require.FileExists(t, filepath.Join(project, ".capsules", "ci", jobID+".trace.json"))
+	require.FileExists(t, filepath.Join(project, ".capsules", "ci", jobID+".receipt.json"))
+	stored, err := (ci.FileRunStore{ProjectRoot: project}).Get(jobID)
+	require.NoError(t, err)
+	require.Equal(t, ci.RunStageFinished, stored.Result.Stage)
+	require.True(t, stored.Result.Terminal)
+	trace, err := os.ReadFile(filepath.Join(project, ".capsules", "ci", jobID+".trace.json"))
+	require.NoError(t, err)
+	require.Contains(t, string(trace), "capsule.executor.started")
+}
+
+func TestCapsuleMCPRefreshAndCancelUseDurableRemoteController(t *testing.T) {
+	var deletes int
+	worker := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/capsules/capabilities":
+			_ = json.NewEncoder(w).Encode(map[string]any{"capabilities": executor.Capabilities{ID: "remote", Placements: []string{"remote"}, Isolation: "supervised", Networks: []string{"none"}, Cancellable: true}})
+		case r.URL.Path == "/v1/capsules/executions/remote-1" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"run": executor.ExecutionStatus{ExecutionID: "remote-1", Status: "running", Stage: "running_story"}})
+		case r.URL.Path == "/v1/capsules/executions/remote-1" && r.Method == http.MethodDelete:
+			deletes++
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{"run": executor.ExecutionStatus{ExecutionID: "remote-1", Status: "cancelling", Stage: "cancellation_requested"}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer worker.Close()
+
+	project := t.TempDir()
+	writeCapsuleMCPSecurityFixture(t, project)
+	remoteCI := strings.ReplaceAll(readMCPFixture(t, filepath.Join(project, ".kitsoki", "ci.yaml")), "executor: host", "executor: vm") + "remotes:\n  vm:\n    endpoint: " + worker.URL + "\n    ca_file: worker-ca.pem\n"
+	require.NoError(t, os.WriteFile(filepath.Join(project, ".kitsoki", "ci.yaml"), []byte(remoteCI), 0o644))
+	caPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: worker.Certificate().Raw}))
+	require.NoError(t, os.WriteFile(filepath.Join(project, "worker-ca.pem"), []byte(caPEM), 0o644))
+	root := filepath.Join(project, ".capsules", "workspaces")
+	manager := &control.Manager{
+		Definitions: control.FileDefinitionStore{ProjectRoot: project},
+		Instances:   control.FileInstanceStore{Root: root},
+		Providers:   map[string]control.WorkspaceProvider{"synthetic": control.SyntheticProvider{ProjectRoot: project}},
+		Grant:       control.ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}, Effects: []string{"workspace_manage", "fs_write", "vcs_commit", "ci_run"}},
+	}
+	server, err := kitsokimcp.NewCapsuleServer(kitsokimcp.CapsuleConfig{Manager: manager, Owner: "runner", Pipeline: "change", CIExecutor: "vm"})
+	require.NoError(t, err)
+	ctx := context.Background()
+	client := connectCapsule(ctx, t, server)
+	created, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.workspace.create", Arguments: map[string]any{"id": "remote-control", "definition": "clean"}})
+	require.NoError(t, err)
+	var current struct {
+		Workspace control.Handle `json:"workspace"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(contentText(created)), &current))
+	for path, contents := range map[string]string{".kitsoki/ci.yaml": remoteCI, "worker-ca.pem": caPEM} {
+		written, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.fs.write", Arguments: map[string]any{"workspace": current.Workspace, "path": path, "contents": contents}})
+		require.NoError(t, err)
+		require.False(t, written.IsError, contentText(written))
+		require.NoError(t, json.Unmarshal([]byte(contentText(written)), &current))
+	}
+	committed, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.vcs.commit", Arguments: map[string]any{"workspace": current.Workspace, "message": "Configure remote worker"}})
+	require.NoError(t, err)
+	require.False(t, committed.IsError, contentText(committed))
+	require.NoError(t, json.Unmarshal([]byte(contentText(committed)), &current))
+
+	run := ci.RunResult{Job: artifactjob.Job{ID: "job-remote", Status: artifactjob.StatusRunning}, Pipeline: "change", Executor: "vm", Stage: ci.RunStageRunning, Envelope: executor.Envelope{Instance: current.Workspace}, Execution: executor.Result{ExecutionID: "remote-1"}}
+	require.NoError(t, (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: "job-remote", Result: run}))
+	status, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.ci.status", Arguments: map[string]any{"job": "job-remote", "refresh": true}})
+	require.NoError(t, err)
+	require.False(t, status.IsError, contentText(status))
+	require.Contains(t, contentText(status), `"status":"running"`)
+	cancelled, err := client.CallTool(ctx, &mcpsdk.CallToolParams{Name: "capsule.ci.cancel", Arguments: map[string]any{"job": "job-remote"}})
+	require.NoError(t, err)
+	require.False(t, cancelled.IsError, contentText(cancelled))
+	require.Contains(t, contentText(cancelled), `"status":"cancelling"`)
+	require.Equal(t, 1, deletes)
+}
+
+func writeCapsuleMCPSecurityFixture(t *testing.T, project string) {
+	t.Helper()
+	files := map[string]string{
+		"capsules/clean/capsule.yaml": `name: clean
+source:
+  synthetic: true
+  steps:
+    - action: write
+      path: initial.txt
+      content: initial
+    - action: write
+      path: .kitsoki/environments/ci.yaml
+      content: |
+        schema: capsule-environment/v1
+        id: ci
+        network: live
+    - action: write
+      path: stories/ci/app.yaml
+      content: |
+        app:
+          id: fixture-ci
+          version: 0.1.0
+          title: Fixture CI
+          author: Test
+          license: CC0
+        intents:
+          run:
+            description: run
+            examples: [run]
+            priority: 1
+        root: idle
+        states:
+          idle:
+            terminal: true
+            view:
+              - prose: ready
+    - action: write
+      path: stories/ci/prompts/review.md
+      content: review v1
+    - action: write
+      path: .kitsoki/ci.yaml
+      content: |
+        schema: capsule-ci/v1
+        default_environment: ci
+        pipelines:
+          change:
+            story: stories/ci/app.yaml
+            triggers: [local]
+            environment: ci
+            executor: host
+            permissions:
+              network: live
+              external_write: allow
+            agents:
+              policy: deny
+            result:
+              schema: capsule-ci-verdict/v1
+          other:
+            story: stories/ci/app.yaml
+            triggers: [local]
+            environment: ci
+            executor: host
+            permissions:
+              network: live
+              external_write: allow
+            agents:
+              policy: deny
+            result:
+              schema: capsule-ci-verdict/v1
+    - action: commit
+      message: init
+`,
+		".kitsoki/environments/ci.yaml": "schema: capsule-environment/v1\nid: ci\nnetwork: live\n",
+		"stories/ci/app.yaml":           "app:\n  id: fixture-ci\n  version: 0.1.0\n  title: Fixture CI\n  author: Test\n  license: CC0\nintents:\n  run:\n    description: run\n    examples: [run]\n    priority: 1\nroot: idle\nstates:\n  idle:\n    terminal: true\n    view:\n      - prose: ready\n",
+		"stories/ci/prompts/review.md":  "review v1\n",
+		".kitsoki/ci.yaml":              "schema: capsule-ci/v1\ndefault_environment: ci\npipelines:\n  change:\n    story: stories/ci/app.yaml\n    triggers: [local]\n    environment: ci\n    executor: host\n    permissions:\n      network: live\n      external_write: allow\n    agents:\n      policy: deny\n    result:\n      schema: capsule-ci-verdict/v1\n  other:\n    story: stories/ci/app.yaml\n    triggers: [local]\n    environment: ci\n    executor: host\n    permissions:\n      network: live\n      external_write: allow\n    agents:\n      policy: deny\n    result:\n      schema: capsule-ci-verdict/v1\n",
+	}
+	for relative, contents := range files {
+		path := filepath.Join(project, filepath.FromSlash(relative))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(contents), 0o644))
+	}
+}
+
+func readMCPFixture(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(raw)
 }
 
 func runMCPGit(t *testing.T, dir string, args ...string) {

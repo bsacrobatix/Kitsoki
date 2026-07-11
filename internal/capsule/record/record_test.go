@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type testLauncher func(context.Context, executor.Prepared) (ci.Verdict, error)
@@ -35,6 +36,42 @@ func TestPersistBuildsReceiptAndTrace(t *testing.T) {
 	}
 }
 
+func TestFileRunObserverPersistsRunningCheckpointAndProviderSafeTrace(t *testing.T) {
+	root := t.TempDir()
+	run := validRunResult("job-running", "sha256:source")
+	run.Job.Status = artifactjob.StatusRunning
+	run.Verdict = ci.Verdict{}
+	run.Execution = executor.Result{ExecutionID: "remote-1"}
+	run.Stage = ci.RunStageRunning
+	run.StartedAt = time.Date(2026, 7, 11, 1, 0, 0, 0, time.UTC)
+	run.UpdatedAt = run.StartedAt.Add(time.Second)
+	run.Events = []executor.Event{{Kind: capsuletrace.KindExecutorFailed, At: run.UpdatedAt, EnvelopeDigest: run.Envelope.Digest, ExecutionID: "remote-1", Outcome: "failed", Error: "/Users/operator/private token=super-secret", Fields: map[string]any{"path": "/Users/operator/private", "message": "token=super-secret", "request_id": "req-1", "error_kind": "transport"}}}
+	if err := (FileRunObserver{ProjectRoot: root}).Observe(context.Background(), ci.RunObservation{Result: run, DiagnosticError: "local diagnostic"}); err != nil {
+		t.Fatal(err)
+	}
+	record, err := (ci.FileRunStore{ProjectRoot: root}).Get("job-running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Result.Stage != ci.RunStageRunning || record.Result.Terminal || record.DiagnosticError != "local diagnostic" {
+		t.Fatalf("record %#v", record)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, ".capsules", "ci", "job-running.trace.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "super-secret") || strings.Contains(string(raw), "/Users/operator") {
+		t.Fatalf("unsafe trace %s", raw)
+	}
+	var doc capsuletrace.Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := capsuletrace.ValidateDocument(doc); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	run := validRunResult("job", "sha256:source")
 	run.Execution.ExecutionID = "exec-1"
@@ -44,7 +81,14 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	}
 	run.Envelope.Environment.CacheKeys = []string{"project:runstatus"}
 	run.Envelope.Environment.SecretRequired = true
-	run.Envelope.Policy = executor.Policy{Network: "replay", MinimumSandbox: "workspace", ExternalWrite: "deny"}
+	run.Envelope.Environment.Network = "replay"
+	lock, err := environment.SealLock(run.Envelope.Environment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Envelope.Environment = lock
+	run.Envelope.Policy = executor.Policy{Network: "replay", MinimumSandbox: "supervised", ExternalWrite: "deny"}
+	run.Envelope.Digest = ""
 	sealed, err := executor.Seal(run.Envelope)
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +144,7 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 		t.Fatalf("environment fields %#v", env)
 	}
 	policy := doc.Events[2].Fields
-	if policy["network"] != "replay" || policy["minimum_sandbox"] != "workspace" || policy["external_write"] != "deny" {
+	if policy["network"] != "replay" || policy["minimum_sandbox"] != "supervised" || policy["external_write"] != "deny" {
 		t.Fatalf("policy fields %#v", policy)
 	}
 	started := doc.Events[4].Fields
@@ -109,6 +153,49 @@ func TestPersistTraceIncludesLifecycleEnvironmentAndPolicyFacts(t *testing.T) {
 	}
 	if strings.Contains(trimmed, "/Users/") || strings.Contains(strings.ToLower(trimmed), "secret_required") {
 		t.Fatalf("trace leaked unsafe content: %s", trimmed)
+	}
+}
+
+func TestPersistTraceRetainsProviderSafeSourceWorkerAndCancellationTimeline(t *testing.T) {
+	run := validRunResult("job-timeline", "sha256:source")
+	run.Execution.ExecutionID = "remote-1"
+	run.Events = []executor.Event{
+		{Kind: capsuletrace.KindExecutorSourceUploading, EnvelopeDigest: run.Envelope.Digest, ExecutionID: "remote-1", Outcome: "running", Fields: map[string]any{"source_digest": "abc", "bundle_digest": "sha256:bundle", "bundle_bytes": int64(42), "source_cache": "miss"}},
+		{Kind: capsuletrace.KindWorkerEnvironmentVerifying, EnvelopeDigest: run.Envelope.Digest, ExecutionID: "remote-1", Outcome: "running", Fields: map[string]any{"stage": "verifying_environment", "worker_request_id": "req-1", "worker_status": "running", "worker_stage": "verifying_environment"}},
+		{Kind: capsuletrace.KindExecutorCancelled, EnvelopeDigest: run.Envelope.Digest, ExecutionID: "remote-1", Outcome: "cancelled", Error: "context canceled", Fields: map[string]any{"worker_status": "cancelled", "worker_stage": "terminal"}},
+	}
+	root := t.TempDir()
+	path, err := PersistTrace(root, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc capsuletrace.Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if err := capsuletrace.ValidateDocument(doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{capsuletrace.KindExecutorSourceUploading, capsuletrace.KindWorkerEnvironmentVerifying, capsuletrace.KindExecutorCancelled} {
+		found := false
+		for _, event := range doc.Events {
+			if event.Kind == kind {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("missing %s in %#v", kind, doc.Events)
+		}
+	}
+	encoded := string(raw)
+	for _, want := range []string{"bundle_digest", "worker_request_id", "worker_stage"} {
+		if !strings.Contains(encoded, want) {
+			t.Fatalf("missing %s in %s", want, encoded)
+		}
 	}
 }
 
@@ -188,11 +275,13 @@ func TestLocalAndFakeRemoteReceiptsAuthorizePromotionPlan(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeReceiptPolicyProjectWithExecutor(t, root, false, tc.executor)
+			executors := ci.NewBuiltinExecutors()
+			executors.Host.(*executor.HostProvider).Cap.Networks = []string{"none"} // parity fixture, not production host confinement.
 			service := ci.Service{
 				ProjectRoot: root,
 				Jobs:        artifactjob.NewMemoryStore(),
 				Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
-				Executors:   ci.NewBuiltinExecutors(),
+				Executors:   executors,
 				Launcher: testLauncher(func(_ context.Context, prepared executor.Prepared) (ci.Verdict, error) {
 					return ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", Summary: "promotion fixture", Checks: []ci.Check{{ID: "tests", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:tests"}}}, PromotionEligible: true, SourceDigest: prepared.Envelope.SourceDigest, StoryDigest: prepared.Envelope.StoryDigest, EnvironmentDigest: prepared.Envelope.Environment.Digest, EnvelopeDigest: prepared.Envelope.Digest}, nil
 				}),
@@ -217,7 +306,14 @@ func TestLocalAndFakeRemoteReceiptsAuthorizePromotionPlan(t *testing.T) {
 }
 
 func validRunResult(jobID, sourceDigest string) ci.RunResult {
-	e, _ := executor.Seal(executor.Envelope{JobID: jobID, ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: sourceDigest, StoryDigest: "sha256:story", Environment: environment.Lock{Schema: environment.LockSchema, ID: "ci", Digest: "sha256:env"}, Policy: executor.Policy{Network: "none"}})
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		panic(err)
+	}
+	e, err := executor.Seal(executor.Envelope{JobID: jobID, ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: sourceDigest, StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: lock, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		panic(err)
+	}
 	v := ci.Verdict{Schema: ci.VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []ci.Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: e.SourceDigest, StoryDigest: e.StoryDigest, EnvironmentDigest: e.Environment.Digest, EnvelopeDigest: e.Digest}
 	return ci.RunResult{Job: artifactjob.Job{ID: artifactjob.JobID(jobID)}, Envelope: e, Verdict: v, Execution: executor.Result{VerdictArtifact: "artifact:verdict"}}
 }

@@ -41,17 +41,10 @@ build/link latency from MCP server startup before changing server code:
 
 If the binary path is fast but `go run` takes many seconds, the MCP client is
 paying compile/link cost on every attach. Fix the client registration to launch
-an installed/built `kitsoki` binary rather than `go run ./cmd/kitsoki ...`.
-For a precise build-under-test without `go run`, build a temporary binary and
-point `mcp-test` at it:
-
-```sh
-go build -o /tmp/kitsoki-mcp-test ./cmd/kitsoki
-/usr/bin/time -p /tmp/kitsoki-mcp-test mcp-test \
-  --server-command /tmp/kitsoki-mcp-test \
-  --stories-dir ./stories \
-  --timeout 20s
-```
+an installed `kitsoki` command rather than `go run ./cmd/kitsoki ...`. Keep
+source-precise diagnosis on `go run`; after it is green, refresh the supported
+staging install and compare again. Do not create an ad hoc Kitsoki executable
+for debugging.
 
 Read `studio.ping` before trusting assumptions about the attached server. Its
 structured content reports `executable`, `working_dir`, `revision`, and
@@ -81,9 +74,8 @@ GOCACHE="${KITSOKI_GOCACHE:-/private/tmp/kitsoki-gocache}" go run ./cmd/kitsoki 
   --tool story.graph \
   --tool-args '{}'
 
-# point at a built binary instead of go run's current executable
-go build -o /tmp/kitsoki-mcp-test ./cmd/kitsoki
-/tmp/kitsoki-mcp-test mcp-test --server-command /tmp/kitsoki-mcp-test --stories-dir ./stories
+# compare the supported installed command after the source-driven smoke is green
+kitsoki mcp-test --server-command kitsoki --stories-dir ./stories
 ```
 
 `mcp-test` defaults to spawning its current executable with generated `mcp`
@@ -126,9 +118,10 @@ startup_timeout_sec = 120
 tool_timeout_sec = 1800
 ```
 
-If the attached binary must match the checkout exactly, run the project install
-target or build a named binary and set `command` to that absolute path. Verify
-the result with `studio.ping` rather than with `kitsoki version` alone.
+If the attached command must match the checkout exactly, validate with `go run`
+inside a managed workspace, then use the supported staging install target and
+set `command` to that installed path. Verify the result with `studio.ping`
+rather than with `kitsoki version` alone.
 
 ## No-LLM Boundary
 
@@ -229,7 +222,7 @@ Slidey-specific traps:
 - The deck annotator should be open when testing anchor/refine flows; use
   `visual_annotate=1` or the specific media handle.
 - Baked demo decks rely on ignored generated files under
-  `stories/slidey-edit/baked/`. If an isolated worktree shows a missing
+  `stories/slidey-edit/baked/`. If an isolated managed workspace shows a missing
   `deck.html`, check whether the main checkout has the ignored artifact before
   changing tracked story logic.
 - Prompt args that pass a scene object must serialize it explicitly. If the

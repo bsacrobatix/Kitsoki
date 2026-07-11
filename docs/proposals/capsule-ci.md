@@ -2,13 +2,14 @@
 
 **Status:** v1 in progress. A local vertical slice now ships: scoped native
 workspaces/MCP, self+pinned sources, environment locks, story-native CI,
-canonical receipts, local ref plans, host/fake/configured-HTTPS remote
-executors, cleanup planning/apply, MCP-scoped hygiene, cleanup policy checks
-inside CI verdicts, and run-index status projection (see
-`docs/guide/development/capsule-ci.md`). Native lifecycle
-compatibility is now the agent-facing path; story workspace-contract
-migration, conflict continuations, production remote publication, container
-adoption, and full adoption remain below.
+canonical receipts, local ref plans, host/fake/container and authenticated HTTPS
+remote executors with exact source transport, sealed agent policy,
+readiness/checkpoint/diagnosis surfaces, conservative workspace/run/cache
+cleanup, MCP-scoped hygiene, cleanup policy checks inside CI verdicts, and
+run-index status projection (see `docs/guide/development/capsule-ci.md`). The
+native lifecycle is the general-project agent surface; Kitsoki contributors
+retain the stricter repository script contract. Only the bounded deployed-worker
+dogfood remains before this implementation ledger is deleted.
 **Kind:**   epic
 **Slices:** 5 (all have partial substrate; none is fully retired)
 
@@ -94,11 +95,11 @@ reimplement:
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | Project-scoped Capsule control plane and MCP | runtime | Canonical definitions, leased workspace handles, scoped file/process/VCS tools, CLI/MCP parity, and a migration adapter over today's workspace script | — | Draft | [`capsule-control-plane.md`](capsule-control-plane.md) |
-| 2 | Ref sync and promotion | runtime | Plan/apply reconciliation for workspace, staging, protected branches, and remotes with compare-and-swap safety and explicit external-write authority | 1 | Draft | [`capsule-sync-promotion.md`](capsule-sync-promotion.md) |
-| 3 | Portable environments and executors | runtime | Sealed environment locks plus one execution envelope across host, container, and remote-worker providers | 1 | Draft | [`capsule-environments-executors.md`](capsule-environments-executors.md) |
-| 4 | Story-native CI | story | `.kitsoki/ci.yaml` routes triggers to stories; story exits and a schema-validated verdict—not a stage DSL—define CI | 1, 3 | Draft | [`story-native-ci.md`](story-native-ci.md) |
-| 5 | Trace-backed CI receipts | tracing | Rebuildable receipts and attestations joining source, environment, policy, decisions, artifacts, cost, sync, and verdict | 1, 4 | Draft | [`capsule-ci-receipts.md`](capsule-ci-receipts.md) |
+| 1 | Project-scoped Capsule control plane and MCP | runtime | Canonical definitions, leased workspace handles, scoped file/process/VCS tools, CLI/MCP parity, and a migration adapter over today's workspace script | — | Shipped; delete with this epic after proof | [`capsule-control-plane.md`](capsule-control-plane.md) |
+| 2 | Ref sync and promotion | runtime | Plan/apply reconciliation for workspace, staging, protected branches, and remotes with compare-and-swap safety and explicit external-write authority | 1 | Partial: production publication/adoption remains | [`capsule-sync-promotion.md`](capsule-sync-promotion.md) |
+| 3 | Portable environments and executors | runtime | Sealed environment locks plus one execution envelope across host, container, and remote-worker providers | 1 | Shipped except terminal deployed-worker proof | [`capsule-environments-executors.md`](capsule-environments-executors.md) |
+| 4 | Story-native CI | story | `.kitsoki/ci.yaml` routes triggers to stories; story exits and a schema-validated verdict—not a stage DSL—define CI | 1, 3 | Shipped except terminal deployed-worker proof | [`story-native-ci.md`](story-native-ci.md) |
+| 5 | Trace-backed CI receipts | tracing | Rebuildable receipts and attestations joining source, environment, policy, decisions, artifacts, cost, sync, and verdict | 1, 4 | Shipped; optional consumers belong in adapters | [`capsule-ci-receipts.md`](capsule-ci-receipts.md) |
 
 ## Sequencing
 

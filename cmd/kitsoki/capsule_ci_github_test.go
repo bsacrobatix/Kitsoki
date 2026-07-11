@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/capsule/ci"
@@ -41,6 +44,27 @@ func TestCapsuleCIGitHubTriggerCommandNormalizesPullRequestPayload(t *testing.T)
 	}
 	if trigger.Kind != "pull_request" || trigger.Provider != "github" || trigger.EventID != "owner/repo#42:synchronize" || trigger.HeadSHA != "abc123" || trigger.RequestedPipeline != "change" {
 		t.Fatalf("trigger %#v", trigger)
+	}
+}
+
+func TestCapsuleCIRunTriggerInputConsumesGitHubAdapterOutput(t *testing.T) {
+	trigger := ci.Trigger{Kind: "pull_request", Provider: "github", EventID: "owner/repo#42:synchronize", HeadSHA: "0123456789012345678901234567890123456789", RequestedPipeline: "change"}
+	raw, err := json.Marshal(trigger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := &cobra.Command{}
+	cmd.SetIn(bytes.NewReader(raw))
+	got, err := capsuleCIReadTrigger(cmd, "-", "change")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Provider != "github" || got.HeadSHA != trigger.HeadSHA || got.RequestedPipeline != "change" {
+		t.Fatalf("trigger %#v", got)
+	}
+	cmd.SetIn(bytes.NewReader(raw))
+	if _, err := capsuleCIReadTrigger(cmd, "-", "nightly"); err == nil || !strings.Contains(err.Error(), "trigger requested pipeline") {
+		t.Fatalf("expected pipeline mismatch, got %v", err)
 	}
 }
 

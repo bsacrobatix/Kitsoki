@@ -22,10 +22,23 @@ const (
 
 	KindEnvironmentResolved = "capsule.environment.resolved"
 
-	KindExecutorPrepared = "capsule.executor.prepared"
-	KindExecutorStarted  = "capsule.executor.started"
-	KindExecutorFinished = "capsule.executor.finished"
-	KindExecutorFailed   = "capsule.executor.failed"
+	KindExecutorPrepared        = "capsule.executor.prepared"
+	KindExecutorStarted         = "capsule.executor.started"
+	KindExecutorFinished        = "capsule.executor.finished"
+	KindExecutorFailed          = "capsule.executor.failed"
+	KindExecutorCancelled       = "capsule.executor.cancelled"
+	KindExecutorSourceUploading = "capsule.executor.source.uploading"
+	KindExecutorSourceReady     = "capsule.executor.source.ready"
+
+	KindWorkerRegistered            = "capsule.worker.registered"
+	KindWorkerSourceMaterializing   = "capsule.worker.source.materializing"
+	KindWorkerEnvironmentVerifying  = "capsule.worker.environment.verifying"
+	KindWorkerEnvironmentVerified   = "capsule.worker.environment.verified"
+	KindWorkerStoryStarted          = "capsule.worker.story.started"
+	KindWorkerCompleted             = "capsule.worker.completed"
+	KindWorkerFailed                = "capsule.worker.failed"
+	KindWorkerCancellationRequested = "capsule.worker.cancellation_requested"
+	KindWorkerCancelled             = "capsule.worker.cancelled"
 
 	KindCIStarted = "capsule.ci.started"
 	KindCIVerdict = "capsule.ci.verdict"
@@ -105,7 +118,10 @@ func ValidateEvent(event Event) error {
 		return err
 	}
 	switch event.Kind {
-	case KindCIStarted, KindCIVerdict, KindExecutorPrepared, KindExecutorStarted, KindExecutorFinished, KindExecutorFailed:
+	case KindCIStarted, KindCIVerdict, KindExecutorPrepared, KindExecutorStarted, KindExecutorFinished, KindExecutorFailed, KindExecutorCancelled,
+		KindExecutorSourceUploading, KindExecutorSourceReady,
+		KindWorkerRegistered, KindWorkerSourceMaterializing, KindWorkerEnvironmentVerifying, KindWorkerEnvironmentVerified,
+		KindWorkerStoryStarted, KindWorkerCompleted, KindWorkerFailed, KindWorkerCancellationRequested, KindWorkerCancelled:
 		if event.JobID == "" || event.EnvelopeDigest == "" {
 			return fmt.Errorf("%s requires job_id and envelope_digest", event.Kind)
 		}

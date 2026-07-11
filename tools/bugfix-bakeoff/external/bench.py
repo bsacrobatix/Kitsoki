@@ -916,8 +916,14 @@ def collect_prepared(results_dir, project, selected):
         key = (item.get("bug"), item.get("candidate"))
         if item.get("project") == project and key in selected:
             item["_path"] = str(f)
+            closed = item.get("workspace_cleanup") == "closed"
+            required_paths = (
+                ("prompt", "preflight", "score_result", "workspace_cleanup_receipt")
+                if closed else
+                ("prompt", "worktree", "preflight")
+            )
             missing_paths = [
-                field for field in ("prompt", "worktree", "preflight")
+                field for field in required_paths
                 if not item.get(field) or not Path(item[field]).exists()
             ]
             if missing_paths:
@@ -941,6 +947,164 @@ def _prompt_for_audit(item):
         return "", [f"prompt unreadable: {prompt}: {e}"]
 
 
+def _audit_capsule_handoff(item):
+    """Prove a prepared coding path is owned by the native Capsule manager.
+
+    `worktree` remains in the handoff schema for older report consumers, but it
+    may only alias the typed managed workspace. This check is deliberately
+    filesystem-only and never starts a model or mutates the checkout.
+    """
+    errors = []
+    required = (
+        "workspace", "workspace_provider", "capsule_project",
+        "capsule_workspace_id", "capsule_definition_id", "capsule_owner",
+        "capsule_generation", "capsule_provider",
+    )
+    for field in required:
+        if item.get(field) in (None, ""):
+            errors.append(f"metadata missing {field}")
+    if errors:
+        return errors
+
+    if item.get("workspace_provider") != "pinned":
+        errors.append(
+            f"workspace_provider is {item.get('workspace_provider')!r}, want 'pinned'"
+        )
+    workspace = Path(item["workspace"])
+    legacy_path = Path(item.get("worktree", ""))
+    capsule_project = Path(item["capsule_project"])
+    if workspace != legacy_path:
+        errors.append("legacy worktree path does not alias workspace")
+    try:
+        workspace.resolve().relative_to(
+            (capsule_project / ".capsules" / "workspaces").resolve()
+        )
+    except (OSError, ValueError):
+        errors.append("workspace escapes the declared Capsule project workspace root")
+
+    generation = item.get("capsule_generation")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        errors.append(f"capsule_generation is not a positive integer: {generation!r}")
+
+    cleanup = item.get("workspace_cleanup", "prepared")
+    if cleanup == "closed":
+        if workspace.exists():
+            errors.append("closed workspace still exists")
+        result_path = Path(item.get("score_result", ""))
+        try:
+            result = json.loads(result_path.read_text())
+        except Exception as exc:
+            errors.append(f"closed workspace score result unreadable: {result_path}: {exc}")
+        else:
+            for field in ("project", "bug", "candidate"):
+                if result.get(field) != item.get(field):
+                    errors.append(f"score result {field} does not match handoff")
+            if (result.get("outcome") or {}).get("quality") not in {"solved", "partial", "failed"}:
+                errors.append("closed workspace score result has no completed verdict")
+        receipt_path = Path(item.get("workspace_cleanup_receipt", ""))
+        try:
+            receipt = json.loads(receipt_path.read_text())
+        except Exception as exc:
+            errors.append(f"workspace close receipt unreadable: {receipt_path}: {exc}")
+        else:
+            expected_receipt = {
+                "schema": "capsule-workspace-close/v1",
+                "ok": True,
+                "id": item.get("capsule_workspace_id"),
+                "definition_id": item.get("capsule_definition_id"),
+                "provider": item.get("capsule_provider"),
+                "owner": item.get("capsule_owner"),
+                "state": "closed",
+            }
+            for field, expected in expected_receipt.items():
+                if receipt.get(field) != expected:
+                    errors.append(
+                        f"workspace close receipt {field}={receipt.get(field)!r}, want {expected!r}"
+                    )
+            try:
+                receipt_project = Path(receipt.get("project", "")).resolve()
+                expected_project = capsule_project.resolve()
+            except OSError as exc:
+                errors.append(f"workspace close receipt project is invalid: {exc}")
+            else:
+                if receipt_project != expected_project:
+                    errors.append("workspace close receipt project does not match handoff")
+            close_generation = receipt.get("generation")
+            if isinstance(close_generation, bool) or not isinstance(close_generation, int) or close_generation <= generation:
+                errors.append("workspace close receipt generation is not newer than the prepared handle")
+            if item.get("capsule_close_generation") != close_generation:
+                errors.append("handoff close generation does not match close receipt")
+        return errors
+
+    if cleanup == "debt":
+        errors.append(
+            "workspace cleanup debt: " +
+            str(item.get("workspace_cleanup_error") or item.get("workspace_cleanup_error_path") or "close failed")
+        )
+    if cleanup == "kept-debug" and not (workspace / ".kitsoki-capsule-pin").is_file():
+        errors.append("debug-kept workspace is missing its Capsule pin sentinel")
+
+    project_sentinel = capsule_project / ".kitsoki-capsule-project"
+    try:
+        sentinel = json.loads(project_sentinel.read_text())
+    except Exception as exc:
+        errors.append(f"Capsule project sentinel unreadable: {project_sentinel}: {exc}")
+    else:
+        if sentinel.get("schema") != "capsule-project/v1":
+            errors.append("Capsule project sentinel has an unsupported schema")
+        if sentinel.get("kind") != "external-bakeoff":
+            errors.append("Capsule project sentinel is not owned by external-bakeoff")
+
+    manifest_path = workspace / ".kitsoki-capsule"
+    if not manifest_path.is_file():
+        errors.append(f"workspace missing Capsule sentinel: {manifest_path}")
+    capsule_manifest_path = workspace / "capsule-manifest.json"
+    try:
+        capsule_manifest = json.loads(capsule_manifest_path.read_text())
+    except Exception as exc:
+        errors.append(f"workspace Capsule manifest unreadable: {capsule_manifest_path}: {exc}")
+    else:
+        if capsule_manifest.get("capsule_name") != item.get("capsule_definition_id"):
+            errors.append("workspace Capsule manifest definition id does not match handoff")
+        try:
+            manifest_workspace = Path(capsule_manifest.get("workspace", "")).resolve()
+            handoff_workspace = workspace.resolve()
+        except OSError as exc:
+            errors.append(f"workspace Capsule manifest path is invalid: {exc}")
+        else:
+            if manifest_workspace != handoff_workspace:
+                errors.append("workspace Capsule manifest path does not match handoff")
+        source = capsule_manifest.get("source") or {}
+        if source.get("commit") != item.get("baseline_sha"):
+            errors.append("workspace Capsule manifest commit does not match baseline_sha")
+        environment = capsule_manifest.get("environment") or {}
+        if environment.get("workspace_id") != item.get("capsule_workspace_id"):
+            errors.append("workspace Capsule manifest id does not match handoff")
+        if environment.get("owner") != item.get("capsule_owner"):
+            errors.append("workspace Capsule manifest owner does not match handoff")
+
+    definition_path = (
+        capsule_project / ".kitsoki" / "capsules" /
+        f"{item.get('capsule_definition_id', '')}.yaml"
+    )
+    try:
+        definition = yaml.safe_load(definition_path.read_text()) or {}
+    except Exception as exc:
+        errors.append(f"Capsule definition unreadable: {definition_path}: {exc}")
+    else:
+        if definition.get("id") != item.get("capsule_definition_id"):
+            errors.append("Capsule definition id does not match handoff")
+        source = definition.get("source") or {}
+        if source.get("kind") != "pinned":
+            errors.append("Capsule definition source is not pinned")
+        if source.get("commit") != item.get("baseline_sha"):
+            errors.append("Capsule definition commit does not match baseline_sha")
+        commands = ((definition.get("policy") or {}).get("commands") or {})
+        if "prepare_base" not in commands or "prepare_branch" not in commands:
+            errors.append("Capsule definition is missing declared branch preparation commands")
+    return errors
+
+
 def audit_prepared_handoff(m, item):
     """Audit a no-drive handoff without running cargo/npm or calling a model.
 
@@ -960,11 +1124,12 @@ def audit_prepared_handoff(m, item):
 
     prompt, prompt_errors = _prompt_for_audit(item)
     errors.extend(prompt_errors)
+    errors.extend(_audit_capsule_handoff(item))
     for field in ("project", "bug", "candidate", "profile", "worktree", "branch",
                   "baseline_sha", "trace", "thread", "preflight", "score_result"):
         if not item.get(field):
             errors.append(f"metadata missing {field}")
-    for field in ("worktree", "preflight"):
+    for field in (("preflight",) if item.get("workspace_cleanup") == "closed" else ("worktree", "preflight")):
         if item.get(field) and not Path(item[field]).exists():
             errors.append(f"{field} path missing: {item[field]}")
 

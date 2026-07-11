@@ -147,6 +147,7 @@ type Handle struct {
 // ScopeGrant is fixed when a Capsule server starts. Individual calls can
 // narrow authority but can never add a definition, executor, effect, or root.
 type ScopeGrant struct {
+	Owner          string   `json:"owner,omitempty"`
 	ProjectRoot    string   `json:"project_root"`
 	WorkspaceRoots []string `json:"workspace_roots"`
 	Definitions    []string `json:"definitions,omitempty"`
@@ -154,6 +155,20 @@ type ScopeGrant struct {
 	Effects        []string `json:"effects,omitempty"`
 	Remotes        []string `json:"remotes,omitempty"`
 	Branches       []string `json:"branches,omitempty"`
+}
+
+// Clone returns an authority snapshot whose slices cannot be widened by a
+// caller mutating the grant used to construct a front door. Interface and
+// provider values live on Manager; only the grant's scalar and slice values
+// define authority.
+func (g ScopeGrant) Clone() ScopeGrant {
+	g.WorkspaceRoots = append([]string(nil), g.WorkspaceRoots...)
+	g.Definitions = append([]string(nil), g.Definitions...)
+	g.Executors = append([]string(nil), g.Executors...)
+	g.Effects = append([]string(nil), g.Effects...)
+	g.Remotes = append([]string(nil), g.Remotes...)
+	g.Branches = append([]string(nil), g.Branches...)
+	return g
 }
 
 func (g ScopeGrant) Validate() error {
@@ -212,6 +227,18 @@ func (g ScopeGrant) Allows(kind, value string) bool {
 		}
 	}
 	return false
+}
+
+// ValidEffect reports whether an effect is part of the Capsule capability
+// vocabulary. Keeping this list centralized prevents startup adapters from
+// silently accepting a misspelled or future capability.
+func ValidEffect(effect string) bool {
+	switch effect {
+	case "workspace_manage", "fs_write", "exec", "raw_exec", "vcs_commit", "local_reconcile", "remote_publish", "ci_run", "cleanup", "env_write":
+		return true
+	default:
+		return false
+	}
 }
 
 // DefinitionStore resolves checked-in immutable definitions.

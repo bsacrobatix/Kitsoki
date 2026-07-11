@@ -2,32 +2,33 @@
 
 Kitsoki development work happens in managed clone-backed Capsule workspaces, not
 Git linked worktrees. The primary checkout is protected as read-mostly; agents
-and operators should delegate lifecycle operations to `kitsoki capsule
-workspace` instead of running `git clone`, `git worktree`, rebase, merge,
-teardown, or the compatibility script by hand.
+and operators should delegate lifecycle operations to
+`scripts/dev-workspace.sh` instead of running `git clone`, `git worktree`,
+rebase, merge, or teardown by hand.
 
-The native Capsule contract creates an isolated clone, writes Kitsoki ownership
-metadata, bootstraps the clone, commits finished work, lands it into the
-configured local target branch, and removes it when requested. The current
-`development` provider delegates protected Git plumbing to
-`scripts/dev-workspace.sh` as an internal compatibility adapter. Normal
+The script creates an isolated clone, writes Kitsoki ownership metadata,
+bootstraps the clone when requested, commits finished work, lands it into the
+configured local target branch, and removes it when requested. Normal
 development starts from `staging/local` and lands back into `staging/local`, so
-local stabilization does not move `main`.
+local stabilization does not move `main`. The native Capsule workspace CLI is
+the general-project product surface described in
+[`guide/development/capsule-ci.md`](guide/development/capsule-ci.md); Kitsoki's
+own protected checkout keeps this script as its contributor-facing lifecycle.
 
 ## Quick path
 
 From the primary checkout:
 
 ```sh
-go run ./cmd/kitsoki capsule workspace create --id docs-example --definition development --owner docs-example
-go run ./cmd/kitsoki capsule workspace status --id docs-example
+scripts/dev-workspace.sh create --id docs-example --branch agent/docs-example --bootstrap
+scripts/dev-workspace.sh status docs-example
 ```
 
 Do the implementation inside the reported workspace path, then:
 
 ```sh
-go run ./cmd/kitsoki capsule workspace commit --id docs-example --message "Document managed workspaces"
-go run ./cmd/kitsoki capsule workspace integrate --id docs-example --gate "go test ./internal/host" --teardown
+scripts/dev-workspace.sh commit docs-example --message "Document managed workspaces"
+scripts/dev-workspace.sh merge docs-example --gate "go test ./internal/host" --teardown
 ```
 
 For docs-only changes, the merge gate can be a focused committed-diff check
@@ -69,13 +70,13 @@ metadata is local provenance rather than project source.
 ### `create`
 
 ```sh
-kitsoki capsule workspace create --id <id> --definition development --owner <owner>
+scripts/dev-workspace.sh create --id <id> --branch <branch> --bootstrap
 ```
 
 `id` is a single path segment and becomes the workspace directory name. The
-checked-in `development` definition declares the `agent/<id>` branch policy,
-`staging/local` base/target, and bootstrap hook. A project can declare another
-Capsule definition instead of passing mutable clone arguments.
+default base and target are `staging/local`; pass the task's `agent/<id>` branch
+explicitly and use `--bootstrap` whenever the workspace will run Kitsoki or its
+browser tooling.
 
 Use `--session-id <id>` from story/runtime code so repeated entry by the same
 session is idempotent while a different session is refused instead of being
@@ -83,9 +84,9 @@ handed another session's workspace.
 
 ### `bootstrap`
 
-Bootstrap is a declared provider hook. The Kitsoki `development` and `staging`
-definitions enable it automatically; custom project definitions should record
-their own bootstrap policy.
+Pass `--bootstrap` to `scripts/dev-workspace.sh create`; the script runs
+`make bootstrap-workspace` in the new clone before returning. Custom Capsule CI
+definitions should record the equivalent setup as a declared environment hook.
 
 Bootstrap prepares embed-only story/SPA assets, installs the runstatus
 dependencies, and warms the Go build cache. In Capsule CI this is also declared
@@ -105,7 +106,7 @@ machine-specific config.
 ### `status`
 
 ```sh
-kitsoki capsule workspace status --id <workspace-id> [--json]
+scripts/dev-workspace.sh status <workspace-id> [--json]
 ```
 
 Use `status` to find the path, current branch, short HEAD, and dirty state. For
@@ -118,17 +119,19 @@ Wait for the owner PID to finish; do not run a second create or teardown.
 ### `commit`
 
 ```sh
-kitsoki capsule workspace commit --id <workspace-id> --message "<message>"
+scripts/dev-workspace.sh commit <workspace-id> --message "<message>"
 ```
 
 `commit` stages the full workspace delta and commits it on the workspace branch.
-It refuses a clean workspace. Commit messages should describe the completed
-slice, not the mechanics of the workspace.
+It refuses a clean workspace, adds the repository-required DCO sign-off, and
+refreshes the workspace manifest's recorded HEAD to the resulting commit.
+Commit messages should describe the completed slice, not the mechanics of the
+workspace.
 
 ### `merge`
 
 ```sh
-kitsoki capsule workspace integrate --id <workspace-id> --gate "<focused validation>" --teardown
+scripts/dev-workspace.sh merge <workspace-id> --gate "<focused validation>" --teardown
 ```
 
 `merge` refuses dirty workspaces, fetches the current target branch when it
@@ -166,7 +169,8 @@ gate has already run and you intentionally want to skip the default `make test`.
 Create the long-lived staging capsule with:
 
 ```sh
-kitsoki capsule workspace create --id local --definition staging --owner staging
+scripts/dev-workspace.sh create --root .capsules/staging --id local \
+  --branch staging/local --base staging/local --target main --bootstrap
 ```
 
 For day-to-day staging operations from the primary checkout:
@@ -214,9 +218,63 @@ work blocks:
 kitsoki capsule cleanup plan --keep-runs 20
 ```
 
-The default plan keeps the newest Capsule CI run records and proposes older
-`.capsules/ci` run/receipt/trace bundles. Add explicit cache flags only when
-cache pressure matters:
+The default plan inventories managed development and staging workspaces as well
+as Capsule CI evidence. It keeps the five newest clean terminal workspaces,
+requires older workspaces to be at least 24 hours old, keeps the newest 20 CI
+run records, and proposes only terminal run/receipt/trace bundles beyond that
+retention. The default safety inventory avoids a slow recursive workspace byte
+walk; it reports the number of unmeasured candidates plus filesystem
+capacity/free bytes and whether free space is below the configured floor. Add
+`--measure-workspace-bytes` when a deliberate deeper accounting pass is useful.
+That plan reports measured inventory/reclaimable bytes and projected free bytes.
+Its `bytes_basis` field records that workspace estimates exclude
+`.git/objects`: clone-backed object databases are shared data, so counting every
+hardlink would overstate what deleting one workspace can actually reclaim.
+
+Workspace cleanup is deliberately conservative. Active, dirty, current,
+pinned, unmanaged, or otherwise unknown workspaces are inventory entries with
+`safe: false`; cleanup never treats them as reclaimable. Both native and legacy
+workspaces require a known-zero process-activity probe, and apply repeats that
+probe immediately before provider-owned close. Pin a workspace for an
+investigation either with `--pin-workspace <id>`, a
+`.kitsoki-capsule-pin` file inside the workspace, or a
+`.capsules/workspace-pins/<id>` marker in the project. Tune the guards without
+bypassing them. Workspaces under `.capsules/staging` are implicitly pinned
+because they are long-lived promotion state.
+
+```sh
+kitsoki capsule cleanup plan --keep-workspaces 10 --workspace-min-age 72h --min-free-bytes 21474836480
+```
+
+`cleanup apply` rebuilds the plan and then rechecks each workspace's generation,
+lifecycle state, owner, pin/current status, and Git cleanliness immediately
+before asking its provider to close it. A workspace that changes during that
+window is reported under `skipped`, not deleted. Add explicit cache flags only
+when cache pressure matters:
+
+The same inventory generically discovers direct, sentinel-owned Capsule control
+projects under `.capsules/projects/`; no tool name is hardcoded. A valid
+`.kitsoki-capsule-project` must declare schema `capsule-project/v1`, its kind,
+`managed_by`, and the canonical parent project. Cleanup records a provenance digest,
+rejects symlink/escaping/malformed roots, and rechecks that provenance plus
+current-directory, pin, process-activity, initialization, workspace-record, and
+age guards before deletion. Child workspaces close through their native manager
+first. The now-empty project root remains protected by recent workspace-record
+activity and becomes reclaimable on a later pass; invalid provenance is
+reported as unsafe for investigation rather than deleted.
+
+Workspaces created by the compatibility script before the native instance index
+existed are not permanent disk debt. Cleanup recognizes them as `legacy: true`
+only when `.kitsoki-capsule`, `.kitsoki-clone`,
+`.kitsoki-dev-workspace.json`, and `capsule-manifest.json` all agree on the
+project, workspace root, id, branch, and target. It then proves the checkout is
+clean, its exact HEAD is contained in the declared target branch, no
+initialization marker exists, and no process has an open file or working
+directory anywhere under the workspace. The default activity proof uses
+`lsof`; if that probe is unavailable or inconclusive, activity is `unknown`
+and the candidate remains unsafe. Apply repeats every proof and uses
+the compatibility provider's `teardown` command, including its issue-preserving
+guard, instead of deleting the directory directly.
 
 ```sh
 kitsoki capsule cleanup plan --include-capsule-cache --include-go-build-cache
@@ -226,15 +284,20 @@ kitsoki capsule cleanup apply --include-capsule-cache --include-go-build-cache
 Go build cache cleanup intentionally uses `go clean -cache -testcache` because
 the active cache can live outside the project root. This keeps disk hygiene in
 the Capsule lifecycle without letting agents delete arbitrary host paths.
+Concurrent Go builds can race while cache entries disappear; cleanup retries
+those recognized races and reports persistent concurrent cleanup under
+`tolerated` instead of turning an otherwise successful hygiene pass red.
 
 ### `close` / `teardown`
 
 ```sh
-kitsoki capsule workspace close --id <workspace-id> --owner <owner>
+scripts/dev-workspace.sh teardown <workspace-id>
 ```
 
-Teardown refuses unmanaged directories and dirty workspaces. Use `--force` only
-when intentionally discarding uncommitted local state.
+Teardown refuses unmanaged directories and dirty workspaces. If requested
+teardown fails after a successful merge, the merge result remains successful
+and carries an explicit cleanup warning so automation does not retry the
+already-landed change as though landing failed.
 
 ### `recover`
 

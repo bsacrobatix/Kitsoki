@@ -1,6 +1,7 @@
 package record
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/executor"
@@ -23,6 +25,28 @@ type Stored struct {
 }
 type PersistOptions struct {
 	Signer receipt.Signer
+}
+
+// FileRunObserver is the durable filesystem observer shared by CLI front doors
+// and available to the scoped MCP service. Every checkpoint rewrites the compact
+// run projection and trace atomically enough for another process to diagnose a
+// running or interrupted job before a terminal receipt exists.
+type FileRunObserver struct{ ProjectRoot string }
+
+func (o FileRunObserver) Observe(_ context.Context, observation ci.RunObservation) error {
+	result := observation.Result
+	writeErr := (ci.FileRunStore{ProjectRoot: o.ProjectRoot}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result, DiagnosticError: observation.DiagnosticError})
+	tracePath, traceErr := PersistTrace(o.ProjectRoot, result)
+	if traceErr != nil && writeErr != nil {
+		return fmt.Errorf("capsule record: checkpoint trace: %v; run record: %w", traceErr, writeErr)
+	}
+	if traceErr != nil {
+		return fmt.Errorf("capsule record: checkpoint trace: %w", traceErr)
+	}
+	if writeErr != nil {
+		return fmt.Errorf("capsule record: checkpoint run record (trace %s): %w", tracePath, writeErr)
+	}
+	return nil
 }
 
 func Persist(project string, result ci.RunResult) (Stored, error) {
@@ -64,7 +88,7 @@ func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions
 	if err != nil {
 		return Stored{}, err
 	}
-	if err := os.WriteFile(receiptPath, append(encoded, '\n'), 0o600); err != nil {
+	if err := writeAtomic(receiptPath, append(encoded, '\n'), 0o600); err != nil {
 		return Stored{}, err
 	}
 	return Stored{Receipt: built, Verification: verification, TracePath: tracePath, ReceiptPath: receiptPath}, nil
@@ -84,7 +108,7 @@ func writeTrace(project string, result ci.RunResult) (string, []byte, error) {
 		return "", nil, err
 	}
 	tracePath := filepath.Join(dir, string(result.Job.ID)+".trace.json")
-	if err := os.WriteFile(tracePath, append(raw, '\n'), 0o600); err != nil {
+	if err := writeAtomic(tracePath, append(raw, '\n'), 0o600); err != nil {
 		return "", nil, err
 	}
 	return tracePath, raw, nil
@@ -93,18 +117,23 @@ func writeTrace(project string, result ci.RunResult) (string, []byte, error) {
 func runTrace(result ci.RunResult) capsuletrace.Document {
 	jobID := string(result.Job.ID)
 	envelope := result.Envelope
-	events := []capsuletrace.Event{
-		{
+	events := make([]capsuletrace.Event, 0, 6+len(result.Events))
+	if envelope.Instance.ID != "" {
+		events = append(events, capsuletrace.Event{
 			Kind:       capsuletrace.KindWorkspaceReady,
+			At:         result.StartedAt,
 			InstanceID: envelope.Instance.ID,
 			Generation: envelope.Instance.Generation,
 			Fields: map[string]any{
 				"definition_digest": envelope.DefinitionDigest,
 				"source_digest":     envelope.SourceDigest,
 			},
-		},
-		{
+		})
+	}
+	if envelope.Environment.Digest != "" {
+		events = append(events, capsuletrace.Event{
 			Kind:           capsuletrace.KindEnvironmentResolved,
+			At:             result.StartedAt,
 			JobID:          jobID,
 			EnvelopeDigest: envelope.Digest,
 			Fields: map[string]any{
@@ -116,9 +145,12 @@ func runTrace(result ci.RunResult) capsuletrace.Document {
 				"environment_cache_keys":     envelope.Environment.CacheKeys,
 				"environment_private_inputs": envelope.Environment.SecretRequired,
 			},
-		},
-		{
+		})
+	}
+	if result.Execution.ExecutionID != "" && jobID != "" && envelope.Digest != "" {
+		events = append(events, capsuletrace.Event{
 			Kind:           capsuletrace.KindExecutorPrepared,
+			At:             result.UpdatedAt,
 			JobID:          jobID,
 			EnvelopeDigest: envelope.Digest,
 			Fields: map[string]any{
@@ -130,22 +162,29 @@ func runTrace(result ci.RunResult) capsuletrace.Document {
 				"story_digest":     envelope.StoryDigest,
 				"verdict_artifact": result.Execution.VerdictArtifact,
 			},
-		},
-		{Kind: capsuletrace.KindCIStarted, JobID: jobID, EnvelopeDigest: envelope.Digest},
+		})
+	}
+	if jobID != "" && envelope.Digest != "" {
+		events = append(events, capsuletrace.Event{Kind: capsuletrace.KindCIStarted, At: result.StartedAt, JobID: jobID, EnvelopeDigest: envelope.Digest, Fields: map[string]any{"stage": result.Stage, "terminal": result.Terminal}})
 	}
 	for _, event := range result.Events {
 		if converted, ok := executorTraceEvent(jobID, event); ok {
 			events = append(events, converted)
 		}
 	}
-	events = append(events, capsuletrace.Event{Kind: capsuletrace.KindCIVerdict, JobID: jobID, EnvelopeDigest: envelope.Digest, Outcome: result.Verdict.Outcome})
+	if result.Verdict.Outcome != "" && jobID != "" && envelope.Digest != "" {
+		events = append(events, capsuletrace.Event{Kind: capsuletrace.KindCIVerdict, At: result.UpdatedAt, JobID: jobID, EnvelopeDigest: envelope.Digest, Outcome: result.Verdict.Outcome})
+	}
 	return capsuletrace.NewDocument(events...)
 }
 
 func executorTraceEvent(jobID string, event executor.Event) (capsuletrace.Event, bool) {
 	switch event.Kind {
-	case capsuletrace.KindExecutorStarted, capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed:
-		return capsuletrace.Event{Kind: event.Kind, JobID: jobID, EnvelopeDigest: event.EnvelopeDigest, Fields: executorTraceFields(event)}, true
+	case capsuletrace.KindExecutorStarted, capsuletrace.KindExecutorFinished, capsuletrace.KindExecutorFailed, capsuletrace.KindExecutorCancelled,
+		capsuletrace.KindExecutorSourceUploading, capsuletrace.KindExecutorSourceReady,
+		capsuletrace.KindWorkerRegistered, capsuletrace.KindWorkerSourceMaterializing, capsuletrace.KindWorkerEnvironmentVerifying, capsuletrace.KindWorkerEnvironmentVerified,
+		capsuletrace.KindWorkerStoryStarted, capsuletrace.KindWorkerCompleted, capsuletrace.KindWorkerFailed, capsuletrace.KindWorkerCancellationRequested, capsuletrace.KindWorkerCancelled:
+		return capsuletrace.Event{Kind: event.Kind, At: event.At, JobID: jobID, EnvelopeDigest: event.EnvelopeDigest, Outcome: event.Outcome, Error: providerSafeExecutorError(event), Fields: executorTraceFields(event)}, true
 	default:
 		return capsuletrace.Event{}, false
 	}
@@ -156,13 +195,79 @@ func executorTraceFields(event executor.Event) map[string]any {
 	if event.ExecutionID != "" {
 		fields["execution_id"] = event.ExecutionID
 	}
+	allowed := map[string]bool{
+		"transport": true, "remote_host": true, "request_id": true, "method": true, "path": true, "status": true, "duration_ms": true,
+		"error_kind": true, "message": true, "completion_state_outcome": true, "exit_code": true, "stage": true,
+		"worker_request_id": true, "worker_status": true, "worker_stage": true,
+		"source_digest": true, "bundle_digest": true, "bundle_bytes": true, "source_cache": true,
+	}
 	for key, value := range event.Fields {
-		fields[key] = value
+		if allowed[key] && providerSafeExecutorField(value) {
+			fields[key] = value
+		}
 	}
 	if len(fields) == 0 {
 		return nil
 	}
 	return fields
+}
+
+func providerSafeExecutorField(value any) bool {
+	text, ok := value.(string)
+	if !ok {
+		return true
+	}
+	if filepath.IsAbs(strings.TrimSpace(text)) {
+		return false
+	}
+	lower := strings.ToLower(text)
+	for _, marker := range []string{"secret=", "token=", "password=", "credential=", "api_key=", "private_key="} {
+		if strings.Contains(lower, marker) {
+			return false
+		}
+	}
+	return true
+}
+
+func providerSafeExecutorError(event executor.Event) string {
+	if event.Error == "" {
+		return ""
+	}
+	// Executor event details are projected into the allowlisted fields above.
+	// Keep the trace error itself stable and provider-safe; the full local error
+	// remains in the run record's DiagnosticError for on-host diagnosis.
+	if event.Kind == capsuletrace.KindExecutorCancelled || event.Kind == capsuletrace.KindWorkerCancelled {
+		return "executor cancelled; see local run diagnostic"
+	}
+	return "executor failed; see local run diagnostic"
+}
+
+func writeAtomic(path string, raw []byte, mode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
 }
 
 func signByPolicy(project string, r receipt.Receipt, signer receipt.Signer) (receipt.Receipt, error) {

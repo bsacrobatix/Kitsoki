@@ -31,7 +31,7 @@ study.
 > | legacy | now |
 > |---|---|
 > | `bakeoff.yaml` | `external/projects/<name>/manifest.yaml` + `external/candidates.yaml` |
-> | `prepare.sh` + `run_cell.sh` | `external/drive_cell.sh` (one cell, worktree+drive+score) |
+> | `prepare.sh` + `run_cell.sh` | `external/drive_cell.sh` (one managed cell workspace + drive + score) |
 > | `score.py` | `external/bench.py score` / `verify` / `cost` / `summarize` |
 > | (new) | `external/escalate.sh` — cheap→expensive model/effort ladder |
 > | `aggregate.py` | `aggregate.py` (kept; reads the external manifest + candidates.yaml) |
@@ -57,12 +57,20 @@ A **cell** = `(task × candidate × contender)`. Three axes:
 - **Task axis.** The tasks/cases — for the bake-off, real fixed bugs, each with a
   `baseline_sha`, a hidden `oracle_test`, and `affected_test_pkgs`.
 
-**One hermetic worktree per cell** — never shared.
-`drive_cell.sh` cuts the per-cell worktree (a detached `git worktree add` on its
-own branch, keyed by `(project, task, candidate)`) at the task's `baseline_sha`
-before driving. A shared checkout *is* concurrent-checkout bug #9 — hard-isolate
-by `(task, candidate, contender)`. Re-running `drive_cell.sh` reuses an existing
-worktree at the right SHA.
+**One hermetic Capsule workspace per cell** — never shared. `drive_cell.sh` must
+acquire a managed clone-backed workspace keyed by `(project, task, candidate,
+contender)` at the task's `baseline_sha` before driving. A shared checkout *is*
+concurrent-checkout bug #9. If `--no-drive` cannot report a typed managed
+workspace handle, stop and migrate the harness before spending. Re-running a
+cell may reacquire the same clean workspace only through its Capsule lease.
+
+For the shipped external bake-off adapter, distinguish the artifact-local
+Capsule identity from story world. `prepared/*.json.capsule_workspace_id` is the
+lifecycle/cleanup handle in the bake-off's generated Capsule project.
+`stories/bench-bugfix` runs in Kitsoki's separate project control plane, so its
+`initial_world.workspace_id` stays empty and it uses the already-authorized,
+sentinel-backed `workdir`. Never copy the artifact-local id into that story
+field; that resolves the right id against the wrong instance store.
 
 ## MANDATORY pre-flight — confirm each baseline is genuinely RED
 
@@ -73,14 +81,14 @@ already-merged behavioural fix, so `<fix>^` was already GREEN → a degenerate c
 that proves nothing. (#1/#2/#8 were dropped for exactly this; only #9/#12/#14
 reproduced.)
 
-For each task, run the oracle at the baseline and confirm RED *before* scheduling:
+For each task, prepare through the free harness path, then run the oracle at the
+reported managed workspace and confirm RED *before* scheduling:
 
 ```bash
-cd .worktrees/bakeoff-<task>-<any>-<any>     # any prepared worktree at baseline
-# go oracle: copy the oracle in from the fix, run it, expect FAIL/noncompile
-git show <fix_sha>:<oracle_test> > <oracle_test>
-go test -run '^TestXxx$' ./path/to/oracle/pkg ; echo "rc=$?"   # MUST be non-zero
-git checkout -- <oracle_test> 2>/dev/null; rm -f <oracle_test>  # leave tree clean
+tools/bugfix-bakeoff/external/drive_cell.sh \
+  --project <name> --bug <task> --candidate <candidate> --no-drive
+python3 tools/bugfix-bakeoff/external/bench.py verify \
+  --project <name> --bug <task>
 ```
 
 A baseline that is GREEN is a study finding (note it), not a cell to run.
@@ -90,7 +98,7 @@ A baseline that is GREEN is a study finding (note it), not a cell to run.
 - **Hidden oracle.** Each task's oracle = the real fix's own regression test,
   kept **out of the candidate's tree**. `bench.py score` overlays it (the isolated
   oracle test file injected/written into a throwaway scratch copy of the candidate
-  tree), runs it there, and never touches the candidate worktree, so the tree is
+  tree), runs it there, and never touches the candidate workspace, so the tree is
   never polluted. The candidate must never see it (that would leak the answer).
 - **Oracles are often wording/impl-coupled** → they false-fail a behaviourally
   correct fix done a different way (Opus refused with different wording; the
@@ -105,7 +113,7 @@ A baseline that is GREEN is a study finding (note it), not a cell to run.
   # Deterministic grade (oracle GREEN/RED). bench.py writes the cell JSON; edit its
   # outcome.adjudicated/adjudication_note when a judge overrides on behaviour.
   python3 tools/bugfix-bakeoff/external/bench.py score \
-    --project <name> --bug <task> --tree <worktree> \
+    --project <name> --bug <task> --tree <workspace> \
     --candidate <cand> --treatment <contender> \
     --out tools/bugfix-bakeoff/results/cells/<task>-<cand>-<contender>.json
   ```
@@ -154,7 +162,8 @@ Per `results/SCHEMA.md`, every cell scores three families:
     --allowedTools Bash Edit Write Read Glob Grep MultiEdit
   ```
   The scoped allowlist is mandatory — the classifier blocks
-  `--dangerously-skip-permissions`; worktrees are disposable. Resume guidance
+  `--dangerously-skip-permissions`; managed cell workspaces are bounded and
+  cleanup-controlled. Resume guidance
   turns with `claude -p --resume <sid> "<msg>"`.
 - **kitsoki / MCP cells** (and single/`session` for GLM, GPT) — studio-MCP
   `session_new` under the candidate's **profile** (the profile/agent-def controls
@@ -169,8 +178,8 @@ Per `results/SCHEMA.md`, every cell scores three families:
     oracle, not the pipeline's internal CI).
 - **Guidance turns** are operator-driven, **oracle-gated**, and **counted** (cap
   e.g. 5). Give fair behavioural feedback (what a reviewer running the scenario
-  sees) *without* revealing the hidden oracle. The worktree is **reused** on a
-  resumed turn — do not re-prepare.
+  sees) *without* revealing the hidden oracle. Reacquire the same managed
+  workspace lease on a resumed turn; do not prepare a second checkout.
 
 ## Aggregation + offline regeneration (zero re-spend)
 
@@ -224,7 +233,7 @@ them, it does not reimplement scoring/pricing.
 ## Common pitfalls (from the learnings doc)
 
 1. **Degenerate baseline** (#1 above) — GREEN-at-baseline tasks prove nothing.
-2. **Shared checkout** — one worktree per cell, always; sharing is the bug.
+2. **Shared checkout** — one managed Capsule workspace per cell, always; sharing is the bug.
 3. **Status-only compliance** — candidates commit their work; diff
    `baseline..HEAD` ∪ working tree.
 4. **Wrong/stale price table** — verify Opus $5/$25, Sonnet $3/$15 before trusting USD.
@@ -254,7 +263,7 @@ them, it does not reimplement scoring/pricing.
 `drive_cell.sh`/`escalate.sh` are the only cost-bearing pieces and are run
 **manually**, never in CI or automatically. `bench.py`/`aggregate.py` are
 deterministic and free; the reference impl ships offline tests against fixture transcripts/
-worktrees (oracle runner + cost extractor are dependency-injected). The committed
+capsule-backed workspaces (oracle runner + cost extractor are dependency-injected). The committed
 `summary.json` lets the whole study re-derive its report/deck with zero spend.
 
 ## Maintenance

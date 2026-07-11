@@ -33,7 +33,9 @@ When in doubt, put transient notes in `.context/` and generated media in `.artif
 
 ## Workflow
 
-1. Inventory with targeted commands. Prefer `find`/`rg --files`; exclude `.git`, `node_modules`, `.pnpm-store`, `.artifacts`, `.worktrees`, and `.claude/worktrees` unless the task is specifically about generated outputs.
+1. Inventory with targeted commands. Prefer `find`/`rg --files`; exclude `.git`,
+   `node_modules`, `.pnpm-store`, `.artifacts`, and `.capsules` unless the task is
+   specifically about generated outputs or managed-workspace hygiene.
 2. Identify the source of truth. For product demos, start from `features/*.yaml`; for deck clips, start from the Slidey JSON references; for staged site media, start from the generated feature index.
 3. Keep automated validation no-LLM. Use structural checks (`make media-check`, `pnpm --dir tools/runstatus --silent features:check`) in default testing. Do not wire `kitsoki-ui-qa` or any real LLM/vision review into `make test`.
 4. Fix catalog drift before media staging drift. Broken feature links, stale generated manifests, or invalid demo paths should be fixed in source contracts, then regenerated.
@@ -70,7 +72,8 @@ make tour-qa
 ## Change Discipline
 
 - Do not move or delete generated media merely because it exists; first determine whether it is ignored staging, review output, or a committed source fixture.
-- Preserve unrelated dirty work, especially under `docs/decks/`, `stories/slidey-edit/`, and `.worktrees/`.
+- Preserve unrelated dirty work, especially under `docs/decks/`,
+  `stories/slidey-edit/`, and any managed Capsule workspace.
 - If adding a new long-lived Slidey deck, keep deck-local rrweb assets under `docs/decks/assets/<deck-id>/` and update `docs/media/README.md` if it changes the inventory or policy.
 - If adding a new product demo, make it `demo.format: rrweb` unless the surface requires the legacy MP4 fallback. Update the graph-backed feature source first, regenerate feature outputs with `make features`, and validate with `make media-check`.
 - Commit only the media-contract/doc/checker changes you made.

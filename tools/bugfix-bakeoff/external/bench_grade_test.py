@@ -599,7 +599,11 @@ def test_drive_cell_preflight_scopes_to_requested_bug():
                 f"    fix_sha: {baseline}\n"
                 "    oracle_test: oracles/missing.test\n"
             )
-            env = {**os.environ, "EXTERNAL_BAKEOFF_CACHE": str(cache)}
+            env = {
+                **os.environ,
+                "EXTERNAL_BAKEOFF_CACHE": str(cache),
+                "EXTERNAL_BAKEOFF_CAPSULE_PROJECT": str(root / "capsule-project"),
+            }
             r = subprocess.run(
                 [
                     str(Path(HERE) / "drive_cell.sh"),
@@ -624,8 +628,54 @@ def test_drive_cell_preflight_scopes_to_requested_bug():
             assert prepared["bug"] == "bug1"
             assert prepared["candidate"] == "opus-4.8"
             assert Path(prepared["worktree"]).exists()
+            assert prepared["workspace"] == prepared["worktree"]
+            assert prepared["workspace_provider"] == "pinned"
+            assert prepared["capsule_provider"] == "git"
+            assert prepared["capsule_workspace_id"].startswith("cell-")
+            assert prepared["capsule_definition_id"] == prepared["capsule_workspace_id"]
+            assert prepared["capsule_owner"] == f"external-bakeoff-{project}-bug1-opus-4.8"
+            assert prepared["capsule_generation"] >= 3
+            workspace = Path(prepared["workspace"])
+            assert (workspace / ".kitsoki-capsule").is_file()
+            assert (workspace / "capsule-manifest.json").is_file()
+            assert subprocess.check_output(
+                ["git", "-C", str(workspace), "branch", "--show-current"], text=True
+            ).strip() == prepared["branch"]
+            source_worktrees = subprocess.check_output(
+                ["git", "-C", str(repo), "worktree", "list", "--porcelain"], text=True
+            )
+            assert str(workspace) not in source_worktrees
             assert Path(prepared["prompt"]).exists()
+            prompt_text = Path(prepared["prompt"]).read_text()
+            assert 'workspace_id: ""' in prompt_text
+            assert f'base_branch: "{prepared["base_branch"]}"' in prompt_text
+            assert subprocess.run(
+                ["git", "-C", str(workspace), "show-ref", "--verify", "--quiet",
+                 f"refs/heads/{prepared['base_branch']}"],
+                check=False,
+            ).returncode == 0
             assert prepared["preflight"].endswith(f"{project}-bug1-opus-4.8.json")
+            capsule_project = Path(prepared["capsule_project"])
+            project_sentinel = json_load(
+                (capsule_project / ".kitsoki-capsule-project").read_text()
+            )
+            assert project_sentinel == {
+                "schema": "capsule-project/v1",
+                "kind": "external-bakeoff",
+                "parent_project": str(Path(HERE).parents[2].resolve()),
+                "managed_by": "tools/bugfix-bakeoff/external/drive_cell.sh",
+            }
+            definition = json_load(
+                (capsule_project / ".kitsoki" / "capsules" /
+                 f"{prepared['capsule_definition_id']}.yaml").read_text()
+            )
+            assert definition["source"] == {
+                "kind": "pinned", "ref": str(repo), "commit": baseline,
+            }
+            assert definition["policy"]["commands"]["prepare_branch"]["argv"][:2] == ["git", "switch"]
+            assert definition["policy"]["commands"]["debug_pin"]["argv"] == [
+                "touch", ".kitsoki-capsule-pin",
+            ]
             old_here = bench.HERE
             bench.HERE = Path(HERE)
             try:
@@ -646,6 +696,27 @@ def test_drive_cell_preflight_scopes_to_requested_bug():
             assert audit["prepared_cells"] == 1
         finally:
             shutil.rmtree(manifest_dir, ignore_errors=True)
+
+
+def test_drive_cell_delegates_mutating_git_lifecycle_to_capsule():
+    text = (Path(HERE) / "drive_cell.sh").read_text()
+    assert "capsule_workspace_cli create" in text
+    assert "capsule_workspace_cli exec" in text
+    assert "capsule_workspace_cli close" in text
+    assert "--keep-workspace" in text
+    assert 'record_workspace_cleanup "debt"' in text
+    assert 'workspace_id: ""' in text  # compatibility: story must not reacquire in another control plane
+    for forbidden in (
+        "git clone",
+        "worktree add",
+        "worktree prune",
+        "reset --hard",
+        "checkout -q",
+        "git -C \"$cell\" clean",
+        "git -C \"$cell\" rebase",
+        "git -C \"$cell\" merge",
+    ):
+        assert forbidden not in text
 
 
 def test_drive_cell_score_writes_completion_state_without_live_drive():
@@ -689,6 +760,7 @@ def test_drive_cell_score_writes_completion_state_without_live_drive():
             env = {
                 **os.environ,
                 "EXTERNAL_BAKEOFF_CACHE": str(cache),
+                "EXTERNAL_BAKEOFF_CAPSULE_PROJECT": str(root / "capsule-project"),
                 "EXTERNAL_BAKEOFF_FAKE_DRIVE_SUCCESS": "1",
             }
             r = subprocess.run(
@@ -716,6 +788,34 @@ def test_drive_cell_score_writes_completion_state_without_live_drive():
             assert payload["target_id"] == project
             assert payload["variant_id"] == "opus-4.8"
             assert payload["axis"] == {"bug": "bug1"}
+            prepared = json_load(
+                (cache / "prepared" / f"{project}-bug1-opus-4.8.json").read_text()
+            )
+            assert prepared["workspace_cleanup"] == "closed"
+            assert prepared["capsule_provider"] == "git"
+            assert prepared["capsule_close_generation"] > prepared["capsule_generation"]
+            assert not Path(prepared["workspace"]).exists()
+            close_receipt = json_load(
+                Path(prepared["workspace_cleanup_receipt"]).read_text()
+            )
+            assert close_receipt == {
+                "schema": "capsule-workspace-close/v1",
+                "ok": True,
+                "project": prepared["capsule_project"],
+                "id": prepared["capsule_workspace_id"],
+                "definition_id": prepared["capsule_definition_id"],
+                "provider": "git",
+                "generation": prepared["capsule_close_generation"],
+                "owner": prepared["capsule_owner"],
+                "state": "closed",
+            }
+            collected, stale, _ = bench.collect_prepared(
+                os.path.relpath(cache / "results", Path(HERE)),
+                project,
+                {("bug1", "opus-4.8")},
+            )
+            assert len(collected) == 1 and stale == []
+            assert bench._audit_capsule_handoff(collected[0]) == []
         finally:
             shutil.rmtree(manifest_dir, ignore_errors=True)
 
@@ -760,7 +860,11 @@ def test_prepare_handoffs_wraps_no_drive_and_audit():
                 "    oracle_test: oracles/missing.test\n"
             )
             rel_results = os.path.relpath(cache / "results", Path(HERE))
-            env = {**os.environ, "EXTERNAL_BAKEOFF_CACHE": str(cache)}
+            env = {
+                **os.environ,
+                "EXTERNAL_BAKEOFF_CACHE": str(cache),
+                "EXTERNAL_BAKEOFF_CAPSULE_PROJECT": str(root / "capsule-project"),
+            }
             r = subprocess.run(
                 [
                     str(Path(HERE) / "prepare_handoffs.sh"),

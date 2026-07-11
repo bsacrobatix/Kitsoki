@@ -58,21 +58,32 @@ the boolean manually.
 - `refine_change`
 - `adjudicate`
 
-The default `run` path parks with `needs_input` until a project wrapper composes
-real checks. This is intentional: the reference story must never fabricate a
-green CI verdict for an unknown project.
+The default `run` path invokes `host.capsule_ci.project_checks`. That
+deterministic host reads the materialized workspace's checked-in
+`.kitsoki/project-profile.yaml`, runs declared `test` and `build` commands,
+writes bounded evidence under `.artifacts/capsule-ci/checks/`, and constructs a
+digest-bound verdict. It parks with `needs_input` when neither command exists
+and fails when a command fails; it never fabricates green evidence.
 
 No-LLM flow fixtures cover pass, fail, park, review pass, and budget exhaustion.
 Runtime tests run the same story contract through host, fake remote, and fake
 container placements.
+
+The host lane is a trusted local compatibility lane (`network: live`,
+`external_write: allow`), not a network sandbox. Tests may inject a contained
+fake host capability to compare the same no-egress envelope across placements;
+that fixture does not claim production host containment. Use container or a
+worker deployment with an independently enforced none/replay network for a
+constrained CI policy.
 
 The optional LLM review room is also covered without live model spend:
 `llm-review-cassette.yaml` replays the `host.agent.decide` call from a host
 cassette, binds the schema-bounded review verdict, and then follows the same
 adjudication path as a real review.
 
-Generated project wrappers are tested separately: they must park honestly across
-host, fake remote, and fake container placements, and the runtime rejects any
+Generated project wrappers are tested separately across host, fake remote, and
+fake container placements. The same injected command runner proves pass/fail/
+no-command behavior without forking real commands, and the runtime rejects any
 wrapper verdict whose source, story, environment, or envelope digest differs
 from the sealed envelope.
 
@@ -83,6 +94,15 @@ modifies code should receive only the Capsule MCP workspace handle for the
 leased workspace unless the story deliberately grants more authority. Remote
 publish, PR creation, and protected-branch promotion are separate grants and
 are not implied by a green CI verdict.
+
+The execution envelope adds a non-bypassable agent policy around every
+`host.agent.*` handler after story/test host configuration. Agent calls default
+to `deny`. An `allow` pipeline must seal an explicit profile allowlist, positive
+`max_cost_usd`, and `on_unavailable` fallback; each call must name an allowed
+profile, and cost is checked before dispatch and again after the one-shot run.
+The launcher also applies the sealed external-write policy after every
+embedding/test host registration, so external host effects cannot be reopened
+by a project wrapper under `external_write: deny`.
 
 The no-LLM writer proof uses the Capsule MCP server directly: the writer-visible
 tool catalog contains only `capsule.*` tools, mutation goes through
@@ -99,7 +119,9 @@ projection plus a mocked HTTP publisher and do not contact GitHub.
 For local/offline adapter testing:
 
 ```sh
-kitsoki capsule ci github trigger --payload payload.json --pipeline change
+kitsoki capsule ci github trigger \
+  --payload payload.json --pipeline change > trigger.json
+kitsoki capsule ci run change --workspace change-1 --trigger trigger.json
 kitsoki capsule ci github check --project . --job <job-id> --details-url <run-url>
 ```
 
@@ -118,6 +140,10 @@ credentialed network write and returns
 `capsule-ci-github-check-publication/v1`. Credentials stay outside the story
 contract and are not written to traces or run records.
 
+`capsule ci plan|run --trigger <file|->` is the ingress seam shared by adapters.
+It accepts the normalized trigger only and rejects a trigger that requests a
+different pipeline, so raw webhook payloads never become unbounded story world.
+
 ## Failure diagnosis
 
 Every completed or failed Capsule CI run should leave a local run record under
@@ -126,10 +152,23 @@ promotion receipt can be signed. Use:
 
 ```sh
 kitsoki capsule ci diagnose --job <job-id>
+kitsoki capsule ci diagnose --latest --stall-after 2m --json=false
+kitsoki capsule ci status --job <job-id> --refresh
 ```
 
 The command projects the run, terminal error, executor failure kind, trace and
-receipt sidecars, and copy-ready follow-up commands into
+receipt sidecars, last durable stage/activity, open executor span, stall
+classification, and copy-ready follow-up commands into
 `capsule-ci-run-diagnosis/v1`. This is the first debugging surface for remote
 worker stalls, story verdict mismatches, and infra failures; raw traces remain
 the deeper evidence layer.
+
+Run `kitsoki capsule ci doctor <pipeline> --workspace <id>` before a live or
+remote run. It validates configuration, story closure, environment, workspace,
+credential names, executor policy, timeouts, and disk hygiene without uploading
+source or invoking the story.
+
+Remote cancellation is worker-confirmed rather than a local status rewrite.
+`capsule ci cancel --job <id>` requests cancellation through the selected
+durable executor; refresh status until the worker reports terminal `cancelled`.
+If it reports `completed` or `failed`, the run remains that outcome.

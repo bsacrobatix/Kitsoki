@@ -527,6 +527,7 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.local_github.ticket", LocalGitHubTicketHandler)
 	r.Register("host.git", GitVCSHandler)
 	r.Register("host.local", LocalCIHandler)
+	r.Register("host.capsule_ci.project_checks", CapsuleCIProjectChecksHandler)
 	r.Register("host.git_worktree", GitWorktreeHandler)
 	r.Register("host.capsule_workspace", CapsuleWorkspaceHandler)
 	r.Register("host.append_to_file", AppendFileTransportHandler)
