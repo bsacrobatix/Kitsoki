@@ -141,7 +141,17 @@ type ConvertOptions struct {
 	// an empty map is emitted (the app's world schema defaults plus on_enter
 	// effects repopulate it on replay).
 	InitialWorld map[string]any
-	traceDir     string
+	// EmitAcceptance, when true, appends a DRAFT session-level acceptance:
+	// block to the generated fixture: final_state_in pins the final
+	// machine.transition's target, host_calls.required lists the unique
+	// dispatched host handlers (handler-only — no args, so the entries stay
+	// portable across arg-shape drift), and world: is emitted empty with a
+	// comment telling the operator to curate the key world vars. The draft is
+	// deliberately coarse — an outcome contract, not a path assertion — so the
+	// story-drift policy above is unaffected: still no per-turn expect_state /
+	// expect_world.
+	EmitAcceptance bool
+	traceDir       string
 }
 
 // ConvertTraceToFlow reads the JSONL trace at tracePath and converts it into a
@@ -229,6 +239,15 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 	var episodes []cassetteEpisodeDoc
 	agentStarts := map[int64]agentCallStartPayload{}
 	agentCompletes := map[int64]agentCallCompletePayload{}
+	// finalState / dispatchedHandlers feed the draft acceptance: block when
+	// EmitAcceptance is set. finalState tracks the target of the LAST
+	// machine.transition — including synthetic and on_complete transitions the
+	// turn mapping skips, because they still move the session and the contract
+	// pins where the session ended up, not how it was driven there.
+	// dispatchedHandlers is the unique host.* handler set in first-seen order.
+	finalState := ""
+	var dispatchedHandlers []string
+	seenHandler := map[string]bool{}
 	for _, tl := range lines {
 		switch tl.Kind {
 		case "turn.input":
@@ -246,6 +265,9 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 			var p transitionPayload
 			if err := json.Unmarshal(tl.Payload, &p); err != nil {
 				return nil, fmt.Errorf("fromtrace: decode machine.transition: %w", err)
+			}
+			if p.To != "" {
+				finalState = p.To
 			}
 			if p.Intent == "" {
 				// A transition with no resolved intent is not re-drivable; skip
@@ -279,6 +301,10 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 			}
 			if !strings.HasPrefix(p.Namespace, "host.") {
 				continue
+			}
+			if !seenHandler[p.Namespace] {
+				seenHandler[p.Namespace] = true
+				dispatchedHandlers = append(dispatchedHandlers, p.Namespace)
 			}
 			ep := cassetteEpisodeDoc{
 				ID:    fmt.Sprintf("%s_%d", episodeIDSlug(p.Namespace), len(episodes)+1),
@@ -336,7 +362,54 @@ func convertTraceLines(lines []traceLine, opts ConvertOptions) (*FlowFromTrace, 
 		return nil, fmt.Errorf("fromtrace: marshal flow: %w", err)
 	}
 	result.FlowYAML = withHeader(flowHeader, fb)
+
+	if opts.EmitAcceptance {
+		draft, dErr := buildAcceptanceDraft(finalState, dispatchedHandlers)
+		if dErr != nil {
+			return nil, fmt.Errorf("fromtrace: build acceptance draft: %w", dErr)
+		}
+		result.FlowYAML = append(result.FlowYAML, draft...)
+	}
 	return result, nil
+}
+
+// buildAcceptanceDraft renders the DRAFT acceptance: block appended to the
+// generated fixture when ConvertOptions.EmitAcceptance is set. The block is
+// marshalled through goyaml (so state paths and handler names are quoted
+// correctly) and then annotated with operator-facing comments — goyaml cannot
+// emit comments itself, so they are spliced into the rendered lines.
+func buildAcceptanceDraft(finalState string, handlers []string) ([]byte, error) {
+	draft := acceptanceDraftDoc{
+		FinalStateIn: []string{},
+		World:        map[string]any{},
+	}
+	if finalState != "" {
+		draft.FinalStateIn = append(draft.FinalStateIn, finalState)
+	}
+	if len(handlers) > 0 {
+		hc := &acceptanceHostCallsDraftDoc{}
+		for _, h := range handlers {
+			hc.Required = append(hc.Required, acceptanceRequiredDraftDoc{Handler: h})
+		}
+		draft.HostCalls = hc
+	}
+	wrapper := struct {
+		Acceptance acceptanceDraftDoc `yaml:"acceptance"`
+	}{Acceptance: draft}
+	b, err := goyaml.Marshal(wrapper)
+	if err != nil {
+		return nil, err
+	}
+	out := "# DRAFT acceptance contract derived from the recorded trace — curate before\n" +
+		"# trusting: it pins the final state and the set of dispatched host handlers,\n" +
+		"# nothing more.\n" +
+		strings.Replace(string(b),
+			"\n  world: {}",
+			"\n  # TODO(operator): curate the key world vars this session must land\n"+
+				"  # (plain scalar = exact JSON-normalized match; { matches: \"regex\" } = Go regex).\n"+
+				"  world: {}",
+			1)
+	return []byte(out), nil
 }
 
 func episodeAgentFromTrace(start agentCallStartPayload, complete agentCallCompletePayload, traceDir string) *EpisodeAgent {
@@ -452,6 +525,26 @@ type flowTurnDoc struct {
 type flowIntentDoc struct {
 	Name  string         `yaml:"name"`
 	Slots map[string]any `yaml:"slots,omitempty"`
+}
+
+// acceptanceDraftDoc is the write-side shape of the draft acceptance: block
+// (buildAcceptanceDraft). It mirrors the read-side FlowAcceptance but keeps
+// final_state_in and world non-omitempty so the draft always shows both keys —
+// the empty world: {} is the operator's curation hook, not an omission.
+type acceptanceDraftDoc struct {
+	FinalStateIn []string                     `yaml:"final_state_in"`
+	World        map[string]any               `yaml:"world"`
+	HostCalls    *acceptanceHostCallsDraftDoc `yaml:"host_calls,omitempty"`
+}
+
+type acceptanceHostCallsDraftDoc struct {
+	Required []acceptanceRequiredDraftDoc `yaml:"required"`
+}
+
+// acceptanceRequiredDraftDoc is one handler-only required entry — the draft
+// deliberately omits args so the contract stays portable across arg drift.
+type acceptanceRequiredDraftDoc struct {
+	Handler string `yaml:"handler"`
 }
 
 type cassetteDoc struct {

@@ -214,6 +214,29 @@ func (c *Cassette) UnmatchedEpisodes() []string {
 	return ids
 }
 
+// PlayedEpisodes returns the IDs of every episode that was consumed (matched)
+// at least once during this run — the complement of UnmatchedEpisodes, in the
+// same episode-position order. replay: any episodes count as played after
+// their first match, exactly as they do for orphan accounting.
+//
+// Play counts are deliberately NOT returned: the internal match counter
+// (episodeMatchCounts) is seeded from prior trace history via
+// SeedMatchCountsFromHistory so post-resume call_ids stay collision-free,
+// which makes it a cross-run counter rather than an in-run play count. The
+// per-episode played flag is the only faithful per-run signal, so this
+// accessor exposes exactly that.
+func (c *Cassette) PlayedEpisodes() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var ids []string
+	for _, ep := range c.Episodes {
+		if ep.played {
+			ids = append(ids, ep.ID)
+		}
+	}
+	return ids
+}
+
 // ErrCassetteMiss is returned when no episode matches a handler call.
 type ErrCassetteMiss struct {
 	Handler           string
