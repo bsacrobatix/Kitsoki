@@ -305,9 +305,12 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         evidence_refs.append(dispatch.launch_plan_ref)
     if dispatch.transcript_ref and dispatch.transcript_ref != container_path(trace_ref):
         evidence_refs.append(dispatch.transcript_ref)
-    if not args.keep_workdir:
+    preserve_incomplete = dispatch.blocked or metrics.get("measurement_status") == "incomplete"
+    if not args.keep_workdir and not preserve_incomplete:
         cleanup_cell_workdir(tree)
         notes = "; ".join(part for part in [notes, f"removed scratch workdir {container_path(str(tree))}"] if part)
+    elif preserve_incomplete:
+        notes = "; ".join(part for part in [notes, f"preserved incomplete scratch workdir {container_path(str(tree))}"] if part)
     return emit(
         verdict=verdict,
         cost_usd=cost_usd,
