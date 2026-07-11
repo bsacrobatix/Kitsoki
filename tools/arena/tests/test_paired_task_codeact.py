@@ -249,6 +249,32 @@ with tempfile.TemporaryDirectory(prefix="paired-prewarm-") as td:
         ["sh", "-lc", "npm install"],
     ])
 
+with tempfile.TemporaryDirectory(prefix="paired-shallow-baseline-") as td:
+    captured: list[list[str]] = []
+    original_run = runner.run
+
+    def fake_materialize_run(cmd, **_kwargs):
+        captured.append(cmd)
+        if cmd[:3] == ["python3", str(runner.BENCH), "meta"]:
+            return runner.subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({"repo": "https://example.test/repo.git", "baseline_sha": "baseline-sha"}),
+                stderr="",
+            )
+        return runner.subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    runner.run = fake_materialize_run
+    try:
+        runner.materialize_baseline(
+            {"oracle": {"kind": "external_bakeoff", "project": "fixture", "bug": "case"}},
+            Path(td) / "tree",
+        )
+    finally:
+        runner.run = original_run
+    check("external baseline starts from empty repository", captured[1], ["git", "init", "-q", str(Path(td) / "tree")])
+    check("external baseline fetches exactly one frozen commit", captured[3], ["git", "fetch", "-q", "--depth", "1", "origin", "baseline-sha"])
+    require("external baseline does not full-clone future history", not any(cmd[:2] == ["git", "clone"] for cmd in captured))
+
 prompt_args = argparse.Namespace(implementation_mode="agent_task")
 prompt = runner.build_kitsoki_prompt(
     prompt_args,
