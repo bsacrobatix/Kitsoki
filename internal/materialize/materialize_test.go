@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -243,36 +242,66 @@ collect:
 		t.Error("written artifact is empty")
 	}
 
-	catalogRaw, err := os.ReadFile(catalogPath)
-	if err != nil {
-		t.Fatalf("read written-back catalog: %v", err)
-	}
-	catalogText := string(catalogRaw)
-	for _, want := range []string{
-		"    evidence:\n      - kind: doc",
-		"path: .artifacts/wi-ready/brief.md",
-		"    materialization:\n      job_id: " + `"` + string(jobID) + `"`,
-		"status: complete",
-		"story: story",
-		"- { id: gather, status: complete }",
-		"- { id: draft, status: complete }",
-		"- { id: done, status: complete }",
-	} {
-		if !strings.Contains(catalogText, want) {
-			t.Errorf("written-back catalog missing %q; got:\n%s", want, catalogText)
-		}
-	}
-
-	// Round-trips as valid YAML with the node's other fields (id/gate/owner/
-	// edges) intact — the splice must not have corrupted the surrounding block.
-	rewritten, err := graph.LoadCatalog(catalogPath)
+	// The write-back's own audit trail (§3.3/§3.4: system-authored
+	// changesets, not a splice) — every mutation went through
+	// graph.Propose/Apply, so both writes land as their own notified
+	// changeset node, in addition to the target node's fields below.
+	catalogAfterWriteback, err := graph.LoadCatalog(catalogPath)
 	if err != nil {
 		t.Fatalf("write-back produced unparseable catalog: %v", err)
 	}
-	n := rewritten.Nodes[graph.NodeID("wi-ready")]
+	n := catalogAfterWriteback.Nodes[graph.NodeID("wi-ready")]
 	if n == nil {
 		t.Fatal("wi-ready missing from write-back catalog")
 	}
+
+	ev, _ := n.Fields["evidence"].([]any)
+	if len(ev) != 1 {
+		t.Fatalf("evidence = %v, want 1 entry", ev)
+	}
+	if entry := ev[0].(map[string]any); entry["kind"] != "doc" || entry["path"] != ".artifacts/wi-ready/brief.md" {
+		t.Errorf("evidence entry = %v, unexpected shape", entry)
+	}
+
+	m, ok := n.Fields["materialization"].(map[string]any)
+	if !ok {
+		t.Fatalf("materialization field missing or wrong shape: %v", n.Fields["materialization"])
+	}
+	if m["job_id"] != string(jobID) || m["status"] != "complete" || m["story"] != "story" {
+		t.Errorf("materialization = %v", m)
+	}
+	wantStageStatuses := []map[string]any{
+		{"id": "gather", "status": "complete"},
+		{"id": "draft", "status": "complete"},
+		{"id": "done", "status": "complete"},
+	}
+	gotStages, _ := m["stages"].([]any)
+	if len(gotStages) != len(wantStageStatuses) {
+		t.Fatalf("materialization stages = %v, want %v", gotStages, wantStageStatuses)
+	}
+	for i, want := range wantStageStatuses {
+		got, _ := gotStages[i].(map[string]any)
+		if got["id"] != want["id"] || got["status"] != want["status"] {
+			t.Errorf("materialization stage %d = %v, want %v", i, got, want)
+		}
+	}
+
+	changesetCount := 0
+	for _, node := range catalogAfterWriteback.Nodes {
+		if node.TypeID == "changeset" {
+			changesetCount++
+			if node.Status != "notified" {
+				t.Errorf("write-back changeset %s status = %q, want notified", node.ID, node.Status)
+			}
+		}
+	}
+	if changesetCount != 2 {
+		t.Errorf("changeset count = %d, want 2 (one evidence append, one materialization write)", changesetCount)
+	}
+
+	// Round-trips as valid YAML with the node's other fields (id/gate/owner/
+	// edges) intact — the surgical field replace must not have corrupted
+	// the surrounding block.
 	if n.Fields["owner"] != "brad" {
 		t.Errorf("owner field corrupted by write-back: %v", n.Fields["owner"])
 	}

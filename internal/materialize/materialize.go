@@ -461,7 +461,7 @@ func driveHandler(def *app.AppDef, stages []string, initialWorld map[string]any,
 			title := artifactTitle(wb.Binding.ArtifactSchema)
 			produced := MaterializationArtifact{Kind: "doc", Title: title, Path: path, ProducedAt: time.Now().UTC().Format(time.RFC3339)}
 			writtenArtifacts = append(writtenArtifacts, produced)
-			_ = AppendEvidence(wb.CatalogPath, string(wb.NodeID), EvidenceEntry{Kind: produced.Kind, Title: produced.Title, Path: produced.Path})
+			_ = AppendEvidence(wb.CatalogPath, string(wb.NodeID), EvidenceEntry{Kind: produced.Kind, Title: produced.Title, Path: produced.Path}, jobID, wb.Binding.Story)
 		}
 		finalizeWriteback := func(status string) {
 			_ = WriteMaterialization(wb.CatalogPath, string(wb.NodeID), MaterializationRecord{
