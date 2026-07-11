@@ -1054,11 +1054,12 @@ func printTraceStatus(w io.Writer, path string, st traceStatus, modTime time.Tim
 // session trace into a replayable deterministic flow fixture (+ host cassette).
 func traceToFlowCmd() *cobra.Command {
 	var (
-		outPath       string
-		recordingPath string
-		appPath       string
-		appID         string
-		initialState  string
+		outPath        string
+		recordingPath  string
+		appPath        string
+		appID          string
+		initialState   string
+		emitAcceptance bool
 	)
 
 	cmd := &cobra.Command{
@@ -1076,6 +1077,11 @@ No expect_state / expect_world is emitted on the turns: a trace recorded against
 an older version of a story may route differently against the current one;
 strict expectations would hard-fail replay on the first divergence. The fixture
 is a faithful re-drive of the recorded intents.
+
+Pass --acceptance to append a DRAFT session-level acceptance: block instead — a
+version-portable outcome contract that pins the final state and the set of
+dispatched host handlers (order-free, handler-only) and leaves world: empty for
+the operator to curate. Unlike per-turn expectations it survives story drift.
 
 The flow is written to --out; the cassette (when the trace has host calls) is
 written next to it (default <out-basename>.cassette.yaml) and referenced from
@@ -1105,10 +1111,11 @@ Replay the result with:
 			}
 
 			res, err := testrunner.ConvertTraceToFlow(tracePath, testrunner.ConvertOptions{
-				AppPath:      appPath,
-				CassettePath: casRef,
-				AppID:        appID,
-				InitialState: initialState,
+				AppPath:        appPath,
+				CassettePath:   casRef,
+				AppID:          appID,
+				InitialState:   initialState,
+				EmitAcceptance: emitAcceptance,
 			})
 			if err != nil {
 				return err
@@ -1134,6 +1141,7 @@ Replay the result with:
 	cmd.Flags().StringVar(&appPath, "app", "", "value for the fixture's app: field, e.g. ../app.yaml (required)")
 	cmd.Flags().StringVar(&appID, "app-id", "", "value for the cassette's app_id: field (default: from-trace)")
 	cmd.Flags().StringVar(&initialState, "initial-state", "", "override the derived initial state")
+	cmd.Flags().BoolVar(&emitAcceptance, "acceptance", false, "append a DRAFT session-level acceptance: block (final_state_in + required host handlers; curate world: by hand)")
 
 	return cmd
 }

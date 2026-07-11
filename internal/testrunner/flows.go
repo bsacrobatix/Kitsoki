@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -195,6 +196,18 @@ type FlowFixture struct {
 	// asserting that a fixture's walk never touched a transport / VCS
 	// op that belongs to a different pipeline.
 	ExpectNoHostCalls []string `yaml:"expect_no_host_calls,omitempty"`
+
+	// Acceptance is an OPTIONAL session-level outcome contract, distinct
+	// from the per-turn expectations: it asserts what the session must
+	// have accomplished by the end of the run (final state, key world
+	// vars, host calls that must/must-not have fired anywhere, on-disk
+	// artefacts) without pinning the path taken to get there. That makes
+	// it version-portable: a story revision that reshuffles rooms on the
+	// way to the same outcome keeps the acceptance block green while
+	// per-turn expect_state assertions would break. Evaluated once after
+	// all turns complete; failures land in the session-level sweep with
+	// an "acceptance:" prefix.
+	Acceptance *FlowAcceptance `yaml:"acceptance,omitempty"`
 }
 
 // ExpectFile is one entry in a fixture-level expect_files assertion.
@@ -211,6 +224,61 @@ type ExpectFile struct {
 	// MustNotExist inverts the assertion — the file must NOT exist on
 	// disk. Useful for asserting that a code-path was never reached.
 	MustNotExist *bool `yaml:"must_not_exist,omitempty"`
+}
+
+// FlowAcceptance is the session-level `acceptance:` block on a flow fixture —
+// a version-portable outcome contract evaluated once, after the final turn.
+// Every field is optional; only declared checks run. Failures are appended to
+// the session-level failure sweep with an "acceptance:" message prefix so a
+// report reader can tell a broken contract from a broken per-turn expectation.
+type FlowAcceptance struct {
+	// FinalStateIn passes when the FINAL turn's resulting state matches at
+	// least one entry. Entries are path.Match-style globs ("core.idle*")
+	// so a contract can tolerate sibling terminal rooms; an entry with no
+	// glob metacharacters is an exact match, i.e. the per-turn
+	// expect_state_in semantics. State paths separate segments with '.'
+	// (never '/'), so `*` effectively matches across segments.
+	FinalStateIn []string `yaml:"final_state_in,omitempty"`
+
+	// World is a subset match on the final world (missing keys in the map
+	// are not checked). A plain scalar value asserts JSON-normalized
+	// equality — the same comparator expect_world_final uses. A one-key
+	// mapping of the form `{ matches: "regex" }` instead runs the Go regex
+	// against the value's JSON-normalized string form (strings verbatim,
+	// everything else its compact JSON encoding — see
+	// jsonNormalizedString). The `matches` form is reserved: a world var
+	// whose expected value IS literally {"matches": ...} cannot be
+	// asserted exactly through this block.
+	World map[string]any `yaml:"world,omitempty"`
+
+	// HostCalls asserts on host dispatches across the WHOLE session with
+	// order-free set semantics — unlike per-turn expect_host_calls, which
+	// scopes to one turn. Requires an execution path that records
+	// HostDispatched events (the orchestrator path); see assertAcceptance
+	// for the legacy-path behaviour.
+	HostCalls *AcceptanceHostCalls `yaml:"host_calls,omitempty"`
+
+	// Files reuses the fixture-level expect_files item shape (path /
+	// content_matches / must_not_exist), resolved against the fixture
+	// file's directory, evaluated after the flow completes.
+	Files []ExpectFile `yaml:"files,omitempty"`
+}
+
+// AcceptanceHostCalls is the host_calls: sub-block of acceptance:.
+type AcceptanceHostCalls struct {
+	// Required entries reuse the ExpectHostCall shape (handler + partial
+	// args + optional times). An entry passes when ANY host call in the
+	// whole session matches. Times means AT LEAST that many matches —
+	// deliberately looser than per-turn expect_host_calls, where times
+	// pins the exact per-turn count: an outcome contract should survive a
+	// story revision that adds a retry, so a floor is the portable
+	// reading. Omitted times defaults to at-least-one.
+	Required []ExpectHostCall `yaml:"required,omitempty"`
+
+	// Forbidden lists handler names that must not fire anywhere in the
+	// session — the same exact-name semantics as the fixture-level
+	// expect_no_host_calls list, scanned over every collected event.
+	Forbidden []string `yaml:"forbidden,omitempty"`
 }
 
 // HostStub declares the canned response for a stub host handler used in a flow
@@ -1549,6 +1617,13 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 	if len(fixture.ExpectFiles) > 0 {
 		sessionFailures = append(sessionFailures, assertExpectFiles(filepath.Dir(filePath), fixture.ExpectFiles)...)
 	}
+	// Session-level acceptance: contract. The legacy machine-only path
+	// never dispatches hosts, so hostCallsRecorded is false — required
+	// host calls fail with an explicit "requires the orchestrator path"
+	// diagnosis instead of a misleading zero count (see assertAcceptance).
+	if fixture.Acceptance != nil {
+		sessionFailures = append(sessionFailures, assertAcceptance(filepath.Dir(filePath), fixture.Acceptance, currentState, currentWorld, allEvents, false)...)
+	}
 	sessionFailures = append(sessionFailures, assertOperationExpectations(allEvents, fixture)...)
 
 	// Compute overall pass.
@@ -1972,6 +2047,13 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 	// where the fixture lives.
 	if len(fixture.ExpectFiles) > 0 {
 		sessionFailures = append(sessionFailures, assertExpectFiles(filepath.Dir(filePath), fixture.ExpectFiles)...)
+	}
+	// Session-level acceptance: contract, evaluated against the final
+	// journey state/world and every event collected across the run. The
+	// orchestrator path records HostDispatched events (in SQLite as well
+	// as the JSONL sink), so host-call acceptance is fully observable here.
+	if fixture.Acceptance != nil {
+		sessionFailures = append(sessionFailures, assertAcceptance(filepath.Dir(filePath), fixture.Acceptance, finalState, finalWorld, allEvents, true)...)
 	}
 	sessionFailures = append(sessionFailures, assertOperationExpectations(allEvents, fixture)...)
 
@@ -2709,6 +2791,13 @@ func assertHostCalls(actual []store.Event, calls []ExpectHostCall) []string {
 // namespace field on the HostDispatched payload carries the handler
 // name (see countHostDispatchedMatching for the same convention).
 func assertNoHostCalls(actual []store.Event, handlers []string) []string {
+	return assertNoHostCallsLabeled(actual, handlers, "expect_no_host_calls")
+}
+
+// assertNoHostCallsLabeled is assertNoHostCalls with a caller-supplied
+// failure-message label, so the acceptance: block's forbidden list can
+// share the exact-name scan while reporting under its own key.
+func assertNoHostCallsLabeled(actual []store.Event, handlers []string, label string) []string {
 	if len(handlers) == 0 {
 		return nil
 	}
@@ -2727,7 +2816,7 @@ func assertNoHostCalls(actual []store.Event, handlers []string) []string {
 		}
 		got, _ := payload["namespace"].(string)
 		if _, ok := banned[got]; ok {
-			failures = append(failures, fmt.Sprintf("expect_no_host_calls: %s was invoked but listed as forbidden", got))
+			failures = append(failures, fmt.Sprintf("%s: %s was invoked but listed as forbidden", label, got))
 		}
 	}
 	return failures
@@ -2738,6 +2827,13 @@ func assertNoHostCalls(actual []store.Event, handlers []string) []string {
 // uses Go regexp; must_not_exist inverts the assertion. A failure is
 // returned per offending entry so the report shows all mismatches.
 func assertExpectFiles(fixtureDir string, files []ExpectFile) []string {
+	return assertExpectFilesLabeled(fixtureDir, files, "expect_files")
+}
+
+// assertExpectFilesLabeled is assertExpectFiles with a caller-supplied
+// failure-message label, so the acceptance: block's files list can share
+// the evaluator while reporting under its own key.
+func assertExpectFilesLabeled(fixtureDir string, files []ExpectFile, label string) []string {
 	var failures []string
 	for _, ef := range files {
 		path := ef.Path
@@ -2748,31 +2844,160 @@ func assertExpectFiles(fixtureDir string, files []ExpectFile) []string {
 		exists := statErr == nil && !info.IsDir()
 		if ef.MustNotExist != nil && *ef.MustNotExist {
 			if exists {
-				failures = append(failures, fmt.Sprintf("expect_files[%s]: must_not_exist but file is present", ef.Path))
+				failures = append(failures, fmt.Sprintf("%s[%s]: must_not_exist but file is present", label, ef.Path))
 			}
 			continue
 		}
 		if !exists {
-			failures = append(failures, fmt.Sprintf("expect_files[%s]: file does not exist (resolved: %s)", ef.Path, path))
+			failures = append(failures, fmt.Sprintf("%s[%s]: file does not exist (resolved: %s)", label, ef.Path, path))
 			continue
 		}
 		if ef.ContentMatches != "" {
 			re, reErr := regexp.Compile(ef.ContentMatches)
 			if reErr != nil {
-				failures = append(failures, fmt.Sprintf("expect_files[%s]: invalid regex %q: %v", ef.Path, ef.ContentMatches, reErr))
+				failures = append(failures, fmt.Sprintf("%s[%s]: invalid regex %q: %v", label, ef.Path, ef.ContentMatches, reErr))
 				continue
 			}
 			data, readErr := os.ReadFile(path)
 			if readErr != nil {
-				failures = append(failures, fmt.Sprintf("expect_files[%s]: read failed: %v", ef.Path, readErr))
+				failures = append(failures, fmt.Sprintf("%s[%s]: read failed: %v", label, ef.Path, readErr))
 				continue
 			}
 			if !re.Match(data) {
-				failures = append(failures, fmt.Sprintf("expect_files[%s]: content does not match %q", ef.Path, ef.ContentMatches))
+				failures = append(failures, fmt.Sprintf("%s[%s]: content does not match %q", label, ef.Path, ef.ContentMatches))
 			}
 		}
 	}
 	return failures
+}
+
+// ─── acceptance: session-level outcome contract ──────────────────────────────
+
+// assertAcceptance evaluates the fixture's session-level acceptance: block —
+// the version-portable outcome contract (see FlowAcceptance) — against the
+// run's final state, final world, and the full collected event log. Every
+// failure message carries an "acceptance:" prefix.
+//
+// hostCallsRecorded reports whether the execution path records HostDispatched
+// events. The orchestrator path does; the legacy machine-only path never
+// dispatches hosts, so no HostDispatched event can exist there. When false
+// and the block declares host_calls.required, the evaluator fails with an
+// explicit "requires the orchestrator path" diagnosis — per-turn
+// expect_host_calls on the legacy path likewise can only ever fail (the
+// count is always zero), but its bare "never invoked" message misdiagnoses
+// the problem, and silently passing is not an option for a contract.
+// host_calls.forbidden is evaluated on both paths and — exactly like the
+// existing fixture-level expect_no_host_calls — trivially passes on the
+// legacy path, where the scan finds no dispatch events.
+func assertAcceptance(fixtureDir string, acc *FlowAcceptance, finalState app.StatePath, finalWorld world.World, allEvents []store.Event, hostCallsRecorded bool) []string {
+	if acc == nil {
+		return nil
+	}
+	var failures []string
+
+	// final_state_in: glob match against the final turn's resulting state.
+	if len(acc.FinalStateIn) > 0 {
+		matched := false
+		for _, pattern := range acc.FinalStateIn {
+			ok, matchErr := matchStatePattern(pattern, string(finalState))
+			if matchErr != nil {
+				failures = append(failures, fmt.Sprintf("acceptance: final_state_in: invalid pattern %q: %v", pattern, matchErr))
+				continue
+			}
+			if ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			failures = append(failures, fmt.Sprintf("acceptance: final_state_in: final state %q matches none of %v", finalState, acc.FinalStateIn))
+		}
+	}
+
+	// world: subset match on the final world; scalar = exact
+	// (JSON-normalized, the expect_world_final comparator), one-key
+	// {matches: "regex"} mapping = Go regex on the JSON-normalized string.
+	for k, expected := range acc.World {
+		got := finalWorld.Vars[k]
+		if pattern, isRegex := acceptanceWorldRegex(expected); isRegex {
+			re, reErr := regexp.Compile(pattern)
+			if reErr != nil {
+				failures = append(failures, fmt.Sprintf("acceptance: world[%q]: invalid regex %q: %v", k, pattern, reErr))
+				continue
+			}
+			if s := jsonNormalizedString(got); !re.MatchString(s) {
+				failures = append(failures, fmt.Sprintf("acceptance: world[%q]: %q does not match %q", k, s, pattern))
+			}
+			continue
+		}
+		if !deepEqualValues(got, expected) {
+			failures = append(failures, fmt.Sprintf("acceptance: world[%q]: got %v (%T), want %v (%T)", k, got, got, expected, expected))
+		}
+	}
+
+	// host_calls: session-wide set semantics over every collected event.
+	if acc.HostCalls != nil {
+		if len(acc.HostCalls.Required) > 0 && !hostCallsRecorded {
+			failures = append(failures, "acceptance: host_calls.required requires the orchestrator path (the legacy machine-only runner records no host dispatches); set use_orchestrator: true or declare host_handlers:/host_cassette: on the fixture")
+		} else {
+			for _, c := range acc.HostCalls.Required {
+				got := countHostDispatchedMatching(allEvents, c.Handler, c.Args)
+				want := 1
+				if c.Times != nil {
+					want = *c.Times
+				}
+				if got < want {
+					failures = append(failures, fmt.Sprintf("acceptance: host_calls.required: %s matched %d time(s), want at least %d (args=%v)", c.Handler, got, want, c.Args))
+				}
+			}
+		}
+		failures = append(failures, assertNoHostCallsLabeled(allEvents, acc.HostCalls.Forbidden, "acceptance: host_calls.forbidden")...)
+	}
+
+	// files: the expect_files evaluator, resolved against the fixture dir.
+	failures = append(failures, assertExpectFilesLabeled(fixtureDir, acc.Files, "acceptance: files")...)
+
+	return failures
+}
+
+// acceptanceWorldRegex reports whether an acceptance world value uses the
+// regex form — a mapping with exactly one key, `matches` — and returns the
+// pattern string when it does. Any other shape (plain scalar, list, larger
+// map) is the exact-equality form.
+func acceptanceWorldRegex(expected any) (string, bool) {
+	m, ok := expected.(map[string]any)
+	if !ok || len(m) != 1 {
+		return "", false
+	}
+	pattern, ok := m["matches"].(string)
+	return pattern, ok
+}
+
+// jsonNormalizedString renders a world value for regex matching: strings are
+// used verbatim (no surrounding JSON quotes, so `docs/.*PRD` can anchor on the
+// raw path) and every other value is its compact JSON encoding — the same
+// normalization deepEqualValues applies before comparing.
+func jsonNormalizedString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprintf("%v", v)
+	}
+	return string(b)
+}
+
+// matchStatePattern reports whether a state path matches one final_state_in
+// entry. An entry with no glob metacharacters is an exact comparison (the
+// per-turn expect_state_in semantics); otherwise it is a path.Match glob.
+// path.Match's `*` stops only at '/' — state paths separate segments with
+// '.', so `core.idle*` matches core.idle and core.idle.confirm alike.
+func matchStatePattern(pattern, state string) (bool, error) {
+	if !strings.ContainsAny(pattern, `*?[\`) {
+		return pattern == state, nil
+	}
+	return path.Match(pattern, state)
 }
 
 // assertEventsSubsequence checks that each expected event appears in order
