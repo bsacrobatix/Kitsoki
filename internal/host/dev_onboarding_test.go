@@ -96,8 +96,16 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(instance), "host.capsule_workspace") || strings.Contains(string(instance), "host.git_worktree") {
+	// The workspace BINDING must be capsule_workspace (the git_worktree →
+	// capsule_workspace migration), but host.git_worktree stays on the plain
+	// hosts allow-list: transitively imported stories (slidey-edit) call the
+	// worktree handler directly, and the instance imports dev-story with
+	// hosts: declared.
+	if !strings.Contains(string(instance), "workspace: host.capsule_workspace") || strings.Contains(string(instance), "workspace: host.git_worktree") {
 		t.Fatalf("instance workspace binding not migrated:\n%s", instance)
+	}
+	if !strings.Contains(string(instance), "- host.git_worktree") {
+		t.Fatalf("instance hosts allow-list missing host.git_worktree (needed by slidey-edit via dev-story):\n%s", instance)
 	}
 	gitignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if err != nil {
