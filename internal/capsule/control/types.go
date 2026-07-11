@@ -122,19 +122,20 @@ type Lease struct {
 // Instance is the durable internal record. Path is intentionally excluded from
 // JSON front-door results; callers receive Handle instead.
 type Instance struct {
-	ID               string    `json:"id"`
-	DefinitionID     string    `json:"definition_id"`
-	DefinitionDigest string    `json:"definition_digest"`
-	Provider         string    `json:"provider"`
-	Path             string    `json:"-"`
-	SourceRef        string    `json:"source_ref,omitempty"`
-	Head             string    `json:"head,omitempty"`
-	Branch           string    `json:"branch,omitempty"`
-	State            State     `json:"state"`
-	Generation       uint64    `json:"generation"`
-	Lease            Lease     `json:"lease"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string       `json:"id"`
+	DefinitionID     string       `json:"definition_id"`
+	DefinitionDigest string       `json:"definition_digest"`
+	Provider         string       `json:"provider"`
+	Path             string       `json:"-"`
+	SourceRef        string       `json:"source_ref,omitempty"`
+	Head             string       `json:"head,omitempty"`
+	Branch           string       `json:"branch,omitempty"`
+	VerifierOverlays []OverlayRef `json:"verifier_overlays,omitempty"`
+	State            State        `json:"state"`
+	Generation       uint64       `json:"generation"`
+	Lease            Lease        `json:"lease"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }
 
 // Handle is the sole workspace authority exposed outside the manager.
@@ -246,10 +247,19 @@ type WorkspaceIntegrator interface {
 // MaterializedWorkspace contains facts discovered by the provider, never a
 // caller-chosen authority expansion.
 type MaterializedWorkspace struct {
-	Path      string
-	SourceRef string
-	Head      string
-	Branch    string
+	Path             string
+	SourceRef        string
+	Head             string
+	Branch           string
+	VerifierOverlays []OverlayRef
+}
+
+// OverlayRef is a sanitized, project-relative reference to verifier-only
+// material. It carries integrity evidence without granting agent-visible FS
+// access to the underlying path.
+type OverlayRef struct {
+	Path   string `json:"path"`
+	Digest string `json:"digest"`
 }
 
 // Event is the deterministic trace fact emitted by the manager. EventSink is
