@@ -204,10 +204,33 @@ func TestGraphServer_ToolSchemasHaveNoBooleanLeaves(t *testing.T) {
 		if err := json.Unmarshal(raw, &m); err != nil {
 			t.Fatalf("unmarshal schema for %s: %v", tool.Name, err)
 		}
-		props, _ := m["properties"].(map[string]any)
-		for propName, propSchema := range props {
-			if _, isBool := propSchema.(bool); isBool {
-				t.Errorf("tool %s property %q has a boolean schema leaf (reflected `any` field) — this drops the whole tools/list in Claude Code", tool.Name, propName)
+		checkSchemaNoBooleanLeaves(t, tool.Name, "", m)
+	}
+}
+
+// checkSchemaNoBooleanLeaves recurses into a JSON Schema map, following
+// "properties" and "items" (the two places a reflected Go `any` field can
+// surface as a bare bool), so nested object/array sub-schemas are covered,
+// not just the tool's top-level properties.
+func checkSchemaNoBooleanLeaves(t *testing.T, toolName, path string, schema map[string]any) {
+	t.Helper()
+	props, _ := schema["properties"].(map[string]any)
+	for propName, propSchema := range props {
+		propPath := path + "." + propName
+		if _, isBool := propSchema.(bool); isBool {
+			t.Errorf("tool %s property %q has a boolean schema leaf (reflected `any` field) — this drops the whole tools/list in Claude Code", toolName, propPath)
+			continue
+		}
+		if sub, ok := propSchema.(map[string]any); ok {
+			checkSchemaNoBooleanLeaves(t, toolName, propPath, sub)
+			if items, ok := sub["items"]; ok {
+				if _, isBool := items.(bool); isBool {
+					t.Errorf("tool %s property %q has a boolean items schema leaf (reflected `any` field) — this drops the whole tools/list in Claude Code", toolName, propPath+"[]")
+					continue
+				}
+				if itemsSchema, ok := items.(map[string]any); ok {
+					checkSchemaNoBooleanLeaves(t, toolName, propPath+"[]", itemsSchema)
+				}
 			}
 		}
 	}
