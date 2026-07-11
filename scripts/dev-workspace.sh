@@ -913,6 +913,15 @@ cmd_merge() {
   [ -n "$branch" ] || branch="$(git -C "$path" branch --show-current)"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ] || die "merge: workspace must be on a branch or --branch must be provided"
 
+  # Kitsoki's staging target has a fast deterministic repository gate. Keep it
+  # on the normal landing path while leaving generic disposable-repo tests and
+  # explicitly supplied gates unchanged.
+  if [ -z "$gate" ] && [ "$target" = "$DEFAULT_TARGET" ] && [ -f "$repo/Makefile" ] &&
+    make -C "$repo" -n capsule-ci-quick >/dev/null 2>&1; then
+    gate="make capsule-ci-quick"
+    echo "merge: using default staging gate: $gate" >&2
+  fi
+
   local target_base
   if git -C "$repo" rev-parse --verify --quiet "refs/heads/$target" >/dev/null; then
     target_base="$target"
