@@ -50,7 +50,10 @@ with tempfile.TemporaryDirectory() as tmp:
     check("report kind", report.get("kind"), "glm52_bugswarm_bugfix_report")
     check("oss corpus task count", report["corpora"]["oss_oracle"]["task_count"], 26)
     check("bugswarm source status", report["corpora"]["bugswarm"]["source_status"], "adapter-ready")
-    check("bugswarm imported count", report["corpora"]["bugswarm"]["imported_task_count"], 1)
+    # 2026-07-11: real seed grew from 1 to 13 real, filtered candidates (docs/proposals/
+    # bugfix-archetype-corpus-and-harness.md Slice 2) via the live BugSwarm REST API.
+    # None are verified yet, so every downstream "pending" count below grows with it.
+    check("bugswarm imported count", report["corpora"]["bugswarm"]["imported_task_count"], 13)
     source_mix = report["source_mix"]
     components = {component["id"]: component for component in source_mix["oss_oracle"]["components"]}
     check("source mix public target tasks", components["pre_registered_oss_targets"]["task_count"], 20)
@@ -79,11 +82,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("oss kitsoki attempted", headline["oss-oracle|kitsoki"]["attempted"], 1)
     check("oss kitsoki success rate", headline["oss-oracle|kitsoki"]["success_rate"], 0.0)
     check("oss raw pending", headline["oss-oracle|raw-prompt"]["pending"], 1)
-    check("bugswarm raw pending", headline["bugswarm|raw-prompt"]["pending"], 1)
+    check("bugswarm raw pending", headline["bugswarm|raw-prompt"]["pending"], 13)
     overall = report["rollups"]["glm52_by_treatment_overall"]
     check("overall kitsoki attempted", overall["kitsoki"]["attempted"], 1)
     check("overall raw attempted pending", overall["raw-prompt"]["attempted"], 0)
-    check("overall raw pending count", overall["raw-prompt"]["pending"], 2)
+    check("overall raw pending count", overall["raw-prompt"]["pending"], 14)
     comparisons = report["comparisons"]
     check("overall comparison pending", comparisons["overall"]["status"], "pending")
     check("bugswarm comparison pending", comparisons["bugswarm"]["status"], "pending")
@@ -123,7 +126,7 @@ with tempfile.TemporaryDirectory() as tmp:
     protocol = report["study_protocol"]
     check("study protocol pending", protocol["status"], "pending-evidence")
     check("study protocol candidate", protocol["candidate"], "glm-5.2")
-    check("study protocol pending count", protocol["pending_cell_count"], 3)
+    check("study protocol pending count", protocol["pending_cell_count"], 27)
     protocol_cells = {(cell["corpus"], cell["treatment"], cell["gate"]) for cell in protocol["pending_cells"]}
     check("study protocol oss raw gate", ("oss-oracle", "raw-prompt", "ready-to-plan") in protocol_cells, True)
     check("study protocol bugswarm kitsoki gate", ("bugswarm", "kitsoki", "execute-verify-bugswarm") in protocol_cells, True)

@@ -1,9 +1,12 @@
 # Bugfix-archetype corpus growth + config-driven mechanism harness
 
-**Status:** Draft v1. **Slice 1 (config-driven target story) landed** — see
-"What exists today" and Tasks below. Everything else (corpus path choice,
-Slices 2-5) is still open, pending Brad's call on BugSwarm vs. GitBug-Java
-(see "Corpus research").
+**Status:** Draft v1. **Slice 1 (config-driven target story) and Slice 2
+(BugSwarm candidate list, real data) landed.** Brad confirmed Path A (BugSwarm,
+filtered) over GitBug-Java. Slice 3 (Docker-gated live RED/GREEN verification)
+and Slice 4 (live round) are operator-run steps this sandbox cannot execute —
+the exact commands are already generated (`.artifacts/arena/glm52-gap-plan.md`,
+regenerate via the command in "Corpus growth" below). Slice 5 (stretch) still
+open.
 **Amends:** `docs/research/cost-efficiency-benchmark.md` (FROZEN M0 protocol) — per
 that document's own rule ("Any change after this freeze requires a new,
 explicitly versioned amendment section, not a silent edit"), this proposal is
@@ -81,7 +84,7 @@ frozen-protocol path and the path any new corpus adapter would generate specs
 for; the story-config fix also applies to (1)/(2) since they duplicate the
 exact same hardcoded constant.
 
-## Corpus research: an open decision, not a settled one
+## Corpus research: resolved — Path A (BugSwarm, filtered)
 
 The corpus research this session turned up a real tension worth Brad's
 explicit call rather than a silent pick. Full comparison researched
@@ -112,20 +115,11 @@ Two defensible paths:
   spec-generate, ~4 small offline Python scripts). 188 cases is enough for a
   repeatable study; MIT means no license caveat in the write-up.
 
-This proposal's harness fixes (config-driven story, below) are corpus-agnostic
-— either path benefits identically, so the harness work isn't blocked on this
-choice. The choice only gates which corpus-growth slice (2/3 below) actually
-runs. **Recommendation if forced to pick one to start: A (BugSwarm), filtered
-to Java + ≤5-files-changed + `classification` excluding flaky/broken** —
-because it's real progress this week on infrastructure that already exists
-and that Brad has already invested in, with the contamination/suitability
-risk mitigated (not eliminated) by mandatory live re-verification of every
-case rather than trusting BugSwarm's own metadata. GitBug-Java stays a
-documented, ready-to-build follow-up (Path B below) if the study later wants
-a second, more rigorously-defensible corpus arm for the same archetype —
-`sources.yaml`'s design already treats corpora as independent, addable
-sources, so this isn't an either/or fork in the data model, only in which
-gets built first.
+**Brad picked Path A (BugSwarm, filtered).** GitBug-Java stays a documented,
+ready-to-build follow-up (Path B below) if the study later wants a second,
+more rigorously-defensible corpus arm for the same archetype — `sources.yaml`'s
+design already treats corpora as independent, addable sources, so this isn't
+an either/or fork in the data model, only in which gets built first.
 
 ## Proposed design
 
@@ -165,29 +159,55 @@ it's the GLM-5.2/BugSwarm report correctly refusing to call itself
 publishable while its claims are still `pending`, which is exactly the gap
 Slices 2-4 close.
 
-### 2. Corpus growth (Docker-gated — this sandbox can't run it)
+### 2. Corpus growth — DONE (candidate data); Docker-gated verification is next
 
-`docker version` did not return in this session (hung past 60s with no
-daemon response), so the live-verification half of this slice is an
-operator-run step. Path A (BugSwarm) is already fully scripted end to end
-(`tools/arena/corpus/README.md`'s BugSwarm section):
+Grew `tools/arena/corpus/bugswarm.seed-artifacts.json` from the original 1
+tutorial artifact to **13** (1 original + 12 new), sourced live from
+BugSwarm's own REST API (`bugswarm-common`'s `DatabaseAPI`, unauthenticated,
+queried 2026-07-11 — no fabricated data; every `image_tag`/`failed_job_id`/
+`passed_job_id`/commit SHA is real and independently re-fetchable). Filter
+applied via `DatabaseAPI.filter_artifacts` (MongoDB-style query): `lang in
+[Java, Python]`, `reproduce_successes = 5` (BugSwarm's own non-flaky signal —
+5/5 reproduction attempts succeeded), `num_of_changed_files <= 3`, `changes
+<= 15`, `classification.code = "Yes"` (a genuine code-level fix, not
+build/test-only — directly targets the ~3.6%-suitability critique from
+"Corpus research"), `1 <= num_tests_failed <= 5` (a bounded, specific
+failure, not mass breakage). 115 artifacts matched across 37 repos; picked
+12, diversified one-per-repo, favoring widely-recognized projects (numpy,
+scikit-learn, apache/commons-lang, apache/dubbo, square/okhttp,
+square/retrofit, spring-data-jpa, pgjdbc, assertj-core, byte-buddy,
+languagetool, owlapi) over obscure ones where the filter offered a choice.
+9 Java / 3 Python (not force-balanced — an honest filter result, not a
+quota). Every new entry's `selection_note` records its exact filter basis
+and evidence (failing test names, exception types, test-suite size) for
+independent audit.
+
+Regenerated `tools/arena/corpus/bugswarm.seed.yaml` via the existing,
+unmodified converter (`bugswarm_to_arena.py`) — no new tooling needed.
+Updated `tools/arena/tests/test_bugswarm_source.py` (task count 1→13, plus
+new checks that every grown task starts unverified, has a real GitHub
+commit `source_url`, and spans 12 distinct repos across both languages) and
+`tools/arena/tests/test_glm52_bugswarm_report.py` (4 count assertions that
+cascade from the corpus size — `imported_task_count`, `bugswarm|raw-prompt`
+pending, overall raw pending, study-protocol pending-cell-count — all
+updated to their new correct values, not just made to pass). Regenerated the
+committed `docs/case-studies/bugswarm-glm52-bugfix-report.{md,data.json}` so
+it no longer claims a stale 1-task corpus. Full `tools/arena/tests/test_*.py`
+suite: 28/29 pass (same pre-existing `test_glm52_report_gate.py` failure as
+Slice 1 — the report correctly refusing to call itself publishable while
+BugSwarm's claims stay `pending`, which is precisely what Slice 3/4 close).
+
+**Still open — Docker-gated, this sandbox can't run it** (`docker version`
+hung past 60s with no daemon response this session):
 
 ```bash
-# 1. Source a candidate artifact list from BugSwarm's public metadata,
-#    filtered per the criteria above — every entry must trace to a real
-#    BugSwarm artifact tag, none invented.
-# 2. Convert (offline, no Docker/LLM):
-python3 tools/arena/scripts/bugswarm_to_arena.py \
-    --in .artifacts/bugswarm/candidates.json --out .artifacts/bugswarm/source.yaml
-# 3. Verify RED/GREEN (Docker-gated, operator machine):
 python3 tools/arena/scripts/bugswarm_verify_source.py \
-    --source .artifacts/bugswarm/source.yaml \
-    --out .artifacts/bugswarm/verify.json --execute
-# 4. Apply verification -> only verified_red=true, verified_green=true survive:
+    --source tools/arena/corpus/bugswarm.seed.yaml \
+    --out .artifacts/bugswarm/verification.json --execute
 python3 tools/arena/scripts/bugswarm_apply_verification.py \
-    --source .artifacts/bugswarm/source.yaml \
-    --verification .artifacts/bugswarm/verify.json \
-    --out tools/arena/corpus/bugswarm.verified.yaml
+    --source tools/arena/corpus/bugswarm.seed.yaml \
+    --verification .artifacts/bugswarm/verification.json \
+    --out .artifacts/bugswarm/arena-source.verified.yaml
 ```
 
 The output is committed as a **new, separately-versioned file**
@@ -195,14 +215,39 @@ The output is committed as a **new, separately-versioned file**
 frozen `cost-bench.manifest.yaml` — consistent with the frozen protocol's
 own no-silent-edit rule. `sources.yaml`'s existing `bugswarm` entry
 (`status: adapter-ready`) flips to `status: active` once this lands with a
-committed verification report.
+committed verification report. Not every one of the 12 candidates is
+guaranteed to still reproduce live (BugSwarm's own weekly health checks put
+overall reproducibility at ~89%) — that's expected and fine; verification
+failures just drop that task, they don't invalidate the slice.
 
-Path B (GitBug-Java), if chosen instead or in addition: mirror the four
+Path B (GitBug-Java), if chosen later or in addition: mirror the four
 BugSwarm scripts' shape against GitBug-Java's own case format (a Zenodo-
 archived Docker-image-per-case list, MIT-licensed) — `gitbug_java_to_arena.py`
 / `_verify_source.py` / `_apply_verification.py` / `_to_arena_spec.py`, same
 `sources.yaml` pattern, new `id: gitbug-java` entry alongside the existing
 `bugswarm` one.
+
+### 2a. Operator packet already exists — no new tooling needed
+
+`tools/arena/scripts/glm52_gap_plan.py` (pre-existing, unmodified) already
+generates exactly the "Slice 3/4" packet against the grown corpus — verified
+by running it this session:
+
+```bash
+python3 tools/arena/scripts/glm52_gap_plan.py \
+    --report-json docs/case-studies/bugswarm-glm52-bugfix-report.data.json \
+    --json-out .artifacts/arena/glm52-gap-plan.json \
+    --markdown-out .artifacts/arena/glm52-gap-plan.md \
+    --bugswarm-source tools/arena/corpus/bugswarm.seed.yaml
+```
+
+Its output (`.artifacts/arena/glm52-gap-plan.md`, gitignored/regenerable, not
+committed) lists all 13 pending BugSwarm image tags needing execute-mode
+verification, the exact verify/apply-verification commands above, and —
+once a `*.verified.yaml` exists — the follow-on `bugswarm_to_arena_spec.py` /
+`arena.py plan` / no-spend `arena.py run` / gated `--live` commands for a
+real round. Nothing new needed to be built here; the original Slices 3/4 as
+separate build tasks are folded into this section.
 
 ### 3. Generalize the GX10 failure taxonomy into reusable diagnostics
 
@@ -243,42 +288,39 @@ blocking the corpus/story work.
       `paired_task_runner.py`; threaded through `paired_task.py`/`bugfix.py`
       `drive_command`; no-LLM tests proving the default is byte-identical to
       today and an override reaches the generated prompt/argv.
-- [ ] **Slice 2 — corpus candidate list + filter** (path A or B per Brad's
-      call, see "Corpus research"). Source and document a candidate case
-      list against the relevant filter; convert via the corpus's adapter
-      script; commit `.artifacts/<corpus>/source.yaml` (unverified) as the
-      operator handoff artifact.
-- [ ] **Slice 3 — operator verification run packet.** A `glm52_gap_plan.py`-style
-      generated packet with the exact verify/apply-verification commands, so
-      Brad (or a Docker-equipped workspace) can run verification and land the
-      corpus's `*.verified.yaml` without reconstructing the pipeline by hand.
-- [ ] **Slice 4 — live round packet.** Generate the paired-task spec plus the
-      exact no-spend `arena plan`/arm commands and the gated `--live`
-      commands for a corpus-backed `bugfix_test_repair` round, mirroring
-      `glm52_gap_plan.py`'s pattern.
+- [x] **Slice 2 — corpus candidate list + filter.** BugSwarm confirmed as
+      Path A; 12 real, filtered, diversified candidates sourced live from
+      BugSwarm's REST API and added to `tools/arena/corpus/bugswarm.seed-artifacts.json`
+      (1→13 total); `bugswarm.seed.yaml` regenerated; tests updated to match
+      (not just made to pass); committed `docs/case-studies/bugswarm-glm52-bugfix-report.*`
+      refreshed so it isn't stale.
+- [x] **Slice 3/4 — operator verification + live round packet.** No new
+      tooling needed — `glm52_gap_plan.py` (pre-existing) already generates
+      the exact commands against the grown corpus; verified by running it
+      this session (see "2a" above). Executing those commands (Docker +
+      live spend) is the remaining operator step.
 - [ ] **Slice 5 (stretch)** — generalized F1/F3/F5/F6-shaped diagnostics in
       `paired_task.py` scoring.
-- [ ] Migrate the shipped pieces into `docs/research/cost-efficiency-benchmark.md`
-      as a dated amendment section once Slice 2-4 land real verified data;
-      trim this proposal to whatever's still in design; delete when Slice 5
-      either lands or is explicitly deferred.
+- [ ] Run the Docker-gated verification + live round on an operator machine;
+      once real solved/partial/failed results exist, migrate the shipped
+      pieces into `docs/research/cost-efficiency-benchmark.md` as a dated
+      amendment section; trim this proposal to whatever's still in design;
+      delete when Slice 5 either lands or is explicitly deferred.
 
 ## Open questions
 
-- **Corpus path A vs B vs both** (see "Corpus research") — this proposal
-  defaults to starting Path A (BugSwarm, filtered) as the cheaper path to
-  real data this week, with Path B (GitBug-Java) as a documented follow-up
-  for a second, lower-contamination-risk corpus arm — pending Brad's
-  confirmation.
 - Round 1's own recommendation was to widen to the other 3 archetypes before
   drawing any H1-H4 verdict; this proposal instead deepens `bugfix_test_repair`
   specifically per Brad's ask. Both are legitimate next investments and
   aren't mutually exclusive — worth Brad's explicit call on relative priority
   for the next live-spend round.
-- How many corpus cases to target for the first verified slice (proposed:
-  8-12, matching the existing archetype's current scale) — open to
-  adjustment once the candidate list is actually sourced and some artifacts
-  fail verification.
-- Whether the Docker-gated verification step (Slice 3) runs on Brad's machine
+- Whether the Docker-gated verification step runs on Brad's machine
   interactively, or should be handed to a Docker-equipped dev-workspace/VM per
-  `tools/arena/README.md`'s existing VM-placement capability.
+  `tools/arena/README.md`'s existing VM-placement capability. Some fraction of
+  the 12 new candidates may fail live re-verification (BugSwarm's own weekly
+  health checks show ~89% overall reproducibility) — not a problem, just
+  expected attrition before the corpus is "frozen."
+- GitBug-Java (Path B) remains a documented, ready-to-build follow-up if the
+  study later wants a second, lower-contamination-risk corpus arm for the
+  same archetype — not pursued this round per Brad's explicit choice of
+  Path A.

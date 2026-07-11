@@ -37,12 +37,30 @@ check("bugswarm oracle kind recorded", bugswarm.get("oracle_contract", {}).get("
 seed_payload = yaml.safe_load(SEED_SOURCE.read_text(encoding="utf-8"))
 check("seed source kind", seed_payload.get("kind"), "arena_bugswarm_source")
 check("seed generated from artifacts", seed_payload.get("generated_from"), "tools/arena/corpus/bugswarm.seed-artifacts.json")
-check("seed task count", seed_payload.get("task_count"), 1)
+check("seed task count", seed_payload.get("task_count"), 13)
 seed_task = seed_payload["tasks"][0]
 check("seed task id", seed_task["id"], "bugswarm-square-okio-140452393")
 check("seed source url preserved", seed_task["meta"]["source_url"], "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/")
 check("seed starts unverified red", seed_task["verified_red"], False)
 check("seed starts unverified green", seed_task["verified_green"], False)
+
+# 2026-07-11 growth (docs/proposals/bugfix-archetype-corpus-and-harness.md Slice 2):
+# 12 real, filtered candidates added via the live BugSwarm REST API (bugswarm-common
+# DatabaseAPI) alongside the original tutorial seed. Every new task must still be
+# unverified (verification is a separate, Docker-gated step, Slice 3) and every
+# image_tag must trace to a real BugSwarm artifact this session actually queried.
+grown_tasks = seed_payload["tasks"][1:]
+check("grown task count", len(grown_tasks), 12)
+check("every grown task starts unverified red", all(t["verified_red"] is False for t in grown_tasks), True)
+check("every grown task starts unverified green", all(t["verified_green"] is False for t in grown_tasks), True)
+check("every grown task has a real github commit source_url", all(
+    t["meta"]["source_url"].startswith("https://github.com/") and "/commit/" in t["meta"]["source_url"]
+    for t in grown_tasks
+), True)
+grown_repos = {t["repo_label"] for t in grown_tasks}
+check("grown tasks span 12 distinct repos", len(grown_repos), 12)
+grown_langs = {t["meta"]["language"] for t in grown_tasks}
+check("grown tasks cover both Java and Python", grown_langs, {"Java", "Python"})
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
