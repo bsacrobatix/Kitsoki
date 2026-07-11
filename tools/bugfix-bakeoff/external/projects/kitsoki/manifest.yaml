@@ -112,6 +112,26 @@ bugs:
       last_error / say never reaches the UI and the run looks hung. A failing
       background_completion turn must refresh currentView so its error surfaces.
 
+  - id: bug15
+    ticket_ref: issues/bugs/2026-06-12T022551Z-background-job-killed-by-caller-ctx-cancel.md
+    title: "Background work dies when the submitting web request returns"
+    severity: P1
+    component: runtime
+    fix_sha: af995fc
+    baseline_sha: 0c9a0ff
+    fix_source: .
+    oracle_test: testdata/bug15.go
+    oracle_match: "TestRepro_BackgroundJobSurvivesSubmittingContextCancellation"
+    oracle:
+      target: internal/jobs/jobs_background_caller_cancel_oracle_test.go
+      run: 'go test ./internal/jobs/ -run {match} -count=1'
+    ticket: |
+      A background host call must outlive the request/turn that submitted it.
+      In web mode, cancelling the submitting request currently cancels the
+      scheduler job immediately, leaving the UI waiting forever. Preserve
+      context values needed for tracing, but detach caller cancellation so only
+      the scheduler's explicit Cancel operation terminates the background job.
+
 treatments: [kitsoki, single]
 
 run:
