@@ -47,7 +47,7 @@ episodes:
   response:
     data:
       diff: ''
-      files: null
+      files: []
   replay: any
 - id: run_tests_any
   match:
