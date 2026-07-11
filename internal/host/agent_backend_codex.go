@@ -406,6 +406,21 @@ type CodexMCPServerConfig struct {
 // from the declaration; otherwise unrelated project or user servers can block
 // startup/tool-list construction.
 func CodexMCPConfigArgsForServers(mcpServers map[string]CodexMCPServerConfig, workingDir string) []string {
+	// Task handlers historically name their generic schema validator
+	// "validator" because Claude namespaces it as mcp__validator__submit.
+	// Codex registers MCP tools lazily and the generic server name is not
+	// discoverable in its live tool registry, even though the same command
+	// works under the established kitsoki-validator name. Keep the
+	// Claude-facing config contract intact and normalize only the Codex
+	// command-line registration.
+	normalized := make(map[string]CodexMCPServerConfig, len(mcpServers))
+	for name, config := range mcpServers {
+		if name == "validator" {
+			name = "kitsoki-validator"
+		}
+		normalized[name] = config
+	}
+	mcpServers = normalized
 	// Stable order for deterministic argv (tests + reproducible transcripts).
 	names := make([]string, 0, len(mcpServers))
 	for name := range mcpServers {
