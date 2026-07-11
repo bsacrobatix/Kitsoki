@@ -8,6 +8,7 @@ package server
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"kitsoki/internal/clock"
@@ -48,15 +49,36 @@ func graphBoolParam(params map[string]any, key string) bool {
 	return b
 }
 
+// graphAllowlist builds this server's catalog alias allowlist (F1,
+// catalog_allowlist.go) against <materializeRoot>/pog/catalog.yaml — the
+// same "home repo" convention materialize.go's repoRoot fallback uses.
+// Rebuilt fresh on every call rather than cached; see
+// buildCatalogAllowlist's doc comment for why.
+func (s *Server) graphAllowlist() *CatalogAllowlist {
+	repoRoot := s.materializeRoot
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+	return buildCatalogAllowlist(filepath.Join(repoRoot, "pog", "catalog.yaml"))
+}
+
 // graphProposeRPC: {catalog_path, title, operations[, visibility, provenance]}
 // -> {changeset_id, status, lint, rejected, reject_reasons}. See
 // internal/host/graph_handlers.go's graphProposeOp for the sibling
 // host.graph.propose adapter this mirrors (kept in sync deliberately —
 // same wire shape, different transport).
-func graphProposeRPC(params map[string]any) (any, *rpcError) {
-	catalogPath := graphStringParam(params, "catalog_path")
+//
+// catalog (optional): a bound allowlist alias (F1, catalog_allowlist.go) —
+// a browser-facing caller should always prefer this over catalog_path, a
+// raw filesystem path a browser must never be trusted to name. catalog_path
+// alone remains fully supported for existing (non-portal) callers.
+func (s *Server) graphProposeRPC(params map[string]any) (any, *rpcError) {
+	catalogPath, rerr := resolveGraphCatalogParam(s.graphAllowlist(), graphStringParam(params, "catalog"), graphStringParam(params, "catalog_path"), "graph.propose")
+	if rerr != nil {
+		return nil, rerr
+	}
 	if catalogPath == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.propose: missing 'catalog_path'"}
+		return nil, &rpcError{Code: codeServerError, Message: "graph.propose: missing 'catalog_path' (or 'catalog')"}
 	}
 	rawOps, _ := params["operations"].([]any)
 	ops := make([]map[string]any, 0, len(rawOps))
@@ -104,11 +126,14 @@ func graphProposeRPC(params map[string]any) (any, *rpcError) {
 // reject_reasons, lint_issues, changed_files} — the same result shape
 // graph.apply/host.graph.apply already use, for a consistent client
 // contract across the two lifecycle-writing ops.
-func graphAuthorizeRPC(params map[string]any) (any, *rpcError) {
-	catalogPath := graphStringParam(params, "catalog_path")
+func (s *Server) graphAuthorizeRPC(params map[string]any) (any, *rpcError) {
+	catalogPath, rerr := resolveGraphCatalogParam(s.graphAllowlist(), graphStringParam(params, "catalog"), graphStringParam(params, "catalog_path"), "graph.authorize")
+	if rerr != nil {
+		return nil, rerr
+	}
 	changesetID := graphStringParam(params, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.authorize: requires both 'catalog_path' and 'changeset_id'"}
+		return nil, &rpcError{Code: codeServerError, Message: "graph.authorize: requires both 'catalog_path' (or 'catalog') and 'changeset_id'"}
 	}
 	clk, rerr := graphRPCClock()
 	if rerr != nil {
@@ -141,11 +166,14 @@ func graphAuthorizeRPC(params map[string]any) (any, *rpcError) {
 // graphWithdrawRPC: {catalog_path, changeset_id} -> the bare sibling of
 // graphAuthorizeRPC for the review queue's "withdraw" action
 // (internal/graph.Withdraw).
-func graphWithdrawRPC(params map[string]any) (any, *rpcError) {
-	catalogPath := graphStringParam(params, "catalog_path")
+func (s *Server) graphWithdrawRPC(params map[string]any) (any, *rpcError) {
+	catalogPath, rerr := resolveGraphCatalogParam(s.graphAllowlist(), graphStringParam(params, "catalog"), graphStringParam(params, "catalog_path"), "graph.withdraw")
+	if rerr != nil {
+		return nil, rerr
+	}
 	changesetID := graphStringParam(params, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.withdraw: requires both 'catalog_path' and 'changeset_id'"}
+		return nil, &rpcError{Code: codeServerError, Message: "graph.withdraw: requires both 'catalog_path' (or 'catalog') and 'changeset_id'"}
 	}
 	clk, rerr := graphRPCClock()
 	if rerr != nil {
@@ -181,11 +209,14 @@ func graphWithdrawRPC(params map[string]any) (any, *rpcError) {
 // a proposed changeset and re-validates, per §3.3. Same graphRPCClock/actor-""
 // carrier gap as every other bare graph.* RPC here (see graphRPCClock's doc
 // comment): no ctx/actor seam on this carrier, so actor is always "".
-func graphRebaseRPC(params map[string]any) (any, *rpcError) {
-	catalogPath := graphStringParam(params, "catalog_path")
+func (s *Server) graphRebaseRPC(params map[string]any) (any, *rpcError) {
+	catalogPath, rerr := resolveGraphCatalogParam(s.graphAllowlist(), graphStringParam(params, "catalog"), graphStringParam(params, "catalog_path"), "graph.rebase")
+	if rerr != nil {
+		return nil, rerr
+	}
 	changesetID := graphStringParam(params, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.rebase: requires both 'catalog_path' and 'changeset_id'"}
+		return nil, &rpcError{Code: codeServerError, Message: "graph.rebase: requires both 'catalog_path' (or 'catalog') and 'changeset_id'"}
 	}
 	clk, rerr := graphRPCClock()
 	if rerr != nil {
@@ -220,11 +251,14 @@ func graphRebaseRPC(params map[string]any) (any, *rpcError) {
 // queue can re-validate (dry_run) and commit an authorized changeset without
 // going through the kit dispatch surface — same wire shape as
 // host.graph.apply (internal/host/graph_handlers.go's graphApplyOp).
-func graphApplyRPC(params map[string]any) (any, *rpcError) {
-	catalogPath := graphStringParam(params, "catalog_path")
+func (s *Server) graphApplyRPC(params map[string]any) (any, *rpcError) {
+	catalogPath, rerr := resolveGraphCatalogParam(s.graphAllowlist(), graphStringParam(params, "catalog"), graphStringParam(params, "catalog_path"), "graph.apply")
+	if rerr != nil {
+		return nil, rerr
+	}
 	changesetID := graphStringParam(params, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.apply: requires both 'catalog_path' and 'changeset_id'"}
+		return nil, &rpcError{Code: codeServerError, Message: "graph.apply: requires both 'catalog_path' (or 'catalog') and 'changeset_id'"}
 	}
 	clk, rerr := graphRPCClock()
 	if rerr != nil {

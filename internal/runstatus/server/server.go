@@ -1920,19 +1920,19 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	// graphAuthorizeOp expose the same two ops for kit/starlark/CLI
 	// callers that DO go through host.graph.*.
 	case "graph.propose":
-		return graphProposeRPC(params)
+		return s.graphProposeRPC(params)
 
 	case "graph.authorize":
-		return graphAuthorizeRPC(params)
+		return s.graphAuthorizeRPC(params)
 
 	case "graph.apply":
-		return graphApplyRPC(params)
+		return s.graphApplyRPC(params)
 
 	case "graph.withdraw":
-		return graphWithdrawRPC(params)
+		return s.graphWithdrawRPC(params)
 
 	case "graph.rebase":
-		return graphRebaseRPC(params)
+		return s.graphRebaseRPC(params)
 
 	// ── demo.* (A2, use-case-loop-plan §3.5): mockup/demo packet pipeline
 	// verbs, bare for the same caller-supplied-path reason as graph.* above.
