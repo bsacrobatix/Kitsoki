@@ -142,6 +142,18 @@ func TestNegative(t *testing.T) {
 			fixture:     "testdata/bad/bad_timeout_duration.yaml",
 			wantErrSnip: "forever",
 		},
+		{
+			// Regression coverage for the "silent no-op" footgun: a story
+			// invoking a host verb missing from its own hosts: allow-list
+			// used to appear to succeed in traces while doing nothing. The
+			// loader has always rejected this at load time (validateStates'
+			// invoke: host.* check against allowedHosts, internal/app/loader.go)
+			// — this test pins that behavior so it can never silently
+			// regress. See docs/architecture/hosts.md "Allow-list enforcement".
+			name:        "host invoke not in own allow-list",
+			fixture:     "testdata/bad/host_not_in_allowlist.yaml",
+			wantErrSnip: "not declared in app hosts",
+		},
 	}
 
 	for _, tc := range cases {

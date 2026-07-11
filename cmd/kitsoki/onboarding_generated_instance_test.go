@@ -9,9 +9,24 @@ import (
 	"testing"
 
 	"kitsoki/internal/host"
+	"kitsoki/internal/kitrepo"
 )
 
 func TestOnboardingGeneratedDevStoryInstanceValidates(t *testing.T) {
+	// Hermetic: force the embedded-library @kitsoki/dev-story resolution
+	// path. Without this, `execRoot(t, "validate", ...)` below runs the real
+	// root command's PersistentPreRunE, which — whenever $KITSOKI_REPO is
+	// unset — reseeds it from the developer's persisted ~/.kitsoki/repo
+	// override (kitrepo.Resolve reads $HOME/.kitsoki/repo), e.g. left behind
+	// by a concurrent `kitsoki kit dev`/`kitsoki run` session on this machine
+	// pointing at an unrelated checkout/worktree. That ambient override can
+	// resolve @kitsoki/dev-story against a DIFFERENT, possibly in-progress
+	// kit.yaml than this repo's, making the test's pass/fail depend on
+	// another session's local machine state instead of this checkout. Both
+	// env vars must be scrubbed: clearing $KITSOKI_REPO alone still lets
+	// prepareInvocation repopulate it from $HOME/.kitsoki/repo.
+	t.Setenv(kitrepo.EnvVar, "")
+	t.Setenv("HOME", t.TempDir())
 	root := t.TempDir()
 	result, err := host.DevOnboardingHandler(context.Background(), map[string]any{
 		"op": "apply",
