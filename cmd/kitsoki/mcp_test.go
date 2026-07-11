@@ -57,7 +57,6 @@ func TestMCPOperatingSystemPaths_ExplicitRepoRootSurvivesForeignCWD(t *testing.T
 	assert.Equal(t, "/workspace/kitsoki/.capsules/workspaces", root)
 	assert.Equal(t, "/workspace/kitsoki/scripts/dev-workspace.sh", script)
 }
-
 func TestShouldWriteMCPStartupError(t *testing.T) {
 	assert.False(t, shouldWriteMCPStartupError(nil))
 	assert.False(t, shouldWriteMCPStartupError(context.Canceled))
