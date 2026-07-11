@@ -437,6 +437,90 @@ func TestFillGuards_RemovedFillsFullNodeAsDigest(t *testing.T) {
 	}
 }
 
+// TestFillGuards_RetypedFillsFullNodeAsDigest mirrors
+// TestFillGuards_RemovedFillsFullNodeAsDigest for "retyped" ops (hazard
+// guard #5's red-team amendment extending guard-fill to retyped/renamed
+// preconditions): clause-one (type iso9001-clause, minimal.yaml fixture)
+// retypes down to requirement — a legal retype (requirement has no
+// required fields clause-one lacks, and clause-one's inherited required_by
+// edge is still declared on the target type) — with no "before" supplied.
+func TestFillGuards_RetypedFillsFullNodeAsDigest(t *testing.T) {
+	root := copySingleFileFixture(t)
+	res, err := Propose(root, ProposeInput{
+		Title: "Retype without an explicit before",
+		Operations: []map[string]any{
+			{"kind": "retyped", "node": "clause-one", "from_type": "iso9001-clause", "to_type": "requirement"},
+		},
+	}, "", clock.Real())
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if len(res.RejectReasons) > 0 {
+		t.Fatalf("expected propose to succeed with a server-filled retyped guard, got: %v", res.RejectReasons)
+	}
+	if len(res.GuardFills) != 1 {
+		t.Fatalf("expected exactly one GuardFill echo, got %d: %+v", len(res.GuardFills), res.GuardFills)
+	}
+	gf := res.GuardFills[0]
+	if gf.Node != "clause-one" {
+		t.Errorf("GuardFill.Node = %q, want clause-one", gf.Node)
+	}
+	if gf.SHA == "" || len(gf.Fields) == 0 {
+		t.Errorf("expected a retyped-op guard fill to echo a {sha, fields} digest, got %+v", gf)
+	}
+	if gf.Value != nil || gf.Path != nil {
+		t.Errorf("a retyped-op guard fill must echo a digest, not full content: %+v", gf)
+	}
+
+	// The persisted changeset must carry the filled Before, not an absent
+	// one, so a later Authorize/Apply's stale-guard actually checks it.
+	cat, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	cs, err := ParseChangeset(cat.Nodes[res.ChangesetID])
+	if err != nil {
+		t.Fatalf("ParseChangeset: %v", err)
+	}
+	if len(cs.Operations) != 1 || len(cs.Operations[0].Before) == 0 {
+		t.Fatalf("expected persisted retyped op to carry a filled Before, got: %+v", cs.Operations)
+	}
+}
+
+// TestFillGuards_RetypedStaleBeforeRejected: a retyped op whose (caller-
+// supplied) Before no longer matches the live node must be rejected as
+// stale — mirroring OpRemoved's nodeMatchesBefore stale-guard.
+func TestFillGuards_RetypedStaleBeforeRejected(t *testing.T) {
+	root := copySingleFileFixture(t)
+	staleRes, err := Propose(root, ProposeInput{
+		Title: "Stale retype",
+		Operations: []map[string]any{
+			{
+				"kind":      "retyped",
+				"node":      "clause-one",
+				"from_type": "iso9001-clause",
+				"to_type":   "requirement",
+				"before":    map[string]any{"title": "Not the real title"},
+			},
+		},
+	}, "", clock.Real())
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if len(staleRes.RejectReasons) == 0 {
+		t.Fatal("expected a stale retyped-op Before to be rejected")
+	}
+	found := false
+	for _, r := range staleRes.RejectReasons {
+		if strings.Contains(r, "stale") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a stale-guard reject reason, got: %v", staleRes.RejectReasons)
+	}
+}
+
 func TestFillGuards_EdgeFieldReadThroughEdgeTargetsNotRawEdgesMap(t *testing.T) {
 	// testdata/lint/cycle.yaml declares change.depends_on as storage:
 	// top_level — the exact edge shape the hard constraint requires

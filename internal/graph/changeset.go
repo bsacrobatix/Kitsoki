@@ -14,11 +14,11 @@ import (
 type OpKind string
 
 const (
-	OpAdded    OpKind = "added"
-	OpModified OpKind = "modified"
-	OpRemoved  OpKind = "removed"
-	OpRenamed  OpKind = "renamed"
-	OpRetyped  OpKind = "retyped"
+	OpAdded                OpKind = "added"
+	OpModified             OpKind = "modified"
+	OpRemoved              OpKind = "removed"
+	OpRenamed              OpKind = "renamed"
+	OpRetyped              OpKind = "retyped"
 	OpRegistryTypeAdded    OpKind = "registry_type_added"
 	OpRegistryTypeModified OpKind = "registry_type_modified"
 )
@@ -44,7 +44,7 @@ type Operation struct {
 	Node NodeID
 
 	After   map[string]any // added/registry_type_added: the full new mapping (must include "id" == Node)
-	Before  map[string]any // removed: the full expected current node mapping (audit + stale-guard)
+	Before  map[string]any // removed/retyped: the full expected current node mapping (audit + stale-guard)
 	Changes []FieldChange  // modified/registry_type_modified
 
 	From NodeID // renamed
@@ -178,7 +178,11 @@ func parseOperation(m map[string]any) (Operation, error) {
 		if nodeID == "" || fromType == "" || toType == "" {
 			return Operation{}, fmt.Errorf("retyped op requires \"node\", \"from_type\", and \"to_type\"")
 		}
-		return Operation{Kind: kind, Node: NodeID(nodeID), FromType: fromType, ToType: toType}, nil
+		// "before" may be omitted — hazard guard #5's server-side guard-fill
+		// (fillGuards, called by Propose before ValidateChangeset) fills the
+		// live node's full mapping in when absent, mirroring OpRemoved.
+		before, _ := m["before"].(map[string]any)
+		return Operation{Kind: kind, Node: NodeID(nodeID), FromType: fromType, ToType: toType, Before: before}, nil
 	case OpRegistryTypeAdded:
 		after, ok := m["after"].(map[string]any)
 		if !ok {
@@ -280,6 +284,17 @@ func ValidateChangeset(cs *Changeset, cat *Catalog) []string {
 			if !exists {
 				reasons = append(reasons, fmt.Sprintf("op %d (retyped): node %q does not exist", i, op.Node))
 				continue
+			}
+			// Stale-guard (hazard guard #5 extends the existing "removed"
+			// guard to "retyped"): op.Before, whether caller-supplied or
+			// server-filled by fillGuards, must match the live node's full
+			// mapping — a retype whose precondition no longer matches the
+			// catalog (someone else already changed the node) is rejected
+			// the same way a stale "removed" Before is.
+			if len(op.Before) > 0 {
+				if mismatches := nodeMatchesBefore(cat, node, op.Before); len(mismatches) > 0 {
+					reasons = append(reasons, fmt.Sprintf("op %d (retyped): node %q is stale: %s", i, op.Node, strings.Join(mismatches, "; ")))
+				}
 			}
 			if node.TypeID != op.FromType {
 				reasons = append(reasons, fmt.Sprintf("op %d (retyped): node %q type is %q, expected %q", i, op.Node, node.TypeID, op.FromType))
@@ -429,7 +444,6 @@ func cloneRegistry(r *Registry) *Registry {
 	return clone
 }
 
-
 // readNodePath reads the current value at a FieldChange-style path off a
 // live Node, for the stale-guard comparison in ValidateChangeset (and
 // fillGuards' guard-fill). cat is required to resolve the node's type-
@@ -499,7 +513,8 @@ func valuesEqual(a, b any) bool {
 
 // nodeToMap materializes a live Node back into the wire-mapping shape a
 // changeset operation's After/Before mappings use (the approximate inverse
-// of buildNode) — used by OpRemoved's guard-fill/stale-guard. Comparison-
+// of buildNode) — used by OpRemoved's and OpRetyped's guard-fill/stale-guard.
+// Comparison-
 // canonical: uses exactly the same field reads (readNodePath/EdgeTargets)
 // the stale-guard elsewhere in this file compares against, so a filled
 // Before is guaranteed to satisfy valuesEqual against a subsequent
@@ -549,7 +564,7 @@ func nodeToMap(cat *Catalog, node *Node) map[string]any {
 }
 
 // nodeMatchesBefore compares a live node against a caller- or
-// fillGuards-supplied "before" mapping (OpRemoved's stale-guard), field by
+// fillGuards-supplied "before" mapping (OpRemoved's/OpRetyped's stale-guard), field by
 // field, via the same comparison-canonical reads nodeToMap uses. Returns a
 // human-readable mismatch description per differing key; empty means the
 // node still matches.
@@ -569,10 +584,10 @@ func nodeMatchesBefore(cat *Catalog, node *Node, before map[string]any) []string
 // GuardFill records one precondition Propose filled in on the caller's
 // behalf (hazard guard #5, plan §3.4 red-team amendment #5) because the
 // wire payload omitted it. A "modified" fill echoes the actual field path
-// and comparison-canonical value asserted; a "removed" fill echoes only a
-// digest of the full node mapping filled into the operation's Before
-// (sha256 + sorted field-name list), not the full content, to keep the
-// echo small.
+// and comparison-canonical value asserted; a "removed" or "retyped" fill
+// echoes only a digest of the full node mapping filled into the
+// operation's Before (sha256 + sorted field-name list), not the full
+// content, to keep the echo small.
 type GuardFill struct {
 	Node   NodeID
 	Path   []string // set for a "modified" fill; nil for a "removed" fill
@@ -585,9 +600,9 @@ type GuardFill struct {
 // precondition from the live catalog:
 //   - "modified" changes with a nil Before get it filled from
 //     readNodePath(cat, node, path) — echoed as a GuardFill{Node,Path,Value}.
-//   - "removed" ops with an empty Before get the live node's full mapping
-//     filled via nodeToMap — echoed as a GuardFill{Node,SHA,Fields} digest,
-//     not the full content.
+//   - "removed" and "retyped" ops with an empty Before get the live node's
+//     full mapping filled via nodeToMap — echoed as a
+//     GuardFill{Node,SHA,Fields} digest, not the full content.
 //
 // A node that does not exist is left alone (ValidateChangeset will reject
 // it with a clearer "does not exist" reason). Filled values are
@@ -612,7 +627,7 @@ func fillGuards(cs *Changeset, cat *Catalog) []GuardFill {
 				ch.Before = val
 				fills = append(fills, GuardFill{Node: op.Node, Path: append([]string{}, ch.Path...), Value: val})
 			}
-		case OpRemoved:
+		case OpRemoved, OpRetyped:
 			node, ok := cat.Nodes[op.Node]
 			if !ok || len(op.Before) > 0 {
 				continue
@@ -627,8 +642,9 @@ func fillGuards(cs *Changeset, cat *Catalog) []GuardFill {
 }
 
 // digestNodeMap produces the {sha, field list} echo GuardFill uses for a
-// "removed" op's server-filled full-node Before mapping, keeping the echo
-// small (a digest, not the full content) per hazard guard #5's spec.
+// "removed" or "retyped" op's server-filled full-node Before mapping,
+// keeping the echo small (a digest, not the full content) per hazard
+// guard #5's spec.
 func digestNodeMap(m map[string]any) (sha string, fields []string) {
 	fields = make([]string, 0, len(m))
 	for k := range m {
@@ -681,6 +697,9 @@ func opsToRaw(ops []Operation) []map[string]any {
 			m["node"] = string(op.Node)
 			m["from_type"] = op.FromType
 			m["to_type"] = op.ToType
+			if op.Before != nil {
+				m["before"] = op.Before
+			}
 		}
 		out[i] = m
 	}
@@ -732,4 +751,3 @@ func readTypeDefPath(def TypeDef, path []string) any {
 		return nil
 	}
 }
-

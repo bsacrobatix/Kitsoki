@@ -2,6 +2,8 @@ package host
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -205,6 +207,33 @@ func TestGraphHandler_Find_LimitOffsetTruncated(t *testing.T) {
 	}
 }
 
+// TestGraphHandler_Find_ZeroMatchesRowsMarshalAsEmptyArray is the nil-vs-[]
+// wire sweep's regression test for find: a Go type assertion on a nil
+// []any and an empty-but-non-nil []any are indistinguishable (both satisfy
+// `.([]any)` with len 0), so this asserts through an actual JSON marshal —
+// an MCP client parsing the wire payload must see `"rows":[]`, never
+// `"rows":null`.
+func TestGraphHandler_Find_ZeroMatchesRowsMarshalAsEmptyArray(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "find",
+		"catalog_path": readsFixturePath,
+		"status":       []any{"does-not-exist-status"},
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(find no matches): %v", err)
+	}
+	if total, _ := res.Data["total"].(int); total != 0 {
+		t.Fatalf("expected 0 matches for a nonexistent status filter, got %v", res.Data["total"])
+	}
+	raw, err := json.Marshal(res.Data)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"rows":[]`) {
+		t.Fatalf("expected rows to marshal as [] (not null) on zero matches, got: %s", raw)
+	}
+}
+
 func TestGraphHandler_Find_NegativeLimitRejected(t *testing.T) {
 	_, err := GraphHandler(context.Background(), map[string]any{
 		"op":           "find",
@@ -400,6 +429,35 @@ func TestGraphHandler_Changeset_Touching(t *testing.T) {
 	touching, ok := res.Data["touching"].([]any)
 	if !ok || len(touching) != 1 || touching[0].(map[string]any)["id"] != "cs-2" {
 		t.Fatalf("expected exactly cs-2 touching req-alpha, got %v", res.Data["touching"])
+	}
+}
+
+// TestGraphHandler_Changeset_Touching_NoHitsMarshalsAsEmptyArray is the
+// nil-vs-[] wire sweep's regression test for changeset touching: before
+// the fix, graphChangesetOp's "touching" accumulator was a `var touching
+// []any` (a nil slice when nothing matched), which marshals to JSON
+// `null` instead of `[]` — surprising for an MCP client expecting an
+// array. change-root isn't referenced by any changeset in the fixture.
+func TestGraphHandler_Changeset_Touching_NoHitsMarshalsAsEmptyArray(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "changeset",
+		"catalog_path": readsFixturePath,
+		"action":       "touching",
+		"node_id":      "change-root",
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(changeset touching): %v", err)
+	}
+	touching, ok := res.Data["touching"].([]any)
+	if !ok || len(touching) != 0 {
+		t.Fatalf("expected zero changesets touching change-root, got %v", res.Data["touching"])
+	}
+	raw, err := json.Marshal(res.Data)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"touching":[]`) {
+		t.Fatalf("expected touching to marshal as [] (not null) on zero hits, got: %s", raw)
 	}
 }
 
