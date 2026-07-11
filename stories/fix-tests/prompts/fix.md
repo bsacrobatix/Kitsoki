@@ -68,6 +68,14 @@ JSON via the `submit` tool.
    proof for it. A task turn that ends without `submit` is a failed repair,
    even when its working-tree change is correct.
 
+## Preserve the repair record before final submission
+
+After the first useful diagnosis, create
+`.artifacts/fix-tests/cycle-{{ args.cycle }}-report.md` and update it while you
+edit and run focused checks. Record the failing evidence, root cause, files
+changed, exact commands/results, and any decision needed. Do not leave the
+whole narrative for the final structured response.
+
 {% block spec_house_rules %}
 ## House rules (hard constraints)
 
@@ -113,7 +121,8 @@ must answer. Otherwise, fix the tests and set `needs_decision: false`.
 
 ## Output
 
-Call `submit` with the `fix_artifact` shape: `summary_title`,
-`summary_markdown` (which tests failed, the root cause, the change per file),
-`files_changed`, `fixed_tests`, `remaining_failures`, `needs_decision`,
+Call `submit` with the `fix_artifact` shape: `summary_title`, `report_path`
+(`.artifacts/fix-tests/cycle-{{ args.cycle }}-report.md`), a compact
+`summary_markdown` pointing to that report, `files_changed`, `fixed_tests`,
+`remaining_failures`, `needs_decision`,
 optionally `open_questions` and `confidence`.

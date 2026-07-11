@@ -68,6 +68,15 @@ this loop until it is green, then submit:
 4. **Iterate.** If any step fails, edit and repeat from step 1. Stay in this
    loop until build + targeted tests + neighbours are all green.
 
+## Preserve the implementation record before final submission
+
+As soon as you have a useful diagnosis, create
+`.artifacts/bugfix/{{ args.ticket_id }}/implementation-report.md` in this
+workspace. Update it as you edit and verify; include the diagnosis, each
+changed file, exact commands/results, and any blocker. Do not wait until the
+final `submit` call to write it. If the turn ends unexpectedly, this report is
+the durable handoff for the testing room.
+
 Prefer the **smallest, most local** change that fixes the root cause. A broad
 edit to shared/engine internals is far more likely to break unrelated tests —
 if a narrow, local fix works, take it.
@@ -91,9 +100,9 @@ if a narrow, local fix works, take it.
 Submit an `implementing_artifact` (see `schemas/implementing_artifact.json`).
 Required fields:
 - `summary_title`: one-line description of what you applied.
-- `summary_markdown`: human-readable diff narrative (what changed, where,
-  why each edit). This is what a human reviewer reads at the testing
-  checkpoint.
+- `report_path`: `.artifacts/bugfix/{{ args.ticket_id }}/implementation-report.md`.
+- `summary_markdown`: one or two sentences stating the result and pointing to
+  `report_path`; do not reproduce the report in the response.
 - `files_changed`: every path you actually edited (or attempted to edit).
 - `applied`: `true` if every required edit was made, `false` if you hit a
   blocker. When `false`, populate `blockers` with the reason.

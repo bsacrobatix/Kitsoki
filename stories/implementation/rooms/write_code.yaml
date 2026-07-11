@@ -138,6 +138,7 @@ states:
             Ticket:   "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary:  '{{ world.code_artifact.summary_title|default:"(missing title)" }}'
             Files:    '{{ world.code_artifact.affected_files|join:", "|default:"(not listed)" }}'
+            Agent report: '{{ world.code_artifact.report_path|default:"(not written)" }}'
             Artifact: '{{ world.code_artifact_path|default:"(not written)" }}'
             Progress: '{{ world.implementation_progress_artifact_path|default:"(not written)" }}'
       - when: "(world.llm_verdict.verdict ?? '') != ''"
@@ -180,6 +181,7 @@ states:
           body: |
             Code change ready: {{ world.code_artifact.summary_title }}
 
+            Agent report: {{ world.code_artifact.report_path }}
             Full artifact: {{ world.code_artifact_path }}
             Progress: {{ world.implementation_progress_artifact_path }}
           phase_id:  "write_code_{{ world.ticket_id }}_{{ world.cycle }}"
@@ -189,7 +191,7 @@ states:
           title:   "Code change: {{ world.ticket_id }}"
           thread:  "{{ world.thread }}"
           state:   write_code_awaiting_reply
-          body:    "Code change ready: {{ world.code_artifact.summary_title }}\n\nFull artifact: {{ world.code_artifact_path }}\nProgress: {{ world.implementation_progress_artifact_path }}"
+          body:    "Code change ready: {{ world.code_artifact.summary_title }}\n\nAgent report: {{ world.code_artifact.report_path }}\nFull artifact: {{ world.code_artifact_path }}\nProgress: {{ world.implementation_progress_artifact_path }}"
       - when: "world.judge_mode == 'llm' || world.judge_mode == 'llm_then_human'"
         invoke: host.agent.decide
         with:

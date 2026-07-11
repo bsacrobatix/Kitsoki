@@ -23,6 +23,7 @@ states:
           pairs:
             Ticket:  "{{ world.ticket_id }} — {{ world.ticket_title }}"
             Summary: '{{ world.done_artifact.summary_title|default:"(pending)" }}'
+            Report:  '{{ world.done_artifact.report_path|default:"(not written)" }}'
       - heading: "Artifact"
       - template: '{{ world.done_artifact.summary_markdown|default:"(pending — agent has not returned yet)" }}'
       - choice:

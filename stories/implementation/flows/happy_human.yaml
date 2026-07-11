@@ -92,6 +92,7 @@ host_handlers:
         involved_components:
           - { name: "internal/auth", reason: "refresh-token validation" }
         # code_artifact fields
+        report_path:      ".artifacts/implementation/TKT-42/code-report.md"
         affected_files:   ["internal/auth/refresh.go", "internal/auth/refresh_test.go"]
         confidence:       0.85
         reasoning:        "Endpoint follows the existing handler pattern; refresh validation reuses the cache."

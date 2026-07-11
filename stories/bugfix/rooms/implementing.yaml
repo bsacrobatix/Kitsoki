@@ -56,6 +56,7 @@ states:
         when: "world.implement_artifact.blockers"
       - heading: "Summary"
       - template: '{{ world.implement_artifact.summary_markdown|default:"(no implementation body — agent pending or failed)" }}'
+      - prose: 'Detailed implementation report: {{ world.implement_artifact.report_path|default:"(not written)" }}'
       - choice:
           mode: single
           prompt: "Actions"

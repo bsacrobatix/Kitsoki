@@ -96,6 +96,7 @@ host_handlers:
           - "GET /healthz returns 200."
         involved_components:
           - { name: "internal/health", reason: "new endpoint" }
+        report_path:      ".artifacts/implementation/TKT-HEALTHZ/code-report.md"
         affected_files:   ["internal/health/health.go", "internal/health/health_test.go"]
         confidence:       0.9
         reasoning:        "Simple handler following the existing pattern."

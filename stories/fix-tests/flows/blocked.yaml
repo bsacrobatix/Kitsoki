@@ -22,6 +22,7 @@ host_handlers:
           submitted:
             summary_title:      "Ambiguous intended behaviour"
             summary_markdown:   "The test asserts X but the code does Y; it is unclear which is intended."
+            report_path:        ".artifacts/fix-tests/cycle-1-report.md"
             files_changed:      []
             fixed_tests:        []
             remaining_failures: ["TestAmbiguous"]

@@ -31,6 +31,7 @@ host_handlers:
           submitted:
             summary_title: "Reduce test wait"
             summary_markdown: "Handled the timeout output and made the quick gate pass."
+            report_path: ".artifacts/fix-tests/cycle-1-report.md"
             files_changed: ["internal/example/example.go"]
             fixed_tests: ["quick gate"]
             remaining_failures: []

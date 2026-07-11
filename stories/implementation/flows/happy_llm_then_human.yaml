@@ -71,6 +71,7 @@ host_handlers:
         acceptance_criteria:
           - "Default timeout is 15s when no override is set."
           - "Existing override path is unchanged."
+        report_path:      ".artifacts/implementation/TKT-TIMEOUT/code-report.md"
         affected_files:   ["internal/auth/config.go", "internal/auth/config_test.go"]
         confidence:       0.92
         reasoning:        "Single constant change; mechanical."
