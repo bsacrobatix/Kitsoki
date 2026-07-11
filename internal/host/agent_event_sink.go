@@ -612,15 +612,27 @@ func appendAgentStreamEvent(ctx context.Context, ts time.Time, callID string, ev
 }
 
 type storeAgentNotice struct {
-	Type     string `json:"type"`
-	Subtype  string `json:"subtype,omitempty"`
-	Severity string `json:"severity,omitempty"`
-	Text     string `json:"text"`
-	Backend  string `json:"backend,omitempty"`
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"effort,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Type            string          `json:"type"`
+	Subtype         string          `json:"subtype,omitempty"`
+	Severity        string          `json:"severity,omitempty"`
+	Text            string          `json:"text"`
+	Backend         string          `json:"backend,omitempty"`
+	Provider        string          `json:"provider,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	Effort          string          `json:"effort,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Bin             string          `json:"bin,omitempty"`
+	WorkingDir      string          `json:"working_dir,omitempty"`
+	Args            []string        `json:"args,omitempty"`
+	PID             int             `json:"pid,omitempty"`
+	DurationMS      int64           `json:"duration_ms,omitempty"`
+	ExitCode        int             `json:"exit_code,omitempty"`
+	RawEventCount   int             `json:"raw_event_count,omitempty"`
+	ProviderEnvKeys []string        `json:"provider_env_keys,omitempty"`
+	EnvPresent      map[string]bool `json:"env_present,omitempty"`
+	UID             int             `json:"uid,omitempty"`
+	IsRoot          bool            `json:"is_root,omitempty"`
+	IsSandbox       bool            `json:"is_sandbox,omitempty"`
 }
 
 // appendAgentNoticeEvent records an operator-facing agent breadcrumb that is

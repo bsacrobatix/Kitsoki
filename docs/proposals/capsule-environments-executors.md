@@ -12,6 +12,10 @@ and a Docker backend that runs `capsule worker run` against a mounted workspace;
 the CI executor catalog accepts an injected production `container` provider
 while keeping the no-Docker `container-fake` test lane. Repo-history capsules
 project environment/executor metadata. Final Arena docs trimming remains.
+A bounded VM dogfood of the Studio/Claude worker path reached real GLM-5.2
+worker launch but stalled before any provider stream or terminal verdict; it is
+not counted as remote-worker completion. The deployed HTTPS Capsule worker proof
+and final Arena docs trimming remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -251,6 +255,10 @@ decision.
   - Shipped: Capsule CI docs now describe host, fake-remote,
     fake-container, Docker worker entrypoint, and repo-history environment
     projection.
+  - Attempted: a two-instance VM dogfood used the external bakeoff worker path
+    with Claude Code / GLM-5.2 and reached real process launch. It did not
+    exercise a deployed HTTPS Capsule worker service and did not complete a
+    typed remote verdict; keep this proposal open until that proof exists.
   - Remaining: fold the final Arena-specific extraction notes into the Arena
     guide, then delete this proposal once downstream docs no longer need it.
 ```
