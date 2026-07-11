@@ -112,6 +112,10 @@ func TestMCPCmd_Registered(t *testing.T) {
 			h := c.Flags().Lookup("harness")
 			require.NotNil(t, h)
 			assert.Equal(t, "replay", h.DefValue, "--harness defaults to the no-LLM replay harness")
+			profile := c.Flags().Lookup("operating-profile")
+			require.NotNil(t, profile)
+			assert.Equal(t, string(studio.StudioOperatingProfileStrict), profile.DefValue,
+				"--operating-profile defaults to the strict managed-workspace surface")
 			break
 		}
 	}

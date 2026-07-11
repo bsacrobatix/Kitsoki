@@ -139,15 +139,16 @@ type Server struct {
 type ServerOption func(*Server)
 
 // StudioOperatingProfile selects the server-exposed operating-system tool
-// surface.  Legacy remains the compatibility default while the replay decision
-// is hold; strict is an explicit preview and escape is an audited exception
-// profile.
+// surface. The CLI selects strict by default. Direct library callers preserve
+// the legacy profile when they omit a profile so existing embeddings remain
+// compatible; new callers should select their authority explicitly.
 type StudioOperatingProfile string
 
 const (
-	StudioOperatingProfileLegacy StudioOperatingProfile = "legacy"
-	StudioOperatingProfileStrict StudioOperatingProfile = "strict"
-	StudioOperatingProfileEscape StudioOperatingProfile = "escape"
+	StudioOperatingProfileLegacy  StudioOperatingProfile = "legacy"
+	StudioOperatingProfileStrict  StudioOperatingProfile = "strict"
+	StudioOperatingProfileEscape  StudioOperatingProfile = "escape"
+	DefaultStudioOperatingProfile                        = StudioOperatingProfileStrict
 )
 
 // OperatingSystemServices is the server-held authority graph shared by the
@@ -278,8 +279,8 @@ func NewServer(sess *StudioSession, opts ...ServerOption) *Server {
 	}, srv.handleWork)
 
 	if srv.operatingSystemProfile == StudioOperatingProfileLegacy {
-		// Legacy is the default compatibility toolbox while strict remains on
-		// replay-decision hold.  It keeps every existing authoring surface.
+		// Legacy is the compatibility toolbox for direct library embeddings. The
+		// public CLI passes its strict default explicitly.
 		srv.registerLegacyToolbox()
 	} else if srv.operatingSystemProfile == StudioOperatingProfileEscape {
 		// Escape deliberately exposes only the audited host.run exception in
