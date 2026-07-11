@@ -62,6 +62,10 @@ imports:
       thread:          "{{ world.thread }}"
       workspace_id:    "{{ world.workspace_id }}"
       workdir:         "{{ world.workdir }}"
+      # The paired-task runner owns this already-isolated checkout. Propagate
+      # the explicit ownership marker into bugfix so its autostart guard never
+      # tries to replace it with a story-created workspace.
+      workspace_prepared: "{{ world.workspace_prepared }}"
       base_branch:     "{{ world.base_branch }}"
       feature_branch:  "{{ world.feature_branch }}"
       bugfix_mode:     "{{ world.bugfix_mode }}"
@@ -109,6 +113,7 @@ world:
   thread:          { type: string, default: "" }
   workspace_id:    { type: string, default: "" }
   workdir:         { type: string, default: "" }
+  workspace_prepared: { type: bool, default: false }
   base_branch:     { type: string, default: "main" }
   feature_branch:  { type: string, default: "" }
   bugfix_mode:     { type: string, default: "full" }
