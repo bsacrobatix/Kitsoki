@@ -39,7 +39,7 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 			if strings.Contains(string(raw), "token") {
 				t.Fatal("credential leaked into remote payload")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": Result{ExitCode: 0, VerdictArtifact: "artifact:verdict", VerdictJSON: []byte(`{"schema":"capsule-ci-verdict/v1"}`), Artifacts: []string{"b", "a"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": Result{ExitCode: 0, VerdictArtifact: "artifact:verdict", VerdictJSON: []byte(`{"schema":"capsule-ci-verdict/v1"}`), Artifacts: []string{"b", "a"}}, "run": ExecutionStatus{ExecutionID: "run/1", Status: "completed", Stage: "terminal"}})
 		case "/v1/capsules/executions/run/1":
 			status := "running"
 			if r.Method == http.MethodDelete {
@@ -75,6 +75,19 @@ func TestHTTPRemoteWorkerSendsSealedEnvelopeWithoutCredentialAndReturnsResult(t 
 	status, err := worker.Status(context.Background(), "run/1")
 	if err != nil || status.Schema != ExecutionStatusSchema || status.Status != "running" {
 		t.Fatalf("status %#v: %v", status, err)
+	}
+}
+
+func TestHTTPRemoteWorkerRejectsHTTP200UnsuccessfulCompletion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": Result{ExitCode: 1, VerdictJSON: []byte(`{"schema":"capsule-ci-verdict/v1"}`)}, "run": ExecutionStatus{ExecutionID: "run-unsuccessful", Status: "completed", Stage: "terminal"}})
+	}))
+	defer server.Close()
+	worker := HTTPRemoteWorker{Endpoint: "https://worker.invalid", Client: rewriteClient(t, server)}
+	_, err := worker.Run(context.Background(), testHTTPPrepared(t, "run-unsuccessful"), nil, nil)
+	var executionErr ExecutionError
+	if !errors.As(err, &executionErr) || !strings.Contains(err.Error(), "unsuccessful completion") {
+		t.Fatalf("expected rejected successful HTTP response, got %T %v", err, err)
 	}
 }
 
