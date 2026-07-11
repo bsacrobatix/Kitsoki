@@ -87,10 +87,12 @@ const defaultTaskMaxRetries = 5
 
 // taskAcceptanceOptions carries the parsed acceptance: block.
 type taskAcceptanceOptions struct {
-	SchemaPath  string
-	PostCmd     string
-	PostCmdArgs []postCmdKV
-	MaxRetries  int
+	SchemaPath          string
+	PostCmd             string
+	PostCmdArgs         []postCmdKV
+	MaxRetries          int
+	MinInformationRatio *float64
+	MinInformationBits  *float64
 }
 
 // AgentTaskHandler implements host.agent.task.
@@ -731,6 +733,19 @@ func parseTaskAcceptance(args map[string]any) (taskAcceptanceOptions, string) {
 	case int8, int16, int32:
 		// Best effort.
 	}
+	var numberErr string
+	if opts.MinInformationRatio, numberErr = optionalValidatorFloat(blk, "min_information_ratio", "acceptance"); numberErr != "" {
+		return taskAcceptanceOptions{}, numberErr
+	}
+	if opts.MinInformationBits, numberErr = optionalValidatorFloat(blk, "min_information_bits", "acceptance"); numberErr != "" {
+		return taskAcceptanceOptions{}, numberErr
+	}
+	if opts.MinInformationRatio != nil && (*opts.MinInformationRatio < 0 || *opts.MinInformationRatio > 1) {
+		return taskAcceptanceOptions{}, "acceptance.min_information_ratio: must be between 0 and 1"
+	}
+	if opts.MinInformationBits != nil && *opts.MinInformationBits < 0 {
+		return taskAcceptanceOptions{}, "acceptance.min_information_bits: must be non-negative"
+	}
 
 	if rawArgs, present := blk["post_cmd_args"]; present && rawArgs != nil {
 		argsMap, ok2 := rawArgs.(map[string]any)
@@ -820,10 +835,12 @@ func buildTaskValidatorMCPConfig(ctx context.Context, acceptance taskAcceptanceO
 // process-global KITSOKI_APP_DIR — see buildValidatorMCPServer's doc.
 func buildTaskValidatorMCPConfigWithState(ctx context.Context, acceptance taskAcceptanceOptions, outputFile, stateFilePath string) (string, map[string]any, error) {
 	opts := validatorOptions{
-		PostCmd:       acceptance.PostCmd,
-		PostCmdArgs:   acceptance.PostCmdArgs,
-		MaxRetries:    acceptance.MaxRetries,
-		StateFilePath: stateFilePath,
+		PostCmd:             acceptance.PostCmd,
+		PostCmdArgs:         acceptance.PostCmdArgs,
+		MaxRetries:          acceptance.MaxRetries,
+		MinInformationRatio: acceptance.MinInformationRatio,
+		MinInformationBits:  acceptance.MinInformationBits,
+		StateFilePath:       stateFilePath,
 	}
 	validatorEntry, err := buildValidatorMCPServer(ctx, acceptance.SchemaPath, outputFile, opts)
 	if err != nil {

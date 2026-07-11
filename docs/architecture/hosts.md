@@ -905,6 +905,8 @@ tool allowlist or working directory; the loader rejects it at app-load time.
 | `acceptance.post_cmd` | string | no | Verifier command run after schema validation passes. Exit code 0 = accepted; non-zero = rejected (LLM gets the stdout as rejection reason). |
 | `acceptance.post_cmd_args` | map | no | `{ key: value }` forwarded as `--key value` to the post_cmd subprocess. |
 | `acceptance.max_retries` | int | no | Retry budget for the acceptance loop (default: 5). |
+| `acceptance.min_information_ratio` | number | no | Minimum information score relative to the richest submission attempt (default: 0.5; `0` disables). |
+| `acceptance.min_information_bits` | number | no | Richest-attempt floor before the relative gate activates (default: 256 Shannon bits). |
 | `context.prompt` | string | no | Prompt text or path injected into the agent's first turn as stdin. |
 | `context.args` | map | no | Template variables for `context.prompt`. |
 | `sandbox` | map | no | Runtime policy for the agent subprocess. See [`sandbox:` runtime policy](#sandbox-runtime-policy). |
@@ -2043,6 +2045,8 @@ validator:
     catalog: "data/catalog.yaml"
   post_cmd_cwd: "tools/verifiers"
   max_retries: 3
+  min_information_ratio: 0.5
+  min_information_bits: 256
 ```
 
 | Field | Type | Notes |
@@ -2051,6 +2055,15 @@ validator:
 | `post_cmd_args` | map | Key/value pairs forwarded as `--key value` to the subprocess. Sorted by key for deterministic argv. |
 | `post_cmd_cwd` | string | CWD for the subprocess. Relative paths resolve against the app dir. |
 | `max_retries` | int | Per-submission retry budget. Default 5. |
+| `min_information_ratio` | number | Reject a schema-valid payload below this fraction of the richest parsed attempt in the validator session. Default 0.5; `0` disables. |
+| `min_information_bits` | number | Activate the relative gate only after the richest attempt reaches this scalar-content Shannon score. Default 256. |
+
+The information gate compares normalized scalar values, excluding object keys
+because they are schema scaffolding. It persists the session maximum in the
+validator state file, so a resumed agent cannot replace a substantive but
+structurally invalid attempt with a much smaller placeholder that happens to
+satisfy the schema. Both settings are deliberately per-call knobs for model
+evaluation and threshold optimization.
 
 ### Examples
 
