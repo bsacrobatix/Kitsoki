@@ -130,6 +130,7 @@ surface for forward compatibility:
 
 ```
 issues/bugs/*.md                   — kitsoki self-bugs
+issues/bugs/*/issue.md             — legacy nested local-bug shape
 issues/features/*.md               — kitsoki PRD-track features
 stories/*/issues/bugs/*.md         — per-story bugs (story authoring)
 stories/*/issues/features/*.md     — per-story features
