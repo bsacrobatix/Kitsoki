@@ -338,6 +338,11 @@ project wrapper that imports only deterministic checks and adjudication.
     remote CI proof to terminal verdict. The attempted run was Studio/Claude
     worker dogfood, not a deployed HTTPS Capsule worker proof.
 - [x] 3.3 Add GitHub trigger/check adapter consuming the same pipeline/result contract
+  - Shipped: `kitsoki capsule ci github trigger` projects pull-request webhook
+    JSON to the standard `ci.Trigger` contract, and
+    `kitsoki capsule ci github check` projects a persisted Capsule CI run record
+    to a GitHub check-run payload. Both commands are pure/no-network adapters;
+    hosted publishers provide credentials and perform the actual GitHub write.
 - [ ] 3.4 Migrate story/CI docs and examples; trim/delete this proposal
   - Shipped: permanent `docs/stories/ci.md` now documents the story-native CI
     contract, reference rooms, authority boundaries, and GitHub adapter model.

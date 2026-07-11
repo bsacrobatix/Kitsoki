@@ -95,3 +95,13 @@ GitHub is an adapter, not the CI engine. Pull-request webhook data normalizes
 to the standard `ci.Trigger` shape, and the check-run publisher projects the
 typed Capsule verdict to a GitHub check conclusion. Automated tests use the pure
 adapter contract and do not contact GitHub.
+
+For local/offline adapter testing:
+
+```sh
+kitsoki capsule ci github trigger --payload payload.json --pipeline change
+kitsoki capsule ci github check --project . --job <job-id> --details-url <run-url>
+```
+
+The output is the JSON a GitHub service would publish; credentials and network
+writes stay outside the story contract.

@@ -47,3 +47,16 @@ func TestBuildGitHubCheckRunRequiresHeadSHA(t *testing.T) {
 		t.Fatal("expected missing head sha error")
 	}
 }
+
+func TestBuildGitHubCheckRunRejectsUnsupportedOutcome(t *testing.T) {
+	_, err := BuildGitHubCheckRun(RunResult{
+		Job: artifactjob.Job{ID: "job-1"},
+		Envelope: executor.Envelope{Trigger: map[string]any{
+			"head_sha": "abc123",
+		}},
+		Verdict: Verdict{Pipeline: "change", Outcome: "mystery"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected unsupported outcome error")
+	}
+}
