@@ -126,9 +126,15 @@ func RunCheck(ctx context.Context, repoRoot string, rc ResolvedCheck) CheckResul
 		return res
 	}
 
+	absRoot, err := filepath.Abs(repoRoot)
+	if err != nil {
+		res.Error = fmt.Sprintf("resolve repo root: %v", err)
+		res.Reasons = []string{res.Error}
+		return res
+	}
 	absScript := rc.Script
 	if !filepath.IsAbs(absScript) {
-		absScript = filepath.Join(repoRoot, rc.Script)
+		absScript = filepath.Join(absRoot, rc.Script)
 	}
 	if raw, err := os.ReadFile(absScript); err == nil {
 		sum := sha256.Sum256(raw)
@@ -143,6 +149,17 @@ func RunCheck(ctx context.Context, repoRoot string, rc ResolvedCheck) CheckResul
 	args := map[string]any{
 		"script": absScript,
 		"inputs": rc.Inputs,
+		// Pin the sandbox's fs/probe root to the materialize repo root via
+		// the world.workdir override — the FIRST root the handler consults
+		// (starlark_run.go's inspector-injection chain). Without this the
+		// root falls back to the process-global KITSOKI_APP_DIR, which any
+		// concurrently seeded session may have pointed at a DIFFERENT repo
+		// (its docstring calls out exactly this race), silently making the
+		// check judge against the wrong tree: the web-session materialize
+		// path reported "no evidence recorded" for evidence that existed,
+		// while the CLI path — same catalog, same check — read it fine.
+		// A gate verdict must not depend on which session ran last.
+		"world": map[string]any{"workdir": absRoot},
 	}
 	if len(rc.Capabilities) > 0 {
 		args["capabilities"] = rc.Capabilities

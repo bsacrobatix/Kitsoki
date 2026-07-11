@@ -2,12 +2,14 @@ package materialize
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"kitsoki/internal/graph"
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 )
 
@@ -56,6 +58,47 @@ func TestResolveChecks_MissingScriptFieldIsUnresolved(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "names no .star assertion script") {
 		t.Errorf("Error = %q", result.Error)
+	}
+}
+
+// TestRunCheck_FsRootPinnedToRepoRoot proves a check's ctx.fs resolves
+// against the materialize repo root even when the process-global
+// KITSOKI_APP_DIR points at a different repo — the exact race that made the
+// web-session materialize path report "no evidence recorded" for evidence
+// the CLI path (same catalog, same check) read fine. RunCheck pins the
+// sandbox root via the world.workdir override, which outranks AppDirEnv.
+func TestRunCheck_FsRootPinnedToRepoRoot(t *testing.T) {
+	root := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("checks/probe.star", "def main(ctx):\n    return {\"ok\": ctx.fs.exists(\"evidence/e.json\")}\n")
+	writeFile("checks/probe.star.yaml", "inputs: {}\noutputs:\n  ok: { type: bool }\n")
+	writeFile("evidence/e.json", "{}")
+
+	// A concurrently seeded session on ANOTHER repo won the process-global
+	// env var — the check's verdict must not care.
+	t.Setenv(host.AppDirEnv, t.TempDir())
+
+	rc := ResolvedCheck{
+		ID:           "gate",
+		Script:       "checks/probe.star",
+		Inputs:       map[string]any{},
+		Capabilities: map[string]any{"fs": map[string]any{"read": []any{"evidence/**"}}},
+	}
+	result := RunCheck(context.Background(), root, rc)
+	if result.Error != "" {
+		t.Fatalf("RunCheck error: %s", result.Error)
+	}
+	if !result.OK {
+		t.Fatalf("check judged against the wrong root: %+v", result)
 	}
 }
 
