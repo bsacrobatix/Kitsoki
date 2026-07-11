@@ -40,10 +40,18 @@ JSON via the `submit` tool.
 
 ## How to work
 
-1. Read the failure output and open the relevant source and test files.
-2. Identify the **root cause**. Decide whether the bug is in the *code under
+1. Start from the named failing package/test in the failure output. Run that
+   **exact focused test once** before broadening the investigation. If it no
+   longer fails, run the smallest command that reproduces the reported order
+   (for example the named package), then classify it as a flake/environment
+   problem or make a narrowly evidenced fix. Do not treat a passing isolated
+   test as proof that the full failure is fixed.
+2. Read at most the failing test plus the directly-called implementation files
+   needed to form a hypothesis. Then run the focused check or edit. Do not
+   continue archaeology after the hypothesis has been tested.
+3. Identify the **root cause**. Decide whether the bug is in the *code under
    test* or in the *test itself* (a stale assertion, a wrong fixture).
-3. Apply the smallest change that fixes it. You may run
+4. Apply the smallest change that fixes it. You may run
    `{{ args.quick_test_cmd }}` (or a narrower `go test ./path/...`) to check
    your work before submitting. The story will run the full acceptance command
    before review.
@@ -54,7 +62,7 @@ JSON via the `submit` tool.
    gates. If the failure is environmental or a focused check cannot complete
    promptly, submit `needs_decision: true` with the exact blocker instead of
    waiting on it.
-4. **Immediately call `submit` after a focused verification passes.** Do not
+5. **Immediately call `submit` after a focused verification passes.** Do not
    keep investigating dependency-manager internals, alternate implementations,
    or unrelated failure groups after you have a correct minimal change and
    proof for it. A task turn that ends without `submit` is a failed repair,
@@ -70,6 +78,15 @@ JSON via the `submit` tool.
   and conventions in the surrounding code.
 - **Keep the change focused** on what the failures require. No drive-by
   refactors, reformatting, or unrelated edits.
+- **Stay in the supplied working directory and failure surface.** Do not list
+  other workspaces, inspect git history/status/branches, read generated
+  binaries, or search unrelated packages. Those actions do not establish the
+  reported failure's root cause.
+- **Use Bash only for a focused reproduction, a focused verification, or a
+  direct source search.** Do not run a full repository test command, `git`,
+  `find`, or broad recursive scans. If the exact failure cannot be reproduced
+  after one focused retry, submit `needs_decision: true` with the evidence;
+  do not spend the turn speculating.
 - **Do not touch** version control (no commits, no branches, no pushes) and do
   not make network calls.
 {% endblock %}
