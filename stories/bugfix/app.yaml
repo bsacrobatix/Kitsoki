@@ -68,6 +68,10 @@ hosts:
   # host.run — the pre-fix regression gate (testing room) + the ship-it tail's
   # integrate/verify/cleanup host.run sites (imported as `tail`).
   - host.run
+  # Deterministic acceptance-contract checker for strict callers. It compares
+  # public requirement IDs against the testing artifact; it never reads a
+  # benchmark oracle or asks an LLM to grade itself.
+  - host.starlark.run
   # Editor awareness (WS-C C3, docs/proposals/ide-integration.md follow-up 3):
   # the validating room pulls REAL diagnostics from an attached `/ide` editor
   # as extra evidence for the verify gate. "Not-connected is a value" — no
@@ -606,6 +610,11 @@ world:
   propose_fix_artifact:      { type: object, default: {} }
   implement_artifact:        { type: object, default: {} }  # implementing agent output (files_changed, applied, blockers)
   implement_review_artifact: { type: object, default: {} }  # testing-room artifact (yes, the name predates the implement_artifact split)
+  # Optional caller-authored, public acceptance contract. Strict benchmark and
+  # MCP callers supply requirement IDs here; ordinary bugfix remains compatible
+  # with the empty default.
+  acceptance_contract:       { type: list, default: [] }
+  acceptance_gate:           { type: object, default: {} }
   validate_artifact:         { type: object, default: {} }
   done_artifact:             { type: object, default: {} }
   fixed_in_commit:           { type: string, default: "" }  # short HEAD at close-out; posted to the issue before resolving

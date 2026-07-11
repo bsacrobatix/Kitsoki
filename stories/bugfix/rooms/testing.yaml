@@ -244,10 +244,25 @@ states:
               workdir:         "{{ world.workdir }}"
               fix_summary:     "{{ world.propose_fix_artifact.summary_markdown }}"
               ci_log:          "{{ world.ci_log }}"
+              acceptance_contract: "{{ world.acceptance_contract }}"
               refine_feedback: "{{ world.refine_feedback }}"
               cycle:           "{{ world.cycle }}"
         bind:
           implement_review_artifact: submitted
+        on_error: idle
+
+      # Strict callers provide public, task-visible acceptance IDs. This is a
+      # deterministic shape gate: every ID needs a concrete test path and
+      # assertion receipt. It deliberately cannot see a hidden benchmark oracle.
+      - invoke: host.starlark.run
+        id: acceptance_contract_gate
+        with:
+          script: scripts/acceptance_contract_gate.star
+          inputs:
+            requirements: "{{ world.acceptance_contract }}"
+            artifact: "{{ world.implement_review_artifact }}"
+        bind:
+          acceptance_gate: gate
         on_error: idle
 
       # ── Commit the test_author's work (lost-work guard) ────────────────
@@ -302,6 +317,16 @@ states:
       # bugfix_mode=quick branch collapses past reviewing on pass. See
       # file header for the full history.
       accept:
+        - when: "len(world.acceptance_contract) > 0 && world.acceptance_gate.ok == false"
+          target: implementing
+          effects:
+            - set:
+                refine_feedback: "Strict acceptance contract is incomplete: {{ world.acceptance_gate.summary }}"
+                implementing_cycle: "{{ world.implementing_cycle + 1 }}"
+                cycle: "{{ world.cycle + 1 }}"
+                implement_artifact: {}
+                implement_review_artifact: {}
+                acceptance_gate: {}
         # failed / blocked — fix needs another pass; check budget.
         - when: |
             (world.implement_review_artifact.status == 'failed' ||

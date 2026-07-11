@@ -28,6 +28,7 @@ hosts:
   - host.git_worktree
   - host.capsule_workspace
   - host.append_to_file
+  - host.starlark.run
   - host.inbox.add
   - host.agent.ask
   - host.agent.decide
@@ -76,6 +77,7 @@ imports:
       test_cmd:        "{{ world.test_cmd }}"
       build_cmd:       "{{ world.build_cmd }}"
       gate_command:    "{{ world.gate_command }}"
+      acceptance_contract: "{{ world.acceptance_contract }}"
       bf_autostart_attempted: "{{ world.bf_autostart_attempted }}"
       # Autonomous benchmark/dogfood runs want ACTIVE escalation: quit early to
       # needs-human on a mis-scoped reproduction / low-confidence proposal / budget
@@ -124,6 +126,7 @@ world:
   # gate_command empty ⇒ skip the deterministic pre-fix RED-gate (LLM-only
   # reproduction); the hidden oracle is NEVER exposed to the pipeline.
   gate_command:    { type: string, default: "" }
+  acceptance_contract: { type: list, default: [] }
   # true ⇒ bf.idle does NOT auto-derive workspace_id/feature_branch/workdir or
   # auto-create a worktree (which would clobber the pre-prepared workdir and try
   # to create a worktree in the wrong repo). The driver seeds workdir +
