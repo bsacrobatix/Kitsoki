@@ -180,6 +180,7 @@ func (s AgentSandboxSpec) launchSpec(ctx context.Context, command string, args [
 		Hidden:      append([]string(nil), s.Hidden...),
 		Network:     s.Network,
 		InheritHome: s.InheritHome,
+		SemanticActivity: true,
 		Resources:   s.Resources,
 		Degrade:     s.Degrade,
 	}

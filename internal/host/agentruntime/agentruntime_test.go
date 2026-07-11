@@ -136,6 +136,14 @@ func TestSupervisedActivityTimeoutAllowsProgressingProcess(t *testing.T) {
 	}
 }
 
+func TestSupervisedSemanticActivityTimeoutIgnoresThinkingTokens(t *testing.T) {
+	if runtime.GOOS == "windows" { t.Skip("shell fixture is Unix-only") }
+	running, _, err := NewSupervised().Launch(context.Background(), LaunchSpec{Command: "/bin/sh", Args: []string{"-c", "i=0; while [ $i -lt 30 ]; do printf '{\\\"type\\\":\\\"system\\\",\\\"subtype\\\":\\\"thinking_tokens\\\"}\\n'; sleep 0.04; i=$((i+1)); done"}, Env: []string{"PATH=" + os.Getenv("PATH")}, Min: StrengthSupervised, SemanticActivity: true, Resources: ResourcePolicy{ActivityTimeout: 200 * time.Millisecond}})
+	if err != nil { t.Fatalf("Launch: %v", err) }
+	res, err := running.Wait(context.Background())
+	if err != nil || !res.Killed { t.Fatalf("thinking-token run = %#v, %v; want activity kill", res, err) }
+}
+
 func TestSupervisedCapturesFinalDiff(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is Unix-only")

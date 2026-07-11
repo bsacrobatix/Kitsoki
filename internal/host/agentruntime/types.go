@@ -116,6 +116,8 @@ type LaunchSpec struct {
 	// HOME. It is required for provider CLIs whose interactive credential is
 	// tied to the operator's login state; callers must opt in deliberately.
 	InheritHome bool
+	// SemanticActivity ignores hidden Claude thinking token stream events.
+	SemanticActivity bool
 	Resources   ResourcePolicy
 	Degrade     DegradePolicy
 }
