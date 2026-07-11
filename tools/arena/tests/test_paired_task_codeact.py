@@ -47,6 +47,10 @@ check("registry kitsoki alias", runner.resolve_treatment_driver("kitsoki").name,
 check("registry codeact", runner.resolve_treatment_driver("codex-codeact").name, "codex-codeact")
 check("registry unknown", runner.resolve_treatment_driver("not-a-treatment"), None)
 
+drive_source = (REPO_ROOT / "tools" / "mcp-drive" / "drive.sh").read_text(encoding="utf-8")
+require("MCP driver skips unset forwarded environment", 'if [[ -n "${!_fwd-}" ]]; then' in drive_source)
+require("MCP driver does not override CODEX_HOME with empty value", 'mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}' not in drive_source)
+
 args = argparse.Namespace(capability_presets_json="", capability_preset="")
 cap_json, cap_hash = runner.capability_preset_json(args, "repo_patch")
 check("canonical capability json", cap_json, '{"fs":{"max_bytes":1048576,"read":["**"],"write":["**"]},"vcs":"read"}')
