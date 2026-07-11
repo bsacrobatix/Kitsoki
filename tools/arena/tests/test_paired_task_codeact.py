@@ -246,6 +246,14 @@ require("raw prompt carries isolation policy", "BENCHMARK ISOLATION:" in runner.
 check("paired task explicit public test command wins", runner.test_cmd_for({"test_cmd": "pnpm vitest run", "oracle": {}}), "pnpm vitest run")
 check("paired task without a suite skips strict suite gate", runner.test_cmd_for({"oracle": {}}), "")
 
+with tempfile.TemporaryDirectory(prefix="paired-trace-reset-") as td:
+    trace = Path(td) / "cell.jsonl"
+    sidecars = [trace, trace.with_suffix(".prompt.md"), trace.with_suffix(".thread.md"), trace.with_suffix(".drive-log.json")]
+    for path in sidecars:
+        path.write_text("stale", encoding="utf-8")
+    runner.reset_cell_trace(trace)
+    check("retained cell rerun clears stale trace sidecars", any(path.exists() for path in sidecars), False)
+
 with tempfile.TemporaryDirectory(prefix="paired-cleanup-") as td:
     tree = Path(td) / "node_modules" / "nested"
     tree.mkdir(parents=True)

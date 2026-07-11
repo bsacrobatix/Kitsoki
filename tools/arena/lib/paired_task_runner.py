@@ -273,6 +273,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     tree = work_root / cell_id
     if tree.exists():
         shutil.rmtree(tree)
+    reset_cell_trace(Path(trace_ref))
 
     try:
         materialize_baseline(task, tree)
@@ -343,6 +344,24 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
         target=args.target,
         exit_code=0,
     )
+
+
+def reset_cell_trace(trace: Path) -> None:
+    """Remove stale per-cell telemetry before a retained-workdir rerun.
+
+    A kept work root is useful for inspecting a failed candidate tree, but its
+    prior Studio trace is a session journal, not an append-only benchmark log.
+    Reusing it made a fresh `session.new` inherit a terminal state and reject
+    `full_pipeline` immediately. Cell JSONs are distinct durable records; only
+    the transient trace and driver sidecars are reset here.
+    """
+    for path in (
+        trace,
+        trace.with_suffix(".prompt.md"),
+        trace.with_suffix(".thread.md"),
+        trace.with_suffix(".drive-log.json"),
+    ):
+        path.unlink(missing_ok=True)
 
 
 def cleanup_cell_workdir(tree: Path) -> None:
