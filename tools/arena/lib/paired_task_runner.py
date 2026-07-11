@@ -61,6 +61,7 @@ from pricing import price_for  # noqa: E402  (path set above; single price table
 # only the process (kitsoki pipeline vs raw codex exec) differs.
 MODEL_TO_PROFILE = {
     "glm-5.2": "synthetic-claude",
+    "gpt-5.4": "codex-gpt54",
     "gpt-5.5": "codex-native",
 }
 
@@ -291,7 +292,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     metrics.update(diff_stats(tree, baseline_ref))
     cost_usd = metrics.get("cost_usd")
     if not isinstance(cost_usd, (int, float)):
-        cost_usd = 0.0
+        cost_usd = None
     tokens = metrics.get("tokens")
     if not isinstance(tokens, int):
         tokens = 0
@@ -775,35 +776,26 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
 
 
 def ensure_kitsoki_binary() -> Path:
-    """Build the kitsoki CLI once and return its containing directory.
+    """Provide a disposable `kitsoki` launcher without producing a binary.
 
-    The paired-task image is built ONCE (Dockerfile.paired-task), but the repo
-    checkout is bind-mounted at container-RUN time — whatever's on the host at
-    that moment, not what was baked into the image. So the binary has to be
-    built at run time, not image-build time. The direct `go build` writes to the
-    checkout's own (gitignored) bin/, which lives on the host side of the bind
-    mount, so a build here is naturally cached across ephemeral `--rm`
-    containers as long as they share the same mounted checkout — no cp of a
-    locally-built binary (see MEMORY cp-binary-invalidates-codesign; that
-    specific failure is macOS ad-hoc-signing, not applicable to this Linux
-    image, but building fresh in-place sidesteps the whole class of problem).
+    Live arena cells need an executable named `kitsoki` because the Studio MCP
+    server is spawned by name. A small launcher delegates to `go run`, reusing
+    Go's cache while avoiding a stale `bin/kitsoki` artifact in the source tree.
     """
-    which = shutil.which("kitsoki")
-    if which:
-        return Path(which).parent
-    binary = KITSOKI_ROOT / "bin" / "kitsoki"
-    if binary.exists():
-        return binary.parent
-    # `make build-bin` first runs the embed-story staging target. In a managed
-    # workspace bootstrap has already staged those trees, and that deliberately
-    # non-idempotent target exits nonzero before Go is reached. The arena only
-    # needs the CLI at this point, so build it directly and keep the cell's
-    # control plane independent of workspace bootstrap state.
-    binary.parent.mkdir(parents=True, exist_ok=True)
-    run(["go", "build", "-o", str(binary), "./cmd/kitsoki"], cwd=KITSOKI_ROOT)
-    if not binary.exists():
-        raise RuntimeError("go build did not produce bin/kitsoki")
-    return binary.parent
+    launcher_dir = Path(os.environ.get(
+        "ARENA_KITSOKI_LAUNCHER_DIR",
+        str(KITSOKI_ROOT / ".artifacts" / "arena" / "go-run-launcher"),
+    ))
+    launcher_dir.mkdir(parents=True, exist_ok=True)
+    launcher = launcher_dir / "kitsoki"
+    launcher.write_text(
+        "#!/usr/bin/env sh\n"
+        "set -eu\n"
+        f"exec go run {str(KITSOKI_ROOT / 'cmd' / 'kitsoki')!r} \"$@\"\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o700)
+    return launcher_dir
 
 
 def test_cmd_for(task: dict[str, Any]) -> str:
@@ -964,25 +956,17 @@ def real_trace_metrics(trace_ref: str, model: str) -> dict[str, Any]:
             "measurement_status": "incomplete",
             "cost_note": "no trace usage recorded",
         }
-    price, _ = price_for(model)
-    fresh_input = max(total_in - total_cached, 0)
-    cost = (fresh_input * price.input + total_cached * price.cache_read + total_out * price.output) / 1e6
-    cost = round(cost, 6)
     return {
-        "cost_usd": cost,
+        "cost_usd": None,
         "tokens": tokens,
         "input_tokens": total_in,
         "cached_input_tokens": total_cached,
         "output_tokens": total_out,
         "reasoning_output_tokens": 0,
-        "cost_basis": "cache-aware-estimate",
+        "cost_basis": "subscription-unmetered",
         "mcp_calls": trace_event_count(trace_ref, "mcp"),
         "codeact_eval_calls": trace_event_count(trace_ref, "codeact_eval"),
-        "cost_note": (
-            f"cost_usd={cost} (cache-aware estimate over REAL trace usage: "
-            f"{fresh_input} fresh input + {total_cached} cache-read input + {total_out} output tokens; "
-            "subscription auth reports no metered cost)"
-        ),
+        "cost_note": "subscription auth reports no authoritative USD cost; tokens are retained for comparison",
     }
 
 
@@ -1259,13 +1243,12 @@ def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
             "cost_basis": "metered",
             "cost_note": "cost_usd from codex JSON envelope",
         }
-    cost, exact = blended_cost_usd(model, tokens)
     return {
-        "cost_usd": cost,
+        "cost_usd": None,
         "tokens": tokens,
         **buckets,
-        "cost_basis": "blended-estimate",
-        "cost_note": "blended estimate, not exact" if not exact else "priced from usage",
+        "cost_basis": "subscription-unmetered",
+        "cost_note": "Codex subscription output contains no authoritative USD cost; tokens are retained for comparison",
     }
 
 
