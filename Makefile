@@ -672,9 +672,10 @@ starcheck-kitsoki:
 # The fixer EDITS YOUR WORKING TREE (it has Edit/Write); review the diff after.
 # It never touches git and never makes network calls.
 #
-# Exit code: 0 when the suite is green (done_clean); nonzero when tests are
-# still red after the budget (done_exhausted) or the fixer needs a human
-# decision (blocked) — the report says which, and lists any open questions.
+# Exit code: 0 when the suite is green. `session continue` reports terminal
+# story exits as `__exit__<name>` rather than the preceding terminal room, so
+# a successful review arrives here as `__exit__achieved`; all other exits are
+# nonzero and the report says which, with any open questions.
 .PHONY: fix-tests
 FIX_TESTS_APP := stories/fix-tests/app.yaml
 FIX_TESTS_TEST_CMD ?= make test
@@ -718,7 +719,7 @@ fix-tests:
 	 report=$$(find "$$report_dir" -maxdepth 1 -name 'report-*.md' -newer "$$marker" -print 2>/dev/null | head -1); \
 	 if [ -n "$$report" ]; then echo; echo "──────── $$report ────────"; cat "$$report"; echo "─────────────────────────"; fi; \
 	 case "$$state" in \
-	   done_clean) echo "fix-tests: PASS — suite is green."; exit 0;; \
+	   __exit__achieved) echo "fix-tests: PASS — suite is green."; exit 0;; \
 	   *) echo "fix-tests: FAIL ($$state) — see the report above." >&2; exit 1;; \
 	 esac
 
