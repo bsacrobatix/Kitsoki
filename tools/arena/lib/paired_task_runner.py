@@ -381,9 +381,19 @@ def prepare_live_tree(task: dict[str, Any], tree: Path) -> dict[str, Any]:
     both treatments start from the same ready baseline and fails closed before
     a provider call when a project cannot be prepared.
     """
+    # The bugfix story commits a verified repair before it can move to testing.
+    # Arena cells are disposable clones and must not inherit a developer's
+    # identity; set an explicit local identity here so a missing container-level
+    # gitconfig cannot spend a worker call and then bounce the pipeline to idle.
+    for key, value in (("user.name", "Kitsoki Arena"), ("user.email", "arena@kitsoki.local")):
+        identity = subprocess.run(
+            ["git", "config", key, value], cwd=tree, text=True, capture_output=True,
+        )
+        if identity.returncode != 0:
+            return {"ok": False, "note": f"git config {key}: {first_line(identity.stderr)}", "wall_s": 0.0}
     oracle = task.get("oracle") or {}
     if oracle.get("kind") != "external_bakeoff":
-        return {"ok": True, "note": "prewarm: not required", "wall_s": 0.0}
+        return {"ok": True, "note": "prewarm: git identity configured; not required", "wall_s": 0.0}
     project = str(oracle["project"])
     bug = str(oracle["bug"])
     meta = json.loads(run(
@@ -393,7 +403,7 @@ def prepare_live_tree(task: dict[str, Any], tree: Path) -> dict[str, Any]:
     ).stdout)
     install = str(meta.get("install") or "").strip()
     if not install:
-        return {"ok": True, "note": "prewarm: no install command", "wall_s": 0.0}
+        return {"ok": True, "note": "prewarm: git identity configured; no install command", "wall_s": 0.0}
     timeout_s = int(os.environ.get("ARENA_PAIRED_TASK_PREWARM_TIMEOUT_S", "300"))
     started = time.monotonic()
     try:
@@ -404,7 +414,7 @@ def prepare_live_tree(task: dict[str, Any], tree: Path) -> dict[str, Any]:
         return {"ok": False, "note": f"{install!r} timed out after {timeout_s}s", "wall_s": elapsed(started)}
     if proc.returncode != 0:
         return {"ok": False, "note": first_line(proc.stdout + "\n" + proc.stderr), "wall_s": elapsed(started)}
-    return {"ok": True, "note": f"prewarm: {install}", "wall_s": elapsed(started)}
+    return {"ok": True, "note": f"prewarm: git identity configured; {install}", "wall_s": elapsed(started)}
 
 
 def materialize_bugswarm_baseline(task: dict[str, Any], tree: Path) -> None:

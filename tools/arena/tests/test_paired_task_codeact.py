@@ -206,7 +206,11 @@ with tempfile.TemporaryDirectory(prefix="paired-prewarm-") as td:
         runner.run = original_run
         runner.subprocess.run = original_subprocess_run
     check("external corpus prewarm succeeds", prewarm["ok"], True)
-    check("external corpus prewarm uses declared install", captured, [["sh", "-lc", "npm install"]])
+    check("external corpus prewarm configures disposable Git identity then installs", captured, [
+        ["git", "config", "user.name", "Kitsoki Arena"],
+        ["git", "config", "user.email", "arena@kitsoki.local"],
+        ["sh", "-lc", "npm install"],
+    ])
 
 prompt_args = argparse.Namespace(implementation_mode="agent_task")
 prompt = runner.build_kitsoki_prompt(
