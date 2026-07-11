@@ -228,7 +228,12 @@ run_once() {
       codex_mcp_args+=(-c "mcp_servers.kitsoki.tool_timeout_sec=${MCP_DRIVE_MCP_TOOL_TIMEOUT_SEC:-1800}")
       local _fwd _fwd_list="${MCP_DRIVE_FORWARD_ENV:-}"
       for _fwd in ${_fwd_list//,/ }; do
-        codex_mcp_args+=(-c "mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}")
+        # An empty override is materially different from inheritance: in
+        # particular `CODEX_HOME=` makes the nested live worker lose the
+        # caller's subscription credentials. Forward only values that exist.
+        if [[ -n "${!_fwd-}" ]]; then
+          codex_mcp_args+=(-c "mcp_servers.kitsoki.env.${_fwd}=${!_fwd}")
+        fi
       done
     fi
     # codex (>=0.142) DEFERS MCP server tools behind its `tool_search` tool —
