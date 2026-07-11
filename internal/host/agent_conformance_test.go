@@ -472,7 +472,14 @@ command = "/bin/codex-app"
 		if !hasFlagValue(inv.Args, "-m", "some-model") {
 			t.Errorf("codex dropped a non-claude model; args=%v", inv.Args)
 		}
+		if !hasFlagValue(inv.Args, "-c", "model_reasoning_effort=\"low\"") {
+			t.Errorf("codex did not translate declared effort to model_reasoning_effort; args=%v", inv.Args)
+		}
 		cb := codexBackend{}
+		maxEffort := cb.TranslateInvocation([]string{"-p", "--effort", "max"}, "p", "")
+		if !hasFlagValue(maxEffort.Args, "-c", "model_reasoning_effort=\"xhigh\"") {
+			t.Errorf("codex max effort must map to GPT-compatible xhigh; args=%v", maxEffort.Args)
+		}
 		mi := cb.TranslateInvocation([]string{"-p", "--model", "claude-haiku-4-5-20251001"}, "p", "")
 		if strings.Contains(strings.Join(mi.Args, " "), "-m ") {
 			t.Errorf("codex forwarded a claude model id; args=%v", mi.Args)
