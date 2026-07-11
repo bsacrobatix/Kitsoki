@@ -369,6 +369,36 @@ func ActorFromContext(ctx context.Context) string {
 	return ""
 }
 
+// ─── Steward context ─────────────────────────────────────────────────────────
+
+// stewardKey is the unexported context key for the trusted/steward flag
+// (graph-mcp plan §3.4 red-team amendment #1: provenance strip). Only a
+// caller explicitly marked steward-trusted may have graph.Propose honor
+// caller-supplied Provenance for the D9 auto-authorize allowlist — an
+// ordinary (agent/CLI/kit_call) caller's provenance is always stripped
+// before it reaches internal/graph.Propose, regardless of what the wire
+// args contained, so an untrusted proposal can never self-authorize via a
+// forged provenance block.
+type stewardKey struct{}
+
+// WithSteward injects the trusted/steward flag into ctx. Server
+// construction (or a CLI's own steward-mode entry point) sets this true
+// only for callers it has independently established as trusted operators;
+// every other caller path (kit_call, starlark, MCP agent tools) leaves it
+// unset, i.e. untrusted by default.
+func WithSteward(ctx context.Context, steward bool) context.Context {
+	return context.WithValue(ctx, stewardKey{}, steward)
+}
+
+// StewardFromContext reports whether ctx was marked steward-trusted.
+// Defaults to false (untrusted) when nothing was injected — fail closed.
+func StewardFromContext(ctx context.Context) bool {
+	if s, ok := ctx.Value(stewardKey{}).(bool); ok {
+		return s
+	}
+	return false
+}
+
 // RequestClarification is the high-level helper that handler authors call to
 // pause the job and ask the user a question. It:
 //  1. Calls jc.Store.RequestClarification to write the schema to the DB and

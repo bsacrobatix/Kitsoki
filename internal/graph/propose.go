@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -26,6 +27,13 @@ type ProposeInput struct {
 	// for an allowlisted field set") instead of leaving it "proposed" for
 	// human review.
 	Provenance map[string]any
+
+	// ValidateOnly, when true, runs the full ValidateChangeset check plus a
+	// scratch-copy candidate build and lint (hazard guard #5, plan §3.4
+	// red-team amendment #5) but writes nothing — not even the changeset
+	// node itself. Returned ChangesetID/Status/GuardFills describe what
+	// WOULD happen; the id is not actually reserved.
+	ValidateOnly bool
 }
 
 // ProposeResult reports the outcome of Propose.
@@ -46,6 +54,18 @@ type ProposeResult struct {
 	// ValidateChangeset against the current catalog (including the
 	// immediate Before stale-check) — the real catalog was never touched.
 	RejectReasons []string
+	// GuardFills lists every precondition Propose filled in on the
+	// caller's behalf (hazard guard #5): a "modified" change that omitted
+	// `before` got it filled from the live node (echoed as Node/Path/
+	// Value); a "removed" op that omitted `before` got the live node's
+	// full mapping filled in (echoed as Node/SHA/Fields, not the full
+	// content). Empty when every operation already carried explicit
+	// preconditions.
+	GuardFills []GuardFill
+	// ValidatedOnly is true when Provenance-free ProposeInput.ValidateOnly
+	// was set: validation + scratch lint ran, but nothing was written, not
+	// even the changeset node.
+	ValidatedOnly bool
 }
 
 // autoAuthorizeFieldRoots is the D9 allowlist: a system-authored changeset
@@ -159,9 +179,30 @@ func Propose(rootPath string, input ProposeInput, actor string, clk clock.Clock)
 	if clk == nil {
 		clk = clock.Real()
 	}
+	// File-level CAS (hazard guard #2): each attempt does a fresh
+	// LoadCatalog + id allocation; a concurrent writer landing in the
+	// window is detected right before copy-back and the whole attempt
+	// (including cs-<n> allocation) is redone against a fresh load.
+	for attempt := 1; attempt <= casMaxAttempts; attempt++ {
+		res, retry, err := proposeOnce(rootPath, input, actor, clk)
+		if retry {
+			continue
+		}
+		return res, err
+	}
+	return &ProposeResult{RejectReasons: []string{
+		fmt.Sprintf("CONFLICT: %s changed concurrently during propose, exceeded %d retry attempts", rootPath, casMaxAttempts),
+	}}, nil
+}
+
+func proposeOnce(rootPath string, input ProposeInput, actor string, clk clock.Clock) (res *ProposeResult, retry bool, err error) {
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
-		return nil, fmt.Errorf("graph propose: load %s: %w", rootPath, err)
+		return nil, false, fmt.Errorf("graph propose: load %s: %w", rootPath, err)
+	}
+	// Canonicality pre-check (hazard guard #4): before any write attempt.
+	if reasons := checkCanonical(cat); len(reasons) > 0 {
+		return &ProposeResult{RejectReasons: reasons}, false, nil
 	}
 
 	synthetic := &Node{
@@ -171,10 +212,17 @@ func Propose(rootPath string, input ProposeInput, actor string, clk clock.Clock)
 	}
 	cs, err := ParseChangeset(synthetic)
 	if err != nil {
-		return &ProposeResult{RejectReasons: []string{err.Error()}}, nil
+		return &ProposeResult{RejectReasons: []string{err.Error()}}, false, nil
 	}
+
+	// Guard-fill (hazard guard #5): a "modified" change or "removed" op
+	// that omitted its precondition gets it filled from the live node,
+	// mutating cs.Operations in place — the changeset persisted below
+	// carries the filled preconditions, not the caller's bare payload.
+	guardFills := fillGuards(cs, cat)
+
 	if reasons := ValidateChangeset(cs, cat); len(reasons) > 0 {
-		return &ProposeResult{RejectReasons: reasons}, nil
+		return &ProposeResult{RejectReasons: reasons}, false, nil
 	}
 
 	id := nextChangesetID(cat)
@@ -187,13 +235,14 @@ func Propose(rootPath string, input ProposeInput, actor string, clk clock.Clock)
 		status = ChangesetStatusAuthorized
 	}
 
+	filledOps := rawOpsToAny(opsToRaw(cs.Operations))
 	nodeMap := map[string]any{
 		"schema":     "graph/changeset/v1",
 		"id":         string(id),
 		"title":      input.Title,
 		"status":     status,
 		"visibility": visibility,
-		"operations": rawOpsToAny(input.Operations),
+		"operations": filledOps,
 		"created_at": clk.Now().UTC().Format(time.RFC3339),
 	}
 	if actor != "" {
@@ -203,21 +252,38 @@ func Propose(rootPath string, input ProposeInput, actor string, clk clock.Clock)
 		nodeMap["provenance"] = input.Provenance
 	}
 
-	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
-		{Kind: OpAdded, Node: id, After: nodeMap},
-	})
+	addOp := []Operation{{Kind: OpAdded, Node: id, After: nodeMap}}
+
+	if input.ValidateOnly {
+		_, issues, rejectReasons, err := commitScratchOperations(cat, addOp, true /* dryRun */)
+		if err != nil {
+			if errors.Is(err, errCASConflict) {
+				return nil, true, nil
+			}
+			return nil, false, fmt.Errorf("graph propose: %w", err)
+		}
+		if len(rejectReasons) > 0 {
+			return &ProposeResult{RejectReasons: rejectReasons}, false, nil
+		}
+		return &ProposeResult{ChangesetID: id, Status: status, Lint: issues, GuardFills: guardFills, ValidatedOnly: true}, false, nil
+	}
+
+	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, addOp, false)
 	if err != nil {
-		return nil, fmt.Errorf("graph propose: %w", err)
+		if errors.Is(err, errCASConflict) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("graph propose: %w", err)
 	}
 	if len(rejectReasons) > 0 {
-		return &ProposeResult{RejectReasons: rejectReasons}, nil
+		return &ProposeResult{RejectReasons: rejectReasons}, false, nil
 	}
 	if len(issues) > 0 {
-		return &ProposeResult{Lint: issues}, nil
+		return &ProposeResult{Lint: issues}, false, nil
 	}
 	_ = changedFiles
 
-	return &ProposeResult{ChangesetID: id, Status: status, Lint: issues}, nil
+	return &ProposeResult{ChangesetID: id, Status: status, Lint: issues, GuardFills: guardFills}, false, nil
 }
 
 // Authorize flips a changeset from "proposed" to "authorized" — the only
@@ -235,25 +301,41 @@ func Authorize(rootPath string, changesetID NodeID, actor string, clk clock.Cloc
 	if clk == nil {
 		clk = clock.Real()
 	}
+	for attempt := 1; attempt <= casMaxAttempts; attempt++ {
+		res, retry, err := authorizeOnce(rootPath, changesetID, actor, clk)
+		if retry {
+			continue
+		}
+		return res, err
+	}
+	return &ApplyResult{RejectReasons: []string{
+		fmt.Sprintf("CONFLICT: %s changed concurrently during authorize, exceeded %d retry attempts", rootPath, casMaxAttempts),
+	}}, nil
+}
+
+func authorizeOnce(rootPath string, changesetID NodeID, actor string, clk clock.Clock) (res *ApplyResult, retry bool, err error) {
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
-		return nil, fmt.Errorf("graph authorize: load %s: %w", rootPath, err)
+		return nil, false, fmt.Errorf("graph authorize: load %s: %w", rootPath, err)
+	}
+	if reasons := checkCanonical(cat); len(reasons) > 0 {
+		return &ApplyResult{RejectReasons: reasons}, false, nil
 	}
 	node, ok := cat.Nodes[changesetID]
 	if !ok {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("graph authorize: changeset %q not found in catalog", changesetID),
-		}}, nil
+		}}, false, nil
 	}
 	if node.TypeID != "changeset" {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("graph authorize: node %q is type %q, not changeset", changesetID, node.TypeID),
-		}}, nil
+		}}, false, nil
 	}
 	if node.Status != ChangesetStatusProposed {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("graph authorize: changeset %q has status %q, must be %q to authorize", changesetID, node.Status, ChangesetStatusProposed),
-		}}, nil
+		}}, false, nil
 	}
 
 	changes := []FieldChange{
@@ -269,17 +351,20 @@ func Authorize(rootPath string, changesetID NodeID, actor string, clk clock.Cloc
 			Node:    changesetID,
 			Changes: changes,
 		},
-	})
+	}, false)
 	if err != nil {
-		return nil, fmt.Errorf("graph authorize: %w", err)
+		if errors.Is(err, errCASConflict) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("graph authorize: %w", err)
 	}
 	if len(rejectReasons) > 0 {
-		return &ApplyResult{RejectReasons: rejectReasons}, nil
+		return &ApplyResult{RejectReasons: rejectReasons}, false, nil
 	}
 	if len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, nil
+		return &ApplyResult{LintIssues: issues}, false, nil
 	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, nil
+	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
 }
 
 // Withdraw flips a "proposed" or "authorized" (but not yet applied/
@@ -293,25 +378,41 @@ func Authorize(rootPath string, changesetID NodeID, actor string, clk clock.Cloc
 // authorized_at/authorized_by, applied_at only).
 func Withdraw(rootPath string, changesetID NodeID, actor string, clk clock.Clock) (*ApplyResult, error) {
 	_, _ = actor, clk
+	for attempt := 1; attempt <= casMaxAttempts; attempt++ {
+		res, retry, err := withdrawOnce(rootPath, changesetID)
+		if retry {
+			continue
+		}
+		return res, err
+	}
+	return &ApplyResult{RejectReasons: []string{
+		fmt.Sprintf("CONFLICT: %s changed concurrently during withdraw, exceeded %d retry attempts", rootPath, casMaxAttempts),
+	}}, nil
+}
+
+func withdrawOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry bool, err error) {
 	cat, err := LoadCatalog(rootPath)
 	if err != nil {
-		return nil, fmt.Errorf("graph withdraw: load %s: %w", rootPath, err)
+		return nil, false, fmt.Errorf("graph withdraw: load %s: %w", rootPath, err)
+	}
+	if reasons := checkCanonical(cat); len(reasons) > 0 {
+		return &ApplyResult{RejectReasons: reasons}, false, nil
 	}
 	node, ok := cat.Nodes[changesetID]
 	if !ok {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("graph withdraw: changeset %q not found in catalog", changesetID),
-		}}, nil
+		}}, false, nil
 	}
 	if node.TypeID != "changeset" {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("graph withdraw: node %q is type %q, not changeset", changesetID, node.TypeID),
-		}}, nil
+		}}, false, nil
 	}
 	if node.Status != ChangesetStatusProposed && node.Status != ChangesetStatusAuthorized {
 		return &ApplyResult{RejectReasons: []string{
 			fmt.Sprintf("graph withdraw: changeset %q has status %q, must be %q or %q to withdraw", changesetID, node.Status, ChangesetStatusProposed, ChangesetStatusAuthorized),
-		}}, nil
+		}}, false, nil
 	}
 
 	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
@@ -322,17 +423,20 @@ func Withdraw(rootPath string, changesetID NodeID, actor string, clk clock.Clock
 				{Path: []string{"status"}, Before: node.Status, After: ChangesetStatusWithdrawn},
 			},
 		},
-	})
+	}, false)
 	if err != nil {
-		return nil, fmt.Errorf("graph withdraw: %w", err)
+		if errors.Is(err, errCASConflict) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("graph withdraw: %w", err)
 	}
 	if len(rejectReasons) > 0 {
-		return &ApplyResult{RejectReasons: rejectReasons}, nil
+		return &ApplyResult{RejectReasons: rejectReasons}, false, nil
 	}
 	if len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, nil
+		return &ApplyResult{LintIssues: issues}, false, nil
 	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, nil
+	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
 }
 
 // commitScratchOperations is Apply's dry-run-first scratch-copy machinery,
@@ -340,8 +444,18 @@ func Withdraw(rootPath string, changesetID NodeID, actor string, clk clock.Clock
 // operation set (appending a changeset node, or flipping its status) with
 // the exact same comment-preserving-rewrite-then-lint-then-copy-back
 // guarantee Apply gives ordinary changesets — a rejected candidate never
-// touches rootPath.
-func commitScratchOperations(cat *Catalog, ops []Operation) (changedFiles []string, lintIssues []LintIssue, rejectReasons []string, err error) {
+// touches rootPath. dryRun mirrors Apply's own dry-run convention
+// (ValidateOnly Propose calls): builds and lints the scratch candidate but
+// never calls commitWithCAS.
+//
+// The lint gate only blocks on error-severity issues NOT already present
+// in cat's own baseline lint (hazard guard #3: pre-existing catalog dirt
+// must never deadlock a write), and commit-time uses commitWithCAS (hazard
+// guard #2): a content-digest mismatch returns errCASConflict for the
+// caller's retry loop instead of clobbering a concurrent write.
+func commitScratchOperations(cat *Catalog, ops []Operation, dryRun bool) (changedFiles []string, lintIssues []LintIssue, rejectReasons []string, err error) {
+	baseline := ErrorIssues(Lint(cat))
+
 	tmpDir, err := os.MkdirTemp("", "kitsoki-graph-commit-*")
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("mktemp: %w", err)
@@ -363,12 +477,17 @@ func commitScratchOperations(cat *Catalog, ops []Operation) (changedFiles []stri
 		return nil, nil, []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}, nil
 	}
 	// Error-severity only, same rationale as Apply's gate (apply.go):
-	// advisory warnings must not block a propose/commit.
-	if issues := ErrorIssues(Lint(candidate)); len(issues) > 0 {
+	// advisory warnings must not block a propose/commit. Only NEW issues
+	// (not in baseline) block (hazard guard #3).
+	if issues := newErrorIssues(baseline, ErrorIssues(Lint(candidate))); len(issues) > 0 {
 		return nil, issues, nil, nil
 	}
 
-	if err := commitChangedFiles(cat.RootPath, scratchRoot, changed); err != nil {
+	if dryRun {
+		return changed, nil, nil, nil
+	}
+
+	if err := commitWithCAS(cat, scratchRoot, changed); err != nil {
 		return nil, nil, nil, err
 	}
 	return changed, nil, nil, nil

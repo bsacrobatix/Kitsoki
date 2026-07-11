@@ -256,12 +256,16 @@ func graphApplyOp(ctx context.Context, args map[string]any) (Result, error) {
 	}}, nil
 }
 
-// graphProposeOp: {catalog_path, title, operations[, visibility, provenance]}
-// -> {changeset_id, status, lint, rejected, reject_reasons}. operations is
-// the changeset wire shape: a list of {"kind": ..., ...} mappings (see
-// internal/graph.ParseChangeset). provenance, when present, marks the
-// changeset system-authored for the D9 auto-authorize allowlist
-// (internal/graph.Propose).
+// graphProposeOp: {catalog_path, title, operations[, visibility, provenance,
+// validate_only]} -> {changeset_id, status, lint, rejected, reject_reasons,
+// guard_fills, validated_only}. operations is the changeset wire shape: a
+// list of {"kind": ..., ...} mappings (see internal/graph.ParseChangeset).
+// provenance, when present AND the call arrived steward-trusted (see the
+// provenance-strip comment below), marks the changeset system-authored for
+// the D9 auto-authorize allowlist (internal/graph.Propose). validate_only
+// runs full validation + scratch lint and writes nothing (hazard guard #5).
+// guard_fills echoes every precondition Propose filled in on the caller's
+// behalf because the wire payload omitted it.
 func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	if catalogPath == "" {
@@ -274,16 +278,27 @@ func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 			ops = append(ops, m)
 		}
 	}
-	provenance, _ := args["provenance"].(map[string]any)
+	// Provenance strip (hazard guard #1, plan §3.4 red-team amendment #1):
+	// caller-supplied provenance only ever reaches internal/graph.Propose —
+	// and therefore only ever feeds the D9 auto-authorize allowlist check —
+	// when this call arrived through a context explicitly marked
+	// steward-trusted (WithSteward). Every other caller's provenance is
+	// silently dropped here, not merely ignored downstream, so an untrusted
+	// proposal can never carry provenance that triggers auto-authorize.
+	var provenance map[string]any
+	if StewardFromContext(ctx) {
+		provenance, _ = args["provenance"].(map[string]any)
+	}
 	clk, err := graphResolveClock(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	res, err := objectgraph.Propose(catalogPath, objectgraph.ProposeInput{
-		Title:      graphStringArg(args, "title"),
-		Visibility: graphStringArg(args, "visibility"),
-		Operations: ops,
-		Provenance: provenance,
+		Title:        graphStringArg(args, "title"),
+		Visibility:   graphStringArg(args, "visibility"),
+		Operations:   ops,
+		Provenance:   provenance,
+		ValidateOnly: graphBoolArg(args, "validate_only"),
 	}, ActorFromContext(ctx), clk)
 	if err != nil {
 		return Result{}, err
@@ -296,11 +311,34 @@ func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 	for i, r := range res.RejectReasons {
 		rejectReasons[i] = r
 	}
+	guardFills := make([]any, len(res.GuardFills))
+	for i, gf := range res.GuardFills {
+		entry := map[string]any{"node": string(gf.Node)}
+		if len(gf.Path) > 0 {
+			path := make([]any, len(gf.Path))
+			for j, p := range gf.Path {
+				path[j] = p
+			}
+			entry["path"] = path
+			entry["value"] = gf.Value
+		}
+		if gf.SHA != "" {
+			entry["sha"] = gf.SHA
+			fields := make([]any, len(gf.Fields))
+			for j, f := range gf.Fields {
+				fields[j] = f
+			}
+			entry["fields"] = fields
+		}
+		guardFills[i] = entry
+	}
 	return Result{Data: map[string]any{
 		"changeset_id":   string(res.ChangesetID),
 		"status":         res.Status,
 		"lint":           lintIssues,
 		"rejected":       len(res.RejectReasons) > 0 || len(res.Lint) > 0,
+		"guard_fills":    guardFills,
+		"validated_only": res.ValidatedOnly,
 		"reject_reasons": rejectReasons,
 	}}, nil
 }

@@ -69,11 +69,16 @@ func graphProposeRPC(params map[string]any) (any, *rpcError) {
 	if rerr != nil {
 		return nil, rerr
 	}
+	// Provenance strip (hazard guard #1, plan §3.4 red-team amendment #1):
+	// this bare RPC carrier has no ctx/actor/trust-injection seam at all
+	// (see graphRPCClock's doc comment on the "third write carrier" gap) —
+	// so, unlike host.graph.propose which honors an explicit steward-mode
+	// context, this surface can never be trusted with caller-supplied
+	// provenance and always drops it, regardless of what params contained.
 	res, err := objectgraph.Propose(catalogPath, objectgraph.ProposeInput{
 		Title:      graphStringParam(params, "title"),
 		Visibility: graphStringParam(params, "visibility"),
 		Operations: ops,
-		Provenance: graphMapParam(params, "provenance"),
 	}, "", clk)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.propose: " + err.Error()}
