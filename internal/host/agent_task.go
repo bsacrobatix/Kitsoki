@@ -422,6 +422,15 @@ func agentTaskHandlerOnce(ctx context.Context, args map[string]any) (Result, err
 		if returnedSID != "" {
 			claudeSID = returnedSID
 		}
+		// `codex exec resume <id>` is interactive when the initial exec failed
+		// before it emitted a real thread id (notably a stdin handoff failure).
+		// Retrying that synthetic UUID parks the worker in code mode with no prompt,
+		// burns the cell timeout, and produces no trace usage. Restart the next
+		// attempt as a fresh non-interactive exec instead; the task prompt and
+		// validator MCP are both rebuilt from this stable call context.
+		if AgentBackendFromContext(ctx).Name() == "codex" && cr.ExitCode != 0 && returnedSID == "" {
+			firstRun = true
+		}
 
 		if runErr != nil {
 			return Result{}, runErr
