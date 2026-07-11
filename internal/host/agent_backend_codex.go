@@ -34,7 +34,7 @@
 // than a flag (see TranslateInvocation).
 //
 // Flags claude understands but codex does not (--permission-mode,
-// --setting-sources, --effort, --exclude-dynamic-system-prompt-sections,
+// --setting-sources, --exclude-dynamic-system-prompt-sections,
 // --no-session-persistence, --verbose, --allowedTools, --output-format) are
 // dropped during translation. --disallowedTools is interpreted only to select
 // Codex's sandbox for read-only story agents.
@@ -93,6 +93,7 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 		systemPrompt    string
 		appendPrompt    string
 		model           string
+		effort          string
 		mcpConfig       string
 		sessionID       string // --session-id (first call) — codex has no equivalent
 		resumeID        string // --resume <id> → `exec resume <id>`
@@ -131,10 +132,16 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 			// acceptance attempt in ~60ms and made codex-profile sessions
 			// "impossible" (validator submit never ran). codex registers the
 			// validator MCP via the `-c mcp_servers.*` overrides below instead.
-		case "--permission-mode", "--setting-sources", "--settings", "--effort",
+		case "--permission-mode", "--setting-sources", "--settings",
 			"--allowedTools":
 			// Dropped along with their value. (Tool-scoping is a parity gap;
 			// codex runs with the bypass flag set below.)
+		case "--effort":
+			// Codex takes reasoning effort through a config value rather than a
+			// command flag. Retain the story/profile selection and translate it
+			// below so a machine's ambient Codex default cannot silently change
+			// (or make invalid) a declared live run.
+			effort = val
 		case "--disallowedTools":
 			// Codex has no direct equivalent. Kitsoki's read-only posture is
 			// enforced by the story/tooling layer; see the bypass rationale below.
@@ -212,6 +219,9 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 		if m := strings.TrimSpace(model); m != "" && !isClaudeModelID(m) {
 			args = append(args, "-m", m)
 		}
+		if reasoningEffort := codexReasoningEffort(effort); reasoningEffort != "" {
+			args = append(args, "-c", "model_reasoning_effort="+tomlString(reasoningEffort))
+		}
 		// `-C/--cd <DIR>` is accepted by `codex exec` but NOT by `codex exec resume`
 		// (the resume subcommand rejects it: "unexpected argument '-C'"). On a
 		// resume the working root is fixed by the recorded session, so omit it.
@@ -279,6 +289,22 @@ func (codexBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir s
 	}
 
 	return Invocation{Args: args, Stdin: prompt, WorkingDir: workingDir, PromptForBudget: promptForBudget, Cleanup: cleanup}
+}
+
+// codexReasoningEffort translates Kitsoki's portable effort vocabulary onto
+// Codex's current configuration values. Claude exposes `max`, while GPT-5.4
+// rejects it; xhigh is the highest value both the current Codex CLI and
+// GPT-5.4 accept. An unknown value deliberately returns empty so we do not
+// invent a provider setting for a future profile vocabulary.
+func codexReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low", "medium", "high", "xhigh":
+		return strings.ToLower(strings.TrimSpace(effort))
+	case "max", "ultra":
+		return "xhigh"
+	default:
+		return ""
+	}
 }
 
 func joinCodexPrompt(a, b string) string {
