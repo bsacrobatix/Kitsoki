@@ -150,26 +150,60 @@ func (s *Server) dispatchMaterialize(ctx context.Context, method string, params 
 	}
 }
 
+// resolveMaterializeCatalog resolves the `catalog` param shared by
+// graph.materialize.start and graph.materialize.checks. `catalog` is an
+// ALIAS (never a raw filesystem path) resolved through s.graphAllowlist() —
+// the same allowlist graph.propose/authorize/withdraw/apply/rebase resolve
+// their own `catalog` param through (F1, catalog_allowlist.go /
+// resolveGraphCatalogParam). Unlike those five verbs, the two
+// graph.materialize.* handlers have no `catalog_path` raw-path back-compat
+// param: neither ever had a working federated caller before this change, so
+// there is nothing depending on raw-path behavior surviving, and accepting
+// one here would reopen exactly the gap F1 closed everywhere else.
+//
+// The returned repoRoot is the resolved catalog's own repository root — two
+// filepath.Dir() calls up from its `pog/catalog.yaml` path, mirroring
+// buildCatalogAllowlist's absTrack derivation (<home>/<repo>/pog/catalog.yaml)
+// exactly, so a "pog" alias still yields s.materializeRoot (zero behavior
+// change for the home-catalog case) while a federated member alias yields
+// that member's own root. RepoRoot controls BOTH where a node's
+// materialize.story path is looked up (internal/materialize.Prepare joins it
+// against RepoRoot) and where produced artifacts are written back
+// (internal/materialize's write-back path also joins against RepoRoot) — so
+// getting this right is what makes materializing a federated member's node
+// read and write that member's own tree instead of the home repo's.
+func (s *Server) resolveMaterializeCatalog(params map[string]any, rpcMethod string) (catalogPath, repoRoot string, rerr *rpcError) {
+	alias := graphStringParam(params, "catalog")
+	if alias == "" {
+		return "", "", &rpcError{Code: codeServerError, Message: rpcMethod + ": missing 'catalog'"}
+	}
+	resolved, rerr := resolveGraphCatalogParam(s.graphAllowlist(), alias, "", rpcMethod)
+	if rerr != nil {
+		return "", "", rerr
+	}
+	root := filepath.Dir(filepath.Dir(resolved))
+	if root == "" {
+		root = "."
+	}
+	return resolved, root, nil
+}
+
 // materializeStart implements graph.materialize.start {catalog, node_id,
 // params} → {job_id, stages: [{id, title}]}. Gates are validated
 // server-side by internal/materialize.Start; an unmet gate rejects with the
 // unmet field list both in the error message and (machine-readable) in the
-// rpcError's Data as a JSON array.
+// rpcError's Data as a JSON array. See resolveMaterializeCatalog's doc
+// comment for `catalog`'s alias-only semantics and RepoRoot derivation.
 func (s *Server) materializeStart(ctx context.Context, params map[string]any) (any, *rpcError) {
-	catalogPath, _ := params["catalog"].(string)
-	if catalogPath == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: missing 'catalog'"}
+	catalogPath, repoRoot, rerr := s.resolveMaterializeCatalog(params, "graph.materialize.start")
+	if rerr != nil {
+		return nil, rerr
 	}
 	nodeID, _ := params["node_id"].(string)
 	if nodeID == "" {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: missing 'node_id'"}
 	}
 	paramArgs, _ := params["params"].(map[string]any)
-
-	repoRoot := s.materializeRoot
-	if repoRoot == "" {
-		repoRoot = "."
-	}
 
 	cat, err := graph.LoadCatalog(catalogPath)
 	if err != nil {
@@ -265,18 +299,16 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 // sandbox capabilities, the current verdict from running the check NOW, and
 // the exact `kitsoki starlark run` command that reproduces that verdict.
 // Read-only: evaluating a check never mutates the catalog or starts a job.
+// See resolveMaterializeCatalog's doc comment for `catalog`'s alias-only
+// semantics and RepoRoot derivation.
 func (s *Server) materializeChecks(ctx context.Context, params map[string]any) (any, *rpcError) {
-	catalogPath, _ := params["catalog"].(string)
-	if catalogPath == "" {
-		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.checks: missing 'catalog'"}
+	catalogPath, repoRoot, rerr := s.resolveMaterializeCatalog(params, "graph.materialize.checks")
+	if rerr != nil {
+		return nil, rerr
 	}
 	nodeID, _ := params["node_id"].(string)
 	if nodeID == "" {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.checks: missing 'node_id'"}
-	}
-	repoRoot := s.materializeRoot
-	if repoRoot == "" {
-		repoRoot = "."
 	}
 
 	cat, err := graph.LoadCatalog(catalogPath)
