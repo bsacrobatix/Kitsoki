@@ -477,6 +477,10 @@ tasks:
     baseline_sha: 85ff4917
     fix_sha: 45276b88
     ticket: "Fix Kitsoki bug14: web transport must surface background completion failures."
+    # Public focused suite for the strict GREEN→RED reproducer gate. This is
+    # intentionally broader than the hidden external oracle, which remains
+    # unavailable to the worker until deterministic scoring.
+    test_cmd: "cd tools/runstatus && pnpm vitest run"
     split: heldout
     verified_red: true
     verified_green: true

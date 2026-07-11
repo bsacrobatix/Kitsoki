@@ -897,15 +897,18 @@ def ensure_kitsoki_binary() -> Path:
 
 
 def test_cmd_for(task: dict[str, Any]) -> str:
-    """The real test command for this task's tree, or a deliberate no-op.
+    """The real public test command for this task's tree, if one exists.
 
-    github_content tasks arm a repo-history content oracle (no test suite is
-    part of the corpus for those repos); "true" is an explicit always-pass
-    no-op, NOT an empty string — an empty test_cmd falls back to `go test
-    ./...` in stories/bugfix (internal/host/local_ci.go), which is wrong (and
-    slow/broken) for a non-Go tree. external_bakeoff tasks DO have a real
-    project test_cmd (bench.py meta), the same one bugfix-bakeoff drives.
+    A no-op command makes the strict GREEN→RED reproducer gate lie: both the
+    dirty tree and the stashed baseline pass, so a real authored RED test is
+    reported as green. Empty intentionally skips that gate; the story still
+    requires the worker's structured reproduction artifact and later promotes
+    its own repro_command into the regression gate. A task may declare a public
+    focused `test_cmd` without revealing its hidden oracle.
     """
+    explicit = str(task.get("test_cmd") or "").strip()
+    if explicit:
+        return explicit
     oracle = task.get("oracle") or {}
     if oracle.get("kind") == "external_bakeoff":
         meta = json.loads(
@@ -915,8 +918,8 @@ def test_cmd_for(task: dict[str, Any]) -> str:
                 capture=True,
             ).stdout
         )
-        return meta.get("test_cmd") or "true"
-    return "true"
+        return str(meta.get("test_cmd") or "").strip()
+    return ""
 
 
 def build_kitsoki_prompt(
