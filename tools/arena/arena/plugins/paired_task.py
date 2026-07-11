@@ -57,6 +57,7 @@ class PairedTaskPlugin:
             _append_if(argv, "--worker-profile", str(cell.variant.meta.get("worker_profile") or ""))
             _append_if(argv, "--orchestrator-model", str(cell.variant.meta.get("orchestrator_model") or ""))
             _append_if(argv, "--implementation-mode", str(cell.variant.meta.get("implementation_mode") or ""))
+            _append_if(argv, "--story", str(cell.target.meta.get("story") or cell.variant.meta.get("story") or ""))
             _append_if(argv, "--capability-preset", str(cell.variant.meta.get("capability_preset") or ""))
             presets = (cell.options or {}).get("capability_presets")
             if isinstance(presets, dict):

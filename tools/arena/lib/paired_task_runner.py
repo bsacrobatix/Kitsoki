@@ -156,6 +156,11 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("ARENA_PAIRED_TASK_CORPUS", str(DEFAULT_CORPUS)),
         help="arena task corpus/source YAML; defaults to the built-in cost bench manifest",
     )
+    parser.add_argument(
+        "--story",
+        default="",
+        help="kitsoki story app.yaml the dispatch_kitsoki treatment drives; defaults to BENCH_BUGFIX_STORY (stories/bench-bugfix/app.yaml)",
+    )
     parser.add_argument("--backend", default="")
     parser.add_argument("--model", default="")
     parser.add_argument("--effort", default="")
@@ -898,6 +903,7 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     metrics["studio_mcp_trace_ref"] = container_path(trace_ref)
     metrics["implementation_mode"] = args.implementation_mode or "agent_task"
     metrics["worker_profile"] = profile
+    metrics["story_path"] = str(args.story or BENCH_BUGFIX_STORY)
     incomplete_measurement = metrics.get("measurement_status") == "incomplete"
     return {
         "blocked": proc.returncode != 0 or incomplete_measurement,
@@ -975,7 +981,7 @@ def build_kitsoki_prompt(
         "",
         f"1. {tool('studio.ping')}.",
         f"2. {tool('session.new')} EXACTLY:",
-        f'   - story_path: "{BENCH_BUGFIX_STORY}"',
+        f'   - story_path: "{getattr(args, "story", "") or BENCH_BUGFIX_STORY}"',
         '   - harness: "live"',
         f'   - profile: "{profile}"',
         f'   - trace: "{trace_ref}"',

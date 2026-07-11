@@ -36,6 +36,13 @@ paired_task_dockerfile = (HERE.parent / "docker" / "Dockerfile.paired-task").rea
 check("paired task image has disposable Git author", "git config --system user.name \"Kitsoki Arena\"" in paired_task_dockerfile, True)
 check("paired task image has disposable Git email", "git config --system user.email \"arena@kitsoki.local\"" in paired_task_dockerfile, True)
 
+REPO_ROOT = HERE.parent.parent.parent
+drive_cell_source = (REPO_ROOT / "tools" / "bugfix-bakeoff" / "external" / "drive_cell.sh").read_text(encoding="utf-8")
+check("drive_cell.sh accepts --story", '--story) story="$2"; shift 2;;' in drive_cell_source, True)
+check("drive_cell.sh defaults --story to bench-bugfix", 'story="stories/bench-bugfix/app.yaml"' in drive_cell_source, True)
+check("drive_cell.sh interpolates $story into story_path (not a hardcoded literal)", 'story_path: "$REPO_ROOT/$story"' in drive_cell_source, True)
+check("drive_cell.sh no longer hardcodes the story literal", 'story_path: "$REPO_ROOT/stories/bench-bugfix/app.yaml"' in drive_cell_source, False)
+
 
 SPEC = {
     "job_type": "bugfix",
@@ -66,6 +73,18 @@ live_argv = bugfix.drive_command(cells[0], live=True)
 check("live uses drive_cell", live_argv[0:2], ["bash", "/workspace/kitsoki/tools/bugfix-bakeoff/external/drive_cell.sh"])
 check("live threads completion-state path", "--completion-state" in live_argv, True)
 check("live completion-state points inside mounted repo", live_argv[live_argv.index("--completion-state") + 1].startswith("/workspace/kitsoki/.artifacts/arena/completion-state/"), True)
+check("no target.meta.story -> no --story flag threaded (default preserved)", "--story" in live_argv, False)
+
+STORY_SPEC = {
+    "job_type": "bugfix",
+    "targets": [{"id": "query-string", "label": "qs", "stack": "javascript", "story": "stories/bugfix/app.yaml"}],
+    "variants": [{"id": "kitsoki-gpt-5.5", "backend": "codex", "model": "gpt-5.5"}],
+    "axes": {"bug": ["qs1"]},
+}
+story_cell = JobSpec.from_dict(STORY_SPEC).cells()[0]
+story_live_argv = bugfix.drive_command(story_cell, live=True)
+check("target.meta.story threads --story into drive_cell.sh", "--story" in story_live_argv, True)
+check("threaded --story value", story_live_argv[story_live_argv.index("--story") + 1] if "--story" in story_live_argv else None, "stories/bugfix/app.yaml")
 
 
 def write_completion_state(cell, *, verdict, health, notes=""):
