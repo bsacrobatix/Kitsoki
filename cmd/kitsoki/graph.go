@@ -92,10 +92,18 @@ drift, if checked); non-zero otherwise.`,
 			}
 			issues := lintRes.Data["issues"].([]any)
 			out := cmd.OutOrStdout()
+			warningCount := 0
 			for _, raw := range issues {
 				iss := raw.(map[string]any)
+				severity, _ := iss["severity"].(string)
+				if severity == string(graph.SeverityWarning) {
+					warningCount++
+					fmt.Fprintf(out, "%s: %s: warning: %s\n", iss["node"], iss["kind"], iss["message"])
+					continue
+				}
 				fmt.Fprintf(out, "%s: %s: %s\n", iss["node"], iss["kind"], iss["message"])
 			}
+			errorCount := len(issues) - warningCount
 
 			var indexErrs []string
 			if checkIndex {
@@ -113,11 +121,18 @@ drift, if checked); non-zero otherwise.`,
 				}
 			}
 
-			if len(issues) == 0 && len(indexErrs) == 0 {
-				fmt.Fprintf(out, "graph lint: %d nodes, clean\n", nodeCount)
+			// Warnings are advisory (graph.SeverityWarning) — print them but
+			// exit 0, so an advisory nudge (e.g. missing-materialize-check)
+			// never breaks a repo's lint gate the way a real error must.
+			if errorCount == 0 && len(indexErrs) == 0 {
+				if warningCount > 0 {
+					fmt.Fprintf(out, "graph lint: %d nodes, %d warning(s), no errors\n", nodeCount, warningCount)
+				} else {
+					fmt.Fprintf(out, "graph lint: %d nodes, clean\n", nodeCount)
+				}
 				return nil
 			}
-			return fmt.Errorf("graph lint: %d issue(s), %d index-drift error(s) found", len(issues), len(indexErrs))
+			return fmt.Errorf("graph lint: %d issue(s), %d index-drift error(s) found", errorCount, len(indexErrs))
 		},
 	}
 	cmd.Flags().BoolVar(&checkIndex, "check-index", false, "also check docs/proposals/README.md's generated index for drift (W6.0)")

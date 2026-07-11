@@ -100,7 +100,13 @@ func Apply(rootPath string, changesetID NodeID, dryRun bool) (*ApplyResult, erro
 	if err != nil {
 		return &ApplyResult{RejectReasons: []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}}, nil
 	}
-	if issues := Lint(candidate); len(issues) > 0 {
+	// Only error-severity issues reject an apply: SeverityWarning is
+	// documented as advisory (lint.go), so a warning — e.g. a work item
+	// that has not yet declared its materialize gate check — must not brick
+	// every subsequent catalog write (including materialize's own
+	// system-authored write-backs, which are exactly how such a node records
+	// that its check failed).
+	if issues := ErrorIssues(Lint(candidate)); len(issues) > 0 {
 		return &ApplyResult{LintIssues: issues}, nil
 	}
 

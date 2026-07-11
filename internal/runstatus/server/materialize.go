@@ -18,7 +18,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"kitsoki/internal/graph"
@@ -140,6 +142,9 @@ func (s *Server) dispatchMaterialize(ctx context.Context, method string, params 
 	case "graph.materialize.answer":
 		result, rerr := s.materializeAnswer(params)
 		return result, rerr, true
+	case "graph.materialize.checks":
+		result, rerr := s.materializeChecks(ctx, params)
+		return result, rerr, true
 	default:
 		return nil, nil, false
 	}
@@ -232,11 +237,14 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 	s.trackMaterializeJob(jobID, state)
 
 	// Room titles: the story's own state descriptions (app.State.Description),
-	// falling back to the room id.
+	// falling back to the room id. Check stages ("check:<id>") are not rooms;
+	// they title themselves.
 	stagesOut := make([]materializeStageWire, len(stages))
 	for i, st := range stages {
 		title := st.ID
-		if roomState, ok := prep.Def.States[st.ID]; ok && roomState.Description != "" {
+		if checkID, isCheck := strings.CutPrefix(st.ID, materialize.CheckStagePrefix); isCheck {
+			title = "Gate check: " + checkID
+		} else if roomState, ok := prep.Def.States[st.ID]; ok && roomState.Description != "" {
 			title = roomState.Description
 		}
 		stagesOut[i] = materializeStageWire{ID: st.ID, Title: title}
@@ -247,6 +255,73 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		"stages":     stagesOut,
 		"session_id": webSessionID,
 	}, nil
+}
+
+// materializeChecks implements graph.materialize.checks {catalog, node_id} —
+// the pre-flight surface behind the portal's "what will actually be
+// verified" panel. For each of the node's resolved gate checks it returns
+// the Starlark script (path AND source text — the user must be able to read
+// the assertion, not trust a label), the concrete inputs the node binds, the
+// sandbox capabilities, the current verdict from running the check NOW, and
+// the exact `kitsoki starlark run` command that reproduces that verdict.
+// Read-only: evaluating a check never mutates the catalog or starts a job.
+func (s *Server) materializeChecks(ctx context.Context, params map[string]any) (any, *rpcError) {
+	catalogPath, _ := params["catalog"].(string)
+	if catalogPath == "" {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.checks: missing 'catalog'"}
+	}
+	nodeID, _ := params["node_id"].(string)
+	if nodeID == "" {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.checks: missing 'node_id'"}
+	}
+	repoRoot := s.materializeRoot
+	if repoRoot == "" {
+		repoRoot = "."
+	}
+
+	cat, err := graph.LoadCatalog(catalogPath)
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.checks: " + err.Error()}
+	}
+	node, ok := cat.Nodes[graph.NodeID(nodeID)]
+	if !ok {
+		return nil, &rpcError{Code: codeServerError, Message: fmt.Sprintf("graph.materialize.checks: node %q not found in catalog", nodeID)}
+	}
+	binding, err := materialize.ResolveBinding(cat, node)
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.checks: " + err.Error()}
+	}
+
+	resolved := materialize.ResolveChecks(node, binding.Checks)
+	out := make([]map[string]any, 0, len(resolved))
+	for _, rc := range resolved {
+		entry := map[string]any{
+			"id":         rc.ID,
+			"script":     rc.Script,
+			"inputs":     rc.Inputs,
+			"unresolved": rc.Unresolved,
+		}
+		if len(rc.Capabilities) > 0 {
+			entry["capabilities"] = rc.Capabilities
+		}
+		if rc.Script != "" {
+			absScript := rc.Script
+			if !filepath.IsAbs(absScript) {
+				absScript = filepath.Join(repoRoot, rc.Script)
+			}
+			if raw, err := os.ReadFile(absScript); err == nil {
+				entry["source"] = string(raw)
+			}
+		}
+		result := materialize.RunCheck(ctx, repoRoot, rc)
+		entry["ok"] = result.OK
+		entry["reasons"] = result.Reasons
+		entry["error"] = result.Error
+		entry["script_sha256"] = result.ScriptSHA256
+		entry["reproduce"] = result.Reproduce
+		out = append(out, entry)
+	}
+	return map[string]any{"node_id": nodeID, "checks": out}, nil
 }
 
 // sessionTurnDriver adapts a live web-registry session's [Driver] +

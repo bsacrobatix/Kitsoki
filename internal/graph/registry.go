@@ -109,6 +109,30 @@ type MaterializeDecl struct {
 	// Gates names node fields that must be non-empty before the materialize
 	// intent is offered.
 	Gates []string
+	// Checks are deterministic Starlark gate assertions run by the
+	// materialize driver AFTER the bound story's rooms complete — the
+	// machine-checkable counterpart to a node's prose gate: field. A false
+	// (or unresolvable) check fails the materialize job. Unlike Gates,
+	// which only require field presence before start, a check evaluates
+	// whether the gate is actually satisfied.
+	Checks []MaterializeCheckDecl
+}
+
+// MaterializeCheckDecl is one entry of a materialize: declaration's checks
+// list. Exactly one of Script (type-provided, reusable across every node of
+// the type) or ScriptField (the node field naming its own .star script) is
+// set — that is how a reusable type either fixes the assertion or lets each
+// node supply one. Inputs are the literal ctx.inputs for the script;
+// InputsField names a node field whose map value is merged over Inputs, so
+// nodes parameterize a shared assertion. Capabilities is the starlark
+// sandbox grant (internal/host/starlark ParseCapabilities shape).
+type MaterializeCheckDecl struct {
+	ID           string
+	Script       string
+	ScriptField  string
+	Inputs       map[string]any
+	InputsField  string
+	Capabilities map[string]any
 }
 
 // MaterializeParamDecl is one entry of a materialize: declaration's params list.

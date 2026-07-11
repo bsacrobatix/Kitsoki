@@ -87,6 +87,32 @@ func TestLint_OrphanFeature(t *testing.T) {
 	}
 }
 
+// TestLint_MaterializeChecks proves missing-materialize-check fires only
+// for a node whose type demands a per-node assertion script (script_field)
+// that the node does not set — always a warning, and never for type-provided
+// (script:) checks.
+func TestLint_MaterializeChecks(t *testing.T) {
+	cat, err := LoadCatalog("testdata/lint/materialize-checks.yaml")
+	if err != nil {
+		t.Fatalf("LoadCatalog: %v", err)
+	}
+	var found []LintIssue
+	for _, iss := range Lint(cat) {
+		if iss.Kind == "missing-materialize-check" {
+			found = append(found, iss)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("missing-materialize-check issues = %v, want exactly 1 (item-missing-check only)", found)
+	}
+	if found[0].Node != "item-missing-check" {
+		t.Errorf("issue node = %q, want %q", found[0].Node, "item-missing-check")
+	}
+	if found[0].Severity != SeverityWarning {
+		t.Errorf("issue severity = %q, want %q", found[0].Severity, SeverityWarning)
+	}
+}
+
 // TestLint_InitiativeScope proves initiative-scope fires only for the
 // initiative whose declared `targets` disagrees with the derived
 // includes -> change.implements -> feature.in_area set, is always a

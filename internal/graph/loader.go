@@ -140,11 +140,21 @@ type fileArtifactDecl struct {
 	Presentation string `yaml:"presentation"`
 }
 
+type fileMaterializeCheck struct {
+	ID           string         `yaml:"id"`
+	Script       string         `yaml:"script"`
+	ScriptField  string         `yaml:"script_field"`
+	Inputs       map[string]any `yaml:"inputs"`
+	InputsField  string         `yaml:"inputs_field"`
+	Capabilities map[string]any `yaml:"capabilities"`
+}
+
 type fileMaterializeDecl struct {
 	Story        string                 `yaml:"story"`
 	ContextEdges []string               `yaml:"context_edges"`
 	Params       []fileMaterializeParam `yaml:"params"`
 	Gates        []string               `yaml:"gates"`
+	Checks       []fileMaterializeCheck `yaml:"checks"`
 }
 
 type fileTypeDef struct {
@@ -187,6 +197,22 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 				Type:    p.Type,
 				Default: p.Default,
 				Values:  p.Values,
+			})
+		}
+		for _, c := range ft.Materialize.Checks {
+			if c.ID == "" {
+				return TypeDef{}, "", fmt.Errorf("type %q materialize check: id is required", ft.ID)
+			}
+			if (c.Script == "") == (c.ScriptField == "") {
+				return TypeDef{}, "", fmt.Errorf("type %q materialize check %q: exactly one of script: or script_field: is required", ft.ID, c.ID)
+			}
+			md.Checks = append(md.Checks, MaterializeCheckDecl{
+				ID:           c.ID,
+				Script:       c.Script,
+				ScriptField:  c.ScriptField,
+				Inputs:       c.Inputs,
+				InputsField:  c.InputsField,
+				Capabilities: c.Capabilities,
 			})
 		}
 		def.Materialize = md
