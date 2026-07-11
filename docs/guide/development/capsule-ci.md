@@ -49,20 +49,34 @@ that cannot complete safely must emit `needs_input`; the reference
 `stories/capsule-ci` does exactly that until a project composes its checks.
 
 Pipeline `executor:` is an immutable placement selection: `host`/`local` runs
-through the host provider and `remote-fake` exercises the identical remote
-worker protocol without a network. A production remote-worker name must be
-declared in the checked-in `remotes:` map; a story cannot select or add one
-itself. The shipped `HTTPRemoteWorker` adapter accepts only HTTPS endpoints,
-sends the sealed envelope to the worker, receives a serialized typed
-verdict/result, and uses an ephemeral authorization header callback. Credential
-values never enter the envelope, workspace, trace, or receipt.
+through the host provider, `remote-fake` exercises the identical remote-worker
+protocol without a network, and `container-fake` exercises the Arena-style
+container completion-state adapter without requiring Docker. A production
+remote-worker name must be declared in the checked-in `remotes:` map; a story
+cannot select or add one itself. The shipped `HTTPRemoteWorker` adapter accepts
+only HTTPS endpoints, sends the sealed envelope to the worker, receives a
+serialized typed verdict/result, and uses an ephemeral authorization header
+callback. Credential values never enter the envelope, workspace, trace, or
+receipt.
 
 The checked-in reference `stories/capsule-ci` is covered as a no-LLM parity
-fixture on both `host` and `remote-fake`: both placements consume the same
-sealed envelope, emit the same normalized typed result, and park with
+fixture on `host`, `remote-fake`, and `container-fake`: all placements consume
+the same sealed envelope, emit the same typed verdict, and park with
 `needs_input` rather than fabricating a green gate before a project-specific
-composition exists. Container parity is tracked separately under the Arena
-executor adoption work.
+composition exists. The container adapter carries the shared
+`completion-state/v1` metadata that Arena cells already use; real Docker
+placement remains an edge backend behind that provider seam.
+
+The reference story now exposes the intended room graph directly: prepare,
+deterministic checks, schema-bounded review, bounded writer/refine, and
+adjudication. Its default direct-run path still parks until a project wrapper
+composes concrete checks or a cassette-backed reviewer.
+
+GitHub ingress is an adapter around the same contract. A pull-request webhook
+normalizes to `Trigger{kind:"pull_request", provider:"github", ...}` and the
+check-run publisher projects a `capsule-ci-verdict/v1` run result to a GitHub
+check conclusion. The adapter does not define a second pipeline result or call
+GitHub from automated tests.
 
 Example remote placement:
 

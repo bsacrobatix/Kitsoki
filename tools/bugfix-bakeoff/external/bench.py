@@ -1886,6 +1886,7 @@ def repo_history_capsule_record(m, bug):
     repo_modes = ["single-repo"]
     if repo_subdir:
         repo_modes.append("meta-repo")
+    environment = repo_history_environment_contract(proj, bug, oracle_cfg)
     return {
         "id": f"{proj['id']}/{bug['id']}",
         "capsule_ref": capsule_ref,
@@ -1908,6 +1909,15 @@ def repo_history_capsule_record(m, bug):
         "repo_envs": project_repo_envs(proj),
         "repo_subdir": repo_subdir,
         "repo_modes": repo_modes,
+        "environment": environment,
+        "executor_contract": {
+            "schema": "capsule-executor-contract/v1",
+            "provider": "container",
+            "materializer": "bugfix-bakeoff",
+            "completion_state": "completion-state/v1",
+            "verify_command": verify_cmd,
+            "readiness_command": readiness_cmd,
+        },
         "source_manifest": str(Path(m.get("_dir", "")) / "manifest.yaml") if m.get("_dir") else "",
         "verify_command": verify_cmd,
         "readiness_command": readiness_cmd,
@@ -1917,6 +1927,50 @@ def repo_history_capsule_record(m, bug):
             "GREEN: overlay the real fix source from fix_sha and require pass",
             "GREEN: score a candidate worktree with the same hidden oracle",
         ],
+    }
+
+
+def repo_history_environment_contract(proj, bug, oracle_cfg):
+    """Project the repo-history harness onto Capsule CI's env/executor vocabulary.
+
+    Repo-history materialization still lives in this Python harness because it
+    owns pinned upstream repos and hidden oracle overlays. The returned shape is
+    intentionally the same checked-in environment contract used by Capsule CI so
+    the catalog can be reasoned about, locked, and eventually moved behind the
+    common executor provider without changing every manifest.
+    """
+    language = str(proj.get("language", "") or "").lower()
+    caches = []
+    lockfiles = []
+    image = "ubuntu:24.04"
+    if language == "javascript":
+        node_min = str(proj.get("node_min", "") or "22")
+        image = f"node:{node_min}-bookworm"
+        lockfiles.extend(["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"])
+        caches.append({"id": "node-modules", "scope": "project", "mode": "read_write"})
+    elif language == "rust":
+        image = "rust:1-bookworm"
+        lockfiles.append("Cargo.lock")
+        caches.append({"id": "cargo", "scope": "project", "mode": "read_write"})
+    elif language == "go":
+        image = "golang:1-bookworm"
+        lockfiles.append("go.sum")
+        caches.append({"id": "go-build", "scope": "project", "mode": "read_write"})
+    return {
+        "schema": "capsule-environment/v1",
+        "id": f"repo-history-{proj['id']}",
+        "source": {"image": image},
+        "lockfiles": lockfiles,
+        "bootstrap": {"command": str(proj.get("install", "") or "").strip()},
+        "network": "replay",
+        "caches": caches,
+        "sandbox": "container",
+        "verifier_overlay": {
+            "visibility": "verifier",
+            "oracle_target": oracle_cfg.get("target", ""),
+            "oracle_run": oracle_cfg.get("run", ""),
+            "oracle_test": bug.get("oracle_test", ""),
+        },
     }
 
 

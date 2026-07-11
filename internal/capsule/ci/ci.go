@@ -519,7 +519,7 @@ func validateCleanupPolicy(label string, policy CleanupPolicy) error {
 }
 func isBuiltinExecutor(name string) bool {
 	switch name {
-	case "", "host", "local", "remote-fake":
+	case "", "host", "local", "remote-fake", "container-fake":
 		return true
 	default:
 		return false

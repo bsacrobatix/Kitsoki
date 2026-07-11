@@ -77,6 +77,9 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
   persona/scenario QA campaign story: project-owned personas/scenarios, the
   `campaign_*` product verbs, the local-vs-GitHub finding-sink policy, worker
   backend receipts, and the Slidey rollup.
+- **[`ci.md`](ci.md)** — story-native Capsule CI: the normalized trigger/world
+  contract, typed verdict, reference rooms, least-authority writer/reviewer
+  boundaries, and GitHub adapter model.
 
 ## See also
 

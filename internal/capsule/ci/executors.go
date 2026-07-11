@@ -13,14 +13,16 @@ import (
 // remote worker is injected by the embedding process under a project-approved
 // name; it is never inferred from story input.
 type BuiltinExecutors struct {
-	Host       executor.Provider
-	FakeRemote executor.Provider
+	Host          executor.Provider
+	FakeRemote    executor.Provider
+	FakeContainer executor.Provider
 }
 
 func NewBuiltinExecutors() BuiltinExecutors {
 	return BuiltinExecutors{
-		Host:       executor.NewHostProvider(),
-		FakeRemote: executor.NewRemoteProvider(executor.NewFakeRemoteWorker()),
+		Host:          executor.NewHostProvider(),
+		FakeRemote:    executor.NewRemoteProvider(executor.NewFakeRemoteWorker()),
+		FakeContainer: executor.NewContainerProvider(executor.NewFakeContainerBackend()),
 	}
 }
 
@@ -33,6 +35,10 @@ func (e BuiltinExecutors) Select(_ context.Context, name string) (executor.Provi
 	case "remote-fake":
 		if e.FakeRemote != nil {
 			return e.FakeRemote, nil
+		}
+	case "container-fake":
+		if e.FakeContainer != nil {
+			return e.FakeContainer, nil
 		}
 	}
 	return nil, fmt.Errorf("capsule ci: executor %q is not configured", name)

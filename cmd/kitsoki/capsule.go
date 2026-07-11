@@ -37,15 +37,16 @@ func capsuleCmd() *cobra.Command {
 }
 
 type capsuleListEntry struct {
-	Ref       string `json:"ref"`
-	Kind      string `json:"kind"`
-	Title     string `json:"title,omitempty"`
-	Path      string `json:"path"`
-	Executor  string `json:"executor"`
-	Project   string `json:"project,omitempty"`
-	Bug       string `json:"bug,omitempty"`
-	Scenario  string `json:"scenario,omitempty"`
-	LocalOnly bool   `json:"local_only,omitempty"`
+	Ref         string `json:"ref"`
+	Kind        string `json:"kind"`
+	Title       string `json:"title,omitempty"`
+	Path        string `json:"path"`
+	Executor    string `json:"executor"`
+	Environment string `json:"environment,omitempty"`
+	Project     string `json:"project,omitempty"`
+	Bug         string `json:"bug,omitempty"`
+	Scenario    string `json:"scenario,omitempty"`
+	LocalOnly   bool   `json:"local_only,omitempty"`
 }
 
 func capsuleListCmd() *cobra.Command {
@@ -92,6 +93,9 @@ func capsuleListCmd() *cobra.Command {
 				}
 				fmt.Fprintf(out, "    path: %s\n", entry.Path)
 				fmt.Fprintf(out, "    executor: %s\n", entry.Executor)
+				if entry.Environment != "" {
+					fmt.Fprintf(out, "    environment: %s\n", entry.Environment)
+				}
 			}
 			return nil
 		},
@@ -273,10 +277,10 @@ func writeCapsuleListMarkdown(w io.Writer, kind string, entries []capsuleListEnt
 	}
 	fmt.Fprintf(w, "# %s\n\n", title)
 	fmt.Fprintf(w, "Capsules: **%d**\n\n", len(entries))
-	fmt.Fprintln(w, "| Capsule | Kind | Executor | Path |")
-	fmt.Fprintln(w, "|---|---|---|---|")
+	fmt.Fprintln(w, "| Capsule | Kind | Executor | Environment | Path |")
+	fmt.Fprintln(w, "|---|---|---|---|---|")
 	for _, entry := range entries {
-		fmt.Fprintf(w, "| `%s` | %s | %s | `%s` |\n", entry.Ref, entry.Kind, entry.Executor, entry.Path)
+		fmt.Fprintf(w, "| `%s` | %s | %s | %s | `%s` |\n", entry.Ref, entry.Kind, entry.Executor, entry.Environment, entry.Path)
 	}
 }
 
@@ -378,14 +382,15 @@ func collectRepoHistoryCapsules(root string) ([]capsuleListEntry, error) {
 				title = strings.TrimSpace(manifest.Project.Title)
 			}
 			entries = append(entries, capsuleListEntry{
-				Ref:       "repo-history/" + project + "/" + bugID,
-				Kind:      "repo-history",
-				Title:     title,
-				Path:      relCapsulePath(root, path),
-				Executor:  "bugfix-bakeoff",
-				Project:   project,
-				Bug:       bugID,
-				LocalOnly: manifest.Project.LocalOnly,
+				Ref:         "repo-history/" + project + "/" + bugID,
+				Kind:        "repo-history",
+				Title:       title,
+				Path:        relCapsulePath(root, path),
+				Executor:    "bugfix-bakeoff",
+				Environment: "repo-history-" + project,
+				Project:     project,
+				Bug:         bugID,
+				LocalOnly:   manifest.Project.LocalOnly,
 			})
 		}
 	}

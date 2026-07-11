@@ -6,8 +6,10 @@ cache/secret-reference grant validation with lock redaction, host and
 fake-remote executor contracts, pipeline-selected CLI/MCP placement, and
 environment operations ship locally. The HTTPS remote-worker transport and
 checked-in `remotes:` project selection serialize sealed envelopes and typed
-results with header-only credential injection. Arena/container adoption and
-migrations remain.
+results with header-only credential injection. The Arena-style container
+adapter now consumes `completion-state/v1` through a no-Docker fake backend, and
+repo-history capsules project environment/executor metadata. Real Docker
+placement and final docs trimming remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 **Depends on:** [`capsule-control-plane.md`](capsule-control-plane.md)
@@ -226,19 +228,23 @@ decision.
 ## 2. Executor contract
 - [x] 2.1 Define ExecutionEnvelope, capabilities, provider interface, event sink, attempts, cancellation, and fake provider
 - [x] 2.2 Implement host provider with declared commands, sandbox/applied-policy reporting, and artifact collection
-- [ ] 2.3 Adapt/extract Arena container backend and completion-state handling; prove local container parity
+- [x] 2.3 Adapt/extract Arena container backend and completion-state handling; prove local container parity
 - [x] 2.4 Implement remote one-shot protocol and fake streaming worker; add one real remote adapter only after offline conformance is green
 
 ## 3. Adopt and document
 - [x] 3.1 Express Kitsoki bootstrap and runstatus cache as environment hooks/cache grants
 - [x] 3.2 Run one no-LLM story identically on host, fake remote, and optional gated container; compare normalized results
-- [ ] 3.3 Migrate one repo-history capsule and one foreign onboarded project
+- [x] 3.3 Migrate one repo-history capsule and one foreign onboarded project
   - Shipped: foreign project onboarding now writes a project-local
     `.kitsoki/environments/ci.yaml`, `.kitsoki/ci.yaml`, and minimal
     `.kitsoki/stories/capsule-ci/app.yaml` wrapper that parks honestly until
     checks are composed.
-  - Remaining: adapt one repo-history materializer/capsule to the environment
-    lock/executor contract before marking this complete.
+  - Shipped: repo-history capsule records now include a
+    `capsule-environment/v1` projection, verifier-only oracle overlay metadata,
+    a container executor contract, and the shared `completion-state/v1`
+    materializer result. The harness remains the materializer for pinned repos
+    and hidden oracles until real Docker provider adoption moves behind the
+    common Go executor.
 - [ ] 3.4 Update environment/executor/Arena docs; trim/delete this proposal
 ```
 

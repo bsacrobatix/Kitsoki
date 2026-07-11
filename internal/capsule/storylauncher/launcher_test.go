@@ -118,14 +118,21 @@ func TestReferenceStoryRunsEquivalentlyOnHostAndFakeRemote(t *testing.T) {
 	}
 	host := run(makeProject("host"))
 	remote := run(makeProject("remote-fake"))
+	container := run(makeProject("container-fake"))
 	if host.Verdict.Outcome != "needs_input" || host.Job.Status != artifactjob.StatusAwaitingInput {
 		t.Fatalf("host reference story should park honestly: %#v", host)
 	}
 	if remote.Verdict.Outcome != "needs_input" || remote.Job.Status != artifactjob.StatusAwaitingInput {
 		t.Fatalf("remote reference story should park honestly: %#v", remote)
 	}
+	if container.Verdict.Outcome != "needs_input" || container.Job.Status != artifactjob.StatusAwaitingInput {
+		t.Fatalf("container reference story should park honestly: %#v", container)
+	}
 	if !reflect.DeepEqual(host.Verdict, remote.Verdict) || !reflect.DeepEqual(host.Execution, remote.Execution) || host.Envelope.Digest != remote.Envelope.Digest {
 		t.Fatalf("host=%#v\nremote=%#v", host, remote)
+	}
+	if !reflect.DeepEqual(host.Verdict, container.Verdict) || host.Envelope.Digest != container.Envelope.Digest {
+		t.Fatalf("host=%#v\ncontainer=%#v", host, container)
 	}
 }
 

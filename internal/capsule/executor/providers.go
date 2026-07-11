@@ -45,6 +45,97 @@ func (*HostProvider) Cancel(context.Context, string) error {
 	return fmt.Errorf("capsule executor: host provider does not support cancellation")
 }
 
+const CompletionStateSchema = "completion-state/v1"
+
+// CompletionState is the narrow versioned result shape shared with Arena's
+// container completion-state contract. Container backends may produce richer
+// artifacts; Capsule CI only consumes the normalized outcome and artifact refs.
+type CompletionState struct {
+	Schema    string   `json:"schema"`
+	Outcome   string   `json:"outcome"`
+	Reason    string   `json:"reason,omitempty"`
+	Artifacts []string `json:"artifacts,omitempty"`
+}
+
+// ContainerBackend is the small adapter seam extracted from Arena's container
+// backend shape. Real Docker or remote-context implementations live at the
+// edge; tests use FakeContainerBackend so no Docker daemon is required.
+type ContainerBackend interface {
+	Describe(context.Context) (Capabilities, error)
+	Run(context.Context, Prepared, Task, EventSink) (Result, CompletionState, error)
+	Cancel(context.Context, string) error
+}
+
+type ContainerProvider struct {
+	Backend  ContainerBackend
+	mu       sync.Mutex
+	prepared map[string]Prepared
+}
+
+func NewContainerProvider(backend ContainerBackend) *ContainerProvider {
+	return &ContainerProvider{Backend: backend, prepared: map[string]Prepared{}}
+}
+func (p *ContainerProvider) Describe(ctx context.Context) (Capabilities, error) {
+	if p.Backend == nil {
+		return Capabilities{}, fmt.Errorf("capsule executor: container backend is required")
+	}
+	return p.Backend.Describe(ctx)
+}
+func (p *ContainerProvider) Prepare(ctx context.Context, e Envelope) (Prepared, error) {
+	if p.Backend == nil {
+		return Prepared{}, fmt.Errorf("capsule executor: container backend is required")
+	}
+	sealed, err := Seal(e)
+	if err != nil {
+		return Prepared{}, err
+	}
+	cap, err := p.Backend.Describe(ctx)
+	if err != nil {
+		return Prepared{}, err
+	}
+	if !supports(cap.Networks, sealed.Policy.Network) {
+		return Prepared{}, fmt.Errorf("capsule executor: container backend cannot satisfy network %s", sealed.Policy.Network)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if out := p.prepared[sealed.Digest]; out.ID != "" {
+		return out, nil
+	}
+	out := Prepared{ID: "container-" + sealed.Digest[len(sealed.Digest)-12:], Envelope: sealed, Placement: first(cap.Placements, "container"), Applied: sealed.Policy}
+	p.prepared[sealed.Digest] = out
+	return out, nil
+}
+func (p *ContainerProvider) Run(ctx context.Context, prepared Prepared, task Task, sink EventSink) (Result, error) {
+	if p.Backend == nil {
+		return Result{}, fmt.Errorf("capsule executor: container backend is required")
+	}
+	result, state, err := p.Backend.Run(ctx, prepared, task, sink)
+	result.ExecutionID = prepared.ID
+	sort.Strings(result.Artifacts)
+	if state.Schema != "" && state.Schema != CompletionStateSchema {
+		return result, fmt.Errorf("capsule executor: unsupported completion-state schema %q", state.Schema)
+	}
+	if state.Schema != "" {
+		if result.Provider == nil {
+			result.Provider = map[string]string{}
+		}
+		result.Provider["completion_state_schema"] = state.Schema
+		result.Provider["completion_state_outcome"] = state.Outcome
+		if state.Reason != "" {
+			result.Provider["completion_state_reason"] = state.Reason
+		}
+		result.Artifacts = append(result.Artifacts, state.Artifacts...)
+		sort.Strings(result.Artifacts)
+	}
+	return result, err
+}
+func (p *ContainerProvider) Cancel(ctx context.Context, id string) error {
+	if p.Backend == nil {
+		return fmt.Errorf("capsule executor: container backend is required")
+	}
+	return p.Backend.Cancel(ctx, id)
+}
+
 // RemoteWorker is a one-shot transport seam. A queue, SSH invocation, GitHub
 // Action, or long-lived streaming service can implement it without changing
 // the envelope or result format.
@@ -134,6 +225,31 @@ func (w *FakeRemoteWorker) Cancel(_ context.Context, id string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Cancelled[id] = true
+	return nil
+}
+
+type FakeContainerBackend struct {
+	Cap       Capabilities
+	Cancelled map[string]bool
+	mu        sync.Mutex
+}
+
+func NewFakeContainerBackend() *FakeContainerBackend {
+	return &FakeContainerBackend{Cap: Capabilities{ID: "fake-container", Placements: []string{"fake-container"}, Isolation: "container", Networks: []string{"none", "replay"}, Cancellable: true}, Cancelled: map[string]bool{}}
+}
+func (b *FakeContainerBackend) Describe(context.Context) (Capabilities, error) { return b.Cap, nil }
+func (b *FakeContainerBackend) Run(ctx context.Context, p Prepared, task Task, sink EventSink) (Result, CompletionState, error) {
+	result, err := runTask(ctx, p, task, sink)
+	state := CompletionState{Schema: CompletionStateSchema, Outcome: "passed", Artifacts: []string{"completion-state:" + p.ID}}
+	if err != nil || result.ExitCode != 0 {
+		state.Outcome = "failed"
+	}
+	return result, state, err
+}
+func (b *FakeContainerBackend) Cancel(_ context.Context, id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.Cancelled[id] = true
 	return nil
 }
 func runTask(ctx context.Context, p Prepared, task Task, sink EventSink) (Result, error) {

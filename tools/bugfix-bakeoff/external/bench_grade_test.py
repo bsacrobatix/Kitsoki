@@ -176,6 +176,12 @@ def test_repo_history_capsule_catalog_has_the_promoted_ten():
     assert gears["materializer"] == "bugfix-bakeoff"
     assert gears["repo_modes"] == ["single-repo", "meta-repo"]
     assert gears["repo_envs"][:2] == ["BUGFIX_BAKEOFF_REPO", "BUGFIX_BAKEOFF_META_REPO"]
+    assert gears["environment"]["schema"] == "capsule-environment/v1"
+    assert gears["environment"]["id"] == "repo-history-gears-rust"
+    assert gears["environment"]["sandbox"] == "container"
+    assert gears["environment"]["verifier_overlay"]["visibility"] == "verifier"
+    assert gears["executor_contract"]["provider"] == "container"
+    assert gears["executor_contract"]["completion_state"] == "completion-state/v1"
     assert gears["green_red_green"][1].startswith("RED:")
 
 
