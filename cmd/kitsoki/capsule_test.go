@@ -34,9 +34,10 @@ func TestCapsuleListRepoHistoryJSON(t *testing.T) {
 		OK       bool `json:"ok"`
 		Count    int  `json:"count"`
 		Capsules []struct {
-			Ref      string `json:"ref"`
-			Kind     string `json:"kind"`
-			Executor string `json:"executor"`
+			Ref         string `json:"ref"`
+			Kind        string `json:"kind"`
+			Executor    string `json:"executor"`
+			Environment string `json:"environment"`
 		} `json:"capsules"`
 	}
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
@@ -47,7 +48,7 @@ func TestCapsuleListRepoHistoryJSON(t *testing.T) {
 	}
 	for _, entry := range payload.Capsules {
 		if entry.Ref == "repo-history/gears-rust/bug1" {
-			if entry.Kind != "repo-history" || entry.Executor != "bugfix-bakeoff" {
+			if entry.Kind != "repo-history" || entry.Executor != "bugfix-bakeoff" || entry.Environment != "repo-history-gears-rust" {
 				t.Fatalf("unexpected gears-rust entry: %+v", entry)
 			}
 			return
@@ -99,6 +100,7 @@ func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
 		"Capsules: **10**",
 		"`repo-history/query-string/qs1`",
 		"bugfix-bakeoff",
+		"repo-history-query-string",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("capsule markdown missing %q:\n%s", want, out)
