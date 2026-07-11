@@ -51,6 +51,10 @@ drive_source = (REPO_ROOT / "tools" / "mcp-drive" / "drive.sh").read_text(encodi
 require("MCP driver skips unset forwarded environment", 'if [[ -n "${!_fwd-}" ]]; then' in drive_source)
 require("MCP driver does not override CODEX_HOME with empty value", 'mcp_servers.kitsoki.env.${_fwd}=${!_fwd-}' not in drive_source)
 
+testing_prompt = (REPO_ROOT / "stories" / "bugfix" / "prompts" / "testing_executing.md").read_text(encoding="utf-8")
+require("strict testing recognizes expected test-runner failures", "[expected fail]" in testing_prompt)
+require("strict testing records expected failures as caveats", "baseline caveat" in testing_prompt)
+
 args = argparse.Namespace(capability_presets_json="", capability_preset="")
 cap_json, cap_hash = runner.capability_preset_json(args, "repo_patch")
 check("canonical capability json", cap_json, '{"fs":{"max_bytes":1048576,"read":["**"],"write":["**"]},"vcs":"read"}')

@@ -42,17 +42,18 @@ Before submitting:
 
 ## Constraints
 
-- **Read the CI log above and judge honestly.** `status` is `passed` ONLY if
-  the tests actually ran AND nothing failed — the bug reproduction now passes
-  and no other test regressed. If the log shows ANY failure (`FAIL`, a
-  non-zero result, a panic, `build failed`, a `UNIQUE constraint`/runtime
-  error, N tests failed) then status is `failed` — even if the bug's own test
-  passes, a fix that breaks other tests is `failed`, not `passed`. Use
-  `blocked` only for an unrunnable suite (compile error, missing dependency).
-  Never report `passed` over a log that contains failures: that ships a broken
-  fix. When `failed`/`blocked`, list the specific failing tests + the root
-  cause in `blockers` and `summary_markdown` so the implementer can repair them
-  on the next cycle.
+- **Read the CI result and log honestly.** `status` is `passed` only when the
+  runner returned success, the bug reproduction now passes, and no *unexpected*
+  regression occurred. A framework may report an explicitly expected / known
+  failure while still returning success (for example AVA's `[expected fail]` or
+  `N known failure`); that is a documented baseline caveat, not a new failure.
+  Record it in `summary_markdown`, but do not turn it into a blocker or fail a
+  correct fix. A non-zero result, panic, build failure, unexpected test failure,
+  `UNIQUE constraint`/runtime error, or an unlabelled `N tests failed` is
+  `failed` even if the bug's own test passes. Use `blocked` only for an
+  unrunnable suite (compile error, missing dependency). When `failed`/`blocked`,
+  list the specific failing tests + root cause in `blockers` and
+  `summary_markdown` so the implementer can repair them on the next cycle.
 - `tests_added` must list new / modified test files. Reuse existing tests
   where possible; only add fresh ones if no existing test covers the bug.
 - **Check the test asserts the ticket's end-to-end OUTCOME, not a near-side
