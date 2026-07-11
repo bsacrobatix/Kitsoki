@@ -102,23 +102,14 @@ thought.
 - [`stories-as-trainable-models.md`](stories-as-trainable-models.md) — **epic.** Reframe a kitsoki story as a quasi-deterministic, **trainable** model of a domain: forward pass = running a session, training set = the event log, but the "weights" being adjusted are the story's scripts/prompts/workflow graph, not a tensor. Subsumes the **training half** of the [4-layer self-improvement model](../competitive-analysis/market-research.md): L1–L2 (validate+nudge, recycle-to-prior-step) stay as the *adaptive forward pass*, L3–L4 (self-patch, cross-run mining) become the trainable model — with the existing [`tools/session-mining/`](../../tools/session-mining/README.md) ladder as the L4 substrate. Three slices (0/3): the **loss** ([`reward-function.md`](reward-function.md), runtime), the **gradient** via failure→success credit assignment ([`credit-assignment.md`](credit-assignment.md), tracing), and the **optimizer step + validation gate** ([`training-loop.md`](training-loop.md), runtime+story).
 - [`repo-history-training-loop.md`](repo-history-training-loop.md) — **epic.** Treat repository history as training material for Kitsoki's own workflows: onboarding, bug fixing, feature spec and design, feature implementation, and dev lifecycle / SDLC. Feasibility-reviewed against the existing `internal/mining`, session-mining, bugfix-bakeoff, `internal/agenteval`, and model-harness/reporting substrates: the plan is to generalize those surfaces into a curated history corpus, lane-neutral task/oracle manifests, traceable precedent selection, and a gated autonomous runner. Nothing implemented yet; slices are sketched but not cut.
 - `hermetic-capsules.md` — **shipped v1 and retired.** The S1 runtime substrate lives in [`../guide/development/capsules.md`](../guide/development/capsules.md): `internal/capsule`, `internal/capsuletest`, `kitsoki capsule open|verify|close`, starter synthetic git capsules, and migrated VCS/git-ops fixtures. Later remote/env/Harbor/workspace slices should be proposed as focused follow-ups instead of reopening the retired epic.
-- [`capsule-ci.md`](capsule-ci.md) — **epic.** Productize the shipped capsule
-  foundation and clone-backed workspace/sync scripts into a general local and
-  remote CI control plane for any onboarded project: project-scoped Capsule MCP
-  ([`capsule-control-plane.md`](capsule-control-plane.md)), stale-safe branch and
-  remote reconciliation ([`capsule-sync-promotion.md`](capsule-sync-promotion.md)),
-  portable environment locks and executors
-  ([`capsule-environments-executors.md`](capsule-environments-executors.md)),
-  stories as the CI definition ([`story-native-ci.md`](story-native-ci.md)), and
-  trace-backed receipts/attestations
-  ([`capsule-ci-receipts.md`](capsule-ci-receipts.md)). The design explicitly
-  reuses artifact jobs, toolboxes/sandboxing, execution-mode deciders, Arena
-  placement, and GitHub-agent ingress rather than duplicating them. The story
-  slice is shipped except for one terminal deployed-worker proof; the
-  environment slice also retains worker-root retention and standalone
-  image-resolution posture.
-  Control-plane migration, production ref publication, and richer receipt
-  producers/goldens/consumers remain active.
+- `capsule-ci.md` and its control-plane, environment/executor, story-native,
+  and receipt children — **shipped and deleted.** The durable product contract
+  lives in [`../guide/development/capsule-ci.md`](../guide/development/capsule-ci.md),
+  [`../guide/development/capsules.md`](../guide/development/capsules.md),
+  [`../stories/ci.md`](../stories/ci.md), and
+  [`../tracing/capsule-ci-receipts.md`](../tracing/capsule-ci-receipts.md).
+  The remaining independently scoped ref-publication work is
+  [`capsule-sync-promotion.md`](capsule-sync-promotion.md).
 - [`kits.md`](kits.md) — **epic.** Kits: named, semver-versioned, distributable bundles of stories with a standardized shape (interface contracts, onboarding, data-management schemas, conformance fixtures), declared by a `kit.yaml` manifest compiled onto the shipped import/interface/profile machinery. Adds the deliberately-deferred versioning enforcement (resolution tiers + lockfile), deterministic conformance (contract checks + the base kit's no-LLM flow suite run against extensions), and a rev-absorption lifecycle so upstream standards (e.g. an ISO 9001 / ISO 14001 pack over a base management-system kit) evolve through re-extension / re-composition / re-parameterization, never copy-and-edit migration. Prior art: cypilot kits (`constructorfabric/studio-kit-sdlc`). Nothing implemented yet; slices sketched but not cut.
 - [`contextual-room-routing.md`](contextual-room-routing.md) — **runtime.** make the final LLM routing tier classify unmatched room input as exactly one of: explicit intent with slots, read-only help, in-room free-form request, or room-scoped meta edit. Adds persistent room chat lanes, route receipts, and one-decision rewind so operators can correct a bad routing choice. Builds on the in-progress ad-hoc structured-plan workbench and existing meta modes. Runtime slices shipped; web receipt/rewind plumbing and intent-class rewind exist. Remaining work is switch-route ergonomics, TUI parity for receipt/rewind controls, and optional extra flow fixtures.
 - `operation-scoped-world.md` — **shipped and retired.** The operation overlay, explicit commit/draft/discard effects, tracing events, and first GitOps `sync_main` adoption live in [`../stories/state-machine.md`](../stories/state-machine.md#operation-scoped-world), [`../embedded/app-schema.md`](../embedded/app-schema.md#operation--abandonable-task-local-world), and [`../tracing/trace-format.md`](../tracing/trace-format.md#operation-events).
