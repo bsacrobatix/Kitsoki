@@ -58,6 +58,21 @@ func seedTicketsRoot(t *testing.T, files map[string]string) string {
 	return root
 }
 
+// seedNestedTicketRoot creates a root with one ticket stored in the legacy
+// nested shape issues/bugs/<id>/issue.md.
+func seedNestedTicketRoot(t *testing.T, id, body string) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "issues", "bugs", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "issue.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write nested issue: %v", err)
+	}
+	return root
+}
+
 // seedMultiKindRoot creates a root with one ticket each under
 // issues/{bugs,features,epics}/.
 func seedMultiKindRoot(t *testing.T) string {
@@ -119,6 +134,62 @@ func TestLocalFilesTicket_Search_Happy(t *testing.T) {
 	}
 	if tickets[0]["title"] != "Esc in foyer hangs the TUI" {
 		t.Fatalf("title: %v", tickets[0]["title"])
+	}
+}
+
+func TestLocalFilesTicket_Search_AndGet_NestedIssueShape(t *testing.T) {
+	id := "2026-07-11-embedded-story-resolver-cmd-test"
+	root := seedNestedTicketRoot(t, id, `---
+title: "Embedded story resolver cmd test"
+status: open
+severity: P1
+---
+
+# Embedded story resolver cmd test
+
+The nested artifact ticket should be selectable from local bugs.
+`)
+
+	searchRes, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op":   "search",
+		"root": root,
+	})
+	if err != nil {
+		t.Fatalf("search infra: %v", err)
+	}
+	if searchRes.Error != "" {
+		t.Fatalf("search domain error: %s", searchRes.Error)
+	}
+	tickets, _ := searchRes.Data["tickets"].([]map[string]any)
+	if len(tickets) != 1 {
+		t.Fatalf("expected 1 nested hit, got %d (%v)", len(tickets), searchRes.Data)
+	}
+	if tickets[0]["id"] != id {
+		t.Fatalf("search id: %v", tickets[0]["id"])
+	}
+	if tickets[0]["url"] != filepath.ToSlash(filepath.Join(root, "issues", "bugs", id, "issue.md")) {
+		t.Fatalf("search url: %v", tickets[0]["url"])
+	}
+
+	getRes, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op":   "get",
+		"root": root,
+		"id":   id,
+	})
+	if err != nil {
+		t.Fatalf("get infra: %v", err)
+	}
+	if getRes.Error != "" {
+		t.Fatalf("get domain error: %s", getRes.Error)
+	}
+	if getRes.Data["id"] != id {
+		t.Fatalf("get id: %v", getRes.Data["id"])
+	}
+	if getRes.Data["title"] != "Embedded story resolver cmd test" {
+		t.Fatalf("get title: %v", getRes.Data["title"])
+	}
+	if getRes.Data["url"] != filepath.ToSlash(filepath.Join(root, "issues", "bugs", id, "issue.md")) {
+		t.Fatalf("get url: %v", getRes.Data["url"])
 	}
 }
 

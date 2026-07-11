@@ -100,19 +100,28 @@ var ticketKindDirs = []struct{ Kind, Dir string }{
 	{"epic", "epics"},
 }
 
-// findTicketPath locates issues/<kind>/<id>.md under root.  Returns
-// ("", "", nil) when the id is not found in any of the type dirs; the
-// caller turns that into a domain-level "not found" error.
+// findTicketPath locates a ticket file under issues/<kind>/ using the
+// flat shape (`<id>.md`) and the legacy nested shape (`<id>/issue.md`).
+// Returns ("", "", nil) when the id is not found in any of the type dirs;
+// the caller turns that into a domain-level "not found" error.
 func findTicketPath(root, id string) (path, kind string, err error) {
 	for _, td := range ticketKindDirs {
-		p := filepath.Join(root, "issues", td.Dir, id+".md")
-		if _, statErr := os.Stat(p); statErr == nil {
-			return p, td.Kind, nil
-		} else if !os.IsNotExist(statErr) {
-			return "", "", statErr
+		for _, p := range ticketPathsForID(root, td.Dir, id) {
+			if _, statErr := os.Stat(p); statErr == nil {
+				return p, td.Kind, nil
+			} else if !os.IsNotExist(statErr) {
+				return "", "", statErr
+			}
 		}
 	}
 	return "", "", nil
+}
+
+func ticketPathsForID(root, kindDir, id string) []string {
+	return []string{
+		filepath.Join(root, "issues", kindDir, id+".md"),
+		filepath.Join(root, "issues", kindDir, id, "issue.md"),
+	}
 }
 
 // ─── Bug-file model & I/O ───────────────────────────────────────────────────
@@ -149,7 +158,7 @@ func readBugFile(path string) (*BugFile, error) {
 		return nil, err
 	}
 	bodyText, comments := splitComments(body)
-	id := strings.TrimSuffix(filepath.Base(path), ".md")
+	id := ticketIDFromPath(path)
 	return &BugFile{
 		ID:       id,
 		Path:     path,
@@ -157,6 +166,20 @@ func readBugFile(path string) (*BugFile, error) {
 		Body:     bodyText,
 		Comments: comments,
 	}, nil
+}
+
+func ticketIDFromPath(path string) string {
+	base := filepath.Base(path)
+	if base == "issue.md" {
+		parent := filepath.Base(filepath.Dir(path))
+		switch parent {
+		case "bugs", "features", "epics":
+			// Flat `issues/<kind>/issue.md` is still a plain file.
+		default:
+			return parent
+		}
+	}
+	return strings.TrimSuffix(base, ".md")
 }
 
 // splitFrontmatter slices the leading `---\n…\n---\n` block off raw and
@@ -289,10 +312,11 @@ func writeBugFile(bf *BugFile) error {
 }
 
 // listAllBugs returns every ticket under root/issues/{bugs,features,
-// epics}/.  Each row carries its source-dir-derived `Kind` so callers
-// can render and route by type.  An absent type-dir yields nothing for
-// that kind — a fresh repo with only bugs is fine.  Name retained for
-// minimal-diff churn; the function now lists all three kinds.
+// epics}/, including the legacy nested `issue.md` shape. Each row
+// carries its source-dir-derived `Kind` so callers can render and route
+// by type.  An absent type-dir yields nothing for that kind — a fresh
+// repo with only bugs is fine.  Name retained for minimal-diff churn;
+// the function now lists all three kinds.
 func listAllBugs(root string) ([]*BugFile, error) {
 	var out []*BugFile
 	for _, td := range ticketKindDirs {
@@ -305,18 +329,31 @@ func listAllBugs(root string) ([]*BugFile, error) {
 			return nil, err
 		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-				continue
+			switch {
+			case e.IsDir():
+				bf, err := readBugFile(filepath.Join(dir, e.Name(), "issue.md"))
+				if err != nil {
+					if os.IsNotExist(err) {
+						continue
+					}
+					// Skip unparseable files so a single bad file
+					// doesn't poison the whole search; callers may grep
+					// on stderr if they care about why.
+					continue
+				}
+				bf.Kind = td.Kind
+				out = append(out, bf)
+			case strings.HasSuffix(e.Name(), ".md"):
+				bf, err := readBugFile(filepath.Join(dir, e.Name()))
+				if err != nil {
+					// Skip unparseable files so a single bad file doesn't
+					// poison the whole search; callers may grep on stderr
+					// if they care about why.
+					continue
+				}
+				bf.Kind = td.Kind
+				out = append(out, bf)
 			}
-			bf, err := readBugFile(filepath.Join(dir, e.Name()))
-			if err != nil {
-				// Skip unparseable files so a single bad file doesn't
-				// poison the whole search; callers may grep on stderr
-				// if they care about why.
-				continue
-			}
-			bf.Kind = td.Kind
-			out = append(out, bf)
 		}
 	}
 	// Multi-key sort: severity ASC (P0 first), then ID DESC. IDs are
