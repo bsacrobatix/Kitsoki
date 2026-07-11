@@ -103,6 +103,15 @@ func (p *stubProvider) ListStories() []server.StoryHeader {
 
 func (p *stubProvider) Rescan() ([]server.StoryHeader, error) { return p.rescanFn() }
 
+// putEntry registers a fully caller-built entry (live source, real driver)
+// under sessionID — for tests that need an actual drivable session behind
+// the provider (e.g. the materialize web-session path).
+func (p *stubProvider) putEntry(sessionID string, entry server.Entry) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.entries[sessionID] = entry
+}
+
 // put registers a routable entry under sessionID with a stub source carrying
 // the given header + def.
 func (p *stubProvider) put(sessionID string, header runstatus.SessionHeader, def *app.AppDef) {

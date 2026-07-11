@@ -309,23 +309,56 @@ func RoomSequence(def *app.AppDef) ([]string, error) {
 // Returns a *[GateError] (unwrap with errors.As) when gates are unmet; the
 // job is never submitted in that case.
 func Start(ctx context.Context, sched jobs.Scheduler, req Request) (jobs.JobID, []Stage, error) {
+	p, err := Prepare(req)
+	if err != nil {
+		return "", nil, err
+	}
+	return p.Submit(ctx, sched, nil, "")
+}
+
+// Prepared is a resolved, gate-checked materialize plan for one node — the
+// output of [Prepare], everything [Prepared.Submit] needs to run the job.
+// Split from Start so a caller that drives the story through its own live
+// session (the runstatus server's web-registry path) can seed that session
+// from StoryAppPath + InitialWorld between preparing and submitting.
+type Prepared struct {
+	Req        Request
+	Node       *graph.Node
+	Binding    *Binding
+	ContextIDs []string
+	// Def is the loaded story definition; StoryAppPath is where it was
+	// loaded from (RepoRoot-joined, suitable for a session registry's
+	// story-path key once absolutized).
+	Def          *app.AppDef
+	StoryAppPath string
+	// Stages is the story's room sequence (see RoomSequence); InitialWorld
+	// is the seed world (node_id + resolved params + the node's gate text).
+	Stages       []string
+	InitialWorld map[string]any
+}
+
+// Prepare resolves req's node binding, validates gates, snapshots the
+// context closure, loads the bound story, and computes the room sequence and
+// seed world. Returns a *[GateError] (unwrap with errors.As) when gates are
+// unmet.
+func Prepare(req Request) (*Prepared, error) {
 	cat, err := graph.LoadCatalog(req.CatalogPath)
 	if err != nil {
-		return "", nil, fmt.Errorf("materialize: load catalog: %w", err)
+		return nil, fmt.Errorf("materialize: load catalog: %w", err)
 	}
 
 	node, ok := cat.Nodes[req.NodeID]
 	if !ok {
-		return "", nil, fmt.Errorf("materialize: node %q not found in catalog", req.NodeID)
+		return nil, fmt.Errorf("materialize: node %q not found in catalog", req.NodeID)
 	}
 
 	binding, err := ResolveBinding(cat, node)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	if unmet := UnmetGates(node, binding.Gates); len(unmet) > 0 {
-		return "", nil, &GateError{NodeID: req.NodeID, Unmet: unmet}
+		return nil, &GateError{NodeID: req.NodeID, Unmet: unmet}
 	}
 
 	closure := ContextClosure(cat, req.NodeID, binding.ContextEdges)
@@ -337,15 +370,15 @@ func Start(ctx context.Context, sched jobs.Scheduler, req Request) (jobs.JobID, 
 	storyAppPath := filepath.Join(req.RepoRoot, binding.Story, "app.yaml")
 	def, err := app.Load(storyAppPath)
 	if err != nil {
-		return "", nil, fmt.Errorf("materialize: load story %q: %w", binding.Story, err)
+		return nil, fmt.Errorf("materialize: load story %q: %w", binding.Story, err)
 	}
 
 	roomSeq, err := RoomSequence(def)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if len(roomSeq) == 0 {
-		return "", nil, fmt.Errorf("materialize: story %q has no rooms", binding.Story)
+		return nil, fmt.Errorf("materialize: story %q has no rooms", binding.Story)
 	}
 
 	initialWorld := map[string]any{"node_id": string(req.NodeID)}
@@ -362,32 +395,63 @@ func Start(ctx context.Context, sched jobs.Scheduler, req Request) (jobs.JobID, 
 		initialWorld["gate"] = gv
 	}
 
-	sessionID := app.SessionID("materialize-" + string(req.NodeID) + "-" + ulid.New())
+	return &Prepared{
+		Req:          req,
+		Node:         node,
+		Binding:      binding,
+		ContextIDs:   contextIDs,
+		Def:          def,
+		StoryAppPath: storyAppPath,
+		Stages:       roomSeq,
+		InitialWorld: initialWorld,
+	}, nil
+}
+
+// TurnDriver is one already-seeded live story session the drive loop
+// advances turn-by-turn: Next submits the materialize contract verb
+// ("next"), World snapshots the session's current world vars. The private
+// path (driver == nil on [Prepared.Submit]) builds its own orchestrator rig
+// and wraps it in one; the runstatus server wraps a web-registry session so
+// the drive is observable — trace and transcript — in the web UI.
+type TurnDriver interface {
+	Next(ctx context.Context) error
+	World(ctx context.Context) (map[string]any, error)
+}
+
+// Submit submits the prepared materialize job to sched and returns the job
+// id plus the full all-"waiting" stage list (Start's ".start" contract).
+//
+// driver == nil drives a self-contained in-memory orchestrator rig seeded
+// from p.InitialWorld (the CLI / no-registry path). A non-nil driver drives
+// the caller's own live session — the caller must have already created and
+// seeded it (e.g. via the web registry's NewSessionSeeded on p.StoryAppPath
+// + p.InitialWorld); webSessionID then records that session's id in the job
+// payload ("web_session") for observability.
+func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver TurnDriver, webSessionID string) (jobs.JobID, []Stage, error) {
+	sessionID := app.SessionID("materialize-" + string(p.Req.NodeID) + "-" + ulid.New())
+
+	payload := map[string]any{
+		"node_id": string(p.Req.NodeID),
+		"story":   p.Binding.Story,
+		"context": p.ContextIDs,
+		"stages":  p.Stages,
+	}
+	if webSessionID != "" {
+		payload["web_session"] = webSessionID
+	}
 
 	jobID, err := sched.Submit(ctx, jobs.JobSpec{
 		SessionID: sessionID,
 		Kind:      "graph.materialize",
-		Payload: map[string]any{
-			"node_id": string(req.NodeID),
-			"story":   binding.Story,
-			"context": contextIDs,
-			"stages":  roomSeq,
-		},
-		Handler: driveHandler(def, roomSeq, initialWorld, sched, driveWriteback{
-			CatalogPath: req.CatalogPath,
-			RepoRoot:    req.RepoRoot,
-			NodeID:      req.NodeID,
-			Node:        node,
-			Binding:     binding,
-			ContextIDs:  contextIDs,
-		}),
+		Payload:   payload,
+		Handler:   driveHandler(p, sched, driver),
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("materialize: submit job: %w", err)
 	}
 
-	stages := make([]Stage, len(roomSeq))
-	for i, id := range roomSeq {
+	stages := make([]Stage, len(p.Stages))
+	for i, id := range p.Stages {
 		stages[i] = Stage{ID: id, Status: "waiting"}
 	}
 	return jobID, stages, nil
@@ -406,18 +470,45 @@ type driveWriteback struct {
 	ContextIDs  []string
 }
 
-// driveHandler builds the [host.Handler] a materialize job runs: a fresh
-// orchestrator rig (in-memory store, no host registry — a materialize-bound
-// story declares no hosts) drives def's rooms via SubmitDirect("next", ...),
-// heartbeating sched on every entry/exit, per the scheduler-injected
-// "__job_id" convention (see [jobs.Scheduler.Submit]). As soon as the
-// driving world exposes an `artifact_path` (checked after every room
-// transition, not only at the end — the plan's "artifacts produced mid-run
-// land as evidence entries as they appear"), it writes the artifact's
-// content to disk under wb.RepoRoot and appends an evidence entry to
-// wb.CatalogPath (writeback.go). On the job's terminal outcome (success or
-// failure) it upserts the node's `materialization:` block.
-func driveHandler(def *app.AppDef, stages []string, initialWorld map[string]any, sched jobs.Scheduler, wb driveWriteback) host.Handler {
+// rigDriver adapts the private orchestrator rig to [TurnDriver] — the
+// original headless drive path, unchanged in behaviour (spike_test.go's
+// primitives), just behind the interface the web-registry path shares.
+type rigDriver struct {
+	orch *orchestrator.Orchestrator
+	sid  app.SessionID
+}
+
+func (d rigDriver) Next(ctx context.Context) error {
+	_, err := d.orch.SubmitDirect(ctx, d.sid, "next", nil)
+	return err
+}
+
+func (d rigDriver) World(context.Context) (map[string]any, error) {
+	return d.orch.CurrentWorld(d.sid).Vars, nil
+}
+
+// driveHandler builds the [host.Handler] a materialize job runs: it drives
+// the story's rooms via TurnDriver.Next ("next" per room), heartbeating
+// sched on every entry/exit, per the scheduler-injected "__job_id"
+// convention (see [jobs.Scheduler.Submit]). With driver == nil it builds a
+// fresh orchestrator rig of its own (in-memory store, no host registry — a
+// materialize-bound story declares no hosts) seeded from p.InitialWorld. As
+// soon as the driving world exposes an `artifact_path` (checked after every
+// room transition, not only at the end — the plan's "artifacts produced
+// mid-run land as evidence entries as they appear"), it writes the
+// artifact's content to disk under the repo root and appends an evidence
+// entry to the catalog (writeback.go). On the job's terminal outcome
+// (success or failure) it upserts the node's `materialization:` block.
+func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Handler {
+	stages := p.Stages
+	wb := driveWriteback{
+		CatalogPath: p.Req.CatalogPath,
+		RepoRoot:    p.Req.RepoRoot,
+		NodeID:      p.Req.NodeID,
+		Node:        p.Node,
+		Binding:     p.Binding,
+		ContextIDs:  p.ContextIDs,
+	}
 	return func(ctx context.Context, args map[string]any) (host.Result, error) {
 		jobID, _ := args["__job_id"].(string)
 		statuses := make([]string, len(stages))
@@ -473,59 +564,74 @@ func driveHandler(def *app.AppDef, stages []string, initialWorld map[string]any,
 			})
 		}
 
-		m, err := machine.New(def)
-		if err != nil {
-			return host.Result{Error: err.Error()}, nil
-		}
-		st, err := store.OpenMemory()
-		if err != nil {
-			return host.Result{Error: err.Error()}, nil
-		}
-		defer st.Close()
+		drv := driver
+		if drv == nil {
+			m, err := machine.New(p.Def)
+			if err != nil {
+				return host.Result{Error: err.Error()}, nil
+			}
+			st, err := store.OpenMemory()
+			if err != nil {
+				return host.Result{Error: err.Error()}, nil
+			}
+			defer st.Close()
 
-		orch := orchestrator.New(def, m, st, &noopHarness{})
+			orch := orchestrator.New(p.Def, m, st, &noopHarness{})
 
-		sid, err := orch.NewSession(ctx)
-		if err != nil {
-			return host.Result{Error: err.Error()}, nil
+			sid, err := orch.NewSession(ctx)
+			if err != nil {
+				return host.Result{Error: err.Error()}, nil
+			}
+			if err := orch.RunInitialOnEnter(ctx, sid); err != nil {
+				return host.Result{Error: err.Error()}, nil
+			}
+			if err := orch.PatchWorld(ctx, sid, p.InitialWorld); err != nil {
+				return host.Result{Error: err.Error()}, nil
+			}
+			drv = rigDriver{orch: orch, sid: sid}
 		}
-		if err := orch.RunInitialOnEnter(ctx, sid); err != nil {
-			return host.Result{Error: err.Error()}, nil
-		}
-		if err := orch.PatchWorld(ctx, sid, initialWorld); err != nil {
-			return host.Result{Error: err.Error()}, nil
+
+		// World snapshots feed the mid-run artifact check; a snapshot error
+		// mid-loop is tolerated (skip that check) because the terminal
+		// snapshot below is the one the result and write-back depend on.
+		worldNow := func() map[string]any {
+			w, err := drv.World(ctx)
+			if err != nil {
+				return nil
+			}
+			return w
 		}
 
 		heartbeat(0, "in-progress")
-		writeArtifactIfPresent(orch.CurrentWorld(sid).Vars)
+		writeArtifactIfPresent(worldNow())
 
 		for i := 0; i < len(stages)-1; i++ {
-			if _, err := orch.SubmitDirect(ctx, sid, "next", nil); err != nil {
+			if err := drv.Next(ctx); err != nil {
 				heartbeat(i, "failed")
 				finalizeWriteback("failed")
 				return host.Result{Error: fmt.Sprintf("materialize: room %q: %v", stages[i], err)}, nil
 			}
 			heartbeat(i, "complete")
 			heartbeat(i+1, "in-progress")
-			writeArtifactIfPresent(orch.CurrentWorld(sid).Vars)
+			writeArtifactIfPresent(worldNow())
 		}
 
-		final, err := orch.LoadJourney(sid)
+		finalWorld, err := drv.World(ctx)
 		if err != nil {
 			heartbeat(len(stages)-1, "failed")
 			finalizeWriteback("failed")
 			return host.Result{Error: err.Error()}, nil
 		}
 		heartbeat(len(stages)-1, "complete")
-		writeArtifactIfPresent(final.World.Vars)
+		writeArtifactIfPresent(finalWorld)
 		finalizeWriteback("complete")
 
-		artifactPath, _ := final.World.Get("artifact_path").(string)
+		artifactPath, _ := finalWorld["artifact_path"].(string)
 
 		return host.Result{Data: map[string]any{
-			"node_id":       initialWorld["node_id"],
+			"node_id":       string(p.Req.NodeID),
 			"artifact_path": artifactPath,
-			"world":         final.World.Vars,
+			"world":         finalWorld,
 		}}, nil
 	}
 }

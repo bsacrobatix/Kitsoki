@@ -21,7 +21,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"kitsoki/internal/app"
 	"kitsoki/internal/graph"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/materialize"
@@ -53,8 +52,13 @@ type materializeArtifact struct {
 // heartbeat payload (jobs.Job.Progress); the full per-stage status array and
 // the artifacts list a `.status` poll needs are accumulated here instead.
 type materializeJobState struct {
-	mu            sync.Mutex
-	nodeID        string
+	mu     sync.Mutex
+	nodeID string
+	// sessionID is the live web-registry session the job drives, when the
+	// provider could seed one (see materializeSessionDriver) — the id the
+	// SPA's /#/s/<id> trace + /#/s/<id>/chat transcript routes take. Empty
+	// on the private-rig fallback.
+	sessionID     string
 	stages        []materialize.Stage
 	gates         []string
 	artifactKind  string
@@ -170,13 +174,12 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 	if !ok {
 		return nil, &rpcError{Code: codeServerError, Message: fmt.Sprintf("graph.materialize.start: node %q not found in catalog", nodeID)}
 	}
-	binding, err := materialize.ResolveBinding(cat, node)
-	if err != nil {
+	if _, err := materialize.ResolveBinding(cat, node); err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
 	}
 	eff, _ := cat.Registry.Effective(node.TypeID)
 
-	jobID, stages, err := materialize.Start(ctx, s.materializeSched, materialize.Request{
+	prep, err := materialize.Prepare(materialize.Request{
 		CatalogPath: catalogPath,
 		RepoRoot:    repoRoot,
 		NodeID:      graph.NodeID(nodeID),
@@ -191,6 +194,20 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
 	}
 
+	// Prefer driving the story through a REAL web session when the provider
+	// can seed one (`kitsoki web`'s live registry): the drive then has a
+	// browsable trace + transcript at /#/s/<session_id> — the portal's "open
+	// the conversation in the kitsoki viewer" affordance. Anything short of a
+	// fully drivable session (no seeded provider, seeding failed, no write
+	// driver, no world reader) falls back to the self-contained private rig,
+	// which remains the CLI / `status serve` path.
+	webSessionID, turnDriver := s.materializeSessionDriver(ctx, prep)
+
+	jobID, stages, err := prep.Submit(ctx, s.materializeSched, turnDriver, webSessionID)
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
+	}
+
 	artifactKind := "doc"
 	if eff.Artifact != nil && eff.Artifact.Presentation != "" {
 		artifactKind = eff.Artifact.Presentation
@@ -198,8 +215,9 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 
 	state := &materializeJobState{
 		nodeID:        nodeID,
+		sessionID:     webSessionID,
 		stages:        append([]materialize.Stage(nil), stages...),
-		gates:         binding.Gates,
+		gates:         prep.Binding.Gates,
 		artifactKind:  artifactKind,
 		artifactTitle: fmt.Sprintf("%s artifact", eff.ID),
 		status:        string(jobs.JobRunning),
@@ -213,26 +231,68 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 	// have (see internal/materialize's doc comment on this exact race).
 	s.trackMaterializeJob(jobID, state)
 
-	// Best-effort room titles: the story's own app.yaml state descriptions
-	// (app.State.Description), falling back to the room id. A load failure
-	// here (unlikely — materialize.Start just loaded the same file
-	// successfully) degrades to id-only titles rather than failing the RPC.
-	def, _ := app.Load(filepath.Join(repoRoot, binding.Story, "app.yaml"))
+	// Room titles: the story's own state descriptions (app.State.Description),
+	// falling back to the room id.
 	stagesOut := make([]materializeStageWire, len(stages))
 	for i, st := range stages {
 		title := st.ID
-		if def != nil {
-			if roomState, ok := def.States[st.ID]; ok && roomState.Description != "" {
-				title = roomState.Description
-			}
+		if roomState, ok := prep.Def.States[st.ID]; ok && roomState.Description != "" {
+			title = roomState.Description
 		}
 		stagesOut[i] = materializeStageWire{ID: st.ID, Title: title}
 	}
 
 	return map[string]any{
-		"job_id": jobID,
-		"stages": stagesOut,
+		"job_id":     jobID,
+		"stages":     stagesOut,
+		"session_id": webSessionID,
 	}, nil
+}
+
+// sessionTurnDriver adapts a live web-registry session's [Driver] +
+// [WorldReader] to internal/materialize's TurnDriver, so the materialize job
+// drives the same session the browser can watch.
+type sessionTurnDriver struct {
+	driver Driver
+	world  WorldReader
+}
+
+func (d sessionTurnDriver) Next(ctx context.Context) error {
+	_, err := d.driver.SubmitDirect(ctx, "next", nil)
+	return err
+}
+
+func (d sessionTurnDriver) World(ctx context.Context) (map[string]any, error) {
+	return d.world.CurrentWorld(ctx)
+}
+
+// materializeSessionDriver tries to create and seed a live web session for
+// prep's story via the provider and wrap it as a TurnDriver. Returns
+// ("", nil) — the private-rig fallback — when the provider cannot seed
+// sessions, seeding fails, or the session's driver cannot advance turns and
+// read world state. Never fails the RPC: the fallback is always valid.
+func (s *Server) materializeSessionDriver(ctx context.Context, prep *materialize.Prepared) (string, materialize.TurnDriver) {
+	seeded, ok := s.provider.(SeededSessionProvider)
+	if !ok {
+		return "", nil
+	}
+	storyAbs, err := filepath.Abs(prep.StoryAppPath)
+	if err != nil {
+		return "", nil
+	}
+	sessionID, err := seeded.NewSessionSeeded(ctx, storyAbs, prep.InitialWorld)
+	if err != nil || sessionID == "" {
+		return "", nil
+	}
+	entry, ok := s.provider.Get(sessionID)
+	if !ok || entry.Driver == nil {
+		return "", nil
+	}
+	worldReader, ok := entry.Driver.(WorldReader)
+	if !ok {
+		return "", nil
+	}
+	return sessionID, sessionTurnDriver{driver: entry.Driver, world: worldReader}
 }
 
 // trackMaterializeJob subscribes to jobID's events and keeps state in step:
@@ -287,9 +347,10 @@ func (s *Server) materializeStatus(params map[string]any) (any, *rpcError) {
 		artifacts = []materializeArtifact{}
 	}
 	return map[string]any{
-		"status":    status,
-		"stages":    stages,
-		"artifacts": artifacts,
+		"status":     status,
+		"stages":     stages,
+		"artifacts":  artifacts,
+		"session_id": state.sessionID,
 	}, nil
 }
 

@@ -27,13 +27,22 @@ package server
 // picture up front instead of missing a frame that only ever fires once, at
 // a moment before it connected.
 //
-// A subscriber that connects to an already-terminal job (fast/deterministic
-// pilot stories routinely finish before a browser's EventSource opens — see
-// internal/materialize's package doc on the Subscribe-after-Start race)
-// receives Subscribe's single replayed terminal JobEvent, so it still gets a
-// status/artifact/done sequence, but not the intermediate per-stage frames
-// that preceded it. graph.materialize.status is the intended fallback for
-// exactly that case (per the plan), not something this endpoint works around.
+// A subscriber that connects late (fast/deterministic pilot stories
+// routinely finish, or get several rooms in, before a browser's EventSource
+// opens — see internal/materialize's package doc on the Subscribe-after-
+// Start race) is healed by an initial snapshot replay: the handler
+// subscribes to the job FIRST, then replays the server's own accumulated
+// per-stage/artifact/status bookkeeping (materializeJobState, fed by
+// trackMaterializeJob's start-synchronous subscription) as ordinary frames
+// before entering the live loop. Subscribe-first means nothing falls in the
+// gap; the price is that a queued live event may re-report state older than
+// the snapshot, so emits are monotonic per stage (a stage never regresses
+// from complete back to in-progress) and artifact frames dedup by path.
+// This closes the stuck-pill gap the first cut deferred to the
+// graph.materialize.status poll fallback: a client whose EventSource
+// connected mid-run used to keep whatever pills it had missed at "waiting"
+// forever, because the fallback only engaged when the stream ERRORED, not
+// when it connected late.
 
 import (
 	"encoding/json"
@@ -124,12 +133,69 @@ func (s *Server) handleMaterializeStream(w http.ResponseWriter, r *http.Request)
 		flusher.Flush()
 	}
 
+	// Monotonic per-stage emit: the snapshot replay below and the live
+	// subscription can both report the same stage, and a queued live event
+	// can lag the snapshot — never let a pill regress (waiting <
+	// in-progress < complete/failed) or re-emit a status it already has.
+	stageRank := func(status string) int {
+		switch status {
+		case "in-progress":
+			return 1
+		case "complete", "failed":
+			return 2
+		default: // "waiting"
+			return 0
+		}
+	}
+	emittedStage := map[string]int{}
+	emitStage := func(stageID, status string) {
+		rank := stageRank(status)
+		if rank == 0 || rank <= emittedStage[stageID] {
+			return // still waiting, or would repeat/regress what was already sent
+		}
+		emittedStage[stageID] = rank
+		emit(materializeStreamFrame{Type: "stage", StageID: stageID, Status: status})
+	}
+	emittedArtifacts := map[string]bool{}
+	emitArtifact := func(a materializeArtifact) {
+		if a.Path == "" || emittedArtifacts[a.Path] {
+			return
+		}
+		emittedArtifacts[a.Path] = true
+		emit(materializeStreamFrame{Type: "artifact", Kind: a.Kind, Title: a.Title, Path: a.Path})
+	}
+
 	for _, gateID := range state.gatesSnapshot() {
 		emit(materializeStreamFrame{Type: "gate", GateID: gateID, Passed: true})
 	}
 
+	// Subscribe BEFORE snapshotting so no event falls between the two; then
+	// replay the snapshot as frames (see the package doc's late-subscriber
+	// paragraph). A snapshot that is already terminal ends the stream right
+	// here with the same status/done tail a live run produces.
 	ch, unsub := s.materializeSched.Subscribe(jobs.JobID(jobID))
 	defer unsub()
+
+	snapStages, snapStatus, snapArtifacts := state.snapshot()
+	for _, st := range snapStages {
+		emitStage(st.ID, st.Status)
+	}
+	for _, a := range snapArtifacts {
+		emitArtifact(a)
+	}
+	switch jobs.JobStatus(snapStatus) {
+	case jobs.JobDone, jobs.JobFailed, jobs.JobCancelled:
+		if jobs.JobStatus(snapStatus) == jobs.JobFailed {
+			if job, ok := s.materializeSched.Get(jobs.JobID(jobID)); ok && job.Error != "" {
+				emit(materializeStreamFrame{Type: "error", Message: job.Error})
+			}
+		}
+		emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(jobs.JobStatus(snapStatus))})
+		emit(materializeStreamFrame{Type: "done"})
+		return
+	case jobs.JobAwaitingInput:
+		emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(jobs.JobAwaitingInput)})
+	}
 
 	// Idle-connection heartbeat, matching handleTurnStream: a deterministic
 	// story can run to completion between two heartbeat frames with nothing
@@ -149,14 +215,14 @@ func (s *Server) handleMaterializeStream(w http.ResponseWriter, r *http.Request)
 				return
 			}
 			if se, ok := ev.Progress.(materialize.StageEvent); ok {
-				emit(materializeStreamFrame{Type: "stage", StageID: se.Stage, Status: se.Status})
+				emitStage(se.Stage, se.Status)
 			}
 			switch ev.Status {
 			case jobs.JobRunning, jobs.JobAwaitingInput:
 				emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(ev.Status)})
 			case jobs.JobDone:
 				if a, ok := materializeArtifactFromResult(state, ev); ok {
-					emit(materializeStreamFrame{Type: "artifact", Kind: a.Kind, Title: a.Title, Path: a.Path})
+					emitArtifact(a)
 				}
 				emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(ev.Status)})
 				emit(materializeStreamFrame{Type: "done"})
