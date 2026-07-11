@@ -9,12 +9,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"kitsoki/internal/kitgit"
-	"kitsoki/internal/kitlock"
 	"kitsoki/internal/kitstage"
 )
 
@@ -57,98 +54,35 @@ remote.`,
 			if err != nil {
 				return err
 			}
-			lockPath := kitlock.Path(targetAbs)
-			if !kitlock.Exists(lockPath) {
-				return fmt.Errorf("no lockfile at %s — run `kitsoki kit add` first", lockPath)
-			}
-			lf, err := kitlock.Load(lockPath)
-			if err != nil {
-				return err
-			}
-			locked := lf.Kits[name]
-			if locked == nil {
-				return fmt.Errorf("kit %q is not locked in %s — run `kitsoki kit add` first", name, lockPath)
-			}
-
-			// Candidate source: --source replaces outright; --to rewrites a
-			// git source's @ref, and is a version gate for every other tier.
-			candSource := locked.Source
-			if source != "" {
-				candSource = source
-			}
-			gate := locked.Constraint
-			if to != "" {
-				if url, _, ok := kitgit.ParseSource(candSource); ok {
-					candSource = "git+" + url + "@" + to
-				} else {
-					gate = to
-				}
-			}
-
-			resolved, resolvedDir, err := resolveKitEntry(cmd.Context(), candSource, targetAbs, gate)
+			// The staging engine lives in internal/kitstage (shared with the
+			// studio MCP kit.update tool); the CLI contributes its resolver
+			// seam and the operator-facing rendering.
+			res, err := kitstage.Update(cmd.Context(), kitstage.UpdateOptions{
+				ProjectRoot: targetAbs,
+				Name:        name,
+				To:          to,
+				Source:      source,
+				CheckOnly:   checkOnly,
+				Resolve:     resolveKitEntry,
+			})
 			if err != nil {
 				return err
 			}
 
 			out := cmd.OutOrStdout()
-			candidate := &kitstage.Entry{
-				Source:   candSource,
-				Version:  resolved.Version,
-				Commit:   resolved.Commit,
-				TreeHash: resolved.TreeHash,
-				From:     kitstage.SnapshotOfLock(locked),
-				StagedAt: time.Now().UTC().Format(time.RFC3339),
-			}
-
-			if candidate.Snapshot().Equal(kitstage.SnapshotOfLock(locked)) {
+			if res.UpToDate {
 				fmt.Fprintf(out, "%s is already up to date (%s, tree %s) — nothing staged\n",
-					name, displayVersion(locked.Version), shortHash(locked.TreeHash))
+					name, displayVersion(res.Locked.Version), shortHash(res.Locked.TreeHash))
 				return nil
 			}
-
-			// Pin candidate bytes for non-git tiers: the resolved directory
-			// is mutable (a checkout, the embedded materialization), so
-			// snapshot it into the content-addressed tree cache. Git-tier
-			// candidates were just materialized into the commit cache by
-			// resolution itself.
-			if candidate.Commit == "" {
-				if _, _, err := kitgit.MaterializeTree(resolvedDir); err != nil {
-					return fmt.Errorf("snapshot candidate tree: %w", err)
-				}
-			}
-
-			plan := &kitstage.Plan{
-				Schema:   kitstage.PlanSchema,
-				Kit:      name,
-				Source:   candSource,
-				From:     candidate.From,
-				To:       candidate.Snapshot(),
-				StagedAt: candidate.StagedAt,
-			}
-			plan.ChangedFiles, plan.ChangedFilesNote = kitstage.DiffAgainstAccepted(locked, candidate)
-			hints, err := kitstage.ScanRenameHints(resolvedDir, kitstage.InstanceApps(targetAbs), kitstage.SourceMatcher(name, locked.Source, candSource))
-			if err != nil {
-				return err
-			}
-			plan.RenameHints = hints
-
+			printUpdatePlan(out, res.Plan, jsonOut)
 			if checkOnly {
-				printUpdatePlan(out, plan, jsonOut)
 				fmt.Fprintln(out, "\n--check-only: nothing staged")
 				return nil
 			}
-
-			if err := kitstage.Stage(targetAbs, name, candidate); err != nil {
-				return err
-			}
-			planPath, err := kitstage.WritePlan(targetAbs, name, plan)
-			if err != nil {
-				return err
-			}
-			printUpdatePlan(out, plan, jsonOut)
 			if !jsonOut {
 				fmt.Fprintf(out, "\nstaged: %s\nplan:   %s\nnext:   kitsoki kit trial %s   (judge)   ·   kitsoki kit reject %s   (drop)\n",
-					kitstage.Path(targetAbs), planPath, name, name)
+					kitstage.Path(targetAbs), res.PlanPath, name, name)
 			}
 			return nil
 		},
