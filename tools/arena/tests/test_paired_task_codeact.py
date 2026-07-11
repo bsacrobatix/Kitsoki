@@ -176,6 +176,8 @@ prompt = runner.build_kitsoki_prompt(
 )
 require("public acceptance contract forwarded", 'acceptance_contract: [{"description": "operator sees error", "id": "visible-message"}]' in prompt)
 require("public acceptance baseline forwarded", 'acceptance_base_sha: "0123456789abcdef"' in prompt)
+require("MCP prompt has one explicit lifecycle entry", "bf_autostart_attempted:" not in prompt)
+require("MCP prompt submits full pipeline explicitly", "Submit `full_pipeline` ONCE with **session.submit**" in prompt)
 check("GPT-5.4 maps to a dedicated Kitsoki profile", runner.MODEL_TO_PROFILE.get("gpt-5.4"), "codex-gpt54")
 
 binary_dir = runner.ensure_kitsoki_binary()
