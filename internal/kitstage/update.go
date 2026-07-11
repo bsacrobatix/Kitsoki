@@ -1,11 +1,13 @@
 package kitstage
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	yaml "github.com/goccy/go-yaml"
 
@@ -287,4 +289,153 @@ func InstanceApps(projectRoot string) []string {
 	}
 	sort.Strings(matches)
 	return matches
+}
+
+// ResolveEntryFunc resolves a kit source string to the lockfile entry it
+// would produce plus the resolved on-disk kit root. cmd/kitsoki's
+// resolveKitEntry is the production implementation — it carries the CLI's
+// import-resolver seam (kit-dev overrides, $KITSOKI_REPO, the embedded
+// library), which is why the update engine takes it as an injected function
+// rather than owning resolution itself.
+type ResolveEntryFunc func(ctx context.Context, source, importerDir, constraint string) (*kitlock.Entry, string, error)
+
+// UpdateOptions configures one staging run of the update engine (Update).
+type UpdateOptions struct {
+	// ProjectRoot is the project the lockfile is read from.
+	ProjectRoot string
+	// Name is the locked kit to re-resolve.
+	Name string
+	// To rewrites a git source's @ref (tag/branch/commit); for every other
+	// tier it is a version constraint the candidate must satisfy (bare
+	// versions mean exact match). Empty keeps the recorded constraint.
+	To string
+	// Source replaces the kit's source string entirely (e.g. migrating a
+	// kit from @kitsoki/<name> to a git+ remote).
+	Source string
+	// CheckOnly resolves and plans without staging anything.
+	CheckOnly bool
+	// Resolve is the source-resolution seam (required).
+	Resolve ResolveEntryFunc
+	// Now is injectable for deterministic tests; defaults to time.Now.
+	Now func() time.Time
+}
+
+// UpdateResult is one staging run's outcome.
+type UpdateResult struct {
+	// UpToDate reports the candidate resolved to exactly the accepted
+	// content — nothing was staged and Plan is nil.
+	UpToDate bool
+	// Staged reports the candidate entry + plan were persisted (false
+	// under CheckOnly and UpToDate).
+	Staged bool
+	// Locked is the accepted lockfile entry the candidate was staged over.
+	Locked *kitlock.Entry
+	// Candidate is the staged (or would-be-staged, under CheckOnly) entry.
+	Candidate *Entry
+	// Plan is the upgrade plan (nil when UpToDate); PlanPath is where it
+	// was written (empty unless Staged).
+	Plan     *Plan
+	PlanPath string
+}
+
+// Update is the `kit update` staging engine, factored out of cmd/kitsoki so
+// the CLI verb and the studio MCP kit.update tool share one behaviour:
+// re-resolve a locked kit's source, gate the candidate on the recorded
+// semver constraint, pin its bytes, and stage entry + upgrade plan WITHOUT
+// touching the accepted kits.lock.
+func Update(ctx context.Context, opts UpdateOptions) (*UpdateResult, error) {
+	if opts.Resolve == nil {
+		return nil, fmt.Errorf("kitstage: UpdateOptions.Resolve is required")
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	lockPath := kitlock.Path(opts.ProjectRoot)
+	if !kitlock.Exists(lockPath) {
+		return nil, fmt.Errorf("no lockfile at %s — run `kitsoki kit add` first", lockPath)
+	}
+	lf, err := kitlock.Load(lockPath)
+	if err != nil {
+		return nil, err
+	}
+	locked := lf.Kits[opts.Name]
+	if locked == nil {
+		return nil, fmt.Errorf("kit %q is not locked in %s — run `kitsoki kit add` first", opts.Name, lockPath)
+	}
+
+	// Candidate source: Source replaces outright; To rewrites a git
+	// source's @ref, and is a version gate for every other tier.
+	candSource := locked.Source
+	if opts.Source != "" {
+		candSource = opts.Source
+	}
+	gate := locked.Constraint
+	if opts.To != "" {
+		if url, _, ok := kitgit.ParseSource(candSource); ok {
+			candSource = "git+" + url + "@" + opts.To
+		} else {
+			gate = opts.To
+		}
+	}
+
+	resolved, resolvedDir, err := opts.Resolve(ctx, candSource, opts.ProjectRoot, gate)
+	if err != nil {
+		return nil, err
+	}
+
+	candidate := &Entry{
+		Source:   candSource,
+		Version:  resolved.Version,
+		Commit:   resolved.Commit,
+		TreeHash: resolved.TreeHash,
+		From:     SnapshotOfLock(locked),
+		StagedAt: opts.Now().UTC().Format(time.RFC3339),
+	}
+	res := &UpdateResult{Locked: locked, Candidate: candidate}
+
+	if candidate.Snapshot().Equal(SnapshotOfLock(locked)) {
+		res.UpToDate = true
+		return res, nil
+	}
+
+	// Pin candidate bytes for non-git tiers: the resolved directory is
+	// mutable (a checkout, the embedded materialization), so snapshot it
+	// into the content-addressed tree cache. Git-tier candidates were just
+	// materialized into the commit cache by resolution itself.
+	if candidate.Commit == "" {
+		if _, _, err := kitgit.MaterializeTree(resolvedDir); err != nil {
+			return nil, fmt.Errorf("snapshot candidate tree: %w", err)
+		}
+	}
+
+	plan := &Plan{
+		Schema:   PlanSchema,
+		Kit:      opts.Name,
+		Source:   candSource,
+		From:     candidate.From,
+		To:       candidate.Snapshot(),
+		StagedAt: candidate.StagedAt,
+	}
+	plan.ChangedFiles, plan.ChangedFilesNote = DiffAgainstAccepted(locked, candidate)
+	hints, err := ScanRenameHints(resolvedDir, InstanceApps(opts.ProjectRoot), SourceMatcher(opts.Name, locked.Source, candSource))
+	if err != nil {
+		return nil, err
+	}
+	plan.RenameHints = hints
+	res.Plan = plan
+
+	if opts.CheckOnly {
+		return res, nil
+	}
+
+	if err := Stage(opts.ProjectRoot, opts.Name, candidate); err != nil {
+		return nil, err
+	}
+	planPath, err := WritePlan(opts.ProjectRoot, opts.Name, plan)
+	if err != nil {
+		return nil, err
+	}
+	res.Staged = true
+	res.PlanPath = planPath
+	return res, nil
 }

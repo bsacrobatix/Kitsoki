@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -158,111 +157,25 @@ entry + workdir.`,
 			if err != nil {
 				return err
 			}
-
-			sf, err := kitstage.Load(kitstage.Path(targetAbs))
+			// The fail-closed promotion engine lives in internal/kittrial
+			// (shared with the studio MCP kit.accept tool); the CLI
+			// contributes only the operator-facing rendering.
+			outcome, err := kittrial.Accept(kittrial.AcceptOptions{
+				ProjectRoot:  targetAbs,
+				KitName:      name,
+				Force:        force,
+				AllowPartial: allowPartial,
+			})
 			if err != nil {
-				return err
-			}
-			staged := sf.Kits[name]
-			if staged == nil {
-				return fmt.Errorf("kit %q has no staged candidate under %s — run `kitsoki kit update %s` first", name, targetAbs, name)
-			}
-			lockPath := kitlock.Path(targetAbs)
-			lf, err := kitlock.Load(lockPath)
-			if err != nil {
-				return err
-			}
-			locked := lf.Kits[name]
-
-			instances := kitstage.InstanceApps(targetAbs)
-			artifactsRoot := filepath.Join(targetAbs, ".artifacts", "kit-trial")
-			receiptPath := kittrial.TrialReceiptPath(artifactsRoot, name, staged.TreeHash)
-			receipt, err := kittrial.LoadReceipt(receiptPath)
-			if err != nil {
-				return err
-			}
-
-			acceptedWith := ""
-			if force {
-				acceptedWith = "force"
-			} else {
-				if receipt == nil {
-					return fmt.Errorf("no trial receipt for the staged tree (%s) — run `kitsoki kit trial %s` first", receiptPath, name)
-				}
-				if receipt.To.TreeHash != staged.TreeHash {
-					return fmt.Errorf("trial receipt pins tree %s but %s is staged — re-run `kitsoki kit trial %s`", receipt.To.TreeHash, staged.TreeHash, name)
-				}
-				switch receipt.Result {
-				case kittrial.ResultBlocked:
-					return fmt.Errorf("latest trial is blocked (open error items in the worklist) — address them and re-run `kitsoki kit trial %s`", name)
-				case kittrial.ResultPartial:
-					if !allowPartial {
-						return fmt.Errorf("latest trial is partial (pending approvals or warnings) — pass --allow-partial to accept anyway (recorded in the receipt)")
-					}
-					acceptedWith = "partial"
-				}
-				current := kittrial.SourceDigests(targetAbs, instances, staged.TreeHash)
-				for k, v := range receipt.SourceDigests {
-					if current[k] != v {
-						return fmt.Errorf("source %q changed since the trial (digest drift) — re-run `kitsoki kit trial %s`", k, name)
-					}
-				}
-				worklistPath := filepath.Join(targetAbs, receipt.Worklist)
-				if receipt.Worklist != "" && kittrial.FileDigest(worklistPath) != receipt.WorklistDigest {
-					return fmt.Errorf("the worklist changed since the trial — re-run `kitsoki kit trial %s` so waivers are re-audited", name)
-				}
-			}
-
-			// (a) durable acceptance receipt, (b) lock promotion, (c) staging
-			// cleanup — in that order, so every crash window is detectable
-			// (staged==accepted) and recoverable.
-			acceptReceipt := &kittrial.Receipt{
-				Schema:        kittrial.ReceiptSchema,
-				Kit:           name,
-				Event:         kittrial.EventAccept,
-				Result:        kittrial.ResultAccepted,
-				From:          staged.From,
-				To:            staged.Snapshot(),
-				SourceDigests: kittrial.SourceDigests(targetAbs, instances, staged.TreeHash),
-				GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-				AcceptedWith:  acceptedWith,
-			}
-			if receipt != nil {
-				acceptReceipt.Gates = receipt.Gates
-				acceptReceipt.Spend = receipt.Spend
-				acceptReceipt.LedgerRefs = receipt.LedgerRefs
-				acceptReceipt.Worklist = receipt.Worklist
-				acceptReceipt.WorklistDigest = receipt.WorklistDigest
-			}
-			acceptPath := kittrial.AcceptReceiptPath(targetAbs, name, staged.Version)
-			if err := kittrial.WriteReceipt(acceptPath, acceptReceipt); err != nil {
-				return err
-			}
-
-			constraint := ""
-			if locked != nil {
-				constraint = locked.Constraint
-			}
-			lf.Kits[name] = &kitlock.Entry{
-				Source:     staged.Source,
-				Version:    staged.Version,
-				Commit:     staged.Commit,
-				TreeHash:   staged.TreeHash,
-				Constraint: constraint,
-			}
-			if err := kitlock.Save(lockPath, lf); err != nil {
-				return err
-			}
-			if err := kitstage.Remove(targetAbs, name); err != nil {
 				return err
 			}
 
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "accepted %s@%s (tree %s)\n", name, displayVersion(staged.Version), shortHash(staged.TreeHash))
-			fmt.Fprintf(out, "  lockfile: %s\n", lockPath)
-			fmt.Fprintf(out, "  receipt:  %s\n", acceptPath)
-			if acceptedWith != "" {
-				fmt.Fprintf(out, "  note:     accepted with %q — recorded in the receipt\n", acceptedWith)
+			fmt.Fprintf(out, "accepted %s@%s (tree %s)\n", name, displayVersion(outcome.Staged.Version), shortHash(outcome.Staged.TreeHash))
+			fmt.Fprintf(out, "  lockfile: %s\n", outcome.LockPath)
+			fmt.Fprintf(out, "  receipt:  %s\n", outcome.ReceiptPath)
+			if outcome.AcceptedWith != "" {
+				fmt.Fprintf(out, "  note:     accepted with %q — recorded in the receipt\n", outcome.AcceptedWith)
 			}
 			return nil
 		},
