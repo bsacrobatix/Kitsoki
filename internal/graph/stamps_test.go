@@ -234,6 +234,86 @@ func TestPropose_DefaultAllowlistAppliesWhenNoWritePolicyDeclared(t *testing.T) 
 	}
 }
 
+// TestRebase_PreservesCreatedAtAndAuthoredByStamps guards the merge-time
+// integration of fad888bf7's Rebase into the P1 stamps seam: Rebase rewrites
+// only the changeset node's "operations" field (a single FieldChange at
+// ["fields", "operations"]) — created_at/authored_by, stamped by the
+// originating Propose call, live under different Fields keys entirely and
+// must survive byte-for-byte.
+func TestRebase_PreservesCreatedAtAndAuthoredByStamps(t *testing.T) {
+	root := copyBundleFixture(t)
+	fake := clock.NewFake(fixedClockTime)
+	proposeRes, err := Propose(root, ProposeInput{
+		Title: "Flip req-one to satisfied",
+		Operations: []map[string]any{
+			{
+				"kind": "modified",
+				"node": "req-one",
+				"changes": []any{
+					map[string]any{"path": []any{"status"}, "before": "draft", "after": "satisfied"},
+				},
+			},
+		},
+	}, "alice", fake)
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if len(proposeRes.RejectReasons) > 0 {
+		t.Fatalf("expected propose to succeed, got: %v", proposeRes.RejectReasons)
+	}
+
+	// Someone else advances req-one's status while the changeset sits in the
+	// review queue, staling out the changeset's own Before — the same
+	// fixture drift propose_test.go's Rebase tests use.
+	reqPath := filepath.Join(root, "nodes", "requirements.yaml")
+	raw, err := os.ReadFile(reqPath)
+	if err != nil {
+		t.Fatalf("read requirements.yaml: %v", err)
+	}
+	drifted := strings.Replace(string(raw), "status: draft", "status: in-review", 1)
+	if drifted == string(raw) {
+		t.Fatal("fixture setup: expected to find 'status: draft' in requirements.yaml")
+	}
+	if err := os.WriteFile(reqPath, []byte(drifted), 0o644); err != nil {
+		t.Fatalf("write drifted requirements.yaml: %v", err)
+	}
+
+	rebaseRes, err := Rebase(root, proposeRes.ChangesetID, "carol", clock.Real())
+	if err != nil {
+		t.Fatalf("Rebase: %v", err)
+	}
+	if rebaseRes.Rejected() {
+		t.Fatalf("expected rebase to succeed (non-conflicting refresh), got rejected: %+v", rebaseRes)
+	}
+
+	cat, err := LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	node, ok := cat.Nodes[proposeRes.ChangesetID]
+	if !ok {
+		t.Fatalf("changeset node %q not found after rebase", proposeRes.ChangesetID)
+	}
+	wantTS := "2026-03-04T12:30:00Z"
+	if got, _ := node.Fields["created_at"].(string); got != wantTS {
+		t.Errorf("created_at = %q, want %q (rebase must not touch it)", got, wantTS)
+	}
+	if got, _ := node.Fields["authored_by"].(string); got != "alice" {
+		t.Errorf("authored_by = %q, want %q (rebase actor %q must not overwrite the original author)", got, "alice", "carol")
+	}
+	// Sanity: the rebase itself actually happened (Before refreshed).
+	cs, err := ParseChangeset(node)
+	if err != nil {
+		t.Fatalf("ParseChangeset: %v", err)
+	}
+	if len(cs.Operations) != 1 || len(cs.Operations[0].Changes) != 1 {
+		t.Fatalf("unexpected operations shape after rebase: %+v", cs.Operations)
+	}
+	if got := cs.Operations[0].Changes[0].Before; got != "in-review" {
+		t.Errorf("Before = %v, want refreshed to %q", got, "in-review")
+	}
+}
+
 func TestLoadCatalog_ParsesFeedbackRouting(t *testing.T) {
 	raw, err := os.ReadFile("testdata/good/minimal.yaml")
 	if err != nil {

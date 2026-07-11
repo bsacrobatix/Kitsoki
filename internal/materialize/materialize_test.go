@@ -320,3 +320,26 @@ func TestRoomSequence(t *testing.T) {
 		t.Errorf("RoomSequence = %v, want %v", seq, want)
 	}
 }
+
+// TestStart_PrivateRigRunsHostVerbs proves the private drive rig wires the
+// builtin host registry: hoststory's produce room writes a file via
+// host.run, which only happens if the invoke actually dispatches (a rig
+// without a registry treats it as a silent no-op — the bug that made
+// `kitsoki graph materialize` run producer rooms without producing).
+func TestStart_PrivateRigRunsHostVerbs(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "produced.txt")
+	t.Setenv("MATERIALIZE_HOST_TEST_OUT", outPath)
+
+	fixtureRoot, job, _ := driveCheckedNode(t, "wi-host-run")
+	_ = fixtureRoot
+	if job.Status != jobs.JobDone {
+		t.Fatalf("job status = %v, error = %q, want done", job.Status, job.Error)
+	}
+	data, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("host.run never produced %s: %v", outPath, err)
+	}
+	if string(data) != "produced" {
+		t.Fatalf("produced file content = %q, want %q", string(data), "produced")
+	}
+}

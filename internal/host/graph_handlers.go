@@ -108,6 +108,8 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphAuthorizeOp(ctx, args)
 	case "withdraw":
 		return graphWithdrawOp(ctx, args)
+	case "rebase":
+		return graphRebaseOp(ctx, args)
 	case "query":
 		return graphQueryOp(args)
 	case "project":
@@ -125,7 +127,7 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 	case "changeset":
 		return graphChangesetOp(args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, query, project, presentation, get, find, neighbors, type_census, changeset)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, query, project, presentation, get, find, neighbors, type_census, changeset)", op)
 	}
 }
 
@@ -395,6 +397,44 @@ func graphWithdrawOp(ctx context.Context, args map[string]any) (Result, error) {
 		return Result{}, err
 	}
 	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	if err != nil {
+		return Result{}, err
+	}
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	lintIssues := make([]any, len(res.LintIssues))
+	for i, iss := range res.LintIssues {
+		lintIssues[i] = iss.Error()
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	return Result{Data: map[string]any{
+		"rejected":       res.Rejected(),
+		"reject_reasons": rejectReasons,
+		"lint_issues":    lintIssues,
+		"changed_files":  changedFiles,
+	}}, nil
+}
+
+// graphRebaseOp: {catalog_path, changeset_id} -> the review queue's "rebase"
+// action (internal/graph.Rebase). Same result shape as graphAuthorizeOp;
+// same ctx-resolved actor/clock threading as graphAuthorizeOp/graphWithdrawOp
+// (actor is accepted for seam consistency — Rebase itself stamps nothing).
+func graphRebaseOp(ctx context.Context, args map[string]any) (Result, error) {
+	catalogPath := graphStringArg(args, "catalog_path")
+	changesetID := graphStringArg(args, "changeset_id")
+	if catalogPath == "" || changesetID == "" {
+		return Result{}, fmt.Errorf("host.graph.rebase: requires both catalog_path and changeset_id")
+	}
+	clk, err := graphResolveClock(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	res, err := objectgraph.Rebase(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
 	if err != nil {
 		return Result{}, err
 	}

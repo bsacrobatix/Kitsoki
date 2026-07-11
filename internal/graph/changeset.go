@@ -641,6 +641,54 @@ func fillGuards(cs *Changeset, cat *Catalog) []GuardFill {
 	return fills
 }
 
+// refreshStaleGuards mutates cs.Operations in place, refreshing every
+// "modified" operation's field-level Before guard that no longer matches
+// the live catalog (readNodePath(cat, node, ch.Path)) to the live value —
+// Rebase's (propose.go) actual job (§3.3's review-queue "rebase" action):
+// someone else edited a DIFFERENT field while this changeset sat in the
+// queue, and the changeset's own field edit is still valid, only its
+// optimistic-concurrency guard on that other field is stale. Reports
+// whether it changed anything.
+//
+// This is fillGuards' sibling, not a replacement: fillGuards only fills a
+// MISSING Before (nil), while this only overwrites a PRESENT-but-stale one
+// (non-nil and mismatched) — the two conditions never overlap, so a
+// changeset could in principle want both, though Propose/Rebase each only
+// call one. Both share readNodePath/valuesEqual, the same comparison-
+// canonical reads ValidateChangeset's own stale-guard check uses, so a
+// refreshed Before is guaranteed to satisfy that check immediately after.
+//
+// Like fillGuards, this intentionally only touches "modified" op field
+// guards — never "removed"/"retyped" whole-node Before mappings (those
+// would need nodeToMap, not readNodePath) or any other op kind, which
+// fad888bf7's original Rebase doc comment already scoped out as unneeded
+// for the review-queue scenario this exists to fix.
+func refreshStaleGuards(cs *Changeset, cat *Catalog) bool {
+	changed := false
+	for i := range cs.Operations {
+		op := &cs.Operations[i]
+		if op.Kind != OpModified {
+			continue
+		}
+		node, ok := cat.Nodes[op.Node]
+		if !ok {
+			continue
+		}
+		for j := range op.Changes {
+			ch := &op.Changes[j]
+			if ch.Before == nil {
+				continue
+			}
+			current := readNodePath(cat, node, ch.Path)
+			if !valuesEqual(current, ch.Before) {
+				ch.Before = current
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
 // digestNodeMap produces the {sha, field list} echo GuardFill uses for a
 // "removed" or "retyped" op's server-filled full-node Before mapping,
 // keeping the echo small (a digest, not the full content) per hazard

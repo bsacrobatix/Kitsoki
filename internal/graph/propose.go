@@ -439,6 +439,120 @@ func withdrawOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry 
 	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
 }
 
+// Rebase refreshes a "proposed" changeset's stale Before guards (§3.3's
+// review-queue "rebase" action, cut from A1) against the catalog's current
+// state, then re-validates. For every "modified" operation's field changes,
+// a Before that no longer matches the live catalog is refreshed to the live
+// value (via refreshStaleGuards, changeset.go — fillGuards' sibling, sharing
+// its readNodePath/valuesEqual comparison-canonical reads but overwriting a
+// present-but-stale Before rather than only filling a missing one); the
+// changeset is only actually rewritten if, after refreshing,
+// ValidateChangeset reports zero remaining reasons — i.e. the refresh was
+// non-conflicting (nothing else about the operation, e.g. a missing node,
+// was wrong). If a genuine conflict remains, Rebase leaves the changeset
+// untouched and reports the reasons, exactly like a rejected Propose. This
+// intentionally does not touch "removed"/"retyped"/other op kinds' guards —
+// only "modified" field-level Before values, which is what the review queue
+// scenario (someone else edited an unrelated field while your changeset sat
+// in the queue) actually needs.
+//
+// actor and clk are accepted for seam consistency with Propose/Authorize/
+// Withdraw/Apply (plan §3.4 item 1) but currently unused, exactly like
+// Withdraw: Rebase stamps no fields of its own (no "rebased_at" in the
+// plan's stamp list) — it only rewrites the changeset's operations field, so
+// created_at/authored_by (and authorized_at/authorized_by, if already
+// authorized-then-withdrawn-back-to-proposed) are untouched and survive.
+func Rebase(rootPath string, changesetID NodeID, actor string, clk clock.Clock) (*ApplyResult, error) {
+	_, _ = actor, clk
+	// File-level CAS (hazard guard #2), same bounded retry shape as
+	// Propose/Authorize/Withdraw/Apply.
+	for attempt := 1; attempt <= casMaxAttempts; attempt++ {
+		res, retry, err := rebaseOnce(rootPath, changesetID)
+		if retry {
+			continue
+		}
+		return res, err
+	}
+	return &ApplyResult{RejectReasons: []string{
+		fmt.Sprintf("CONFLICT: %s changed concurrently during rebase, exceeded %d retry attempts", rootPath, casMaxAttempts),
+	}}, nil
+}
+
+func rebaseOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry bool, err error) {
+	cat, err := LoadCatalog(rootPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("graph rebase: load %s: %w", rootPath, err)
+	}
+	// Canonicality pre-check (hazard guard #4): before any write attempt.
+	if reasons := checkCanonical(cat); len(reasons) > 0 {
+		return &ApplyResult{RejectReasons: reasons}, false, nil
+	}
+	node, ok := cat.Nodes[changesetID]
+	if !ok {
+		return &ApplyResult{RejectReasons: []string{
+			fmt.Sprintf("graph rebase: changeset %q not found in catalog", changesetID),
+		}}, false, nil
+	}
+	if node.TypeID != "changeset" {
+		return &ApplyResult{RejectReasons: []string{
+			fmt.Sprintf("graph rebase: node %q is type %q, not changeset", changesetID, node.TypeID),
+		}}, false, nil
+	}
+	if node.Status != ChangesetStatusProposed {
+		return &ApplyResult{RejectReasons: []string{
+			fmt.Sprintf("graph rebase: changeset %q has status %q, must be %q to rebase", changesetID, node.Status, ChangesetStatusProposed),
+		}}, false, nil
+	}
+
+	rawOps, ok := node.Fields["operations"].([]any)
+	if !ok {
+		return &ApplyResult{RejectReasons: []string{
+			fmt.Sprintf("graph rebase: changeset %q missing operations", changesetID),
+		}}, false, nil
+	}
+
+	cs, err := ParseChangeset(node)
+	if err != nil {
+		return &ApplyResult{RejectReasons: []string{err.Error()}}, false, nil
+	}
+
+	if !refreshStaleGuards(cs, cat) {
+		return &ApplyResult{RejectReasons: []string{
+			fmt.Sprintf("graph rebase: changeset %q has no stale Before guards to refresh", changesetID),
+		}}, false, nil
+	}
+
+	// Re-validate the refreshed operations before committing anything —
+	// only a fully non-conflicting refresh is applied.
+	if reasons := ValidateChangeset(cs, cat); len(reasons) > 0 {
+		return &ApplyResult{RejectReasons: reasons}, false, nil
+	}
+
+	newRawOps := rawOpsToAny(opsToRaw(cs.Operations))
+	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
+		{
+			Kind: OpModified,
+			Node: changesetID,
+			Changes: []FieldChange{
+				{Path: []string{"fields", "operations"}, Before: rawOps, After: newRawOps},
+			},
+		},
+	}, false)
+	if err != nil {
+		if errors.Is(err, errCASConflict) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("graph rebase: %w", err)
+	}
+	if len(rejectReasons) > 0 {
+		return &ApplyResult{RejectReasons: rejectReasons}, false, nil
+	}
+	if len(issues) > 0 {
+		return &ApplyResult{LintIssues: issues}, false, nil
+	}
+	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
+}
+
 // commitScratchOperations is Apply's dry-run-first scratch-copy machinery,
 // factored out so Propose and Authorize can commit a small synthetic
 // operation set (appending a changeset node, or flipping its status) with
