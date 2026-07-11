@@ -192,6 +192,25 @@ bugs:
       silently bouncing the operator to an apparently normal screen.
       Add focused tests and run `go test ./internal/orchestrator -count=1`.
 
+  - id: bug19
+    ticket_ref: issues/bugs/2026-06-23T100426Z-studio-concurrent-sessions-agent-schema-bleed.md
+    title: "Concurrent studio sessions resolve validator schemas from another story"
+    severity: P1
+    component: mcp
+    fix_sha: 31c96b09
+    baseline_sha: 0350fe9901b3f611c6c37f70162513cd75959501
+    fix_source: .
+    oracle_test: testdata/bug19.go
+    oracle_match: "TestRepro_ValidatorSchemaUsesPerCallRenderer"
+    oracle:
+      target: internal/host/concurrent_schema_bleed_oracle_test.go
+      run: 'go test ./internal/host/ -run {match} -count=1'
+    ticket: |
+      Concurrent live Studio sessions must resolve a relative agent validator
+      schema against the dispatching session's story directory, not the most
+      recently opened session's global app directory. Add focused tests and run
+      `go test ./internal/host -count=1`.
+
 treatments: [kitsoki, single]
 
 run:
