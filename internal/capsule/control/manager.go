@@ -92,6 +92,7 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 		cur.SourceRef = materialized.SourceRef
 		cur.Head = materialized.Head
 		cur.Branch = materialized.Branch
+		cur.VerifierOverlays = append([]OverlayRef(nil), materialized.VerifierOverlays...)
 		cur.State = StateReady
 		return nil
 	})
@@ -193,7 +194,11 @@ func (m *Manager) emit(ctx context.Context, kind string, in Instance) error {
 	if m.Events == nil {
 		return nil
 	}
-	return m.Events.Emit(ctx, Event{Kind: kind, InstanceID: in.ID, Generation: in.Generation, Fields: map[string]any{"definition_id": in.DefinitionID, "definition_digest": in.DefinitionDigest, "provider": in.Provider, "state": in.State, "lease_owner": in.Lease.Owner, "source_ref": in.SourceRef, "head": in.Head}})
+	fields := map[string]any{"definition_id": in.DefinitionID, "definition_digest": in.DefinitionDigest, "provider": in.Provider, "state": in.State, "lease_owner": in.Lease.Owner, "source_ref": in.SourceRef, "head": in.Head}
+	if len(in.VerifierOverlays) > 0 {
+		fields["verifier_overlays"] = in.VerifierOverlays
+	}
+	return m.Events.Emit(ctx, Event{Kind: kind, InstanceID: in.ID, Generation: in.Generation, Fields: fields})
 }
 
 // WorkspacePath is intentionally package-private authority exposed only to
@@ -216,4 +221,34 @@ func (m *Manager) WorkspacePath(ctx context.Context, h Handle) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: instance path is outside grant", ErrDenied)
+}
+
+// VerifierOverlayPaths resolves verifier-only overlay refs to absolute paths
+// for same-process verifier execution. It is intentionally not used by the
+// agent-facing FS/MCP tools: those surfaces only see OverlayRef digests.
+func (m *Manager) VerifierOverlayPaths(ctx context.Context, h Handle) ([]string, error) {
+	in, err := m.Status(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	def, err := m.Definitions.Get(ctx, in.DefinitionID)
+	if err != nil {
+		return nil, err
+	}
+	root, err := projectRoot(m.Grant.ProjectRoot)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, overlay := range def.Overlays {
+		if overlay.Visibility != "verifier" {
+			continue
+		}
+		path, err := projectRelativePath(root, overlay.Path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, path)
+	}
+	return out, nil
 }

@@ -10,9 +10,10 @@ substrate grows:
 - **Core fixture capsules** live under `capsules/<name>/capsule.yaml` and are
   opened by `internal/capsule`, `internal/capsuletest`, and `kitsoki capsule`.
 - **Repo-history capsules** are historical bug capsules consumed by
-  `stories/repo-bakeoff` and `tools/bugfix-bakeoff/external`. They currently use
-  the repo-history harness materializer because they need pinned external or
-  private repositories and hidden oracle overlays.
+  `stories/repo-bakeoff` and `tools/bugfix-bakeoff/external`. They remain
+  harness-executed while their verifier contracts migrate, but the generic
+  control plane now has the source-cache and verifier-overlay primitives they
+  need.
 
 The shipped v1 is intentionally narrow and local-only:
 
@@ -23,7 +24,21 @@ The shipped v1 is intentionally narrow and local-only:
 - `internal/capsuletest.Open(t, name)` opens capsules under `t.TempDir()` and
   registers cleanup for Go tests.
 - `kitsoki capsule open|verify|close` exposes the same behavior from the CLI.
-- `scripts/dev-workspace.sh` opens clone-backed development workspaces under
+- `kitsoki capsule workspace` opens managed source workspaces through the
+  control plane. Synthetic fixtures, project `self` sources, pinned Git
+  sources, and the Kitsoki development compatibility provider all share opaque
+  handles, generation checks, lifecycle facts, and least-authority FS/exec/VCS
+  operations.
+- Pinned Git sources populate a content-addressed bare cache under
+  `.capsules/cache/git-sources/<commit>.git` before materializing a workspace.
+  Subsequent materializations of the same full commit clone from the cache
+  without touching the original source path or remote.
+- `visibility: workspace` overlays are copied into the workspace. `visibility:
+  verifier` overlays are recorded as project-relative digest refs and are
+  resolvable only by same-process verifier execution; they are not copied into
+  the workspace and are not reachable through the agent-facing FS/MCP tools.
+- `scripts/dev-workspace.sh` remains a compatibility entry point for Kitsoki's
+  protected local workflow, opening clone-backed development workspaces under
   `.capsules/workspaces/`, writes the same capsule sentinel/manifest plus a
   `.kitsoki-clone` manifest, and owns bootstrap, commit, merge, and teardown for
   ad-hoc Codex/Claude work and the default dev-story workspace provider. See
@@ -32,12 +47,11 @@ The shipped v1 is intentionally narrow and local-only:
   `mid-rebase-conflict`, `dirty-index`, `stale-worktree`, and
   `diverged-remote`.
 
-Remote pinned repositories, hidden-oracle overlays, environment image capture,
-`seal`, flow-test capsule bindings, agent workspace providers, product-journey
-adoption, and Harbor import/export are follow-on slices for the core
-materializer. v1 does not perform live network fetches and does not install tools
-on the host. Until those slices land, repo-history capsules remain first-class
-capsules in the catalog but are executed through the repo-history harness.
+Environment image capture, broader flow-test bindings, product-journey adoption,
+and Harbor import/export remain follow-on slices for the core materializer. The
+host provider does not install tools on the host. Remote network fetches happen
+only when a pinned source cache miss requires reading the declared source and the
+caller has chosen a source that requires network access.
 
 ## Capsule spec
 

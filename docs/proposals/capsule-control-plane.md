@@ -5,8 +5,7 @@ and scoped Capsule MCP now cover definitions, lease/generation handles, safe
 FS/exec/VCS, synthetic/self/pinned providers, and the `development`/`staging`
 compatibility providers behind the native lifecycle. Host adoption and
 story-contract migration have started via `host.capsule_workspace`; generic
-clone lifecycle, seal/cache/verifier-overlay completion, and full story rebinding
-remain.
+clone lifecycle and full story rebinding remain.
 **Kind:**   runtime
 **Epic:**   [capsule-ci.md](capsule-ci.md)
 
@@ -207,9 +206,14 @@ all consumers migrate.
 ## 1. Contract and native service
 - [x] 1.1 Define DefinitionStore, InstanceStore, WorkspaceProvider, ScopeGrant, lease/generation, and lifecycle state types behind DI seams
 - [x] 1.2 Discover project definitions under `.kitsoki/capsules/` plus compatible root `capsules/`; validate project/local config boundaries
-- [ ] 1.3 Implement synthetic, live/self, and pinned local/remote source providers with content-addressed cache and workspace/verifier overlay visibility
-  - Shipped: synthetic, self, and pinned source providers.
-  - Remaining: content-addressed source cache and verifier-overlay completion.
+- [x] 1.3 Implement synthetic, live/self, and pinned local/remote source providers with content-addressed cache and workspace/verifier overlay visibility
+  - Shipped: synthetic, self, and pinned source providers. Pinned sources now
+    materialize through a content-addressed bare Git cache keyed by the full
+    immutable commit, so later materializations can proceed from cache without
+    touching the original source. `visibility: workspace` overlays are copied
+    into the materialized workspace; `visibility: verifier` overlays are kept
+    out of the agent-facing filesystem and recorded as project-relative digest
+    refs with same-process verifier path resolution only.
 - [x] 1.4 Implement native instance metadata and sentinel-gated create/status/close plus policy-filtered capsule seal
 - [x] 1.5 Emit capsule.workspace lifecycle facts with stable instance/generation ids
 
