@@ -58,6 +58,12 @@ type Entry struct {
 	// git's own tree object hash for the git tier, internal/kitgit.DirTreeHash
 	// for every other tier.
 	TreeHash string `yaml:"tree_hash,omitempty"`
+	// Constraint is the semver constraint the operator recorded at `kit add
+	// --version` time (e.g. "^1.2.0"); empty when none was given. It is the
+	// gate `kit update` re-resolves against (S7) — the import-side
+	// `imports.<alias>.version:` constraint still gates loading, this one
+	// gates updating. Pre-Constraint lockfiles parse unchanged (omitempty).
+	Constraint string `yaml:"constraint,omitempty"`
 }
 
 // Lockfile is the parsed `.kitsoki/kits.lock`.

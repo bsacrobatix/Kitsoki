@@ -31,6 +31,7 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/inbox"
 	"kitsoki/internal/kitrepo"
+	"kitsoki/internal/kitstage"
 	"kitsoki/internal/machine"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/metamode"
@@ -55,6 +56,12 @@ func newRootCmd() *cobra.Command {
 	// embedded story library (see buildImportResolver). Empty → no override;
 	// the resolver falls through to on-disk discovery then the embedded copy.
 	var kitsokiRepoFlag string
+	// stagedFlag backs the persistent --staged toggle. It resolves every kit
+	// with a `kitsoki kit update` staged candidate to that candidate instead
+	// of the accepted lockfile resolution (see internal/kitstage and
+	// buildImportResolver). Exported as $KITSOKI_KIT_STAGED so subprocesses
+	// inherit the trial posture, mirroring --kitsoki-repo → $KITSOKI_REPO.
+	var stagedFlag bool
 	defaultRunCmd := runCmd()
 	prepareInvocation := func(cmd *cobra.Command, args []string) error {
 		// --kitsoki-repo overrides $KITSOKI_REPO when given; either way the
@@ -75,6 +82,11 @@ func newRootCmd() *cobra.Command {
 			if repo := kitrepo.Resolve(); repo != "" {
 				_ = os.Setenv(kitrepo.EnvVar, repo)
 			}
+		}
+		// --staged exports the trial posture the same way: flag wins, env
+		// stays authoritative for subprocesses and the import resolver.
+		if stagedFlag {
+			_ = os.Setenv(kitstage.EnvStaged, "all")
 		}
 		// Record whether the operator explicitly passed --semantic-routing so
 		// semanticRoutingOptions can let it override KITSOKI_SEMANTIC_ROUTING.
@@ -127,6 +139,11 @@ See docs/ in the repo for the narrative documentation.`,
 	// every subcommand; see buildImportResolver for the precedence order.
 	root.PersistentFlags().StringVar(&kitsokiRepoFlag, "kitsoki-repo", "",
 		"path to a kitsoki source checkout; resolves @kitsoki/NAME imports against <path>/stories/NAME (overrides $KITSOKI_REPO and the embedded story library)")
+
+	// Persistent trial-posture toggle: resolve kits staged by `kitsoki kit
+	// update` to their candidate trees (see internal/kitstage).
+	root.PersistentFlags().BoolVar(&stagedFlag, "staged", false,
+		"resolve kits with a staged update candidate (kitsoki kit update) to the staged version instead of the accepted lockfile resolution (env: KITSOKI_KIT_STAGED)")
 
 	// Global toggle for the deterministic semantic-routing stack. When unset,
 	// the CLI keeps the stack off: exact deterministic commands still route, and

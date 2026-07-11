@@ -21,6 +21,7 @@ import (
 	"kitsoki/internal/kitdev"
 	"kitsoki/internal/kitgit"
 	"kitsoki/internal/kitlock"
+	"kitsoki/internal/kitstage"
 	"kitsoki/internal/kitver"
 	"kitsoki/internal/kitverify"
 	"kitsoki/internal/testrunner"
@@ -84,6 +85,9 @@ func kitAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Record the constraint so `kit update` (S7) has a semver gate to
+			// re-resolve against; see kitlock.Entry.Constraint.
+			entry.Constraint = constraint
 
 			lockPath := kitlock.Path(targetAbs)
 			lf, err := kitlock.Load(lockPath)
@@ -137,6 +141,10 @@ func kitListCmd() *cobra.Command {
 				fmt.Fprintln(out, "no kits locked yet")
 				return nil
 			}
+			staged, err := kitstage.Load(kitstage.Path(targetAbs))
+			if err != nil {
+				return err
+			}
 			for _, kn := range lf.SortedNames() {
 				e := lf.Kits[kn]
 				fmt.Fprintf(out, "%s@%s\n", kn, displayVersion(e.Version))
@@ -145,8 +153,29 @@ func kitListCmd() *cobra.Command {
 					fmt.Fprintf(out, "  commit:    %s\n", e.Commit)
 				}
 				fmt.Fprintf(out, "  tree_hash: %s\n", e.TreeHash)
+				if e.Constraint != "" {
+					fmt.Fprintf(out, "  constraint: %s\n", e.Constraint)
+				}
 				if dev := kitdev.Resolve(kn); dev != "" {
 					fmt.Fprintf(out, "  dev override: %s\n", dev)
+				}
+				if s := staged.Kits[kn]; s != nil {
+					if s.Snapshot().Equal(kitstage.SnapshotOfLock(e)) {
+						// The crash window between accept's lockfile write and
+						// its staged-entry removal leaves this shape behind;
+						// surface it instead of advertising a stale trial.
+						fmt.Fprintf(out, "  staged:    %s (already accepted — run `kitsoki kit reject %s` to clean up)\n", displayVersion(s.Version), kn)
+					} else {
+						fmt.Fprintf(out, "  staged:    %s (staged %s) — kit trial / kit accept / kit reject\n", displayVersion(s.Version), s.StagedAt)
+					}
+				}
+			}
+			// Staged candidates for names that are NOT locked shouldn't be
+			// invisible (kit update refuses to create them, but a hand-edited
+			// file or a future flow might).
+			for _, kn := range staged.SortedNames() {
+				if _, locked := lf.Kits[kn]; !locked {
+					fmt.Fprintf(out, "%s (staged only — not in kits.lock)\n", kn)
 				}
 			}
 			return nil
@@ -258,6 +287,13 @@ func verifyKitLockfile(cmd *cobra.Command, target string) error {
 	if len(lf.Kits) == 0 {
 		fmt.Fprintln(out, "no kits locked yet")
 		return nil
+	}
+
+	// verify checks the ACCEPTED lock only; staged candidates are trial
+	// state judged by `kit trial`, not drift. But their presence is worth a
+	// notice so a MISMATCH isn't misread while an update is mid-flight.
+	if staged, stErr := kitstage.Load(kitstage.Path(targetAbs)); stErr == nil && len(staged.Kits) > 0 {
+		fmt.Fprintf(out, "note: %d staged update candidate(s) pending (kit list shows them); verifying accepted entries only\n", len(staged.Kits))
 	}
 
 	ok := true
