@@ -14,6 +14,8 @@ Current paired-task treatments:
 | `codex-codeact` | `kitsoki-codeact-mcp` | Direct `kitsoki-codeact-driver` launch with only `mcp__kitsoki-codeact__codeact_eval` exposed. Requires `variant.agent`. |
 | `kitsoki-mcp` | `kitsoki-studio-mcp` | `kitsoki-mcp-driver` drives the normal Studio MCP workflow. Alias: `kitsoki`. |
 | `kitsoki-mcp-codeact` | `kitsoki-studio-mcp+codeact` | Studio MCP orchestration while the story implementation step uses `host.agent.codeact`. |
+| `strict-mcp-codeact-decomposed` | `kitsoki-studio-mcp+codeact-decomposed` | Compiler-bounded per-item CodeAct grants; each item must pass a host-owned deterministic gate. No fallback is allowed. |
+| `strict-mcp-decomposed-fallback` | `kitsoki-studio-mcp+codeact-decomposed-fallback` | Same strict per-item executor, with at most one retry of the same item after a schema-typed reason declared on that item (`capability_missing` or `task_not_decomposable`). The retry keeps the identical grant. |
 
 Operator discovery:
 
@@ -26,6 +28,10 @@ Validation is intentionally exact for direct CodeAct: `codex-codeact` must use
 `agent: kitsoki-codeact-driver`, not the Studio MCP driver. `kitsoki-mcp` and
 `kitsoki-mcp-codeact` use the Studio MCP surface; the latter forces the story
 implementation step through `host.agent.codeact`.
+
+The strict decomposed treatments never select `agent_task` after a CodeAct
+failure. A fallback receipt is recorded only when the current compiled item
+allowlists the structured reason; an unlisted reason exits `needs-human`.
 
 Add a treatment by creating a focused driver module, registering it in
 `registry.py`, and documenting the stable spec fields here. Driver modules

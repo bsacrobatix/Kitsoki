@@ -66,3 +66,60 @@ class KitsokiMCPCodeactDriver(KitsokiMCPDriver):
         result.metrics.setdefault("capability_json", cap_json)
         result.metrics.setdefault("action_surface", self.action_surface)
         return result
+
+
+class KitsokiMCPDecomposedCodeactDriver(KitsokiMCPCodeactDriver):
+    """Strict per-item CodeAct treatment with no alternative action surface."""
+
+    name = "strict-mcp-codeact-decomposed"
+    action_surface = "kitsoki-studio-mcp+codeact-decomposed"
+    implementation_mode = "codeact_decomposed"
+
+    def run(
+        self,
+        args: argparse.Namespace,
+        task: dict[str, Any],
+        tree: Path,
+        trace_ref: str,
+        services: DriverServices,
+    ) -> DriverResult:
+        # Do not let an omitted variant field select the historical broad
+        # CodeAct mode. This is a treatment boundary, not a convenience alias.
+        args.implementation_mode = self.implementation_mode
+        result = super().run(args, task, tree, trace_ref, services)
+        result.metrics.update({
+            "treatment_ladder": "strict-decomposed",
+            "fallback_policy": "forbidden",
+            "capability_widening": False,
+        })
+        return result
+
+
+class KitsokiMCPDecomposedFallbackDriver(KitsokiMCPCodeactDriver):
+    """Strict per-item CodeAct with one typed, same-grant retry.
+
+    The bugfix story records a fallback only when the implementation artifact
+    names an item-allowlisted reason.  It never replaces CodeAct with a broad
+    agent task and never changes the capability map for the retried item.
+    """
+
+    name = "strict-mcp-decomposed-fallback"
+    action_surface = "kitsoki-studio-mcp+codeact-decomposed-fallback"
+    implementation_mode = "codeact_decomposed_fallback"
+
+    def run(
+        self,
+        args: argparse.Namespace,
+        task: dict[str, Any],
+        tree: Path,
+        trace_ref: str,
+        services: DriverServices,
+    ) -> DriverResult:
+        args.implementation_mode = self.implementation_mode
+        result = super().run(args, task, tree, trace_ref, services)
+        result.metrics.update({
+            "treatment_ladder": "strict-decomposed-fallback",
+            "fallback_policy": "typed-allowlisted-same-grant-once",
+            "capability_widening": False,
+        })
+        return result

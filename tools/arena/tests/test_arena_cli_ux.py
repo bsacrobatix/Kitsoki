@@ -70,8 +70,20 @@ catalog = run("treatments", "--json")
 check("treatments exits 0", catalog.returncode, 0)
 rows = json.loads(catalog.stdout)
 ids = sorted(row["id"] for row in rows)
-check("catalog ids", ids, ["codex-codeact", "kitsoki-mcp", "kitsoki-mcp-codeact", "raw-codex"])
+check("catalog ids", ids, [
+    "codex-codeact",
+    "kitsoki-mcp",
+    "kitsoki-mcp-codeact",
+    "raw-codex",
+    "strict-mcp-codeact-decomposed",
+    "strict-mcp-decomposed-fallback",
+])
 require("catalog names codeact surface", any(row["id"] == "codex-codeact" and row["action_surface"] == "kitsoki-codeact-mcp" for row in rows))
+require("catalog names strict fallback surface", any(
+    row["id"] == "strict-mcp-decomposed-fallback"
+    and row["action_surface"] == "kitsoki-studio-mcp+codeact-decomposed-fallback"
+    for row in rows
+))
 
 valid = run("validate", "--spec", "tools/arena/specs/codex-codeact-action-surface.yaml")
 check("valid spec exits 0", valid.returncode, 0)

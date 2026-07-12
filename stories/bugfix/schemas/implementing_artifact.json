@@ -38,6 +38,11 @@
       "items": { "type": "string" },
       "description": "Populated when applied=false. Each entry describes one reason an edit couldn't be made (file not found, conflict, ambiguous match, etc)."
     },
+    "fallback_reason": {
+      "type": "string",
+      "enum": ["capability_missing", "task_not_decomposable"],
+      "description": "Optional typed reason for the strict decomposed fallback treatment. The story retries only when this exact value is on the current work item's allowlist."
+    },
     "notes": {
       "type": "string",
       "description": "Optional free-form notes the agent wants to leave for the testing-room reviewer."

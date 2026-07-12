@@ -207,7 +207,7 @@ states:
       # failed/blocked accept arms, validating's fail_short arm, and the
       # restart_from-to-implementing arms — clears implement_artifact to
       # re-arm the apply.
-      - when: "world.workdir != '' && world.implementation_mode != 'codeact' && world.implementation_mode != 'codeact_decomposed'"
+      - when: "world.workdir != '' && world.implementation_mode != 'codeact' && world.implementation_mode != 'codeact_decomposed' && world.implementation_mode != 'codeact_decomposed_fallback'"
         invoke: host.agent.task
         once: true
         with:
@@ -250,7 +250,7 @@ states:
       # Starlark capabilities, and runs a host-owned deterministic gate after
       # the item.  Missing/invalid plans fail closed through on_error; this
       # branch never falls back to the broad `codeact` grant.
-      - when: "world.workdir != '' && world.implementation_mode == 'codeact_decomposed' && len(world.compiled_implementation_plan) > world.decomposed_implementation_index"
+      - when: "world.workdir != '' && (world.implementation_mode == 'codeact_decomposed' || world.implementation_mode == 'codeact_decomposed_fallback') && len(world.compiled_implementation_plan) > world.decomposed_implementation_index"
         invoke: host.agent.codeact
         id: execute_implementation_item
         once: true
@@ -358,11 +358,25 @@ states:
         # One bounded re-run returns the exact gate diagnostic to that same
         # item; a second failure is explicit needs-human rather than a broad
         # fallback or an unbounded repair loop.
-        - when: "world.implementation_mode == 'codeact_decomposed' && world.implement_artifact.applied == true"
+        - when: "(world.implementation_mode == 'codeact_decomposed' || world.implementation_mode == 'codeact_decomposed_fallback') && world.implement_artifact.applied == true"
           target: implementation_gating
           effects:
             - set:
                 decomposed_active_item: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index] }}"
+        # The only fallback in the treatment ladder is one same-item retry. It
+        # requires a schema-typed reason explicitly allowed by the compiler's
+        # immutable item plan. Clearing the artifact re-arms the exact same
+        # CodeAct invocation; the capabilities remain derived from that item.
+        - when: "world.implementation_mode == 'codeact_decomposed_fallback' && world.implement_artifact.applied == false && world.decomposed_fallback_attempt == 0 && world.implement_artifact.fallback_reason in world.compiled_implementation_plan[world.decomposed_implementation_index].fallback_reason_allowlist"
+          target: implementing
+          effects:
+            - set:
+                decomposed_fallback_attempt: "{{ world.decomposed_fallback_attempt + 1 }}"
+                decomposed_fallback_reason: "{{ world.implement_artifact.fallback_reason }}"
+                decomposed_fallback_item_id: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index].id }}"
+                refine_feedback: "Recorded allowlisted fallback reason {{ world.implement_artifact.fallback_reason }} for {{ world.compiled_implementation_plan[world.decomposed_implementation_index].id }}. Retry only this item with the unchanged capability grant."
+                implement_artifact: {}
+                codeact_implement_steps: []
         - when: "world.implement_artifact.applied == false"
           target: "@exit:needs-human"
           effects:
@@ -503,6 +517,9 @@ states:
                 decomposed_completed_summary: "{{ world.decomposed_completed_summary }}\n{{ world.decomposed_active_item.id }}: {{ world.implement_artifact.summary_title }} — {{ world.implement_artifact.summary_markdown }}"
                 decomposed_implementation_index: "{{ world.decomposed_implementation_index + 1 }}"
                 decomposed_gate_attempt: 0
+                decomposed_fallback_attempt: 0
+                decomposed_fallback_reason: ""
+                decomposed_fallback_item_id: ""
                 refine_feedback: ""
                 implement_artifact: {}
                 codeact_implement_steps: []

@@ -401,7 +401,7 @@ world:
   # Implementation action surface. agent_task is the existing open coding-agent
   # path; codeact swaps only the mutating implementing-room step to
   # host.agent.codeact so benchmark runners can isolate the action surface.
-  implementation_mode: { type: string, default: "agent_task" }    # agent_task | codeact | codeact_decomposed
+  implementation_mode: { type: string, default: "agent_task" }    # agent_task | codeact | codeact_decomposed | codeact_decomposed_fallback
   codeact_implement_steps: { type: list, default: [] }
   # Filled only when the optional implementation plan is present. Legacy callers
   # leave these empty and retain the established action surfaces.
@@ -415,6 +415,12 @@ world:
   decomposed_gate: { type: object, default: {} }
   decomposed_gate_attempt: { type: int, default: 0 }
   decomposed_completed_summary: { type: string, default: "" }
+  # A fallback receipt is only populated by the explicit fallback treatment.
+  # It records a structured allowlisted reason and preserves the same per-item
+  # grant for the one retry; it is never a permission to use agent_task.
+  decomposed_fallback_attempt: { type: int, default: 0 }
+  decomposed_fallback_reason: { type: string, default: "" }
+  decomposed_fallback_item_id: { type: string, default: "" }
   # Autostart pre-flight triage (default ON). Before spending the maker
   # pipeline on an autostarted ticket, run the read-only triager once against
   # the freshly-cut worktree: ALREADY-FIXED short-circuits to @exit:triaged
