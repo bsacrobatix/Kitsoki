@@ -291,6 +291,7 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
 
     try:
         materialize_baseline(task, tree)
+        baseline_ref = assert_materialized_baseline(task, tree)
         prewarm = prepare_live_tree(task, tree)
     except (Exception, SystemExit) as exc:  # noqa: BLE001 - report unsupported sources as cell results.
         return emit(
@@ -319,7 +320,6 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
             target=args.target,
             exit_code=0,
         )
-    baseline_ref = current_head(tree)
     dispatch = dispatch_worker(args, task, tree, trace_ref)
     # A nonterminal live MCP trace is not a candidate result. In particular,
     # tearing down the orchestrator's temporary auth home while a supervised
@@ -336,6 +336,8 @@ def run_live(args: argparse.Namespace, task: dict[str, Any]) -> int:
     else:
         score = score_tree(task, tree)
     metrics = dict(dispatch.metrics or {})
+    if baseline_ref:
+        metrics["baseline_sha"] = baseline_ref
     metrics["prewarm_wall_s"] = prewarm["wall_s"]
     metrics.update(diff_stats(tree, baseline_ref))
     cost_usd = metrics.get("cost_usd")
@@ -512,6 +514,31 @@ def materialize_bugswarm_baseline(task: dict[str, Any], tree: Path) -> None:
         run(["docker", "cp", f"{container}:{source_dir}/.", container_path(tree)], cwd=KITSOKI_ROOT)
     finally:
         subprocess.run(["docker", "rm", "-f", container], cwd=KITSOKI_ROOT, text=True, capture_output=True)
+
+
+def required_baseline_sha(task: dict[str, Any]) -> str:
+    """Return the immutable baseline revision a live cell is allowed to edit.
+
+    BugSwarm's verifier observes this value inside the failed image.  Treating
+    it as optional at dispatch time let a reused checkout silently turn a
+    comparison into a different-baseline run.
+    """
+    meta = task.get("meta") or {}
+    return str(meta.get("failed_commit_sha") or task.get("baseline_sha") or "").strip().lower()
+
+
+def assert_materialized_baseline(task: dict[str, Any], tree: Path) -> str:
+    expected = required_baseline_sha(task)
+    actual = current_head(tree).lower()
+    if not expected:
+        if (task.get("oracle") or {}).get("kind") == "bugswarm_fail_pass_pair":
+            raise SystemExit(f"BugSwarm task {task.get('id')!r} has no verified failed_commit_sha")
+        return actual
+    if not actual:
+        raise SystemExit(f"materialized task {task.get('id')!r} has no readable git HEAD; expected {expected}")
+    if actual != expected:
+        raise SystemExit(f"materialized baseline mismatch for {task.get('id')!r}: HEAD={actual}, expected failed_commit_sha={expected}")
+    return actual
 
 
 def bugswarm_image(task: dict[str, Any]) -> str:

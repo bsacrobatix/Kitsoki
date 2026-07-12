@@ -3,11 +3,11 @@
 
 test_kind: flow
 app: ../app.yaml
-# Enter proposing through the real state transition so its deterministic plan
-# compiler is executed rather than bypassed by fixture seeding.
-initial_state: reproducing
+# The compiler is attached to proposing.accept, so seed proposing with an
+# already-bound proposal and exercise that transition directly.
+initial_state: proposing
 initial_world:
-  implementation_mode: agent_task
+  implementation_mode: codeact_decomposed
   judge_mode: human
   propose_fix_artifact:
     summary_title: "Reject broad plan"
