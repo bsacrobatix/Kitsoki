@@ -1,0 +1,25 @@
+schema: gravytanker/branding/v1
+name: Kitsoki
+icon: ../docs/branding/assets/mesa-sun.svg
+
+colors:
+  primary: "#1c140d"
+  on_primary: "#f0e3c8"
+  accent: "#e0a23a"
+  on_accent: "#3a2418"
+  canvas: "#f6efe2"
+  surface: "#fffaf0"
+  text: "#3a2418"
+  muted: "#6e4b38"
+  border: "#d8c5a7"
+  success: "#397a61"
+  warning: "#b66e1f"
+  danger: "#a3422d"
+
+surfaces:
+  public:
+    colors: {}
+  internal:
+    colors:
+      primary: "#2b4a6f"
+      on_primary: "#f6efe2"
