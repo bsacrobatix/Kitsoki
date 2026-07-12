@@ -105,8 +105,8 @@ python3 tools/arena/scripts/glm52_bugswarm_report.py --generated-at 2026-07-11T0
 | artifact | kind | status | bytes | sha256 |
 |---|---|---|---:|---|
 | `tools/arena/corpus/cost-bench.manifest.yaml` | file | present | 21,037 | `8d6695ef085cacba3894a9710fe7119a778ebbd1c8a8bc68f281dc3fe008485d` |
-| `tools/arena/corpus/sources.yaml` | file | present | 3,008 | `93125ed682ff0b829b75642fcefd6a4a8f2a2993f99122629dea51b70590e566` |
-| `tools/arena/corpus/bugswarm.seed.yaml` | file | present | 19,407 | `133869b15b85b8eed8786a219218bbafc2828e836395b0d4f49fae6529aa3904` |
+| `tools/arena/corpus/sources.yaml` | file | present | 3,470 | `8142b27fb5a8d9b6acf282d14613220c000484114872fdcf4bdc1adbde0de25d` |
+| `tools/arena/corpus/bugswarm.seed.yaml` | file | present | 19,433 | `4e6517147a7a006a2670dac69afa4c2d82c3d73ab8fbab2eea48224c60990304` |
 | `tools/arena/results/round-1/rollup.json` | file | present | 10,978 | `49f8d3cb25601a32a51d44a44cc940bd24f0261af887cc31fdcbc95443745724` |
 | `tools/bugfix-bakeoff/results/cells/*glm-5.2*.json` | directory-glob | 1 match(es) | n/a | n/a |
 | `tools/bugfix-bakeoff/results/cells/bug9-glm-5.2-kitsoki.json` | file | present | 1,554 | `ae6b0d8529e1b3fc183a999e93788ffa852b9881dbc8e6a3248aa1fe89839046` |
