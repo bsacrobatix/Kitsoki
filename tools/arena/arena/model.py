@@ -290,7 +290,11 @@ class TaskOptimizationStudy:
         if not isinstance(policy, dict) or not isinstance(retry_policy, dict):
             raise ValueError("stop promotion_policy and retry_policy must be objects")
         return {"schema": TASK_OPTIMIZATION_SCHEMA, "study_id": self.study_id, "repeat_phase": repeat_phase,
-                "cell_count": len(cells), "promotion_policy": policy, "retry_policy": retry_policy, "cells": cells}
+                "cell_count": len(cells), "promotion_policy": policy, "retry_policy": retry_policy,
+                # The dispatcher consumes the frozen plan rather than re-reading
+                # a mutable study manifest before each cell.  Keep the spend gate
+                # in that frozen boundary too.
+                "live_gate_env": self.live_gate_env, "cells": cells}
 
     def lock(self) -> dict[str, Any]:
         corpus_bytes = Path(self.corpus_lock).read_bytes()
