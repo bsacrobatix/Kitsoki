@@ -64,7 +64,7 @@ func handleGraphHistory(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 		}
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}

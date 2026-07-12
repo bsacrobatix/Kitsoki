@@ -58,6 +58,15 @@ func WithGraphFeedbackSink(sink string) ServerOption {
 	return func(s *Server) { s.graphFeedbackSink = sink }
 }
 
+// WithGraphWriteVia sets the studio-mounted graph write family's write
+// routing (auto|direct|capsule), mirroring mcp-graph's --write-via. Empty
+// keeps auto: each bound catalog's route comes from its own repo's
+// .kitsoki/project-profile.yaml `graph: {write_via: ...}` block, defaulting
+// to direct when absent.
+func WithGraphWriteVia(via string) ServerOption {
+	return func(s *Server) { s.graphWriteVia = via }
+}
+
 // WithGraphIssueFiler injects the GitHub issue-filing seam the
 // studio-mounted feedback.report uses for --feedback-sink github.
 // Independent of WithIssueFiler (issue.create's own seam) — see
@@ -98,6 +107,16 @@ func (srv *Server) registerGraphTools() {
 	registry := host.NewRegistry()
 	host.RegisterBuiltins(registry)
 
+	via := srv.graphWriteVia
+	if via == "" {
+		via = graphsrv.DefaultWriteVia
+	}
+	if graphsrv.ValidateWriteVia(via) != nil {
+		// Mirror the malformed --catalog degrade above: an invalid value
+		// must not fail studio server construction over this family.
+		via = graphsrv.DefaultWriteVia
+	}
+
 	deps := &graphsrv.Deps{
 		Registry:     registry,
 		Catalogs:     catalogs,
@@ -107,6 +126,7 @@ func (srv *Server) registerGraphTools() {
 		Clock:        clock.Real(),
 		Recorder:     graphsrv.NewRecorder(),
 		IssueFiler:   srv.graphIssueFiler,
+		Router:       graphsrv.NewWriteRouter(via, nil),
 	}
 
 	graphsrv.RegisterGraphTools(srv.mcpSrv, deps, mode)

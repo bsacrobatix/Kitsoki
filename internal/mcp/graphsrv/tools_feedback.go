@@ -300,7 +300,19 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 		}
 	}
 
-	cat, err := objectgraph.LoadCatalog(path)
+	// The catalog-sink proposal is a WRITE: in capsule write routing it
+	// must land in the managed workspace, never the primary checkout. The
+	// anchor path (repo-root resolution, receipts) stays the bound path.
+	enginePath := path
+	if deps.Router != nil {
+		wp, wep := deps.Router.writePath(ctx, path)
+		if wep != nil {
+			return routedEntry{}, &routingErrorEntry{Sink: "catalog", Code: wep.Code, Error: wep.Error}
+		}
+		enginePath = wp
+	}
+
+	cat, err := objectgraph.LoadCatalog(enginePath)
 	if err != nil {
 		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Error: "load catalog for feedback routing: " + err.Error()}
 	}
@@ -333,7 +345,7 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 	})
 
 	hostArgs := map[string]any{
-		"catalog_path": path,
+		"catalog_path": enginePath,
 		"title":        "feedback: " + args.Title,
 		"operations":   []any{map[string]any{"kind": "added", "after": after}},
 	}
@@ -368,6 +380,9 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 	}
 
 	changesetID, _ := res.Data["changeset_id"].(string)
+	if iep := deps.integrateWrite(ctx, path, "graph-mcp: feedback.report "+reportID, false); iep != nil {
+		return routedEntry{}, &routingErrorEntry{Sink: "catalog", Code: iep.Code, Error: iep.Error + " (changeset " + changesetID + " is proposed in the workspace but not merged)"}
+	}
 	return routedEntry{Sink: "catalog", Ref: changesetID}, nil
 }
 

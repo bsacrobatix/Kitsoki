@@ -105,7 +105,7 @@ func handleGraphLint(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 		}
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -210,7 +210,7 @@ func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 			return errorResult(NewError(CodeValidation, "graph.open: arguments are not valid JSON: "+err.Error(), "")), nil
 		}
 	}
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -345,7 +345,7 @@ func handleGraphGet(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest
 		return errorResult(NewError(CodeValidation, "graph.get: `view` must be \"full\" if given, got "+args.View, "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -561,7 +561,7 @@ func handleGraphFind(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 		return errorResult(NewError(CodeValidation, "graph.find: `view` must be \"summary\" if given, got "+args.View, "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -709,7 +709,7 @@ func handleGraphNeighbors(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		return errorResult(NewError(CodeValidation, "graph.neighbors: `view` must be \"summary\" if given, got "+args.View, "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -790,7 +790,7 @@ func handleGraphType(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 			return errorResult(NewError(CodeValidation, "graph.type: arguments are not valid JSON: "+err.Error(), "")), nil
 		}
 	}
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -869,7 +869,7 @@ func handleGraphChangeset(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		return errorResult(NewError(CodeValidation, "graph.changeset: op \"touching\" requires `node`", "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -952,7 +952,7 @@ func handleGraphImpact(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequ
 	if args.ID == "" {
 		return errorResult(NewError(CodeValidation, "graph.impact: `id` is required", "")), nil
 	}
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}

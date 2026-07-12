@@ -31,6 +31,16 @@ type Config struct {
 	// ClockFixed is the --clock-fixed flag value (RFC3339), or empty.
 	ClockFixed string
 
+	// WriteVia is the --write-via flag: auto|direct|capsule. Empty means
+	// auto — each bound catalog's route comes from its own repo's
+	// .kitsoki/project-profile.yaml `graph: {write_via: ...}` block,
+	// defaulting to direct when absent. See writevia.go.
+	WriteVia string
+	// WorkspaceRunner is the injectable dev-workspace.sh process seam used
+	// by capsule write routing. Nil uses the real script executor; tests
+	// inject a deterministic fake.
+	WorkspaceRunner WorkspaceRunner
+
 	// IssueFiler is the injectable GitHub issue-filing seam used when
 	// --feedback-sink github (plan §3.6 "Submit stage", P6). Nil disables
 	// the github sink: feedback.report degrades to local-only with a
@@ -64,6 +74,10 @@ type Deps struct {
 	// IssueFiler is the GitHub issue-filing seam for --feedback-sink
 	// github (P6). Nil means the github sink is unconfigured.
 	IssueFiler IssueFiler
+	// Router decides, per bound catalog, whether writes land directly in
+	// the working tree or route through the managed capsule workflow
+	// (writevia.go). Nil behaves as direct-everywhere.
+	Router *WriteRouter
 }
 
 // Server is the standalone stdio MCP server exposing mcp-graph's read
@@ -88,6 +102,12 @@ func NewServer(cfg Config) (*Server, error) {
 		cfg.FeedbackSink = FeedbackSinkLocal
 	}
 	if err := ValidateFeedbackSink(cfg.FeedbackSink); err != nil {
+		return nil, err
+	}
+	if cfg.WriteVia == "" {
+		cfg.WriteVia = DefaultWriteVia
+	}
+	if err := ValidateWriteVia(cfg.WriteVia); err != nil {
 		return nil, err
 	}
 
@@ -117,6 +137,7 @@ func NewServer(cfg Config) (*Server, error) {
 		Clock:        clk,
 		Recorder:     NewRecorder(),
 		IssueFiler:   cfg.IssueFiler,
+		Router:       NewWriteRouter(cfg.WriteVia, cfg.WorkspaceRunner),
 	}
 
 	s := &Server{deps: deps}

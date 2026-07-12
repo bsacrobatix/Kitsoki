@@ -127,6 +127,9 @@ type Server struct {
 	// graphFeedbackSink is the mounted feedback.report's sink
 	// (local|catalog|github). Empty means local. See WithGraphFeedbackSink.
 	graphFeedbackSink string
+	// graphWriteVia is the mounted graph write family's write routing
+	// (auto|direct|capsule). Empty means auto. See WithGraphWriteVia.
+	graphWriteVia string
 	// graphIssueFiler is the GitHub issue-filing seam the mounted
 	// feedback.report uses for --feedback-sink github. Independent of
 	// issueFiler (issue.create's own seam) — see graphsrv.IssueFiler's doc

@@ -177,6 +177,7 @@ func mcpCmd() *cobra.Command {
 		graphSteward            bool
 		graphActor              string
 		graphFeedbackSink       string
+		graphWriteVia           string
 	)
 	cmd := &cobra.Command{
 		Use:   "mcp",
@@ -327,6 +328,7 @@ docs land):
 				studio.WithGraphSteward(graphSteward),
 				studio.WithGraphActor(graphActor),
 				studio.WithGraphFeedbackSink(graphFeedbackSink),
+				studio.WithGraphWriteVia(graphWriteVia),
 				studio.WithGraphIssueFiler(ghGraphIssueFiler),
 			}
 			if studioBugPrivacyChecker != nil {
@@ -373,6 +375,8 @@ docs land):
 		"actor name stamped on studio-mounted graph write-tool calls (mirrors `kitsoki mcp-graph --actor`)")
 	cmd.Flags().StringVar(&graphFeedbackSink, "graph-feedback-sink", "",
 		"one of: local, catalog, github — sink for the studio-mounted feedback.report (mirrors `kitsoki mcp-graph --feedback-sink`; default local)")
+	cmd.Flags().StringVar(&graphWriteVia, "graph-write-via", "",
+		"one of: auto, direct, capsule — write routing for the studio-mounted graph write family (mirrors `kitsoki mcp-graph --write-via`; default auto: consult the catalog repo's .kitsoki/project-profile.yaml graph.write_via, else direct)")
 	return cmd
 }
 
