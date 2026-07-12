@@ -155,8 +155,12 @@ with tempfile.TemporaryDirectory() as tmp:
         "#!/bin/sh\n"
         "printf '%s\\n' \"$*\" >> \"$KITSOKI_FAKE_DOCKER_LOG\"\n"
         "case \"$*\" in\n"
-        "  *run_failed.sh*) printf '__KITSOKI_BUGSWARM_COMMIT__=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'; exit 17 ;;\n"
-        "  *run_passed.sh*) printf '__KITSOKI_BUGSWARM_COMMIT__=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\n'; exit 0 ;;\n"
+        # This intentionally treats the image root as non-Git. It only emits
+        # provenance when the verifier asks for the side-specific checkout;
+        # the old artifact-root probe therefore fails this no-Docker seam.
+        "  *'cd -- /home/travis/build/failed/example/provenance'*run_failed.sh*) printf '__KITSOKI_BUGSWARM_COMMIT__=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n'; exit 17 ;;\n"
+        "  *'cd -- /home/travis/build/passed/example/provenance'*run_passed.sh*) printf '__KITSOKI_BUGSWARM_COMMIT__=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\\n'; exit 0 ;;\n"
+        "  *run_failed.sh*|*run_passed.sh*) echo 'fatal: not a git repository (or any parent up to mount point /)' >&2; exit 98 ;;\n"
         "esac\n"
         "exit 99\n",
         encoding="utf-8",
@@ -197,12 +201,51 @@ with tempfile.TemporaryDirectory() as tmp:
     check("container passed commit recorded", result["passed_commit_sha"], "b" * 40)
     check("container provenance remains valid RED", result["verified_red"], True)
     check("container provenance remains valid GREEN", result["verified_green"], True)
+    check("failed checkout path is retained", result["checkout_dirs"]["failed"], "/home/travis/build/failed/example/provenance")
+    check("passed checkout path is retained", result["checkout_dirs"]["passed"], "/home/travis/build/passed/example/provenance")
     invocations = invocation_log.read_text(encoding="utf-8").splitlines()
     check("separate fresh container invocations", len(invocations), 3)  # failed, passed, image inspect
     check("failed invocation remains fresh", "run --rm" in invocations[0], True)
     check("passed invocation remains fresh", "run --rm" in invocations[1], True)
-    check("failed invocation captures container HEAD", "git rev-parse HEAD" in invocations[0], True)
+    check("failed invocation captures checkout HEAD", "cd -- /home/travis/build/failed/example/provenance" in invocations[0], True)
+    check("passed invocation captures checkout HEAD", "cd -- /home/travis/build/passed/example/provenance" in invocations[1], True)
     check("passed invocation preserves script status", "status=$?; exit $status" in invocations[1], True)
+
+with tempfile.TemporaryDirectory() as tmp:
+    tmpdir = Path(tmp)
+    source = tmpdir / "source.yaml"
+    report = tmpdir / "verification.json"
+    source.write_text(
+        "\n".join(
+            [
+                "kind: arena_bugswarm_source",
+                "version: 1",
+                "source: bugswarm",
+                "tasks:",
+                "- id: bugswarm-explicit-layout",
+                "  repo: project",
+                "  repo_label: example/project",
+                "  image_tag: explicit-layout-1",
+                "  failed_job_id: '1'",
+                "  passed_job_id: '2'",
+                "  meta:",
+                "    bugswarm_failed_source_dir: /opt/bugswarm/failure/project",
+                "    bugswarm_passed_source_dir: /opt/bugswarm/success/project",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    verify = subprocess.run(
+        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run"],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("explicit checkout dirs dry-run exits zero", verify.returncode, 0)
+    result = json.loads(report.read_text(encoding="utf-8"))["results"][0]
+    check("explicit failed dir retained", result["checkout_dirs"]["failed"], "/opt/bugswarm/failure/project")
+    check("explicit passed dir retained", result["checkout_dirs"]["passed"], "/opt/bugswarm/success/project")
+    check("explicit failed dir used in command", "cd -- /opt/bugswarm/failure/project" in result["commands"]["failed"], True)
+    check("explicit passed dir used in command", "cd -- /opt/bugswarm/success/project" in result["commands"]["passed"], True)
 
 if failures:
     print("FAIL: bugswarm verify source")
