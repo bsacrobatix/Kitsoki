@@ -235,6 +235,13 @@ check("direct CodeAct preserves cache-read usage", direct_codeact_usage.get("cac
 check("direct CodeAct preserves output usage", direct_codeact_usage.get("output_tokens"), 26)
 check("direct CodeAct preserves reasoning usage", direct_codeact_usage.get("reasoning_output_tokens"), 9)
 
+direct_codeact_log_fixture = (HERE / "fixtures" / "direct-codeact-turn-completed.log").read_text(encoding="utf-8")
+direct_codeact_log_usage = runner.codex_output_metrics(direct_codeact_log_fixture, "gpt-5.4")
+check("direct CodeAct structured turn.completed retains input", direct_codeact_log_usage.get("input_tokens"), 1008249)
+check("direct CodeAct structured turn.completed retains output", direct_codeact_log_usage.get("output_tokens"), 12703)
+check("direct CodeAct structured turn.completed totals tokens", direct_codeact_log_usage.get("tokens"), 1020952)
+check("direct CodeAct structured log duplicate is counted once", direct_codeact_log_usage.get("tokens"), 1020952)
+
 with tempfile.TemporaryDirectory(prefix="paired-result-target-") as td:
     target = Path(td) / "nested" / "cell.json"
     exit_code = runner.emit(

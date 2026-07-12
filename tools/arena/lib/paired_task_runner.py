@@ -13,6 +13,7 @@ import argparse
 import traceback
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1450,6 +1451,30 @@ def int_value(value: Any) -> int:
     return value if isinstance(value, int) else 0
 
 
+_CODEX_LOG_FIELD = re.compile(r"(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|[^\s]+)")
+
+
+def structured_turn_completed_usage(line: str) -> tuple[str, dict[str, int]] | None:
+    """Extract one request's usage from Codex's retained key=value logs.
+
+    Direct CodeAct can retain logger output rather than Codex's JSONL stream,
+    e.g. ``type=turn.completed input_tokens=...``. Prefer a supplied request
+    identity; absent one, the complete normalized line is the only honest
+    duplicate key (we must not merge two different requests that happen to use
+    the same number of tokens).
+    """
+    fields = {key: value.strip('"') for key, value in _CODEX_LOG_FIELD.findall(line)}
+    if fields.get("type") != "turn.completed":
+        return None
+    usage = {key: int(value) for key, value in fields.items()
+             if key in {"input_tokens", "output_tokens", "cached_input_tokens", "cache_read_input_tokens",
+                        "cache_creation_input_tokens", "reasoning_output_tokens"} and value.isdigit()}
+    if not usage:
+        return None
+    request_id = next((fields[key] for key in ("request_id", "turn_id", "id") if fields.get(key)), "")
+    return ("log-id:" + request_id) if request_id else ("log:" + " ".join(line.split())), usage_token_buckets(usage)
+
+
 def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
     # Codex JSONL reports each provider request as a ``turn.completed`` event.
     # A direct CodeAct process can emit several of those events, so the final
@@ -1465,8 +1490,18 @@ def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
     seen_request_ids: set[str] = set()
     found_usage = False
     cost_usd: float | None = None
-    for line_number, line in enumerate(blob.splitlines(), start=1):
+    for line in blob.splitlines():
         line = line.strip()
+        logged_usage = structured_turn_completed_usage(line)
+        if logged_usage is not None:
+            request_id, buckets = logged_usage
+            if request_id in seen_request_ids:
+                continue
+            seen_request_ids.add(request_id)
+            for key in token_totals:
+                token_totals[key] += buckets[key]
+            found_usage = True
+            continue
         if not line.startswith("{"):
             continue
         try:
@@ -1485,10 +1520,11 @@ def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
             # terminal turn event. Other JSON envelopes may reuse a message id.
             if event_type != "turn.completed" and not payload.get("request_id") and not payload.get("turn_id"):
                 request_id = ""
-            if request_id and request_id in seen_request_ids:
+            request_key = "json:" + request_id if request_id else ""
+            if request_key and request_key in seen_request_ids:
                 continue
-            if request_id:
-                seen_request_ids.add(request_id)
+            if request_key:
+                seen_request_ids.add(request_key)
             buckets = usage_token_buckets(usage)
             for key in token_totals:
                 token_totals[key] += buckets[key]
