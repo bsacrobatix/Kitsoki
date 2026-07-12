@@ -337,8 +337,9 @@ assert_contains "$capsule_loss_out" "refresh gate moved capsule HEAD"
 
 # Ordinary rebase flattens merge commits. If a staging merge carries
 # resolution-only content, finding all non-merge parent patches is not enough:
-# the complete captured tree delta must reject a result that lost the merge
-# resolution.
+# the complete captured tree delta must replace a flattened rebase result with
+# a signed reconciliation merge that preserves the resolution and both parent
+# histories.
 merge_delta_repo="$tmp/merge-delta-refresh"
 git_init "$merge_delta_repo"
 copy_scripts "$merge_delta_repo"
@@ -369,26 +370,31 @@ git -C "$merge_delta_repo/.capsules/staging/local" switch -q -c staging/local so
 touch "$merge_delta_repo/.capsules/staging/local/.kitsoki-capsule"
 
 merge_delta_out="$tmp/merge-delta-refresh.out"
-set +e
-(
+if ! (
   cd "$merge_delta_repo"
   scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
-) >"$merge_delta_out" 2>&1
-merge_delta_status=$?
-set -e
-[ "$merge_delta_status" -eq 1 ] ||
-  fail "expected merge-resolution loss to stop refresh, got $merge_delta_status"
-assert_contains "$merge_delta_out" "rebased staging tree differs from the expected preserved tree"
-[ "$(git -C "$merge_delta_repo" rev-parse staging/local)" = "$merge_delta_start" ] ||
-  fail "merge-resolution refusal moved primary staging"
+) >"$merge_delta_out" 2>&1; then
+  cat "$merge_delta_out" >&2
+  fail "merge-resolution reconciliation refresh failed"
+fi
+assert_contains "$merge_delta_out" "materializing a signed reconciliation merge"
+git -C "$merge_delta_repo" merge-base --is-ancestor main staging/local ||
+  fail "merge-resolution reconciliation is not based on main"
 [ "$(git -C "$merge_delta_repo" show staging/local:resolution-only.txt)" = "merge-resolution-only" ] ||
-  fail "merge-resolution refusal removed primary staging content"
+  fail "merge-resolution reconciliation removed resolution-only content"
+[ "$(git -C "$merge_delta_repo" show staging/local:main.txt)" = "main-after-merge" ] ||
+  fail "merge-resolution reconciliation dropped main content"
+[ "$(git -C "$merge_delta_repo" rev-parse staging/local)" = "$(git -C "$merge_delta_repo/.capsules/staging/local" rev-parse HEAD)" ] ||
+  fail "merge-resolution reconciliation left primary staging and capsule apart"
+merge_delta_second_parent="$(git -C "$merge_delta_repo" rev-parse staging/local^2)"
+[ "$merge_delta_second_parent" = "$merge_delta_start" ] ||
+  fail "merge-resolution reconciliation did not retain exact staging history as second parent"
 
 # Capsule-only merge resolutions need protection during the first rebase too.
 # Advance primary staging after cloning, then put a resolution-only merge in the
 # stale capsule. Rebasing that capsule onto the newer snapshot flattens the
-# merge; refresh must stop immediately and retain a private recovery ref to the
-# original capsule tip.
+# merge; refresh must materialize the independently proven tree and retain the
+# exact original capsule history as a durable primary recovery ref.
 capsule_merge_repo="$tmp/capsule-merge-refresh"
 git_init "$capsule_merge_repo"
 copy_scripts "$capsule_merge_repo"
@@ -419,24 +425,21 @@ capsule_merge_staging="$(git -C "$capsule_merge_repo" rev-parse staging/local)"
 git -C "$capsule_merge_repo" switch -q main
 
 capsule_merge_out="$tmp/capsule-merge-refresh.out"
-set +e
-(
+if ! (
   cd "$capsule_merge_repo"
   scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
-) >"$capsule_merge_out" 2>&1
-capsule_merge_status=$?
-set -e
-[ "$capsule_merge_status" -eq 1 ] ||
-  fail "expected capsule merge-resolution loss to stop refresh, got $capsule_merge_status"
-assert_contains "$capsule_merge_out" "post-snapshot capsule tree differs from the expected preserved tree"
-[ "$(git -C "$capsule_merge_repo" rev-parse staging/local)" = "$capsule_merge_staging" ] ||
-  fail "capsule merge-resolution refusal moved primary staging"
-capsule_merge_recovery="$(git -C "$capsule_merge_repo/.capsules/staging/local" for-each-ref \
-  --points-at "$capsule_merge_original" --format='%(refname)' refs/kitsoki/refresh/ | \
-  grep '/capsule-original$' | head -1)"
-[ -n "$capsule_merge_recovery" ] ||
-  fail "capsule merge-resolution refusal did not retain the original capsule ref"
-assert_contains "$capsule_merge_out" "preserved original capsule work at $capsule_merge_recovery"
+) >"$capsule_merge_out" 2>&1; then
+  cat "$capsule_merge_out" >&2
+  fail "capsule merge-resolution reconciliation refresh failed"
+fi
+assert_contains "$capsule_merge_out" "materializing a signed reconciliation merge"
+[ "$(git -C "$capsule_merge_repo" show staging/local:capsule-resolution-only.txt)" = "capsule-resolution-only" ] ||
+  fail "capsule merge-resolution reconciliation dropped resolution-only content"
+[ "$(git -C "$capsule_merge_repo" show staging/local:primary-advance.txt)" = "primary-advance" ] ||
+  fail "capsule merge-resolution reconciliation dropped newer primary staging content"
+capsule_merge_recovery="refs/kitsoki/staging-capsule-recovery/$capsule_merge_original"
+[ "$(git -C "$capsule_merge_repo" rev-parse "$capsule_merge_recovery")" = "$capsule_merge_original" ] ||
+  fail "capsule merge-resolution reconciliation did not retain the original capsule ref"
 
 local_repo="$tmp/local-refresh"
 git_init "$local_repo"
