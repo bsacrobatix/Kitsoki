@@ -58,7 +58,12 @@ function computeInPage(anchor) {
     return { attempt: { strategy, count: unique.length }, resolved: null };
   }
 
-  const scopeRoot = anchor.ancestor ? document.querySelector(anchor.ancestor) : document;
+  // document.body, not document: <head> leaf elements (title, meta,
+  // style/script text) are never legitimate click/fill targets but can
+  // still substring-match a text anchor (e.g. a <title> that happens to
+  // mention the same word), turning a real unique match into a false
+  // ambiguous one.
+  const scopeRoot = anchor.ancestor ? document.querySelector(anchor.ancestor) : document.body;
   const attempts = [];
   if (anchor.ancestor && !scopeRoot) {
     attempts.push({ strategy: "ancestor-scope", error: "ancestor selector matched nothing" });
