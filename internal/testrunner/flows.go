@@ -1469,7 +1469,8 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 		}
 
 		// expect_world: subset match.
-		for k, expected := range turn.ExpectWorld {
+		for _, k := range sortedKeys(turn.ExpectWorld) {
+			expected := turn.ExpectWorld[k]
 			got := currentWorld.Vars[k]
 			if !deepEqualValues(got, expected) {
 				tr.Failures = append(tr.Failures, fmt.Sprintf("expect_world[%q]: got %v (%T), want %v (%T)", k, got, got, expected, expected))
@@ -1478,13 +1479,14 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 
 		// expect_world_full: full match.
 		if len(turn.ExpectWorldFull) > 0 {
-			for k, expected := range turn.ExpectWorldFull {
+			for _, k := range sortedKeys(turn.ExpectWorldFull) {
+				expected := turn.ExpectWorldFull[k]
 				got := currentWorld.Vars[k]
 				if !deepEqualValues(got, expected) {
 					tr.Failures = append(tr.Failures, fmt.Sprintf("expect_world_full[%q]: got %v, want %v", k, got, expected))
 				}
 			}
-			for k := range currentWorld.Vars {
+			for _, k := range sortedKeys(currentWorld.Vars) {
 				if _, ok := turn.ExpectWorldFull[k]; !ok {
 					tr.Failures = append(tr.Failures, fmt.Sprintf("expect_world_full: unexpected key %q in world", k))
 				}
@@ -1906,7 +1908,8 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 			}
 		}
 		// expect_world: subset match.
-		for k, expected := range turn.ExpectWorld {
+		for _, k := range sortedKeys(turn.ExpectWorld) {
+			expected := turn.ExpectWorld[k]
 			got := currentWorld.Vars[k]
 			if !deepEqualValues(got, expected) {
 				tr.Failures = append(tr.Failures, fmt.Sprintf("expect_world[%q]: got %v (%T), want %v (%T)", k, got, got, expected, expected))
@@ -1914,13 +1917,14 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		}
 		// expect_world_full.
 		if len(turn.ExpectWorldFull) > 0 {
-			for k, expected := range turn.ExpectWorldFull {
+			for _, k := range sortedKeys(turn.ExpectWorldFull) {
+				expected := turn.ExpectWorldFull[k]
 				got := currentWorld.Vars[k]
 				if !deepEqualValues(got, expected) {
 					tr.Failures = append(tr.Failures, fmt.Sprintf("expect_world_full[%q]: got %v, want %v", k, got, expected))
 				}
 			}
-			for k := range currentWorld.Vars {
+			for _, k := range sortedKeys(currentWorld.Vars) {
 				if _, ok := turn.ExpectWorldFull[k]; !ok {
 					tr.Failures = append(tr.Failures, fmt.Sprintf("expect_world_full: unexpected key %q in world", k))
 				}
@@ -3133,6 +3137,18 @@ func matchEvent(ev store.Event, exp FlowEvent) bool {
 		}
 	}
 	return true
+}
+
+// sortedKeys returns m's keys in sorted order so failure messages assembled
+// from map iteration are deterministic run-to-run (kitworklist derives stable
+// item ids from these strings — see internal/kitworklist Item id docs).
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // deepEqualValues compares two values accounting for JSON number types.

@@ -92,8 +92,10 @@ func Path(projectRoot, kitName string) string {
 // ItemID derives the stable id for (kind, subject, detail). subject
 // contributes only its base name (paths move between machines); detail is
 // normalized by dropping digits (line/column/counter churn), lowercasing,
-// collapsing whitespace, and truncating — cosmetically shifting messages
-// keep their identity, genuinely different failures diverge.
+// collapsing whitespace, sorting "; "-separated fragments (producers that
+// assemble a detail from map iteration emit fragments in varying order —
+// the id must not flip with them), and truncating — cosmetically shifting
+// messages keep their identity, genuinely different failures diverge.
 func ItemID(kind, subject, detail string) string {
 	base := filepath.Base(strings.TrimSpace(subject))
 	h := sha256.Sum256([]byte(kind + "\x00" + base + "\x00" + normalizeDetail(detail)))
@@ -101,6 +103,16 @@ func ItemID(kind, subject, detail string) string {
 }
 
 func normalizeDetail(detail string) string {
+	// Order-insensitive over "; "-joined fragments: a multi-failure detail
+	// hashes identically regardless of the order its fragments arrived in.
+	if parts := strings.Split(detail, "; "); len(parts) > 1 {
+		sort.Strings(parts)
+		detail = strings.Join(parts, "; ")
+	}
+	return normalizeDetailText(detail)
+}
+
+func normalizeDetailText(detail string) string {
 	var b strings.Builder
 	lastSpace := false
 	for _, r := range strings.ToLower(strings.TrimSpace(detail)) {
