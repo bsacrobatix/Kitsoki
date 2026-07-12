@@ -174,6 +174,7 @@ func mcpCmd() *cobra.Command {
 		readOnly                bool
 		operatingProfile        string
 		graphCatalogs           []string
+		graphScopes             []string
 		graphSteward            bool
 		graphActor              string
 		graphFeedbackSink       string
@@ -325,6 +326,7 @@ docs land):
 				studio.WithKitTrialDeps(studioKitTrialDeps()),
 				studio.WithOperatingSystemServices(studio.StudioOperatingProfile(operatingProfile), operatingServices),
 				studio.WithGraphCatalogs(graphCatalogs),
+				studio.WithGraphScopes(graphScopes),
 				studio.WithGraphSteward(graphSteward),
 				studio.WithGraphActor(graphActor),
 				studio.WithGraphFeedbackSink(graphFeedbackSink),
@@ -369,6 +371,8 @@ docs land):
 		"Studio operating-system profile: strict (default), legacy (explicit compatibility), or escape (audited exception)")
 	cmd.Flags().StringArrayVar(&graphCatalogs, "catalog", nil,
 		"[alias=]path to a bound catalog for the mounted graph.*/feedback.* tool family; repeatable, first is default (mirrors `kitsoki mcp-graph --catalog`; omit to leave the family catalog-less, degrading every call to NO_CATALOG)")
+	cmd.Flags().StringArrayVar(&graphScopes, "graph-scope", nil,
+		"[alias=]path to a scope-spec YAML baking a deterministic catalog subset into the mounted graph tool family (mirrors `kitsoki mcp-graph --scope`; a malformed spec fails the mount closed, never unscoped)")
 	cmd.Flags().BoolVar(&graphSteward, "graph-steward", false,
 		"Grant graph.authorize and live graph.apply on the studio-mounted graph tool family (default: propose-only, per the graph-mcp plan's studio-second-door gate).")
 	cmd.Flags().StringVar(&graphActor, "graph-actor", "",

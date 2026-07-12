@@ -162,6 +162,7 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 		"operations":    operationsToAny(args.Operations),
 		"validate_only": args.ValidateOnly,
 	}
+	deps.applyScope(alias, hostArgs)
 	if args.Visibility != "" {
 		hostArgs["visibility"] = args.Visibility
 	}
@@ -292,7 +293,9 @@ func handleGraphWithdraw(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRe
 		}
 	}
 
-	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.withdraw", map[string]any{"catalog_path": path, "changeset_id": args.ID})
+	withdrawArgs := map[string]any{"catalog_path": path, "changeset_id": args.ID}
+	deps.applyScope(alias, withdrawArgs)
+	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.withdraw", withdrawArgs)
 	if err != nil {
 		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, hostErrResult("graph.withdraw", err), args.ID), nil
 	}
@@ -382,7 +385,9 @@ func handleGraphApply(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReque
 		return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
-	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.apply", map[string]any{"catalog_path": path, "changeset_id": args.ID, "dry_run": args.DryRun})
+	applyArgs := map[string]any{"catalog_path": path, "changeset_id": args.ID, "dry_run": args.DryRun}
+	deps.applyScope(alias, applyArgs)
+	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.apply", applyArgs)
 	if err != nil {
 		return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, hostErrResult("graph.apply", err), args.ID), nil
 	}
@@ -471,7 +476,9 @@ func handleGraphAuthorize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
-	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.authorize", map[string]any{"catalog_path": path, "changeset_id": args.ID})
+	authorizeArgs := map[string]any{"catalog_path": path, "changeset_id": args.ID}
+	deps.applyScope(alias, authorizeArgs)
+	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.authorize", authorizeArgs)
 	if err != nil {
 		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, hostErrResult("graph.authorize", err), args.ID), nil
 	}

@@ -54,10 +54,18 @@ func graphGetOp(args map[string]any) (Result, error) {
 	for _, id := range ids {
 		node, ok := cat.Nodes[objectgraph.NodeID(id)]
 		if !ok {
-			missing = append(missing, map[string]any{
+			entry := map[string]any{
 				"id":          id,
 				"suggestions": stringSliceToAny(objectgraph.NearestIDs(cat, id, 3)),
-			})
+			}
+			// The node exists in the full catalog but was pruned by this
+			// session's baked scope: say so, instead of pretending the id
+			// is a typo. NearestIDs above already only suggests in-scope
+			// ids (it ran against the pruned view).
+			if cat.Scope != nil && cat.Scope.Excluded[objectgraph.NodeID(id)] {
+				entry["out_of_scope"] = true
+			}
+			missing = append(missing, entry)
 			continue
 		}
 		nodes = append(nodes, graphNodeEnvelope(cat, node, revIdx, fieldsFilter))
@@ -359,6 +367,9 @@ func graphNeighborsOp(args map[string]any) (Result, error) {
 		return Result{}, fmt.Errorf("host.graph.neighbors: missing required arg %q", "id")
 	}
 	if _, ok := cat.Nodes[objectgraph.NodeID(id)]; !ok {
+		if cat.Scope != nil && cat.Scope.Excluded[objectgraph.NodeID(id)] {
+			return Result{}, fmt.Errorf("host.graph.neighbors: node %q is out of scope for this session's baked graph scope", id)
+		}
 		return Result{}, fmt.Errorf("host.graph.neighbors: unknown node %q (nearest: %v)", id, objectgraph.NearestIDs(cat, id, 3))
 	}
 
@@ -743,7 +754,8 @@ func graphOpenOp(args map[string]any) (Result, error) {
 	issues := objectgraph.Lint(cat)
 	lint := map[string]any{"clean": len(issues) == 0, "count": len(issues)}
 
-	return Result{Data: map[string]any{
+	guide := graphOpenGuide
+	data := map[string]any{
 		"head":       map[string]any{"rev": rev, "dirty": dirty},
 		"node_count": len(cat.Nodes),
 		"types":      graphOpenTypeCensus(cat),
@@ -754,8 +766,30 @@ func graphOpenOp(args map[string]any) (Result, error) {
 		// from; kept at 0 rather than omitted so callers can rely on the
 		// field's presence/shape now.
 		"feedback": map[string]any{"pending": 0},
-		"guide":    graphOpenGuide,
-	}}, nil
+	}
+	if cat.Scope != nil {
+		data["scope"] = graphScopeWire(cat.Scope)
+		guide += "\n" + fmt.Sprintf("This session is SCOPED: %d of %d catalog nodes are visible; everything else reads as out of scope and cannot be modified. The scope was baked in at server start and no argument changes it.",
+			cat.Scope.MemberCount, cat.Scope.TotalNodes)
+	}
+	data["guide"] = guide
+	return Result{Data: data}, nil
+}
+
+// graphScopeWire renders the scope block graph.open's overview carries when
+// the session was constructed with a baked scope: enough for an agent to
+// understand what it can and cannot see, without re-deriving the member set.
+func graphScopeWire(info *objectgraph.ScopeInfo) map[string]any {
+	out := map[string]any{
+		"active":           true,
+		"member_count":     info.MemberCount,
+		"total_node_count": info.TotalNodes,
+		"pruned_edges":     info.PrunedEdges,
+	}
+	if info.Spec != nil {
+		out["spec"] = info.Spec.WireMap()
+	}
+	return out
 }
 
 // graphOpenGuide is graph.open's ~6-line orientation string.

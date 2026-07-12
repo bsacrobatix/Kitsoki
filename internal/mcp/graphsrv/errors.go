@@ -77,6 +77,13 @@ const (
 	// it. The panic message and stack still go to stderr for postmortem.
 	CodeInternal = "INTERNAL"
 
+	// CodeOutOfScope: the call named (or, for a write, would touch) a node
+	// that exists in the bound catalog but sits outside the session's baked
+	// scope (--scope / WithGraphScopes). The scope is fixed at server
+	// construction; no tool argument can widen it — a caller that needs the
+	// node needs a differently-scoped session.
+	CodeOutOfScope = "OUT_OF_SCOPE"
+
 	// CodeCapsuleWorkflow: a capsule-routed write's workspace lifecycle
 	// failed — the catalog repo declares graph.write_via: capsule (or the
 	// server runs --write-via capsule) but the workspace could not be
