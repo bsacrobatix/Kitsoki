@@ -30,6 +30,7 @@ states:
       - init_repo_branch_issue_id
       - init_ticket_provider
       - init_ticket_repo
+      - init_ticket_sources
       - init_pr_provider
       - init_pr_repository
       - init_pr_base_branch
@@ -97,7 +98,7 @@ states:
             host:
               verbs: [host.dev.onboarding]
         bind:
-          init_run_ok:        "result.status"
+          init_run_ok:        "result.ok"
           init_discovery:     "result"
           init_discovery_error: "result.error"
           init_target_path:   "result.target_path"
@@ -117,6 +118,7 @@ states:
           init_tracker:       "result.tracker"
           init_ticket_provider: "result.tracker"
           init_ticket_repo:   "result.ticket_repo"
+          init_ticket_sources: "result.ticket_sources"
           init_pr_provider:   "result.pr_provider"
           init_pr_repository: "result.pr_repository"
           init_pr_base_branch: "result.pr_base_branch"
@@ -213,6 +215,7 @@ states:
                 init_repo_remote: ""
                 init_ticket_provider: "local"
                 init_ticket_repo: ""
+                init_ticket_sources: []
                 init_story_pack: "core-engineering"
                 init_story_pack_title: "Core engineering starter"
                 init_story_pack_summary: ""
@@ -251,6 +254,7 @@ states:
       - init_repo_remote
       - init_ticket_provider
       - init_ticket_repo
+      - init_ticket_sources
       - init_conventions
       - init_tracker
       - init_story_pack
@@ -313,10 +317,15 @@ states:
           pairs:
             Ticket source: "{{ world.init_ticket_provider|default:'informal' }}"
             Ticket project: "{{ world.init_ticket_repo|default:'pasted' }}"
+            Ticket sources: "{{ world.init_ticket_sources|length }} configured"
             PR provider: "{{ world.init_pr_provider|default:'local' }}"
             PR repository: "{{ world.init_pr_repository|default:'local' }}"
             PR base: "{{ world.init_pr_base_branch|default:world.init_repo_default_branch|default:'main' }}"
             PR template: "{{ world.init_pr_template|default:'none' }}"
+      - template: |
+          {% for source in world.init_ticket_sources %}- {{ source.label|default:source.id }} ({{ source.kind|default:source.provider }})
+          {% endfor %}
+        when: "len(world.init_ticket_sources) > 0"
       - heading: "Defaults used — review these"
         when: "len(world.init_default_notices) > 0"
       - template: |
@@ -330,8 +339,8 @@ states:
           pairs:
             Conventions: "{{ world.init_conventions }}"
             Tracker:     "{{ world.init_tracker }}"
-            Ticket provider: "{% if world.init_ticket_provider == 'github' %}GitHub Issues ({{ world.init_ticket_repo|default:'repo not detected' }}){% elif world.init_ticket_provider == 'local' %}local markdown / pasted reports{% else %}{{ world.init_ticket_provider|default:'informal' }} ({{ world.init_ticket_repo|default:'pasted' }}){% endif %}"
-            Capability: "{% if world.init_ticket_provider == 'github' && world.init_ticket_repo != '' %}full{% else %}good{% endif %}"
+            Ticket sources: "{{ world.init_ticket_sources|length }} composed"
+            Routing: "provider-neutral by selected source id"
             Transcripts: "{{ world.init_transcript_count|default:0 }}"
             Writes:      ".kitsoki.yaml, .kitsoki/project-profile.yaml, .kitsoki/stories/{{ world.init_project_id }}-dev/app.yaml"
             Mode:        "{{ world.init_profile_mode }}"
@@ -386,8 +395,8 @@ states:
             - label:  "story packs"
               hint:   "choose the starter pack for first-run adoption"
               intent: review_story_pack
-            - label:  "ticket provider"
-              hint:   "choose local/copy-paste ticket intake or GitHub Issues"
+            - label:  "ticket sources"
+              hint:   "review local intake and optional remote sources"
               intent: select_ticket_provider
               slots:  { provider: "review" }
             - label:  "revise"
@@ -481,6 +490,7 @@ states:
                 init_repo_remote: ""
                 init_ticket_provider: "local"
                 init_ticket_repo: ""
+                init_ticket_sources: []
                 init_story_pack: "core-engineering"
                 init_story_pack_title: "Core engineering starter"
                 init_story_pack_summary: ""
@@ -664,19 +674,20 @@ states:
         - target: .
 
   init_ticket_provider:
-    description: "Choose the ticket provider before onboarding writes the project profile."
+    description: "Choose the ticket-source composition before onboarding writes the project profile."
     relevant_world:
       - init_target_path
       - init_project_title
       - init_tracker
       - init_ticket_provider
       - init_ticket_repo
+      - init_ticket_sources
       - init_repo_remote
       - init_profile_status
     view:
       - banner:
           text:     "PROJECT ONBOARDING"
-          subtitle: "choose ticket provider"
+          subtitle: "choose ticket sources"
           color:    "#14B8A6"
       - kv:
           pairs:
@@ -684,23 +695,27 @@ states:
             Project:  "{{ world.init_project_title|default:'(not yet inferred)' }}"
             Detected: "{% if world.init_tracker == 'github' %}GitHub Issues{% else %}no remote provider detected{% endif %}"
             Repository: "{{ world.init_ticket_repo|default:'(none)' }}"
-            Selected: "{% if world.init_ticket_provider == 'github' %}GitHub Issues{% else %}local markdown / pasted reports{% endif %}"
-      - prose: "Good capability is available without a provider: paste bug reports or keep local markdown tickets. Full ticket capability uses a configured provider for search, issue-body fetch, comments, and status transitions."
+            Selected: "{{ world.init_ticket_sources|length }} configured source(s)"
+      - template: |
+          {% for source in world.init_ticket_sources %}- {{ source.label|default:source.id }} ({{ source.kind|default:source.provider }})
+          {% endfor %}
+        when: "len(world.init_ticket_sources) > 0"
+      - prose: "Local artifact intake is always available. Add a remote source for search, issue-body fetch, comments, and status transitions; every source remains independently labelled and routed."
       - choice:
           mode: single
-          prompt: "Ticket provider"
+          prompt: "Ticket sources"
           items:
-            - label:  "local reports"
+            - label:  "local only"
               hint:   "good capability; no remote credentials required"
               intent: select_ticket_provider
               slots:  { provider: "local" }
-            - label:  "GitHub detected"
-              hint:   "full capability using the detected owner/repo"
+            - label:  "keep detected sources"
+              hint:   "retain local intake plus the discovered owner/repo sources"
               intent: select_ticket_provider
               slots:  { provider: "github" }
               when:   "world.init_ticket_repo != ''"
-            - label:  "GitHub repo"
-              hint:   "full capability with an owner/repo slug"
+            - label:  "local + GitHub repo"
+              hint:   "compose local intake with one owner/repo slug"
               intent: select_ticket_provider
               param:
                 slot:        repo
@@ -721,6 +736,13 @@ states:
             - set:
                 init_ticket_provider: "local"
                 init_ticket_repo: ""
+                init_ticket_sources:
+                  - id: local
+                    label: Local
+                    provider: host.local_files.ticket
+                    kind: local
+                    mode: local
+                    args: { root: ".artifacts" }
                 init_profile_status: "draft"
                 last_error: ""
             - say: "Selected local ticket intake."
@@ -738,6 +760,19 @@ states:
             - set:
                 init_ticket_provider: "github"
                 init_ticket_repo: "{{ slots.repo }}"
+                init_ticket_sources:
+                  - id: local
+                    label: Local
+                    provider: host.local_files.ticket
+                    kind: local
+                    mode: local
+                    args: { root: ".artifacts" }
+                  - id: github
+                    label: "{{ slots.repo }}"
+                    provider: host.gh.ticket
+                    kind: github
+                    mode: remote
+                    args: { repo: "{{ slots.repo }}" }
                 init_profile_status: "draft"
                 last_error: ""
             - say: "Selected GitHub Issues for {{ slots.repo }}."
@@ -1030,6 +1065,7 @@ states:
               conventions: "{{ world.init_conventions }}"
               tracker: "{{ world.init_ticket_provider }}"
               ticket_repo: "{{ world.init_ticket_repo }}"
+              ticket_sources: "{{ world.init_ticket_sources }}"
               repo_vcs: "{{ world.init_repo_vcs }}"
               repo_default_branch: "{{ world.init_repo_default_branch }}"
               repo_remote: "{{ world.init_repo_remote }}"

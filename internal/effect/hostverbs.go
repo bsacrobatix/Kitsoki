@@ -14,7 +14,8 @@ package effect
 // loader's (internal/app) concern.
 //
 // A handful of verbs — host.git, host.gh.ticket, host.local,
-// host.local_files.ticket, host.local_github.ticket, host.cypilot_artifacts —
+// host.local_files.ticket, host.local_github.ticket, host.ticket_federation,
+// host.cypilot_artifacts —
 // are prefix-fallback
 // handlers that dispatch several operations via an `op` argument, and one
 // verb spans multiple effect tiers (e.g. "git log" reads; "git push" is
@@ -184,6 +185,24 @@ var builtinVerbTable = map[string]verbEffect{
 			"comment_edit": {class: External, deterministic: false},
 			"transition":   {class: External, deterministic: false},
 			"list_mine":    {class: Read, deterministic: false},
+		},
+	},
+
+	// host.ticket_federation composes explicitly marked providers. A read can
+	// fan out to remote services, while any mutation may select such a remote
+	// source; therefore reads are non-deterministic Read and mutations fail
+	// closed to External.
+	"host.ticket_federation": {
+		class: External, deterministic: false,
+		ops: map[string]opEffect{
+			"create":            {class: External, deterministic: false},
+			"search":            {class: Read, deterministic: false},
+			"get":               {class: Read, deterministic: false},
+			"comment":           {class: External, deterministic: false},
+			"comment_edit":      {class: External, deterministic: false},
+			"comment_reactions": {class: Read, deterministic: false},
+			"transition":        {class: External, deterministic: false},
+			"list_mine":         {class: Read, deterministic: false},
 		},
 	},
 

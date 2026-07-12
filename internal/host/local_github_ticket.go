@@ -43,6 +43,9 @@ func localGitHubTicketList(ctx context.Context, args map[string]any, op string) 
 
 	var providerErrors []string
 	localTickets := ticketRows(localRes.Data["tickets"])
+	for _, warning := range ticketFederationWarnings(localRes.Data["provider_errors"]) {
+		providerErrors = append(providerErrors, "local: "+warning)
+	}
 	if localRes.Error != "" {
 		providerErrors = append(providerErrors, "local: "+localRes.Error)
 		localTickets = nil
@@ -60,6 +63,9 @@ func localGitHubTicketList(ctx context.Context, args map[string]any, op string) 
 			return Result{}, ghErr
 		}
 		githubTickets = ticketRows(ghRes.Data["tickets"])
+		for _, warning := range ticketFederationWarnings(ghRes.Data["provider_errors"]) {
+			providerErrors = append(providerErrors, "github: "+warning)
+		}
 		if ghRes.Error != "" {
 			providerErrors = append(providerErrors, "github: "+ghRes.Error)
 			githubTickets = nil

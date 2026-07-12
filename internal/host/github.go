@@ -107,9 +107,9 @@ func ghTicketSearch(ctx context.Context, args map[string]any) (Result, error) {
 	tickets := make([]map[string]any, 0, len(raw.Items))
 	for _, r := range raw.Items {
 		ghNormalizeIssueURL(r)
-		tickets = append(tickets, ghIssueSummary(r))
+		tickets = append(tickets, ghIssueSummary(r, repo))
 	}
-	return Result{Data: map[string]any{"tickets": tickets}}, nil
+	return Result{Data: githubTicketSourceData(map[string]any{"tickets": tickets}, repo)}, nil
 }
 
 // ghTicketGet implements ticket.get via the native GitHub REST API.
@@ -144,7 +144,7 @@ func ghTicketGet(ctx context.Context, args map[string]any) (Result, error) {
 		return Result{Error: fmt.Sprintf("ticket.get: %s", githubAPIError(resp))}, nil
 	}
 	ghNormalizeIssueURL(raw)
-	data := ghIssueSummary(raw)
+	data := ghIssueSummary(raw, repo)
 	if body, ok := raw["body"].(string); ok {
 		data["body"] = body
 		// Recover the ```kitsoki body-metadata block create() wrote (trace_ref,
@@ -207,11 +207,11 @@ func ghTicketComment(ctx context.Context, args map[string]any) (Result, error) {
 		return Result{Error: fmt.Sprintf("ticket.comment: %s", githubAPIError(resp))}, nil
 	}
 	commentURL, _ := raw["html_url"].(string)
-	return Result{Data: map[string]any{
+	return Result{Data: githubTicketSourceData(map[string]any{
 		"ok":         true,
 		"comment_id": commentURL,
 		"url":        commentURL,
-	}}, nil
+	}, repo)}, nil
 }
 
 // ghTicketCommentEdit implements ticket.comment_edit via the GitHub REST issue
@@ -253,11 +253,11 @@ func ghTicketCommentEdit(ctx context.Context, args map[string]any) (Result, erro
 	if url, _ := raw["html_url"].(string); strings.TrimSpace(url) != "" {
 		commentURL = url
 	}
-	return Result{Data: map[string]any{
+	return Result{Data: githubTicketSourceData(map[string]any{
 		"ok":         true,
 		"comment_id": commentURL,
 		"url":        commentURL,
-	}}, nil
+	}, repo)}, nil
 }
 
 // ghTicketCommentReactions implements ticket.comment_reactions via the native
@@ -310,12 +310,12 @@ func ghTicketCommentReactions(ctx context.Context, args map[string]any) (Result,
 	for i, r := range raw {
 		reactions[i] = r
 	}
-	return Result{Data: map[string]any{
+	return Result{Data: githubTicketSourceData(map[string]any{
 		"ok":             true,
 		"reactions":      reactions,
 		"has_thumbsdown": hasThumbsdown,
 		"has_thumbsup":   hasThumbsup,
-	}}, nil
+	}, repo)}, nil
 }
 
 // ghTicketTransition implements ticket.transition via the native GitHub REST
@@ -363,10 +363,10 @@ func ghTicketTransition(ctx context.Context, args map[string]any) (Result, error
 	if code >= 300 {
 		return Result{Error: fmt.Sprintf("ticket.transition: %s", githubAPIError(resp))}, nil
 	}
-	return Result{Data: map[string]any{
+	return Result{Data: githubTicketSourceData(map[string]any{
 		"ok":     true,
 		"status": state,
-	}}, nil
+	}, repo)}, nil
 }
 
 // ghTicketListMine implements ticket.list_mine via the native GitHub Search API.
@@ -400,9 +400,9 @@ func ghTicketListMine(ctx context.Context, args map[string]any) (Result, error) 
 	tickets := make([]map[string]any, 0, len(raw.Items))
 	for _, r := range raw.Items {
 		ghNormalizeIssueURL(r)
-		tickets = append(tickets, ghIssueSummary(r))
+		tickets = append(tickets, ghIssueSummary(r, repo))
 	}
-	return Result{Data: map[string]any{"tickets": tickets}}, nil
+	return Result{Data: githubTicketSourceData(map[string]any{"tickets": tickets}, repo)}, nil
 }
 
 type githubIssueSearchResponse struct {
@@ -480,7 +480,7 @@ func ghNormalizeIssueURL(raw map[string]any) {
 // ("github").  GitHub does not have a native priority field; we leave
 // priority empty (callers that need it can read it off labels via
 // per-team convention — out of scope for v1).
-func ghIssueSummary(raw map[string]any) map[string]any {
+func ghIssueSummary(raw map[string]any, repo string) map[string]any {
 	num := ""
 	switch v := raw["number"].(type) {
 	case float64:
@@ -516,10 +516,14 @@ func ghIssueSummary(raw map[string]any) map[string]any {
 		// catch-all self-loop, and the headline drive button no-ops — the
 		// mirror of the local-files provider's source-dir `Kind` tagging.
 		"type": ghClassifyType(raw),
-		// source marks this row as GitHub-issue-backed so the ticket view
-		// can surface the local↔issue identity (see ghTicketGet, which
-		// also lifts the legacy_id out of the ```kitsoki metadata block).
-		"source": "github",
+	}
+	githubTicketSourceData(out, repo)
+	if num != "" {
+		localID := num
+		if strings.TrimSpace(repo) != "" {
+			localID = strings.TrimSpace(repo) + "#" + num
+		}
+		out["ref"] = "github:" + localID
 	}
 	if body, _ := raw["body"].(string); body != "" {
 		if meta := ghParseMetadata(body); meta != nil {
@@ -529,6 +533,30 @@ func ghIssueSummary(raw map[string]any) map[string]any {
 		}
 	}
 	return out
+}
+
+// githubTicketSourceData standardizes provider identity on direct GitHub
+// results. Federation replaces source/source_id with the configured source id,
+// but it relies on the resolved repository fields to distinguish symbolic
+// remotes such as origin and upstream.
+func githubTicketSourceData(data map[string]any, repo string) map[string]any {
+	if data == nil {
+		data = map[string]any{}
+	}
+	repo = strings.TrimSpace(repo)
+	label := repo
+	if label == "" {
+		label = "GitHub"
+	}
+	data["source"] = "github"
+	data["source_id"] = "github"
+	data["source_label"] = label
+	data["source_kind"] = "github"
+	data["source_mode"] = "remote"
+	data["source_repo"] = repo
+	data["ticket_repo"] = repo
+	data["repo"] = repo
+	return data
 }
 
 // ghClassifyType derives a kitsoki ticket type (bug | feature | epic) from a

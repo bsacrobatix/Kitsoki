@@ -61,8 +61,8 @@ host_handlers:
     data: { ok: true, sha: "abc123", diff: "", url: "https://example/pr/103205", pr_id: "103205", state: "success", checks: "", comments: "" }
   host.local:
     data: { ok: true, log: "PASS: 12 tests", passed: 12, failed: 0, state: "success" }
-  host.local_github.ticket:
-    data: { ok: true, tickets: "" }
+  host.ticket_federation:
+    data: { ok: true, tickets: [], source_groups: [], provider_errors: [] }
   # Confident verdict — every checkpoint where judge_mode is non-human
   # will auto-fire `accept` until we flip the mode.
   host.agent.decide:

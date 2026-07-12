@@ -33,53 +33,59 @@ func Builtins() *Registry {
 
 	// ticket -> host.local_files.ticket
 	r.Register("host.local_files.ticket", "search", Op{
-		Input:  fields("query", "string", "limit", "int"),
-		Output: fields("tickets", "list"),
+		Input:  fields("query", "string", "limit", "int", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
 	})
 	r.Register("host.local_files.ticket", "get", Op{
-		Input: fields("id", "string"),
+		Input: fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string"),
 		Output: fields(
 			"id", "string", "title", "string", "body", "string", "status", "string",
 			"priority", "string", "assignee", "string", "url", "string", "comments", "list",
+			"source", "string", "source_label", "string", "source_kind", "string",
+			"source_mode", "string", "source_repo", "string", "ref", "string",
 		),
 	})
 	r.Register("host.local_files.ticket", "comment", Op{
-		Input:  fields("id", "string", "body", "string", "thread", "string"),
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "body", "string", "thread", "string"),
 		Output: fields("ok", "bool", "comment_id", "string"),
 	})
 	r.Register("host.local_files.ticket", "transition", Op{
-		Input:  fields("id", "string", "to", "string"),
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "to", "string"),
 		Output: fields("ok", "bool"),
 	})
 	r.Register("host.local_files.ticket", "list_mine", Op{
-		Input:  fields("filter", "string"),
-		Output: fields("tickets", "list"),
+		Input:  fields("filter", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
 	})
 
 	// ticket -> host.local_github.ticket
 	r.Register("host.local_github.ticket", "search", Op{
-		Input:  fields("query", "string", "limit", "int"),
-		Output: fields("tickets", "list"),
+		Input:  fields("query", "string", "limit", "int", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
 	})
 	r.Register("host.local_github.ticket", "get", Op{
-		Input: fields("id", "string"),
+		Input: fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string"),
 		Output: fields(
 			"id", "string", "title", "string", "body", "string", "status", "string",
 			"priority", "string", "assignee", "string", "url", "string", "comments", "list",
+			"source", "string", "source_label", "string", "source_kind", "string",
+			"source_mode", "string", "source_repo", "string", "ref", "string",
 		),
 	})
 	r.Register("host.local_github.ticket", "comment", Op{
-		Input:  fields("id", "string", "body", "string", "thread", "string"),
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "body", "string", "thread", "string"),
 		Output: fields("ok", "bool", "comment_id", "string"),
 	})
 	r.Register("host.local_github.ticket", "transition", Op{
-		Input:  fields("id", "string", "to", "string"),
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "to", "string"),
 		Output: fields("ok", "bool"),
 	})
 	r.Register("host.local_github.ticket", "list_mine", Op{
-		Input:  fields("filter", "string"),
-		Output: fields("tickets", "list"),
+		Input:  fields("filter", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
 	})
+
+	registerTicketFederationBuiltins(r)
 
 	// vcs -> host.git
 	r.Register("host.git", "branch", Op{
@@ -219,6 +225,54 @@ func Builtins() *Registry {
 	registerGraphBuiltins(r)
 
 	return r
+}
+
+// registerTicketFederationBuiltins records the provider-neutral composition
+// carrier. Its declared ticket operations intentionally mirror dev-story's
+// ticket interface while adding the GitHub-compatible operations already
+// supported by the runtime handler for callers outside that story.
+func registerTicketFederationBuiltins(r *Registry) {
+	r.Register("host.ticket_federation", "search", Op{
+		Input:  fields("query", "string", "limit", "int", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
+	})
+	r.Register("host.ticket_federation", "get", Op{
+		Input: fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields(
+			"id", "string", "title", "string", "body", "string", "status", "string",
+			"priority", "string", "assignee", "string", "url", "string", "comments", "list",
+			"source", "string", "source_label", "string", "source_kind", "string",
+			"source_mode", "string", "source_repo", "string", "ref", "string",
+		),
+	})
+	r.Register("host.ticket_federation", "create", Op{
+		Input: fields(
+			"source", "string", "sources", "list", "repo", "string", "root", "string",
+			"title", "string", "body", "string", "severity", "string", "component", "string",
+			"target", "string", "labels", "list", "assignee", "string",
+		),
+		Output: fields("ok", "bool", "id", "string", "url", "string", "ref", "string"),
+	})
+	r.Register("host.ticket_federation", "comment", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "body", "string", "thread", "string"),
+		Output: fields("ok", "bool", "comment_id", "string"),
+	})
+	r.Register("host.ticket_federation", "comment_edit", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "comment_id", "string", "body", "string"),
+		Output: fields("ok", "bool", "comment_id", "string"),
+	})
+	r.Register("host.ticket_federation", "comment_reactions", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "comment_id", "string"),
+		Output: fields("ok", "bool", "reactions", "list", "has_thumbsdown", "bool", "has_thumbsup", "bool"),
+	})
+	r.Register("host.ticket_federation", "transition", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "to", "string"),
+		Output: fields("ok", "bool"),
+	})
+	r.Register("host.ticket_federation", "list_mine", Op{
+		Input:  fields("filter", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
+	})
 }
 
 // registerGraphBuiltins registers every host.graph.* op (graph-mcp plan P1

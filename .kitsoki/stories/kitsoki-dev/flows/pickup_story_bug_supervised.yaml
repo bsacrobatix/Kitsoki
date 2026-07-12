@@ -51,7 +51,7 @@ host_handlers:
       comments: ""
   host.local:
     data: { ok: true, log: "PASS: 28 tests", passed: 28, failed: 0, state: "success" }
-  host.local_github.ticket:
+  host.ticket_federation:
     data:
       ok: true
       tickets:

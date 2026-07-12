@@ -118,6 +118,8 @@ func ghTicketCreate(ctx context.Context, args map[string]any) (Result, error) {
 	if warning != "" {
 		data["warning"] = warning
 	}
+	githubTicketSourceData(data, repo)
+	data["ref"] = "github:" + repo + "#" + num
 	return Result{Data: data}, nil
 }
 

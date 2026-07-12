@@ -9,7 +9,7 @@ initial_world:
   core__judge_mode: "human"
 
 host_handlers:
-  host.local_github.ticket:
+  host.ticket_federation:
     by_op:
       get:
         data:
@@ -17,7 +17,12 @@ host_handlers:
           id: "117"
           title: "Bugfix URL should route to the bugfix story"
           type: "bug"
-          source: "github"
+          source: "origin"
+          source_label: "bsacrobatix/Kitsoki"
+          source_kind: "github"
+          source_mode: "remote"
+          source_repo: "bsacrobatix/Kitsoki"
+          ref: "origin:117"
           body: |
             The operator pasted a GitHub issue URL directly at landing.
           status: "open"
@@ -44,14 +49,14 @@ turns:
         request: "https://github.com/bsacrobatix/Kitsoki/issues/117"
     expect_state: core.bf.triaging
     expect_host_calls:
-      - handler: host.local_github.ticket.get
+      - handler: host.ticket_federation.get
         args:
           id: "https://github.com/bsacrobatix/Kitsoki/issues/117"
     expect_world:
       core__bf__ticket_id: "117"
       core__bf__ticket_title: "Bugfix URL should route to the bugfix story"
       core__bf__ticket_source_mode: "remote"
-      core__bf__ticket_source_ref: "https://github.com/bsacrobatix/Kitsoki/issues/117"
+      core__bf__ticket_source_ref: "origin:117"
       core__bf__ticket_url: "https://github.com/bsacrobatix/Kitsoki/issues/117"
       core__bf__ticket_body: |
         The operator pasted a GitHub issue URL directly at landing.

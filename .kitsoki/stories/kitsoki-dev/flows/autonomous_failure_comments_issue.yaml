@@ -50,7 +50,7 @@ host_handlers:
         intent: "refine"
         reason: "The test artifact is incomplete; a human should inspect the issue."
         confidence: 0.95
-  host.local_github.ticket:
+  host.ticket_federation:
     data: { ok: true, comment_id: "issue-comment-123" }
 
 turns:
@@ -61,7 +61,7 @@ turns:
       core__human_review_reason: "testing_cycle_budget_exhausted"
       core__human_review_issue_comment_id: "issue-comment-123"
     expect_host_calls:
-      - handler: host.local_github.ticket.comment
+      - handler: host.ticket_federation.comment
         args: { id: "123" }
         times: 1
 

@@ -246,8 +246,41 @@
 
     "tracker": {
       "type": "object",
-      "description": "Issue or work tracker metadata discovered for this project.",
-      "additionalProperties": true
+      "description": "Issue or work tracker metadata discovered for this project. tracker.sources is the canonical ordered set; provider/project/repo remain readable for legacy profiles.",
+      "additionalProperties": true,
+      "properties": {
+        "provider": { "type": "string", "description": "Legacy single-provider metadata. New profiles should declare tracker.sources." },
+        "project": { "type": "string", "description": "Legacy single-project locator. New profiles should declare each source's args." },
+        "repo": { "type": "string", "description": "Legacy alias for tracker.project." },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Ordered, composable ticket sources exposed through host.ticket_federation. Source ids are stable user-facing identities, independent of provider-local ticket numbers.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "provider", "kind", "mode", "args"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "description": "Stable source id used in federated refs such as upstream:123."
+              },
+              "label": { "type": "string", "minLength": 1, "description": "Unambiguous label shown in ticket lists." },
+              "provider": { "type": "string", "pattern": "^host\\.[A-Za-z0-9_.-]+$", "description": "Concrete statically registered ticket host id, for example host.local_files.ticket or host.gh.ticket. Raw .star paths are direct bindings and cannot be composed as federation sources." },
+              "kind": { "type": "string", "minLength": 1, "description": "Presentation/provider class such as local, github, jira, or a future provider kind." },
+              "mode": { "enum": ["local", "remote"], "description": "Whether the source is local to the checkout or backed by a remote service." },
+              "args": { "type": "object", "description": "Provider-specific arguments passed directly to the concrete ticket host.", "additionalProperties": true },
+              "locator_keys": {
+                "type": "array",
+                "description": "Optional provider-specific args that identify this source and must override ambient runtime values, for example project or queue. repo, root, and workdir are implicit when present in args.",
+                "items": { "type": "string", "minLength": 1 },
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
     },
 
     "pull_requests": {

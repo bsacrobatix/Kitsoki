@@ -3,8 +3,11 @@ package webconfig
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/goccy/go-yaml"
 )
 
 // repoRootFromCWD walks up from the test's cwd (internal/webconfig) to the
@@ -115,13 +118,27 @@ func TestLoadRoot_ProjectProfile(t *testing.T) {
 	profile := `schema: project-profile/v1
 repo:
   root: "."
+tracker:
+  sources:
+    - id: local
+      label: Local
+      provider: host.local_files.ticket
+      kind: local
+      mode: local
+      args: {root: .artifacts}
+    - id: upstream
+      label: constructorfabric/Kitsoki
+      provider: host.gh.ticket
+      kind: github
+      mode: remote
+      args: {repo: constructorfabric/Kitsoki}
 commands:
   build: "make build"
   test: "make test"
 kitsoki:
   instance:
     bindings:
-      ticket: host.local_files.ticket
+      ticket: host.ticket_federation
       vcs: host.git
       ci: host.local
       workspace: host.git_worktree
@@ -161,6 +178,13 @@ dev_story_profile:
 	}
 	if spec.World["ticket_repo"] != "constructorfabric/Kitsoki" {
 		t.Fatalf("profile ticket_repo not carried into RootSpec: %+v", spec.World)
+	}
+	sources, ok := spec.World["ticket_sources"].([]any)
+	if !ok || len(sources) != 2 {
+		t.Fatalf("profile tracker.sources not projected as ticket_sources: %#v", spec.World["ticket_sources"])
+	}
+	if got := sources[1].(map[string]any)["id"]; got != "upstream" {
+		t.Fatalf("projected ticket source identity = %#v, want upstream", got)
 	}
 }
 
@@ -262,15 +286,32 @@ func TestLoadRoot_LocalRootOverrideWinsOverProjectProfile(t *testing.T) {
 	local := `root:
   overrides:
     world:
-      ticket_repo: bsacrobatix/Kitsoki
+      ticket_sources:
+        - id: local
+          label: Local only
+          provider: host.local_files.ticket
+          kind: local
+          mode: local
+          args: {root: .artifacts}
 `
 	if err := os.WriteFile(filepath.Join(dir, ".kitsoki.local.yaml"), []byte(local), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	profile := `schema: project-profile/v1
-dev_story_profile:
-  docs:
-    ticket_repo: constructorfabric/Kitsoki
+tracker:
+  sources:
+    - id: local
+      label: Local
+      provider: host.local_files.ticket
+      kind: local
+      mode: local
+      args: {root: .artifacts}
+    - id: upstream
+      label: constructorfabric/Kitsoki
+      provider: host.gh.ticket
+      kind: github
+      mode: remote
+      args: {repo: constructorfabric/Kitsoki}
 `
 	if err := os.WriteFile(filepath.Join(dir, ".kitsoki", "project-profile.yaml"), []byte(profile), 0o644); err != nil {
 		t.Fatal(err)
@@ -280,8 +321,67 @@ dev_story_profile:
 		t.Fatalf("load profile root with local override: %v", err)
 	}
 	spec := cfg.Root.RootSpec()
-	if spec.World["ticket_repo"] != "bsacrobatix/Kitsoki" {
-		t.Fatalf("local root override should win over profile ticket_repo: %+v", spec.World)
+	sources, ok := spec.World["ticket_sources"].([]any)
+	if !ok || len(sources) != 1 || sources[0].(map[string]any)["label"] != "Local only" {
+		t.Fatalf("local root override should replace profile ticket_sources as one coherent list: %#v", spec.World["ticket_sources"])
+	}
+}
+
+func TestLoadRoot_KitsokiProfileKeepsTicketSourcesComposed(t *testing.T) {
+	realRoot := repoRootFromCWD(t)
+	raw, err := os.ReadFile(filepath.Join(realRoot, ".kitsoki", "project-profile.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := writableRepoRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, ".kitsoki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, ".kitsoki.yaml")
+	if err := os.WriteFile(configPath, []byte("story_dirs: [./stories]\nproject_profile: .kitsoki/project-profile.yaml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("load Kitsoki project profile: %v", err)
+	}
+	spec := cfg.Root.RootSpec()
+	if spec.Bindings["ticket"] != "host.ticket_federation" {
+		t.Fatalf("Kitsoki profile ticket binding drifted: %+v", spec.Bindings)
+	}
+	sources, ok := spec.World["ticket_sources"].([]any)
+	if !ok || len(sources) != 3 {
+		t.Fatalf("Kitsoki profile should project local, origin, and upstream sources: %#v", spec.World["ticket_sources"])
+	}
+	wantIDs := []string{"local", "origin", "upstream"}
+	for i, want := range wantIDs {
+		if got := sources[i].(map[string]any)["id"]; got != want {
+			t.Fatalf("ticket source %d id = %#v, want %q", i, got, want)
+		}
+	}
+	expected := []any{
+		map[string]any{"id": "local", "label": "Local", "provider": "host.local_files.ticket", "kind": "local", "mode": "local", "args": map[string]any{"root": ".artifacts"}},
+		map[string]any{"id": "origin", "label": "bsacrobatix/Kitsoki", "provider": "host.gh.ticket", "kind": "github", "mode": "remote", "args": map[string]any{"repo": "bsacrobatix/Kitsoki"}},
+		map[string]any{"id": "upstream", "label": "constructorfabric/Kitsoki", "provider": "host.gh.ticket", "kind": "github", "mode": "remote", "args": map[string]any{"repo": "constructorfabric/Kitsoki"}},
+	}
+	if !reflect.DeepEqual(sources, expected) {
+		t.Fatalf("Kitsoki profile ticket sources drifted:\n got: %#v\nwant: %#v", sources, expected)
+	}
+	wrapperRaw, err := os.ReadFile(filepath.Join(realRoot, ".kitsoki", "stories", "kitsoki-dev", "app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wrapper map[string]any
+	if err := yaml.Unmarshal(wrapperRaw, &wrapper); err != nil {
+		t.Fatalf("parse explicit Kitsoki wrapper: %v", err)
+	}
+	wrapperWorld := wrapper["world"].(map[string]any)
+	wrapperTicketSources := wrapperWorld["ticket_sources"].(map[string]any)["default"]
+	if !reflect.DeepEqual(sources, wrapperTicketSources) {
+		t.Fatalf("project profile and explicit Kitsoki wrapper ticket sources drifted:\nprofile: %#v\nwrapper: %#v", sources, wrapperTicketSources)
 	}
 }
 

@@ -2,8 +2,11 @@ package kitendpoint
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 	"kitsoki/internal/kit"
 )
@@ -120,5 +123,46 @@ func TestDispatcherCall_UndeclaredOp(t *testing.T) {
 
 	if _, err := d.Call(context.Background(), "synthetic", "reporter", "no-such-op", nil); err == nil {
 		t.Fatal("expected an error for an undeclared operation, got nil")
+	}
+}
+
+func TestRegisterScriptsLocked_PreservesTicketProviderCapabilityOnReplace(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tickets.star")
+	if err := os.WriteFile(script, []byte("def search(ctx):\n    return {\"tickets\": []}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script+".yaml", []byte("kind: ticket_provider/v1\nhttp:\n  enabled: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := host.NewRegistry()
+	const name = "host.starlark_binding.lazy_ticket_provider"
+	// Lazy kit registration intentionally replaces an existing entry. The
+	// replacement must add the explicit federation capability marker too.
+	reg.Register(name, func(context.Context, map[string]any) (host.Result, error) {
+		return host.Result{}, nil
+	})
+	d := NewDispatcher(kit.NewRegistry(), reg)
+	d.registerScriptsLocked(&app.AppDef{StarlarkHostBindings: map[string]string{name: script}})
+	if !reg.IsTicketProvider(name) {
+		t.Fatalf("lazy ticket_provider/v1 binding %q was replaced without its federation capability marker", name)
+	}
+
+	generic := filepath.Join(dir, "generic.star")
+	if err := os.WriteFile(generic, []byte("def main(ctx):\n    return {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(generic+".yaml", []byte("inputs: {}\noutputs: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg2 := host.NewRegistry()
+	reg2.RegisterTicketProvider(name, func(context.Context, map[string]any) (host.Result, error) {
+		return host.Result{}, nil
+	})
+	d2 := NewDispatcher(kit.NewRegistry(), reg2)
+	d2.registerScriptsLocked(&app.AppDef{StarlarkHostBindings: map[string]string{name: generic}})
+	if reg2.IsTicketProvider(name) {
+		t.Fatalf("generic Starlark replacement %q inherited ticket-provider capability", name)
 	}
 }

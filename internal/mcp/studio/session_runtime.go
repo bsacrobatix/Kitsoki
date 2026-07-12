@@ -411,7 +411,7 @@ func applyStudioHostCassette(hostReg *host.Registry, cassettePath string, sink s
 		if failClosedAgentReplay && strings.HasPrefix(hn, "host.agent.") {
 			fallback = replayAgentMissHandler(hn)
 		}
-		hostReg.Replace(hn, testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), sink, nil))
+		hostReg.ReplacePreservingCapabilities(hn, testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), sink, nil))
 	}
 	return seen, nil
 }

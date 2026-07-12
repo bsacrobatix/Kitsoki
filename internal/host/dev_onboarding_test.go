@@ -36,6 +36,35 @@ func TestDevOnboardingDiscoverUsesProjectMetadata(t *testing.T) {
 	}
 }
 
+func TestOnboardingTicketSourcesFromRemotesKeepsForkAndUpstreamDistinct(t *testing.T) {
+	sources := onboardingTicketSourcesFromRemotes([]onboardingRemote{
+		{Name: "mirror", URL: "https://github.com/constructorfabric/Kitsoki.git"},
+		{Name: "upstream", URL: "git@github.com:constructorfabric/Kitsoki.git"},
+		{Name: "origin", URL: "git@github.com:bsacrobatix/Kitsoki.git"},
+		{Name: "internal", URL: "ssh://git.example.test/team/kitsoki"},
+	})
+	if len(sources) != 3 {
+		t.Fatalf("sources = %#v, want local plus two distinct GitHub repositories", sources)
+	}
+	want := []struct {
+		id    string
+		label string
+		repo  string
+	}{{"local", "Local", ""}, {"origin", "bsacrobatix/Kitsoki", "bsacrobatix/Kitsoki"}, {"upstream", "constructorfabric/Kitsoki", "constructorfabric/Kitsoki"}}
+	for index, expected := range want {
+		source := onboardingMap(sources[index])
+		if got := stringValue(source, "id"); got != expected.id {
+			t.Fatalf("source %d id = %q, want %q", index, got, expected.id)
+		}
+		if got := stringValue(source, "label"); got != expected.label {
+			t.Fatalf("source %d label = %q, want %q", index, got, expected.label)
+		}
+		if expected.repo != "" && stringValue(onboardingMap(source["args"]), "repo") != expected.repo {
+			t.Fatalf("source %d args = %#v, want repo %q", index, source["args"], expected.repo)
+		}
+	}
+}
+
 func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example\n"), 0o644); err != nil {
@@ -65,6 +94,9 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	}
 	if !strings.Contains(string(profile), "workspace: host.capsule_workspace") || strings.Contains(string(profile), "workspace: host.git_worktree") {
 		t.Fatalf("profile workspace binding not migrated:\n%s", profile)
+	}
+	if !strings.Contains(string(profile), "ticket: host.ticket_federation") || !strings.Contains(string(profile), "sources:") || !strings.Contains(string(profile), "root: .artifacts") {
+		t.Fatalf("profile should bind the ticket federation with local artifact intake:\n%s", profile)
 	}
 	developmentCapsule, err := os.ReadFile(filepath.Join(root, ".kitsoki/capsules/development.yaml"))
 	if err != nil {
@@ -109,12 +141,167 @@ func TestDevOnboardingApplyWritesValidatedProfileAndInstance(t *testing.T) {
 	if !strings.Contains(string(instance), "- host.git_worktree") {
 		t.Fatalf("instance hosts allow-list missing host.git_worktree (needed by slidey-edit via dev-story):\n%s", instance)
 	}
+	if !strings.Contains(string(instance), "ticket: host.ticket_federation") || !strings.Contains(string(instance), "ticket_sources: { type: list") {
+		t.Fatalf("instance should project the profile's composed ticket sources:\n%s", instance)
+	}
 	gitignore, err := os.ReadFile(filepath.Join(root, ".gitignore"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(gitignore), ".capsules/") {
 		t.Fatalf("gitignore missing capsule workspace entry:\n%s", gitignore)
+	}
+}
+
+func TestDevOnboardingApplyCarriesMultipleAndFutureTicketSources(t *testing.T) {
+	root := t.TempDir()
+	sources := []any{
+		map[string]any{"id": "work", "label": "ACME", "provider": "host.acme.ticket", "kind": "acme", "mode": "remote", "args": map[string]any{"project": "ENG"}, "locator_keys": []any{"project"}},
+		map[string]any{"id": "upstream", "label": "constructorfabric/Kitsoki", "provider": "host.gh.ticket", "kind": "github", "mode": "remote", "args": map[string]any{"repo": "constructorfabric/Kitsoki"}},
+	}
+	result, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": map[string]any{
+		"target_path": root, "project_id": "example", "project_title": "Example", "stack": "local project",
+		"test_command": "true", "repo_vcs": "none", "ticket_sources": sources,
+	}})
+	if err != nil || stringValue(result.Data, "status") != "applied" {
+		t.Fatalf("apply = %#v, %v", result, err)
+	}
+	profile, err := os.ReadFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ticket: host.ticket_federation", "provider: host.acme.ticket", "project: ENG", "repo: constructorfabric/Kitsoki"} {
+		if !strings.Contains(string(profile), want) {
+			t.Fatalf("profile missing %q:\n%s", want, profile)
+		}
+	}
+	instance, err := os.ReadFile(filepath.Join(root, ".kitsoki", "stories", "example-dev", "app.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"- host.ticket_federation", "- host.acme.ticket", `"id":"local"`, `"id":"work"`, `"id":"upstream"`} {
+		if !strings.Contains(string(instance), want) {
+			t.Fatalf("instance missing %q:\n%s", want, instance)
+		}
+	}
+}
+
+func TestDevOnboardingApplyMigratesUntouchedLegacyGeneratedWrapper(t *testing.T) {
+	root := t.TempDir()
+	data := map[string]any{
+		"target_path": root, "project_id": "example", "project_title": "Example", "stack": "go project",
+		"test_command": "go test ./...", "build_command": "go build ./...", "repo_vcs": "git",
+		"repo_default_branch": "main", "tracker": "github", "ticket_repo": "acme/example",
+		"pr_provider": "github", "pr_repository": "acme/example",
+	}
+	legacyProfile := onboardingProfileDocument(data)
+	legacyTracker := onboardingMap(legacyProfile["tracker"])
+	delete(legacyTracker, "sources")
+	legacyTracker["provider"] = "github"
+	legacyTracker["project"] = "acme/example"
+	legacyTracker["repo"] = "acme/example"
+	legacyOnboarding := onboardingMap(legacyProfile["onboarding"])
+	legacyResolutions := []any{}
+	for _, raw := range onboardingAnyList(legacyOnboarding["resolutions"]) {
+		if stringValue(onboardingMap(raw), "field") != "tracker.sources" {
+			legacyResolutions = append(legacyResolutions, raw)
+		}
+	}
+	legacyResolutions = append(legacyResolutions,
+		onboardingResolution("tracker.provider", "github", "discovered", "Legacy generated provider discovery.", ""),
+		onboardingResolution("tracker.project", "acme/example", "discovered", "Legacy generated repository discovery.", ""),
+	)
+	legacyOnboarding["resolutions"] = legacyResolutions
+	legacyInstance := onboardingMap(onboardingMap(legacyProfile["kitsoki"])["instance"])
+	onboardingMap(legacyInstance["bindings"])["ticket"] = "host.local_github.ticket"
+	profileRaw, err := yaml.Marshal(legacyProfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profilePath := filepath.Join(root, ".kitsoki", "project-profile.yaml")
+	instancePath := filepath.Join(root, ".kitsoki", "stories", "example-dev", "app.yaml")
+	if err := os.MkdirAll(filepath.Dir(instancePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profilePath, profileRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(instancePath, []byte(onboardingLegacyInstanceYAML(legacyProfile)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": data})
+	if err != nil || stringValue(result.Data, "status") != "applied" || boolValue(result.Data, "instance_update_required") {
+		t.Fatalf("migration apply = %#v, %v", result, err)
+	}
+	got, err := os.ReadFile(instancePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# kitsoki-managed-wrapper: v1", "ticket: host.ticket_federation", "ticket_sources:", "acme/example"} {
+		if !strings.Contains(string(got), want) {
+			t.Fatalf("migrated wrapper missing %q:\n%s", want, got)
+		}
+	}
+	updatedProfile, err := onboardingReadProfile(profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundManagedSources := false
+	for _, raw := range onboardingResolutionList(updatedProfile) {
+		resolution := onboardingMap(raw)
+		if stringValue(resolution, "field") == "tracker.sources" {
+			foundManagedSources = stringValue(resolution, "source") == "discovered"
+		}
+	}
+	if !foundManagedSources {
+		t.Fatalf("legacy tracker provenance was not migrated as managed: %#v", onboardingResolutionList(updatedProfile))
+	}
+	data["ticket_sources"] = []any{
+		onboardingGitHubTicketSource("origin", "acme/example"),
+		onboardingGitHubTicketSource("upstream", "upstream/example"),
+	}
+	refreshed, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": data})
+	if err != nil || stringValue(refreshed.Data, "status") != "applied" {
+		t.Fatalf("post-migration refresh = %#v, %v", refreshed, err)
+	}
+	profileAfterRefresh, _ := os.ReadFile(profilePath)
+	wrapperAfterRefresh, _ := os.ReadFile(instancePath)
+	if !strings.Contains(string(profileAfterRefresh), "upstream/example") || !strings.Contains(string(wrapperAfterRefresh), "upstream/example") {
+		t.Fatalf("managed migrated sources did not accept later discovery:\nprofile:\n%s\nwrapper:\n%s", profileAfterRefresh, wrapperAfterRefresh)
+	}
+}
+
+func TestMergeOnboardingProfilePreservesLegacyDirectTicketBinding(t *testing.T) {
+	generated := onboardingProfileDocument(map[string]any{
+		"target_path": t.TempDir(), "project_id": "example", "project_title": "Example",
+		"stack": "local project", "test_command": "true", "repo_vcs": "none",
+	})
+	existing := map[string]any{
+		"tracker": map[string]any{"provider": "private", "project": "ENG"},
+		"kitsoki": map[string]any{"instance": map[string]any{"bindings": map[string]any{
+			"ticket": ".kitsoki/providers/ticket.star", "vcs": "host.git", "ci": "host.local",
+			"workspace": "host.capsule_workspace", "transport": "host.append_to_file",
+		}}},
+	}
+	merged, _ := mergeOnboardingProfile(generated, existing)
+	bindings := onboardingMap(onboardingMap(onboardingMap(merged["kitsoki"])["instance"])["bindings"])
+	if got := stringValue(bindings, "ticket"); got != ".kitsoki/providers/ticket.star" {
+		t.Fatalf("legacy direct binding = %q, want preserved script path", got)
+	}
+	if sources := onboardingAnyList(onboardingMap(merged["tracker"])["sources"]); len(sources) != 0 {
+		t.Fatalf("raw script binding must not be rewritten as federation sources: %#v", sources)
+	}
+	found := false
+	for _, raw := range onboardingAnyList(onboardingMap(merged["setup_plan"])["verifications"]) {
+		verification := onboardingMap(raw)
+		if stringValue(verification, "id") == "ticket-source" {
+			fields := onboardingAnyList(verification["fields"])
+			found = len(fields) == 1 && fields[0] == "kitsoki.instance.bindings.ticket"
+		}
+	}
+	if !found {
+		t.Fatalf("legacy direct binding verification was not preserved: %#v", onboardingMap(merged["setup_plan"])["verifications"])
 	}
 }
 
@@ -228,6 +415,22 @@ func TestDevOnboardingApplyIsIdempotentAndPreservesOperatorFields(t *testing.T) 
 	updated, _ := os.ReadFile(profilePath)
 	if !strings.Contains(string(updated), "test: make project-test") || !strings.Contains(string(updated), "source: operator") {
 		t.Fatalf("operator override was not preserved and marked:\n%s", updated)
+	}
+	instanceAfterOperatorEdit, _ := os.ReadFile(instancePath)
+	if !strings.Contains(string(instanceAfterOperatorEdit), `test_cmd: { type: string, default: "make project-test" }`) {
+		t.Fatalf("managed wrapper did not follow preserved profile command:\n%s", instanceAfterOperatorEdit)
+	}
+	customized := append(append([]byte(nil), instanceAfterOperatorEdit...), []byte("# project-authored wrapper note\n")...)
+	if err := os.WriteFile(instancePath, customized, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fourth, err := DevOnboardingHandler(context.Background(), map[string]any{"op": "apply", "data": data})
+	if err != nil || boolValue(fourth.Data, "instance_update_required") {
+		t.Fatalf("customized but contract-compatible wrapper apply = %#v, %v", fourth, err)
+	}
+	instanceAfterCustomApply, _ := os.ReadFile(instancePath)
+	if string(instanceAfterCustomApply) != string(customized) {
+		t.Fatal("project-authored wrapper content was overwritten")
 	}
 }
 

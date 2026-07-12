@@ -778,7 +778,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 				fallback, _ = reg.Get(handlerName)
 			}
 			casDispatcher := BuildCassetteDispatcherWithJournalAndSink(cas, handlerName, stateOf, fallback, recordSink, clk, jw, journalLookup, deferredAgentSink)
-			reg.Replace(handlerName, casDispatcher)
+			reg.ReplacePreservingCapabilities(handlerName, casDispatcher)
 		}
 
 		// When host_bindings: is set (builtins registered) and a record sink is
@@ -803,7 +803,7 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 					continue // not a builtin in this rig — skip
 				}
 				casDispatcher := BuildCassetteDispatcherWithJournalAndSink(cas, handlerName, stateOf, fallback, recordSink, clk, jw, journalLookup, deferredAgentSink)
-				reg.Replace(handlerName, casDispatcher)
+				reg.ReplacePreservingCapabilities(handlerName, casDispatcher)
 				seen[handlerName] = true
 			}
 		}

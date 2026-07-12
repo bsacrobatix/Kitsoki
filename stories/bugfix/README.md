@@ -199,8 +199,13 @@ in `app.yaml`'s `world:` block so the child loads standalone for tests.
 | `ticket_id` | string | Every checkpoint's `phase_id:` and post title. | `""` |
 | `ticket_title` | string | Views / artifact prompts. | `""` |
 | `ticket_url` | string | Returned to parent on completion. | `""` |
+| `ticket_sources` | list | Ordered provider-neutral source composition used by `iface.ticket.*`. | `[]` |
+| `ticket_source` | string | Stable selected source id; required for unambiguous routing when ids overlap. | `""` |
+| `ticket_source_label` | string | Operator-facing source label. | `""` |
+| `ticket_source_kind` | string | Provider class such as `local`, `github`, or `jira`; only `github` enables the legacy direct-GitHub fallback. | `""` |
+| `ticket_source_repo` | string | Selected provider's repo/project identity, independent of GitHub. | `""` |
 | `ticket_source_mode` | string | Tells triage where the report lives. Values: `local` \| `remote` \| `freeform`. | `local` |
-| `ticket_source_ref` | string | Local markdown path, remote issue URL/ref, or free-form complaint label used as the report source. | `""` |
+| `ticket_source_ref` | string | Stable provider/federation routing identity such as `local:<id>` or `upstream:123`; local paths and remote URLs stay in `thread` / `ticket_url`. | `""` |
 | `ticket_body` | string | Remote issue body, pre-read local issue body, or free-form operator complaint. If set without `ticket_id`, `idle` synthesizes a complaint id and autostarts. | `""` |
 | `acceptance_contract` | list | Optional caller-visible strict requirements. Each needs a test receipt; `required_paths` must occur in the committed range and `required_diff_contains` may require public literal source evidence. Never use this to encode a hidden oracle. | `[]` |
 | `thread` | string | The transport's thread identifier (file path / Jira key / chat ID). | `""` |

@@ -87,10 +87,17 @@ registration, and the skills/agents toolkit.
 
 The review is an outcome contract, not just a file preview. It must identify
 the canonical test command, deterministic dev-server lifecycle when applicable,
-branch and ticket-ID convention, ticket source, and PR destination/base/template
-policy. When repository evidence cannot answer one of those questions, Kitsoki
-shows the default it used and the exact field in
+branch and ticket-ID convention, the ordered ticket sources, and PR
+destination/base/template policy. When repository evidence cannot answer one
+of those questions, Kitsoki shows the default it used and the exact field in
 `.kitsoki/project-profile.yaml` to update.
+
+Every new profile includes local markdown intake under `.artifacts` and may add
+any number of independently labelled remote sources. GitHub remotes are
+discovered by repository identity, so an origin fork and an upstream repository
+remain distinct even when their issue numbers overlap. The generated wrapper
+binds the source list through `host.ticket_federation`; edit
+`tracker.sources` to add or remove sources later.
 
 Discovery is read-only. If the toolkit or MCP install fails, onboarding stops
 with a loud `init_tools_failed` state rather than reporting success. You can
@@ -200,10 +207,17 @@ kitsoki project-profile refresh --target /path/to/project --apply
 
 Fields recorded as `source: operator` are preserved. A manual value that differs
 from its last managed resolution is promoted to operator-owned on refresh. The
-command validates before writing and never overwrites the project-owned wrapper.
+command validates before writing. Generator-owned wrappers carry a
+`kitsoki-managed-wrapper` content checksum and refresh their wiring when
+profile-owned ticket sources change; an untouched legacy generated wrapper is
+migrated once by a frozen exact fingerprint. A customized wrapper invalidates
+that checksum and is never overwritten: refresh
+returns `instance_update_required: true` and a validation warning until its
+ticket binding, source projection, defaults, and host allow-list match.
 
-That wrapper imports `@kitsoki/dev-story`, so installing a new binary updates
-the embedded base story without regenerating the wrapper. During source
+The wrapper still imports `@kitsoki/dev-story`, so installing a new binary
+updates the embedded base story without copying story content into the wrapper.
+During source
 development, select the staging story explicitly:
 
 ```sh

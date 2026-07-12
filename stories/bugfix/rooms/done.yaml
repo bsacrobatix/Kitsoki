@@ -227,9 +227,13 @@ states:
                 body:     "{{ world.done_artifact.summary_markdown }}"
                 phase_id: "done_{{ world.ticket_id }}"
             - invoke: iface.ticket.comment
-              when: "world.ticket_repo == ''"
+              when: "(len(world.ticket_sources) > 0 && world.ticket_source != '') || (len(world.ticket_sources) == 0 && world.ticket_repo == '')"
               with:
                 id: "{{ world.ticket_id }}"
+                ref: "{{ world.ticket_source_ref }}"
+                source: "{{ world.ticket_source }}"
+                sources: "{{ world.ticket_sources }}"
+                repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : world.ticket_repo }}"
                 thread: "{{ world.thread }}"
                 body: |
                   Fixed in:
@@ -285,7 +289,7 @@ states:
                   cycle: {{ world.cycle }}
                   -->
             - invoke: host.gh.ticket.comment
-              when: "world.ticket_repo != ''"
+              when: "len(world.ticket_sources) == 0 && world.ticket_repo != ''"
               with:
                 repo: "{{ world.ticket_repo }}"
                 id: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_id }}"
@@ -344,12 +348,16 @@ states:
                   cycle: {{ world.cycle }}
                   -->
             - invoke: iface.ticket.transition
-              when: "world.ticket_repo == ''"
+              when: "(len(world.ticket_sources) > 0 && world.ticket_source != '') || (len(world.ticket_sources) == 0 && world.ticket_repo == '')"
               with:
                 id: "{{ world.ticket_id }}"
+                ref: "{{ world.ticket_source_ref }}"
+                source: "{{ world.ticket_source }}"
+                sources: "{{ world.ticket_sources }}"
+                repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : world.ticket_repo }}"
                 to: "resolved"
             - invoke: host.gh.ticket.transition
-              when: "world.ticket_repo != ''"
+              when: "len(world.ticket_sources) == 0 && world.ticket_repo != ''"
               with:
                 repo: "{{ world.ticket_repo }}"
                 id: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_id }}"
@@ -375,9 +383,13 @@ states:
                 body:     "{{ world.done_artifact.summary_markdown }}"
                 phase_id: "done_{{ world.ticket_id }}"
             - invoke: iface.ticket.comment
-              when: "world.ticket_repo == ''"
+              when: "(len(world.ticket_sources) > 0 && world.ticket_source != '') || (len(world.ticket_sources) == 0 && world.ticket_repo == '')"
               with:
                 id: "{{ world.ticket_id }}"
+                ref: "{{ world.ticket_source_ref }}"
+                source: "{{ world.ticket_source }}"
+                sources: "{{ world.ticket_sources }}"
+                repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : world.ticket_repo }}"
                 thread: "{{ world.thread }}"
                 body: |
                   Fixed in:
@@ -433,7 +445,7 @@ states:
                   cycle: {{ world.cycle }}
                   -->
             - invoke: host.gh.ticket.comment
-              when: "world.ticket_repo != ''"
+              when: "len(world.ticket_sources) == 0 && world.ticket_repo != ''"
               with:
                 repo: "{{ world.ticket_repo }}"
                 id: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_id }}"
@@ -492,12 +504,16 @@ states:
                   cycle: {{ world.cycle }}
                   -->
             - invoke: iface.ticket.transition
-              when: "world.ticket_repo == ''"
+              when: "(len(world.ticket_sources) > 0 && world.ticket_source != '') || (len(world.ticket_sources) == 0 && world.ticket_repo == '')"
               with:
                 id: "{{ world.ticket_id }}"
+                ref: "{{ world.ticket_source_ref }}"
+                source: "{{ world.ticket_source }}"
+                sources: "{{ world.ticket_sources }}"
+                repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : world.ticket_repo }}"
                 to: "resolved"
             - invoke: host.gh.ticket.transition
-              when: "world.ticket_repo != ''"
+              when: "len(world.ticket_sources) == 0 && world.ticket_repo != ''"
               with:
                 repo: "{{ world.ticket_repo }}"
                 id: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_id }}"

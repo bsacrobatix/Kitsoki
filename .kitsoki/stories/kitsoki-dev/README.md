@@ -4,15 +4,15 @@ This is the project-owned wrapper for running `@kitsoki/dev-story` against the
 Kitsoki checkout. It is the golden example for reusable dev-story instances:
 the app imports the shared story under `core`, keeps project defaults in
 `world:`, and binds provider interfaces without forking shared rooms. Local
-artifact bug files stay the default developer loop, and GitHub Issues appear
-beside them for user-submitted issues and coordination.
+artifact bug files stay the default developer loop. The fork and upstream
+GitHub repositories appear beside them as separately named sources.
 
 The app imports `stories/dev-story/` under the alias `core` and binds five
 `host_interfaces:` to concrete providers:
 
 | iface       | binding                  | what it does                                                     |
 |-------------|--------------------------|------------------------------------------------------------------|
-| `ticket`    | `host.local_github.ticket`| shows local artifact tickets plus GitHub issues; routes selected close-out by source |
+| `ticket`    | `host.ticket_federation`  | composes ordered local and remote sources; routes every operation to the selected source |
 | `vcs`       | `host.git`               | local git CLI — branch, commit, diff, push, open_pr, merge       |
 | `ci`        | `host.local`             | `go test ./...` and friends                                      |
 | `workspace` | `host.capsule_workspace` | managed Capsule workspaces from `.kitsoki/capsules/development.yaml` |
@@ -111,6 +111,8 @@ canned closed-loop tests:
 | Fixture                                  | What it proves                                                                  |
 |------------------------------------------|---------------------------------------------------------------------------------|
 | `flows/self_host_smoke.yaml`             | the app loads; `iface.ticket.list_mine` resolves; navigation lifts work          |
+| `flows/ticket_source_pick_routes.yaml`   | local, fork, and upstream groups keep global indices and exact source routing |
+| `flows/local_named_bug_intake_routes.yaml` | `fix local bug <id>` becomes a source-qualified local ref before bugfix |
 | `flows/fix_tests_autonomous.yaml`        | `core__go_fix_tests` runs quick/full make-test gates plus review and returns to landing |
 | `flows/idea_uses_context_workspace.yaml` | the idea/proposal room writes workspaces under `.context/designs`, not protected `docs/proposals/.workspace` |
 | `flows/pickup_self_bug_supervised.yaml`  | 18-turn supervised walk: ticket pick → bf 8-room → @exit:done → pr → @exit:merged → main |
@@ -125,15 +127,22 @@ walkthrough".
 
 ## Ticket sources
 
-`kitsoki-dev` presents one active local pile and the configured GitHub remote in
-the same picker:
+`kitsoki-dev` presents three ordered, independently labelled sources in the
+same picker:
 
 ```
 .artifacts/issues/bugs/*.md       — local developer bugs
 .artifacts/issues/features/*.md   — local feature tickets
 .artifacts/issues/epics/*.md      — local epics
-origin                             — GitHub issues for the repository remote
+bsacrobatix/Kitsoki                — fork GitHub issues
+constructorfabric/Kitsoki          — upstream GitHub issues
 ```
+
+The wrapper stores concrete `owner/repo` slugs in each source's `args.repo`.
+That remains correct in managed capsule clones whose only git remote may be
+named `source`; display and routing never depend on a checkout-local alias.
+The same `ticket_sources` list can mix other statically registered ticket
+providers without changing dev-story rooms.
 
 When the process runs in a managed capsule, the relative `.artifacts` root is
 anchored at the source checkout recorded in `capsule-manifest.json`. Search,
@@ -173,8 +182,8 @@ The first command writes a markdown file under
 with the frontmatter schema documented in
 [`docs/stories/bugs.md`](../../../docs/stories/bugs.md) (and mirrored in
 [`../../../issues/README.md`](../../../issues/README.md)). The second command
-boots this instance, whose composite ticket provider shows that local
-artifact under the Local section and GitHub issues under the GitHub section.
+boots this instance, whose ticket federation shows that artifact under Local
+and the two GitHub repositories under their explicit `owner/repo` labels.
 
 Committed `issues/bugs/` files are archive/fixture data and are not part of the
 active `kitsoki-dev` local queue.
@@ -193,11 +202,12 @@ ticket-search room. Then:
 > search "tui view render"
 ```
 
-This dispatches `iface.ticket.search` against
-`host.local_github.ticket` with `query: "tui view render"`. The local side
-matches artifact files by title + body substring; the GitHub side searches the
-configured repo. The combined list is bound into `world.ticket_results`. You see
-separate Local and GitHub sections:
+This dispatches `iface.ticket.search` against `host.ticket_federation` with the
+ordered `world.ticket_sources` composition and `query: "tui view render"`.
+The local provider matches artifact files by title + body substring; each
+GitHub provider searches its explicit repository. The flat picker rows land in
+`world.ticket_results`, while `world.ticket_source_groups` preserves the named
+sections. Provider failures remain visible beside successful sources.
 
 ```
 Results:
@@ -209,8 +219,12 @@ Results:
 Pick it:
 
 ```
-> pick 2026-05-14T103205Z-tui-view-render-before-bind
+> pick 1
 ```
+
+Row numbers are global across source groups. A source-qualified ref such as
+`local:2026-05-14T103205Z-tui-view-render-before-bind` is also unambiguous;
+bare provider-local ids are rejected when more than one source is configured.
 
 The room sets `ticket_id`, `ticket_title`, `thread`. The
 `thread` value is the file path itself — that's how the transport
@@ -343,7 +357,7 @@ remote providers. Historical implementation notes:
 
 A fifth concession the flow fixtures take:
 
-5. **Flow fixtures can't register the REAL `host.local_github.ticket`
+5. **Flow fixtures can't register the REAL `host.ticket_federation`
    against a temp git repo.** `testrunner/flows.go`'s `HostHandlers`
    map only registers STUB handlers via a closure over the
    `HostStub.Data` blob. There's no path to register a real

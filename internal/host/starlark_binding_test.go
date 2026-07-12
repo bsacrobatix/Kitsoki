@@ -124,6 +124,9 @@ func TestRegisterStarlarkBindings_TicketProviderFunctions(t *testing.T) {
 	reg := NewRegistry()
 	const handlerName = "host.starlark_binding.ticketprovider"
 	RegisterStarlarkBindings(reg, map[string]string{handlerName: script})
+	if !reg.IsTicketProvider(handlerName) {
+		t.Fatalf("ticket_provider/v1 Starlark binding %q was not marked as a federation-safe ticket provider", handlerName)
+	}
 
 	res, err := reg.Invoke(context.Background(), handlerName+".search", map[string]any{
 		"query": "provider-backed",
@@ -145,6 +148,19 @@ func TestRegisterStarlarkBindings_TicketProviderFunctions(t *testing.T) {
 	}
 	if got := res.Data["project"]; got != "inherited" {
 		t.Fatalf("provider world project = %v, want inherited", got)
+	}
+}
+
+func TestRegistryReplaceClearsTicketProviderCapability(t *testing.T) {
+	reg := NewRegistry()
+	reg.RegisterTicketProvider("host.test.ticket", func(context.Context, map[string]any) (Result, error) {
+		return Result{}, nil
+	})
+	reg.Replace("host.test.ticket", func(context.Context, map[string]any) (Result, error) {
+		return Result{}, nil
+	})
+	if reg.IsTicketProvider("host.test.ticket") {
+		t.Fatal("ordinary replacement retained ticket-provider capability")
 	}
 }
 

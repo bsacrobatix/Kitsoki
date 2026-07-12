@@ -447,6 +447,47 @@ func TestLocalFilesTicket_Search_TagsByKind(t *testing.T) {
 	}
 }
 
+func TestLocalFilesTicket_PlainMarkdownIsOpenReadmeIsIgnoredAndParseFailuresAreVisible(t *testing.T) {
+	root := seedTicketsRoot(t, map[string]string{
+		"plain.md":  "# Plain local report\n\nThis report intentionally has no frontmatter.\n",
+		"README.md": "# Ticket format\n\nDocumentation, not a ticket.\n",
+		"broken.md": "---\ntitle: [unterminated\n---\n# Broken candidate\n",
+	})
+	res, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op": "search", "root": root,
+	})
+	if err != nil || res.Error != "" {
+		t.Fatalf("search: infra=%v domain=%s", err, res.Error)
+	}
+	tickets, _ := res.Data["tickets"].([]map[string]any)
+	if len(tickets) != 1 {
+		t.Fatalf("tickets = %#v, want only the plain report", tickets)
+	}
+	row := tickets[0]
+	if row["id"] != "plain" || row["title"] != "Plain local report" || row["status"] != "open" {
+		t.Fatalf("plain ticket projection = %#v", row)
+	}
+	for key, want := range map[string]any{
+		"source": "local", "source_id": "local", "source_label": "Local",
+		"source_kind": "local", "source_mode": "local", "source_repo": "", "ref": "local:plain",
+	} {
+		if row[key] != want {
+			t.Fatalf("plain ticket %s = %#v, want %#v (row %#v)", key, row[key], want, row)
+		}
+	}
+	warnings, _ := res.Data["provider_errors"].([]string)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "broken.md") {
+		t.Fatalf("provider_errors = %#v, want the malformed candidate named", warnings)
+	}
+
+	got, err := host.LocalFilesTicketHandler(context.Background(), map[string]any{
+		"op": "get", "root": root, "id": "plain",
+	})
+	if err != nil || got.Error != "" || got.Data["status"] != "open" || got.Data["ref"] != "local:plain" {
+		t.Fatalf("plain get = data %#v, infra=%v domain=%s", got.Data, err, got.Error)
+	}
+}
+
 func TestLocalFilesTicket_Get_LocatesAcrossKinds(t *testing.T) {
 	root := seedMultiKindRoot(t)
 	for id, wantKind := range map[string]string{"B-001": "bug", "F-001": "feature", "E-001": "epic"} {

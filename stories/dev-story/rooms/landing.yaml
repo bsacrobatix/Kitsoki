@@ -537,6 +537,7 @@ states:
                 init_discovery_error: ""
                 init_ticket_provider: ""
                 init_ticket_repo:     ""
+                init_ticket_sources:  []
                 init_apply_result:   {}
                 init_apply_ok:       false
                 init_apply_output:   ""
@@ -688,7 +689,7 @@ states:
           target: bugfix_ref_intake
           effects:
             - set:
-                bugfix_ref_input: "{{ trim(split(slots.request, 'fix local bug ')[1]) }}"
+                bugfix_ref_input: "local:{{ trim(split(slots.request, 'fix local bug ')[1]) }}"
                 bugfix_link_input: ""
                 bugfix_intake_title: "Referenced bug"
                 last_error: ""
@@ -696,7 +697,7 @@ states:
           target: bugfix_ref_intake
           effects:
             - set:
-                bugfix_ref_input: "{{ trim(split(slots.request, 'debug local bug ')[1]) }}"
+                bugfix_ref_input: "local:{{ trim(split(slots.request, 'debug local bug ')[1]) }}"
                 bugfix_link_input: ""
                 bugfix_intake_title: "Referenced bug"
                 last_error: ""
@@ -1380,7 +1381,7 @@ states:
 
   bugfix_ref_intake:
     description: "Resolve a raw bug reference before entering the bugfix child story."
-    relevant_world: [bugfix_ref_input, bugfix_intake_title, ticket_id, ticket_title, ticket_url, ticket_body, ticket_type, ticket_repo, ticket_github_repo, ticket_source, ticket_source_mode, ticket_source_ref, thread]
+    relevant_world: [bugfix_ref_input, bugfix_intake_title, ticket_id, ticket_title, ticket_url, ticket_body, ticket_type, ticket_repo, ticket_sources, ticket_github_repo, ticket_source, ticket_source_label, ticket_source_kind, ticket_source_mode, ticket_source_repo, ticket_source_ref, thread]
     intents:
       bugfix_ref_intake_done:
         title: "Bug reference resolved"
@@ -1400,8 +1401,11 @@ states:
           ticket_type: "bug"
           gate_command: ""
           ticket_source: ""
+          ticket_source_label: ""
+          ticket_source_kind: ""
+          ticket_source_repo: ""
           ticket_legacy_id: ""
-          ticket_source_mode: "local"
+          ticket_source_mode: ""
           ticket_source_ref: "{{ trim(world.bugfix_ref_input) }}"
           thread: "{{ trim(world.bugfix_ref_input) }}"
           bugfix_intake_loaded: ""
@@ -1409,6 +1413,9 @@ states:
       - invoke: iface.ticket.get
         with:
           id: "{{ trim(world.bugfix_ref_input) }}"
+          ref: "{{ trim(world.bugfix_ref_input) }}"
+          source: "{{ world.ticket_source }}"
+          sources: "{{ world.ticket_sources }}"
           repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
           root: "{{ world.repo_root }}"
         bind:
@@ -1419,8 +1426,12 @@ states:
           ticket_type: type
           gate_command: repro_command
           ticket_source: source
+          ticket_source_label: source_label
+          ticket_source_kind: source_kind
+          ticket_source_mode: source_mode
+          ticket_source_repo: source_repo
           ticket_legacy_id: legacy_id
-          ticket_source_ref: url
+          ticket_source_ref: ref
           thread: url
           bugfix_intake_loaded: id
         on_error: landing
@@ -1432,18 +1443,21 @@ states:
           effects:
             - set:
                 ticket_type: "{{ world.ticket_type != '' ? world.ticket_type : 'bug' }}"
-                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : (world.ticket_source == 'local' ? 'local' : (world.ticket_repo != '' ? 'remote' : 'local')) }}"
-                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : (world.ticket_source == 'local' ? '' : world.ticket_repo) }}"
-                ticket_source_ref: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_source_ref }}"
+                ticket_source_kind: "{{ world.ticket_source_kind != '' ? world.ticket_source_kind : world.ticket_source }}"
+                ticket_source_mode: "{{ world.ticket_source_mode != '' ? world.ticket_source_mode : (world.ticket_source == 'github' ? 'remote' : (world.ticket_source == 'local' ? 'local' : (world.ticket_repo != '' ? 'remote' : 'local'))) }}"
+                ticket_source_repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : (world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '') }}"
+                ticket_source_ref: "{{ world.ticket_source_ref != '' ? world.ticket_source_ref : (world.ticket_url != '' ? world.ticket_url : trim(world.bugfix_ref_input)) }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
                 last_error: ""
+            - set:
+                ticket_repo: "{{ world.ticket_source_kind == 'github' ? world.ticket_source_repo : '' }}"
             - say: "Bug reference {{ world.ticket_id }} resolved; entering bugfix with provider metadata."
       look:
         - target: .
 
   bugfix_link_intake:
     description: "Resolve a raw bug link before entering the bugfix child story."
-    relevant_world: [bugfix_link_input, bugfix_intake_title, ticket_id, ticket_title, ticket_url, ticket_body, ticket_type, ticket_repo, ticket_github_repo, ticket_source, ticket_source_mode, ticket_source_ref, thread]
+    relevant_world: [bugfix_link_input, bugfix_intake_title, ticket_id, ticket_title, ticket_url, ticket_body, ticket_type, ticket_repo, ticket_sources, ticket_github_repo, ticket_source, ticket_source_label, ticket_source_kind, ticket_source_mode, ticket_source_repo, ticket_source_ref, thread]
     intents:
       bugfix_link_intake_done:
         title: "Bug link resolved"
@@ -1463,8 +1477,11 @@ states:
           ticket_type: "bug"
           gate_command: ""
           ticket_source: ""
+          ticket_source_label: ""
+          ticket_source_kind: ""
+          ticket_source_repo: ""
           ticket_legacy_id: ""
-          ticket_source_mode: "local"
+          ticket_source_mode: ""
           ticket_source_ref: "{{ trim(world.bugfix_link_input) }}"
           thread: "{{ trim(world.bugfix_link_input) }}"
           bugfix_intake_loaded: ""
@@ -1472,6 +1489,9 @@ states:
       - invoke: iface.ticket.get
         with:
           id: "{{ trim(world.bugfix_link_input) }}"
+          ref: "{{ trim(world.bugfix_link_input) }}"
+          source: "{{ world.ticket_source }}"
+          sources: "{{ world.ticket_sources }}"
           repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
           root: "{{ world.repo_root }}"
         bind:
@@ -1482,8 +1502,12 @@ states:
           ticket_type: type
           gate_command: repro_command
           ticket_source: source
+          ticket_source_label: source_label
+          ticket_source_kind: source_kind
+          ticket_source_mode: source_mode
+          ticket_source_repo: source_repo
           ticket_legacy_id: legacy_id
-          ticket_source_ref: url
+          ticket_source_ref: ref
           thread: url
           bugfix_intake_loaded: id
         on_error: landing
@@ -1495,11 +1519,14 @@ states:
           effects:
             - set:
                 ticket_type: "{{ world.ticket_type != '' ? world.ticket_type : 'bug' }}"
-                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : (world.ticket_source == 'local' ? 'local' : (world.ticket_repo != '' ? 'remote' : 'local')) }}"
-                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : (world.ticket_source == 'local' ? '' : world.ticket_repo) }}"
-                ticket_source_ref: "{{ world.ticket_url != '' ? world.ticket_url : world.ticket_source_ref }}"
+                ticket_source_kind: "{{ world.ticket_source_kind != '' ? world.ticket_source_kind : world.ticket_source }}"
+                ticket_source_mode: "{{ world.ticket_source_mode != '' ? world.ticket_source_mode : (world.ticket_source == 'github' ? 'remote' : (world.ticket_source == 'local' ? 'local' : (world.ticket_repo != '' ? 'remote' : 'local'))) }}"
+                ticket_source_repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : (world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '') }}"
+                ticket_source_ref: "{{ world.ticket_source_ref != '' ? world.ticket_source_ref : (world.ticket_url != '' ? world.ticket_url : trim(world.bugfix_link_input)) }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
                 last_error: ""
+            - set:
+                ticket_repo: "{{ world.ticket_source_kind == 'github' ? world.ticket_source_repo : '' }}"
             - say: "Bug link {{ world.ticket_url }} resolved; entering bugfix with provider metadata."
       look:
         - target: .

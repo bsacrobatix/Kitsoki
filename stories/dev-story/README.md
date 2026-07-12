@@ -203,7 +203,7 @@ repo-native docs paths such as `docs/prd` and `docs/proposals`.
 
 | World key | Default | Effect |
 |---|---|---|
-| `repo_root` | `""` | external checkout root; threaded into every `iface.ticket.*` call as the `root` arg, so `host.local_files.ticket` scans `<repo_root>/issues/...` (`""` ⇒ cwd). `host.gh.ticket` ignores it (its source is `ticket_repo`). |
+| `repo_root` | `""` | external checkout root; threaded into every `iface.ticket.*` call as the legacy `root` arg. Composed providers normally carry source-specific roots in `ticket_sources[*].args`. |
 | `publish_durable_path` | `docs/prd` | PRD publish home (relative to `workdir`); projected into the `prd` import via `world_in`. |
 | `prd_doc_filename` | `""` | fixed PRD filename (e.g. `PRD` → `PRD.md`); `""` ⇒ slug-named (`<slug>.md`) |
 | `prd_mockup_path` | `""` | optional project-local HTML mockup embedded into the PRD published read-out; project demos set this, ordinary repos leave it empty. |
@@ -211,8 +211,9 @@ repo-native docs paths such as `docs/prd` and `docs/proposals`.
 | `design_durable_path` | `docs/proposals` | DESIGN publish home (relative to `workdir`). |
 | `design_doc_filename` | `""` | fixed DESIGN filename (e.g. `DESIGN` → `DESIGN.md`); `""` ⇒ slug-named |
 | `design_ticket_dir` | `issues/features` | where the linking feature ticket is minted; `""` ⇒ **skip** minting (an external target tracks work elsewhere, e.g. GitHub issues) |
-| `ticket_repo` | `""` | active selected GitHub issue repo. Generated wrappers keep this empty at rest so local/pasted reports stay local; `ticket_search` fills it after a GitHub row is picked. Non-empty during design publish mints a GitHub feature issue instead of a local file. |
-| `ticket_github_repo` | `""` | GitHub issue source shown beside local artifact tickets when the wrapper binds `ticket` to `host.local_github.ticket`; usually an `owner/repo` slug or a resolvable remote name. |
+| `ticket_sources` | `[]` | ordered provider-neutral composition (`id`, `label`, `provider`, `kind`, `mode`, `args`, optional `locator_keys`). `host.ticket_federation` returns the same grouped order and source-qualified picker rows. |
+| `ticket_repo` | `""` | legacy active GitHub-only compatibility key. It is filled only after selecting a source whose `kind` is `github`; other remote trackers use `ticket_source_repo`. Non-empty during design publish still mints a GitHub feature issue. |
+| `ticket_github_repo` | `""` | legacy single-GitHub fallback used only when `ticket_sources` is empty. New wrappers put concrete repository slugs in each GitHub source's `args.repo`. |
 
 How the keys reach the glue: the `prd` import's `world_in` projects
 `publish_durable_path` + `prd_doc_filename` into the prd child;
@@ -261,17 +262,17 @@ shape:
   imports, including ticket providers, agent verbs, IDE/diff helpers, chat,
   Starlark, and local command hosts. Strict parents should prefer this superset
   over hand-pruning; unused entries are harmless, missing entries break loads.
-- `host_bindings.ticket` is `host.local_files.ticket` for good local capability
-  and `host.local_github.ticket` when a GitHub source is configured. The latter
-  searches local artifacts and GitHub issues side by side while routing selected
-  close-out by source.
+- `host_bindings.ticket` is `host.ticket_federation`. Its ordered
+  `ticket_sources` list can combine local files, multiple GitHub repositories,
+  Jira, or future statically registered ticket hosts without story-specific
+  headings or routing branches.
 - `world_in` always projects `workdir`, `repo_root`, judge settings, document
-  placement, `prd_mockup_path`, `ticket_repo`, `ticket_github_repo`,
+  placement, `prd_mockup_path`, `ticket_sources`, `ticket_repo`, `ticket_github_repo`,
   `bugfix_destination`, and project build/test commands.
-- At rest, `ticket_repo` is empty and `ticket_github_repo` carries the configured
-  GitHub source. This is the key distinction that lets a project have full
-  GitHub search/fetch/close-out for remote issues without making pasted or local
-  bug reports mutate GitHub.
+- At rest, `ticket_repo` remains empty. A selected row carries its stable source
+  id, label, kind, mode, repo/project identity, and source-qualified ref through
+  bugfix. Only a GitHub-kind selection populates the legacy `ticket_repo` key,
+  so a future remote provider cannot accidentally trigger direct GitHub calls.
 
 The renderer for onboarding-generated wrappers lives in the native
 `host.dev.onboarding` handler, called by
@@ -291,8 +292,9 @@ coded `echo` commands. dev-story (this app) strips those:
 | `world.jira_results` | `world.ticket_results` |
 | `host.run` (echo) | `iface.ticket.search` / `iface.ticket.list_mine` |
 
-An importing project can bind `iface.ticket` to local files, a composite
-local+GitHub provider, or another provider that implements the same interface.
+An importing project can bind `iface.ticket` directly to one provider for
+legacy use, or bind `host.ticket_federation` and compose any number of providers
+that implement the interface.
 Same room YAML, different provider.
 
 ### Parent meta-repo ticket providers

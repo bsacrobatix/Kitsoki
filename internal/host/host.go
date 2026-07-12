@@ -63,42 +63,100 @@ type Result struct {
 // Names should be dot-separated, e.g. "host.workspace_manager.get".
 // The registry is safe for concurrent reads after initialization.
 type Registry struct {
-	mu       sync.RWMutex
-	handlers map[string]Handler
-	secrets  map[string]string
+	mu              sync.RWMutex
+	handlers        map[string]Handler
+	ticketProviders map[string]struct{}
+	secrets         map[string]string
 }
 
 // NewRegistry creates a new empty Registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		handlers: make(map[string]Handler),
-		secrets:  LoadSecrets(),
+		handlers:        make(map[string]Handler),
+		ticketProviders: make(map[string]struct{}),
+		secrets:         LoadSecrets(),
 	}
 }
 
 // Register adds a handler under the given name.
 // Panics if a handler with that name is already registered (init-time contract).
 func (r *Registry) Register(name string, h Handler) {
+	r.register(name, h, false)
+}
+
+// RegisterTicketProvider registers h and marks name as safe for nested dispatch
+// by host.ticket_federation. The marker is deliberately separate from naming:
+// a mutable ticket-source configuration must not be able to turn an arbitrary
+// registered host (host.run, host.git, …) into a provider merely by spelling
+// its name in world data.
+func (r *Registry) RegisterTicketProvider(name string, h Handler) {
+	r.register(name, h, true)
+}
+
+func (r *Registry) register(name string, h Handler, ticketProvider bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.handlers[name]; exists {
 		panic(fmt.Sprintf("host: handler %q already registered", name))
 	}
 	r.handlers[name] = h
+	if ticketProvider {
+		r.ticketProviders[name] = struct{}{}
+	}
 }
 
 // Replace registers a handler, overwriting any existing entry with the
 // same name. Unlike Register (which panics on duplicate as an init-time
 // contract against accidental shadowing in production code), Replace is
 // the test-friendly variant: a fixture that wants to stub a production
-// handler simply re-registers it on top of the builtin. Returns true
+// handler simply re-registers it on top of the builtin. Replacement clears
+// explicit capability markers; wrappers/cassettes that preserve the original
+// capability class use ReplacePreservingCapabilities instead. Returns true
 // when an existing handler was overwritten so callers can audit/log.
 func (r *Registry) Replace(name string, h Handler) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_, existed := r.handlers[name]
 	r.handlers[name] = h
+	delete(r.ticketProviders, name)
 	return existed
+}
+
+// ReplacePreservingCapabilities replaces a handler while retaining its current
+// capability markers. Cassette and flow harnesses use this when they wrap a
+// real provider with deterministic replay. Ordinary Replace deliberately
+// clears markers so a generic dynamically loaded handler cannot inherit ticket
+// federation authority merely by reusing a provider's name.
+func (r *Registry) ReplacePreservingCapabilities(name string, h Handler) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, existed := r.handlers[name]
+	r.handlers[name] = h
+	return existed
+}
+
+// ReplaceTicketProvider is the idempotent counterpart to
+// RegisterTicketProvider. It is used by shared registries whose Starlark
+// bindings are discovered lazily: replacing the handler must also retain the
+// explicit capability marker consumed by host.ticket_federation.
+func (r *Registry) ReplaceTicketProvider(name string, h Handler) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, existed := r.handlers[name]
+	r.handlers[name] = h
+	r.ticketProviders[name] = struct{}{}
+	return existed
+}
+
+// IsTicketProvider reports whether name was explicitly registered as a ticket
+// provider. Prefix fallback is intentionally not used: federation source
+// declarations name the provider carrier (for example host.gh.ticket), while
+// the federation appends and controls the operation suffix itself.
+func (r *Registry) IsTicketProvider(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.ticketProviders[name]
+	return ok
 }
 
 // Get returns the handler for the given name.
