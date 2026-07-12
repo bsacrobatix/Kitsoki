@@ -145,13 +145,29 @@ func buildCatalogAllowlist(homeCatalogPath string) *CatalogAllowlist {
 			continue
 		}
 		override, _ := node.Fields["catalog"].(string)
-		var trackCatalogPath string
-		if override != "" {
-			trackCatalogPath = filepath.Join(homeDir, override)
-		} else {
-			trackCatalogPath = filepath.Join(homeDir, repo, "pog", "catalog.yaml")
+		rel := override
+		if rel == "" {
+			rel = filepath.Join(repo, "pog", "catalog.yaml")
 		}
-		if _, statErr := os.Stat(trackCatalogPath); statErr != nil {
+		// A track's repo/catalog fields are resolved against two candidate
+		// bases: the catalog file's own directory, then that directory's
+		// parent. The portal's memberCatalogs() (POG portal/vite.config.ts)
+		// resolves them against the checkout root that CONTAINS pog/ — so
+		// for the production <repo>/pog/catalog.yaml layout, member repos
+		// like "../studio-sassfully" only bind via the second base. The
+		// first base is kept (and tried first) for the flat scratch
+		// topologies the acceptance gates use ($scratch/pog/catalog.yaml
+		// beside $scratch/<member>-scratch/), which bind via the catalog
+		// directory itself.
+		var trackCatalogPath string
+		for _, base := range []string{homeDir, filepath.Dir(homeDir)} {
+			candidate := filepath.Join(base, rel)
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				trackCatalogPath = candidate
+				break
+			}
+		}
+		if trackCatalogPath == "" {
 			continue
 		}
 		absTrack, err := filepath.Abs(trackCatalogPath)
