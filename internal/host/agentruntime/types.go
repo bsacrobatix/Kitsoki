@@ -175,6 +175,9 @@ type Result struct {
 	Stderr    string
 	ExitCode  int
 	Killed    bool
+	// KillReason distinguishes an ordinary non-zero process exit from a process
+	// group that the runtime terminated for timeout or cancellation.
+	KillReason string
 	Duration  time.Duration
 	FinalDiff string
 }

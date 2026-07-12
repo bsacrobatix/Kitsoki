@@ -25,6 +25,12 @@ type AgentSandboxSpec struct {
 
 type agentRuntimeRegistryKey struct{}
 
+// codeactRuntimeStepKey correlates a supervised CLI CodeAct subprocess with
+// the outer host.agent.codeact call and its zero-based loop step. It is private
+// because it is an implementation detail of the CodeAct CLI adapter, not a
+// story-level sandbox field.
+type codeactRuntimeStepKey struct{}
+
 func WithAgentRuntimeRegistry(ctx context.Context, reg *agentruntime.Registry) context.Context {
 	if reg == nil {
 		return ctx
@@ -37,6 +43,15 @@ func agentRuntimeRegistryFrom(ctx context.Context) *agentruntime.Registry {
 		return reg
 	}
 	return agentruntime.NewRegistry(agentruntime.NewSupervised())
+}
+
+func withCodeactRuntimeStep(ctx context.Context, step int) context.Context {
+	return context.WithValue(ctx, codeactRuntimeStepKey{}, step)
+}
+
+func codeactRuntimeStepFrom(ctx context.Context) (int, bool) {
+	step, ok := ctx.Value(codeactRuntimeStepKey{}).(int)
+	return step, ok
 }
 
 func parseAgentSandbox(args map[string]any) (*AgentSandboxSpec, string) {
@@ -187,7 +202,7 @@ func (s AgentSandboxSpec) launchSpec(ctx context.Context, command string, args [
 }
 
 func appendAgentRuntimeStartEvent(ctx context.Context, callID string, policy agentruntime.AppliedPolicy) {
-	appendAgentRuntimeEvent(ctx, callID, store.EventKind("agent.runtime.start"), map[string]any{
+	payload := map[string]any{
 		"backend":      policy.Backend,
 		"strength":     policy.Strength,
 		"min_strength": policy.MinStrength,
@@ -197,7 +212,9 @@ func appendAgentRuntimeStartEvent(ctx context.Context, callID string, policy age
 		"network":      policy.Network,
 		"degrade":      policy.Degrade,
 		"degraded":     policy.Degraded,
-	})
+	}
+	appendCodeactRuntimeStep(ctx, payload)
+	appendAgentRuntimeEvent(ctx, callID, store.EventKind("agent.runtime.start"), payload)
 }
 
 func appendAgentRuntimeEndEvent(ctx context.Context, callID string, policy agentruntime.AppliedPolicy, res agentruntime.Result, err error) {
@@ -214,10 +231,20 @@ func appendAgentRuntimeEndEvent(ctx context.Context, callID string, policy agent
 	if res.FinalDiff != "" {
 		payload["final_diff_bytes"] = len(res.FinalDiff)
 	}
+	if res.KillReason != "" {
+		payload["kill_reason"] = res.KillReason
+	}
 	if err != nil {
 		payload["error"] = err.Error()
 	}
+	appendCodeactRuntimeStep(ctx, payload)
 	appendAgentRuntimeEvent(ctx, callID, store.EventKind("agent.runtime.end"), payload)
+}
+
+func appendCodeactRuntimeStep(ctx context.Context, payload map[string]any) {
+	if step, ok := codeactRuntimeStepFrom(ctx); ok {
+		payload["codeact_step"] = step
+	}
 }
 
 func appendAgentRuntimeEvent(ctx context.Context, callID string, kind store.EventKind, payload map[string]any) {
