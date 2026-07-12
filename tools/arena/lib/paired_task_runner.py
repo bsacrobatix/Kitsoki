@@ -1268,6 +1268,11 @@ def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
         "docker",
         "run",
         "--rm",
+        # Candidate trees are host-mounted and may be owned by a different
+        # UID than the image's travis user. The oracle writes Maven/Gradle
+        # outputs below that mount, so run its disposable container as root.
+        "--user",
+        "root",
         "-v",
             f"{container_path(tree)}:{source_dir}",
         image,
