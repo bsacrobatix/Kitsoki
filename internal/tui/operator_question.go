@@ -238,6 +238,35 @@ func (m *operatorQuestionModel) View(width int) string {
 	return sb.String()
 }
 
+// ChromeView bounds the forwarded operator question when it occupies
+// transcript.LiveLine in the normal-screen renderer. The full View remains the
+// committed transcript body; this projection keeps the active cursor visible
+// and prevents resize repaints from pushing stale question rows to scrollback.
+func (m *operatorQuestionModel) ChromeView(width, maxRows int) string {
+	full := m.View(width)
+	if full == "" {
+		return ""
+	}
+	if maxRows <= 0 {
+		return ""
+	}
+	lines := clampLiveOverlayRows(strings.Split(full, "\n"), width)
+	if len(lines) <= maxRows {
+		return strings.Join(lines, "\n")
+	}
+	cursor := -1
+	for i, line := range lines {
+		if strings.Contains(line, "▸") {
+			cursor = i
+			break
+		}
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	return strings.Join(windowLiveOverlayRows(lines, cursor, maxRows, width), "\n")
+}
+
 func (m *operatorQuestionModel) renderOptions(q host.OperatorQuestion) string {
 	if len(q.Options) == 0 {
 		return "  (no options — press Enter to skip)"

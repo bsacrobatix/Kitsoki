@@ -421,6 +421,7 @@ func TestTUIResizeDoesNotClearNormalScreen(t *testing.T) {
 		{"menu", tuipkg.ModeMenu},
 		{"meta", tuipkg.ModeMeta},
 		{"meta-sessions", tuipkg.ModeMetaSessions},
+		{"story-selector", tuipkg.ModeStorySelector},
 		{"world-view", tuipkg.ModeWorldView},
 		{"choosing", tuipkg.ModeChoosing},
 		{"operator-question", tuipkg.ModeOperatorQuestion},
@@ -442,6 +443,8 @@ func TestTUIResizeDoesNotClearNormalScreen(t *testing.T) {
 
 			require.NotContains(t, commandMessageTypes(cmd), "tea.clearScreenMsg",
 				"resize is a regular repaint; clearing the normal screen on SIGWINCH appends duplicate live chrome to scrollback")
+			require.NotContains(t, commandMessageTypes(cmd), "tea.printLineMessage",
+				"resize with no pending transcript must not print live overlay chrome into scrollback")
 		})
 	}
 }

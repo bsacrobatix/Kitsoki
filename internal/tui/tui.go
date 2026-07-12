@@ -154,6 +154,13 @@ type RootModel struct {
 	width    int
 	height   int
 	quitting bool
+	// liveOverlayRowLimit pins the active variable-height overlay to the
+	// smallest terminal budget observed during its lifetime. Keeping the live
+	// region's physical row count stable across grow/shrink cycles prevents
+	// Bubble Tea's normal-screen renderer from copying old top rows into native
+	// scrollback. The limit resets whenever a new overlay opens.
+	liveOverlayRowLimit    int
+	liveOverlayRowLimitSet bool
 
 	location         locationModel
 	transcript       transcriptModel
@@ -904,6 +911,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 				slog.Warn("tui.choice.open_initial", "err", err)
 			} else {
 				m.mode = ModeChoosing
+				m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 				typedForBody = viewWithoutChoice(m.initialTypedView)
 				// Snapshot whatever was in the prompt textarea (if
 				// anything) so /input can restore it later, then clear
@@ -1165,6 +1173,16 @@ func (m RootModel) pollInbox(syncGitHub bool) tea.Msg {
 func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm, cmd := m.updateInner(msg)
 	if rm, ok := nm.(RootModel); ok {
+		// Any message may add a sibling chrome row (for example an inbox
+		// banner or operation status). Tighten the active overlay at the shared
+		// Update boundary so a transient shrink cannot grow back on the next
+		// repaint and change the normal-screen live-region height again.
+		if rm.tightenLiveOverlayRowLimit() && rm.mode == ModeOperatorQuestion {
+			// Prompt overlays render from logical data on every View. The
+			// operator question is materialized in transcript.LiveLine, so
+			// re-render it immediately when a new sibling row tightens its cap.
+			rm.transcript.UpdateLive(rm.operatorQuestionLiveView())
+		}
 		if flush := rm.flushPendingWhenStable(); flush != nil {
 			if cmd == nil {
 				cmd = flush
@@ -1648,6 +1666,7 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.mode == ModeOnPath || m.mode == ModeOffPath {
 			m.mode = ModeMenu
 			m.menuSystem.Open()
+			m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 			return m, nil
 		}
 		if m.mode == ModeAwaitingLLM {
@@ -1656,6 +1675,7 @@ func (m RootModel) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.mode = ModeMenu
 			m.menuSystem.Open()
+			m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 			return m, nil
 		}
 	}
@@ -2882,6 +2902,7 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 					slog.Warn("tui.choice.open", "err", err)
 				} else {
 					m.mode = ModeChoosing
+					m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 					typedForBody = viewWithoutChoice(out.TypedView)
 					// Snapshot the textarea draft (if any) so /input
 					// can restore it; then clear so the user can't
@@ -3453,6 +3474,7 @@ func (m RootModel) handleSessionsPanelLoaded(msg sessionsPanelLoadedMsg) (tea.Mo
 	}
 	m.sessionsPanel.Open(msg.listings)
 	m.mode = ModeMetaSessions
+	m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 	return m, nil
 }
 
@@ -4395,6 +4417,7 @@ func (m RootModel) openStorySelector() (tea.Model, tea.Cmd) {
 	}
 	m.mode = ModeStorySelector
 	m.storySelector.Open(m.appPath)
+	m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 	return m, nil
 }
 
@@ -4634,8 +4657,9 @@ func (m RootModel) handleOperatorQuestion(msg operatorQuestionMsg) (tea.Model, t
 	if m.transcript.hasLive() {
 		m.transcript.FinalizeLive("")
 	}
-	m.transcript.AppendLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
 	m.mode = ModeOperatorQuestion
+	m.resetLiveOverlayRowLimit(liveOverlayTranscriptLine)
+	m.transcript.AppendLive(m.operatorQuestionLiveView())
 	return m, nil
 }
 
@@ -4653,7 +4677,7 @@ func (m RootModel) updateOperatorQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		var cmd tea.Cmd
 		m, cmd = m.handleWindowSize(msg)
-		m.transcript.UpdateLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
+		m.transcript.UpdateLive(m.operatorQuestionLiveView())
 		return m, cmd
 
 	case turnOutcomeMsg:
@@ -4683,7 +4707,7 @@ func (m RootModel) updateOperatorQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var result *operatorQuestionResult
 		var cmd tea.Cmd
 		m.operatorQuestion, cmd, result = m.operatorQuestion.Update(msg)
-		m.transcript.UpdateLive(m.operatorQuestion.View(m.transcript.wrapWidth()))
+		m.transcript.UpdateLive(m.operatorQuestionLiveView())
 		if result == nil {
 			return m, cmd
 		}
@@ -4715,6 +4739,13 @@ func (m RootModel) updateOperatorQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Everything else falls through so the model keeps reacting underneath.
 	return m, nil
+}
+
+func (m RootModel) operatorQuestionLiveView() string {
+	return m.operatorQuestion.ChromeView(
+		m.transcript.wrapWidth(),
+		m.liveOverlayRenderRows(liveOverlayTranscriptLine),
+	)
 }
 
 // findChoiceElement returns the first Kind=="choice" element in a
@@ -4872,6 +4903,7 @@ func (m RootModel) handleWindowSize(msg tea.WindowSizeMsg) (RootModel, tea.Cmd) 
 	m.width = msg.Width
 	m.height = msg.Height
 	m = m.resize()
+	m.tightenLiveOverlayRowLimit()
 
 	// A resize is a regular Bubble Tea redraw. Do not issue ClearScreen here:
 	// Kitsoki deliberately runs in the normal screen so transcript history stays
@@ -5005,11 +5037,11 @@ func (m RootModel) View() string {
 	case ModeChoosing:
 		promptLine = m.choicePromptLine()
 	case ModeMenu:
-		promptLine = m.menuSystem.View()
+		promptLine = m.menuSystem.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeMetaSessions:
-		promptLine = m.sessionsPanel.View()
+		promptLine = m.sessionsPanel.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeStorySelector:
-		promptLine = m.storySelector.View()
+		promptLine = m.storySelector.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeAwaitingLLM:
 		// Keep the textarea visible during in-flight so the user
 		// can type the next message — Enter enqueues. A muted
@@ -5080,51 +5112,12 @@ func (m RootModel) View() string {
 	return joinChromeParts(parts)
 }
 
-const (
-	choiceChromeMinRows     = 4
-	choiceChromeDefaultRows = 12
-	choiceChromeReserved    = 8
-)
-
-// choiceChromeRowsFor returns the picker budget after reserving the rows that
-// composeChromeParts adds around it.  The operation row is especially
-// important here: without reserving it, an operation-driven picker can make
-// the live region taller than the terminal and Bubble Tea leaves old bottom
-// rows in scrollback on repaint.
-func (m RootModel) choiceChromeRowsFor(height int) int {
-	reserved := choiceChromeReserved
-	if m.transcript.LiveLine() != "" {
-		reserved++
-	}
-	if m.inbox.ActionRequiredBanner() != "" {
-		reserved++
-	}
-	if operationRunChromeLine(m, m.width) != "" {
-		reserved++
-	}
-	if footerStoryLine(m) != "" {
-		reserved++
-	}
-	return choiceChromeMaxRowsWithReserved(height, reserved)
-}
-
-func choiceChromeMaxRowsWithReserved(height, reserved int) int {
-	if height <= 0 {
-		return choiceChromeDefaultRows
-	}
-	rows := height - reserved
-	if rows < choiceChromeMinRows {
-		rows = choiceChromeMinRows
-	}
-	if rows > choiceChromeDefaultRows {
-		rows = choiceChromeDefaultRows
-	}
-	return rows
-}
-
 func (m RootModel) choicePromptLine() string {
 	if m.choice.IsActive() {
-		return m.choice.ChromeView(m.transcript.wrapWidth(), m.choiceChromeRowsFor(m.height))
+		return m.choice.ChromeView(
+			m.transcript.wrapWidth(),
+			m.liveOverlayRenderRows(liveOverlayPrompt),
+		)
 	}
 	return pickerActiveLine(m.pendingDraft)
 }

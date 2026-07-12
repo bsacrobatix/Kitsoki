@@ -85,6 +85,7 @@ func ComposeFrame(m *RootModel, width, height int) Frame {
 	mm.width = width
 	mm.height = height
 	mm = mm.resize()
+	mm.tightenLiveOverlayRowLimit()
 
 	promptLine, bannerLine := composePromptAndBanner(mm)
 
@@ -153,11 +154,11 @@ func composePromptAndBanner(m RootModel) (promptLine, bannerLine string) {
 	case ModeChoosing:
 		promptLine = m.choicePromptLine()
 	case ModeMenu:
-		promptLine = m.menuSystem.View()
+		promptLine = m.menuSystem.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeMetaSessions:
-		promptLine = m.sessionsPanel.View()
+		promptLine = m.sessionsPanel.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeStorySelector:
-		promptLine = m.storySelector.View()
+		promptLine = m.storySelector.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeAwaitingLLM:
 		caption := "thinking… (Ctrl+C to cancel)"
 		if m.pendingKind == pendingDeterministic {
