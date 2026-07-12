@@ -509,12 +509,12 @@
         "sha256": "8d6695ef085cacba3894a9710fe7119a778ebbd1c8a8bc68f281dc3fe008485d"
       },
       {
-        "bytes": 3470,
+        "bytes": 3775,
         "exists": true,
         "kind": "file",
         "path": "tools/arena/corpus/sources.yaml",
         "role": "source-catalog",
-        "sha256": "8142b27fb5a8d9b6acf282d14613220c000484114872fdcf4bdc1adbde0de25d"
+        "sha256": "96ff4fe57cabd6f5b04641ab82be648d438f63b8f5d2e0a6018c0c6fcd29ce9c"
       },
       {
         "bytes": 19433,
