@@ -45,6 +45,8 @@ harness_profiles:
     env:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: ${SYNTHETIC_API_KEY}
+    quota:
+      max_concurrent: 1
 `), 0644))
 
 	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
@@ -72,6 +74,13 @@ harness_profiles:
 	require.Contains(t, plan.Command, "hf:test/model")
 	require.Contains(t, plan.Command, "-C")
 	require.Contains(t, plan.Command, filepath.Join(dir, "work"))
+	require.NotNil(t, plan.ProfileResolution)
+	require.Equal(t, "configured-unverified", plan.ProfileResolution.Auth.Status)
+	require.Equal(t, []string{"OPENAI_API_KEY", "OPENAI_BASE_URL"}, plan.ProfileResolution.Auth.EnvironmentKeys)
+	require.NotNil(t, plan.ProfileResolution.Quota)
+	encoded, err := json.Marshal(plan)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "secret-token", "profile resolution must never expose auth values")
 }
 
 func TestAgentLaunchPlan_ReadOnlyAgentDeniesMutationTools(t *testing.T) {
