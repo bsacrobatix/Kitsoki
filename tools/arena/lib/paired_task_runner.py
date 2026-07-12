@@ -76,6 +76,7 @@ from pricing import price_for  # noqa: E402  (path set above; single price table
 # only the process (kitsoki pipeline vs raw codex exec) differs.
 MODEL_TO_PROFILE = {
     "glm-5.2": "synthetic-claude",
+    "kimi-k2.7-code": "synthetic-kimi-k27",
     "gpt-5.4": "codex-gpt54",
     "gpt-5.5": "codex-native",
     # Spark is a native Codex candidate.  Keep the runner's default profile
@@ -87,6 +88,7 @@ MODEL_TO_PROFILE = {
 
 MODEL_TO_RAW_CLAUDE_PROFILE = {
     "glm-5.2": "synthetic-claude",
+    "kimi-k2.7-code": "synthetic-kimi-k27",
 }
 
 RAW_ALLOWED_TOOLS = "Bash,Edit,Write,Read,Glob,Grep,MultiEdit"
