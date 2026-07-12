@@ -18,14 +18,19 @@ campaign needs explicit operator authorization and its separate live gate.
 
 ## Workflow
 
-1. Configure a bench manifest, optional case id, optional trace override, and
-   output directory.
-2. Run `score`.
-3. Review the generated evidence:
+1. For a single boundary, configure a bench manifest, optional case id, optional
+   trace override, and output directory, then run `score`.
+2. For a campaign, run `campaign review`. It asks Arena to materialize
+   `plan.json` and `plan.md`, then renders `plan-deck.slidey.json` from that
+   canonical plan. This is deterministic and no-spend.
+3. `campaign arm` is a distinct operator intent. It passes `--live` to Arena,
+   which also requires the study-specific live-gate environment variable; the
+   resulting receipt records authorization only and `provider_dispatched: false`.
+4. Review the generated evidence:
    - `*-report.json` for automation.
    - `*-report.md` for human review and issue filing.
    - `*-deck.slidey.json` for shareable status decks.
-4. Accept with `done` once the artifacts explain the outcome.
+5. Accept with `done` once the artifacts explain the outcome.
 
 ## Testing
 

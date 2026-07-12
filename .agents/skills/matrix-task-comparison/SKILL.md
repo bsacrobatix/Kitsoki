@@ -19,7 +19,11 @@ drivable workflow. The live drive there uses the headless MCP primitive
 [`tools/mcp-drive/drive.sh`](../../../tools/mcp-drive/README.md). -->
 
 re-derive them, and do **not** hardcode the bug9/12/14 specifics into a new
-study.
+study. For iterative process versions, use a `task-optimization/v1` study so
+the corpus lock, learning/confirmation split, preflight, no-spend plan, and
+immutable attempt receipts are reviewable. Canonical review output is JSON,
+Markdown, and a `.slidey.json` deck regenerated offline; do not render MP4 or
+bundle HTML unless explicitly requested.
 
 > **Harness ownership.** Arena schedules immutable attempts. The adapter under
 > [`tools/bugfix-bakeoff/external/`](../../../tools/bugfix-bakeoff/external)

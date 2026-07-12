@@ -13,6 +13,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ARENA = HERE.parent / "arena.py"
+TASK_OPTIMIZATION_PLAN_DECK = HERE.parent / "scripts" / "task_optimization_plan_deck.go"
 REPO_ROOT = HERE.parent.parent.parent
 sys.path.insert(0, str(HERE.parent))
 
@@ -105,6 +106,16 @@ live_gate_env: KITSOKI_TASK_OPT_LIVE
     plan_json = json.loads((out / "plan.json").read_text(encoding="utf-8"))
     check("task plan has task x candidate x treatment cells", plan_json["cell_count"], 8)
     check("task plan starts planned", {cell["status"] for cell in plan_json["cells"]}, {"planned"})
+    deck_path = out / "plan-deck.slidey.json"
+    deck = subprocess.run(
+        ["go", "run", str(TASK_OPTIMIZATION_PLAN_DECK), "--plan", str(out / "plan.json"), "--out", str(deck_path)],
+        cwd=REPO_ROOT, text=True, capture_output=True,
+    )
+    check("task plan deck exits 0", deck.returncode, 0)
+    deck_json = json.loads(deck_path.read_text(encoding="utf-8"))
+    check("task plan deck title", deck_json["meta"]["title"], "Task optimization plan: bugfix-codeact-v1")
+    check("task plan deck scene count", len(deck_json["scenes"]), 5)
+    require("task plan deck declares no-provider source", "no provider" in deck_json["_comment"].lower())
     lock = json.loads((out / "study.lock.json").read_text(encoding="utf-8"))
     require("task lock pins study hash", bool(lock["study_manifest_sha256"]))
     require("task lock pins corpus hash", bool(lock["corpus_lock_sha256"]))
