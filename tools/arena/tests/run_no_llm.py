@@ -63,6 +63,13 @@ def fixture_result(task: str, treatment: str) -> dict:
 
 def run_default() -> int:
     checks = Checks()
+    lifecycle_test = subprocess.run(
+        [sys.executable, str(HERE / "test_task_optimization_lifecycle.py")],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    checks.check("task optimization lifecycle gate", lifecycle_test.returncode, 0)
+    if lifecycle_test.returncode:
+        checks.failures.append((lifecycle_test.stdout + lifecycle_test.stderr).strip())
     source_test = subprocess.run(
         [sys.executable, str(HERE / "test_bugswarm_source.py")],
         cwd=REPO_ROOT,
