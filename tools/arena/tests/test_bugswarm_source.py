@@ -18,6 +18,8 @@ SOURCES = REPO_ROOT / "tools/arena/corpus/sources.yaml"
 SEED_ARTIFACTS = REPO_ROOT / "tools/arena/corpus/bugswarm.seed-artifacts.json"
 SEED_SOURCE = REPO_ROOT / "tools/arena/corpus/bugswarm.seed.yaml"
 STUDY_SOURCE = REPO_ROOT / "tools/arena/specs/bugfix-task-optimization-v1.yaml"
+SHARED_CONFIG = REPO_ROOT / ".kitsoki.yaml"
+LOCAL_CONFIG_TEMPLATE = REPO_ROOT / ".kitsoki.local.yaml.example"
 
 failures: list[str] = []
 
@@ -50,6 +52,13 @@ check("seed source url preserved", seed_task["meta"]["source_url"], "https://www
 check("seed starts unverified red", seed_task["verified_red"], False)
 check("seed starts unverified green", seed_task["verified_green"], False)
 
+shared_profiles = yaml.safe_load(SHARED_CONFIG.read_text(encoding="utf-8")).get("harness_profiles", {})
+check("shared mini profile pins exact model", shared_profiles.get("codex-gpt54-mini", {}).get("model"), "gpt-5.4-mini")
+check("shared spark profile pins exact model", shared_profiles.get("codex-spark", {}).get("model"), "gpt-5.3-codex-spark")
+check("shared Sonnet profile pins low effort", shared_profiles.get("claude-sonnet-low", {}).get("effort"), "low")
+template_profiles = yaml.safe_load(LOCAL_CONFIG_TEMPLATE.read_text(encoding="utf-8")).get("harness_profiles", {})
+check("local template pins hosted oss profile", template_profiles.get("syn-gpt-oss-120b", {}).get("model"), "hf:openai/gpt-oss-120b")
+
 # 2026-07-11 growth (docs/proposals/bugfix-archetype-corpus-and-harness.md Slice 2):
 # 12 real, filtered candidates added via the live BugSwarm REST API (bugswarm-common
 # DatabaseAPI) alongside the original tutorial seed. Every new task must still be
@@ -76,7 +85,12 @@ check("study schema", study.get("schema"), "task-optimization/v1")
 check("study starts live-blocked", study.get("live_status"), "blocked")
 study_candidates = {candidate["key"]: candidate for candidate in study.get("candidates", [])}
 check("study declares low Sonnet profile", study_candidates.get("sonnet-low", {}).get("profile"), "claude-sonnet-low")
-check("study refuses gpt54-mini fallback", study_candidates.get("gpt54-mini", {}).get("preflight"), "unsupported-until-profile-resolves")
+check("study resolves exact gpt54-mini profile", study_candidates.get("gpt54-mini", {}).get("preflight"), "require-local-resolution")
+check("study declares complete treatment ladder", study.get("treatments"), [
+    "raw-agent", "strict-mcp-current", "strict-mcp-direct-driver",
+    "strict-mcp-codeact-broad", "strict-mcp-codeact-decomposed",
+    "strict-mcp-decomposed-fallback",
+])
 check("study defines unsupported result", study.get("preflight_contract", {}).get("unsupported_result"), "unsupported")
 
 blocked_validate = subprocess.run(

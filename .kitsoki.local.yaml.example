@@ -123,6 +123,17 @@ harness_profiles:
       OPENAI_BASE_URL: https://api.synthetic.new/openai/v1
       OPENAI_API_KEY: "${SYNTHETIC_API_KEY}"
 
+  # Pinned hosted gpt-oss candidate used by task-optimization studies. It stays
+  # local because its endpoint credential must never make the shared catalog
+  # fail to load. Its receipts describe a hosted proxy, never GX10 hardware.
+  syn-gpt-oss-120b:
+    backend: claude
+    model: hf:openai/gpt-oss-120b
+    models: [hf:openai/gpt-oss-120b]
+    env:
+      ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
+      ANTHROPIC_AUTH_TOKEN: "${SYNTHETIC_API_KEY}"
+
   # A local llama.cpp model via the builtin plugin (no backend CLI forked).
   llama-local:
     plugin: builtin.local_llm

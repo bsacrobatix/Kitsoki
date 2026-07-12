@@ -11,19 +11,38 @@ live_status: blocked
 blocked_by:
   - "BugSwarm candidates require explicit Docker RED/GREEN verification; no live verification is authorized by this source."
   - "A frozen learning/confirmation split and content-addressed corpus lock are required before planning cells."
+splits:
+  learning: bugswarm-learning
+  confirmation: bugswarm-confirmation
+treatments:
+  - raw-agent
+  - strict-mcp-current
+  - strict-mcp-direct-driver
+  - strict-mcp-codeact-broad
+  - strict-mcp-codeact-decomposed
+  - strict-mcp-decomposed-fallback
+repeats:
+  screening: 1
+  decision_boundary: 3
+stop:
+  max_versions: 4
+  plateau_rounds: 2
+  min_efficiency_delta: 0.10
+  promotion_policy: { primary: oracle_solve, secondary: [tokens_per_solve, wall_per_solve] }
+  retry_policy: { infrastructure_only: true, max_attempts: 2, bounded_backoff_seconds: [15, 60] }
 candidates:
   - key: gpt54-mini
     requested_model: gpt-5.4-mini
     requested_effort: medium
     profile: codex-gpt54-mini
-    preflight: unsupported-until-profile-resolves
-    note: "The checked-in profile catalog pins gpt-5.4, not gpt-5.4-mini. Do not alias or fall back; mark the cell unsupported unless this exact profile/model resolves."
+    preflight: require-local-resolution
+    note: "The shared profile catalog pins this exact model. Do not alias or fall back; mark the cell unsupported unless the native launch plan resolves it exactly."
   - key: spark
     requested_model: gpt-5.3-codex-spark
     requested_effort: medium
     profile: codex-spark
     preflight: require-local-resolution
-    note: "This operator profile may be supplied by .kitsoki.local.yaml. Persist requested and effective model/effort; an ignored effort flag invalidates the cell."
+    note: "This shared ambient-auth profile must resolve natively. Persist requested and effective model/effort; an ignored effort flag invalidates the cell."
   - key: sonnet-low
     requested_model: sonnet
     requested_effort: low

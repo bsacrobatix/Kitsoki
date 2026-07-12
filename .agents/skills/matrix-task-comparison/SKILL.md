@@ -226,16 +226,28 @@ path.) `summary.json` and the `agenteval.Report` files are the durable artifacts
 7. **Aggregate.** `aggregate.py [--emit-agenteval]` → `summary.json`.
 8. **Report + deck.** `eval_pilot_report.py --markdown --deck` (offline).
 
-## How this connects to the `task-bakeoff` story
+## Workflow ownership
 
-A kitsoki story `stories/task-bakeoff/` (being built in parallel) wraps this
-method into a **drivable workflow** that produces the slidey report directly:
-the rooms encode Setup → manifest → pre-flight → run cells → score → adjudicate →
-aggregate, calling the same `tools/bugfix-bakeoff/*` scripts as host steps, and
-the final room renders the deck (the `--deck` HTML / a slidey spec). When that
-story lands, drive it with `kitsoki-mcp-driver`; until then run this skill's
-manual runbook. Keep the scripts the single source of truth — the story orchestrates
-them, it does not reimplement scoring/pricing.
+`stories/task-bakeoff/` is a retired replay-compatibility story. Do not add
+rooms, launch paths, cell scheduling, score logic, or decks to it. Arena is the
+only current workflow boundary for comparison and optimization studies:
+
+```sh
+# No provider request: resolve the effective local profiles and write receipts.
+python3 tools/arena/arena.py task-optimization preflight \
+  --study tools/arena/specs/bugfix-task-optimization-v1.yaml \
+  --out .artifacts/task-optimization/bugfix-codeact-v1
+
+# No provider request: materialize the immutable cell plan and review inputs.
+python3 tools/arena/arena.py task-optimization plan \
+  --study tools/arena/specs/bugfix-task-optimization-v1.yaml \
+  --out .artifacts/task-optimization/bugfix-codeact-v1
+```
+
+Use the `model-task-engineering` story only to review those offline artifacts.
+A provider run requires an explicit operator instruction, `--live`, and the
+study-specific live gate. The legacy external adapter remains the project/oracle
+adapter; it must not become a competing scheduler or trace scorer.
 
 ## Common pitfalls (from the learnings doc)
 

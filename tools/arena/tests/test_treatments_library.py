@@ -30,23 +30,28 @@ def require(label: str, condition: bool) -> None:
 
 catalog = {str(row["id"]): row for row in treatments.treatment_catalog()}
 check("catalog treatments", sorted(catalog), [
-    "codex-codeact",
-    "kitsoki-mcp",
-    "kitsoki-mcp-codeact",
-    "raw-codex",
+    "raw-agent",
+    "strict-mcp-codeact-broad",
     "strict-mcp-codeact-decomposed",
+    "strict-mcp-current",
     "strict-mcp-decomposed-fallback",
+    "strict-mcp-direct-driver",
 ])
-check("raw aliases", catalog["raw-codex"].get("aliases"), ["single-briefed", "single-naive"])
-check("kitsoki alias", catalog["kitsoki-mcp"].get("aliases"), ["kitsoki"])
-check("codeact action surface", catalog["codex-codeact"]["action_surface"], "kitsoki-codeact-mcp")
-require("codeact requires agent", "agent" in catalog["codex-codeact"]["required_variant_fields"])
+check("raw aliases", catalog["raw-agent"].get("aliases"), ["raw-codex", "single-briefed", "single-naive"])
+check("current aliases", catalog["strict-mcp-current"].get("aliases"), ["kitsoki-mcp", "kitsoki"])
+check("direct aliases", catalog["strict-mcp-direct-driver"].get("aliases"), ["codex-codeact"])
+check("broad aliases", catalog["strict-mcp-codeact-broad"].get("aliases"), ["kitsoki-mcp-codeact"])
+check("direct action surface", catalog["strict-mcp-direct-driver"]["action_surface"], "kitsoki-codeact-mcp")
+require("direct driver requires agent", "agent" in catalog["strict-mcp-direct-driver"]["required_variant_fields"])
 
-check("canonical raw alias", treatments.canonical_treatment("single-naive"), "raw-codex")
-check("canonical kitsoki alias", treatments.canonical_treatment("kitsoki"), "kitsoki-mcp")
+check("canonical raw alias", treatments.canonical_treatment("single-naive"), "raw-agent")
+check("canonical raw legacy alias", treatments.canonical_treatment("raw-codex"), "raw-agent")
+check("canonical current alias", treatments.canonical_treatment("kitsoki"), "strict-mcp-current")
+check("canonical direct alias", treatments.canonical_treatment("codex-codeact"), "strict-mcp-direct-driver")
+check("canonical broad alias", treatments.canonical_treatment("kitsoki-mcp-codeact"), "strict-mcp-codeact-broad")
 check("known includes aliases", "single-briefed" in treatments.known_treatments(), True)
 check("unknown driver", treatments.resolve_treatment_driver("missing"), None)
-check("known driver name", treatments.resolve_treatment_driver("kitsoki-mcp-codeact").name, "kitsoki-mcp-codeact")
+check("known broad driver", treatments.resolve_treatment_driver("strict-mcp-codeact-broad").name, "kitsoki-mcp-codeact")
 check("strict decomposed driver", treatments.resolve_treatment_driver("strict-mcp-codeact-decomposed").name, "strict-mcp-codeact-decomposed")
 check("typed fallback driver", treatments.resolve_treatment_driver("strict-mcp-decomposed-fallback").name, "strict-mcp-decomposed-fallback")
 check("strict decomposed action surface", catalog["strict-mcp-codeact-decomposed"]["action_surface"], "kitsoki-studio-mcp+codeact-decomposed")
@@ -59,7 +64,7 @@ require("capability hash", cap_hash.startswith("sha256:"))
 json.loads(cap_json)
 
 missing_agent = argparse.Namespace(
-    treatment="codex-codeact",
+    treatment="strict-mcp-direct-driver",
     agent="",
     capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
     capability_presets_json="",
@@ -67,7 +72,7 @@ missing_agent = argparse.Namespace(
 require("missing agent validation", "requires variant.agent" in treatments.validate_driver_args(missing_agent))
 
 wrong_agent = argparse.Namespace(
-    treatment="codex-codeact",
+    treatment="strict-mcp-direct-driver",
     backend="codex",
     agent="kitsoki-mcp-driver",
     capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
@@ -76,7 +81,7 @@ wrong_agent = argparse.Namespace(
 require("wrong codeact agent validation", "kitsoki-codeact-driver" in treatments.validate_driver_args(wrong_agent))
 
 bad_preset = argparse.Namespace(
-    treatment="kitsoki-mcp-codeact",
+    treatment="strict-mcp-codeact-broad",
     backend="codex",
     agent="",
     implementation_mode="codeact",
@@ -86,7 +91,7 @@ bad_preset = argparse.Namespace(
 require("bad preset validation", "unknown capability preset" in treatments.validate_driver_args(bad_preset))
 
 bad_mode = argparse.Namespace(
-    treatment="kitsoki-mcp-codeact",
+    treatment="strict-mcp-codeact-broad",
     backend="codex",
     agent="",
     implementation_mode="patch",
@@ -96,7 +101,7 @@ bad_mode = argparse.Namespace(
 require("bad implementation mode validation", "implementation_mode 'codeact'" in treatments.validate_driver_args(bad_mode))
 
 spark_strict = argparse.Namespace(
-    treatment="kitsoki-mcp-codeact",
+    treatment="strict-mcp-codeact-broad",
     backend="codex",
     agent="",
     worker_profile="codex-spark",
