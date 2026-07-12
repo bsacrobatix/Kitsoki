@@ -112,7 +112,7 @@ func (a *CatalogAllowlist) Aliases() []string {
 // allowlist rather than an error: callers that never pass a `catalog` alias
 // are unaffected by a broken home catalog, and a caller that does name an
 // alias gets a clear "unknown alias" rather than every graph.* RPC 500ing.
-func buildCatalogAllowlist(homeCatalogPath string) *CatalogAllowlist {
+func buildCatalogAllowlist(homeCatalogPath, repoRoot string) *CatalogAllowlist {
 	out := &CatalogAllowlist{aliases: map[string]string{}}
 
 	absHome, err := filepath.Abs(homeCatalogPath)
@@ -126,13 +126,24 @@ func buildCatalogAllowlist(homeCatalogPath string) *CatalogAllowlist {
 		return out
 	}
 
-	homeDir := filepath.Dir(absHome)
-	if info, statErr := os.Stat(absHome); statErr == nil && info.IsDir() {
-		// Bundle catalogs (a directory containing catalog.yaml) resolve a
-		// track's relative repo/catalog fields against the bundle
-		// directory itself, same as the single-file case resolves them
-		// against the file's directory.
-		homeDir = absHome
+	// homeDir is the base a track node's repo-relative `repo:`/`catalog:`
+	// field resolves against. This MUST be repoRoot (the git checkout
+	// root), not the home catalog file's own directory: the home catalog
+	// conventionally lives at <repoRoot>/pog/catalog.yaml, one level below
+	// repoRoot, and every real track's `repo:` field (e.g.
+	// "../studio-sassfully") is authored relative to repoRoot to match
+	// sibling checkouts on disk — the SAME convention POG portal's
+	// vite.config.ts uses client-side (memberCatalogs()'s portfolioRoot,
+	// the git common-dir parent, not dirname(catalogPath)). Resolving
+	// against the catalog file's own directory instead (as an earlier
+	// version of this function did) is off by one path segment for any
+	// home catalog nested under a repoRoot subdirectory — the normal case,
+	// not an edge case — and was only masked by test/gate fixtures that
+	// (wrongly) nested their scratch member repos one level too shallow to
+	// match real topology.
+	homeDir, err := filepath.Abs(repoRoot)
+	if err != nil {
+		homeDir = filepath.Dir(absHome)
 	}
 
 	for _, id := range cat.SortedNodeIDs() {
