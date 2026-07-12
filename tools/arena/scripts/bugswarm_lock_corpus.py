@@ -57,6 +57,7 @@ def task_record(task: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None
         "failed_job_id": task.get("failed_job_id"), "passed_job_id": task.get("passed_job_id"),
         "failed_commit_sha": meta.get("failed_commit_sha"), "passed_commit_sha": meta.get("passed_commit_sha"),
         "ticket": task.get("ticket"), "selection_rationale": meta.get("selection_note"),
+        "verification_receipt": verification.get("report"), "verification_receipt_sha256": verification.get("report_sha256"),
         "oracle": oracle,
     }
     missing = [key for key, value in required.items() if not value]
@@ -67,7 +68,7 @@ def task_record(task: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None
         "language": str(required["language"]), "image_tag": str(required["image_tag"]),
         "image_digest": str(required["image_digest"]), "failed_job_id": str(required["failed_job_id"]),
         "passed_job_id": str(required["passed_job_id"]), "commits": {"failed": str(required["failed_commit_sha"]), "passed": str(required["passed_commit_sha"])},
-        "verification": {"receipt": str(verification.get("report") or ""), "receipt_sha256": str(verification.get("report_sha256") or ""), "red": True, "green": True},
+        "verification": {"receipt": str(required["verification_receipt"]), "receipt_sha256": str(required["verification_receipt_sha256"]), "red": True, "green": True},
         "public_task": {"text": str(required["ticket"]), "sha256": digest(str(required["ticket"]))},
         "hidden_oracle": {"reference": str(oracle.get("reference") or oracle.get("kind") or ""), "sha256": digest(oracle)},
         "selection_rationale": str(required["selection_rationale"]),

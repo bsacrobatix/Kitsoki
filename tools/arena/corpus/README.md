@@ -67,6 +67,27 @@ python3 tools/arena/scripts/bugswarm_verify_source.py \
   --execute
 ```
 
+On a capacity-constrained Docker host, verify a bounded batch and apply it to
+the exact source revision before moving to the next batch.  `--task-id` may be
+repeated; the receipt pins the source bytes, and the applier rejects a receipt
+for a different source revision.  Re-run the verifier against the newly
+written source for the next batch, preserving prior task evidence.
+
+```sh
+python3 tools/arena/scripts/bugswarm_verify_source.py \
+  --source .artifacts/bugswarm/arena-source.yaml \
+  --out .artifacts/bugswarm/verification.okio.json \
+  --execute --task-id bugswarm-square-okio-140452393
+python3 tools/arena/scripts/bugswarm_apply_verification.py \
+  --source .artifacts/bugswarm/arena-source.yaml \
+  --verification .artifacts/bugswarm/verification.okio.json \
+  --out .artifacts/bugswarm/arena-source.batch-1.yaml
+```
+
+Do not hand-copy image digests or commit identifiers into a source.  The corpus
+locker remains blocked until each selected task has execute evidence, a pinned
+image digest, both commit SHAs, and a receipt hash.
+
 The verifier follows BugSwarm's own artifact contract: `run_failed.sh` must
 exit non-zero and `run_passed.sh` must exit zero, each in a fresh container so
 the failed script cannot pollute the passed run.

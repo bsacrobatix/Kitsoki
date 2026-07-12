@@ -37,6 +37,9 @@ def main(argv: list[str] | None = None) -> int:
     verification_path = Path(args.verification)
     source = load_yaml(source_path)
     verification = load_yaml_or_json(verification_path)
+    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    if verification.get("source_sha256") != source_sha256:
+        raise ValueError("verification source_sha256 does not match --source; rerun verification for this source revision")
     updated = apply_verification(source, verification, verification_path=str(args.verification), allow_dry_run=args.allow_dry_run)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +82,12 @@ def apply_verification(
         for result in verification.get("results", [])
         if isinstance(result, dict)
     }
+    if len(results) != len([result for result in verification.get("results", []) if isinstance(result, dict)]):
+        raise ValueError("verification results require unique non-empty task_id values")
+    source_ids = {str(task.get("id") or "") for task in source.get("tasks", []) if isinstance(task, dict)}
+    unknown = sorted(set(results) - source_ids)
+    if unknown:
+        raise ValueError("verification contains task ids absent from source: " + ", ".join(unknown))
     out = dict(source)
     out["verification"] = {
         "path": verification_path,

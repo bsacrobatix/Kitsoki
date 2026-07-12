@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import runpy
 import subprocess
@@ -75,6 +76,7 @@ with tempfile.TemporaryDirectory() as tmp:
     verification.write_text(json.dumps({
         "kind": "arena_bugswarm_verification",
         "version": 1,
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "mode": "execute",
         "task_count": 2,
         "verified_count": 1,

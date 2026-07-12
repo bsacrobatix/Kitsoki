@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,7 @@ with tempfile.TemporaryDirectory() as tmp:
     verification.write_text(json.dumps({
         "kind": "arena_bugswarm_verification",
         "version": 1,
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "mode": "execute",
         "task_count": 1,
         "verified_count": 1,
@@ -91,6 +93,7 @@ with tempfile.TemporaryDirectory() as tmp:
     dry.write_text(json.dumps({
         "kind": "arena_bugswarm_verification",
         "version": 1,
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "mode": "dry-run",
         "task_count": 1,
         "verified_count": 0,
@@ -117,6 +120,17 @@ with tempfile.TemporaryDirectory() as tmp:
     dry_payload = yaml.safe_load(dry_out.read_text(encoding="utf-8"))
     check("dry-run does not set red", dry_payload["tasks"][0]["verified_red"], False)
     check("dry-run records mode", dry_payload["tasks"][0]["meta"]["bugswarm_verification"]["mode"], "dry-run")
+
+    stale = tmpdir / "stale.json"
+    stale.write_text(json.dumps({
+        "kind": "arena_bugswarm_verification", "version": 1, "mode": "execute", "source_sha256": "0" * 64,
+        "task_count": 0, "verified_count": 0, "results": [],
+    }), encoding="utf-8")
+    stale_apply = subprocess.run(
+        [sys.executable, str(APPLY), "--source", str(source), "--verification", str(stale), "--out", str(verified_source)],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("stale source receipt rejected", stale_apply.returncode != 0, True)
 
 if failures:
     print("FAIL: bugswarm apply verification")

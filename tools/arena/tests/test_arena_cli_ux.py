@@ -30,6 +30,32 @@ def require(label: str, condition: bool) -> None:
         failures.append(label)
 
 
+def corpus_lock(tasks: list[dict[str, str]]) -> dict:
+    """Build a minimal but self-authenticating BugSwarm corpus lock fixture."""
+    payload = {
+        "schema": "arena_bugswarm_corpus_lock/v1",
+        "status": "ready",
+        "source": "verified-source.yaml",
+        "source_sha256": "a" * 64,
+        "selection": {"algorithm": "test", "learning_count": 1, "confirmation_count": 1, "repository_separated": True},
+        "tasks": [
+            {
+                "id": task["id"], "split": task["split"], "repository": task["repository"],
+                "image_digest": "repo@sha256:" + "b" * 64,
+                "commits": {"failed": "c" * 40, "passed": "d" * 40},
+                "verification": {"receipt": "verify.json", "receipt_sha256": "e" * 64, "red": True, "green": True},
+                "public_task": {"text": "ticket", "sha256": "f" * 64},
+                "hidden_oracle": {"reference": "oracle", "sha256": "0" * 64},
+            }
+            for task in tasks
+        ],
+    }
+    payload["lock_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+    return payload
+
+
 def run(*argv: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(ARENA), *argv],
@@ -78,10 +104,10 @@ options:
     require("wrong agent rejected", "kitsoki-codeact-driver" in invalid.stderr)
 
     corpus = Path(td) / "corpus.lock.json"
-    corpus.write_text(json.dumps({"tasks": [
-        {"id": "kitsoki-exposed", "split": "learning", "task_sha256": "a"},
-        {"id": "bugswarm-heldout", "split": "confirmation", "task_sha256": "b"},
-    ]}), encoding="utf-8")
+    corpus.write_text(json.dumps(corpus_lock([
+        {"id": "kitsoki-exposed", "split": "learning", "repository": "example/exposed"},
+        {"id": "bugswarm-heldout", "split": "confirmation", "repository": "example/heldout"},
+    ])), encoding="utf-8")
     study = Path(td) / "study.yaml"
     study.write_text(
         """
@@ -100,6 +126,19 @@ live_gate_env: KITSOKI_TASK_OPT_LIVE
 """, encoding="utf-8")
     study_valid = run("task-optimization", "validate", "--study", str(study))
     check("task study validates", study_valid.returncode, 0)
+    tampered_lock = corpus_lock([
+        {"id": "kitsoki-exposed", "split": "learning", "repository": "example/exposed"},
+        {"id": "bugswarm-heldout", "split": "confirmation", "repository": "example/heldout"},
+    ])
+    tampered_lock["tasks"][0]["image_digest"] = "forged"
+    corpus.write_text(json.dumps(tampered_lock), encoding="utf-8")
+    tampered = run("task-optimization", "validate", "--study", str(study))
+    check("task study rejects tampered corpus lock", tampered.returncode, 1)
+    require("tampered corpus error is explicit", "lock_sha256" in tampered.stderr)
+    corpus.write_text(json.dumps(corpus_lock([
+        {"id": "kitsoki-exposed", "split": "learning", "repository": "example/exposed"},
+        {"id": "bugswarm-heldout", "split": "confirmation", "repository": "example/heldout"},
+    ])), encoding="utf-8")
     out = Path(td) / "out"
     plan = run("task-optimization", "plan", "--study", str(study), "--out", str(out))
     check("task plan exits 0", plan.returncode, 0)

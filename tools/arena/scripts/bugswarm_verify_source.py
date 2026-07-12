@@ -9,6 +9,7 @@ BugSwarm images and run long CI jobs. No mode calls an LLM.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shlex
 import subprocess
@@ -33,10 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-s", type=int, default=7200)
     parser.add_argument("--image-repo", default="bugswarm/images")
     parser.add_argument("--cached-image-repo", default="bugswarm/cached-images")
+    parser.add_argument("--task-id", action="append", default=[], help="verify one task id; repeat for a bounded batch")
     args = parser.parse_args(argv)
 
     source = load_source(Path(args.source))
-    tasks = source.get("tasks") or []
+    tasks = select_tasks(source.get("tasks") or [], args.task_id)
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     execute = bool(args.execute)
     results = [
@@ -54,6 +56,8 @@ def main(argv: list[str] | None = None) -> int:
         "kind": "arena_bugswarm_verification",
         "version": 1,
         "source": str(args.source),
+        "source_sha256": hashlib.sha256(Path(args.source).read_bytes()).hexdigest(),
+        "selected_task_ids": [str(task["id"]) for task in tasks],
         "mode": "execute" if execute else "dry-run",
         "generated_at": started,
         "task_count": len(results),
@@ -67,6 +71,23 @@ def main(argv: list[str] | None = None) -> int:
     if execute and payload["verified_count"] != len(results):
         return 1
     return 0
+
+
+def select_tasks(tasks: list[Any], requested_ids: list[str]) -> list[dict[str, Any]]:
+    """Return an explicit source-order batch, rejecting ambiguous selection."""
+    normalized = [task for task in tasks if isinstance(task, dict)]
+    by_id = {str(task.get("id") or ""): task for task in normalized}
+    if len(by_id) != len(normalized) or "" in by_id:
+        raise ValueError("source tasks require unique non-empty ids")
+    if not requested_ids:
+        return normalized
+    requested = [str(task_id) for task_id in requested_ids]
+    if len(requested) != len(set(requested)):
+        raise ValueError("--task-id must not repeat an id")
+    unknown = sorted(set(requested) - set(by_id))
+    if unknown:
+        raise ValueError("unknown --task-id: " + ", ".join(unknown))
+    return [task for task in normalized if str(task["id"]) in set(requested)]
 
 
 def load_source(path: Path) -> dict[str, Any]:

@@ -67,6 +67,7 @@ with tempfile.TemporaryDirectory() as tmp:
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("verification kind", payload["kind"], "arena_bugswarm_verification")
     check("verification mode", payload["mode"], "dry-run")
+    check("verification pins source bytes", len(payload["source_sha256"]), 64)
     check("verified count dry-run", payload["verified_count"], 0)
     result = payload["results"][0]
     check("dry-run red false", result["verified_red"], False)
@@ -75,6 +76,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("passed command uses run_passed", "run_passed.sh" in result["commands"]["passed"], True)
     check("commands use cached image first", "bugswarm/cached-images:square-okio-140452393" in result["commands"]["failed"], True)
     check("fallback command recorded", "bugswarm/images:square-okio-140452393" in result["commands"]["passed_fallback"], True)
+
+    selected = subprocess.run(
+        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run", "--task-id", "bugswarm-square-okio-140452393"],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("single task batch exits zero", selected.returncode, 0)
+    check("single task batch contains one result", json.loads(report.read_text(encoding="utf-8"))["task_count"], 1)
+    missing = subprocess.run(
+        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run", "--task-id", "missing"],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("unknown task batch fails", missing.returncode != 0, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
