@@ -11,6 +11,7 @@ docs:
 related:
   - slidey-bugfix
 demo:
+  format: rrweb
   spec: tests/playwright/slidey-open-pr-video.spec.ts
   artifactDir: slidey-open-pr
   videoBase: slidey-open-pr-demo
@@ -73,6 +74,14 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 8000
+      drive:
+        - type: wait-state
+          state: idle
+        - type: click-intent
+          intent: open
+        - type: wait-state
+          state: open_pr
+        - type: reveal-turn
     - id: sop-ci
       route: any
       target: chat-transcript
@@ -83,6 +92,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7500
+      drive:
+        - type: click-intent
+          intent: proceed
+        - type: wait-state
+          state: ci_monitoring
+        - type: reveal-turn
     - id: sop-merge
       route: any
       target: chat-transcript
@@ -93,6 +108,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7500
+      drive:
+        - type: click-intent
+          intent: proceed
+        - type: wait-state
+          state: merge_executing
+        - type: reveal-turn
     - id: sop-checkpoint
       route: any
       target: chat-transcript
@@ -103,6 +124,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7500
+      drive:
+        - type: click-intent
+          intent: proceed
+        - type: wait-state
+          state: merge_awaiting_reply
+        - type: reveal-turn
     - id: sop-merged
       route: any
       target: state-badge
@@ -113,6 +140,13 @@ tour:
       advance: next
       waitForTarget: state-badge
       dwellMs: 6500
+      drive:
+        - type: click-intent
+          intent: accept
+        - type: wait-state
+          state: __exit__merged
+        - type: dwell-ms
+          ms: 1500
     - id: sop-outro
       route: any
       title: That's the PR, landed

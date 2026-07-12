@@ -12,6 +12,7 @@ related:
   - agent-actions
   - trace-introspection
 demo:
+  format: rrweb
   spec: tests/playwright/trace-features-video.spec.ts
   artifactDir: trace-features
   videoBase: trace-features-demo

@@ -11,6 +11,7 @@ docs:
 related:
   - mockup-video
 demo:
+  format: rrweb
   spec: tests/playwright/review-video.spec.ts
   artifactDir: review-video
   videoBase: review-video-demo

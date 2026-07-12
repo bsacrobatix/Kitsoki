@@ -9,6 +9,7 @@ promo:
 docs:
   - docs/tui/story-editor.md
 demo:
+  format: rrweb
   spec: tests/playwright/story-editor-video.spec.ts
   artifactDir: story-editor
   videoBase: story-editor-demo

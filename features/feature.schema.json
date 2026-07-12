@@ -71,7 +71,18 @@
             "binary"
           ]
         },
+        "format": {
+          "type": "string",
+          "enum": [
+            "mp4",
+            "rrweb"
+          ]
+        },
         "spec": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rrwebSpec": {
           "type": "string",
           "minLength": 1
         },

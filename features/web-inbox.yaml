@@ -7,9 +7,10 @@ summary: 'A background host call launched from the chat composer completes while
 promo:
   order: 45
 demo:
+  format: rrweb
   spec: tests/playwright/web-inbox-video.spec.ts
   artifactDir: web-inbox
-  videoBase: web-inbox-demo
+  videoBase: web-inbox
   posterStep: wi-intro-home
   story: stories/inbox-demo
   flow: stories/inbox-demo/flows/background_notifies.yaml

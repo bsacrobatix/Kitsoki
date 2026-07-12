@@ -8,6 +8,7 @@ docs:
   - docs/architecture/hosts/local.md
   - docs/architecture/hosts.md
 demo:
+  format: rrweb
   spec: tests/playwright/weather-report-tour.spec.ts
   artifactDir: weather-report-tour
   videoBase: weather-report-tour

@@ -13,6 +13,7 @@ related:
   - story-editor
   - trace-features
 demo:
+  format: rrweb
   spec: tests/playwright/meta-mode.spec.ts
   artifactDir: meta-mode
   videoBase: meta-mode-demo

@@ -5,6 +5,7 @@ title: Design pipeline walkthrough
 tagline: From idea to published design doc — one conversation.
 summary: 'The dev-story design pipeline end to end on a realistic idea: intake, the prior-art scout, the refined brief, the brief judge, the generated draft, and the published design document — every advancing turn visible on the interactive chat surface.'
 demo:
+  format: rrweb
   spec: tests/playwright/design-walkthrough.spec.ts
   artifactDir: design-walkthrough
   videoBase: design-walkthrough

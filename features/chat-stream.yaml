@@ -11,6 +11,7 @@ docs:
 related:
   - agent-actions
 demo:
+  format: rrweb
   spec: tests/playwright/chat-stream-video.spec.ts
   artifactDir: chat-stream
   videoBase: chat-stream-demo

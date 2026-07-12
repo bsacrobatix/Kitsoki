@@ -10,6 +10,7 @@ docs:
 related:
   - trace-features
 demo:
+  format: rrweb
   spec: tests/playwright/trace-introspection-demo.spec.ts
   artifactDir: trace-introspection-demo
   videoBase: trace-introspection-demo

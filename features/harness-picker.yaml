@@ -12,6 +12,7 @@ related:
   - agent-actions
   - trace-features
 demo:
+  format: rrweb
   spec: tests/playwright/harness-picker-video.spec.ts
   artifactDir: harness-picker
   videoBase: harness-picker-demo

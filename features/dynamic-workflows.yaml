@@ -10,6 +10,7 @@ docs:
   - docs/stories/dynamic-workflows.md
   - docs/architecture/mcp-studio.md
 demo:
+  format: rrweb
   spec: tests/playwright/dynamic-workflows-video.spec.ts
   artifactDir: dynamic-workflows
   videoBase: dynamic-workflows-demo
