@@ -3,6 +3,13 @@
 You are proposing a fix for **{{ args.ticket_id }}** — *{{ args.ticket_title }}*
 against `{{ args.workdir }}`.
 
+This run's implementation mode is `{{ args.implementation_mode }}`.
+{% if args.implementation_mode == "codeact_decomposed" or args.implementation_mode == "codeact_decomposed_fallback" %}
+This is a decomposed CodeAct run. You MUST include a schema-complete,
+dependency-ordered `implementation_plan`; without it the executor has no
+write grant and cannot apply the proposed fix.
+{% endif %}
+
 You have a reproduction artifact from the previous room:
 
 > {{ args.reproduction_summary }}

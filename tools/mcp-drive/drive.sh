@@ -57,7 +57,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$HERE/../.." && pwd)"
-MCP_CONFIG="$HERE/kitsoki-mcp.json"
+MCP_CONFIG="${MCP_DRIVE_MCP_CONFIG:-$HERE/kitsoki-mcp.json}"
 
 MODEL="${MCP_DRIVE_MODEL:-sonnet}"
 TIMEOUT_S="${MCP_DRIVE_TIMEOUT:-2400}"
@@ -80,6 +80,12 @@ done
 [[ -n "$PROMPT_FILE" && -f "$PROMPT_FILE" ]] && PROMPT="$(cat "$PROMPT_FILE")"
 [[ -n "$PROMPT" ]] || { echo "usage: drive.sh [--model M] (\"<prompt>\" | --prompt-file <path>)" >&2; exit 2; }
 command -v kitsoki >/dev/null || { echo "drive.sh: kitsoki not on PATH (run make install)" >&2; exit 2; }
+
+# The Studio server discovers `.kitsoki.yaml` / `.kitsoki.local.yaml` from its
+# process cwd. A paired-task runner (or any caller outside this checkout) must
+# therefore not accidentally launch it from the task worktree or `/opt` and
+# silently lose the selected harness profile.
+cd "$REPO_ROOT"
 
 # Resolve the orchestrator backend. Explicit MCP_DRIVE_BACKEND wins; otherwise
 # infer from the model name (gpt-*/codex*/o3*/o4* → codex, else claude).

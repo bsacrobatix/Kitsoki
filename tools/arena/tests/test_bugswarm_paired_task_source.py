@@ -159,6 +159,8 @@ with tempfile.TemporaryDirectory() as tmp:
             os.environ["KITSOKI_ROOT"] = old_kitsoki_root
     check("glm profile mapping", runner_globals["MODEL_TO_PROFILE"].get("glm-5.2"), "synthetic-claude")
     check("glm raw claude mapping", runner_globals["MODEL_TO_RAW_CLAUDE_PROFILE"].get("glm-5.2"), "synthetic-claude")
+    check("Kimi profile mapping", runner_globals["MODEL_TO_PROFILE"].get("kimi-k2.7-code"), "synthetic-kimi-k27")
+    check("Kimi raw claude mapping", runner_globals["MODEL_TO_RAW_CLAUDE_PROFILE"].get("kimi-k2.7-code"), "synthetic-kimi-k27")
     check("Spark profile mapping", runner_globals["MODEL_TO_PROFILE"].get("gpt-5.3-codex-spark"), "codex-spark")
     check(
         "container runtime CLI stays off host checkout mount",

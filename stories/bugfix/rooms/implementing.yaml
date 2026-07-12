@@ -219,6 +219,9 @@ states:
           sandbox:
             min_strength: supervised
             degrade: warn
+            # Provider-backed worker profiles authenticate through the
+            # operator's Claude home. Keep it for this explicitly live call.
+            auth_home: inherit
             resources:
               timeout: "15m"
               activity_timeout: "90s"

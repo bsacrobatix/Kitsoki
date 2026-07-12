@@ -94,6 +94,7 @@ states:
             ticket_title:          "{{ world.ticket_title }}"
             workdir:               "{{ world.workdir }}"
             reproduction_summary:  "{{ world.reproduction_artifact.summary_markdown }}"
+            implementation_mode:   "{{ world.implementation_mode }}"
             refine_feedback:       "{{ world.refine_feedback }}"
             cycle:                 "{{ world.cycle }}"
         bind:
