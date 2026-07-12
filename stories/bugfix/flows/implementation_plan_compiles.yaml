@@ -4,7 +4,11 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing
+# Seed one state before proposing so the fixture exercises the real
+# reproducing -> proposing transition. Flow fixtures seed their initial state
+# without running its on_enter effects; starting directly in proposing would
+# test only the view, not the compiler invocation.
+initial_state: reproducing
 initial_world:
   implementation_mode: agent_task
   judge_mode: human
@@ -40,8 +44,15 @@ initial_world:
         max_steps: 3
         fallback_reason_allowlist: [task_not_decomposable]
 
+# `host_handlers` selects the orchestrator-backed flow path, which is where
+# the real registered host.starlark.run handler executes. The legacy machine
+# path intentionally renders effects but has no host registry.
+host_handlers:
+  host.inbox.add:
+    data: { ok: true }
+
 turns:
-  - intent: { name: look, slots: {} }
+  - intent: { name: accept, slots: {} }
     expect_state: proposing
     expect_world:
       implementation_capability_manifest:

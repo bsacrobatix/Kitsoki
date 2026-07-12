@@ -124,7 +124,24 @@ def main(ctx):
         invariants = _string_list(raw.get("invariants", []), "implementation_plan[" + str(index) + "].invariants", False)
         acceptance_commands = _string_list(raw.get("acceptance_commands", []), "implementation_plan[" + str(index) + "].acceptance_commands", False)
         expected_artifacts = _string_list(raw.get("expected_artifacts", []), "implementation_plan[" + str(index) + "].expected_artifacts", False)
+        # Effect interpolation preserves nested plan objects but represents
+        # scalar YAML values as strings at this host boundary. Normalize only
+        # a canonical decimal string; accepting arbitrary coercions here would
+        # weaken the plan's bounded-step contract.
         max_steps = raw.get("max_steps", 0)
+        if type(max_steps) == "string":
+            parsed_max_steps = int(max_steps)
+            if str(parsed_max_steps) != max_steps:
+                fail("implementation_plan item " + item_id + " max_steps must be an integer from 1 through 5")
+            max_steps = parsed_max_steps
+        # YAML decoded through a rendered effect can arrive as a float. Accept
+        # only an exactly integral value and immediately canonicalize it; 4.5
+        # and other fractional budgets remain invalid rather than truncating.
+        if type(max_steps) == "float":
+            parsed_max_steps = int(max_steps)
+            if max_steps != float(parsed_max_steps):
+                fail("implementation_plan item " + item_id + " max_steps must be an integer from 1 through 5")
+            max_steps = parsed_max_steps
         if type(max_steps) != "int" or max_steps < 1 or max_steps > 5:
             fail("implementation_plan item " + item_id + " max_steps must be an integer from 1 through 5")
         fallback_reason_allowlist = _fallback_reasons(raw.get("fallback_reason_allowlist", []), "implementation_plan[" + str(index) + "].fallback_reason_allowlist")
