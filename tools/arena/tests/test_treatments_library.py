@@ -29,7 +29,14 @@ def require(label: str, condition: bool) -> None:
 
 
 catalog = {str(row["id"]): row for row in treatments.treatment_catalog()}
-check("catalog treatments", sorted(catalog), ["codex-codeact", "kitsoki-mcp", "kitsoki-mcp-codeact", "raw-codex"])
+check("catalog treatments", sorted(catalog), [
+    "codex-codeact",
+    "kitsoki-mcp",
+    "kitsoki-mcp-codeact",
+    "raw-codex",
+    "strict-mcp-codeact-decomposed",
+    "strict-mcp-decomposed-fallback",
+])
 check("raw aliases", catalog["raw-codex"].get("aliases"), ["single-briefed", "single-naive"])
 check("kitsoki alias", catalog["kitsoki-mcp"].get("aliases"), ["kitsoki"])
 check("codeact action surface", catalog["codex-codeact"]["action_surface"], "kitsoki-codeact-mcp")
@@ -40,6 +47,10 @@ check("canonical kitsoki alias", treatments.canonical_treatment("kitsoki"), "kit
 check("known includes aliases", "single-briefed" in treatments.known_treatments(), True)
 check("unknown driver", treatments.resolve_treatment_driver("missing"), None)
 check("known driver name", treatments.resolve_treatment_driver("kitsoki-mcp-codeact").name, "kitsoki-mcp-codeact")
+check("strict decomposed driver", treatments.resolve_treatment_driver("strict-mcp-codeact-decomposed").name, "strict-mcp-codeact-decomposed")
+check("typed fallback driver", treatments.resolve_treatment_driver("strict-mcp-decomposed-fallback").name, "strict-mcp-decomposed-fallback")
+check("strict decomposed action surface", catalog["strict-mcp-codeact-decomposed"]["action_surface"], "kitsoki-studio-mcp+codeact-decomposed")
+check("typed fallback action surface", catalog["strict-mcp-decomposed-fallback"]["action_surface"], "kitsoki-studio-mcp+codeact-decomposed-fallback")
 
 args = argparse.Namespace(capability_presets_json="", capability_preset="")
 cap_json, cap_hash = treatments.capability_preset_json(args, treatments.CODEACT_CAPABILITY_PRESET)
@@ -94,6 +105,69 @@ spark_strict = argparse.Namespace(
     capability_presets_json="",
 )
 check("Spark strict CodeAct backend validation", treatments.validate_driver_args(spark_strict), "")
+
+strict_decomposed = argparse.Namespace(
+    treatment="strict-mcp-codeact-decomposed",
+    backend="codex",
+    agent="",
+    implementation_mode="codeact_decomposed",
+    capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+    capability_presets_json="",
+)
+check("strict decomposed validation", treatments.validate_driver_args(strict_decomposed), "")
+
+bad_strict_decomposed = argparse.Namespace(
+    treatment="strict-mcp-codeact-decomposed",
+    backend="codex",
+    agent="",
+    implementation_mode="codeact",
+    capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+    capability_presets_json="",
+)
+require("strict decomposed rejects broad mode", "codeact_decomposed" in treatments.validate_driver_args(bad_strict_decomposed))
+
+typed_fallback = argparse.Namespace(
+    treatment="strict-mcp-decomposed-fallback",
+    backend="codex",
+    agent="",
+    implementation_mode="codeact_decomposed_fallback",
+    capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+    capability_presets_json="",
+)
+check("typed fallback validation", treatments.validate_driver_args(typed_fallback), "")
+
+# Driver-level metrics are part of the immutable cell receipt. Exercise the
+# treatment wrappers without a provider: the shared Studio MCP dispatcher is
+# injected and returns a minimal completed result.
+driver_services = treatments.DriverServices(
+    kitsoki_root=Path("."),
+    dispatch_single_prompt=lambda *_: {},
+    dispatch_kitsoki=lambda *_: {"blocked": False, "notes": "fixture", "metrics": {}},
+    zero_metrics=lambda **kwargs: kwargs,
+    container_path=lambda value: str(value),
+    write_task_file=lambda *_: Path("unused"),
+    ensure_kitsoki_binary=lambda: Path("."),
+    first_line=lambda value: value,
+    redact_cmd=lambda value: value,
+    codex_output_metrics=lambda *_: {},
+    codeact_text_metrics=lambda *_: {},
+)
+for treatment_id, expected_mode, expected_policy in [
+    ("strict-mcp-codeact-decomposed", "codeact_decomposed", "forbidden"),
+    ("strict-mcp-decomposed-fallback", "codeact_decomposed_fallback", "typed-allowlisted-same-grant-once"),
+]:
+    runtime_args = argparse.Namespace(
+        backend="codex",
+        implementation_mode="",
+        capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+        capability_presets_json="",
+    )
+    driver_result = treatments.resolve_treatment_driver(treatment_id).run(
+        runtime_args, {"id": "fixture"}, Path("."), "fixture.jsonl", driver_services,
+    )
+    check(f"{treatment_id} forces mode", runtime_args.implementation_mode, expected_mode)
+    check(f"{treatment_id} metrics policy", driver_result.metrics.get("fallback_policy"), expected_policy)
+    check(f"{treatment_id} metrics no widening", driver_result.metrics.get("capability_widening"), False)
 
 with tempfile.TemporaryDirectory(prefix="arena-treatment-") as td:
     tree = Path(td).resolve()

@@ -7,7 +7,12 @@ import argparse
 from .base import TreatmentCatalogEntry, TreatmentDriver
 from .capabilities import CODEACT_CAPABILITY_PRESET, DEFAULT_CODEACT_AGENT, capability_preset_json
 from .codex_codeact import CodexCodeactDriver
-from .kitsoki_mcp import KitsokiMCPCodeactDriver, KitsokiMCPDriver
+from .kitsoki_mcp import (
+    KitsokiMCPCodeactDriver,
+    KitsokiMCPDecomposedCodeactDriver,
+    KitsokiMCPDecomposedFallbackDriver,
+    KitsokiMCPDriver,
+)
 from .raw_codex import RawPromptDriver
 
 TREATMENT_CATALOG: tuple[TreatmentCatalogEntry, ...] = (
@@ -41,6 +46,20 @@ TREATMENT_CATALOG: tuple[TreatmentCatalogEntry, ...] = (
         summary="Studio MCP orchestration with the story's implementation step forced through host.agent.codeact.",
         option_fields=("worker_profile", "implementation_mode", "capability_preset", "capability_presets"),
     ),
+    TreatmentCatalogEntry(
+        id="strict-mcp-codeact-decomposed",
+        driver="KitsokiMCPDecomposedCodeactDriver",
+        action_surface="kitsoki-studio-mcp+codeact-decomposed",
+        summary="Studio MCP with compiler-bounded, per-item CodeAct grants and host-owned item gates.",
+        option_fields=("worker_profile", "capability_preset", "capability_presets"),
+    ),
+    TreatmentCatalogEntry(
+        id="strict-mcp-decomposed-fallback",
+        driver="KitsokiMCPDecomposedFallbackDriver",
+        action_surface="kitsoki-studio-mcp+codeact-decomposed-fallback",
+        summary="Strict decomposed CodeAct with one recorded allowlisted same-grant retry; no broad fallback.",
+        option_fields=("worker_profile", "capability_preset", "capability_presets"),
+    ),
 )
 
 _DRIVERS_BY_CANONICAL: dict[str, TreatmentDriver] = {
@@ -48,6 +67,8 @@ _DRIVERS_BY_CANONICAL: dict[str, TreatmentDriver] = {
     "codex-codeact": CodexCodeactDriver(),
     "kitsoki-mcp": KitsokiMCPDriver(),
     "kitsoki-mcp-codeact": KitsokiMCPCodeactDriver(),
+    "strict-mcp-codeact-decomposed": KitsokiMCPDecomposedCodeactDriver(),
+    "strict-mcp-decomposed-fallback": KitsokiMCPDecomposedFallbackDriver(),
 }
 _ALIASES: dict[str, str] = {
     alias: entry.id
@@ -120,12 +141,17 @@ def validate_driver_errors(args: argparse.Namespace) -> list[str]:
             capability_preset_json(args, preset_name)
         except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
             errors.append(str(exc))
-    if treatment == "kitsoki-mcp-codeact":
+    if treatment in {"kitsoki-mcp-codeact", "strict-mcp-codeact-decomposed", "strict-mcp-decomposed-fallback"}:
         if getattr(args, "backend", "") and args.backend != "codex":
-            errors.append(f"kitsoki-mcp-codeact requires backend 'codex', got {args.backend!r}")
+            errors.append(f"{treatment} requires backend 'codex', got {args.backend!r}")
         mode = (getattr(args, "implementation_mode", "") or "").strip()
-        if mode and mode != "codeact":
-            errors.append(f"kitsoki-mcp-codeact requires implementation_mode 'codeact', got {mode!r}")
+        required_mode = {
+            "kitsoki-mcp-codeact": "codeact",
+            "strict-mcp-codeact-decomposed": "codeact_decomposed",
+            "strict-mcp-decomposed-fallback": "codeact_decomposed_fallback",
+        }[treatment]
+        if mode and mode != required_mode:
+            errors.append(f"{treatment} requires implementation_mode {required_mode!r}, got {mode!r}")
         preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
         try:
             capability_preset_json(args, preset_name)
