@@ -63,6 +63,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 "verified_green": True,
                 "failed_exit_code": 1,
                 "passed_exit_code": 0,
+                "image_digest": "bugswarm/cached-images@sha256:abc",
             }
         ],
     }), encoding="utf-8")
@@ -82,6 +83,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("source verification mode", payload["verification"]["mode"], "execute")
     check("task verification report path", task["meta"]["bugswarm_verification"]["report"], str(verification))
     check("failed exit carried", task["meta"]["bugswarm_verification"]["failed_exit_code"], 1)
+    check("verification receipt hash carried", len(task["meta"]["bugswarm_verification"]["report_sha256"]), 64)
+    check("image digest carried", task["meta"]["bugswarm_verification"]["image_digest"], "bugswarm/cached-images@sha256:abc")
 
     dry = tmpdir / "dry.json"
     dry_out = tmpdir / "dry-verified.yaml"

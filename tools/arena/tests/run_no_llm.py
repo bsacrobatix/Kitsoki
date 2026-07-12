@@ -96,6 +96,13 @@ def run_default() -> int:
     checks.check("bugswarm apply verification gate", apply_verification_test.returncode, 0)
     if apply_verification_test.returncode:
         checks.failures.append((apply_verification_test.stdout + apply_verification_test.stderr).strip())
+    corpus_lock_test = subprocess.run(
+        [sys.executable, str(HERE / "test_bugswarm_lock_corpus.py")],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    checks.check("bugswarm corpus lock gate", corpus_lock_test.returncode, 0)
+    if corpus_lock_test.returncode:
+        checks.failures.append((corpus_lock_test.stdout + corpus_lock_test.stderr).strip())
     paired_task_source_test = subprocess.run(
         [sys.executable, str(HERE / "test_bugswarm_paired_task_source.py")],
         cwd=REPO_ROOT,

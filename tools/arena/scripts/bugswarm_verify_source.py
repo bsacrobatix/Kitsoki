@@ -117,6 +117,7 @@ def verify_task(
     verified_red = failed["exit_code"] != 0 and not failed_infra
     verified_green = passed["exit_code"] == 0 and not passed_infra
     infrastructure_error = failed_infra or passed_infra
+    image_digest = inspect_image_digest(failed["command"])
     return {
         "task_id": str(task.get("id") or ""),
         "image_tag": image_tag,
@@ -126,6 +127,7 @@ def verify_task(
         "infrastructure_error": infrastructure_error,
         "failed_exit_code": failed["exit_code"],
         "passed_exit_code": passed["exit_code"],
+        "image_digest": image_digest,
         "commands": {
             "failed": shell_join(failed["command"]),
             "passed": shell_join(passed["command"]),
@@ -180,6 +182,25 @@ def run_cmd(cmd: list[str], *, timeout_s: int) -> dict[str, Any]:
             "stdout_tail": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
             "stderr_tail": f"timed out after {exc.timeout}s",
         }
+
+
+def inspect_image_digest(run_command: list[str]) -> str:
+    """Return Docker's immutable repo digest for the exact verified image.
+
+    A missing digest is not fabricated: the corpus locker will block rather
+    than freeze a mutable tag.  This is intentionally best-effort because the
+    verification result itself already captures infrastructure failures.
+    """
+    try:
+        image_index = run_command.index("--rm") + 1
+        image = run_command[image_index]
+        proc = subprocess.run(
+            ["docker", "image", "inspect", "--format={{index .RepoDigests 0}}", image],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=False,
+        )
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return ""
+    return proc.stdout.strip() if proc.returncode == 0 else ""
 
 
 def is_infrastructure_exit(exit_code: int) -> bool:
