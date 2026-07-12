@@ -117,6 +117,21 @@ expected_tree_after_delta() {
   printf '%s\n' "$tree"
 }
 
+materialize_expected_tree_merge() {
+  local dir="$1" expected_tree="$2" first_parent="$3" second_parent="$4" label="$5"
+  local reconciled tree
+  reconciled="$(git -C "$dir" commit-tree "$expected_tree" \
+    -p "$first_parent" \
+    -p "$second_parent" \
+    -m "chore: reconcile $label" \
+    -m "Preserve the independently proven tree when sequential rebase replay produces a different result. The exact pre-refresh staging history remains reachable through the second parent." \
+    -m "Signed-off-by: Kitsoki Agent <agent@kitsoki.dev>")" || return 1
+  git -C "$dir" reset --hard "$reconciled" >/dev/null || return 1
+  tree="$(git -C "$dir" rev-parse "$reconciled^{tree}")" || return 1
+  [ "$tree" = "$expected_tree" ] || return 1
+  printf '%s\n' "$reconciled"
+}
+
 refuse_untracked_tree_collisions() {
   local dir="$1" from_ref="$2" to_ref="$3" context="$4" output
   if ! output="$(python3 - "$dir" "$from_ref" "$to_ref" <<'PY'
@@ -797,12 +812,18 @@ refuse_untracked_tree_collisions \
 echo "refresh-staging-local: rebasing staging capsule onto the captured staging snapshot" >&2
 git -C "$staging_capsule" rebase "$snapshot_ref"
 capsule_start="$(git -C "$staging_capsule" rev-parse HEAD)"
-git -C "$staging_capsule" update-ref "$capsule_ref" "$capsule_start"
 capsule_tree="$(git -C "$staging_capsule" rev-parse "$capsule_start^{tree}")"
 if [ "$capsule_tree" != "$expected_capsule_tree" ]; then
-  restore_original_on_failure=1
-  die "refusing to continue: post-snapshot capsule tree differs from the expected preserved tree"
+  echo "refresh-staging-local: sequential snapshot rebase changed the independently proven tree; materializing a signed reconciliation merge" >&2
+  if ! capsule_start="$(materialize_expected_tree_merge \
+    "$staging_capsule" "$expected_capsule_tree" "$staging_start" \
+    "$capsule_original_start" "capsule work onto staging snapshot")"; then
+    restore_original_on_failure=1
+    die "refusing to continue: could not materialize the expected post-snapshot capsule tree"
+  fi
+  capsule_tree="$(git -C "$staging_capsule" rev-parse "$capsule_start^{tree}")"
 fi
+git -C "$staging_capsule" update-ref "$capsule_ref" "$capsule_start"
 
 combined_base="$(git -C "$staging_capsule" merge-base "$staging_start" "$base_start")" ||
   die "could not find the staging/base merge base"
@@ -822,8 +843,14 @@ git -C "$staging_capsule" rebase "$base_start"
 rebased_result="$(git -C "$staging_capsule" rev-parse HEAD)"
 rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
 if [ "$rebased_result_tree" != "$expected_result_tree" ]; then
-  restore_original_on_failure=1
-  die "refusing to continue: rebased staging tree differs from the expected preserved tree"
+  echo "refresh-staging-local: sequential base rebase changed the independently proven tree; materializing a signed reconciliation merge" >&2
+  if ! rebased_result="$(materialize_expected_tree_merge \
+    "$staging_capsule" "$expected_result_tree" "$base_start" \
+    "$capsule_start" "staging snapshot onto $base")"; then
+    restore_original_on_failure=1
+    die "refusing to continue: could not materialize the expected staging-on-base tree"
+  fi
+  rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
 fi
 git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$rebased_result" ||
   die "refusing to continue: rebased staging is not based on captured $base"

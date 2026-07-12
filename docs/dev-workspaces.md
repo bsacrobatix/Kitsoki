@@ -232,8 +232,14 @@ later replaced. Failed runs retain the original/post-rebase/candidate refs that
 carry diagnostic state; ephemeral captured-input refs are removed by exit
 cleanup. If failure happens after the candidate was copied into the primary
 repository, that immutable import ref is retained there too.
-The expected post-rebase tree is constructed independently, and the final
-primary update verifies captured `main` and `staging/local` atomically. If the
+The expected post-rebase tree is constructed independently. If sequential
+replay produces a different tree, refresh replaces that replay with a signed
+reconciliation merge whose first parent is the captured destination, whose
+second parent is the exact pre-refresh staging snapshot, and whose tree is the
+independently proven three-way result. This preserves resolution-only content
+and the complete original history instead of accepting the changed replay.
+The final primary update verifies captured `main` and `staging/local`
+atomically. If the
 staging capsule is dirty and the helper is attached to a terminal, it asks
 whether to inspect,
 move the work into a new committed managed recovery capsule (the default),
