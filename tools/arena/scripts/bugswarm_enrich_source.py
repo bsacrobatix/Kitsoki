@@ -113,8 +113,11 @@ def fetch_database_api(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     rows: list[Any] = []
     for task in tasks:
         tag = str(task.get("image_tag") or "")
-        # DatabaseAPI.filter_artifacts is the documented public convention.
-        found = api.filter_artifacts({"image_tag": tag})
+        # DatabaseAPI.filter_artifacts accepts a MongoDB query *string*, not
+        # a Python mapping. Compact, sorted JSON makes the exact query durable
+        # in client logs and prevents representation-dependent behavior.
+        query = json.dumps({"image_tag": tag}, sort_keys=True, separators=(",", ":"))
+        found = api.filter_artifacts(query)
         if not isinstance(found, list) or len(found) != 1:
             raise RuntimeError(f"DatabaseAPI returned {len(found) if isinstance(found, list) else 'non-list'} records for {tag!r}; refusing ambiguity")
         rows.append(found[0])

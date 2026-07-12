@@ -52,12 +52,15 @@ def mock_database_api_module():
     re-export.  This makes the test fail if the helper regresses to the old,
     unsupported top-level import while remaining entirely offline.
     """
-    calls: list[dict] = []
+    calls: list[str] = []
 
     class FakeDatabaseAPI:
         def filter_artifacts(self, query):
+            if not isinstance(query, str):
+                raise TypeError("DatabaseAPI.filter_artifacts requires a MongoDB query string")
             calls.append(query)
-            return [{"image_tag": query["image_tag"], "failed_job": {"commit": "d" * 40}, "passed_job": {"commit": "e" * 40}}]
+            parsed = json.loads(query)
+            return [{"image_tag": parsed["image_tag"], "failed_job": {"commit": "d" * 40}, "passed_job": {"commit": "e" * 40}}]
 
     bugswarm = types.ModuleType("bugswarm")
     common = types.ModuleType("bugswarm.common")
@@ -80,7 +83,7 @@ fetch_calls, fake_modules = mock_database_api_module()
 with patch.dict(sys.modules, fake_modules):
     fetched = enricher.fetch_database_api([{"image_tag": "official-import-path"}])
 check("documented DatabaseAPI module path fetches offline", fetched["artifacts"][0]["image_tag"], "official-import-path")
-check("DatabaseAPI receives exact image tag filter", fetch_calls, [{"image_tag": "official-import-path"}])
+check("DatabaseAPI receives canonical MongoDB query string", fetch_calls, ['{"image_tag":"official-import-path"}'])
 
 
 with tempfile.TemporaryDirectory() as tmp:
