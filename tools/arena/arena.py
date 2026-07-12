@@ -28,6 +28,7 @@ from arena.model import (
     Cell, JobSpec, TaskOptimizationStudy, canonical_json, load_task_optimization_receipts,
     receipt_sha256, select_task_optimization_champion, task_optimization_status,
 )
+from arena.task_optimization_receipt import validate_scored_attempt_receipt
 from arena.placement import run_sweep
 from arena.plugins import base as plugins
 from arena.rollup import write_rollup
@@ -382,6 +383,11 @@ def cmd_task_optimization_record(args: argparse.Namespace) -> int:
         preflight_candidates = {str(record.get("candidate_id")): record for record in preflight.get("candidates", []) if isinstance(record, dict)}
         if preflight_candidates.get(candidate_id, {}).get("status") != "ready":
             raise ValueError("attempt receipt candidate lacks a ready preflight receipt")
+        validate_scored_attempt_receipt(
+            receipt,
+            receipt_path=args.receipt,
+            preflight_candidate=preflight_candidates[candidate_id],
+        )
         destination = Path(args.out) / cell_id / f"{attempt_id}.json"
         _write_immutable_json(destination, receipt)
     except (OSError, ValueError, json.JSONDecodeError) as exc:

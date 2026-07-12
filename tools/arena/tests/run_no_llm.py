@@ -147,6 +147,13 @@ def run_default() -> int:
     checks.check("arena CLI UX gate", cli_ux_test.returncode, 0)
     if cli_ux_test.returncode:
         checks.failures.append((cli_ux_test.stdout + cli_ux_test.stderr).strip())
+    scored_receipt_test = subprocess.run(
+        [sys.executable, str(HERE / "test_task_optimization_scored_receipt.py")],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    checks.check("task optimization scored receipt gate", scored_receipt_test.returncode, 0)
+    if scored_receipt_test.returncode:
+        checks.failures.append((scored_receipt_test.stdout + scored_receipt_test.stderr).strip())
     report_test = subprocess.run(
         [sys.executable, str(HERE / "test_glm52_bugswarm_report.py")],
         cwd=REPO_ROOT,
