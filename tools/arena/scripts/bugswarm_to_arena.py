@@ -11,16 +11,44 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-try:
-    import yaml  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - exercised by CLI environment.
-    sys.exit("bugswarm_to_arena.py needs pyyaml")
+
+def _import_pyyaml() -> Any:
+    """Import installed PyYAML rather than the local offline test shim."""
+    arena_root = Path(__file__).resolve().parents[1]
+
+    def is_arena_path(entry: str) -> bool:
+        try:
+            Path(entry or ".").resolve().relative_to(arena_root)
+            return True
+        except ValueError:
+            return False
+
+    previous_module = sys.modules.pop("yaml", None)
+    previous_path = sys.path[:]
+    sys.path[:] = [entry for entry in sys.path if not is_arena_path(entry)]
+    try:
+        module = importlib.import_module("yaml")
+    except ModuleNotFoundError:  # pragma: no cover - depends on CLI environment.
+        if previous_module is not None:
+            sys.modules["yaml"] = previous_module
+        sys.exit("bugswarm_to_arena.py needs pyyaml")
+    finally:
+        sys.path[:] = previous_path
+
+    origin = Path(str(getattr(module, "__file__", ""))).resolve()
+    if is_arena_path(str(origin)):
+        raise RuntimeError(f"refusing local YAML shim for corpus serialization: {origin}")
+    return module
+
+
+yaml = _import_pyyaml()
 
 REQUIRED = ("image_tag", "repo", "failed_job_id", "passed_job_id")
 

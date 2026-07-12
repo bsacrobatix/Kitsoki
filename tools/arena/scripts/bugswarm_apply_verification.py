@@ -11,14 +11,51 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import sys
 from pathlib import Path
 from typing import Any
 
-try:
-    import yaml  # type: ignore
-except ModuleNotFoundError:
-    sys.exit("bugswarm_apply_verification.py needs pyyaml")
+
+def _import_pyyaml() -> Any:
+    """Import the installed PyYAML package, never this directory's shim.
+
+    ``tools/arena/scripts/yaml.py`` is a deliberately small offline parser for
+    manifest tests.  Python puts a directly executed script's directory first
+    on ``sys.path``, which previously made this command silently serialize via
+    that shim.  Its emitter does not implement YAML's colon quoting rules, so
+    the resulting corpus could not be read by a standard YAML implementation.
+    Corpus evidence is exchanged outside this repository; require the real
+    PyYAML serializer for that boundary.
+    """
+    arena_root = Path(__file__).resolve().parents[1]
+
+    def is_arena_path(entry: str) -> bool:
+        try:
+            Path(entry or ".").resolve().relative_to(arena_root)
+            return True
+        except ValueError:
+            return False
+
+    previous_module = sys.modules.pop("yaml", None)
+    previous_path = sys.path[:]
+    sys.path[:] = [entry for entry in sys.path if not is_arena_path(entry)]
+    try:
+        module = importlib.import_module("yaml")
+    except ModuleNotFoundError:
+        if previous_module is not None:
+            sys.modules["yaml"] = previous_module
+        sys.exit("bugswarm_apply_verification.py needs pyyaml")
+    finally:
+        sys.path[:] = previous_path
+
+    origin = Path(str(getattr(module, "__file__", ""))).resolve()
+    if is_arena_path(str(origin)):
+        raise RuntimeError(f"refusing local YAML shim for corpus serialization: {origin}")
+    return module
+
+
+yaml = _import_pyyaml()
 
 
 def main(argv: list[str] | None = None) -> int:

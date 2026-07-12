@@ -25,6 +25,26 @@ def check(label: str, got, want) -> None:
         failures.append(f"{label}: got {got!r}, want {want!r}")
 
 
+def load_with_external_pyyaml(path: Path) -> dict:
+    """Exercise an installed YAML parser from outside the arena shim paths."""
+    command = (
+        "import json, pathlib, sys, yaml; "
+        "print(json.dumps(yaml.safe_load(pathlib.Path(sys.argv[1]).read_text()), sort_keys=True))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", command, str(path)],
+        cwd="/tmp",
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("external PyYAML parses source", result.returncode, 0)
+    if result.returncode:
+        return {}
+    return json.loads(result.stdout)
+
+
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     artifacts = tmpdir / "artifacts.json"
@@ -80,6 +100,19 @@ with tempfile.TemporaryDirectory() as tmp:
         check=False,
     )
     check("apply exits zero", apply.returncode, 0)
+    external_payload = load_with_external_pyyaml(verified_source)
+    check("external PyYAML retains colon ticket", external_payload["tasks"][0]["ticket"], "Repair BugSwarm artifact square-okio-140452393: CI job 140452393 fails and job 140452394 passes.")
+    first_serialization = verified_source.read_bytes()
+    repeat_apply = subprocess.run(
+        [sys.executable, str(APPLY), "--source", str(source), "--verification", str(verification), "--out", str(verified_source)],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("repeat apply exits zero", repeat_apply.returncode, 0)
+    check("apply serialization deterministic", verified_source.read_bytes(), first_serialization)
     payload = yaml.safe_load(verified_source.read_text(encoding="utf-8"))
     task = payload["tasks"][0]
     check("verified red set", task["verified_red"], True)
