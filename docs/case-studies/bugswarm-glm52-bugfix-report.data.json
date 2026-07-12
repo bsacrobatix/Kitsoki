@@ -517,12 +517,12 @@
         "sha256": "93125ed682ff0b829b75642fcefd6a4a8f2a2993f99122629dea51b70590e566"
       },
       {
-        "bytes": 19407,
+        "bytes": 19433,
         "exists": true,
         "kind": "file",
         "path": "tools/arena/corpus/bugswarm.seed.yaml",
         "role": "bugswarm-source",
-        "sha256": "133869b15b85b8eed8786a219218bbafc2828e836395b0d4f49fae6529aa3904"
+        "sha256": "4e6517147a7a006a2670dac69afa4c2d82c3d73ab8fbab2eea48224c60990304"
       },
       {
         "bytes": 10978,
