@@ -22,6 +22,12 @@ catalog:
       - id: source-feature-specs
         kind: document
         path: features/feature.schema.json
+      - id: source-product-journey-personas
+        kind: document
+        path: tools/product-journey/personas.json
+      - id: source-product-journey-scenarios
+        kind: document
+        path: tools/product-journey/scenarios.json
 
 type_registry:
   - id: core-node
@@ -104,6 +110,38 @@ type_registry:
         cardinality: many
       - id: acceptance
         target_type: requirement
+        cardinality: many
+      - id: for_persona
+        target_type: persona
+        cardinality: many
+  # Intent-context layer — POG portfolio taxonomy (Features level: feature,
+  # requirement, use-case, scenario, persona). Personas mirror the persona-QA
+  # profiles in tools/product-journey/personas.json (the same profiles
+  # seed-objects.yaml models as persona nodes); scenarios mirror the journey
+  # definitions in tools/product-journey/scenarios.json. Both are REAL
+  # product-journey inputs — run.py pairs one persona with one scenario per
+  # journey run — not portal-invented content.
+  - id: persona
+    schema: graph-type/v0
+    extends: core-node
+    summary: Concrete profile of a user perspective — experience, surface preference, risk focus — that persona-QA journeys run as.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+  - id: scenario
+    schema: graph-type/v0
+    extends: core-node
+    summary: A reference operating story — a persona-QA journey definition a persona walks end to end.
+    edge_fields:
+      - id: part_of
+        target_type: product
+        cardinality: one
+      - id: for_persona
+        target_type: persona
+        cardinality: many
+      - id: realizes
+        target_type: use-case
         cardinality: many
 
   # Deliverable layer — POG materialization-first taxonomy (2026-07-11):
@@ -826,6 +864,8 @@ nodes:
         - req-operator-ask-no-silent-default
         - req-operator-ask-blocking-round-trip
         - req-operator-ask-multi-select
+      for_persona:
+        - persona-core-maintainer
 
   - schema: kitsoki/use-case/v0
     id: usecase-maintainer-inspects-agent-call
@@ -862,6 +902,8 @@ nodes:
         - feature-trace-introspection
       acceptance:
         - req-trace-introspection-decision-first
+      for_persona:
+        - persona-core-maintainer
 
   - schema: kitsoki/use-case/v0
     id: usecase-developer-edits-running-story
@@ -879,6 +921,8 @@ nodes:
         - feature-meta-mode
       acceptance:
         - req-meta-mode-story-aware-edit
+      for_persona:
+        - persona-ide-first-engineer
 
   - schema: kitsoki/use-case/v0
     id: usecase-developer-runs-bugfix-pipeline
@@ -897,6 +941,9 @@ nodes:
         - feature-dev-story-bugfix
       acceptance:
         - req-dev-story-bugfix-end-to-end
+      for_persona:
+        - persona-dependency-debugger
+        - persona-hobbyist-contributor
 
   - schema: kitsoki/use-case/v0
     id: usecase-product-owner-computes-roadmap-delta
@@ -977,6 +1024,158 @@ nodes:
         - feature-graph-viewer
       acceptance:
         - req-viewer-full-graph-traversal
+      for_persona:
+        - persona-docs-minded-contributor
+  # --- personas (tools/product-journey/personas.json) -----------------------
+  # The five persona-QA profiles product-journey runs journeys as. Fields
+  # (experience, surface_preference, risk_focus) are carried verbatim from
+  # personas.json; the use-case links mirror seed-objects.yaml's curated
+  # participates_in edges (inverted onto the use cases' for_persona below).
+  - schema: kitsoki/persona/v0
+    id: persona-core-maintainer
+    title: Core maintainer
+    status: active
+    visibility: public
+    experience: Senior; maintains a mature repository and is skeptical of bot-generated churn.
+    surface_preference: terminal-first
+    risk_focus: [reviewability, house-style, minimal diffs]
+    summary: Maintainer persona that judges every journey by whether the resulting change is reviewable, house-style, and minimally invasive.
+    sources: [source-product-journey-personas]
+    edges:
+      part_of: [product-kitsoki]
+  - schema: kitsoki/persona/v0
+    id: persona-dependency-debugger
+    title: Dependency debugger
+    status: active
+    visibility: public
+    experience: Experienced developer using Kitsoki to fix a bug in a dependency blocking their own project.
+    surface_preference: web-first
+    risk_focus: [time-to-repro, test confidence, handoff artifacts]
+    summary: Developer persona optimizing for fast reproduction and a credible handoff, not long-term ownership of the repo being fixed.
+    sources: [source-product-journey-personas]
+    edges:
+      part_of: [product-kitsoki]
+  - schema: kitsoki/persona/v0
+    id: persona-docs-minded-contributor
+    title: Docs-minded contributor
+    status: active
+    visibility: public
+    experience: Values clear onboarding and follows documented paths before improvising.
+    surface_preference: docs-first
+    risk_focus: [stale docs, missing prerequisites, broken demos]
+    summary: Developer persona whose journeys fail when documentation, prerequisites, or demos drift from the shipped behavior.
+    sources: [source-product-journey-personas]
+    edges:
+      part_of: [product-kitsoki]
+  - schema: kitsoki/persona/v0
+    id: persona-ide-first-engineer
+    title: IDE-first engineer
+    status: active
+    visibility: public
+    experience: Expects editor and visual surfaces to explain state without terminal archaeology.
+    surface_preference: vscode-first
+    risk_focus: [visual state, operator questions, navigation clarity]
+    summary: Developer persona that exercises the editor and visual surfaces and blocks on anything that requires dropping to the terminal to understand state.
+    sources: [source-product-journey-personas]
+    edges:
+      part_of: [product-kitsoki]
+  - schema: kitsoki/persona/v0
+    id: persona-hobbyist-contributor
+    title: Hobbyist contributor
+    status: active
+    visibility: public
+    experience: Contributes in spare time and needs a low-context path from issue selection to a credible small change.
+    surface_preference: docs-and-web-first
+    risk_focus: [time budget, setup friction, clear next step]
+    summary: Contributor persona with a strict time budget — journeys fail on setup friction or an unclear next step.
+    sources: [source-product-journey-personas]
+    edges:
+      part_of: [product-kitsoki]
+  # --- scenarios (tools/product-journey/scenarios.json) ---------------------
+  # The six persona-QA journey definitions, verbatim from scenarios.json
+  # (task → summary, success_criteria → outcome). for_persona links follow
+  # each persona's documented risk_focus; realizes is only set where an
+  # existing use case genuinely captures the journey's job — the gaps are
+  # honest (e.g. no use case yet models PRD authoring or product discovery).
+  - schema: kitsoki/scenario/v0
+    id: scenario-product-discovery
+    title: Product discovery walkthrough
+    status: reference
+    visibility: public
+    stage: Discover the product
+    trigger: A newcomer needs to understand what Kitsoki does, who it is for, and what the first credible action should be — without private repo context.
+    outcome: The persona identifies the product category, finds a documented next action, and files broken links, stale media, or confusing claims as product findings.
+    summary: Walk the Kitsoki product overview story (stories/product-site) end to end and explain what Kitsoki does, who it is for, and what the first credible action should be.
+    sources: [source-product-journey-scenarios]
+    edges:
+      part_of: [product-kitsoki]
+      for_persona: [persona-docs-minded-contributor, persona-hobbyist-contributor]
+  - schema: kitsoki/scenario/v0
+    id: scenario-project-onboarding
+    title: Project onboarding
+    status: reference
+    visibility: public
+    stage: Onboard a project
+    trigger: An assigned repository needs Kitsoki configured for it before any bugfix or design work can launch.
+    outcome: Generated project config names real commands and relevant project files, the persona can state the next Kitsoki command or room to use, and no silent operator-question defaulting occurs.
+    summary: Use the documented Kitsoki onboarding path (stories/dev-story) to configure the assigned repository and explain how bugfix/design work should be launched.
+    sources: [source-product-journey-scenarios]
+    edges:
+      part_of: [product-kitsoki]
+      for_persona: [persona-hobbyist-contributor, persona-docs-minded-contributor]
+  - schema: kitsoki/scenario/v0
+    id: scenario-bugfix-hidden-oracle
+    title: Bug fix with hidden oracle
+    status: reference
+    visibility: public
+    stage: Fix a bug
+    trigger: Public issue/repro material describes a bug; the fix must be scored by a deterministic oracle the workflow never sees.
+    outcome: The hidden oracle passes, the full suite passes or the failure is classified, and the patch shape is reviewable for the persona's project.
+    summary: Start from public issue/repro material, drive Kitsoki's bugfix workflow (stories/bugfix), and score the resulting worktree with the project's deterministic oracle.
+    sources: [source-product-journey-scenarios]
+    edges:
+      part_of: [product-kitsoki]
+      for_persona: [persona-dependency-debugger, persona-core-maintainer]
+      realizes: [usecase-developer-runs-bugfix-pipeline]
+  - schema: kitsoki/scenario/v0
+    id: scenario-prd-design
+    title: PRD and design workflow
+    status: reference
+    visibility: public
+    stage: Plan project work
+    trigger: A project improvement idea needs to become a PRD/design artifact grounded in real repository files, conventions, and tests.
+    outcome: Artifacts cite real repository files and commands, scope is small enough for review, and open questions are explicit instead of hidden in generated prose.
+    summary: Use Kitsoki (stories/dev-story) to turn a project improvement idea into a PRD/design artifact grounded in repository files, conventions, and tests.
+    sources: [source-product-journey-scenarios]
+    edges:
+      part_of: [product-kitsoki]
+      for_persona: [persona-core-maintainer]
+  - schema: kitsoki/scenario/v0
+    id: scenario-feature-implementation
+    title: Feature implementation
+    status: reference
+    visibility: public
+    stage: Plan project work
+    trigger: A small accepted design slice is ready to implement and must be validated with the project's own tests.
+    outcome: The implementation follows the design artifact, tests are targeted and deterministic, and remaining work is separated from completed work.
+    summary: Use Kitsoki (stories/dev-story) to implement a small accepted design slice and validate it with project tests.
+    sources: [source-product-journey-scenarios]
+    edges:
+      part_of: [product-kitsoki]
+      for_persona: [persona-ide-first-engineer, persona-core-maintainer]
+  - schema: kitsoki/scenario/v0
+    id: scenario-evidence-backed-product-bug
+    title: Evidence-backed product bug
+    status: reference
+    visibility: public
+    stage: File a product issue
+    trigger: Confusing or broken Kitsoki behavior observed during a journey should become a useful product bug report instead of a lost impression.
+    outcome: The report includes expected-versus-actual behavior and deterministic reproduction context, with sensitive local data redacted or explicitly marked local-only.
+    summary: Convert any confusing or broken Kitsoki behavior observed during the journey into a useful product bug report with visual and trace evidence.
+    sources: [source-product-journey-scenarios]
+    edges:
+      part_of: [product-kitsoki]
+      for_persona: [persona-ide-first-engineer, persona-docs-minded-contributor]
   # --- deliverables (evidence/functionality nodes) --------------------------
   - schema: kitsoki/test-suite/v0
     id: ts-materialize-package
