@@ -3,7 +3,9 @@
 
 test_kind: flow
 app: ../app.yaml
-initial_state: proposing
+# Enter proposing through the real state transition so its deterministic plan
+# compiler is executed rather than bypassed by fixture seeding.
+initial_state: reproducing
 initial_world:
   implementation_mode: agent_task
   judge_mode: human
@@ -28,11 +30,16 @@ initial_world:
         max_steps: 2
         fallback_reason_allowlist: []
 
+# Use the orchestrator-backed path so the real Starlark compiler is invoked.
+host_handlers:
+  host.inbox.add:
+    data: { ok: true }
+
 turns:
-  - intent: { name: look, slots: {} }
+  - intent: { name: accept, slots: {} }
     expect_state: idle
     expect_world:
-      last_error: "implementation_plan[0].write_paths[0] must be a narrow repository-relative path or glob"
+      last_error: "host.starlark.run: starlark: main(ctx): fail: implementation_plan[0].write_paths[0] must be a narrow repository-relative path or glob"
     expect_host_calls: [{ handler: host.starlark.run, call: compile_implementation_plan }]
 
 expect_no_errors: true

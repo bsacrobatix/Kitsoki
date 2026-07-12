@@ -103,10 +103,14 @@ states:
       # Normalize the optional decomposed plan before any future per-item
       # write-capable work. Its presence is explicit; the existing action modes
       # remain unchanged until that executor is added in a later slice.
-      - when: "len(world.propose_fix_artifact.implementation_plan ?? []) > 0"
+      # The world schema gives both bind targets concrete empty defaults. A
+      # `once: true` invoke therefore treats a fresh proposal as cached and
+      # skips compilation entirely. Guard the actual empty compiled plan
+      # instead: a successful compiler always emits at least one item, so this
+      # remains reload-safe without conflating an empty default with a receipt.
+      - when: "len(world.propose_fix_artifact.implementation_plan ?? []) > 0 && len(world.compiled_implementation_plan ?? []) == 0"
         invoke: host.starlark.run
         id: compile_implementation_plan
-        once: true
         with:
           script: scripts/compile_implementation_plan.star
           inputs:
