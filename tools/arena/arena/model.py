@@ -476,6 +476,7 @@ def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], p
             data,
             receipt_path=file,
             preflight_candidate=preflight_candidate,
+            requires_codeact_runtime="codeact" in str(plan_cells[cell_id].get("treatment") or ""),
         )
         seen.add(attempt_id)
         receipts.append(data)

@@ -131,11 +131,13 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 	callStart := time.Now()
 	ctx = WithCallID(ctx, callID)
 	runCtx = WithCallID(runCtx, callID)
+	runtimeKind := codeactRuntimeKind(ctx)
 	appendAgentCalledEvent(ctx, callStart, callID, goal, AgentCalledPayload{
-		Verb:  "codeact",
-		Agent: agentName,
-		Model: agent.Model,
-		Input: marshalInput(map[string]any{"budget": budget, "capabilities": capabilityLabels}),
+		Verb:        "codeact",
+		Agent:       agentName,
+		Model:       agent.Model,
+		RuntimeKind: runtimeKind,
+		Input:       marshalInput(map[string]any{"budget": budget, "capabilities": capabilityLabels}),
 	})
 
 	finish := func(res Result, err error) (Result, error) {
@@ -177,8 +179,9 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 	// the CLI path below — IsLocalLLM("") and IsLocalLLM("agent.claude") are
 	// both false, so existing stories are byte-identical. See
 	// agent_codeact_api.go and .context/diy-harness-sandboxing-brief.md item 1.
-	if reg := AgentRegistryFromCtx(ctx); reg != nil {
-		if pluginName := AgentPluginNameFromCtx(ctx); reg.IsLocalLLM(pluginName) {
+	if runtimeKind == "direct_api" {
+		if reg := AgentRegistryFromCtx(ctx); reg != nil {
+			pluginName := AgentPluginNameFromCtx(ctx)
 			plug, perr := reg.Resolve(pluginName)
 			if perr != nil {
 				return finish(Result{Error: fmt.Sprintf("host.agent.codeact: resolve api plugin %q: %v", pluginName, perr), FailureKind: FailureInfra}, nil)
@@ -195,6 +198,19 @@ func AgentCodeactHandler(ctx context.Context, args map[string]any) (Result, erro
 	defer cleanup()
 	res, err := runCodeactLoop(runCtx, worldArg, schemaFn, agentImpl, budget, capabilities)
 	return finish(res, err)
+}
+
+// codeactRuntimeKind distinguishes CodeAct's two real execution boundaries
+// before tracing the outer call. The CLI adapter launches a supervised local
+// generator process for every step; builtin.local_llm makes direct API calls
+// and therefore has no subprocess receipt to pair. Keeping this fact on the
+// outer call lets AgentBench reject a CLI trace with missing/mismatched runtime
+// events without misclassifying direct API executions.
+func codeactRuntimeKind(ctx context.Context) string {
+	if reg := AgentRegistryFromCtx(ctx); reg != nil && reg.IsLocalLLM(AgentPluginNameFromCtx(ctx)) {
+		return "direct_api"
+	}
+	return "cli"
 }
 
 func codeactCapabilityContext(ctx context.Context, args map[string]any, worldArg map[string]any, capabilities starlarkhost.CapabilitySpec) (context.Context, error) {

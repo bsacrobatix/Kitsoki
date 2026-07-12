@@ -374,6 +374,11 @@ type AgentCalledPayload struct {
 	// Effort is the reasoning effort in effect for this call (the active profile's
 	// effort or its operator override), when one was selected. Empty otherwise.
 	Effort string `json:"effort,omitempty"`
+	// RuntimeKind records the execution boundary for a codeact call. CLI-backed
+	// CodeAct must be paired with agent.runtime receipts; direct_api has no
+	// local subprocess and must not fabricate those receipts. Empty preserves
+	// compatibility for the other host.agent verbs and legacy traces.
+	RuntimeKind string `json:"runtime_kind,omitempty"`
 	// Prompt is the inline rendered prompt, present when it is small enough to
 	// embed (≤ the offload threshold). Larger prompts are written to a sidecar
 	// file and referenced via PromptFile instead. Exactly one of Prompt /

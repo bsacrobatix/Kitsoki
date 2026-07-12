@@ -62,6 +62,29 @@ def main() -> int:
         preflight = {"profile_hash": "profile", "launch_plan_hash": "launch"}
         validate_scored_attempt_receipt(receipt, receipt_path=root / "receipt.json", preflight_candidate=preflight)
 
+        try:
+            validate_scored_attempt_receipt(
+                copy.deepcopy(receipt), receipt_path=root / "receipt.json", preflight_candidate=preflight,
+                requires_codeact_runtime=True,
+            )
+        except ValueError as exc:
+            if "runtime receipts" not in str(exc):
+                failures.append("CodeAct runtime omission returned an unrelated error: " + str(exc))
+        else:
+            failures.append("CodeAct receipt without runtime accounting was accepted")
+
+        codeact_report = json.loads(report.read_text(encoding="utf-8"))
+        codeact_report["metrics"]["runtime_accounting_status"] = "complete"
+        codeact_report_path = root / "codeact-agentbench.json"
+        codeact_report_path.write_text(json.dumps(codeact_report), encoding="utf-8")
+        codeact_receipt = copy.deepcopy(receipt)
+        codeact_receipt["artifacts"]["agentbench_report"] = artifact(codeact_report_path)
+        codeact_receipt["score"]["agentbench_report_sha256"] = digest(codeact_report_path)
+        validate_scored_attempt_receipt(
+            codeact_receipt, receipt_path=root / "receipt.json", preflight_candidate=preflight,
+            requires_codeact_runtime=True,
+        )
+
         cases = {
             "missing oracle": lambda value: value["artifacts"].pop("oracle"),
             "failed suite": lambda value: value["artifacts"]["suite"].update({"passed": False}),
