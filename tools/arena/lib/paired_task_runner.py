@@ -14,6 +14,7 @@ import traceback
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1272,7 +1273,10 @@ def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
         image,
         "bash",
         "-lc",
-            "run_failed.sh",
+        # BugSwarm images do not guarantee their default working directory.
+        # Mounting the candidate alone is insufficient: run the artifact script
+        # from the documented failed-source root, as corpus verification does.
+        f"cd -- {shlex.quote(source_dir)} && run_failed.sh",
     ]
     try:
         proc = subprocess.run(
