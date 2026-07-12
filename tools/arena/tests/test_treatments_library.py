@@ -84,6 +84,17 @@ bad_mode = argparse.Namespace(
 )
 require("bad implementation mode validation", "implementation_mode 'codeact'" in treatments.validate_driver_args(bad_mode))
 
+spark_strict = argparse.Namespace(
+    treatment="kitsoki-mcp-codeact",
+    backend="codex",
+    agent="",
+    worker_profile="codex-spark",
+    implementation_mode="codeact",
+    capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
+    capability_presets_json="",
+)
+check("Spark strict CodeAct backend validation", treatments.validate_driver_args(spark_strict), "")
+
 with tempfile.TemporaryDirectory(prefix="arena-treatment-") as td:
     tree = Path(td).resolve()
     plan = {
