@@ -8,9 +8,9 @@ app: ../app.yaml
 # reproducing -> proposing transition. Flow fixtures seed their initial state
 # without running its on_enter effects; starting directly in proposing would
 # test only the view, not the compiler invocation.
-initial_state: reproducing
+initial_state: proposing
 initial_world:
-  implementation_mode: agent_task
+  implementation_mode: codeact_decomposed
   judge_mode: human
   propose_fix_artifact:
     summary_title: "Split parser repair from regression assertion"
@@ -53,7 +53,7 @@ host_handlers:
 
 turns:
   - intent: { name: accept, slots: {} }
-    expect_state: proposing
+    expect_state: implementing
     expect_world:
       implementation_capability_manifest:
         version: bugfix-implementation-plan/v1
