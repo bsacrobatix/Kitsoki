@@ -6,11 +6,11 @@ description: Run a controlled matrix comparison of approaches over a set of task
 # Matrix task comparison
 
 Compare approaches on the **same** tasks under **identical** conditions, score
-each cell on outcome / compliance / cost / time, roll up, and deck it. The
-reference implementation — the worked first instance — is
-[`tools/bugfix-bakeoff/`](../../../tools/bugfix-bakeoff/) (kitsoki's `bugfix`
-pipeline vs a naive single prompt, across an Opus/Sonnet/GLM/GPT model grid, on
-real fixed bugs). This skill is the reusable *method*; cite those files, do not
+each cell on outcome / compliance / cost / time, roll up, and deck it. Arena is
+the canonical planner, scheduler, resumer, and artifact owner. The external
+bugfix adapter owns project manifests and hidden-oracle materialization, while
+`internal/agentbench` owns trace/lifecycle/usage scoring. This skill is the
+reusable *method*; cite those files, do not
 <!-- For an EXTERNAL repo (not kitsoki's own bugs) — "should I use kitsoki for my
 project?" — use the [`external-repo-bakeoff`](../external-repo-bakeoff/SKILL.md)
 skill + [`tools/bugfix-bakeoff/external`](../../../tools/bugfix-bakeoff/external)
@@ -21,9 +21,10 @@ drivable workflow. The live drive there uses the headless MCP primitive
 re-derive them, and do **not** hardcode the bug9/12/14 specifics into a new
 study.
 
-> **Harness consolidated (2026-06).** The reference impl is now the ONE
-> manifest-driven harness under
-> [`tools/bugfix-bakeoff/external/`](../../../tools/bugfix-bakeoff/external) —
+> **Harness ownership.** Arena schedules immutable attempts. The adapter under
+> [`tools/bugfix-bakeoff/external/`](../../../tools/bugfix-bakeoff/external)
+> supplies project/oracle adaptation; it must not grow a competing scheduler or
+> weaker trace scorer. The legacy adapter remains —
 > kitsoki's own bugs are just `projects/kitsoki`. The legacy four-piece flow
 > (`prepare.sh` · `run_cell.sh` · `score.py` · `bakeoff.yaml`) was retired; map
 > the old names to the new pieces:
@@ -45,7 +46,9 @@ study.
 
 ## The design — three axes → cells
 
-A **cell** = `(task × candidate × contender)`. Three axes:
+A **cell** = `(task × candidate × contender × repeat)`; each provider request
+is an immutable attempt, and a valid scored attempt must be resumed rather than
+overwritten or automatically rerun. Three axes:
 
 - **Structure axis (the contenders).** The approaches under test, e.g. kitsoki
   pipeline vs naive single-prompt+guidance; or two stories; or pipeline-vs-pipeline.
