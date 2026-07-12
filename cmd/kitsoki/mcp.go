@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,34 +52,6 @@ func studioImportResolver(storiesDir string) app.ImportResolver {
 			return candidate, nil
 		}
 		return base(name, importerDir, override)
-	}
-}
-
-// studioKitTrialDeps assembles the cmd-layer seams the studio kit.* tools
-// need (studio.WithKitTrialDeps): the same resolver pair, project-checks
-// sweep, and extends resolver `kitsoki kit trial`/`kit update` wire for
-// the CLI verbs — so a lifecycle driven over MCP is the same computation
-// as one driven from the shell. checkProjectUpgrade stays in this package
-// (it is the CLI's project-tools sweep); only a closure crosses the seam.
-func studioKitTrialDeps() studio.KitTrialDeps {
-	return studio.KitTrialDeps{
-		BaseResolver:  buildImportResolver(),
-		PlainResolver: buildPlainImportResolver(),
-		ProjectChecks: func(ctx context.Context, projectRoot string, resolver app.ImportResolver) ([]kittrial.Check, error) {
-			rep, err := checkProjectUpgrade(ctx, projectUpgradeOptions{Target: projectRoot, Resolver: resolver})
-			if err != nil {
-				return nil, err
-			}
-			checks := make([]kittrial.Check, 0, len(rep.Checks))
-			for _, c := range rep.Checks {
-				checks = append(checks, kittrial.Check{ID: c.ID, Status: c.Status, Detail: c.Detail})
-			}
-			return checks, nil
-		},
-		Extends: func(ctx context.Context, projectRoot string) kitverify.ExtendsResolver {
-			return lockfileExtendsResolver(ctx, projectRoot)
-		},
-		ResolveEntry: resolveKitEntry,
 	}
 }
 
