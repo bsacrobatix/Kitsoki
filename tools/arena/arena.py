@@ -24,7 +24,10 @@ import sys
 from pathlib import Path
 
 from arena.executor import CellExecutor, DockerBackend
-from arena.model import Cell, JobSpec, TaskOptimizationStudy
+from arena.model import (
+    Cell, JobSpec, TaskOptimizationStudy, canonical_json, load_task_optimization_receipts,
+    receipt_sha256, select_task_optimization_champion, task_optimization_status,
+)
 from arena.placement import run_sweep
 from arena.plugins import base as plugins
 from arena.rollup import write_rollup
@@ -306,6 +309,115 @@ def cmd_task_optimization_arm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_json(path: str | Path, *, label: str) -> dict[str, object]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return data
+
+
+def _write_immutable_json(path: Path, value: object) -> None:
+    """Create an evidence receipt once; never silently replace it."""
+    payload = canonical_json(value)
+    if path.exists():
+        if path.read_bytes() != payload:
+            raise ValueError(f"immutable receipt already exists with different bytes: {path}")
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+
+
+def cmd_task_optimization_preflight(args: argparse.Namespace) -> int:
+    study = _study_or_error(args.study)
+    if study is None:
+        return 1
+    if study.blocked_by:
+        print(f"ERROR: task-optimization study is blocked: {'; '.join(study.blocked_by)}", file=sys.stderr)
+        return 1
+    try:
+        resolutions = _load_json(args.resolutions, label="profile resolutions") if args.resolutions else {}
+        receipt = study.preflight(resolutions)
+        _write_immutable_json(Path(args.out) / "preflight.json", receipt)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not preflight task-optimization study: {exc}", file=sys.stderr)
+        return 1
+    invalid = [record["candidate_id"] for record in receipt["candidates"] if record["status"] == "invalid"]
+    print(f"preflight → {Path(args.out) / 'preflight.json'} ({len(receipt['candidates'])} candidate(s); invalid={len(invalid)})")
+    return 1 if invalid else 0
+
+
+def _task_optimization_inputs(args: argparse.Namespace) -> tuple[dict[str, object], dict[str, object], list[dict[str, object]]]:
+    plan = _load_json(args.plan, label="plan")
+    preflight = _load_json(args.preflight, label="preflight")
+    if plan.get("schema") != "task-optimization/v1":
+        raise ValueError("plan has unsupported task-optimization schema")
+    receipts = load_task_optimization_receipts(args.attempts, plan=plan, preflight=preflight)
+    return plan, preflight, receipts
+
+
+def cmd_task_optimization_record(args: argparse.Namespace) -> int:
+    """Append one pre-scored attempt receipt after verifying frozen inputs."""
+    try:
+        plan, preflight, _ = _task_optimization_inputs(args)
+        receipt = _load_json(args.receipt, label="attempt receipt")
+        if receipt.get("schema") != "task-optimization/attempt/v1":
+            raise ValueError("attempt receipt has unsupported schema")
+        if receipt.get("study_id") != plan.get("study_id"):
+            raise ValueError("attempt receipt study_id does not match plan")
+        if receipt.get("plan_sha256") != receipt_sha256(plan):
+            raise ValueError("attempt receipt plan_sha256 does not match immutable plan")
+        expected_preflight = str(preflight.get("preflight_sha256") or receipt_sha256(preflight))
+        if receipt.get("preflight_sha256") != expected_preflight:
+            raise ValueError("attempt receipt preflight_sha256 does not match immutable preflight")
+        attempt_id = str(receipt.get("attempt_id") or "")
+        cell_id = str(receipt.get("cell_id") or "")
+        if not attempt_id or not cell_id:
+            raise ValueError("attempt receipt requires non-empty attempt_id and cell_id")
+        planned = {str(cell["id"]): cell for cell in plan.get("cells", [])}
+        if cell_id not in planned:
+            raise ValueError("attempt receipt cell_id is absent from immutable plan")
+        candidate_id = str(receipt.get("candidate_id") or "")
+        if candidate_id != str(planned[cell_id].get("candidate_id") or ""):
+            raise ValueError("attempt receipt candidate_id does not match planned cell")
+        preflight_candidates = {str(record.get("candidate_id")): record for record in preflight.get("candidates", []) if isinstance(record, dict)}
+        if preflight_candidates.get(candidate_id, {}).get("status") != "ready":
+            raise ValueError("attempt receipt candidate lacks a ready preflight receipt")
+        destination = Path(args.out) / cell_id / f"{attempt_id}.json"
+        _write_immutable_json(destination, receipt)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not record task-optimization attempt: {exc}", file=sys.stderr)
+        return 1
+    print(f"attempt → {destination}")
+    return 0
+
+
+def cmd_task_optimization_status(args: argparse.Namespace) -> int:
+    try:
+        plan, _preflight, receipts = _task_optimization_inputs(args)
+        champion = _load_json(args.champion, label="champion") if args.champion else None
+        if champion is not None and (champion.get("study_id") != plan.get("study_id") or champion.get("plan_sha256") != receipt_sha256(plan)):
+            raise ValueError("champion receipt does not match immutable plan")
+        status = task_optimization_status(plan, receipts, champion=champion)
+        _write_json(Path(args.out) / "status.json", status)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not aggregate task-optimization status: {exc}", file=sys.stderr)
+        return 1
+    print(f"status → {Path(args.out) / 'status.json'} ({status['phase']}; resume={len(status['resume_cell_ids'])})")
+    return 0
+
+
+def cmd_task_optimization_select_champion(args: argparse.Namespace) -> int:
+    try:
+        plan, _preflight, receipts = _task_optimization_inputs(args)
+        champion = select_task_optimization_champion(plan, receipts)
+        _write_immutable_json(Path(args.out) / "champion.json", champion)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not select task-optimization champion: {exc}", file=sys.stderr)
+        return 1
+    print(f"champion → {Path(args.out) / 'champion.json'} ({champion['candidate_id']})")
+    return 0
+
+
 def validate_spec(spec_path: str, *, live: bool = False) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -446,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     p_plugins = sub.add_parser("plugins", help="list registered job types")
     p_plugins.set_defaults(func=cmd_plugins)
 
-    p_task_opt = sub.add_parser("task-optimization", help="plan and arm a locked task-optimization study")
+    p_task_opt = sub.add_parser("task-optimization", help="plan, preflight, and resume a locked task-optimization study")
     task_opt_sub = p_task_opt.add_subparsers(dest="task_optimization_cmd", required=True)
     p_task_validate = task_opt_sub.add_parser("validate", help="validate study and frozen corpus inputs without LLM calls")
     p_task_validate.add_argument("--study", required=True)
@@ -462,6 +574,31 @@ def main(argv: list[str] | None = None) -> int:
     p_task_arm.add_argument("--repeat-phase", default="screening")
     p_task_arm.add_argument("--live", action="store_true")
     p_task_arm.set_defaults(func=cmd_task_optimization_arm)
+    p_task_preflight = task_opt_sub.add_parser("preflight", help="write immutable requested/effective profile receipt without a provider call")
+    p_task_preflight.add_argument("--study", required=True)
+    p_task_preflight.add_argument("--out", required=True)
+    p_task_preflight.add_argument("--resolutions", default="", help="JSON mapping candidate id to effective local profile resolution")
+    p_task_preflight.set_defaults(func=cmd_task_optimization_preflight)
+    p_task_record = task_opt_sub.add_parser("record", help="append one immutable scored attempt receipt")
+    p_task_record.add_argument("--plan", required=True)
+    p_task_record.add_argument("--preflight", required=True)
+    p_task_record.add_argument("--attempts", required=True, help="existing append-only attempt receipt directory")
+    p_task_record.add_argument("--receipt", required=True, help="pre-scored attempt JSON")
+    p_task_record.add_argument("--out", required=True, help="append-only attempt receipt directory")
+    p_task_record.set_defaults(func=cmd_task_optimization_record)
+    p_task_status = task_opt_sub.add_parser("status", help="aggregate immutable attempts and list resume cells")
+    p_task_status.add_argument("--plan", required=True)
+    p_task_status.add_argument("--preflight", required=True)
+    p_task_status.add_argument("--attempts", required=True)
+    p_task_status.add_argument("--champion", default="")
+    p_task_status.add_argument("--out", required=True)
+    p_task_status.set_defaults(func=cmd_task_optimization_status)
+    p_task_champion = task_opt_sub.add_parser("select-champion", help="freeze deterministic champion after learning completion")
+    p_task_champion.add_argument("--plan", required=True)
+    p_task_champion.add_argument("--preflight", required=True)
+    p_task_champion.add_argument("--attempts", required=True)
+    p_task_champion.add_argument("--out", required=True)
+    p_task_champion.set_defaults(func=cmd_task_optimization_select_champion)
 
     args = parser.parse_args(argv)
     return args.func(args)
