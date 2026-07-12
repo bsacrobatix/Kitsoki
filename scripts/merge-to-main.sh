@@ -67,6 +67,7 @@ goal_script=""
 staging_snapshot=""
 source_snapshot=""
 source_result=""
+source_recovery_ref=""
 
 usage() {
   cat >&2 <<EOF
@@ -101,6 +102,79 @@ ensure_managed_source_dir() {
   if [ ! -f "$dir/$CAPSULE_SENTINEL" ] && [ ! -f "$dir/$CLONE_SENTINEL" ]; then
     echo "error: source dir is not a managed capsule: $dir (missing $CAPSULE_SENTINEL or $CLONE_SENTINEL)" >&2
     exit 1
+  fi
+}
+
+source_dir_dirty() {
+  local dir="$1" status line
+  if ! status="$(git -C "$dir" status --porcelain --untracked-files=all)"; then
+    echo "error: could not inspect source dir status: $dir" >&2
+    return 1
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      ""|"?? $CAPSULE_SENTINEL"|"?? $CLONE_SENTINEL"|"?? capsule-manifest.json"|"?? .kitsoki-dev-workspace.json"|"?? .kitsoki-owner") ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done <<<"$status"
+}
+
+expected_tree_after_delta() {
+  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree
+  tree="$(git -C "$dir" merge-tree --write-tree --no-messages \
+    --merge-base "$old_base" "$new_base" "$snapshot")" || return 1
+  printf '%s\n' "$tree"
+}
+
+refuse_untracked_tree_collisions() {
+  local dir="$1" from_ref="$2" to_ref="$3" context="$4" output
+  if ! output="$(python3 - "$dir" "$from_ref" "$to_ref" <<'PY'
+import subprocess
+import sys
+
+repo, from_ref, to_ref = sys.argv[1:]
+changed_run = subprocess.run(
+    ["git", "-C", repo, "diff", "--name-only", "-z", "--no-renames", from_ref, to_ref],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+if changed_run.returncode:
+    sys.stderr.buffer.write(changed_run.stderr)
+    sys.exit(changed_run.returncode)
+changed = {p.decode("utf-8", "surrogateescape") for p in changed_run.stdout.split(b"\0") if p}
+status_run = subprocess.run(
+    [
+        "git", "-C", repo, "status", "--porcelain=v1", "-z",
+        "--untracked-files=all", "--ignored=traditional",
+    ],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+if status_run.returncode:
+    sys.stderr.buffer.write(status_run.stderr)
+    sys.exit(status_run.returncode)
+local = set()
+for entry in status_run.stdout.split(b"\0"):
+    if not entry or entry[:2] not in (b"??", b"!!"):
+        continue
+    path = entry[3:].decode("utf-8", "surrogateescape").rstrip("/")
+    if path:
+        local.add(path)
+
+def overlaps(a, b):
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+conflicts = sorted({p for p in local for c in changed if overlaps(p, c)})
+for path in conflicts:
+    print(path)
+sys.exit(1 if conflicts else 0)
+PY
+)"; then
+    echo "error: $context would overwrite untracked or ignored source paths:" >&2
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+    return 1
   fi
 }
 
@@ -212,17 +286,61 @@ if [ -n "$source_dir" ]; then
       exit 1
     fi
   fi
-  source_dirty="$(git -C "$source_dir" status --porcelain --untracked-files=all | grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' || true)"
+  if ! source_dirty="$(source_dir_dirty "$source_dir")"; then
+    exit 1
+  fi
   if [ -n "$source_dirty" ]; then
     echo "error: source dir has uncommitted changes: $source_dir" >&2
     printf '%s\n' "$source_dirty" >&2
     exit 1
   fi
+  source_original="$(git -C "$source_dir" rev-parse --verify HEAD)"
+  source_original_recovery_ref="refs/kitsoki/promotion-source-recovery/$source_original"
+  if git rev-parse --verify --quiet "$source_original_recovery_ref" >/dev/null; then
+    [ "$(git rev-parse "$source_original_recovery_ref")" = "$source_original" ] || {
+      echo "error: content-addressed promotion recovery ref points at the wrong object" >&2
+      exit 1
+    }
+  else
+    git fetch --no-tags "$source_dir" "$source_original:$source_original_recovery_ref"
+  fi
   if git -C "$source_dir" remote get-url source >/dev/null 2>&1; then
     git -C "$source_dir" fetch source main
+    source_main="$(git -C "$source_dir" rev-parse --verify source/main)"
+    source_delta_base="$(git -C "$source_dir" merge-base "$source_original" "$source_main")" || {
+      echo "error: could not determine source/main merge base" >&2
+      exit 1
+    }
+    expected_source_tree="$(expected_tree_after_delta \
+      "$source_dir" "$source_delta_base" "$source_original" "$source_main")" || {
+      echo "error: could not construct expected rebased source tree" >&2
+      exit 1
+    }
+    refuse_untracked_tree_collisions \
+      "$source_dir" "$source_original" "$expected_source_tree" "source rebase" || exit 1
     git -C "$source_dir" rebase source/main
+    source_rebased="$(git -C "$source_dir" rev-parse --verify HEAD)"
+    if [ "$(git -C "$source_dir" rev-parse "$source_rebased^{tree}")" != "$expected_source_tree" ]; then
+      git -C "$source_dir" update-ref "refs/kitsoki/promotion-rebase-failed/$source_rebased" "$source_rebased" || true
+      if failed_source_dirty="$(source_dir_dirty "$source_dir")" && [ -z "$failed_source_dirty" ]; then
+        git -C "$source_dir" update-ref "refs/heads/$source_branch" "$source_original" "$source_rebased" || true
+        git -c submodule.recurse=false -C "$source_dir" reset --hard "$source_original" >/dev/null 2>&1 || true
+      fi
+      echo "error: rebased source tree differs from the expected preserved tree; original retained at $source_original_recovery_ref" >&2
+      exit 1
+    fi
   else
     echo "warning: source dir has no 'source' remote; skipping rebase onto local main before gate" >&2
+  fi
+  source_pre_gate="$(git -C "$source_dir" rev-parse --verify HEAD)"
+  source_recovery_ref="refs/kitsoki/promotion-source-recovery/$source_pre_gate"
+  if git rev-parse --verify --quiet "$source_recovery_ref" >/dev/null; then
+    [ "$(git rev-parse "$source_recovery_ref")" = "$source_pre_gate" ] || {
+      echo "error: content-addressed promotion recovery ref points at the wrong object" >&2
+      exit 1
+    }
+  else
+    git fetch --no-tags "$source_dir" "$source_pre_gate:$source_recovery_ref"
   fi
   if [ "$force" = "1" ]; then
     echo "warning: --force supplied; skipping gate: $DEFAULT_GATE" >&2
@@ -232,7 +350,25 @@ if [ -n "$source_dir" ]; then
     (cd "$source_dir" && sh -c "$gate")
   fi
 
+  if ! source_dirty="$(source_dir_dirty "$source_dir")"; then
+    exit 1
+  fi
+  if [ -n "$source_dirty" ]; then
+    echo "error: source dir has uncommitted changes after rebase/gate: $source_dir" >&2
+    printf '%s\n' "$source_dirty" >&2
+    exit 1
+  fi
+
   source_result="$(git -C "$source_dir" rev-parse --verify HEAD)"
+  if [ "$source_result" != "$source_pre_gate" ]; then
+    echo "error: source-dir gate moved HEAD ($source_pre_gate -> $source_result); validation gates must not mutate committed state" >&2
+    echo "error: pre-gate source remains at $source_recovery_ref" >&2
+    exit 1
+  fi
+  if [ "$(git -C "$source_dir" rev-parse --verify "refs/heads/$source_branch")" != "$source_result" ]; then
+    echo "error: source branch advanced during validation; refusing to promote an unproven result" >&2
+    exit 1
+  fi
   if [ "$branch" = "$DEFAULT_BRANCH" ] && ! git -C "$source_dir" merge-base --is-ancestor "$source_snapshot" "$source_result"; then
     echo "error: staging capsule changed incompatibly during rebase or gate: result $source_result does not contain source snapshot $source_snapshot" >&2
     exit 1
@@ -244,6 +380,11 @@ if [ -n "$source_dir" ]; then
   fi
   # Fetch the exact post-gate object, rather than the moving branch name.
   git fetch "$source_dir" "$source_result:refs/heads/$import_branch"
+  if [ "$(git -C "$source_dir" rev-parse --verify "refs/heads/$source_branch")" != "$source_result" ]; then
+    echo "error: source branch advanced while importing the proven result; main was not changed" >&2
+    git branch -D "$import_branch" >/dev/null 2>&1 || true
+    exit 1
+  fi
   if [ "$branch" = "$DEFAULT_BRANCH" ]; then
     # This is the compare-and-swap. Do not use a force fetch here: it would
     # overwrite staging work that arrived while the gate was running.
@@ -276,30 +417,39 @@ if ! git merge-base --is-ancestor HEAD "$branch"; then
   exit 1
 fi
 
-files="$(git diff --name-only HEAD "$branch")"
-if [ -z "$files" ]; then
+# Disable rename/copy detection so both preimage and destination paths are in
+# the protection set. A dirty rename source must block before Git can touch it.
+changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-merge-files.XXXXXX")"
+git diff --name-only -z --no-renames HEAD "$branch" >"$changed_files_file"
+if [ ! -s "$changed_files_file" ]; then
+  rm -f "$changed_files_file"
   echo "nothing to merge; main already contains $branch"
   if [ -n "$import_branch" ] && git rev-parse --verify --quiet "$import_branch" >/dev/null; then
     git branch -D "$import_branch" >/dev/null
   fi
+  if [ -n "$source_dir" ]; then
+    git update-ref -d "$source_original_recovery_ref" >/dev/null 2>&1 || true
+    git update-ref -d "$source_recovery_ref" >/dev/null 2>&1 || true
+  fi
   exit 0
 fi
 
-changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-merge-files.XXXXXX")"
-printf '%s\n' "$files" >"$changed_files_file"
 set +e
 dirty_overlap="$(python3 - "$PWD" "$changed_files_file" <<'PY'
 import subprocess
 import sys
 
 repo, changed_files_file = sys.argv[1:]
-with open(changed_files_file, encoding="utf-8") as f:
-    changed = [line.rstrip("\n") for line in f if line.rstrip("\n")]
+with open(changed_files_file, "rb") as f:
+    changed = [p.decode("utf-8", "surrogateescape") for p in f.read().split(b"\0") if p]
 if not changed:
     sys.exit(0)
 
 status = subprocess.run(
-    ["git", "-C", repo, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    [
+        "git", "-C", repo, "status", "--porcelain=v1", "-z",
+        "--untracked-files=all", "--ignored=traditional",
+    ],
     stdout=subprocess.PIPE,
     check=False,
 )
@@ -315,11 +465,11 @@ while i < len(parts):
     if not entry:
         continue
     code = entry[:2].decode("ascii", "replace")
-    path = entry[3:].decode("utf-8", "surrogateescape")
+    path = entry[3:].decode("utf-8", "surrogateescape").rstrip("/")
     if path:
         dirty.add(path)
     if ("R" in code or "C" in code) and i < len(parts) and parts[i]:
-        dirty.add(parts[i].decode("utf-8", "surrogateescape"))
+        dirty.add(parts[i].decode("utf-8", "surrogateescape").rstrip("/"))
         i += 1
 
 def overlaps(a, b):
@@ -333,8 +483,8 @@ PY
 )"
 dirty_status=$?
 set -e
-rm -f "$changed_files_file"
 if [ "$dirty_status" -ne 0 ]; then
+  rm -f "$changed_files_file"
   if [ -z "$dirty_overlap" ]; then
     echo "error: failed to inspect primary checkout dirty paths" >&2
     exit "$dirty_status"
@@ -344,32 +494,54 @@ if [ "$dirty_status" -ne 0 ]; then
   exit 1
 fi
 
-dirs="$(printf '%s\n' "$files" | xargs -n1 dirname | sort -u)"
-guard_paths="$(
-  printf '%s\n' "$files" | while IFS= read -r f; do
-    [ -e "$f" ] && printf '%s\n' "$f"
-    d="$(dirname "$f")"
-    [ "$d" = "." ] && printf '%s\n' "."
-    while [ "$d" != "." ] && [ "$d" != "/" ]; do
-      [ -e "$d" ] && printf '%s\n' "$d"
-      parent="$(dirname "$d")"
-      [ "$parent" = "." ] && printf '%s\n' "."
-      [ "$parent" = "$d" ] && break
-      d="$parent"
-    done
-  done | sort -u
-)"
+dirs_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-merge-dirs.XXXXXX")"
+guard_paths_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-merge-guards.XXXXXX")"
+python3 - "$changed_files_file" "$dirs_file" "$guard_paths_file" <<'PY'
+import os
+import sys
+
+changed_file, dirs_file, guards_file = sys.argv[1:]
+with open(changed_file, "rb") as f:
+    paths = [p.decode("utf-8", "surrogateescape") for p in f.read().split(b"\0") if p]
+
+dirs = set()
+guards = set()
+for path in paths:
+    if os.path.lexists(path):
+        guards.add(path)
+    directory = os.path.dirname(path) or "."
+    dirs.add(directory)
+    if directory == ".":
+        guards.add(".")
+    while directory not in (".", "/"):
+        if os.path.lexists(directory):
+            guards.add(directory)
+        parent = os.path.dirname(directory) or "."
+        if parent == ".":
+            guards.add(".")
+        if parent == directory:
+            break
+        directory = parent
+
+def write_nul(path, values):
+    with open(path, "wb") as f:
+        for value in sorted(values):
+            f.write(value.encode("utf-8", "surrogateescape") + b"\0")
+
+write_nul(dirs_file, dirs)
+write_nul(guards_file, guards)
+PY
 
 restore_guard_fallback() {
-  printf '%s\n' "$files" | while IFS= read -r f; do
-    [ -e "$f" ] && chmod a-w "$f" || true
-  done
-  printf '%s\n' "$dirs" | while IFS= read -r d; do
-    [ -n "$d" ] && [ -e "$d" ] && chmod a-w "$d" 2>/dev/null || true
-  done
-  printf '%s\n' "$guard_paths" | while IFS= read -r p; do
-    [ -n "$p" ] && [ -e "$p" ] && chmod a-w "$p" 2>/dev/null || true
-  done
+  while IFS= read -r -d '' f; do
+    [ -e "$f" ] && [ ! -L "$f" ] && chmod a-w "$f" || true
+  done <"$changed_files_file"
+  while IFS= read -r -d '' d; do
+    [ -n "$d" ] && [ -e "$d" ] && [ ! -L "$d" ] && chmod a-w "$d" 2>/dev/null || true
+  done <"$dirs_file"
+  while IFS= read -r -d '' p; do
+    [ -n "$p" ] && [ -e "$p" ] && [ ! -L "$p" ] && chmod a-w "$p" 2>/dev/null || true
+  done <"$guard_paths_file"
 }
 
 restore_guard() {
@@ -379,16 +551,17 @@ restore_guard() {
       echo "warning: protected-main-mode.sh repair-writable-roots failed; scratch roots may need manual chmod repair" >&2
     fi
   fi
+  rm -f "$changed_files_file" "$dirs_file" "$guard_paths_file"
 }
 
 trap restore_guard EXIT
 
-printf '%s\n' "$guard_paths" | while IFS= read -r p; do
-  [ -n "$p" ] && chmod u+w "$p" 2>/dev/null || true
-done
-printf '%s\n' "$files" | while IFS= read -r f; do
-  [ -e "$f" ] && chmod u+w "$f" || true
-done
+while IFS= read -r -d '' p; do
+  [ -n "$p" ] && [ ! -L "$p" ] && chmod u+w "$p" 2>/dev/null || true
+done <"$guard_paths_file"
+while IFS= read -r -d '' f; do
+  [ -e "$f" ] && [ ! -L "$f" ] && chmod u+w "$f" || true
+done <"$changed_files_file"
 
 # The update-ref above prevents an in-gate staging overwrite. Check again at
 # the last possible point so a later concurrent staging change cannot be
@@ -402,6 +575,7 @@ if [ -n "$staging_snapshot" ]; then
 fi
 
 merge_out=""
+pre_merge_head="$(git rev-parse --verify HEAD)"
 set +e
 merge_out="$(git merge --ff-only "$branch" 2>&1)"
 merge_status=$?
@@ -411,12 +585,15 @@ if [ -n "$merge_out" ]; then
 fi
 if [ "$merge_status" -ne 0 ]; then
   current_head="$(git rev-parse --verify HEAD 2>/dev/null || true)"
-  if [ -n "$current_head" ]; then
-    git reset --hard "$current_head" >/dev/null 2>&1 || true
-    echo "error: merge failed; reset primary checkout index/worktree to HEAD $current_head" >&2
+  if [ "$current_head" = "$pre_merge_head" ]; then
+    if git restore --source="$pre_merge_head" --staged --worktree \
+      --pathspec-from-file="$changed_files_file" --pathspec-file-nul >/dev/null 2>&1; then
+      echo "error: merge failed; restored only the proven-clean branch paths from $pre_merge_head" >&2
+    else
+      echo "error: merge failed; automatic path-scoped cleanup failed, leaving state for inspection" >&2
+    fi
   else
-    git reset --hard >/dev/null 2>&1 || true
-    echo "error: merge failed; attempted to reset primary checkout index/worktree" >&2
+    echo "error: merge failed after HEAD changed ($pre_merge_head -> ${current_head:-missing}); refusing destructive cleanup" >&2
   fi
   exit "$merge_status"
 fi
@@ -474,6 +651,11 @@ PY
       echo "warning: failed to build goal ledger entry JSON for change $change_id — skipping ledger update" >&2
     fi
   fi
+fi
+
+if [ -n "$source_dir" ]; then
+  git update-ref -d "$source_original_recovery_ref" >/dev/null 2>&1 || true
+  git update-ref -d "$source_recovery_ref" >/dev/null 2>&1 || true
 fi
 
 echo "main -> $(git rev-parse --short HEAD); read-only guard restored for changed paths"

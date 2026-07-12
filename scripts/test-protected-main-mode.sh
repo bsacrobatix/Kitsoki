@@ -200,6 +200,74 @@ assert_contains "$tmp/dirty-unrelated.out" "main ->"
   { echo "dirty-unrelated merge clobbered local dirty file" >&2; exit 1; }
 
 chmod -R u+w "$dirty_repo"
+
+# Rename detection must not hide the preimage from the dirty-overlap guard.
+# Refusal must preserve the user's local edit byte-for-byte.
+commit_file "$dirty_repo" old-name.txt baseline
+git -C "$dirty_repo" checkout -q -b rename-preimage
+git -C "$dirty_repo" mv old-name.txt new-name.txt
+git -C "$dirty_repo" commit -q -m "rename old name"
+git -C "$dirty_repo" checkout -q main
+printf '%s\n' 'precious local edit' >"$dirty_repo/old-name.txt"
+set +e
+(
+  cd "$dirty_repo"
+  scripts/merge-to-main.sh rename-preimage --force
+) >"$tmp/dirty-rename-preimage.out" 2>&1
+dirty_rename_status=$?
+set -e
+[ "$dirty_rename_status" -ne 0 ] || { echo "dirty rename-preimage merge should fail" >&2; exit 1; }
+assert_contains "$tmp/dirty-rename-preimage.out" "old-name.txt"
+[ "$(cat "$dirty_repo/old-name.txt")" = "precious local edit" ] ||
+  { echo "dirty rename-preimage refusal erased the local edit" >&2; exit 1; }
+
+# Changed-path and dirty-status transport is NUL-delimited; even a newline in
+# a filename must remain protected rather than being split into fake paths.
+newline_path=$'line\nbreak.txt'
+printf 'baseline\n' >"$dirty_repo/$newline_path"
+git -C "$dirty_repo" add "$newline_path"
+git -C "$dirty_repo" commit -q -m "add newline path"
+git -C "$dirty_repo" checkout -q -b newline-path-change
+printf 'branch change\n' >"$dirty_repo/$newline_path"
+git -C "$dirty_repo" add "$newline_path"
+git -C "$dirty_repo" commit -q -m "change newline path"
+git -C "$dirty_repo" checkout -q main
+printf 'precious newline edit\n' >"$dirty_repo/$newline_path"
+set +e
+(
+  cd "$dirty_repo"
+  scripts/merge-to-main.sh newline-path-change --force
+) >"$tmp/dirty-newline-path.out" 2>&1
+dirty_newline_status=$?
+set -e
+[ "$dirty_newline_status" -ne 0 ] || { echo "dirty newline-path merge should fail" >&2; exit 1; }
+[ "$(cat "$dirty_repo/$newline_path")" = "precious newline edit" ] ||
+  { echo "dirty newline-path refusal erased the local edit" >&2; exit 1; }
+
+# Ignored work is still work. A branch can force-track a path underneath an
+# ignored directory; promotion must see the ignored preimage and refuse.
+printf 'ignored/\n' >"$dirty_repo/.gitignore"
+git -C "$dirty_repo" add .gitignore
+git -C "$dirty_repo" commit -q -m "ignore local evidence directory"
+git -C "$dirty_repo" checkout -q -b ignored-preimage
+mkdir -p "$dirty_repo/ignored"
+printf 'feature version\n' >"$dirty_repo/ignored/valuable.txt"
+git -C "$dirty_repo" add -f ignored/valuable.txt
+git -C "$dirty_repo" commit -q -m "force-track ignored path"
+git -C "$dirty_repo" checkout -q main
+mkdir -p "$dirty_repo/ignored"
+printf 'local irreplaceable version\n' >"$dirty_repo/ignored/valuable.txt"
+set +e
+(
+  cd "$dirty_repo"
+  scripts/merge-to-main.sh ignored-preimage --force
+) >"$tmp/dirty-ignored-preimage.out" 2>&1
+dirty_ignored_status=$?
+set -e
+[ "$dirty_ignored_status" -ne 0 ] || { echo "dirty ignored-preimage merge should fail" >&2; exit 1; }
+[ "$(cat "$dirty_repo/ignored/valuable.txt")" = "local irreplaceable version" ] ||
+  { echo "dirty ignored-preimage refusal erased ignored local work" >&2; exit 1; }
+
 git -C "$dirty_repo" checkout -q -b overlap
 commit_file "$dirty_repo" conflict.txt branch
 git -C "$dirty_repo" checkout -q main
@@ -213,6 +281,74 @@ dirty_overlap_status=$?
 set -e
 [ "$dirty_overlap_status" -ne 0 ] || { echo "dirty-overlap merge should fail" >&2; exit 1; }
 assert_contains "$tmp/dirty-overlap.out" "conflict.txt"
+
+# Permission guards must never follow a tracked symlink and chmod data outside
+# the repository when an incoming branch replaces that link.
+symlink_repo="$tmp/symlink-repo"
+git_init "$symlink_repo"
+mkdir -p "$symlink_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$symlink_repo/scripts/merge-to-main.sh"
+chmod +x "$symlink_repo/scripts/merge-to-main.sh"
+external_target="$tmp/external-symlink-target.txt"
+printf 'external\n' >"$external_target"
+chmod 0444 "$external_target"
+ln -s "$external_target" "$symlink_repo/link.txt"
+git -C "$symlink_repo" add scripts/merge-to-main.sh link.txt
+git -C "$symlink_repo" commit -q -m "add symlink"
+git -C "$symlink_repo" branch -M main
+git -C "$symlink_repo" checkout -q -b replace-symlink
+rm "$symlink_repo/link.txt"
+printf 'regular\n' >"$symlink_repo/link.txt"
+git -C "$symlink_repo" add link.txt
+git -C "$symlink_repo" commit -q -m "replace symlink"
+git -C "$symlink_repo" checkout -q main
+(
+  cd "$symlink_repo"
+  scripts/merge-to-main.sh replace-symlink --force >"$tmp/symlink-merge.out"
+)
+external_mode="$(stat -f '%Lp' "$external_target" 2>/dev/null || stat -c '%a' "$external_target")"
+[ "$external_mode" = "444" ] || { echo "merge chmod followed symlink; external mode is $external_mode" >&2; exit 1; }
+
+# Source-capsule rebases must protect ignored local bytes before a newer main
+# starts tracking the same path.
+source_collision_repo="$tmp/source-collision-repo"
+git_init "$source_collision_repo"
+mkdir -p "$source_collision_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$source_collision_repo/scripts/merge-to-main.sh"
+chmod +x "$source_collision_repo/scripts/merge-to-main.sh"
+printf 'ignored-source/\n' >"$source_collision_repo/.gitignore"
+git -C "$source_collision_repo" add scripts/merge-to-main.sh .gitignore
+git -C "$source_collision_repo" commit -q -m "initial source collision"
+git -C "$source_collision_repo" branch -M main
+git -C "$source_collision_repo" branch staging/local
+mkdir -p "$source_collision_repo/.capsules/staging"
+git -C "$source_collision_repo" clone --no-local "$source_collision_repo" \
+  "$source_collision_repo/.capsules/staging/local" >/dev/null
+git -C "$source_collision_repo/.capsules/staging/local" remote rename origin source
+git -C "$source_collision_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$source_collision_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$source_collision_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$source_collision_repo/.capsules/staging/local/.kitsoki-capsule"
+mkdir -p "$source_collision_repo/.capsules/staging/local/ignored-source"
+printf 'capsule local evidence\n' >"$source_collision_repo/.capsules/staging/local/ignored-source/valuable.txt"
+mkdir -p "$source_collision_repo/ignored-source"
+printf 'main tracked version\n' >"$source_collision_repo/ignored-source/valuable.txt"
+git -C "$source_collision_repo" add -f ignored-source/valuable.txt
+git -C "$source_collision_repo" commit -q -m "main tracks ignored source path"
+source_collision_main="$(git -C "$source_collision_repo" rev-parse main)"
+set +e
+(
+  cd "$source_collision_repo"
+  scripts/merge-to-main.sh --gate true
+) >"$tmp/source-collision.out" 2>&1
+source_collision_status=$?
+set -e
+[ "$source_collision_status" -ne 0 ] || { echo "source ignored collision promotion should fail" >&2; exit 1; }
+assert_contains "$tmp/source-collision.out" "would overwrite untracked or ignored source paths"
+[ "$(cat "$source_collision_repo/.capsules/staging/local/ignored-source/valuable.txt")" = "capsule local evidence" ] ||
+  { echo "source rebase overwrote ignored capsule evidence" >&2; exit 1; }
+[ "$(git -C "$source_collision_repo" rev-parse main)" = "$source_collision_main" ] ||
+  { echo "source collision refusal moved main" >&2; exit 1; }
 
 staging_repo="$tmp/staging-repo"
 git_init "$staging_repo"
@@ -239,6 +375,46 @@ git -C "$staging_repo/.capsules/staging/local" add staged.txt
 git -C "$staging_repo/.capsules/staging/local" commit -q -m "staged change"
 git -C "$staging_repo" fetch -q "$staging_repo/.capsules/staging/local" staging/local:refs/heads/staging-candidate
 git -C "$staging_repo" update-ref refs/heads/staging/local "$(git -C "$staging_repo/.capsules/staging/local" rev-parse HEAD)"
+
+# A failed late status probe is unknown state, not evidence that the staging
+# capsule stayed clean through the gate. Fail the second source-dir status
+# call and prove promotion stops before protected main moves.
+status_shim="$tmp/source-status-shim"
+status_count_file="$tmp/source-status-count"
+mkdir -p "$status_shim"
+real_git="$(command -v git)"
+cat >"$status_shim/git" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = -C ] && [ "${2:-}" = "${KITSOKI_FAIL_SOURCE_STATUS_DIR:-}" ] && [ "${3:-}" = status ]; then
+  count=0
+  [ ! -f "${KITSOKI_SOURCE_STATUS_COUNT_FILE:?}" ] || count="$(cat "$KITSOKI_SOURCE_STATUS_COUNT_FILE")"
+  count=$((count + 1))
+  printf '%s\n' "$count" >"$KITSOKI_SOURCE_STATUS_COUNT_FILE"
+  [ "$count" -ne "${KITSOKI_FAIL_SOURCE_STATUS_N:?}" ] || exit 86
+fi
+exec "${KITSOKI_REAL_GIT:?}" "$@"
+SH
+chmod +x "$status_shim/git"
+staging_status_main_before="$(git -C "$staging_repo" rev-parse main)"
+staging_status_source_dir="$(git -C "$staging_repo/.capsules/staging/local" rev-parse --show-toplevel)"
+set +e
+(
+  cd "$staging_repo"
+  PATH="$status_shim:$PATH" \
+    KITSOKI_REAL_GIT="$real_git" \
+    KITSOKI_FAIL_SOURCE_STATUS_DIR="$staging_status_source_dir" \
+    KITSOKI_SOURCE_STATUS_COUNT_FILE="$status_count_file" \
+    KITSOKI_FAIL_SOURCE_STATUS_N=3 \
+    scripts/merge-to-main.sh --gate true
+) >"$tmp/staging-status-failure.out" 2>&1
+staging_status_failure=$?
+set -e
+[ "$staging_status_failure" -ne 0 ] || { echo "source status failure should stop promotion" >&2; exit 1; }
+assert_contains "$tmp/staging-status-failure.out" "could not inspect source dir status"
+[ "$(git -C "$staging_repo" rev-parse main)" = "$staging_status_main_before" ] ||
+  { echo "source status failure advanced main" >&2; exit 1; }
+
 (
   cd "$staging_repo"
   scripts/merge-to-main.sh >"$tmp/staging.out"
@@ -338,7 +514,7 @@ set +e
 race_status=$?
 set -e
 [ "$race_status" -ne 0 ] || { echo "race simulation should fail" >&2; exit 1; }
-assert_contains "$tmp/race.out" "reset primary checkout index/worktree to HEAD"
+assert_contains "$tmp/race.out" "restored only the proven-clean branch paths"
 [ -z "$(git -C "$race_repo" status --short)" ] ||
   { git -C "$race_repo" status --short >&2; exit 1; }
 [ "$(cat "$race_repo/src/app.txt")" = "base" ] ||

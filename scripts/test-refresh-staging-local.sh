@@ -51,6 +51,393 @@ copy_scripts() {
   chmod +x "$repo/scripts/"*.sh
 }
 
+# A staging patch may already be embodied in main by a different patch
+# sequence. Git then drops the staging commit as empty during rebase. The
+# refresh must accept the preserved tree delta instead of treating the absent
+# patch-id as lost work.
+already_present_repo="$tmp/already-present-refresh"
+git_init "$already_present_repo"
+copy_scripts "$already_present_repo"
+printf 'keep\nstale\n' >"$already_present_repo/shared.txt"
+printf 'mode\n' >"$already_present_repo/mode.txt"
+printf 'rename\n' >"$already_present_repo/old-name.txt"
+git -C "$already_present_repo" add -A
+git -C "$already_present_repo" commit -q -m initial
+git -C "$already_present_repo" branch staging/local
+git -C "$already_present_repo" switch -q staging/local
+printf 'keep\n' >"$already_present_repo/shared.txt"
+git -C "$already_present_repo" add shared.txt
+git -C "$already_present_repo" commit -q -m 'staging removes stale line'
+git -C "$already_present_repo" switch -q main
+printf 'keep\n' >"$already_present_repo/shared.txt"
+printf 'main-only\n' >"$already_present_repo/main-only.txt"
+git -C "$already_present_repo" add shared.txt main-only.txt
+git -C "$already_present_repo" commit -q -m 'main replaces stale line differently'
+
+mkdir -p "$already_present_repo/.capsules/staging"
+git clone -q --no-local "$already_present_repo" "$already_present_repo/.capsules/staging/local"
+git -C "$already_present_repo/.capsules/staging/local" remote rename origin source
+git -C "$already_present_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$already_present_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$already_present_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$already_present_repo/.capsules/staging/local/.kitsoki-capsule"
+commit_file "$already_present_repo/.capsules/staging/local" capsule-only.txt capsule-only
+chmod +x "$already_present_repo/.capsules/staging/local/mode.txt"
+git -C "$already_present_repo/.capsules/staging/local" mv old-name.txt new-name.txt
+printf '\000\001\002capsule-binary\377' >"$already_present_repo/.capsules/staging/local/capsule.bin"
+git -C "$already_present_repo/.capsules/staging/local" add mode.txt new-name.txt capsule.bin
+git -C "$already_present_repo/.capsules/staging/local" commit -q -m 'capsule mode rename and binary delta'
+capsule_binary_hash="$(git hash-object "$already_present_repo/.capsules/staging/local/capsule.bin")"
+already_present_original="$(git -C "$already_present_repo/.capsules/staging/local" rev-parse HEAD)"
+
+already_present_out="$tmp/already-present-refresh.out"
+if ! (
+  cd "$already_present_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$already_present_out" 2>&1; then
+  cat "$already_present_out" >&2
+  fail "already-present staging refresh failed"
+fi
+assert_contains "$already_present_out" "staging/local ->"
+git -C "$already_present_repo" merge-base --is-ancestor main staging/local ||
+  fail "already-present refresh did not base staging on main"
+[ "$(git -C "$already_present_repo" show staging/local:shared.txt)" = "keep" ] ||
+  fail "already-present refresh dropped the main replacement"
+[ "$(git -C "$already_present_repo" show staging/local:main-only.txt)" = "main-only" ] ||
+  fail "already-present refresh dropped the main-only file"
+[ "$(git -C "$already_present_repo" show staging/local:capsule-only.txt)" = "capsule-only" ] ||
+  fail "already-present refresh dropped capsule-only work"
+[ "$(git -C "$already_present_repo" ls-tree staging/local mode.txt | awk '{print $1}')" = "100755" ] ||
+  fail "already-present refresh dropped capsule mode change"
+git -C "$already_present_repo" cat-file -e staging/local:new-name.txt ||
+  fail "already-present refresh dropped capsule rename destination"
+if git -C "$already_present_repo" cat-file -e staging/local:old-name.txt 2>/dev/null; then
+  fail "already-present refresh retained capsule rename source"
+fi
+[ "$(git -C "$already_present_repo" rev-parse staging/local:capsule.bin)" = "$capsule_binary_hash" ] ||
+  fail "already-present refresh changed capsule binary content"
+[ "$(git -C "$already_present_repo" rev-parse staging/local)" = "$(git -C "$already_present_repo/.capsules/staging/local" rev-parse HEAD)" ] ||
+  fail "already-present primary staging and capsule HEAD differ"
+[ -z "$(git -C "$already_present_repo/.capsules/staging/local" for-each-ref --format='%(refname)' refs/kitsoki/refresh/)" ] ||
+  fail "successful refresh left temporary capsule recovery refs"
+already_present_recovery_ref="refs/kitsoki/staging-capsule-recovery/$already_present_original"
+[ "$(git -C "$already_present_repo" rev-parse "$already_present_recovery_ref")" = "$already_present_original" ] ||
+  fail "successful refresh did not retain the original capsule in primary recovery refs"
+
+# Content-addressed recovery refs are idempotent. The first no-op refresh may
+# anchor the current unpromoted staging tip; repeating the same no-op must not
+# grow the recovery-ref set again.
+(
+  cd "$already_present_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$tmp/already-present-noop-1.out" 2>&1
+noop_recovery_count="$(git -C "$already_present_repo" for-each-ref \
+  --format='%(refname)' refs/kitsoki/staging-capsule-recovery/ | wc -l | tr -d ' ')"
+(
+  cd "$already_present_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$tmp/already-present-noop-2.out" 2>&1
+[ "$(git -C "$already_present_repo" for-each-ref \
+  --format='%(refname)' refs/kitsoki/staging-capsule-recovery/ | wc -l | tr -d ' ')" = "$noop_recovery_count" ] ||
+  fail "repeated no-op refresh leaked a new primary recovery ref"
+
+# The old source/staging tracking tip is state too. It can carry work not
+# reachable from capsule HEAD after an interrupted refresh. Prove a successful
+# refresh anchors that orphaned tip outside the capsule before force-fetching
+# the tracking ref and deleting temporary capsule-local refs.
+upstream_only_repo="$tmp/upstream-only-recovery"
+git_init "$upstream_only_repo"
+copy_scripts "$upstream_only_repo"
+commit_file "$upstream_only_repo" base.txt base
+git -C "$upstream_only_repo" branch staging/local
+mkdir -p "$upstream_only_repo/.capsules/staging"
+git clone -q --no-local "$upstream_only_repo" "$upstream_only_repo/.capsules/staging/local"
+git -C "$upstream_only_repo/.capsules/staging/local" remote rename origin source
+git -C "$upstream_only_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$upstream_only_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$upstream_only_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$upstream_only_repo/.capsules/staging/local/.kitsoki-capsule"
+git -C "$upstream_only_repo/.capsules/staging/local" switch -q -c upstream-only
+commit_file "$upstream_only_repo/.capsules/staging/local" orphaned-upstream.txt preserved
+upstream_only_tip="$(git -C "$upstream_only_repo/.capsules/staging/local" rev-parse HEAD)"
+git -C "$upstream_only_repo/.capsules/staging/local" update-ref \
+  refs/remotes/source/staging/local "$upstream_only_tip"
+git -C "$upstream_only_repo/.capsules/staging/local" switch -q staging/local
+git -C "$upstream_only_repo/.capsules/staging/local" branch -D upstream-only >/dev/null
+(
+  cd "$upstream_only_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$tmp/upstream-only-refresh.out" 2>&1
+upstream_only_recovery_ref="refs/kitsoki/staging-capsule-recovery/$upstream_only_tip"
+[ "$(git -C "$upstream_only_repo" rev-parse "$upstream_only_recovery_ref")" = "$upstream_only_tip" ] ||
+  fail "refresh did not retain the old capsule upstream in the primary repository"
+[ "$(git -C "$upstream_only_repo" show "$upstream_only_recovery_ref:orphaned-upstream.txt")" = "preserved" ] ||
+  fail "old capsule upstream recovery ref lost its unique tree content"
+[ "$(git -C "$upstream_only_repo/.capsules/staging/local" rev-parse refs/remotes/source/staging/local)" = \
+  "$(git -C "$upstream_only_repo" rev-parse staging/local)" ] ||
+  fail "refresh did not converge the capsule tracking ref after preserving its old tip"
+[ -z "$(git -C "$upstream_only_repo/.capsules/staging/local" for-each-ref \
+  --format='%(refname)' refs/kitsoki/refresh/)" ] ||
+  fail "successful upstream-only refresh left temporary capsule recovery refs"
+
+# Ignored local evidence is invisible to ordinary status but Git can overwrite
+# it when a refreshed branch begins tracking the same path. Refuse before the
+# first rebase and leave both sides intact.
+ignored_collision_repo="$tmp/ignored-collision-refresh"
+git_init "$ignored_collision_repo"
+copy_scripts "$ignored_collision_repo"
+printf 'ignored/\n' >"$ignored_collision_repo/.gitignore"
+git -C "$ignored_collision_repo" add .gitignore
+git -C "$ignored_collision_repo" commit -q -m initial
+git -C "$ignored_collision_repo" branch staging/local
+mkdir -p "$ignored_collision_repo/.capsules/staging"
+git clone -q --no-local "$ignored_collision_repo" "$ignored_collision_repo/.capsules/staging/local"
+git -C "$ignored_collision_repo/.capsules/staging/local" remote rename origin source
+git -C "$ignored_collision_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$ignored_collision_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$ignored_collision_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$ignored_collision_repo/.capsules/staging/local/.kitsoki-capsule"
+mkdir -p "$ignored_collision_repo/.capsules/staging/local/ignored"
+printf 'local irreplaceable version\n' >"$ignored_collision_repo/.capsules/staging/local/ignored/valuable.txt"
+git -C "$ignored_collision_repo" switch -q staging/local
+mkdir -p "$ignored_collision_repo/ignored"
+printf 'staging tracked version\n' >"$ignored_collision_repo/ignored/valuable.txt"
+git -C "$ignored_collision_repo" add -f ignored/valuable.txt
+git -C "$ignored_collision_repo" commit -q -m 'track formerly ignored path'
+ignored_collision_staging="$(git -C "$ignored_collision_repo" rev-parse HEAD)"
+git -C "$ignored_collision_repo" switch -q main
+ignored_collision_capsule="$(git -C "$ignored_collision_repo/.capsules/staging/local" rev-parse HEAD)"
+set +e
+(
+  cd "$ignored_collision_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$tmp/ignored-collision-refresh.out" 2>&1
+ignored_collision_status=$?
+set -e
+[ "$ignored_collision_status" -ne 0 ] || fail "ignored collision refresh should fail"
+assert_contains "$tmp/ignored-collision-refresh.out" "would overwrite untracked or ignored capsule paths"
+[ "$(cat "$ignored_collision_repo/.capsules/staging/local/ignored/valuable.txt")" = "local irreplaceable version" ] ||
+  fail "ignored collision refresh overwrote local capsule evidence"
+[ "$(git -C "$ignored_collision_repo/.capsules/staging/local" rev-parse HEAD)" = "$ignored_collision_capsule" ] ||
+  fail "ignored collision refresh moved the capsule branch"
+[ "$(git -C "$ignored_collision_repo" rev-parse staging/local)" = "$ignored_collision_staging" ] ||
+  fail "ignored collision refresh moved primary staging"
+
+# A failed status probe is unknown state, never evidence that the capsule is
+# clean. Simulate ENOSPC/lock-style Git failure and prove refresh stops before
+# touching either staging ref.
+fake_git_dir="$tmp/fake-git"
+mkdir -p "$fake_git_dir"
+cat >"$fake_git_dir/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "${KITSOKI_FAIL_STATUS_DIR:-}" ] && [ "${3:-}" = status ]; then
+  exit 86
+fi
+exec "${KITSOKI_REAL_GIT:?}" "$@"
+SH
+chmod +x "$fake_git_dir/git"
+real_git="$(command -v git)"
+status_failure_primary="$(git -C "$already_present_repo" rev-parse staging/local)"
+status_failure_capsule="$(git -C "$already_present_repo/.capsules/staging/local" rev-parse HEAD)"
+status_failure_out="$tmp/status-failure-refresh.out"
+status_failure_capsule_dir="$(cd "$already_present_repo/.capsules/staging/local" && pwd -P)"
+set +e
+(
+  cd "$already_present_repo"
+  PATH="$fake_git_dir:$PATH" \
+    KITSOKI_REAL_GIT="$real_git" \
+    KITSOKI_FAIL_STATUS_DIR="$status_failure_capsule_dir" \
+    scripts/refresh-staging-local.sh --skip-remote
+) >"$status_failure_out" 2>&1
+status_failure_code=$?
+set -e
+[ "$status_failure_code" -eq 1 ] ||
+  fail "expected status-probe failure to stop refresh, got $status_failure_code"
+assert_contains "$status_failure_out" "could not inspect staging capsule status"
+[ "$(git -C "$already_present_repo" rev-parse staging/local)" = "$status_failure_primary" ] ||
+  fail "status-probe failure moved primary staging"
+[ "$(git -C "$already_present_repo/.capsules/staging/local" rev-parse HEAD)" = "$status_failure_capsule" ] ||
+  fail "status-probe failure moved capsule staging"
+
+# The tree-delta fallback must not weaken the fail-closed behavior. A gate that
+# deliberately rewinds the capsule to main removes the captured staging delta.
+# It also recreates the staged file only as an uncommitted worktree change;
+# that must not fool the result-commit proof. Refresh must refuse to import it
+# and leave the primary staging ref untouched.
+lost_delta_repo="$tmp/lost-delta-refresh"
+git_init "$lost_delta_repo"
+copy_scripts "$lost_delta_repo"
+printf 'base\n' >"$lost_delta_repo/README.md"
+git -C "$lost_delta_repo" add -A
+git -C "$lost_delta_repo" commit -q -m initial
+git -C "$lost_delta_repo" branch staging/local
+git -C "$lost_delta_repo" switch -q staging/local
+commit_file "$lost_delta_repo" staged.txt staged-delta
+lost_delta_start="$(git -C "$lost_delta_repo" rev-parse staging/local)"
+git -C "$lost_delta_repo" switch -q main
+commit_file "$lost_delta_repo" main.txt main-delta
+
+mkdir -p "$lost_delta_repo/.capsules/staging"
+git clone -q --no-local "$lost_delta_repo" "$lost_delta_repo/.capsules/staging/local"
+git -C "$lost_delta_repo/.capsules/staging/local" remote rename origin source
+git -C "$lost_delta_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$lost_delta_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$lost_delta_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$lost_delta_repo/.capsules/staging/local/.kitsoki-capsule"
+
+lost_delta_out="$tmp/lost-delta-refresh.out"
+set +e
+(
+  cd "$lost_delta_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git reset --hard source/main && printf "staged-delta\n" >staged.txt'
+) >"$lost_delta_out" 2>&1
+lost_delta_status=$?
+set -e
+[ "$lost_delta_status" -eq 1 ] ||
+  fail "expected lost-delta refresh to stop with exit 1, got $lost_delta_status"
+assert_contains "$lost_delta_out" "staging refresh gate left uncommitted changes"
+[ "$(git -C "$lost_delta_repo" rev-parse staging/local)" = "$lost_delta_start" ] ||
+  fail "lost-delta refresh overwrote primary staging"
+[ "$(git -C "$lost_delta_repo" show staging/local:staged.txt)" = "staged-delta" ] ||
+  fail "lost-delta refresh removed captured staging content"
+
+# Preserve capsule-only commits independently from the primary snapshot. A gate
+# can reset to the exact captured staging commit, satisfying the primary
+# ancestry check while still discarding pre-refresh capsule work.
+git -C "$lost_delta_repo/.capsules/staging/local" reset --hard source/staging/local >/dev/null
+git -C "$lost_delta_repo/.capsules/staging/local" clean -fd >/dev/null
+touch "$lost_delta_repo/.capsules/staging/local/.kitsoki-capsule"
+commit_file "$lost_delta_repo/.capsules/staging/local" capsule-only.txt capsule-only-delta
+capsule_loss_original="$(git -C "$lost_delta_repo/.capsules/staging/local" rev-parse HEAD)"
+capsule_loss_out="$tmp/capsule-loss-refresh.out"
+set +e
+(
+  cd "$lost_delta_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git reset --hard source/staging/local'
+) >"$capsule_loss_out" 2>&1
+capsule_loss_status=$?
+set -e
+[ "$capsule_loss_status" -eq 1 ] ||
+  fail "expected capsule-loss refresh to stop with exit 1, got $capsule_loss_status"
+assert_contains "$capsule_loss_out" "refresh gate moved capsule HEAD"
+[ "$(git -C "$lost_delta_repo" rev-parse staging/local)" = "$lost_delta_start" ] ||
+  fail "capsule-loss refresh moved primary staging"
+[ "$(git -C "$lost_delta_repo" show staging/local:staged.txt)" = "staged-delta" ] ||
+  fail "capsule-loss refresh removed primary staging content"
+[ "$(git -C "$lost_delta_repo/.capsules/staging/local" rev-parse HEAD)" = "$capsule_loss_original" ] ||
+  fail "capsule-loss refusal did not restore the active capsule branch"
+[ "$(git -C "$lost_delta_repo/.capsules/staging/local" show HEAD:capsule-only.txt)" = "capsule-only-delta" ] ||
+  fail "capsule-loss refusal hid the original capsule-only content"
+(
+  cd "$lost_delta_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$tmp/capsule-loss-rerun.out" 2>&1
+[ "$(git -C "$lost_delta_repo" show staging/local:capsule-only.txt)" = "capsule-only-delta" ] ||
+  fail "rerun after capsule-loss refusal omitted the restored capsule-only work"
+
+# Ordinary rebase flattens merge commits. If a staging merge carries
+# resolution-only content, finding all non-merge parent patches is not enough:
+# the complete captured tree delta must reject a result that lost the merge
+# resolution.
+merge_delta_repo="$tmp/merge-delta-refresh"
+git_init "$merge_delta_repo"
+copy_scripts "$merge_delta_repo"
+printf 'base\n' >"$merge_delta_repo/README.md"
+git -C "$merge_delta_repo" add -A
+git -C "$merge_delta_repo" commit -q -m initial
+git -C "$merge_delta_repo" branch staging/local
+git -C "$merge_delta_repo" branch side
+git -C "$merge_delta_repo" switch -q staging/local
+commit_file "$merge_delta_repo" staged-parent.txt staged-parent
+git -C "$merge_delta_repo" switch -q side
+commit_file "$merge_delta_repo" side-parent.txt side-parent
+git -C "$merge_delta_repo" switch -q staging/local
+git -C "$merge_delta_repo" merge -q --no-ff --no-commit side
+printf 'merge-resolution-only\n' >"$merge_delta_repo/resolution-only.txt"
+git -C "$merge_delta_repo" add resolution-only.txt
+git -C "$merge_delta_repo" commit -q -m 'merge side with resolution-only content'
+merge_delta_start="$(git -C "$merge_delta_repo" rev-parse staging/local)"
+git -C "$merge_delta_repo" switch -q main
+commit_file "$merge_delta_repo" main.txt main-after-merge
+
+mkdir -p "$merge_delta_repo/.capsules/staging"
+git clone -q --no-local "$merge_delta_repo" "$merge_delta_repo/.capsules/staging/local"
+git -C "$merge_delta_repo/.capsules/staging/local" remote rename origin source
+git -C "$merge_delta_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$merge_delta_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$merge_delta_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$merge_delta_repo/.capsules/staging/local/.kitsoki-capsule"
+
+merge_delta_out="$tmp/merge-delta-refresh.out"
+set +e
+(
+  cd "$merge_delta_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$merge_delta_out" 2>&1
+merge_delta_status=$?
+set -e
+[ "$merge_delta_status" -eq 1 ] ||
+  fail "expected merge-resolution loss to stop refresh, got $merge_delta_status"
+assert_contains "$merge_delta_out" "rebased staging tree differs from the expected preserved tree"
+[ "$(git -C "$merge_delta_repo" rev-parse staging/local)" = "$merge_delta_start" ] ||
+  fail "merge-resolution refusal moved primary staging"
+[ "$(git -C "$merge_delta_repo" show staging/local:resolution-only.txt)" = "merge-resolution-only" ] ||
+  fail "merge-resolution refusal removed primary staging content"
+
+# Capsule-only merge resolutions need protection during the first rebase too.
+# Advance primary staging after cloning, then put a resolution-only merge in the
+# stale capsule. Rebasing that capsule onto the newer snapshot flattens the
+# merge; refresh must stop immediately and retain a private recovery ref to the
+# original capsule tip.
+capsule_merge_repo="$tmp/capsule-merge-refresh"
+git_init "$capsule_merge_repo"
+copy_scripts "$capsule_merge_repo"
+printf 'base\n' >"$capsule_merge_repo/README.md"
+git -C "$capsule_merge_repo" add -A
+git -C "$capsule_merge_repo" commit -q -m initial
+git -C "$capsule_merge_repo" branch staging/local
+mkdir -p "$capsule_merge_repo/.capsules/staging"
+git clone -q --no-local "$capsule_merge_repo" "$capsule_merge_repo/.capsules/staging/local"
+git -C "$capsule_merge_repo/.capsules/staging/local" remote rename origin source
+git -C "$capsule_merge_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$capsule_merge_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$capsule_merge_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$capsule_merge_repo/.capsules/staging/local/.kitsoki-capsule"
+git -C "$capsule_merge_repo/.capsules/staging/local" branch capsule-side
+commit_file "$capsule_merge_repo/.capsules/staging/local" capsule-parent.txt capsule-parent
+git -C "$capsule_merge_repo/.capsules/staging/local" switch -q capsule-side
+commit_file "$capsule_merge_repo/.capsules/staging/local" capsule-side.txt capsule-side
+git -C "$capsule_merge_repo/.capsules/staging/local" switch -q staging/local
+git -C "$capsule_merge_repo/.capsules/staging/local" merge -q --no-ff --no-commit capsule-side
+printf 'capsule-resolution-only\n' >"$capsule_merge_repo/.capsules/staging/local/capsule-resolution-only.txt"
+git -C "$capsule_merge_repo/.capsules/staging/local" add capsule-resolution-only.txt
+git -C "$capsule_merge_repo/.capsules/staging/local" commit -q -m 'capsule merge with resolution-only content'
+capsule_merge_original="$(git -C "$capsule_merge_repo/.capsules/staging/local" rev-parse HEAD)"
+git -C "$capsule_merge_repo" switch -q staging/local
+commit_file "$capsule_merge_repo" primary-advance.txt primary-advance
+capsule_merge_staging="$(git -C "$capsule_merge_repo" rev-parse staging/local)"
+git -C "$capsule_merge_repo" switch -q main
+
+capsule_merge_out="$tmp/capsule-merge-refresh.out"
+set +e
+(
+  cd "$capsule_merge_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$capsule_merge_out" 2>&1
+capsule_merge_status=$?
+set -e
+[ "$capsule_merge_status" -eq 1 ] ||
+  fail "expected capsule merge-resolution loss to stop refresh, got $capsule_merge_status"
+assert_contains "$capsule_merge_out" "post-snapshot capsule tree differs from the expected preserved tree"
+[ "$(git -C "$capsule_merge_repo" rev-parse staging/local)" = "$capsule_merge_staging" ] ||
+  fail "capsule merge-resolution refusal moved primary staging"
+capsule_merge_recovery="$(git -C "$capsule_merge_repo/.capsules/staging/local" for-each-ref \
+  --points-at "$capsule_merge_original" --format='%(refname)' refs/kitsoki/refresh/ | \
+  grep '/capsule-original$' | head -1)"
+[ -n "$capsule_merge_recovery" ] ||
+  fail "capsule merge-resolution refusal did not retain the original capsule ref"
+assert_contains "$capsule_merge_out" "preserved original capsule work at $capsule_merge_recovery"
+
 local_repo="$tmp/local-refresh"
 git_init "$local_repo"
 copy_scripts "$local_repo"
@@ -71,13 +458,11 @@ git -C "$local_repo" add -A
 git -C "$local_repo" commit -q -m initial
 git -C "$local_repo" branch staging/local
 
-mkdir -p "$local_repo/.capsules/staging"
-git clone -q --no-local "$local_repo" "$local_repo/.capsules/staging/local"
-git -C "$local_repo/.capsules/staging/local" remote rename origin source
-git -C "$local_repo/.capsules/staging/local" config user.name "Test User"
-git -C "$local_repo/.capsules/staging/local" config user.email "test@example.invalid"
-git -C "$local_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
-touch "$local_repo/.capsules/staging/local/.kitsoki-capsule"
+(
+  cd "$local_repo"
+  scripts/dev-workspace.sh create --root .capsules/staging --id local \
+    --branch staging/local --base staging/local --target main --no-bootstrap >/dev/null
+)
 
 commit_file "$local_repo/.capsules/staging/local" staged.txt staged
 # A long-lived staging capsule can retain a rebased source/staging tracking
@@ -118,6 +503,41 @@ git -C "$local_repo" merge-base --is-ancestor main staging/local ||
   fail "refresh did not converge the capsule-private source/staging tracking ref"
 cmp "$local_repo/.kitsoki.local.yaml" "$local_repo/.capsules/staging/local/.kitsoki.local.yaml" >/dev/null ||
   fail "refresh did not copy .kitsoki.local.yaml into staging capsule"
+
+# Main and staging are one atomic refresh input. If main advances during the
+# gate, refuse to publish a staging result based on the captured older main.
+commit_file "$local_repo/.capsules/staging/local" after-main-snapshot.txt capsule-after-main-snapshot
+main_advancer="$tmp/main-advancer"
+git clone -q --no-local "$local_repo" "$main_advancer"
+git -C "$main_advancer" config user.name "Test User"
+git -C "$main_advancer" config user.email "test@example.invalid"
+git -C "$main_advancer" switch -q main
+commit_file "$main_advancer" concurrent-main.txt concurrent-main-advance
+concurrent_main="$(git -C "$main_advancer" rev-parse HEAD)"
+git -C "$local_repo" fetch -q "$main_advancer" "HEAD:refs/kitsoki/test-concurrent-main"
+main_race_staging="$(git -C "$local_repo" rev-parse staging/local)"
+main_race_out="$tmp/concurrent-main-advance.out"
+set +e
+(
+  cd "$local_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate "git -C '$local_repo' update-ref refs/heads/main $concurrent_main"
+) >"$main_race_out" 2>&1
+main_race_status=$?
+set -e
+[ "$main_race_status" -eq 1 ] ||
+  fail "expected concurrent main advance to stop refresh, got $main_race_status"
+assert_contains "$main_race_out" "main advanced during refresh"
+[ "$(git -C "$local_repo" rev-parse main)" = "$concurrent_main" ] ||
+  fail "concurrent main advance did not remain authoritative"
+[ "$(git -C "$local_repo" rev-parse staging/local)" = "$main_race_staging" ] ||
+  fail "concurrent main advance imported stale staging"
+main_race_candidate="$(git -C "$local_repo" for-each-ref \
+  --format='%(refname)' refs/kitsoki/refresh/ | grep '/import$' | tail -1)"
+[ -n "$main_race_candidate" ] ||
+  fail "concurrent main refusal did not retain its proven import candidate"
+git -C "$local_repo" rev-parse --verify "$main_race_candidate^{tree}" >/dev/null ||
+  fail "retained main-race import candidate has no readable tree"
+assert_contains "$main_race_out" "preserved proven import candidate at $main_race_candidate"
 
 # A refresh must preserve the captured primary staging input.  Create a newer
 # primary staging commit, advance it from the gate (after the snapshot), and
@@ -184,10 +604,13 @@ assert_contains "$dirty_out" "--dirty-action preserve"
   fail "dirty abort removed the untracked file"
 
 default_out="$tmp/dirty-capsule-default.out"
-printf '\n' | script -q /dev/null bash -c '
+if ! printf '\n' | script -q /dev/null bash -c '
   cd "$1"
   scripts/refresh-staging-local.sh --skip-remote --dirty-action prompt --gate "git diff --check"
-' bash "$local_repo" >"$default_out" 2>&1
+' bash "$local_repo" >"$default_out" 2>&1; then
+  cat "$default_out" >&2
+  fail "interactive default move refresh failed"
+fi
 assert_contains "$default_out" "Move changes to a new managed capsule, commit them, clean, and continue (default)"
 assert_contains "$default_out" "moved dirty staging-capsule changes to a committed recovery capsule"
 default_recovery_dir="$(sed -n 's/^  workspace: //p' "$default_out" | tail -1 | tr -d '\r')"
@@ -196,6 +619,10 @@ default_recovery_dir="$(sed -n 's/^  workspace: //p' "$default_out" | tail -1 | 
   fail "default move did not commit the untracked staging file"
 
 printf 'scratch-explicit\n' >"$local_repo/.capsules/staging/local/scratch.txt"
+printf 'staged move state\n' >"$local_repo/.capsules/staging/local/README.md"
+git -C "$local_repo/.capsules/staging/local" add README.md
+printf 'tracked move survives external diff\n' >"$local_repo/.capsules/staging/local/README.md"
+git -C "$local_repo/.capsules/staging/local" config diff.external /usr/bin/true
 move_out="$tmp/dirty-capsule-move.out"
 (
   cd "$local_repo"
@@ -203,25 +630,51 @@ move_out="$tmp/dirty-capsule-move.out"
 ) >"$move_out" 2>&1
 assert_contains "$move_out" "moved dirty staging-capsule changes to a committed recovery capsule"
 recovery_dir="$(sed -n 's/^  workspace: //p' "$move_out" | tail -1)"
+move_snapshot_ref="$(sed -n 's/^  snapshot ref: //p' "$move_out" | tail -1)"
+move_recovery_ref="$(sed -n 's/^  recovery ref: //p' "$move_out" | tail -1)"
+move_quarantine="$(sed -n 's/^  original quarantine: //p' "$move_out" | tail -1)"
 [ -n "$recovery_dir" ] || fail "move did not report a recovery workspace"
 [ -f "$recovery_dir/.kitsoki-dev-workspace.json" ] ||
   fail "move did not create a managed recovery workspace"
 [ "$(git -C "$recovery_dir" show HEAD:scratch.txt)" = "scratch-explicit" ] ||
   fail "move did not commit the untracked staging file"
+[ "$(git -C "$recovery_dir" show HEAD:README.md)" = "tracked move survives external diff" ] ||
+  fail "move lost a tracked edit hidden by diff.external"
+[ "$(git -C "$local_repo" show "$move_recovery_ref:README.md")" = "tracked move survives external diff" ] ||
+  fail "primary dirty-recovery ref lost tracked staging work"
+[ "$(git -C "$local_repo" show "$move_recovery_ref:scratch.txt")" = "scratch-explicit" ] ||
+  fail "primary dirty-recovery ref lost untracked staging work"
+[ "$(git -C "$local_repo" show "$move_snapshot_ref^2:README.md")" = "staged move state" ] ||
+  fail "primary dirty-snapshot ref lost exact staged staging state"
+[ "$(cat "$move_quarantine/README.md")" = "tracked move survives external diff" ] ||
+  fail "move did not retain the original staging quarantine"
+[ "$(git -C "$local_repo/.capsules/staging/local" show HEAD:README.md)" = \
+  "$(cat "$local_repo/.capsules/staging/local/README.md")" ] ||
+  fail "move did not clean the original tracked file back to HEAD after recovery"
+git -C "$local_repo/.capsules/staging/local" config --unset-all diff.external >/dev/null 2>&1 || true
 [ -z "$(git -C "$local_repo/.capsules/staging/local" status --porcelain --untracked-files=all |
   grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' || true)" ] ||
   fail "move left the staging capsule dirty"
 
 printf 'scratch-again\n' >"$local_repo/.capsules/staging/local/scratch.txt"
 preserve_out="$tmp/dirty-capsule-preserve.out"
-(
+if ! (
   cd "$local_repo"
   scripts/refresh-staging-local.sh --skip-remote --dirty-action preserve --gate 'git diff --check'
-) >"$preserve_out" 2>&1
+) >"$preserve_out" 2>&1; then
+  cat "$preserve_out" >&2
+  fail "preserve refresh failed"
+fi
 assert_contains "$preserve_out" "preserved dirty staging-capsule changes"
 assert_contains "$preserve_out" "staging/local ->"
+preserve_snapshot_ref="$(sed -n 's/^  snapshot ref: //p' "$preserve_out" | tail -1)"
+[ -n "$preserve_snapshot_ref" ] || fail "preserve did not report its durable snapshot ref"
+[ "$(git -C "$local_repo" show "$preserve_snapshot_ref^3:scratch.txt")" = "scratch-again" ] ||
+  fail "preserve snapshot ref did not retain the untracked file"
 [ ! -e "$local_repo/.capsules/staging/local/scratch.txt" ] ||
   fail "preserve did not clean the untracked file"
+[ -f "$local_repo/.capsules/staging/local/.kitsoki-capsule" ] ||
+  fail "preserve dropped the managed capsule sentinel"
 preserve_patch="$(ls "$local_repo/.artifacts/staging-local-preserved"/staging-capsule-dirty-*.patch | tail -1)"
 assert_contains "$preserve_patch" "scratch.txt"
 remaining_dirty="$(git -C "$local_repo/.capsules/staging/local" status --porcelain --untracked-files=all |
@@ -229,6 +682,48 @@ remaining_dirty="$(git -C "$local_repo/.capsules/staging/local" status --porcela
   true)"
 [ -z "$remaining_dirty" ] ||
   fail "preserve left staging capsule dirty: $remaining_dirty"
+
+# Import the immutable proven SHA, then recheck the capsule branch. A concurrent
+# clean commit during that fetch must stop before primary staging moves.
+capsule_race_git_dir="$tmp/capsule-race-git"
+mkdir -p "$capsule_race_git_dir"
+cat >"$capsule_race_git_dir/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${2:-}" = "${KITSOKI_RACE_PRIMARY:-}" ] &&
+  [ "${3:-}" = fetch ] && [ "${4:-}" = "${KITSOKI_RACE_CAPSULE:-}" ] &&
+  [[ "${5:-}" == *:refs/kitsoki/refresh/*/import ]] &&
+  [ ! -f "${KITSOKI_RACE_ONCE:?}" ]; then
+  printf 'race\n' >"$KITSOKI_RACE_CAPSULE/capsule-race.txt"
+  "${KITSOKI_REAL_GIT:?}" -C "$KITSOKI_RACE_CAPSULE" add capsule-race.txt
+  "${KITSOKI_REAL_GIT:?}" -C "$KITSOKI_RACE_CAPSULE" commit -q -m 'concurrent capsule advance'
+  touch "$KITSOKI_RACE_ONCE"
+fi
+exec "${KITSOKI_REAL_GIT:?}" "$@"
+SH
+chmod +x "$capsule_race_git_dir/git"
+capsule_race_primary="$(cd "$local_repo" && pwd -P)"
+capsule_race_capsule="$(cd "$local_repo/.capsules/staging/local" && pwd -P)"
+capsule_race_staging="$(git -C "$local_repo" rev-parse staging/local)"
+capsule_race_out="$tmp/capsule-race.out"
+set +e
+(
+  cd "$local_repo"
+  PATH="$capsule_race_git_dir:$PATH" \
+    KITSOKI_REAL_GIT="$real_git" \
+    KITSOKI_RACE_PRIMARY="$capsule_race_primary" \
+    KITSOKI_RACE_CAPSULE="$capsule_race_capsule" \
+    KITSOKI_RACE_ONCE="$tmp/capsule-race-once" \
+    scripts/refresh-staging-local.sh --skip-remote --gate 'git diff --check'
+) >"$capsule_race_out" 2>&1
+capsule_race_status=$?
+set -e
+[ "$capsule_race_status" -eq 1 ] ||
+  fail "expected concurrent capsule advance to stop refresh, got $capsule_race_status"
+assert_contains "$capsule_race_out" "staging capsule branch advanced while importing the proven result"
+[ "$(git -C "$local_repo" rev-parse staging/local)" = "$capsule_race_staging" ] ||
+  fail "concurrent capsule advance moved primary staging"
+[ "$(git -C "$local_repo/.capsules/staging/local" show HEAD:capsule-race.txt)" = "race" ] ||
+  fail "concurrent capsule commit was not preserved"
 
 make_out="$tmp/make-staging.out"
 (

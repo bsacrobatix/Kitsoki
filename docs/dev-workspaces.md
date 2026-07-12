@@ -142,8 +142,19 @@ inside the workspace, imports the branch into the primary checkout as a temporar
 Before rebasing, the helper verifies that every object reachable from the
 freshly fetched target is readable inside the capsule. It repeats the
 clean-checkout/object verification after rebase, after the gate, and for the
-temporary landing ref before updating the target. This makes a stale or broken
-clone object store fail before target movement. Once the target update succeeds,
+temporary landing ref before updating the target. A gate is validation-only:
+if it moves the captured workspace commit, the merge stops. The helper imports
+that immutable commit rather than the moving branch, rechecks the branch after
+import, and updates the target with the fetched target commit as its
+compare-and-swap expectation. If the workspace branch advances after landing,
+requested teardown keeps the workspace unless the target contains that newer
+tip. Before rebase it constructs the expected transplanted tree independently;
+a flattened merge or other rebase result that loses resolution-only content is
+rejected, and the original commit is retained under a content-addressed primary
+recovery ref. Untracked and ignored paths that an incoming tree would overwrite
+are reported before rebase. This makes a stale or broken clone object store,
+committed branch writer, or target race fail without deleting or overwriting
+work. Once the target update succeeds,
 the command reports a successful merge even if best-effort temporary-ref cleanup
 or requested teardown has a problem; those follow-up failures are warnings, not
 a false report that the landing failed.
@@ -165,6 +176,15 @@ recovery when interactive, rebases staging onto local `main`, runs `make test`
 in the staging capsule, then fast-forwards protected local `main`. Pass
 `--gate "<cmd>"` to use a different gate. Pass `--force` only when an equivalent
 gate has already run and you intentionally want to skip the default `make test`.
+Source-directory gates are validation-only and cannot move the captured
+commit. The pre-gate source commit is copied to a content-addressed
+`refs/kitsoki/promotion-source-recovery/<commit>` ref in the primary repository.
+Changed-path protection is NUL-safe and includes both sides of renames; a merge
+refusal restores only paths proven clean before the attempt, never the whole
+checkout with `reset --hard`. Ignored preimages are included, and permission
+guard changes never follow symlinks outside the repository. Source rebases use
+the same independent expected-tree and ignored-collision checks as workspace
+rebases.
 
 Create the long-lived staging capsule with:
 
@@ -203,13 +223,39 @@ local `main` is current, the helper snapshots local `staging/local`, refreshes
 `main`, and imports the refreshed ref with a compare-and-swap update. If a
 workspace merge advances primary `staging/local` during the refresh, the helper
 refuses rather than overwriting the newer work; rerun refresh from that newer
-snapshot. If the staging capsule is
-dirty and the helper is attached to a terminal, it asks whether to inspect,
+snapshot. Before it mutates the capsule, the helper copies both the original
+capsule branch tip and its old `source/staging/local` tracking tip into
+content-addressed `refs/kitsoki/staging-capsule-recovery/<commit>` refs in the
+primary repository. Those durable, idempotent refs survive a successful
+refresh and preserve capsule-only history even if the long-lived capsule is
+later replaced. Failed runs retain the original/post-rebase/candidate refs that
+carry diagnostic state; ephemeral captured-input refs are removed by exit
+cleanup. If failure happens after the candidate was copied into the primary
+repository, that immutable import ref is retained there too.
+The expected post-rebase tree is constructed independently, and the final
+primary update verifies captured `main` and `staging/local` atomically. If the
+staging capsule is dirty and the helper is attached to a terminal, it asks
+whether to inspect,
 move the work into a new committed managed recovery capsule (the default),
 preserve-and-clean, discard-and-clean, or stop. Non-interactive runs stop with
 the same next-step commands; pass `--dirty-action move`,
 `--dirty-action preserve`, or `--dirty-action discard` only when that outcome
-is intentional. The Make targets
+is intentional. `move` captures the working tree and index as Git objects plus
+the complete non-ignored untracked archive, materializes a signed recovery
+commit, and anchors both snapshots under content-addressed
+`refs/kitsoki/dirty-*` refs in the primary repository. It rechecks the source,
+atomically renames the whole dirty checkout to a managed
+`closed-recovered-*` quarantine, creates and bootstraps a clean staging capsule
+at the original path when the repository exposes a bootstrap target, then
+seals the quarantine as a signed commit. This preserves ignored evidence and
+prevents a late writer from racing a reset or clean. Capsule cleanup recognizes
+the sealed quarantine only while its exact HEAD/tree and all recovery refs
+remain valid. The move path does not use configurable diff output as a recovery
+transport. `preserve` stashes tracked and non-ignored untracked work without a
+pathspec and anchors the exact stash commit (including index and untracked
+parents) under `refs/kitsoki/dirty-snapshot/<commit>` in the primary repository;
+ignored capsule-management sentinels and evidence remain in place throughout.
+The Make targets
 call this refresh helper first, then verify that `.capsules/staging/local` is a
 managed capsule at the current `staging/local` head before running the
 corresponding command inside it. To refresh without running a staging command,
@@ -220,6 +266,26 @@ rerun the focused validation, then rerun `merge`. If a staging refresh rebase
 conflicts, resolve it inside `.capsules/staging/local`, rerun the needed staging
 validation, then rerun `refresh-staging-local.sh`. Do not resolve either path by
 editing the primary checkout.
+
+Teardown anchors the exact committed tip in
+`refs/kitsoki/workspace-teardown-recovery/<commit>`, preserves ignored
+`.context`, `.artifacts`, and local configuration under
+`.artifacts/workspace-close/`, then atomically renames the managed checkout to
+a same-filesystem `closed-*` managed quarantine. Preservation copies only
+ignored/untracked review files; tracked files under those roots stay in the Git
+checkout. The branch, manifests, complete source issue tree, and original
+evidence stay intact in quarantine.
+The normal Capsule cleanup plan discovers that quarantine as a legacy managed
+workspace and applies the same clean, merged, inactive, and age guards. Only
+cleanup apply invokes the provider's `--purge-quarantine` path. The provider
+atomically moves the path to a visible managed purge state, repeats exact
+branch/HEAD/status checks, re-preserves review artifacts and the complete
+ignored tree, archives complete Git metadata plus a verified pack of every
+object not reachable from a primary repository ref, proves inactivity both
+before and after preservation,
+and only then removes it and its teardown recovery ref. Stashes, secondary
+refs, reflog-only commits, and unreachable objects therefore remain
+reconstructible even though they do not make `git status` dirty.
 
 ### Hygiene
 
@@ -252,8 +318,9 @@ probe immediately before provider-owned close. Pin a workspace for an
 investigation either with `--pin-workspace <id>`, a
 `.kitsoki-capsule-pin` file inside the workspace, or a
 `.capsules/workspace-pins/<id>` marker in the project. Tune the guards without
-bypassing them. Workspaces under `.capsules/staging` are implicitly pinned
-because they are long-lived promotion state.
+bypassing them. Long-lived workspaces under `.capsules/staging` are implicitly
+pinned; managed `closed-*` quarantines there remain eligible for normal
+retention cleanup.
 
 ```sh
 kitsoki capsule cleanup plan --keep-workspaces 10 --workspace-min-age 72h --min-free-bytes 21474836480
@@ -287,7 +354,32 @@ directory anywhere under the workspace. The default activity proof uses
 `lsof`; if that probe is unavailable or inconclusive, activity is `unknown`
 and the candidate remains unsafe. Apply repeats every proof and uses
 the compatibility provider's `teardown` command, including its issue-preserving
-guard, instead of deleting the directory directly.
+guard, instead of deleting the directory directly. The provider atomically
+moves a quarantine to a visible managed `closed-purging-*` state, archives its
+complete ignored tree and Git repository recovery state, and repeats the
+process-activity proof both before preservation and immediately before
+deletion. The activity probe must
+produce no process IDs, no diagnostic output, and only a recognized no-match
+status. An interrupted purge therefore remains discoverable by the next plan,
+and an unavailable or inconclusive activity probe fails closed. A
+`closed-recovered-*` quarantine is the one exception to target containment: its
+signed seal manifest must prove exact content-addressed primary `dirty-snapshot`,
+`dirty-recovery`, and `recovered-quarantine` refs plus unchanged HEAD/tree.
+Missing or changed proof makes the candidate unsafe.
+
+Inspect durable recovery state without moving any branch:
+
+```sh
+git for-each-ref --format='%(refname) %(objectname)' refs/kitsoki/dirty-snapshot/ refs/kitsoki/dirty-recovery/ refs/kitsoki/staging-capsule-recovery/
+git show refs/kitsoki/dirty-recovery/<commit>
+git fsck --connectivity-only --no-dangling refs/kitsoki/dirty-recovery/<commit>
+```
+
+Cleanup removes ordinary teardown refs after target containment is proven.
+Content-addressed recovered-quarantine tips, canonical dirty refs, and
+staging-capsule recovery refs are retained deliberately so archived Git
+metadata remains reconstructible even after reflog expiry and object pruning;
+do not delete them ad hoc.
 
 ```sh
 kitsoki capsule cleanup plan --include-capsule-cache --include-go-build-cache
@@ -307,7 +399,10 @@ those recognized races and reports persistent concurrent cleanup under
 scripts/dev-workspace.sh teardown <workspace-id>
 ```
 
-Teardown refuses unmanaged directories and dirty workspaces. If requested
+Teardown refuses unmanaged directories and dirty workspaces. A successful close
+moves the checkout to a managed `closed-*` quarantine; it does not immediately
+delete the only remaining checkout or branch. Capsule cleanup later purges that
+quarantine after its independent safety and retention checks. If requested
 teardown fails after a successful merge, the merge result remains successful
 and carries an explicit cleanup warning so automation does not retry the
 already-landed change as though landing failed.

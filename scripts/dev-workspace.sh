@@ -16,6 +16,7 @@ INITIALIZATION_METADATA="metadata"
 DEFAULT_TARGET="staging/local"
 DEFAULT_BASE="$DEFAULT_TARGET"
 LOCAL_CONFIG=".kitsoki.local.yaml"
+RECOVERED_QUARANTINE_MANIFEST=".kitsoki-recovered-quarantine.json"
 
 usage() {
   cat >&2 <<'EOF'
@@ -26,6 +27,7 @@ usage:
   scripts/dev-workspace.sh commit <workspace|id> --message MESSAGE [--repo REPO] [--root ROOT] [--json]
   scripts/dev-workspace.sh merge <workspace|id> [--repo REPO] [--root ROOT] [--branch BRANCH] [--target TARGET] [--gate CMD] [--replace-landing] [--teardown]
   scripts/dev-workspace.sh park <workspace|id> [--repo REPO] [--root ROOT] [--session-id SID] [--message MESSAGE] [--json]
+  scripts/dev-workspace.sh seal-recovered-quarantine <workspace> --snapshot-ref REF --recovery-ref REF [--repo REPO] [--root ROOT]
   scripts/dev-workspace.sh recover <workspace|id> [--repo REPO] [--root ROOT] [--discard-incomplete]
   scripts/dev-workspace.sh close <workspace|id> [--repo REPO] [--root ROOT] [--force]
   scripts/dev-workspace.sh teardown <workspace|id> [--repo REPO] [--root ROOT] [--force]
@@ -77,6 +79,15 @@ print(os.path.abspath(sys.argv[1]))
 PY
 }
 
+same_device() {
+  python3 - "$1" "$2" <<'PY'
+import os
+import sys
+
+sys.exit(0 if os.stat(sys.argv[1]).st_dev == os.stat(sys.argv[2]).st_dev else 1)
+PY
+}
+
 resolve_root() {
   local repo="$1"
   local root="${2:-}"
@@ -99,6 +110,14 @@ validate_id() {
 
 safe_ref_fragment() {
   printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-'
+}
+
+is_object_id() {
+  local oid="$1"
+  case "$oid" in
+    ""|*[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#oid}" = "40" ] || [ "${#oid}" = "64" ]
 }
 
 workspace_path() {
@@ -140,6 +159,26 @@ try:
     with open(manifest, encoding="utf-8") as f:
         value = json.load(f).get(key, "")
 except FileNotFoundError:
+    value = ""
+if value is None:
+    value = ""
+print(str(value) if str(value).strip() else fallback)
+PY
+}
+
+json_file_value() {
+  local file="$1"
+  local key="$2"
+  local fallback="${3:-}"
+  python3 - "$file" "$key" "$fallback" <<'PY'
+import json
+import sys
+
+path, key, fallback = sys.argv[1:]
+try:
+    with open(path, encoding="utf-8") as f:
+        value = json.load(f).get(key, "")
+except (FileNotFoundError, json.JSONDecodeError, OSError):
     value = ""
 if value is None:
     value = ""
@@ -260,6 +299,7 @@ write_git_excludes() {
     echo "/$CLONE_SENTINEL"
     echo "/$DEV_MANIFEST"
     echo "/.kitsoki-owner"
+    echo "/$RECOVERED_QUARANTINE_MANIFEST"
   } >>"$exclude"
 }
 
@@ -417,8 +457,11 @@ copy_local_config() {
 }
 
 workspace_dirty() {
-  local path="$1"
-  [ -n "$(git -C "$path" status --porcelain)" ]
+  local path="$1" status
+  if ! status="$(git -C "$path" status --porcelain --untracked-files=all)"; then
+    die "could not inspect workspace status: $path"
+  fi
+  [ -n "$status" ]
 }
 
 import_workspace_issue_file() {
@@ -451,8 +494,11 @@ workspace_artifact_matches() {
 }
 
 # Older filing paths could leave durable tickets inside an ignored workspace
-# artifact tree. Preserve both the canonical flat shape and the retired
-# <id>/issue.md shape before teardown so ignored evidence cannot disappear.
+# artifact tree. Import the known canonical and retired shapes for immediate
+# visibility, but leave the complete source tree in the quarantined checkout.
+# Unknown providers, future kinds, hidden entries, and concurrent late writes
+# must never be deleted merely because this compatibility importer cannot yet
+# interpret them.
 import_workspace_issues() {
   local path="$1"
   local repo="$2"
@@ -501,19 +547,273 @@ import_workspace_issues() {
       fi
     done
   done
-  rm -rf "$src_root"
 }
 
-clean_parked_workspace_source() {
-  local path="$1"
-  git -C "$path" reset --hard HEAD >/dev/null
-  git -C "$path" clean -fd \
-    -e "$CAPSULE_SENTINEL" \
-    -e "$CLONE_SENTINEL" \
-    -e capsule-manifest.json \
-    -e .kitsoki-dev-workspace.json \
-    -e .kitsoki-owner \
-    -e "$LOCAL_CONFIG" >/dev/null
+preserve_workspace_review_artifacts() {
+  local path="$1" repo="$2" id="$3" stamp destination preserved=0
+  local visible_file ignored_file relative source destination_path
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  destination="$repo/.artifacts/workspace-close/${id}-${stamp}-$$"
+  visible_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-visible.XXXXXX")"
+  ignored_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-ignored.XXXXXX")"
+  if ! git -C "$path" ls-files --others --exclude-standard -z -- \
+    .context .artifacts .kitsoki.local.yaml >"$visible_file"; then
+    rm -f "$visible_file" "$ignored_file"
+    echo "error: close: could not inventory untracked review artifacts; keeping workspace" >&2
+    return 1
+  fi
+  if ! git -C "$path" ls-files --others --ignored --exclude-standard -z -- \
+    .context .artifacts .kitsoki.local.yaml >"$ignored_file"; then
+    rm -f "$visible_file" "$ignored_file"
+    echo "error: close: could not inventory ignored review artifacts; keeping workspace" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' relative; do
+    source="$path/$relative"
+    destination_path="$destination/$relative"
+    # A concurrent deletion is not data loss caused by close. A concurrent
+    # replacement remains in the source checkout and is caught by the later
+    # quarantine/status boundary.
+    [ -e "$source" ] || [ -L "$source" ] || continue
+    mkdir -p "$(dirname "$destination_path")"
+    if ! cp -Rp "$source" "$destination_path"; then
+      rm -f "$visible_file" "$ignored_file"
+      echo "error: close: could not preserve $source; keeping workspace" >&2
+      return 1
+    fi
+    preserved=1
+  done < <(cat "$visible_file" "$ignored_file")
+  rm -f "$visible_file" "$ignored_file"
+  if [ "$preserved" = "1" ]; then
+    echo "close: preserved ignored review artifacts at $destination" >&2
+  else
+    rmdir "$destination" >/dev/null 2>&1 || true
+  fi
+}
+
+preserve_all_ignored_artifacts() {
+  local path="$1" repo="$2" id="$3" stamp destination
+  local before_list after_list before_tar after_tar
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  destination="$repo/.artifacts/workspace-close/${id}-${stamp}-$$-ignored"
+  before_list="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-ignored-before.XXXXXX")"
+  after_list="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-ignored-after.XXXXXX")"
+  before_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-ignored-before-tar.XXXXXX")"
+  after_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-ignored-after-tar.XXXXXX")"
+  if ! git -C "$path" ls-files --others --ignored --exclude-standard -z >"$before_list"; then
+    rm -f "$before_list" "$after_list" "$before_tar" "$after_tar"
+    echo "error: close: could not inventory the complete ignored tree; keeping quarantine" >&2
+    return 1
+  fi
+  if [ ! -s "$before_list" ]; then
+    rm -f "$before_list" "$after_list" "$before_tar" "$after_tar"
+    return 0
+  fi
+  if ! tar -C "$path" --null --files-from="$before_list" -cf "$before_tar"; then
+    rm -f "$before_list" "$after_list" "$before_tar" "$after_tar"
+    echo "error: close: could not archive the complete ignored tree; keeping quarantine" >&2
+    return 1
+  fi
+  if ! git -C "$path" ls-files --others --ignored --exclude-standard -z >"$after_list" ||
+    ! tar -C "$path" --null --files-from="$after_list" -cf "$after_tar"; then
+    rm -f "$before_list" "$after_list" "$before_tar" "$after_tar"
+    echo "error: close: ignored tree changed while archiving; keeping quarantine" >&2
+    return 1
+  fi
+  if ! cmp -s "$before_list" "$after_list" || ! cmp -s "$before_tar" "$after_tar"; then
+    mkdir -p "$destination"
+    cp -p "$before_list" "$destination/ignored-paths-before.nul" || true
+    cp -p "$before_tar" "$destination/ignored-root-before.tar" || true
+    rm -f "$before_list" "$after_list" "$before_tar" "$after_tar"
+    echo "error: close: ignored tree changed while archiving; first snapshot retained at $destination and quarantine kept" >&2
+    return 1
+  fi
+  if ! mkdir -p "$destination" ||
+    ! mv "$before_list" "$destination/ignored-paths.nul" ||
+    ! mv "$before_tar" "$destination/ignored-root.tar"; then
+    rm -f "$before_list" "$after_list" "$before_tar" "$after_tar"
+    echo "error: close: could not publish the complete ignored-tree archive; keeping quarantine" >&2
+    return 1
+  fi
+  rm -f "$after_list" "$after_tar"
+  echo "close: preserved complete ignored tree at $destination/ignored-root.tar" >&2
+}
+
+preserve_git_repository_state() {
+  local path="$1" repo="$2" id="$3" stamp destination
+  local all_before all_after primary_objects missing_objects
+  local metadata_before metadata_after unique_dir unique_pack unique_index pack_hash
+  [ -d "$path/.git" ] || {
+    echo "error: close: managed quarantine has no standalone Git directory; keeping quarantine" >&2
+    return 1
+  }
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  destination="$repo/.artifacts/workspace-close/${id}-${stamp}-$$-git"
+  all_before="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-git-objects-before.XXXXXX")"
+  all_after="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-git-objects-after.XXXXXX")"
+  primary_objects="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-git-primary.XXXXXX")"
+  missing_objects="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-git-missing.XXXXXX")"
+  metadata_before="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-git-metadata-before.XXXXXX")"
+  metadata_after="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-git-metadata-after.XXXXXX")"
+  unique_dir="$(mktemp -d "${TMPDIR:-/tmp}/kitsoki-close-git-unique.XXXXXX")"
+  unique_pack="$unique_dir/unique-objects.pack"
+  unique_index="$unique_dir/unique-objects.idx"
+  if ! git -C "$path" cat-file --batch-all-objects --batch-check='%(objectname)' | LC_ALL=C sort -u >"$all_before" ||
+    ! tar -C "$path" \
+      --exclude='.git/objects/[0-9a-f][0-9a-f]' \
+      --exclude='.git/objects/pack/*.pack' \
+      --exclude='.git/objects/pack/*.idx' \
+      --exclude='.git/objects/pack/*.rev' \
+      -cf "$metadata_before" .git; then
+    rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+      "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+    rmdir "$unique_dir" >/dev/null 2>&1 || true
+    echo "error: close: could not inventory Git repository state; keeping quarantine" >&2
+    return 1
+  fi
+  if ! git -C "$repo" rev-list --objects --all | awk '{ print $1 }' | LC_ALL=C sort -u >"$primary_objects"; then
+    rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+      "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+    rmdir "$unique_dir" >/dev/null 2>&1 || true
+    echo "error: close: could not inventory objects reachable from primary refs; keeping quarantine" >&2
+    return 1
+  fi
+  if ! comm -23 "$all_before" "$primary_objects" >"$missing_objects"; then
+    rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+      "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+    rmdir "$unique_dir" >/dev/null 2>&1 || true
+    echo "error: close: could not compute the unique Git object set; keeping quarantine" >&2
+    return 1
+  fi
+  pack_hash=""
+  if [ -s "$missing_objects" ]; then
+    rm -f "$unique_index"
+    if ! git -C "$path" pack-objects --stdout <"$missing_objects" >"$unique_pack" ||
+      ! pack_hash="$(git index-pack -o "$unique_index" "$unique_pack")" ||
+      [ -z "$pack_hash" ] ||
+      ! git verify-pack "$unique_index" >/dev/null; then
+      rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+        "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+      rmdir "$unique_dir" >/dev/null 2>&1 || true
+      echo "error: close: could not create a verified pack of unique Git objects; keeping quarantine" >&2
+      return 1
+    fi
+  else
+    rm -f "$unique_pack" "$unique_index"
+  fi
+  if ! git -C "$path" cat-file --batch-all-objects --batch-check='%(objectname)' | LC_ALL=C sort -u >"$all_after" ||
+    ! tar -C "$path" \
+      --exclude='.git/objects/[0-9a-f][0-9a-f]' \
+      --exclude='.git/objects/pack/*.pack' \
+      --exclude='.git/objects/pack/*.idx' \
+      --exclude='.git/objects/pack/*.rev' \
+      -cf "$metadata_after" .git; then
+    rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+      "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+    rmdir "$unique_dir" >/dev/null 2>&1 || true
+    echo "error: close: Git repository changed while archiving; keeping quarantine" >&2
+    return 1
+  fi
+  if ! cmp -s "$all_before" "$all_after" || ! cmp -s "$metadata_before" "$metadata_after"; then
+    mkdir -p "$destination"
+    cp -p "$all_before" "$destination/all-objects-before.txt" || true
+    cp -p "$metadata_before" "$destination/git-metadata-before.tar" || true
+    [ ! -f "$unique_pack" ] || cp -p "$unique_pack" "$destination/unique-objects-before.pack" || true
+    [ ! -f "$unique_index" ] || cp -p "$unique_index" "$destination/unique-objects-before.idx" || true
+    rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+      "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+    rmdir "$unique_dir" >/dev/null 2>&1 || true
+    echo "error: close: Git repository changed while archiving; first snapshot retained at $destination and quarantine kept" >&2
+    return 1
+  fi
+  if ! mkdir -p "$destination" ||
+    ! mv "$all_before" "$destination/all-objects.txt" ||
+    ! mv "$primary_objects" "$destination/primary-reachable-objects.txt" ||
+    ! mv "$missing_objects" "$destination/unique-object-ids.txt" ||
+    ! mv "$metadata_before" "$destination/git-metadata.tar"; then
+    rm -f "$all_before" "$all_after" "$primary_objects" "$missing_objects" \
+      "$metadata_before" "$metadata_after" "$unique_pack" "$unique_index"
+    rmdir "$unique_dir" >/dev/null 2>&1 || true
+    echo "error: close: could not publish Git repository recovery metadata; keeping quarantine" >&2
+    return 1
+  fi
+  if [ -f "$unique_pack" ]; then
+    if ! mv "$unique_pack" "$destination/pack-$pack_hash.pack" ||
+      ! mv "$unique_index" "$destination/pack-$pack_hash.idx" ||
+      ! printf '%s\n' "$pack_hash" >"$destination/unique-objects.pack-hash"; then
+      rm -f "$all_after" "$metadata_after" "$unique_pack" "$unique_index"
+      rmdir "$unique_dir" >/dev/null 2>&1 || true
+      echo "error: close: could not publish the verified unique-object pack; keeping quarantine" >&2
+      return 1
+    fi
+  fi
+  rm -f "$all_after" "$metadata_after"
+  rmdir "$unique_dir" >/dev/null 2>&1 || true
+  if ! git -C "$path" for-each-ref --format='%(refname)%09%(objectname)' >"$destination/refs.tsv" ||
+    ! git -C "$path" reflog show --all --date=iso-strict --format='%H%x09%gD%x09%gs' >"$destination/reflog.tsv" ||
+    ! git -C "$path" rev-parse HEAD >"$destination/HEAD"; then
+    echo "error: close: could not publish Git ref/reflog ownership metadata; keeping quarantine" >&2
+    return 1
+  fi
+  echo "close: preserved complete Git metadata and unique objects at $destination" >&2
+}
+
+quarantine_activity() {
+  local path="$1" lsof_bin output status stderr_file stderr_output
+  lsof_bin="$(command -v lsof 2>/dev/null || true)"
+  if [ -z "$lsof_bin" ]; then
+    return 2
+  fi
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-close-lsof.XXXXXX")"
+  set +e
+  output="$("$lsof_bin" -n -P -t +D "$path" 2>"$stderr_file")"
+  status=$?
+  set -e
+  stderr_output="$(cat "$stderr_file")"
+  rm -f "$stderr_file"
+  if [ -n "$output" ]; then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  if [ -n "$stderr_output" ]; then
+    return 2
+  fi
+  # lsof exits 1 when no files match. Any larger status is inconclusive and
+  # must fail closed rather than authorize deletion.
+  case "$status" in
+    0|1) return 0 ;;
+    *) return 2 ;;
+  esac
+}
+
+rewrite_workspace_identity() {
+  local path="$1" id="$2" root="$3"
+  python3 - "$path" "$id" "$root" <<'PY'
+import json
+import os
+import sys
+
+path, workspace_id, root = sys.argv[1:]
+for name in (".kitsoki-clone", ".kitsoki-dev-workspace.json", "capsule-manifest.json"):
+    manifest_path = os.path.join(path, name)
+    with open(manifest_path, encoding="utf-8") as f:
+        data = json.load(f)
+    if name == "capsule-manifest.json":
+        data["workspace"] = path
+        data["environment"]["id"] = workspace_id
+        data["environment"]["root"] = root
+    else:
+        data["id"] = workspace_id
+        data["root"] = root
+        if name == ".kitsoki-dev-workspace.json":
+            data["workspace"] = path
+            data["capsule_manifest"] = os.path.join(path, "capsule-manifest.json")
+    temp = manifest_path + ".tmp"
+    with open(temp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(temp, manifest_path)
+PY
 }
 
 # A local clone may share objects with its source repository. Before using a
@@ -536,10 +836,76 @@ verify_clean_readable_checkout() {
   local path="$1"
   local ref="$2"
   local context="$3"
+  local status
   verify_commit_objects "$path" "$ref" "$context"
   git -C "$path" diff --quiet || die "$context: checkout has unstaged changes"
   git -C "$path" diff --cached --quiet || die "$context: checkout has staged changes"
-  [ -z "$(git -C "$path" status --porcelain)" ] || die "$context: checkout is not clean"
+  if ! status="$(git -C "$path" status --porcelain --untracked-files=all)"; then
+    die "$context: could not inspect checkout status"
+  fi
+  [ -z "$status" ] || die "$context: checkout is not clean"
+}
+
+expected_tree_after_delta() {
+  local path="$1" old_base="$2" snapshot="$3" new_base="$4" tree
+  tree="$(git -C "$path" merge-tree --write-tree --no-messages \
+    --merge-base "$old_base" "$new_base" "$snapshot")" || return 1
+  printf '%s\n' "$tree"
+}
+
+refuse_untracked_tree_collisions() {
+  local path="$1" from_ref="$2" to_ref="$3" context="$4" output
+  if ! output="$(python3 - "$path" "$from_ref" "$to_ref" <<'PY'
+import subprocess
+import sys
+
+repo, from_ref, to_ref = sys.argv[1:]
+changed_run = subprocess.run(
+    ["git", "-C", repo, "diff", "--name-only", "-z", "--no-renames", from_ref, to_ref],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+if changed_run.returncode:
+    sys.stderr.buffer.write(changed_run.stderr)
+    sys.exit(changed_run.returncode)
+changed = {
+    p.decode("utf-8", "surrogateescape")
+    for p in changed_run.stdout.split(b"\0") if p
+}
+status_run = subprocess.run(
+    [
+        "git", "-C", repo, "status", "--porcelain=v1", "-z",
+        "--untracked-files=all", "--ignored=traditional",
+    ],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+if status_run.returncode:
+    sys.stderr.buffer.write(status_run.stderr)
+    sys.exit(status_run.returncode)
+local = set()
+for entry in status_run.stdout.split(b"\0"):
+    if not entry or entry[:2] not in (b"??", b"!!"):
+        continue
+    path = entry[3:].decode("utf-8", "surrogateescape").rstrip("/")
+    if path:
+        local.add(path)
+
+def overlaps(a, b):
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+conflicts = sorted({p for p in local for c in changed if overlaps(p, c)})
+for path in conflicts:
+    print(path)
+sys.exit(1 if conflicts else 0)
+PY
+)"; then
+    echo "error: $context would overwrite untracked or ignored workspace paths:" >&2
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+    return 1
+  fi
 }
 
 primary_dirty_overlaps_file_list() {
@@ -922,9 +1288,10 @@ cmd_merge() {
     echo "merge: using default staging gate: $gate" >&2
   fi
 
-  local target_base
+  local target_base target_existed=0
   if git -C "$repo" rev-parse --verify --quiet "refs/heads/$target" >/dev/null; then
     target_base="$target"
+    target_existed=1
   elif git -C "$path" rev-parse --verify --quiet "source/$target^{commit}" >/dev/null; then
     # Agent capsules track their target under source/<target> until the first
     # local merge. Preserve that target rather than rebasing a nested workspace
@@ -937,20 +1304,59 @@ cmd_merge() {
   # after this clone-backed capsule was created. Verify the complete fetched
   # graph in the capsule before rebase so shared-object problems fail before
   # any worktree mutation.
+  local workspace_original workspace_delta_base expected_workspace_tree workspace_recovery_ref
+  workspace_original="$(git -C "$path" rev-parse --verify HEAD)"
+  workspace_recovery_ref="refs/kitsoki/workspace-merge-recovery/$workspace_original"
+  if git -C "$repo" rev-parse --verify --quiet "$workspace_recovery_ref" >/dev/null; then
+    [ "$(git -C "$repo" rev-parse "$workspace_recovery_ref")" = "$workspace_original" ] ||
+      die "merge: content-addressed workspace recovery ref points at the wrong object"
+  else
+    git -C "$repo" fetch --no-tags "$path" "$workspace_original:$workspace_recovery_ref"
+  fi
   git -C "$path" fetch --no-tags source "+refs/heads/$target_base:refs/remotes/source/$target_base"
   verify_commit_objects "$path" "source/$target_base" "merge: fetched target"
   verify_commit_objects "$path" HEAD "merge: workspace branch before rebase"
+  local target_snapshot
+  target_snapshot="$(git -C "$path" rev-parse --verify "source/$target_base")"
+  if [ "$target_existed" = "1" ]; then
+    [ "$(git -C "$repo" rev-parse --verify "refs/heads/$target")" = "$target_snapshot" ] ||
+      die "merge: target $target advanced while fetching; rerun merge"
+  elif git -C "$repo" rev-parse --verify --quiet "refs/heads/$target" >/dev/null; then
+    die "merge: target $target was created while fetching; rerun merge"
+  fi
+  workspace_delta_base="$(git -C "$path" merge-base "$workspace_original" "$target_snapshot")" ||
+    die "merge: could not determine workspace/target merge base"
+  expected_workspace_tree="$(expected_tree_after_delta \
+    "$path" "$workspace_delta_base" "$workspace_original" "$target_snapshot")" ||
+    die "merge: could not construct expected rebased workspace tree"
+  refuse_untracked_tree_collisions \
+    "$path" "$workspace_original" "$expected_workspace_tree" "workspace rebase" ||
+    die "merge: move or preserve the reported local paths before retrying"
   git -C "$path" rebase "source/$target_base"
   verify_clean_readable_checkout "$path" HEAD "merge: rebased workspace"
+  local workspace_result
+  workspace_result="$(git -C "$path" rev-parse --verify HEAD)"
+  if [ "$(git -C "$path" rev-parse "$workspace_result^{tree}")" != "$expected_workspace_tree" ]; then
+    git -C "$path" update-ref "refs/kitsoki/workspace-merge-failed/$workspace_result" "$workspace_result" || true
+    if ! workspace_dirty "$path"; then
+      git -C "$path" update-ref "refs/heads/$branch" "$workspace_original" "$workspace_result" || true
+      git -c submodule.recurse=false -C "$path" reset --hard "$workspace_original" >/dev/null 2>&1 || true
+    fi
+    die "merge: rebased workspace tree differs from the expected preserved tree; original retained at $workspace_recovery_ref"
+  fi
   if [ -n "$gate" ]; then
     (cd "$path" && sh -c "$gate")
   fi
   verify_clean_readable_checkout "$path" HEAD "merge: workspace after gate"
+  [ "$(git -C "$path" rev-parse --verify HEAD)" = "$workspace_result" ] ||
+    die "merge: validation gate moved workspace HEAD; committed state must remain unchanged"
+  [ "$(git -C "$path" rev-parse --verify "refs/heads/$branch")" = "$workspace_result" ] ||
+    die "merge: workspace branch advanced during validation; refusing unproven work"
 
   if [ "$target" = "main" ]; then
     local changed_files_file
     changed_files_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-dev-workspace-files.XXXXXX")"
-    git -C "$path" diff --name-only "source/$target_base" HEAD >"$changed_files_file"
+    git -C "$path" diff --name-only "source/$target_base" "$workspace_result" >"$changed_files_file"
     local dirty_overlap
     set +e
     dirty_overlap="$(primary_dirty_overlaps_file_list "$repo" "$changed_files_file")"
@@ -972,7 +1378,7 @@ cmd_merge() {
   safe="$(safe_ref_fragment "$id")"
   landing_branch="capsule/${safe}-land"
   if git -C "$repo" rev-parse --verify --quiet "$landing_branch" >/dev/null; then
-    if git -C "$repo" merge-base --is-ancestor "$landing_branch" "$target_base"; then
+    if git -C "$repo" merge-base --is-ancestor "$landing_branch" "$target_snapshot"; then
       git -C "$repo" branch -D "$landing_branch" >/dev/null
     elif [ "$replace_landing" = "1" ]; then
       # A previous attempt may have created the transport ref and then lost a
@@ -985,8 +1391,10 @@ cmd_merge() {
       die "merge: landing branch already exists and is not merged: $landing_branch (rerun with --replace-landing after reviewing the workspace)"
     fi
   fi
-  git -C "$repo" fetch --no-tags "$path" "$branch:refs/heads/$landing_branch"
-  verify_commit_objects "$path" HEAD "merge: landing source"
+  git -C "$repo" fetch --no-tags "$path" "$workspace_result:refs/heads/$landing_branch"
+  [ "$(git -C "$path" rev-parse --verify "refs/heads/$branch")" = "$workspace_result" ] ||
+    die "merge: workspace branch advanced while importing the proven result"
+  verify_commit_objects "$path" "$workspace_result" "merge: landing source"
   verify_commit_objects "$repo" "$landing_branch" "merge: landing branch"
   local landed=0
   if [ "$target" = "main" ]; then
@@ -1008,16 +1416,20 @@ cmd_merge() {
     fi
     landed=1
   else
-    if ! git -C "$repo" merge-base --is-ancestor "$target_base" "$landing_branch"; then
-      die "merge: $landing_branch is not a fast-forward of $target_base"
+    if ! git -C "$repo" merge-base --is-ancestor "$target_snapshot" "$landing_branch"; then
+      die "merge: $landing_branch is not a fast-forward of captured $target_base"
     fi
     local old_target new_target
-    old_target="$(git -C "$repo" rev-parse --verify "refs/heads/$target" 2>/dev/null || true)"
     new_target="$(git -C "$repo" rev-parse --verify "$landing_branch")"
-    if [ -n "$old_target" ]; then
-      git -C "$repo" update-ref -m "dev-workspace merge $branch into $target" "refs/heads/$target" "$new_target" "$old_target"
+    if [ "$target_existed" = "1" ]; then
+      old_target="$target_snapshot"
+      git -C "$repo" update-ref -m "dev-workspace merge $branch into $target" \
+        "refs/heads/$target" "$new_target" "$old_target" ||
+        die "merge: target $target advanced before the atomic landing; rerun merge"
     else
-      git -C "$repo" update-ref -m "dev-workspace create $target from $branch" "refs/heads/$target" "$new_target"
+      git -C "$repo" update-ref -m "dev-workspace create $target from $branch" \
+        "refs/heads/$target" "$new_target" "" ||
+        die "merge: target $target was created before the atomic landing; rerun merge"
     fi
     echo "$target -> $(git -C "$repo" rev-parse --short "$target")"
     landed=1
@@ -1025,6 +1437,7 @@ cmd_merge() {
 
   # From this point the target already contains the work. Cleanup is useful,
   # but must not turn a successful landing into a reported failure.
+  git -C "$repo" update-ref -d "$workspace_recovery_ref" >/dev/null 2>&1 || true
   if ! git -C "$repo" branch -D "$landing_branch" >/dev/null; then
     echo "warning: merge landed but could not remove temporary branch $landing_branch" >&2
   fi
@@ -1046,7 +1459,12 @@ cmd_merge() {
   fi
 
   if [ "$teardown" = "1" ]; then
-    if ! cmd_close --repo "$repo" --root "$root" "$path"; then
+    local current_workspace_tip
+    current_workspace_tip="$(git -C "$path" rev-parse --verify "refs/heads/$branch")"
+    if ! git -C "$repo" merge-base --is-ancestor "$current_workspace_tip" "refs/heads/$target"; then
+      echo "warning: merge landed, but workspace branch advanced to unlanded $current_workspace_tip; keeping $path" >&2
+    elif ! cmd_close --repo "$repo" --root "$root" \
+      --expected-branch "$branch" --expected-tip "$current_workspace_tip" "$path"; then
       echo "warning: merge landed but teardown failed for $path" >&2
     fi
   fi
@@ -1101,6 +1519,9 @@ PY
     fi
     return 0
   fi
+  ensure_not_initializing park "$root" "$abs_path"
+  ensure_managed_workspace "$abs_path"
+  ensure_under_root_or_forced "$root" "$abs_path" 0
   if ! workspace_dirty "$abs_path"; then
     if [ "$json" = "1" ]; then
       python3 - "$abs_path" <<'PY'
@@ -1122,6 +1543,7 @@ PY
 
   root="$(manifest_value "$abs_path" root "$root")"
   current_branch="$(git -C "$abs_path" branch --show-current 2>/dev/null || true)"
+  [ -n "$current_branch" ] || die "park: source workspace must be on a branch"
   base="$(manifest_value "$abs_path" base "${current_branch:-HEAD}")"
   target="$(manifest_value "$abs_path" target "$DEFAULT_TARGET")"
   source_id="$(workspace_id_from_path "$abs_path")"
@@ -1131,42 +1553,118 @@ PY
   recovery_branch="agent/$recovery_id"
   recovery_workspace="$root/$recovery_id"
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-  local patch_file untracked_file untracked_tar create_json recovery_commit park_message
-  patch_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park.patch.XXXXXX")"
+  local untracked_file untracked_tar current_untracked_file current_untracked_tar
+  local create_json recovery_commit park_message snapshot_oid snapshot_tree snapshot_index_tree
+  local current_oid current_tree current_index_tree recovery_parent recovery_snapshot_ref expected_tree
+  local primary_snapshot_ref primary_recovery_ref quarantine_root quarantine_path replacement_bootstrap
   untracked_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-untracked.XXXXXX")"
-  untracked_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-untracked.XXXXXX.tar")"
+  untracked_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-untracked-tar.XXXXXX")"
+  current_untracked_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-current-untracked.XXXXXX")"
+  current_untracked_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-park-current-untracked-tar.XXXXXX")"
   park_message="${message:-chore: park rerouted work from $source_id}"
 
-  git -C "$abs_path" diff --binary HEAD >"$patch_file"
+  snapshot_oid="$(git -C "$abs_path" stash create "kitsoki park snapshot $stamp")"
+  [ -n "$snapshot_oid" ] || snapshot_oid="$(git -C "$abs_path" rev-parse HEAD)"
+  snapshot_tree="$(git -C "$abs_path" rev-parse "$snapshot_oid^{tree}")"
+  snapshot_index_tree="$(git -C "$abs_path" rev-parse "$snapshot_oid^2^{tree}" 2>/dev/null || git -C "$abs_path" rev-parse HEAD^{tree})"
   git -C "$abs_path" ls-files --others --exclude-standard -z >"$untracked_file"
   if [ -s "$untracked_file" ]; then
     tar -C "$abs_path" --null --files-from="$untracked_file" -cf "$untracked_tar"
   fi
 
   if ! create_json="$("$script_path" create --repo "$repo" --root "$root" --id "$recovery_id" --branch "$recovery_branch" --base "$base" --target "$target" --session-id "$session_id" --json --no-bootstrap 2>/dev/null)"; then
-    rm -f "$patch_file" "$untracked_file" "$untracked_tar"
+    rm -f "$untracked_file" "$untracked_tar" "$current_untracked_file" "$current_untracked_tar"
     die "park: could not create recovery capsule"
   fi
   recovery_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$create_json")"
-  if [ -s "$patch_file" ]; then
-    git -C "$recovery_workspace" apply --index --binary "$patch_file"
-  fi
+  recovery_parent="$(git -C "$recovery_workspace" rev-parse HEAD)"
+  recovery_snapshot_ref="refs/kitsoki/dirty-snapshot/$snapshot_oid"
+  git -C "$recovery_workspace" fetch --no-tags "$abs_path" "$snapshot_oid:$recovery_snapshot_ref"
+  git -C "$recovery_workspace" reset --hard "$recovery_snapshot_ref" >/dev/null
   if [ -s "$untracked_file" ]; then
     tar -C "$recovery_workspace" -xf "$untracked_tar"
   fi
-  if ! "$script_path" commit "$recovery_workspace" --message "$park_message" >/dev/null; then
-    rm -f "$patch_file" "$untracked_file" "$untracked_tar"
+  git -C "$recovery_workspace" add -A
+  expected_tree="$(git -C "$recovery_workspace" write-tree)"
+  git -C "$recovery_workspace" reset --soft "$recovery_parent"
+  if ! git -C "$recovery_workspace" commit --allow-empty --signoff -m "$park_message" >/dev/null; then
+    rm -f "$untracked_file" "$untracked_tar" "$current_untracked_file" "$current_untracked_tar"
     die "park: could not commit recovery capsule"
   fi
   recovery_commit="$(git -C "$recovery_workspace" rev-parse HEAD)"
-  clean_parked_workspace_source "$abs_path"
+  [ "$(git -C "$recovery_workspace" rev-parse HEAD^{tree})" = "$expected_tree" ] ||
+    die "park: committed recovery tree does not match the captured dirty snapshot"
+  primary_snapshot_ref="refs/kitsoki/dirty-snapshot/$snapshot_oid"
+  primary_recovery_ref="refs/kitsoki/dirty-recovery/$recovery_commit"
+  git -C "$repo" fetch --no-tags "$abs_path" "$snapshot_oid:$primary_snapshot_ref"
+  git -C "$repo" fetch --no-tags "$recovery_workspace" "$recovery_commit:$primary_recovery_ref"
+  [ "$(git -C "$repo" rev-parse "$primary_snapshot_ref")" = "$snapshot_oid" ] ||
+    die "park: original staged/worktree snapshot was not anchored in the primary repository"
+  [ "$(git -C "$repo" rev-parse "$primary_recovery_ref^{tree}")" = "$expected_tree" ] ||
+    die "park: signed recovery tree was not anchored in the primary repository"
+  git -C "$recovery_workspace" update-ref -d "$recovery_snapshot_ref" >/dev/null 2>&1 || true
 
-  rm -f "$patch_file" "$untracked_file" "$untracked_tar"
+  current_oid="$(git -C "$abs_path" stash create "kitsoki park snapshot recheck $stamp")"
+  [ -n "$current_oid" ] || current_oid="$(git -C "$abs_path" rev-parse HEAD)"
+  current_tree="$(git -C "$abs_path" rev-parse "$current_oid^{tree}")"
+  current_index_tree="$(git -C "$abs_path" rev-parse "$current_oid^2^{tree}" 2>/dev/null || git -C "$abs_path" rev-parse HEAD^{tree})"
+  git -C "$abs_path" ls-files --others --exclude-standard -z >"$current_untracked_file"
+  if [ -s "$current_untracked_file" ]; then
+    tar -C "$abs_path" --null --files-from="$current_untracked_file" -cf "$current_untracked_tar"
+  fi
+  if [ "$current_tree" != "$snapshot_tree" ] ||
+    [ "$current_index_tree" != "$snapshot_index_tree" ] ||
+    ! cmp -s "$untracked_file" "$current_untracked_file" ||
+    ! cmp -s "$untracked_tar" "$current_untracked_tar"; then
+    die "park: source changed while its recovery snapshot was being committed; original left unchanged"
+  fi
+  quarantine_root="$repo/.capsules/workspaces"
+  mkdir -p "$quarantine_root"
+  if ! same_device "$(dirname "$abs_path")" "$quarantine_root"; then
+    die "park: source root is on a different filesystem from the managed quarantine root; recovery is anchored but the source was left unchanged"
+  fi
+  quarantine_path="$quarantine_root/closed-recovered-$recovery_id-source"
+  [ ! -e "$quarantine_path" ] || die "park: source quarantine already exists: $quarantine_path"
+  mv "$abs_path" "$quarantine_path"
+  if ! rewrite_workspace_identity "$quarantine_path" "$(basename "$quarantine_path")" "$quarantine_root"; then
+    [ ! -e "$abs_path" ] && mv "$quarantine_path" "$abs_path" >/dev/null 2>&1 || true
+    die "park: could not record managed recovery-quarantine identity"
+  fi
+  replacement_bootstrap="--no-bootstrap"
+  if make -C "$repo" -n bootstrap-workspace >/dev/null 2>&1 ||
+    make -C "$repo" -n bootstrap-worktree >/dev/null 2>&1; then
+    replacement_bootstrap="--bootstrap"
+  fi
+  if ! "$script_path" create \
+    --repo "$repo" \
+    --root "$root" \
+    --id "$source_id" \
+    --branch "$current_branch" \
+    --base "$base" \
+    --target "$target" \
+    --session-id "$session_id" \
+    "$replacement_bootstrap" >/dev/null; then
+    if [ ! -e "$abs_path" ]; then
+      rewrite_workspace_identity "$quarantine_path" "$source_id" "$root" >/dev/null 2>&1 || true
+      mv "$quarantine_path" "$abs_path" >/dev/null 2>&1 || true
+    fi
+    die "park: recovery is anchored, but a clean source workspace could not be recreated"
+  fi
+  if ! "$script_path" seal-recovered-quarantine \
+    --repo "$repo" \
+    --root "$quarantine_root" \
+    --snapshot-ref "$primary_snapshot_ref" \
+    --recovery-ref "$primary_recovery_ref" \
+    "$quarantine_path" >/dev/null; then
+    die "park: clean source was recreated and recovery refs are anchored, but the source quarantine could not be sealed"
+  fi
+
+  rm -f "$untracked_file" "$untracked_tar" "$current_untracked_file" "$current_untracked_tar"
   if [ "$json" = "1" ]; then
-    python3 - "$abs_path" "$recovery_workspace" "$recovery_branch" "$recovery_commit" "$park_message" <<'PY'
+    python3 - "$abs_path" "$recovery_workspace" "$recovery_branch" "$recovery_commit" "$park_message" "$quarantine_path" "$primary_snapshot_ref" "$primary_recovery_ref" <<'PY'
 import json
 import sys
-source_workspace, recovery_workspace, recovery_branch, recovery_commit, reason = sys.argv[1:]
+source_workspace, recovery_workspace, recovery_branch, recovery_commit, reason, quarantine, snapshot_ref, recovery_ref = sys.argv[1:]
 print(json.dumps({
     "ok": True,
     "parked": True,
@@ -1174,6 +1672,9 @@ print(json.dumps({
     "recovery_workspace": recovery_workspace,
     "recovery_branch": recovery_branch,
     "recovery_commit": recovery_commit,
+    "source_quarantine": quarantine,
+    "snapshot_ref": snapshot_ref,
+    "recovery_ref": recovery_ref,
     "cleaned": True,
     "reason": reason,
 }, indent=2, sort_keys=True))
@@ -1184,7 +1685,106 @@ PY
     echo "recovery: $recovery_workspace"
     echo "branch: $recovery_branch"
     echo "commit: $recovery_commit"
+    echo "source quarantine: $quarantine_path"
+    echo "snapshot ref: $primary_snapshot_ref"
+    echo "recovery ref: $primary_recovery_ref"
   fi
+}
+
+cmd_seal_recovered_quarantine() {
+  local repo="."
+  local root=""
+  local ref=""
+  local snapshot_ref=""
+  local recovery_ref=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --repo) repo="${2:?--repo requires a value}"; shift 2 ;;
+      --root) root="${2:?--root requires a value}"; shift 2 ;;
+      --snapshot-ref) snapshot_ref="${2:?--snapshot-ref requires a value}"; shift 2 ;;
+      --recovery-ref) recovery_ref="${2:?--recovery-ref requires a value}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        [ -z "$ref" ] || die "seal-recovered-quarantine: unexpected argument: $1"
+        ref="$1"
+        shift
+        ;;
+    esac
+  done
+  [ -n "$ref" ] || die "seal-recovered-quarantine: workspace path is required"
+  [ -n "$snapshot_ref" ] || die "seal-recovered-quarantine: --snapshot-ref is required"
+  [ -n "$recovery_ref" ] || die "seal-recovered-quarantine: --recovery-ref is required"
+  case "$snapshot_ref" in refs/kitsoki/dirty-snapshot/*) ;; *) die "seal-recovered-quarantine: invalid snapshot ref" ;; esac
+  case "$recovery_ref" in refs/kitsoki/dirty-recovery/*) ;; *) die "seal-recovered-quarantine: invalid recovery ref" ;; esac
+  repo="$(repo_root "$repo")"
+  root="$(resolve_root "$repo" "$root")"
+  local path id branch head tree tip_ref recovery_tree marker status
+  local snapshot_commit recovery_commit
+  path="$(workspace_path "$repo" "$root" "$ref")"
+  id="$(basename "$path")"
+  case "$id" in closed-recovered-*) ;; *) die "seal-recovered-quarantine: path must use a closed-recovered-* id" ;; esac
+  ensure_managed_workspace "$path"
+  ensure_under_root_or_forced "$root" "$path" 0
+  rewrite_workspace_identity "$path" "$id" "$root" ||
+    die "seal-recovered-quarantine: could not record managed quarantine identity"
+  snapshot_commit="$(git -C "$repo" rev-parse --verify "$snapshot_ref^{commit}" 2>/dev/null || true)"
+  recovery_commit="$(git -C "$repo" rev-parse --verify "$recovery_ref^{commit}" 2>/dev/null || true)"
+  is_object_id "$snapshot_commit" && [ "${snapshot_ref##*/}" = "$snapshot_commit" ] ||
+    die "seal-recovered-quarantine: primary snapshot ref is missing or unreadable"
+  is_object_id "$recovery_commit" && [ "${recovery_ref##*/}" = "$recovery_commit" ] ||
+    die "seal-recovered-quarantine: primary recovery ref is missing or unreadable"
+  recovery_tree="$(git -C "$repo" rev-parse "$recovery_ref^{tree}")"
+  write_git_excludes "$path"
+  branch="$(git -C "$path" branch --show-current)"
+  [ -n "$branch" ] || die "seal-recovered-quarantine: workspace must be on a branch"
+  git -C "$path" add -A
+  git -C "$path" commit --allow-empty --no-verify --signoff \
+    -m "chore: seal recovered workspace quarantine" >/dev/null
+  head="$(git -C "$path" rev-parse HEAD)"
+  tree="$(git -C "$path" rev-parse HEAD^{tree})"
+  tip_ref="refs/kitsoki/recovered-quarantine/$head"
+  if git -C "$repo" rev-parse --verify --quiet "$tip_ref" >/dev/null; then
+    [ "$(git -C "$repo" rev-parse "$tip_ref")" = "$head" ] ||
+      die "seal-recovered-quarantine: content-addressed tip ref points at the wrong object"
+  else
+    git -C "$repo" fetch --no-tags "$path" "$head:$tip_ref"
+  fi
+  marker="$path/$RECOVERED_QUARANTINE_MANIFEST"
+  python3 - "$marker" "$snapshot_ref" "$recovery_ref" "$recovery_tree" "$tip_ref" "$head" "$tree" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+path, snapshot_ref, recovery_ref, recovery_tree, tip_ref, head, tree = sys.argv[1:]
+payload = {
+    "schema": "kitsoki.recovered-quarantine/v1",
+    "snapshot_ref": snapshot_ref,
+    "recovery_ref": recovery_ref,
+    "recovery_tree": recovery_tree,
+    "tip_ref": tip_ref,
+    "head": head,
+    "tree": tree,
+    "sealed_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+}
+temp = path + ".tmp"
+with open(temp, "w", encoding="utf-8") as f:
+    json.dump(payload, f, indent=2, sort_keys=True)
+    f.write("\n")
+os.replace(temp, path)
+PY
+  if ! status="$(git -C "$path" status --porcelain --untracked-files=all)"; then
+    die "seal-recovered-quarantine: could not verify sealed status"
+  fi
+  if [ -n "$status" ]; then
+    echo "warning: recovered quarantine changed while sealing and remains cleanup-ineligible: $path" >&2
+  fi
+  if [ "$tree" != "$recovery_tree" ]; then
+    echo "error: recovered quarantine contains late work beyond the signed recovery tree; exact tip retained and quarantine left cleanup-ineligible: $path" >&2
+    return 2
+  fi
+  echo "sealed recovered quarantine: $path"
+  echo "quarantine tip ref: $tip_ref"
 }
 
 cmd_close() {
@@ -1192,11 +1792,17 @@ cmd_close() {
   local root=""
   local force=0
   local ref=""
+  local expected_branch=""
+  local expected_tip=""
+  local purge_quarantine=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --repo) repo="${2:?--repo requires a value}"; shift 2 ;;
       --root) root="${2:?--root requires a value}"; shift 2 ;;
       --force) force=1; shift ;;
+      --expected-branch) expected_branch="${2:?--expected-branch requires a value}"; shift 2 ;;
+      --expected-tip) expected_tip="${2:?--expected-tip requires a value}"; shift 2 ;;
+      --purge-quarantine) purge_quarantine=1; shift ;;
       -h|--help) usage; exit 0 ;;
       *)
         [ -z "$ref" ] || die "close: unexpected argument: $1"
@@ -1213,6 +1819,28 @@ cmd_close() {
   ensure_not_initializing close "$root" "$path"
   ensure_managed_workspace "$path"
   ensure_under_root_or_forced "$root" "$path" "$force"
+  if [ -z "$expected_branch" ] && [ -z "$expected_tip" ]; then
+    expected_branch="$(git -C "$path" branch --show-current)"
+    [ -n "$expected_branch" ] || {
+      echo "error: close: workspace must be on a branch" >&2
+      return 1
+    }
+    expected_tip="$(git -C "$path" rev-parse --verify "refs/heads/$expected_branch")"
+  fi
+  if [ -n "$expected_branch" ] || [ -n "$expected_tip" ]; then
+    if [ -z "$expected_branch" ] || [ -z "$expected_tip" ]; then
+      echo "error: close: --expected-branch and --expected-tip must be supplied together" >&2
+      return 1
+    fi
+    if [ "$(git -C "$path" branch --show-current)" != "$expected_branch" ]; then
+      echo "error: close: workspace branch changed before teardown; keeping workspace: $path" >&2
+      return 1
+    fi
+    if [ "$(git -C "$path" rev-parse --verify "refs/heads/$expected_branch")" != "$expected_tip" ]; then
+      echo "error: close: workspace tip changed before teardown; keeping workspace: $path" >&2
+      return 1
+    fi
+  fi
   if ! import_workspace_issues "$path" "$repo"; then
     echo "error: close: workspace tickets were not safely preserved; keeping workspace: $path" >&2
     return 1
@@ -1220,18 +1848,195 @@ cmd_close() {
   if [ "$force" != "1" ] && workspace_dirty "$path"; then
     die "close: workspace has uncommitted changes: $path"
   fi
-  chmod -R u+rwX "$path" 2>/dev/null || true
-  # Keep cleanup failures observable to merge, which can then report a
-  # successful landing with a truthful teardown warning.
-  if ! rm -rf "$path"; then
-    echo "error: close: failed to remove workspace: $path" >&2
+  local workspace_close_id
+  workspace_close_id="$(workspace_id_from_path "$path")"
+  preserve_workspace_review_artifacts "$path" "$repo" "$workspace_close_id" || return 1
+  if [ "$purge_quarantine" = "1" ]; then
+    case "$(basename "$path")" in
+      closed-*) ;;
+      *) echo "error: close: --purge-quarantine only accepts a closed-* managed workspace" >&2; return 1 ;;
+    esac
+    local purge_target recovered_marker snapshot_ref recovery_ref recovery_tree tip_ref marker_head marker_tree
+    local snapshot_commit recovery_commit tip_commit
+    local purge_path purge_id purge_status purge_branch purge_head original_quarantine_id
+    local activity_pids activity_status
+    purge_target="$(manifest_value "$path" target "$DEFAULT_TARGET")"
+    recovered_marker="$path/$RECOVERED_QUARANTINE_MANIFEST"
+    tip_ref=""
+    if [ -f "$recovered_marker" ]; then
+      case "$(basename "$path")" in
+        closed-recovered-*) ;;
+        *) echo "error: close: recovered-quarantine marker on unexpected path" >&2; return 1 ;;
+      esac
+      snapshot_ref="$(json_file_value "$recovered_marker" snapshot_ref "")"
+      recovery_ref="$(json_file_value "$recovered_marker" recovery_ref "")"
+      recovery_tree="$(json_file_value "$recovered_marker" recovery_tree "")"
+      tip_ref="$(json_file_value "$recovered_marker" tip_ref "")"
+      marker_head="$(json_file_value "$recovered_marker" head "")"
+      marker_tree="$(json_file_value "$recovered_marker" tree "")"
+      case "$snapshot_ref" in refs/kitsoki/dirty-snapshot/*) ;; *) echo "error: close: invalid recovered snapshot ref" >&2; return 1 ;; esac
+      case "$recovery_ref" in refs/kitsoki/dirty-recovery/*) ;; *) echo "error: close: invalid recovered recovery ref" >&2; return 1 ;; esac
+      case "$tip_ref" in refs/kitsoki/recovered-quarantine/*) ;; *) echo "error: close: invalid recovered tip ref" >&2; return 1 ;; esac
+      [ "$marker_head" = "$expected_tip" ] || { echo "error: close: recovered quarantine HEAD changed" >&2; return 1; }
+      [ "$(git -C "$path" rev-parse HEAD^{tree})" = "$marker_tree" ] || { echo "error: close: recovered quarantine tree changed" >&2; return 1; }
+      [ "$marker_tree" = "$recovery_tree" ] || { echo "error: close: recovered quarantine contains work beyond the signed recovery tree; refusing purge" >&2; return 1; }
+      snapshot_commit="$(git -C "$repo" rev-parse --verify "$snapshot_ref^{commit}" 2>/dev/null || true)"
+      recovery_commit="$(git -C "$repo" rev-parse --verify "$recovery_ref^{commit}" 2>/dev/null || true)"
+      tip_commit="$(git -C "$repo" rev-parse --verify "$tip_ref^{commit}" 2>/dev/null || true)"
+      is_object_id "$snapshot_commit" && [ "${snapshot_ref##*/}" = "$snapshot_commit" ] || { echo "error: close: recovered snapshot ref is not exact and content-addressed" >&2; return 1; }
+      is_object_id "$recovery_commit" && [ "${recovery_ref##*/}" = "$recovery_commit" ] || { echo "error: close: recovered recovery ref is not exact and content-addressed" >&2; return 1; }
+      is_object_id "$tip_commit" && [ "${tip_ref##*/}" = "$tip_commit" ] || { echo "error: close: recovered quarantine tip ref is not exact and content-addressed" >&2; return 1; }
+      [ "$(git -C "$repo" rev-parse "$recovery_ref^{tree}")" = "$recovery_tree" ] || { echo "error: close: recovered recovery tree changed" >&2; return 1; }
+      [ "$tip_commit" = "$expected_tip" ] || { echo "error: close: recovered quarantine tip ref changed" >&2; return 1; }
+    elif ! git -C "$repo" merge-base --is-ancestor "$expected_tip" "refs/heads/$purge_target"; then
+      echo "error: close: quarantine tip is not contained in $purge_target; refusing purge" >&2
+      return 1
+    fi
+
+    # Isolate the quarantine with a same-root atomic rename before the final
+    # checks. A new path-based writer can no longer enter it; a writer that
+    # changed it before the rename is caught below, while the hygiene provider
+    # has already proven there was no process holding it open. Keep the isolated
+    # path visible and managed so interruption can never strand hidden data.
+    original_quarantine_id="$(basename "$path")"
+    case "$original_quarantine_id" in
+      closed-recovered-*) purge_id="closed-recovered-purging-$(safe_ref_fragment "$original_quarantine_id")-$$" ;;
+      *) purge_id="closed-purging-$(safe_ref_fragment "$original_quarantine_id")-$$" ;;
+    esac
+    purge_path="$root/$purge_id"
+    [ ! -e "$purge_path" ] || { echo "error: close: purge path already exists: $purge_path" >&2; return 1; }
+    if ! mv "$path" "$purge_path"; then
+      echo "error: close: could not atomically isolate quarantine for purge" >&2
+      return 1
+    fi
+    if ! rewrite_workspace_identity "$purge_path" "$purge_id" "$root"; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      echo "error: close: could not keep isolated quarantine managed; restored when possible" >&2
+      return 1
+    fi
+    purge_branch="$(git -C "$purge_path" branch --show-current 2>/dev/null || true)"
+    purge_head="$(git -C "$purge_path" rev-parse --verify HEAD 2>/dev/null || true)"
+    if ! purge_status="$(git -C "$purge_path" status --porcelain --untracked-files=all 2>/dev/null)" ||
+      [ "$purge_branch" != "$expected_branch" ] || [ "$purge_head" != "$expected_tip" ] ||
+      [ -n "$purge_status" ]; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      echo "error: close: quarantine changed at the atomic purge boundary; restored when possible" >&2
+      return 1
+    fi
+    # A process that retained a cwd or descriptor through the rename must be
+    # rejected before preservation starts. The randomized old-path removal
+    # prevents a new path-based writer from entering after this proof; the
+    # second probe below closes the archive-to-delete boundary.
+    set +e
+    activity_pids="$(quarantine_activity "$purge_path")"
+    activity_status=$?
+    set -e
+    if [ "$activity_status" != "0" ]; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      if [ "$activity_status" = "1" ]; then
+        echo "error: close: quarantine has active process IDs after isolation (${activity_pids//$'\n'/,}); restored when possible" >&2
+      else
+        echo "error: close: quarantine activity probe is unavailable or inconclusive after isolation; restored when possible" >&2
+      fi
+      return 1
+    fi
+    preserve_workspace_review_artifacts "$purge_path" "$repo" "$workspace_close_id" || {
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      return 1
+    }
+    preserve_all_ignored_artifacts "$purge_path" "$repo" "$workspace_close_id" || {
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      return 1
+    }
+    preserve_git_repository_state "$purge_path" "$repo" "$workspace_close_id" || {
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      return 1
+    }
+    if ! purge_status="$(git -C "$purge_path" status --porcelain --untracked-files=all 2>/dev/null)" ||
+      [ "$(git -C "$purge_path" rev-parse --verify HEAD 2>/dev/null || true)" != "$expected_tip" ] ||
+      [ -n "$purge_status" ]; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      echo "error: close: quarantine changed while final evidence was copied; restored when possible" >&2
+      return 1
+    fi
+    set +e
+    activity_pids="$(quarantine_activity "$purge_path")"
+    activity_status=$?
+    set -e
+    if [ "$activity_status" != "0" ]; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      if [ "$activity_status" = "1" ]; then
+        echo "error: close: quarantine has active process IDs after isolation (${activity_pids//$'\n'/,}); restored when possible" >&2
+      else
+        echo "error: close: quarantine activity probe is unavailable or inconclusive after isolation; restored when possible" >&2
+      fi
+      return 1
+    fi
+    find "$purge_path" -type d -exec chmod u+rwx {} + 2>/dev/null || true
+    find "$purge_path" -type f -exec chmod u+rw {} + 2>/dev/null || true
+    if ! rm -rf "$purge_path"; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      echo "error: close: quarantine purge failed; restored when possible: $path" >&2
+      return 1
+    fi
+    if [ -e "$purge_path" ]; then
+      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
+      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
+      echo "error: close: quarantine remains after purge; restored when possible: $path" >&2
+      return 1
+    fi
+    git -C "$repo" update-ref -d "refs/kitsoki/workspace-teardown-recovery/$expected_tip" >/dev/null 2>&1 || true
+    echo "purged quarantine: $path"
+    return 0
+  fi
+  local teardown_recovery_ref=""
+  if [ -n "$expected_tip" ]; then
+    teardown_recovery_ref="refs/kitsoki/workspace-teardown-recovery/$expected_tip"
+    if git -C "$repo" rev-parse --verify --quiet "$teardown_recovery_ref" >/dev/null; then
+      if [ "$(git -C "$repo" rev-parse "$teardown_recovery_ref")" != "$expected_tip" ]; then
+        echo "error: close: content-addressed teardown recovery ref points at the wrong object" >&2
+        return 1
+      fi
+    else
+      git -C "$repo" fetch --no-tags "$path" "$expected_tip:$teardown_recovery_ref"
+    fi
+  fi
+  local quarantine_path quarantine_id attempt=0 actual_tip actual_recovery_ref
+  while :; do
+    quarantine_id="closed-$(safe_ref_fragment "$workspace_close_id")-$(date -u +%Y%m%dT%H%M%SZ)-$$-$attempt"
+    quarantine_path="$root/$quarantine_id"
+    [ ! -e "$quarantine_path" ] && break
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 1000 ] || { echo "error: close: could not allocate quarantine path" >&2; return 1; }
+  done
+  if ! mv "$path" "$quarantine_path"; then
+    echo "error: close: could not atomically quarantine workspace before removal: $path" >&2
     return 1
   fi
-  if [ -e "$path" ]; then
-    echo "error: close: workspace remains after removal: $path" >&2
+  if ! rewrite_workspace_identity "$quarantine_path" "$quarantine_id" "$root"; then
+    [ ! -e "$path" ] && mv "$quarantine_path" "$path" >/dev/null 2>&1 || true
+    echo "error: close: could not record managed quarantine identity; workspace restored when possible" >&2
     return 1
   fi
-  echo "removed: $path"
+  actual_tip="$(git -C "$quarantine_path" rev-parse --verify "refs/heads/$expected_branch")"
+  actual_recovery_ref="refs/kitsoki/workspace-teardown-recovery/$actual_tip"
+  if ! git -C "$repo" rev-parse --verify --quiet "$actual_recovery_ref" >/dev/null; then
+    git -C "$repo" fetch --no-tags "$quarantine_path" "$actual_tip:$actual_recovery_ref"
+  fi
+  if [ "$actual_tip" != "$expected_tip" ]; then
+    echo "warning: close: workspace advanced during quarantine; retained unlanded tip $actual_tip" >&2
+  fi
+  echo "removed from managed workspaces: $path"
+  echo "quarantined: $quarantine_path"
 }
 
 cmd_recover() {
@@ -1290,6 +2095,7 @@ main() {
     commit) shift; cmd_commit "$@" ;;
     merge|land) shift; cmd_merge "$@" ;;
     park) shift; cmd_park "$@" ;;
+    seal-recovered-quarantine) shift; cmd_seal_recovered_quarantine "$@" ;;
     recover) shift; cmd_recover "$@" ;;
     close|teardown) shift; cmd_close "$@" ;;
     -h|--help|"") usage; [ -n "$cmd" ] || exit 1 ;;
