@@ -100,7 +100,10 @@ def select_tasks(source: dict[str, Any], requested: list[str]) -> list[dict[str,
 def fetch_database_api(tasks: list[dict[str, Any]]) -> dict[str, Any]:
     """Use BugSwarm's documented client API, not an invented HTTP endpoint."""
     try:
-        from bugswarm.common import DatabaseAPI  # type: ignore
+        # This is the documented bugswarm-common public module path.  Do not
+        # import a re-export from ``bugswarm.common``: released client versions
+        # do not promise one there.
+        from bugswarm.common.rest_api.database_api import DatabaseAPI  # type: ignore
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "--fetch-database-api needs the official bugswarm-common client; install it in the operator environment "
