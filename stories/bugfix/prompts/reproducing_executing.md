@@ -100,6 +100,13 @@ Before submitting:
   investigating (e.g. `go test ./internal/host/...`, `grep -R <term>
   internal/host`), and prefer several small, fast commands over one broad
   one.
+- **You have no file-editing tool and no `apply_patch` tool.** Write and
+  modify files by piping through the `Bash` tool, e.g.
+  `cat > path/to/file <<'EOF'` ... `EOF`, or `sed -i ''` for small edits.
+  Do not attempt `apply_patch`, a diff/patch-application command, or any
+  tool not in your allowed list — none of those exist here, and trying to
+  invoke them wastes your turn on tool errors instead of producing the
+  reproduction.
 
 ## Output
 

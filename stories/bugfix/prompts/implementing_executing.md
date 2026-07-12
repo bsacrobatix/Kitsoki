@@ -116,6 +116,10 @@ if a narrow, local fix works, take it.
   has an activity timeout, so a slow, silent command can get your turn
   killed before you finish. Scope builds/tests to the package(s) in
   `affected_files` plus anything importing them.
+- **Edit files with your `Edit`/`Write` tools, not `apply_patch`.** You have
+  no `apply_patch` tool and no diff/patch-application command — attempting
+  one wastes your turn on tool errors. Use `Edit` for targeted changes and
+  `Write` for new files.
 
 ## Output
 
