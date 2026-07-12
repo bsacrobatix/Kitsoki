@@ -126,7 +126,18 @@ drive_with_retry() {
   local drive_path="/root/go/bin:$PATH"
   while true; do
     set +e
-    MCP_DRIVE_MODEL="$orch" PATH="$drive_path" "$REPO_ROOT/tools/mcp-drive/drive.sh" --prompt-file "$pf" >"$log_file" 2>"$err_file"
+    # codex does not forward the parent environment to the kitsoki MCP
+    # subprocess it spawns (tools/mcp-drive/drive.sh's own header comment).
+    # Any harness_profiles.*.env ${VAR} the DRIVEN session's profile needs
+    # (synthetic.new-backed profiles: glm-5.2, glm-5.2-high, and every
+    # syn-* GX10 candidate all reference ${SYNTHETIC_API_KEY}) must be
+    # forwarded explicitly or webconfig silently drops that profile from the
+    # usable set at load (internal/webconfig/webconfig.go's expandEnvVar
+    # path) and session.new fails with "unknown harness profile" -- looking
+    # exactly like a config/typo bug rather than a missing env var. Claude
+    # orchestrator backend inherits the parent env normally and is
+    # unaffected; this only matters for the codex orchestrator path.
+    MCP_DRIVE_MODEL="$orch" PATH="$drive_path" MCP_DRIVE_FORWARD_ENV="${MCP_DRIVE_FORWARD_ENV:-SYNTHETIC_API_KEY}" "$REPO_ROOT/tools/mcp-drive/drive.sh" --prompt-file "$pf" >"$log_file" 2>"$err_file"
     local rc=$?
     set -e
     local payload
