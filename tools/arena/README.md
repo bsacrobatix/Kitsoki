@@ -366,6 +366,14 @@ python3 tools/arena/arena.py run \
     --out .artifacts/arena/bugswarm-glm52
 ```
 
+The applier copies both the exact input source and verification receipt into a
+content-addressed `bugswarm-evidence/` directory beside `--out` (or the
+explicit `--evidence-dir`). That directory must be outside a managed capsule
+workspace because workspace teardown removes ignored files. When running from
+a capsule, point `--evidence-dir` at the primary checkout's `.artifacts`
+directory; the verified source and later lock then retain immutable paths and
+hashes for both snapshots.
+
 The generated spec includes only tasks with `verified_red: true` and
 `verified_green: true` by default. To prepare a live GLM spec, use
 `--kitsoki-backend codex --raw-backend claude` so the raw-prompt arm runs through

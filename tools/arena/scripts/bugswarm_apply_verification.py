@@ -64,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verification", required=True, help="JSON from bugswarm_verify_source.py")
     parser.add_argument("--out", required=True, help="updated source YAML")
     parser.add_argument(
+        "--evidence-dir",
+        help="durable directory for immutable source and receipt snapshots (default: <out parent>/bugswarm-evidence)",
+    )
+    parser.add_argument(
         "--allow-dry-run",
         action="store_true",
         help="carry dry-run evidence into meta without setting verified flags",
@@ -72,17 +76,30 @@ def main(argv: list[str] | None = None) -> int:
 
     source_path = Path(args.source)
     verification_path = Path(args.verification)
+    out = Path(args.out)
     source = load_yaml(source_path)
     verification = load_yaml_or_json(verification_path)
     source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
     if verification.get("source_sha256") != source_sha256:
         raise ValueError("verification source_sha256 does not match --source; rerun verification for this source revision")
-    updated = apply_verification(source, verification, verification_path=str(args.verification), allow_dry_run=args.allow_dry_run)
-    out = Path(args.out)
+    evidence_dir = Path(args.evidence_dir) if args.evidence_dir else out.parent / "bugswarm-evidence"
+    require_durable_evidence_dir(evidence_dir)
+    source_snapshot = write_immutable_snapshot(evidence_dir, "source", source_path, source_sha256)
+    receipt_sha256 = hashlib.sha256(verification_path.read_bytes()).hexdigest()
+    receipt_snapshot = write_immutable_snapshot(evidence_dir, "verification", verification_path, receipt_sha256)
+    updated = apply_verification(
+        source,
+        verification,
+        verification_path=str(receipt_snapshot),
+        verification_sha256=receipt_sha256,
+        source_snapshot_path=str(source_snapshot),
+        source_snapshot_sha256=source_sha256,
+        allow_dry_run=args.allow_dry_run,
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(yaml.safe_dump(updated, sort_keys=False), encoding="utf-8")
     verified_count = sum(1 for task in updated.get("tasks", []) if task.get("verified_red") and task.get("verified_green"))
-    print(f"wrote {out} ({verified_count} verified task(s))")
+    print(f"wrote {out} ({verified_count} verified task(s)); immutable evidence: {evidence_dir}")
     return 0
 
 
@@ -104,11 +121,48 @@ def load_yaml_or_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def managed_workspace_root(path: Path) -> Path | None:
+    """Return a managed workspace ancestor, if this path would be torn down."""
+    resolved = path.resolve()
+    for candidate in (resolved, *resolved.parents):
+        if (candidate / ".kitsoki-dev-workspace.json").is_file():
+            return candidate
+    return None
+
+
+def require_durable_evidence_dir(path: Path) -> None:
+    workspace = managed_workspace_root(path)
+    if workspace is not None:
+        raise ValueError(
+            f"evidence directory is inside managed workspace {workspace}: {path}; "
+            "use --evidence-dir under the primary checkout's .artifacts directory"
+        )
+
+
+def write_immutable_snapshot(evidence_dir: Path, kind: str, source: Path, sha256: str) -> Path:
+    """Copy bytes once, content-addressed, so teardown cannot erase the evidence."""
+    suffix = ".yaml" if kind == "source" else ".json"
+    destination = evidence_dir / f"bugswarm-{kind}-{sha256}{suffix}"
+    payload = source.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != sha256:
+        raise ValueError(f"{kind} changed while applying verification: {source}")
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        if destination.read_bytes() != payload:
+            raise ValueError(f"immutable {kind} snapshot collision: {destination}")
+        return destination.resolve()
+    destination.write_bytes(payload)
+    return destination.resolve()
+
+
 def apply_verification(
     source: dict[str, Any],
     verification: dict[str, Any],
     *,
     verification_path: str,
+    verification_sha256: str,
+    source_snapshot_path: str,
+    source_snapshot_sha256: str,
     allow_dry_run: bool,
 ) -> dict[str, Any]:
     mode = str(verification.get("mode") or "")
@@ -128,7 +182,9 @@ def apply_verification(
     out = dict(source)
     out["verification"] = {
         "path": verification_path,
-        "sha256": hashlib.sha256(Path(verification_path).read_bytes()).hexdigest(),
+        "sha256": verification_sha256,
+        "source_snapshot": source_snapshot_path,
+        "source_snapshot_sha256": source_snapshot_sha256,
         "mode": mode,
         "task_count": int(verification.get("task_count") or 0),
         "verified_count": int(verification.get("verified_count") or 0),
@@ -159,6 +215,8 @@ def apply_verification(
                 "passed_commit_sha": result.get("passed_commit_sha"),
                 "report": verification_path,
                 "report_sha256": out["verification"]["sha256"],
+                "source_snapshot": source_snapshot_path,
+                "source_snapshot_sha256": source_snapshot_sha256,
                 "image_digest": result.get("image_digest"),
             }
             if mode == "execute":

@@ -84,6 +84,11 @@ python3 tools/arena/scripts/bugswarm_apply_verification.py \
   --out .artifacts/bugswarm/arena-source.batch-1.yaml
 ```
 
+The applier creates content-addressed source and receipt snapshots beside its
+output. In a managed capsule, supply `--evidence-dir` outside that capsule
+(normally the primary checkout's `.artifacts/bugswarm/evidence`); capsule
+teardown otherwise deletes ignored evidence and the lock will reject it.
+
 Do not hand-copy image digests or commit identifiers into a source.  The corpus
 locker remains blocked until each selected task has execute evidence, a pinned
 image digest, both commit SHAs, and a receipt hash.

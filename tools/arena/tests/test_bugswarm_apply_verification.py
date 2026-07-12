@@ -118,7 +118,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("verified red set", task["verified_red"], True)
     check("verified green set", task["verified_green"], True)
     check("source verification mode", payload["verification"]["mode"], "execute")
-    check("task verification report path", task["meta"]["bugswarm_verification"]["report"], str(verification))
+    receipt_snapshot = Path(task["meta"]["bugswarm_verification"]["report"])
+    source_snapshot = Path(task["meta"]["bugswarm_verification"]["source_snapshot"])
+    check("receipt snapshot is retained", receipt_snapshot.read_bytes(), verification.read_bytes())
+    check("source snapshot is retained", source_snapshot.read_bytes(), source.read_bytes())
+    check("source snapshot hash carried", task["meta"]["bugswarm_verification"]["source_snapshot_sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
     check("failed exit carried", task["meta"]["bugswarm_verification"]["failed_exit_code"], 1)
     check("verification receipt hash carried", len(task["meta"]["bugswarm_verification"]["report_sha256"]), 64)
     check("image digest carried", task["meta"]["bugswarm_verification"]["image_digest"], "bugswarm/cached-images@sha256:abc")
@@ -168,6 +172,19 @@ with tempfile.TemporaryDirectory() as tmp:
         cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     check("stale source receipt rejected", stale_apply.returncode != 0, True)
+
+    # An ignored .artifacts directory in a managed workspace disappears during
+    # teardown. Reject it before writing a source that would retain dead paths.
+    workspace = tmpdir / "managed-workspace"
+    workspace.mkdir()
+    (workspace / ".kitsoki-dev-workspace.json").write_text("{}", encoding="utf-8")
+    unsafe_out = workspace / ".artifacts" / "verified.yaml"
+    unsafe_apply = subprocess.run(
+        [sys.executable, str(APPLY), "--source", str(source), "--verification", str(verification), "--out", str(unsafe_out)],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("managed workspace evidence rejected", unsafe_apply.returncode != 0, True)
+    check("managed workspace error explains durable root", "primary checkout's .artifacts" in unsafe_apply.stderr, True)
 
 if failures:
     print("FAIL: bugswarm apply verification")
