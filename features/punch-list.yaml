@@ -9,6 +9,7 @@ promo:
 docs:
   - docs/stories/punch-list.md
 demo:
+  format: rrweb
   spec: tests/playwright/punch-list-video.spec.ts
   artifactDir: punch-list
   videoBase: punch-list-demo

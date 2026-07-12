@@ -9,6 +9,7 @@ promo:
 docs:
   - docs/tracing/run-status-ui.md
 demo:
+  format: rrweb
   spec: tests/playwright/diagram-showcase.spec.ts
   artifactDir: diagram-showcase
   videoBase: diagram-showcase-demo

@@ -11,6 +11,7 @@ docs:
 related:
   - dev-story-bugfix
 demo:
+  format: rrweb
   spec: tests/playwright/slidey-bugfix-video.spec.ts
   artifactDir: slidey-bugfix
   videoBase: slidey-bugfix-demo
@@ -74,6 +75,14 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 8000
+      drive:
+        - type: wait-state
+          state: bf.idle
+        - type: click-intent
+          intent: bf__start
+        - type: wait-state
+          state: bf.reproducing
+        - type: reveal-turn
     - id: sb-propose
       route: any
       target: chat-transcript
@@ -84,6 +93,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7000
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: bf.proposing
+        - type: reveal-turn
     - id: sb-implement
       route: any
       target: chat-transcript
@@ -94,6 +109,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7000
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: bf.implementing
+        - type: reveal-turn
     - id: sb-test
       route: any
       target: chat-transcript
@@ -104,6 +125,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7500
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: bf.testing
+        - type: reveal-turn
     - id: sb-review
       route: any
       target: chat-transcript
@@ -114,6 +141,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7000
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: bf.reviewing
+        - type: reveal-turn
     - id: sb-validate
       route: any
       target: chat-transcript
@@ -124,6 +157,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7500
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: bf.validating
+        - type: reveal-turn
     - id: sb-done
       route: any
       target: chat-transcript
@@ -134,6 +173,12 @@ tour:
       advance: next
       waitForTarget: chat-transcript
       dwellMs: 7500
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: bf.done
+        - type: reveal-turn
     - id: sb-resolved
       route: any
       target: state-badge
@@ -144,6 +189,13 @@ tour:
       advance: next
       waitForTarget: state-badge
       dwellMs: 6500
+      drive:
+        - type: click-intent
+          intent: bf__accept
+        - type: wait-state
+          state: shipped
+        - type: dwell-ms
+          ms: 1500
     - id: sb-outro
       route: any
       title: That's a real bug, fixed

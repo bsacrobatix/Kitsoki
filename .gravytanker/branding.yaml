@@ -1,0 +1,18 @@
+# Kitsoki brand — the Mesa Sun palette from docs/branding/logo.md.
+# Consumed by the POG portal's branding loader (gravytanker/branding/v1):
+# sits next to pog/catalog.yaml so the federated portfolio portal and the
+# focused ?repo=kitsoki surfaces both pick it up.
+schema: gravytanker/branding/v1
+name: Kitsoki
+icon: ../docs/branding/assets/mesa-sun.svg
+colors:
+  primary: "#7d2e1c"   # rust — ground/shadow band
+  on_primary: "#f6efe2" # paper
+  accent: "#e0a23a"    # gold — the sun
+  on_accent: "#3a2418" # mesa shadow
+  canvas: "#f6efe2"    # paper — the background the mark is tuned for
+  surface: "#fdf8ee"
+  text: "#3a2418"      # mesa shadow
+  muted: "#7d2e1c"     # rust
+  border: "#d8c5a8"    # sand, dimmed
+  warning: "#c97b4a"   # adobe

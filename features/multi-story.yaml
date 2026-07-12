@@ -9,6 +9,7 @@ promo:
 docs:
   - docs/web/README.md
 demo:
+  format: rrweb
   spec: tests/playwright/multi-story.spec.ts
   artifactDir: multi-story
   videoBase: multi-story-demo
