@@ -157,6 +157,7 @@ with tempfile.TemporaryDirectory() as tmp:
             os.environ["KITSOKI_ROOT"] = old_kitsoki_root
     check("glm profile mapping", runner_globals["MODEL_TO_PROFILE"].get("glm-5.2"), "synthetic-claude")
     check("glm raw claude mapping", runner_globals["MODEL_TO_RAW_CLAUDE_PROFILE"].get("glm-5.2"), "synthetic-claude")
+    check("Spark profile mapping", runner_globals["MODEL_TO_PROFILE"].get("gpt-5.3-codex-spark"), "codex-spark")
 
     spec = JobSpec.load(spec_path)
     cells = spec.cells()

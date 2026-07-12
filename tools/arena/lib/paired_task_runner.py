@@ -77,6 +77,11 @@ MODEL_TO_PROFILE = {
     "glm-5.2": "synthetic-claude",
     "gpt-5.4": "codex-gpt54",
     "gpt-5.5": "codex-native",
+    # Spark is a native Codex candidate.  Keep the runner's default profile
+    # resolution aligned with the local profile name used by the Stage-1
+    # paired raw/strict-CodeAct comparison; callers may still override this
+    # explicitly with --worker-profile.
+    "gpt-5.3-codex-spark": "codex-spark",
 }
 
 MODEL_TO_RAW_CLAUDE_PROFILE = {

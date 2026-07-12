@@ -179,6 +179,21 @@ require("public acceptance baseline forwarded", 'acceptance_base_sha: "012345678
 require("MCP prompt has one explicit lifecycle entry", "bf_autostart_attempted:" not in prompt)
 require("MCP prompt submits full pipeline explicitly", "Submit `full_pipeline` ONCE with **session.submit**" in prompt)
 check("GPT-5.4 maps to a dedicated Kitsoki profile", runner.MODEL_TO_PROFILE.get("gpt-5.4"), "codex-gpt54")
+check("Spark maps to its dedicated Kitsoki profile", runner.MODEL_TO_PROFILE.get("gpt-5.3-codex-spark"), "codex-spark")
+
+# Spark uses the same Codex backend in both arms.  The strict CodeAct
+# treatment must therefore accept its worker profile rather than rejecting the
+# cell at the generic backend guard before a provider is ever considered.
+spark_strict_args = argparse.Namespace(
+    treatment="kitsoki-mcp-codeact",
+    backend="codex",
+    agent="",
+    worker_profile="codex-spark",
+    implementation_mode="codeact",
+    capability_preset="repo_patch",
+    capability_presets_json="",
+)
+check("Spark strict CodeAct backend validation", runner.validate_driver_args(spark_strict_args), "")
 
 binary_dir = runner.ensure_kitsoki_binary()
 require("Kitsoki stable binary exists", (binary_dir / "kitsoki").exists())
