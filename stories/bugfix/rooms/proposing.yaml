@@ -66,7 +66,7 @@ states:
             - label:  "look"
               hint:   "re-render"
               intent: look
-    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, propose_fix_artifact, reproduction_artifact, llm_verdict, refine_feedback, cycle]
+    relevant_world: [judge_mode, judge_confidence_threshold, ticket_id, ticket_title, thread, workdir, implementation_mode, propose_fix_artifact, compiled_implementation_plan, implementation_capability_manifest, reproduction_artifact, llm_verdict, refine_feedback, cycle]
     on_enter:
       # (The synthesised-gate commit lives in implementing/on_enter — after the
       #  worktree is synced and the reproducer's RED-test file is provably on disk
@@ -98,6 +98,22 @@ states:
             cycle:                 "{{ world.cycle }}"
         bind:
           propose_fix_artifact: submitted
+        on_error: idle
+
+      # Normalize the optional decomposed plan before any future per-item
+      # write-capable work. Its presence is explicit; the existing action modes
+      # remain unchanged until that executor is added in a later slice.
+      - when: "len(world.propose_fix_artifact.implementation_plan ?? []) > 0"
+        invoke: host.starlark.run
+        id: compile_implementation_plan
+        once: true
+        with:
+          script: scripts/compile_implementation_plan.star
+          inputs:
+            implementation_plan: "{{ world.propose_fix_artifact.implementation_plan }}"
+        bind:
+          compiled_implementation_plan: plan
+          implementation_capability_manifest: capability_manifest
         on_error: idle
 
       # Early low-confidence quit (escalate_low_value). A proposal the proposer

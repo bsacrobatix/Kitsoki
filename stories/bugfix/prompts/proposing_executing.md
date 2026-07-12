@@ -61,6 +61,16 @@ Before submitting:
   the only correct fix is invasive, say so and name the call sites most at risk
   so the implementer verifies them.
 
+## Optional decomposed CodeAct plan
+
+Only when the caller asks for the decomposed CodeAct treatment, include
+`implementation_plan`: one to four dependency-ordered, independently testable
+work items. Do not create a plan merely by splitting one file into many edits.
+Each item must supply every field in the schema and must use narrow repository
+paths (never `**`). The acceptance commands are deterministic host gates: do
+not claim that CodeAct itself can run them. Ordinary proposals should omit this
+optional field so their established execution paths remain unchanged.
+
 ## Output
 
 Submit a `propose_fix_artifact` (see `schemas/proposing_artifact.json`).

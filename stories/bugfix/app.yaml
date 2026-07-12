@@ -403,6 +403,10 @@ world:
   # host.agent.codeact so benchmark runners can isolate the action surface.
   implementation_mode: { type: string, default: "agent_task" }    # agent_task | codeact
   codeact_implement_steps: { type: list, default: [] }
+  # Filled only when the optional implementation plan is present. Legacy callers
+  # leave these empty and retain the established action surfaces.
+  compiled_implementation_plan: { type: list, default: [] }
+  implementation_capability_manifest: { type: object, default: {} }
   # Autostart pre-flight triage (default ON). Before spending the maker
   # pipeline on an autostarted ticket, run the read-only triager once against
   # the freshly-cut worktree: ALREADY-FIXED short-circuits to @exit:triaged
