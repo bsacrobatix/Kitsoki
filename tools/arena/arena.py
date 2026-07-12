@@ -239,6 +239,9 @@ def cmd_task_optimization_validate(args: argparse.Namespace) -> int:
     study = _study_or_error(args.study)
     if study is None:
         return 1
+    if study.blocked_by:
+        print(f"BLOCKED: {study.study_id}: {'; '.join(study.blocked_by)}")
+        return 0
     try:
         corpus = study.corpus()
     except (OSError, ValueError) as exc:
@@ -251,6 +254,9 @@ def cmd_task_optimization_validate(args: argparse.Namespace) -> int:
 def cmd_task_optimization_plan(args: argparse.Namespace) -> int:
     study = _study_or_error(args.study)
     if study is None:
+        return 1
+    if study.blocked_by:
+        print(f"ERROR: task-optimization study is blocked: {'; '.join(study.blocked_by)}", file=sys.stderr)
         return 1
     try:
         plan = study.plan(repeat_phase=args.repeat_phase)
@@ -278,6 +284,9 @@ def cmd_task_optimization_arm(args: argparse.Namespace) -> int:
     """
     study = _study_or_error(args.study)
     if study is None:
+        return 1
+    if study.blocked_by:
+        print(f"ERROR: task-optimization study is blocked: {'; '.join(study.blocked_by)}", file=sys.stderr)
         return 1
     if not args.live or os.environ.get(study.live_gate_env) != "1":
         print(f"ERROR: task-optimization arming requires --live and {study.live_gate_env}=1; no provider was called", file=sys.stderr)

@@ -79,6 +79,13 @@ check("study declares low Sonnet profile", study_candidates.get("sonnet-low", {}
 check("study refuses gpt54-mini fallback", study_candidates.get("gpt54-mini", {}).get("preflight"), "unsupported-until-profile-resolves")
 check("study defines unsupported result", study.get("preflight_contract", {}).get("unsupported_result"), "unsupported")
 
+blocked_validate = subprocess.run(
+    [sys.executable, str(REPO_ROOT / "tools/arena/arena.py"), "task-optimization", "validate", "--study", str(STUDY_SOURCE)],
+    cwd=REPO_ROOT, text=True, capture_output=True,
+)
+check("blocked study validates without a fabricated corpus lock", blocked_validate.returncode, 0)
+check("blocked study reports its boundary", "BLOCKED: bugfix-codeact-v1" in blocked_validate.stdout, True)
+
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
     src = tmpdir / "artifacts.json"

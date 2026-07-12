@@ -117,6 +117,7 @@ class TaskOptimizationStudy:
     repeats: dict[str, int]
     stop: dict[str, Any]
     live_gate_env: str
+    blocked_by: list[str] = field(default_factory=list)
     path: str = ""
 
     @staticmethod
@@ -132,10 +133,20 @@ class TaskOptimizationStudy:
             raise ValueError("study manifest must be a mapping")
         if data.get("schema") != TASK_OPTIMIZATION_SCHEMA:
             raise ValueError(f"unsupported study schema {data.get('schema')!r}")
+        blocked_by = [str(reason) for reason in data.get("blocked_by", []) or []]
+        is_blocked = data.get("live_status") == "blocked"
         required = ("study_id", "boundary", "corpus_lock", "splits", "candidates", "treatments", "repeats", "stop")
         missing = [key for key in required if not data.get(key)]
-        if missing:
+        if missing and not is_blocked:
             raise ValueError(f"study manifest missing required fields: {', '.join(missing)}")
+        if missing:
+            if not blocked_by:
+                raise ValueError("blocked study manifests require non-empty blocked_by")
+            return TaskOptimizationStudy(
+                study_id=str(data["study_id"]), boundary=str(data["boundary"]), corpus_lock=str(data.get("corpus_lock") or ""),
+                splits={}, candidates=[], treatments=[], repeats={}, stop={},
+                live_gate_env=str(data.get("live_gate_env") or "KITSOKI_TASK_OPT_LIVE"), blocked_by=blocked_by, path=str(p),
+            )
         candidates = data["candidates"]
         if not isinstance(candidates, list) or not all(isinstance(c, dict) for c in candidates):
             raise ValueError("candidates must be a non-empty list of mappings")
@@ -160,7 +171,8 @@ class TaskOptimizationStudy:
             study_id=str(data["study_id"]), boundary=str(data["boundary"]), corpus_lock=str(lock_path),
             splits={str(k): str(v) for k, v in dict(data["splits"]).items()},
             candidates=[dict(c) for c in candidates], treatments=treatments, repeats=repeats,
-            stop=dict(data["stop"]), live_gate_env=str(data.get("live_gate_env") or "KITSOKI_TASK_OPT_LIVE"), path=str(p),
+            stop=dict(data["stop"]), live_gate_env=str(data.get("live_gate_env") or "KITSOKI_TASK_OPT_LIVE"),
+            blocked_by=blocked_by, path=str(p),
         )
 
     def corpus(self) -> dict[str, Any]:
