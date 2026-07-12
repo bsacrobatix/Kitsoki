@@ -129,7 +129,7 @@ def _load_json(stdout: str) -> dict[str, Any]:
 
 def _normalize_verdict(verdict: str) -> str:
     lowered = verdict.strip().lower()
-    if lowered in {"solved", "partial", "failed", "armed", "blocked", "pending"}:
+    if lowered in {"solved", "partial", "failed", "armed", "blocked", "pending", "unsupported"}:
         return lowered
     if lowered in {"pass", "passed", "green"}:
         return "solved"

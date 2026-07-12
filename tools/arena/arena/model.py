@@ -13,7 +13,9 @@ executor.py so this layer stays deterministic and trivially testable.
 from __future__ import annotations
 
 import itertools
+import hashlib
 import json
+import subprocess
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
@@ -80,7 +82,138 @@ class Cell:
 # Job-type-agnostic verdicts. Plugins map their native grade into these so the
 # rollup can aggregate across any job type. (bugfix oracle, persona review gate,
 # onboarding assertions all land in this vocabulary.)
-VERDICTS = ("solved", "partial", "failed", "armed", "blocked", "pending")
+VERDICTS = ("solved", "partial", "failed", "armed", "blocked", "pending", "unsupported")
+
+# A task-optimization cell moves through these durable scheduler states. They
+# deliberately are not verdicts: a valid scored attempt can be failed, while a
+# pending/unsupported candidate has not supplied a model result at all.
+TASK_OPTIMIZATION_CELL_STATES = (
+    "planned", "armed", "ready", "running", "scored", "blocked", "pending", "unsupported",
+)
+TASK_OPTIMIZATION_SCHEMA = "task-optimization/v1"
+
+
+def _sha256(value: bytes | str) -> str:
+    if isinstance(value, str):
+        value = value.encode("utf-8")
+    return hashlib.sha256(value).hexdigest()
+
+
+@dataclass(frozen=True)
+class TaskOptimizationStudy:
+    """Immutable-input declaration for a task x model x treatment campaign.
+
+    The study file is intentionally separate from the generic ``JobSpec``:
+    it owns split discipline, pinned corpus/profile inputs and repeat policy,
+    while Arena remains the scheduler and report surface.
+    """
+
+    study_id: str
+    boundary: str
+    corpus_lock: str
+    splits: dict[str, str]
+    candidates: list[dict[str, Any]]
+    treatments: list[str]
+    repeats: dict[str, int]
+    stop: dict[str, Any]
+    live_gate_env: str
+    path: str = ""
+
+    @staticmethod
+    def load(path: str | Path) -> "TaskOptimizationStudy":
+        p = Path(path).resolve()
+        text = p.read_text(encoding="utf-8")
+        try:
+            import yaml  # type: ignore
+            data = yaml.safe_load(text)
+        except ModuleNotFoundError:
+            data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("study manifest must be a mapping")
+        if data.get("schema") != TASK_OPTIMIZATION_SCHEMA:
+            raise ValueError(f"unsupported study schema {data.get('schema')!r}")
+        required = ("study_id", "boundary", "corpus_lock", "splits", "candidates", "treatments", "repeats", "stop")
+        missing = [key for key in required if not data.get(key)]
+        if missing:
+            raise ValueError(f"study manifest missing required fields: {', '.join(missing)}")
+        candidates = data["candidates"]
+        if not isinstance(candidates, list) or not all(isinstance(c, dict) for c in candidates):
+            raise ValueError("candidates must be a non-empty list of mappings")
+        ids = [str(c.get("id") or "") for c in candidates]
+        if not all(ids) or len(ids) != len(set(ids)):
+            raise ValueError("candidates require unique non-empty ids")
+        for candidate in candidates:
+            if not candidate.get("profile") or not candidate.get("model"):
+                raise ValueError(f"candidate {candidate.get('id')!r} requires profile and model")
+            if "effort" not in candidate:
+                raise ValueError(f"candidate {candidate.get('id')!r} requires effort (use 'n/a' when unsupported)")
+        treatments = [str(t) for t in data["treatments"]]
+        if not all(treatments) or len(treatments) != len(set(treatments)):
+            raise ValueError("treatments require unique non-empty ids")
+        repeats = dict(data["repeats"])
+        if any(not isinstance(value, int) or value < 1 for value in repeats.values()):
+            raise ValueError("repeat values must be positive integers")
+        lock_path = Path(str(data["corpus_lock"]))
+        if not lock_path.is_absolute():
+            lock_path = (p.parent / lock_path).resolve()
+        return TaskOptimizationStudy(
+            study_id=str(data["study_id"]), boundary=str(data["boundary"]), corpus_lock=str(lock_path),
+            splits={str(k): str(v) for k, v in dict(data["splits"]).items()},
+            candidates=[dict(c) for c in candidates], treatments=treatments, repeats=repeats,
+            stop=dict(data["stop"]), live_gate_env=str(data.get("live_gate_env") or "KITSOKI_TASK_OPT_LIVE"), path=str(p),
+        )
+
+    def corpus(self) -> dict[str, Any]:
+        path = Path(self.corpus_lock)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"corpus lock must be JSON: {exc}") from exc
+        tasks = data.get("tasks") if isinstance(data, dict) else None
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError("corpus lock requires a non-empty tasks list")
+        seen: set[str] = set()
+        for task in tasks:
+            if not isinstance(task, dict) or not task.get("id") or not task.get("split"):
+                raise ValueError("every corpus task requires id and split")
+            if task["id"] in seen:
+                raise ValueError(f"duplicate corpus task id {task['id']!r}")
+            seen.add(task["id"])
+            if task["split"] not in self.splits:
+                raise ValueError(f"corpus task {task['id']!r} has unknown split {task['split']!r}")
+        return data
+
+    def plan(self, *, repeat_phase: str = "screening") -> dict[str, Any]:
+        if repeat_phase not in self.repeats:
+            raise ValueError(f"unknown repeat phase {repeat_phase!r}; known: {sorted(self.repeats)}")
+        corpus = self.corpus()
+        cells: list[dict[str, Any]] = []
+        for task in sorted(corpus["tasks"], key=lambda t: str(t["id"])):
+            for candidate in sorted(self.candidates, key=lambda c: str(c["id"])):
+                for treatment in sorted(self.treatments):
+                    for repeat in range(1, self.repeats[repeat_phase] + 1):
+                        cell_id = f"{task['id']}--{candidate['id']}--{treatment}--r{repeat}"
+                        cells.append({"id": cell_id, "task_id": task["id"], "split": task["split"],
+                                      "candidate_id": candidate["id"], "treatment": treatment,
+                                      "repeat": repeat, "status": "planned"})
+        return {"schema": TASK_OPTIMIZATION_SCHEMA, "study_id": self.study_id, "repeat_phase": repeat_phase,
+                "cell_count": len(cells), "cells": cells}
+
+    def lock(self) -> dict[str, Any]:
+        corpus_bytes = Path(self.corpus_lock).read_bytes()
+        study_bytes = Path(self.path).read_bytes()
+        runner_commit = ""
+        try:
+            runner_commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True,
+                                           capture_output=True, check=True).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            runner_commit = "unknown"
+        return {"schema": TASK_OPTIMIZATION_SCHEMA, "study_id": self.study_id, "boundary": self.boundary,
+                "study_manifest": self.path, "study_manifest_sha256": _sha256(study_bytes),
+                "corpus_lock": self.corpus_lock, "corpus_lock_sha256": _sha256(corpus_bytes),
+                "splits": self.splits, "candidates": self.candidates, "treatments": sorted(self.treatments),
+                "repeats": self.repeats, "stop": self.stop, "live_gate_env": self.live_gate_env,
+                "runner_commit": runner_commit}
 
 # Check-type discriminator (WS-G G1): a cell declares a check SUITE, not one
 # verdict shape, and every check emits a completion-state verdict tagged with

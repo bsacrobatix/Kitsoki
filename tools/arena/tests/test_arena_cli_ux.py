@@ -75,6 +75,42 @@ options:
     check("invalid spec exits 1", invalid.returncode, 1)
     require("wrong agent rejected", "kitsoki-codeact-driver" in invalid.stderr)
 
+    corpus = Path(td) / "corpus.lock.json"
+    corpus.write_text(json.dumps({"tasks": [
+        {"id": "kitsoki-exposed", "split": "learning", "task_sha256": "a"},
+        {"id": "bugswarm-heldout", "split": "confirmation", "task_sha256": "b"},
+    ]}), encoding="utf-8")
+    study = Path(td) / "study.yaml"
+    study.write_text(
+        """
+schema: task-optimization/v1
+study_id: bugfix-codeact-v1
+boundary: stories/bugfix
+corpus_lock: corpus.lock.json
+splits: {learning: exposed-plus-bugswarm, confirmation: bugswarm-holdout}
+candidates:
+  - {id: mini, profile: codex-mini, model: gpt-5.4-mini, effort: medium}
+  - {id: oss, profile: syn-gpt-oss-120b, model: hf:openai/gpt-oss-120b, effort: n/a}
+treatments: [raw-agent, strict-mcp-current]
+repeats: {screening: 1, decision_boundary: 3}
+stop: {max_versions: 4}
+live_gate_env: KITSOKI_TASK_OPT_LIVE
+""", encoding="utf-8")
+    study_valid = run("task-optimization", "validate", "--study", str(study))
+    check("task study validates", study_valid.returncode, 0)
+    out = Path(td) / "out"
+    plan = run("task-optimization", "plan", "--study", str(study), "--out", str(out))
+    check("task plan exits 0", plan.returncode, 0)
+    plan_json = json.loads((out / "plan.json").read_text(encoding="utf-8"))
+    check("task plan has task x candidate x treatment cells", plan_json["cell_count"], 8)
+    check("task plan starts planned", {cell["status"] for cell in plan_json["cells"]}, {"planned"})
+    lock = json.loads((out / "study.lock.json").read_text(encoding="utf-8"))
+    require("task lock pins study hash", bool(lock["study_manifest_sha256"]))
+    require("task lock pins corpus hash", bool(lock["corpus_lock_sha256"]))
+    arm_without_gate = run("task-optimization", "arm", "--study", str(study), "--out", str(out), "--live")
+    check("task arm refuses without environment gate", arm_without_gate.returncode, 1)
+    require("task arm calls no provider when gated", "no provider was called" in arm_without_gate.stderr)
+
 from arena.model import JobSpec  # noqa: E402
 from arena.plugins import base as plugins  # noqa: E402
 
@@ -105,6 +141,9 @@ result = plugins.get("paired-task").score(
 )
 check("docker desktop sign-in verdict", result.verdict, "blocked")
 check("docker desktop sign-in health", result.health, "infra:harness")
+
+result = plugins.get("paired-task").score(cell, exit_code=0, stdout='{"verdict":"unsupported"}', stderr="")
+check("unsupported is preserved", result.verdict, "unsupported")
 
 spec_mod = importlib.util.spec_from_file_location("arena_cli", ARENA)
 assert spec_mod and spec_mod.loader
