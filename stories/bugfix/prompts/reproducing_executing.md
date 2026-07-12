@@ -92,6 +92,14 @@ Before submitting:
   avoid pinning internal symbols, exact error strings, or one mechanism.
 - `summary_markdown` is what a human reviewer will read in the checkpoint
   inbox — write it for them, not for yourself.{% endblock %}
+- **Keep every shell command scoped and fast.** Never run a whole-repo
+  command (`go test ./...`, a full lint/build sweep, etc.) while exploring —
+  it produces no incremental output for as long as it runs and this step has
+  an activity timeout, so a slow, silent command can get your turn killed
+  before you produce anything. Target the specific package/directory you are
+  investigating (e.g. `go test ./internal/host/...`, `grep -R <term>
+  internal/host`), and prefer several small, fast commands over one broad
+  one.
 
 ## Output
 
