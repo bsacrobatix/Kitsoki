@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { runDoctor } from "./scripts/demo-doctor.mjs";
 import { runRecordTour } from "./scripts/record-tour.mjs";
 import { runCreateMockup } from "./scripts/create-mockup.mjs";
+// The harness LLM-call bridge (keyless grounding via `kitsoki agent ask`) is
+// no longer duplicated here — it's the same module tools/browser-mcp's
+// server.mjs uses (P6 of .context/2026-07-12-browser-mcp-tour-
+// implementation-brief.md: "retire duplicated Stagehand embedding").
+import { makeKitsokiLLMClient } from "../browser-mcp/lib/kitsoki-llm-client.mjs";
 
 const SERVER_INFO = { name: "kitsoki-frontend-mockup", version: "0.1.0" };
 const KITSOKI_REPO = process.env.KITSOKI_REPO || process.cwd();
@@ -298,89 +302,12 @@ function imageResult(value, pngBuffer) {
   return { content };
 }
 
-function stripInvisible(text) {
-  return text.replace(/[\u200b-\u200f\u2060-\u2064\ufeff]/g, "");
-}
-
 function slugify(value) {
   return String(value || "mockup-tour")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "mockup-tour";
-}
-
-function extractJSON(text) {
-  const clean = stripInvisible(text).trim();
-  try {
-    return JSON.parse(clean);
-  } catch {
-    const start = clean.search(/[\[{]/);
-    if (start === -1) {
-      throw new Error(`kitsoki agent ask did not return JSON: ${clean.slice(0, 500)}`);
-    }
-    for (let end = clean.length; end > start; end -= 1) {
-      try {
-        return JSON.parse(clean.slice(start, end));
-      } catch {
-        // Keep scanning for the final valid JSON suffix.
-      }
-    }
-    throw new Error(`kitsoki agent ask returned unparsable JSON: ${clean.slice(0, 500)}`);
-  }
-}
-
-function stringifyMessageContent(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return JSON.stringify(content);
-  return content
-    .map((part) => {
-      if (part?.type === "text") return part.text || "";
-      if (part?.text) return part.text;
-      if (part?.image_url || part?.source) return "[image omitted: mockup MCP Stagehand calls use DOM/text context]";
-      return JSON.stringify(part);
-    })
-    .join("\n");
-}
-
-function schemaHint(schema) {
-  if (!schema) return "";
-  if (typeof schema.toJSON === "function") return JSON.stringify(schema.toJSON(), null, 2);
-  if (typeof schema.toJSONSchema === "function") return JSON.stringify(schema.toJSONSchema(), null, 2);
-  return String(schema);
-}
-
-function askKitsoki(prompt) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      KITSOKI_AGENT_CMD,
-      ["agent", "ask", "--agent", KITSOKI_AGENT, "--working-dir", KITSOKI_REPO, "--prompt", "-"],
-      {
-        cwd: KITSOKI_REPO,
-        env: { ...process.env, KITSOKI_REPO },
-        stdio: ["pipe", "pipe", "pipe"]
-      }
-    );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(`kitsoki agent ask exited ${code}: ${stderr || stdout}`));
-        return;
-      }
-      resolve(stripInvisible(stdout));
-    });
-    child.stdin.end(prompt);
-  });
 }
 
 async function loadStagehandModule() {
@@ -392,49 +319,7 @@ async function loadStagehandModule() {
 
 async function makeLLMClient(modelName = "openai/gpt-5.5") {
   const { LLMClient } = await loadStagehandModule();
-  return new (class KitsokiLLMClient extends LLMClient {
-    constructor() {
-      super(modelName);
-      this.type = "kitsoki";
-      this.modelName = modelName;
-      this.hasVision = false;
-      this.clientOptions = {};
-    }
-
-    async createChatCompletion({ options }) {
-      const prompt = [
-        "You are answering an internal Stagehand browser automation LLM request for frontend mockup review.",
-        "Focus on visible UI structure, labels, affordances, and DOM-described behavior.",
-        "Return ONLY the requested answer. Do not include markdown fences.",
-        options.response_model
-          ? `Return ONLY JSON matching this schema:\n${schemaHint(options.response_model.schema)}`
-          : "For non-structured requests, return concise plain text.",
-        "",
-        ...options.messages.map((message) => `${message.role.toUpperCase()}:\n${stringifyMessageContent(message.content)}`)
-      ].join("\n\n");
-      const stdout = await askKitsoki(prompt);
-      if (options.response_model) {
-        return {
-          data: extractJSON(stdout),
-          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-        };
-      }
-      return {
-        id: `kitsoki-mockup-${Date.now()}`,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model: modelName,
-        choices: [
-          {
-            index: 0,
-            message: { role: "assistant", content: stdout, tool_calls: [] },
-            finish_reason: "stop"
-          }
-        ],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-      };
-    }
-  })();
+  return makeKitsokiLLMClient(LLMClient, { modelName, repo: KITSOKI_REPO, agentCmd: KITSOKI_AGENT_CMD, agent: KITSOKI_AGENT });
 }
 
 async function ensureStagehand(viewport, forceNew = false) {
