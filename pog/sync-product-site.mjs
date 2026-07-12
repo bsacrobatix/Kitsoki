@@ -93,6 +93,27 @@ function findRrweb(spec) {
   return "";
 }
 
+// Where a capture spec WILL write its recording — parsed from the spec's own
+// ARTIFACT_DIR/EVENTS_JSON constants (the shared convention across the
+// *-rrweb-capture specs). Lets the catalog declare the rrweb artifact before
+// it exists on a given machine: the recording is gitignored and
+// deterministically produced, so a fresh clone renders it on demand via
+// pog/render-demo.mjs (the portal's render-on-demand flow).
+function expectedRrweb(specEvidencePath) {
+  if (!specEvidencePath || !specEvidencePath.includes("-rrweb-capture.spec.ts")) return "";
+  let text = "";
+  try {
+    text = readFileSync(join(ROOT, specEvidencePath), "utf8");
+  } catch {
+    return "";
+  }
+  const dirMatch = text.match(/ARTIFACT_DIR = path\.join\(\s*repoRoot,\s*([^)]+)\)/);
+  const eventsMatch = text.match(/EVENTS_JSON = path\.join\(\s*ARTIFACT_DIR,\s*"([^"]+)"\s*\)/);
+  const segs = dirMatch ? [...dirMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
+  if (!eventsMatch || segs[0] !== ".artifacts") return "";
+  return [...segs, eventsMatch[1]].join("/");
+}
+
 // The tour-driven spec itself (the persistent source). Prefer the dedicated
 // rrweb-capture spec when one exists; fall back to the video spec.
 function findSpecFile(spec) {
@@ -115,7 +136,7 @@ const existingIds = new Set([...prefix.matchAll(/^    id: ([a-z0-9-]+)$/gm)].map
 
 const q = (s) => JSON.stringify(String(s ?? "").replace(/\s+/g, " ").trim());
 const lines = [];
-const stats = { features: 0, demos: 0, docs: 0, tutorials: 0, verified: 0, planned: 0, rrweb: 0 };
+const stats = { features: 0, demos: 0, docs: 0, tutorials: 0, verified: 0, planned: 0, rrweb: 0, renderable: 0 };
 
 lines.push("");
 lines.push(`${MARKER} ---------------------------------`);
@@ -147,6 +168,10 @@ for (const spec of specs) {
   if (spec.demo) {
     const rrwebPath = findRrweb(spec);
     const specPath = findSpecFile(spec);
+    // No persisted recording, but a capture spec that can produce one: still
+    // declare the rrweb evidence at the spec's output path. The portal marks
+    // it unavailable and offers render-on-demand (pog/render-demo.mjs).
+    const rrwebExpected = !rrwebPath ? expectedRrweb(specPath) : "";
     const posterPath = existsSync(join(ROOT, ".artifacts/site-media", spec.id, "poster.png"))
       ? `.artifacts/site-media/${spec.id}/poster.png`
       : "";
@@ -168,6 +193,7 @@ for (const spec of specs) {
     stats.demos++;
     stats[produced ? "verified" : "planned"]++;
     if (rrwebPath) stats.rrweb++;
+    if (rrwebExpected) stats.renderable++;
     const id = `demo-${spec.id}`;
     if (!existingIds.has(id)) {
       const specRel = spec.demo.spec ?? "";
@@ -185,12 +211,15 @@ for (const spec of specs) {
               ]
                 .filter(Boolean)
                 .join("; ")}.`
-            : `Tour-driven spec ${specRel || "(spec pending)"} authored; rrweb + video artifacts not yet produced — rerun the capture to materialize them.`,
+            : rrwebExpected
+              ? `Tour-driven spec ${specRel || "(spec pending)"} authored; the rrweb recording is deterministically producible on demand (node pog/render-demo.mjs demo-${spec.id}).`
+              : `Tour-driven spec ${specRel || "(spec pending)"} authored; rrweb + video artifacts not yet produced — rerun the capture to materialize them.`,
         )}`,
       );
       lines.push(`    sources: [source-feature-specs]`);
       const evidence = [];
       if (rrwebPath) evidence.push({ kind: "video", title: `${spec.title} — rrweb replay`, path: rrwebPath, poster: posterPath });
+      else if (rrwebExpected) evidence.push({ kind: "video", title: `${spec.title} — rrweb replay (render on demand)`, path: rrwebExpected, poster: posterPath });
       if (mp4Path) evidence.push({ kind: "video", title: `${spec.title} — demo video`, path: mp4Path, poster: posterPath });
       if (specPath) evidence.push({ kind: "doc", title: `${spec.title} — tour-driven spec (source)`, path: specPath, poster: "" });
       if (evidence.length) {

@@ -1020,6 +1020,10 @@ nodes:
     sources: [source-feature-specs]
     evidence:
       - kind: video
+        title: "Agent action transcripts — rrweb replay (render on demand)"
+        path: .artifacts/rrweb-eval/agent-actions/agent-actions.rrweb.json
+        poster: .artifacts/site-media/agent-actions/poster.png
+      - kind: video
         title: "Agent action transcripts — demo video"
         path: .artifacts/site-media/agent-actions/demo.mp4
         poster: .artifacts/site-media/agent-actions/poster.png
@@ -1233,6 +1237,10 @@ nodes:
     summary: "Deterministically produced from the tour-driven spec tests/playwright/diagram-showcase.spec.ts — video published on the product site."
     sources: [source-feature-specs]
     evidence:
+      - kind: video
+        title: "The state diagram, four ways — rrweb replay (render on demand)"
+        path: .artifacts/rrweb-eval/diagram-showcase/diagram-showcase.rrweb.json
+        poster: .artifacts/site-media/diagram-showcase/poster.png
       - kind: video
         title: "The state diagram, four ways — demo video"
         path: .artifacts/site-media/diagram-showcase/demo.mp4
@@ -2387,12 +2395,12 @@ nodes:
     title: "Demo — The async inbox"
     status: verified
     visibility: public
-    summary: "Deterministically produced from the tour-driven spec tests/playwright/web-inbox-video.spec.ts — rrweb replay persisted; video published on the product site."
+    summary: "Deterministically produced from the tour-driven spec tests/playwright/web-inbox-video.spec.ts — video published on the product site."
     sources: [source-feature-specs]
     evidence:
       - kind: video
-        title: "The async inbox — rrweb replay"
-        path: .artifacts/rrweb-eval/web-inbox/web-inbox.rrweb.json
+        title: "The async inbox — rrweb replay (render on demand)"
+        path: .artifacts/web-inbox/web-inbox.rrweb.json
         poster: .artifacts/site-media/web-inbox/poster.png
       - kind: video
         title: "The async inbox — demo video"
