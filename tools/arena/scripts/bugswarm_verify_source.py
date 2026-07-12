@@ -118,10 +118,11 @@ def verify_task(
     image_tag = str(task.get("image_tag") or "")
     if not image_tag:
         raise ValueError(f"BugSwarm task {task.get('id')!r} missing image_tag")
-    failed_cmd = docker_cmd(cached_image_repo, image_tag, "run_failed.sh")
-    passed_cmd = docker_cmd(cached_image_repo, image_tag, "run_passed.sh")
-    fallback_failed_cmd = docker_cmd(image_repo, image_tag, "run_failed.sh")
-    fallback_passed_cmd = docker_cmd(image_repo, image_tag, "run_passed.sh")
+    failed_source_dir, passed_source_dir = bugswarm_checkout_dirs(task)
+    failed_cmd = docker_cmd(cached_image_repo, image_tag, "run_failed.sh", failed_source_dir)
+    passed_cmd = docker_cmd(cached_image_repo, image_tag, "run_passed.sh", passed_source_dir)
+    fallback_failed_cmd = docker_cmd(image_repo, image_tag, "run_failed.sh", failed_source_dir)
+    fallback_passed_cmd = docker_cmd(image_repo, image_tag, "run_passed.sh", passed_source_dir)
 
     if not execute:
         return {
@@ -136,6 +137,7 @@ def verify_task(
                 "failed_fallback": shell_join(fallback_failed_cmd),
                 "passed_fallback": shell_join(fallback_passed_cmd),
             },
+            "checkout_dirs": {"failed": failed_source_dir, "passed": passed_source_dir},
             "notes": "dry-run only; run with --execute to verify fresh failed/passed containers",
         }
 
@@ -143,8 +145,12 @@ def verify_task(
     passed = run_with_fallback(passed_cmd, fallback_passed_cmd, timeout_s=timeout_s)
     failed_infra = is_infrastructure_exit(failed["exit_code"])
     passed_infra = is_infrastructure_exit(passed["exit_code"])
-    verified_red = failed["exit_code"] != 0 and not failed_infra
-    verified_green = passed["exit_code"] == 0 and not passed_infra
+    # A non-zero script result without a source-bound commit is not RED
+    # evidence: for example, `git rev-parse` at the artifact root itself can
+    # fail.  Do not infer a revision from the image tag, API metadata, or a
+    # neighbouring checkout.
+    verified_red = failed["exit_code"] != 0 and not failed_infra and bool(failed["observed_commit_sha"])
+    verified_green = passed["exit_code"] == 0 and not passed_infra and bool(passed["observed_commit_sha"])
     infrastructure_error = failed_infra or passed_infra
     image_digest = inspect_image_digest(failed["command"])
     return {
@@ -159,6 +165,7 @@ def verify_task(
         "failed_commit_sha": failed["observed_commit_sha"],
         "passed_commit_sha": passed["observed_commit_sha"],
         "image_digest": image_digest,
+        "checkout_dirs": {"failed": failed_source_dir, "passed": passed_source_dir},
         "commands": {
             "failed": shell_join(failed["command"]),
             "passed": shell_join(passed["command"]),
@@ -175,7 +182,41 @@ def verify_task(
     }
 
 
-def docker_cmd(repo: str, image_tag: str, script: str) -> list[str]:
+def bugswarm_checkout_dirs(task: dict[str, Any]) -> tuple[str, str]:
+    """Return the exact failed/passed repository roots in a BugSwarm image.
+
+    BugSwarm's entrypoint is an artifact root, not a Git repository.  The
+    source repositories live below the side-specific ``failed`` and ``passed``
+    roots.  A legacy ``bugswarm_source_dir`` can describe the failed side only
+    when it visibly contains that path segment; otherwise an explicit passed
+    directory is mandatory.  This deliberately refuses to guess sibling
+    layouts such as ``/workspace/src``.
+    """
+    meta = task.get("meta") or {}
+    failed_explicit = str(meta.get("bugswarm_failed_source_dir") or "").strip()
+    passed_explicit = str(meta.get("bugswarm_passed_source_dir") or "").strip()
+    legacy = str(meta.get("bugswarm_source_dir") or "").strip()
+    if legacy and not failed_explicit:
+        failed_explicit = legacy
+    if failed_explicit and not passed_explicit and "/failed/" in failed_explicit:
+        passed_explicit = failed_explicit.replace("/failed/", "/passed/", 1)
+    if failed_explicit or passed_explicit:
+        if not failed_explicit or not passed_explicit:
+            raise ValueError(
+                f"BugSwarm task {task.get('id')!r} requires both "
+                "meta.bugswarm_failed_source_dir and meta.bugswarm_passed_source_dir "
+                "when the source layout cannot be derived from /failed/"
+            )
+        return failed_explicit.rstrip("/"), passed_explicit.rstrip("/")
+    repo = str(task.get("repo_label") or task.get("repo") or "").strip("/")
+    if "/" not in repo:
+        raise ValueError(
+            f"BugSwarm task {task.get('id')!r} needs repo_label owner/name or explicit source dirs"
+        )
+    return f"/home/travis/build/failed/{repo}", f"/home/travis/build/passed/{repo}"
+
+
+def docker_cmd(repo: str, image_tag: str, script: str, checkout_dir: str) -> list[str]:
     # BugSwarm docs warn not to run failed and passed scripts consecutively in
     # the same container; each command therefore uses a fresh --rm container.
     return [
@@ -185,11 +226,13 @@ def docker_cmd(repo: str, image_tag: str, script: str) -> list[str]:
         f"{repo}:{image_tag}",
         "bash",
         "-lc",
-        # Capture the revision from *inside* this new container, then preserve
-        # the artifact script's exit code exactly.  The failed and passed
-        # commands are built independently and each has its own `docker run
-        # --rm`, as BugSwarm requires.
-        f"printf '%s' '{COMMIT_MARKER}'; git rev-parse HEAD; {script}; status=$?; exit $status",
+        # Capture the revision from the side-specific repository, not the
+        # artifact root. Preserve the artifact script's exit code exactly.
+        # The failed and passed commands are built independently and each has
+        # its own `docker run --rm`, as BugSwarm requires.
+        f"cd -- {shlex.quote(checkout_dir)} || exit 98; "
+        f"printf '%s' '{COMMIT_MARKER}'; git rev-parse HEAD || exit 98; "
+        f"{script}; status=$?; exit $status",
     ]
 
 
@@ -260,6 +303,10 @@ def verification_notes(failed: dict[str, Any], passed: dict[str, Any]) -> str:
         notes.append(f"failed-side infrastructure exit {failed['exit_code']}")
     if is_infrastructure_exit(passed["exit_code"]):
         notes.append(f"passed-side infrastructure exit {passed['exit_code']}")
+    if not failed.get("observed_commit_sha"):
+        notes.append("failed-side source commit unavailable; verification is not provenance-complete")
+    if not passed.get("observed_commit_sha"):
+        notes.append("passed-side source commit unavailable; verification is not provenance-complete")
     return "; ".join(notes)
 
 
