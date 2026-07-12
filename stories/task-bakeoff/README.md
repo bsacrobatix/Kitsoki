@@ -3,17 +3,18 @@
 > **Deprecated.** This story predates the native Capsule evaluation adapter and
 > refers to retired `bakeoff.yaml` / `prepare.sh` / `run_cell.sh` machinery.
 > Do not use it for CI, workspace lifecycle, or new comparisons. Use Capsule CI
-> for project validation and the `matrix-task-comparison` skill/Arena plus
-> `tools/bugfix-bakeoff/external` for an explicitly operator-run evaluation.
+> for project validation and the `matrix-task-comparison` skill with Arena as
+> the canonical planner/scheduler, plus `tools/bugfix-bakeoff/external` for
+> project/oracle adaptation.
 > It remains temporarily for replay/history compatibility only.
 
 > Sibling: for an EXTERNAL repo (onboard a third-party project + fix real bugs), see [`stories/repo-bakeoff`](../repo-bakeoff/README.md) (wraps `tools/bugfix-bakeoff/external`).
 
 A kitsoki story that wraps the **`matrix-task-comparison`** method
 (`.agents/skills/matrix-task-comparison/SKILL.md`) and its reference harness
-(`tools/bugfix-bakeoff/`) into a drivable workflow that ends in a **baked
-static-HTML slidey report** — produced via `host.slidey.render` exactly like
-`stories/slidey-edit`.
+(`tools/arena/`) into a replay-compatible workflow. New studies should review
+the Arena-produced `.slidey.json` source deck; do not render static HTML, bundle,
+or MP4 unless explicitly requested.
 
 ```
 kitsoki run stories/task-bakeoff/app.yaml
@@ -27,11 +28,10 @@ kitsoki run stories/task-bakeoff/app.yaml
   - **tasks** — the cases under test (e.g. `bug9`, `bug12`, `bug14`).
   - **candidates** — the harness/model axis (e.g. `opus-4.8`, `sonnet-4.6`).
   - **contenders** — the structure axis (e.g. `kitsoki` pipeline vs `single` prompt).
-- **The harness** — `tools/bugfix-bakeoff/`: `bakeoff.yaml` (the manifest),
-  `prepare.sh` / `run_cell.sh` (per-cell, the only cost-bearing pieces),
-  its free deterministic aggregation and the offline report/deck builder.
-  **This story orchestrates
-  those scripts — it never reimplements scoring or pricing.**
+- **The harness** — Arena owns study planning, immutable attempt receipts,
+  resumption, and report/deck inputs. `tools/bugfix-bakeoff/external` remains
+  the project/oracle adapter. This compatibility story does not schedule cells
+  or interpret traces.
 - **The report** — the slidey deck schema (`schemas/deck.json`, reused verbatim
   from `slidey-edit`) + the `host.slidey.render` → `host.artifacts_dir` sequence
   from `stories/slidey-edit/rooms/rendering.yaml`.
@@ -50,7 +50,7 @@ idle ──start──▶ configure ──accept──▶ running ──accept�
 | `running` | **orchestration stub** | Track the cell roster as a checklist. The cost-bearing per-cell run (`prepare.sh` / `run_cell.sh`) is run **manually**, never in CI/auto — so this room does **not** execute cells; it surfaces progress and advances. |
 | `scoring` | deterministic | `host.starlark.run` → `host.bakeoff.run` rolls the committed `cells/*.json` into a `summary` (by treatment / candidate / cell-key). Free, no LLM. |
 | `reporting` | deterministic | `host.starlark.run` → `host.bakeoff.run` builds the comparison report + the slidey **deck spec** from the rollup. Offline, zero re-spend. |
-| `slideshow` | deterministic | `host.slidey.render` (`format: html`) → static-HTML deck **+ `.semantic.json` sidecar**, both emitted to `host.artifacts_dir` as media kind `slideshow`. **This is the deliverable report** — identical to `slidey-edit`'s `rendering` room. |
+| `slideshow` | deprecated compatibility | Existing replay-only HTML rendering. New studies emit a `.slidey.json` source deck from Arena and do not use this room. |
 | `done` | gallery | `media(deck_handle)` + the headline rollup. `accept` → `@exit:done` (requires `deck_handle` — a real rendered report exists). |
 
 ## Honesty: what is real vs. stubbed
