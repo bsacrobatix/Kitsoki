@@ -347,6 +347,13 @@ python3 tools/arena/scripts/bugswarm_apply_verification.py \
     --verification .artifacts/bugswarm/verify.json \
     --out .artifacts/bugswarm/verified-source.yaml
 
+# Freeze only execute-verified, provenance-complete tasks. This exits 2 and
+# writes a durable blocked receipt when the pool cannot form four learning plus
+# eight confirmation tasks with no repository in both splits.
+python3 tools/arena/scripts/bugswarm_lock_corpus.py \
+    --source .artifacts/bugswarm/verified-source.yaml \
+    --out .artifacts/bugswarm/corpus.lock.json
+
 # Generate a schedulable kitsoki-vs-raw-prompt paired-task spec.
 # The default backend is synthetic, keeping the generated spec no-spend.
 python3 tools/arena/scripts/bugswarm_to_arena_spec.py \

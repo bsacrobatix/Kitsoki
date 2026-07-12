@@ -10,6 +10,7 @@ records the evidence in each task's `meta.bugswarm_verification`.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,7 @@ def apply_verification(
     out = dict(source)
     out["verification"] = {
         "path": verification_path,
+        "sha256": hashlib.sha256(Path(verification_path).read_bytes()).hexdigest(),
         "mode": mode,
         "task_count": int(verification.get("task_count") or 0),
         "verified_count": int(verification.get("verified_count") or 0),
@@ -105,6 +107,8 @@ def apply_verification(
                 "failed_exit_code": result.get("failed_exit_code"),
                 "passed_exit_code": result.get("passed_exit_code"),
                 "report": verification_path,
+                "report_sha256": out["verification"]["sha256"],
+                "image_digest": result.get("image_digest"),
             }
             updated["meta"] = meta
         tasks.append(updated)
