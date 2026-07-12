@@ -43,6 +43,7 @@ tools/arena/scripts/bugswarm_lock_corpus.py	arena subsystem deterministic BugSwa
 tools/arena/scripts/bugswarm_to_arena.py	arena subsystem helper script
 tools/arena/scripts/bugswarm_to_arena_spec.py	arena subsystem helper script
 tools/arena/scripts/bugswarm_verify_source.py	arena subsystem helper script
+tools/arena/scripts/bugswarm_disk_budget.py	arena subsystem disk-budget preflight helper; Docker inspection is isolated behind explicit operator invocation
 tools/arena/scripts/glm52_bugswarm_report.py	arena subsystem helper script
 tools/arena/scripts/glm52_gap_plan.py	arena subsystem helper script
 tools/arena/scripts/glm52_report_gate.py	arena subsystem helper script
@@ -58,6 +59,7 @@ tools/arena/tests/test_bugswarm_lock_corpus.py	arena subsystem test
 tools/arena/tests/test_bugswarm_paired_task_source.py	arena subsystem test
 tools/arena/tests/test_bugswarm_source.py	arena subsystem test
 tools/arena/tests/test_bugswarm_verify_source.py	arena subsystem test
+tools/arena/tests/test_bugswarm_disk_budget.py	arena subsystem no-Docker disk-budget preflight test
 tools/arena/tests/test_check_types.py	arena subsystem test
 tools/arena/tests/test_completion_state.py	arena subsystem test
 tools/arena/tests/test_corpus_loading.py	arena subsystem test

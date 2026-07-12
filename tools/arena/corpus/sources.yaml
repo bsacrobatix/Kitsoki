@@ -28,6 +28,7 @@ sources:
     owner: external
     adapter: tools/arena/scripts/bugswarm_to_arena.py
     verifier: tools/arena/scripts/bugswarm_verify_source.py
+    disk_budget_planner: tools/arena/scripts/bugswarm_disk_budget.py
     provenance_enricher: tools/arena/scripts/bugswarm_enrich_source.py
     verification_applier: tools/arena/scripts/bugswarm_apply_verification.py
     spec_generator: tools/arena/scripts/bugswarm_to_arena_spec.py
@@ -67,6 +68,7 @@ sources:
     notes:
       - "Adapter generation is offline and no-LLM; live artifact verification requires Docker and must be explicitly invoked."
       - "Verification runs failed and passed scripts in separate fresh containers: run_failed.sh must exit non-zero, run_passed.sh must exit zero."
+      - "Before an execute-mode verification on a constrained Docker host, bugswarm_disk_budget.py records cached layers, free-space budget, and evidence-gated manual reclamation suggestions; it never pulls, prunes, or deletes images."
       - "bugswarm_apply_verification.py turns an execute-mode verification report into a verified source YAML for report generation and benchmark scheduling."
       - "bugswarm_enrich_source.py copies commits only from an explicit saved DatabaseAPI export, or from an explicitly requested DatabaseAPI fetch that writes the raw response first; it never derives commits from URLs or tags."
       - "bugswarm_to_arena_spec.py turns that verified source into a paired-task arena spec with kitsoki-vs-raw-prompt candidate arms."

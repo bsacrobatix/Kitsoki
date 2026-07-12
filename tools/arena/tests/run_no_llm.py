@@ -106,6 +106,17 @@ def run_default() -> int:
     checks.check("bugswarm source verifier gate", verify_source_test.returncode, 0)
     if verify_source_test.returncode:
         checks.failures.append((verify_source_test.stdout + verify_source_test.stderr).strip())
+    disk_budget_test = subprocess.run(
+        [sys.executable, str(HERE / "test_bugswarm_disk_budget.py")],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    checks.check("bugswarm disk budget gate", disk_budget_test.returncode, 0)
+    if disk_budget_test.returncode:
+        checks.failures.append((disk_budget_test.stdout + disk_budget_test.stderr).strip())
     apply_verification_test = subprocess.run(
         [sys.executable, str(HERE / "test_bugswarm_apply_verification.py")],
         cwd=REPO_ROOT,

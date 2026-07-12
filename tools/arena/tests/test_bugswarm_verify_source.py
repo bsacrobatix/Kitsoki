@@ -29,6 +29,7 @@ def check(label: str, got, want) -> None:
 sources = yaml.safe_load(SOURCES.read_text(encoding="utf-8"))
 bugswarm = next((s for s in sources.get("sources", []) if s.get("id") == "bugswarm"), None)
 check("bugswarm verifier path recorded", bugswarm.get("verifier") if bugswarm else "", "tools/arena/scripts/bugswarm_verify_source.py")
+check("bugswarm disk budget planner recorded", bugswarm.get("disk_budget_planner") if bugswarm else "", "tools/arena/scripts/bugswarm_disk_budget.py")
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
