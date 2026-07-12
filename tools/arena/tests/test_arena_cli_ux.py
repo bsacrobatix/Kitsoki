@@ -198,6 +198,12 @@ harness_profiles:
     check("task preflight has effective receipts", {row["status"] for row in preflight_json["candidates"]}, {"ready"})
     require("task preflight has native launch plans", all(row.get("launch_plan", {}).get("dry_run") for row in preflight_json["candidates"]))
     require("task preflight reports redacted auth readiness", all(row.get("auth", {}).get("status") == "ambient-unverified" for row in preflight_json["candidates"]))
+    ready_candidates = {row["candidate_id"]: row for row in preflight_json["candidates"] if row.get("status") == "ready"}
+    check("task preflight readies every planned candidate", set(ready_candidates), {cell["candidate_id"] for cell in plan_json["cells"]})
+    require("ready profile boundary has stable hashes", all(
+        isinstance(row.get("profile_hash"), str) and isinstance(row.get("launch_plan_hash"), str)
+        for row in ready_candidates.values()
+    ))
     unsupported_config = Path(td) / "unsupported-profiles.yaml"
     unsupported_config.write_text("""
 harness_profiles:
@@ -293,7 +299,7 @@ harness_profiles:
         report.write_text(json.dumps({"trace": str(trace), "passed": solved,
                                       "outcome": "solved" if solved else "failed",
                                       "metrics": report_metrics}), encoding="utf-8")
-        candidate = next(row for row in preflight_json["candidates"] if row["candidate_id"] == cell_data["candidate_id"])
+        candidate = ready_candidates[cell_data["candidate_id"]]
         receipt_path = Path(td) / f"attempt-{n}.json"
         receipt_path.write_text(json.dumps({
             "schema": "task-optimization/attempt/v1", "study_id": "bugfix-codeact-v1", "attempt_id": attempt_id,

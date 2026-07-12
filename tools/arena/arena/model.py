@@ -455,8 +455,12 @@ def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], p
         candidate_id = str(data.get("candidate_id") or "")
         if candidate_id != str(plan_cells[cell_id].get("candidate_id") or ""):
             raise ValueError(f"{file}: candidate_id does not match the planned cell")
-        if preflight_candidates.get(candidate_id, {}).get("status") != "ready":
+        preflight_candidate = preflight_candidates.get(candidate_id, {})
+        if preflight_candidate.get("status") != "ready":
             raise ValueError(f"{file}: candidate {candidate_id!r} lacks a ready preflight receipt")
+        boundary_missing = [key for key in ("profile_hash", "launch_plan_hash") if not preflight_candidate.get(key)]
+        if boundary_missing:
+            raise ValueError(f"{file}: ready candidate {candidate_id!r} lacks preflight boundary fields: {', '.join(boundary_missing)}")
         if data.get("plan_sha256") != plan_digest:
             raise ValueError(f"{file}: plan_sha256 does not match immutable plan")
         if data.get("preflight_sha256") != preflight_digest:
@@ -467,7 +471,7 @@ def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], p
         validate_scored_attempt_receipt(
             data,
             receipt_path=file,
-            preflight_candidate=preflight_candidates[candidate_id],
+            preflight_candidate=preflight_candidate,
         )
         seen.add(attempt_id)
         receipts.append(data)
