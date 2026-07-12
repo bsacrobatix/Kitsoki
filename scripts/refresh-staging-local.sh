@@ -90,46 +90,84 @@ PY
 }
 
 source_dirty() {
-  local dir="$1"
-  git -C "$dir" status --porcelain --untracked-files=all |
-    grep -Ev '^[?][?] (\.kitsoki-capsule|\.kitsoki-clone|capsule-manifest.json|\.kitsoki-dev-workspace.json|\.kitsoki-owner)$' ||
-    true
+  local dir="$1" status line
+  if ! status="$(git -C "$dir" status --porcelain --untracked-files=all)"; then
+    die "could not inspect staging capsule status: $dir"
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      ""|"?? $CAPSULE_SENTINEL"|"?? $CLONE_SENTINEL"|"?? capsule-manifest.json"|"?? .kitsoki-dev-workspace.json"|"?? .kitsoki-owner") ;;
+      *) printf '%s\n' "$line" ;;
+    esac
+  done <<<"$status"
 }
 
-# rebased_snapshot_is_preserved proves the captured staging patch series is
-# represented in result even though rebase necessarily rewrites commit IDs.
-# Comparing ancestry here is invalid: a successful rebase intentionally makes
-# the old snapshot a sibling of its rewritten replacement. Patch IDs preserve
-# the safety property we need — no captured staging change may disappear —
-# while allowing Git to skip a patch already present on the newer base.
-rebased_snapshot_is_preserved() {
-  local dir="$1" snapshot="$2" result="$3" base_ref="$4" snapshot_base snapshot_ids result_ids missing sha
-  snapshot_base="$(git -C "$dir" merge-base "$snapshot" "source/$base_ref" 2>/dev/null || true)"
-  [ -n "$snapshot_base" ] || return 1
-  snapshot_ids="$(mktemp "${TMPDIR:-/tmp}/kitsoki-refresh-snapshot-patches.XXXXXX")"
-  result_ids="$(mktemp "${TMPDIR:-/tmp}/kitsoki-refresh-result-patches.XXXXXX")"
-  missing="$(mktemp "${TMPDIR:-/tmp}/kitsoki-refresh-missing-patches.XXXXXX")"
-  for sha in $(git -C "$dir" rev-list --no-merges "$snapshot_base..$snapshot"); do
-    git -C "$dir" show --format= "$sha" | git patch-id --stable | awk '{print $1}'
-  done | sort -u >"$snapshot_ids"
-  for sha in $(git -C "$dir" rev-list --no-merges "$result"); do
-    git -C "$dir" show --format= "$sha" | git patch-id --stable | awk '{print $1}'
-  done | sort -u >"$result_ids"
-  comm -23 "$snapshot_ids" "$result_ids" >"$missing"
-  if [ -s "$missing" ]; then
-    rm -f "$snapshot_ids" "$result_ids" "$missing"
+# Construct the exact tree expected when the net change from old_base to
+# snapshot is transplanted onto new_base. merge-tree performs the three-way
+# merge entirely in Git's object database: external diff/textconv/whitespace
+# settings and a moving worktree/index cannot weaken the proof, and a change
+# already present on new_base is handled as an ordinary clean merge.
+expected_tree_after_delta() {
+  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree
+  tree="$(git -C "$dir" merge-tree \
+    --write-tree \
+    --no-messages \
+    --merge-base "$old_base" \
+    "$new_base" "$snapshot")" || return 1
+  printf '%s\n' "$tree"
+}
+
+refuse_untracked_tree_collisions() {
+  local dir="$1" from_ref="$2" to_ref="$3" context="$4" output
+  if ! output="$(python3 - "$dir" "$from_ref" "$to_ref" <<'PY'
+import subprocess
+import sys
+
+repo, from_ref, to_ref = sys.argv[1:]
+changed_run = subprocess.run(
+    ["git", "-C", repo, "diff", "--name-only", "-z", "--no-renames", from_ref, to_ref],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+if changed_run.returncode:
+    sys.stderr.buffer.write(changed_run.stderr)
+    sys.exit(changed_run.returncode)
+changed = {p.decode("utf-8", "surrogateescape") for p in changed_run.stdout.split(b"\0") if p}
+status_run = subprocess.run(
+    [
+        "git", "-C", repo, "status", "--porcelain=v1", "-z",
+        "--untracked-files=all", "--ignored=traditional",
+    ],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    check=False,
+)
+if status_run.returncode:
+    sys.stderr.buffer.write(status_run.stderr)
+    sys.exit(status_run.returncode)
+local = set()
+for entry in status_run.stdout.split(b"\0"):
+    if not entry or entry[:2] not in (b"??", b"!!"):
+        continue
+    path = entry[3:].decode("utf-8", "surrogateescape").rstrip("/")
+    if path:
+        local.add(path)
+
+def overlaps(a, b):
+    return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+conflicts = sorted({p for p in local for c in changed if overlaps(p, c)})
+for path in conflicts:
+    print(path)
+sys.exit(1 if conflicts else 0)
+PY
+)"; then
+    echo "error: $context would overwrite untracked or ignored capsule paths:" >&2
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
     return 1
   fi
-  rm -f "$snapshot_ids" "$result_ids" "$missing"
 }
-
-staging_sentinel_files=(
-  "$CAPSULE_SENTINEL"
-  "$CLONE_SENTINEL"
-  "capsule-manifest.json"
-  ".kitsoki-dev-workspace.json"
-  ".kitsoki-owner"
-)
 
 print_dirty_next_steps() {
   local dir="$1"
@@ -148,7 +186,7 @@ EOF
 
 clean_dirty_staging_capsule() {
   local dir="$1"
-  git -C "$dir" reset --hard HEAD >/dev/null
+  git -c submodule.recurse=false -C "$dir" reset --hard HEAD >/dev/null
   git -C "$dir" clean -fd \
     -e "$CAPSULE_SENTINEL" \
     -e "$CLONE_SENTINEL" \
@@ -159,47 +197,50 @@ clean_dirty_staging_capsule() {
 
 preserve_dirty_staging_capsule() {
   local dir="$1"
-  local patch_dir patch stamp status_file sentinel_tmp sentinel moved output
+  local patch_dir patch stamp status_file output stash_oid primary_snapshot_ref
 
   stamp="$(date +%Y%m%dT%H%M%S)"
   patch_dir="$repo_root/.artifacts/staging-local-preserved"
   mkdir -p "$patch_dir"
   patch="$patch_dir/staging-capsule-dirty-$stamp-$$.patch"
   status_file="$patch_dir/staging-capsule-dirty-$stamp-$$.status.txt"
-  sentinel_tmp="$(mktemp -d "${TMPDIR:-/tmp}/kitsoki-staging-sentinels.XXXXXX")"
 
   git -C "$dir" status --short --untracked-files=all >"$status_file"
-  for sentinel in "${staging_sentinel_files[@]}"; do
-    if [ -e "$dir/$sentinel" ]; then
-      mv "$dir/$sentinel" "$sentinel_tmp/$sentinel"
-    fi
-  done
+  # Management sentinels are ignored, so --include-untracked leaves them (and
+  # all other ignored evidence) in place. Supplying a pathspec here makes Git
+  # stage the ignored sentinels while constructing the stash on older Git
+  # versions, which can leave the user's changes staged instead of preserved.
   if ! output="$(git -C "$dir" stash push --include-untracked \
     -m "pre-refresh dirty staging capsule $stamp" 2>&1)"; then
-    for moved in "$sentinel_tmp"/*; do
-      [ -e "$moved" ] || continue
-      mv "$moved" "$dir/$(basename "$moved")"
-    done
-    rm -rf "$sentinel_tmp"
     echo "$output" >&2
     return 1
   fi
-  for moved in "$sentinel_tmp"/*; do
-    [ -e "$moved" ] || continue
-    mv "$moved" "$dir/$(basename "$moved")"
-  done
-  rm -rf "$sentinel_tmp"
 
   if ! git -C "$dir" rev-parse --verify --quiet refs/stash >/dev/null; then
     echo "error: git stash did not create a preserved change set" >&2
     return 1
   fi
+  stash_oid="$(git -C "$dir" rev-parse refs/stash)"
+  primary_snapshot_ref="refs/kitsoki/dirty-snapshot/$stash_oid"
+  if git -C "$repo_root" rev-parse --verify --quiet "$primary_snapshot_ref" >/dev/null; then
+    [ "$(git -C "$repo_root" rev-parse "$primary_snapshot_ref")" = "$stash_oid" ] || {
+      echo "error: content-addressed preserve ref points at the wrong object" >&2
+      return 1
+    }
+  else
+    git -C "$repo_root" fetch --no-tags "$dir" "$stash_oid:$primary_snapshot_ref"
+  fi
+  git -C "$repo_root" fsck --connectivity-only --no-dangling "$primary_snapshot_ref" >/dev/null 2>&1 || {
+    echo "error: preserved staging snapshot is not fully readable from the primary repository" >&2
+    return 1
+  }
 
   {
     printf 'staging capsule: %s\n' "$dir"
     printf 'branch: %s\n' "$(git -C "$dir" branch --show-current)"
     printf 'head: %s\n' "$(git -C "$dir" rev-parse HEAD)"
     printf 'stash: stash@{0}\n'
+    printf 'snapshot ref: %s\n' "$primary_snapshot_ref"
     printf '\n'
     printf 'status before preserve:\n'
     cat "$status_file"
@@ -211,12 +252,17 @@ preserve_dirty_staging_capsule() {
 
   echo "refresh-staging-local: preserved dirty staging-capsule changes:" >&2
   echo "  stash: git -C \"$dir\" stash show -p --include-untracked 'stash@{0}'" >&2
+  echo "  snapshot ref: $primary_snapshot_ref" >&2
   echo "  patch: $patch" >&2
 }
 
 move_dirty_staging_capsule() {
   local dir="$1"
-  local stamp recovery_id recovery_branch recovery_dir patch_dir patch status_file untracked_file untracked_tar
+  local stamp recovery_id recovery_branch recovery_dir patch_dir status_file
+  local untracked_file untracked_tar current_untracked_file current_untracked_tar
+  local snapshot_oid snapshot_tree snapshot_index_tree current_oid current_tree current_index_tree
+  local recovery_parent recovery_snapshot_ref expected_tree recovery_tree recovery_commit
+  local primary_snapshot_ref primary_recovery_ref quarantine_root quarantine_dir staging_root staging_id replacement_bootstrap
 
   stamp="$(date +%Y%m%dT%H%M%S)"
   recovery_id="staging-dirty-recovery-$stamp-$$"
@@ -224,13 +270,17 @@ move_dirty_staging_capsule() {
   recovery_dir="$repo_root/.capsules/workspaces/$recovery_id"
   patch_dir="$repo_root/.artifacts/staging-local-recovery"
   mkdir -p "$patch_dir"
-  patch="$patch_dir/$recovery_id.patch"
   status_file="$patch_dir/$recovery_id.status.txt"
   untracked_file="$patch_dir/$recovery_id.untracked"
   untracked_tar="$patch_dir/$recovery_id.untracked.tar"
+  current_untracked_file="$(mktemp "${TMPDIR:-/tmp}/kitsoki-staging-current-untracked.XXXXXX")"
+  current_untracked_tar="$(mktemp "${TMPDIR:-/tmp}/kitsoki-staging-current-untracked-tar.XXXXXX")"
 
   git -C "$dir" status --short --untracked-files=all >"$status_file"
-  git -C "$dir" diff --binary HEAD >"$patch"
+  snapshot_oid="$(git -C "$dir" stash create "kitsoki staging dirty snapshot $stamp")"
+  [ -n "$snapshot_oid" ] || snapshot_oid="$(git -C "$dir" rev-parse HEAD)"
+  snapshot_tree="$(git -C "$dir" rev-parse "$snapshot_oid^{tree}")"
+  snapshot_index_tree="$(git -C "$dir" rev-parse "$snapshot_oid^2^{tree}" 2>/dev/null || git -C "$dir" rev-parse HEAD^{tree})"
   git -C "$dir" ls-files --others --exclude-standard -z >"$untracked_file"
   if [ -s "$untracked_file" ]; then
     tar -C "$dir" --null --files-from="$untracked_file" -cf "$untracked_tar"
@@ -246,23 +296,99 @@ move_dirty_staging_capsule() {
     return 1
   fi
 
-  if [ -s "$patch" ]; then
-    git -C "$recovery_dir" apply --index --binary "$patch"
-  fi
+  recovery_parent="$(git -C "$recovery_dir" rev-parse HEAD)"
+  recovery_snapshot_ref="refs/kitsoki/dirty-snapshot/$snapshot_oid"
+  git -C "$recovery_dir" fetch --no-tags "$dir" "$snapshot_oid:$recovery_snapshot_ref"
+  git -C "$recovery_dir" reset --hard "$recovery_snapshot_ref" >/dev/null
   if [ -s "$untracked_file" ]; then
     tar -C "$recovery_dir" -xf "$untracked_tar"
   fi
-  if ! scripts/dev-workspace.sh commit "$recovery_dir" \
-    --message "chore: recover dirty staging capsule changes" >/dev/null; then
+  git -C "$recovery_dir" add -A
+  expected_tree="$(git -C "$recovery_dir" write-tree)"
+  git -C "$recovery_dir" reset --soft "$recovery_parent"
+  if ! git -C "$recovery_dir" commit --allow-empty --signoff \
+    -m "chore: recover dirty staging capsule changes" >/dev/null; then
     echo "error: could not commit recovery capsule; staging capsule left unchanged" >&2
     return 1
   fi
+  recovery_tree="$(git -C "$recovery_dir" rev-parse HEAD^{tree})"
+  [ "$recovery_tree" = "$expected_tree" ] || {
+    echo "error: recovery capsule tree does not match the captured dirty snapshot; staging capsule left unchanged" >&2
+    return 1
+  }
+  recovery_commit="$(git -C "$recovery_dir" rev-parse HEAD)"
+  primary_snapshot_ref="refs/kitsoki/dirty-snapshot/$snapshot_oid"
+  primary_recovery_ref="refs/kitsoki/dirty-recovery/$recovery_commit"
+  git -C "$repo_root" fetch --no-tags "$dir" "$snapshot_oid:$primary_snapshot_ref"
+  git -C "$repo_root" fetch --no-tags "$recovery_dir" "$recovery_commit:$primary_recovery_ref"
+  [ "$(git -C "$repo_root" rev-parse "$primary_snapshot_ref")" = "$snapshot_oid" ] ||
+    die "dirty staging snapshot was not anchored in the primary repository"
+  [ "$(git -C "$repo_root" rev-parse "$primary_recovery_ref^{tree}")" = "$expected_tree" ] ||
+    die "dirty staging recovery tree was not anchored in the primary repository"
+  git -C "$recovery_dir" update-ref -d "$recovery_snapshot_ref" >/dev/null 2>&1 || true
 
-  clean_dirty_staging_capsule "$dir"
+  # Recheck both tracked/index state and untracked bytes immediately before
+  # cleaning. A concurrent writer must leave the original capsule untouched.
+  current_oid="$(git -C "$dir" stash create "kitsoki staging dirty snapshot recheck $stamp")"
+  [ -n "$current_oid" ] || current_oid="$(git -C "$dir" rev-parse HEAD)"
+  current_tree="$(git -C "$dir" rev-parse "$current_oid^{tree}")"
+  current_index_tree="$(git -C "$dir" rev-parse "$current_oid^2^{tree}" 2>/dev/null || git -C "$dir" rev-parse HEAD^{tree})"
+  git -C "$dir" ls-files --others --exclude-standard -z >"$current_untracked_file"
+  if [ -s "$current_untracked_file" ]; then
+    tar -C "$dir" --null --files-from="$current_untracked_file" -cf "$current_untracked_tar"
+  fi
+  if [ "$current_tree" != "$snapshot_tree" ] ||
+    [ "$current_index_tree" != "$snapshot_index_tree" ] ||
+    ! cmp -s "$untracked_file" "$current_untracked_file" ||
+    ! cmp -s "$untracked_tar" "$current_untracked_tar"; then
+    echo "error: staging capsule changed while its recovery snapshot was being committed; original left unchanged" >&2
+    return 1
+  fi
+
+  # Atomically remove the dirty capsule from the active path. Keep the full
+  # checkout as an ignored quarantine so late writers and ignored evidence are
+  # preserved; recreate a clean managed staging capsule at the original path.
+  quarantine_root="$(dirname "$dir")"
+  quarantine_dir="$quarantine_root/closed-recovered-$recovery_id"
+  mkdir -p "$quarantine_root"
+  [ ! -e "$quarantine_dir" ] || die "staging dirty-source quarantine already exists: $quarantine_dir"
+  mv "$dir" "$quarantine_dir"
+  staging_root="$(dirname "$dir")"
+  staging_id="$(basename "$dir")"
+  replacement_bootstrap="--no-bootstrap"
+  if make -C "$repo_root" -n bootstrap-workspace >/dev/null 2>&1 ||
+    make -C "$repo_root" -n bootstrap-worktree >/dev/null 2>&1; then
+    replacement_bootstrap="--bootstrap"
+  fi
+  if ! scripts/dev-workspace.sh create \
+    --repo "$repo_root" \
+    --root "$staging_root" \
+    --id "$staging_id" \
+    --branch "$staging_branch" \
+    --base "$staging_branch" \
+    --target "$base" \
+    "$replacement_bootstrap" >/dev/null; then
+    [ ! -e "$dir" ] && mv "$quarantine_dir" "$dir" >/dev/null 2>&1 || true
+    echo "error: recovery is anchored, but a clean staging capsule could not be recreated" >&2
+    return 1
+  fi
+  if ! scripts/dev-workspace.sh seal-recovered-quarantine \
+    --repo "$repo_root" \
+    --root "$staging_root" \
+    --snapshot-ref "$primary_snapshot_ref" \
+    --recovery-ref "$primary_recovery_ref" \
+    "$quarantine_dir" >/dev/null; then
+    echo "error: clean staging capsule was recreated and recovery refs are anchored, but the source quarantine could not be sealed" >&2
+    return 1
+  fi
+  rm -f "$current_untracked_file" "$current_untracked_tar"
   echo "refresh-staging-local: moved dirty staging-capsule changes to a committed recovery capsule:" >&2
   echo "  workspace: $recovery_dir" >&2
   echo "  branch: $recovery_branch" >&2
-  echo "  patch: $patch" >&2
+  echo "  snapshot tree: $expected_tree" >&2
+  echo "  snapshot ref: $primary_snapshot_ref" >&2
+  echo "  recovery ref: $primary_recovery_ref" >&2
+  echo "  original quarantine: $quarantine_dir" >&2
 }
 
 handle_dirty_staging_capsule() {
@@ -524,13 +650,116 @@ git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$staging_branch" >/de
 # merge may advance staging/local while this helper is rebasing; that new work
 # is authoritative and must never be replaced by a stale staging capsule.
 staging_start="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
-snapshot_ref="refs/kitsoki/refresh-staging-snapshot-$$"
-import_ref="refs/kitsoki/refresh-staging-import-$$"
+base_primary_start="$(git -C "$repo_root" rev-parse "refs/heads/$base")"
+capsule_upstream_start="$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$staging_branch")" ||
+  die "staging capsule cannot resolve its pre-refresh source/$staging_branch"
+capsule_original_start="$(git -C "$staging_capsule" rev-parse HEAD)"
+primary_recovery_ref="refs/kitsoki/staging-capsule-recovery/$capsule_original_start"
+primary_upstream_recovery_ref="refs/kitsoki/staging-capsule-recovery/$capsule_upstream_start"
+
+# Failed refreshes intentionally retain recovery refs. Use a timestamp, PID,
+# and collision suffix so PID reuse can never overwrite older recovery state.
+refresh_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+refresh_attempt=0
+while :; do
+  refresh_id="$refresh_stamp-$$-$refresh_attempt"
+  capsule_original_ref="refs/kitsoki/refresh/$refresh_id/capsule-original"
+  if ! git -C "$staging_capsule" rev-parse --verify --quiet "$capsule_original_ref" >/dev/null; then
+    break
+  fi
+  refresh_attempt=$((refresh_attempt + 1))
+  [ "$refresh_attempt" -lt 1000 ] || die "could not allocate a unique staging refresh id"
+done
+snapshot_ref="refs/kitsoki/refresh/$refresh_id/staging-snapshot"
+base_snapshot_ref="refs/kitsoki/refresh/$refresh_id/base-snapshot"
+capsule_upstream_ref="refs/kitsoki/refresh/$refresh_id/capsule-upstream"
+capsule_ref="refs/kitsoki/refresh/$refresh_id/capsule-post-snapshot"
+import_ref="refs/kitsoki/refresh/$refresh_id/import"
+capsule_failed_ref="refs/kitsoki/refresh/$refresh_id/capsule-failed-head"
+refresh_succeeded=0
+restore_original_on_failure=0
+restore_failed_capsule_branch() {
+  local primary_current current_branch clean current_tip
+  [ "$restore_original_on_failure" = "1" ] || return 0
+  primary_current="$(git -C "$repo_root" rev-parse --verify "refs/heads/$staging_branch" 2>/dev/null || true)"
+  # Once primary staging moved, leave any newer capsule branch in place; the
+  # next refresh can converge it without hiding concurrent work.
+  [ "$primary_current" = "$staging_start" ] || return 0
+  current_branch="$(git -C "$staging_capsule" branch --show-current 2>/dev/null || true)"
+  [ "$current_branch" = "$staging_branch" ] || return 0
+  if ! clean="$(source_dirty "$staging_capsule")"; then
+    return 0
+  fi
+  [ -z "$clean" ] || return 0
+  current_tip="$(git -C "$staging_capsule" rev-parse --verify "refs/heads/$staging_branch" 2>/dev/null || true)"
+  [ -n "$current_tip" ] || return 0
+  [ "$current_tip" != "$capsule_original_start" ] || return 0
+  git -C "$staging_capsule" update-ref "$capsule_failed_ref" "$current_tip" || return 0
+  if git -C "$staging_capsule" update-ref \
+    "refs/heads/$staging_branch" "$capsule_original_start" "$current_tip"; then
+    git -c submodule.recurse=false -C "$staging_capsule" reset --hard "$capsule_original_start" >/dev/null || return 0
+    echo "refresh-staging-local: restored active capsule branch to its original tip after refusal" >&2
+    echo "refresh-staging-local: preserved refused capsule tip at $capsule_failed_ref" >&2
+  fi
+}
 cleanup_refresh_refs() {
-  git -C "$repo_root" update-ref -d "$import_ref" >/dev/null 2>&1 || true
   git -C "$staging_capsule" update-ref -d "$snapshot_ref" >/dev/null 2>&1 || true
+  git -C "$staging_capsule" update-ref -d "$base_snapshot_ref" >/dev/null 2>&1 || true
+  if [ "$refresh_succeeded" -eq 1 ]; then
+    git -C "$repo_root" update-ref -d "$import_ref" >/dev/null 2>&1 || true
+    git -C "$staging_capsule" update-ref -d "$capsule_original_ref" >/dev/null 2>&1 || true
+    git -C "$staging_capsule" update-ref -d "$capsule_upstream_ref" >/dev/null 2>&1 || true
+    git -C "$staging_capsule" update-ref -d "$capsule_ref" >/dev/null 2>&1 || true
+  else
+    restore_failed_capsule_branch
+    if [ "$(git -C "$repo_root" rev-parse --verify --quiet "$primary_recovery_ref" 2>/dev/null || true)" = "$capsule_original_start" ]; then
+      echo "refresh-staging-local: durable original capsule backup: $primary_recovery_ref" >&2
+    fi
+    if [ "$(git -C "$repo_root" rev-parse --verify --quiet "$primary_upstream_recovery_ref" 2>/dev/null || true)" = "$capsule_upstream_start" ]; then
+      echo "refresh-staging-local: durable old capsule upstream backup: $primary_upstream_recovery_ref" >&2
+    fi
+    if git -C "$staging_capsule" rev-parse --verify --quiet "$capsule_original_ref" >/dev/null; then
+      echo "refresh-staging-local: preserved original capsule work at $capsule_original_ref" >&2
+    fi
+    if git -C "$staging_capsule" rev-parse --verify --quiet "$capsule_upstream_ref" >/dev/null; then
+      echo "refresh-staging-local: preserved old capsule upstream at $capsule_upstream_ref" >&2
+    fi
+    if git -C "$staging_capsule" rev-parse --verify --quiet "$capsule_ref" >/dev/null; then
+      echo "refresh-staging-local: preserved post-snapshot capsule work at $capsule_ref" >&2
+    fi
+    if git -C "$staging_capsule" rev-parse --verify --quiet "$capsule_failed_ref" >/dev/null; then
+      echo "refresh-staging-local: preserved refused capsule head at $capsule_failed_ref" >&2
+    fi
+    if git -C "$repo_root" rev-parse --verify --quiet "$import_ref" >/dev/null; then
+      echo "refresh-staging-local: preserved proven import candidate at $import_ref" >&2
+    fi
+  fi
 }
 trap cleanup_refresh_refs EXIT
+git -C "$staging_capsule" update-ref "$capsule_original_ref" "$capsule_original_start"
+git -C "$staging_capsule" update-ref "$capsule_upstream_ref" "$capsule_upstream_start"
+
+# Anchor both pieces of pre-refresh capsule state outside the capsule before
+# mutating it. The remote-tracking tip can contain work not reachable from the
+# checked-out branch, especially after an interrupted or manually recovered
+# refresh. Content-addressed refs are idempotent and survive successful refresh
+# and capsule replacement.
+anchor_capsule_state() {
+  local source_ref="$1" expected="$2" recovery_ref="$3" label="$4"
+  if git -C "$repo_root" rev-parse --verify --quiet "$recovery_ref" >/dev/null; then
+    [ "$(git -C "$repo_root" rev-parse "$recovery_ref")" = "$expected" ] ||
+      die "content-addressed $label recovery ref points at the wrong object"
+  else
+    git -C "$repo_root" fetch --no-tags "$staging_capsule" \
+      "$source_ref:$recovery_ref"
+  fi
+  [ "$(git -C "$repo_root" rev-parse "$recovery_ref")" = "$expected" ] ||
+    die "primary $label recovery ref does not match captured capsule state"
+}
+anchor_capsule_state \
+  "$capsule_original_ref" "$capsule_original_start" "$primary_recovery_ref" "original capsule"
+anchor_capsule_state \
+  "$capsule_upstream_ref" "$capsule_upstream_start" "$primary_upstream_recovery_ref" "old capsule upstream"
 
 echo "refresh-staging-local: fetching staging snapshot $staging_start and local $base into staging capsule" >&2
 # The staging capsule is long-lived, so its source/staging ref can have been
@@ -546,12 +775,58 @@ if [ "$snapshot_fetched" != "$staging_start" ]; then
   die "staging branch advanced before the capsule could fetch its snapshot ($staging_start -> $snapshot_fetched); rerun refresh"
 fi
 git -C "$staging_capsule" update-ref "$snapshot_ref" "$snapshot_fetched"
+capsule_delta_base_start="$(git -C "$staging_capsule" \
+  merge-base "$capsule_original_start" "$staging_start")" ||
+  die "could not determine the capsule/new-staging merge base"
+base_start="$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$base")"
+[ "$base_start" = "$base_primary_start" ] ||
+  die "$base advanced before the capsule fetched it ($base_primary_start -> $base_start); rerun refresh"
+git -C "$staging_capsule" update-ref "$base_snapshot_ref" "$base_start"
+
+expected_capsule_tree="$(expected_tree_after_delta \
+  "$staging_capsule" \
+  "$capsule_delta_base_start" \
+  "$capsule_original_start" \
+  "$staging_start")" ||
+  die "could not construct the expected post-snapshot capsule tree"
+refuse_untracked_tree_collisions \
+  "$staging_capsule" "$capsule_original_start" "$expected_capsule_tree" \
+  "staging-snapshot rebase" ||
+  die "move or preserve the reported local paths before retrying"
 
 echo "refresh-staging-local: rebasing staging capsule onto the captured staging snapshot" >&2
 git -C "$staging_capsule" rebase "$snapshot_ref"
+capsule_start="$(git -C "$staging_capsule" rev-parse HEAD)"
+git -C "$staging_capsule" update-ref "$capsule_ref" "$capsule_start"
+capsule_tree="$(git -C "$staging_capsule" rev-parse "$capsule_start^{tree}")"
+if [ "$capsule_tree" != "$expected_capsule_tree" ]; then
+  restore_original_on_failure=1
+  die "refusing to continue: post-snapshot capsule tree differs from the expected preserved tree"
+fi
+
+combined_base="$(git -C "$staging_capsule" merge-base "$staging_start" "$base_start")" ||
+  die "could not find the staging/base merge base"
+expected_result_tree="$(expected_tree_after_delta \
+  "$staging_capsule" \
+  "$combined_base" \
+  "$capsule_start" \
+  "$base_start")" ||
+  die "could not construct the expected staging-on-base tree"
+refuse_untracked_tree_collisions \
+  "$staging_capsule" "$capsule_start" "$expected_result_tree" \
+  "$base rebase" ||
+  die "move or preserve the reported local paths before retrying"
 
 echo "refresh-staging-local: rebasing staging capsule onto source/$base" >&2
-git -C "$staging_capsule" rebase "source/$base"
+git -C "$staging_capsule" rebase "$base_start"
+rebased_result="$(git -C "$staging_capsule" rev-parse HEAD)"
+rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
+if [ "$rebased_result_tree" != "$expected_result_tree" ]; then
+  restore_original_on_failure=1
+  die "refusing to continue: rebased staging tree differs from the expected preserved tree"
+fi
+git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$rebased_result" ||
+  die "refusing to continue: rebased staging is not based on captured $base"
 
 copy_local_config
 
@@ -559,27 +834,56 @@ if [ -n "$gate" ]; then
   echo "refresh-staging-local: running gate in $staging_capsule: $gate" >&2
   (cd "$staging_capsule" && sh -c "$gate")
 fi
+post_gate_dirty="$(source_dirty "$staging_capsule")"
+if [ -n "$post_gate_dirty" ]; then
+  echo "error: staging refresh gate left uncommitted changes:" >&2
+  printf '%s\n' "$post_gate_dirty" >&2
+  exit 1
+fi
 
 staging_result="$(git -C "$staging_capsule" rev-parse HEAD)"
 git -C "$staging_capsule" rev-parse --verify --quiet "$staging_result^{tree}" >/dev/null ||
   die "staging capsule result has no readable tree: $staging_result"
-if ! git -C "$staging_capsule" merge-base --is-ancestor "$staging_start" "$staging_result"; then
-  rebased_snapshot_is_preserved "$staging_capsule" "$staging_start" "$staging_result" "$base" ||
-    die "refusing to import staging result that does not preserve the captured staging patch series"
+if [ "$staging_result" != "$rebased_result" ]; then
+  restore_original_on_failure=1
+  die "refusing to import staging result because the refresh gate moved capsule HEAD"
 fi
+git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$staging_result" ||
+  die "refusing to import staging result that is not based on captured $base"
+
+capsule_current="$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")"
+[ "$capsule_current" = "$staging_result" ] ||
+  die "staging capsule branch advanced before import ($staging_result -> $capsule_current); rerun refresh"
 
 # Import the object under a private ref first.  Do not fetch directly into the
 # primary staging ref: doing so is a forceful ref mutation that can silently
 # discard a successful concurrent workspace merge.
-git -C "$repo_root" fetch "$staging_capsule" "HEAD:$import_ref"
+git -C "$repo_root" fetch "$staging_capsule" "$staging_result:$import_ref"
+[ "$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")" = "$staging_result" ] ||
+  die "staging capsule branch advanced while importing the proven result; rerun refresh"
 staging_current="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
 if [ "$staging_current" != "$staging_start" ]; then
   die "staging branch advanced during refresh ($staging_start -> $staging_current); refusing to overwrite newer work"
 fi
-if ! git -C "$repo_root" update-ref "refs/heads/$staging_branch" "$staging_result" "$staging_start"; then
-  die "staging branch changed while importing refreshed capsule; refusing to overwrite newer work"
+base_current="$(git -C "$repo_root" rev-parse "refs/heads/$base")"
+if [ "$base_current" != "$base_start" ]; then
+  die "$base advanced during refresh ($base_start -> $base_current); refusing to import stale staging"
 fi
+if ! {
+  printf 'start\n'
+  printf 'verify refs/heads/%s %s\n' "$base" "$base_start"
+  printf 'update refs/heads/%s %s %s\n' "$staging_branch" "$staging_result" "$staging_start"
+  printf 'prepare\n'
+  printf 'commit\n'
+} | git -C "$repo_root" update-ref --stdin; then
+  die "$base or $staging_branch changed during the atomic staging import; refusing to overwrite newer work"
+fi
+[ "$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")" = "$staging_result" ] ||
+  die "staging capsule advanced after import; primary result is preserved, rerun refresh to converge"
+refresh_succeeded=1
 
 printf '%s -> %s\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")"
 printf 'staging capsule: %s\n' "$staging_capsule"
 printf 'base: %s (%s)\n' "$base" "$(git rev-parse --short "$base")"
+printf 'original capsule backup: %s\n' "$primary_recovery_ref"
+printf 'old capsule upstream backup: %s\n' "$primary_upstream_recovery_ref"

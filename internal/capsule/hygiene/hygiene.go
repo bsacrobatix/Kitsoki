@@ -725,10 +725,12 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 	}
 	candidate.Initializing = fileExists(filepath.Join(filepath.Dir(path), ".initializing", candidate.WorkspaceID))
 	candidate.Current = pathContains(path, current)
+	stagingPinned := pathContains(filepath.Join(root, ".capsules", "staging"), path) &&
+		!strings.HasPrefix(filepath.Base(path), "closed-")
 	candidate.Pinned = pinned[candidate.WorkspaceID] ||
 		fileExists(filepath.Join(path, workspacePinSentinel)) ||
 		fileExists(filepath.Join(root, ".capsules", "workspace-pins", candidate.WorkspaceID)) ||
-		pathContains(filepath.Join(root, ".capsules", "staging"), path)
+		stagingPinned
 	status, statusErr := gitStatus(ctx, path)
 	if statusErr == nil {
 		candidate.Status = "clean"
@@ -822,6 +824,16 @@ type legacyCapsuleManifest struct {
 	} `json:"environment"`
 }
 
+type recoveredQuarantineManifest struct {
+	Schema       string `json:"schema"`
+	SnapshotRef  string `json:"snapshot_ref"`
+	RecoveryRef  string `json:"recovery_ref"`
+	RecoveryTree string `json:"recovery_tree"`
+	TipRef       string `json:"tip_ref"`
+	Head         string `json:"head"`
+	Tree         string `json:"tree"`
+}
+
 func legacyWorkspaceMarker(path string) bool {
 	return fileExists(filepath.Join(path, ".kitsoki-clone")) || fileExists(filepath.Join(path, ".kitsoki-dev-workspace.json"))
 }
@@ -892,12 +904,82 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 	if err != nil {
 		return invalid("read HEAD: %v", err)
 	}
-	merged, err := gitAncestor(ctx, root, head, "refs/heads/"+clone.Target)
-	if err != nil {
-		return invalid("verify target containment: %v", err)
+	merged := false
+	if strings.HasPrefix(id, "closed-recovered-") {
+		if err := validateRecoveredQuarantine(ctx, root, path, head); err != nil {
+			return invalid("recovered quarantine: %v", err)
+		}
+		merged = true
+	} else {
+		merged, err = gitAncestor(ctx, root, head, "refs/heads/"+clone.Target)
+		if err != nil {
+			return invalid("verify target containment: %v", err)
+		}
 	}
 	updated := workspaceUpdatedAt(ctx, path, clone.Branch, clone.CreatedAt)
 	return legacyWorkspace{Branch: clone.Branch, Target: clone.Target, Head: head, Merged: merged, UpdatedAt: updated}, true, nil
+}
+
+func validateRecoveredQuarantine(ctx context.Context, root, path, head string) error {
+	var marker recoveredQuarantineManifest
+	if err := readJSON(filepath.Join(path, ".kitsoki-recovered-quarantine.json"), &marker); err != nil {
+		return fmt.Errorf("manifest: %w", err)
+	}
+	if marker.Schema != "kitsoki.recovered-quarantine/v1" ||
+		!strings.HasPrefix(marker.SnapshotRef, "refs/kitsoki/dirty-snapshot/") ||
+		!strings.HasPrefix(marker.RecoveryRef, "refs/kitsoki/dirty-recovery/") ||
+		!strings.HasPrefix(marker.TipRef, "refs/kitsoki/recovered-quarantine/") ||
+		marker.Head == "" || marker.Tree == "" || marker.RecoveryTree == "" {
+		return errors.New("ownership fields are invalid")
+	}
+	if !isObjectID(marker.Head) || !isObjectID(marker.Tree) || !isObjectID(marker.RecoveryTree) {
+		return errors.New("ownership object IDs are invalid")
+	}
+	if marker.Head != head {
+		return fmt.Errorf("HEAD changed after seal: got %s want %s", head, marker.Head)
+	}
+	if marker.Tree != marker.RecoveryTree {
+		return fmt.Errorf("sealed tree contains work beyond the signed recovery tree: got %s want %s", marker.Tree, marker.RecoveryTree)
+	}
+	workspaceTree, err := gitText(ctx, path, "rev-parse", "HEAD^{tree}")
+	if err != nil || workspaceTree != marker.Tree {
+		return fmt.Errorf("sealed tree changed: got %s want %s", workspaceTree, marker.Tree)
+	}
+	snapshot, err := gitText(ctx, root, "rev-parse", "--verify", marker.SnapshotRef+"^{commit}")
+	if err != nil || snapshot == "" {
+		return errors.New("primary snapshot ref is missing or unreadable")
+	}
+	if strings.TrimPrefix(marker.SnapshotRef, "refs/kitsoki/dirty-snapshot/") != snapshot {
+		return fmt.Errorf("primary snapshot ref is not content-addressed to %s", snapshot)
+	}
+	recovery, err := gitText(ctx, root, "rev-parse", "--verify", marker.RecoveryRef+"^{commit}")
+	if err != nil || strings.TrimPrefix(marker.RecoveryRef, "refs/kitsoki/dirty-recovery/") != recovery {
+		return fmt.Errorf("primary recovery ref is not content-addressed to %s", recovery)
+	}
+	recoveryTree, err := gitText(ctx, root, "rev-parse", "--verify", marker.RecoveryRef+"^{tree}")
+	if err != nil || recoveryTree != marker.RecoveryTree {
+		return fmt.Errorf("primary recovery tree changed: got %s want %s", recoveryTree, marker.RecoveryTree)
+	}
+	tip, err := gitText(ctx, root, "rev-parse", "--verify", marker.TipRef+"^{commit}")
+	if err != nil || tip != marker.Head {
+		return fmt.Errorf("primary quarantine tip changed: got %s want %s", tip, marker.Head)
+	}
+	if strings.TrimPrefix(marker.TipRef, "refs/kitsoki/recovered-quarantine/") != tip {
+		return fmt.Errorf("primary quarantine tip ref is not content-addressed to %s", tip)
+	}
+	return nil
+}
+
+func isObjectID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func workspaceUpdatedAt(ctx context.Context, path, branch string, created time.Time) time.Time {
@@ -1203,7 +1285,12 @@ func closeLegacyWorkspace(ctx context.Context, root string, candidate Candidate)
 		return fmt.Errorf("capsule hygiene: legacy workspace path failed confinement")
 	}
 	script := filepath.Join(root, "scripts", "dev-workspace.sh")
-	cmd := exec.CommandContext(ctx, script, "teardown", "--repo", root, "--root", filepath.Dir(path), path)
+	args := []string{"teardown", "--repo", root, "--root", filepath.Dir(path)}
+	if strings.HasPrefix(filepath.Base(path), "closed-") {
+		args = append(args, "--purge-quarantine")
+	}
+	args = append(args, path)
+	cmd := exec.CommandContext(ctx, script, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("capsule hygiene: legacy provider teardown: %w: %s", err, strings.TrimSpace(string(out)))
@@ -1425,7 +1512,7 @@ func pathSize(ctx context.Context, path string, excludeSharedGitObjects bool) (i
 }
 
 func gitStatus(ctx context.Context, path string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain", "--untracked-files=all")
 	cmd.Dir = path
 	out, err := cmd.CombinedOutput()
 	if err != nil {

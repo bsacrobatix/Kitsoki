@@ -871,6 +871,238 @@ func TestApplyUsesLegacyProviderTeardownAfterRecheck(t *testing.T) {
 	}
 }
 
+func TestApplyPurgesClosedWorkspaceQuarantineThroughProvider(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	created := time.Now().UTC()
+	workspace := writeLegacyWorkspace(t, root, "closed-finished-20260712", created, false, false)
+	script := filepath.Join(root, "scripts", "dev-workspace.sh")
+	stub := "#!/bin/sh\n[ \"$1\" = teardown ] || exit 11\n[ \"$2\" = --repo ] || exit 12\n[ \"$4\" = --root ] || exit 13\n[ \"$6\" = --purge-quarantine ] || exit 14\nrm -rf \"$7\"\n"
+	if err := os.WriteFile(script, []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Apply(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Removed) != 1 || !result.Removed[0].Legacy || len(result.Skipped) != 0 {
+		t.Fatalf("result=%#v", result)
+	}
+	if _, err := os.Stat(workspace); !os.IsNotExist(err) {
+		t.Fatalf("closed workspace quarantine still exists or unexpected stat error: %v", err)
+	}
+}
+
+func TestCloseThenCleanupPreservesTrackedAndIgnoredReviewRoots(t *testing.T) {
+	root := t.TempDir()
+	runHygieneGit(t, root, "init")
+	runHygieneGit(t, root, "config", "user.name", "Close Hygiene Test")
+	runHygieneGit(t, root, "config", "user.email", "close-hygiene@example.test")
+	for _, dir := range []string{".context", ".artifacts"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		".gitignore":              "/.context/\n/.artifacts/\n",
+		"README.md":               "close fixture\n",
+		".context/tracked.md":     "tracked context\n",
+		".artifacts/tracked.json": "{\"tracked\":true}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runHygieneGit(t, root, "add", ".gitignore", "README.md")
+	runHygieneGit(t, root, "add", "-f", ".context/tracked.md", ".artifacts/tracked.json")
+	runHygieneGit(t, root, "commit", "--signoff", "-m", "tracked review roots")
+	runHygieneGit(t, root, "branch", "staging/local")
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scriptSource := filepath.Clean(filepath.Join(wd, "..", "..", "..", "scripts", "dev-workspace.sh"))
+	scriptBytes, err := os.ReadFile(scriptSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(root, "scripts", "dev-workspace.sh")
+	if err := os.MkdirAll(filepath.Dir(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, scriptBytes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(root, ".capsules", "workspaces", "tracked-review")
+	runHygieneCommand(t, root, script, "create", "--repo", root, "--id", "tracked-review", "--branch", "agent/tracked-review", "--base", "staging/local", "--target", "staging/local", "--no-bootstrap")
+	for path, body := range map[string]string{
+		".context/ignored.md":                        "ignored context\n",
+		".artifacts/ignored.txt":                     "ignored evidence\n",
+		".artifacts/issues/future/.provider-payload": "future provider payload\n",
+	} {
+		full := filepath.Join(workspace, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runHygieneCommand(t, root, script, "close", "--repo", root, "tracked-review")
+	closed, err := filepath.Glob(filepath.Join(root, ".capsules", "workspaces", "closed-tracked-review-*"))
+	if err != nil || len(closed) != 1 {
+		t.Fatalf("closed workspaces=%v err=%v", closed, err)
+	}
+	quarantine := closed[0]
+	for _, path := range []string{".context/tracked.md", ".artifacts/tracked.json", ".context/ignored.md", ".artifacts/ignored.txt", ".artifacts/issues/future/.provider-payload"} {
+		if _, err := os.Stat(filepath.Join(quarantine, path)); err != nil {
+			t.Fatalf("quarantine lost %s: %v", path, err)
+		}
+	}
+	if status := runHygieneCommand(t, quarantine, "git", "status", "--porcelain", "--untracked-files=all"); strings.TrimSpace(status) != "" {
+		t.Fatalf("closed quarantine is tracked-dirty: %s", status)
+	}
+	preserved, err := filepath.Glob(filepath.Join(root, ".artifacts", "workspace-close", "tracked-review-*", ".artifacts", "issues", "future", ".provider-payload"))
+	if err != nil || len(preserved) != 1 {
+		t.Fatalf("future provider evidence was not copied: %v err=%v", preserved, err)
+	}
+
+	result, err := Apply(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Removed) != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("result=%#v", result)
+	}
+	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
+		t.Fatalf("closed quarantine still exists or unexpected stat error: %v", err)
+	}
+}
+
+func TestClosedWorkspaceCannotHideUntrackedFilesWithGitConfig(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	workspace := writeLegacyWorkspace(t, root, "closed-hidden-untracked", time.Now().UTC(), false, false)
+	runHygieneGit(t, workspace, "config", "status.showUntrackedFiles", "no")
+	if err := os.WriteFile(filepath.Join(workspace, "surprise.txt"), []byte("must survive\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := assertWorkspaceCandidate(t, plan, "closed-hidden-untracked", false, "uncommitted changes")
+	if !candidate.Dirty {
+		t.Fatalf("candidate did not report hidden untracked work: %#v", candidate)
+	}
+}
+
+func TestRecoveredQuarantineIsEligibleOnlyThroughDurableRefs(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	workspace := writeLegacyWorkspace(t, root, "closed-recovered-safe", time.Now().UTC(), false, false)
+	if err := os.WriteFile(filepath.Join(workspace, "recovered.txt"), []byte("recovered work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runHygieneGit(t, workspace, "add", "recovered.txt")
+	runHygieneGit(t, workspace, "commit", "--signoff", "-m", "sealed recovered work")
+	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
+	tree := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD^{tree}"))
+	snapshotRef := "refs/kitsoki/dirty-snapshot/" + head
+	recoveryRef := "refs/kitsoki/dirty-recovery/" + head
+	tipRef := "refs/kitsoki/recovered-quarantine/" + head
+	for _, ref := range []string{snapshotRef, recoveryRef, tipRef} {
+		runHygieneGit(t, root, "fetch", "--no-tags", workspace, head+":"+ref)
+	}
+	exclude := filepath.Join(workspace, ".git", "info", "exclude")
+	f, err := os.OpenFile(exclude, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(".kitsoki-recovered-quarantine.json\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	writeTestJSON(t, filepath.Join(workspace, ".kitsoki-recovered-quarantine.json"), map[string]any{
+		"schema":        "kitsoki.recovered-quarantine/v1",
+		"snapshot_ref":  snapshotRef,
+		"recovery_ref":  recoveryRef,
+		"recovery_tree": tree,
+		"tip_ref":       tipRef,
+		"head":          head,
+		"tree":          tree,
+	})
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := assertWorkspaceCandidate(t, plan, "closed-recovered-safe", true, "clean merged inactive")
+	if !candidate.Merged || !candidate.Legacy {
+		t.Fatalf("recovered quarantine did not validate as durable managed state: %#v", candidate)
+	}
+
+	wrongSnapshotRef := "refs/kitsoki/dirty-snapshot/" + strings.Repeat("a", 40)
+	runHygieneGit(t, root, "update-ref", wrongSnapshotRef, head)
+	writeTestJSON(t, filepath.Join(workspace, ".kitsoki-recovered-quarantine.json"), map[string]any{
+		"schema":        "kitsoki.recovered-quarantine/v1",
+		"snapshot_ref":  wrongSnapshotRef,
+		"recovery_ref":  recoveryRef,
+		"recovery_tree": tree,
+		"tip_ref":       tipRef,
+		"head":          head,
+		"tree":          tree,
+	})
+	plan, err = BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkspaceCandidate(t, plan, "closed-recovered-safe", false, "snapshot ref is not content-addressed")
+}
+
 func TestParseWorkspaceActivityMapsOpenFilesToWorkspace(t *testing.T) {
 	root := t.TempDir()
 	one := filepath.Join(root, "one")
@@ -1110,6 +1342,17 @@ func runHygieneGit(t *testing.T, dir string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
+}
+
+func runHygieneCommand(t *testing.T, dir, name string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %v: %v: %s", name, args, err, out)
+	}
+	return string(out)
 }
 
 func assertWorkspaceCandidate(t *testing.T, plan Plan, id string, safe bool, reason string) Candidate {
