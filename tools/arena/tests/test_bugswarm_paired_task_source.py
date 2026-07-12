@@ -300,7 +300,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("docker materializer create image", docker_commands[0][2], "bugswarm/cached-images:square-okio-140452393")
     check("docker materializer source dir", docker_commands[1][2], "container-123:/workspace/src/.")
     check("docker scorer verdict", docker_score["verdict"], "solved")
-    score_cmd = next(cmd for cmd in docker_commands if cmd[:2] == ["docker", "run"])
+    score_cmd = next(cmd for cmd in docker_commands if cmd[:2] == ["docker", "run"] and "run_failed.sh" in cmd[-1])
     check("docker scorer mounts candidate tree", score_cmd[score_cmd.index("-v") + 1], f"{docker_tree}:/workspace/src")
     check("docker scorer command", score_cmd[-2:], ["-lc", "cd -- /workspace/src && run_failed.sh"])
 

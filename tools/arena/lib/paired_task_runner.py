@@ -1264,15 +1264,17 @@ def score_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
 def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
     image = bugswarm_image(task)
     source_dir = bugswarm_source_dir(task)
+    # The image runs its artifact script as the Travis user, while candidate
+    # files originated on the host. Make the disposable mount writable first
+    # without changing the script's expected user/environment.
+    prep = ["docker", "run", "--rm", "--user", "root", "-v", f"{container_path(tree)}:{source_dir}", image, "bash", "-lc", f"chmod -R a+rwX {shlex.quote(source_dir)}"]
+    prepared = subprocess.run(prep, cwd=KITSOKI_ROOT, text=True, capture_output=True)
+    if prepared.returncode != 0:
+        return {"verdict": "blocked", "evidence": task_ref(task), "notes": f"bugswarm candidate permission preparation failed: {first_line(prepared.stdout + chr(10) + prepared.stderr)}"}
     cmd = [
         "docker",
         "run",
         "--rm",
-        # Candidate trees are host-mounted and may be owned by a different
-        # UID than the image's travis user. The oracle writes Maven/Gradle
-        # outputs below that mount, so run its disposable container as root.
-        "--user",
-        "root",
         "-v",
             f"{container_path(tree)}:{source_dir}",
         image,
