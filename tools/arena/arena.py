@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 from arena.executor import CellExecutor, DockerBackend
-from arena.model import Cell, JobSpec
+from arena.model import Cell, JobSpec, TaskOptimizationStudy
 from arena.placement import run_sweep
 from arena.plugins import base as plugins
 from arena.rollup import write_rollup
@@ -222,6 +222,81 @@ def cmd_plugins(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _study_or_error(path: str) -> TaskOptimizationStudy | None:
+    try:
+        return TaskOptimizationStudy.load(path)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: could not load task-optimization study {path}: {exc}", file=sys.stderr)
+        return None
+
+
+def cmd_task_optimization_validate(args: argparse.Namespace) -> int:
+    study = _study_or_error(args.study)
+    if study is None:
+        return 1
+    try:
+        corpus = study.corpus()
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: invalid corpus lock: {exc}", file=sys.stderr)
+        return 1
+    print(f"OK: {study.study_id} tasks={len(corpus['tasks'])} candidates={len(study.candidates)} treatments={len(study.treatments)}")
+    return 0
+
+
+def cmd_task_optimization_plan(args: argparse.Namespace) -> int:
+    study = _study_or_error(args.study)
+    if study is None:
+        return 1
+    try:
+        plan = study.plan(repeat_phase=args.repeat_phase)
+        lock = study.lock()
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: could not materialize task-optimization plan: {exc}", file=sys.stderr)
+        return 1
+    out = Path(args.out)
+    _write_json(out / "plan.json", plan)
+    _write_json(out / "study.lock.json", lock)
+    lines = [f"# Task optimization plan: {study.study_id}", "", f"- cells: **{plan['cell_count']}**",
+             f"- repeat phase: `{args.repeat_phase}`", f"- live gate: `{study.live_gate_env}=1` plus explicit `--live`", "",
+             "## Cells", ""]
+    lines.extend(f"- `{cell['id']}` — {cell['split']} — {cell['status']}" for cell in plan["cells"])
+    (out / "plan.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"plan → {out / 'plan.json'} ({plan['cell_count']} cells)")
+    return 0
+
+
+def cmd_task_optimization_arm(args: argparse.Namespace) -> int:
+    """Create a no-spend arm receipt; live intent is gated even at arming.
+
+    This command intentionally does not dispatch a provider. It exists so an
+    operator cannot mistake a generated plan for authorization to spend.
+    """
+    study = _study_or_error(args.study)
+    if study is None:
+        return 1
+    if not args.live or os.environ.get(study.live_gate_env) != "1":
+        print(f"ERROR: task-optimization arming requires --live and {study.live_gate_env}=1; no provider was called", file=sys.stderr)
+        return 1
+    try:
+        plan = study.plan(repeat_phase=args.repeat_phase)
+        lock = study.lock()
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: could not arm task-optimization study: {exc}", file=sys.stderr)
+        return 1
+    out = Path(args.out)
+    _write_json(out / "study.lock.json", lock)
+    _write_json(out / "armed.json", {"schema": "task-optimization/arm/v1", "study_id": study.study_id,
+                                       "cell_count": plan["cell_count"], "live_gate_env": study.live_gate_env,
+                                       "status": "armed", "provider_dispatched": False})
+    print(f"armed → {out / 'armed.json'} (no provider dispatched)")
+    return 0
+
+
 def validate_spec(spec_path: str, *, live: bool = False) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -361,6 +436,23 @@ def main(argv: list[str] | None = None) -> int:
 
     p_plugins = sub.add_parser("plugins", help="list registered job types")
     p_plugins.set_defaults(func=cmd_plugins)
+
+    p_task_opt = sub.add_parser("task-optimization", help="plan and arm a locked task-optimization study")
+    task_opt_sub = p_task_opt.add_subparsers(dest="task_optimization_cmd", required=True)
+    p_task_validate = task_opt_sub.add_parser("validate", help="validate study and frozen corpus inputs without LLM calls")
+    p_task_validate.add_argument("--study", required=True)
+    p_task_validate.set_defaults(func=cmd_task_optimization_validate)
+    p_task_plan = task_opt_sub.add_parser("plan", help="write deterministic plan and study lock without LLM calls")
+    p_task_plan.add_argument("--study", required=True)
+    p_task_plan.add_argument("--out", required=True)
+    p_task_plan.add_argument("--repeat-phase", default="screening")
+    p_task_plan.set_defaults(func=cmd_task_optimization_plan)
+    p_task_arm = task_opt_sub.add_parser("arm", help="record explicit live authorization without dispatching a provider")
+    p_task_arm.add_argument("--study", required=True)
+    p_task_arm.add_argument("--out", required=True)
+    p_task_arm.add_argument("--repeat-phase", default="screening")
+    p_task_arm.add_argument("--live", action="store_true")
+    p_task_arm.set_defaults(func=cmd_task_optimization_arm)
 
     args = parser.parse_args(argv)
     return args.func(args)
