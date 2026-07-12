@@ -4,103 +4,20 @@
 // launches, but observe/act are never called, so no LLM call happens),
 // drives it through the MCP wire protocol against the local fixture page,
 // and asserts the primitive tool surface actually works end to end.
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { startClient, assertOk } from "../test/mcp-stdio-client.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.join(here, "..", "server.mjs");
 const fixturePath = path.join(here, "..", "test", "fixtures", "fixture.html");
 const fixtureUrl = `file://${fixturePath}`;
 
-function startClient() {
-  const child = spawn(process.execPath, [serverPath], {
-    cwd: path.join(here, ".."),
-    env: { ...process.env, KITSOKI_BROWSER_MCP_HEADLESS: "1" },
-    stdio: ["pipe", "pipe", "inherit"]
-  });
-
-  let buffer = "";
-  const pending = new Map();
-  let nextId = 1;
-
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    buffer += chunk;
-    for (;;) {
-      const idx = buffer.indexOf("\n");
-      if (idx === -1) break;
-      const line = buffer.slice(0, idx).replace(/\r$/, "");
-      buffer = buffer.slice(idx + 1);
-      if (!line.trim()) continue;
-      let message;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (message.id !== undefined && pending.has(message.id)) {
-        pending.get(message.id).resolve(message);
-        pending.delete(message.id);
-      }
-    }
-  });
-
-  function send(method, params) {
-    const id = nextId++;
-    const message = { jsonrpc: "2.0", id, method, params };
-    child.stdin.write(`${JSON.stringify(message)}\n`);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`timed out waiting for response to ${method}`));
-      }, 30000);
-      pending.set(id, {
-        resolve: (msg) => {
-          clearTimeout(timer);
-          resolve(msg);
-        }
-      });
-    });
-  }
-
-  function notify(method, params) {
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
-  }
-
-  async function callTool(name, args = {}) {
-    const response = await send("tools/call", { name, arguments: args });
-    if (response.error) throw new Error(`${name}: ${JSON.stringify(response.error)}`);
-    const result = response.result;
-    const text = result?.content?.[0]?.text;
-    let parsed = text;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      // leave as text
-    }
-    if (result?.isError) throw new Error(`${name} returned isError: ${text}`);
-    return parsed;
-  }
-
-  return { child, send, notify, callTool };
-}
-
-function assertOk(cond, message) {
-  if (!cond) throw new Error(`SMOKE FAIL: ${message}`);
-  console.log(`ok - ${message}`);
-}
-
 async function main() {
-  const client = startClient();
+  const client = startClient({ serverPath });
 
-  const init = await client.send("initialize", {
-    protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "browser-mcp-smoke", version: "0.0.0" }
-  });
+  const init = await client.initialize();
   assertOk(init.result?.serverInfo?.name === "kitsoki-browser-mcp", "initialize returns server info");
-  client.notify("notifications/initialized", {});
 
   const list = await client.send("tools/list", {});
   const names = (list.result?.tools || []).map((t) => t.name);
@@ -114,7 +31,11 @@ async function main() {
     "browser_find",
     "browser_batch",
     "observe",
-    "act"
+    "act",
+    "tour_start",
+    "tour_step",
+    "tour_export",
+    "tour_replay"
   ]) {
     assertOk(names.includes(expected), `tools/list includes ${expected}`);
   }

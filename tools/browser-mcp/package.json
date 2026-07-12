@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:tour": "node scripts/smoke-tour.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

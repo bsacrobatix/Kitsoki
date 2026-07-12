@@ -16,6 +16,7 @@ import { z } from "zod";
 import { makeKitsokiLLMClient } from "./lib/kitsoki-llm-client.mjs";
 import { resolveAnchor, AnchorResolutionError } from "./lib/anchors.mjs";
 import { captureSnapshot, filterSnapshot, resolveRef, DEFAULT_SNAPSHOT_CAP } from "./lib/snapshot.mjs";
+import { tourStart, tourStep, tourExport, tourReplay } from "./lib/tour.mjs";
 
 const KITSOKI_REPO = process.env.KITSOKI_REPO || process.cwd();
 const KITSOKI_AGENT_CMD = process.env.KITSOKI_AGENT_CMD || "kitsoki";
@@ -332,6 +333,82 @@ server.registerTool(
     if (!instruction && !action) throw new Error("act requires either instruction or action");
     const sh = await ensureStagehand();
     return sh.act(action || instruction);
+  })
+);
+
+// --- tour authoring + replay (tour format v2) ----------------------------
+//
+// The browser-mcp package's tour tools produce and consume v2 JSON
+// (schemas/tour-v2.schema.json, internal/tour/manifest_v2.go,
+// tools/runstatus/src/tour/types-v2.ts) directly — tour_export's output is
+// valid input to tour_replay, to internal/tour's v2 loader, and to the
+// player (P4).
+
+const targetBundleShape = {
+  role: z.string().optional(),
+  name: z.string().optional(),
+  testid: z.string().optional(),
+  text: z.string().optional(),
+  css: z.string().optional(),
+  ancestor: z.string().optional()
+};
+
+const popoverShape = {
+  title: z.string().optional(),
+  body: z.string().optional(),
+  side: z.enum(["top", "bottom", "left", "right", "center"]).optional(),
+  align: z.enum(["start", "center", "end"]).optional()
+};
+
+server.registerTool(
+  "tour_start",
+  {
+    description: "Begin authoring a new tour format v2 tour. Call tour_step to add steps, then tour_export.",
+    inputSchema: { id: z.string(), origin: z.string().optional() }
+  },
+  asTool(async (args) => tourStart(args))
+);
+
+server.registerTool(
+  "tour_step",
+  {
+    description:
+      "Append one step to the active tour, validating (and enriching from the live DOM) its target anchor. No LLM call.",
+    inputSchema: {
+      id: z.string(),
+      route: z.string().optional(),
+      target: z.object(targetBundleShape).optional(),
+      popover: z.object(popoverShape).optional(),
+      kind: z.enum(["highlight", "gate", "act", "navigate"]),
+      advanceOn: z.object({ event: z.enum(["click", "input", "route", "submit"]) }).optional(),
+      act: z.object({ kind: z.enum(["click", "fill", "scroll", "press"]), value: z.string().optional() }).optional(),
+      policy: z.enum(["watch", "confirm", "auto"]).optional()
+    }
+  },
+  asTool(async (step) => {
+    const page = await currentPage();
+    return tourStep(page, step);
+  })
+);
+
+server.registerTool(
+  "tour_export",
+  { description: "Return the active tour as tour format v2 JSON." },
+  asTool(async () => tourExport())
+);
+
+server.registerTool(
+  "tour_replay",
+  {
+    description:
+      "Deterministically replay a v2 tour against the current page: resolves every step's target (with anchor healing), performs act steps, and reports pass/fail + any HealEvent per step. No LLM call.",
+    inputSchema: {
+      tour: z.record(z.string(), z.unknown()).describe("A tour format v2 JSON document, as returned by tour_export.")
+    }
+  },
+  asTool(async ({ tour }) => {
+    const page = await currentPage();
+    return tourReplay(page, tour);
   })
 );
 

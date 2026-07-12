@@ -182,14 +182,44 @@ func LoadFeatureManifest(featurePath, repoRoot string) (*TourManifest, DemoBindi
 	return m, b, nil
 }
 
-// LoadTourManifest loads a standalone tour manifest YAML (the --manifest path),
-// which is just the tour block: {export, steps}. No demo binding is implied;
-// the caller supplies --flow / --stories-dir explicitly.
+// LoadTourManifest loads a standalone tour manifest YAML or JSON (the
+// --manifest path). A document declaring "version: 2" is a tour format v2
+// manifest (schemas/tour-v2.schema.json): it is parsed as [TourManifestV2]
+// and downconverted via [ConvertV2ToV1] so the renderer sees the same
+// [TourManifest] shape either way — this is how internal/tour renders v2.
+// A document with no version field (or version other than 2) is the legacy
+// {export, steps} shape. No demo binding is implied; the caller supplies
+// --flow / --stories-dir explicitly.
 func LoadTourManifest(manifestPath string) (*TourManifest, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return nil, fmt.Errorf("read manifest %q: %w", manifestPath, err)
 	}
+
+	var versionProbe struct {
+		Version int `yaml:"version" json:"version"`
+	}
+	if err := yaml.Unmarshal(data, &versionProbe); err != nil {
+		return nil, fmt.Errorf("parse manifest %q: %w", manifestPath, err)
+	}
+	if versionProbe.Version == 2 {
+		var v2 TourManifestV2
+		if err := yaml.Unmarshal(data, &v2); err != nil {
+			return nil, fmt.Errorf("parse v2 manifest %q: %w", manifestPath, err)
+		}
+		v2.SpecPath = manifestPath
+		m, err := ConvertV2ToV1(&v2)
+		if err != nil {
+			return nil, fmt.Errorf("render v2 manifest %q: %w", manifestPath, err)
+		}
+		m.SpecPath = manifestPath
+		m.SpecPointerBase = "/steps"
+		if err := m.validate(); err != nil {
+			return nil, err
+		}
+		return m, nil
+	}
+
 	var m TourManifest
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest %q: %w", manifestPath, err)
