@@ -17,7 +17,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"kitsoki/internal/host/agentruntime"
 	"kitsoki/internal/host/codeact"
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/sysprompt"
@@ -62,14 +64,32 @@ var codeactCapabilityDescriptions = map[string]string{
 // ctx, resolved binary, base CLI args, and the step-schema tempfile) so each
 // Next() call only has to build its own per-step prompt and MCP config.
 type RealCodeactAgent struct {
-	ctx          context.Context
-	bin          string
-	baseCLIArgs  []string
-	workingDir   string
-	schemaPath   string
-	goal         string
-	budget       int
-	capabilities []string
+	ctx            context.Context
+	bin            string
+	baseCLIArgs    []string
+	workingDir     string
+	schemaPath     string
+	goal           string
+	budget         int
+	capabilities   []string
+	runtimeSandbox *AgentSandboxSpec
+}
+
+// codeactCLIRuntimeSandbox is deliberately internal rather than a story YAML
+// sandbox: CodeAct's action boundary is its explicit Starlark capabilities,
+// while this policy supervises the separate model-generator process. Every
+// CLI-backed step must enter this registry-selected baseline or fail closed.
+func codeactCLIRuntimeSandbox() *AgentSandboxSpec {
+	return &AgentSandboxSpec{
+		MinStrength: agentruntime.StrengthSupervised,
+		Repo:        agentruntime.RepoNone,
+		Network:     agentruntime.NetworkModelOnly,
+		Resources: agentruntime.ResourcePolicy{
+			Timeout:         15 * time.Minute,
+			ActivityTimeout: 90 * time.Second,
+		},
+		Degrade: agentruntime.DegradeFail,
+	}
 }
 
 // newRealCodeactAgent resolves the named agent (provider + ladder rung
@@ -108,14 +128,15 @@ func newRealCodeactAgent(ctx context.Context, args map[string]any, goal string, 
 	cleanup := func() { _ = os.Remove(schemaPath) }
 
 	return &RealCodeactAgent{
-		ctx:          ctx,
-		bin:          bin,
-		baseCLIArgs:  cliArgs,
-		workingDir:   workingDir,
-		schemaPath:   schemaPath,
-		goal:         goal,
-		budget:       budget,
-		capabilities: capabilities,
+		ctx:            ctx,
+		bin:            bin,
+		baseCLIArgs:    cliArgs,
+		workingDir:     workingDir,
+		schemaPath:     schemaPath,
+		goal:           goal,
+		budget:         budget,
+		capabilities:   capabilities,
+		runtimeSandbox: codeactCLIRuntimeSandbox(),
 	}, cleanup, nil
 }
 
@@ -147,12 +168,14 @@ func (a *RealCodeactAgent) Next(_ context.Context, step int, obs map[string]any,
 	stepArgs := append(append([]string{}, a.baseCLIArgs...), "--mcp-config", mcpConfigPath)
 	stdin := a.buildStepPrompt(step, obs, errEnv)
 
+	stepCtx := withCodeactRuntimeStep(a.ctx, step)
 	cr, _, runErr := AgentStreamer{
 		Bin:        a.bin,
 		CLIArgs:    stepArgs,
 		Stdin:      stdin,
 		WorkingDir: a.workingDir,
-	}.Run(a.ctx)
+		Sandbox:    a.runtimeSandbox,
+	}.Run(stepCtx)
 	if runErr != nil {
 		return codeact.Emission{}, fmt.Errorf("codeact step %d: claude exec failed: %w", step, runErr)
 	}

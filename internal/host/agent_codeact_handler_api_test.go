@@ -19,6 +19,7 @@ import (
 
 	"kitsoki/internal/agent"
 	"kitsoki/internal/host"
+	"kitsoki/internal/host/agentruntime"
 )
 
 // fakeAPIChatHandler is a RoundTripper emulating an OpenAI-compatible
@@ -149,7 +150,7 @@ func TestAgentCodeactHandler_APIPathSendsAPIKey(t *testing.T) {
 // TestAgentCodeactHandler_FallsBackToCLIWhenNoPluginNamed proves wiring a
 // local_llm registry does NOT divert default codeact to the API path: with no
 // plugin name injected, IsLocalLLM("") is false and the handler uses the CLI
-// path (RealCodeactAgent via the scripted ClaudeRunner). The explodeHandler
+// path (RealCodeactAgent via the scripted runtime). The explodeHandler
 // fails loudly if the API path is accidentally taken.
 func TestAgentCodeactHandler_FallsBackToCLIWhenNoPluginNamed(t *testing.T) {
 	t.Parallel()
@@ -157,10 +158,10 @@ func TestAgentCodeactHandler_FallsBackToCLIWhenNoPluginNamed(t *testing.T) {
 		{"action": "snippet", "snippet": "def main(ctx):\n    return {\"seen\": True}\n"},
 		{"action": "done", "payload": map[string]any{"result": "ok"}},
 	}
-	runner := fakeCodeactRunner(t, turns)
+	runtime := fakeCodeactRuntime(t, turns)
 	reg := glmRegistry(&explodeHandler{t: t}) // API path must NOT be taken
 
-	ctx := host.WithClaudeRunner(context.Background(), runner)
+	ctx := host.WithAgentRuntimeRegistry(context.Background(), agentruntime.NewRegistry(runtime))
 	ctx = host.WithAgentRegistry(ctx, reg)
 	// Deliberately NO WithAgentPluginName → plugin name "" → CLI path.
 	ctx = host.WithAgents(ctx, map[string]host.Agent{"coder": {SystemPrompt: "You write small Starlark snippets."}})

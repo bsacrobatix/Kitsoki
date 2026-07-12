@@ -163,6 +163,7 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 		}()
 		var waitErr error
 		killed := false
+		killReason := ""
 		var activityC <-chan time.Time
 		var activityTicker *time.Ticker
 		if spec.Resources.ActivityTimeout > 0 {
@@ -187,16 +188,23 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 					continue
 				}
 				killed = true
+				killReason = "activity_timeout"
 				killProcessGroup(cmd)
 				waitErr = <-done
 				goto finished
 			case <-waitCtx.Done():
 				killed = true
+				killReason = "cancelled"
 				killProcessGroup(cmd)
 				waitErr = <-done
 				goto finished
 			case <-runCtx.Done():
 				killed = true
+				if runCtx.Err() == context.DeadlineExceeded {
+					killReason = "timeout"
+				} else {
+					killReason = "cancelled"
+				}
 				killProcessGroup(cmd)
 				waitErr = <-done
 				goto finished
@@ -216,12 +224,13 @@ func (s *Supervised) Launch(ctx context.Context, spec LaunchSpec) (*Running, App
 			diff = captureGitDiff(waitCtx, spec.RepoRoot)
 		}
 		return Result{
-			Stdout:    stdout.String(),
-			Stderr:    stderr.String(),
-			ExitCode:  exitCode,
-			Killed:    killed,
-			Duration:  time.Since(start),
-			FinalDiff: diff,
+			Stdout:     stdout.String(),
+			Stderr:     stderr.String(),
+			ExitCode:   exitCode,
+			Killed:     killed,
+			KillReason: killReason,
+			Duration:   time.Since(start),
+			FinalDiff:  diff,
 		}, nil
 	}
 	return NewRunning(policy, wait), policy, nil
