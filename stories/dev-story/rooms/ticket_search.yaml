@@ -30,7 +30,7 @@ states:
           mode: single
           prompt: "Actions"
           items:
-            - { label: "back to tickets", intent: go_back, hint: "refresh local and GitHub tickets, then retry" }
+            - { label: "back to tickets", intent: go_back, hint: "refresh all configured ticket sources, then retry" }
             - { label: "go_main", intent: go_main, hint: "return to the engineering workbench" }
             - { label: "look", intent: look, hint: "re-render the provider error" }
     on:
@@ -43,7 +43,7 @@ states:
 
   ticket_search:
     description: "Browse tickets — pick one, then `continue` into the bugfix pipeline."
-    relevant_world: [ticket_query, ticket_results, ticket_id, ticket_title, oversight_mode]
+    relevant_world: [ticket_query, ticket_sources, ticket_results, ticket_source_groups, ticket_id, ticket_title, oversight_mode]
     # Proactive fetch on entry — the operator should land here and SEE
     # the queue, not be prompted to type a search query first. The
     # empty `ticket_query` default returns the full list; the optional
@@ -58,6 +58,9 @@ states:
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
+          # Ordered provider-neutral federation config. Empty preserves the
+          # legacy single-provider repo/root path below.
+          sources: "{{ world.ticket_sources }}"
           # repo is honoured by host.gh.ticket (the GitHub binding for
           # onboarded repos); ignored by host.local_files.ticket.
           # "" ⇒ gh's local-remote default.
@@ -67,6 +70,7 @@ states:
           root: "{{ world.repo_root }}"
         bind:
           ticket_results: tickets
+          ticket_source_groups: source_groups
           ticket_provider_errors: provider_errors
           ticket_local_count: local_count
           ticket_github_count: github_count
@@ -103,26 +107,27 @@ states:
       # within a session — safe to type `pick_ticket n=2` and have it
       # mean the same row the operator just read.
       #
-      # README-style ghost rows (frontmatter-less *.md under issues/) are
-      # dropped via `{% if t.status %}`. Severity reads only `t.severity`
-      # — the local-files provider's `bugSummary` no longer projects
-      # `priority`, and no host emits it on this branch.
+      # Frontmatter-less Markdown is a valid local report: the local-files
+      # provider normalizes a missing status to `open`, and the view renders
+      # every returned row. README.md is excluded by the provider. Severity
+      # prefers `t.severity` while retaining `priority` as a compatibility
+      # fallback for external providers.
       - heading: 'Tickets{% if world.ticket_query %} (filter: {{ world.ticket_query }}){% endif %}'
       - code: |
           {% if world.ticket_provider_errors|default:""|length > 0 %}Warnings
           {% for err in world.ticket_provider_errors|default:"" %}- {{ err }}
           {% endfor %}
-          {% endif %}{% if world.ticket_results|default:""|length == 0 %}(none — file one in .artifacts/issues/bugs/)
-          {% else %}Local
+          {% endif %}{% if world.ticket_source_groups|default:""|length > 0 %}{% for group in world.ticket_source_groups|default:"" %}{{ group.label|default:group.id|default:"Tickets" }}
            #     St  Sev  Filed       Title
-          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source|default:"local" != "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-          {% endif %}{% endif %}{% endfor %}{% if world.ticket_local_count|default:999 == 0 %}(none — file one in .artifacts/issues/bugs/)
-          {% endif %}{% if world.ticket_github_repo != "" or world.ticket_repo != "" or world.ticket_github_count|default:999 < 999 %}
-          GitHub
+          {% for t in group.tickets|default:"" %}{{ t.index|default:forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id and t.source == world.ticket_source %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endfor %}{% if group.tickets|default:""|length == 0 %}(none)
+          {% endif %}{% if group.error %}⚠ {{ group.error }}
+          {% endif %}
+          {% endfor %}{% elif world.ticket_results|default:""|length > 0 %}Tickets
            #     St  Sev  Filed       Title
-          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source == "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-          {% endif %}{% endif %}{% endfor %}{% if world.ticket_github_count|default:999 == 0 %}(none — check GitHub auth/repo)
-          {% endif %}{% endif %}{% endif %}
+          {% for t in world.ticket_results|default:"" %}{{ t.index|default:forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endfor %}{% else %}(none — no configured source returned tickets)
+          {% endif %}
       # Readiness banner — two sibling elements with mutually-exclusive
       # `when:` guards. The ready case is a `heading:` (style-guide §1
       # emerald "go"); the not-ready case is plain prose (no false green).
@@ -137,17 +142,10 @@ states:
             # parentheses so a quick glance lands on the human label.
             Picked: '{% if world.ticket_id %}{{ world.ticket_title|default:"(no title)" }}  ({{ world.ticket_id }}){% else %}(none — pick one below){% endif %}'
             Oversight: "{{ world.oversight_mode|default:'gated' }}"
-      # Source / identity line (P5) — only rendered for a GitHub-Issue-backed
-      # ticket (ticket_source=github), surfacing the original local-bug-file
-      # id so the local↔issue mapping is visible instead of eyeball-matched.
       - kv:
           pairs:
-            Source: 'GitHub issue #{{ world.ticket_id }}{% if world.ticket_legacy_id %}  (filed locally as {{ world.ticket_legacy_id }}){% endif %}'
-        when: "world.ticket_source == 'github'"
-      - kv:
-          pairs:
-            Source: 'Local artifact {{ world.ticket_source_ref }}'
-        when: "world.ticket_id != '' && world.ticket_source != 'github' && world.ticket_source_ref != ''"
+            Source: '{{ world.ticket_source_label|default:world.ticket_source|default:"(unknown source)" }}{% if world.ticket_source_repo and world.ticket_source_repo != world.ticket_source_label %} · {{ world.ticket_source_repo }}{% endif %}{% if world.ticket_source_ref %} · {{ world.ticket_source_ref }}{% endif %}{% if world.ticket_legacy_id %}  (filed locally as {{ world.ticket_legacy_id }}){% endif %}'
+        when: "world.ticket_id != ''"
       - choice:
           mode: single
           prompt: "Actions"
@@ -168,11 +166,11 @@ states:
                 required:    true
             - label:  "pick_ticket_by_id"
               intent: pick_ticket
-              hint:   "pick by filename id (for fixtures / tab-completed paste)"
+              hint:   "pick by ticket id, or source:id when multiple sources are configured"
               param:
                 slot:        id
                 type:        string
-                placeholder: "ticket id (60-char filename slug)"
+                placeholder: "ticket id or source:id"
                 required:    true
             - label:  "search_tickets"
               intent: search_tickets
@@ -226,7 +224,8 @@ states:
           effects:
             - set:
                 ticket_query:   "{{ slots.query }}"
-                ticket_results: ""
+                ticket_results: []
+                ticket_source_groups: []
       pick_ticket:
         # Stash the picked id + a placeholder title. The optional
         # `type:` slot pins ticket_type for the drive arc; fixtures
@@ -256,7 +255,7 @@ states:
           guard_hint: "Row {{ slots.n }} is out of range — pick 1..{{ len(world.ticket_results) }}."
         - when: "slots.id == nil && slots.n == nil"
           target: .
-          guard_hint: "Provide either id=<filename> or n=<row number>."
+          guard_hint: "Provide either id=<ticket id or source:id> or n=<row number>."
         - target: .
           effects:
             # slots.id wins when supplied; otherwise fall through to the
@@ -267,6 +266,11 @@ states:
             - set:
                 ticket_id:     "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
                 ticket_body:   ""
+                ticket_source: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source ?? '') : '' }}"
+                ticket_source_label: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_label ?? '') : '' }}"
+                ticket_source_kind: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_kind ?? (world.ticket_results[int(slots.n) - 1].source ?? '')) : '' }}"
+                ticket_source_mode: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_mode ?? (world.ticket_results[int(slots.n) - 1].source == 'github' ? 'remote' : 'local')) : '' }}"
+                ticket_source_repo: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_repo ?? '') : '' }}"
                 # Populate ticket_type from the picked ROW so `drive`
                 # routes by kind (bug → bf, feature → impl, epic → cyp).
                 # Direct index access off world.ticket_results works in
@@ -287,9 +291,12 @@ states:
               with:
                 id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
                 source: "{{ slots.n != nil ? world.ticket_results[int(slots.n) - 1].source : '' }}"
-                repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
+                ref: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].ref ?? '') : slots.id }}"
+                sources: "{{ world.ticket_sources }}"
+                repo: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_repo ?? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo)) : (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) }}"
                 root: "{{ world.repo_root }}"
               bind:
+                ticket_id:    id
                 ticket_title: title
                 ticket_url:   url
                 ticket_type:  type
@@ -305,15 +312,25 @@ states:
                 # ticket file. Bound here so the view and child imports keep
                 # the local artifact path or the remote issue URL.
                 ticket_source:    source
+                ticket_source_label: source_label
+                ticket_source_kind: source_kind
+                ticket_source_mode: source_mode
+                ticket_source_repo: source_repo
                 ticket_legacy_id: legacy_id
-                ticket_source_ref: url
+                ticket_source_ref: ref
                 thread: url
               on_error: ticket_pick_error
             - set:
-                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : 'local' }}"
-                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '' }}"
-                ticket_source_ref:  "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+                ticket_source_kind: "{{ world.ticket_source_kind != '' ? world.ticket_source_kind : world.ticket_source }}"
+                ticket_source_mode: "{{ world.ticket_source_mode != '' ? world.ticket_source_mode : (world.ticket_source == 'github' ? 'remote' : 'local') }}"
+                ticket_source_repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : (world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '') }}"
+                ticket_source_ref:  "{{ world.ticket_source_ref != '' ? world.ticket_source_ref : (world.ticket_url != '' ? world.ticket_url : world.thread) }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+            - set:
+                # ticket_repo remains the legacy GitHub-only compatibility key.
+                # Other remote trackers keep identity in ticket_source_repo and
+                # must not trigger bugfix's direct host.gh.ticket fallback.
+                ticket_repo: "{{ world.ticket_source_kind == 'github' ? world.ticket_source_repo : '' }}"
       # Hand off to the bugfix sub-story for the picked ticket.
       # bf.idle's on_enter auto-emits `start` when entered with a
       # ticket and no in-progress artifact, so the operator types
@@ -428,17 +445,17 @@ states:
           {% if world.ticket_provider_errors|default:""|length > 0 %}Warnings
           {% for err in world.ticket_provider_errors|default:"" %}- {{ err }}
           {% endfor %}
-          {% endif %}{% if world.ticket_results|default:""|length == 0 %}(empty)
-          {% else %}Local
+          {% endif %}{% if world.ticket_source_groups|default:""|length > 0 %}{% for group in world.ticket_source_groups|default:"" %}{{ group.label|default:group.id|default:"Tickets" }}
            #     St  Sev  Filed       Title
-          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source|default:"local" != "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-          {% endif %}{% endif %}{% endfor %}{% if world.ticket_local_count|default:999 == 0 %}(none)
-          {% endif %}{% if world.ticket_github_repo != "" or world.ticket_repo != "" or world.ticket_github_count|default:999 < 999 %}
-          GitHub
+          {% for t in group.tickets|default:"" %}{{ t.index|default:forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id and t.source == world.ticket_source %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endfor %}{% if group.tickets|default:""|length == 0 %}(none)
+          {% endif %}{% if group.error %}⚠ {{ group.error }}
+          {% endif %}
+          {% endfor %}{% elif world.ticket_results|default:""|length > 0 %}Tickets
            #     St  Sev  Filed       Title
-          {% for t in world.ticket_results|default:"" %}{% if t.status %}{% if t.source == "github" %}{{ forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
-          {% endif %}{% endif %}{% endfor %}{% if world.ticket_github_count|default:999 == 0 %}(none)
-          {% endif %}{% endif %}{% endif %}
+          {% for t in world.ticket_results|default:"" %}{{ t.index|default:forloop.Counter|stringformat:"%d"|rcol:2 }}  {% if t.id == world.ticket_id %}★{% else %} {% endif %}  {% if t.status == "resolved" or t.status == "closed" %}●{% elif t.status == "in-progress" or t.status == "in_progress" %}◐{% elif t.status == "open" %}○{% else %}·{% endif %}  {{ t.severity|default:t.priority|default:""|col:3 }}  {{ t.id|slice:":10"|col:10 }}  {{ t.title|default:"(untitled)"|truncatechars:52 }}
+          {% endfor %}{% else %}(none — no configured source returned tickets)
+          {% endif %}
       - choice:
           mode: single
           prompt: "Actions"
@@ -455,20 +472,21 @@ states:
                 required:    true
             - label:  "pick_ticket_by_id"
               intent: pick_ticket
-              hint:   "pick by filename id (for fixtures / tab-completed paste)"
+              hint:   "pick by ticket id, or source:id when multiple sources are configured"
               param:
                 slot:        id
                 type:        string
-                placeholder: "ticket id (60-char filename slug)"
+                placeholder: "ticket id or source:id"
                 required:    true
             - { label: "go_back", intent: go_back, hint: "return to ticket_search" }
             - { label: "look",    intent: look,    hint: "re-render" }
-    relevant_world: [ticket_query, ticket_results]
+    relevant_world: [ticket_query, ticket_sources, ticket_results, ticket_source_groups]
     on_enter:
       - invoke: iface.ticket.search
         with:
           query: "{{ world.ticket_query }}"
           limit: 25
+          sources: "{{ world.ticket_sources }}"
           # repo is honoured by host.gh.ticket (the GitHub binding for
           # onboarded repos); ignored by host.local_files.ticket.
           # "" ⇒ gh's local-remote default.
@@ -478,6 +496,7 @@ states:
           root: "{{ world.repo_root }}"
         bind:
           ticket_results: tickets
+          ticket_source_groups: source_groups
           ticket_provider_errors: provider_errors
           ticket_local_count: local_count
           ticket_github_count: github_count
@@ -493,7 +512,7 @@ states:
           guard_hint: "Row {{ slots.n }} is out of range — pick 1..{{ len(world.ticket_results) }}."
         - when: "slots.id == nil && slots.n == nil"
           target: ticket_searching
-          guard_hint: "Provide either id=<filename> or n=<row number>."
+          guard_hint: "Provide either id=<ticket id or source:id> or n=<row number>."
         - target: ticket_search
           effects:
             - set:
@@ -502,29 +521,43 @@ states:
                 ticket_title: "(picked from search)"
                 ticket_type:  "{{ slots.type ?? world.ticket_type }}"
                 thread:       "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
-                ticket_source_mode: "{{ world.ticket_repo != '' ? 'remote' : 'local' }}"
+                ticket_source: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source ?? '') : '' }}"
+                ticket_source_label: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_label ?? '') : '' }}"
+                ticket_source_kind: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_kind ?? (world.ticket_results[int(slots.n) - 1].source ?? '')) : '' }}"
+                ticket_source_mode: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_mode ?? (world.ticket_results[int(slots.n) - 1].source == 'github' ? 'remote' : 'local')) : '' }}"
+                ticket_source_repo: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_repo ?? '') : '' }}"
                 ticket_source_ref:  "{{ slots.id ?? (world.ticket_results[int(slots.n) - 1].url != '' ? world.ticket_results[int(slots.n) - 1].url : world.ticket_results[int(slots.n) - 1].id) }}"
             - invoke: iface.ticket.get
               with:
                 id: "{{ slots.id ?? world.ticket_results[int(slots.n) - 1].id }}"
                 source: "{{ slots.n != nil ? world.ticket_results[int(slots.n) - 1].source : '' }}"
-                repo: "{{ world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo }}"
+                ref: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].ref ?? '') : slots.id }}"
+                sources: "{{ world.ticket_sources }}"
+                repo: "{{ slots.n != nil ? (world.ticket_results[int(slots.n) - 1].source_repo ?? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo)) : (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) }}"
                 root: "{{ world.repo_root }}"
               bind:
+                ticket_id:    id
                 ticket_title: title
                 ticket_url:   url
                 ticket_type:  type
                 gate_command: repro_command
                 ticket_source:    source
+                ticket_source_label: source_label
+                ticket_source_kind: source_kind
+                ticket_source_mode: source_mode
+                ticket_source_repo: source_repo
                 ticket_legacy_id: legacy_id
-                ticket_source_ref: url
+                ticket_source_ref: ref
                 thread: url
               on_error: ticket_pick_error
             - set:
-                ticket_source_mode: "{{ world.ticket_source == 'github' ? 'remote' : 'local' }}"
-                ticket_repo: "{{ world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '' }}"
-                ticket_source_ref:  "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+                ticket_source_kind: "{{ world.ticket_source_kind != '' ? world.ticket_source_kind : world.ticket_source }}"
+                ticket_source_mode: "{{ world.ticket_source_mode != '' ? world.ticket_source_mode : (world.ticket_source == 'github' ? 'remote' : 'local') }}"
+                ticket_source_repo: "{{ world.ticket_source_repo != '' ? world.ticket_source_repo : (world.ticket_source == 'github' ? (world.ticket_github_repo != '' ? world.ticket_github_repo : world.ticket_repo) : '') }}"
+                ticket_source_ref:  "{{ world.ticket_source_ref != '' ? world.ticket_source_ref : (world.ticket_url != '' ? world.ticket_url : world.thread) }}"
                 thread: "{{ world.ticket_url != '' ? world.ticket_url : world.thread }}"
+            - set:
+                ticket_repo: "{{ world.ticket_source_kind == 'github' ? world.ticket_source_repo : '' }}"
       search_tickets:
         - target: ticket_searching
           effects:

@@ -719,6 +719,7 @@ type projectProfile struct {
 	Schema          string                 `yaml:"schema"`
 	Commands        map[string]string      `yaml:"commands"`
 	Repo            projectProfileRepo     `yaml:"repo"`
+	Tracker         projectProfileTracker  `yaml:"tracker"`
 	Kitsoki         projectProfileKitsoki  `yaml:"kitsoki"`
 	DevStoryProfile projectDevStoryProfile `yaml:"dev_story_profile"`
 }
@@ -734,6 +735,10 @@ type projectProfileKitsoki struct {
 
 type projectProfileInstance struct {
 	Bindings map[string]string `yaml:"bindings"`
+}
+
+type projectProfileTracker struct {
+	Sources []any `yaml:"sources"`
 }
 
 type projectDevStoryProfile struct {
@@ -806,6 +811,9 @@ func profileRootConfig(profile projectProfile) *RootConfig {
 	}
 	if profile.Kitsoki.JudgeMode != "" {
 		world["judge_mode"] = profile.Kitsoki.JudgeMode
+	}
+	if len(profile.Tracker.Sources) > 0 {
+		world["ticket_sources"] = copyAnySlice(profile.Tracker.Sources)
 	}
 	docs := profile.DevStoryProfile.Docs
 	setStringWorld(world, "publish_durable_path", docs.PublishDurablePath)
@@ -907,6 +915,15 @@ func copyAnyMap(in map[string]any) map[string]any {
 	for k, v := range in {
 		out[k] = v
 	}
+	return out
+}
+
+func copyAnySlice(in []any) []any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]any, len(in))
+	copy(out, in)
 	return out
 }
 

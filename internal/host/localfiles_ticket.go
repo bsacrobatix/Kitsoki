@@ -311,8 +311,9 @@ func writeBugFile(bf *BugFile) error {
 // An absent type-dir yields nothing for that kind — a fresh repo with
 // only bugs is fine.  Name retained for minimal-diff churn; the
 // function now lists all three kinds.
-func listAllBugs(root string) ([]*BugFile, error) {
+func listAllBugs(root string) ([]*BugFile, []string, error) {
 	var out []*BugFile
+	var warnings []string
 	for _, td := range ticketKindDirs {
 		dir := filepath.Join(root, "issues", td.Dir)
 		entries, err := os.ReadDir(dir)
@@ -320,15 +321,21 @@ func listAllBugs(root string) ([]*BugFile, error) {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, err
+			return nil, nil, err
 		}
 		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".md") {
+				// Ticket directories commonly carry their own format README. It is
+				// documentation, not an implicit open ticket.
+				if strings.EqualFold(e.Name(), "README.md") {
+					continue
+				}
 				bf, err := readBugFile(filepath.Join(dir, e.Name()))
 				if err != nil {
-					// Skip unparseable files so a single bad file doesn't
-					// poison the whole search; callers may grep on stderr
-					// if they care about why.
+					// Keep the healthy queue available, but make every skipped
+					// candidate visible to the operator. Silently swallowing one
+					// malformed report is indistinguishable from losing it.
+					warnings = append(warnings, fmt.Sprintf("%s: %v", filepath.ToSlash(filepath.Join(dir, e.Name())), err))
 					continue
 				}
 				bf.Kind = td.Kind
@@ -350,7 +357,7 @@ func listAllBugs(root string) ([]*BugFile, error) {
 		}
 		return out[i].ID > out[j].ID
 	})
-	return out, nil
+	return out, warnings, nil
 }
 
 // ─── Op dispatchers ─────────────────────────────────────────────────────────
@@ -364,7 +371,7 @@ func ticketSearch(root string, args map[string]any) (Result, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
 	limit := optInt(args, "limit", 0)
 
-	bugs, err := listAllBugs(root)
+	bugs, warnings, err := listAllBugs(root)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("list bugs: %v", err)}, nil
 	}
@@ -383,7 +390,7 @@ func ticketSearch(root string, args map[string]any) (Result, error) {
 			break
 		}
 	}
-	return Result{Data: map[string]any{"tickets": out}}, nil
+	return Result{Data: map[string]any{"tickets": out, "provider_errors": warnings}}, nil
 }
 
 // ticketGet implements ticket.get.
@@ -525,7 +532,7 @@ func ticketTransition(root string, args map[string]any) (Result, error) {
 func ticketListMine(root string, args map[string]any) (Result, error) {
 	filter, _ := args["filter"].(string)
 	filter = strings.ToLower(strings.TrimSpace(filter))
-	bugs, err := listAllBugs(root)
+	bugs, warnings, err := listAllBugs(root)
 	if err != nil {
 		return Result{Error: fmt.Sprintf("list bugs: %v", err)}, nil
 	}
@@ -539,7 +546,7 @@ func ticketListMine(root string, args map[string]any) (Result, error) {
 		annotateLocalTicketPath(b, row)
 		out = append(out, row)
 	}
-	return Result{Data: map[string]any{"tickets": out}}, nil
+	return Result{Data: map[string]any{"tickets": out, "provider_errors": warnings}}, nil
 }
 
 // ─── Field accessors / projections ──────────────────────────────────────────
@@ -558,10 +565,16 @@ func ticketListMine(root string, args map[string]any) (Result, error) {
 // silently get ” for every bug" mistake that produced the original
 // defect.
 func bugSummary(b *BugFile) map[string]any {
+	status := strings.TrimSpace(b.frontString("status"))
+	if status == "" {
+		// Plain Markdown is a valid local ticket. Absence of workflow
+		// frontmatter means newly filed/open, not invisible.
+		status = "open"
+	}
 	out := map[string]any{
 		"id":       b.ID,
 		"title":    b.titleString(),
-		"status":   b.frontString("status"),
+		"status":   status,
 		"severity": b.frontString("severity"),
 		"assignee": b.frontString("assignee"),
 		"url":      b.frontString("url"),
@@ -583,6 +596,13 @@ func annotateLocalTicketPath(b *BugFile, row map[string]any) {
 	}
 	path := filepath.ToSlash(b.Path)
 	row["source"] = "local"
+	row["source_id"] = "local"
+	row["source_label"] = "Local"
+	row["source_kind"] = "local"
+	row["source_mode"] = "local"
+	row["source_repo"] = ""
+	row["ticket_repo"] = ""
+	row["ref"] = "local:" + b.ID
 	row["path"] = path
 	if strings.TrimSpace(fmt.Sprint(row["url"])) == "" {
 		row["url"] = path

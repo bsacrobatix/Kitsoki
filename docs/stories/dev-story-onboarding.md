@@ -22,7 +22,7 @@ Onboarding does not define success as "some files were written." The generated
 
 | Goal | Required outcome |
 |---|---|
-| `onboarding` | The project wrapper loads the current `@kitsoki/dev-story`; the canonical tests run; an applicable dev server has a deterministic boot/probe/teardown path; branch naming and ticket-ID policy are explicit; the ticket source is explicit; and the PR destination, base, and template policy are explicit. |
+| `onboarding` | The project wrapper loads the current `@kitsoki/dev-story`; the canonical tests run; an applicable dev server has a deterministic boot/probe/teardown path; branch naming and ticket-ID policy are explicit; the ordered ticket sources are explicit; and the PR destination, base, and template policy are explicit. |
 | `validation` | After onboarding, independently RED/GREEN-proved repo-history cases are frozen as a calibration `corpus-receipt.v1`; the calibration corpus is driven green without tuning on heldout evidence; and a developer can pick a configured bug ticket, work it, and open a policy-compliant PR. |
 
 This is the canonical project-specific way to document the goal of any story or
@@ -156,27 +156,54 @@ For one-off custom scopes, discovery still accepts
 `--stories`/`stories=`/`focus=` and normalizes aliases such as `bugfixing` →
 `bugfix` and `gitops` → `git-ops`; those are recorded as a custom pack.
 
-## Ticket provider setup
+## Ticket source composition
 
-Onboarding also asks which ticket intake mode this project should start with:
+Onboarding writes one ordered source list at
+`.kitsoki/project-profile.yaml#tracker.sources`. Local markdown intake under
+`.artifacts` is always present. Discovery then adds every distinct GitHub
+repository found in configured git remotes, with `origin`, `upstream`, and any
+additional remote kept as separate source identities. A source label names the
+actual repository rather than merely saying "GitHub", so equal issue numbers
+cannot hide which tracker owns a row.
 
-- **Good capability, no provider required** — local markdown tickets and pasted
-  bug reports. A user can start from `tickets`, a local file under
-  `issues/bugs/`, or a pasted report (`fix bug ...`) without configuring a
-  remote service.
-- **Full capability** — a configured ticket provider such as GitHub Issues.
-  When discovery sees a `github.com` origin, the provider menu offers that
-  `owner/repo` slug. The operator can also type a custom slug. Full mode lets
-  the story search remote issues, fetch issue bodies from links, comment, and
-  transition status through `iface.ticket`.
+```yaml
+tracker:
+  sources:
+    - id: local
+      label: Local
+      provider: host.local_files.ticket
+      kind: local
+      mode: local
+      args: {root: .artifacts}
+    - id: origin
+      label: acme/project
+      provider: host.gh.ticket
+      kind: github
+      mode: remote
+      args: {repo: acme/project}
+    - id: upstream
+      label: upstream/project
+      provider: host.gh.ticket
+      kind: github
+      mode: remote
+      args: {repo: upstream/project}
+```
 
-The selected provider is written into `.kitsoki/project-profile.yaml` and the
-generated `.kitsoki/stories/<id>-dev/app.yaml`. Choosing local mode keeps
-`iface.ticket` bound to `host.local_files.ticket`; choosing GitHub binds it to
-the composite `host.local_github.ticket`, with the configured repository in
-`world.ticket_github_repo`. No network call is made during discovery or apply;
-actual GitHub use happens later when the user searches or starts work from a
-link and has access.
+The generated wrapper binds `iface.ticket` once to
+`host.ticket_federation` and projects the complete list through
+`world.ticket_sources`. The federation passes each entry's `args` directly to
+its concrete provider and namespaces returned refs by source id. New provider
+kinds compose the same way when their `provider` is a statically registered
+`host.*` ticket handler; raw `.star` paths remain direct, single-provider
+bindings and cannot be placed in `tracker.sources`. A future provider lists
+source-owned identity args such as `project` or `queue` in `locator_keys` so
+ambient runtime values cannot redirect one configured source into another.
+
+No network call is made during discovery or apply. Remote providers are called
+only when the user searches, fetches, comments on, or transitions their tickets.
+Generated profiles always include local intake; a manual `tracker.sources`
+override is an intentional whole-list replacement and should restate `local`
+when the operator wants to keep it.
 
 ## Local harness profile setup
 
@@ -261,13 +288,11 @@ installer:
 
 The generated `.kitsoki/stories/<id>-dev/app.yaml` imports
 `@kitsoki/dev-story` from the binary's embedded story library and rebinds the
-providers to project-selected implementations. Local mode uses
-`host.local_files.ticket`; full GitHub mode uses the composite
-`host.local_github.ticket` with the selected `owner/repo`; and a child checkout
-under a parent meta-repo can inherit a parent-declared non-GitHub ticket
-provider. The other defaults (`host.git`, `host.local`, `host.git_worktree`,
-`host.append_to_file`) let the instance run standalone with only the `kitsoki`
-binary present.
+ticket interface to `host.ticket_federation`. It projects
+`tracker.sources` as `world.ticket_sources` and allow-lists every statically
+registered provider named by that list. The other defaults (`host.git`,
+`host.local`, `host.capsule_workspace`, `host.append_to_file`) let the instance
+run standalone with only the `kitsoki` binary present.
 
 New generated instances bind their workspace interface to
 `host.capsule_workspace`; `host.git_worktree` remains a compatibility alias for
@@ -276,11 +301,16 @@ projects.
 
 ### Idempotent reruns and profile refresh
 
-Onboarding apply is create-once/merge-safe. Repeating it with the same discovery
-result produces no file writes. It preserves project-owned profile values and
-does not replace the thin `.kitsoki/stories/<id>-dev/app.yaml` wrapper after the
-wrapper exists. Readiness is also rerunnable: it re-executes the declared gates,
-replaces `.artifacts/kitsoki-readiness.json`, and refreshes the profile's
+Onboarding apply is merge-safe. Repeating it with the same discovery result
+produces no file writes. It preserves project-owned profile values. A generated
+wrapper carries a `# kitsoki-managed-wrapper: v1 sha256=...` content checksum,
+so generator-owned wiring can follow profile ticket-source changes; an
+untouched pre-marker wrapper is migrated only when it exactly matches the
+frozen prior generator output. Customized
+wrappers remain project-owned and are never overwritten. If their ticket
+contract drifts, apply returns `instance_update_required: true` plus a visible
+validation warning. Readiness is also rerunnable: it re-executes the declared
+gates, replaces `.artifacts/kitsoki-readiness.json`, and refreshes the profile's
 `readiness:` result rather than appending stale status.
 
 For an already-onboarded checkout, use the explicit profile update channel.
@@ -300,7 +330,8 @@ kitsoki project-profile refresh --target /path/to/project --apply
 
 Refresh updates only fields still owned by discovery/default provenance,
 preserves operator-owned and unrelated profile policy, validates the complete
-candidate before writing, and never regenerates the project wrapper. Repeating
+candidate before writing, and refreshes only generator-owned wrapper wiring.
+It reports customized-wrapper drift rather than replacing it. Repeating
 `--apply` without repository or policy changes reports `changed: false` and
 performs no write.
 
@@ -363,35 +394,25 @@ origin default branch and origin remote in `repo.default_branch` /
 `repo.remote`; non-git directories are recorded as `repo.vcs: none` with empty
 branch and remote fields.
 
-### Parent meta-repo providers
+### Parent meta-repo and custom providers
 
-For meta-repos or monorepos with child projects under `projects/` or `src/`,
-discovery walks ancestors for `.kitsoki/project-profile.yaml`. If the child
-does not have a GitHub `ticket_repo`, onboarding can inherit a non-GitHub
-`tracker.provider` and `kitsoki.instance.bindings.ticket` from the nearest
-parent profile. Relative `.star` bindings are rebased into the child profile and
-again into the generated `.kitsoki/stories/<id>-dev/app.yaml`.
+Parent and child projects use the same `tracker.sources` contract. A child can
+copy selected source entries from a meta-repo profile, add a child-local source,
+or replace the list. Source ids must remain unique within the resulting list;
+labels should identify the owning project or repository.
 
-Parent tracker metadata is copied into the child's `tracker:` block. When the
-parent declares `setup_command`, `readiness_command`, or `required_env`, those
-remain generic profile metadata; a declared `readiness_command` is added to the
-generated profile checks and runs from the parent root through the native
-readiness operation.
-`ticket_repo` stays GitHub-only, so private providers use the `iface.ticket`
-binding without triggering GitHub-specific publish or closeout behavior.
+Federated custom sources must name a statically registered `host.*` ticket
+handler. Its entry can use any `kind` and provider-specific `args`, so Jira,
+Linear, or an internal tracker can coexist with local files and multiple GitHub
+repositories without adding provider-specific world keys.
 
-Inherited `.star` bindings can be first-class ticket providers by declaring a
-`ticket_provider/v1` sidecar. The script defines pure functions such as
-`search(ctx)` and `get(ctx)` rather than `main(ctx)`. Its sidecar declares HTTP
-hosts/methods and symbolic auth policies; scripts pass `auth="name"` to
-`ctx.http.get/post`, while the Go HTTP transport reads the configured env or
-secret and applies headers after the Starlark runtime has built the request.
-Provider functions return normal ticket data or `{"ok": false, "error":
-{"code": "...", "message": "..."}}` for custom operator-facing failures.
-
-The same module is reusable outside a story through
-`kitsoki ticket-provider call --script <provider.star> --op search ...` and the
-studio MCP `ticket.call` tool.
+Legacy `.star` ticket bindings remain supported as direct
+`kitsoki.instance.bindings.ticket` values and can use a `ticket_provider/v1`
+sidecar, but they are not federation source handlers. Profile refresh preserves
+such a binding instead of silently converting the script path into an invalid
+`tracker.sources[].provider`. The same script module remains reusable outside a
+story through `kitsoki ticket-provider call --script <provider.star> --op
+search ...` and the studio MCP `ticket.call` tool.
 
 The native `host.dev.onboarding` readiness operation is the explicit post-apply
 verifier. It mirrors the profile's declared commands, writes
@@ -415,8 +436,8 @@ deliver a fresh bug safely:
   working directory, readiness probe, timeout, and teardown behavior;
 - repository identity, VCS, default/PR base branch, working-branch template,
   and whether a ticket ID is required, optional, or forbidden in that template;
-- ticket provider plus its project/repository locator and a working search,
-  fetch, and pick path;
+- an ordered ticket source list with unique ids, unambiguous labels, provider
+  arguments, and a working federated search, fetch, and pick path;
 - PR provider, destination repository, base branch, template policy, and a
   working open-PR path;
 - local history containing the selected baseline/fix refs, a direct argv oracle
@@ -466,8 +487,9 @@ and terminology.
 ## The external-target profile
 
 The instance `app.yaml` carries an **external-target profile**: a block of world
-keys (`publish_durable_path`, `prd_doc_filename`, `design_*`, `ticket_repo`, …)
-that retargets doc placement, fixed filenames, or a GitHub-issue tracker.
+keys (`publish_durable_path`, `prd_doc_filename`, `design_*`,
+`ticket_sources`, …) that retargets doc placement, fixed filenames, or one or
+more issue trackers.
 Generic generated projects default PRDs and design documents into `.context/`
 subdirectories and assume no project-specific design template directory.
 Project-specific profiles, such as a Slidey checkout that already has a docs

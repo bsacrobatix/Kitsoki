@@ -61,7 +61,7 @@ turns:
       bf__ticket_title: "Crash opening saved filters"
       bf__ticket_repo: "acme/api"
       bf__ticket_source_mode: "remote"
-      bf__ticket_source_ref: "https://github.com/acme/api/issues/77"
+      bf__ticket_source_ref: "77"
       bf__ticket_url: "https://github.com/acme/api/issues/77"
       bf__ticket_body: |
         Steps:

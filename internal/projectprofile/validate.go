@@ -210,6 +210,37 @@ func validateSemantic(doc map[string]any, repoRoot string) ([]string, []string) 
 		}
 	}
 
+	tracker := mapAt(doc, "tracker")
+	sources, _ := tracker["sources"].([]any)
+	if len(sources) > 0 {
+		seenSourceIDs := map[string]struct{}{}
+		seenSourceLabels := map[string]struct{}{}
+		for _, raw := range sources {
+			source := mapValue(raw)
+			id := strings.TrimSpace(stringAt(source, "id"))
+			if id == "" {
+				continue // JSON Schema reports missing and malformed ids.
+			}
+			if _, exists := seenSourceIDs[id]; exists {
+				errs = append(errs, fmt.Sprintf("tracker.sources id %q is declared more than once", id))
+			}
+			seenSourceIDs[id] = struct{}{}
+			label := strings.TrimSpace(stringAt(source, "label"))
+			labelKey := strings.ToLower(label)
+			if labelKey != "" {
+				if _, exists := seenSourceLabels[labelKey]; exists {
+					errs = append(errs, fmt.Sprintf("tracker.sources label %q is declared more than once", label))
+				}
+				seenSourceLabels[labelKey] = struct{}{}
+			}
+		}
+		if ticketBinding := strings.TrimSpace(stringAt(bindings, "ticket")); ticketBinding != "host.ticket_federation" {
+			errs = append(errs, fmt.Sprintf("kitsoki.instance.bindings.ticket = %q, want %q when tracker.sources is configured", ticketBinding, "host.ticket_federation"))
+		}
+	} else if strings.TrimSpace(stringAt(bindings, "ticket")) == "host.ticket_federation" {
+		errs = append(errs, "tracker.sources must contain at least one source when kitsoki.instance.bindings.ticket = \"host.ticket_federation\"")
+	}
+
 	commands := mapAt(doc, "commands")
 	testCmd := strings.TrimSpace(stringAt(commands, "test"))
 	buildCmd := strings.TrimSpace(stringAt(commands, "build"))

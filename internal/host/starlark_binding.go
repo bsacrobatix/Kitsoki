@@ -151,6 +151,11 @@ func TicketProviderEnvLookup(ctx context.Context, name string) string {
 // paper over.
 func RegisterStarlarkBindings(reg *Registry, bindings map[string]string) {
 	for name, scriptPath := range bindings {
-		reg.Register(name, StarlarkBindingHandler(scriptPath))
+		handler := StarlarkBindingHandler(scriptPath)
+		if ticketprovider.IsProviderScript(scriptPath) {
+			reg.RegisterTicketProvider(name, handler)
+			continue
+		}
+		reg.Register(name, handler)
 	}
 }

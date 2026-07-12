@@ -253,22 +253,24 @@ host_interfaces:
     description: "Issue tracker abstraction (file / GitHub Issues / Jira)."
     operations:
       search:
-        input:  { query: string, limit: int }
-        output: { tickets: list }
+        input:  { query: string, limit: int, sources: list, repo: string, root: string }
+        output: { tickets: list, source_groups: list, provider_errors: list }
       get:
-        input:  { id: string }
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string }
         output: { id: string, title: string, body: string, status: string,
                   priority: string, assignee: string, url: string, comments: list,
-                  repro_command: string }
+                  repro_command: string, source: string, source_label: string,
+                  source_kind: string, source_mode: string, source_repo: string,
+                  ref: string }
       comment:
-        input:  { id: string, body: string, thread: string }
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string, body: string, thread: string }
         output: { ok: bool, comment_id: string }
       transition:
-        input:  { id: string, to: string }
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string, to: string }
         output: { ok: bool }
       list_mine:
-        input:  { filter: string }
-        output: { tickets: list }
+        input:  { filter: string, sources: list, repo: string, root: string }
+        output: { tickets: list, source_groups: list, provider_errors: list }
     default: host.local_files.ticket
 
   # 2.2 vcs — version control + PR host (git / GitHub / Bitbucket).
@@ -362,8 +364,13 @@ world:
   ticket_status:    { type: string, default: "" }
   ticket_url:       { type: string, default: "" }
   ticket_repo:      { type: string, default: "" }   # owner/repo for GitHub issue close-out; empty keeps local ticket provider
+  ticket_sources:   { type: list,   default: [] }   # ordered provider-neutral source configuration inherited from the parent
+  ticket_source:    { type: string, default: "" }   # selected source id used for exact federation routing
+  ticket_source_label: { type: string, default: "" }
+  ticket_source_kind:  { type: string, default: "" }
+  ticket_source_repo:  { type: string, default: "" }
   ticket_source_mode: { type: string, default: "local" } # local | remote | freeform; triage prompt contract
-  ticket_source_ref:  { type: string, default: "" }      # local path, remote issue URL/ref, or free-form complaint label
+  ticket_source_ref:  { type: string, default: "" }      # stable provider/federation ref; thread/ticket_url retain local paths and remote URLs
   ticket_body:        { type: string, default: "" }      # remote issue body, pre-read local issue body, or free-form complaint
   thread:           { type: string, default: "" }
   allowed_authors:  { type: string, default: "" }   # CSV — list not yet a first-class scalar type

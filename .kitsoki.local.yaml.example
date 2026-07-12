@@ -22,13 +22,26 @@
 # default_profile: codex-native
 
 # Project-local overrides can also replace checked-in project defaults from
-# .kitsoki/project-profile.yaml through root.overrides. For example, to dogfood
-# GitHub issues against a fork instead of the canonical constructorfabric repo:
+# .kitsoki/project-profile.yaml through root.overrides. Ticket sources are one
+# ordered, coherent list: restate every source you want to keep when overriding
+# it. This example keeps local artifacts and adds a private GitHub repository:
 #
 # root:
 #   overrides:
 #     world:
-#       ticket_repo: bsacrobatix/Kitsoki
+#       ticket_sources:
+#         - id: local
+#           label: Local
+#           provider: host.local_files.ticket
+#           kind: local
+#           mode: local
+#           args: { root: .artifacts }
+#         - id: private
+#           label: my-org/Kitsoki
+#           provider: host.gh.ticket
+#           kind: github
+#           mode: remote
+#           args: { repo: my-org/Kitsoki }
 
 # Optional local guard for external coding-agent launches. Keep this machine-
 # specific: protected roots and capsule locations differ per operator.

@@ -99,7 +99,7 @@ func applyHostCassette(rt *sessionRuntime, hostReg *host.Registry, cassettePath,
 		seen[hn] = true
 		fallback, _ := hostReg.Get(hn)
 		disp := testrunner.BuildCassetteDispatcherWithSink(cas, hn, stateOf, fallback, nil, clock.Real(), deferredSink, nil)
-		hostReg.Replace(hn, disp)
+		hostReg.ReplacePreservingCapabilities(hn, disp)
 	}
 	return nil
 }

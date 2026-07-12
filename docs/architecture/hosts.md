@@ -2327,13 +2327,74 @@ tour recorder mirrors the JSON shape in
 
 ---
 
+## host.ticket_federation — named ticket-source composition
+
+`host.ticket_federation` is a provider-neutral `ticket` host_interface binding
+for projects that need local tickets and one or more remote trackers in the
+same picker. Its `sources` argument is an ordered list:
+
+```yaml
+- id: local
+  label: Local
+  provider: host.local_files.ticket
+  kind: local
+  mode: local
+  args: {root: .artifacts}
+- id: origin
+  label: bsacrobatix/Kitsoki
+  provider: host.gh.ticket
+  kind: github
+  mode: remote
+  args: {repo: bsacrobatix/Kitsoki}
+```
+
+`search` and `list_mine` fan out concurrently and return both a flattened
+`tickets` list (with one global picker index) and ordered `source_groups`.
+Every row carries `source`, `source_label`, `source_kind`, `source_mode`,
+`source_repo`, and a globally unambiguous `ref` (`<source-id>:<provider-id>`).
+Per-source errors and warnings remain visible while healthy sources continue to
+return rows. With one local store, a remote row's historical `legacy_id`
+suppresses the matching local copy. With multiple local stores the row must
+also carry `legacy_source` or a source-qualified `legacy_ref`, so migration from
+one store never hides an equal id in another. Equal issue numbers in two remote
+repositories always remain distinct.
+
+`get`, `comment`, `transition`, and the extended ticket operations route to
+exactly one source. Callers pass the selected row's `source` or `ref`; a raw
+GitHub URL can also select the one configured source whose repository matches
+the URL. A bare provider-local id is rejected when multiple sources make it
+ambiguous.
+
+Source `args` are provider defaults. Live operation arguments win for generic
+payload keys, including fields introduced by future providers; known ticket
+payload fields are never taken from static configuration. The legacy locator
+keys `repo`, `root`, and `workdir` are source-owned automatically. Future
+providers declare any additional source identity keys (for example `project`
+or `queue`) in `locator_keys`; those keys are re-pinned from `args` so an outer
+story fallback cannot redirect the call.
+
+Provider names are capabilities, not arbitrary commands. The registry marks
+ticket providers explicitly through `RegisterTicketProvider`; the federation
+refuses ordinary hosts such as `host.run` even if mutable world data names
+them. Built-in local/GitHub providers and loader-resolved
+`ticket_provider/v1` Starlark bindings receive that marker. A raw `.star` path
+in `sources` is not resolved: use a direct script-form `host_bindings.ticket`
+entry, or expose the implementation as a statically registered ticket host.
+
+Implementation and regressions:
+[`internal/host/ticket_federation.go`](../../internal/host/ticket_federation.go)
+and
+[`internal/host/ticket_federation_test.go`](../../internal/host/ticket_federation_test.go).
+`host.local_github.ticket` remains a compatibility adapter for older
+single-local-plus-single-GitHub instances.
+
 ## host.gh.ticket — GitHub Issues-backed tracker
 
 The `ticket` host_interface backed by the native GitHub REST API. It mirrors the
 file-backed `host.local_files.ticket` surface so dev-story instances can rebind
-`iface.ticket → host.gh.ticket` without touching room YAML. The dogfood
-`kitsoki-dev` instance uses `host.local_github.ticket` instead, which calls local
-artifact tickets and this GitHub provider as two sections of one selector. Auth
+`iface.ticket → host.gh.ticket` without touching room YAML. Multi-source
+instances, including `kitsoki-dev`, list this provider inside
+`host.ticket_federation` alongside their local and other remote sources. Auth
 uses `GH_TOKEN` / `GITHUB_TOKEN`, including tokens
 minted by the GitHub App path for headless runs. Every op degrades cleanly (a
 `Result.Error`, not a crash) when auth or transport fails, so rooms route the
@@ -2352,29 +2413,25 @@ binary is required. Implementation:
 | `transition` | `PATCH /repos/{owner}/{repo}/issues/{number}` | `{ok}` |
 | `list_mine` | `GET /search/issues` with `assignee:` (newest-first) | `{tickets: […]}` |
 
-**Repo pin.** Every call takes a `repo` arg (`owner/repo`). Direct GitHub-backed
-instances use `ticket_repo`; the dogfood composite selector uses
-`ticket_github_repo`, defaulting to symbolic `origin`, which `host.gh.ticket`
-resolves against `git remote get-url origin`. The queue targets the repo you
-cloned (a fork like `bsacrobatix/Kitsoki`, or the canonical
-`constructorfabric/Kitsoki`) rather than a hardcoded slug. The slug is data, not
-a Go constant: pin an explicit `owner/repo`, or override the world key
-per-session, to retarget a fork-of-a-fork or downstream project.
+**Repo pin.** Every call takes a `repo` arg (`owner/repo`). Direct
+GitHub-backed instances may use `ticket_repo`. Federated instances put the
+explicit slug in each source's `args.repo`; the resolved slug is returned as
+`source_repo`/`ticket_repo` so a later pick, comment, or transition cannot drift
+to another configured repository. Symbolic remote names remain supported for
+legacy direct bindings, but generated federation profiles use explicit slugs
+because managed capsule clones do not necessarily carry the source checkout's
+`origin` and `upstream` remotes.
 
 **External repo binding (onboarding passthrough).** Project onboarding
 (`stories/dev-story/scripts/init_onboarding.star` calling the native
 `host.dev.onboarding` capability) closes the
-same loop for external repos: discovery classifies `tracker: github` when the
-target's `origin` remote parses to a `github.com` `owner/repo` slug, and apply
-generates an instance whose `host_bindings` pin `ticket: host.gh.ticket` with
-`world.ticket_repo` defaulting to that slug (plus a `tracker.repo` record in
-`.kitsoki/project-profile.yaml`). The dev-story rooms thread
-`repo: {{ world.ticket_repo }}` into every `iface.ticket.*` call, so an
-onboarded gears-rust checkout reads/comments its real GitHub issues with zero
-room changes; a non-GitHub remote (or `tracker: none`) keeps
-`host.local_files.ticket`, which instead honours the threaded
-`root: {{ world.repo_root }}` arg for tickets under an external checkout.
-No repo slug is ever hardcoded — the source of truth is the onboarded profile.
+same loop for external repos: discovery always adds local `.artifacts` intake,
+then adds every distinct GitHub repository found in configured remotes. Apply
+writes the ordered list to `tracker.sources`, binds
+`ticket: host.ticket_federation`, and projects it as
+`world.ticket_sources`. The source list in the onboarded profile—not an
+ambient remote name—is the source of truth for later search, fetch, comment,
+and transition operations.
 
 **Label vocabulary.** `create` maps the bug-format axes onto a fixed GitHub label
 set, applied by `create` and understood by `transition`:

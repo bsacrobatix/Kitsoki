@@ -1064,5 +1064,7 @@ func TestGitHubTicket_ResolveRemoteRepo(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("unexpected domain error: %s", res.Error)
 	}
+	if res.Data["source_repo"] != "bsacrobatix/Kitsoki" || res.Data["source_label"] != "bsacrobatix/Kitsoki" {
+		t.Fatalf("resolved source identity = repo %v label %v, want bsacrobatix/Kitsoki", res.Data["source_repo"], res.Data["source_label"])
+	}
 }
-

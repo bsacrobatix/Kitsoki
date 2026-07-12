@@ -16,7 +16,7 @@
 # # Two-command quickstart
 #
 #   $ kitsoki run .kitsoki/stories/kitsoki-dev/app.yaml
-#   # Lands in core.landing. Type `tickets` to search; `pick TKT` to pick;
+#   # Lands in core.landing. Type `tickets` to search; `pick 1` to pick;
 #   # `bugfix` to enter the pipeline.
 #
 # Autonomous variant (set judge_mode at boot via a warp scenario):
@@ -26,12 +26,12 @@
 #
 # # Local and remote ticket source
 #
-# The local-files side scans `<repo_root>/issues/{bugs,features,epics}/*.md`.
-# This instance sets `repo_root` to `.artifacts`, giving one active local pile
+# The local-files source scans `.artifacts/issues/{bugs,features,epics}/*.md`
 # under the source checkout. When this story runs inside a managed capsule,
-# relative ticket roots resolve against the manifest's source checkout rather
-# than the disposable clone. The GitHub side resolves the repository's `origin`
-# remote and appears in the same picker.
+# that relative root resolves against the manifest's source checkout rather
+# than the disposable clone. The two GitHub sources use explicit owner/repo
+# slugs, so both the fork and upstream appear under unambiguous labels even
+# when the managed clone has different remote names.
 #
 # # transport — the bug file IS the conversation log
 #
@@ -79,6 +79,7 @@ hosts:
   # Iface-backed handlers — rebound via host_bindings below. Listed
   # here so `hosts: declared` is satisfied.
   - host.local_files.ticket
+  - host.ticket_federation
   - host.local_github.ticket
   - host.gh.ticket
   - host.gh.ticket.get
@@ -159,10 +160,9 @@ imports:
     # iface.transport.post carries the file path), so the local file
     # is the comment thread.
     host_bindings:
-      # Local iteration default: search local artifact tickets and GitHub
-      # Issues side by side. Picked local artifacts keep local close-out; picked
-      # GitHub issues carry ticket_repo into the child stories.
-      ticket:    host.local_github.ticket
+      # Compose local artifacts plus the fork and upstream GitHub repositories.
+      # Every row retains its source identity through fetch and close-out.
+      ticket:    host.ticket_federation
       vcs:       host.git
       ci:        host.local
       workspace: host.capsule_workspace
@@ -176,6 +176,7 @@ imports:
       judge_mode:                 "{{ world.judge_mode }}"
       judge_confidence_threshold: "{{ world.judge_confidence_threshold }}"
       repo_root:                  "{{ world.repo_root }}"
+      ticket_sources:             "{{ world.ticket_sources }}"
       ticket_repo:                "{{ world.ticket_repo }}"
       ticket_github_repo:         "{{ world.ticket_github_repo }}"
       bugfix_destination:         "{{ world.bugfix_destination }}"
@@ -196,13 +197,39 @@ imports:
 world:
   # Provider-pointing key. repo_root reaches iface.ticket.* via the
   # dev-story rooms' `root:` passthrough.
-  repo_root:    { type: string, default: ".artifacts" }
+  repo_root:    { type: string, default: "." }
+
+  # Ordered, composable ticket sources. Labels are the UI contract; provider
+  # kinds only control routing, so future Jira/private providers can sit beside
+  # these without adding story-specific headings.
+  ticket_sources:
+    type: list
+    default:
+      - id: local
+        label: Local
+        provider: host.local_files.ticket
+        kind: local
+        mode: local
+        args: { root: ".artifacts" }
+      - id: origin
+        label: bsacrobatix/Kitsoki
+        provider: host.gh.ticket
+        kind: github
+        mode: remote
+        args: { repo: bsacrobatix/Kitsoki }
+      - id: upstream
+        label: constructorfabric/Kitsoki
+        provider: host.gh.ticket
+        kind: github
+        mode: remote
+        args: { repo: constructorfabric/Kitsoki }
 
   # ticket_repo is intentionally empty for local artifact iteration. It is set
   # after picking a GitHub row, so downstream close-out knows the selected
-  # ticket is remote. ticket_github_repo feeds the selector's GitHub section.
+  # ticket is remote. ticket_github_repo is only the legacy single-GitHub
+  # fallback; this wrapper's concrete repositories live in ticket_sources.
   ticket_repo:  { type: string, default: "" }
-  ticket_github_repo: { type: string, default: "origin" }
+  ticket_github_repo: { type: string, default: "" }
   # Default local destination: land fixes into the local base branch
   # (main here) after the bugfix RED/GREEN gate and shared ship-it tail pass.
   # Operators can still choose open-pr or leave-worktree from the dev-story UI.

@@ -56,7 +56,7 @@ turns:
       bf__ticket_id: "TKT-404"
       bf__ticket_title: "Run list stays stale after cleanup"
       bf__ticket_source_mode: "local"
-      bf__ticket_source_ref: ".artifacts/issues/bugs/TKT-404.md"
+      bf__ticket_source_ref: "TKT-404"
       bf__thread: ".artifacts/issues/bugs/TKT-404.md"
       bf__ticket_body: |
         Steps:

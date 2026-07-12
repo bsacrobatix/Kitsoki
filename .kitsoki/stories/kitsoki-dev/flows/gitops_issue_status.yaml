@@ -1,8 +1,8 @@
 # gitops_issue_status — kitsoki-dev can inspect a GitHub issue from its native
-# git-ops hub, through iface.ticket -> host.local_github.ticket.
+# git-ops hub, through iface.ticket -> host.ticket_federation.
 #
 # This is the story-owned replacement for an operator or agent typing
-# `gh issue view 105` directly. The flow stubs host.local_github.ticket; no
+# `gh issue view 105` directly. The flow stubs host.ticket_federation; no
 # real GitHub call or LLM runs.
 
 test_kind: flow
@@ -26,7 +26,7 @@ host_handlers:
             has_uncommitted:    false
             on_integration:     true
             no_common_ancestor: false
-  host.local_github.ticket:
+  host.ticket_federation:
     by_op:
       get:
         data:

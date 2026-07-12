@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -531,9 +532,10 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 		"stories": []any{"setup", "bugfix", "repo-bakeoff", "pr-refinement", "git-ops"},
 	}
 	base := map[string]any{
+		"ok": false, "error": "",
 		"target_path": target, "project_id": "", "project_title": "", "stack": "",
 		"dev_command": "", "test_command": "", "build_command": "", "conventions": "local defaults",
-		"repo_vcs": "none", "repo_default_branch": "", "repo_remote": "", "tracker": "none", "ticket_repo": "",
+		"repo_vcs": "none", "repo_default_branch": "", "repo_remote": "", "tracker": "none", "ticket_repo": "", "ticket_sources": []any{},
 		"repo_branch_pattern": "", "repo_branch_issue_id": "", "pr_provider": "", "pr_repository": "", "pr_base_branch": "", "pr_template": "",
 		"goals": map[string]any{}, "resolutions": []any{}, "default_notices": []any{},
 		"starter_stories": starterStories, "story_pack": pack["id"], "story_pack_title": pack["title"],
@@ -574,7 +576,8 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 	}
 	vcs, branch, remote := onboardingGitInfo(target)
 	branchPattern, branchIssueID, branchSource, branchEvidence, branchNotice := onboardingBranchPolicy(target)
-	tracker, ticketProject, ticketSource, ticketEvidence, ticketNotice := onboardingTicketPolicy(target, remote)
+	tracker, ticketProject, _, _, _ := onboardingTicketPolicy(target, remote)
+	ticketSources, ticketSourcesSource, ticketSourcesEvidence, ticketSourcesNotice := onboardingDiscoveredTicketSources(target)
 	prProvider, prRepository, prSource, prEvidence, prNotice, prTemplate, prTemplateSource, prTemplateEvidence, prTemplateNotice := onboardingPullRequestPolicy(target, remote)
 	base["project_id"], base["project_title"], base["stack"] = projectID, projectTitle, stack
 	base["dev_command"], base["test_command"], base["build_command"] = dev, test, build
@@ -585,6 +588,7 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 	base["repo_vcs"], base["repo_default_branch"], base["repo_remote"] = vcs, branch, remote
 	base["repo_branch_pattern"], base["repo_branch_issue_id"] = branchPattern, branchIssueID
 	base["tracker"], base["ticket_repo"] = tracker, ticketProject
+	base["ticket_sources"] = ticketSources
 	base["pr_provider"], base["pr_repository"], base["pr_base_branch"], base["pr_template"] = prProvider, prRepository, branch, prTemplate
 	devApplicable := onboardingDevServerApplicable(target, dev)
 	base["dev_server_applicable"] = devApplicable
@@ -596,8 +600,7 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 		onboardingResolution("repo.default_branch", branch, onboardingBranchResolutionSource(target), onboardingGitBranchEvidence(target, branch), onboardingDefaultNotice("default branch", branch, onboardingGitBranchDiscovered(target))),
 		onboardingResolution("repo.branch_pattern", branchPattern, branchSource, branchEvidence, branchNotice),
 		onboardingResolution("repo.branch_issue_id", branchIssueID, branchSource, branchEvidence, branchNotice),
-		onboardingResolution("tracker.provider", tracker, ticketSource, ticketEvidence, ticketNotice),
-		onboardingResolution("tracker.project", ticketProject, ticketSource, ticketEvidence, ticketNotice),
+		onboardingResolution("tracker.sources", ticketSources, ticketSourcesSource, ticketSourcesEvidence, ticketSourcesNotice),
 		onboardingResolution("pull_requests.provider", prProvider, prSource, prEvidence, prNotice),
 		onboardingResolution("pull_requests.repository", prRepository, prSource, prEvidence, prNotice),
 		onboardingResolution("pull_requests.base_branch", branch, onboardingBranchResolutionSource(target), onboardingGitBranchEvidence(target, branch), onboardingDefaultNotice("pull-request base branch", branch, onboardingGitBranchDiscovered(target))),
@@ -605,6 +608,7 @@ func discoverDevOnboarding(args map[string]any) map[string]any {
 	}
 	base["resolutions"] = resolutions
 	base["default_notices"] = onboardingDefaultResolutions(resolutions)
+	base["ok"] = true
 	return base
 }
 
@@ -627,7 +631,7 @@ func onboardingGoalContracts(devApplicable bool) map[string]any {
 				map[string]any{"id": "tests-runnable", "statement": "Canonical project tests run deterministically.", "gate": "required", "verification": "tests", "applicable": true},
 				map[string]any{"id": "dev-server-runnable", "statement": "The development server can be booted, probed, and stopped deterministically when applicable.", "gate": "required", "verification": "dev-server", "applicable": devApplicable},
 				map[string]any{"id": "branch-policy-known", "statement": "The base branch, branch pattern, and ticket-ID rule are explicit.", "gate": "required", "verification": "branch-policy", "applicable": true},
-				map[string]any{"id": "ticket-source-known", "statement": "The ticket provider and project/repository locator are explicit.", "gate": "required", "verification": "ticket-source", "applicable": true},
+				map[string]any{"id": "ticket-source-known", "statement": "The ordered local and remote ticket sources, provider bindings, and unambiguous labels are explicit.", "gate": "required", "verification": "ticket-source", "applicable": true},
 				map[string]any{"id": "pr-policy-known", "statement": "The pull-request destination, base branch, and template policy are explicit.", "gate": "required", "verification": "pr-policy", "applicable": true},
 			},
 		},
@@ -883,7 +887,7 @@ func onboardingTicketPolicy(root, remote string) (provider, project, source, evi
 	}
 	for _, rel := range []string{"jira.yaml", "jira.yml", ".jira", filepath.Join(".config", "jira.yaml")} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
-			return "jira", "", "discovered", rel + " indicates Jira ticket intake.", "Ticket provider is Jira but no project key was discovered. Update .kitsoki/project-profile.yaml#tracker.project."
+			return "jira", "", "discovered", rel + " indicates Jira ticket intake.", "Ticket provider is Jira but no project key was discovered. Add the provider and project key to .kitsoki/project-profile.yaml#tracker.sources."
 		}
 	}
 	for _, rel := range []string{"issues", filepath.Join(".artifacts", "issues")} {
@@ -891,7 +895,124 @@ func onboardingTicketPolicy(root, remote string) (provider, project, source, evi
 			return "local", filepath.ToSlash(rel), "discovered", filepath.ToSlash(rel) + " contains local ticket artifacts.", ""
 		}
 	}
-	return "informal", "pasted", "default", "No GitHub, Jira, or local ticket source was found.", "Could not determine a ticket source; using informal/pasted intake. Update .kitsoki/project-profile.yaml#tracker.provider and #tracker.project."
+	return "informal", "pasted", "default", "No GitHub, Jira, or local ticket source was found.", "Could not determine a remote ticket source; using local .artifacts intake. Update .kitsoki/project-profile.yaml#tracker.sources to add remote providers."
+}
+
+func onboardingDiscoveredTicketSources(root string) ([]any, string, string, string) {
+	remoteNames := strings.Fields(onboardingGit(root, "remote"))
+	remotes := make([]onboardingRemote, 0, len(remoteNames))
+	for _, name := range remoteNames {
+		remotes = append(remotes, onboardingRemote{Name: name, URL: onboardingGit(root, "remote", "get-url", name)})
+	}
+	sources := onboardingTicketSourcesFromRemotes(remotes)
+	if len(sources) > 1 {
+		return sources, "discovered", "Local .artifacts intake plus GitHub repository identities discovered from configured git remotes.", ""
+	}
+	return sources, "default", "No supported remote ticket source was discovered; local .artifacts intake is always available.", "No remote ticket source was discovered. Add entries to .kitsoki/project-profile.yaml#tracker.sources when remote intake is wanted."
+}
+
+type onboardingRemote struct {
+	Name string
+	URL  string
+}
+
+func onboardingTicketSourcesFromRemotes(remotes []onboardingRemote) []any {
+	sources := []any{onboardingLocalTicketSource()}
+	orderedRemotes := make([]onboardingRemote, 0, len(remotes))
+	seenNames := map[string]bool{}
+	for _, preferred := range []string{"origin", "upstream"} {
+		for _, remote := range remotes {
+			if remote.Name == preferred {
+				orderedRemotes = append(orderedRemotes, remote)
+				seenNames[remote.Name] = true
+			}
+		}
+	}
+	remaining := make([]onboardingRemote, 0, len(remotes))
+	for _, remote := range remotes {
+		if !seenNames[remote.Name] {
+			remaining = append(remaining, remote)
+		}
+	}
+	sort.Slice(remaining, func(i, j int) bool { return remaining[i].Name < remaining[j].Name })
+	orderedRemotes = append(orderedRemotes, remaining...)
+
+	seenRepos := map[string]bool{}
+	seenIDs := map[string]bool{"local": true}
+	for _, remote := range orderedRemotes {
+		repo := onboardingGitHubRepo(remote.URL)
+		if repo == "" || seenRepos[strings.ToLower(repo)] {
+			continue
+		}
+		id := onboardingSlug(remote.Name)
+		if id == "" || seenIDs[id] {
+			id = "remote-" + defaultString(id, "github")
+		}
+		for suffix := 2; seenIDs[id]; suffix++ {
+			id = fmt.Sprintf("%s-%d", onboardingSlug(remote.Name), suffix)
+		}
+		sources = append(sources, onboardingGitHubTicketSource(id, repo))
+		seenRepos[strings.ToLower(repo)] = true
+		seenIDs[id] = true
+	}
+	return sources
+}
+
+func onboardingTicketSourcesForProfile(data map[string]any) []any {
+	if configured := onboardingAnyList(data["ticket_sources"]); len(configured) > 0 {
+		configured = onboardingCloneValue(configured).([]any)
+		for _, raw := range configured {
+			if stringValue(onboardingMap(raw), "id") == "local" {
+				return configured
+			}
+		}
+		return append([]any{onboardingLocalTicketSource()}, configured...)
+	}
+	root := stringValue(data, "target_path")
+	sources, _, _, _ := onboardingDiscoveredTicketSources(root)
+	if len(sources) == 0 {
+		sources = []any{onboardingLocalTicketSource()}
+	}
+	if stringValue(data, "tracker") != "github" {
+		return sources
+	}
+	repo := stringValue(data, "ticket_repo")
+	if repo == "" || onboardingTicketSourcesContainRepo(sources, repo) {
+		return sources
+	}
+	id := "github"
+	seen := map[string]bool{}
+	for _, raw := range sources {
+		seen[stringValue(onboardingMap(raw), "id")] = true
+	}
+	for suffix := 2; seen[id]; suffix++ {
+		id = fmt.Sprintf("github-%d", suffix)
+	}
+	return append(sources, onboardingGitHubTicketSource(id, repo))
+}
+
+func onboardingTicketSourcesContainRepo(sources []any, repo string) bool {
+	for _, raw := range sources {
+		source := onboardingMap(raw)
+		if stringValue(source, "kind") == "github" && strings.EqualFold(stringValue(onboardingMap(source["args"]), "repo"), repo) {
+			return true
+		}
+	}
+	return false
+}
+
+func onboardingLocalTicketSource() map[string]any {
+	return map[string]any{
+		"id": "local", "label": "Local", "provider": "host.local_files.ticket",
+		"kind": "local", "mode": "local", "args": map[string]any{"root": ".artifacts"},
+	}
+}
+
+func onboardingGitHubTicketSource(id, repo string) map[string]any {
+	return map[string]any{
+		"id": id, "label": repo, "provider": "host.gh.ticket",
+		"kind": "github", "mode": "remote", "args": map[string]any{"repo": repo},
+	}
 }
 
 func onboardingPullRequestPolicy(root, remote string) (provider, repository, source, evidence, notice, template, templateSource, templateEvidence, templateNotice string) {
@@ -1104,6 +1225,8 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 	ciStoryPath := filepath.Join(root, ciStoryRel)
 	instancePath := filepath.Join(root, instanceRel)
 	readmePath := filepath.Join(root, ".kitsoki", "stories", projectID+"-dev", "README.md")
+	desiredInstance := onboardingInstanceYAML(profile)
+	instanceUpdateRequired := false
 	files := map[string]string{
 		profilePath: string(profileBytes),
 	}
@@ -1114,14 +1237,27 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 		ciEnvPath:              onboardingCapsuleEnvironmentYAML(root),
 		ciConfigPath:           onboardingCapsuleCIYAML(),
 		ciStoryPath:            onboardingCapsuleCIStoryYAML(),
-		instancePath:           onboardingInstanceYAML(profile),
-		readmePath:             "# " + projectID + " dev-story\n\nGenerated once by Kitsoki project onboarding. The wrapper imports `@kitsoki/dev-story`, so base-story updates arrive through the configured binary or story-source override; project policy stays in `.kitsoki/project-profile.yaml`.\n",
+		instancePath:           desiredInstance,
+		readmePath:             "# " + projectID + " dev-story\n\nGenerated by Kitsoki project onboarding. The wrapper imports `@kitsoki/dev-story`, so base-story updates arrive through the configured binary or story-source override; generator-owned wiring may be refreshed while project-authored wrappers remain preserved for review. Project policy stays in `.kitsoki/project-profile.yaml`.\n",
 	} {
-		if _, statErr := os.Stat(path); statErr == nil {
+		if raw, readErr := os.ReadFile(path); readErr == nil {
+			if path == instancePath {
+				if string(raw) == content || onboardingInstanceIsManaged(raw, existing) {
+					files[path] = content
+					continue
+				}
+				if !onboardingInstanceTicketContractMatches(raw, profile) {
+					instanceUpdateRequired = true
+				}
+			}
 			preserved = append(preserved, filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator))))
 			continue
 		}
 		files[path] = content
+	}
+	if instanceUpdateRequired {
+		warnings := onboardingAnyList(validationData["warnings"])
+		validationData["warnings"] = append(warnings, "project-owned dev-story wrapper does not match tracker.sources; review its ticket binding, world_in.ticket_sources, world.ticket_sources default, and provider host allow-list")
 	}
 	writes := []any{}
 	unchanged := []any{}
@@ -1145,7 +1281,8 @@ func applyDevOnboarding(data map[string]any, profileJSON string) (map[string]any
 		"ci_config_path": ciConfigPath, "ci_story_path": ciStoryPath,
 		"profile_path": profilePath, "instance_path": instancePath, "gitignore_path": gitignorePath,
 		"profile_validation": validationData, "writes": writes, "unchanged": unchanged,
-		"preserved_overrides": stringsToAny(preserved), "defaults_used": onboardingDefaultResolutions(onboardingResolutionList(profile)),
+		"instance_update_required": instanceUpdateRequired,
+		"preserved_overrides":      stringsToAny(preserved), "defaults_used": onboardingDefaultResolutions(onboardingResolutionList(profile)),
 	}, nil
 }
 
@@ -1326,11 +1463,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 	defaultBranch := defaultString(stringValue(data, "repo_default_branch"), "main")
 	branchPattern := defaultString(stringValue(data, "repo_branch_pattern"), "feature/{slug}")
 	branchIssueID := defaultString(stringValue(data, "repo_branch_issue_id"), "optional")
-	trackerProvider := defaultString(stringValue(data, "tracker"), "informal")
-	trackerProject := stringValue(data, "ticket_repo")
-	if trackerProject == "" && trackerProvider == "informal" {
-		trackerProject = "pasted"
-	}
+	ticketSources := onboardingTicketSourcesForProfile(data)
 	prProvider := defaultString(stringValue(data, "pr_provider"), "local")
 	prRepository := stringValue(data, "pr_repository")
 	if prRepository == "" && prProvider == "local" {
@@ -1351,7 +1484,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 		resolutions = onboardingResolutionsForProfile(data, map[string]any{
 			"commands.dev": devCommand, "commands.test": testCommand, "commands.build": buildCommand,
 			"repo.default_branch": defaultBranch, "repo.branch_pattern": branchPattern, "repo.branch_issue_id": branchIssueID,
-			"tracker.provider": trackerProvider, "tracker.project": trackerProject,
+			"tracker.sources":        ticketSources,
 			"pull_requests.provider": prProvider, "pull_requests.repository": prRepository,
 			"pull_requests.base_branch": defaultBranch, "pull_requests.template": prTemplate,
 		})
@@ -1364,10 +1497,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 	// workspace binding targets host.capsule_workspace (not host.git_worktree):
 	// project development moved to managed clone-backed capsule workspaces, so
 	// generated dev-story instances should bind the same way.
-	bindings := map[string]any{"ticket": "host.local_files.ticket", "vcs": "host.git", "ci": "host.local", "workspace": "host.capsule_workspace", "transport": "host.append_to_file"}
-	if trackerProvider == "github" {
-		bindings["ticket"] = "host.local_github.ticket"
-	}
+	bindings := map[string]any{"ticket": "host.ticket_federation", "vcs": "host.git", "ci": "host.local", "workspace": "host.capsule_workspace", "transport": "host.append_to_file"}
 	mechanisms := []any{}
 	if testCommand != "" {
 		mechanisms = append(mechanisms, map[string]any{"kind": "unit", "runner": "command", "command": testCommand})
@@ -1375,7 +1505,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 	if buildCommand != "" {
 		mechanisms = append(mechanisms, map[string]any{"kind": "build", "runner": "command", "command": buildCommand})
 	}
-	verifications := onboardingSetupVerifications(devCommand, testCommand, buildCommand, trackerProvider, prProvider)
+	verifications := onboardingSetupVerifications(devCommand, testCommand, buildCommand, prProvider)
 	profile := map[string]any{
 		"schema": "project-profile/v1", "id": stringValue(data, "project_id"), "title": stringValue(data, "project_title"),
 		"summary":           "Project-local Kitsoki dev-story binding.",
@@ -1384,7 +1514,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 		"stack":             map[string]any{"kind": kind, "languages": languages},
 		"testing":           map[string]any{"mechanisms": mechanisms},
 		"conventions":       map[string]any{"source": "project"},
-		"tracker":           map[string]any{"provider": trackerProvider, "project": trackerProject, "repo": trackerProject},
+		"tracker":           map[string]any{"sources": ticketSources},
 		"pull_requests":     map[string]any{"provider": prProvider, "repository": prRepository, "base_branch": defaultBranch, "template": prTemplate},
 		"goals":             goals,
 		"kitsoki":           map[string]any{"story": "dev-story", "story_pack": storyPack, "enabled_stories": enabledStories, "instance": map[string]any{"id": projectID + "-dev", "path": ".kitsoki/stories/" + projectID + "-dev/app.yaml", "bindings": bindings}},
@@ -1412,7 +1542,7 @@ func onboardingProfileDocument(data map[string]any) map[string]any {
 	return profile
 }
 
-func onboardingSetupVerifications(dev, test, build, trackerProvider, prProvider string) []any {
+func onboardingSetupVerifications(dev, test, build, prProvider string) []any {
 	items := []any{map[string]any{"id": "story-load", "kind": "story", "fields": []any{"kitsoki.instance.path"}, "gate": "required"}}
 	if test != "" {
 		items = append(items, map[string]any{"id": "tests", "kind": "tests", "command": test, "gate": "required"})
@@ -1424,11 +1554,7 @@ func onboardingSetupVerifications(dev, test, build, trackerProvider, prProvider 
 	}
 	items = append(items, map[string]any{"id": "dev-server", "kind": "dev-server", "fields": []any{"dev_server.components"}, "gate": "required"})
 	items = append(items, map[string]any{"id": "branch-policy", "kind": "profile", "fields": []any{"repo.default_branch", "repo.branch_pattern", "repo.branch_issue_id"}, "gate": "required"})
-	ticketFields := []any{"tracker.provider"}
-	if trackerProvider == "github" || trackerProvider == "jira" || trackerProvider == "local" || trackerProvider == "informal" {
-		ticketFields = append(ticketFields, "tracker.project")
-	}
-	items = append(items, map[string]any{"id": "ticket-source", "kind": "ticket", "fields": ticketFields, "gate": "required"})
+	items = append(items, map[string]any{"id": "ticket-source", "kind": "ticket", "fields": []any{"tracker.sources"}, "gate": "required"})
 	prFields := []any{"pull_requests.provider", "pull_requests.base_branch", "pull_requests.template"}
 	if prProvider != "none" {
 		prFields = append(prFields, "pull_requests.repository")
@@ -1437,7 +1563,7 @@ func onboardingSetupVerifications(dev, test, build, trackerProvider, prProvider 
 	items = append(items,
 		map[string]any{"id": "reference-corpus", "kind": "corpus", "fields": []any{"commands.test", "repo.vcs", "repo.default_branch"}, "gate": "required"},
 		map[string]any{"id": "optimization-loop", "kind": "workflow", "fields": []any{"commands.test", "kitsoki.story"}, "gate": "required"},
-		map[string]any{"id": "bug-to-pr", "kind": "workflow", "fields": []any{"commands.test", "tracker.provider", "pull_requests.repository", "pull_requests.base_branch"}, "gate": "required"},
+		map[string]any{"id": "bug-to-pr", "kind": "workflow", "fields": []any{"commands.test", "tracker.sources", "pull_requests.repository", "pull_requests.base_branch"}, "gate": "required"},
 	)
 	_ = dev
 	return items
@@ -1467,7 +1593,7 @@ func onboardingProfileFieldWasDefaulted(data map[string]any, field string) bool 
 	inputKey := map[string]string{
 		"commands.dev": "dev_command", "commands.test": "test_command", "commands.build": "build_command",
 		"repo.default_branch": "repo_default_branch", "repo.branch_pattern": "repo_branch_pattern", "repo.branch_issue_id": "repo_branch_issue_id",
-		"tracker.provider": "tracker", "tracker.project": "ticket_repo",
+		"tracker.sources":        "ticket_sources",
 		"pull_requests.provider": "pr_provider", "pull_requests.repository": "pr_repository",
 		"pull_requests.base_branch": "repo_default_branch", "pull_requests.template": "pr_template",
 	}[field]
@@ -1479,6 +1605,7 @@ func mergeOnboardingProfile(generated, existing map[string]any) (map[string]any,
 		return onboardingCloneMap(generated), nil
 	}
 	existing = onboardingCloneMap(existing)
+	onboardingMigrateLegacyTicketComposition(generated, existing)
 	if project, ok := onboardingValueAt(existing, "tracker.project"); !ok || onboardingValueEmpty(project) {
 		if legacy, legacyOK := onboardingValueAt(existing, "tracker.repo"); legacyOK && !onboardingValueEmpty(legacy) {
 			onboardingSetValueAt(existing, "tracker.project", legacy)
@@ -1545,6 +1672,129 @@ func mergeOnboardingProfile(generated, existing map[string]any) (map[string]any,
 	onboardingBlock["resolutions"] = managed
 	sort.Strings(preserved)
 	return merged, preserved
+}
+
+func onboardingMigrateLegacyTicketComposition(generated, existing map[string]any) {
+	generatedTracker := onboardingMap(generated["tracker"])
+	generatedSources := onboardingAnyList(generatedTracker["sources"])
+	existingTracker := onboardingMap(existing["tracker"])
+	if len(existingTracker) == 0 {
+		existingTracker = map[string]any{}
+		existing["tracker"] = existingTracker
+	}
+	existingKitsoki := onboardingMap(existing["kitsoki"])
+	existingInstance := onboardingMap(existingKitsoki["instance"])
+	existingBinding := stringValue(onboardingMap(existingInstance["bindings"]), "ticket")
+	existingSources := onboardingAnyList(existingTracker["sources"])
+	if len(existingSources) == 0 && !onboardingLegacyTicketBindingIsComposable(existingBinding) {
+		onboardingPreserveLegacyDirectTicketBinding(generated)
+		return
+	}
+	if len(existingSources) == 0 {
+		existingSources = onboardingCloneValue(generatedSources).([]any)
+		legacyProvider := strings.TrimSpace(stringValue(existingTracker, "provider"))
+		legacyProject := strings.TrimSpace(stringValue(existingTracker, "project"))
+		if legacyProject == "" {
+			legacyProject = strings.TrimSpace(stringValue(existingTracker, "repo"))
+		}
+		switch {
+		case legacyProvider == "github" && legacyProject != "" && !onboardingTicketSourcesContainRepo(existingSources, legacyProject):
+			existingSources = append(existingSources, onboardingGitHubTicketSource("github", legacyProject))
+		case legacyProvider == "local" && legacyProject != "" && legacyProject != "pasted":
+			for _, raw := range existingSources {
+				source := onboardingMap(raw)
+				if stringValue(source, "id") == "local" {
+					onboardingMap(source["args"])["root"] = legacyProject
+				}
+			}
+		}
+		existingTracker["sources"] = existingSources
+		onboardingMigrateLegacyTicketResolution(existing, existingSources)
+	}
+	if len(existingSources) == 0 {
+		return
+	}
+	kitsoki := onboardingMap(existing["kitsoki"])
+	instance := onboardingMap(kitsoki["instance"])
+	bindings := onboardingMap(instance["bindings"])
+	if len(bindings) > 0 {
+		bindings["ticket"] = "host.ticket_federation"
+	}
+}
+
+func onboardingMigrateLegacyTicketResolution(existing map[string]any, sources []any) {
+	onboarding := onboardingMap(existing["onboarding"])
+	if len(onboarding) == 0 {
+		onboarding = map[string]any{}
+		existing["onboarding"] = onboarding
+	}
+	resolutions := onboardingAnyList(onboarding["resolutions"])
+	kept := make([]any, 0, len(resolutions)+1)
+	source := ""
+	hadSourcesResolution := false
+	for _, raw := range resolutions {
+		resolution := onboardingMap(raw)
+		switch stringValue(resolution, "field") {
+		case "tracker.provider", "tracker.project", "tracker.repo":
+			candidate := stringValue(resolution, "source")
+			if candidate == "operator" || source == "" {
+				source = candidate
+			}
+			continue
+		case "tracker.sources":
+			// A real sources resolution already owns provenance; preserve it.
+			kept = append(kept, raw)
+			hadSourcesResolution = true
+		default:
+			kept = append(kept, raw)
+		}
+	}
+	if hadSourcesResolution {
+		onboarding["resolutions"] = kept
+		return
+	}
+	if source == "" {
+		// A value without managed provenance predates refresh ownership and must
+		// remain operator-owned rather than being silently reclassified.
+		source = "operator"
+	}
+	kept = append(kept, onboardingResolution(
+		"tracker.sources", onboardingCloneValue(sources), source,
+		"Migrated legacy tracker.provider/project metadata into the ordered ticket-source contract.", "",
+	))
+	onboarding["resolutions"] = kept
+}
+
+func onboardingLegacyTicketBindingIsComposable(binding string) bool {
+	switch binding {
+	case "", "host.ticket_federation", "host.local_files.ticket", "host.local_github.ticket", "host.gh.ticket":
+		return true
+	default:
+		return false
+	}
+}
+
+func onboardingPreserveLegacyDirectTicketBinding(generated map[string]any) {
+	delete(onboardingMap(generated["tracker"]), "sources")
+	onboarding := onboardingMap(generated["onboarding"])
+	resolutions := onboardingAnyList(onboarding["resolutions"])
+	kept := make([]any, 0, len(resolutions))
+	for _, raw := range resolutions {
+		if stringValue(onboardingMap(raw), "field") != "tracker.sources" {
+			kept = append(kept, raw)
+		}
+	}
+	onboarding["resolutions"] = kept
+	setup := onboardingMap(generated["setup_plan"])
+	for _, raw := range onboardingAnyList(setup["verifications"]) {
+		verification := onboardingMap(raw)
+		switch stringValue(verification, "id") {
+		case "ticket-source":
+			verification["fields"] = []any{"kitsoki.instance.bindings.ticket"}
+		case "bug-to-pr":
+			verification["fields"] = []any{"commands.test", "kitsoki.instance.bindings.ticket", "pull_requests.repository", "pull_requests.base_branch"}
+		}
+	}
 }
 
 func onboardingMergeOverride(base, override map[string]any) {
@@ -1738,17 +1988,52 @@ func RefreshDevOnboardingProfile(target string, apply bool) (map[string]any, err
 		return map[string]any{"ok": false, "profile_path": profilePath, "validation": map[string]any{"schema": stringsToAny(validation.Schema), "semantic": stringsToAny(validation.Semantic), "warnings": stringsToAny(validation.Warnings)}}, nil
 	}
 	oldRaw, _ := os.ReadFile(profilePath)
-	changed := string(oldRaw) != string(raw)
-	if apply && changed {
+	profileChanged := string(oldRaw) != string(raw)
+	if apply && profileChanged {
 		if _, err := writeOnboardingFile(profilePath, string(raw)); err != nil {
 			return nil, err
 		}
 	}
+	instanceRel := stringValue(onboardingMap(onboardingMap(merged["kitsoki"])["instance"]), "path")
+	instancePath := filepath.Join(abs, filepath.FromSlash(instanceRel))
+	desiredInstance := onboardingInstanceYAML(merged)
+	instanceChanged := false
+	instanceApplied := false
+	instanceUpdateRequired := false
+	instanceRaw, instanceErr := os.ReadFile(instancePath)
+	switch {
+	case os.IsNotExist(instanceErr):
+		// Profile refresh remains profile-scoped for a checkout that has never
+		// created its project wrapper. Full onboarding owns wrapper creation.
+		instanceUpdateRequired = true
+	case instanceErr != nil:
+		return nil, fmt.Errorf("read project wrapper: %w", instanceErr)
+	case string(instanceRaw) == desiredInstance:
+		// Already current.
+	case onboardingInstanceIsManaged(instanceRaw, existing):
+		instanceChanged = true
+		if apply {
+			changed, writeErr := writeOnboardingFile(instancePath, desiredInstance)
+			if writeErr != nil {
+				return nil, writeErr
+			}
+			instanceApplied = changed
+		}
+	case !onboardingInstanceTicketContractMatches(instanceRaw, merged):
+		instanceUpdateRequired = true
+	}
+	warnings := stringsToAny(validation.Warnings)
+	if instanceUpdateRequired {
+		warnings = append(warnings, "project-owned dev-story wrapper does not match tracker.sources; review its ticket federation wiring")
+	}
+	changed := profileChanged || instanceChanged
 	return map[string]any{
 		"ok": true, "target": abs, "profile_path": profilePath, "changed": changed,
-		"applied": apply && changed, "profile": merged, "preserved_overrides": stringsToAny(preserved),
-		"defaults_used": onboardingDefaultResolutions(onboardingResolutionList(merged)),
-		"validation":    map[string]any{"warnings": stringsToAny(validation.Warnings)},
+		"applied": apply && (profileChanged || instanceApplied), "profile": merged, "preserved_overrides": stringsToAny(preserved),
+		"instance_path": instancePath, "instance_changed": instanceChanged, "instance_applied": instanceApplied,
+		"instance_update_required": instanceUpdateRequired,
+		"defaults_used":            onboardingDefaultResolutions(onboardingResolutionList(merged)),
+		"validation":               map[string]any{"warnings": warnings},
 	}, nil
 }
 
@@ -1763,6 +2048,7 @@ func onboardingConfigYAML() string {
 }
 
 var onboardingInstanceHosts = []string{
+	"host.ticket_federation",
 	"host.local_files.ticket",
 	"host.local_github.ticket",
 	"host.gh.ticket",
@@ -1806,6 +2092,91 @@ func onboardingInstanceYAML(profile map[string]any) string {
 	commands := onboardingMap(profile["commands"])
 	repo := onboardingMap(profile["repo"])
 	tracker := onboardingMap(profile["tracker"])
+	ticketSources := onboardingAnyList(tracker["sources"])
+	pullRequests := onboardingMap(profile["pull_requests"])
+	kitsoki := onboardingMap(profile["kitsoki"])
+	instance := onboardingMap(kitsoki["instance"])
+	bindings := onboardingMap(instance["bindings"])
+	ticketBinding := defaultString(stringValue(bindings, "ticket"), "host.ticket_federation")
+	baseBranch := defaultString(stringValue(repo, "default_branch"), "main")
+	bugfixDestination := "open-pr"
+	if stringValue(pullRequests, "provider") == "local" || stringValue(pullRequests, "provider") == "none" {
+		bugfixDestination = "local-merge"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "app:\n  id: %s-dev\n  version: 0.1.0\n  title: %q\n  author: Kitsoki\n  license: CC0\n\nhosts:\n", id, id+"-dev - work on "+title+" with Kitsoki")
+	for _, host := range onboardingInstanceHostIDs(ticketSources) {
+		fmt.Fprintf(&b, "  - %s\n", host)
+	}
+	b.WriteString("\nrouting:\n  free_form_fallback:\n    state: core.landing\n    intent: core__landing_capture\n\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: declared\n    host_bindings:\n")
+	fmt.Fprintf(&b, "      ticket: %s\n", ticketBinding)
+	// workspace binds to host.capsule_workspace (not host.git_worktree):
+	// project development moved to managed clone-backed capsule workspaces.
+	b.WriteString("      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      base_branch: \"{{ world.base_branch }}\"\n      ticket_sources: \"{{ world.ticket_sources }}\"\n      ticket_repo: \"{{ world.ticket_repo }}\"\n      ticket_github_repo: \"{{ world.ticket_github_repo }}\"\n      bugfix_destination: \"{{ world.bugfix_destination }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n")
+	fmt.Fprintf(&b, "  base_branch: { type: string, default: %q }\n", baseBranch)
+	fmt.Fprintf(&b, "  branch_pattern: { type: string, default: %q }\n", stringValue(repo, "branch_pattern"))
+	fmt.Fprintf(&b, "  branch_issue_id: { type: string, default: %q }\n", stringValue(repo, "branch_issue_id"))
+	fmt.Fprintf(&b, "  ticket_sources: { type: list, default: %s }\n", onboardingTicketSourcesJSON(ticketSources))
+	b.WriteString("  ticket_repo: { type: string, default: \"\" }\n")
+	b.WriteString("  ticket_github_repo: { type: string, default: \"\" }\n")
+	fmt.Fprintf(&b, "  bugfix_destination: { type: string, default: %q }\n", bugfixDestination)
+	fmt.Fprintf(&b, "  pull_request_template: { type: string, default: %q }\n", stringValue(pullRequests, "template"))
+	fmt.Fprintf(&b, "  build_cmd: { type: string, default: %q }\n", stringValue(commands, "build"))
+	fmt.Fprintf(&b, "  test_cmd: { type: string, default: %q }\n\nroot: core\n", stringValue(commands, "test"))
+	body := "# Code generated by Kitsoki project onboarding; managed wiring may be refreshed.\n" + b.String()
+	digest := sha256.Sum256([]byte(body))
+	return fmt.Sprintf("# kitsoki-managed-wrapper: v1 sha256=%x\n%s", digest, body)
+}
+
+// onboardingLegacyInstanceYAML reproduces the unmarked wrapper emitted before
+// ticket-source federation. It exists only as a safe migration fingerprint:
+// apply/refresh may replace an existing wrapper when its bytes exactly match
+// this generator output for the previous profile, but never infer ownership
+// from a merely similar project-authored file.
+var onboardingLegacyInstanceHosts = []string{
+	"host.local_files.ticket",
+	"host.local_github.ticket",
+	"host.gh.ticket",
+	"host.gh.ticket.get",
+	"host.gh.ticket.comment",
+	"host.gh.ticket.transition",
+	"host.git",
+	"host.git_worktree",
+	"host.local",
+	"host.capsule_workspace",
+	"host.append_to_file",
+	"host.inbox.add",
+	"host.agent.ask",
+	"host.agent.decide",
+	"host.agent.task",
+	"host.agent.codeact",
+	"host.agent.search",
+	"host.agent.converse",
+	"host.chat.resolve",
+	"host.chat.transcript",
+	"host.artifacts_dir",
+	"host.slidey.render",
+	"host.fs.writable_dir",
+	"host.ide.get_diagnostics",
+	"host.ide.open_file",
+	"host.ide.open_diff",
+	"host.diff.open",
+	"host.run",
+	"host.starlark.run",
+	"host.session_mining.run",
+	"host.ui_qa.run",
+	"host.proposal.publish",
+	"host.dev.profile_setup",
+	"host.dev.onboarding",
+	"host.decomposition.update",
+}
+
+func onboardingLegacyInstanceYAML(profile map[string]any) string {
+	id := stringValue(profile, "id")
+	title := stringValue(profile, "title")
+	commands := onboardingMap(profile["commands"])
+	repo := onboardingMap(profile["repo"])
+	tracker := onboardingMap(profile["tracker"])
 	pullRequests := onboardingMap(profile["pull_requests"])
 	kitsoki := onboardingMap(profile["kitsoki"])
 	instance := onboardingMap(kitsoki["instance"])
@@ -1822,13 +2193,11 @@ func onboardingInstanceYAML(profile map[string]any) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "app:\n  id: %s-dev\n  version: 0.1.0\n  title: %q\n  author: Kitsoki\n  license: CC0\n\nhosts:\n", id, id+"-dev - work on "+title+" with Kitsoki")
-	for _, host := range onboardingInstanceHosts {
+	for _, host := range onboardingLegacyInstanceHosts {
 		fmt.Fprintf(&b, "  - %s\n", host)
 	}
 	b.WriteString("\nrouting:\n  free_form_fallback:\n    state: core.landing\n    intent: core__landing_capture\n\nimports:\n  core:\n    source: \"@kitsoki/dev-story\"\n    entry: landing\n    hosts: declared\n    host_bindings:\n")
 	fmt.Fprintf(&b, "      ticket: %s\n", ticketBinding)
-	// workspace binds to host.capsule_workspace (not host.git_worktree):
-	// project development moved to managed clone-backed capsule workspaces.
 	b.WriteString("      vcs: host.git\n      ci: host.local\n      workspace: host.capsule_workspace\n      transport: host.append_to_file\n    world_in:\n      workdir: \"{{ world.workdir }}\"\n      repo_root: \"{{ world.repo_root }}\"\n      base_branch: \"{{ world.base_branch }}\"\n      ticket_repo: \"{{ world.ticket_repo }}\"\n      ticket_github_repo: \"{{ world.ticket_github_repo }}\"\n      bugfix_destination: \"{{ world.bugfix_destination }}\"\n      build_cmd: \"{{ world.build_cmd }}\"\n      test_cmd: \"{{ world.test_cmd }}\"\n\nworld:\n  workdir: { type: string, default: \".\" }\n  repo_root: { type: string, default: \".\" }\n")
 	fmt.Fprintf(&b, "  base_branch: { type: string, default: %q }\n", baseBranch)
 	fmt.Fprintf(&b, "  branch_pattern: { type: string, default: %q }\n", stringValue(repo, "branch_pattern"))
@@ -1840,4 +2209,89 @@ func onboardingInstanceYAML(profile map[string]any) string {
 	fmt.Fprintf(&b, "  build_cmd: { type: string, default: %q }\n", stringValue(commands, "build"))
 	fmt.Fprintf(&b, "  test_cmd: { type: string, default: %q }\n\nroot: core\n", stringValue(commands, "test"))
 	return b.String()
+}
+
+func onboardingInstanceIsManaged(raw []byte, previousProfile map[string]any) bool {
+	text := string(raw)
+	if onboardingManagedInstanceChecksumMatches(text) {
+		return true
+	}
+	return len(previousProfile) > 0 && text == onboardingLegacyInstanceYAML(previousProfile)
+}
+
+func onboardingManagedInstanceChecksumMatches(text string) bool {
+	marker, body, ok := strings.Cut(text, "\n")
+	const prefix = "# kitsoki-managed-wrapper: v1 sha256="
+	if !ok || !strings.HasPrefix(marker, prefix) {
+		return false
+	}
+	want := strings.TrimSpace(strings.TrimPrefix(marker, prefix))
+	if len(want) != sha256.Size*2 {
+		return false
+	}
+	got := fmt.Sprintf("%x", sha256.Sum256([]byte(body)))
+	return strings.EqualFold(got, want)
+}
+
+func onboardingInstanceTicketContractMatches(raw []byte, profile map[string]any) bool {
+	var doc map[string]any
+	if yaml.Unmarshal(raw, &doc) != nil {
+		return false
+	}
+	profileInstance := onboardingMap(onboardingMap(profile["kitsoki"])["instance"])
+	expectedBinding := stringValue(onboardingMap(profileInstance["bindings"]), "ticket")
+	core := onboardingMap(onboardingMap(doc["imports"])["core"])
+	if stringValue(onboardingMap(core["host_bindings"]), "ticket") != expectedBinding {
+		return false
+	}
+	expectedSources := onboardingAnyList(onboardingMap(profile["tracker"])["sources"])
+	if len(expectedSources) == 0 {
+		return true
+	}
+	if strings.TrimSpace(stringValue(onboardingMap(core["world_in"]), "ticket_sources")) == "" {
+		return false
+	}
+	worldSources := onboardingMap(onboardingMap(doc["world"])["ticket_sources"])
+	if !reflect.DeepEqual(onboardingAnyList(worldSources["default"]), expectedSources) {
+		return false
+	}
+	hosts := map[string]bool{}
+	for _, host := range onboardingStrings(doc["hosts"]) {
+		hosts[host] = true
+	}
+	if !hosts["host.ticket_federation"] {
+		return false
+	}
+	for _, rawSource := range expectedSources {
+		provider := stringValue(onboardingMap(rawSource), "provider")
+		if provider != "" && !hosts[provider] {
+			return false
+		}
+	}
+	return true
+}
+
+func onboardingInstanceHostIDs(ticketSources []any) []string {
+	hosts := append([]string(nil), onboardingInstanceHosts...)
+	seen := make(map[string]bool, len(hosts))
+	for _, host := range hosts {
+		seen[host] = true
+	}
+	for _, raw := range ticketSources {
+		provider := strings.TrimSpace(stringValue(onboardingMap(raw), "provider"))
+		if provider == "" || seen[provider] {
+			continue
+		}
+		hosts = append(hosts, provider)
+		seen[provider] = true
+	}
+	return hosts
+}
+
+func onboardingTicketSourcesJSON(ticketSources []any) string {
+	raw, err := json.Marshal(ticketSources)
+	if err != nil || len(raw) == 0 {
+		return "[]"
+	}
+	return string(raw)
 }

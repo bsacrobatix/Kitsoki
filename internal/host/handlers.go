@@ -525,8 +525,9 @@ func RegisterBuiltins(r *Registry) {
 	// handler per provider surface (the registry dispatches every
 	// host.<name>.<op> call to the longest registered prefix).  See
 	// docs/architecture/hosts.md.
-	r.Register("host.local_files.ticket", LocalFilesTicketHandler)
-	r.Register("host.local_github.ticket", LocalGitHubTicketHandler)
+	r.RegisterTicketProvider("host.local_files.ticket", LocalFilesTicketHandler)
+	r.RegisterTicketProvider("host.local_github.ticket", LocalGitHubTicketHandler)
+	r.Register("host.ticket_federation", TicketFederationHandler(r))
 	r.Register("host.git", GitVCSHandler)
 	r.Register("host.local", LocalCIHandler)
 	r.Register("host.capsule_ci.project_checks", CapsuleCIProjectChecksHandler)
@@ -542,7 +543,7 @@ func RegisterBuiltins(r *Registry) {
 	// calls; `host.git` routes PR operations through local git plus native
 	// GitHub API calls. `host.cypilot_artifacts` shells out to cpt for the SDLC
 	// artifact iface.
-	r.Register("host.gh.ticket", GitHubTicketHandler)
+	r.RegisterTicketProvider("host.gh.ticket", GitHubTicketHandler)
 	r.Register("host.cypilot_artifacts", CypilotArtifactsHandler)
 
 	// Agent five verbs.

@@ -18,9 +18,10 @@ evidence.
 
 The caller must choose exactly one source mode. Do not silently switch modes.
 
-- **local** — the bug report is a local markdown ticket. Read the concrete local
-  file named by `ticket_source_ref` when present; otherwise read `thread` when it
-  is a markdown/path value; otherwise read `issues/bugs/{{ args.ticket_id }}.md`.
+- **local** — the bug report is a local markdown ticket. `ticket_source_ref` is
+  routing identity (for example `local:<id>`), not a filesystem path. Read
+  `thread` when it is a markdown/path value, then `ticket_url`; otherwise read
+  `issues/bugs/{{ args.ticket_id }}.md`.
 - **remote** — the bug report is a remote tracker issue. Use the supplied
   `ticket_body` below plus `ticket_title`, `ticket_url`, and `ticket_repo`.
   Do **not** search `issues/bugs/`, `.context`, traces, or unrelated local notes

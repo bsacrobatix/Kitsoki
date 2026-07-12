@@ -255,21 +255,23 @@ host_interfaces:
     description: "Issue tracker abstraction (file / GitHub Issues / Jira)."
     operations:
       search:
-        input:  { query: string, limit: int }
-        output: { tickets: list }
+        input:  { query: string, limit: int, sources: list, repo: string, root: string }
+        output: { tickets: list, source_groups: list, provider_errors: list }
       get:
-        input:  { id: string }
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string }
         output: { id: string, title: string, body: string, status: string,
-                  priority: string, assignee: string, url: string, comments: list }
+                  priority: string, assignee: string, url: string, comments: list,
+                  source: string, source_label: string, source_kind: string,
+                  source_mode: string, source_repo: string, ref: string }
       comment:
-        input:  { id: string, body: string, thread: string }
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string, body: string, thread: string }
         output: { ok: bool, comment_id: string }
       transition:
-        input:  { id: string, to: string }
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string, to: string }
         output: { ok: bool }
       list_mine:
-        input:  { filter: string }
-        output: { tickets: list }
+        input:  { filter: string, sources: list, repo: string, root: string }
+        output: { tickets: list, source_groups: list, provider_errors: list }
     default: host.local_files.ticket
 
   vcs:
@@ -439,7 +441,13 @@ world:
 
   # ── Ticket search / pickup ────────────────────────────────────────
   ticket_query:        { type: string, default: "" }
-  ticket_results:      { type: string, default: "" }
+  # ticket_sources is the configured, ordered federation input. Each source is
+  # provider-neutral: {id,label,provider,kind,mode,args}. The ticket provider
+  # returns the same ordering as ticket_source_groups and annotates every flat
+  # row with a global picker index plus its source identity.
+  ticket_sources:      { type: list,   default: [] }
+  ticket_results:      { type: list,   default: [] }
+  ticket_source_groups: { type: list,  default: [] }
   ticket_provider_errors: { type: list, default: [] }
   ticket_local_count:  { type: int,    default: 999 }
   ticket_github_count: { type: int,    default: 999 }
@@ -469,10 +477,13 @@ world:
   # (see internal/host/github.go). The local-files provider sets source=local
   # and url/path to the ticket file, so artifact-backed local issues keep their
   # .artifacts/issues/bugs/... thread across the bugfix import boundary.
-  ticket_source:       { type: string, default: "" }
+  ticket_source:       { type: string, default: "" }      # stable configured source id
+  ticket_source_label: { type: string, default: "" }      # operator-facing source label
+  ticket_source_kind:  { type: string, default: "" }      # provider kind (github, local, jira, ...)
+  ticket_source_repo:  { type: string, default: "" }      # provider repo/project identity when applicable
   ticket_legacy_id:    { type: string, default: "" }
   ticket_source_mode:  { type: string, default: "local" } # local | remote | freeform
-  ticket_source_ref:   { type: string, default: "" }      # local path, GitHub URL, or inline complaint marker
+  ticket_source_ref:   { type: string, default: "" }      # stable provider/federation ref (for example local:<id> or upstream:123); thread/ticket_url retain paths and URLs
   bugfix_ref_input:    { type: string, default: "" }      # exact raw ID/URL captured before provider lookup
   bugfix_link_input:   { type: string, default: "" }      # exact raw issue link captured before provider lookup
   bugfix_intake_title: { type: string, default: "" }      # fallback title while provider metadata loads
@@ -689,6 +700,7 @@ world:
   init_tracker:          { type: string, default: "none" }
   init_ticket_provider:  { type: string, default: "" }
   init_ticket_repo:      { type: string, default: "" }
+  init_ticket_sources:   { type: list,   default: [] }
   init_pr_provider:      { type: string, default: "" }
   init_pr_repository:    { type: string, default: "" }
   init_pr_base_branch:   { type: string, default: "" }
@@ -2011,6 +2023,11 @@ imports:
       ticket_url:      "{{ world.ticket_url }}"
       ticket_body:     "{{ world.ticket_body }}"
       ticket_repo:     "{{ world.ticket_repo }}"
+      ticket_sources:  "{{ world.ticket_sources }}"
+      ticket_source:   "{{ world.ticket_source }}"
+      ticket_source_label: "{{ world.ticket_source_label }}"
+      ticket_source_kind:  "{{ world.ticket_source_kind }}"
+      ticket_source_repo:  "{{ world.ticket_source_repo }}"
       thread:          "{{ world.thread }}"
       ticket_source_mode: "{{ world.ticket_source_mode }}"
       ticket_source_ref:  "{{ world.ticket_source_ref }}"

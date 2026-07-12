@@ -21,7 +21,7 @@ initial_world:
   core__pr__pr_title:   "Fix issue 124"
 
 host_handlers:
-  host.local_github.ticket:
+  host.ticket_federation:
     data: { ok: true, comment_id: "issue-comment-124" }
   host.git:
     data: { ok: true, state: "pending", checks: "", comments: "" }
@@ -34,7 +34,7 @@ turns:
       core__human_review_issue_comment_id: "issue-comment-124"
       core__human_review_pr_comment_ok: true
     expect_host_calls:
-      - handler: host.local_github.ticket.comment
+      - handler: host.ticket_federation.comment
         args: { id: "124" }
         times: 1
       - handler: host.git.pr_comment

@@ -59,6 +59,7 @@ root:
   # verifies this list covers every expanded subtree host.
   hosts:
     - host.local_files.ticket
+    - host.ticket_federation
     - host.gh.ticket
     - host.gh.ticket.comment
     - host.gh.ticket.get

@@ -19,8 +19,21 @@ stack:
   kind: rust
   languages: [rust]
 tracker:
-  provider: github
-  project: bsacrobatix/gears-rust
+  sources:
+    - id: local
+      label: Local
+      provider: host.local_files.ticket
+      kind: local
+      mode: local
+      args:
+        root: .artifacts
+    - id: origin
+      label: bsacrobatix/gears-rust
+      provider: host.gh.ticket
+      kind: github
+      mode: remote
+      args:
+        repo: bsacrobatix/gears-rust
 pull_requests:
   provider: github
   repository: bsacrobatix/gears-rust
@@ -42,7 +55,7 @@ kitsoki:
     id: gears-rust-dev
     path: .kitsoki/stories/gears-rust-dev/app.yaml
     bindings:
-      ticket: host.local_files.ticket
+      ticket: host.ticket_federation
       vcs: host.git
       ci: host.local
       workspace: host.git_worktree
@@ -64,7 +77,7 @@ goals:
         gate: required
         verification: branch-policy
       - id: ticket-source-known
-        statement: The ticket provider and project are explicit.
+        statement: The ordered ticket sources are explicit.
         gate: required
         verification: ticket-source
       - id: pr-policy-known
@@ -140,7 +153,7 @@ setup_plan:
       gate: required
     - id: ticket-source
       kind: ticket
-      fields: [tracker.provider, tracker.project]
+      fields: [tracker.sources]
       gate: required
     - id: pr-policy
       kind: pull-request
@@ -164,6 +177,62 @@ setup_plan:
 	}
 	if len(res.Warnings) != 0 {
 		t.Fatalf("complete profile should not warn: %v", res.Warnings)
+	}
+}
+
+func TestValidate_RejectsInvalidTicketSourceComposition(t *testing.T) {
+	profile := []byte(`schema: project-profile/v1
+id: composed
+title: Composed
+repo:
+  root: "."
+  vcs: git
+stack:
+  kind: generic
+commands:
+  build: "true"
+  test: "true"
+tracker:
+  sources:
+    - id: local
+      label: Local
+      provider: .kitsoki/providers/ticket.star
+      kind: local
+      mode: local
+      args: {root: .artifacts}
+    - id: local
+      label: local
+      provider: host.gh.ticket
+      kind: github
+      mode: remote
+      args: {repo: example/project}
+kitsoki:
+  story: dev-story
+  instance:
+    id: composed-dev
+    path: .kitsoki/stories/composed-dev/app.yaml
+    bindings:
+      ticket: host.local_files.ticket
+      vcs: host.git
+      ci: host.local
+      workspace: host.capsule_workspace
+      transport: host.append_to_file
+`)
+	res, err := Validate(profile, "")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if res.OK {
+		t.Fatal("invalid ticket source composition should fail semantic validation")
+	}
+	joined := strings.Join(res.Semantic, "\n")
+	for _, want := range []string{`tracker.sources id "local" is declared more than once`, `tracker.sources label "local" is declared more than once`, `want "host.ticket_federation" when tracker.sources is configured`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("semantic output missing %q:\n%s", want, joined)
+		}
+	}
+	if schema := strings.Join(res.Schema, "\n"); !strings.Contains(schema, "/tracker/sources/0/provider") {
+		t.Fatalf("schema output should reject a raw script path as a federated provider:\n%s", schema)
 	}
 }
 

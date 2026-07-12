@@ -32,6 +32,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/host"
 	"kitsoki/internal/kit"
+	"kitsoki/internal/ticketprovider"
 )
 
 // MethodPrefix is the JSON-RPC method / dot-namespace prefix every kit
@@ -184,7 +185,12 @@ func (d *Dispatcher) registerScriptsLocked(def *app.AppDef) {
 			continue
 		}
 		d.scripts[name] = struct{}{}
-		d.reg.Replace(name, host.StarlarkBindingHandler(scriptPath))
+		handler := host.StarlarkBindingHandler(scriptPath)
+		if ticketprovider.IsProviderScript(scriptPath) {
+			d.reg.ReplaceTicketProvider(name, handler)
+			continue
+		}
+		d.reg.Replace(name, handler)
 	}
 }
 
