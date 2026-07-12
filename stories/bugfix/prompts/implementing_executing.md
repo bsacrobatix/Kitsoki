@@ -65,7 +65,8 @@ it back to you. Catch that **now**, before you submit.
 Do not submit a fix you have not verified. You have a shell — use it. Work
 this loop until it is green, then submit:
 
-1. **Build.** Run the project's build (e.g. `go build ./...`). If it does not
+1. **Build.** Run the build for the package(s) you touched (e.g. `go build
+   ./path/to/changed/pkg/...`), not a whole-repo build. If it does not
    compile, fix it and rebuild. Never submit a fix that does not build.
 2. **Targeted test.** Run the test(s) that exercise this bug — the
    reproduction test and the package(s) you changed
@@ -109,6 +110,12 @@ if a narrow, local fix works, take it.
 - Set `applied: false` with `blockers` ONLY if you genuinely could not reach a
   green build+test state — never submit `applied: true` for a fix you could
   not get to compile and pass.
+- **Keep every shell command scoped and fast.** Never run a whole-repo
+  command (`go build ./...`, `go test ./...`, a full lint/build sweep, etc.)
+  — it produces no incremental output for as long as it runs and this step
+  has an activity timeout, so a slow, silent command can get your turn
+  killed before you finish. Scope builds/tests to the package(s) in
+  `affected_files` plus anything importing them.
 
 ## Output
 
