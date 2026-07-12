@@ -2552,10 +2552,14 @@ func checkAgentEffect(file, loc string, eff Effect, agents map[string]*AgentDecl
 	case "codeact":
 		// with.capabilities uses the shared structured Starlark capability
 		// schema, and runtime enforcement comes from the normalized spec rather
-		// than a prompt-only allow-list.
+		// than a prompt-only allow-list. Dynamic leaves are permitted so a
+		// compiler-normalized work item can supply narrow path grants at dispatch;
+		// their typed, rendered value is parsed again by AgentCodeactHandler.
 		if rawCaps, present := eff.With["capabilities"]; present {
-			if _, err := starlarkhost.ParseCapabilities(rawCaps); err != nil {
-				addErr(fmt.Sprintf("%s: with.capabilities is invalid for host.agent.codeact: %v", loc, err))
+			if !containsCapabilityTemplate(rawCaps) {
+				if _, err := starlarkhost.ParseCapabilities(rawCaps); err != nil {
+					addErr(fmt.Sprintf("%s: with.capabilities is invalid for host.agent.codeact: %v", loc, err))
+				}
 			}
 		}
 	case "ask", "decide", "extract":

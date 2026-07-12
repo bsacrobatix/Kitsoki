@@ -70,6 +70,26 @@ def _max_bytes(write_paths, expected_artifacts):
     return estimate
 
 
+def _acceptance_command(commands):
+    # The compiler keeps the individual commands for auditability and derives
+    # one explicit, fail-fast gate command.  host.run owns execution; CodeAct
+    # never receives a process capability or claims it ran these commands.
+    wrapped = []
+    for command in commands:
+        if "\n" in command or "\r" in command or "\x00" in command:
+            fail("acceptance_commands must be single-line deterministic commands")
+        wrapped.append("(" + command + ")")
+    return " && ".join(wrapped)
+
+
+def _acceptance_gate_command(commands):
+    # Preserve the gate verdict as a JSON envelope even when a command fails:
+    # host.run's process exit is therefore infrastructure-only while the story
+    # can deterministically route a failed acceptance gate back to this item.
+    command = _acceptance_command(commands)
+    return "set +e; " + command + "; rc=$?; printf '{\\\"ok\\\":%s,\\\"exit_code\\\":%s}\\n' \"$([ \"$rc\" -eq 0 ] && printf true || printf false)\" \"$rc\"; exit 0"
+
+
 def main(ctx):
     source = _require_list(ctx.inputs["implementation_plan"], "implementation_plan", 1)
     if len(source) > 4:
@@ -122,6 +142,8 @@ def main(ctx):
             "write_paths": write_paths,
             "invariants": invariants,
             "acceptance_commands": acceptance_commands,
+            "acceptance_command": _acceptance_command(acceptance_commands),
+            "acceptance_gate_command": _acceptance_gate_command(acceptance_commands),
             "expected_artifacts": expected_artifacts,
             "max_steps": max_steps,
             "fallback_reason_allowlist": fallback_reason_allowlist,
