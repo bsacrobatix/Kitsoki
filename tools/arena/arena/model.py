@@ -96,6 +96,11 @@ TASK_OPTIMIZATION_SCHEMA = "task-optimization/v1"
 TASK_OPTIMIZATION_PREFLIGHT_SCHEMA = "task-optimization/preflight/v1"
 TASK_OPTIMIZATION_ATTEMPT_SCHEMA = "task-optimization/attempt/v1"
 TASK_OPTIMIZATION_CHAMPION_SCHEMA = "task-optimization/champion/v1"
+# ``blocked`` is deliberately not always terminal.  A placement/harness outage
+# must be recorded (so the evidence is not lost) but remains resumable while
+# it declares ``retryable: true`` or an ``infra:*`` health.  The lifecycle
+# reducer below is the sole place which makes that distinction; receipt schema
+# validation remains owned by the receipt contract.
 TASK_OPTIMIZATION_TERMINAL_STATES = ("scored", "blocked", "unsupported")
 
 
@@ -280,8 +285,12 @@ class TaskOptimizationStudy:
                         cells.append({"id": cell_id, "task_id": task["id"], "split": task["split"],
                                       "candidate_id": candidate["id"], "treatment": treatment,
                                       "repeat": repeat, "status": "planned"})
+        policy = self.stop.get("promotion_policy", {}) if isinstance(self.stop, dict) else {}
+        retry_policy = self.stop.get("retry_policy", {}) if isinstance(self.stop, dict) else {}
+        if not isinstance(policy, dict) or not isinstance(retry_policy, dict):
+            raise ValueError("stop promotion_policy and retry_policy must be objects")
         return {"schema": TASK_OPTIMIZATION_SCHEMA, "study_id": self.study_id, "repeat_phase": repeat_phase,
-                "cell_count": len(cells), "cells": cells}
+                "cell_count": len(cells), "promotion_policy": policy, "retry_policy": retry_policy, "cells": cells}
 
     def lock(self) -> dict[str, Any]:
         corpus_bytes = Path(self.corpus_lock).read_bytes()
@@ -391,25 +400,73 @@ def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], p
     return receipts
 
 
+def _retryable_infra(receipt: dict[str, Any]) -> bool:
+    """Whether a recorded blocked attempt is an infrastructure retry, not a verdict."""
+    if str(receipt.get("status") or "") != "blocked":
+        return False
+    if receipt.get("retryable") is True:
+        return True
+    return str(receipt.get("health") or "").startswith("infra:") and receipt.get("retryable") is not False
+
+
+def _cell_lifecycle(attempts: list[dict[str, Any]], *, max_infra_retries: int) -> dict[str, Any]:
+    """Reduce append-only attempts without allowing an infra failure to grade a model."""
+    retryable = [item for item in attempts if _retryable_infra(item)]
+    model_results = [item for item in attempts if str(item.get("status") or "") == "scored"]
+    terminal_blocks = [item for item in attempts if str(item.get("status") or "") == "blocked" and not _retryable_infra(item)]
+    unsupported = [item for item in attempts if str(item.get("status") or "") == "unsupported"]
+    if model_results:
+        return {"status": "scored", "result": model_results[-1], "retryable_infra_attempts": len(retryable)}
+    if terminal_blocks:
+        return {"status": "blocked", "result": terminal_blocks[-1], "retryable_infra_attempts": len(retryable)}
+    if unsupported:
+        return {"status": "unsupported", "result": unsupported[-1], "retryable_infra_attempts": len(retryable)}
+    if len(retryable) > max_infra_retries:
+        return {"status": "blocked", "result": None, "retryable_infra_attempts": len(retryable), "reason": "infra retry budget exhausted"}
+    if any(str(item.get("status") or "") in {"running", "armed"} for item in attempts):
+        return {"status": "running", "result": None, "retryable_infra_attempts": len(retryable)}
+    if retryable:
+        return {"status": "retryable_infra", "result": None, "retryable_infra_attempts": len(retryable)}
+    return {"status": "planned", "result": None, "retryable_infra_attempts": 0}
+
+
+def _promotion_policy(plan: dict[str, Any]) -> dict[str, Any]:
+    """Read a small, explicit selection policy with conservative defaults."""
+    declared = plan.get("promotion_policy") or {}
+    if not isinstance(declared, dict):
+        raise ValueError("plan promotion_policy must be an object")
+    policy = {
+        "min_scored": int(declared.get("min_scored", 1)),
+        "min_solved": int(declared.get("min_solved", 1)),
+        "min_solve_rate": float(declared.get("min_solve_rate", 0.0)),
+        "require_matched_tasks": bool(declared.get("require_matched_tasks", True)),
+    }
+    if policy["min_scored"] < 1 or policy["min_solved"] < 0 or not 0 <= policy["min_solve_rate"] <= 1:
+        raise ValueError("invalid promotion_policy thresholds")
+    return policy
+
+
 def task_optimization_status(plan: dict[str, Any], receipts: list[dict[str, Any]], *, champion: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Aggregate append-only attempts into resume and campaign phase state."""
+    """Aggregate attempts into a retry-safe, champion-aware resume state."""
+    max_infra_retries = int((plan.get("retry_policy") or {}).get("max_infra_retries", 2))
+    if max_infra_retries < 0:
+        raise ValueError("retry_policy.max_infra_retries must be non-negative")
     by_cell: dict[str, list[dict[str, Any]]] = {str(cell["id"]): [] for cell in plan["cells"]}
     for receipt in receipts:
         by_cell[receipt["cell_id"]].append(receipt)
     cells: list[dict[str, Any]] = []
     for cell in plan["cells"]:
         attempts = by_cell[cell["id"]]
-        statuses = {str(item["status"]) for item in attempts}
-        if statuses & set(TASK_OPTIMIZATION_TERMINAL_STATES):
-            state = next(state for state in TASK_OPTIMIZATION_TERMINAL_STATES if state in statuses)
-        elif "running" in statuses or "armed" in statuses:
-            state = "running"
-        else:
-            state = "planned"
+        lifecycle = _cell_lifecycle(attempts, max_infra_retries=max_infra_retries)
+        state = str(lifecycle["status"])
         cells.append({**cell, "status": state, "attempt_count": len(attempts),
-                      "attempt_ids": sorted(str(item["attempt_id"]) for item in attempts)})
+                      "attempt_ids": sorted(str(item["attempt_id"]) for item in attempts),
+                      "retryable_infra_attempts": lifecycle["retryable_infra_attempts"],
+                      **({"reason": lifecycle["reason"]} if lifecycle.get("reason") else {})})
     learning = [cell for cell in cells if cell["split"] == "learning"]
     confirmation = [cell for cell in cells if cell["split"] == "confirmation"]
+    if champion is not None:
+        confirmation = [cell for cell in confirmation if cell["candidate_id"] == champion.get("candidate_id") and cell["treatment"] == champion.get("treatment")]
     learning_complete = bool(learning) and all(cell["status"] in TASK_OPTIMIZATION_TERMINAL_STATES for cell in learning)
     confirmation_complete = bool(confirmation) and all(cell["status"] in TASK_OPTIMIZATION_TERMINAL_STATES for cell in confirmation)
     phase = "learning"
@@ -419,30 +476,88 @@ def task_optimization_status(plan: dict[str, Any], receipts: list[dict[str, Any]
         phase = "complete" if confirmation_complete else "confirmation"
     return {"schema": "task-optimization/status/v1", "study_id": plan["study_id"], "plan_sha256": receipt_sha256(plan),
             "phase": phase, "learning_complete": learning_complete, "confirmation_complete": confirmation_complete,
-            "resume_cell_ids": [cell["id"] for cell in cells if cell["status"] in {"planned", "running"}], "cells": cells}
+            "resume_cell_ids": [cell["id"] for cell in cells if cell["status"] in {"planned", "running", "retryable_infra"}
+                                and (champion is None or cell["split"] != "confirmation" or cell in confirmation)], "cells": cells}
 
 
-def select_task_optimization_champion(plan: dict[str, Any], receipts: list[dict[str, Any]]) -> dict[str, Any]:
-    """Freeze a deterministic champion after all learning cells terminate."""
+def analyze_task_optimization(plan: dict[str, Any], receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return treatment-aware learning metrics and a promotion decision input."""
     status = task_optimization_status(plan, receipts)
     if not status["learning_complete"]:
-        raise ValueError("cannot select champion until every learning cell has a terminal receipt")
-    scores: dict[str, dict[str, int]] = {}
+        raise ValueError("cannot analyze champion until every learning cell has a terminal receipt")
+    policy = _promotion_policy(plan)
+    scores: dict[tuple[str, str], dict[str, Any]] = {}
     for cell in status["cells"]:
         if cell["split"] != "learning":
             continue
-        score = scores.setdefault(cell["candidate_id"], {"solved": 0, "scored": 0, "tokens": 0})
-        terminal = [item for item in receipts if item["cell_id"] == cell["id"] and item["status"] in TASK_OPTIMIZATION_TERMINAL_STATES]
-        latest = terminal[-1]
-        score["scored"] += 1
-        if latest.get("verdict") == "solved":
-            score["solved"] += 1
-        score["tokens"] += int((latest.get("metrics") or {}).get("total_tokens") or 0)
+        key = (str(cell["candidate_id"]), str(cell["treatment"]))
+        score = scores.setdefault(key, {"candidate_id": key[0], "treatment": key[1], "scored": 0, "solved": 0, "tokens": 0, "task_ids": [], "solve_task_ids": []})
+        terminal = [item for item in receipts if item["cell_id"] == cell["id"] and item.get("status") == "scored"]
+        score["task_ids"].append(cell["task_id"])
+        if terminal:
+            latest = terminal[-1]
+            score["scored"] += 1
+            if latest.get("verdict") == "solved":
+                score["solved"] += 1
+                score["solve_task_ids"].append(cell["task_id"])
+            score["tokens"] += int((latest.get("metrics") or {}).get("total_tokens") or 0)
     if not scores:
         raise ValueError("learning plan contains no candidate cells")
-    winner = min(scores, key=lambda candidate_id: (-scores[candidate_id]["solved"], -scores[candidate_id]["scored"], scores[candidate_id]["tokens"], candidate_id))
+    all_tasks = sorted({str(cell["task_id"]) for cell in status["cells"] if cell["split"] == "learning"})
+    arms: list[dict[str, Any]] = []
+    for score in scores.values():
+        score["task_ids"] = sorted(set(score["task_ids"]))
+        score["solve_task_ids"] = sorted(set(score["solve_task_ids"]))
+        score["solve_rate"] = round(score["solved"] / score["scored"], 6) if score["scored"] else 0.0
+        score["matched_task_ids"] = sorted(set(score["task_ids"]) & set(all_tasks))
+        score["tokens_per_solved"] = round(score["tokens"] / score["solved"], 6) if score["solved"] else None
+        reasons: list[str] = []
+        if score["scored"] < policy["min_scored"]: reasons.append("min_scored unmet")
+        if score["solved"] < policy["min_solved"]: reasons.append("min_solved unmet")
+        if score["solve_rate"] < policy["min_solve_rate"]: reasons.append("min_solve_rate unmet")
+        if policy["require_matched_tasks"] and score["matched_task_ids"] != all_tasks: reasons.append("matched task set incomplete")
+        score["promotion_eligible"] = not reasons
+        score["promotion_reasons"] = reasons
+        arms.append(score)
+    return {"schema": "task-optimization/analysis/v1", "study_id": plan["study_id"], "plan_sha256": receipt_sha256(plan),
+            "policy": policy, "learning_task_ids": all_tasks,
+            "arms": sorted(arms, key=lambda arm: (arm["candidate_id"], arm["treatment"]))}
+
+
+def compare_task_optimization(plan: dict[str, Any], receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build exhaustive pairwise arm deltas from the immutable analysis input."""
+    analysis = analyze_task_optimization(plan, receipts)
+    comparisons: list[dict[str, Any]] = []
+    arms = list(analysis["arms"])
+    for left_index, left in enumerate(arms):
+        for right in arms[left_index + 1:]:
+            left_set, right_set = set(left["solve_task_ids"]), set(right["solve_task_ids"])
+            union = left_set | right_set
+            comparisons.append({
+                "left": {"candidate_id": left["candidate_id"], "treatment": left["treatment"]},
+                "right": {"candidate_id": right["candidate_id"], "treatment": right["treatment"]},
+                "matched_task_ids": sorted(set(left["task_ids"]) & set(right["task_ids"])),
+                "left_only_solved_task_ids": sorted(left_set - right_set),
+                "right_only_solved_task_ids": sorted(right_set - left_set),
+                "solve_set_jaccard": round(len(left_set & right_set) / len(union), 6) if union else None,
+                "solved_delta_left_minus_right": left["solved"] - right["solved"],
+                "tokens_delta_left_minus_right": left["tokens"] - right["tokens"],
+            })
+    return {"schema": "task-optimization/comparison/v1", "study_id": plan["study_id"],
+            "plan_sha256": receipt_sha256(plan), "analysis_sha256": receipt_sha256(analysis),
+            "arms": analysis["arms"], "comparisons": comparisons}
+
+
+def select_task_optimization_champion(plan: dict[str, Any], receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Freeze one candidate+treatment arm only after its policy promotion bar passes."""
+    analysis = analyze_task_optimization(plan, receipts)
+    eligible = [arm for arm in analysis["arms"] if arm["promotion_eligible"]]
+    if not eligible:
+        raise ValueError("no candidate+treatment arm satisfies the promotion policy")
+    winner = min(eligible, key=lambda arm: (-arm["solved"], -arm["solve_rate"], arm["tokens"], arm["candidate_id"], arm["treatment"]))
     champion = {"schema": TASK_OPTIMIZATION_CHAMPION_SCHEMA, "study_id": plan["study_id"],
-                "plan_sha256": receipt_sha256(plan), "candidate_id": winner, "scores": scores}
+                "plan_sha256": receipt_sha256(plan), "candidate_id": winner["candidate_id"], "treatment": winner["treatment"],
+                "policy": analysis["policy"], "analysis_sha256": receipt_sha256(analysis), "scores": analysis["arms"]}
     champion["champion_sha256"] = receipt_sha256(champion)
     return champion
 

@@ -21,12 +21,13 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from arena.executor import CellExecutor, DockerBackend
 from arena.model import (
     Cell, JobSpec, TaskOptimizationStudy, canonical_json, load_task_optimization_receipts,
-    receipt_sha256, select_task_optimization_champion, task_optimization_status,
+    receipt_sha256, analyze_task_optimization, compare_task_optimization, select_task_optimization_champion, task_optimization_status,
 )
 from arena.task_optimization_receipt import validate_scored_attempt_receipt
 from arena.placement import run_sweep
@@ -228,7 +229,15 @@ def cmd_plugins(_args: argparse.Namespace) -> int:
 
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Status/analysis artifacts are replaceable projections, but readers must
+    # never observe a partially-written JSON document.
+    payload = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as tmp:
+        tmp.write(payload)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        temporary = Path(tmp.name)
+    os.replace(temporary, path)
 
 
 def _study_or_error(path: str) -> TaskOptimizationStudy | None:
@@ -320,12 +329,27 @@ def _load_json(path: str | Path, *, label: str) -> dict[str, object]:
 def _write_immutable_json(path: Path, value: object) -> None:
     """Create an evidence receipt once; never silently replace it."""
     payload = canonical_json(value)
-    if path.exists():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # O_EXCL gives concurrent recorders a single linearizable append point.
+    # The loser may only accept byte-identical evidence, never replace it.
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    except FileExistsError:
         if path.read_bytes() != payload:
             raise ValueError(f"immutable receipt already exists with different bytes: {path}")
         return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(payload)
+    try:
+        with os.fdopen(fd, "wb") as out:
+            out.write(payload)
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        # A write failure must not leave a corrupt receipt that blocks resume.
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def cmd_task_optimization_preflight(args: argparse.Namespace) -> int:
@@ -359,6 +383,8 @@ def _task_optimization_inputs(args: argparse.Namespace) -> tuple[dict[str, objec
 def cmd_task_optimization_record(args: argparse.Namespace) -> int:
     """Append one pre-scored attempt receipt after verifying frozen inputs."""
     try:
+        if Path(args.attempts).resolve() != Path(args.out).resolve():
+            raise ValueError("attempts and out must name the same append-only receipt directory")
         plan, preflight, _ = _task_optimization_inputs(args)
         receipt = _load_json(args.receipt, label="attempt receipt")
         if receipt.get("schema") != "task-optimization/attempt/v1":
@@ -403,6 +429,8 @@ def cmd_task_optimization_status(args: argparse.Namespace) -> int:
         champion = _load_json(args.champion, label="champion") if args.champion else None
         if champion is not None and (champion.get("study_id") != plan.get("study_id") or champion.get("plan_sha256") != receipt_sha256(plan)):
             raise ValueError("champion receipt does not match immutable plan")
+        if champion is not None and (not champion.get("candidate_id") or not champion.get("treatment")):
+            raise ValueError("champion receipt must name a candidate and treatment")
         status = task_optimization_status(plan, receipts, champion=champion)
         _write_json(Path(args.out) / "status.json", status)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -421,6 +449,61 @@ def cmd_task_optimization_select_champion(args: argparse.Namespace) -> int:
         print(f"ERROR: could not select task-optimization champion: {exc}", file=sys.stderr)
         return 1
     print(f"champion → {Path(args.out) / 'champion.json'} ({champion['candidate_id']})")
+    return 0
+
+
+def cmd_task_optimization_analyze(args: argparse.Namespace) -> int:
+    """Materialize a deterministic, treatment-aware learning analysis."""
+    try:
+        plan, _preflight, receipts = _task_optimization_inputs(args)
+        analysis = analyze_task_optimization(plan, receipts)
+        _write_immutable_json(Path(args.out) / "analysis.json", analysis)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not analyze task-optimization campaign: {exc}", file=sys.stderr)
+        return 1
+    eligible = sum(1 for arm in analysis["arms"] if arm["promotion_eligible"])
+    print(f"analysis → {Path(args.out) / 'analysis.json'} (eligible arms={eligible})")
+    return 0
+
+
+def cmd_task_optimization_compare(args: argparse.Namespace) -> int:
+    """Materialize pairwise solve-set/token comparisons without provider work."""
+    try:
+        plan, _preflight, receipts = _task_optimization_inputs(args)
+        comparison = compare_task_optimization(plan, receipts)
+        _write_immutable_json(Path(args.out) / "comparison.json", comparison)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not compare task-optimization campaign: {exc}", file=sys.stderr)
+        return 1
+    print(f"comparison → {Path(args.out) / 'comparison.json'} (pairs={len(comparison['comparisons'])})")
+    return 0
+
+
+def cmd_task_optimization_confirm(args: argparse.Namespace) -> int:
+    """Write immutable confirmation evidence for the frozen arm; no dispatch occurs."""
+    try:
+        plan, _preflight, receipts = _task_optimization_inputs(args)
+        champion = _load_json(args.champion, label="champion")
+        if champion.get("study_id") != plan.get("study_id") or champion.get("plan_sha256") != receipt_sha256(plan):
+            raise ValueError("champion receipt does not match immutable plan")
+        if not champion.get("candidate_id") or not champion.get("treatment"):
+            raise ValueError("champion receipt must name a candidate and treatment")
+        status = task_optimization_status(plan, receipts, champion=champion)
+        confirmation = [cell for cell in status["cells"] if cell["split"] == "confirmation" and cell["candidate_id"] == champion["candidate_id"] and cell["treatment"] == champion["treatment"]]
+        if not confirmation:
+            raise ValueError("plan contains no confirmation cells for frozen champion arm")
+        receipt = {"schema": "task-optimization/confirmation/v1", "study_id": plan["study_id"],
+                   "plan_sha256": receipt_sha256(plan), "champion_sha256": str(champion.get("champion_sha256") or receipt_sha256(champion)),
+                   "candidate_id": champion["candidate_id"], "treatment": champion["treatment"],
+                   "phase": status["phase"], "complete": status["confirmation_complete"],
+                   "resume_cell_ids": [cell["id"] for cell in confirmation if cell["status"] in {"planned", "running", "retryable_infra"}],
+                   "cells": confirmation}
+        receipt["confirmation_sha256"] = receipt_sha256(receipt)
+        _write_immutable_json(Path(args.out) / "confirmation.json", receipt)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not materialize task-optimization confirmation: {exc}", file=sys.stderr)
+        return 1
+    print(f"confirmation → {Path(args.out) / 'confirmation.json'} ({'complete' if receipt['complete'] else 'resume'})")
     return 0
 
 
@@ -599,12 +682,31 @@ def main(argv: list[str] | None = None) -> int:
     p_task_status.add_argument("--champion", default="")
     p_task_status.add_argument("--out", required=True)
     p_task_status.set_defaults(func=cmd_task_optimization_status)
-    p_task_champion = task_opt_sub.add_parser("select-champion", help="freeze deterministic champion after learning completion")
+    p_task_champion = task_opt_sub.add_parser("select-champion", aliases=["freeze"], help="freeze deterministic champion after learning completion")
     p_task_champion.add_argument("--plan", required=True)
     p_task_champion.add_argument("--preflight", required=True)
     p_task_champion.add_argument("--attempts", required=True)
     p_task_champion.add_argument("--out", required=True)
     p_task_champion.set_defaults(func=cmd_task_optimization_select_champion)
+    p_task_analyze = task_opt_sub.add_parser("analyze", help="write immutable candidate+treatment promotion analysis")
+    p_task_analyze.add_argument("--plan", required=True)
+    p_task_analyze.add_argument("--preflight", required=True)
+    p_task_analyze.add_argument("--attempts", required=True)
+    p_task_analyze.add_argument("--out", required=True)
+    p_task_analyze.set_defaults(func=cmd_task_optimization_analyze)
+    p_task_compare = task_opt_sub.add_parser("compare", help="write immutable pairwise candidate+treatment comparison")
+    p_task_compare.add_argument("--plan", required=True)
+    p_task_compare.add_argument("--preflight", required=True)
+    p_task_compare.add_argument("--attempts", required=True)
+    p_task_compare.add_argument("--out", required=True)
+    p_task_compare.set_defaults(func=cmd_task_optimization_compare)
+    p_task_confirm = task_opt_sub.add_parser("confirm", help="write immutable confirmation status for the frozen champion arm")
+    p_task_confirm.add_argument("--plan", required=True)
+    p_task_confirm.add_argument("--preflight", required=True)
+    p_task_confirm.add_argument("--attempts", required=True)
+    p_task_confirm.add_argument("--champion", required=True)
+    p_task_confirm.add_argument("--out", required=True)
+    p_task_confirm.set_defaults(func=cmd_task_optimization_confirm)
 
     args = parser.parse_args(argv)
     return args.func(args)
