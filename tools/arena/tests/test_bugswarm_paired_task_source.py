@@ -262,7 +262,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("exported checkout copied", (exported_tree / "README.md").read_text(encoding="utf-8"), "buggy checkout\n")
 
     docker_task = dict(bugswarm_task)
-    docker_task["meta"] = dict(docker_task.get("meta") or {}, bugswarm_source_dir="/workspace/src")
+    docker_task["meta"] = dict(docker_task.get("meta") or {}, bugswarm_source_dir="/workspace/src", failed_commit_sha="0123456789abcdef0123456789abcdef01234567")
     docker_tree = tmpdir / "docker-tree"
     docker_commands: list[list[str]] = []
     runner_module_globals = runner_globals["materialize_baseline"].__globals__
@@ -322,6 +322,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
     def fake_docker_infrastructure_failure(cmd, **kwargs):  # noqa: ANN001 - mirrors subprocess.run shape.
         if cmd[:2] == ["docker", "run"]:
+            if "chmod -R a+rwX" in cmd[-1]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 125, stdout="", stderr="docker daemon metadata I/O error\n")
         raise AssertionError(f"unexpected subprocess command: {cmd}")
 
@@ -333,6 +335,26 @@ with tempfile.TemporaryDirectory() as tmp:
 
     check("docker infrastructure scorer verdict", blocked_score["verdict"], "blocked")
     require("docker infrastructure scorer notes", "exit=125" in blocked_score["notes"])
+
+    baseline_tree = tmpdir / "baseline-tree"
+    baseline_tree.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=baseline_tree, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=baseline_tree, check=True)
+    subprocess.run(["git", "config", "user.name", "Arena Test"], cwd=baseline_tree, check=True)
+    (baseline_tree / "fixture.txt").write_text("fixture\n", encoding="utf-8")
+    subprocess.run(["git", "add", "fixture.txt"], cwd=baseline_tree, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=baseline_tree, check=True)
+    baseline_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=baseline_tree, text=True, capture_output=True, check=True).stdout.strip()
+    pinned_task = dict(bugswarm_task)
+    pinned_task["meta"] = dict(pinned_task.get("meta") or {}, failed_commit_sha=baseline_sha)
+    check("materialized baseline pin", runner_globals["assert_materialized_baseline"](pinned_task, baseline_tree), baseline_sha)
+    pinned_task["meta"]["failed_commit_sha"] = "0" * 40
+    try:
+        runner_globals["assert_materialized_baseline"](pinned_task, baseline_tree)
+    except SystemExit as exc:
+        require("baseline mismatch fails closed", "baseline mismatch" in str(exc))
+    else:
+        failures.append("baseline mismatch was accepted")
 
     old_key = os.environ.get("SYNTHETIC_API_KEY")
     old_budget = os.environ.get("ARENA_CLAUDE_MAX_BUDGET_USD")

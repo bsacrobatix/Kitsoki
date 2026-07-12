@@ -158,7 +158,11 @@ states:
             # accepted transition, when that binding is visible; compiling in
             # the same on_enter pass saw the pre-dispatch empty value and left
             # decomposed CodeAct with no item or write grant.
-            - when: "(world.implementation_mode == 'codeact_decomposed' || world.implementation_mode == 'codeact_decomposed_fallback') && len(world.propose_fix_artifact.implementation_plan ?? []) > 0"
+            # A submitted plan is a safety boundary regardless of the selected
+            # implementation mode. Compile it before the proposal is posted:
+            # otherwise a malformed plan can evade validation merely because a
+            # caller changes modes between proposal and acceptance.
+            - when: "len(world.propose_fix_artifact.implementation_plan ?? []) > 0"
               invoke: host.starlark.run
               id: compile_implementation_plan
               with:
@@ -168,6 +172,10 @@ states:
               bind:
                 compiled_implementation_plan: plan
                 implementation_capability_manifest: capability_manifest
+              # A malformed plan must not be followed by proposal posting or
+              # an implementation transition.  Keep the compiler's explicit
+              # rejection visible in idle for correction.
+              on_error: idle
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
