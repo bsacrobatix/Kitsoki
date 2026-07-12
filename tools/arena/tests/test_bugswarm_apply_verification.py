@@ -65,6 +65,8 @@ with tempfile.TemporaryDirectory() as tmp:
                 "verified_green": True,
                 "failed_exit_code": 1,
                 "passed_exit_code": 0,
+                "failed_commit_sha": "a" * 40,
+                "passed_commit_sha": "b" * 40,
                 "image_digest": "bugswarm/cached-images@sha256:abc",
             }
         ],
@@ -87,6 +89,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("failed exit carried", task["meta"]["bugswarm_verification"]["failed_exit_code"], 1)
     check("verification receipt hash carried", len(task["meta"]["bugswarm_verification"]["report_sha256"]), 64)
     check("image digest carried", task["meta"]["bugswarm_verification"]["image_digest"], "bugswarm/cached-images@sha256:abc")
+    check("failed container commit promotes to source meta", task["meta"]["failed_commit_sha"], "a" * 40)
+    check("passed container commit promotes to source meta", task["meta"]["passed_commit_sha"], "b" * 40)
 
     dry = tmpdir / "dry.json"
     dry_out = tmpdir / "dry-verified.yaml"
