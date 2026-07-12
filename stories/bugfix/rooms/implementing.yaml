@@ -207,7 +207,7 @@ states:
       # failed/blocked accept arms, validating's fail_short arm, and the
       # restart_from-to-implementing arms — clears implement_artifact to
       # re-arm the apply.
-      - when: "world.workdir != '' && world.implementation_mode != 'codeact'"
+      - when: "world.workdir != '' && world.implementation_mode != 'codeact' && world.implementation_mode != 'codeact_decomposed'"
         invoke: host.agent.task
         once: true
         with:
@@ -243,6 +243,48 @@ states:
               cycle:            "{{ world.cycle }}"
         bind:
           implement_artifact: submitted
+        on_error: idle
+
+      # Strict decomposed CodeAct is deliberately a separate action surface.
+      # It selects one compiler-normalized item, grants exactly that item's
+      # Starlark capabilities, and runs a host-owned deterministic gate after
+      # the item.  Missing/invalid plans fail closed through on_error; this
+      # branch never falls back to the broad `codeact` grant.
+      - when: "world.workdir != '' && world.implementation_mode == 'codeact_decomposed' && len(world.compiled_implementation_plan) > world.decomposed_implementation_index"
+        invoke: host.agent.codeact
+        id: execute_implementation_item
+        once: true
+        with:
+          agent: implementer
+          working_dir: "{{ world.workdir }}"
+          budget: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index].max_steps }}"
+          capabilities:
+            world: read
+            fs:
+              read: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index].read_paths }}"
+              write: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index].write_paths }}"
+              max_bytes: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index].capabilities.fs.max_bytes }}"
+            vcs: read
+          schema: schemas/implementing_artifact.json
+          goal: >-
+            Implement exactly work item {{ world.compiled_implementation_plan[world.decomposed_implementation_index].id }} in
+            the working tree rooted at {{ world.workdir }}. Objective:
+            {{ world.compiled_implementation_plan[world.decomposed_implementation_index].objective }}. Evidence:
+            {{ join(world.compiled_implementation_plan[world.decomposed_implementation_index].evidence_refs ?? [], "; ") }}.
+            Invariants: {{ join(world.compiled_implementation_plan[world.decomposed_implementation_index].invariants ?? [], "; ") }}.
+            Expected artifacts: {{ join(world.compiled_implementation_plan[world.decomposed_implementation_index].expected_artifacts ?? [], ", ") }}.
+            Prior accepted item outputs: {{ world.decomposed_completed_summary ?? '(none)' }}.
+            Act only through Starlark snippets and the granted capability map.
+            Do not run commands, inspect paths outside the grant, or implement a
+            different item. The host runs acceptance commands after done(); do
+            not claim they ran. Finish with implementing_artifact payload.
+          world:
+            ticket_id: "{{ world.ticket_id }}"
+            work_item: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index] }}"
+            prior_accepted_outputs: "{{ world.decomposed_completed_summary }}"
+        bind:
+          implement_artifact: payload
+          codeact_implement_steps: steps
         on_error: idle
 
       - when: "world.workdir != '' && world.implementation_mode == 'codeact'"
@@ -312,6 +354,15 @@ states:
         say: "Fix applied — {{ world.implement_artifact.summary_title|default:world.propose_fix_artifact.summary_title }}"
     on:
       accept:
+        # No decomposed item advances without an independently executed gate.
+        # One bounded re-run returns the exact gate diagnostic to that same
+        # item; a second failure is explicit needs-human rather than a broad
+        # fallback or an unbounded repair loop.
+        - when: "world.implementation_mode == 'codeact_decomposed' && world.implement_artifact.applied == true"
+          target: implementation_gating
+          effects:
+            - set:
+                decomposed_active_item: "{{ world.compiled_implementation_plan[world.decomposed_implementation_index] }}"
         - when: "world.implement_artifact.applied == false"
           target: "@exit:needs-human"
           effects:
@@ -378,6 +429,89 @@ states:
                 # Clear proposing's once: bind so it re-runs fresh.
                 propose_fix_artifact: {}
 
+      quit:
+        - target: "@exit:abandoned"
+      look:
+        - target: .
+
+  # A separate state makes the host-owned acceptance command a distinct turn:
+  # foreground on_enter calls are selected before prior binds exist, so keeping
+  # this boundary prevents a CodeAct done payload from being mistaken for a
+  # gate result in the same dispatch batch.
+  implementation_gating:
+    description: "Run the focused deterministic gate for one decomposed implementation item."
+    relevant_world: [implementation_mode, compiled_implementation_plan, decomposed_implementation_index, decomposed_gate, decomposed_gate_attempt, implement_artifact]
+    view:
+      - banner:
+          text: "IMPLEMENTATION GATE"
+          subtitle: "Strict CodeAct item verification"
+          color: "#3B82F6"
+      - prose: "The host, not CodeAct, ran the selected item's focused acceptance command."
+      - kv:
+          pairs:
+            Item: "{{ world.decomposed_active_item.id }}"
+            Gate: '{{ world.decomposed_gate.ok|default:"(pending)" }} (exit {{ world.decomposed_gate.exit_code|default:"(pending)" }})'
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - label: continue
+              hint: "accept the gate and advance, or retry the same item"
+              intent: accept
+            - label: quit
+              intent: quit
+            - label: look
+              intent: look
+    on_enter:
+      - invoke: host.run
+        id: gate_implementation_item
+        once: true
+        with:
+          cmd: bash
+          args:
+            - "-o"
+            - pipefail
+            - "-c"
+            - "{{ world.decomposed_active_item.acceptance_gate_command }}"
+          cwd: "{{ world.workdir }}"
+          timeout: 5m
+          fail_on_error: false
+        bind:
+          decomposed_gate: stdout_json
+        on_error: idle
+    on:
+      accept:
+        - when: "world.decomposed_gate.ok != true && world.decomposed_gate_attempt >= 1"
+          target: "@exit:needs-human"
+          effects:
+            - set:
+                last_error: "implementation item {{ world.decomposed_active_item.id }} failed its deterministic acceptance gate (exit {{ world.decomposed_gate.exit_code }})."
+                status: "needs-human"
+        - when: "world.decomposed_gate.ok != true"
+          target: implementing
+          effects:
+            - set:
+                decomposed_gate_attempt: "{{ world.decomposed_gate_attempt + 1 }}"
+                refine_feedback: "Acceptance gate for {{ world.decomposed_active_item.id }} failed (exit {{ world.decomposed_gate.exit_code }}). Fix only this item under the same capability grant."
+                implement_artifact: {}
+                codeact_implement_steps: []
+                decomposed_gate: {}
+        - when: "world.decomposed_implementation_index + 1 < len(world.compiled_implementation_plan)"
+          target: implementing
+          effects:
+            - set:
+                decomposed_completed_summary: "{{ world.decomposed_completed_summary }}\n{{ world.decomposed_active_item.id }}: {{ world.implement_artifact.summary_title }} — {{ world.implement_artifact.summary_markdown }}"
+                decomposed_implementation_index: "{{ world.decomposed_implementation_index + 1 }}"
+                decomposed_gate_attempt: 0
+                refine_feedback: ""
+                implement_artifact: {}
+                codeact_implement_steps: []
+                decomposed_gate: {}
+                decomposed_active_item: {}
+        - target: testing
+          effects:
+            - set:
+                decomposed_completed_summary: "{{ world.decomposed_completed_summary }}\n{{ world.decomposed_active_item.id }}: {{ world.implement_artifact.summary_title }} — {{ world.implement_artifact.summary_markdown }}"
       quit:
         - target: "@exit:abandoned"
       look:

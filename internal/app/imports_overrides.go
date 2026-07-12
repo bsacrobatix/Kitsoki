@@ -218,6 +218,30 @@ func containsTemplate(s string) bool {
 	return strings.Contains(s, "{{") || strings.Contains(s, "{%")
 }
 
+// containsCapabilityTemplate reports whether a nested CodeAct capability
+// declaration has a dispatch-time expression. Static declarations are checked
+// at load time; dynamic leaves are re-rendered to typed values and parsed by
+// AgentCodeactHandler before any model call starts.
+func containsCapabilityTemplate(v any) bool {
+	switch value := v.(type) {
+	case string:
+		return containsTemplate(value)
+	case map[string]any:
+		for _, child := range value {
+			if containsCapabilityTemplate(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if containsCapabilityTemplate(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // applyPromptOverridesToStates walks every Effect.With["prompt"] in the
 // child's state tree and rewrites the value when a key matches `resolved`.
 // `resolved` keys are both the relative path the child author wrote and
