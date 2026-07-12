@@ -12,7 +12,7 @@ tasks:
     image_tag: square-okio-140452393
     failed_job_id: 140452393
     passed_job_id: 140452394
-    ticket: Repair BugSwarm artifact square-okio-140452393: CI job 140452393 fails and job 140452394 passes.
+    ticket: "Repair BugSwarm artifact square-okio-140452393: CI job 140452393 fails and job 140452394 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -38,7 +38,7 @@ tasks:
     image_tag: square-retrofit-201300817
     failed_job_id: 201300817
     passed_job_id: 201301494
-    ticket: Repair BugSwarm artifact square-retrofit-201300817: CI job 201300817 fails and job 201301494 passes.
+    ticket: "Repair BugSwarm artifact square-retrofit-201300817: CI job 201300817 fails and job 201301494 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -64,7 +64,7 @@ tasks:
     image_tag: apache-commons-lang-224267191
     failed_job_id: 224267191
     passed_job_id: 224269234
-    ticket: Repair BugSwarm artifact apache-commons-lang-224267191: CI job 224267191 fails and job 224269234 passes.
+    ticket: "Repair BugSwarm artifact apache-commons-lang-224267191: CI job 224267191 fails and job 224269234 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -90,7 +90,7 @@ tasks:
     image_tag: scikit-learn-scikit-learn-77914145
     failed_job_id: 77914145
     passed_job_id: 77914671
-    ticket: Repair BugSwarm artifact scikit-learn-scikit-learn-77914145: CI job 77914145 fails and job 77914671 passes.
+    ticket: "Repair BugSwarm artifact scikit-learn-scikit-learn-77914145: CI job 77914145 fails and job 77914671 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -116,7 +116,7 @@ tasks:
     image_tag: owlcs-owlapi-93793148
     failed_job_id: 93793148
     passed_job_id: 93794423
-    ticket: Repair BugSwarm artifact owlcs-owlapi-93793148: CI job 93793148 fails and job 93794423 passes.
+    ticket: "Repair BugSwarm artifact owlcs-owlapi-93793148: CI job 93793148 fails and job 93794423 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -142,7 +142,7 @@ tasks:
     image_tag: languagetool-org-languagetool-393031702
     failed_job_id: 393031702
     passed_job_id: 393031871
-    ticket: Repair BugSwarm artifact languagetool-org-languagetool-393031702: CI job 393031702 fails and job 393031871 passes.
+    ticket: "Repair BugSwarm artifact languagetool-org-languagetool-393031702: CI job 393031702 fails and job 393031871 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -168,7 +168,7 @@ tasks:
     image_tag: square-okhttp-99758865
     failed_job_id: 99758865
     passed_job_id: 99766358
-    ticket: Repair BugSwarm artifact square-okhttp-99758865: CI job 99758865 fails and job 99766358 passes.
+    ticket: "Repair BugSwarm artifact square-okhttp-99758865: CI job 99758865 fails and job 99766358 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -194,7 +194,7 @@ tasks:
     image_tag: joel-costigliola-assertj-core-309871149
     failed_job_id: 309871149
     passed_job_id: 309872880
-    ticket: Repair BugSwarm artifact joel-costigliola-assertj-core-309871149: CI job 309871149 fails and job 309872880 passes.
+    ticket: "Repair BugSwarm artifact joel-costigliola-assertj-core-309871149: CI job 309871149 fails and job 309872880 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -220,7 +220,7 @@ tasks:
     image_tag: pgjdbc-pgjdbc-117659967
     failed_job_id: 117659967
     passed_job_id: 117667147
-    ticket: Repair BugSwarm artifact pgjdbc-pgjdbc-117659967: CI job 117659967 fails and job 117667147 passes.
+    ticket: "Repair BugSwarm artifact pgjdbc-pgjdbc-117659967: CI job 117659967 fails and job 117667147 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -246,7 +246,7 @@ tasks:
     image_tag: raphw-byte-buddy-150449078
     failed_job_id: 150449078
     passed_job_id: 150478318
-    ticket: Repair BugSwarm artifact raphw-byte-buddy-150449078: CI job 150449078 fails and job 150478318 passes.
+    ticket: "Repair BugSwarm artifact raphw-byte-buddy-150449078: CI job 150449078 fails and job 150478318 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -272,7 +272,7 @@ tasks:
     image_tag: spring-projects-spring-data-jpa-94336959
     failed_job_id: 94336959
     passed_job_id: 94338428
-    ticket: Repair BugSwarm artifact spring-projects-spring-data-jpa-94336959: CI job 94336959 fails and job 94338428 passes.
+    ticket: "Repair BugSwarm artifact spring-projects-spring-data-jpa-94336959: CI job 94336959 fails and job 94338428 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -298,7 +298,7 @@ tasks:
     image_tag: numpy-numpy-308844949
     failed_job_id: 308844949
     passed_job_id: 308846914
-    ticket: Repair BugSwarm artifact numpy-numpy-308844949: CI job 308844949 fails and job 308846914 passes.
+    ticket: "Repair BugSwarm artifact numpy-numpy-308844949: CI job 308844949 fails and job 308846914 passes."
     split: heldout
     verified_red: false
     verified_green: false
@@ -324,7 +324,7 @@ tasks:
     image_tag: apache-dubbo-416671625
     failed_job_id: 416671625
     passed_job_id: 416678998
-    ticket: Repair BugSwarm artifact apache-dubbo-416671625: CI job 416671625 fails and job 416678998 passes.
+    ticket: "Repair BugSwarm artifact apache-dubbo-416671625: CI job 416671625 fails and job 416678998 passes."
     split: heldout
     verified_red: false
     verified_green: false

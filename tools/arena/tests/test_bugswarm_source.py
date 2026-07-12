@@ -17,6 +17,7 @@ SCRIPT = REPO_ROOT / "tools/arena/scripts/bugswarm_to_arena.py"
 SOURCES = REPO_ROOT / "tools/arena/corpus/sources.yaml"
 SEED_ARTIFACTS = REPO_ROOT / "tools/arena/corpus/bugswarm.seed-artifacts.json"
 SEED_SOURCE = REPO_ROOT / "tools/arena/corpus/bugswarm.seed.yaml"
+STUDY_SOURCE = REPO_ROOT / "tools/arena/specs/bugfix-task-optimization-v1.yaml"
 
 failures: list[str] = []
 
@@ -40,6 +41,11 @@ check("seed generated from artifacts", seed_payload.get("generated_from"), "tool
 check("seed task count", seed_payload.get("task_count"), 13)
 seed_task = seed_payload["tasks"][0]
 check("seed task id", seed_task["id"], "bugswarm-square-okio-140452393")
+check(
+    "seed ticket preserves YAML-sensitive colon text",
+    seed_task["ticket"],
+    "Repair BugSwarm artifact square-okio-140452393: CI job 140452393 fails and job 140452394 passes.",
+)
 check("seed source url preserved", seed_task["meta"]["source_url"], "https://www.bugswarm.org/docs/tutorials/setting-up-an-experiment/")
 check("seed starts unverified red", seed_task["verified_red"], False)
 check("seed starts unverified green", seed_task["verified_green"], False)
@@ -61,6 +67,17 @@ grown_repos = {t["repo_label"] for t in grown_tasks}
 check("grown tasks span 12 distinct repos", len(grown_repos), 12)
 grown_langs = {t["meta"]["language"] for t in grown_tasks}
 check("grown tasks cover both Java and Python", grown_langs, {"Java", "Python"})
+
+# Stage-0 must keep missing model pins honest: a gpt-5.4-mini cell cannot
+# silently fall back to the checked-in gpt-5.4 profile. The study source is
+# declarative and never authorizes a live run by itself.
+study = yaml.safe_load(STUDY_SOURCE.read_text(encoding="utf-8"))
+check("study schema", study.get("schema"), "task-optimization/v1")
+check("study starts live-blocked", study.get("live_status"), "blocked")
+study_candidates = {candidate["key"]: candidate for candidate in study.get("candidates", [])}
+check("study declares low Sonnet profile", study_candidates.get("sonnet-low", {}).get("profile"), "claude-sonnet-low")
+check("study refuses gpt54-mini fallback", study_candidates.get("gpt54-mini", {}).get("preflight"), "unsupported-until-profile-resolves")
+check("study defines unsupported result", study.get("preflight_contract", {}).get("unsupported_result"), "unsupported")
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
@@ -94,6 +111,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("converted task count", payload.get("task_count"), 1)
     task = payload["tasks"][0]
     check("task id stable", task["id"], "bugswarm-square-okio-140452393")
+    check(
+        "generated ticket preserves YAML-sensitive colon text",
+        task["ticket"],
+        "Repair BugSwarm artifact square-okio-140452393: CI job 140452393 fails and job 140452394 passes.",
+    )
     check("repo label preserved", task["repo_label"], "square/okio")
     check("verified red initially false", task["verified_red"], False)
     check("verified green initially false", task["verified_green"], False)
