@@ -9,6 +9,7 @@ from .capabilities import CODEACT_CAPABILITY_PRESET, DEFAULT_CODEACT_AGENT, capa
 from .codex_codeact import CodexCodeactDriver
 from .kitsoki_mcp import (
     KitsokiMCPCodeactDriver,
+    KitsokiMCPDirectDriver,
     KitsokiMCPDecomposedCodeactDriver,
     KitsokiMCPDecomposedFallbackDriver,
     KitsokiMCPDriver,
@@ -25,12 +26,18 @@ TREATMENT_CATALOG: tuple[TreatmentCatalogEntry, ...] = (
     ),
     TreatmentCatalogEntry(
         id="strict-mcp-direct-driver",
+        driver="KitsokiMCPDirectDriver",
+        action_surface="kitsoki-studio-mcp+direct-submit",
+        summary="The current bugfix story and roles driven through bounded Studio session.submit intents; isolates the outer driver from CodeAct action-surface changes.",
+        option_fields=("worker_profile",),
+    ),
+    TreatmentCatalogEntry(
+        id="codex-codeact",
         driver="CodexCodeactDriver",
         action_surface="kitsoki-codeact-mcp",
-        summary="Direct CodeAct MCP launch via kitsoki-codeact-driver; Codex shell/apps disabled. This is a real direct driver, not a deterministic stand-in.",
+        summary="Direct CodeAct MCP launch via kitsoki-codeact-driver; a Codex-only action-surface diagnostic, not a task-optimization headline arm.",
         required_variant_fields=("agent",),
         option_fields=("capability_preset", "capability_presets"),
-        aliases=("codex-codeact",),
     ),
     TreatmentCatalogEntry(
         id="strict-mcp-current",
@@ -66,7 +73,8 @@ TREATMENT_CATALOG: tuple[TreatmentCatalogEntry, ...] = (
 
 _DRIVERS_BY_CANONICAL: dict[str, TreatmentDriver] = {
     "raw-agent": RawPromptDriver(),
-    "strict-mcp-direct-driver": CodexCodeactDriver(),
+    "strict-mcp-direct-driver": KitsokiMCPDirectDriver(),
+    "codex-codeact": CodexCodeactDriver(),
     "strict-mcp-current": KitsokiMCPDriver(),
     "strict-mcp-codeact-broad": KitsokiMCPCodeactDriver(),
     "strict-mcp-codeact-decomposed": KitsokiMCPDecomposedCodeactDriver(),
@@ -130,14 +138,14 @@ def validate_driver_errors(args: argparse.Namespace) -> list[str]:
     if treatment not in _DRIVERS_BY_CANONICAL:
         errors.append(f"unknown paired-task treatment {args.treatment!r}; known: {', '.join(known_treatments())}")
         return errors
-    if treatment == "strict-mcp-direct-driver":
+    if treatment == "codex-codeact":
         if getattr(args, "backend", "") and args.backend != "codex":
-            errors.append(f"strict-mcp-direct-driver requires backend 'codex', got {args.backend!r}")
+            errors.append(f"codex-codeact requires backend 'codex', got {args.backend!r}")
         agent = (args.agent or "").strip()
         if not agent:
-            errors.append(f"strict-mcp-direct-driver requires variant.agent={DEFAULT_CODEACT_AGENT!r}")
+            errors.append(f"codex-codeact requires variant.agent={DEFAULT_CODEACT_AGENT!r}")
         elif agent != DEFAULT_CODEACT_AGENT:
-            errors.append(f"strict-mcp-direct-driver requires variant.agent={DEFAULT_CODEACT_AGENT!r}, got {agent!r}")
+            errors.append(f"codex-codeact requires variant.agent={DEFAULT_CODEACT_AGENT!r}, got {agent!r}")
         preset_name = args.capability_preset or CODEACT_CAPABILITY_PRESET
         try:
             capability_preset_json(args, preset_name)
@@ -159,9 +167,9 @@ def validate_driver_errors(args: argparse.Namespace) -> list[str]:
             capability_preset_json(args, preset_name)
         except Exception as exc:  # noqa: BLE001 - validation string for cell JSON.
             errors.append(str(exc))
-    if treatment == "strict-mcp-current":
+    if treatment in {"strict-mcp-current", "strict-mcp-direct-driver"}:
         if getattr(args, "backend", "") and args.backend != "codex":
-            errors.append(f"strict-mcp-current requires backend 'codex', got {args.backend!r}")
+            errors.append(f"{treatment} requires backend 'codex', got {args.backend!r}")
     return errors
 
 
