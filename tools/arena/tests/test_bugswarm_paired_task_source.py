@@ -158,6 +158,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("glm profile mapping", runner_globals["MODEL_TO_PROFILE"].get("glm-5.2"), "synthetic-claude")
     check("glm raw claude mapping", runner_globals["MODEL_TO_RAW_CLAUDE_PROFILE"].get("glm-5.2"), "synthetic-claude")
     check("Spark profile mapping", runner_globals["MODEL_TO_PROFILE"].get("gpt-5.3-codex-spark"), "codex-spark")
+    check(
+        "container runtime CLI stays off host checkout mount",
+        runner_globals["kitsoki_runtime_binary_path"](kitsoki_root=Path("/workspace/kitsoki")),
+        Path("/tmp/kitsoki-arena-bin/kitsoki"),
+    )
+    check(
+        "container runtime CLI permits an explicit ephemeral cache",
+        runner_globals["kitsoki_runtime_binary_path"](
+            kitsoki_root=Path("/workspace/kitsoki"),
+            env={"KITSOKI_ARENA_RUNTIME_BIN_DIR": "/tmp/arena-cli-cache"},
+        ),
+        Path("/tmp/arena-cli-cache/kitsoki"),
+    )
 
     spec = JobSpec.load(spec_path)
     cells = spec.cells()

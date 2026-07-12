@@ -934,9 +934,32 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     }
 
 
+def kitsoki_runtime_binary_path(
+    *,
+    kitsoki_root: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> Path:
+    """Return the platform-local CLI path for a paired-task runtime.
+
+    Arena mounts the source checkout into its Linux cell at
+    ``/workspace/kitsoki``. That mount can contain a macOS ``bin/kitsoki``
+    created by a host-side run. Executing it in the cell fails with ``Exec
+    format error``. Keep cell binaries outside the mount so Go builds them for
+    the container platform and never overwrites the operator's binary.
+    """
+    root = kitsoki_root or KITSOKI_ROOT
+    values = env if env is not None else os.environ
+    override = values.get("KITSOKI_ARENA_RUNTIME_BIN_DIR", "").strip()
+    if override:
+        return Path(override) / "kitsoki"
+    if root == Path("/workspace/kitsoki"):
+        return Path("/tmp/kitsoki-arena-bin") / "kitsoki"
+    return root / "bin" / "kitsoki"
+
+
 def ensure_kitsoki_binary() -> Path:
-    """Build a stable, workspace-local CLI for nested live MCP subprocesses."""
-    binary = KITSOKI_ROOT / "bin" / "kitsoki"
+    """Build a stable platform-local CLI for nested live MCP subprocesses."""
+    binary = kitsoki_runtime_binary_path()
     if not binary.exists():
         binary.parent.mkdir(parents=True, exist_ok=True)
         run(["go", "build", "-o", str(binary), "./cmd/kitsoki"], cwd=KITSOKI_ROOT)
