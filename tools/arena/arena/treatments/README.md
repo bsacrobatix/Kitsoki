@@ -12,7 +12,8 @@ Current paired-task treatments:
 |---|---|---|
 | `raw-agent` | `raw-agent` | One raw one-shot prompt. Legacy alias: `raw-codex`; also `single-briefed`, `single-naive`. |
 | `strict-mcp-current` | `kitsoki-studio-mcp` | `kitsoki-mcp-driver` drives the normal Studio MCP workflow. Legacy aliases: `kitsoki-mcp`, `kitsoki`. |
-| `strict-mcp-direct-driver` | `kitsoki-codeact-mcp` | Direct `kitsoki-codeact-driver` launch with only `mcp__kitsoki-codeact__codeact_eval` exposed. Requires `variant.agent`; this is the actual direct CodeAct driver, not a deterministic implementation surrogate. Legacy alias: `codex-codeact`. |
+| `strict-mcp-direct-driver` | `kitsoki-studio-mcp+direct-submit` | The same bugfix story/roles driven through its bounded `session.submit` loop, with `implementation_mode=agent_task`. It is not a CodeAct action-surface replacement. |
+| `codex-codeact` | `kitsoki-codeact-mcp` | Direct `kitsoki-codeact-driver` launch with only `mcp__kitsoki-codeact__codeact_eval` exposed. Requires `variant.agent`; a Codex-only diagnostic, not a cross-provider headline arm. |
 | `strict-mcp-codeact-broad` | `kitsoki-studio-mcp+codeact` | Studio MCP orchestration while the story implementation step uses broad `host.agent.codeact`. Legacy alias: `kitsoki-mcp-codeact`. |
 | `strict-mcp-codeact-decomposed` | `kitsoki-studio-mcp+codeact-decomposed` | Compiler-bounded per-item CodeAct grants; each item must pass a host-owned deterministic gate. No fallback is allowed. |
 | `strict-mcp-decomposed-fallback` | `kitsoki-studio-mcp+codeact-decomposed-fallback` | Same strict per-item executor, with at most one retry of the same item after a schema-typed reason declared on that item (`capability_missing` or `task_not_decomposable`). The retry keeps the identical grant. |
@@ -24,7 +25,7 @@ python3 tools/arena/arena.py treatments --aliases
 python3 tools/arena/arena.py validate --spec tools/arena/specs/codex-codeact-action-surface.yaml
 ```
 
-Validation is intentionally exact for direct CodeAct: `strict-mcp-direct-driver` must use
+Validation is intentionally exact for diagnostic direct CodeAct: `codex-codeact` must use
 `agent: kitsoki-codeact-driver`, not the Studio MCP driver. `kitsoki-mcp` and
 `strict-mcp-codeact-broad` use the Studio MCP surface; the latter forces the story
 implementation step through `host.agent.codeact`.

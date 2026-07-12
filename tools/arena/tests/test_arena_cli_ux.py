@@ -71,6 +71,7 @@ check("treatments exits 0", catalog.returncode, 0)
 rows = json.loads(catalog.stdout)
 ids = sorted(row["id"] for row in rows)
 check("catalog ids", ids, [
+    "codex-codeact",
     "raw-agent",
     "strict-mcp-codeact-broad",
     "strict-mcp-codeact-decomposed",
@@ -79,7 +80,7 @@ check("catalog ids", ids, [
     "strict-mcp-direct-driver",
 ])
 require("catalog names direct driver surface", any(
-    row["id"] == "strict-mcp-direct-driver" and row["action_surface"] == "kitsoki-codeact-mcp"
+    row["id"] == "strict-mcp-direct-driver" and row["action_surface"] == "kitsoki-studio-mcp+direct-submit"
     for row in rows
 ))
 require("catalog names strict fallback surface", any(

@@ -30,6 +30,7 @@ def require(label: str, condition: bool) -> None:
 
 catalog = {str(row["id"]): row for row in treatments.treatment_catalog()}
 check("catalog treatments", sorted(catalog), [
+    "codex-codeact",
     "raw-agent",
     "strict-mcp-codeact-broad",
     "strict-mcp-codeact-decomposed",
@@ -39,15 +40,15 @@ check("catalog treatments", sorted(catalog), [
 ])
 check("raw aliases", catalog["raw-agent"].get("aliases"), ["raw-codex", "single-briefed", "single-naive"])
 check("current aliases", catalog["strict-mcp-current"].get("aliases"), ["kitsoki-mcp", "kitsoki"])
-check("direct aliases", catalog["strict-mcp-direct-driver"].get("aliases"), ["codex-codeact"])
 check("broad aliases", catalog["strict-mcp-codeact-broad"].get("aliases"), ["kitsoki-mcp-codeact"])
-check("direct action surface", catalog["strict-mcp-direct-driver"]["action_surface"], "kitsoki-codeact-mcp")
-require("direct driver requires agent", "agent" in catalog["strict-mcp-direct-driver"]["required_variant_fields"])
+check("strict direct surface", catalog["strict-mcp-direct-driver"]["action_surface"], "kitsoki-studio-mcp+direct-submit")
+check("diagnostic CodeAct surface", catalog["codex-codeact"]["action_surface"], "kitsoki-codeact-mcp")
+require("diagnostic CodeAct requires agent", "agent" in catalog["codex-codeact"]["required_variant_fields"])
 
 check("canonical raw alias", treatments.canonical_treatment("single-naive"), "raw-agent")
 check("canonical raw legacy alias", treatments.canonical_treatment("raw-codex"), "raw-agent")
 check("canonical current alias", treatments.canonical_treatment("kitsoki"), "strict-mcp-current")
-check("canonical direct alias", treatments.canonical_treatment("codex-codeact"), "strict-mcp-direct-driver")
+check("diagnostic CodeAct stays distinct", treatments.canonical_treatment("codex-codeact"), "codex-codeact")
 check("canonical broad alias", treatments.canonical_treatment("kitsoki-mcp-codeact"), "strict-mcp-codeact-broad")
 check("known includes aliases", "single-briefed" in treatments.known_treatments(), True)
 check("unknown driver", treatments.resolve_treatment_driver("missing"), None)
@@ -64,7 +65,7 @@ require("capability hash", cap_hash.startswith("sha256:"))
 json.loads(cap_json)
 
 missing_agent = argparse.Namespace(
-    treatment="strict-mcp-direct-driver",
+    treatment="codex-codeact",
     agent="",
     capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
     capability_presets_json="",
@@ -72,7 +73,7 @@ missing_agent = argparse.Namespace(
 require("missing agent validation", "requires variant.agent" in treatments.validate_driver_args(missing_agent))
 
 wrong_agent = argparse.Namespace(
-    treatment="strict-mcp-direct-driver",
+    treatment="codex-codeact",
     backend="codex",
     agent="kitsoki-mcp-driver",
     capability_preset=treatments.CODEACT_CAPABILITY_PRESET,
@@ -158,6 +159,7 @@ driver_services = treatments.DriverServices(
     codeact_text_metrics=lambda *_: {},
 )
 for treatment_id, expected_mode, expected_policy in [
+    ("strict-mcp-direct-driver", "agent_task", "studio-direct-submit"),
     ("strict-mcp-codeact-decomposed", "codeact_decomposed", "forbidden"),
     ("strict-mcp-decomposed-fallback", "codeact_decomposed_fallback", "typed-allowlisted-same-grant-once"),
 ]:
@@ -171,7 +173,8 @@ for treatment_id, expected_mode, expected_policy in [
         runtime_args, {"id": "fixture"}, Path("."), "fixture.jsonl", driver_services,
     )
     check(f"{treatment_id} forces mode", runtime_args.implementation_mode, expected_mode)
-    check(f"{treatment_id} metrics policy", driver_result.metrics.get("fallback_policy"), expected_policy)
+    policy_key = "session_driver" if treatment_id == "strict-mcp-direct-driver" else "fallback_policy"
+    check(f"{treatment_id} metrics policy", driver_result.metrics.get(policy_key), expected_policy)
     check(f"{treatment_id} metrics no widening", driver_result.metrics.get("capability_widening"), False)
 
 with tempfile.TemporaryDirectory(prefix="arena-treatment-") as td:

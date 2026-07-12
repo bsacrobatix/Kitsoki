@@ -43,6 +43,39 @@ class KitsokiMCPDriver(TreatmentDriver):
         )
 
 
+class KitsokiMCPDirectDriver(KitsokiMCPDriver):
+    """The same bugfix story through its bounded direct-submit Studio loop.
+
+    This is deliberately not the standalone ``codex-codeact`` diagnostic.  The
+    paired runner's Studio prompt opens the ordinary bugfix session and moves
+    it with explicit ``session.submit`` intents, preserving the normal story
+    roles while avoiding an alternate action surface for implementation.
+    """
+
+    name = "strict-mcp-direct-driver"
+    action_surface = "kitsoki-studio-mcp+direct-submit"
+
+    def run(
+        self,
+        args: argparse.Namespace,
+        task: dict[str, Any],
+        tree: Path,
+        trace_ref: str,
+        services: DriverServices,
+    ) -> DriverResult:
+        # This arm measures the current agent-task implementation role. It may
+        # not silently drift into either broad or decomposed CodeAct.
+        args.implementation_mode = "agent_task"
+        result = super().run(args, task, tree, trace_ref, services)
+        result.metrics.update({
+            "treatment_ladder": "strict-direct-submit",
+            "session_driver": "studio-direct-submit",
+            "implementation_mode": "agent_task",
+            "capability_widening": False,
+        })
+        return result
+
+
 class KitsokiMCPCodeactDriver(KitsokiMCPDriver):
     name = "kitsoki-mcp-codeact"
     action_surface = "kitsoki-studio-mcp+codeact"
