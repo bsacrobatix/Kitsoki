@@ -91,12 +91,25 @@ TASK_OPTIMIZATION_CELL_STATES = (
     "planned", "armed", "ready", "running", "scored", "blocked", "pending", "unsupported",
 )
 TASK_OPTIMIZATION_SCHEMA = "task-optimization/v1"
+TASK_OPTIMIZATION_PREFLIGHT_SCHEMA = "task-optimization/preflight/v1"
+TASK_OPTIMIZATION_ATTEMPT_SCHEMA = "task-optimization/attempt/v1"
+TASK_OPTIMIZATION_CHAMPION_SCHEMA = "task-optimization/champion/v1"
+TASK_OPTIMIZATION_TERMINAL_STATES = ("scored", "blocked", "unsupported")
 
 
 def _sha256(value: bytes | str) -> str:
     if isinstance(value, str):
         value = value.encode("utf-8")
     return hashlib.sha256(value).hexdigest()
+
+
+def canonical_json(value: Any) -> bytes:
+    """Return the canonical bytes used by task-optimization receipts."""
+    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def receipt_sha256(value: Any) -> str:
+    return _sha256(canonical_json(value))
 
 
 @dataclass(frozen=True)
@@ -150,10 +163,23 @@ class TaskOptimizationStudy:
         candidates = data["candidates"]
         if not isinstance(candidates, list) or not all(isinstance(c, dict) for c in candidates):
             raise ValueError("candidates must be a non-empty list of mappings")
-        ids = [str(c.get("id") or "") for c in candidates]
+        # The checked-in Stage-0 declaration uses the more explicit
+        # key/requested_* spelling.  Normalize both it and the compact test
+        # spelling here, so a corpus unlock cannot silently change candidate
+        # identity or discard the requested model/effort contract.
+        normalized_candidates: list[dict[str, Any]] = []
+        for raw in candidates:
+            candidate = dict(raw)
+            candidate["id"] = str(candidate.get("id") or candidate.get("key") or "")
+            candidate["model"] = str(candidate.get("model") or candidate.get("requested_model") or "")
+            candidate["effort"] = str(candidate.get("effort") or candidate.get("requested_effort") or "")
+            candidate["requested_model"] = str(candidate.get("requested_model") or candidate["model"])
+            candidate["requested_effort"] = str(candidate.get("requested_effort") or candidate["effort"])
+            normalized_candidates.append(candidate)
+        ids = [str(c.get("id") or "") for c in normalized_candidates]
         if not all(ids) or len(ids) != len(set(ids)):
             raise ValueError("candidates require unique non-empty ids")
-        for candidate in candidates:
+        for candidate in normalized_candidates:
             if not candidate.get("profile") or not candidate.get("model"):
                 raise ValueError(f"candidate {candidate.get('id')!r} requires profile and model")
             if "effort" not in candidate:
@@ -170,7 +196,7 @@ class TaskOptimizationStudy:
         return TaskOptimizationStudy(
             study_id=str(data["study_id"]), boundary=str(data["boundary"]), corpus_lock=str(lock_path),
             splits={str(k): str(v) for k, v in dict(data["splits"]).items()},
-            candidates=[dict(c) for c in candidates], treatments=treatments, repeats=repeats,
+            candidates=normalized_candidates, treatments=treatments, repeats=repeats,
             stop=dict(data["stop"]), live_gate_env=str(data.get("live_gate_env") or "KITSOKI_TASK_OPT_LIVE"),
             blocked_by=blocked_by, path=str(p),
         )
@@ -226,6 +252,148 @@ class TaskOptimizationStudy:
                 "splits": self.splits, "candidates": self.candidates, "treatments": sorted(self.treatments),
                 "repeats": self.repeats, "stop": self.stop, "live_gate_env": self.live_gate_env,
                 "runner_commit": runner_commit}
+
+    def preflight(self, resolutions: dict[str, Any]) -> dict[str, Any]:
+        """Validate local profile resolution without dispatching a provider.
+
+        ``resolutions`` is deliberately an operator-produced receipt rather
+        than a profile lookup.  This makes requested versus effective settings
+        auditable and forbids hidden aliases/fallbacks before a live cell can
+        be armed.
+        """
+        required = ("effective_model", "effective_effort", "provider", "backend", "profile_hash", "launch_plan_hash")
+        records: list[dict[str, Any]] = []
+        for candidate in self.candidates:
+            configured = resolutions.get(candidate["id"], {})
+            if not isinstance(configured, dict):
+                configured = {}
+            record = {
+                "candidate_id": candidate["id"],
+                "profile": candidate["profile"],
+                "requested_model": candidate["requested_model"],
+                "requested_effort": candidate["requested_effort"],
+                "effective_model": configured.get("effective_model"),
+                "effective_effort": configured.get("effective_effort"),
+                "provider": configured.get("provider"),
+                "backend": configured.get("backend"),
+                "profile_hash": configured.get("profile_hash"),
+                "launch_plan_hash": configured.get("launch_plan_hash"),
+            }
+            declared = str(configured.get("status") or candidate.get("preflight") or "")
+            missing = [key for key in required if not record.get(key)]
+            if declared == "unsupported" or declared.startswith("unsupported-"):
+                record["status"] = "unsupported"
+                record["reason"] = str(configured.get("reason") or declared)
+            elif missing:
+                record["status"] = "invalid"
+                record["reason"] = "missing " + ", ".join(missing)
+            elif record["effective_model"] != record["requested_model"]:
+                record["status"] = "invalid"
+                record["reason"] = "effective_model differs from requested_model; fallback is forbidden"
+            elif record["effective_effort"] != record["requested_effort"]:
+                record["status"] = "invalid"
+                record["reason"] = "effective_effort differs from requested_effort"
+            else:
+                record["status"] = "ready"
+            records.append(record)
+        result = {"schema": TASK_OPTIMIZATION_PREFLIGHT_SCHEMA, "study_id": self.study_id,
+                  "study_lock_sha256": receipt_sha256(self.lock()), "candidates": records}
+        result["preflight_sha256"] = receipt_sha256(result)
+        return result
+
+
+def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], preflight: dict[str, Any]) -> list[dict[str, Any]]:
+    """Load immutable result receipts and reject mismatched/corrupt evidence."""
+    root = Path(path)
+    files = [root] if root.is_file() else sorted(root.rglob("*.json")) if root.exists() else []
+    plan_ids = {str(cell["id"]) for cell in plan.get("cells", [])}
+    plan_cells = {str(cell["id"]): cell for cell in plan.get("cells", [])}
+    preflight_candidates = {str(record.get("candidate_id")): record for record in preflight.get("candidates", []) if isinstance(record, dict)}
+    plan_digest = receipt_sha256(plan)
+    preflight_digest = str(preflight.get("preflight_sha256") or receipt_sha256(preflight))
+    receipts: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for file in files:
+        data = json.loads(file.read_text(encoding="utf-8"))
+        if data.get("schema") != TASK_OPTIMIZATION_ATTEMPT_SCHEMA:
+            raise ValueError(f"{file}: unsupported attempt receipt schema")
+        attempt_id = str(data.get("attempt_id") or "")
+        cell_id = str(data.get("cell_id") or "")
+        if not attempt_id or attempt_id in seen:
+            raise ValueError(f"{file}: attempt_id must be unique and non-empty")
+        if cell_id not in plan_ids:
+            raise ValueError(f"{file}: cell_id {cell_id!r} is absent from the plan")
+        candidate_id = str(data.get("candidate_id") or "")
+        if candidate_id != str(plan_cells[cell_id].get("candidate_id") or ""):
+            raise ValueError(f"{file}: candidate_id does not match the planned cell")
+        if preflight_candidates.get(candidate_id, {}).get("status") != "ready":
+            raise ValueError(f"{file}: candidate {candidate_id!r} lacks a ready preflight receipt")
+        if data.get("plan_sha256") != plan_digest:
+            raise ValueError(f"{file}: plan_sha256 does not match immutable plan")
+        if data.get("preflight_sha256") != preflight_digest:
+            raise ValueError(f"{file}: preflight_sha256 does not match immutable preflight")
+        status = str(data.get("status") or "")
+        if status not in TASK_OPTIMIZATION_CELL_STATES:
+            raise ValueError(f"{file}: invalid task-optimization status {status!r}")
+        seen.add(attempt_id)
+        receipts.append(data)
+    return receipts
+
+
+def task_optimization_status(plan: dict[str, Any], receipts: list[dict[str, Any]], *, champion: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Aggregate append-only attempts into resume and campaign phase state."""
+    by_cell: dict[str, list[dict[str, Any]]] = {str(cell["id"]): [] for cell in plan["cells"]}
+    for receipt in receipts:
+        by_cell[receipt["cell_id"]].append(receipt)
+    cells: list[dict[str, Any]] = []
+    for cell in plan["cells"]:
+        attempts = by_cell[cell["id"]]
+        statuses = {str(item["status"]) for item in attempts}
+        if statuses & set(TASK_OPTIMIZATION_TERMINAL_STATES):
+            state = next(state for state in TASK_OPTIMIZATION_TERMINAL_STATES if state in statuses)
+        elif "running" in statuses or "armed" in statuses:
+            state = "running"
+        else:
+            state = "planned"
+        cells.append({**cell, "status": state, "attempt_count": len(attempts),
+                      "attempt_ids": sorted(str(item["attempt_id"]) for item in attempts)})
+    learning = [cell for cell in cells if cell["split"] == "learning"]
+    confirmation = [cell for cell in cells if cell["split"] == "confirmation"]
+    learning_complete = bool(learning) and all(cell["status"] in TASK_OPTIMIZATION_TERMINAL_STATES for cell in learning)
+    confirmation_complete = bool(confirmation) and all(cell["status"] in TASK_OPTIMIZATION_TERMINAL_STATES for cell in confirmation)
+    phase = "learning"
+    if learning_complete:
+        phase = "champion_selection"
+    if champion is not None:
+        phase = "complete" if confirmation_complete else "confirmation"
+    return {"schema": "task-optimization/status/v1", "study_id": plan["study_id"], "plan_sha256": receipt_sha256(plan),
+            "phase": phase, "learning_complete": learning_complete, "confirmation_complete": confirmation_complete,
+            "resume_cell_ids": [cell["id"] for cell in cells if cell["status"] in {"planned", "running"}], "cells": cells}
+
+
+def select_task_optimization_champion(plan: dict[str, Any], receipts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Freeze a deterministic champion after all learning cells terminate."""
+    status = task_optimization_status(plan, receipts)
+    if not status["learning_complete"]:
+        raise ValueError("cannot select champion until every learning cell has a terminal receipt")
+    scores: dict[str, dict[str, int]] = {}
+    for cell in status["cells"]:
+        if cell["split"] != "learning":
+            continue
+        score = scores.setdefault(cell["candidate_id"], {"solved": 0, "scored": 0, "tokens": 0})
+        terminal = [item for item in receipts if item["cell_id"] == cell["id"] and item["status"] in TASK_OPTIMIZATION_TERMINAL_STATES]
+        latest = terminal[-1]
+        score["scored"] += 1
+        if latest.get("verdict") == "solved":
+            score["solved"] += 1
+        score["tokens"] += int((latest.get("metrics") or {}).get("total_tokens") or 0)
+    if not scores:
+        raise ValueError("learning plan contains no candidate cells")
+    winner = min(scores, key=lambda candidate_id: (-scores[candidate_id]["solved"], -scores[candidate_id]["scored"], scores[candidate_id]["tokens"], candidate_id))
+    champion = {"schema": TASK_OPTIMIZATION_CHAMPION_SCHEMA, "study_id": plan["study_id"],
+                "plan_sha256": receipt_sha256(plan), "candidate_id": winner, "scores": scores}
+    champion["champion_sha256"] = receipt_sha256(champion)
+    return champion
 
 # Check-type discriminator (WS-G G1): a cell declares a check SUITE, not one
 # verdict shape, and every check emits a completion-state verdict tagged with

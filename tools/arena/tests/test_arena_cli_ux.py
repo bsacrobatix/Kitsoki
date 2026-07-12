@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import importlib.util
 import subprocess
 import sys
@@ -89,8 +90,8 @@ boundary: stories/bugfix
 corpus_lock: corpus.lock.json
 splits: {learning: exposed-plus-bugswarm, confirmation: bugswarm-holdout}
 candidates:
-  - {id: mini, profile: codex-mini, model: gpt-5.4-mini, effort: medium}
-  - {id: oss, profile: syn-gpt-oss-120b, model: hf:openai/gpt-oss-120b, effort: n/a}
+  - {key: mini, profile: codex-mini, requested_model: gpt-5.4-mini, requested_effort: medium}
+  - {key: oss, profile: syn-gpt-oss-120b, requested_model: hf:openai/gpt-oss-120b, requested_effort: n/a}
 treatments: [raw-agent, strict-mcp-current]
 repeats: {screening: 1, decision_boundary: 3}
 stop: {max_versions: 4}
@@ -110,6 +111,50 @@ live_gate_env: KITSOKI_TASK_OPT_LIVE
     arm_without_gate = run("task-optimization", "arm", "--study", str(study), "--out", str(out), "--live")
     check("task arm refuses without environment gate", arm_without_gate.returncode, 1)
     require("task arm calls no provider when gated", "no provider was called" in arm_without_gate.stderr)
+
+    resolutions = Path(td) / "resolutions.json"
+    resolutions.write_text(json.dumps({
+        "mini": {"effective_model": "gpt-5.4-mini", "effective_effort": "medium", "provider": "openai", "backend": "codex", "profile_hash": "mini-profile", "launch_plan_hash": "mini-launch"},
+        "oss": {"effective_model": "hf:openai/gpt-oss-120b", "effective_effort": "n/a", "provider": "synthetic", "backend": "openai", "profile_hash": "oss-profile", "launch_plan_hash": "oss-launch"},
+    }), encoding="utf-8")
+    preflight_dir = Path(td) / "preflight"
+    preflight = run("task-optimization", "preflight", "--study", str(study), "--resolutions", str(resolutions), "--out", str(preflight_dir))
+    check("task preflight exits 0", preflight.returncode, 0)
+    preflight_json = json.loads((preflight_dir / "preflight.json").read_text(encoding="utf-8"))
+    check("task preflight has effective receipts", {row["status"] for row in preflight_json["candidates"]}, {"ready"})
+
+    attempts = Path(td) / "attempts"
+    status_before = run("task-optimization", "status", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--out", str(Path(td) / "status-before"))
+    check("task status resumes unattempted cells", status_before.returncode, 0)
+    before_json = json.loads((Path(td) / "status-before" / "status.json").read_text(encoding="utf-8"))
+    check("task status starts learning", before_json["phase"], "learning")
+    check("task status lists all resume cells", len(before_json["resume_cell_ids"]), 8)
+
+    plan_digest = hashlib.sha256((json.dumps(plan_json, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")).hexdigest()
+    for n, cell_data in enumerate(plan_json["cells"]):
+        receipt_path = Path(td) / f"attempt-{n}.json"
+        receipt_path.write_text(json.dumps({
+            "schema": "task-optimization/attempt/v1", "study_id": "bugfix-codeact-v1", "attempt_id": f"attempt-{n}",
+            "cell_id": cell_data["id"], "candidate_id": cell_data["candidate_id"], "plan_sha256": plan_digest, "preflight_sha256": preflight_json["preflight_sha256"],
+            "status": "scored", "verdict": "solved" if cell_data["candidate_id"] == "mini" else "failed",
+            "metrics": {"total_tokens": 10 if cell_data["candidate_id"] == "mini" else 20},
+        }), encoding="utf-8")
+        recorded = run("task-optimization", "record", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--receipt", str(receipt_path), "--out", str(attempts))
+        check(f"task attempt {n} records", recorded.returncode, 0)
+    champion_dir = Path(td) / "champion"
+    selected = run("task-optimization", "select-champion", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--out", str(champion_dir))
+    check("task champion selects after learning", selected.returncode, 0)
+    champion_json = json.loads((champion_dir / "champion.json").read_text(encoding="utf-8"))
+    check("task champion uses learning scores", champion_json["candidate_id"], "mini")
+    status_after = run("task-optimization", "status", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--champion", str(champion_dir / "champion.json"), "--out", str(Path(td) / "status-after"))
+    check("task status reaches complete after confirmation", status_after.returncode, 0)
+    after_json = json.loads((Path(td) / "status-after" / "status.json").read_text(encoding="utf-8"))
+    check("task status completes confirmed campaign", after_json["phase"], "complete")
+
+    mismatched = Path(td) / "mismatched-attempt.json"
+    mismatched.write_text(json.dumps({"schema": "task-optimization/attempt/v1", "study_id": "bugfix-codeact-v1", "attempt_id": "wrong-lock", "cell_id": plan_json["cells"][0]["id"], "candidate_id": plan_json["cells"][0]["candidate_id"], "plan_sha256": "wrong", "preflight_sha256": preflight_json["preflight_sha256"], "status": "scored"}), encoding="utf-8")
+    rejected = run("task-optimization", "record", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--receipt", str(mismatched), "--out", str(attempts))
+    check("task record rejects altered plan", rejected.returncode, 1)
 
 from arena.model import JobSpec  # noqa: E402
 from arena.plugins import base as plugins  # noqa: E402
