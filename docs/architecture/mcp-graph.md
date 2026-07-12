@@ -112,6 +112,62 @@ accepting it from an agent would hollow out the human gate). The
 catalog-sink feedback proposal (below) follows the identical rule even when
 the server itself is running in steward mode — see "Feedback channel."
 
+## Write routing: direct vs capsule
+
+Kitsoki-convention repos protect the primary checkout (pinned to `main`,
+read-mostly) and land local work on `staging/local` through managed
+clone-backed capsule workspaces (`scripts/dev-workspace.sh`, AGENTS.md). A
+graph server whose write tools mutate the bound catalog **in place** would
+violate that convention — so write materialization is routable, per bound
+catalog ([`writevia.go`](../../internal/mcp/graphsrv/writevia.go)):
+
+- **`direct`** — the historical behavior: `host.graph.*` writes land in the
+  bound catalog's working tree.
+- **`capsule`** — the write lands in a managed workspace: on the first write
+  the server runs the catalog repo's own `scripts/dev-workspace.sh create`
+  (workspace under `<repo>/.capsules/workspaces/graph-mcp-<pid>`, based on
+  the staging branch), the engine op runs against the workspace copy, and
+  every successful write is `commit`ted (DCO sign-off is the script's own
+  contract) and `merge`d into the staging branch **without teardown** — the
+  workspace stays alive for the server's lifetime, and once it exists every
+  read for that catalog routes to it too, so a proposed changeset is visible
+  to the `graph.get`/`changeset`/`apply` calls that follow. The primary
+  checkout is never touched.
+
+Resolution precedence, per bound catalog:
+
+1. `--write-via direct|capsule` (`kitsoki mcp`: `--graph-write-via`) — a
+   server-level override for every bound catalog;
+2. otherwise (`--write-via auto`, the default) the catalog repo's checked-in
+   `.kitsoki/project-profile.yaml`:
+
+   ```yaml
+   graph:
+     write_via: capsule   # or direct
+     gate: "git diff --check"   # optional dev-workspace.sh merge gate
+   ```
+
+3. otherwise **`direct`** — a repo with no `.kitsoki` profile (or a catalog
+   outside any git repo) just edits in the working directory.
+
+The default capsule merge gate is `git diff --check`, not the repo's full CI
+gate: graph writes are already validated all-or-nothing by the engine (lint
+regression gate, hazard guards) before any file changes, so the integration
+gate only needs repo hygiene. A project can widen it via `graph.gate`.
+
+Failure honesty: a workspace that cannot be created (no
+`scripts/dev-workspace.sh` in a repo whose profile says `capsule`), or a
+completed write that cannot be committed/merged, comes back as
+`CAPSULE_WORKFLOW` whose hint names the workspace path/branch holding the
+work. An engine *rejection* is never masked by a lifecycle warning — the
+post-reject integrate is best-effort. Receipts and feedback artifacts keep
+anchoring to the **primary** repo root (never a disposable workspace), so
+`.artifacts/graph-mcp/` stays in one predictable place.
+
+The dev-workspace.sh process seam is injectable (`Config.WorkspaceRunner`) —
+tests drive the whole capsule route with a deterministic fake and never
+spawn a real clone ([`writevia_test.go`](../../internal/mcp/graphsrv/writevia_test.go)).
+
 ## No-LLM, ever
 
 Every handler in this package is deterministic Go: JSON args in, a
@@ -188,6 +244,9 @@ constants in `errors.go`:
   scalar.
 - `NOT_YOUR_CHANGESET` — a propose-mode `graph.withdraw` call named a
   changeset authored by a different actor.
+- `CAPSULE_WORKFLOW` — a capsule-routed write's workspace lifecycle failed
+  (workspace create, commit, or merge into the staging branch); the hint
+  names where the work physically is so nothing is silently lost.
 
 `routing_errors[].code` on `feedback.report` reuses this same vocabulary
 (currently only `READ_ONLY_MODE`, for the catalog sink's read-mode degrade)
@@ -245,7 +304,7 @@ local sink already triggers (always, on every call, regardless of mode).
   and [`internal/mcp/studio/server.go`](../../internal/mcp/studio/server.go) —
   the studio-server mount (P6).
 - [`cmd/kitsoki/mcp.go`](../../cmd/kitsoki/mcp.go) — `kitsoki mcp`'s
-  `--catalog`/`--graph-steward`/`--graph-actor`/`--graph-feedback-sink`
-  flags.
+  `--catalog`/`--graph-steward`/`--graph-actor`/`--graph-feedback-sink`/
+  `--graph-write-via` flags.
 - [`docs/proposals/graph-mcp.md`](../proposals/graph-mcp.md) — the full plan,
   design rationale, and P1–P6 work-plan history.

@@ -151,7 +151,7 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 		return errorResult(NewError(CodeValidation, "graph.propose: `operations` requires at least 1 entry", "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, anchor, alias, errPayload := deps.resolveWrite(ctx, args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -168,10 +168,10 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 
 	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.propose", hostArgs)
 	if err != nil {
-		return journal(deps, "graph.propose", path, alias, req.Params.Arguments, hostErrResult("graph.propose", err), ""), nil
+		return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, hostErrResult("graph.propose", err), ""), nil
 	}
 	if res.Error != "" {
-		return journal(deps, "graph.propose", path, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.propose: "+res.Error, "")), ""), nil
+		return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.propose: "+res.Error, "")), ""), nil
 	}
 
 	changesetID, _ := res.Data["changeset_id"].(string)
@@ -179,19 +179,29 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 	if rejected {
 		rejectReasons, _ := res.Data["reject_reasons"].([]any)
 		lint, _ := res.Data["lint"].([]any)
-		return journal(deps, "graph.propose", path, alias, req.Params.Arguments, writeRejectResult("graph.propose", rejectReasons, lint), changesetID), nil
+		// Best-effort: a rejected proposal normally writes nothing (the
+		// integrate is then a clean no-op), and a lifecycle warning must
+		// never mask the engine's reject reasons.
+		_ = deps.integrateWrite(ctx, anchor, "graph-mcp: graph.propose rejected "+changesetID, true)
+		return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, writeRejectResult("graph.propose", rejectReasons, lint), changesetID), nil
 	}
 
 	status, _ := res.Data["status"].(string)
 	guardFills, _ := res.Data["guard_fills"].([]any)
 	validatedOnly, _ := res.Data["validated_only"].(bool)
 
+	if !args.ValidateOnly && !validatedOnly {
+		if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.propose "+changesetID, false); ep != nil {
+			return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, errorResult(ep), changesetID), nil
+		}
+	}
+
 	out := graphProposeOK{OK: true, Catalog: alias, ChangesetID: changesetID, Status: status, GuardFills: guardFills, ValidatedOnly: validatedOnly}
 	for !fitsBudget(out, BudgetGraphPropose) && len(out.GuardFills) > 0 {
 		out.GuardFills = out.GuardFills[:len(out.GuardFills)-1]
 		out.Truncated = true
 	}
-	return journal(deps, "graph.propose", path, alias, req.Params.Arguments, okResult(out), changesetID), nil
+	return journal(deps, "graph.propose", anchor, alias, req.Params.Arguments, okResult(out), changesetID), nil
 }
 
 // ─── graph.withdraw ───
@@ -271,30 +281,34 @@ func handleGraphWithdraw(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRe
 		return errorResult(NewError(CodeValidation, "graph.withdraw: `id` is required", "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, anchor, alias, errPayload := deps.resolveWrite(ctx, args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
 
 	if deps.Mode == ModePropose {
 		if ep := checkWithdrawOwnership(ctx, deps, path, args.ID); ep != nil {
-			return journal(deps, "graph.withdraw", path, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
+			return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 		}
 	}
 
 	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.withdraw", map[string]any{"catalog_path": path, "changeset_id": args.ID})
 	if err != nil {
-		return journal(deps, "graph.withdraw", path, alias, req.Params.Arguments, hostErrResult("graph.withdraw", err), args.ID), nil
+		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, hostErrResult("graph.withdraw", err), args.ID), nil
 	}
 	if res.Error != "" {
-		return journal(deps, "graph.withdraw", path, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.withdraw: "+res.Error, "")), args.ID), nil
+		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.withdraw: "+res.Error, "")), args.ID), nil
 	}
 
 	rejected, _ := res.Data["rejected"].(bool)
 	if rejected {
 		rejectReasons, _ := res.Data["reject_reasons"].([]any)
 		lintIssues, _ := res.Data["lint_issues"].([]any)
-		return journal(deps, "graph.withdraw", path, alias, req.Params.Arguments, writeRejectResult("graph.withdraw", rejectReasons, lintIssues), args.ID), nil
+		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, writeRejectResult("graph.withdraw", rejectReasons, lintIssues), args.ID), nil
+	}
+
+	if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.withdraw "+args.ID, false); ep != nil {
+		return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
 	changedFiles, _ := res.Data["changed_files"].([]any)
@@ -303,7 +317,7 @@ func handleGraphWithdraw(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRe
 		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
 		out.Truncated = true
 	}
-	return journal(deps, "graph.withdraw", path, alias, req.Params.Arguments, okResult(out), args.ID), nil
+	return journal(deps, "graph.withdraw", anchor, alias, req.Params.Arguments, okResult(out), args.ID), nil
 }
 
 // ─── graph.apply ───
@@ -356,7 +370,7 @@ func handleGraphApply(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReque
 		return errorResult(NewError(CodeValidation, "graph.apply: `id` is required", "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, anchor, alias, errPayload := deps.resolveWrite(ctx, args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -365,22 +379,28 @@ func handleGraphApply(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReque
 		ep := NewError(CodeStewardOnly,
 			"graph.apply: a real apply (dry_run:false) requires --mode steward; propose-mode callers may only dry-run",
 			"call graph.apply with dry_run:true, or ask a steward-mode operator to apply")
-		return journal(deps, "graph.apply", path, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
+		return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
 	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.apply", map[string]any{"catalog_path": path, "changeset_id": args.ID, "dry_run": args.DryRun})
 	if err != nil {
-		return journal(deps, "graph.apply", path, alias, req.Params.Arguments, hostErrResult("graph.apply", err), args.ID), nil
+		return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, hostErrResult("graph.apply", err), args.ID), nil
 	}
 	if res.Error != "" {
-		return journal(deps, "graph.apply", path, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.apply: "+res.Error, "")), args.ID), nil
+		return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.apply: "+res.Error, "")), args.ID), nil
 	}
 
 	rejected, _ := res.Data["rejected"].(bool)
 	if rejected {
 		rejectReasons, _ := res.Data["reject_reasons"].([]any)
 		lintIssues, _ := res.Data["lint_issues"].([]any)
-		return journal(deps, "graph.apply", path, alias, req.Params.Arguments, writeRejectResult("graph.apply", rejectReasons, lintIssues), args.ID), nil
+		return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, writeRejectResult("graph.apply", rejectReasons, lintIssues), args.ID), nil
+	}
+
+	if !args.DryRun {
+		if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.apply "+args.ID, false); ep != nil {
+			return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
+		}
 	}
 
 	changedFiles, _ := res.Data["changed_files"].([]any)
@@ -389,7 +409,7 @@ func handleGraphApply(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReque
 		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
 		out.Truncated = true
 	}
-	return journal(deps, "graph.apply", path, alias, req.Params.Arguments, okResult(out), args.ID), nil
+	return journal(deps, "graph.apply", anchor, alias, req.Params.Arguments, okResult(out), args.ID), nil
 }
 
 // ─── graph.authorize ───
@@ -439,7 +459,7 @@ func handleGraphAuthorize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		return errorResult(NewError(CodeValidation, "graph.authorize: `id` is required", "")), nil
 	}
 
-	path, alias, errPayload := deps.Catalogs.Resolve(args.Catalog)
+	path, anchor, alias, errPayload := deps.resolveWrite(ctx, args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
@@ -448,22 +468,26 @@ func handleGraphAuthorize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		ep := NewError(CodeStewardOnly,
 			fmt.Sprintf("graph.authorize: only a steward-mode server may authorize a changeset — this server is running in %q mode", deps.Mode),
 			"ask a steward-mode operator to authorize this changeset")
-		return journal(deps, "graph.authorize", path, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
+		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
 	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.authorize", map[string]any{"catalog_path": path, "changeset_id": args.ID})
 	if err != nil {
-		return journal(deps, "graph.authorize", path, alias, req.Params.Arguments, hostErrResult("graph.authorize", err), args.ID), nil
+		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, hostErrResult("graph.authorize", err), args.ID), nil
 	}
 	if res.Error != "" {
-		return journal(deps, "graph.authorize", path, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.authorize: "+res.Error, "")), args.ID), nil
+		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.authorize: "+res.Error, "")), args.ID), nil
 	}
 
 	rejected, _ := res.Data["rejected"].(bool)
 	if rejected {
 		rejectReasons, _ := res.Data["reject_reasons"].([]any)
 		lintIssues, _ := res.Data["lint_issues"].([]any)
-		return journal(deps, "graph.authorize", path, alias, req.Params.Arguments, writeRejectResult("graph.authorize", rejectReasons, lintIssues), args.ID), nil
+		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, writeRejectResult("graph.authorize", rejectReasons, lintIssues), args.ID), nil
+	}
+
+	if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.authorize "+args.ID, false); ep != nil {
+		return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, errorResult(ep), args.ID), nil
 	}
 
 	changedFiles, _ := res.Data["changed_files"].([]any)
@@ -472,5 +496,5 @@ func handleGraphAuthorize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
 		out.Truncated = true
 	}
-	return journal(deps, "graph.authorize", path, alias, req.Params.Arguments, okResult(out), args.ID), nil
+	return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, okResult(out), args.ID), nil
 }

@@ -76,6 +76,14 @@ const (
 	// take down the long-lived stdio server and every bound catalog with
 	// it. The panic message and stack still go to stderr for postmortem.
 	CodeInternal = "INTERNAL"
+
+	// CodeCapsuleWorkflow: a capsule-routed write's workspace lifecycle
+	// failed — the catalog repo declares graph.write_via: capsule (or the
+	// server runs --write-via capsule) but the workspace could not be
+	// created, or a completed write could not be committed/merged into the
+	// staging branch. The hint names where the work physically is (the
+	// managed workspace path/branch) so nothing is silently lost.
+	CodeCapsuleWorkflow = "CAPSULE_WORKFLOW"
 )
 
 // defaultIfStuck is the standing advertisement of the feedback channel:
