@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -22,6 +23,13 @@ try:
     import yaml  # type: ignore
 except ModuleNotFoundError:
     sys.exit("bugswarm_verify_source.py needs pyyaml")
+
+
+# The marker is emitted by the wrapper inside each fresh artifact container.
+# Parsing happens before output is tailed so a verbose CI script cannot discard
+# the exact checked-out revision from the durable verification receipt.
+COMMIT_MARKER = "__KITSOKI_BUGSWARM_COMMIT__="
+COMMIT_RE = re.compile(r"(?m)^" + re.escape(COMMIT_MARKER) + r"([0-9a-fA-F]{40,64})\s*$")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,6 +156,8 @@ def verify_task(
         "infrastructure_error": infrastructure_error,
         "failed_exit_code": failed["exit_code"],
         "passed_exit_code": passed["exit_code"],
+        "failed_commit_sha": failed["observed_commit_sha"],
+        "passed_commit_sha": passed["observed_commit_sha"],
         "image_digest": image_digest,
         "commands": {
             "failed": shell_join(failed["command"]),
@@ -175,7 +185,11 @@ def docker_cmd(repo: str, image_tag: str, script: str) -> list[str]:
         f"{repo}:{image_tag}",
         "bash",
         "-lc",
-        script,
+        # Capture the revision from *inside* this new container, then preserve
+        # the artifact script's exit code exactly.  The failed and passed
+        # commands are built independently and each has its own `docker run
+        # --rm`, as BugSwarm requires.
+        f"printf '%s' '{COMMIT_MARKER}'; git rev-parse HEAD; {script}; status=$?; exit $status",
     ]
 
 
@@ -194,15 +208,25 @@ def run_cmd(cmd: list[str], *, timeout_s: int) -> dict[str, Any]:
         proc = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout_s, check=False)
         return {
             "exit_code": proc.returncode,
+            "observed_commit_sha": extract_observed_commit(proc.stdout),
             "stdout_tail": proc.stdout[-4000:],
             "stderr_tail": proc.stderr[-4000:],
         }
     except subprocess.TimeoutExpired as exc:
         return {
             "exit_code": 124,
+            "observed_commit_sha": extract_observed_commit(exc.stdout) if isinstance(exc.stdout, str) else "",
             "stdout_tail": (exc.stdout or "")[-4000:] if isinstance(exc.stdout, str) else "",
             "stderr_tail": f"timed out after {exc.timeout}s",
         }
+
+
+def extract_observed_commit(stdout: str) -> str:
+    """Return the exact container-side ``git rev-parse HEAD`` value, if any."""
+    matches = COMMIT_RE.findall(stdout)
+    # A repeat marker is ambiguous evidence (for example, a test script echoed
+    # it).  Never promote an arbitrary value into corpus provenance.
+    return matches[0].lower() if len(matches) == 1 else ""
 
 
 def inspect_image_digest(run_command: list[str]) -> str:

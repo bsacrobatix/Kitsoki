@@ -115,10 +115,20 @@ def apply_verification(
                 "verified_green": green,
                 "failed_exit_code": result.get("failed_exit_code"),
                 "passed_exit_code": result.get("passed_exit_code"),
+                # These values are observed by `git rev-parse HEAD` inside the
+                # separate failed/passed containers, not inferred from an API
+                # export.  The corpus locker consumes them directly.
+                "failed_commit_sha": result.get("failed_commit_sha"),
+                "passed_commit_sha": result.get("passed_commit_sha"),
                 "report": verification_path,
                 "report_sha256": out["verification"]["sha256"],
                 "image_digest": result.get("image_digest"),
             }
+            if mode == "execute":
+                for field in ("failed_commit_sha", "passed_commit_sha"):
+                    value = result.get(field)
+                    if isinstance(value, str) and value:
+                        meta[field] = value.lower()
             updated["meta"] = meta
         tasks.append(updated)
     out["tasks"] = tasks
