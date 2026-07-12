@@ -175,16 +175,79 @@ live_gate_env: KITSOKI_TASK_OPT_LIVE
     check("task arm refuses without environment gate", arm_without_gate.returncode, 1)
     require("task arm calls no provider when gated", "no provider was called" in arm_without_gate.stderr)
 
-    resolutions = Path(td) / "resolutions.json"
-    resolutions.write_text(json.dumps({
-        "mini": {"effective_model": "gpt-5.4-mini", "effective_effort": "medium", "provider": "openai", "backend": "codex", "profile_hash": "mini-profile", "launch_plan_hash": "mini-launch"},
-        "oss": {"effective_model": "hf:openai/gpt-oss-120b", "effective_effort": "n/a", "provider": "synthetic", "backend": "openai", "profile_hash": "oss-profile", "launch_plan_hash": "oss-launch"},
-    }), encoding="utf-8")
+    # The campaign preflight resolves the actual native dry-run launch plan;
+    # it no longer trusts an operator-authored requested/effective mapping.
+    profile_config = Path(td) / "profiles.yaml"
+    profile_config.write_text("""
+harness_profiles:
+  codex-mini:
+    backend: codex
+    model: gpt-5.4-mini
+    models: [gpt-5.4-mini]
+    effort: medium
+    efforts: [medium]
+  syn-gpt-oss-120b:
+    backend: claude
+    model: hf:openai/gpt-oss-120b
+    models: [hf:openai/gpt-oss-120b]
+""", encoding="utf-8")
     preflight_dir = Path(td) / "preflight"
-    preflight = run("task-optimization", "preflight", "--study", str(study), "--resolutions", str(resolutions), "--out", str(preflight_dir))
+    preflight = run("task-optimization", "preflight", "--study", str(study), "--config", str(profile_config), "--working-dir", str(REPO_ROOT), "--out", str(preflight_dir))
     check("task preflight exits 0", preflight.returncode, 0)
     preflight_json = json.loads((preflight_dir / "preflight.json").read_text(encoding="utf-8"))
     check("task preflight has effective receipts", {row["status"] for row in preflight_json["candidates"]}, {"ready"})
+    require("task preflight has native launch plans", all(row.get("launch_plan", {}).get("dry_run") for row in preflight_json["candidates"]))
+    require("task preflight reports redacted auth readiness", all(row.get("auth", {}).get("status") == "ambient-unverified" for row in preflight_json["candidates"]))
+    unsupported_config = Path(td) / "unsupported-profiles.yaml"
+    unsupported_config.write_text("""
+harness_profiles:
+  codex-mini:
+    backend: codex
+    model: gpt-5.4-mini
+    models: [gpt-5.4-mini]
+    effort: medium
+    efforts: [medium]
+""", encoding="utf-8")
+    unsupported_dir = Path(td) / "unsupported-preflight"
+    unsupported = run("task-optimization", "preflight", "--study", str(study), "--config", str(unsupported_config), "--working-dir", str(REPO_ROOT), "--out", str(unsupported_dir))
+    check("task preflight allows explicit unsupported profile", unsupported.returncode, 0)
+    unsupported_json = json.loads((unsupported_dir / "preflight.json").read_text(encoding="utf-8"))
+    check("task preflight emits unsupported profile", {row["candidate_id"]: row["status"] for row in unsupported_json["candidates"]}["oss"], "unsupported")
+    model_mismatch_config = Path(td) / "model-mismatch.yaml"
+    model_mismatch_config.write_text("""
+harness_profiles:
+  codex-mini:
+    backend: codex
+    model: gpt-5.4
+    models: [gpt-5.4]
+    effort: medium
+    efforts: [medium]
+""", encoding="utf-8")
+    model_mismatch_dir = Path(td) / "model-mismatch-preflight"
+    model_mismatch = run("task-optimization", "preflight", "--study", str(study), "--config", str(model_mismatch_config), "--working-dir", str(REPO_ROOT), "--out", str(model_mismatch_dir))
+    check("task preflight rejects unavailable requested model", model_mismatch.returncode, 1)
+    model_mismatch_json = json.loads((model_mismatch_dir / "preflight.json").read_text(encoding="utf-8"))
+    require("task preflight preserves model mismatch reason", "fallback is forbidden" in {row["candidate_id"]: row.get("reason", "") for row in model_mismatch_json["candidates"]}["mini"])
+    effort_mismatch_config = Path(td) / "effort-mismatch.yaml"
+    effort_mismatch_config.write_text("""
+harness_profiles:
+  codex-mini:
+    backend: codex
+    model: gpt-5.4-mini
+    models: [gpt-5.4-mini]
+    effort: high
+    efforts: [high]
+""", encoding="utf-8")
+    effort_mismatch_dir = Path(td) / "effort-mismatch-preflight"
+    effort_mismatch = run("task-optimization", "preflight", "--study", str(study), "--config", str(effort_mismatch_config), "--working-dir", str(REPO_ROOT), "--out", str(effort_mismatch_dir))
+    check("task preflight rejects unsupported effort", effort_mismatch.returncode, 1)
+    effort_mismatch_json = json.loads((effort_mismatch_dir / "preflight.json").read_text(encoding="utf-8"))
+    require("task preflight preserves effort mismatch reason", "effective_effort differs" in {row["candidate_id"]: row.get("reason", "") for row in effort_mismatch_json["candidates"]}["mini"])
+    invalid_dir = Path(td) / "invalid-context-preflight"
+    invalid_context = run("task-optimization", "preflight", "--study", str(study), "--config", str(profile_config), "--working-dir", str(Path(td) / "missing-context"), "--out", str(invalid_dir))
+    check("task preflight rejects missing context", invalid_context.returncode, 1)
+    invalid_context_json = json.loads((invalid_dir / "preflight.json").read_text(encoding="utf-8"))
+    check("task preflight records invalid context", {row["status"] for row in invalid_context_json["candidates"]}, {"invalid"})
 
     attempts = Path(td) / "attempts"
     status_before = run("task-optimization", "status", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--out", str(Path(td) / "status-before"))

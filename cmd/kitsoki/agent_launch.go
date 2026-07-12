@@ -64,10 +64,71 @@ type agentLaunchPlan struct {
 	Interactive  bool                      `json:"interactive,omitempty"`
 	FutureNotes  []string                  `json:"future_notes,omitempty"`
 	LaunchPolicy *host.AgentLaunchDecision `json:"launch_policy,omitempty"`
+	// ProfileResolution is the secret-free, local catalog evidence used to
+	// construct this dry-run. It lets callers prove that a requested model and
+	// effort came from the selected profile rather than an operator-authored
+	// receipt. Env values deliberately never leave providerEnv.
+	ProfileResolution *agentLaunchProfileResolution `json:"profile_resolution,omitempty"`
 
 	providerEnv map[string]string
 	claudeArgs  []string
 	cleanups    []func()
+}
+
+type agentLaunchProfileResolution struct {
+	Name    string                     `json:"name,omitempty"`
+	Backend string                     `json:"backend,omitempty"`
+	Model   string                     `json:"model,omitempty"`
+	Models  []string                   `json:"models,omitempty"`
+	Effort  string                     `json:"effort,omitempty"`
+	Efforts []string                   `json:"efforts,omitempty"`
+	Auth    agentLaunchAuthReadiness   `json:"auth"`
+	Quota   *agentLaunchQuotaReadiness `json:"quota,omitempty"`
+}
+
+type agentLaunchAuthReadiness struct {
+	// Status only describes local configuration. It never claims that a remote
+	// provider accepted credentials; that would require a provider call.
+	Status          string   `json:"status"`
+	EnvironmentKeys []string `json:"environment_keys,omitempty"`
+}
+
+// agentLaunchQuotaReadiness deliberately omits the local state path. The
+// preflight needs only the configured throttle shape, not filesystem details.
+type agentLaunchQuotaReadiness struct {
+	Window          string `json:"window,omitempty"`
+	TokensPerWindow int64  `json:"tokens_per_window,omitempty"`
+	MaxConcurrent   int    `json:"max_concurrent,omitempty"`
+	ReserveTokens   int64  `json:"reserve_tokens,omitempty"`
+	LeaseTimeout    string `json:"lease_timeout,omitempty"`
+}
+
+func launchProfileResolution(name string, profile orchestrator.HarnessProfile) *agentLaunchProfileResolution {
+	if strings.TrimSpace(name) == "" {
+		return nil
+	}
+	envKeys := make([]string, 0, len(profile.Env))
+	for key := range profile.Env {
+		envKeys = append(envKeys, key)
+	}
+	sort.Strings(envKeys)
+	auth := agentLaunchAuthReadiness{Status: "ambient-unverified"}
+	if len(envKeys) > 0 {
+		auth = agentLaunchAuthReadiness{Status: "configured-unverified", EnvironmentKeys: envKeys}
+	}
+	resolution := &agentLaunchProfileResolution{
+		Name: name, Backend: profile.Backend, Model: profile.Model,
+		Models: append([]string(nil), profile.Models...), Effort: profile.Effort,
+		Efforts: append([]string(nil), profile.Efforts...), Auth: auth,
+	}
+	if profile.Quota != (host.QuotaControl{}) {
+		resolution.Quota = &agentLaunchQuotaReadiness{
+			Window: profile.Quota.Window, TokensPerWindow: profile.Quota.TokensPerWindow,
+			MaxConcurrent: profile.Quota.MaxConcurrent, ReserveTokens: profile.Quota.ReserveTokens,
+			LeaseTimeout: profile.Quota.LeaseTimeout,
+		}
+	}
+	return resolution
 }
 
 type standaloneCodexAgent struct {
@@ -336,25 +397,26 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	}
 	command := append([]string{bin}, inv.Args...)
 	return agentLaunchPlan{
-		App:          opts.AppPath,
-		Agent:        opts.AgentName,
-		Profile:      profileName,
-		Backend:      backend,
-		Mode:         opts.Mode,
-		Binary:       bin,
-		WorkingDir:   workingDir,
-		Model:        model,
-		Effort:       effort,
-		Tools:        planTools,
-		Env:          redactEnv(providerEnv),
-		Command:      command,
-		Stdin:        inv.Stdin,
-		RunAsUser:    runAsUser,
-		providerEnv:  providerEnv,
-		claudeArgs:   cliArgs,
-		cleanups:     cleanups,
-		LaunchPolicy: launchDecision,
-		FutureNotes:  launchFutureNotes(opts.Mode),
+		App:               opts.AppPath,
+		Agent:             opts.AgentName,
+		Profile:           profileName,
+		Backend:           backend,
+		Mode:              opts.Mode,
+		Binary:            bin,
+		WorkingDir:        workingDir,
+		Model:             model,
+		Effort:            effort,
+		Tools:             planTools,
+		Env:               redactEnv(providerEnv),
+		Command:           command,
+		Stdin:             inv.Stdin,
+		RunAsUser:         runAsUser,
+		providerEnv:       providerEnv,
+		claudeArgs:        cliArgs,
+		cleanups:          cleanups,
+		LaunchPolicy:      launchDecision,
+		FutureNotes:       launchFutureNotes(opts.Mode),
+		ProfileResolution: launchProfileResolution(profileName, profile),
 	}, nil
 }
 
@@ -511,24 +573,25 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 		}
 		futureNotes = append(futureNotes, standaloneLaunchFutureNotes(opts.Mode, disableCodexShell)...)
 		plan := agentLaunchPlan{
-			AgentFile:    agentPath,
-			Agent:        opts.AgentName,
-			Profile:      profileName,
-			Backend:      backend,
-			Mode:         opts.Mode,
-			Binary:       bin,
-			WorkingDir:   workingDir,
-			Model:        model,
-			Effort:       effort,
-			Tools:        planTools,
-			Env:          redactEnv(providerEnv),
-			Command:      command,
-			RunAsUser:    runAsUser,
-			Interactive:  true,
-			providerEnv:  providerEnv,
-			cleanups:     cleanups,
-			LaunchPolicy: launchDecision,
-			FutureNotes:  futureNotes,
+			AgentFile:         agentPath,
+			Agent:             opts.AgentName,
+			Profile:           profileName,
+			Backend:           backend,
+			Mode:              opts.Mode,
+			Binary:            bin,
+			WorkingDir:        workingDir,
+			Model:             model,
+			Effort:            effort,
+			Tools:             planTools,
+			Env:               redactEnv(providerEnv),
+			Command:           command,
+			RunAsUser:         runAsUser,
+			Interactive:       true,
+			providerEnv:       providerEnv,
+			cleanups:          cleanups,
+			LaunchPolicy:      launchDecision,
+			FutureNotes:       futureNotes,
+			ProfileResolution: launchProfileResolution(profileName, profile),
 		}
 		cleanupRendered = false
 		return plan, nil
@@ -539,25 +602,26 @@ func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, e
 	}
 	command := append([]string{bin}, inv.Args...)
 	plan := agentLaunchPlan{
-		AgentFile:    agentPath,
-		Agent:        opts.AgentName,
-		Profile:      profileName,
-		Backend:      backend,
-		Mode:         opts.Mode,
-		Binary:       bin,
-		WorkingDir:   workingDir,
-		Model:        model,
-		Effort:       effort,
-		Tools:        planTools,
-		Env:          redactEnv(providerEnv),
-		Command:      command,
-		Stdin:        inv.Stdin,
-		RunAsUser:    runAsUser,
-		providerEnv:  providerEnv,
-		claudeArgs:   cliArgs,
-		cleanups:     cleanups,
-		LaunchPolicy: launchDecision,
-		FutureNotes:  standaloneLaunchFutureNotes(opts.Mode, disableCodexShell),
+		AgentFile:         agentPath,
+		Agent:             opts.AgentName,
+		Profile:           profileName,
+		Backend:           backend,
+		Mode:              opts.Mode,
+		Binary:            bin,
+		WorkingDir:        workingDir,
+		Model:             model,
+		Effort:            effort,
+		Tools:             planTools,
+		Env:               redactEnv(providerEnv),
+		Command:           command,
+		Stdin:             inv.Stdin,
+		RunAsUser:         runAsUser,
+		providerEnv:       providerEnv,
+		claudeArgs:        cliArgs,
+		cleanups:          cleanups,
+		LaunchPolicy:      launchDecision,
+		FutureNotes:       standaloneLaunchFutureNotes(opts.Mode, disableCodexShell),
+		ProfileResolution: launchProfileResolution(profileName, profile),
 	}
 	cleanupRendered = false
 	return plan, nil

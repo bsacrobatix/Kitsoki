@@ -360,14 +360,15 @@ def cmd_task_optimization_preflight(args: argparse.Namespace) -> int:
         print(f"ERROR: task-optimization study is blocked: {'; '.join(study.blocked_by)}", file=sys.stderr)
         return 1
     try:
-        resolutions = _load_json(args.resolutions, label="profile resolutions") if args.resolutions else {}
-        receipt = study.preflight(resolutions)
+        receipt = study.preflight(config_path=args.config, launch_agent=args.launch_agent,
+                                  working_dir=args.working_dir)
         _write_immutable_json(Path(args.out) / "preflight.json", receipt)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: could not preflight task-optimization study: {exc}", file=sys.stderr)
         return 1
     invalid = [record["candidate_id"] for record in receipt["candidates"] if record["status"] == "invalid"]
-    print(f"preflight → {Path(args.out) / 'preflight.json'} ({len(receipt['candidates'])} candidate(s); invalid={len(invalid)})")
+    unsupported = [record["candidate_id"] for record in receipt["candidates"] if record["status"] == "unsupported"]
+    print(f"preflight → {Path(args.out) / 'preflight.json'} ({len(receipt['candidates'])} candidate(s); invalid={len(invalid)}; unsupported={len(unsupported)})")
     return 1 if invalid else 0
 
 
@@ -663,10 +664,12 @@ def main(argv: list[str] | None = None) -> int:
     p_task_arm.add_argument("--repeat-phase", default="screening")
     p_task_arm.add_argument("--live", action="store_true")
     p_task_arm.set_defaults(func=cmd_task_optimization_arm)
-    p_task_preflight = task_opt_sub.add_parser("preflight", help="write immutable requested/effective profile receipt without a provider call")
+    p_task_preflight = task_opt_sub.add_parser("preflight", help="resolve local profile catalogs into immutable dry-run launch-plan receipts without a provider call")
     p_task_preflight.add_argument("--study", required=True)
     p_task_preflight.add_argument("--out", required=True)
-    p_task_preflight.add_argument("--resolutions", default="", help="JSON mapping candidate id to effective local profile resolution")
+    p_task_preflight.add_argument("--config", default=str(REPO_ROOT / ".kitsoki.yaml"), help="effective Kitsoki config; its local overlay is loaded by the native resolver")
+    p_task_preflight.add_argument("--launch-agent", default="task-optimization-preflight", help="freestanding agent used solely to materialize the native dry-run launch plan")
+    p_task_preflight.add_argument("--working-dir", default=str(REPO_ROOT), help="required launch context; must resolve exactly in every plan")
     p_task_preflight.set_defaults(func=cmd_task_optimization_preflight)
     p_task_record = task_opt_sub.add_parser("record", help="append one immutable scored attempt receipt")
     p_task_record.add_argument("--plan", required=True)

@@ -308,53 +308,127 @@ class TaskOptimizationStudy:
                 "repeats": self.repeats, "stop": self.stop, "live_gate_env": self.live_gate_env,
                 "runner_commit": runner_commit}
 
-    def preflight(self, resolutions: dict[str, Any]) -> dict[str, Any]:
-        """Validate local profile resolution without dispatching a provider.
+    def preflight(self, *, config_path: str | Path | None = None,
+                  launch_agent: str = "task-optimization-preflight", working_dir: str | Path | None = None) -> dict[str, Any]:
+        """Resolve every candidate through the real local dry-run launcher.
 
-        ``resolutions`` is deliberately an operator-produced receipt rather
-        than a profile lookup.  This makes requested versus effective settings
-        auditable and forbids hidden aliases/fallbacks before a live cell can
-        be armed.
+        This boundary intentionally does *not* accept operator-authored model,
+        effort, hash, auth, or quota fields.  ``kitsoki agent launch`` loads
+        the effective local profile catalog (including the ignored local
+        overlay) and returns a redacted no-provider launch plan.  An absent
+        profile is an explicit ``unsupported`` outcome; malformed context or a
+        launcher error is ``invalid``.  Auth readiness is configuration-only:
+        no remote credential or quota probe is performed here.
         """
-        required = ("effective_model", "effective_effort", "provider", "backend", "profile_hash", "launch_plan_hash")
+        config = Path(config_path or (REPO_ROOT / ".kitsoki.yaml")).resolve()
+        context_dir = Path(working_dir or REPO_ROOT).resolve()
         records: list[dict[str, Any]] = []
         for candidate in self.candidates:
-            configured = resolutions.get(candidate["id"], {})
-            if not isinstance(configured, dict):
-                configured = {}
             record = {
                 "candidate_id": candidate["id"],
                 "profile": candidate["profile"],
                 "requested_model": candidate["requested_model"],
                 "requested_effort": candidate["requested_effort"],
-                "effective_model": configured.get("effective_model"),
-                "effective_effort": configured.get("effective_effort"),
-                "provider": configured.get("provider"),
-                "backend": configured.get("backend"),
-                "profile_hash": configured.get("profile_hash"),
-                "launch_plan_hash": configured.get("launch_plan_hash"),
+                "context": {"working_dir": str(context_dir), "launch_agent": launch_agent},
             }
-            declared = str(configured.get("status") or candidate.get("preflight") or "")
-            missing = [key for key in required if not record.get(key)]
-            if declared == "unsupported" or declared.startswith("unsupported-"):
-                record["status"] = "unsupported"
-                record["reason"] = str(configured.get("reason") or declared)
-            elif missing:
-                record["status"] = "invalid"
-                record["reason"] = "missing " + ", ".join(missing)
-            elif record["effective_model"] != record["requested_model"]:
-                record["status"] = "invalid"
-                record["reason"] = "effective_model differs from requested_model; fallback is forbidden"
-            elif record["effective_effort"] != record["requested_effort"]:
-                record["status"] = "invalid"
-                record["reason"] = "effective_effort differs from requested_effort"
+            resolved, failure = _resolve_task_optimization_launch_plan(
+                profile=str(candidate["profile"]), config_path=config, launch_agent=launch_agent,
+                working_dir=context_dir,
+            )
+            if failure:
+                record["status"] = "unsupported" if "unknown harness profile" in failure else "invalid"
+                record["reason"] = failure
             else:
-                record["status"] = "ready"
+                assert resolved is not None
+                profile_resolution = resolved.get("profile_resolution")
+                if not isinstance(profile_resolution, dict):
+                    record["status"] = "invalid"
+                    record["reason"] = "launch plan omitted secret-free profile_resolution"
+                    records.append(record)
+                    continue
+                record.update({
+                    "effective_model": resolved.get("model"),
+                    "effective_effort": resolved.get("effort") or "n/a",
+                    "provider": _provider_for_launch_plan(resolved),
+                    "backend": resolved.get("backend"),
+                    "profile_hash": receipt_sha256(profile_resolution),
+                    "launch_plan_hash": receipt_sha256(resolved),
+                    "launch_plan": resolved,
+                    "auth": profile_resolution.get("auth"),
+                    "quota": _quota_readiness(profile_resolution.get("quota")),
+                })
+                if record["context"]["working_dir"] != str(resolved.get("working_dir") or ""):
+                    record["status"] = "invalid"
+                    record["reason"] = "launch plan working_dir differs from requested context"
+                elif record["effective_model"] != record["requested_model"]:
+                    record["status"] = "invalid"
+                    record["reason"] = "effective_model differs from requested_model; fallback is forbidden"
+                elif record["effective_effort"] != record["requested_effort"]:
+                    record["status"] = "invalid"
+                    record["reason"] = "effective_effort differs from requested_effort"
+                else:
+                    record["status"] = "ready"
+            if record["status"] == "unsupported":
+                record["status"] = "unsupported"
             records.append(record)
         result = {"schema": TASK_OPTIMIZATION_PREFLIGHT_SCHEMA, "study_id": self.study_id,
                   "study_lock_sha256": receipt_sha256(self.lock()), "candidates": records}
         result["preflight_sha256"] = receipt_sha256(result)
         return result
+
+
+def _resolve_task_optimization_launch_plan(*, profile: str, config_path: Path,
+                                           launch_agent: str, working_dir: Path) -> tuple[dict[str, Any] | None, str]:
+    """Return a normalized native dry-run plan without ever executing a CLI provider."""
+    if not config_path.is_file():
+        return None, f"profile config does not exist: {config_path}"
+    if not working_dir.is_dir():
+        return None, f"working directory does not exist: {working_dir}"
+    command = ["go", "run", "./cmd/kitsoki", "agent", "launch", "--agent", launch_agent,
+               "--profile", profile, "--config", str(config_path), "--working-dir", str(working_dir),
+               "--task", "Task-optimization preflight only. Do not execute this task."]
+    try:
+        completed = subprocess.run(command, cwd=REPO_ROOT, text=True, capture_output=True, check=False)
+    except OSError as exc:
+        return None, f"could not start native launch-plan resolver: {exc}"
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().replace("\n", " ")
+        return None, f"native launch-plan resolution failed: {detail or f'exit {completed.returncode}'}"
+    try:
+        plan = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"native launch-plan resolver returned invalid JSON: {exc}"
+    if not isinstance(plan, dict):
+        return None, "native launch-plan resolver returned a non-object"
+    # The launcher safely creates an ephemeral MCP config for some agents. Its
+    # random filesystem name is not semantic evidence, so canonicalize it
+    # before hashing or persisting the plan receipt.
+    command_value = plan.get("command")
+    if isinstance(command_value, list):
+        normalized_command = [str(value) for value in command_value]
+        for index, value in enumerate(normalized_command[:-1]):
+            if value == "--mcp-config":
+                normalized_command[index + 1] = "<ephemeral-mcp-config>"
+        for index, value in enumerate(normalized_command):
+            if value.startswith("model_instructions_file="):
+                normalized_command[index] = "model_instructions_file=<ephemeral-prompt-file>"
+        plan["command"] = normalized_command
+    plan["dry_run"] = True
+    return plan, ""
+
+
+def _provider_for_launch_plan(plan: dict[str, Any]) -> str:
+    model = str(plan.get("model") or "")
+    if model.startswith("hf:"):
+        return "synthetic"
+    return {"codex": "openai", "claude": "anthropic", "agy": "google", "copilot": "github"}.get(
+        str(plan.get("backend") or ""), str(plan.get("backend") or "unknown"))
+
+
+def _quota_readiness(quota: Any) -> dict[str, str]:
+    if not isinstance(quota, dict):
+        return {"status": "not-configured"}
+    return {"status": "configured-unverified"}
 
 
 def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], preflight: dict[str, Any]) -> list[dict[str, Any]]:
