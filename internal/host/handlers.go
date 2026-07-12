@@ -501,6 +501,8 @@ func RegisterBuiltins(r *Registry) {
 	r.Register("host.dev.profile_setup", ProfileSetupHandler)
 	r.Register("host.dev.onboarding", DevOnboardingHandler)
 	r.Register("host.decomposition.update", DecompositionUpdateHandler)
+	r.Register("host.tour.plan", TourPlanHandler)
+	r.Register("host.tour.validate", TourValidateHandler)
 	r.Register("host.product_journey.run", ProductJourneyRunHandler)
 	r.Register("host.bakeoff.run", BakeoffRunHandler)
 	r.Register("host.session_mining.run", SessionMiningRunHandler)
