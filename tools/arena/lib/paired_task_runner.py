@@ -1451,10 +1451,21 @@ def int_value(value: Any) -> int:
 
 
 def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
-    tokens = parse_tokens(blob)
+    # Codex JSONL reports each provider request as a ``turn.completed`` event.
+    # A direct CodeAct process can emit several of those events, so the final
+    # request is not a summary of the earlier ones.  Keep an event without an
+    # id distinct (its line is the only available identity), but de-duplicate
+    # retransmitted events that carry an explicit request/turn id.
+    token_totals = {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0,
+    }
+    seen_request_ids: set[str] = set()
+    found_usage = False
     cost_usd: float | None = None
-    buckets: dict[str, int] = {}
-    for line in blob.splitlines():
+    for line_number, line in enumerate(blob.splitlines(), start=1):
         line = line.strip()
         if not line.startswith("{"):
             continue
@@ -1466,25 +1477,40 @@ def codex_output_metrics(blob: str, model: str) -> dict[str, Any]:
             continue
         usage = payload.get("usage") or (payload.get("message") or {}).get("usage")
         if isinstance(usage, dict):
-            tokens = max(tokens, usage_token_count(usage))
+            event_type = str(payload.get("type") or payload.get("kind") or "")
+            request_id = next((str(value) for value in (
+                payload.get("request_id"), payload.get("turn_id"), payload.get("id"), usage.get("request_id"),
+            ) if value not in (None, "")), "")
+            # A top-level ``id`` is only reliably a request identity for the
+            # terminal turn event. Other JSON envelopes may reuse a message id.
+            if event_type != "turn.completed" and not payload.get("request_id") and not payload.get("turn_id"):
+                request_id = ""
+            if request_id and request_id in seen_request_ids:
+                continue
+            if request_id:
+                seen_request_ids.add(request_id)
             buckets = usage_token_buckets(usage)
+            for key in token_totals:
+                token_totals[key] += buckets[key]
+            found_usage = True
         for key in ("total_cost_usd", "cost_usd"):
             value = payload.get(key)
             if isinstance(value, (int, float)):
-                cost_usd = float(value)
+                cost_usd = (cost_usd or 0.0) + float(value)
                 break
+    tokens = sum(token_totals.values()) if found_usage else parse_tokens(blob)
     if cost_usd is not None:
         return {
             "cost_usd": round(cost_usd, 6),
             "tokens": tokens,
-            **buckets,
+            **token_totals,
             "cost_basis": "metered",
             "cost_note": "cost_usd from codex JSON envelope",
         }
     return {
         "cost_usd": None,
         "tokens": tokens,
-        **buckets,
+        **token_totals,
         "cost_basis": "subscription-unmetered",
         "cost_note": "Codex subscription output contains no authoritative USD cost; tokens are retained for comparison",
     }

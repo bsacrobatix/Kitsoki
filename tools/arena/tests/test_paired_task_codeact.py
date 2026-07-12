@@ -227,6 +227,14 @@ subscription_raw = runner.codex_output_metrics('{"usage":{"input_tokens":10,"out
 check("raw subscription USD is unavailable", subscription_raw.get("cost_usd"), None)
 check("raw subscription cost basis is explicit", subscription_raw.get("cost_basis"), "subscription-unmetered")
 
+direct_codeact_fixture = (HERE / "fixtures" / "direct-codeact-turn-completed.jsonl").read_text(encoding="utf-8")
+direct_codeact_usage = runner.codex_output_metrics(direct_codeact_fixture, "gpt-5.4")
+check("direct CodeAct turn.completed sums distinct requests", direct_codeact_usage.get("tokens"), 385)
+check("direct CodeAct turn.completed deduplicates retry event", direct_codeact_usage.get("input_tokens"), 210)
+check("direct CodeAct preserves cache-read usage", direct_codeact_usage.get("cached_input_tokens"), 140)
+check("direct CodeAct preserves output usage", direct_codeact_usage.get("output_tokens"), 26)
+check("direct CodeAct preserves reasoning usage", direct_codeact_usage.get("reasoning_output_tokens"), 9)
+
 with tempfile.TemporaryDirectory(prefix="paired-result-target-") as td:
     target = Path(td) / "nested" / "cell.json"
     exit_code = runner.emit(
