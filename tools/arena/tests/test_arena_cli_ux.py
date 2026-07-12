@@ -9,6 +9,7 @@ import importlib.util
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -181,13 +182,59 @@ live_gate_env: KITSOKI_TASK_OPT_LIVE
     check("task status lists all resume cells", len(before_json["resume_cell_ids"]), 8)
 
     plan_digest = hashlib.sha256((json.dumps(plan_json, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")).hexdigest()
+    run_started = datetime.now(timezone.utc).replace(microsecond=0)
+    run_finished = run_started + timedelta(seconds=60)
+    produced_at = (run_started + timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
+    started_at = run_started.isoformat().replace("+00:00", "Z")
+    finished_at = run_finished.isoformat().replace("+00:00", "Z")
+    def sha256(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def evidence(path, attempt_id, *, passed=None):
+        payload = {"path": str(path), "sha256": sha256(path), "attempt_id": attempt_id,
+                   "produced_at": produced_at}
+        if passed is not None:
+            payload["passed"] = passed
+        return payload
+
     for n, cell_data in enumerate(plan_json["cells"]):
+        attempt_id = f"attempt-{n}"
+        solved = cell_data["candidate_id"] == "mini"
+        trace = Path(td) / f"{attempt_id}.jsonl"
+        trace.write_text('{"event":"fixture"}\n', encoding="utf-8")
+        oracle = Path(td) / f"{attempt_id}.oracle.json"
+        oracle.write_text(json.dumps({"passed": solved}), encoding="utf-8")
+        suite = Path(td) / f"{attempt_id}.suite.json"
+        suite.write_text(json.dumps({"passed": solved}), encoding="utf-8")
+        report = Path(td) / f"{attempt_id}.agentbench.json"
+        report_metrics = {
+            "input_tokens": 6 if solved else 12, "output_tokens": 2,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            "total_tokens": 8 if solved else 14, "cost_usd": 0.0,
+            "wall_seconds": 1.5, "accounting_status": "complete",
+            "agent_calls_started": 1, "agent_calls_finished": 1,
+            "agent_calls_errored": 0, "agent_calls_in_flight": 0,
+        }
+        report.write_text(json.dumps({"trace": str(trace), "passed": solved,
+                                      "outcome": "solved" if solved else "failed",
+                                      "metrics": report_metrics}), encoding="utf-8")
+        candidate = next(row for row in preflight_json["candidates"] if row["candidate_id"] == cell_data["candidate_id"])
         receipt_path = Path(td) / f"attempt-{n}.json"
         receipt_path.write_text(json.dumps({
-            "schema": "task-optimization/attempt/v1", "study_id": "bugfix-codeact-v1", "attempt_id": f"attempt-{n}",
+            "schema": "task-optimization/attempt/v1", "study_id": "bugfix-codeact-v1", "attempt_id": attempt_id,
             "cell_id": cell_data["id"], "candidate_id": cell_data["candidate_id"], "plan_sha256": plan_digest, "preflight_sha256": preflight_json["preflight_sha256"],
-            "status": "scored", "verdict": "solved" if cell_data["candidate_id"] == "mini" else "failed",
-            "metrics": {"total_tokens": 10 if cell_data["candidate_id"] == "mini" else 20},
+            "status": "scored", "verdict": "solved" if solved else "failed",
+            "metrics": {"input_tokens": report_metrics["input_tokens"], "output_tokens": report_metrics["output_tokens"],
+                        "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+                        "total_tokens": report_metrics["total_tokens"], "cost_usd": 0.0, "wall_s": 1.5},
+            "runtime": {"status": "exited", "exit_code": 0 if solved else 1, "runner_commit": "fixture",
+                        "image_digest": "sha256:fixture", "started_at": started_at, "finished_at": finished_at},
+            "boundary": {"profile_hash": candidate["profile_hash"], "launch_plan_hash": candidate["launch_plan_hash"],
+                         "capability_hash": "sha256:fixture", "sandbox_kind": "fake", "sandbox_identity": "fixture"},
+            "leakage": {"verdict": "clean", "checker": "fixture", "policy_hash": "sha256:fixture"},
+            "artifacts": {"agentbench_report": evidence(report, attempt_id), "trace": evidence(trace, attempt_id),
+                          "oracle": evidence(oracle, attempt_id, passed=solved), "suite": evidence(suite, attempt_id, passed=solved)},
+            "score": {"schema": "task-optimization/score/v1", "agentbench_report_sha256": sha256(report), "trace_sha256": sha256(trace)},
         }), encoding="utf-8")
         recorded = run("task-optimization", "record", "--plan", str(out / "plan.json"), "--preflight", str(preflight_dir / "preflight.json"), "--attempts", str(attempts), "--receipt", str(receipt_path), "--out", str(attempts))
         check(f"task attempt {n} records", recorded.returncode, 0)

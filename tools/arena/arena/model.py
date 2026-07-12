@@ -20,6 +20,8 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
+from .task_optimization_receipt import validate_scored_attempt_receipt
+
 # tools/arena/arena/model.py -> parents[3] is the repo root. `targets_from` /
 # `persona_axis_from` / `target_proof_from` paths in a spec are resolved
 # relative to this so specs stay portable regardless of cwd.
@@ -379,6 +381,11 @@ def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], p
         status = str(data.get("status") or "")
         if status not in TASK_OPTIMIZATION_CELL_STATES:
             raise ValueError(f"{file}: invalid task-optimization status {status!r}")
+        validate_scored_attempt_receipt(
+            data,
+            receipt_path=file,
+            preflight_candidate=preflight_candidates[candidate_id],
+        )
         seen.add(attempt_id)
         receipts.append(data)
     return receipts
