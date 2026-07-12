@@ -23,6 +23,21 @@ func TestItemIDStableAcrossVolatileDetail(t *testing.T) {
 	}
 }
 
+func TestItemIDStableAcrossFragmentOrder(t *testing.T) {
+	// Producers that assemble a detail from map iteration (e.g. the flow
+	// runner's expect_world sweep) emit "; "-joined fragments in varying
+	// order; the id must not flip with them or waivers never carry forward.
+	a := ItemID("flow", "fix.yaml", `expect_state: got "landing", want "plan_done"; expect_world["verify_ok"]: got  (string), want true (bool); expect_world["captured"]: got 0 (uint64), want 1 (uint64)`)
+	b := ItemID("flow", "fix.yaml", `expect_state: got "landing", want "plan_done"; expect_world["captured"]: got 0 (uint64), want 1 (uint64); expect_world["verify_ok"]: got  (string), want true (bool)`)
+	if a != b {
+		t.Fatalf("ids should survive fragment reordering: %q vs %q", a, b)
+	}
+	c := ItemID("flow", "fix.yaml", `expect_state: got "landing", want "plan_done"; expect_world["verify_ok"]: got false (bool), want true (bool)`)
+	if a == c {
+		t.Fatal("genuinely different fragment sets must get different ids")
+	}
+}
+
 func TestMergeCarryForwardAndResolution(t *testing.T) {
 	stale := NewItem("load", SeverityError, "app.yaml", "old failure now fixed")
 	waived := NewItem("flow", SeverityError, "fix.yaml", "known flaky expectation")
