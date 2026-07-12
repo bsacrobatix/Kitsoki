@@ -101,26 +101,6 @@ states:
           propose_fix_artifact: submitted
         on_error: idle
 
-      # Normalize the optional decomposed plan before any future per-item
-      # write-capable work. Its presence is explicit; the existing action modes
-      # remain unchanged until that executor is added in a later slice.
-      # The world schema gives both bind targets concrete empty defaults. A
-      # `once: true` invoke therefore treats a fresh proposal as cached and
-      # skips compilation entirely. Guard the actual empty compiled plan
-      # instead: a successful compiler always emits at least one item, so this
-      # remains reload-safe without conflating an empty default with a receipt.
-      - when: "len(world.propose_fix_artifact.implementation_plan ?? []) > 0 && len(world.compiled_implementation_plan ?? []) == 0"
-        invoke: host.starlark.run
-        id: compile_implementation_plan
-        with:
-          script: scripts/compile_implementation_plan.star
-          inputs:
-            implementation_plan: "{{ world.propose_fix_artifact.implementation_plan }}"
-        bind:
-          compiled_implementation_plan: plan
-          implementation_capability_manifest: capability_manifest
-        on_error: idle
-
       # Early low-confidence quit (escalate_low_value). A proposal the proposer
       # itself rates below the floor is low value — escalate to a human BEFORE
       # spending the judge call and the whole implement→test→review path. Guarded
@@ -174,6 +154,20 @@ states:
       accept:
         - target: implementing
           effects:
+            # The proposal artifact binds during on_enter. Compile only on the
+            # accepted transition, when that binding is visible; compiling in
+            # the same on_enter pass saw the pre-dispatch empty value and left
+            # decomposed CodeAct with no item or write grant.
+            - when: "(world.implementation_mode == 'codeact_decomposed' || world.implementation_mode == 'codeact_decomposed_fallback') && len(world.propose_fix_artifact.implementation_plan ?? []) > 0"
+              invoke: host.starlark.run
+              id: compile_implementation_plan
+              with:
+                script: scripts/compile_implementation_plan.star
+                inputs:
+                  implementation_plan: "{{ world.propose_fix_artifact.implementation_plan }}"
+              bind:
+                compiled_implementation_plan: plan
+                implementation_capability_manifest: capability_manifest
             - invoke: iface.transport.post
               with:
                 thread:   "{{ world.thread }}"
