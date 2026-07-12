@@ -71,14 +71,17 @@ check("treatments exits 0", catalog.returncode, 0)
 rows = json.loads(catalog.stdout)
 ids = sorted(row["id"] for row in rows)
 check("catalog ids", ids, [
-    "codex-codeact",
-    "kitsoki-mcp",
-    "kitsoki-mcp-codeact",
-    "raw-codex",
+    "raw-agent",
+    "strict-mcp-codeact-broad",
     "strict-mcp-codeact-decomposed",
+    "strict-mcp-current",
     "strict-mcp-decomposed-fallback",
+    "strict-mcp-direct-driver",
 ])
-require("catalog names codeact surface", any(row["id"] == "codex-codeact" and row["action_surface"] == "kitsoki-codeact-mcp" for row in rows))
+require("catalog names direct driver surface", any(
+    row["id"] == "strict-mcp-direct-driver" and row["action_surface"] == "kitsoki-codeact-mcp"
+    for row in rows
+))
 require("catalog names strict fallback surface", any(
     row["id"] == "strict-mcp-decomposed-fallback"
     and row["action_surface"] == "kitsoki-studio-mcp+codeact-decomposed-fallback"
@@ -202,6 +205,66 @@ harness_profiles:
         row.get("launch_plan", {}).get("dry_run") and row.get("auth", {}).get("status")
         for row in native_preflight["candidates"] if row.get("status") == "ready"
     ))
+
+    # The shipped task-optimization catalog pins all four candidate identities.
+    # Exercise that contract with a hermetic profile catalog so a developer's
+    # ignored overlay cannot turn this into an accidental environment test.
+    full_study = Path(td) / "full-study.yaml"
+    full_study.write_text("""
+schema: task-optimization/v1
+study_id: full-candidate-catalog
+boundary: stories/bugfix
+corpus_lock: corpus.lock.json
+splits: {learning: exposed-plus-bugswarm, confirmation: bugswarm-holdout}
+candidates:
+  - {key: gpt54-mini, profile: codex-gpt54-mini, requested_model: gpt-5.4-mini, requested_effort: medium}
+  - {key: spark, profile: codex-spark, requested_model: gpt-5.3-codex-spark, requested_effort: medium}
+  - {key: sonnet-low, profile: claude-sonnet-low, requested_model: sonnet, requested_effort: low}
+  - {key: gpt-oss-120b, profile: syn-gpt-oss-120b, requested_model: hf:openai/gpt-oss-120b, requested_effort: n/a}
+treatments: [raw-agent, strict-mcp-current, strict-mcp-direct-driver, strict-mcp-codeact-broad, strict-mcp-codeact-decomposed, strict-mcp-decomposed-fallback]
+repeats: {screening: 1, decision_boundary: 3}
+stop: {max_versions: 4}
+live_gate_env: KITSOKI_TASK_OPT_LIVE
+""", encoding="utf-8")
+    full_profile_config = Path(td) / "full-profiles.yaml"
+    full_profile_config.write_text("""
+harness_profiles:
+  codex-gpt54-mini:
+    backend: codex
+    model: gpt-5.4-mini
+    models: [gpt-5.4-mini]
+    effort: medium
+    efforts: [medium]
+  codex-spark:
+    backend: codex
+    model: gpt-5.3-codex-spark
+    models: [gpt-5.3-codex-spark]
+    effort: medium
+    efforts: [medium]
+  claude-sonnet-low:
+    backend: claude
+    model: sonnet
+    models: [sonnet]
+    effort: low
+    efforts: [low]
+  syn-gpt-oss-120b:
+    backend: claude
+    model: hf:openai/gpt-oss-120b
+    models: [hf:openai/gpt-oss-120b]
+""", encoding="utf-8")
+    full_preflight_dir = Path(td) / "full-preflight"
+    full_preflight = run("task-optimization", "preflight", "--study", str(full_study), "--config", str(full_profile_config), "--working-dir", str(REPO_ROOT), "--out", str(full_preflight_dir))
+    check("four candidate preflight exits 0", full_preflight.returncode, 0)
+    full_preflight_json = json.loads((full_preflight_dir / "preflight.json").read_text(encoding="utf-8"))
+    check("four candidate preflight resolves exact profile catalog", {
+        row["candidate_id"]: (row.get("effective_model"), row.get("effective_effort"), row.get("status"))
+        for row in full_preflight_json["candidates"]
+    }, {
+        "gpt54-mini": ("gpt-5.4-mini", "medium", "ready"),
+        "spark": ("gpt-5.3-codex-spark", "medium", "ready"),
+        "sonnet-low": ("sonnet", "low", "ready"),
+        "gpt-oss-120b": ("hf:openai/gpt-oss-120b", "n/a", "ready"),
+    })
 
     # Receipt/lifecycle tests must be hermetic: native launch-plan resolution
     # is deliberately sensitive to an operator's local launch policy, while

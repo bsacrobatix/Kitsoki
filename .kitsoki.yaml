@@ -41,6 +41,24 @@ harness_profiles:
     effort: medium
     efforts: [low, medium, high, xhigh, max]
 
+  # Pinned small Codex cohort for task optimization. Keeping this distinct
+  # prevents a larger model from silently standing in for the requested cell.
+  codex-gpt54-mini:
+    backend: codex
+    model: gpt-5.4-mini
+    models: [gpt-5.4-mini]
+    effort: medium
+    efforts: [low, medium, high, xhigh, max]
+
+  # Dedicated native Codex tier. This uses the same ambient authentication as
+  # codex-gpt54, so it is a shared profile rather than a secret local overlay.
+  codex-spark:
+    backend: codex
+    model: gpt-5.3-codex-spark
+    models: [gpt-5.3-codex-spark]
+    effort: medium
+    efforts: [low, medium, high, xhigh, max]
+
   # Your native Anthropic Claude Code subscription (ambient auth — nothing to
   # set). claude supports a model selector (short names) and --effort.
   claude-native:
