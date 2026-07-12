@@ -56,7 +56,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("converter exits zero", convert.returncode, 0)
 
     verify = subprocess.run(
-        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run"],
+        [
+            sys.executable,
+            str(VERIFY),
+            "--source",
+            str(source),
+            "--out",
+            str(report),
+            "--dry-run",
+            "--docker-context",
+            "arena-test-vm",
+        ],
         cwd=REPO_ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -67,6 +77,8 @@ with tempfile.TemporaryDirectory() as tmp:
     payload = json.loads(report.read_text(encoding="utf-8"))
     check("verification kind", payload["kind"], "arena_bugswarm_verification")
     check("verification mode", payload["mode"], "dry-run")
+    check("explicit Docker context is recorded", payload["docker_context"], "arena-test-vm")
+    check("explicit Docker context source is recorded", payload["docker_context_source"], "explicit")
     check("verification pins source bytes", len(payload["source_sha256"]), 64)
     check("verified count dry-run", payload["verified_count"], 0)
     result = payload["results"][0]
@@ -76,6 +88,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("passed command uses run_passed", "run_passed.sh" in result["commands"]["passed"], True)
     check("commands use cached image first", "bugswarm/cached-images:square-okio-140452393" in result["commands"]["failed"], True)
     check("fallback command recorded", "bugswarm/images:square-okio-140452393" in result["commands"]["passed_fallback"], True)
+    check("failed command binds explicit context", "docker --context arena-test-vm run" in result["commands"]["failed"], True)
+    check("passed command binds explicit context", "docker --context arena-test-vm run" in result["commands"]["passed"], True)
 
     selected = subprocess.run(
         [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run", "--task-id", "bugswarm-square-okio-140452393"],
@@ -88,6 +102,24 @@ with tempfile.TemporaryDirectory() as tmp:
         cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     check("unknown task batch fails", missing.returncode != 0, True)
+
+    environment = dict(os.environ)
+    environment["DOCKER_CONTEXT"] = "arena-env-vm"
+    env_selected = subprocess.run(
+        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run"],
+        cwd=REPO_ROOT, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("environment context dry-run exits zero", env_selected.returncode, 0)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    check("environment Docker context is recorded", payload["docker_context"], "arena-env-vm")
+    check("environment Docker context source is recorded", payload["docker_context_source"], "environment")
+    check("environment context binds command", "docker --context arena-env-vm run" in payload["results"][0]["commands"]["failed"], True)
+
+    invalid_context = subprocess.run(
+        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--dry-run", "--docker-context", "bad/context"],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    check("option-like Docker context is rejected", invalid_context.returncode != 0, True)
 
 with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
@@ -124,7 +156,17 @@ with tempfile.TemporaryDirectory() as tmp:
     env = dict(os.environ)
     env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
     verify = subprocess.run(
-        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--execute"],
+        [
+            sys.executable,
+            str(VERIFY),
+            "--source",
+            str(source),
+            "--out",
+            str(report),
+            "--execute",
+            "--docker-context",
+            "receipt-context",
+        ],
         cwd=REPO_ROOT,
         env=env,
         text=True,
@@ -190,11 +232,23 @@ with tempfile.TemporaryDirectory() as tmp:
     env["PATH"] = str(bin_dir) + os.pathsep + env.get("PATH", "")
     env["KITSOKI_FAKE_DOCKER_LOG"] = str(invocation_log)
     verify = subprocess.run(
-        [sys.executable, str(VERIFY), "--source", str(source), "--out", str(report), "--execute"],
+        [
+            sys.executable,
+            str(VERIFY),
+            "--source",
+            str(source),
+            "--out",
+            str(report),
+            "--execute",
+            "--docker-context",
+            "receipt-context",
+        ],
         cwd=REPO_ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
     )
     check("container provenance execute exits zero", verify.returncode, 0)
-    result = json.loads(report.read_text(encoding="utf-8"))["results"][0]
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    check("execute receipt records Docker context", payload["docker_context"], "receipt-context")
+    result = payload["results"][0]
     check("container failed script exit preserved", result["failed_exit_code"], 17)
     check("container passed script exit preserved", result["passed_exit_code"], 0)
     check("container failed commit recorded", result["failed_commit_sha"], "a" * 40)
@@ -205,6 +259,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("passed checkout path is retained", result["checkout_dirs"]["passed"], "/home/travis/build/passed/example/provenance")
     invocations = invocation_log.read_text(encoding="utf-8").splitlines()
     check("separate fresh container invocations", len(invocations), 3)  # failed, passed, image inspect
+    check("failed invocation uses receipt context", invocations[0].startswith("--context receipt-context run "), True)
+    check("passed invocation uses receipt context", invocations[1].startswith("--context receipt-context run "), True)
+    check("image inspection uses receipt context", invocations[2].startswith("--context receipt-context image inspect "), True)
     check("failed invocation remains fresh", "run --rm" in invocations[0], True)
     check("passed invocation remains fresh", "run --rm" in invocations[1], True)
     check("failed invocation captures checkout HEAD", "cd -- /home/travis/build/failed/example/provenance" in invocations[0], True)

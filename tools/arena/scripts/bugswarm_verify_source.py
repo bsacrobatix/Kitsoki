@@ -11,13 +11,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 try:
     import yaml  # type: ignore
@@ -30,6 +31,7 @@ except ModuleNotFoundError:
 # the exact checked-out revision from the durable verification receipt.
 COMMIT_MARKER = "__KITSOKI_BUGSWARM_COMMIT__="
 COMMIT_RE = re.compile(r"(?m)^" + re.escape(COMMIT_MARKER) + r"([0-9a-fA-F]{40,64})\s*$")
+DOCKER_CONTEXT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,8 +45,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--image-repo", default="bugswarm/images")
     parser.add_argument("--cached-image-repo", default="bugswarm/cached-images")
     parser.add_argument("--task-id", action="append", default=[], help="verify one task id; repeat for a bounded batch")
+    parser.add_argument(
+        "--docker-context",
+        default=None,
+        help=(
+            "Docker context for every run and image inspection. Defaults to "
+            "DOCKER_CONTEXT when set, otherwise Docker's currently selected context."
+        ),
+    )
     args = parser.parse_args(argv)
 
+    try:
+        docker_context, docker_context_source = resolve_docker_context(args.docker_context, os.environ)
+    except ValueError as exc:
+        parser.error(str(exc))
     source = load_source(Path(args.source))
     tasks = select_tasks(source.get("tasks") or [], args.task_id)
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -56,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             timeout_s=args.timeout_s,
             image_repo=args.image_repo,
             cached_image_repo=args.cached_image_repo,
+            docker_context=docker_context,
         )
         for task in tasks
         if isinstance(task, dict)
@@ -67,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
         "source_sha256": hashlib.sha256(Path(args.source).read_bytes()).hexdigest(),
         "selected_task_ids": [str(task["id"]) for task in tasks],
         "mode": "execute" if execute else "dry-run",
+        # Persist the exact explicit or environment-selected context.  `null`
+        # deliberately means the Docker CLI's selected current context, so
+        # existing local dry-runs do not require a daemon or Docker config.
+        "docker_context": docker_context,
+        "docker_context_source": docker_context_source,
         "generated_at": started,
         "task_count": len(results),
         "verified_count": sum(1 for r in results if r["verified_red"] and r["verified_green"]),
@@ -79,6 +99,33 @@ def main(argv: list[str] | None = None) -> int:
     if execute and payload["verified_count"] != len(results):
         return 1
     return 0
+
+
+def resolve_docker_context(
+    requested: str | None, environ: Mapping[str, str]
+) -> tuple[str | None, str]:
+    """Return one safe context binding for every Docker invocation.
+
+    An explicit flag wins over ``DOCKER_CONTEXT``.  When neither is set we
+    intentionally return ``None``: Docker then uses its configured current
+    context, retaining dry-run's no-Docker/no-daemon contract.  Every command
+    in a verifier execution is nevertheless constructed from this one value.
+    """
+    if requested is not None:
+        return validate_docker_context(requested, source="--docker-context"), "explicit"
+    from_environment = environ.get("DOCKER_CONTEXT", "")
+    if from_environment:
+        return validate_docker_context(from_environment, source="DOCKER_CONTEXT"), "environment"
+    return None, "current"
+
+
+def validate_docker_context(value: str, *, source: str) -> str:
+    """Reject ambiguous or option-like context values before any Docker call."""
+    if not DOCKER_CONTEXT_RE.fullmatch(value):
+        raise ValueError(
+            f"{source} must be a Docker context name containing only letters, digits, '.', '_', or '-'"
+        )
+    return value
 
 
 def select_tasks(tasks: list[Any], requested_ids: list[str]) -> list[dict[str, Any]]:
@@ -114,15 +161,16 @@ def verify_task(
     timeout_s: int,
     image_repo: str,
     cached_image_repo: str,
+    docker_context: str | None,
 ) -> dict[str, Any]:
     image_tag = str(task.get("image_tag") or "")
     if not image_tag:
         raise ValueError(f"BugSwarm task {task.get('id')!r} missing image_tag")
     failed_source_dir, passed_source_dir = bugswarm_checkout_dirs(task)
-    failed_cmd = docker_cmd(cached_image_repo, image_tag, "run_failed.sh", failed_source_dir)
-    passed_cmd = docker_cmd(cached_image_repo, image_tag, "run_passed.sh", passed_source_dir)
-    fallback_failed_cmd = docker_cmd(image_repo, image_tag, "run_failed.sh", failed_source_dir)
-    fallback_passed_cmd = docker_cmd(image_repo, image_tag, "run_passed.sh", passed_source_dir)
+    failed_cmd = docker_cmd(cached_image_repo, image_tag, "run_failed.sh", failed_source_dir, docker_context)
+    passed_cmd = docker_cmd(cached_image_repo, image_tag, "run_passed.sh", passed_source_dir, docker_context)
+    fallback_failed_cmd = docker_cmd(image_repo, image_tag, "run_failed.sh", failed_source_dir, docker_context)
+    fallback_passed_cmd = docker_cmd(image_repo, image_tag, "run_passed.sh", passed_source_dir, docker_context)
 
     if not execute:
         return {
@@ -152,7 +200,7 @@ def verify_task(
     verified_red = failed["exit_code"] != 0 and not failed_infra and bool(failed["observed_commit_sha"])
     verified_green = passed["exit_code"] == 0 and not passed_infra and bool(passed["observed_commit_sha"])
     infrastructure_error = failed_infra or passed_infra
-    image_digest = inspect_image_digest(failed["command"])
+    image_digest = inspect_image_digest(failed["command"], docker_context=docker_context)
     return {
         "task_id": str(task.get("id") or ""),
         "image_tag": image_tag,
@@ -216,11 +264,13 @@ def bugswarm_checkout_dirs(task: dict[str, Any]) -> tuple[str, str]:
     return f"/home/travis/build/failed/{repo}", f"/home/travis/build/passed/{repo}"
 
 
-def docker_cmd(repo: str, image_tag: str, script: str, checkout_dir: str) -> list[str]:
+def docker_cmd(
+    repo: str, image_tag: str, script: str, checkout_dir: str, docker_context: str | None
+) -> list[str]:
     # BugSwarm docs warn not to run failed and passed scripts consecutively in
     # the same container; each command therefore uses a fresh --rm container.
     return [
-        "docker",
+        *docker_cli_prefix(docker_context),
         "run",
         "--rm",
         f"{repo}:{image_tag}",
@@ -234,6 +284,13 @@ def docker_cmd(repo: str, image_tag: str, script: str, checkout_dir: str) -> lis
         f"printf '%s' '{COMMIT_MARKER}'; git rev-parse HEAD || exit 98; "
         f"{script}; status=$?; exit $status",
     ]
+
+
+def docker_cli_prefix(docker_context: str | None) -> list[str]:
+    """Return the only Docker command prefix used by this verifier."""
+    if docker_context is None:
+        return ["docker"]
+    return ["docker", "--context", docker_context]
 
 
 def run_with_fallback(primary: list[str], fallback: list[str], *, timeout_s: int) -> dict[str, Any]:
@@ -272,7 +329,7 @@ def extract_observed_commit(stdout: str) -> str:
     return matches[0].lower() if len(matches) == 1 else ""
 
 
-def inspect_image_digest(run_command: list[str]) -> str:
+def inspect_image_digest(run_command: list[str], *, docker_context: str | None) -> str:
     """Return Docker's immutable repo digest for the exact verified image.
 
     A missing digest is not fabricated: the corpus locker will block rather
@@ -283,7 +340,13 @@ def inspect_image_digest(run_command: list[str]) -> str:
         image_index = run_command.index("--rm") + 1
         image = run_command[image_index]
         proc = subprocess.run(
-            ["docker", "image", "inspect", "--format={{index .RepoDigests 0}}", image],
+            [
+                *docker_cli_prefix(docker_context),
+                "image",
+                "inspect",
+                "--format={{index .RepoDigests 0}}",
+                image,
+            ],
             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, check=False,
         )
     except (ValueError, OSError, subprocess.TimeoutExpired):
