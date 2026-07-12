@@ -43,8 +43,8 @@ bugs:
     title: "Concurrent dogfood sessions share one checkout — destructive git (WIP clobbered)"
     severity: P1
     component: host
-    fix_sha: 67ac5fb1
-    baseline_sha: ea2ca55a
+    fix_sha: 67ac5fb1bc0d04ced1cf34aafb4fd0556f84750c
+    baseline_sha: ea2ca55a1306d87ef9e0d73236cae6dd5f860c57
     fix_source: "."   # fix spans internal/host + internal/orchestrator; overlay whole tree for GREEN leg
     oracle_test: testdata/bug9.go
     oracle_match: "TestRepro_ConcurrentSessionsShareCheckout_DestroysWIP"
@@ -74,8 +74,8 @@ bugs:
     title: "host.agent.decide with validator.post_cmd reports 'abandoned' when the payload WAS captured"
     severity: P1
     component: runtime
-    fix_sha: ea2ca55a
-    baseline_sha: 45276b88
+    fix_sha: ea2ca55a1306d87ef9e0d73236cae6dd5f860c57
+    baseline_sha: 45276b881b0a0fd4950beb1f21107ae402e6a089
     fix_source: "."   # fix spans internal/host + a root file; overlay whole tree for GREEN leg
     oracle_test: testdata/bug12.go
     oracle_match: "TestRepro_PostCmdInfraFailureMisreportedAsSemanticRejection|TestRepro_PostCmdCwdIsDroppedOnDecidePath"
@@ -94,8 +94,8 @@ bugs:
     title: "Web transport doesn't surface a background_completion turn's failure (looks hung)"
     severity: P2
     component: web
-    fix_sha: 45276b88
-    baseline_sha: 85ff4917
+    fix_sha: 45276b881b0a0fd4950beb1f21107ae402e6a089
+    baseline_sha: 85ff4917d87953206e1fbba66246599322119b4c
     fix_source: tools/runstatus
     oracle_test: testdata/bug14.test.ts
     oracle_match: "background_completion failure surfacing"
