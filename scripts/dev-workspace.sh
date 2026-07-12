@@ -1446,11 +1446,18 @@ cmd_merge() {
   # targets still refresh defensively, but a successful branch landing should
   # not leave the staging checkout knowingly stale. Generic repositories and
   # projects without the managed staging capsule are unaffected.
+  local staging_refresh_script="$repo/scripts/refresh-staging-local.sh"
+  if [ -x "$path/scripts/refresh-staging-local.sh" ]; then
+    # The landed staging workspace can contain the refresh fix itself while
+    # protected main intentionally remains older. Use the immutable landed
+    # source, not the stale primary working tree, for post-landing convergence.
+    staging_refresh_script="$path/scripts/refresh-staging-local.sh"
+  fi
   if [ "$target" = "$DEFAULT_TARGET" ] &&
     [ -d "$repo/.capsules/staging/local/.git" ] &&
-    [ -x "$repo/scripts/refresh-staging-local.sh" ]; then
+    [ -x "$staging_refresh_script" ]; then
     echo "merge: refreshing managed staging capsule after landing" >&2
-    (cd "$repo" && scripts/refresh-staging-local.sh \
+    (cd "$repo" && "$staging_refresh_script" \
       --skip-remote \
       --staging-branch "$target" \
       --staging-capsule "$repo/.capsules/staging/local" \

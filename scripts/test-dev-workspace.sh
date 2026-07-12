@@ -63,6 +63,12 @@ fi
 git merge --ff-only "$branch"
 SH
   chmod +x "$repo/scripts/merge-to-main.sh"
+cat >"$repo/scripts/refresh-staging-local.sh" <<'SH'
+#!/usr/bin/env bash
+echo "stale primary refresh helper should not run" >&2
+exit 77
+SH
+  chmod +x "$repo/scripts/refresh-staging-local.sh"
 }
 
 source_repo="$tmp/source"
@@ -524,6 +530,23 @@ from_staging_json="$("$dev_workspace" create --repo "$source_repo" --root "$root
 from_staging_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$from_staging_json")"
 [ "$(cat "$from_staging_workspace/feature.txt")" = "two" ] || fail "default create did not start from staging branch"
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$from_staging_workspace" >/dev/null
+
+# A staging landing can contain the refresh fix itself while protected main's
+# working tree still has an older helper. Post-landing convergence must execute
+# the immutable helper from the landed workspace, not the stale primary copy.
+refresh_source_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id refresh-source --branch agent/refresh-source --json)"
+refresh_source_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$refresh_source_json")"
+cat >"$refresh_source_workspace/scripts/refresh-staging-local.sh" <<SH
+#!/usr/bin/env bash
+printf 'workspace refresh helper\n' >"$source_repo/.refresh-helper-used"
+SH
+chmod +x "$refresh_source_workspace/scripts/refresh-staging-local.sh"
+"$dev_workspace" commit --repo "$source_repo" --root "$root" "$refresh_source_workspace" --message 'fix staging refresh helper' >/dev/null
+mkdir -p "$source_repo/.capsules/staging/local/.git"
+"$dev_workspace" merge --repo "$source_repo" --root "$root" "$refresh_source_workspace" --gate true --teardown >/dev/null
+[ "$(cat "$source_repo/.refresh-helper-used")" = "workspace refresh helper" ] ||
+  fail "post-landing convergence did not use the landed workspace refresh helper"
+rm -rf "$source_repo/.capsules/staging" "$source_repo/.refresh-helper-used"
 
 park_json="$("$dev_workspace" create --repo "$source_repo" --root "$root" --id park-source --branch agent/park-source --json)"
 park_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$park_json")"
