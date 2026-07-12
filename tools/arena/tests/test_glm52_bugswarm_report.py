@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -261,9 +262,11 @@ with tempfile.TemporaryDirectory() as tmp:
             }
         ]
     }), encoding="utf-8")
+    subprocess.run([sys.executable, str(CONVERT), "--in", str(artifacts), "--out", str(source)], cwd=REPO_ROOT, check=True)
     verification.write_text(json.dumps({
         "kind": "arena_bugswarm_verification",
         "version": 1,
+        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
         "mode": "execute",
         "task_count": 1,
         "verified_count": 1,
@@ -278,7 +281,6 @@ with tempfile.TemporaryDirectory() as tmp:
             }
         ],
     }), encoding="utf-8")
-    subprocess.run([sys.executable, str(CONVERT), "--in", str(artifacts), "--out", str(source)], cwd=REPO_ROOT, check=True)
     subprocess.run(
         [
             sys.executable,

@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory() as tmp:
     check("repository split separation", len({t["repository"] for t in payload["tasks"]}), 12)
     check("content lock present", len(payload["lock_sha256"]), 64)
     check("oracle hash hidden", len(payload["tasks"][0]["hidden_oracle"]["sha256"]), 64)
+    check("verification receipt is required", bool(payload["tasks"][0]["verification"]["receipt"]), True)
     # Same source must produce exactly the same receipt.
     out2 = root / "lock2.json"; run2 = subprocess.run([sys.executable, str(LOCK), "--source", str(source), "--out", str(out2)], text=True, capture_output=True)
     check("repeat exits zero", run2.returncode, 0); check("deterministic bytes", out2.read_bytes(), out.read_bytes())
@@ -40,6 +41,12 @@ with tempfile.TemporaryDirectory() as tmp:
     missing = subprocess.run([sys.executable, str(LOCK), "--source", str(source), "--out", str(out)], text=True, capture_output=True)
     check("missing provenance blocked", missing.returncode, 2)
     payload = json.loads(out.read_text()); check("image digest named", any("image_digest" in b for b in payload["blockers"]), True)
+    source.write_text(yaml.safe_dump({"kind": "arena_bugswarm_source", "tasks": [task(i, f"org/repo-{i}") for i in range(12)]}, sort_keys=False))
+    no_receipt = yaml.safe_load(source.read_text()); no_receipt["tasks"][0]["meta"]["bugswarm_verification"].pop("report_sha256")
+    source.write_text(yaml.safe_dump(no_receipt, sort_keys=False))
+    missing_receipt = subprocess.run([sys.executable, str(LOCK), "--source", str(source), "--out", str(out)], text=True, capture_output=True)
+    check("missing receipt hash blocked", missing_receipt.returncode, 2)
+    payload = json.loads(out.read_text()); check("receipt hash named", any("verification_receipt_sha256" in b for b in payload["blockers"]), True)
 if failures:
     print("FAIL: bugswarm corpus lock"); print("\n".join("  - " + f for f in failures)); sys.exit(1)
 print("PASS: BugSwarm corpus lock (no LLM, no Docker)")

@@ -112,6 +112,16 @@ def receipt_sha256(value: Any) -> str:
     return _sha256(canonical_json(value))
 
 
+BUGSWARM_CORPUS_LOCK_SCHEMA = "arena_bugswarm_corpus_lock/v1"
+
+
+def bugswarm_lock_sha256(value: dict[str, Any]) -> str:
+    """Return the locker's canonical digest, excluding its self-reference."""
+    payload = dict(value)
+    payload.pop("lock_sha256", None)
+    return _sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8"))
+
+
 @dataclass(frozen=True)
 class TaskOptimizationStudy:
     """Immutable-input declaration for a task x model x treatment campaign.
@@ -207,10 +217,32 @@ class TaskOptimizationStudy:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ValueError(f"corpus lock must be JSON: {exc}") from exc
-        tasks = data.get("tasks") if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            raise ValueError("corpus lock must be a JSON object")
+        if data.get("schema") != BUGSWARM_CORPUS_LOCK_SCHEMA:
+            raise ValueError("corpus lock has an unsupported schema")
+        if data.get("status") != "ready":
+            raise ValueError("corpus lock is not ready")
+        actual_digest = bugswarm_lock_sha256(data)
+        if data.get("lock_sha256") != actual_digest:
+            raise ValueError("corpus lock_sha256 does not match its contents")
+        source_sha = str(data.get("source_sha256") or "")
+        if len(source_sha) != 64 or any(char not in "0123456789abcdef" for char in source_sha.lower()):
+            raise ValueError("corpus lock requires a SHA-256 source_sha256")
+        selection = data.get("selection")
+        if not isinstance(selection, dict) or selection.get("repository_separated") is not True:
+            raise ValueError("corpus lock requires repository_separated selection")
+        expected = {"learning": selection.get("learning_count"), "confirmation": selection.get("confirmation_count")}
+        if any(not isinstance(count, int) or count < 1 for count in expected.values()):
+            raise ValueError("corpus lock selection requires positive learning_count and confirmation_count")
+        tasks = data.get("tasks")
         if not isinstance(tasks, list) or not tasks:
             raise ValueError("corpus lock requires a non-empty tasks list")
+        if len(tasks) != sum(expected.values()):
+            raise ValueError("corpus lock task count does not match its selection")
         seen: set[str] = set()
+        repositories: set[str] = set()
+        split_counts = {"learning": 0, "confirmation": 0}
         for task in tasks:
             if not isinstance(task, dict) or not task.get("id") or not task.get("split"):
                 raise ValueError("every corpus task requires id and split")
@@ -219,6 +251,18 @@ class TaskOptimizationStudy:
             seen.add(task["id"])
             if task["split"] not in self.splits:
                 raise ValueError(f"corpus task {task['id']!r} has unknown split {task['split']!r}")
+            if task["split"] not in split_counts:
+                raise ValueError(f"corpus task {task['id']!r} has unsupported lock split {task['split']!r}")
+            split_counts[task["split"]] += 1
+            repository = str(task.get("repository") or "")
+            if not repository or repository in repositories:
+                raise ValueError(f"corpus task {task['id']!r} lacks a repository-distinct provenance record")
+            repositories.add(repository)
+            provenance = ("image_digest", "commits", "verification", "public_task", "hidden_oracle")
+            if any(not task.get(key) for key in provenance):
+                raise ValueError(f"corpus task {task['id']!r} lacks required provenance")
+        if split_counts != expected:
+            raise ValueError("corpus lock split counts do not match its selection")
         return data
 
     def plan(self, *, repeat_phase: str = "screening") -> dict[str, Any]:
