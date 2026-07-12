@@ -23,13 +23,19 @@ const trackFixtureTypeRegistry = `type_registry:
 //     all — must be silently skipped, not error the whole build.
 //
 // It also writes the two real target catalogs the resolvable tracks point
-// at. Returns root (the directory containing pog/) and the home catalog's
-// absolute path.
-func writeHomeFixture(t *testing.T) (root, homePath string) {
+// at. The layout mirrors real POG topology, not a flattened one: the home
+// checkout (repoRoot) sits under root with its home catalog nested one
+// level further at <repoRoot>/pog/catalog.yaml, and sibling checkouts sit
+// beside repoRoot (children of root, not of repoRoot) — e.g. root =
+// ~/code, repoRoot = ~/code/POG, sassfully = ~/code/studio-sassfully — so
+// `repo: ../studio-sassfully` (relative to repoRoot) correctly reaches it.
+// Returns root, repoRoot, and the home catalog's absolute path.
+func writeHomeFixture(t *testing.T) (root, repoRoot, homePath string) {
 	t.Helper()
 	root = t.TempDir()
+	repoRoot = filepath.Join(root, "pog-home-repo")
 
-	homeDir := filepath.Join(root, "pog")
+	homeDir := filepath.Join(repoRoot, "pog")
 	if err := os.MkdirAll(homeDir, 0o755); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
@@ -90,7 +96,7 @@ nodes: []
 		t.Fatalf("write kitsoki catalog: %v", err)
 	}
 
-	return root, homePath
+	return root, repoRoot, homePath
 }
 
 // TestBuildCatalogAllowlist_DerivesAliasesFromTrackNodes is (a): the
@@ -99,9 +105,9 @@ nodes: []
 // catalog under "pog", and silently skip a track whose target catalog does
 // not exist.
 func TestBuildCatalogAllowlist_DerivesAliasesFromTrackNodes(t *testing.T) {
-	root, homePath := writeHomeFixture(t)
+	root, repoRoot, homePath := writeHomeFixture(t)
 
-	allowlist := buildCatalogAllowlist(homePath)
+	allowlist := buildCatalogAllowlist(homePath, repoRoot)
 
 	wantHome, err := filepath.Abs(homePath)
 	if err != nil {
@@ -133,61 +139,6 @@ func TestBuildCatalogAllowlist_DerivesAliasesFromTrackNodes(t *testing.T) {
 	}
 }
 
-// TestBuildCatalogAllowlist_ProductionLayoutResolvesViaRepoRoot covers the
-// layout the REAL POG portfolio uses, which writeHomeFixture does not: the
-// home catalog lives at <checkout>/pog/catalog.yaml and a track's repo field
-// ("../studio-sassfully") is relative to the CHECKOUT root (the portal's
-// memberCatalogs() portfolioRoot convention), i.e. members are siblings of
-// the checkout, not of the pog/ directory. Before the two-base candidate
-// resolution, buildCatalogAllowlist only tried the catalog directory itself,
-// so every production track was silently skipped and the portal's federated
-// writes failed with "known aliases: pog" (found live 2026-07-12 on the POG
-// portal backend).
-func TestBuildCatalogAllowlist_ProductionLayoutResolvesViaRepoRoot(t *testing.T) {
-	parent := t.TempDir()
-
-	homeDir := filepath.Join(parent, "POG", "pog")
-	if err := os.MkdirAll(homeDir, 0o755); err != nil {
-		t.Fatalf("mkdir home: %v", err)
-	}
-	homePath := filepath.Join(homeDir, "catalog.yaml")
-	homeYAML := `schema: project-object-graph/seed-catalog/v0
-catalog:
-  id: pog-program-catalog
-` + trackFixtureTypeRegistry + `nodes:
-  - schema: pog/track/v0
-    id: track-sassfully
-    title: sassfully
-    status: active
-    visibility: internal
-    repo: ../studio-sassfully
-`
-	if err := os.WriteFile(homePath, []byte(homeYAML), 0o644); err != nil {
-		t.Fatalf("write home catalog: %v", err)
-	}
-
-	memberDir := filepath.Join(parent, "studio-sassfully", "pog")
-	if err := os.MkdirAll(memberDir, 0o755); err != nil {
-		t.Fatalf("mkdir member: %v", err)
-	}
-	memberPath := filepath.Join(memberDir, "catalog.yaml")
-	memberYAML := `schema: project-object-graph/seed-catalog/v0
-catalog:
-  id: sassfully-catalog
-nodes: []
-`
-	if err := os.WriteFile(memberPath, []byte(memberYAML), 0o644); err != nil {
-		t.Fatalf("write member catalog: %v", err)
-	}
-
-	allowlist := buildCatalogAllowlist(homePath)
-
-	wantMember, _ := filepath.Abs(memberPath)
-	if got, ok := allowlist.Resolve("sassfully"); !ok || got != wantMember {
-		t.Errorf(`Resolve("sassfully") = (%q, %v), want (%q, true) — production layout must fall back to the checkout root`, got, ok, wantMember)
-	}
-}
-
 // TestGraphProposeRPC_UnknownCatalogAliasRejected is (b): an RPC call
 // naming an unbound `catalog` alias must be rejected with a clear error
 // naming the known aliases, and must never fall through to touching a
@@ -196,8 +147,8 @@ nodes: []
 // failure would be a "stat ...: no such file" style error instead of the
 // allowlist's "not a known alias" message.
 func TestGraphProposeRPC_UnknownCatalogAliasRejected(t *testing.T) {
-	root, _ := writeHomeFixture(t)
-	s := &Server{materializeRoot: root}
+	_, repoRoot, _ := writeHomeFixture(t)
+	s := &Server{materializeRoot: repoRoot}
 
 	_, rerr := s.graphProposeRPC(map[string]any{
 		"catalog": "not-a-bound-alias",
@@ -227,8 +178,8 @@ func TestGraphProposeRPC_UnknownCatalogAliasRejected(t *testing.T) {
 // always has (backward compatibility — zero behavior change for existing
 // callers that never pass `catalog`).
 func TestGraphProposeRPC_KnownCatalogAliasResolvesAndNoParamStillWorks(t *testing.T) {
-	root, homePath := writeHomeFixture(t)
-	s := &Server{materializeRoot: root}
+	_, repoRoot, homePath := writeHomeFixture(t)
+	s := &Server{materializeRoot: repoRoot}
 
 	// The bound "pog" alias's target is a real (if minimal) catalog, so this
 	// operation reaches internal/graph.Propose itself, which rejects it for
