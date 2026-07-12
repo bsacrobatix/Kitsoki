@@ -2395,11 +2395,11 @@ nodes:
     title: "Demo — The async inbox"
     status: verified
     visibility: public
-    summary: "Deterministically produced from the tour-driven spec tests/playwright/web-inbox-video.spec.ts — video published on the product site."
+    summary: "Deterministically produced from the tour-driven spec tests/playwright/web-inbox-video.spec.ts — rrweb replay persisted; video published on the product site."
     sources: [source-feature-specs]
     evidence:
       - kind: video
-        title: "The async inbox — rrweb replay (render on demand)"
+        title: "The async inbox — rrweb replay"
         path: .artifacts/web-inbox/web-inbox.rrweb.json
         poster: .artifacts/site-media/web-inbox/poster.png
       - kind: video
