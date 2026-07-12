@@ -23,19 +23,13 @@ const trackFixtureTypeRegistry = `type_registry:
 //     all — must be silently skipped, not error the whole build.
 //
 // It also writes the two real target catalogs the resolvable tracks point
-// at. The layout mirrors real POG topology, not a flattened one: the home
-// checkout (repoRoot) sits under root with its home catalog nested one
-// level further at <repoRoot>/pog/catalog.yaml, and sibling checkouts sit
-// beside repoRoot (children of root, not of repoRoot) — e.g. root =
-// ~/code, repoRoot = ~/code/POG, sassfully = ~/code/studio-sassfully — so
-// `repo: ../studio-sassfully` (relative to repoRoot) correctly reaches it.
-// Returns root, repoRoot, and the home catalog's absolute path.
-func writeHomeFixture(t *testing.T) (root, repoRoot, homePath string) {
+// at. Returns root (the directory containing pog/) and the home catalog's
+// absolute path.
+func writeHomeFixture(t *testing.T) (root, homePath string) {
 	t.Helper()
 	root = t.TempDir()
-	repoRoot = filepath.Join(root, "pog-home-repo")
 
-	homeDir := filepath.Join(repoRoot, "pog")
+	homeDir := filepath.Join(root, "pog")
 	if err := os.MkdirAll(homeDir, 0o755); err != nil {
 		t.Fatalf("mkdir home: %v", err)
 	}
@@ -96,7 +90,7 @@ nodes: []
 		t.Fatalf("write kitsoki catalog: %v", err)
 	}
 
-	return root, repoRoot, homePath
+	return root, homePath
 }
 
 // TestBuildCatalogAllowlist_DerivesAliasesFromTrackNodes is (a): the
@@ -105,9 +99,9 @@ nodes: []
 // catalog under "pog", and silently skip a track whose target catalog does
 // not exist.
 func TestBuildCatalogAllowlist_DerivesAliasesFromTrackNodes(t *testing.T) {
-	root, repoRoot, homePath := writeHomeFixture(t)
+	root, homePath := writeHomeFixture(t)
 
-	allowlist := buildCatalogAllowlist(homePath, repoRoot)
+	allowlist := buildCatalogAllowlist(homePath)
 
 	wantHome, err := filepath.Abs(homePath)
 	if err != nil {
@@ -147,8 +141,8 @@ func TestBuildCatalogAllowlist_DerivesAliasesFromTrackNodes(t *testing.T) {
 // failure would be a "stat ...: no such file" style error instead of the
 // allowlist's "not a known alias" message.
 func TestGraphProposeRPC_UnknownCatalogAliasRejected(t *testing.T) {
-	_, repoRoot, _ := writeHomeFixture(t)
-	s := &Server{materializeRoot: repoRoot}
+	root, _ := writeHomeFixture(t)
+	s := &Server{materializeRoot: root}
 
 	_, rerr := s.graphProposeRPC(map[string]any{
 		"catalog": "not-a-bound-alias",
@@ -178,8 +172,8 @@ func TestGraphProposeRPC_UnknownCatalogAliasRejected(t *testing.T) {
 // always has (backward compatibility — zero behavior change for existing
 // callers that never pass `catalog`).
 func TestGraphProposeRPC_KnownCatalogAliasResolvesAndNoParamStillWorks(t *testing.T) {
-	_, repoRoot, homePath := writeHomeFixture(t)
-	s := &Server{materializeRoot: repoRoot}
+	root, homePath := writeHomeFixture(t)
+	s := &Server{materializeRoot: root}
 
 	// The bound "pog" alias's target is a real (if minimal) catalog, so this
 	// operation reaches internal/graph.Propose itself, which rejects it for

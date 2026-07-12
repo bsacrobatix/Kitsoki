@@ -31,50 +31,19 @@ import (
 	"kitsoki/internal/store"
 )
 
-// materializeFixtureRoot builds a disposable fixture repo root (F3,
-// federated-materialize follow-up to F1's catalog-allowlist) at a fresh
-// t.TempDir() containing:
-//
-//   - pog/catalog.yaml: a fresh copy of testdata/materialize-catalog.yaml.
-//     graph.materialize.start/.checks now resolve `catalog` as an ALIAS
-//     through s.graphAllowlist() (materialize.go's
-//     resolveMaterializeCatalog), the same mechanism graph.propose and
-//     friends use — there is no raw-path back door left to hand a test
-//     fixture in directly, so the fixture catalog must live at
-//     <root>/pog/catalog.yaml to be addressable as alias "pog" at all. This
-//     also gets the write-back isolation the old materializeCatalogCopy
-//     helper existed for: graph.materialize.start's write-back
-//     (internal/materialize/writeback.go, slice 6) edits the catalog file in
-//     place, so every test needs its own disposable copy, not the checked-in
-//     fixture, or repeated runs would leave it mutated with the previous
-//     run's job id/timestamp.
-//   - stories: a symlink to the real POG checkout's stories/ dir (located
-//     via POG_REPO_ROOT, see pogRepoRoot), so the fixture catalog's
-//     materialize.story: stories/materialize-work-item path — resolved
-//     RepoRoot-relative, per internal/materialize.Request's RepoRoot doc
-//     comment — still finds the real pilot story even though RepoRoot itself
-//     is now this disposable fixture root (derived from the resolved
-//     "pog" alias's catalog path, two filepath.Dir() calls up, exactly as
-//     materialize.go's resolveMaterializeCatalog does in production).
-//
-// Because RepoRoot is now derived from the fixture root rather than pinned
-// to the real POG checkout, a job's artifact write-back also lands under
-// <root>/.artifacts/ — fully disposable with the temp dir, so callers no
-// longer need to separately clean up the real POG checkout's .artifacts/.
-func materializeFixtureRoot(t *testing.T) string {
+// materializeCatalogCopy copies testdata/materialize-catalog.yaml into a
+// fresh t.TempDir() and returns the copy's path. graph.materialize.start's
+// write-back (internal/materialize/writeback.go, slice 6) edits the catalog
+// file in place — a flow test that drives a job to completion must run
+// against a disposable copy, not the checked-in fixture, or every run would
+// leave it mutated with the previous run's job id/timestamp.
+func materializeCatalogCopy(t *testing.T) string {
 	t.Helper()
-	pogRoot := pogRepoRoot(t)
-	root := t.TempDir()
-
-	homeDir := filepath.Join(root, "pog")
-	require.NoError(t, os.MkdirAll(homeDir, 0o755))
 	raw, err := os.ReadFile("testdata/materialize-catalog.yaml")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(homeDir, "catalog.yaml"), raw, 0o644))
-
-	require.NoError(t, os.Symlink(filepath.Join(pogRoot, "stories"), filepath.Join(root, "stories")))
-
-	return root
+	dst := filepath.Join(t.TempDir(), "materialize-catalog.yaml")
+	require.NoError(t, os.WriteFile(dst, raw, 0o644))
+	return dst
 }
 
 // pogRepoRoot locates the POG checkout that carries the node-artifact-
@@ -98,14 +67,7 @@ func pogRepoRoot(t *testing.T) string {
 
 func newMaterializeServer(t *testing.T) *httptest.Server {
 	t.Helper()
-	return newMaterializeServerAt(t, materializeFixtureRoot(t))
-}
-
-// newMaterializeServerAt builds the materialize RPC server against a caller-
-// supplied fixture root (see materializeFixtureRoot), for tests that need to
-// keep a handle on root for filesystem assertions (write-back, artifacts).
-func newMaterializeServerAt(t *testing.T, root string) *httptest.Server {
-	t.Helper()
+	root := pogRepoRoot(t)
 	// The stub provider implements SeededSessionProvider, so materializeStart
 	// will try the web-session drive path first; failing the seed here pins
 	// these tests to the private-rig fallback (the CLI / no-registry path).
@@ -166,9 +128,14 @@ func readMaterializeStreamFrames(t *testing.T, ts *httptest.Server, jobID string
 // and finally cross-checks graph.materialize.status (the poll fallback)
 // against what the stream showed.
 func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
-	root := materializeFixtureRoot(t)
-	ts := newMaterializeServerAt(t, root)
-	catalogPath := filepath.Join(root, "pog", "catalog.yaml")
+	ts := newMaterializeServer(t)
+	root := pogRepoRoot(t)
+	catalogPath := materializeCatalogCopy(t)
+	// The real pilot story writes its artifact under RepoRoot/.artifacts/
+	// (RepoRoot here is the sibling POG checkout, per WithMaterializeRoot) —
+	// clean up that one write, not the whole POG .artifacts/ dir, which
+	// carries unrelated checked-in demo assets.
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(root, ".artifacts", "wi-ready")) })
 
 	var start struct {
 		JobID  string `json:"job_id"`
@@ -178,7 +145,7 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 		} `json:"stages"`
 	}
 	rpcCall(t, ts, "graph.materialize.start", map[string]any{
-		"catalog": "pog",
+		"catalog": catalogPath,
 		"node_id": "wi-ready",
 		"params":  map[string]any{"depth": 3, "audience": "public"},
 	}, &start)
@@ -325,7 +292,9 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 // real orchestrator rig per NewSessionSeeded — the in-process equivalent of
 // the `kitsoki web` registry's NewSessionSeeded.
 func TestMaterialize_Start_DrivesWebSession(t *testing.T) {
-	root := materializeFixtureRoot(t)
+	root := pogRepoRoot(t)
+	catalogPath := materializeCatalogCopy(t)
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(root, ".artifacts", "wi-ready")) })
 
 	p := newStubProvider()
 	var seededPaths []string
@@ -383,7 +352,7 @@ func TestMaterialize_Start_DrivesWebSession(t *testing.T) {
 		SessionID string `json:"session_id"`
 	}
 	rpcCall(t, ts, "graph.materialize.start", map[string]any{
-		"catalog": "pog",
+		"catalog": catalogPath,
 		"node_id": "wi-ready",
 		"params":  map[string]any{"depth": 2, "audience": "internal"},
 	}, &start)
@@ -449,7 +418,7 @@ func TestMaterialize_Start_RejectsUnmetGates(t *testing.T) {
 	ts := newMaterializeServer(t)
 
 	code, msg := rpcCallExpectError(t, ts, "graph.materialize.start", map[string]any{
-		"catalog": "pog",
+		"catalog": "testdata/materialize-catalog.yaml",
 		"node_id": "wi-not-ready",
 	})
 	assert.NotEqual(t, 0, code)

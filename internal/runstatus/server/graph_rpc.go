@@ -59,7 +59,7 @@ func (s *Server) graphAllowlist() *CatalogAllowlist {
 	if repoRoot == "" {
 		repoRoot = "."
 	}
-	return buildCatalogAllowlist(filepath.Join(repoRoot, "pog", "catalog.yaml"), repoRoot)
+	return buildCatalogAllowlist(filepath.Join(repoRoot, "pog", "catalog.yaml"))
 }
 
 // graphProposeRPC: {catalog_path, title, operations[, visibility, provenance]}
