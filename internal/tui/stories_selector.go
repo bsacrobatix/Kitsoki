@@ -113,6 +113,31 @@ func (m storySelectorModel) View() string {
 		sb.WriteString(choiceHintStyle.Render("No stories discovered. Check .kitsoki.yaml story_dirs or ./stories."))
 		return sb.String()
 	}
+	sb.WriteString(strings.Join(m.rows(), "\n"))
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// ChromeView renders the selector through the shared normal-screen row
+// budget. Logical row numbers remain absolute while the visible window follows
+// selected.
+func (m storySelectorModel) ChromeView(width, maxRows int) string {
+	if !m.active {
+		return ""
+	}
+	header := []string{"stories (up/down to move, Enter to launch, Esc to close)"}
+	if m.err != "" {
+		header = append(header, choiceErrorStyle.Render("("+m.err+")"))
+	}
+	if len(m.stories) == 0 {
+		return renderLiveOverlay(header, []string{
+			choiceHintStyle.Render("No stories discovered. Check .kitsoki.yaml story_dirs or ./stories."),
+		}, 0, width, maxRows)
+	}
+	return renderLiveOverlay(header, m.rows(), m.selected, width, maxRows)
+}
+
+func (m storySelectorModel) rows() []string {
+	rows := make([]string, 0, len(m.stories))
 	for i, story := range m.stories {
 		marker := "  "
 		label := storySelectorLabel(story)
@@ -122,15 +147,15 @@ func (m storySelectorModel) View() string {
 		} else {
 			label = menuItemStyle.Render(label)
 		}
+		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("%s[%d] %s", marker, i+1, label))
-		hint := storySelectorHint(story)
-		if hint != "" {
+		if hint := storySelectorHint(story); hint != "" {
 			sb.WriteString(" - ")
 			sb.WriteString(menuItemBlockedStyle.Render(hint))
 		}
-		sb.WriteString("\n")
+		rows = append(rows, sb.String())
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	return rows
 }
 
 func storySelectorLabel(story StoryOption) string {

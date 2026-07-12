@@ -728,8 +728,11 @@ func (m *choiceWidgetModel) View(width int) string {
 // entries.
 func (m *choiceWidgetModel) ChromeView(width, maxRows int) string {
 	full := m.View(width)
-	if full == "" || maxRows <= 0 {
+	if full == "" {
 		return full
+	}
+	if maxRows <= 0 {
+		return ""
 	}
 	lines := strings.Split(full, "\n")
 	if len(lines) <= maxRows {
@@ -764,7 +767,7 @@ func (m *choiceWidgetModel) ChromeView(width, maxRows int) string {
 	if cursor < 0 {
 		cursor = len(body) - 1
 	}
-	body = windowChoiceLines(body, cursor, bodyBudget, width)
+	body = windowLiveOverlayRows(clampLiveOverlayRows(body, width), cursor, bodyBudget, width)
 	out := append([]string(nil), body...)
 	if len(footer) > 0 {
 		if separatorRows > 0 {
@@ -783,70 +786,6 @@ func choiceCursorLine(lines []string) int {
 		}
 	}
 	return -1
-}
-
-func windowChoiceLines(lines []string, cursor, maxRows, width int) []string {
-	if len(lines) <= maxRows || maxRows <= 0 {
-		return lines
-	}
-	if maxRows == 1 {
-		if cursor < 0 || cursor >= len(lines) {
-			cursor = 0
-		}
-		return []string{lines[cursor]}
-	}
-	if cursor < 0 {
-		cursor = 0
-	}
-	if cursor >= len(lines) {
-		cursor = len(lines) - 1
-	}
-
-	start := cursor - maxRows/2
-	if start < 0 {
-		start = 0
-	}
-	if start+maxRows > len(lines) {
-		start = len(lines) - maxRows
-	}
-	end := start + maxRows
-	above := start
-	below := len(lines) - end
-	bodyRows := maxRows
-	if above > 0 {
-		bodyRows--
-	}
-	if below > 0 {
-		bodyRows--
-	}
-	if bodyRows < 1 {
-		bodyRows = 1
-	}
-
-	start = cursor - bodyRows/2
-	if start < 0 {
-		start = 0
-	}
-	if start+bodyRows > len(lines) {
-		start = len(lines) - bodyRows
-	}
-	end = start + bodyRows
-	above = start
-	below = len(lines) - end
-
-	out := make([]string, 0, maxRows)
-	if above > 0 {
-		out = append(out, choiceOverflowLine("↑", above, width))
-	}
-	out = append(out, lines[start:end]...)
-	if below > 0 {
-		out = append(out, choiceOverflowLine("↓", below, width))
-	}
-	return out
-}
-
-func choiceOverflowLine(dir string, n int, width int) string {
-	return choiceHintStyle.Render(truncateChoiceCell(fmt.Sprintf("  %s %d more", dir, n), width))
 }
 
 func (m *choiceWidgetModel) renderSingleBody(width int) string {
