@@ -303,6 +303,8 @@ with tempfile.TemporaryDirectory() as tmp:
     score_cmd = next(cmd for cmd in docker_commands if cmd[:2] == ["docker", "run"] and "run_failed.sh" in cmd[-1])
     check("docker scorer mounts candidate tree", score_cmd[score_cmd.index("-v") + 1], f"{docker_tree}:/workspace/src")
     check("docker scorer command", score_cmd[-2:], ["-lc", "cd -- /workspace/src && run_failed.sh"])
+    prep_cmd = next(cmd for cmd in docker_commands if cmd[:2] == ["docker", "run"] and "find /workspace/src" in cmd[-1])
+    require("docker scorer permission prep prunes git metadata", "-path /workspace/src/.git -prune" in prep_cmd[-1])
 
     host_root = tmpdir / "host-kitsoki"
     container_tree = REPO_ROOT / ".artifacts/arena/paired-task-work/container-path"
@@ -322,7 +324,7 @@ with tempfile.TemporaryDirectory() as tmp:
 
     def fake_docker_infrastructure_failure(cmd, **kwargs):  # noqa: ANN001 - mirrors subprocess.run shape.
         if cmd[:2] == ["docker", "run"]:
-            if "chmod -R a+rwX" in cmd[-1]:
+            if "find /workspace/src" in cmd[-1]:
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             return subprocess.CompletedProcess(cmd, 125, stdout="", stderr="docker daemon metadata I/O error\n")
         raise AssertionError(f"unexpected subprocess command: {cmd}")

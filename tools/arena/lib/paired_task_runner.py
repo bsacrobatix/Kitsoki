@@ -1294,7 +1294,15 @@ def score_bugswarm_tree(task: dict[str, Any], tree: Path) -> dict[str, str]:
     # The image runs its artifact script as the Travis user, while candidate
     # files originated on the host. Make the disposable mount writable first
     # without changing the script's expected user/environment.
-    prep = ["docker", "run", "--rm", "--user", "root", "-v", f"{container_path(tree)}:{source_dir}", image, "bash", "-lc", f"chmod -R a+rwX {shlex.quote(source_dir)}"]
+    # The copied candidate includes a host-owned `.git/objects` store whose
+    # hard-linked objects cannot be chmodded from Docker Desktop.  The oracle
+    # only needs a writable working tree; deliberately prune Git metadata so a
+    # successful candidate is not misclassified as an infrastructure block.
+    prep_cmd = (
+        f"find {shlex.quote(source_dir)} -path {shlex.quote(source_dir + '/.git')} -prune "
+        "-o -exec chmod a+rwX {} +"
+    )
+    prep = ["docker", "run", "--rm", "--user", "root", "-v", f"{container_path(tree)}:{source_dir}", image, "bash", "-lc", prep_cmd]
     prepared = subprocess.run(prep, cwd=KITSOKI_ROOT, text=True, capture_output=True)
     if prepared.returncode != 0:
         return {"verdict": "blocked", "evidence": task_ref(task), "notes": f"bugswarm candidate permission preparation failed: {first_line(prepared.stdout + chr(10) + prepared.stderr)}"}
