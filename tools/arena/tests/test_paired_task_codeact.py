@@ -107,7 +107,6 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
     check("valid plan passes", assertions["passed"], True)
     escaped = dict(plan, command=command[:-1] + [
         f'mcp_servers.kitsoki-codeact.args=["mcp-codeact","--capabilities-json","{cap_json.replace(chr(34), chr(92) + chr(34))}"]',
-        command[-1],
     ])
     assertions = runner.assert_codeact_launch_plan(
         escaped,
@@ -118,6 +117,32 @@ with tempfile.TemporaryDirectory(prefix="paired-codeact-") as td:
         capability_hash=cap_hash,
     )
     check("escaped capability plan passes", assertions["passed"], True)
+    doubly_escaped = cap_json.replace(chr(34), chr(92) + chr(92) + chr(92) + chr(34))
+    double_escaped = dict(plan, command=command[:-1] + [
+        f'mcp_servers.kitsoki-codeact.args=["mcp-codeact","--capabilities-json","{doubly_escaped}"]',
+    ])
+    assertions = runner.assert_codeact_launch_plan(
+        double_escaped,
+        tree=tree,
+        agent="kitsoki-codeact-driver",
+        backend="codex",
+        capability_json=cap_json,
+        capability_hash=cap_hash,
+    )
+    check("double-escaped capability plan passes", assertions["passed"], True)
+    wrong_payload = cap_json.replace("1048576", "1")
+    wrong_payload_plan = dict(plan, command=command[:-1] + [
+        f'mcp_servers.kitsoki-codeact.args=["mcp-codeact","--capabilities-json","{wrong_payload}"]',
+    ])
+    assertions = runner.assert_codeact_launch_plan(
+        wrong_payload_plan,
+        tree=tree,
+        agent="kitsoki-codeact-driver",
+        backend="codex",
+        capability_json=cap_json,
+        capability_hash=cap_hash,
+    )
+    check("different capability payload fails", assertions["passed"], False)
     bad = dict(plan, tools=["mcp__kitsoki-codeact__codeact_eval", "Bash"])
     assertions = runner.assert_codeact_launch_plan(
         bad,

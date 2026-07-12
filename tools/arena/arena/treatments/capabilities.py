@@ -56,6 +56,42 @@ def capability_hash(capability_json: str) -> str:
     return "sha256:" + hashlib.sha256(capability_json.encode("utf-8")).hexdigest()
 
 
+def _command_contains_capability_payload(command: list[str], capability_json: str) -> bool:
+    """Find the expected capabilities as a JSON object through TOML escaping.
+
+    ``agent launch`` carries CodeAct arguments in a TOML ``-c`` value.  Its
+    rendered launch plan can therefore contain more than one layer of escaped
+    JSON quotes.  String equality after one replacement is brittle and can
+    falsely reject the exact payload that will reach ``mcp-codeact``.  Decode
+    bounded quote-escape layers, then compare a parsed JSON object to the
+    canonical expected payload.
+    """
+    try:
+        expected = json.loads(capability_json)
+    except json.JSONDecodeError:
+        return False
+    decoder = json.JSONDecoder()
+    candidates = [
+        value for value in command
+        if f"mcp_servers.{CODEACT_MCP_SERVER}.args=" in value and "--capabilities-json" in value
+    ]
+    layer = candidates
+    for _ in range(4):
+        layer = [value.replace(r'\"', '"') for value in layer]
+        candidates.extend(layer)
+    for value in candidates:
+        for start, character in enumerate(value):
+            if character != "{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(value[start:])
+            except json.JSONDecodeError:
+                continue
+            if payload == expected:
+                return True
+    return False
+
+
 def assert_codeact_launch_plan(
     plan: dict[str, Any],
     *,
@@ -89,12 +125,7 @@ def assert_codeact_launch_plan(
     require("studio mcp not exposed", "mcp_servers.kitsoki.command=" not in joined and "mcp_servers.kitsoki.enabled=true" not in joined)
     require("direct editor tools absent", all(tool not in joined for tool in ("--allowedTools Write", "--allowedTools Edit", "MultiEdit")))
     require("launch policy allowed or absent", allowed)
-    # Codex's launch plan serializes the value supplied to `-c` as a TOML-ish
-    # string. JSON quotes in the capability payload are consequently escaped
-    # in the plan (`{\\\"fs\\\":...}`), while the arena preset is deliberately
-    # canonical unescaped JSON. Compare both representations so the assertion
-    # proves the payload rather than its incidental transport encoding.
-    require("capabilities json threaded", capability_json in joined or capability_json in joined.replace('\\\\"', '"'))
+    require("capabilities json threaded", _command_contains_capability_payload(command, capability_json))
     return {
         "passed": not failures,
         "failures": failures,
