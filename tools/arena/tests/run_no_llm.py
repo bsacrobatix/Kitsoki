@@ -88,6 +88,13 @@ def run_default() -> int:
     checks.check("bugswarm source adapter gate", source_test.returncode, 0)
     if source_test.returncode:
         checks.failures.append((source_test.stdout + source_test.stderr).strip())
+    enrich_source_test = subprocess.run(
+        [sys.executable, str(HERE / "test_bugswarm_enrich_source.py")],
+        cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    checks.check("bugswarm provenance enrichment gate", enrich_source_test.returncode, 0)
+    if enrich_source_test.returncode:
+        checks.failures.append((enrich_source_test.stdout + enrich_source_test.stderr).strip())
     verify_source_test = subprocess.run(
         [sys.executable, str(HERE / "test_bugswarm_verify_source.py")],
         cwd=REPO_ROOT,

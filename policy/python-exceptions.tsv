@@ -38,6 +38,7 @@ tools/arena/arena/treatments/registry.py	arena subsystem treatment module
 tools/arena/lib/paired_task_runner.py	arena subsystem support module
 tools/arena/lib/yaml.py	arena subsystem support module
 tools/arena/scripts/bugswarm_apply_verification.py	arena subsystem helper script
+tools/arena/scripts/bugswarm_enrich_source.py	arena subsystem source-bound BugSwarm provenance enrichment helper
 tools/arena/scripts/bugswarm_lock_corpus.py	arena subsystem deterministic BugSwarm corpus lock helper
 tools/arena/scripts/bugswarm_to_arena.py	arena subsystem helper script
 tools/arena/scripts/bugswarm_to_arena_spec.py	arena subsystem helper script
@@ -52,6 +53,7 @@ tools/arena/tests/run_no_llm.py	arena subsystem no-LLM test harness
 tools/arena/tests/test_arena_cli_ux.py	arena subsystem test
 tools/arena/tests/test_arena_skeleton.py	arena subsystem test
 tools/arena/tests/test_bugswarm_apply_verification.py	arena subsystem test
+tools/arena/tests/test_bugswarm_enrich_source.py	arena subsystem no-network provenance enrichment test
 tools/arena/tests/test_bugswarm_lock_corpus.py	arena subsystem test
 tools/arena/tests/test_bugswarm_paired_task_source.py	arena subsystem test
 tools/arena/tests/test_bugswarm_source.py	arena subsystem test
