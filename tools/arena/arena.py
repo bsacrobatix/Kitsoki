@@ -30,6 +30,7 @@ from arena.model import (
     receipt_sha256, analyze_task_optimization, compare_task_optimization, select_task_optimization_champion, task_optimization_status,
 )
 from arena.task_optimization_receipt import validate_scored_attempt_receipt
+from arena.task_optimization_runner import run as run_task_optimization
 from arena.placement import run_sweep
 from arena.plugins import base as plugins
 from arena.rollup import write_rollup
@@ -424,6 +425,47 @@ def cmd_task_optimization_record(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_task_optimization_run(args: argparse.Namespace) -> int:
+    """Run frozen campaign cells through an explicit, injectable executor.
+
+    The command never guesses a provider command.  A live caller supplies a
+    treatment adapter which receives the materialized request path and emits a
+    canonical attempt receipt on stdout; its scoring evidence is still checked
+    before Arena commits the receipt.  Without --live this is a no-spend plan.
+    """
+    try:
+        plan, preflight, _ = _task_optimization_inputs(args)
+
+        def execute(_cell: dict[str, object], request: dict[str, object]) -> dict[str, object]:
+            if not args.executor_command:
+                raise ValueError("live task-optimization dispatch requires --executor-command")
+            command = [*args.executor_command, "--request", str(request["request_path"])]
+            completed = subprocess.run(command, text=True, capture_output=True, check=False)
+            if completed.returncode != 0:
+                # A launcher failure is infrastructure evidence, not a model
+                # result.  It remains resumable under the plan retry budget.
+                return {"status": "blocked", "health": "infra:executor",
+                        "retryable": True, "notes": _first_nonempty_line(completed.stderr) or f"executor exit {completed.returncode}"}
+            try:
+                value = json.loads(completed.stdout)
+            except json.JSONDecodeError as exc:
+                raise ValueError("executor stdout must be one JSON attempt receipt") from exc
+            if not isinstance(value, dict):
+                raise ValueError("executor stdout must be one JSON attempt receipt object")
+            return value
+
+        summary = run_task_optimization(
+            plan=plan, preflight=preflight, attempts_dir=args.attempts, out_dir=args.out,
+            live=args.live, executor=execute if args.live else None, max_cells=args.max_cells,
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"ERROR: could not run task-optimization campaign: {exc}", file=sys.stderr)
+        return 1
+    mode = "dry dispatch" if summary.dry_run else "live dispatch"
+    print(f"{mode} → {Path(args.out) / 'dispatch.json'} (cells={len(summary.dispatched)})")
+    return 0
+
+
 def cmd_task_optimization_status(args: argparse.Namespace) -> int:
     try:
         plan, _preflight, receipts = _task_optimization_inputs(args)
@@ -678,6 +720,15 @@ def main(argv: list[str] | None = None) -> int:
     p_task_record.add_argument("--receipt", required=True, help="pre-scored attempt JSON")
     p_task_record.add_argument("--out", required=True, help="append-only attempt receipt directory")
     p_task_record.set_defaults(func=cmd_task_optimization_record)
+    p_task_run = task_opt_sub.add_parser("run", help="schedule only ready/resumable frozen cells; dry by default")
+    p_task_run.add_argument("--plan", required=True, help="immutable plan.json")
+    p_task_run.add_argument("--preflight", required=True, help="immutable preflight.json")
+    p_task_run.add_argument("--attempts", required=True, help="append-only attempt receipt directory")
+    p_task_run.add_argument("--out", required=True, help="run artifacts, isolated workspaces, and dispatch receipt")
+    p_task_run.add_argument("--max-cells", type=int, default=0, help="cap selected cells; 0 means all resumable cells")
+    p_task_run.add_argument("--live", action="store_true", help="execute the explicit treatment adapter; requires frozen live gate")
+    p_task_run.add_argument("--executor-command", nargs="+", default=[], help="adapter command; Arena appends --request <dispatch-request.json>")
+    p_task_run.set_defaults(func=cmd_task_optimization_run)
     p_task_status = task_opt_sub.add_parser("status", help="aggregate immutable attempts and list resume cells")
     p_task_status.add_argument("--plan", required=True)
     p_task_status.add_argument("--preflight", required=True)
