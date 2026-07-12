@@ -17,6 +17,7 @@ tools/arena/arena/mcp_os_report.py	arena subsystem module
 tools/arena/arena/model.py	arena subsystem module
 tools/arena/arena/placement.py	arena subsystem module
 tools/arena/arena/task_optimization_receipt.py	arena subsystem strict scored-attempt evidence validator
+tools/arena/arena/task_optimization_runner.py	arena subsystem deterministic task-optimization lifecycle runner
 tools/arena/arena/plugins/__init__.py	arena subsystem package marker
 tools/arena/arena/plugins/base.py	arena subsystem plugin module
 tools/arena/arena/plugins/bugfix.py	arena subsystem plugin module
@@ -73,6 +74,8 @@ tools/arena/tests/test_oss_to_arena_spec.py	arena subsystem test
 tools/arena/tests/test_paired_task_codeact.py	arena subsystem test
 tools/arena/tests/test_persona_qa_plugin.py	arena subsystem test
 tools/arena/tests/test_swarm_plugin.py	arena subsystem test
+tools/arena/tests/test_task_optimization_lifecycle.py	arena subsystem no-LLM task-optimization lifecycle test
+tools/arena/tests/test_task_optimization_runner.py	arena subsystem no-LLM task-optimization runner test
 tools/arena/tests/test_task_optimization_scored_receipt.py	arena subsystem no-LLM scored receipt contract test
 tools/arena/tests/test_treatments_library.py	arena subsystem test
 tools/arena/tests/test_ui_verdict_checks.py	arena subsystem test
