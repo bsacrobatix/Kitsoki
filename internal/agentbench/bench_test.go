@@ -165,6 +165,60 @@ func TestScoreTraceTreatsAgentCallCompleteAsTerminal(t *testing.T) {
 	}
 }
 
+// CLI CodeAct is a two-layer execution: the outer host call is not enough to
+// prove that its one-or-more generator subprocesses were supervised. A scored
+// campaign trace must contain a paired runtime receipt for every CLI CodeAct
+// step, all under the outer call ID.
+func TestScoreTraceRequiresPairedCLICodeactRuntimeReceipts(t *testing.T) {
+	complete := filepath.Join(t.TempDir(), "complete.jsonl")
+	if err := os.WriteFile(complete, []byte(strings.Join([]string{
+		`{"ts":"2026-07-12T01:00:00Z","kind":"agent.call.start","state_path":"implement","call_id":"codeact-1","payload":{"verb":"codeact","runtime_kind":"cli"}}`,
+		`{"ts":"2026-07-12T01:00:01Z","kind":"agent.runtime.start","state_path":"implement","call_id":"codeact-1","payload":{"strength":"supervised"}}`,
+		`{"ts":"2026-07-12T01:00:02Z","kind":"agent.runtime.end","state_path":"implement","call_id":"codeact-1","payload":{"exit_code":0}}`,
+		`{"ts":"2026-07-12T01:00:03Z","kind":"agent.call.complete","state_path":"implement","call_id":"codeact-1","payload":{}}`,
+	}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ScoreTrace(complete, Case{ID: "codeact-runtime-complete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed || report.Metrics.RuntimeAccountingStatus != "complete" || report.Metrics.RuntimeStarts != 1 || report.Metrics.RuntimeEnds != 1 {
+		t.Fatalf("complete runtime receipts = %+v failures=%v", report.Metrics, report.Failures)
+	}
+
+	missingEnd := filepath.Join(t.TempDir(), "missing-end.jsonl")
+	if err := os.WriteFile(missingEnd, []byte(strings.Join([]string{
+		`{"ts":"2026-07-12T01:00:00Z","kind":"agent.call.start","state_path":"implement","call_id":"codeact-2","payload":{"verb":"codeact","runtime_kind":"cli"}}`,
+		`{"ts":"2026-07-12T01:00:01Z","kind":"agent.runtime.start","state_path":"implement","call_id":"codeact-2","payload":{"strength":"supervised"}}`,
+		`{"ts":"2026-07-12T01:00:02Z","kind":"agent.call.complete","state_path":"implement","call_id":"codeact-2","payload":{}}`,
+	}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	report, err = ScoreTrace(missingEnd, Case{ID: "codeact-runtime-missing-end"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Passed || report.Metrics.RuntimeAccountingStatus != "partial" || report.Metrics.AccountingStatus != "partial" {
+		t.Fatalf("missing runtime end was accepted: %+v failures=%v", report.Metrics, report.Failures)
+	}
+	assertFailureContains(t, report.Failures, "runtime receipt lifecycle")
+}
+
+func TestScoreTraceRecordsDirectAPICodeactWithoutSubprocessReceipt(t *testing.T) {
+	trace := writeTrace(t,
+		callStartEvent("2026-07-12T01:00:00Z", "implement", "codeact-api", map[string]any{"verb": "codeact", "runtime_kind": "direct_api"}),
+		completeEventWithCallID("2026-07-12T01:00:01Z", "implement", "codeact-api", map[string]any{}),
+	)
+	report, err := ScoreTrace(trace, Case{ID: "codeact-direct-api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Passed || report.Metrics.RuntimeAccountingStatus != "direct_api" {
+		t.Fatalf("direct API runtime accounting = %+v failures=%v", report.Metrics, report.Failures)
+	}
+}
+
 func TestScoreTraceDoesNotDoubleCountToolAndToolsArray(t *testing.T) {
 	trace := writeTrace(t,
 		event("2026-06-26T01:00:00Z", "agent.stream", "rooms/decompose", map[string]any{

@@ -145,7 +145,10 @@ def run(
                 raise ValueError("task-optimization executor must return an attempt receipt object")
             receipt = _attempt_receipt(plan=plan, preflight=preflight, cell=cell, attempt_id=attempt_id, result=result)
             if receipt.get("status") == "scored":
-                validate_scored_attempt_receipt(receipt, receipt_path=workspace / "receipt.json", preflight_candidate=candidate)
+                validate_scored_attempt_receipt(
+                    receipt, receipt_path=workspace / "receipt.json", preflight_candidate=candidate,
+                    requires_codeact_runtime="codeact" in str(cell.get("treatment") or ""),
+                )
             destination = attempts / str(cell["id"]) / f"{attempt_id}.json"
             _write_once(destination, receipt)
             dispatched.append(str(cell["id"]))

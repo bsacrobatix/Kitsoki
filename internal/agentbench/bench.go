@@ -99,12 +99,20 @@ type Report struct {
 }
 
 type Metrics struct {
-	Events                   int            `json:"events"`
-	AgentStreamEvents        int            `json:"agent_stream_events"`
-	AgentCallsStarted        int            `json:"agent_calls_started,omitempty"`
-	AgentCallsFinished       int            `json:"agent_calls_finished,omitempty"`
-	AgentCallsErrored        int            `json:"agent_calls_errored,omitempty"`
-	AgentCallsInFlight       int            `json:"agent_calls_in_flight,omitempty"`
+	Events             int `json:"events"`
+	AgentStreamEvents  int `json:"agent_stream_events"`
+	AgentCallsStarted  int `json:"agent_calls_started,omitempty"`
+	AgentCallsFinished int `json:"agent_calls_finished,omitempty"`
+	AgentCallsErrored  int `json:"agent_calls_errored,omitempty"`
+	AgentCallsInFlight int `json:"agent_calls_in_flight,omitempty"`
+	RuntimeStarts      int `json:"runtime_starts,omitempty"`
+	RuntimeEnds        int `json:"runtime_ends,omitempty"`
+	RuntimeInFlight    int `json:"runtime_in_flight,omitempty"`
+	// RuntimeAccountingStatus is complete only when every runtime start has a
+	// matching end and every CLI CodeAct call has at least one paired
+	// supervised-runtime receipt. direct_api is an explicit non-subprocess
+	// CodeAct boundary, not an absent CLI receipt.
+	RuntimeAccountingStatus  string         `json:"runtime_accounting_status,omitempty"`
 	WallSeconds              float64        `json:"wall_seconds,omitempty"`
 	ToolCallsTotal           int            `json:"tool_calls_total"`
 	ToolCallsByName          map[string]int `json:"tool_calls_by_name,omitempty"`
@@ -253,6 +261,13 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 	// carry the same call_id. Used to attribute submit signals and usage
 	// accounting-completeness per call, not just globally.
 	callVerb := map[string]string{}
+	// codeactRuntimeKind is stamped by host.agent.codeact on the outer call.
+	// runtimeStarts/runtimeEnds are deliberately tracked independently from
+	// agent calls: a runtime is a generator-process lifecycle, not another
+	// provider request.
+	codeactRuntimeKind := map[string]string{}
+	runtimeStarts := map[string]int{}
+	runtimeEnds := map[string]int{}
 	// callTerminated tracks which call_ids reached a terminal (finished or
 	// errored) event, for AccountingStatus.
 	callTerminated := map[string]bool{}
@@ -325,6 +340,17 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 				callVerb[ev.CallID] = v
 				verb = v
 			}
+			if verb == "codeact" {
+				codeactRuntimeKind[ev.CallID] = stringValue(ev.Payload, "runtime_kind")
+			}
+		}
+		switch ev.Kind {
+		case "agent.runtime.start":
+			metrics.RuntimeStarts++
+			runtimeStarts[ev.CallID]++
+		case "agent.runtime.end":
+			metrics.RuntimeEnds++
+			runtimeEnds[ev.CallID]++
 		}
 		if ev.Kind == "agent.stream" {
 			metrics.AgentStreamEvents++
@@ -410,6 +436,55 @@ func ScoreTrace(tracePath string, c Case) (Report, error) {
 	}
 	for id := range callVerb {
 		if !callTerminated[id] {
+			metrics.AccountingStatus = "partial"
+		}
+	}
+	metrics.RuntimeAccountingStatus = "not_applicable"
+	runtimeComplete := true
+	runtimeIDs := map[string]bool{}
+	for id := range runtimeStarts {
+		runtimeIDs[id] = true
+	}
+	for id := range runtimeEnds {
+		runtimeIDs[id] = true
+	}
+	for id := range runtimeIDs {
+		starts, ends := runtimeStarts[id], runtimeEnds[id]
+		if starts != ends {
+			runtimeComplete = false
+			if starts > ends {
+				metrics.RuntimeInFlight += starts - ends
+			} else {
+				metrics.RuntimeInFlight += ends - starts
+			}
+		}
+	}
+	directAPIOnly := len(codeactRuntimeKind) > 0
+	for id, kind := range codeactRuntimeKind {
+		switch kind {
+		case "cli":
+			directAPIOnly = false
+			if runtimeStarts[id] == 0 || runtimeStarts[id] != runtimeEnds[id] {
+				runtimeComplete = false
+			}
+		case "direct_api":
+			if runtimeStarts[id] != 0 || runtimeEnds[id] != 0 {
+				runtimeComplete = false
+			}
+		default:
+			directAPIOnly = false
+			// A CodeAct trace without an explicit kind predates the receipt
+			// contract and cannot be exact campaign evidence.
+			runtimeComplete = false
+		}
+	}
+	if len(codeactRuntimeKind) > 0 || metrics.RuntimeStarts > 0 || metrics.RuntimeEnds > 0 {
+		metrics.RuntimeAccountingStatus = "complete"
+		if directAPIOnly && metrics.RuntimeStarts == 0 && metrics.RuntimeEnds == 0 {
+			metrics.RuntimeAccountingStatus = "direct_api"
+		}
+		if !runtimeComplete {
+			metrics.RuntimeAccountingStatus = "partial"
 			metrics.AccountingStatus = "partial"
 		}
 	}
@@ -607,6 +682,9 @@ func scoreFailures(c Case, m Metrics, tracePath string, runStart time.Time) (cor
 	}
 	if m.AgentCallsInFlight > 0 {
 		correctness = append(correctness, fmt.Sprintf("agent_calls_in_flight %d: trace has start event(s) without returned/error terminal event", m.AgentCallsInFlight))
+	}
+	if m.RuntimeAccountingStatus == "partial" {
+		correctness = append(correctness, "runtime receipt lifecycle is incomplete or mismatched")
 	}
 	if c.Expectations.RequireSubmit {
 		switch {

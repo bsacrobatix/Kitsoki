@@ -415,6 +415,7 @@ def cmd_task_optimization_record(args: argparse.Namespace) -> int:
             receipt,
             receipt_path=args.receipt,
             preflight_candidate=preflight_candidates[candidate_id],
+            requires_codeact_runtime="codeact" in str(planned[cell_id].get("treatment") or ""),
         )
         destination = Path(args.out) / cell_id / f"{attempt_id}.json"
         _write_immutable_json(destination, receipt)

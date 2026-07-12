@@ -85,7 +85,8 @@ def _require_equal(receipt_value: Any, report_value: Any, label: str) -> None:
 
 
 def validate_scored_attempt_receipt(receipt: dict[str, Any], *, receipt_path: str | Path,
-                                    preflight_candidate: dict[str, Any]) -> None:
+                                    preflight_candidate: dict[str, Any],
+                                    requires_codeact_runtime: bool = False) -> None:
     """Reject incomplete, stale, or caller-forged evidence for a scored cell.
 
     Non-scored scheduler states are not execution claims and remain validated by
@@ -155,6 +156,8 @@ def validate_scored_attempt_receipt(receipt: dict[str, Any], *, receipt_path: st
         raise ValueError("scored receipt trace artifact does not match AgentBench report trace")
     if report_metrics.get("accounting_status") != "complete":
         raise ValueError("scored receipt AgentBench accounting_status must be complete")
+    if requires_codeact_runtime and report_metrics.get("runtime_accounting_status") not in {"complete", "direct_api"}:
+        raise ValueError("scored CodeAct receipt requires complete AgentBench runtime receipts")
     started_calls = report_metrics.get("agent_calls_started")
     finished_calls = report_metrics.get("agent_calls_finished")
     errored_calls = report_metrics.get("agent_calls_errored")
