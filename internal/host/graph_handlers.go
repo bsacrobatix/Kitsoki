@@ -149,16 +149,36 @@ func graphBoolArg(args map[string]any, key string) bool {
 
 // loadCatalogArg loads catalog_path (required), optionally unioning
 // overlay_path (LoadCatalogWithOverlay) when present — the shared "load
-// current, optionally desired" step every read-only op needs.
+// current, optionally desired" step every read-only op needs. When args
+// carries a `scope` mapping (a session's baked catalog subset, see
+// graph_scope.go), the loaded catalog is pruned to that scope's member set
+// — the single choke point that makes every read op scope-aware at once.
+// Write ops never load through here (they hand catalog_path to
+// objectgraph.Propose/Apply/... directly), so a pruned view can never be
+// written back to disk.
 func loadCatalogArg(args map[string]any) (*objectgraph.Catalog, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	if catalogPath == "" {
 		return nil, fmt.Errorf("host.graph: missing required arg %q", "catalog_path")
 	}
+	var cat *objectgraph.Catalog
+	var err error
 	if overlay := graphStringArg(args, "overlay_path"); overlay != "" {
-		return objectgraph.LoadCatalogWithOverlay(catalogPath, overlay)
+		cat, err = objectgraph.LoadCatalogWithOverlay(catalogPath, overlay)
+	} else {
+		cat, err = objectgraph.LoadCatalog(catalogPath)
 	}
-	return objectgraph.LoadCatalog(catalogPath)
+	if err != nil {
+		return nil, err
+	}
+	spec, err := graphScopeSpecArg(args)
+	if err != nil {
+		return nil, err
+	}
+	if spec != nil {
+		return objectgraph.ApplyScope(cat, spec)
+	}
+	return cat, nil
 }
 
 // graphLoadOp: {catalog_path[, overlay_path]} -> a raw catalog summary (node
@@ -236,6 +256,9 @@ func graphApplyOp(ctx context.Context, args map[string]any) (Result, error) {
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.apply: requires both catalog_path and changeset_id")
 	}
+	if err := graphScopeGuardChangeset("apply", catalogPath, changesetID, args); err != nil {
+		return Result{}, err
+	}
 	clk, err := graphResolveClock(ctx)
 	if err != nil {
 		return Result{}, err
@@ -285,6 +308,9 @@ func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 		if m, ok := r.(map[string]any); ok {
 			ops = append(ops, m)
 		}
+	}
+	if err := graphScopeGuardOps("propose", catalogPath, args, ops); err != nil {
+		return Result{}, err
 	}
 	// Provenance strip (hazard guard #1, plan §3.4 red-team amendment #1):
 	// caller-supplied provenance only ever reaches internal/graph.Propose —
@@ -361,6 +387,9 @@ func graphAuthorizeOp(ctx context.Context, args map[string]any) (Result, error) 
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.authorize: requires both catalog_path and changeset_id")
 	}
+	if err := graphScopeGuardChangeset("authorize", catalogPath, changesetID, args); err != nil {
+		return Result{}, err
+	}
 	clk, err := graphResolveClock(ctx)
 	if err != nil {
 		return Result{}, err
@@ -397,6 +426,9 @@ func graphWithdrawOp(ctx context.Context, args map[string]any) (Result, error) {
 	changesetID := graphStringArg(args, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.withdraw: requires both catalog_path and changeset_id")
+	}
+	if err := graphScopeGuardChangeset("withdraw", catalogPath, changesetID, args); err != nil {
+		return Result{}, err
 	}
 	clk, err := graphResolveClock(ctx)
 	if err != nil {
@@ -435,6 +467,9 @@ func graphRebaseOp(ctx context.Context, args map[string]any) (Result, error) {
 	changesetID := graphStringArg(args, "changeset_id")
 	if catalogPath == "" || changesetID == "" {
 		return Result{}, fmt.Errorf("host.graph.rebase: requires both catalog_path and changeset_id")
+	}
+	if err := graphScopeGuardChangeset("rebase", catalogPath, changesetID, args); err != nil {
+		return Result{}, err
 	}
 	clk, err := graphResolveClock(ctx)
 	if err != nil {

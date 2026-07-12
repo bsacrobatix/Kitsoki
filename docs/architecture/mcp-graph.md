@@ -68,6 +68,80 @@ that silently varies with how the operator happened to launch it.
 Per-call reload from disk (engine semantics unchanged); no server-side
 catalog cache.
 
+## Scoped sessions: a baked-in catalog subset
+
+`--scope [alias=]<scope.yaml>` (repeatable, one per bound alias; studio
+mount: `--graph-scope`) restricts a session to a deterministic subset of a
+catalog. Like the catalog binding and the actor ceiling, the scope lives in
+server argv and is resolved at construction — **no tool argument can widen,
+narrow, or drop it**, so the restriction holds at the engine level rather
+than as prompt guidance an LLM could ignore. Every `graph.*` call on a
+scoped alias carries the spec into its `host.graph.*` op; the member set is
+re-resolved against the freshly loaded catalog on each call (consistent with
+the no-cache reload model above), so it deterministically tracks catalog
+edits.
+
+The scope file is a YAML selector
+([`internal/graph/scope.go`](../../internal/graph/scope.go) —
+`ParseScopeSpec` rejects unknown keys, and at least one of
+`roots`/`types`/`include` is required):
+
+```yaml
+roots: [feature-payments]   # BFS start nodes (must exist)
+direction: out              # out (default) | in | both
+depth: 2                    # hops from roots; omit = unlimited, 0 = roots only
+edges: [requirements, acceptance]  # optional traversal edge allowlist
+types: [decision]           # additionally include every node IsA these types
+include: [adr-0007]         # additionally include these exact ids
+exclude: [noisy-node]       # remove after expansion AND block traversal through
+```
+
+Membership = BFS(roots) ∪ IsA(types) ∪ include, minus exclude. Changeset
+nodes are **always in scope** (unless explicitly excluded) so a scoped
+session can read back the lifecycle of its own proposals.
+
+Semantics, split by read/write:
+
+- **Reads** operate on a pruned view (`internal/graph.ApplyScope`, applied
+  at the single `loadCatalogArg` choke point every `host.graph.*` read op
+  shares): `find`/`open` counts, `lint`, `type` censuses, and `neighbors`
+  walks see only member nodes, and edges targeting a pruned node are
+  dropped from the view. `graph.open` reports a `scope` block
+  (`{active, member_count, total_node_count, pruned_edges, spec}`) and a
+  guide line saying the session is scoped. `graph.get` on an out-of-scope
+  id lands in `missing` with `out_of_scope: true` (suggestions only ever
+  name in-scope ids); `graph.neighbors` from an out-of-scope root errors
+  `OUT_OF_SCOPE`.
+- **Writes** are gated against the **full** catalog
+  (`internal/graph.ScopeWriteViolations` via the guards in
+  [`internal/host/graph_scope.go`](../../internal/host/graph_scope.go)) —
+  a pruned view must never reach a path that writes the catalog back, since
+  that would delete every out-of-scope node. `graph.propose` rejects
+  operations that modify/remove/rename/retype an out-of-scope node
+  (`OUT_OF_SCOPE`); `added` operations are always allowed (creating a node
+  never damages out-of-scope content, and one connected to the scope becomes
+  a member on the next resolve); `registry_type_*` operations are always
+  rejected in a scoped session (the type registry is catalog-wide).
+  `graph.apply`/`authorize`/`withdraw` apply the same gate to the target
+  changeset's parsed operations.
+
+Failure posture: a malformed scope file, an unknown root/include/type/edge,
+or a scope bound to an unbound alias **fails server construction** — a scope
+must never silently degrade to "unscoped". The studio mount fails closed the
+other way too: an unparseable `--graph-scope` mounts the family with zero
+catalogs (`NO_CATALOG` everywhere) rather than mounting the catalogs
+unscoped. Unknown `exclude` ids alone are ignored, so a scope file survives
+the deletion of a node it excludes.
+
+Known limits (by design, documented rather than hidden): scope is a focus
+and blast-radius guardrail, not a security boundary — out-of-scope *ids* can
+still appear in `graph.history` rows and changeset operation listings
+(lifecycle surfaces are not pruned per-operation), but out-of-scope node
+*content* is unreachable and out-of-scope nodes are immutable through the
+session. Lint on a scoped view runs against the pruned graph, so
+membership-shaped lints (e.g. orphan-feature) can fire for nodes whose
+anchoring edge was pruned.
+
 ## The actor ceiling
 
 `--actor <name>` (mirrored by the studio mount's `--graph-actor`) is a
@@ -244,6 +318,9 @@ constants in `errors.go`:
   scalar.
 - `NOT_YOUR_CHANGESET` — a propose-mode `graph.withdraw` call named a
   changeset authored by a different actor.
+- `OUT_OF_SCOPE` — the call named (or a write would touch) a node that
+  exists in the catalog but sits outside the session's baked scope (see
+  "Scoped sessions"); only a differently-scoped session can reach it.
 - `CAPSULE_WORKFLOW` — a capsule-routed write's workspace lifecycle failed
   (workspace create, commit, or merge into the staging branch); the hint
   names where the work physically is so nothing is silently lost.
@@ -303,8 +380,11 @@ local sink already triggers (always, on every call, regardless of mode).
 - [`internal/mcp/studio/graph_tools.go`](../../internal/mcp/studio/graph_tools.go)
   and [`internal/mcp/studio/server.go`](../../internal/mcp/studio/server.go) —
   the studio-server mount (P6).
+- [`internal/graph/scope.go`](../../internal/graph/scope.go) and
+  [`internal/host/graph_scope.go`](../../internal/host/graph_scope.go) —
+  scope spec parsing/resolution, the pruned read view, and the write guards.
 - [`cmd/kitsoki/mcp.go`](../../cmd/kitsoki/mcp.go) — `kitsoki mcp`'s
-  `--catalog`/`--graph-steward`/`--graph-actor`/`--graph-feedback-sink`/
-  `--graph-write-via` flags.
+  `--catalog`/`--graph-scope`/`--graph-steward`/`--graph-actor`/
+  `--graph-feedback-sink`/`--graph-write-via` flags.
 - [`docs/proposals/graph-mcp.md`](../proposals/graph-mcp.md) — the full plan,
   design rationale, and P1–P6 work-plan history.

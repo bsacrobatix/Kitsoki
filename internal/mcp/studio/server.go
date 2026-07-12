@@ -117,6 +117,11 @@ type Server struct {
 	// door", P6). Mirrors mcp-graph's own repeatable --catalog flag; see
 	// WithGraphCatalogs.
 	graphCatalogSpecs []string
+	// graphScopeSpecs are the mounted graph family's baked scope bindings,
+	// each "[alias=]path-to-scope-yaml" (mirrors mcp-graph's --scope). A
+	// malformed spec fails the mount CLOSED (zero catalogs), never
+	// unscoped. See WithGraphScopes.
+	graphScopeSpecs []string
 	// graphSteward opts the mounted graph family into steward mode
 	// (graph.authorize + live graph.apply). Default false = propose mode.
 	// See WithGraphSteward.

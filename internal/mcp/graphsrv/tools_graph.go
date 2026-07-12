@@ -110,7 +110,9 @@ func handleGraphLint(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 		return errorResult(errPayload), nil
 	}
 
-	res, err := deps.Registry.Invoke(ctx, "host.graph.lint", map[string]any{"catalog_path": path})
+	hostArgs := map[string]any{"catalog_path": path}
+	deps.applyScope(alias, hostArgs)
+	res, err := deps.Registry.Invoke(ctx, "host.graph.lint", hostArgs)
 	if err != nil {
 		return errorResult(NewError(CodeValidation, "graph.lint: "+err.Error(), "check that the bound catalog path is a valid catalog file or bundle")), nil
 	}
@@ -148,6 +150,8 @@ func handleGraphLint(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 func classifyHostErr(err error) string {
 	msg := err.Error()
 	switch {
+	case strings.Contains(msg, "out of scope"):
+		return CodeOutOfScope
 	case strings.Contains(msg, "unknown node") || strings.Contains(msg, "node") && strings.Contains(msg, "not found"):
 		return CodeUnknownNode
 	case strings.Contains(msg, "unknown type") || strings.Contains(msg, "type") && strings.Contains(msg, "not found in registry"):
@@ -189,8 +193,11 @@ type graphOpenOK struct {
 	Lint       map[string]any `json:"lint"`
 	Changesets map[string]any `json:"changesets"`
 	Feedback   map[string]any `json:"feedback"`
-	Guide      string         `json:"guide"`
-	Truncated  bool           `json:"truncated,omitempty"`
+	// Scope is present only on a scoped session: {active, member_count,
+	// total_node_count, pruned_edges, spec}.
+	Scope     map[string]any `json:"scope,omitempty"`
+	Guide     string         `json:"guide"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
 
 func registerGraphOpenTool(srv *mcpsdk.Server, deps *Deps) {
@@ -214,7 +221,9 @@ func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	if errPayload != nil {
 		return errorResult(errPayload), nil
 	}
-	res, err := deps.Registry.Invoke(ctx, "host.graph.open", map[string]any{"catalog_path": path})
+	hostArgs := map[string]any{"catalog_path": path}
+	deps.applyScope(alias, hostArgs)
+	res, err := deps.Registry.Invoke(ctx, "host.graph.open", hostArgs)
 	if err != nil {
 		return hostErrResult("graph.open", err), nil
 	}
@@ -237,6 +246,7 @@ func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	feedback["pending"] = pendingFeedbackCount(path)
 	guide, _ := res.Data["guide"].(string)
 	nodeCount, _ := res.Data["node_count"].(int)
+	scope, _ := res.Data["scope"].(map[string]any)
 
 	out := graphOpenOK{
 		OK:         true,
@@ -247,6 +257,7 @@ func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 		Lint:       lint,
 		Changesets: changesets,
 		Feedback:   feedback,
+		Scope:      scope,
 		Guide:      guide,
 	}
 
@@ -351,6 +362,7 @@ func handleGraphGet(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest
 	}
 
 	hostArgs := map[string]any{"catalog_path": path, "ids": args.IDs}
+	deps.applyScope(alias, hostArgs)
 	if len(args.Fields) > 0 {
 		hostArgs["fields"] = args.Fields
 	}
@@ -527,8 +539,12 @@ func findFilterHash(args graphFindArgs) string {
 // server-side pagination state. Returns "" on any failure — callers treat
 // that as "unknown", which conservatively means "assume changed" wherever a
 // prior cursor claimed a specific hash.
-func findCatalogHash(ctx context.Context, deps *Deps, path string) string {
-	res, err := deps.Registry.Invoke(ctx, "host.graph.load", map[string]any{"catalog_path": path})
+func findCatalogHash(ctx context.Context, deps *Deps, path, alias string) string {
+	hostArgs := map[string]any{"catalog_path": path}
+	// The hash must digest the SCOPED view: an out-of-scope edit that can't
+	// affect any page a scoped find returns shouldn't invalidate cursors.
+	deps.applyScope(alias, hostArgs)
+	res, err := deps.Registry.Invoke(ctx, "host.graph.load", hostArgs)
 	if err != nil {
 		return ""
 	}
@@ -572,7 +588,7 @@ func handleGraphFind(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	}
 
 	fh := findFilterHash(args)
-	ch := findCatalogHash(ctx, deps, path)
+	ch := findCatalogHash(ctx, deps, path, alias)
 
 	offset := 0
 	catalogChanged := false
@@ -596,6 +612,7 @@ func handleGraphFind(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 		"offset":       offset,
 		"count_only":   args.CountOnly,
 	}
+	deps.applyScope(alias, hostArgs)
 	if args.Type != "" {
 		hostArgs["type"] = args.Type
 	}
@@ -715,6 +732,7 @@ func handleGraphNeighbors(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 	}
 
 	hostArgs := map[string]any{"catalog_path": path, "id": args.ID}
+	deps.applyScope(alias, hostArgs)
 	if args.Direction != "" {
 		hostArgs["direction"] = args.Direction
 	}
@@ -796,6 +814,7 @@ func handleGraphType(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	}
 
 	hostArgs := map[string]any{"catalog_path": path}
+	deps.applyScope(alias, hostArgs)
 	if args.TypeID != "" {
 		hostArgs["type_id"] = args.TypeID
 	}
@@ -875,6 +894,7 @@ func handleGraphChangeset(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 	}
 
 	hostArgs := map[string]any{"catalog_path": path, "action": args.Op}
+	deps.applyScope(alias, hostArgs)
 	if args.ID != "" {
 		hostArgs["changeset_id"] = args.ID
 	}
@@ -958,6 +978,7 @@ func handleGraphImpact(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequ
 	}
 
 	hostArgs := map[string]any{"catalog_path": path, "mode": "impact", "target": args.ID}
+	deps.applyScope(alias, hostArgs)
 	if args.ToType != "" {
 		hostArgs["to_type"] = args.ToType
 	}

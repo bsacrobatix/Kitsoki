@@ -32,6 +32,18 @@ func WithGraphCatalogs(specs []string) ServerOption {
 	return func(s *Server) { s.graphCatalogSpecs = specs }
 }
 
+// WithGraphScopes bakes a deterministic catalog subset into the
+// studio-mounted graph family, mirroring mcp-graph's repeatable --scope
+// flag: each spec is "[alias=]path-to-scope-yaml" binding a scope file to a
+// bound catalog alias (default: the default catalog). Unlike a malformed
+// --catalog spec (which degrades to NO_CATALOG), a malformed scope spec
+// FAILS CLOSED: the graph family is mounted with zero catalogs — every call
+// reports NO_CATALOG — because silently mounting the catalogs UNSCOPED
+// would widen a restriction the operator explicitly asked for.
+func WithGraphScopes(specs []string) ServerOption {
+	return func(s *Server) { s.graphScopeSpecs = specs }
+}
+
 // WithGraphSteward opts the studio-mounted graph family into steward mode
 // (graph.authorize + a real, non-dry-run graph.apply). Default false =
 // propose mode: the read family, graph.propose/withdraw-own/changeset, and
@@ -90,6 +102,15 @@ func (srv *Server) registerGraphTools() {
 		catalogs = &graphsrv.CatalogSet{}
 	}
 
+	scopes, err := graphsrv.ParseScopeFlags(srv.graphScopeSpecs, catalogs)
+	if err != nil {
+		// Fail closed (see WithGraphScopes): an unparseable scope must not
+		// degrade to an UNSCOPED mount — bind zero catalogs instead, so
+		// every graph call reports NO_CATALOG until the spec is fixed.
+		catalogs = &graphsrv.CatalogSet{}
+		scopes = nil
+	}
+
 	mode := graphsrv.ModePropose
 	if srv.graphSteward {
 		mode = graphsrv.ModeSteward
@@ -120,6 +141,7 @@ func (srv *Server) registerGraphTools() {
 	deps := &graphsrv.Deps{
 		Registry:     registry,
 		Catalogs:     catalogs,
+		Scopes:       scopes,
 		Mode:         mode,
 		Actor:        srv.graphActor,
 		FeedbackSink: sink,

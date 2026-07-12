@@ -8,6 +8,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/clock"
+	objectgraph "kitsoki/internal/graph"
 	"kitsoki/internal/host"
 )
 
@@ -16,6 +17,12 @@ type Config struct {
 	// CatalogFlags are the raw --catalog values, each "[alias=]path", in
 	// flag order. May be empty (triggers the pog/catalog.yaml cwd probe).
 	CatalogFlags []string
+	// ScopeFlags are the raw --scope values, each "[alias=]path" naming a
+	// scope-spec YAML file bound to a catalog alias (default: the default
+	// catalog). A bound scope deterministically restricts every graph.*
+	// call on that alias to the spec's member subset — baked in here, at
+	// construction, never adjustable by a tool argument. See scope.go.
+	ScopeFlags []string
 	// Mode gates write-tool registration: read|propose|steward. P2 has no
 	// write tools, so this only needs to be wired correctly for P4.
 	Mode string
@@ -60,8 +67,11 @@ type Config struct {
 // (no cobra flags involved) and reuse the exact same registration
 // functions.
 type Deps struct {
-	Registry     *host.Registry
-	Catalogs     *CatalogSet
+	Registry *host.Registry
+	Catalogs *CatalogSet
+	// Scopes maps a bound catalog alias to its baked scope spec (scope.go).
+	// Nil/absent alias = that catalog is unscoped.
+	Scopes       map[string]*objectgraph.ScopeSpec
 	Mode         string
 	Actor        string
 	FeedbackSink string
@@ -121,6 +131,11 @@ func NewServer(cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	scopes, err := ParseScopeFlags(cfg.ScopeFlags, catalogs)
+	if err != nil {
+		return nil, err
+	}
+
 	registry := cfg.Registry
 	if registry == nil {
 		registry = host.NewRegistry()
@@ -130,6 +145,7 @@ func NewServer(cfg Config) (*Server, error) {
 	deps := &Deps{
 		Registry:     registry,
 		Catalogs:     catalogs,
+		Scopes:       scopes,
 		Mode:         cfg.Mode,
 		Actor:        cfg.Actor,
 		FeedbackSink: cfg.FeedbackSink,

@@ -70,6 +70,7 @@ func handleGraphHistory(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 	}
 
 	hostArgs := map[string]any{"catalog_path": path}
+	deps.applyScope(alias, hostArgs)
 	if args.ID != "" {
 		hostArgs["id"] = args.ID
 	}

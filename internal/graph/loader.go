@@ -53,6 +53,14 @@ type Catalog struct {
 	// shape. Unused by any check today; validated for shape only.
 	FeedbackRouting *FeedbackRouting
 
+	// Scope, when non-nil, marks this catalog as ApplyScope's pruned READ
+	// view of a larger catalog (scope.go): Nodes holds only the scope's
+	// member nodes and every edge target pointing outside the member set
+	// has been dropped. A scoped catalog must never be written back to
+	// disk — write ops load the full catalog and gate via
+	// ScopeWriteViolations instead.
+	Scope *ScopeInfo
+
 	// ContentDigest is a fingerprint of every real on-disk file backing this
 	// catalog, computed once at load time (buildCatalog, via
 	// computeContentDigest in guards.go). Propose/Authorize/Withdraw/Apply

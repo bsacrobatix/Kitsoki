@@ -18,6 +18,7 @@ import (
 func mcpGraphCmd() *cobra.Command {
 	var (
 		catalogFlags []string
+		scopeFlags   []string
 		mode         string
 		actor        string
 		feedbackSink string
@@ -45,11 +46,20 @@ Every tool call is bound to one of the catalogs named by --catalog; a tool's
 "catalog" argument selects among bound aliases and never accepts a raw
 filesystem path.
 
+--scope bakes a deterministic catalog subset into the session: reads see
+only the scope's member nodes (edges to pruned nodes are dropped) and
+writes touching an out-of-scope node are rejected with OUT_OF_SCOPE. The
+scope is fixed at server construction — no tool argument can widen it. The
+scope file is a YAML selector (roots/direction/depth/edges/types/include/
+exclude); see docs/architecture/mcp-graph.md "Scoped sessions".
+
 Examples:
 
   kitsoki mcp-graph --catalog pog/catalog.yaml
 
-  kitsoki mcp-graph --catalog main=pog/catalog.yaml --catalog docs=docs/catalog.yaml --mode read`,
+  kitsoki mcp-graph --catalog main=pog/catalog.yaml --catalog docs=docs/catalog.yaml --mode read
+
+  kitsoki mcp-graph --catalog pog/catalog.yaml --scope .kitsoki/scopes/payments.yaml --mode propose`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := graphsrv.ValidateMode(mode); err != nil {
 				return err
@@ -62,6 +72,7 @@ Examples:
 			}
 			srv, err := graphsrv.NewServer(graphsrv.Config{
 				CatalogFlags: catalogFlags,
+				ScopeFlags:   scopeFlags,
 				Mode:         mode,
 				Actor:        actor,
 				FeedbackSink: feedbackSink,
@@ -83,6 +94,7 @@ Examples:
 		},
 	}
 	cmd.Flags().StringArrayVar(&catalogFlags, "catalog", nil, "[alias=]path to a bound catalog; repeatable, first is default (default: probe pog/catalog.yaml under cwd)")
+	cmd.Flags().StringArrayVar(&scopeFlags, "scope", nil, "[alias=]path to a scope-spec YAML baking a deterministic catalog subset into the session for that alias (default: the default catalog); repeatable, one per alias")
 	cmd.Flags().StringVar(&mode, "mode", graphsrv.DefaultMode, "one of: read, propose, steward (gates future write-tool registration)")
 	cmd.Flags().StringVar(&actor, "actor", "", "actor name stamped on write-tool calls (authored_by/authorized_by) and checked for graph.withdraw's own-changeset gate in propose mode")
 	cmd.Flags().StringVar(&feedbackSink, "feedback-sink", graphsrv.FeedbackSinkLocal, "one of: local, catalog, github (local always writes; catalog proposes a changeset per the catalog's feedback_routing block; github files an issue via the native ticket provider; catalog/github degrade to local-only with a routing_errors entry when unconfigured/blocked)")
