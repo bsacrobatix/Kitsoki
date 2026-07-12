@@ -50,6 +50,16 @@ harness_profiles:
     effort: medium
     efforts: [low, medium, high, xhigh, max]
 
+  # Stable study pin for the requested low-effort Sonnet cohort. This uses
+  # ambient Claude auth and only selects values already supported by the
+  # baseline Claude profile above.
+  claude-sonnet-low:
+    backend: claude
+    model: sonnet
+    models: [sonnet]
+    effort: low
+    efforts: [low, medium, high, xhigh, max]
+
   # Your native Google Antigravity (agy CLI) subscription (ambient auth — nothing to set).
   agy-native:
     backend: agy
