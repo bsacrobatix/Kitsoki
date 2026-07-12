@@ -1,6 +1,9 @@
 [mcp_servers.slidey]
-command = "/Users/Brad.Smith/.local/bin/slidey-mcp"
-args = ["--root", "/Users/Brad.Smith/code/kitsoki"]
+# Keep this checked-in launcher portable: project config overrides the user's
+# global MCP entry, so a developer-specific absolute path breaks every restart.
+command = "slidey-mcp"
+args = ["--root", "."]
+cwd = "."
 
 [mcp_servers.slidey.tools.slidey_scene_summary]
 approval_mode = "approve"
