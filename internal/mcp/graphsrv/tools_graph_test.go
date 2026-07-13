@@ -292,8 +292,8 @@ func TestGraphServer_ImpactWrapsQuery(t *testing.T) {
 // TestGraphServer_ToolsListByteCeiling is the golden byte-ceiling test
 // (graph-mcp-plan.md §3.7): serializes the tools/list response and asserts
 // it stays comfortably under a concrete, measured ceiling. Default mode
-// (propose) now registers 15 tools: 9 read (7 + graph.changeset +
-// graph.history) + 4 write (propose/withdraw/apply/authorize) + 2
+// (propose) now registers 17 tools: 9 read (7 + graph.changeset +
+// graph.history) + 6 write (propose/withdraw/apply/authorize + claim/release) + 2
 // feedback. The plan's own ballpark is ~24KB for a similarly sized
 // ~15-tool family; a 24KB ceiling (generous headroom for schema/
 // description growth without being so loose it stops catching a real
@@ -308,8 +308,8 @@ func TestGraphServer_ToolsListByteCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(res.Tools) != 15 {
-		t.Fatalf("expected 15 tools (9 read + 4 write + 2 feedback) in default (propose) mode, got %d: %+v", len(res.Tools), toolNames(res.Tools))
+	if len(res.Tools) != 17 {
+		t.Fatalf("expected 17 tools (9 read + 6 write + 2 feedback) in default (propose) mode, got %d: %+v", len(res.Tools), toolNames(res.Tools))
 	}
 	b, err := json.Marshal(res.Tools)
 	if err != nil {
@@ -327,8 +327,8 @@ func TestGraphServer_ToolsListModeGating(t *testing.T) {
 		count int
 	}{
 		{graphsrv.ModeRead, 11},    // 9 read + 2 feedback, no write tools
-		{graphsrv.ModePropose, 15}, // + propose/withdraw/apply/authorize
-		{graphsrv.ModeSteward, 15},
+		{graphsrv.ModePropose, 17}, // + propose/withdraw/apply/authorize/claim/release
+		{graphsrv.ModeSteward, 17},
 	}
 	for _, tc := range cases {
 		t.Run(tc.mode, func(t *testing.T) {
@@ -346,7 +346,7 @@ func TestGraphServer_ToolsListModeGating(t *testing.T) {
 				names[tool.Name] = true
 			}
 			if tc.mode == graphsrv.ModeRead {
-				for _, w := range []string{"graph.propose", "graph.withdraw", "graph.apply", "graph.authorize"} {
+				for _, w := range []string{"graph.propose", "graph.withdraw", "graph.apply", "graph.authorize", "graph.claim", "graph.release"} {
 					if names[w] {
 						t.Errorf("mode read: %s should not be registered", w)
 					}
