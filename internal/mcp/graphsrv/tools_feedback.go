@@ -309,48 +309,21 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 	}
 	fr := cat.FeedbackRouting
 
-	// Node id/shape: After is a flat mapping (schema/id/title/status/
-	// visibility/edges + type-specific fields), never a nested
-	// {type,fields,edges} envelope — see internal/graph's buildNode/
-	// fileNode. The new node's own id is a fresh id derived from the
-	// report id (never the changeset's own cs-<n>, which Propose mints
-	// itself).
-	nodeID := "feedback-" + reportID
-	after := map[string]any{
-		"schema":     fmt.Sprintf("graph/%s/v0", fr.Type),
-		"id":         nodeID,
-		"title":      args.Title,
-		"status":     "draft",
-		"visibility": "internal",
-	}
-	// Field mapping (judgment call — feedback_routing.fields names field
-	// IDs only, never a value template): the FIRST declared field carries
-	// the report's title/summary text, so any taxonomy gets at least a
-	// human-readable line; a field literally named "report" or
-	// "report_id" (if the taxonomy declares one) additionally gets the
-	// report_id verbatim, for a durable dereference back to the JSONL/
-	// markdown record. Documented per the plan's own convention (the node
-	// carries `report: <report_id>` "for dereference").
-	for i, f := range fr.Fields {
-		if i == 0 {
-			after[f] = args.Title
-		}
-		if f == "report" || f == "report_id" {
-			after[f] = reportID
-		}
-	}
-	// Edge targets — a genuine plan gap, flagged rather than papered
-	// over: feedback_routing.edges names edge FIELD ids only (e.g.
-	// "filed_against"), never a target node id, and nothing in
-	// feedback.report's own args reliably supplies one either (anchor.node
-	// is producer-supplied, optional, and may name something unrelated to
-	// what the taxonomy wants linked). Writing a stub edge with a
-	// hallucinated or empty target would propose bad data into the review
-	// queue; instead this deliberately omits the `edges` key entirely.
-	// The node still lands for human review with its declared field(s)
-	// populated, and if the target type requires that edge, lint surfaces
-	// it as a normal, honest validation gap on the proposal rather than
-	// this code inventing a target.
+	// Node shape + field/edge mapping live in the shared builder
+	// (internal/graph.FeedbackNodeAfter) so the web intake carrier
+	// (internal/runstatus/server's POST /api/feedback/local, U2) proposes
+	// the exact same node shape this MCP carrier does — see its doc
+	// comment for the field-mapping judgment call and the deliberate
+	// edge-target omission. The new node's own id is a fresh id derived
+	// from the report id (never the changeset's own cs-<n>, which Propose
+	// mints itself).
+	after := objectgraph.FeedbackNodeAfter(objectgraph.FeedbackNodeSpec{
+		Type:      fr.Type,
+		Fields:    fr.Fields,
+		NodeID:    "feedback-" + reportID,
+		Title:     args.Title,
+		ReportRef: reportID,
+	})
 
 	hostArgs := map[string]any{
 		"catalog_path": path,
