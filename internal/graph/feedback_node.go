@@ -29,6 +29,19 @@ type FeedbackNodeSpec struct {
 	// ReportRef is the durable dereference back to the JSONL/markdown
 	// record (a report id or idempotency key).
 	ReportRef string
+	// Kind classifies what this report is about — a bug report, an
+	// improvement idea, or general feedback (the producer's own vocabulary,
+	// e.g. feedback-core's bug|issue_request|content_comment|question, or
+	// the MCP tool's tool_gap|data_gap|doc_gap|bug|other). Set on the node
+	// as `kind` whenever non-empty, independent of Fields — see
+	// FeedbackNodeAfter.
+	Kind string
+	// TargetNodeID is the catalog node this report is about, when the
+	// carrier reliably knows one (the web intake's context.nodeIds[0] — the
+	// node selected in the portal at submit time — or the MCP tool's
+	// anchor.node). Empty when no such target is known. See
+	// FeedbackNodeAfter.
+	TargetNodeID string
 }
 
 // FeedbackNodeAfter builds the flat `after` mapping for a feedback node's
@@ -41,15 +54,22 @@ type FeedbackNodeSpec struct {
 // title/summary text, so any taxonomy gets at least a human-readable line;
 // a field literally named "report" or "report_id" (if the taxonomy declares
 // one) additionally gets ReportRef verbatim, for a durable dereference back
-// to the JSONL/markdown record.
+// to the JSONL/markdown record. `kind` is set unconditionally (not gated by
+// Fields, which only names value-templated fields) whenever the carrier
+// supplied one, since it's intrinsic to the report the same way ReportRef
+// is.
 //
-// Edge targets are deliberately omitted: routing configs name edge FIELD
-// ids only, never a target node id, and nothing in a feedback submission
-// reliably supplies one. Writing a stub edge with a hallucinated or empty
-// target would propose bad data into the review queue; instead the node
-// lands for human review with its declared field(s) populated, and if the
-// target type requires an edge, lint surfaces it as a normal, honest
-// validation gap on the proposal.
+// Edge target: when the carrier supplied a TargetNodeID (the web intake's
+// context.nodeIds[0], or the MCP tool's anchor.node) the node's
+// filed_against edge is populated directly — the whole point of capturing
+// it is that the submitter's selection IS the reliable target a feedback
+// submission can supply. An unknown or stale id is not specially validated
+// here; if the target type requires the edge and this id doesn't resolve,
+// lint surfaces it as a normal, honest validation gap on the proposal, same
+// as any other malformed edge. Absent a TargetNodeID (e.g. nothing was
+// selected, or the MCP caller passed no anchor.node), the node lands with
+// no filed_against target for a human to fill in during review — unchanged
+// from before.
 func FeedbackNodeAfter(spec FeedbackNodeSpec) map[string]any {
 	after := map[string]any{
 		"schema":     fmt.Sprintf("graph/%s/v0", spec.Type),
@@ -65,6 +85,12 @@ func FeedbackNodeAfter(spec FeedbackNodeSpec) map[string]any {
 		if f == "report" || f == "report_id" {
 			after[f] = spec.ReportRef
 		}
+	}
+	if spec.Kind != "" {
+		after["kind"] = spec.Kind
+	}
+	if spec.TargetNodeID != "" {
+		after["edges"] = map[string]any{"filed_against": []string{spec.TargetNodeID}}
 	}
 	return after
 }

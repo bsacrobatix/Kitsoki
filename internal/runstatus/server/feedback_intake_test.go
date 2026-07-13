@@ -256,6 +256,32 @@ func TestFeedbackIntake_CatalogSinkFiresForRoutedProducer(t *testing.T) {
 	}
 }
 
+func TestFeedbackIntake_CatalogSinkPopulatesKindAndFiledAgainstFromContext(t *testing.T) {
+	root := t.TempDir()
+	writeIntakeCatalog(t, root)
+	s := intakeServer(root, map[string]FeedbackRoute{
+		"pog-portal": {Sink: "catalog", Catalog: "catalog.yaml", Type: "portal-feedback", Fields: []string{"summary", "report"}},
+	})
+
+	bundle := `{"idempotencyKey":"fb-routed-2","kind":"bug","reviewed":true,"userText":"stage pill drifts on this node",` +
+		`"anchor":{"producer":"pog-portal"},"context":{"nodeIds":["feature-portal-feedback"]}}`
+	rec := postFeedback(t, s, bundle)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	raw, err := os.ReadFile(filepath.Join(root, "catalog.yaml"))
+	if err != nil {
+		t.Fatalf("re-read catalog: %v", err)
+	}
+	text := string(raw)
+	for _, want := range []string{"kind: bug", "filed_against", "feature-portal-feedback"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("catalog missing %q after routed propose:\n%s", want, text)
+		}
+	}
+}
+
 func TestFeedbackIntake_CatalogSinkGatedByProducerKey(t *testing.T) {
 	root := t.TempDir()
 	writeIntakeCatalog(t, root)
