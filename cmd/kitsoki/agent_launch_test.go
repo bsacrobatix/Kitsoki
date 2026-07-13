@@ -120,6 +120,45 @@ states:
 	require.Contains(t, denied, "Write")
 }
 
+func TestAgentLaunchPlan_MCPOnlyStoryAgentDisablesCodexShell(t *testing.T) {
+	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	appPath := filepath.Join(dir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte(`
+app: { id: graph-driver, version: 0.1.0, title: Graph Driver }
+hosts: [host.agent.task]
+agents:
+  driver:
+    system_prompt: "Use only the graph MCP."
+    tools: []
+    mcp:
+      servers:
+        kitsoki-graph:
+          command: kitsoki
+          args: [mcp-graph, --catalog, pog/catalog.yaml]
+      tools: ["mcp__kitsoki-graph__*"]
+world: {}
+intents: {}
+root: idle
+states:
+  idle: { view: "idle" }
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AppPath:   appPath,
+		AgentName: "driver",
+		Backend:   "codex",
+		Task:      "Open the graph.",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+	require.Contains(t, strings.Join(plan.Command, " "), "mcp_servers.kitsoki-graph.enabled=true")
+}
+
 func TestAgentLaunchPlan_CodeactModeStoryAgentOnlyAllowsCodeactTool(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
