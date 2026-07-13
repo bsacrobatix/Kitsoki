@@ -846,6 +846,28 @@ harness_profiles:
 	require.NotContains(t, joined, "Use ONLY")
 }
 
+func TestAgentLaunchPlan_RawInteractivePreservesShimArgsAfterProfileDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`default_profile: desktop
+harness_profiles:
+  desktop:
+    backend: codex
+    model: gpt-5.5
+    effort: medium
+`), 0644))
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		RawInteractive: true,
+		Interactive:    true,
+		ConfigPath:     cfgPath,
+		WorkingDir:     dir,
+		RawArgs:        []string{"-m", "gpt-5.9", "-p", "hello"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"-m", "gpt-5.5", "-c", `model_reasoning_effort="medium"`, codexBypassApprovalsAndSandboxFlag, "-C", dir, "-m", "gpt-5.9", "-p", "hello"}, plan.Command[1:])
+}
+
 func TestAgentLaunchPlan_LaunchPolicyDeniesRawInteractive(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".kitsoki.yaml")

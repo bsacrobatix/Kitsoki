@@ -39,6 +39,7 @@ type agentLaunchOptions struct {
 	CodeactCapabilitiesFile string
 	AddDirs                 []string
 	Env                     []string
+	RawArgs                 []string
 	Exec                    bool
 	Interactive             bool
 	RawInteractive          bool
@@ -232,6 +233,8 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 	cmd.Flags().StringVar(&opts.CodeactCapabilitiesFile, "codeact-capabilities-file", "", "file containing the CodeAct mode Starlark capability ceiling")
 	cmd.Flags().StringArrayVar(&opts.AddDirs, "add-dir", nil, "additional directory made available to the launched agent")
 	cmd.Flags().StringArrayVar(&opts.Env, "env", nil, "extra environment override KEY=VALUE; values are redacted from dry-run output")
+	cmd.Flags().StringArrayVar(&opts.RawArgs, "raw-arg", nil, "raw backend argument; only for launcher shims used with --raw --interactive")
+	_ = cmd.Flags().MarkHidden("raw-arg")
 	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run a task-backed external CLI; task-backed default is a no-provider dry run")
 	cmd.Flags().BoolVar(&opts.Interactive, "interactive", false, "force an interactive Codex session instead of one-shot codex exec; implied when freestanding launch has no task")
 	cmd.Flags().BoolVar(&opts.RawInteractive, "raw", false, "with --interactive, launch the normal backend CLI without app/agent prompt synthesis")
@@ -695,6 +698,11 @@ func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, er
 		return agentLaunchPlan{}, err
 	}
 	args := buildRawInteractiveArgs(backend, model, effort, workingDir, opts.AddDirs)
+	// A launcher shim preserves the caller's backend argv by passing each item
+	// through the hidden repeatable --raw-arg flag. Keep those arguments last:
+	// explicit CLI input must retain its normal backend precedence over a
+	// profile's default model/effort settings.
+	args = append(args, opts.RawArgs...)
 	return agentLaunchPlan{
 		Agent:        "raw",
 		Profile:      profileName,

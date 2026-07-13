@@ -137,6 +137,17 @@ Raw interactive launch also uses the backend's top-level interactive CLI, but
 passes no app/agent prompt and no MCP config. It is intended for native
 logged-in host CLI sessions, especially macOS subscription workflows.
 
+## Policy-aware shell launchers
+
+The distributable `pack/launch-policy` installer also writes
+`.kitsoki/bin/{claude,codex}` and `.kitsoki/launch-policy.sh`. Source the latter
+in an interactive shell to route bare `claude` and `codex` invocations, plus
+Kitsoki backend calls made through `KITSOKI_AGENT_{CLAUDE,CODEX}_BIN`, through
+the same raw-interactive launch-policy preflight. The wrapper preserves the
+native backend argv after policy approval. It does not replace a task-backed
+agent definition: use `kitsoki agent launch --agent … --task … --exec` when a
+task needs Kitsoki's prompt/profile/MCP synthesis.
+
 ## Backends And Profiles
 
 Use `--backend codex`, `--backend claude`, or `--backend copilot` to select a
