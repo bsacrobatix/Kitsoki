@@ -384,6 +384,63 @@ type Metric struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// FrictionRankingV1 is the deterministic, no-provider ranking boundary for a
+// set of EventSink traces. It deliberately ranks only directly evidenced
+// friction; unavailable telemetry has no invented zero contribution.
+const FrictionRankingV1 = "friction-ranking/v1"
+
+type FrictionRanking struct {
+	Schema  string              `json:"schema"`
+	Entries []FrictionRankEntry `json:"entries"`
+}
+
+type FrictionRankEntry struct {
+	Rank   int            `json:"rank"`
+	Trace  string         `json:"trace"`
+	Score  int64          `json:"score"`
+	Report FrictionReport `json:"report"`
+}
+
+// RankFriction analyzes and orders traces by their evidenced friction. The
+// weights make hard failures dominate retries and no-op calls, while keeping
+// token and latency contributions bounded. Ties use the trace path, so a
+// fixture always has one stable order on every machine.
+func RankFriction(traces []string) (FrictionRanking, error) {
+	ranking := FrictionRanking{Schema: FrictionRankingV1}
+	for _, trace := range traces {
+		report, err := AnalyzeFriction(trace)
+		if err != nil {
+			return FrictionRanking{}, err
+		}
+		ranking.Entries = append(ranking.Entries, FrictionRankEntry{
+			Trace: trace, Score: frictionScore(report), Report: report,
+		})
+	}
+	sort.SliceStable(ranking.Entries, func(i, j int) bool {
+		if ranking.Entries[i].Score != ranking.Entries[j].Score {
+			return ranking.Entries[i].Score > ranking.Entries[j].Score
+		}
+		return ranking.Entries[i].Trace < ranking.Entries[j].Trace
+	})
+	for i := range ranking.Entries {
+		ranking.Entries[i].Rank = i + 1
+	}
+	return ranking, nil
+}
+
+func frictionScore(r FrictionReport) int64 {
+	value := func(m Metric) int64 {
+		if !m.Available {
+			return 0
+		}
+		return m.Value
+	}
+	return value(r.ToolErrors)*1000 + value(r.SchemaFailures)*1000 +
+		value(r.Retries)*100 + value(r.NoStateChangeCalls)*10 +
+		value(r.WastedCallTokens)/100 + value(r.CrawlTokens)/100 +
+		value(r.TimeToFirstSuccessfulCall)/1000
+}
+
 // AnalyzeFriction reports only facts that trace evidence supports. In
 // particular token-attribution metrics are unavailable when provider usage is
 // absent; they are never fabricated as zero.
