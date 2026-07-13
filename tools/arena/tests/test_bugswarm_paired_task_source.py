@@ -123,8 +123,17 @@ with tempfile.TemporaryDirectory() as tmp:
     check("target corpus threaded", spec_payload["targets"][0]["corpus"], str(verified_source))
     check("verified-only task axis", spec_payload["axes"]["task"], ["bugswarm-square-okio-140452393"])
     check("variant treatments", [v["treatment"] for v in spec_payload["variants"]], ["kitsoki", "single-briefed"])
-    check("default variant backends", [v["backend"] for v in spec_payload["variants"]], ["synthetic", "synthetic"])
+    check("default variant backends", [v["backend"] for v in spec_payload["variants"]], ["codex", "synthetic"])
     check("candidate model", spec_payload["variants"][0]["model"], "glm-5.2")
+    validation = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "tools/arena/arena.py"), "validate", "--spec", str(spec_path)],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    check("default generated spec validates without live spend", validation.returncode, 0)
     live_spec_path = tmpdir / "bugswarm-paired-task-live.yaml"
     live_generate = subprocess.run(
         [
