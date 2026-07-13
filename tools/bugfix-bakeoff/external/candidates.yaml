@@ -50,6 +50,41 @@ candidates:
     model: gpt-5.5
     effort: medium
     metered: false
+  - key: gpt-5.6-sol
+    short: sol
+    profile: codex-native-5.6-sol
+    provider: openai-codex
+    model: gpt-5.6-sol
+    effort: high
+    metered: false
+  - key: gpt-5.6-terra
+    short: terra
+    profile: codex-native-5.6-terra
+    provider: openai-codex
+    model: gpt-5.6-terra
+    effort: medium
+    metered: false
+  - key: gpt-5.6-luna
+    short: luna
+    profile: codex-native-5.6-luna
+    provider: openai-codex
+    model: gpt-5.6-luna
+    effort: low
+    metered: false
+  - key: gpt-5.4
+    short: gpt54
+    profile: codex-native-5.4
+    provider: openai-codex
+    model: gpt-5.4
+    effort: medium
+    metered: false
+  - key: gpt-5.4-mini
+    short: gpt54mini
+    profile: codex-native-5.4-mini
+    provider: openai-codex
+    model: gpt-5.4-mini
+    effort: low
+    metered: false
   - key: opus-4.8
     short: opus
     profile: claude-native      # Anthropic Opus (native subscription auth)
