@@ -68,9 +68,11 @@ type classifiedEvent struct {
 	// Tool / ToolArgs describe the FIRST tool invocation in this event (a
 	// compact preview of its args). Tools holds every tool invocation in
 	// declaration order. Empty for non-tool events.
-	Tool     string
-	ToolArgs string
-	Tools    []StreamToolUse
+	Tool        string
+	ToolArgs    string
+	Tools       []StreamToolUse
+	ActionID    string
+	ActionState string
 	// IsResult marks the terminal event of a run. ResultText, when non-empty,
 	// is the authoritative final reply text carried by that event (claude
 	// only; copilot leaves it empty and the reply is the last assistant
