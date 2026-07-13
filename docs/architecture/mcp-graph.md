@@ -122,7 +122,16 @@ its test suite — tests drive the server via the SDK's in-process
 Every tool invokes `host.graph.*` through the registry rather than calling
 `internal/graph` directly, so CLI, `kit_call`, and Starlark share the exact
 same engine surface this package exposes over MCP (plan §1's "all capability
-lands as engine ops" constraint).
+lands as engine ops" constraint). `kitsoki graph propose`
+([`cmd/kitsoki/graph_propose.go`](../../cmd/kitsoki/graph_propose.go)) is
+the CLI twin of `graph.propose` over that same op — added 2026-07-13 after
+dogfood friction where an MCP-server outage forced agents to hand-author
+changeset YAML because the CLI had `lint`/`apply`/`query`/`materialize` but
+no `propose`. It reads `{title, operations[, visibility]}` (or a bare
+operations list plus `--title`) from a file or stdin, stamps `authored_by`
+from `--actor`, and shares all of `Propose`'s id minting, guard fills, and
+scratch-copy validation; like the MCP tool in propose mode it is never
+steward-trusted, so input provenance can't trigger auto-authorize.
 
 ## Budgets
 
