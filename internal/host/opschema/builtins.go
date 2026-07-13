@@ -269,6 +269,14 @@ func registerTicketFederationBuiltins(r *Registry) {
 		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "to", "string"),
 		Output: fields("ok", "bool"),
 	})
+	r.Register("host.ticket_federation", "assign", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "assignee", "string"),
+		Output: fields("ok", "bool", "assignee", "string"),
+	})
+	r.Register("host.ticket_federation", "unassign", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("ok", "bool", "assignee", "string"),
+	})
 	r.Register("host.ticket_federation", "list_mine", Op{
 		Input:  fields("filter", "string", "sources", "list", "repo", "string", "root", "string"),
 		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),

@@ -1526,6 +1526,18 @@ func validateStates(
 		}
 		statePath := joinPath(prefix, name)
 
+		if policy := s.Assignment; policy != nil {
+			loc := fmt.Sprintf("state %q assignment", statePath)
+			if strings.TrimSpace(policy.Role) == "" {
+				addErr(fmt.Sprintf("%s: role is required", loc))
+			}
+			switch policy.Sync {
+			case "", "linked-ticket":
+			default:
+				addErr(fmt.Sprintf("%s: sync %q is not supported (want linked-ticket)", loc, policy.Sync))
+			}
+		}
+
 		// Gather local intent names for this state.
 		localIntents := make(map[string]struct{}, len(s.Intents))
 		for k := range s.Intents {

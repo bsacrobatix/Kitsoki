@@ -269,6 +269,12 @@ host_interfaces:
       transition:
         input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string, to: string }
         output: { ok: bool }
+      assign:
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string, assignee: string }
+        output: { ok: bool, assignee: string }
+      unassign:
+        input:  { id: string, ref: string, source: string, sources: list, repo: string, root: string }
+        output: { ok: bool, assignee: string }
       list_mine:
         input:  { filter: string, sources: list, repo: string, root: string }
         output: { tickets: list, source_groups: list, provider_errors: list }

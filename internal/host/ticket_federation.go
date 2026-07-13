@@ -65,7 +65,7 @@ func TicketFederationHandler(reg *Registry) Handler {
 		switch op {
 		case "search", "list_mine":
 			return ticketFederationList(ctx, reg, sources, args, op), nil
-		case "get", "create", "comment", "comment_edit", "comment_reactions", "transition":
+		case "get", "create", "comment", "comment_edit", "comment_reactions", "transition", "assign", "unassign":
 			return ticketFederationRoute(ctx, reg, sources, args, op)
 		default:
 			return Result{Error: fmt.Sprintf("host.ticket_federation: unknown op %q", op)}, nil
@@ -407,9 +407,9 @@ func ticketFederationControlArg(key string) bool {
 
 func ticketFederationDynamicArg(key string) bool {
 	switch key {
-	case "op", "id", "body", "thread", "to", "query", "limit", "filter", "comment_id",
+	case "op", "id", "body", "thread", "to", "query", "limit", "filter", "comment_id", "assignee",
 		"title", "description", "severity", "component", "target", "trace_ref", "filed_by",
-		"labels", "assignee", "state":
+		"labels", "state":
 		return true
 	default:
 		return false

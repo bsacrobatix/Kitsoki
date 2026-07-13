@@ -22,7 +22,7 @@ func LocalGitHubTicketHandler(ctx context.Context, args map[string]any) (Result,
 		return localGitHubTicketList(ctx, args, op)
 	case "get":
 		return localGitHubTicketGet(ctx, args)
-	case "comment", "transition":
+	case "comment", "transition", "assign", "unassign":
 		if localGitHubUseGitHub(args) {
 			return GitHubTicketHandler(ctx, withOp(args, op))
 		}
