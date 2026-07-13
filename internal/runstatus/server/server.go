@@ -91,6 +91,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/assignment"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/dynamicworkflow"
 	"kitsoki/internal/helpdocs"
@@ -170,8 +171,9 @@ func (s *Server) injectAuthor(ctx context.Context, params map[string]any, slots 
 // Server answers the runstatus live contract by routing every RPC to the right
 // session via a [SessionProvider]. It is safe for concurrent use.
 type Server struct {
-	provider SessionProvider
-	poll     time.Duration
+	provider    SessionProvider
+	poll        time.Duration
+	assignments assignment.Store
 
 	// defaultActor is the lowest-precedence operator identity injected as
 	// slots.author on a drive turn (see WithDefaultActor). Empty = none.
@@ -359,6 +361,13 @@ type serverConfig struct {
 	projectOnboarded          bool
 	feedbackRouting           map[string]FeedbackRoute
 	storyDirs                 []string
+	assignments               assignment.Store
+}
+
+// WithAssignmentStore enables the persisted room-assignment RPC family. The
+// caller owns store placement; the server never invents a portal-local source.
+func WithAssignmentStore(store assignment.Store) Option {
+	return func(c *serverConfig) { c.assignments = store }
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -538,6 +547,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 	return &Server{
 		provider:                  provider,
 		poll:                      cfg.poll,
+		assignments:               cfg.assignments,
 		defaultActor:              cfg.defaultActor,
 		subs:                      make(map[string]*subscription),
 		notifs:                    newNotifBuffer(),
@@ -808,6 +818,9 @@ const (
 	// codeNotFound is returned when a session-routed RPC carries a session_id
 	// the provider does not know (an expired or never-existing session).
 	codeNotFound = -32002
+	// codeStaleVersion makes an optimistic assignment conflict actionable: Data
+	// carries the current folded Record for a refresh-and-retry UI.
+	codeStaleVersion = -32003
 
 	// maxRPCBodyBytes caps a single /rpc request body. The largest legitimate
 	// payload is a bug.report with a base64'd rrweb session buffer (~last 30s of
@@ -929,6 +942,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, serverErr(err)
 		}
 		return out, nil
+
+	case "runstatus.assignment.get", "runstatus.assignment.list", "runstatus.assignment.assign", "runstatus.assignment.reassign", "runstatus.assignment.unassign":
+		return s.dispatchAssignment(method, params)
 
 	case "runstatus.chat.show":
 		entry, rerr := s.resolve(params)
