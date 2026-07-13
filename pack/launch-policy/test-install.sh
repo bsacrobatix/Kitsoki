@@ -13,6 +13,10 @@ git -C "$repo" commit -q --allow-empty -m init
 
 "$pack_dir/install.sh" "$repo" --no-siblings
 test -x "$repo/.claude/hooks/block-bare-checkout.sh"
+test -x "$repo/.kitsoki/bin/claude"
+test -x "$repo/.kitsoki/bin/codex"
+test -f "$repo/.kitsoki/launch-policy.sh"
+grep -q 'KITSOKI_AGENT_CLAUDE_BIN' "$repo/.kitsoki/launch-policy.sh"
 node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$repo/.claude/settings.json"
 grep -q 'require_capsule: false' "$repo/.kitsoki.local.yaml"
 grep -q '\.capsules/workspaces' "$repo/.kitsoki.local.yaml"
