@@ -438,7 +438,16 @@ def _quota_readiness(quota: Any) -> dict[str, str]:
 def load_task_optimization_receipts(path: str | Path, *, plan: dict[str, Any], preflight: dict[str, Any]) -> list[dict[str, Any]]:
     """Load immutable result receipts and reject mismatched/corrupt evidence."""
     root = Path(path)
-    files = [root] if root.is_file() else sorted(root.rglob("*.json")) if root.exists() else []
+    if root.is_file():
+        files = [root]
+    elif root.exists():
+        # .leases are dispatch inputs, not scored attempts. New attempts are
+        # immutable directories containing receipt.json; retain support for
+        # legacy cell/*.json records so existing campaigns remain resumable.
+        files = sorted(file for file in root.rglob("*.json")
+                       if ".leases" not in file.parts and (file.name == "receipt.json" or file.parent == root / file.parent.name))
+    else:
+        files = []
     plan_ids = {str(cell["id"]) for cell in plan.get("cells", [])}
     plan_cells = {str(cell["id"]): cell for cell in plan.get("cells", [])}
     preflight_candidates = {str(record.get("candidate_id")): record for record in preflight.get("candidates", []) if isinstance(record, dict)}

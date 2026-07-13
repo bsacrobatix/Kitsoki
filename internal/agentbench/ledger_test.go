@@ -46,3 +46,34 @@ func TestFrictionUnknownIsNotZero(t *testing.T) {
 		t.Fatalf("crawl metric=%+v; want unavailable explanation", r.CrawlTokens)
 	}
 }
+
+func TestProviderResultReceiptsPreserveRetryResults(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "trace.jsonl")
+	lines := []map[string]any{
+		{"ts": "2026-07-13T00:00:00Z", "kind": "agent.call.start", "call_id": "retry-1", "state_path": "generate", "payload": map[string]any{"provider": "openai", "model": "gpt-test"}},
+		{"ts": "2026-07-13T00:00:01Z", "kind": "agent.call.error", "call_id": "retry-1", "payload": map[string]any{"error": "429"}},
+		{"ts": "2026-07-13T00:00:02Z", "kind": "agent.call.start", "call_id": "retry-2", "state_path": "generate", "payload": map[string]any{"provider": "openai", "model": "gpt-test"}},
+		{"ts": "2026-07-13T00:00:04Z", "kind": "agent.call.complete", "call_id": "retry-2", "payload": map[string]any{"meta": map[string]any{"usage": map[string]any{"input_tokens": float64(7), "output_tokens": float64(2)}}}},
+	}
+	var b []byte
+	for _, l := range lines {
+		x, _ := json.Marshal(l)
+		b = append(b, append(x, '\n')...)
+	}
+	if err := os.WriteFile(p, b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	receipts, err := BuildProviderResultReceipts(p, RequestIdentity{RunID: "run", AttemptID: "attempt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(receipts) != 2 || receipts[0].AttemptOrdinal != 1 || receipts[1].AttemptOrdinal != 2 {
+		t.Fatalf("receipts=%+v", receipts)
+	}
+	if receipts[0].Status != "failed" || receipts[1].Status != "completed" || receipts[1].APIDurationMS != 2000 {
+		t.Fatalf("receipt lifecycle=%+v", receipts)
+	}
+	if receipts[1].RawUsageHash == "" {
+		t.Fatal("successful provider result must carry raw usage hash")
+	}
+}

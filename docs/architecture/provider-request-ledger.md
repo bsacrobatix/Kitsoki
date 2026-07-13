@@ -19,3 +19,10 @@ the trace cannot support them; unavailable never means zero.
 The initial API is `internal/agentbench.BuildProviderRequestLedger` and
 `AnalyzeFriction`. It is intentionally provider-free, so historical evidence
 can be reprocessed without live spend.
+
+`provider-result/v1` is the result-level companion used by restartable Arena
+attempts. `BuildProviderResultReceipts` emits terminal results in trace order,
+including failed and retried calls, an attempt ordinal, API duration, and a
+hash of the raw provider usage object when one exists. A result receipt is not
+an estimate: absent usage is retained as unavailable evidence and must not be
+converted into zero-cost spend.

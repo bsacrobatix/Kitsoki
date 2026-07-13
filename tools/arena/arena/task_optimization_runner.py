@@ -149,7 +149,11 @@ def run(
                     receipt, receipt_path=workspace / "receipt.json", preflight_candidate=candidate,
                     requires_codeact_runtime="codeact" in str(cell.get("treatment") or ""),
                 )
-            destination = attempts / str(cell["id"]) / f"{attempt_id}.json"
+            # One attempt owns one directory. The receipt is written once and
+            # never replaced, so provider retries/resumes cannot inherit or
+            # overwrite another attempt's evidence.
+            attempt_dir = attempts / str(cell["id"]) / attempt_id
+            destination = attempt_dir / "receipt.json"
             _write_once(destination, receipt)
             dispatched.append(str(cell["id"]))
             last_provider_dispatch[provider] = clock()

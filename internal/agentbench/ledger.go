@@ -17,6 +17,7 @@ import (
 
 const ProviderRequestLedgerV1 = "provider-request-ledger/v1"
 const FrictionV1 = "friction/v1"
+const ProviderResultReceiptV1 = "provider-result/v1"
 
 type RequestIdentity struct {
 	RunID     string `json:"run_id"`
@@ -40,6 +41,31 @@ type ProviderRequest struct {
 	Usage        TokenUsage   `json:"usage"`
 	Money        Money        `json:"money"`
 	EvidenceHash string       `json:"evidence_hash"`
+}
+
+// ProviderResultReceipt is the provider-result boundary for one terminal
+// request. Unlike aggregate bench metrics, this record survives retries and
+// resumes as one independently attributable result. Unknown usage remains
+// unknown (zero values plus an empty raw hash), rather than being reported as
+// a free provider call.
+type ProviderResultReceipt struct {
+	Schema         string       `json:"schema"`
+	RequestID      string       `json:"request_id"`
+	RunID          string       `json:"run_id"`
+	AttemptID      string       `json:"attempt_id"`
+	AttemptOrdinal int          `json:"attempt_ordinal"`
+	Stage          string       `json:"stage"`
+	Requested      ModelRequest `json:"requested"`
+	Resolved       ModelRequest `json:"resolved"`
+	StartedNS      int64        `json:"started_monotonic_ns"`
+	FinishedNS     int64        `json:"finished_monotonic_ns"`
+	APIDurationMS  int64        `json:"api_duration_ms"`
+	Status         string       `json:"status"`
+	Error          string       `json:"error,omitempty"`
+	Usage          TokenUsage   `json:"usage"`
+	Money          Money        `json:"money"`
+	RawUsageHash   string       `json:"raw_usage_hash,omitempty"`
+	EvidenceHash   string       `json:"evidence_hash"`
 }
 
 type ModelRequest struct {
@@ -133,6 +159,96 @@ func BuildProviderRequestLedger(trace string, identity RequestIdentity) ([]Provi
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].RequestID < rows[j].RequestID })
 	return rows, nil
+}
+
+// BuildProviderResultReceipts emits one receipt for every terminal provider
+// call in trace order. The ordinal is deliberately based on terminal results,
+// not call IDs, so a retry/resume can be compared without relying on provider
+// naming conventions.
+func BuildProviderResultReceipts(trace string, identity RequestIdentity) ([]ProviderResultReceipt, error) {
+	f, err := os.Open(trace)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	starts := map[string]ledgerEvent{}
+	terminal := map[string]bool{}
+	rows := make([]ProviderResultReceipt, 0)
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for line := 1; s.Scan(); line++ {
+		var ev ledgerEvent
+		if err := json.Unmarshal(s.Bytes(), &ev); err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", trace, line, err)
+		}
+		if ev.CallID == "" {
+			continue
+		}
+		if ev.Kind == "agent.call.start" {
+			starts[ev.CallID] = ev
+			continue
+		}
+		if ev.Kind != "agent.call.complete" && ev.Kind != "agent.call.error" {
+			continue
+		}
+		start, ok := starts[ev.CallID]
+		if !ok {
+			continue
+		}
+		if terminal[ev.CallID] {
+			return nil, fmt.Errorf("%s:%d: duplicate terminal evidence for request %q", trace, line, ev.CallID)
+		}
+		terminal[ev.CallID] = true
+		requested := modelFrom(start.Payload)
+		resolved := modelFrom(ev.Payload)
+		if resolved.Model == "" {
+			resolved = requested
+		}
+		usage, money := usageFrom(ev.Payload)
+		status := "completed"
+		if ev.Kind == "agent.call.error" {
+			status = "failed"
+		}
+		receipt := ProviderResultReceipt{
+			Schema: ProviderResultReceiptV1, RequestID: ev.CallID, RunID: identity.RunID,
+			AttemptID: identity.AttemptID, AttemptOrdinal: len(rows) + 1, Stage: start.StatePath,
+			Requested: requested, Resolved: resolved, StartedNS: start.TS.UnixNano(),
+			FinishedNS: ev.TS.UnixNano(), APIDurationMS: ev.TS.Sub(start.TS).Milliseconds(),
+			Status: status, Usage: usage, Money: money,
+		}
+		if status == "failed" {
+			receipt.Error, _ = ev.Payload["error"].(string)
+		}
+		if raw, ok := rawUsage(ev.Payload); ok {
+			receipt.RawUsageHash = sha256JSON(raw)
+		}
+		raw, _ := json.Marshal(struct {
+			Start    ledgerEvent `json:"start"`
+			Terminal ledgerEvent `json:"terminal"`
+		}{start, ev})
+		receipt.EvidenceHash = sha256JSON(json.RawMessage(raw))
+		rows = append(rows, receipt)
+	}
+	if err := s.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func rawUsage(p map[string]any) (any, bool) {
+	if meta, ok := p["meta"].(map[string]any); ok {
+		if usage, ok := meta["usage"]; ok {
+			return usage, true
+		}
+	}
+	usage, ok := p["usage"]
+	return usage, ok
+}
+
+func sha256JSON(value any) string {
+	raw, _ := json.Marshal(value)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func modelFrom(p map[string]any) ModelRequest {

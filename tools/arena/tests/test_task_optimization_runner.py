@@ -84,7 +84,7 @@ with tempfile.TemporaryDirectory() as td:
     check("live retries only infra", len(calls), 3)
     check("live records every dispatch", summary.dispatched, ["one", "one", "two"])
     check("provider pacing is applied", sleeps, [3.0])
-    receipts = sorted(path for path in (root / "attempts").glob("*/*.json") if path.parent.name != ".leases")
+    receipts = sorted((root / "attempts").glob("*/*/receipt.json"))
     check("attempts are immutable canonical records", len(receipts), 3)
     leases = sorted((root / "attempts" / ".leases").glob("*.json"))
     check("every attempt owns a lease", len(leases), 3)
