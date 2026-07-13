@@ -199,6 +199,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(statusCmd())
 	root.AddCommand(webCmd())
 	root.AddCommand(tourCmd())
+	root.AddCommand(tourSpecCmd())
 	root.AddCommand(materializeCmd())
 	root.AddCommand(newGHAgentCmd())
 	root.AddCommand(projectProfileCmd())
