@@ -830,6 +830,25 @@ EXAMPLES:
 	cmd.AddCommand(traceToFlowCmd())
 	cmd.AddCommand(traceStatusCmd())
 	cmd.AddCommand(traceRuntimeContractCmd())
+	cmd.AddCommand(traceSequenceContractCmd())
+	return cmd
+}
+
+// traceSequenceContractCmd exposes the store's authoritative EventSink JSONL
+// sequence validation to CI and Arena before a trace is scored.
+func traceSequenceContractCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sequence-contract <trace.jsonl>",
+		Short: "Fail closed when EventSink turn/sequence ordering is invalid",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := store.ValidateJSONL(args[0]); err != nil {
+				return fmt.Errorf("trace sequence contract failed: %w", err)
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "trace sequence: valid (%s)\n", args[0])
+			return nil
+		},
+	}
 	return cmd
 }
 

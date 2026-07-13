@@ -67,7 +67,7 @@ type JSONLSink struct {
 	// (the race detector flags Append at jsonl.go vs History/BuildJourney).
 	// Holding mu across each public method, and returning copies from the
 	// readers, keeps the sink self-consistent regardless of caller locking.
-	mu   sync.Mutex
+	mu sync.Mutex
 	// Path is the file path passed to OpenJSONL; exposed for diagnostics.
 	Path string
 	hist History
@@ -187,6 +187,19 @@ func OpenJSONL(path string) (*JSONLSink, error) {
 		seqByTurn[ev.Turn] = ev.Seq + 1 // next seq for this turn
 	}
 	return &JSONLSink{Path: path, hist: hist, rawLines: rawLines, f: f, openInfo: info, seqByTurn: seqByTurn}, nil
+}
+
+// ValidateJSONL verifies an EventSink JSONL trace without opening it for
+// append. It enforces the session-header schema plus contiguous per-turn
+// sequences and cross-turn ordering, making the same persistence oracle
+// available to read-only CI and trace consumers.
+func ValidateJSONL(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("store/jsonl: read %q: %w", path, err)
+	}
+	_, _, err = loadAndValidate(data, path)
+	return err
 }
 
 // loadAndValidate reads existing JSONL bytes, validates the header, and
