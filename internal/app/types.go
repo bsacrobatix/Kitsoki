@@ -904,6 +904,16 @@ type OperationPhaseSummary struct {
 	From []string `yaml:"from,omitempty"`
 }
 
+// AssignmentPolicy declares how a room may be staffed at runtime. It names a
+// role rather than a person so story definitions stay portable between
+// operators and ticket providers. Runtime state is event-sourced separately.
+type AssignmentPolicy struct {
+	Role          string `yaml:"role,omitempty"`
+	Required      bool   `yaml:"required,omitempty"`
+	AllowReassign bool   `yaml:"allow_reassign,omitempty"`
+	Sync          string `yaml:"sync,omitempty"` // "" | linked-ticket
+}
+
 type State struct {
 	// Type is "atomic" (default), "compound", or "parallel".
 	Type string `yaml:"type,omitempty"`
@@ -912,6 +922,9 @@ type State struct {
 	Mode string `yaml:"mode,omitempty"`
 	// Description is shown in the location indicator.
 	Description string `yaml:"description,omitempty"`
+	// Assignment optionally declares the staffing policy for this room/state.
+	// It never stores a principal identity; session assignments live in events.
+	Assignment *AssignmentPolicy `yaml:"assignment,omitempty"`
 	// View is the render template shown to the user on arrival.
 	//
 	// The View type custom-unmarshals YAML and accepts either the legacy

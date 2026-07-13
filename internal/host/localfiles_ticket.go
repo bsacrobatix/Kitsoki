@@ -35,7 +35,7 @@ import (
 // LocalFilesTicketHandler implements host.local_files.ticket (prefix-fallback).
 //
 // Required args:
-//   - op (string): one of "search", "get", "comment", "transition", "list_mine".
+//   - op (string): one of "search", "get", "comment", "transition", "assign", "unassign", "list_mine".
 //
 // Per-op args/returns follow the ticket iface contract.  See doc comments on each
 // dispatch helper below for the precise shape.
@@ -69,6 +69,10 @@ func LocalFilesTicketHandler(ctx context.Context, args map[string]any) (Result, 
 		return ticketComment(root, args, time.Now().UTC())
 	case "transition":
 		return ticketTransition(root, args)
+	case "assign":
+		return ticketSetAssignee(root, args, false)
+	case "unassign":
+		return ticketSetAssignee(root, args, true)
 	case "list_mine":
 		return ticketListMine(root, args)
 	default:
@@ -520,6 +524,42 @@ func ticketTransition(root string, args map[string]any) (Result, error) {
 		return Result{Error: fmt.Sprintf("ticket.transition: write: %v", err)}, nil
 	}
 	return Result{Data: map[string]any{"ok": true}}, nil
+}
+
+// ticketSetAssignee updates the provider-neutral assignee field. Agent
+// principals are runtime-only identities and must not leak into ticket files.
+func ticketSetAssignee(root string, args map[string]any, clear bool) (Result, error) {
+	id := strings.TrimSpace(ghStr(args["id"]))
+	if id == "" {
+		return Result{Error: "ticket.assign: id argument is required"}, nil
+	}
+	assignee := strings.TrimSpace(ghStr(args["assignee"]))
+	if !clear && assignee == "" {
+		return Result{Error: "ticket.assign: assignee argument is required"}, nil
+	}
+	if strings.HasPrefix(strings.ToLower(assignee), "agent:") {
+		return Result{Error: "ticket.assign: agent principals are runtime-only and cannot be synced to tickets"}, nil
+	}
+	path, _, err := findTicketPath(root, id)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.assign: %v", err)}, nil
+	}
+	if path == "" {
+		return Result{Error: fmt.Sprintf("ticket.assign: %s not found", id)}, nil
+	}
+	bf, err := readBugFile(path)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.assign: %v", err)}, nil
+	}
+	if clear {
+		delete(bf.Front, "assignee")
+	} else {
+		bf.Front["assignee"] = assignee
+	}
+	if err := writeBugFile(bf); err != nil {
+		return Result{Error: fmt.Sprintf("ticket.assign: write: %v", err)}, nil
+	}
+	return Result{Data: map[string]any{"ok": true, "assignee": assignee}}, nil
 }
 
 // ticketListMine implements ticket.list_mine.

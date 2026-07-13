@@ -73,11 +73,50 @@ func GitHubTicketHandler(ctx context.Context, args map[string]any) (Result, erro
 		return ghTicketCommentReactions(ctx, args)
 	case "transition":
 		return ghTicketTransition(ctx, args)
+	case "assign":
+		return ghTicketAssign(ctx, args, false)
+	case "unassign":
+		return ghTicketAssign(ctx, args, true)
 	case "list_mine":
 		return ghTicketListMine(ctx, args)
 	default:
 		return Result{Error: fmt.Sprintf("host.gh.ticket: unknown op %q", op)}, nil
 	}
+}
+
+func ghTicketAssign(ctx context.Context, args map[string]any, clear bool) (Result, error) {
+	id := strings.TrimSpace(ghStr(args["id"]))
+	if id == "" {
+		return Result{Error: "ticket.assign: id argument is required"}, nil
+	}
+	assignee := strings.TrimSpace(ghStr(args["assignee"]))
+	if !clear && assignee == "" {
+		return Result{Error: "ticket.assign: assignee argument is required"}, nil
+	}
+	if strings.HasPrefix(strings.ToLower(assignee), "agent:") {
+		return Result{Error: "ticket.assign: agent principals are runtime-only and cannot be synced to tickets"}, nil
+	}
+	repo, num := splitIssueID(id)
+	if repo == "" {
+		repo = strings.TrimSpace(ghStr(args["repo"]))
+	}
+	repo = resolveTicketRepo(ctx, repo, args)
+	if repo == "" {
+		return Result{Error: "ticket.assign: repo argument is required for native GitHub ticket assignment"}, nil
+	}
+	payload := map[string]any{"assignees": []string{assignee}}
+	if clear {
+		payload["assignees"] = []string{}
+	}
+	var raw map[string]any
+	code, resp, err := githubAPIJSON(ctx, "PATCH", "repos/"+repo+"/issues/"+num, payload, &raw)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("ticket.assign: %v", err)}, nil
+	}
+	if code >= 300 {
+		return Result{Error: fmt.Sprintf("ticket.assign: %s", githubAPIError(resp))}, nil
+	}
+	return Result{Data: githubTicketSourceData(map[string]any{"ok": true, "assignee": assignee}, repo)}, nil
 }
 
 // ─── Op dispatchers ─────────────────────────────────────────────────────────
