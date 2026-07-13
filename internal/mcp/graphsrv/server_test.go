@@ -7,6 +7,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/host"
 	"kitsoki/internal/mcp/graphsrv"
 )
 
@@ -232,6 +233,44 @@ func checkSchemaNoBooleanLeaves(t *testing.T, toolName, path string, schema map[
 					checkSchemaNoBooleanLeaves(t, toolName, propPath+"[]", itemsSchema)
 				}
 			}
+		}
+	}
+}
+
+// TestGraphServer_SurvivesPanickingHandler proves the panic firewall
+// end-to-end through the SDK session: a tool handler panic (injected here
+// via a Registry whose host.graph.lint op panics) must come back as a
+// normal INTERNAL error result — and the same session must still serve the
+// next call — rather than killing the server. Without recorder.go's
+// recover, this test would crash the whole test binary.
+func TestGraphServer_SurvivesPanickingHandler(t *testing.T) {
+	reg := host.NewRegistry()
+	reg.Register("host.graph.lint", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		panic("boom: simulated engine bug")
+	})
+	cs, done := connectGraphServer(t, graphsrv.Config{
+		CatalogFlags: []string{fixturePath},
+		Registry:     reg,
+	})
+	defer done()
+
+	for i := 0; i < 2; i++ { // second call proves the session survived the first panic
+		res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
+			Name:      "graph.lint",
+			Arguments: map[string]any{},
+		})
+		if err != nil {
+			t.Fatalf("call %d: CallTool after handler panic must still get a response, got: %v", i, err)
+		}
+		if !res.IsError {
+			t.Fatalf("call %d: expected an isError result from the panicking handler", i)
+		}
+		m, ok := res.StructuredContent.(map[string]any)
+		if !ok {
+			t.Fatalf("call %d: StructuredContent is not a map: %T", i, res.StructuredContent)
+		}
+		if code, _ := m["code"].(string); code != "INTERNAL" {
+			t.Fatalf("call %d: expected code INTERNAL, got %+v", i, m)
 		}
 	}
 }

@@ -67,6 +67,15 @@ const (
 	// changeset authored by a different actor. Steward mode skips this
 	// check — stewards can withdraw anything.
 	CodeNotYourChangeset = "NOT_YOUR_CHANGESET"
+
+	// CodeInternal: a tool handler panicked. The `recorded` wrapper
+	// converts the panic into this error payload instead of letting it
+	// kill the whole server process — mcpsdk v1.0.0 does not recover
+	// handler panics itself, so without this a single buggy call (or a
+	// panic-inducing catalog state written by a concurrent session) would
+	// take down the long-lived stdio server and every bound catalog with
+	// it. The panic message and stack still go to stderr for postmortem.
+	CodeInternal = "INTERNAL"
 )
 
 // defaultIfStuck is the standing advertisement of the feedback channel:

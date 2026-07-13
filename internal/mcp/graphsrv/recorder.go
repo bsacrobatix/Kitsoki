@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -85,16 +88,37 @@ func resultCodeOf(res *mcpsdk.CallToolResult) string {
 // at every tool's registration site so feedback.report always has a real
 // evidence trail to attach, regardless of which tools were actually called
 // leading up to it.
+//
+// It is also the server's panic firewall: mcpsdk v1.0.0 does not recover
+// tool-handler panics, so an unrecovered panic anywhere in a handler would
+// kill the whole stdio server process. Since every tool registers through
+// this wrapper, recovering here converts any handler panic into a normal
+// CodeInternal error payload (still recorded as evidence) while the panic
+// value and stack go to stderr for postmortem — the server stays up.
 func recorded(deps *Deps, tool string, h mcpsdk.ToolHandler) mcpsdk.ToolHandler {
-	return func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
-		res, err := h(ctx, req)
-		if deps.Recorder != nil {
-			at := time.Now().UTC()
-			if deps.Clock != nil {
-				at = deps.Clock.Now()
-			}
-			deps.Recorder.Record(tool, digestArgs(req.Params.Arguments), resultCodeOf(res), at)
+	record := func(req *mcpsdk.CallToolRequest, res *mcpsdk.CallToolResult) {
+		if deps.Recorder == nil {
+			return
 		}
+		at := time.Now().UTC()
+		if deps.Clock != nil {
+			at = deps.Clock.Now()
+		}
+		deps.Recorder.Record(tool, digestArgs(req.Params.Arguments), resultCodeOf(res), at)
+	}
+	return func(ctx context.Context, req *mcpsdk.CallToolRequest) (res *mcpsdk.CallToolResult, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "mcp-graph: recovered panic in tool %q: %v\n%s", tool, r, debug.Stack())
+				res = errorResult(NewError(CodeInternal,
+					fmt.Sprintf("%s: internal error (recovered panic): %v", tool, r),
+					"this is a server bug — the call failed but the server is still up; the stack was written to the server's stderr"))
+				err = nil
+				record(req, res)
+			}
+		}()
+		res, err = h(ctx, req)
+		record(req, res)
 		return res, err
 	}
 }
