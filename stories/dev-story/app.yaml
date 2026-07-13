@@ -1624,6 +1624,12 @@ intents:
     examples: ["make a demo video", "record a demo", "demo video", "refresh the demo video", "tour video for this feature"]
     priority: 34
 
+  go_demo_artifact_review:
+    title: "Review Demo Artifacts"
+    description: "Review independent mockup, rrweb, and Slidey deck revisions through the trusted demo-artifact contract."
+    examples: ["review demo artifacts", "demo artifact review"]
+    priority: 34
+
   # Inbox-routed review-request pickup. Selects a "PR awaiting your
   # review" inbox item and projects its payload (pr_id, pr_title,
   # pr_author) into the rev import via world_in:. The inbox.yaml
@@ -2542,6 +2548,22 @@ imports:
         to: landing
         set:
           status: "demo-exhausted"
+      abandoned:
+        to: landing
+        set:
+          status: "abandoned"
+
+  # Demo artifact review is deliberately separate from the video producer.
+  # Existing `demovid` paths stay intact as compatibility wrappers; this import
+  # is the trusted, versioned review/annotation entrypoint.
+  demoart:
+    source: ../demo-artifact-review
+    entry: review
+    exits:
+      reviewed:
+        to: landing
+        set:
+          status: "demo-artifacts-reviewed"
       abandoned:
         to: landing
         set:

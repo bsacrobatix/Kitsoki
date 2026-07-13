@@ -53,6 +53,14 @@ func Builtins() *Registry {
 		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "to", "string"),
 		Output: fields("ok", "bool"),
 	})
+	r.Register("host.local_files.ticket", "assign", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "assignee", "string"),
+		Output: fields("ok", "bool", "assignee", "string"),
+	})
+	r.Register("host.local_files.ticket", "unassign", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("ok", "bool", "assignee", "string"),
+	})
 	r.Register("host.local_files.ticket", "list_mine", Op{
 		Input:  fields("filter", "string", "sources", "list", "repo", "string", "root", "string"),
 		Output: fields("tickets", "list", "source_groups", "list", "provider_errors", "list"),
@@ -79,6 +87,14 @@ func Builtins() *Registry {
 	r.Register("host.local_github.ticket", "transition", Op{
 		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "to", "string"),
 		Output: fields("ok", "bool"),
+	})
+	r.Register("host.local_github.ticket", "assign", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string", "assignee", "string"),
+		Output: fields("ok", "bool", "assignee", "string"),
+	})
+	r.Register("host.local_github.ticket", "unassign", Op{
+		Input:  fields("id", "string", "ref", "string", "source", "string", "sources", "list", "repo", "string", "root", "string"),
+		Output: fields("ok", "bool", "assignee", "string"),
 	})
 	r.Register("host.local_github.ticket", "list_mine", Op{
 		Input:  fields("filter", "string", "sources", "list", "repo", "string", "root", "string"),
