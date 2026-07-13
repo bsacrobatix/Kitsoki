@@ -369,6 +369,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 	permMode = policy.CLIMode
 	tools := policy.AllowedTools
 	disallowedTools := policy.DeniedTools
+	mcpServers := effectiveMCPServers(args, agent)
 
 	var out Result
 	lockErr := cs.WithLock(ctx, chatID, func(ctx context.Context) error {
@@ -377,7 +378,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 			out = Result{Error: "host.agent.converse: " + sandboxErr}
 			return nil
 		}
-		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, effort, permMode, tools, disallowedTools, agent.InheritClaudeDefault, policy, sandbox)
+		inner, runErr := doConverseChatTurn(ctx, cs, chatID, question, workingDir, systemPrompt, model, effort, permMode, tools, disallowedTools, agent.InheritClaudeDefault, policy, sandbox, mcpServers)
 		out = inner
 		return runErr
 	})
@@ -394,7 +395,7 @@ func runConverseWithChat(ctx context.Context, cs ChatStore, chatID, question, pe
 //
 // Step ordering: allocate/persist the Claude session ID BEFORE appending the
 // user message to prevent orphan transcript rows on session-write failures.
-func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, effort, permMode string, tools, disallowedTools []string, inheritDefault bool, policy ToolboxEnforcement, sandbox *AgentSandboxSpec) (Result, error) {
+func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, workingDir, systemPrompt, model, effort, permMode string, tools, disallowedTools []string, inheritDefault bool, policy ToolboxEnforcement, sandbox *AgentSandboxSpec, mcpServers map[string]any) (Result, error) {
 	callID := newUUID()
 	callStart := time.Now()
 	// Install the active call_id so the claude transport tees its stream-json
@@ -472,12 +473,15 @@ func doConverseChatTurn(ctx context.Context, cs ChatStore, chatID, question, wor
 	if e := strings.TrimSpace(effort); e != "" {
 		cliArgs = append(cliArgs, "--effort", e)
 	}
-	// This chat-aware path builds no other --mcp-config (unlike the
-	// stateless path above), so a chat agent whose tool surface names a
-	// studio tool needs its own attach here rather than riding along on
-	// attachOperatorAsk's config (which only exists when an operator is
-	// attached).
-	if studioServers := attachStudioMCPServer(nil, tools); len(studioServers) > 0 {
+	// This chat-aware path used to build no other --mcp-config (unlike the
+	// stateless path above), which silently dropped every story-declared
+	// agent.mcp.servers entry (e.g. stories/portal-graph-chat's
+	// kitsoki-graph server) for every chat-aware turn — the chat agent's
+	// tool surface named mcp__kitsoki-graph__* tools that could never
+	// actually connect. Mirror the stateless branch's
+	// effectiveMCPServers(args, agent) call (now threaded in as
+	// mcpServers) alongside the studio-tool attach.
+	if studioServers := attachStudioMCPServer(mcpServers, tools); len(studioServers) > 0 {
 		studioMCPPath, studioMCPCleanup, mErr := writeMCPConfigTempfile(studioServers, "kitsoki-converse-chat-studio-mcp")
 		if mErr != nil {
 			return Result{Error: fmt.Sprintf("host.agent.converse: write studio MCP config: %v", mErr)}, nil
