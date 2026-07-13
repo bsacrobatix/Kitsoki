@@ -301,6 +301,17 @@ type Server struct {
 	// and /rpc/materialize-stream's initial gate frames.
 	materializeMu   sync.Mutex
 	materializeJobs map[jobs.JobID]*materializeJobState
+
+	// feedbackRouting is the producer-keyed catalog-sink routing table for
+	// POST /api/feedback/local (feedback_intake.go); feedbackIntakeMu
+	// serializes that endpoint's dedupe-check + JSONL append.
+	feedbackRouting  map[string]FeedbackRoute
+	feedbackIntakeMu sync.Mutex
+
+	// storyDirs + hostConfig back GET /api/config's staleness digests
+	// (host_config.go).
+	storyDirs  []string
+	hostConfig hostConfigCache
 }
 
 // activeTurn is one in-flight streamed turn's cancel handle. Stored by pointer
@@ -346,6 +357,8 @@ type serverConfig struct {
 	kits                      *kitendpoint.Dispatcher
 	setupWarnings             []SetupWarning
 	projectOnboarded          bool
+	feedbackRouting           map[string]FeedbackRoute
+	storyDirs                 []string
 }
 
 // WithBugRoot sets the repo root under which runstatus.bug.report writes
@@ -548,6 +561,8 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		materializeSched:          jobs.NewInMemoryScheduler(),
 		materializeRoot:           cfg.materializeRoot,
 		materializeJobs:           make(map[jobs.JobID]*materializeJobState),
+		feedbackRouting:           cfg.feedbackRouting,
+		storyDirs:                 append([]string(nil), cfg.storyDirs...),
 	}
 }
 
@@ -698,6 +713,12 @@ func (s *Server) Handler() http.Handler {
 	// Embedded help-docs site (make site-embed). Serves an actionable
 	// placeholder when not staged — never an error (see internal/helpdocs).
 	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
+	// Host staleness surface (U3) + web feedback intake (U2) — plain HTTP
+	// (not /rpc methods) so external host pages (the POG portal, sassfully's
+	// httpSink) need no JSON-RPC envelope. See host_config.go /
+	// feedback_intake.go.
+	mux.HandleFunc("/api/config", s.handleAPIConfig)
+	mux.HandleFunc("/api/feedback/local", s.handleFeedbackLocal)
 	// Installed-kit UI static assets (S3c vertical slice — see kit_ui.go).
 	mux.HandleFunc("/kit/", s.handleKitUI)
 	mux.HandleFunc("/", s.handleIndex)

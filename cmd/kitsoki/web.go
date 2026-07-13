@@ -333,6 +333,21 @@ authentication.`,
 			if err != nil {
 				materializeRoot = "."
 			}
+			// Producer-keyed feedback routing (U2) — converted from the
+			// consumer repo's .kitsoki.yaml feedback_routing block into the
+			// server package's twin type.
+			var feedbackRouting map[string]server.FeedbackRoute
+			if len(cfg.FeedbackRouting) > 0 {
+				feedbackRouting = make(map[string]server.FeedbackRoute, len(cfg.FeedbackRouting))
+				for producer, rule := range cfg.FeedbackRouting {
+					feedbackRouting[producer] = server.FeedbackRoute{
+						Sink:    rule.Sink,
+						Catalog: rule.Catalog,
+						Type:    rule.Type,
+						Fields:  rule.Fields,
+					}
+				}
+			}
 			srv := server.NewMulti(registry,
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(bugRoot),
@@ -346,6 +361,8 @@ authentication.`,
 				server.WithSetupWarnings(setupWarningsFromRuntimeConfig(cfg, runtime.GOOS, bugPrivacyRuntime, ticketRepo != "")),
 				server.WithProjectOnboarded(projectOnboardedForRoot(bugRoot)),
 				server.WithKits(kits),
+				server.WithFeedbackRouting(feedbackRouting),
+				server.WithStoryDirs(dirs),
 			)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification

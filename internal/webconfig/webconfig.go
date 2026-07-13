@@ -116,6 +116,55 @@ type WebConfig struct {
 	// The profile supplies community/project conventions; root.overrides remains
 	// the explicit escape hatch and wins on conflicts.
 	ProjectProfile string `yaml:"project_profile,omitempty"`
+
+	// FeedbackRouting is the producer-keyed routing table for the web
+	// server's POST /api/feedback/local intake (U2, feedback report
+	// 01KXD2300AEDR4DKBVGQY7PJT2): keyed by the feedback bundle's producer
+	// id (e.g. "pog-portal"), each rule decides whether the catalog sink
+	// fires for that producer and what node type it proposes into which
+	// catalog. Absent ⇒ every bundle stays local-JSONL-only. Validated in
+	// Load via resolveFeedbackRouting.
+	FeedbackRouting map[string]FeedbackRoute `yaml:"feedback_routing,omitempty"`
+}
+
+// FeedbackRoute is one producer's `feedback_routing:` rule. The node type
+// named here lives in the CONSUMER repo's own catalog (POG ruling D-F2 —
+// e.g. a `portal-feedback` type proposed into the consumer's review queue);
+// kitsoki never declares feedback node types itself.
+type FeedbackRoute struct {
+	// Sink selects the extra sink for this producer: "" or "local" keeps
+	// the bundle JSONL-only; "catalog" additionally proposes a node.
+	Sink string `yaml:"sink,omitempty"`
+	// Catalog is the target catalog path, repo-root-relative (the same
+	// convention --kits-dir/--stories-dir use). Empty defaults to
+	// pog/catalog.yaml.
+	Catalog string `yaml:"catalog,omitempty"`
+	// Type is the node type id to propose. Required when sink is "catalog".
+	Type string `yaml:"type,omitempty"`
+	// Fields optionally names field ids of the target type to populate
+	// (first carries the summary text; "report"/"report_id" carry the
+	// receipt ref) — mirrors a catalog's own feedback_routing.fields.
+	Fields []string `yaml:"fields,omitempty"`
+}
+
+// resolveFeedbackRouting validates the `feedback_routing:` block fail-fast
+// at load, mirroring resolveMining: sink must be one of ""|local|catalog,
+// and a catalog-sink rule must name its node type.
+func (cfg *WebConfig) resolveFeedbackRouting() error {
+	for producer, rule := range cfg.FeedbackRouting {
+		if strings.TrimSpace(producer) == "" {
+			return fmt.Errorf("feedback_routing: empty producer key")
+		}
+		switch rule.Sink {
+		case "", "local", "catalog":
+		default:
+			return fmt.Errorf("feedback_routing.%s: sink %q is not one of \"local\"|\"catalog\"", producer, rule.Sink)
+		}
+		if rule.Sink == "catalog" && strings.TrimSpace(rule.Type) == "" {
+			return fmt.Errorf("feedback_routing.%s: sink \"catalog\" requires a node `type`", producer)
+		}
+	}
+	return nil
 }
 
 // InterceptConfig is the operator's binding for the pre-LLM intercept gate. It
@@ -456,6 +505,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveMining(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveFeedbackRouting(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	return cfg, nil
 }
 
@@ -644,6 +696,18 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	// whole rather than field-merging.
 	if local.HarnessLadder != nil {
 		out.HarnessLadder = local.HarnessLadder
+	}
+	// Per-producer key merge, like HarnessProfiles: a local rule replaces
+	// the base rule for the same producer whole.
+	if len(local.FeedbackRouting) > 0 {
+		merged := make(map[string]FeedbackRoute, len(base.FeedbackRouting)+len(local.FeedbackRouting))
+		for k, v := range base.FeedbackRouting {
+			merged[k] = v
+		}
+		for k, v := range local.FeedbackRouting {
+			merged[k] = v
+		}
+		out.FeedbackRouting = merged
 	}
 	return out
 }
