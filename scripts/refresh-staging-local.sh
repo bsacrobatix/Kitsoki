@@ -33,6 +33,7 @@ staging_branch="$DEFAULT_STAGING_BRANCH"
 staging_capsule="$DEFAULT_STAGING_CAPSULE"
 skip_remote=0
 no_fetch=0
+resume=0
 gate=""
 dirty_action="auto"
 
@@ -43,7 +44,7 @@ usage:
                                    [--staging-branch staging/local]
                                    [--staging-capsule .capsules/staging/local]
                                    [--gate CMD] [--dirty-action ACTION]
-                                   [--skip-remote] [--no-fetch]
+                                   [--skip-remote] [--no-fetch] [--resume]
 
 Refreshes the managed local staging capsule from local staging, rebases it onto
 local main, and updates the primary staging ref from the capsule.
@@ -54,6 +55,7 @@ you to complete the printed sync steps before rerunning.
 
 --skip-remote intentionally skips the remote freshness check.
 --no-fetch checks existing remote-tracking refs without fetching first.
+--resume atomically imports a clean, manually completed staging rebase.
 --gate runs CMD inside the staging capsule after the rebase and before import.
 --dirty-action controls dirty staging-capsule recovery:
   auto      prompt when interactive, otherwise stop with next steps (default)
@@ -570,6 +572,10 @@ while [ "$#" -gt 0 ]; do
       no_fetch=1
       shift
       ;;
+    --resume)
+      resume=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -660,6 +666,44 @@ git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null ||
   die "base branch not found: $base"
 git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$staging_branch" >/dev/null ||
   die "staging branch not found: $staging_branch"
+
+# A conflict deliberately leaves the managed capsule in place so its rebase can
+# be resolved there. An ordinary retry would otherwise replay that work from
+# the old primary staging snapshot. Resume is explicit to avoid treating an
+# arbitrary divergent capsule as a resolution.
+if [ "$resume" -eq 1 ]; then
+  staging_start="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
+  base_start="$(git -C "$repo_root" rev-parse "refs/heads/$base")"
+  resumed_result="$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")"
+  git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$resumed_result" ||
+    die "cannot resume: staging capsule is not based on current $base; finish or abort its rebase first"
+  if [ -n "$gate" ]; then
+    echo "refresh-staging-local: running resume gate in $staging_capsule: $gate" >&2
+    (cd "$staging_capsule" && sh -c "$gate")
+  fi
+  post_gate_dirty="$(source_dirty "$staging_capsule")"
+  [ -z "$post_gate_dirty" ] || die "cannot resume: gate left uncommitted staging-capsule changes"
+  resume_import_ref="refs/kitsoki/refresh/resume-$(date -u +%Y%m%dT%H%M%SZ)-$$/import"
+  git -C "$repo_root" fetch "$staging_capsule" "$resumed_result:$resume_import_ref"
+  [ "$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")" = "$resumed_result" ] ||
+    die "staging capsule advanced while importing resumed result; rerun resume"
+  [ "$(git -C "$repo_root" rev-parse "refs/heads/$base")" = "$base_start" ] ||
+    die "$base advanced while importing resumed staging; rerun refresh"
+  if ! {
+    printf 'start\n'
+    printf 'verify refs/heads/%s %s\n' "$base" "$base_start"
+    printf 'update refs/heads/%s %s %s\n' "$staging_branch" "$resumed_result" "$staging_start"
+    printf 'prepare\n'
+    printf 'commit\n'
+  } | git -C "$repo_root" update-ref --stdin; then
+    die "$base or $staging_branch changed while importing resumed staging; refusing to overwrite newer work"
+  fi
+  git -C "$repo_root" update-ref -d "$resume_import_ref" >/dev/null 2>&1 || true
+  printf '%s -> %s (resumed)\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")"
+  printf 'staging capsule: %s\n' "$staging_capsule"
+  printf 'base: %s (%s)\n' "$base" "$(git rev-parse --short "$base")"
+  exit 0
+fi
 
 # Capture the exact staging input before touching the capsule.  A workspace
 # merge may advance staging/local while this helper is rebasing; that new work

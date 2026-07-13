@@ -99,29 +99,6 @@ const (
 	// liveness handle than the current owner.
 	CodeNotClaimHolder = "NOT_CLAIM_HOLDER"
 
-	// CodeInternal: a tool handler panicked. The `recorded` wrapper
-	// converts the panic into this error payload instead of letting it
-	// kill the whole server process — mcpsdk v1.0.0 does not recover
-	// handler panics itself, so without this a single buggy call (or a
-	// panic-inducing catalog state written by a concurrent session) would
-	// take down the long-lived stdio server and every bound catalog with
-	// it. The panic message and stack still go to stderr for postmortem.
-	CodeInternal = "INTERNAL"
-
-	// CodeOutOfScope: the call named (or, for a write, would touch) a node
-	// that exists in the bound catalog but sits outside the session's baked
-	// scope (--scope / WithGraphScopes). The scope is fixed at server
-	// construction; no tool argument can widen it — a caller that needs the
-	// node needs a differently-scoped session.
-	CodeOutOfScope = "OUT_OF_SCOPE"
-
-	// CodeCapsuleWorkflow: a capsule-routed write's workspace lifecycle
-	// failed — the catalog repo declares graph.write_via: capsule (or the
-	// server runs --write-via capsule) but the workspace could not be
-	// created, or a completed write could not be committed/merged into the
-	// staging branch. The hint names where the work physically is (the
-	// managed workspace path/branch) so nothing is silently lost.
-	CodeCapsuleWorkflow = "CAPSULE_WORKFLOW"
 )
 
 // defaultIfStuck is the standing advertisement of the feedback channel:

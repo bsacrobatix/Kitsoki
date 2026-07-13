@@ -124,6 +124,25 @@ already_present_recovery_ref="refs/kitsoki/staging-capsule-recovery/$already_pre
 [ "$(git -C "$already_present_repo" rev-parse "$already_present_recovery_ref")" = "$already_present_original" ] ||
   fail "successful refresh did not retain the original capsule in primary recovery refs"
 
+# A completed conflict resolution lives in the capsule while primary staging
+# still names the old snapshot. Resume imports it rather than replaying it.
+resume_primary_before="$(git -C "$already_present_repo" rev-parse staging/local)"
+commit_file "$already_present_repo/.capsules/staging/local" resumed.txt manually-resolved-rebase
+resume_capsule_result="$(git -C "$already_present_repo/.capsules/staging/local" rev-parse HEAD)"
+resume_out="$tmp/resume-refresh.out"
+if ! (
+  cd "$already_present_repo"
+  scripts/refresh-staging-local.sh --skip-remote --resume --gate 'git diff --check'
+) >"$resume_out" 2>&1; then
+  cat "$resume_out" >&2
+  fail "resume refresh failed"
+fi
+assert_contains "$resume_out" "(resumed)"
+[ "$(git -C "$already_present_repo" rev-parse staging/local)" = "$resume_capsule_result" ] ||
+  fail "resume refresh did not import the manually completed capsule rebase"
+[ "$(git -C "$already_present_repo" rev-parse staging/local)" != "$resume_primary_before" ] ||
+  fail "resume refresh left the old primary staging snapshot in place"
+
 # Content-addressed recovery refs are idempotent. The first no-op refresh may
 # anchor the current unpromoted staging tip; repeating the same no-op must not
 # grow the recovery-ref set again.
