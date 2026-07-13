@@ -34,6 +34,7 @@ func RegisterGraphTools(srv *mcpsdk.Server, deps *Deps, mode string) {
 	registerGraphImpactTool(srv, deps)
 	registerGraphChangesetTool(srv, deps)
 	registerGraphHistoryTool(srv, deps)
+	registerGraphClaimTools(srv, deps)
 
 	switch mode {
 	case ModePropose, ModeSteward:

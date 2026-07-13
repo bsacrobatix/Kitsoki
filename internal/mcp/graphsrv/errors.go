@@ -91,6 +91,13 @@ const (
 	// staging branch. The hint names where the work physically is (the
 	// managed workspace path/branch) so nothing is silently lost.
 	CodeCapsuleWorkflow = "CAPSULE_WORKFLOW"
+
+	// CodeClaimHeld means another live actor owns the requested graph node.
+	// The result includes holder provenance so a worker can avoid duplicate work.
+	CodeClaimHeld = "CLAIM_HELD"
+	// CodeNotClaimHolder means release was attempted by a different actor or
+	// liveness handle than the current owner.
+	CodeNotClaimHolder = "NOT_CLAIM_HOLDER"
 )
 
 // defaultIfStuck is the standing advertisement of the feedback channel:

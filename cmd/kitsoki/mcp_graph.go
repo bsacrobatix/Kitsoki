@@ -32,13 +32,13 @@ func mcpGraphCmd() *cobra.Command {
 		Long: `mcp-graph exposes kitsoki's project-object-graph read family (graph.open,
 graph.get, graph.find, graph.neighbors, graph.type, graph.lint, graph.impact,
 graph.changeset), write family (graph.propose, graph.withdraw, graph.apply,
-graph.authorize), and feedback channel (feedback.report, feedback.list) as a
+graph.authorize, graph.claim, graph.release), and feedback channel (feedback.report, feedback.list) as a
 standalone stdio MCP server.
 
 --mode gates the write family: "read" registers no write tools at all;
 "propose" registers propose/withdraw/apply(dry-run only)/authorize(rejected
 as steward-only); "steward" additionally allows a real apply and authorize.
-Every write-tool call (propose/withdraw/apply/authorize) is appended to a
+Every write-tool call (propose/withdraw/apply/authorize/claim/release) is appended to a
 receipts journal (.artifacts/graph-mcp/receipts.jsonl next to the bound
 catalog's repo root, or --journal's path).
 

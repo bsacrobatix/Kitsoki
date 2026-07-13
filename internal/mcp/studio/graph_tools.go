@@ -149,6 +149,9 @@ func (srv *Server) registerGraphTools() {
 		Recorder:     graphsrv.NewRecorder(),
 		IssueFiler:   srv.graphIssueFiler,
 		Router:       graphsrv.NewWriteRouter(via, nil),
+		// Studio mounts graph tools directly rather than through graphsrv.NewServer,
+		// so it owns the same per-server claim registry initialization here.
+		Claims: graphsrv.NewClaimRegistry(nil, clock.Real()),
 	}
 
 	graphsrv.RegisterGraphTools(srv.mcpSrv, deps, mode)

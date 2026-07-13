@@ -59,6 +59,12 @@ type Config struct {
 	// use this to inject a registry pointed at fixture catalogs without
 	// touching global process state.
 	Registry *host.Registry
+	// Claims is the process-wide claim registry used by graph.claim and
+	// graph.release. Nil creates the conservative default registry.
+	Claims *ClaimRegistry
+	// Liveness decides whether a claim holder is still live. Nil treats every
+	// holder as live, which fails closed against an accidental claim steal.
+	Liveness Liveness
 }
 
 // Deps bundles the resolved, request-independent state every graphsrv tool
@@ -88,6 +94,7 @@ type Deps struct {
 	// the working tree or route through the managed capsule workflow
 	// (writevia.go). Nil behaves as direct-everywhere.
 	Router *WriteRouter
+	Claims *ClaimRegistry
 }
 
 // Server is the standalone stdio MCP server exposing mcp-graph's read
@@ -154,6 +161,10 @@ func NewServer(cfg Config) (*Server, error) {
 		Recorder:     NewRecorder(),
 		IssueFiler:   cfg.IssueFiler,
 		Router:       NewWriteRouter(cfg.WriteVia, cfg.WorkspaceRunner),
+		Claims:       cfg.Claims,
+	}
+	if deps.Claims == nil {
+		deps.Claims = NewClaimRegistry(cfg.Liveness, clk)
 	}
 
 	s := &Server{deps: deps}
