@@ -5,15 +5,10 @@
 //
 //   node pog/sync-product-site.mjs
 //
-// Taxonomy (Brad, 2026-07-12): the TOUR-DRIVEN SPEC is the key persistent
-// piece — the playwright demo/tour spec deterministically produces the rrweb
-// recording and the rendered mp4, so those are ARTIFACTS of the spec, not
-// independent deliverables. Each feature's demo node is therefore modeled
-// spec-first: the spec is listed as the source evidence, the rrweb replay
-// (playable in the portal through the slidey rrweb player) is the preferred
-// artifact, the site-published mp4 + poster the rendered fallback. Statuses
-// stay derived from what actually exists on disk in the member root:
-// verified when a produced artifact is real, planned when only specced.
+// Taxonomy (Brad, 2026-07-13): the TOUR-DRIVEN SPEC is the only persistent
+// demo evidence. rrweb and MP4 are temporary render outputs, never catalog
+// evidence. A portal render request invokes the repo's trusted runner, which
+// regenerates an ephemeral replay from this source.
 //
 // Disk bridges (gitignored symlinks under .artifacts/, safe on the staging
 // branch because .artifacts is ignored):
@@ -65,65 +60,11 @@ const siteIndex = siteIndexPath ? JSON.parse(readFileSync(siteIndexPath, "utf8")
 const siteEntries = Array.isArray(siteIndex) ? siteIndex : (siteIndex.features ?? Object.values(siteIndex));
 const siteIds = new Set(siteEntries.map((e) => e.id));
 
-// Persisted rrweb recordings that predate the per-feature capture specs —
-// the slidey case-study clips live under .artifacts/slidey-hybrid/clips/.
-const CLIP_MAP = {
-  "slidey-decomposition": "decomposition",
-  "slidey-architect-design": "architect-design",
-  "slidey-bugfix": "slidey-bugfix",
-  "slidey-open-pr": "open-pr",
-  "slidey-dev-prd-design": "pm-idea",
-};
-
-function findRrweb(spec) {
-  const clip = CLIP_MAP[spec.id];
-  if (clip && existsSync(join(ROOT, ".artifacts/slidey-hybrid/clips", `${clip}.rrweb.json`))) {
-    return `.artifacts/slidey-hybrid/clips/${clip}.rrweb.json`;
-  }
-  const dir = spec.demo?.artifactDir ?? spec.id;
-  for (const base of [join(ROOT, ".artifacts", dir), join(ROOT, ".artifacts/rrweb-eval", spec.id)]) {
-    if (!existsSync(base)) continue;
-    try {
-      const hit = readdirSync(base, { recursive: true }).find((f) => String(f).endsWith(".rrweb.json"));
-      if (hit) return join(base, String(hit)).slice(ROOT.length + 1);
-    } catch {
-      /* unreadable — skip */
-    }
-  }
-  return "";
-}
-
-// Where a capture spec WILL write its recording — parsed from the spec's own
-// ARTIFACT_DIR/EVENTS_JSON constants (the shared convention across the
-// *-rrweb-capture specs). Lets the catalog declare the rrweb artifact before
-// it exists on a given machine: the recording is gitignored and
-// deterministically produced, so a fresh clone renders it on demand via
-// pog/render-demo.mjs (the portal's render-on-demand flow).
-function expectedRrweb(specEvidencePath) {
-  if (!specEvidencePath || !specEvidencePath.includes("-rrweb-capture.spec.ts")) return "";
-  let text = "";
-  try {
-    text = readFileSync(join(ROOT, specEvidencePath), "utf8");
-  } catch {
-    return "";
-  }
-  const dirMatch = text.match(/ARTIFACT_DIR = path\.join\(\s*repoRoot,\s*([^)]+)\)/);
-  const eventsMatch = text.match(/EVENTS_JSON = path\.join\(\s*ARTIFACT_DIR,\s*"([^"]+)"\s*\)/);
-  const segs = dirMatch ? [...dirMatch[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [];
-  if (!eventsMatch || segs[0] !== ".artifacts") return "";
-  return [...segs, eventsMatch[1]].join("/");
-}
-
-// The tour-driven spec itself (the persistent source). Prefer the dedicated
-// rrweb-capture spec when one exists; fall back to the video spec.
+// The tour-driven spec itself (the persistent source).
 function findSpecFile(spec) {
-  const names = [];
-  for (const stem of [spec.id, spec.demo?.artifactDir, spec.demo?.videoBase?.replace(/-demo$/, "")]) {
-    if (stem) names.push(`${stem}-rrweb-capture.spec.ts`);
-  }
-  if (spec.demo?.spec) names.push(spec.demo.spec.split("/").pop());
-  for (const name of names) {
-    if (name && existsSync(join(ROOT, ".artifacts/demo-specs", name))) return `.artifacts/demo-specs/${name}`;
+  const rel = spec.demo?.rrwebSpec ?? spec.demo?.spec;
+  if (typeof rel === "string" && rel.startsWith("tests/playwright/") && existsSync(join(ROOT, "tools/runstatus", rel))) {
+    return `tools/runstatus/${rel}`;
   }
   return "";
 }
@@ -133,6 +74,24 @@ const markerAt = catalogText.indexOf(`\n${MARKER}`);
 const prefix = markerAt >= 0 ? catalogText.slice(0, markerAt).replace(/\n+$/, "\n") : catalogText.replace(/\n+$/, "\n");
 const existingFeatureIds = new Set([...prefix.matchAll(/^    id: (feature-[a-z0-9-]+)$/gm)].map((m) => m[1]));
 const existingIds = new Set([...prefix.matchAll(/^    id: ([a-z0-9-]+)$/gm)].map((m) => m[1]));
+const allExistingIds = new Set([...catalogText.matchAll(/^    id: ([a-z0-9-]+)$/gm)].map((m) => m[1]));
+const knownFeatureIds = new Set([...catalogText.matchAll(/^    id: (feature-[a-z0-9-]+)$/gm)].map((m) => m[1]));
+
+// The historical generated section also contains a few hand-maintained
+// product-tour rows that have no matching features/*.yaml source. Preserve
+// those verbatim while regenerating the feature-spec-owned rows below.
+const managedIds = new Set(
+  specs.flatMap((spec) => (spec?.id ? [`feature-${spec.id}`, `demo-${spec.id}`] : [])),
+);
+const retainedNodes = markerAt < 0
+  ? []
+  : catalogText
+      .slice(markerAt)
+      .match(/  - [\s\S]*?(?=\n  - |\s*$)/g)
+      ?.filter((block) => {
+        const id = block.match(/^    id: ([a-z0-9-]+)$/m)?.[1];
+        return !id || !managedIds.has(id);
+      }) ?? [];
 
 const q = (s) => JSON.stringify(String(s ?? "").replace(/\s+/g, " ").trim());
 const lines = [];
@@ -142,15 +101,14 @@ lines.push("");
 lines.push(`${MARKER} ---------------------------------`);
 lines.push("  # GENERATED by pog/sync-product-site.mjs — edit specs in features/*.yaml");
 lines.push("  # and rerun; everything below this marker is replaced in place.");
-lines.push("  # Spec-first model: the tour-driven spec is the persistent source; the");
-lines.push("  # rrweb replay and rendered mp4 are its deterministically produced");
-lines.push("  # artifacts. Statuses derive from what exists on disk right now.");
+lines.push("  # Spec-first model: a committed tour/capture spec is the sole durable demo evidence.");
+lines.push("  # rrweb and mp4 replays are ephemeral render outputs and are never listed here.");
 
 for (const spec of specs) {
   if (!spec?.id) continue;
   const featureId = `feature-${spec.id}`;
   const inCatalog = existingFeatureIds.has(featureId);
-  if (!siteIds.has(spec.id) && !spec.promo && !inCatalog) continue; // not on the product site
+  if (!siteIds.has(spec.id) && !spec.promo && !knownFeatureIds.has(featureId)) continue; // not on the product site
 
   if (!inCatalog) {
     stats.features++;
@@ -166,70 +124,25 @@ for (const spec of specs) {
   }
 
   if (spec.demo) {
-    const rrwebPath = findRrweb(spec);
     const specPath = findSpecFile(spec);
-    // No persisted recording, but a capture spec that can produce one: still
-    // declare the rrweb evidence at the spec's output path. The portal marks
-    // it unavailable and offers render-on-demand (pog/render-demo.mjs).
-    const rrwebExpected = !rrwebPath ? expectedRrweb(specPath) : "";
-    const posterPath = existsSync(join(ROOT, ".artifacts/site-media", spec.id, "poster.png"))
-      ? `.artifacts/site-media/${spec.id}/poster.png`
-      : "";
-    let mp4Path = "";
-    if (existsSync(join(ROOT, ".artifacts/site-media", spec.id, "demo.mp4"))) {
-      mp4Path = `.artifacts/site-media/${spec.id}/demo.mp4`;
-    } else {
-      const dir = spec.demo.artifactDir ?? spec.id;
-      const base = spec.demo.videoBase ?? `${spec.id}-demo`;
-      const artDir = join(ROOT, ".artifacts", dir);
-      if (existsSync(artDir)) {
-        const files = readdirSync(artDir).filter((f) => f.startsWith(base) && f.endsWith(".mp4") && !f.includes("BUG"));
-        const video = files.find((f) => f === `${base}.mp4`) ?? files[0] ?? "";
-        if (video) mp4Path = `.artifacts/${dir}/${video}`;
-      }
-    }
-    const produced = Boolean(rrwebPath || mp4Path);
-    const status = produced ? "verified" : "planned";
+    const status = specPath ? "verified" : "planned";
     stats.demos++;
-    stats[produced ? "verified" : "planned"]++;
-    if (rrwebPath) stats.rrweb++;
-    if (rrwebExpected) stats.renderable++;
+    stats[status]++;
+    if (specPath) stats.renderable++;
     const id = `demo-${spec.id}`;
     if (!existingIds.has(id)) {
-      const specRel = spec.demo.spec ?? "";
       lines.push(`  - schema: kitsoki/demo/v0`);
       lines.push(`    id: ${id}`);
       lines.push(`    title: ${q(`Demo — ${spec.title}`)}`);
       lines.push(`    status: ${status}`);
       lines.push(`    visibility: public`);
-      lines.push(
-        `    summary: ${q(
-          produced
-            ? `Deterministically produced from the tour-driven spec ${specRel || "(spec pending)"} — ${[
-                rrwebPath && "rrweb replay persisted",
-                mp4Path && (mp4Path.startsWith(".artifacts/site-media/") ? "video published on the product site" : "video rendered, not yet published"),
-              ]
-                .filter(Boolean)
-                .join("; ")}.`
-            : rrwebExpected
-              ? `Tour-driven spec ${specRel || "(spec pending)"} authored; the rrweb recording is deterministically producible on demand (node pog/render-demo.mjs demo-${spec.id}).`
-              : `Tour-driven spec ${specRel || "(spec pending)"} authored; rrweb + video artifacts not yet produced — rerun the capture to materialize them.`,
-        )}`,
-      );
+      lines.push(`    summary: ${q(specPath ? `Committed tour-driven source ${specPath}; render an ephemeral replay on demand.` : "Tour-driven source spec is not available in this checkout.")}`);
       lines.push(`    sources: [source-feature-specs]`);
-      const evidence = [];
-      if (rrwebPath) evidence.push({ kind: "video", title: `${spec.title} — rrweb replay`, path: rrwebPath, poster: posterPath });
-      else if (rrwebExpected) evidence.push({ kind: "video", title: `${spec.title} — rrweb replay (render on demand)`, path: rrwebExpected, poster: posterPath });
-      if (mp4Path) evidence.push({ kind: "video", title: `${spec.title} — demo video`, path: mp4Path, poster: posterPath });
-      if (specPath) evidence.push({ kind: "doc", title: `${spec.title} — tour-driven spec (source)`, path: specPath, poster: "" });
-      if (evidence.length) {
+      if (specPath) {
         lines.push(`    evidence:`);
-        for (const item of evidence) {
-          lines.push(`      - kind: ${item.kind}`);
-          lines.push(`        title: ${q(item.title)}`);
-          lines.push(`        path: ${item.path}`);
-          if (item.poster) lines.push(`        poster: ${item.poster}`);
-        }
+        lines.push(`      - kind: doc`);
+        lines.push(`        title: ${q(`${spec.title} — tour-driven source spec`)}`);
+        lines.push(`        path: ${specPath}`);
       }
       lines.push(`    edges:`);
       lines.push(`      part_of: [product-kitsoki]`);
@@ -243,7 +156,7 @@ for (const spec of specs) {
     stats.docs++;
     stats[status === "verified" ? "verified" : "planned"]++;
     const id = `doc-${spec.id}`;
-    if (!existingIds.has(id)) {
+    if (!allExistingIds.has(id)) {
       lines.push(`  - schema: kitsoki/doc/v0`);
       lines.push(`    id: ${id}`);
       lines.push(`    title: ${q(`Docs — ${spec.title}`)}`);
@@ -281,7 +194,7 @@ for (const spec of specs) {
     stats.tutorials++;
     stats[manifest ? "verified" : "planned"]++;
     const id = `tutorial-${spec.id}`;
-    if (!existingIds.has(id)) {
+    if (!allExistingIds.has(id)) {
       lines.push(`  - schema: kitsoki/tutorial/v0`);
       lines.push(`    id: ${id}`);
       lines.push(`    title: ${q(`Guided tour — ${spec.title}`)}`);
@@ -306,6 +219,12 @@ for (const spec of specs) {
       lines.push(`      teaches: [${featureId}]`);
     }
   }
+}
+
+if (retainedNodes.length) {
+  lines.push("");
+  lines.push("  # Product-tour rows retained until they gain a feature-spec source.");
+  lines.push(...retainedNodes);
 }
 
 writeFileSync(CATALOG, `${prefix}${lines.join("\n")}\n`);
