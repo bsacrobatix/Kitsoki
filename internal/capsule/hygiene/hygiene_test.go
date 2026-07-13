@@ -785,6 +785,70 @@ func TestBuildPlanAdoptsOnlyInactiveCleanMergedLegacyWorkspace(t *testing.T) {
 	assertWorkspaceCandidate(t, plan, "legacy-invalid", false, "metadata is invalid")
 }
 
+func TestClearInactiveMergedPlansOnlyCooledOffIntegratedOrBranchMergedWorkspaces(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Now().UTC()
+	writeLegacyWorkspace(t, root, "legacy-merged", now, false, false)
+	writeLegacyWorkspace(t, root, "legacy-unmerged", now, false, true)
+	writeManagedWorkspace(t, root, "integrated", control.StateIntegrated, now, false)
+	writeManagedWorkspace(t, root, "closed", control.StateClosed, now, false)
+	ci := filepath.Join(root, ".capsules", "ci")
+	if err := os.MkdirAll(ci, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRunBundle(t, ci, "evidence", now)
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:         root,
+		KeepWorkspaces:      -1,
+		MinWorkspaceAge:     5 * time.Minute,
+		ClearInactiveMerged: true,
+		CurrentPath:         root,
+		Now:                 func() time.Time { return now.Add(6 * time.Minute) },
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 4 {
+		t.Fatalf("candidates=%#v", plan.Candidates)
+	}
+	assertWorkspaceCandidate(t, plan, "legacy-merged", true, "clean merged inactive")
+	assertWorkspaceCandidate(t, plan, "legacy-unmerged", false, "not contained")
+	assertWorkspaceCandidate(t, plan, "integrated", true, "clean terminal")
+	assertWorkspaceCandidate(t, plan, "closed", false, "not integrated")
+}
+
+func TestClearInactiveMergedAcceptsLegacyHeadMergedIntoAnotherBranch(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Now().UTC()
+	workspace := writeLegacyWorkspace(t, root, "merged-elsewhere", now, false, true)
+	runHygieneGit(t, root, "fetch", workspace, "agent/merged-elsewhere:refs/heads/recovered")
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:         root,
+		KeepWorkspaces:      -1,
+		MinWorkspaceAge:     5 * time.Minute,
+		ClearInactiveMerged: true,
+		CurrentPath:         root,
+		Now:                 func() time.Time { return now.Add(6 * time.Minute) },
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := assertWorkspaceCandidate(t, plan, "merged-elsewhere", true, "clean merged inactive")
+	if candidate.Target != "recovered" {
+		t.Fatalf("merge target=%q candidate=%#v", candidate.Target, candidate)
+	}
+}
+
 func TestBuildPlanNeverPrunesLegacyWorkspaceWhenActivityIsUnknown(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)

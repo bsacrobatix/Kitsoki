@@ -54,6 +54,12 @@ type Options struct {
 	CloseWorkspace        func(context.Context, string, Candidate) error
 	BeforeApply           func(Candidate)
 	Now                   func() time.Time
+	// ClearInactiveMerged limits cleanup to workspaces whose work is already
+	// integrated: native workspaces must be in the integrated lifecycle state
+	// and legacy workspaces must have their HEAD contained in a branch. It is
+	// intentionally used by the no-argument operator clear command, not by the
+	// broader retention-based hygiene pass.
+	ClearInactiveMerged bool
 }
 
 type Candidate struct {
@@ -159,7 +165,12 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 		return Plan{}, err
 	}
 	plan.Candidates = append(plan.Candidates, workspaceCandidates...)
-	plan.Candidates = append(plan.Candidates, projectCandidates...)
+	if !opts.ClearInactiveMerged {
+		plan.Candidates = append(plan.Candidates, projectCandidates...)
+	}
+	if opts.ClearInactiveMerged {
+		return finishPlan(root, opts, plan)
+	}
 	runCandidates, err := ciRunCandidates(root, keepRuns)
 	if err != nil {
 		return Plan{}, err
@@ -181,6 +192,10 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 			plan.Candidates = append(plan.Candidates, goCandidate)
 		}
 	}
+	return finishPlan(root, opts, plan)
+}
+
+func finishPlan(root string, opts Options, plan Plan) (Plan, error) {
 	sort.Slice(plan.Candidates, func(i, j int) bool {
 		if plan.Candidates[i].Kind != plan.Candidates[j].Kind {
 			return plan.Candidates[i].Kind < plan.Candidates[j].Kind
@@ -656,7 +671,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 		go func() {
 			for path := range jobs {
 				in, ok := byPath[path]
-				candidate, inspectErr := inspectWorkspace(ctx, root, path, maybeInstance(in, ok), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes)
+				candidate, inspectErr := inspectWorkspace(ctx, root, path, maybeInstance(in, ok), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged)
 				results <- inspection{candidate: candidate, err: inspectErr}
 			}
 		}()
@@ -676,7 +691,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 	return out, nil
 }
 
-func inspectWorkspace(ctx context.Context, root, path string, in *control.Instance, current string, pinned map[string]bool, now time.Time, minAge time.Duration, activity WorkspaceActivity, measureBytes bool) (Candidate, error) {
+func inspectWorkspace(ctx context.Context, root, path string, in *control.Instance, current string, pinned map[string]bool, now time.Time, minAge time.Duration, activity WorkspaceActivity, measureBytes, clearInactiveMerged bool) (Candidate, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Candidate{}, err
@@ -767,6 +782,8 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 		candidate.Reason = "workspace has uncommitted changes"
 	case candidate.Legacy && !candidate.Merged:
 		candidate.Reason = "legacy workspace HEAD is not contained in declared target " + candidate.Target
+	case clearInactiveMerged && !candidate.Legacy && in.State != control.StateIntegrated:
+		candidate.Reason = "workspace is not integrated into a branch"
 	case !candidate.Legacy && in.State == control.StateCommitted:
 		candidate.Reason = "workspace has committed but unintegrated work"
 	case !candidate.Legacy && activeWorkspaceState(in.State):
@@ -911,13 +928,57 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 		}
 		merged = true
 	} else {
-		merged, err = gitAncestor(ctx, root, head, "refs/heads/"+clone.Target)
+		var mergedTarget string
+		merged, mergedTarget, err = gitMergedIntoAnyBranch(ctx, root, head, clone.Target)
 		if err != nil {
-			return invalid("verify target containment: %v", err)
+			return invalid("verify branch containment: %v", err)
+		}
+		if mergedTarget != "" {
+			clone.Target = mergedTarget
 		}
 	}
 	updated := workspaceUpdatedAt(ctx, path, clone.Branch, clone.CreatedAt)
 	return legacyWorkspace{Branch: clone.Branch, Target: clone.Target, Head: head, Merged: merged, UpdatedAt: updated}, true, nil
+}
+
+// gitMergedIntoAnyBranch proves that a legacy capsule can be reconstructed
+// from a branch already known to the source repository. Prefer its declared
+// target for stable reporting, then accept any local or remote branch that
+// contains the exact capsule HEAD.
+func gitMergedIntoAnyBranch(ctx context.Context, repo, head, declaredTarget string) (bool, string, error) {
+	refs := []string{}
+	if strings.TrimSpace(declaredTarget) != "" {
+		refs = append(refs, "refs/heads/"+declaredTarget)
+	}
+	all, err := gitText(ctx, repo, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
+	if err != nil {
+		return false, "", err
+	}
+	for _, ref := range strings.Fields(all) {
+		if ref == "refs/remotes/origin/HEAD" {
+			continue
+		}
+		seen := false
+		for _, candidate := range refs {
+			if candidate == ref {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			refs = append(refs, ref)
+		}
+	}
+	for _, ref := range refs {
+		merged, ancestorErr := gitAncestor(ctx, repo, head, ref)
+		if ancestorErr != nil {
+			return false, "", ancestorErr
+		}
+		if merged {
+			return true, strings.TrimPrefix(ref, "refs/heads/"), nil
+		}
+	}
+	return false, "", nil
 }
 
 func validateRecoveredQuarantine(ctx context.Context, root, path, head string) error {
@@ -1168,7 +1229,7 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 		if opts.Now != nil {
 			now = opts.Now().UTC()
 		}
-		fresh, inspectErr := inspectWorkspace(ctx, root, path, nil, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes)
+		fresh, inspectErr := inspectWorkspace(ctx, root, path, nil, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged)
 		if inspectErr != nil {
 			return planned, false, inspectErr
 		}
@@ -1202,7 +1263,7 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 	if activityErr != nil {
 		activity = WorkspaceActivity{Reason: activityErr.Error()}
 	}
-	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes)
+	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged)
 	if err != nil {
 		return planned, false, err
 	}

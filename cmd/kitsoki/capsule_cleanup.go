@@ -11,8 +11,39 @@ import (
 
 func capsuleCleanupCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "cleanup", Short: "Plan and apply local Capsule disk hygiene"}
-	cmd.AddCommand(capsuleCleanupPlanCmd(), capsuleCleanupApplyCmd())
+	cmd.AddCommand(capsuleCleanupPlanCmd(), capsuleCleanupApplyCmd(), capsuleCleanupClearCmd())
 	return cmd
+}
+
+const capsuleClearInactiveCooloff = 5 * time.Minute
+
+// capsuleCleanupClearCmd is deliberately parameterless: it is the safe
+// high-water-mark cleanup for merged, clean, inactive development capsules.
+func capsuleCleanupClearCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:          "clear",
+		Short:        "Remove all clean merged capsules inactive for at least five minutes",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			result, err := hygiene.Apply(cmd.Context(), capsuleClearInactiveOptions("."))
+			if err != nil {
+				return err
+			}
+			return capsuleCleanupWrite(cmd, result, false)
+		},
+	}
+}
+
+func capsuleClearInactiveOptions(project string) hygiene.Options {
+	return hygiene.Options{
+		ProjectRoot:           project,
+		KeepRuns:              -1,
+		KeepWorkspaces:        -1,
+		MinWorkspaceAge:       capsuleClearInactiveCooloff,
+		ClearInactiveMerged:   true,
+		MeasureWorkspaceBytes: false,
+	}
 }
 
 type capsuleCleanupFlags struct {

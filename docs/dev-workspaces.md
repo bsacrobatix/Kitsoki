@@ -373,6 +373,19 @@ signed seal manifest must prove exact content-addressed primary `dirty-snapshot`
 `dirty-recovery`, and `recovered-quarantine` refs plus unchanged HEAD/tree.
 Missing or changed proof makes the candidate unsafe.
 
+For routine reclamation of completed agent capsules, use the parameterless
+command below. It removes only clean workspaces with a lossless branch proof:
+legacy workspaces must have their exact HEAD contained in a local or fetched
+remote branch, while native workspaces must be recorded as integrated. It keeps
+no count-based retention, never removes CI evidence or caches, and requires a
+full five-minute cooloff since the latest workspace activity before both
+planning and provider-owned teardown. Current, pinned, initializing, dirty, or
+process-active capsules remain untouched.
+
+```sh
+kitsoki capsule cleanup clear
+```
+
 Inspect durable recovery state without moving any branch:
 
 ```sh
