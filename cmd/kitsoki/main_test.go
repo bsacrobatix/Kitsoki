@@ -74,6 +74,7 @@ func TestCLI_TopLevelHelp(t *testing.T) {
 		"docs", "record", "inspect", "turn", "session", "chat",
 		"mcp", "mcp-test", "mcp-codeact", "mcp-validator", "agent-bench",
 		"ticket-provider",
+		"queue",
 	}
 	for _, sub := range subs {
 		sub := sub
