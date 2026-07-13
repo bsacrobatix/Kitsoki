@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--backend",
         default="synthetic",
-        help="variant backend to record in the spec; synthetic keeps generated specs no-spend by default",
+        help="raw-prompt backend to record in the spec; no-spend is controlled by omitting arena run --live, not by an invalid Kitsoki backend",
     )
     parser.add_argument("--kitsoki-backend", default="", help="override the Kitsoki variant backend")
     parser.add_argument("--raw-backend", default="", help="override the raw-prompt variant backend")
@@ -50,7 +50,12 @@ def main(argv: list[str] | None = None) -> int:
         target_label=args.target_label,
         image=args.image,
         candidate=args.candidate,
-        kitsoki_backend=args.kitsoki_backend or args.backend,
+        # `kitsoki` resolves to strict-mcp-current, whose driver contract
+        # requires the Codex backend even on Arena's no-LLM arming path.
+        # `arena run` only spends when both --live and the explicit gate are
+        # supplied, so using the truthful backend here does not make the
+        # generated default spec live.
+        kitsoki_backend=args.kitsoki_backend or "codex",
         raw_backend=args.raw_backend or args.backend,
     )
     out = Path(args.out)
