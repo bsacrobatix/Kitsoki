@@ -220,8 +220,11 @@ spark_strict_args = argparse.Namespace(
 )
 check("Spark strict CodeAct backend validation", runner.validate_driver_args(spark_strict_args), "")
 
-binary_dir = runner.ensure_kitsoki_binary()
-require("Kitsoki stable binary exists", (binary_dir / "kitsoki").exists())
+launcher_dir = runner.ensure_kitsoki_launcher()
+launcher = launcher_dir / "kitsoki"
+require("Kitsoki source launcher exists", launcher.exists())
+require("Kitsoki source launcher uses go run", "go run" in launcher.read_text(encoding="utf-8"))
+require("Kitsoki source launcher does not compile a binary", "go build" not in launcher.read_text(encoding="utf-8"))
 
 subscription_raw = runner.codex_output_metrics('{"usage":{"input_tokens":10,"output_tokens":2}}', "gpt-5.4")
 check("raw subscription USD is unavailable", subscription_raw.get("cost_usd"), None)

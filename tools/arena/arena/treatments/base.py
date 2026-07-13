@@ -50,7 +50,7 @@ class DriverServices:
     zero_metrics: Callable[..., dict[str, Any]]
     container_path: Callable[[Any], str]
     write_task_file: Callable[[argparse.Namespace, dict[str, Any], str], Path]
-    ensure_kitsoki_binary: Callable[[], Path]
+    ensure_kitsoki_launcher: Callable[[], Path]
     first_line: Callable[[str], str]
     redact_cmd: Callable[[list[str]], list[str]]
     codex_output_metrics: Callable[[str, str], dict[str, Any]]
