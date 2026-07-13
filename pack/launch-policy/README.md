@@ -7,7 +7,18 @@ guard and settings wiring, and a local `agent_launch_policy:` seed.
 ```sh
 pack/launch-policy/install.sh /path/to/consumer
 pack/launch-policy/test-install.sh
+pack/launch-policy/test-delegation.sh
 ```
+
+`test-install.sh` proves the installer and the Git-hook/Claude-guard red-team
+gate. `test-delegation.sh` builds the real `kitsoki` binary and proves the
+installed launcher shims against the real (deterministic, no-LLM) policy gate:
+a denied working directory blocks the backend before it is ever invoked, an
+approved launch delegates to the real backend exactly once with native argv
+preserved unmangled and unevaluated (including shell-metacharacter and
+injection-shaped arguments), and `KITSOKI_AGENT_CLAUDE_BIN`/`KITSOKI_AGENT_CODEX_BIN`
+pointing at the shim itself — the activation script's own standing
+configuration — does not recurse.
 
 The installer discovers adjacent Git repositories and records them as sibling
 protected roots. It does not silently overwrite divergent managed files; use
