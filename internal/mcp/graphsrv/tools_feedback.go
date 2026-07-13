@@ -313,14 +313,21 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 	// (internal/graph.FeedbackNodeAfter) so the web intake carrier
 	// (internal/runstatus/server's POST /api/feedback/local, U2) proposes
 	// the exact same node shape this MCP carrier does — see its doc
-	// comment for the field-mapping judgment call and the deliberate
-	// edge-target omission. The new node's own id is a fresh id derived
-	// from the report id (never the changeset's own cs-<n>, which Propose
-	// mints itself).
+	// comment for the field-mapping judgment call. The new node's own id is
+	// a fresh id derived from the report id (never the changeset's own
+	// cs-<n>, which Propose mints itself). anchor.node is this carrier's
+	// only reliable target — filed_against lands empty when the caller
+	// didn't supply one, same as before.
+	targetNodeID := ""
+	if args.Anchor != nil {
+		targetNodeID = args.Anchor.Node
+	}
 	after := objectgraph.FeedbackNodeAfter(objectgraph.FeedbackNodeSpec{
-		Type:      fr.Type,
-		Fields:    fr.Fields,
-		NodeID:    "feedback-" + reportID,
+		Type:         fr.Type,
+		Fields:       fr.Fields,
+		Kind:         args.Kind,
+		TargetNodeID: targetNodeID,
+		NodeID:       "feedback-" + reportID,
 		Title:     args.Title,
 		ReportRef: reportID,
 	})

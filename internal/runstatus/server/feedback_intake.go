@@ -270,6 +270,32 @@ func feedbackBundleTitle(bundle map[string]any) string {
 	return "feedback"
 }
 
+// feedbackBundleKind resolves the bundle's `kind` — feedback-core's fixed
+// vocabulary (bug|issue_request|content_comment|question), carried straight
+// onto the proposed node's `kind` field (see objectgraph.FeedbackNodeAfter).
+func feedbackBundleKind(bundle map[string]any) string {
+	k, _ := bundle["kind"].(string)
+	return k
+}
+
+// feedbackBundleTargetNodeID resolves the catalog node this report is about:
+// the first id in the bundle's `context.nodeIds` — the node selected in the
+// portal at submit time (pogFeedback.ts's buildContext). Empty when nothing
+// was selected; the proposed node then lands with no filed_against target,
+// same as before this carrier knew how to fill it in.
+func feedbackBundleTargetNodeID(bundle map[string]any) string {
+	ctx, _ := bundle["context"].(map[string]any)
+	if ctx == nil {
+		return ""
+	}
+	ids, _ := ctx["nodeIds"].([]any)
+	if len(ids) == 0 {
+		return ""
+	}
+	id, _ := ids[0].(string)
+	return id
+}
+
 // routeIntakeToCatalogSink proposes — never authorizes — one new node of
 // the rule's type into the target catalog's review queue, via the same
 // objectgraph.Propose the bare graph.propose RPC uses (this carrier has no
@@ -294,11 +320,13 @@ func (s *Server) routeIntakeToCatalogSink(rule FeedbackRoute, bundle map[string]
 	// be caller-supplied.
 	nodeID := "feedback-" + sanitizeFeedbackNodeID(ref)
 	after := objectgraph.FeedbackNodeAfter(objectgraph.FeedbackNodeSpec{
-		Type:      rule.Type,
-		Fields:    rule.Fields,
-		NodeID:    nodeID,
-		Title:     title,
-		ReportRef: ref,
+		Type:         rule.Type,
+		Fields:       rule.Fields,
+		NodeID:       nodeID,
+		Title:        title,
+		ReportRef:    ref,
+		Kind:         feedbackBundleKind(bundle),
+		TargetNodeID: feedbackBundleTargetNodeID(bundle),
 	})
 
 	clk, rerr := graphRPCClock()
