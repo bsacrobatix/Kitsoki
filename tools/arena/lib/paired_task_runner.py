@@ -1630,30 +1630,23 @@ def trace_event_count(trace_ref: str, needle: str) -> int:
 
 
 def trace_has_unclosed_runtime(trace_ref: str) -> bool:
-    """Return true when a strict trace records a runtime start without its end.
+    """Return true when the shared supervised-runtime contract rejects a trace.
 
     The runner owns the temporary authentication home for the MCP orchestrator.
     Returning while such a worker is live tears that environment down and turns
-    a transport/lifecycle defect into a misleading candidate score. Match
-    events by call id so sequential workers are handled independently.
+    a transport/lifecycle defect into a misleading candidate score. The Go
+    contract also rejects orphaned, duplicate, and missing-call-ID events so
+    Arena cannot quietly score a malformed trace differently from CI.
     """
     if not os.path.exists(trace_ref):
         return False
-    starts: set[str] = set()
-    ends: set[str] = set()
-    for line in Path(trace_ref).read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            entry = json.loads(line)
-        except (json.JSONDecodeError, ValueError):
-            continue
-        call_id = str(entry.get("call_id") or "")
-        if not call_id:
-            continue
-        if entry.get("kind") == "agent.runtime.start":
-            starts.add(call_id)
-        elif entry.get("kind") == "agent.runtime.end":
-            ends.add(call_id)
-    return bool(starts - ends)
+    proc = subprocess.run(
+        ["go", "run", "./cmd/kitsoki", "trace", "runtime-contract", trace_ref],
+        cwd=KITSOKI_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    return proc.returncode != 0
 
 
 def current_head(tree: Path) -> str:

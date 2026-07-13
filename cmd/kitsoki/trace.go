@@ -25,6 +25,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/agentbench"
 	"kitsoki/internal/store"
 	"kitsoki/internal/testrunner"
 )
@@ -828,6 +829,32 @@ EXAMPLES:
 
 	cmd.AddCommand(traceToFlowCmd())
 	cmd.AddCommand(traceStatusCmd())
+	cmd.AddCommand(traceRuntimeContractCmd())
+	return cmd
+}
+
+// traceRuntimeContractCmd exposes the reusable supervised-runtime lifecycle
+// check to operators and CI before a scorer consumes a trace.
+func traceRuntimeContractCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "runtime-contract <trace.jsonl>",
+		Short: "Fail closed when supervised runtime events are unpaired",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			report, err := agentbench.ValidateRuntimeLifecycle(args[0])
+			if err != nil {
+				return err
+			}
+			if report.Valid {
+				fmt.Fprintf(cmd.OutOrStdout(), "runtime lifecycle: valid (%s)\n", args[0])
+				return nil
+			}
+			for _, violation := range report.Violations {
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s:%d: %s\n", args[0], violation.Line, violation.Reason)
+			}
+			return fmt.Errorf("runtime lifecycle contract failed with %d violation(s)", len(report.Violations))
+		},
+	}
 	return cmd
 }
 

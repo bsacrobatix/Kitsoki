@@ -18,6 +18,7 @@ import (
 const ProviderRequestLedgerV1 = "provider-request-ledger/v1"
 const FrictionV1 = "friction/v1"
 const ProviderResultReceiptV1 = "provider-result/v1"
+const RuntimeLifecycleV1 = "agent-runtime-lifecycle/v1"
 
 type RequestIdentity struct {
 	RunID     string `json:"run_id"`
@@ -92,6 +93,98 @@ type ledgerEvent struct {
 	StatePath string         `json:"state_path"`
 	CallID    string         `json:"call_id"`
 	Payload   map[string]any `json:"payload"`
+}
+
+// RuntimeLifecycleReport records the complete lifecycle verdict for supervised
+// agent runtimes in an EventSink JSONL trace. A valid report proves that every
+// start has exactly one terminal end with the same call ID.
+type RuntimeLifecycleReport struct {
+	Schema     string
+	Trace      string
+	Valid      bool
+	Violations []RuntimeLifecycleViolation
+}
+
+// RuntimeLifecycleViolation identifies a trace line that cannot participate in
+// a single well-formed runtime lifecycle.
+type RuntimeLifecycleViolation struct {
+	Line   int
+	CallID string
+	Kind   string
+	Reason string
+}
+
+// ValidateRuntimeLifecycle verifies the terminal pairing contract independently
+// of Arena scoring. Runtime events without a call ID, duplicate starts or ends,
+// and starts with no end are all invalid. Malformed trace JSON is an error,
+// never silently ignored.
+func ValidateRuntimeLifecycle(trace string) (RuntimeLifecycleReport, error) {
+	f, err := os.Open(trace)
+	if err != nil {
+		return RuntimeLifecycleReport{}, err
+	}
+	defer f.Close()
+
+	report := RuntimeLifecycleReport{Schema: RuntimeLifecycleV1, Trace: trace, Valid: true}
+	starts := map[string]int{}
+	ends := map[string]int{}
+	s := bufio.NewScanner(f)
+	s.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	for line := 1; s.Scan(); line++ {
+		var ev ledgerEvent
+		if err := json.Unmarshal(s.Bytes(), &ev); err != nil {
+			return report, fmt.Errorf("%s:%d: %w", trace, line, err)
+		}
+		if ev.Kind != "agent.runtime.start" && ev.Kind != "agent.runtime.end" {
+			continue
+		}
+		if strings.TrimSpace(ev.CallID) == "" {
+			report.Violations = append(report.Violations, RuntimeLifecycleViolation{
+				Line: line, Kind: ev.Kind, Reason: "runtime event is missing call_id",
+			})
+			continue
+		}
+		switch ev.Kind {
+		case "agent.runtime.start":
+			if first, exists := starts[ev.CallID]; exists {
+				report.Violations = append(report.Violations, RuntimeLifecycleViolation{
+					Line: line, CallID: ev.CallID, Kind: ev.Kind,
+					Reason: fmt.Sprintf("duplicate runtime start; first start is line %d", first),
+				})
+				continue
+			}
+			starts[ev.CallID] = line
+		case "agent.runtime.end":
+			if first, exists := ends[ev.CallID]; exists {
+				report.Violations = append(report.Violations, RuntimeLifecycleViolation{
+					Line: line, CallID: ev.CallID, Kind: ev.Kind,
+					Reason: fmt.Sprintf("duplicate runtime end; first end is line %d", first),
+				})
+				continue
+			}
+			ends[ev.CallID] = line
+			if _, started := starts[ev.CallID]; !started {
+				report.Violations = append(report.Violations, RuntimeLifecycleViolation{
+					Line: line, CallID: ev.CallID, Kind: ev.Kind, Reason: "runtime end has no matching start",
+				})
+			}
+		}
+	}
+	if err := s.Err(); err != nil {
+		return report, err
+	}
+	for callID, line := range starts {
+		if _, ended := ends[callID]; !ended {
+			report.Violations = append(report.Violations, RuntimeLifecycleViolation{
+				Line: line, CallID: callID, Kind: "agent.runtime.start", Reason: "runtime start has no matching end",
+			})
+		}
+	}
+	sort.Slice(report.Violations, func(i, j int) bool {
+		return report.Violations[i].Line < report.Violations[j].Line
+	})
+	report.Valid = len(report.Violations) == 0
+	return report, nil
 }
 
 // BuildProviderRequestLedger reconstructs one immutable row per terminal

@@ -77,3 +77,65 @@ func TestProviderResultReceiptsPreserveRetryResults(t *testing.T) {
 		t.Fatal("successful provider result must carry raw usage hash")
 	}
 }
+
+func TestValidateRuntimeLifecycleRejectsMalformedPairing(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "trace.jsonl")
+	lines := []map[string]any{
+		{"kind": "agent.runtime.start", "call_id": "unclosed"},
+		{"kind": "agent.runtime.end", "call_id": "orphan"},
+		{"kind": "agent.runtime.start", "call_id": "duplicate"},
+		{"kind": "agent.runtime.start", "call_id": "duplicate"},
+		{"kind": "agent.runtime.end", "call_id": "duplicate"},
+		{"kind": "agent.runtime.end", "call_id": "duplicate"},
+		{"kind": "agent.runtime.start"},
+	}
+	var b []byte
+	for _, line := range lines {
+		raw, err := json.Marshal(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = append(b, append(raw, '\n')...)
+	}
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ValidateRuntimeLifecycle(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Valid || len(report.Violations) != 5 {
+		t.Fatalf("report=%+v; want five lifecycle violations", report)
+	}
+	if report.Violations[0].Reason != "runtime start has no matching end" {
+		t.Fatalf("first violation=%+v; want unclosed start", report.Violations[0])
+	}
+}
+
+func TestValidateRuntimeLifecycleAcceptsIndependentClosedRuntimes(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "trace.jsonl")
+	lines := []map[string]any{
+		{"kind": "agent.runtime.start", "call_id": "first"},
+		{"kind": "agent.runtime.start", "call_id": "second"},
+		{"kind": "agent.runtime.end", "call_id": "second"},
+		{"kind": "agent.runtime.end", "call_id": "first"},
+	}
+	var b []byte
+	for _, line := range lines {
+		raw, err := json.Marshal(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = append(b, append(raw, '\n')...)
+	}
+	if err := os.WriteFile(p, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	report, err := ValidateRuntimeLifecycle(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Valid || len(report.Violations) != 0 {
+		t.Fatalf("report=%+v; want valid closed lifecycles", report)
+	}
+}

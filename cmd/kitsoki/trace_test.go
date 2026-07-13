@@ -51,6 +51,20 @@ func TestDigestTurns(t *testing.T) {
 	assert.Contains(t, out, "transitioned → core.proposal")
 }
 
+func TestTraceRuntimeContractCmd(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "trace.jsonl")
+	require.NoError(t, os.WriteFile(trace, []byte("{\"kind\":\"agent.runtime.start\",\"call_id\":\"live\"}\n"), 0o600))
+	cmd := traceRuntimeContractCmd()
+	cmd.SetArgs([]string{trace})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "runtime lifecycle contract failed")
+	assert.Contains(t, stderr.String(), "runtime start has no matching end")
+}
+
 func TestDigestTurns_SurfacesErrors(t *testing.T) {
 	const tr = `{"turn":1,"kind":"turn.start","state_path":"implementing","payload":{"input":"go","routed_by":"deterministic"}}
 {"turn":1,"kind":"host.on_error.redirect","state_path":"implementing","payload":{"from":"implementing","to":"idle"}}
