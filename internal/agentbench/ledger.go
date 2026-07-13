@@ -280,6 +280,7 @@ type FrictionReport struct {
 	SchemaFailures            Metric   `json:"schema_failures"`
 	Retries                   Metric   `json:"retries"`
 	NoStateChangeCalls        Metric   `json:"no_state_change_calls"`
+	WastedCallTokens          Metric   `json:"wasted_call_tokens"`
 	CrawlTokens               Metric   `json:"crawl_tokens"`
 	TimeToFirstSuccessfulCall Metric   `json:"time_to_first_successful_call_ms"`
 	Evidence                  []string `json:"evidence"`
@@ -302,10 +303,10 @@ func AnalyzeFriction(trace string) (FrictionReport, error) {
 	r := FrictionReport{Schema: FrictionV1, Trace: trace}
 	var first time.Time
 	var success time.Time
-	var toolErrors, schemaFailures, retries, noChange int64
+	var toolErrors, schemaFailures, retries, noChange, wasted int64
 	var crawlTokens int64
 	usageSeen := false
-	lastTool := ""
+	seen := map[string]bool{}
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for line := 1; s.Scan(); line++ {
@@ -316,34 +317,41 @@ func AnalyzeFriction(trace string) (FrictionReport, error) {
 		if first.IsZero() {
 			first = ev.TS
 		}
-		if ev.Kind != "agent.stream" {
+		kind := strings.ToLower(ev.Kind)
+		if ev.Kind == "agent.call.start" {
 			continue
 		}
-		tool := stringField(ev.Payload, "tool", "name")
-		if tool == "" {
-			continue
-		}
-		r.Evidence = append(r.Evidence, fmt.Sprintf("%s:%d", trace, line))
-		if tool == lastTool {
-			retries++
-		}
-		lastTool = tool
-		text := strings.ToLower(stringField(ev.Payload, "error", "text", "preview"))
-		if strings.Contains(text, "error") {
+		if strings.Contains(kind, "tool") && (strings.Contains(kind, "error") || strings.Contains(kind, "fail")) {
 			toolErrors++
+			r.Evidence = append(r.Evidence, fmt.Sprintf("%s:%d", trace, line))
 		}
-		if strings.Contains(text, "schema") || strings.Contains(text, "validation") {
+		if strings.Contains(kind, "schema") && (strings.Contains(kind, "error") || strings.Contains(kind, "fail") || strings.Contains(kind, "invalid")) {
 			schemaFailures++
+			r.Evidence = append(r.Evidence, fmt.Sprintf("%s:%d", trace, line))
 		}
-		if strings.Contains(text, "no state change") {
-			noChange++
+		if strings.Contains(kind, "retry") || boolValue(ev.Payload["retry"]) {
+			retries++
+			r.Evidence = append(r.Evidence, fmt.Sprintf("%s:%d", trace, line))
 		}
-		if success.IsZero() && !strings.Contains(text, "error") {
+		if ev.Kind != "agent.call.complete" && ev.Kind != "agent.call.error" || ev.CallID == "" || seen[ev.CallID] {
+			continue
+		}
+		seen[ev.CallID] = true
+		if ev.Kind == "agent.call.complete" && success.IsZero() {
 			success = ev.TS
 		}
-		if strings.Contains(strings.ToLower(tool), "read") || strings.Contains(strings.ToLower(tool), "search") {
-			if u, ok := ev.Payload["usage"].(map[string]any); ok {
-				crawlTokens += int64Value(u, "input_tokens")
+		usage, _ := usageFrom(ev.Payload)
+		if changed, ok := ev.Payload["state_changed"].(bool); ok {
+			if !changed {
+				noChange++
+				wasted += usage.Input + usage.Output
+				r.Evidence = append(r.Evidence, fmt.Sprintf("%s:%d", trace, line))
+			}
+		}
+		tool := strings.ToLower(stringField(ev.Payload, "tool", "tool_name", "name"))
+		if strings.Contains(tool, "read") || strings.Contains(tool, "search") || tool == "rg" || tool == "grep" || tool == "find" {
+			crawlTokens += usage.Input + usage.Output
+			if raw, ok := rawUsage(ev.Payload); ok && raw != nil {
 				usageSeen = true
 			}
 		}
@@ -351,10 +359,31 @@ func AnalyzeFriction(trace string) (FrictionReport, error) {
 	if err := s.Err(); err != nil {
 		return r, err
 	}
-	r.ToolErrors = Metric{Available: true, Value: toolErrors}
-	r.SchemaFailures = Metric{Available: true, Value: schemaFailures}
-	r.Retries = Metric{Available: true, Value: retries}
-	r.NoStateChangeCalls = Metric{Available: true, Value: noChange}
+	if toolErrors > 0 {
+		r.ToolErrors = Metric{Available: true, Value: toolErrors}
+	} else {
+		r.ToolErrors = Metric{Reason: "trace has no tool-error events"}
+	}
+	if schemaFailures > 0 {
+		r.SchemaFailures = Metric{Available: true, Value: schemaFailures}
+	} else {
+		r.SchemaFailures = Metric{Reason: "trace has no schema-failure events"}
+	}
+	if retries > 0 {
+		r.Retries = Metric{Available: true, Value: retries}
+	} else {
+		r.Retries = Metric{Reason: "trace has no retry evidence"}
+	}
+	if noChange > 0 {
+		r.NoStateChangeCalls = Metric{Available: true, Value: noChange}
+	} else {
+		r.NoStateChangeCalls = Metric{Reason: "trace has no no-state-change evidence"}
+	}
+	if wasted > 0 {
+		r.WastedCallTokens = Metric{Available: true, Value: wasted}
+	} else {
+		r.WastedCallTokens = Metric{Reason: "trace has no no-state-change usage"}
+	}
 	if usageSeen {
 		r.CrawlTokens = Metric{Available: true, Value: crawlTokens}
 	} else {
@@ -367,3 +396,5 @@ func AnalyzeFriction(trace string) (FrictionReport, error) {
 	}
 	return r, nil
 }
+
+func boolValue(v any) bool { b, _ := v.(bool); return b }

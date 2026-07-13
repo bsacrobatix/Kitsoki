@@ -26,3 +26,9 @@ including failed and retried calls, an attempt ordinal, API duration, and a
 hash of the raw provider usage object when one exists. A result receipt is not
 an estimate: absent usage is retained as unavailable evidence and must not be
 converted into zero-cost spend.
+
+Batch 3's `AnalyzeFriction` derives the `friction/v1` sidecar from the same
+stored trace without provider access. It reports evidence-backed tool errors,
+schema failures, retries, no-state-change calls, wasted tokens, crawl tokens,
+and time-to-first-success. A metric with no supporting event remains
+unavailable with a reason, rather than being reported as a misleading zero.
