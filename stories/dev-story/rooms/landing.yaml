@@ -351,6 +351,9 @@ states:
             - label:  "demo video"
               hint:   "produce/refresh a tour video and gate it with vision QA"
               intent: make_demo
+            - label: "demo artifacts"
+              hint: "review independent mockup, rrweb, and Slidey revisions"
+              intent: go_demo_artifact_review
             - label:  "prd"
               hint:   "author a PRD, then carry it into design"
               intent: go_prd
@@ -1284,6 +1287,11 @@ states:
       # navigation, preserving existing arc order.
       make_demo:
         - target: demovid
+          effects:
+            - set: { last_error: "" }
+
+      go_demo_artifact_review:
+        - target: demoart
           effects:
             - set: { last_error: "" }
 
