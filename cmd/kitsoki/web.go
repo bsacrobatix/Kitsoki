@@ -39,6 +39,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/assignment"
 	"kitsoki/internal/capsule"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
@@ -214,6 +215,10 @@ authentication.`,
 			if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 				return fmt.Errorf("create db directory: %w", err)
 			}
+			assignmentStore, err := assignment.Open(filepath.Join(filepath.Dir(dbPath), "room-assignments.jsonl"))
+			if err != nil {
+				return fmt.Errorf("open room assignment store: %w", err)
+			}
 
 			// ── Story discovery config (flags > .kitsoki.yaml > ./stories) ──
 			// Loading the config (root-story world-key resolution) and the
@@ -349,6 +354,7 @@ authentication.`,
 				}
 			}
 			srv := server.NewMulti(registry,
+				server.WithAssignmentStore(assignmentStore),
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(bugRoot),
 				server.WithWorkflowRoot(bugRoot),

@@ -8,6 +8,9 @@
         <span class="iv__app-id">{{ appId }}</span>
         <span class="iv__sep">·</span>
         <code class="iv__current-state" data-testid="current-state">{{ store.currentStatePath || "—" }}</code>
+        <span v-if="roomAssignment" class="iv__assignment" data-testid="room-assignment" :title="`assignment version ${roomAssignment.version}`">
+          {{ roomAssignment.principal || "unassigned" }}
+        </span>
         <span
           class="iv__state-badge"
           data-testid="state-badge"
@@ -758,6 +761,17 @@ const pending = ref(false);
 const cancelling = ref(false);
 const drivingOperation = ref(false);
 const error = ref<string | null>(null);
+const roomAssignment = ref<{ principal?: string; version: number } | null>(null);
+
+async function loadRoomAssignment(sessionID: string): Promise<void> {
+  const room = store.currentStatePath;
+  if (!room) { roomAssignment.value = null; return; }
+  try {
+    const response = await fetch("/rpc", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: "assignment", method: "runstatus.assignment.get", params: { session_id: sessionID, room_path: room } }) });
+    const frame = await response.json() as { result?: { assignment?: { principal?: string; version: number }; found?: boolean } };
+    roomAssignment.value = frame.result?.found ? frame.result.assignment ?? null : null;
+  } catch { roomAssignment.value = null; }
+}
 const sourceCanDriveOperation = ref(false);
 const traceCollapsed = ref(false);
 const traceWidthPercent = ref(TRACE_WIDTH_DEFAULT);
@@ -1438,7 +1452,7 @@ onMounted(() => {
   // user back in when they click "← Stories" with one live session.
   markAutoNavDone();
   window.addEventListener("kitsoki:pin-media", onPinMedia);
-  void loadSession(props.sessionId).then(() => maybeClearDraftFromQuery());
+  void loadSession(props.sessionId).then(async () => { await loadRoomAssignment(props.sessionId); await maybeClearDraftFromQuery(); });
 
   // Demo / tour test hook: submit an explicit intent through THIS view's own
   // store path (the same code path InputBar's @intent uses), so the chat +
@@ -1714,6 +1728,7 @@ function onEventSelect(index: number): void {
   font-size: 0.775rem;
   color: var(--k-fg-code, #7dd3fc);
 }
+.iv__assignment { color: var(--k-fg-muted, #94a3b8); font-size: .75rem; border: 1px solid var(--k-border, #334155); border-radius: 999px; padding: .1rem .4rem; }
 
 .iv__state-badge {
   display: inline-block;
