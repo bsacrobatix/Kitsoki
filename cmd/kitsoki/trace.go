@@ -831,6 +831,44 @@ EXAMPLES:
 	cmd.AddCommand(traceStatusCmd())
 	cmd.AddCommand(traceRuntimeContractCmd())
 	cmd.AddCommand(traceSequenceContractCmd())
+	cmd.AddCommand(traceFrictionCmd())
+	return cmd
+}
+
+// traceFrictionCmd ranks completed traces without a provider call. It is the
+// human/CI surface for the friction-ranking fixture and real strict-MCP traces.
+func traceFrictionCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "friction <trace.jsonl> [trace.jsonl...]",
+		Short: "Rank directly evidenced MCP and harness friction across traces",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ranking, err := agentbench.RankFriction(args)
+			if err != nil {
+				return err
+			}
+			format, _ := cmd.Flags().GetString("format")
+			if format == "markdown" {
+				fmt.Fprintln(cmd.OutOrStdout(), "# Trace friction ranking")
+				fmt.Fprintln(cmd.OutOrStdout(), "")
+				fmt.Fprintln(cmd.OutOrStdout(), "| Rank | Trace | Score | Tool errors | Schema failures | Retries | No-op calls |")
+				fmt.Fprintln(cmd.OutOrStdout(), "| ---: | --- | ---: | ---: | ---: | ---: | ---: |")
+				value := func(m agentbench.Metric) string {
+					if !m.Available {
+						return "unavailable"
+					}
+					return fmt.Sprintf("%d", m.Value)
+				}
+				for _, entry := range ranking.Entries {
+					r := entry.Report
+					fmt.Fprintf(cmd.OutOrStdout(), "| %d | %s | %d | %s | %s | %s | %s |\n", entry.Rank, entry.Trace, entry.Score, value(r.ToolErrors), value(r.SchemaFailures), value(r.Retries), value(r.NoStateChangeCalls))
+				}
+				return nil
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(ranking)
+		},
+	}
+	cmd.Flags().String("format", "json", "output format: json or markdown")
 	return cmd
 }
 
