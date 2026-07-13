@@ -12,7 +12,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueListCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd())
 	return cmd
 }
 func queueSubmitCmd() *cobra.Command {
@@ -44,12 +44,34 @@ func queueSubmitCmd() *cobra.Command {
 	_ = cmd.MarkFlagRequired("receipt")
 	return cmd
 }
-func queueListCmd() *cobra.Command {
+func queueStatusCmd() *cobra.Command {
 	var project string
-	cmd := &cobra.Command{Use: "list", Short: "List durable queue candidates", RunE: func(cmd *cobra.Command, _ []string) error {
+	cmd := &cobra.Command{Use: "status", Aliases: []string{"list"}, Short: "Show durable merge-queue candidates", RunE: func(cmd *cobra.Command, _ []string) error {
 		state, err := (queue.Store{ProjectRoot: project}).List()
 		if err != nil {
 			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	return cmd
+}
+
+// process is deliberately fail-closed until a project supplies its protected
+// integration and deterministic-gate adapters. The queue package owns the
+// reusable injected processor; this CLI verb prevents an accidental direct
+// main mutation from becoming a default implementation.
+func queueProcessCmd() *cobra.Command {
+	var project string
+	cmd := &cobra.Command{Use: "process", Aliases: []string{"drain"}, Short: "Process candidates through a configured protected integration", RunE: func(cmd *cobra.Command, _ []string) error {
+		state, err := (queue.Store{ProjectRoot: project}).List()
+		if err != nil {
+			return err
+		}
+		for _, candidate := range state.Candidates {
+			if candidate.Status == queue.Queued || candidate.Status == queue.Running {
+				return fmt.Errorf("queue: local processing requires a project protected-integration and deterministic-gate adapter; refusing to mutate protected main directly")
+			}
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
