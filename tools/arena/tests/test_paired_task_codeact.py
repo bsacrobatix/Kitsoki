@@ -504,6 +504,23 @@ with tempfile.TemporaryDirectory(prefix="paired-runtime-trace-") as td:
         f.write(json.dumps({"kind": "agent.runtime.end", "call_id": "live"}) + "\n")
     check("closed supervised runtime is terminal", runner.trace_has_unclosed_runtime(str(trace)), False)
 
+with tempfile.TemporaryDirectory(prefix="paired-sequence-trace-") as td:
+    trace = Path(td) / "trace.jsonl"
+    trace.write_text(
+        json.dumps({"kind": "session.header", "schema_version": 1}) + "\n" +
+        json.dumps({"turn": 1, "seq": 0, "kind": "turn.start", "payload": {}}) + "\n" +
+        json.dumps({"turn": 1, "seq": 2, "kind": "turn.end", "payload": {}}) + "\n",
+        encoding="utf-8",
+    )
+    check("sequence gap blocks a cell", runner.trace_has_invalid_sequence(str(trace)), True)
+    trace.write_text(
+        json.dumps({"kind": "session.header", "schema_version": 1}) + "\n" +
+        json.dumps({"turn": 1, "seq": 0, "kind": "turn.start", "payload": {}}) + "\n" +
+        json.dumps({"turn": 1, "seq": 1, "kind": "turn.end", "payload": {}}) + "\n",
+        encoding="utf-8",
+    )
+    check("contiguous sequence is accepted", runner.trace_has_invalid_sequence(str(trace)), False)
+
 require("blocked dispatch skips external scoring", "external oracle skipped because live dispatch did not reach a terminal trace" in runner_source)
 
 bench_story = (REPO_ROOT / "stories" / "bench-bugfix" / "app.yaml").read_text(encoding="utf-8")

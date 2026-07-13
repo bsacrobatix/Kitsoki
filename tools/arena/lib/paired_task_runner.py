@@ -954,12 +954,16 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
     metrics["worker_profile"] = profile
     metrics["story_path"] = str(args.story or BENCH_BUGFIX_STORY)
     nonterminal_runtime = trace_has_unclosed_runtime(trace_ref)
-    if nonterminal_runtime:
+    invalid_sequence = trace_has_invalid_sequence(trace_ref)
+    if nonterminal_runtime or invalid_sequence:
         metrics["measurement_status"] = "incomplete"
-        notes += "; incomplete strict trace: supervised runtime has no terminal event"
+        if nonterminal_runtime:
+            notes += "; incomplete strict trace: supervised runtime lifecycle is invalid"
+        if invalid_sequence:
+            notes += "; incomplete strict trace: EventSink sequence contract is invalid"
     incomplete_measurement = metrics.get("measurement_status") == "incomplete"
     return {
-        "blocked": proc.returncode != 0 or incomplete_measurement or nonterminal_runtime,
+        "blocked": proc.returncode != 0 or incomplete_measurement or nonterminal_runtime or invalid_sequence,
         "notes": notes,
         "metrics": metrics,
     }
@@ -1642,6 +1646,19 @@ def trace_has_unclosed_runtime(trace_ref: str) -> bool:
         return False
     proc = subprocess.run(
         ["go", "run", "./cmd/kitsoki", "trace", "runtime-contract", trace_ref],
+        cwd=KITSOKI_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    return proc.returncode != 0
+
+
+def trace_has_invalid_sequence(trace_ref: str) -> bool:
+    """Return true when the shared EventSink sequence contract rejects a trace."""
+    if not os.path.exists(trace_ref):
+        return False
+    proc = subprocess.run(
+        ["go", "run", "./cmd/kitsoki", "trace", "sequence-contract", trace_ref],
         cwd=KITSOKI_ROOT,
         text=True,
         capture_output=True,

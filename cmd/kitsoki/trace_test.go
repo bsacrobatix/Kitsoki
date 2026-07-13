@@ -65,6 +65,24 @@ func TestTraceRuntimeContractCmd(t *testing.T) {
 	assert.Contains(t, stderr.String(), "runtime start has no matching end")
 }
 
+func TestTraceSequenceContractCmd(t *testing.T) {
+	trace := filepath.Join(t.TempDir(), "trace.jsonl")
+	require.NoError(t, os.WriteFile(trace, []byte(
+		"{\"kind\":\"session.header\",\"schema_version\":1}\n"+
+			"{\"turn\":1,\"seq\":0,\"kind\":\"turn.start\",\"payload\":{}}\n"+
+			"{\"turn\":1,\"seq\":2,\"kind\":\"turn.end\",\"payload\":{}}\n",
+	), 0o600))
+	cmd := traceSequenceContractCmd()
+	cmd.SetArgs([]string{trace})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	err := cmd.Execute()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "trace sequence contract failed")
+	assert.Contains(t, err.Error(), "gap in seq")
+}
+
 func TestDigestTurns_SurfacesErrors(t *testing.T) {
 	const tr = `{"turn":1,"kind":"turn.start","state_path":"implementing","payload":{"input":"go","routed_by":"deterministic"}}
 {"turn":1,"kind":"host.on_error.redirect","state_path":"implementing","payload":{"from":"implementing","to":"idle"}}
