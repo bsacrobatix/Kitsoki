@@ -42,7 +42,7 @@ class CodexCodeactDriver(TreatmentDriver):
         try:
             cap_json, cap_hash = capability_preset_json(args, preset_name)
             task_file = services.write_task_file(args, task, trace_ref)
-            bin_dir = services.ensure_kitsoki_binary()
+            bin_dir = services.ensure_kitsoki_launcher()
         except (Exception, SystemExit) as exc:  # noqa: BLE001 - report as harness failure.
             return DriverResult(
                 blocked=True,

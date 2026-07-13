@@ -133,7 +133,7 @@ def treatment_services() -> DriverServices:
         zero_metrics=zero_metrics,
         container_path=container_path,
         write_task_file=write_task_file,
-        ensure_kitsoki_binary=ensure_kitsoki_binary,
+        ensure_kitsoki_launcher=ensure_kitsoki_launcher,
         first_line=first_line,
         redact_cmd=redact_cmd,
         codex_output_metrics=codex_output_metrics,
@@ -870,7 +870,7 @@ def dispatch_kitsoki(args: argparse.Namespace, task: dict[str, Any], tree: Path,
             "metrics": zero_metrics(action_surface="kitsoki-studio-mcp"),
         }
     try:
-        bin_dir = ensure_kitsoki_binary()
+        bin_dir = ensure_kitsoki_launcher()
         branch = f"paired-task-{safe_name(task['id'])}"
         run(["git", "checkout", "-q", "-B", branch], cwd=tree)
         test_cmd = test_cmd_for(task)
@@ -988,13 +988,22 @@ def kitsoki_runtime_binary_path(
     return root / "bin" / "kitsoki"
 
 
-def ensure_kitsoki_binary() -> Path:
-    """Build a stable platform-local CLI for nested live MCP subprocesses."""
-    binary = kitsoki_runtime_binary_path()
-    if not binary.exists():
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        run(["go", "build", "-o", str(binary), "./cmd/kitsoki"], cwd=KITSOKI_ROOT)
-    return binary.parent
+def ensure_kitsoki_launcher() -> Path:
+    """Provide a PATH launcher without compiling a repo-local Kitsoki binary.
+
+    Nested MCP clients require a ``kitsoki`` command, but a generated binary is
+    stale-prone and bypasses the normal ``go run`` development surface. The Go
+    build cache still makes repeated invocations cheap while the launcher keeps
+    every dispatch pinned to this checkout's source.
+    """
+    launcher = kitsoki_runtime_binary_path()
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    source = shlex.quote(str(KITSOKI_ROOT / "cmd" / "kitsoki"))
+    contents = f"#!/usr/bin/env bash\nset -euo pipefail\nexec go run {source} \"$@\"\n"
+    if not launcher.exists() or launcher.read_text(encoding="utf-8") != contents:
+        launcher.write_text(contents, encoding="utf-8")
+        launcher.chmod(0o755)
+    return launcher.parent
 
 
 def test_cmd_for(task: dict[str, Any]) -> str:
