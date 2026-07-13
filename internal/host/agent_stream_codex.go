@@ -108,6 +108,12 @@ func classifyCodexItem(eventType string, item map[string]any, ce *classifiedEven
 		ce.Tool = name
 		ce.ToolArgs = preview
 		ce.Tools = []StreamToolUse{{Name: name, Preview: preview}}
+		ce.ActionID, _ = item["id"].(string)
+		if eventType == "item.started" {
+			ce.ActionState = "started"
+		} else {
+			ce.ActionState = "completed"
+		}
 
 	default:
 		// Unknown item type — leave ce carrying only the top-level type.

@@ -669,6 +669,19 @@ func appendAgentStreamEvent(ctx context.Context, ts time.Time, callID string, ev
 		CallID:    callID,
 		Payload:   raw,
 	})
+	if ev.ActionState == "" || ev.Tool == "" {
+		return
+	}
+	action, err := json.Marshal(map[string]any{
+		"schema": "agent-action/v1", "method": ev.Tool, "action_id": ev.ActionID,
+		"parent_call_id": callID, "outcome_class": ev.ActionState,
+		"duration_available": false, "result_summary_available": false,
+		"arguments_summary": ev.Preview,
+	})
+	if err != nil {
+		return
+	}
+	_ = sink.Append(store.Event{Turn: oc.Turn, Ts: ts, Kind: store.EventKind("agent.action"), StatePath: oc.StatePath, CallID: callID, Payload: action})
 }
 
 type storeAgentNotice struct {

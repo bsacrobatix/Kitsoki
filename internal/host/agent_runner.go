@@ -744,11 +744,13 @@ func emitClassified(ctx context.Context, ce classifiedEvent) {
 	preview := onelinePreview(previewSrc, 120)
 
 	out := StreamEvent{
-		Type:    ce.Type,
-		Subtype: ce.Subtype,
-		Tool:    ce.Tool,
-		Preview: preview,
-		Tools:   ce.Tools,
+		Type:        ce.Type,
+		Subtype:     ce.Subtype,
+		Tool:        ce.Tool,
+		Preview:     preview,
+		Tools:       ce.Tools,
+		ActionID:    ce.ActionID,
+		ActionState: ce.ActionState,
 		// Full narration prose, untruncated — the transcript word-
 		// wraps it. Cutting it mid-sentence was the truncation bug.
 		Text:      ce.Text,

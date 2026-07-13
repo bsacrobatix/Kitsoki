@@ -52,7 +52,9 @@ type StreamEvent struct {
 	// event can carry multiple tools; rendering only Tool collapses them
 	// into a single line. Tool/Preview remain populated with the first
 	// entry for back-compat. Empty for non-tool events.
-	Tools []StreamToolUse
+	Tools       []StreamToolUse
+	ActionID    string
+	ActionState string
 	// Text is the FULL assistant narration / "thinking" prose for this
 	// event, untruncated and with newlines preserved. Consumers that
 	// show reasoning to the user (the transcript pane) must render this,
