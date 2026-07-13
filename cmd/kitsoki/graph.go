@@ -48,6 +48,7 @@ func graphCmd() *cobra.Command {
 		Short: "Project object graph catalog tools",
 	}
 	cmd.AddCommand(graphLintCmd())
+	cmd.AddCommand(graphProposeCmd())
 	cmd.AddCommand(graphApplyCmd())
 	cmd.AddCommand(graphQueryCmd())
 	cmd.AddCommand(graphRenderFeaturesCmd())
