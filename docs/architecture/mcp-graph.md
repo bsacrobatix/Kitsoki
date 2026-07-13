@@ -221,8 +221,15 @@ Resolution precedence, per bound catalog:
      gate: "git diff --check"   # optional dev-workspace.sh merge gate
    ```
 
-3. otherwise **`direct`** — a repo with no `.kitsoki` profile (or a catalog
+3. otherwise, when the bound catalog is visibly read-only and its repository
+   carries `scripts/dev-workspace.sh`, **`capsule`** — protected primary
+   checkouts work without requiring a duplicate local profile setting;
+4. otherwise **`direct`** — a repo with no `.kitsoki` profile (or a catalog
    outside any git repo) just edits in the working directory.
+
+`--write-via direct` remains an explicit override. The protected-catalog
+fallback checks mode bits without attempting a write, so it never probes or
+weakens the protected checkout.
 
 The default capsule merge gate is `git diff --check`, not the repo's full CI
 gate: graph writes are already validated all-or-nothing by the engine (lint

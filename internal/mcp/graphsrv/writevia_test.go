@@ -277,6 +277,51 @@ func TestGraphServer_NoProfileDefaultsToDirect(t *testing.T) {
 	}
 }
 
+func TestGraphServer_ProtectedCatalogAutoRoutesThroughCapsule(t *testing.T) {
+	repoRoot, catalogPath := capsuleFixture(t, "")
+	if err := os.Chmod(catalogPath, 0o444); err != nil {
+		t.Fatalf("protect catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(catalogPath, 0o644) })
+	runner := &fakeWorkspaceRunner{t: t, repoRoot: repoRoot, wsRoot: t.TempDir()}
+	cs, done := connectGraphServer(t, graphsrv.Config{
+		CatalogFlags:    []string{catalogPath},
+		Mode:            graphsrv.ModePropose,
+		WorkspaceRunner: runner,
+	})
+	defer done()
+
+	if m, isErr := callTool(t, cs, "graph.propose", proposeArgs("flip req-beta", []map[string]any{flipStatusOp("req-beta", "active", "done")})); isErr {
+		t.Fatalf("graph.propose (protected auto route): %+v", m)
+	}
+	if verbs := runner.verbs(); strings.Join(verbs, ",") != "create,commit,merge" {
+		t.Fatalf("dev-workspace verbs = %v, want [create commit merge]", verbs)
+	}
+}
+
+func TestGraphServer_ProtectedCatalogDirectOverrideStaysDirect(t *testing.T) {
+	_, catalogPath := capsuleFixture(t, "")
+	if err := os.Chmod(catalogPath, 0o444); err != nil {
+		t.Fatalf("protect catalog: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(catalogPath, 0o644) })
+	runner := &fakeWorkspaceRunner{t: t, repoRoot: filepath.Dir(catalogPath), wsRoot: t.TempDir()}
+	cs, done := connectGraphServer(t, graphsrv.Config{
+		CatalogFlags:    []string{catalogPath},
+		Mode:            graphsrv.ModePropose,
+		WriteVia:        graphsrv.WriteViaDirect,
+		WorkspaceRunner: runner,
+	})
+	defer done()
+
+	if _, isErr := callTool(t, cs, "graph.propose", proposeArgs("flip req-beta", []map[string]any{flipStatusOp("req-beta", "active", "done")})); !isErr {
+		t.Fatal("graph.propose (--write-via direct) unexpectedly bypassed the protected catalog")
+	}
+	if verbs := runner.verbs(); len(verbs) != 0 {
+		t.Fatalf("direct override must never touch dev-workspace.sh, got %v", verbs)
+	}
+}
+
 func TestGraphServer_CapsuleWithoutScriptFails(t *testing.T) {
 	repoRoot, catalogPath := capsuleFixture(t, "capsule")
 	if err := os.Remove(filepath.Join(repoRoot, "scripts", "dev-workspace.sh")); err != nil {

@@ -24,7 +24,11 @@ import (
 //  1. the server-level --write-via flag (direct|capsule), when not "auto";
 //  2. the catalog repo's checked-in `.kitsoki/project-profile.yaml`
 //     `graph: {write_via: ...}` block;
-//  3. "direct" — a repo with no .kitsoki profile (or no git repo at all)
+//  3. "capsule" when the bound catalog is visibly protected (no write bits)
+//     and the catalog repo carries the managed-workspace helper; this keeps a
+//     protected primary checkout from turning a normal graph proposal into a
+//     raw permission error;
+//  4. "direct" — a repo with no .kitsoki profile (or no git repo at all)
 //     just edits in the working directory.
 const (
 	WriteViaAuto    = "auto"
@@ -87,6 +91,19 @@ func readProjectGraphConfig(repoRoot string) projectGraphConfig {
 		doc.Graph.WriteVia = ""
 	}
 	return doc.Graph
+}
+
+// catalogLooksProtected reports whether the catalog itself is deliberately
+// read-only. It intentionally consults mode bits rather than attempting a
+// write: an MCP server must not probe a protected primary checkout by
+// modifying it, and tests often run as an owner that could bypass permission
+// checks. An explicit --write-via direct still wins over this auto heuristic.
+func catalogLooksProtected(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode().Perm()&0o222 == 0
 }
 
 // WorkspaceRunResult is one dev-workspace.sh invocation's outcome.
@@ -181,6 +198,16 @@ func (r *WriteRouter) route(primaryPath string) *catalogRoute {
 		}
 		if strings.TrimSpace(cfg.Gate) != "" {
 			rt.gate = cfg.Gate
+		}
+		// A protected primary checkout is a capsule signal even for projects
+		// that have not yet added a graph block to their profile. Only select
+		// it when the repo actually supplies the lifecycle helper; otherwise
+		// preserve the historical direct route and its native filesystem error.
+		if cfg.WriteVia == "" && catalogLooksProtected(primaryPath) {
+			script := filepath.Join(root, "scripts", "dev-workspace.sh")
+			if info, statErr := os.Stat(script); statErr == nil && info.Mode()&0o111 != 0 {
+				rt.via = WriteViaCapsule
+			}
 		}
 	}
 	if r.via != WriteViaAuto {
