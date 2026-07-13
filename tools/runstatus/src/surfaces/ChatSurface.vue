@@ -201,16 +201,21 @@ async function ensureStories(): Promise<void> {
   }
 }
 
-// The first `context` postMessage (or null once waitForContext's timeout
-// elapses) — captured once at boot so autostart's session.new can fold it
-// into initial_world.portal_context instead of racing the host's reply.
-let bootContext: import("../lib/embedHost.js").EmbedContext | null = null;
+// The boot context autostart's session.new folds into
+// initial_world.portal_context: a URL-delivered ?world_seed= payload when
+// the host supplied one (race-free — it exists before any script runs),
+// else the first `context` postMessage (or null once waitForContext's
+// bounded wait elapses; a host that posts later than that window silently
+// loses — hosts that care should send world_seed).
+let bootContext: Record<string, unknown> | null = null;
 
 onMounted(async () => {
   source = createDataSource();
   embedHost.sendReady();
-  if (boot.story || boot.autostart) {
-    bootContext = await embedHost.waitForContext();
+  if (boot.worldSeed) {
+    bootContext = boot.worldSeed;
+  } else if (boot.story || boot.autostart) {
+    bootContext = (await embedHost.waitForContext()) as Record<string, unknown> | null;
   }
   try {
     const current = await source.getCurrentSession();
