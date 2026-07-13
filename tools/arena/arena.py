@@ -417,7 +417,7 @@ def cmd_task_optimization_record(args: argparse.Namespace) -> int:
             preflight_candidate=preflight_candidates[candidate_id],
             requires_codeact_runtime="codeact" in str(planned[cell_id].get("treatment") or ""),
         )
-        destination = Path(args.out) / cell_id / f"{attempt_id}.json"
+        destination = Path(args.out) / cell_id / attempt_id / "receipt.json"
         _write_immutable_json(destination, receipt)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: could not record task-optimization attempt: {exc}", file=sys.stderr)
