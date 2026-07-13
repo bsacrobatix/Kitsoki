@@ -378,6 +378,14 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	}
 	cliArgs := buildLaunchClaudeArgs(&launchDecl, model, effort, permissionMode, opts.AddDirs)
 	cliArgs = appendCodeactBackendArgs(cliArgs, opts.Mode, backend)
+	// A story agent that declares no native tools and only MCP servers is an
+	// MCP-only contract. Codex cannot express Claude's per-tool allowlist, but
+	// it can remove its shell surface while retaining the declared MCP servers.
+	// Keep this generic rather than special-casing individual drivers (for
+	// example, the graph driver hosted by another repository).
+	mcpOnlyStoryAgent := opts.Mode != launchModeCodeact && len(launchDecl.Tools) == 0 &&
+		launchDecl.MCP != nil && len(launchDecl.MCP.Servers) > 0
+	cliArgs = appendCodexShellToolDisableArg(cliArgs, backend, mcpOnlyStoryAgent)
 	var cleanups []func()
 	if launchDecl.MCP != nil && len(launchDecl.MCP.Servers) > 0 {
 		mcpConfigPath, cleanup, cfgErr := writeLaunchMCPConfigTempfile(launchDecl.MCP.Servers, "kitsoki-agent-launch-mcp")
