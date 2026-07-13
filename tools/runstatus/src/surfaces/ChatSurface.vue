@@ -101,8 +101,17 @@ import type { StoryHeader } from "../data/live-source.js";
 import ActivityFeed from "../components/ActivityFeed.vue";
 import ChatTranscript from "../components/ChatTranscript.vue";
 import InputBar from "../components/InputBar.vue";
+import { resolveEmbedBoot } from "../lib/embedBoot.js";
+import { EmbedHost } from "../lib/embedHost.js";
 
 const store = useRunStore();
+
+// Embed boot (portal-kitsoki-chat-embed-plan.md §3.1/§3.2): a host page
+// (the POG portal popup) pins story/catalog/scope on the URL and drives the
+// surface headless — no picker, no manual Start click when autostart=1.
+// undefined outside an embed context (no listeners, no-op postMessage).
+const boot = resolveEmbedBoot();
+const embedHost = new EmbedHost(boot.origin);
 
 // One DataSource for the lifetime of the surface (DI; the transport auto-selects
 // Bridge in the webview / Http in the browser).
@@ -158,7 +167,9 @@ async function adopt(id: string | null): Promise<void> {
     // Populate the story picker in the background — the empty state renders
     // immediately; the picker (and the default selection) fill in once the list
     // lands. The Start button stays disabled until then.
-    void ensureStories();
+    void ensureStories().then(() => {
+      if (boot.autostart) void onStart();
+    });
   }
 }
 
@@ -176,8 +187,13 @@ async function ensureStories(): Promise<void> {
     if (!live) live = new LiveSource("/");
     const list = await live.listStories();
     stories.value = list;
-    const preferred = list.find((s) => s.app_id === "kitsoki-dev");
-    selectedStoryPath.value = (preferred ?? list[0])?.path ?? "";
+    // An embed's ?story= boot param (path or app_id) wins over the
+    // kitsoki-dev dogfood default — the host pinned this one deliberately.
+    const bootMatch = boot.story
+      ? list.find((s) => s.path === boot.story || s.app_id === boot.story)
+      : undefined;
+    const preferred = bootMatch ?? list.find((s) => s.app_id === "kitsoki-dev");
+    selectedStoryPath.value = (preferred ?? list[0])?.path ?? boot.story ?? "";
   } catch (e) {
     startError.value = errMsg(e);
   } finally {
@@ -185,8 +201,17 @@ async function ensureStories(): Promise<void> {
   }
 }
 
+// The first `context` postMessage (or null once waitForContext's timeout
+// elapses) — captured once at boot so autostart's session.new can fold it
+// into initial_world.portal_context instead of racing the host's reply.
+let bootContext: import("../lib/embedHost.js").EmbedContext | null = null;
+
 onMounted(async () => {
   source = createDataSource();
+  embedHost.sendReady();
+  if (boot.story || boot.autostart) {
+    bootContext = await embedHost.waitForContext();
+  }
   try {
     const current = await source.getCurrentSession();
     await adopt(current);
@@ -213,7 +238,7 @@ onUnmounted(() => {
  * but selectedStoryPath is still seeded to that lone story.
  */
 async function onStart(): Promise<void> {
-  const storyPath = selectedStoryPath.value || stories.value[0]?.path;
+  const storyPath = selectedStoryPath.value || boot.story || stories.value[0]?.path;
   if (!storyPath) {
     startError.value = "No story available to start a chat.";
     return;
@@ -222,10 +247,21 @@ async function onStart(): Promise<void> {
   startError.value = null;
   try {
     if (!live) live = new LiveSource("/");
-    const id = await live.newSession(storyPath);
+    // Embed contract §3.1/§3.2: catalog/scope ride the URL, richer context
+    // (node ids, filters, instruction) rides the one postMessage captured at
+    // boot — both fold into world.portal_context/catalog/scope_key so the
+    // agent's very first turn already has them via relevant_world.
+    const initialWorld: Record<string, unknown> = {};
+    if (boot.catalog) initialWorld.catalog = boot.catalog;
+    if (boot.scope) initialWorld.scope_key = boot.scope;
+    if (bootContext) initialWorld.portal_context = bootContext;
+    const id = await live.newSession(storyPath, { initialWorld });
     await adopt(id);
+    embedHost.sendEvent("session_started", { session_id: id });
   } catch (e) {
-    startError.value = errMsg(e);
+    const message = errMsg(e);
+    startError.value = message;
+    embedHost.sendEvent("error", { message });
   } finally {
     starting.value = false;
   }
@@ -237,8 +273,11 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
   error.value = null;
   try {
     await fn();
+    embedHost.sendEvent("turn_done", { session_id: sessionId.value ?? undefined });
   } catch (e) {
-    error.value = errMsg(e);
+    const message = errMsg(e);
+    error.value = message;
+    embedHost.sendEvent("error", { message });
   } finally {
     pending.value = false;
   }
