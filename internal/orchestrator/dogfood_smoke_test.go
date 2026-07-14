@@ -502,11 +502,7 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 	// Boot the session the way every real surface does (see
 	// DriveToRest → RunInitialOnEnter). This fires the `core` compound's
 	// on_enter chain, including the kitsoki-dev world_in projection that
-	// sets core__ticket_repo from the instance-level ticket_repo default
-	// (the symbolic `origin` — host.gh.ticket resolves it against
-	// `git remote get-url origin` at dispatch time).
-	// Without it the child keeps its own "" default and every
-	// host.gh.ticket.* call resolves repo via ambient gh (the bug).
+	// sets core__ticket_repo from the instance-level ticket_repo default.
 	require.NoError(t, orch.RunInitialOnEnter(c, sid))
 
 	// The operator boots into the free-form workbench landing.
@@ -521,10 +517,21 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 
 	history, err := s.LoadHistory(sid)
 	require.NoError(t, err)
-	requireDogfoodHostArgAny(t, history, []string{
-		"host.gh.ticket.search",
-		"host.local_github.ticket.search",
-	}, "repo", nil)
+	// kitsoki-dev's `ticket` interface is bound to host.ticket_federation
+	// (see .kitsoki/stories/kitsoki-dev/app.yaml host_bindings), which
+	// composes the local + GitHub ticket_sources behind ONE host call and
+	// fans out to each source's provider (host.local_files.ticket,
+	// host.gh.ticket) via its own internal reg.Invoke — those nested calls
+	// are never individually recorded as HostDispatched events (that trace
+	// only covers the machine's compiled top-level `invoke:` steps, see
+	// internal/orchestrator/host_dispatch.go). This used to assert on a
+	// per-provider HostDispatched event (host.gh.ticket.search /
+	// host.local_github.ticket.search) that predates the federation
+	// default switch (2dfc5984c) and can never fire under the current
+	// architecture. The federated call's own `sources` arg already carries
+	// each configured provider's resolved repo, so assert on that instead.
+	requireDogfoodFederatedTicketSourceRepo(t, history, "host.ticket_federation.search",
+		[]string{"host.gh.ticket", "host.local_github.ticket"})
 
 	// 2. In the strict ticket-search menu the operator does NOT pick a row —
 	//    they describe a piece of ad-hoc work in their own words (the exact
@@ -554,36 +561,48 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 	requireDogfoodRoutedBy(t, history, "fallback")
 }
 
-func requireDogfoodHostArgAny(t *testing.T, history []store.Event, namespaces []string, key string, want any) {
+// requireDogfoodFederatedTicketSourceRepo asserts that the HostDispatched
+// event for `namespace` (the host.ticket_federation call itself) carried a
+// `sources` list containing at least one row for one of `providers` with a
+// non-empty `repo` arg. host.ticket_federation composes N ticket providers
+// behind ONE dispatched host call and fans out to each provider internally
+// via its own reg.Invoke (internal/host/ticket_federation.go) — those nested
+// calls are never individually recorded as HostDispatched events, so a
+// per-provider repo identity has to be read out of the federation call's own
+// `sources` arg instead of a separate nested dispatch event.
+func requireDogfoodFederatedTicketSourceRepo(t *testing.T, history []store.Event, namespace string, providers []string) {
 	t.Helper()
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Kind != store.HostDispatched {
 			continue
 		}
 		var payload struct {
-			Namespace string         `json:"namespace"`
-			Args      map[string]any `json:"args"`
+			Namespace string `json:"namespace"`
+			Args      struct {
+				Sources []struct {
+					Provider string         `json:"provider"`
+					Args     map[string]any `json:"args"`
+				} `json:"sources"`
+			} `json:"args"`
 		}
 		require.NoError(t, json.Unmarshal(history[i].Payload, &payload))
-		found := false
-		for _, ns := range namespaces {
-			if payload.Namespace == ns {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if payload.Namespace != namespace {
 			continue
 		}
-		if want == nil {
-			require.NotNil(t, payload.Args[key], "missing argument %q on host dispatch %s", key, payload.Namespace)
-			require.NotEmpty(t, payload.Args[key], "argument %q on host dispatch %s should be non-empty", key, payload.Namespace)
-			return
+		for _, src := range payload.Args.Sources {
+			for _, p := range providers {
+				if src.Provider != p {
+					continue
+				}
+				repo, _ := src.Args["repo"].(string)
+				require.NotEmpty(t, repo, "source %q (%s) missing repo arg", src.Provider, namespace)
+				return
+			}
 		}
-		require.Equal(t, want, payload.Args[key])
+		t.Fatalf("no federated source for any of %v found in %s dispatch", providers, namespace)
 		return
 	}
-	t.Fatalf("no HostDispatched event found for any of %v", namespaces)
+	t.Fatalf("no HostDispatched event found for %s", namespace)
 }
 
 func requireDogfoodRoutedBy(t *testing.T, history []store.Event, want string) {

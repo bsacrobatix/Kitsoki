@@ -96,6 +96,16 @@ func (p DevWorkspaceScriptProvider) Integrate(ctx context.Context, _ Definition,
 	return nil
 }
 
+// WorkspaceMaterialized implements WorkspaceMaterializationVerifier: Create
+// only returns success after `dev-workspace.sh create` completes AND the
+// sentinel stat below passes, so its presence at in.Path is durable proof the
+// managed clone/worktree is real, not merely a directory that happens to
+// exist.
+func (DevWorkspaceScriptProvider) WorkspaceMaterialized(in Instance) bool {
+	_, err := os.Stat(filepath.Join(in.Path, instanceSentinel))
+	return err == nil
+}
+
 func (p DevWorkspaceScriptProvider) Close(ctx context.Context, in Instance) error {
 	root, err := projectRoot(p.ProjectRoot)
 	if err != nil {
@@ -124,3 +134,4 @@ func (p DevWorkspaceScriptProvider) runner() ScriptRunner {
 
 var _ WorkspaceProvider = DevWorkspaceScriptProvider{}
 var _ WorkspaceIntegrator = DevWorkspaceScriptProvider{}
+var _ WorkspaceMaterializationVerifier = DevWorkspaceScriptProvider{}

@@ -66,6 +66,43 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 		if existing.State == StateClosed {
 			return Handle{}, fmt.Errorf("%w: instance %q is closed", ErrInvalidState, req.ID)
 		}
+		// Self-heal: the on-disk workspace can go missing out from under the
+		// instance store (a manual `rm -rf`, a caller-side `git worktree
+		// prune`, an aborted create) while metadata still records the
+		// instance as Ready at its old path. A bare "already exists"
+		// short-circuit here would hand back a handle pointing at a path
+		// that no longer exists, and every subsequent op against it (sync,
+		// agent writes, git commit) fails with an opaque "chdir: no such
+		// file or directory" instead of the caller's `create` ever getting a
+		// chance to rebuild it. Providers that durably mark their own
+		// materialized output (WorkspaceMaterializationVerifier — both
+		// git-backed providers write the `.kitsoki-capsule` sentinel) get a
+		// verify-before-trust check here; providers that don't implement it
+		// (e.g. a synthetic/in-memory provider with no on-disk contract)
+		// keep the historical trust-the-store short-circuit untouched, since
+		// "no directory" carries no meaning for them.
+		if verifier, ok := provider.(WorkspaceMaterializationVerifier); ok && !verifier.WorkspaceMaterialized(existing) {
+			_ = m.emit(ctx, "capsule.workspace.materializing", existing)
+			materialized, createErr := provider.Create(ctx, def, existing)
+			if createErr != nil {
+				_, _ = m.Instances.CompareAndSwap(ctx, existing.ID, existing.Generation, func(cur *Instance) error { cur.State = StateFailed; return nil })
+				_ = m.emit(ctx, "capsule.workspace.failed", existing)
+				return Handle{}, createErr
+			}
+			existing, err = m.Instances.CompareAndSwap(ctx, existing.ID, existing.Generation, func(cur *Instance) error {
+				cur.Path = materialized.Path
+				cur.SourceRef = materialized.SourceRef
+				cur.Head = materialized.Head
+				cur.Branch = materialized.Branch
+				cur.VerifierOverlays = append([]OverlayRef(nil), materialized.VerifierOverlays...)
+				cur.State = StateReady
+				return nil
+			})
+			if err != nil {
+				return Handle{}, err
+			}
+			_ = m.emit(ctx, "capsule.workspace.ready", existing)
+		}
 		return Handle{ID: existing.ID, Generation: existing.Generation}, nil
 	} else if !strings.Contains(err.Error(), ErrNotFound.Error()) {
 		return Handle{}, err

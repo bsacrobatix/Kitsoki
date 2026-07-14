@@ -263,6 +263,22 @@ type WorkspaceProvider interface {
 	Close(context.Context, Instance) error
 }
 
+// WorkspaceMaterializationVerifier is implemented by providers whose Create
+// leaves durable, provider-owned evidence at Instance.Path (both git-backed
+// providers write the `.kitsoki-capsule` sentinel file). Manager.Create uses
+// it to self-heal an instance record whose on-disk workspace disappeared out
+// from under the instance store — a manual `rm -rf`, an external `git
+// worktree prune`, an aborted create — instead of trusting stale Ready
+// metadata and handing back a handle to a path that no longer exists.
+// Providers that don't materialize durable on-disk state (e.g. a
+// synthetic/in-memory provider used in tests) simply don't implement this,
+// and Manager.Create falls back to its historical trust-the-store behavior
+// for them, since "no directory" carries no meaning for a provider with no
+// on-disk contract in the first place.
+type WorkspaceMaterializationVerifier interface {
+	WorkspaceMaterialized(in Instance) bool
+}
+
 // WorkspaceIntegrator is implemented only by providers that own a complete
 // protected integration lifecycle. Generic local ref reconciliation continues
 // through reconcile.Plan/Apply; this seam preserves the historical script's

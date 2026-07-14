@@ -35,6 +35,9 @@ type GitSourceProvider struct {
 	CacheRoot string
 }
 
+var _ WorkspaceProvider = GitSourceProvider{}
+var _ WorkspaceMaterializationVerifier = GitSourceProvider{}
+
 func (GitSourceProvider) Name() string { return "git" }
 func (p GitSourceProvider) Create(ctx context.Context, def Definition, in Instance) (MaterializedWorkspace, error) {
 	root, err := projectRoot(p.ProjectRoot)
@@ -155,6 +158,15 @@ func writeGitSourceManifest(workspace, source string, def Definition, in Instanc
 	}
 	return nil
 }
+// WorkspaceMaterialized implements WorkspaceMaterializationVerifier: the
+// instance sentinel is written last in Create (after clone/checkout/overlay
+// all succeeded), so its presence is durable proof the workspace at in.Path
+// is real and complete, not merely a directory that happens to exist.
+func (GitSourceProvider) WorkspaceMaterialized(in Instance) bool {
+	_, err := os.Stat(filepath.Join(in.Path, instanceSentinel))
+	return err == nil
+}
+
 func (GitSourceProvider) Close(_ context.Context, in Instance) error {
 	if strings.TrimSpace(in.Path) == "" {
 		return fmt.Errorf("git source: instance path is required")
