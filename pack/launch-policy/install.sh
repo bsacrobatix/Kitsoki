@@ -57,9 +57,58 @@ install_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/
 install_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/codex" 0755
 install_file "$pack_dir/templates/launcher-env.sh" "$target/.kitsoki/launch-policy.sh" 0644
 
-hooks_dir="$(git -C "$target" rev-parse --git-path hooks)"
-case "$hooks_dir" in /*) ;; *) hooks_dir="$target/$hooks_dir" ;; esac
-install_file "$pack_dir/git-hooks/reference-transaction" "$hooks_dir/reference-transaction" 0755
+# The main-pinning git hook belongs only in a primary checkout. A managed
+# capsule workspace (or any clone carrying the capsule sentinel/manifest) is
+# the sanctioned place for branch work — installing the hook there locks the
+# workspace onto main and breaks it.
+if [ -e "$target/capsule-manifest.json" ] || [ -e "$target/.kitsoki-capsule" ] || [ -e "$target/.kitsoki-clone" ]; then
+  echo "skipping reference-transaction hook: $target is a capsule workspace"
+else
+  hooks_dir="$(git -C "$target" rev-parse --git-path hooks)"
+  case "$hooks_dir" in /*) ;; *) hooks_dir="$target/$hooks_dir" ;; esac
+  install_file "$pack_dir/git-hooks/reference-transaction" "$hooks_dir/reference-transaction" 0755
+fi
+
+# Upsert the operating-principles section as a marker-delimited managed block
+# in AGENTS.md and README.md, so pack/kit upgrades refresh it in place while
+# everything outside the markers stays the consumer's own. Never SKIPs: the
+# block is pack-owned by contract, unlike whole managed files.
+DOC_BEGIN="<!-- BEGIN kitsoki:launch-policy (managed by pack/launch-policy/install.sh; edits inside are overwritten on upgrade) -->"
+DOC_END="<!-- END kitsoki:launch-policy -->"
+upsert_doc_block() {
+  local dst="$1" body="$pack_dir/templates/operating-principles.md" tmp
+  tmp="$(mktemp)"
+  if [ -e "$dst" ] && grep -qF "$DOC_BEGIN" "$dst"; then
+    awk -v begin="$DOC_BEGIN" -v end="$DOC_END" -v body="$body" '
+      index($0, begin) == 1 {
+        print
+        while ((getline line < body) > 0) print line
+        close(body)
+        skipping = 1
+        next
+      }
+      index($0, end) == 1 { skipping = 0 }
+      !skipping { print }
+    ' "$dst" > "$tmp"
+  else
+    { if [ -e "$dst" ]; then cat "$dst"; printf '\n'; fi
+      printf '%s\n' "$DOC_BEGIN"
+      cat "$body"
+      printf '%s\n' "$DOC_END"; } > "$tmp"
+  fi
+  if [ -e "$dst" ] && cmp -s "$tmp" "$dst"; then rm -f "$tmp"; return; fi
+  if [ -e "$dst" ] && [ ! -w "$dst" ]; then
+    rm -f "$tmp"
+    echo "SKIP $dst is not writable (protected checkout?); rerun from a workspace" >&2
+    skipped=$((skipped + 1))
+    return 0
+  fi
+  mv "$tmp" "$dst"
+  changed=$((changed + 1))
+  echo "updated ${dst#$target/} (kitsoki:launch-policy block)"
+}
+upsert_doc_block "$target/AGENTS.md"
+upsert_doc_block "$target/README.md"
 
 mkdir -p "$target/.capsules/workspaces"
 if [ "$changed" -eq 0 ] && [ "$skipped" -eq 0 ]; then
