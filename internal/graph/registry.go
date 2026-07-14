@@ -137,10 +137,13 @@ type MaterializeCheckDecl struct {
 
 // MaterializeParamDecl is one entry of a materialize: declaration's params list.
 type MaterializeParamDecl struct {
-	ID      string
-	Type    string
-	Default any
-	Values  []string
+	ID          string
+	Type        string
+	Default     any
+	Values      []string
+	Required    bool
+	SourceField string
+	SourceEdge  EdgeField
 }
 
 // EffectiveType is a TypeDef with its whole extends ancestry resolved: the
@@ -297,7 +300,6 @@ func (r *Registry) All() []TypeDef {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
-
 
 // IsA reports whether typeID equals ancestorID or extends it (directly or
 // transitively) — the assignability check an edge target uses (an edge

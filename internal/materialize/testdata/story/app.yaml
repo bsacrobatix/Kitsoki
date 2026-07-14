@@ -11,6 +11,7 @@ world:
   audience: { type: string, default: "internal" }
   gate: { type: string, default: "" }
   artifact_path: { type: string, default: "" }
+  artifact_content: { type: string, default: "" }
   status: { type: string, default: "" }
 
 intents:

@@ -110,6 +110,40 @@ func TestUnmetGates(t *testing.T) {
 	}
 }
 
+func TestMaterializeReadinessResolvesPartialFromGraph(t *testing.T) {
+	cat := loadTestCatalog(t)
+	node := cat.Nodes[graph.NodeID("wi-ready")]
+	binding, err := ResolveBinding(cat, node)
+	if err != nil {
+		t.Fatalf("ResolveBinding: %v", err)
+	}
+	binding.Params = []graph.MaterializeParamDecl{
+		{ID: "owner", Type: "string", Required: true, SourceField: "owner"},
+		{ID: "phases", Type: "list", Required: true, SourceEdge: graph.EdgeField("in_phase")},
+		{ID: "audience", Type: "string", Required: true},
+	}
+
+	notReady := MaterializeReadiness(cat, node, binding, nil)
+	if notReady.Ready {
+		t.Fatal("Readiness.Ready = true, want false while audience is absent")
+	}
+	if got, want := notReady.MissingParams, []string{"audience"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("MissingParams = %v, want %v", got, want)
+	}
+	if got, want := notReady.Params["phases"], []string{"phase-one"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("edge-backed phases = %#v, want %#v", got, want)
+	}
+
+	ready := MaterializeReadiness(cat, node, binding, map[string]any{"audience": "internal"})
+	if !ready.Ready {
+		t.Fatalf("Readiness.Ready = false: %+v", ready)
+	}
+	emptyEdgeOverride := MaterializeReadiness(cat, node, binding, map[string]any{"audience": "internal", "phases": []string{}})
+	if !emptyEdgeOverride.Ready || !reflect.DeepEqual(emptyEdgeOverride.Params["phases"], []string{"phase-one"}) {
+		t.Fatalf("empty override must not erase graph-backed required params: %+v", emptyEdgeOverride)
+	}
+}
+
 func TestContextClosure(t *testing.T) {
 	cat := loadTestCatalog(t)
 
@@ -240,6 +274,9 @@ collect:
 	}
 	if len(artifactBytes) == 0 {
 		t.Error("written artifact is empty")
+	}
+	if got, want := string(artifactBytes), "# Script-produced fixture\n\nExact producer bytes."; got != want {
+		t.Errorf("written artifact = %q, want script-produced bytes %q", got, want)
 	}
 
 	// The write-back's own audit trail (§3.3/§3.4: system-authored
