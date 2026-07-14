@@ -12,6 +12,7 @@ without GitHub credentials or LLM cost.
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -161,7 +162,16 @@ def main():
         tmp = Path(tmp)
         run.ARTIFACT_ROOT = tmp / "product-journey"
         run.ARTIFACT_ROOT.mkdir(parents=True)
-        os.environ.pop("KITSOKI_BIN", None)
+        # The native queue and drain are separate CLI invocations. Build the
+        # exact checkout once so this smoke does not race two `go run` builds
+        # (or accidentally exercise an installed, stale binary).
+        kitsoki_bin = tmp / "kitsoki"
+        subprocess.run(
+            ["go", "build", "-o", str(kitsoki_bin), "./cmd/kitsoki"],
+            cwd=run.ROOT,
+            check=True,
+        )
+        os.environ["KITSOKI_BIN"] = str(kitsoki_bin)
 
         catalog = run.load_catalog(run.CATALOG)
         personas = run.load_personas(run.PERSONAS)
