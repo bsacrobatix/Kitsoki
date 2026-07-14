@@ -7,12 +7,12 @@ guard and settings wiring, and a local `agent_launch_policy:` seed.
 ```sh
 pack/launch-policy/install.sh /path/to/consumer
 pack/launch-policy/test-install.sh
-pack/launch-policy/test-delegation.sh
 ```
 
 `test-install.sh` proves the installer and the Git-hook/Claude-guard red-team
-gate. `test-delegation.sh` builds the real `kitsoki` binary and proves the
-installed launcher shims against the real (deterministic, no-LLM) policy gate:
+gate, then runs the fresh installed-pack shell delegation proof. That proof
+runs the real `kitsoki` CLI through `go run` against the real (deterministic,
+no-LLM) policy gate and installed launcher shims:
 a denied working directory blocks the backend before it is ever invoked, an
 approved launch delegates to the real backend exactly once with native argv
 preserved unmangled and unevaluated (including shell-metacharacter and

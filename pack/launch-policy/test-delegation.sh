@@ -35,9 +35,19 @@ git -C "$workspace" config user.name "Launch Policy Acceptance"
 git -C "$workspace" config user.email "launch-policy@example.invalid"
 git -C "$workspace" commit -q --allow-empty -m init
 
-echo "building kitsoki (real policy gate; only claude/codex backends are faked)..." >&2
-kitsoki_bin="$tmp/kitsoki-real"
-( cd "$repo_root" && go build -o "$kitsoki_bin" ./cmd/kitsoki )
+echo "running kitsoki through go run (real policy gate; only claude/codex backends are faked)..." >&2
+# Keep this proof on the source surface: the shim only needs an executable
+# KITSOKI_BIN, so a tiny runner gives it one without leaving a test binary
+# behind. Resolve Go before the env -i calls below intentionally narrow PATH.
+go_bin="$(command -v go)"
+kitsoki_bin="$tmp/kitsoki"
+cat > "$kitsoki_bin" <<SCRIPT
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$repo_root"
+exec "$go_bin" run ./cmd/kitsoki "\$@"
+SCRIPT
+chmod +x "$kitsoki_bin"
 
 # Fake backends: never a real LLM. Each records its invocation + full argv.
 realbin="$tmp/realbin"
