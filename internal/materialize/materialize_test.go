@@ -163,6 +163,70 @@ func TestContextClosure(t *testing.T) {
 	}
 }
 
+func TestMaterializeReadiness_IncomingContextDigestStaleness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "catalog.yaml")
+	const catalog = `schema: project-object-graph/seed-catalog/v0
+catalog: {id: incoming-context}
+type_registry:
+  - {id: core-node, schema: graph-type/v0, extends: null, required_fields: [id, schema, title, status, visibility]}
+  - {id: app, schema: graph-type/v0, extends: core-node, artifact: {schema: pog/artifact/app/v0, format: markdown, presentation: document}, materialize: {story: story, incoming_context_edges: [applies_to, implemented_in, surfaces_on]}}
+  - {id: requirement, schema: graph-type/v0, extends: core-node, edge_fields: [{id: applies_to, target_type: app, cardinality: many}]}
+  - {id: feature, schema: graph-type/v0, extends: core-node, edge_fields: [{id: implemented_in, target_type: app, cardinality: many}, {id: surfaces_on, target_type: app, cardinality: many}]}
+nodes:
+  - {schema: graph/app/v0, id: console, title: Console, status: active, visibility: internal}
+  - {schema: graph/requirement/v0, id: req-console, title: Requirement, status: active, visibility: internal, statement: old, edges: {applies_to: [console]}}
+  - {schema: graph/feature/v0, id: feature-console, title: Feature, status: active, visibility: internal, edges: {implemented_in: [console]}}
+  - {schema: graph/requirement/v0, id: req-other, title: Other, status: active, visibility: internal, statement: unrelated}
+`
+	if err := os.WriteFile(path, []byte(catalog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := graph.LoadCatalog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := cat.Nodes[graph.NodeID("console")]
+	binding, err := ResolveBinding(cat, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := MaterializeReadiness(cat, node, binding, nil)
+	if first.StaleStatus != "needs_materialization" || !first.Stale {
+		t.Fatalf("unmaterialized readiness = %+v", first)
+	}
+	node.Fields = map[string]any{"materialization": map[string]any{"context_digest": first.ContextDigest}}
+	if got := MaterializeReadiness(cat, node, binding, nil); got.StaleStatus != "fresh" || got.Stale {
+		t.Fatalf("recorded current digest should be fresh: %+v", got)
+	}
+
+	// A targeted requirement is declared incoming context, so changing it
+	// makes the app stale. Replacing the recorded digest models rematerializing
+	// the app and restores freshness.
+	cat.Nodes[graph.NodeID("req-console")].Fields = map[string]any{"statement": "new"}
+	stale := MaterializeReadiness(cat, node, binding, nil)
+	if stale.StaleStatus != "stale" || stale.StaleReason != "context_digest_changed" {
+		t.Fatalf("targeted requirement mutation = %+v, want stale context", stale)
+	}
+	node.Fields["materialization"] = map[string]any{"context_digest": stale.ContextDigest}
+	if got := MaterializeReadiness(cat, node, binding, nil); got.StaleStatus != "fresh" {
+		t.Fatalf("rematerialized digest should refresh readiness: %+v", got)
+	}
+
+	// Nodes that do not target the app are absent from declared context.
+	before := MaterializeReadiness(cat, node, binding, nil).ContextDigest
+	cat.Nodes[graph.NodeID("req-other")].Fields = map[string]any{"statement": "still unrelated"}
+	if got := MaterializeReadiness(cat, node, binding, nil); got.ContextDigest != before || got.StaleStatus != "fresh" {
+		t.Fatalf("unrelated mutation changed readiness: %+v", got)
+	}
+
+	// Historical records have no digest. They must be an explicit unknown,
+	// never assumed fresh for compatibility.
+	node.Fields["materialization"] = map[string]any{"job_id": "old"}
+	if got := MaterializeReadiness(cat, node, binding, nil); got.StaleStatus != "unknown" || !got.Stale || got.StaleReason != "materialization_record_missing_context_digest" {
+		t.Fatalf("historical record readiness = %+v", got)
+	}
+}
+
 func TestStart_GateValidation_RejectsWithUnmetList(t *testing.T) {
 	sched := jobs.NewInMemoryScheduler()
 	ctx := context.Background()
@@ -296,7 +360,7 @@ collect:
 	if len(ev) != 1 {
 		t.Fatalf("evidence = %v, want 1 entry", ev)
 	}
-	if entry := ev[0].(map[string]any); entry["kind"] != "doc" || entry["path"] != ".artifacts/wi-ready/brief.md" {
+	if entry := ev[0].(map[string]any); entry["kind"] != "document" || entry["path"] != ".artifacts/wi-ready/brief.md" {
 		t.Errorf("evidence entry = %v, unexpected shape", entry)
 	}
 

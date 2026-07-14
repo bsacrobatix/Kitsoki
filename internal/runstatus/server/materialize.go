@@ -145,6 +145,9 @@ func (s *Server) dispatchMaterialize(ctx context.Context, method string, params 
 	case "graph.materialize.checks":
 		result, rerr := s.materializeChecks(ctx, params)
 		return result, rerr, true
+	case "graph.materialize.readiness":
+		result, rerr := s.materializeReadiness(params)
+		return result, rerr, true
 	default:
 		return nil, nil, false
 	}
@@ -216,8 +219,6 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 	if _, err := materialize.ResolveBinding(cat, node); err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
 	}
-	eff, _ := cat.Registry.Effective(node.TypeID)
-
 	prep, err := materialize.Prepare(materialize.Request{
 		CatalogPath: catalogPath,
 		RepoRoot:    repoRoot,
@@ -247,18 +248,13 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
 	}
 
-	artifactKind := "doc"
-	if eff.Artifact != nil && eff.Artifact.Presentation != "" {
-		artifactKind = eff.Artifact.Presentation
-	}
-
 	state := &materializeJobState{
 		nodeID:        nodeID,
 		sessionID:     webSessionID,
 		stages:        append([]materialize.Stage(nil), stages...),
 		gates:         prep.Binding.Gates,
-		artifactKind:  artifactKind,
-		artifactTitle: fmt.Sprintf("%s artifact", eff.ID),
+		artifactKind:  prep.Binding.ArtifactKind,
+		artifactTitle: fmt.Sprintf("%s artifact", prep.Binding.TypeID),
 		status:        string(jobs.JobRunning),
 	}
 	s.materializeMu.Lock()
@@ -289,6 +285,35 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		"stages":     stagesOut,
 		"session_id": webSessionID,
 	}, nil
+}
+
+// materializeReadiness exposes gate readiness plus deterministic context
+// freshness without starting a job. Historical records lacking context_digest
+// intentionally return stale_status=unknown rather than fresh.
+func (s *Server) materializeReadiness(params map[string]any) (any, *rpcError) {
+	catalogPath, _, rerr := s.resolveMaterializeCatalog(params, "graph.materialize.readiness")
+	if rerr != nil {
+		return nil, rerr
+	}
+	nodeID := graphStringParam(params, "node_id")
+	if nodeID == "" {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.readiness: missing 'node_id'"}
+	}
+	paramArgs, _ := params["params"].(map[string]any)
+	cat, err := graph.LoadCatalog(catalogPath)
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.readiness: " + err.Error()}
+	}
+	node := cat.Nodes[graph.NodeID(nodeID)]
+	if node == nil {
+		return nil, &rpcError{Code: codeServerError, Message: fmt.Sprintf("graph.materialize.readiness: node %q not found in catalog", nodeID)}
+	}
+	binding, err := materialize.ResolveBinding(cat, node)
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.readiness: " + err.Error()}
+	}
+	readiness := materialize.MaterializeReadiness(cat, node, binding, paramArgs)
+	return map[string]any{"node_id": nodeID, "ready": readiness.Ready, "missing_gates": readiness.MissingGates, "missing_params": readiness.MissingParams, "context_digest": readiness.ContextDigest, "stale": readiness.Stale, "stale_status": readiness.StaleStatus, "stale_reason": readiness.StaleReason}, nil
 }
 
 // materializeChecks implements graph.materialize.checks {catalog, node_id} —
