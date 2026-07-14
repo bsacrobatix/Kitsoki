@@ -116,7 +116,7 @@ source_dirty() {
 # settings and a moving worktree/index cannot weaken the proof, and a change
 # already present on new_base is handled as an ordinary clean merge.
 expected_tree_after_delta() {
-  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree status
+  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree status diagnostics
   merge_tree_diagnostics=""
   set +e
   tree="$(git -C "$dir" merge-tree \
@@ -127,7 +127,15 @@ expected_tree_after_delta() {
   status=$?
   set -e
   if [ "$status" -ne 0 ]; then
-    merge_tree_diagnostics="$tree"
+    set +e
+    diagnostics="$(git -C "$dir" merge-tree \
+      --write-tree \
+      --messages \
+      --merge-base "$old_base" \
+      "$new_base" "$snapshot" 2>&1)"
+    set -e
+    merge_tree_diagnostics="${diagnostics:-$tree}"
+    [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics"
     return "$status"
   fi
   printf '%s\n' "$tree"
@@ -762,9 +770,9 @@ if rebase_in_progress "$staging_capsule"; then
     die "staging capsule has no 'source' remote: $staging_capsule"
   rebase_original="$(git -C "$staging_capsule" rev-parse --verify ORIG_HEAD)" ||
     die "staging capsule has an active rebase without a readable ORIG_HEAD; do not overwrite it"
-  recover_obsolete_staging_rebase "$staging_capsule" "$rebase_original" "$staging_start" "$base_primary_start"
   git -C "$staging_capsule" fetch source \
     "+refs/heads/$staging_branch:refs/remotes/source/$staging_branch"
+  recover_obsolete_staging_rebase "$staging_capsule" "$rebase_original" "$staging_start" "$base_primary_start"
   [ "$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$staging_branch")" = "$staging_start" ] ||
     die "staging branch advanced while recovering an obsolete rebase; rerun"
   git -C "$staging_capsule" reset --hard "refs/remotes/source/$staging_branch" >/dev/null
@@ -1003,6 +1011,7 @@ expected_capsule_tree="$(expected_tree_after_delta \
   "$capsule_delta_base_start" \
   "$capsule_original_start" \
   "$staging_start")" || {
+  merge_tree_diagnostics="$expected_capsule_tree"
   merge_tree_has_conflicts || die "could not construct the expected post-snapshot capsule tree: ${merge_tree_diagnostics:-no diagnostics}"
   begin_resumable_merge "$staging_capsule" "$snapshot_ref" \
     "post-snapshot capsule tree" \
@@ -1043,6 +1052,7 @@ expected_result_tree="$(expected_tree_after_delta \
   "$combined_base" \
   "$capsule_start" \
   "$base_start")" || {
+  merge_tree_diagnostics="$expected_result_tree"
   merge_tree_has_conflicts || die "could not construct the expected staging-on-base tree: ${merge_tree_diagnostics:-no diagnostics}"
   begin_resumable_merge "$staging_capsule" "$base_start" \
     "staging-on-base tree" \
