@@ -36,7 +36,7 @@ assert_readonly() {
 assert_contains() {
   local file="$1"
   local needle="$2"
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     echo "expected '$needle' in $file" >&2
     cat "$file" >&2
     exit 1
@@ -519,5 +519,61 @@ assert_contains "$tmp/race.out" "restored only the proven-clean branch paths"
   { git -C "$race_repo" status --short >&2; exit 1; }
 [ "$(cat "$race_repo/src/app.txt")" = "base" ] ||
   { echo "race failure left feature content in primary checkout" >&2; exit 1; }
+
+# Promotion uses the same explicit handoff: an add/add merge-tree conflict
+# leaves a source-capsule rebase for a human to resolve, then --resume runs the
+# configured gate before moving either staging or protected main.
+resume_repo="$tmp/add-add-conflict-promotion"
+git_init "$resume_repo"
+mkdir -p "$resume_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$resume_repo/scripts/merge-to-main.sh"
+chmod +x "$resume_repo/scripts/merge-to-main.sh"
+git -C "$resume_repo" add scripts/merge-to-main.sh
+git -C "$resume_repo" commit -q -m helper
+commit_file "$resume_repo" base.txt base
+git -C "$resume_repo" branch staging/local
+git -C "$resume_repo" switch -q staging/local
+commit_file "$resume_repo" conflict.txt staging-version
+git -C "$resume_repo" switch -q main
+commit_file "$resume_repo" conflict.txt main-version
+mkdir -p "$resume_repo/.capsules/staging"
+git -C "$resume_repo" clone --no-local "$resume_repo" "$resume_repo/.capsules/staging/local" >/dev/null
+git -C "$resume_repo/.capsules/staging/local" remote rename origin source
+git -C "$resume_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$resume_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$resume_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$resume_repo/.capsules/staging/local/.kitsoki-capsule"
+resume_main_before="$(git -C "$resume_repo" rev-parse main)"
+set +e
+(
+  cd "$resume_repo"
+  scripts/merge-to-main.sh --gate true
+) >"$tmp/add-add-conflict-promotion.out" 2>&1
+resume_status=$?
+set -e
+[ "$resume_status" -eq 2 ] || { echo "add/add promotion conflict should be resumable" >&2; exit 1; }
+assert_contains "$tmp/add-add-conflict-promotion.out" "expected rebased source tree has merge conflicts"
+assert_contains "$tmp/add-add-conflict-promotion.out" "--resume"
+[ "$(git -C "$resume_repo" rev-parse main)" = "$resume_main_before" ] ||
+  { echo "conflicted promotion moved main" >&2; exit 1; }
+[ -d "$resume_repo/.capsules/staging/local/.git/rebase-merge" ] ||
+  { echo "conflicted promotion did not retain source rebase" >&2; exit 1; }
+printf 'manual-resolution\n' >"$resume_repo/.capsules/staging/local/conflict.txt"
+git -C "$resume_repo/.capsules/staging/local" add conflict.txt
+GIT_EDITOR=true git -C "$resume_repo/.capsules/staging/local" rebase --continue >/dev/null
+set +e
+(
+  cd "$resume_repo"
+  scripts/merge-to-main.sh --resume --gate true
+) >"$tmp/add-add-conflict-promotion-resume.out" 2>&1
+resume_complete_status=$?
+set -e
+[ "$resume_complete_status" -eq 0 ] || {
+  cat "$tmp/add-add-conflict-promotion-resume.out" >&2
+  echo "promotion resume failed" >&2
+  exit 1
+}
+[ "$(git -C "$resume_repo" show main:conflict.txt)" = "manual-resolution" ] ||
+  { echo "promotion resume did not land manual resolution" >&2; exit 1; }
 
 echo "merge-to-main protected-mode integration tests passed"

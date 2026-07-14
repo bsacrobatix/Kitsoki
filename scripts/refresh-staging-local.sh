@@ -36,6 +36,7 @@ no_fetch=0
 resume=0
 gate=""
 dirty_action="auto"
+merge_tree_diagnostics=""
 
 usage() {
   cat >&2 <<EOF
@@ -110,13 +111,58 @@ source_dirty() {
 # settings and a moving worktree/index cannot weaken the proof, and a change
 # already present on new_base is handled as an ordinary clean merge.
 expected_tree_after_delta() {
-  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree
+  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree status
+  merge_tree_diagnostics=""
+  set +e
   tree="$(git -C "$dir" merge-tree \
     --write-tree \
     --no-messages \
     --merge-base "$old_base" \
-    "$new_base" "$snapshot")" || return 1
+    "$new_base" "$snapshot" 2>&1)"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    merge_tree_diagnostics="$tree"
+    return "$status"
+  fi
   printf '%s\n' "$tree"
+}
+
+rebase_in_progress() {
+  local dir="$1" git_dir
+  git_dir="$(git -C "$dir" rev-parse --git-dir)" || return 1
+  [ -d "$dir/$git_dir/rebase-merge" ] || [ -d "$dir/$git_dir/rebase-apply" ]
+}
+
+merge_tree_has_conflicts() {
+  case "$merge_tree_diagnostics" in
+    *CONFLICT*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+begin_resumable_rebase() {
+  local dir="$1" target="$2" label="$3" resume_cmd="$4"
+  echo "error: $label has merge conflicts; preserved recovery refs remain in place" >&2
+  [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics" >&2
+  echo "refresh-staging-local: starting the managed rebase so the conflict can be resolved in the capsule" >&2
+  if git -C "$dir" rebase "$target"; then
+    die "$label merge analysis failed unexpectedly even though rebase completed; inspect recovery refs before retrying"
+  fi
+  if rebase_in_progress "$dir"; then
+    cat >&2 <<EOF
+
+Resolve the conflict in the managed staging capsule, then continue the rebase:
+  git -C "$dir" status
+  # edit and git -C "$dir" add <resolved-paths>
+  git -C "$dir" rebase --continue
+  $resume_cmd
+
+To abandon this attempt: git -C "$dir" rebase --abort
+EOF
+    exit 2
+  fi
+  die "$label merge analysis failed and did not create a resumable rebase; inspect the diagnostics and preserved refs"
 }
 
 materialize_expected_tree_merge() {
@@ -657,6 +703,9 @@ if [ "$source_branch" != "$staging_branch" ]; then
 fi
 dirty="$(source_dirty "$staging_capsule")"
 if [ -n "$dirty" ]; then
+  if [ "$resume" -eq 1 ] && rebase_in_progress "$staging_capsule"; then
+    die "cannot resume while the staging rebase is still in progress; resolve it, run git rebase --continue, then retry --resume"
+  fi
   handle_dirty_staging_capsule "$staging_capsule" "$dirty" || exit 1
 fi
 git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
@@ -846,8 +895,12 @@ expected_capsule_tree="$(expected_tree_after_delta \
   "$staging_capsule" \
   "$capsule_delta_base_start" \
   "$capsule_original_start" \
-  "$staging_start")" ||
-  die "could not construct the expected post-snapshot capsule tree"
+  "$staging_start")" || {
+  merge_tree_has_conflicts || die "could not construct the expected post-snapshot capsule tree: ${merge_tree_diagnostics:-no diagnostics}"
+  begin_resumable_rebase "$staging_capsule" "$snapshot_ref" \
+    "post-snapshot capsule tree" \
+    "scripts/refresh-staging-local.sh --skip-remote --resume --base '$base' --staging-branch '$staging_branch' --staging-capsule '$staging_capsule'${gate:+ --gate '$gate'}"
+}
 refuse_untracked_tree_collisions \
   "$staging_capsule" "$capsule_original_start" "$expected_capsule_tree" \
   "staging-snapshot rebase" ||
@@ -875,8 +928,12 @@ expected_result_tree="$(expected_tree_after_delta \
   "$staging_capsule" \
   "$combined_base" \
   "$capsule_start" \
-  "$base_start")" ||
-  die "could not construct the expected staging-on-base tree"
+  "$base_start")" || {
+  merge_tree_has_conflicts || die "could not construct the expected staging-on-base tree: ${merge_tree_diagnostics:-no diagnostics}"
+  begin_resumable_rebase "$staging_capsule" "$base_start" \
+    "staging-on-base tree" \
+    "scripts/refresh-staging-local.sh --skip-remote --resume --base '$base' --staging-branch '$staging_branch' --staging-capsule '$staging_capsule'${gate:+ --gate '$gate'}"
+}
 refuse_untracked_tree_collisions \
   "$staging_capsule" "$capsule_start" "$expected_result_tree" \
   "$base rebase" ||

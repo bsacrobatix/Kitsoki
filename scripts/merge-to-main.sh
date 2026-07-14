@@ -59,6 +59,7 @@ branch=""
 source_dir=""
 gate="$DEFAULT_GATE"
 force=0
+resume=0
 import_branch=""
 goal_dir=""
 change_id=""
@@ -68,11 +69,12 @@ staging_snapshot=""
 source_snapshot=""
 source_result=""
 source_recovery_ref=""
+merge_tree_diagnostics=""
 
 usage() {
   cat >&2 <<EOF
 usage:
-  scripts/merge-to-main.sh [branch] [--source-dir DIR] [--gate CMD] [--force]
+  scripts/merge-to-main.sh [branch] [--source-dir DIR] [--gate CMD] [--force] [--resume]
   scripts/merge-to-main.sh [branch] --goal-dir DIR --change-id ID [--goal-work DIR] [--goal-script PATH]
 
 Defaults:
@@ -81,6 +83,7 @@ Defaults:
   gate        $DEFAULT_GATE
 
 --force skips the gate. Use it only when an equivalent gate already ran.
+--resume imports a clean, manually completed source-dir rebase, then runs the gate.
 EOF
 }
 
@@ -120,10 +123,31 @@ source_dir_dirty() {
 }
 
 expected_tree_after_delta() {
-  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree
+  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree status
+  merge_tree_diagnostics=""
+  set +e
   tree="$(git -C "$dir" merge-tree --write-tree --no-messages \
-    --merge-base "$old_base" "$new_base" "$snapshot")" || return 1
+    --merge-base "$old_base" "$new_base" "$snapshot" 2>&1)"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    merge_tree_diagnostics="$tree"
+    return "$status"
+  fi
   printf '%s\n' "$tree"
+}
+
+rebase_in_progress() {
+  local dir="$1" git_dir
+  git_dir="$(git -C "$dir" rev-parse --git-dir)" || return 1
+  [ -d "$dir/$git_dir/rebase-merge" ] || [ -d "$dir/$git_dir/rebase-apply" ]
+}
+
+merge_tree_has_conflicts() {
+  case "$merge_tree_diagnostics" in
+    *CONFLICT*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 refuse_untracked_tree_collisions() {
@@ -208,6 +232,10 @@ while [ $# -gt 0 ]; do
       force=1
       shift
       ;;
+    --resume)
+      resume=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -264,6 +292,10 @@ if [ -n "$source_dir" ]; then
   if [ "${source_dir#/}" = "$source_dir" ]; then
     source_dir="$repo_root/$source_dir"
   fi
+  if [ "$resume" = "1" ] && [ "$force" = "1" ]; then
+    echo "error: --resume cannot be combined with --force" >&2
+    exit 1
+  fi
   source_dir="$(abs_path "$source_dir")"
   ensure_managed_source_dir "$source_dir"
   source_branch="$(git -C "$source_dir" branch --show-current)"
@@ -281,7 +313,7 @@ if [ -n "$source_dir" ]; then
       exit 1
     }
     source_snapshot="$(git -C "$source_dir" rev-parse --verify HEAD)"
-    if [ "$source_snapshot" != "$staging_snapshot" ]; then
+    if [ "$source_snapshot" != "$staging_snapshot" ] && [ "$resume" != "1" ]; then
       echo "error: staging capsule is stale: $source_dir is at $source_snapshot, primary $DEFAULT_BRANCH is at $staging_snapshot; refresh staging before promotion" >&2
       exit 1
     fi
@@ -294,6 +326,10 @@ if [ -n "$source_dir" ]; then
     printf '%s\n' "$source_dirty" >&2
     exit 1
   fi
+  if [ "$resume" = "1" ] && rebase_in_progress "$source_dir"; then
+    echo "error: cannot resume while the source rebase is still in progress; resolve it and run git -C '$source_dir' rebase --continue first" >&2
+    exit 1
+  fi
   source_original="$(git -C "$source_dir" rev-parse --verify HEAD)"
   source_original_recovery_ref="refs/kitsoki/promotion-source-recovery/$source_original"
   if git rev-parse --verify --quiet "$source_original_recovery_ref" >/dev/null; then
@@ -304,18 +340,42 @@ if [ -n "$source_dir" ]; then
   else
     git fetch --no-tags "$source_dir" "$source_original:$source_original_recovery_ref"
   fi
-  if git -C "$source_dir" remote get-url source >/dev/null 2>&1; then
+  if git -C "$source_dir" remote get-url source >/dev/null 2>&1 && [ "$resume" != "1" ]; then
     git -C "$source_dir" fetch source main
     source_main="$(git -C "$source_dir" rev-parse --verify source/main)"
     source_delta_base="$(git -C "$source_dir" merge-base "$source_original" "$source_main")" || {
       echo "error: could not determine source/main merge base" >&2
       exit 1
     }
-    expected_source_tree="$(expected_tree_after_delta \
-      "$source_dir" "$source_delta_base" "$source_original" "$source_main")" || {
-      echo "error: could not construct expected rebased source tree" >&2
+    if ! expected_source_tree="$(expected_tree_after_delta \
+      "$source_dir" "$source_delta_base" "$source_original" "$source_main")"; then
+      if ! merge_tree_has_conflicts; then
+        echo "error: could not construct expected rebased source tree: ${merge_tree_diagnostics:-no diagnostics}" >&2
+        exit 1
+      fi
+      echo "error: expected rebased source tree has merge conflicts; original retained at $source_original_recovery_ref" >&2
+      [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics" >&2
+      echo "merge-to-main: starting the managed source rebase so the conflict can be resolved in place" >&2
+      if git -C "$source_dir" rebase source/main; then
+        echo "error: merge analysis failed unexpectedly even though source rebase completed; inspect $source_original_recovery_ref" >&2
+        exit 1
+      fi
+      if rebase_in_progress "$source_dir"; then
+        cat >&2 <<EOF
+
+Resolve the conflict in the managed source capsule, then:
+  git -C "$source_dir" status
+  # edit and git -C "$source_dir" add <resolved-paths>
+  git -C "$source_dir" rebase --continue
+  scripts/merge-to-main.sh '$branch' --source-dir '$source_dir' --resume --gate '$gate'
+
+To abandon this attempt: git -C "$source_dir" rebase --abort
+EOF
+        exit 2
+      fi
+      echo "error: merge analysis failed and did not create a resumable source rebase; inspect $source_original_recovery_ref" >&2
       exit 1
-    }
+    fi
     refuse_untracked_tree_collisions \
       "$source_dir" "$source_original" "$expected_source_tree" "source rebase" || exit 1
     git -C "$source_dir" rebase source/main
@@ -329,7 +389,7 @@ if [ -n "$source_dir" ]; then
       echo "error: rebased source tree differs from the expected preserved tree; original retained at $source_original_recovery_ref" >&2
       exit 1
     fi
-  else
+  elif ! git -C "$source_dir" remote get-url source >/dev/null 2>&1; then
     echo "warning: source dir has no 'source' remote; skipping rebase onto local main before gate" >&2
   fi
   source_pre_gate="$(git -C "$source_dir" rev-parse --verify HEAD)"
@@ -369,7 +429,7 @@ if [ -n "$source_dir" ]; then
     echo "error: source branch advanced during validation; refusing to promote an unproven result" >&2
     exit 1
   fi
-  if [ "$branch" = "$DEFAULT_BRANCH" ] && ! git -C "$source_dir" merge-base --is-ancestor "$source_snapshot" "$source_result"; then
+  if [ "$branch" = "$DEFAULT_BRANCH" ] && [ "$resume" != "1" ] && ! git -C "$source_dir" merge-base --is-ancestor "$source_snapshot" "$source_result"; then
     echo "error: staging capsule changed incompatibly during rebase or gate: result $source_result does not contain source snapshot $source_snapshot" >&2
     exit 1
   fi
