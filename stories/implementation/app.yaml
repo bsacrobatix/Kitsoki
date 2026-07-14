@@ -165,6 +165,18 @@ world:
   ticket_status:    { type: string, default: "" }
   ticket_url:       { type: string, default: "" }
   ticket_body:      { type: string, default: "" }
+  ticket_repo:      { type: string, default: "" }
+  # Ordered, provider-neutral ticket federation config, inherited from the
+  # parent (mirrors bugfix/app.yaml). Empty by default so a standalone
+  # implementation session still gets the plain host.local_files.ticket
+  # default binding.
+  ticket_sources:      { type: list,   default: [] }
+  ticket_source:       { type: string, default: "" }
+  ticket_source_label: { type: string, default: "" }
+  ticket_source_kind:  { type: string, default: "" }
+  ticket_source_repo:  { type: string, default: "" }
+  ticket_source_mode:  { type: string, default: "local" }
+  ticket_source_ref:   { type: string, default: "" }
   # Optional override for host.local_files.ticket's `root` arg (falls back to
   # $KITSOKI_TICKETS_ROOT then cwd when empty — see internal/host/localfiles_ticket.go).
   # Lets a headless dispatcher (goal-seeker/punch-list) point ticket.get at a

@@ -74,6 +74,21 @@ func setupDogfoodRepo(t *testing.T) (repoRoot string, ticketID string) {
 			"copy %s → %s", src, dst)
 	}
 
+	// stories/*/app.yaml binds `workspace` to host.capsule_workspace with
+	// definition: "development" — provide a matching self-sourced capsule
+	// definition so project.Open finds it (real checkouts ship
+	// .kitsoki/capsules/development.yaml; this fixture repo doesn't have one).
+	capsuleDefsDir := filepath.Join(repoRoot, ".kitsoki", "capsules")
+	require.NoError(t, os.MkdirAll(capsuleDefsDir, 0o755))
+	capsuleDef := "schema: capsule-definition/v1\n" +
+		"id: development\n" +
+		"description: smoke-test capsule (self-sourced)\n" +
+		"source:\n" +
+		"  kind: self\n" +
+		"policy:\n" +
+		"  network: none\n"
+	require.NoError(t, os.WriteFile(filepath.Join(capsuleDefsDir, "development.yaml"), []byte(capsuleDef), 0o644))
+
 	// Initialise a real git repo so `git worktree add` has a base.
 	gitConfig := func(args ...string) {
 		cmd := exec.Command("git", args...)
@@ -267,11 +282,17 @@ func newDogfoodRegistry(agentCalls *int) *host.Registry {
 			return host.Result{Data: map[string]any{"ok": true}}, nil
 		}
 	}
+	// ReplaceTicketProvider (not Replace): host.ticket_federation gates
+	// nested dispatch on the explicit ticket-provider marker, which plain
+	// Replace deliberately clears (internal/host/host.go). kitsoki-dev's
+	// default ticket_sources list configures host.gh.ticket rows, so the
+	// stub must retain the marker or federation calls fail closed with
+	// "is not a registered ticket provider" before ever reaching this stub.
 	for _, name := range []string{
 		"host.gh.ticket",
 		"host.local_github.ticket",
 	} {
-		reg.Replace(name, ticketFetcher)
+		reg.ReplaceTicketProvider(name, ticketFetcher)
 	}
 	for _, name := range []string{
 		"host.gh.ticket.get", "host.gh.ticket.search",
@@ -1152,6 +1173,15 @@ func TestDogfoodSmoke_FullImplementationPipeline(t *testing.T) {
 	}
 	seed := seedDogfoodWorld(ticketID)
 	seed["core__ticket_type"] = "feature"
+	// The seeded ticket lives under top-level issues/bugs/ (copied into the
+	// fixture repo by setupDogfoodRepo) — kitsoki-dev's "local" federation
+	// row is scoped to .artifacts/issues/bugs (dogfood-loop scratch tickets,
+	// see AGENTS.md), so a real filed ticket like this one is the "origin"
+	// GitHub row. A real ticket-picker run would have recorded exactly this;
+	// without it, host.ticket_federation correctly refuses to guess among
+	// the 3 configured sources.
+	seed["core__ticket_source"] = "origin"
+	seed["core__ticket_source_mode"] = "remote"
 	{
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
@@ -1225,6 +1255,15 @@ func TestDogfoodSmoke_ImplHandoffRefusesUncommittedWork(t *testing.T) {
 	}
 	seed := seedDogfoodWorld(ticketID)
 	seed["core__ticket_type"] = "feature"
+	// The seeded ticket lives under top-level issues/bugs/ (copied into the
+	// fixture repo by setupDogfoodRepo) — kitsoki-dev's "local" federation
+	// row is scoped to .artifacts/issues/bugs (dogfood-loop scratch tickets,
+	// see AGENTS.md), so a real filed ticket like this one is the "origin"
+	// GitHub row. A real ticket-picker run would have recorded exactly this;
+	// without it, host.ticket_federation correctly refuses to guess among
+	// the 3 configured sources.
+	seed["core__ticket_source"] = "origin"
+	seed["core__ticket_source_mode"] = "remote"
 	{
 		c, cancel := context.WithTimeout(ctx, 10*time.Second)
 		_, err := orch.Teleport(c, sid, inbox.TeleportTarget{
@@ -1340,6 +1379,15 @@ func TestDogfoodSmoke_ImplIdleProvisionsWorktree(t *testing.T) {
 	// stays "" and the assertions below fail.
 	seed := seedDogfoodWorld(ticketID)
 	seed["core__ticket_type"] = "feature"
+	// The seeded ticket lives under top-level issues/bugs/ (copied into the
+	// fixture repo by setupDogfoodRepo) — kitsoki-dev's "local" federation
+	// row is scoped to .artifacts/issues/bugs (dogfood-loop scratch tickets,
+	// see AGENTS.md), so a real filed ticket like this one is the "origin"
+	// GitHub row. A real ticket-picker run would have recorded exactly this;
+	// without it, host.ticket_federation correctly refuses to guess among
+	// the 3 configured sources.
+	seed["core__ticket_source"] = "origin"
+	seed["core__ticket_source_mode"] = "remote"
 	delete(seed, "core__workspace_id")
 	delete(seed, "core__workdir")
 	delete(seed, "core__feature_branch")

@@ -307,3 +307,39 @@ def main(ctx):
 		t.Fatalf("total = %v (%T), want int64(5)", got, got)
 	}
 }
+
+// TestRun_ConvertsGoNativeSliceAndMapTypes locks that goToStarlark accepts
+// concretely-typed Go slices/maps ([]string, []map[string]any, …), not just
+// the []any/map[string]any shapes a JSON decode produces. Go-native host
+// handlers (agent stubs, wrapped CLI output, structured records) commonly
+// build inputs by hand with these concrete types; hit live by a bugfix
+// dogfood smoke test whose stubbed agent artifact carried
+// affected_files []string and involved_components []map[string]any straight
+// into host.starlark.run's inputs.
+func TestRun_ConvertsGoNativeSliceAndMapTypes(t *testing.T) {
+	script := `
+def main(ctx):
+    return {
+        "files": ctx.inputs["files"],
+        "first_component": ctx.inputs["components"][0]["name"],
+    }
+`
+	res, err := starlarkhost.Run(context.Background(), starlarkhost.Params{
+		Script: "native_types.star",
+		Source: []byte(script),
+		Inputs: map[string]any{
+			"files":      []string{"a.go", "b.go"},
+			"components": []map[string]any{{"name": "internal/orchestrator"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	files, ok := res.Outputs["files"].([]any)
+	if !ok || len(files) != 2 || files[0] != "a.go" || files[1] != "b.go" {
+		t.Fatalf("files = %#v, want [a.go b.go]", res.Outputs["files"])
+	}
+	if got := res.Outputs["first_component"]; got != "internal/orchestrator" {
+		t.Fatalf("first_component = %v, want internal/orchestrator", got)
+	}
+}

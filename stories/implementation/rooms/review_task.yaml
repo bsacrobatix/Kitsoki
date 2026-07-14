@@ -73,17 +73,21 @@ states:
                 placeholder: "e.g. review_task"
             - { label: "quit", intent: quit, hint: "abandon the pipeline" }
             - { label: "look", intent: look, hint: "re-render" }
-    relevant_world: [ticket_id, ticket_title, ticket_body, task_summary_artifact, cycle]
+    relevant_world: [ticket_id, ticket_title, ticket_body, ticket_sources, ticket_source, ticket_source_ref, task_summary_artifact, cycle]
     on_enter:
       # Fetch the ticket. The default host.local_files.ticket binding
-      # is the prefix-fallback handler; focused-engineering's parent rebinds
-      # iface.ticket → host.jira. We bind the body so the LLM has
-      # something to chew on.
+      # is the prefix-fallback handler; a parent (e.g. kitsoki-dev) may
+      # rebind iface.ticket → host.ticket_federation with a configured
+      # ticket_sources list (Jira, multiple GitHub repos, …) — thread the
+      # selector fields through so that routing works either way.
       - invoke: iface.ticket.get
         with:
-          id:   "{{ world.ticket_id }}"
-          repo: "{{ world.ticket_repo }}"
-          root: "{{ world.tickets_root }}"
+          id:      "{{ world.ticket_id }}"
+          ref:     "{{ world.ticket_source_ref }}"
+          source:  "{{ world.ticket_source }}"
+          sources: "{{ world.ticket_sources }}"
+          repo:    "{{ world.ticket_repo }}"
+          root:    "{{ world.tickets_root }}"
         bind:
           ticket_body:  body
           ticket_title: title
