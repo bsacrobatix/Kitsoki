@@ -68,10 +68,17 @@ if [ "\$1" = "capsule" ] && [ "\$2" = "workspace" ] && [ "\$3" = "create" ]; the
   git -C "\$workspace" config user.name "Launch Policy Acceptance"
   git -C "\$workspace" config user.email "launch-policy@example.invalid"
   git -C "\$workspace" commit -q --allow-empty -m init
-  # A real development Capsule carries the project config but not the
-  # source checkout's machine-local policy override. The superagent shim
-  # deliberately launches with this workspace config after creation.
+  # A real development Capsule can carry a copied machine-local config whose
+  # relative roots now resolve against the Capsule itself. Make that copy
+  # deliberately deny this workspace: the shim must evaluate launch policy
+  # from the install root while using the Capsule only as working_dir.
   printf '%s\\n' '# test superagent workspace config' > "\$workspace/.kitsoki.yaml"
+  cat > "\$workspace/.kitsoki.local.yaml" <<'POLICY'
+agent_launch_policy:
+  enabled: true
+  protected_roots: [.]
+  allowed_roots: [/definitely-not-the-created-workspace]
+POLICY
   printf '%s\\n' "\$workspace" >> "$tmp/capsule-workspaces.log"
   exit 0
 fi
