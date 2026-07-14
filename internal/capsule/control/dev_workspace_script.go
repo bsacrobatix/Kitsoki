@@ -26,6 +26,10 @@ type execScriptRunner struct{}
 func (execScriptRunner) Run(ctx context.Context, dir, program string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
+	// The native manager has already reserved and owns this instance. Keep the
+	// script's direct-invocation admission bridge from racing that provisional
+	// record before Create can publish its final generation.
+	cmd.Env = append(os.Environ(), "KITSOKI_CAPSULE_NATIVE_CREATE=1")
 	return cmd.CombinedOutput()
 }
 

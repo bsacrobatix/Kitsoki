@@ -65,6 +65,31 @@ clone:
 The script also appends those paths to `.git/info/exclude` in the clone, so the
 metadata is local provenance rather than project source.
 
+### Capsule CI admission
+
+Kitsoki's `development` Capsule definition uses the script as its protected
+clone provider. On a Kitsoki checkout, `create` (including an idempotent
+reacquire) and `commit` automatically verify the script-written manifest and
+record or refresh the matching native Capsule instance. That makes the same
+workspace addressable by both lifecycle surfaces:
+
+```sh
+scripts/dev-workspace.sh create --id change-1 --branch agent/change-1 --bootstrap
+go run ./cmd/kitsoki capsule ci doctor change --workspace change-1
+```
+
+The native record is derived only after the definition, sentinels, manifest
+paths, branch, and current Git HEAD agree. It is not a path override. A clone
+created before this bridge can be admitted explicitly without recreating or
+rewriting it:
+
+```sh
+go run ./cmd/kitsoki capsule workspace adopt-script --id change-1 --json
+```
+
+Use the command from the owning protected checkout. It fails closed for a
+missing, foreign, malformed, or definition-mismatched workspace.
+
 ## Commands
 
 ### `create`
