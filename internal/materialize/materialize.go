@@ -32,9 +32,13 @@ package materialize
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,12 +68,13 @@ type StageEvent struct {
 
 // Binding is a type's resolved materialize: declaration.
 type Binding struct {
-	TypeID       string
-	Story        string
-	ContextEdges []graph.EdgeField
-	Params       []graph.MaterializeParamDecl
-	Gates        []string
-	Checks       []graph.MaterializeCheckDecl
+	TypeID               string
+	Story                string
+	ContextEdges         []graph.EdgeField
+	IncomingContextEdges []graph.EdgeField
+	Params               []graph.MaterializeParamDecl
+	Gates                []string
+	Checks               []graph.MaterializeCheckDecl
 	// ArtifactSchema/ArtifactFormat carry the type's artifact: declaration
 	// alongside the materialize: binding — used only to title/format the
 	// write-back artifact (writeback.go); ResolveBinding still errors if a
@@ -77,6 +82,7 @@ type Binding struct {
 	// contract), so these are always populated whenever Binding is.
 	ArtifactSchema string
 	ArtifactFormat string
+	ArtifactKind   string
 }
 
 // GateError reports node fields required by a type's materialize.gates that
@@ -118,14 +124,16 @@ func ResolveBinding(cat *graph.Catalog, node *graph.Node) (*Binding, error) {
 	}
 	md := eff.Materialize
 	return &Binding{
-		TypeID:         eff.ID,
-		Story:          md.Story,
-		ContextEdges:   md.ContextEdges,
-		Params:         md.Params,
-		Gates:          md.Gates,
-		Checks:         md.Checks,
-		ArtifactSchema: string(eff.Artifact.Schema),
-		ArtifactFormat: eff.Artifact.Format,
+		TypeID:               eff.ID,
+		Story:                md.Story,
+		ContextEdges:         md.ContextEdges,
+		IncomingContextEdges: md.IncomingContextEdges,
+		Params:               md.Params,
+		Gates:                md.Gates,
+		Checks:               md.Checks,
+		ArtifactSchema:       string(eff.Artifact.Schema),
+		ArtifactFormat:       eff.Artifact.Format,
+		ArtifactKind:         graph.CanonicalArtifactKind(eff.Artifact),
 	}, nil
 }
 
@@ -274,17 +282,53 @@ type Readiness struct {
 	MissingGates  []string
 	MissingParams []string
 	Params        map[string]any
+	// ContextDigest fingerprints the node, its normalized declared context,
+	// and the binding inputs that affect a materialization.
+	ContextDigest string
+	// StaleStatus is one of fresh, stale, unknown, or needs_materialization.
+	// Unknown is the compatibility state for historical records with no digest;
+	// it is never treated as fresh.
+	StaleStatus string
+	Stale       bool
+	StaleReason string
 }
 
 func MaterializeReadiness(cat *graph.Catalog, node *graph.Node, binding *Binding, overrides map[string]any) Readiness {
 	params, missingParams := ResolveParams(cat, node, binding.Params, overrides)
 	missingGates := UnmetGates(node, binding.Gates)
-	return Readiness{
+	readiness := Readiness{
 		Ready:         len(missingGates) == 0 && len(missingParams) == 0,
 		MissingGates:  missingGates,
 		MissingParams: missingParams,
 		Params:        params,
 	}
+	readiness.ContextDigest = ContextDigest(cat, node, binding, params)
+	applyRecordedDigest(&readiness, node)
+	return readiness
+}
+
+func applyRecordedDigest(readiness *Readiness, node *graph.Node) {
+	recorded, ok := node.Fields["materialization"].(map[string]any)
+	if !ok || recorded == nil {
+		readiness.StaleStatus = "needs_materialization"
+		readiness.Stale = true
+		readiness.StaleReason = "no_materialization_record"
+		return
+	}
+	digest, _ := recorded["context_digest"].(string)
+	if digest == "" {
+		readiness.StaleStatus = "unknown"
+		readiness.Stale = true
+		readiness.StaleReason = "materialization_record_missing_context_digest"
+		return
+	}
+	if digest != readiness.ContextDigest {
+		readiness.StaleStatus = "stale"
+		readiness.Stale = true
+		readiness.StaleReason = "context_digest_changed"
+		return
+	}
+	readiness.StaleStatus = "fresh"
 }
 
 func valuePresent(v any) bool {
@@ -324,10 +368,24 @@ func nodeFieldValue(node *graph.Node, field string) (any, bool) {
 // declares"), and returns the reached node ids in first-seen (BFS) order.
 // The root node itself is not included.
 func ContextClosure(cat *graph.Catalog, root graph.NodeID, edgeKinds []graph.EdgeField) []graph.NodeID {
+	return ContextClosureWithIncoming(cat, root, edgeKinds, nil)
+}
+
+// ContextClosureWithIncoming walks the explicitly declared outgoing and
+// incoming edge kinds. Inbound traversal uses the registry-aware reverse index
+// so top-level edge storage and inherited declarations remain consistent with
+// the rest of the graph. Only named incoming fields participate; unrelated
+// incoming graph edges are intentionally excluded.
+func ContextClosureWithIncoming(cat *graph.Catalog, root graph.NodeID, edgeKinds, incomingEdgeKinds []graph.EdgeField) []graph.NodeID {
 	kindSet := make(map[graph.EdgeField]bool, len(edgeKinds))
 	for _, k := range edgeKinds {
 		kindSet[k] = true
 	}
+	incomingSet := make(map[graph.EdgeField]bool, len(incomingEdgeKinds))
+	for _, k := range incomingEdgeKinds {
+		incomingSet[k] = true
+	}
+	reverse := graph.BuildReverseIndex(cat)
 
 	visited := map[graph.NodeID]bool{root: true}
 	queue := []graph.NodeID{root}
@@ -357,7 +415,97 @@ func ContextClosure(cat *graph.Catalog, root graph.NodeID, edgeKinds []graph.Edg
 				queue = append(queue, target)
 			}
 		}
+		for _, ref := range reverse[id] {
+			if !incomingSet[ref.EdgeField] || visited[ref.Node] {
+				continue
+			}
+			visited[ref.Node] = true
+			out = append(out, ref.Node)
+			queue = append(queue, ref.Node)
+		}
 	}
+	return out
+}
+
+// ContextDigest is a SHA-256 digest of canonical JSON. Nodes are normalized by
+// id (rather than traversal order), edge fields and targets are sorted, and
+// json.Marshal sorts map keys. The payload includes only the root plus the
+// explicitly declared closure and materialization-affecting binding inputs.
+func ContextDigest(cat *graph.Catalog, node *graph.Node, binding *Binding, params map[string]any) string {
+	closure := ContextClosureWithIncoming(cat, node.ID, binding.ContextEdges, binding.IncomingContextEdges)
+	ids := append([]graph.NodeID{node.ID}, closure...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	nodes := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		if n := cat.Nodes[id]; n != nil {
+			nodes = append(nodes, normalizedDigestNode(n, cat))
+		}
+	}
+	payload := map[string]any{
+		"version": "materialization-context/v1",
+		"node_id": string(node.ID),
+		"nodes":   nodes,
+		"binding": map[string]any{
+			"type_id": binding.TypeID, "story": binding.Story,
+			"artifact_schema": binding.ArtifactSchema, "artifact_format": binding.ArtifactFormat, "artifact_kind": binding.ArtifactKind,
+			"context_edges": sortedEdgeNames(binding.ContextEdges), "incoming_context_edges": sortedEdgeNames(binding.IncomingContextEdges),
+			"gates": sortedStrings(binding.Gates), "params": binding.Params, "checks": binding.Checks,
+		},
+		"params": params,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func normalizedDigestNode(node *graph.Node, cat *graph.Catalog) map[string]any {
+	edges := map[string][]string{}
+	if eff, ok := cat.Registry.Effective(node.TypeID); ok {
+		for _, decl := range eff.EdgeFields {
+			targets := node.EdgeTargets(decl)
+			values := make([]string, len(targets))
+			for i, target := range targets {
+				values[i] = string(target)
+			}
+			sort.Strings(values)
+			edges[string(decl.ID)] = values
+		}
+	}
+	fields := make(map[string]any, len(node.Fields))
+	for key, value := range node.Fields {
+		// These are outputs of materialization itself. Including them would make
+		// the digest self-referential: persisting a digest/evidence would
+		// immediately make the result appear stale.
+		if key == "materialization" || key == "evidence" {
+			continue
+		}
+		fields[key] = value
+	}
+	return map[string]any{"id": string(node.ID), "schema": string(node.Schema), "type": node.TypeID, "title": node.Title, "status": node.Status, "visibility": string(node.Visibility), "sources": sortedNodeIDs(node.Sources), "fields": fields, "edges": edges}
+}
+
+func sortedEdgeNames(edges []graph.EdgeField) []string {
+	out := make([]string, len(edges))
+	for i, edge := range edges {
+		out[i] = string(edge)
+	}
+	sort.Strings(out)
+	return out
+}
+func sortedStrings(values []string) []string {
+	out := append([]string(nil), values...)
+	sort.Strings(out)
+	return out
+}
+func sortedNodeIDs(values []graph.NodeID) []string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = string(value)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -420,10 +568,11 @@ func Start(ctx context.Context, sched jobs.Scheduler, req Request) (jobs.JobID, 
 // session (the runstatus server's web-registry path) can seed that session
 // from StoryAppPath + InitialWorld between preparing and submitting.
 type Prepared struct {
-	Req        Request
-	Node       *graph.Node
-	Binding    *Binding
-	ContextIDs []string
+	Req           Request
+	Node          *graph.Node
+	Binding       *Binding
+	ContextIDs    []string
+	ContextDigest string
 	// Def is the loaded story definition; StoryAppPath is where it was
 	// loaded from (RepoRoot-joined, suitable for a session registry's
 	// story-path key once absolutized).
@@ -468,7 +617,7 @@ func Prepare(req Request) (*Prepared, error) {
 		return nil, &GateError{NodeID: req.NodeID, Unmet: unmet}
 	}
 
-	closure := ContextClosure(cat, req.NodeID, binding.ContextEdges)
+	closure := ContextClosureWithIncoming(cat, req.NodeID, binding.ContextEdges, binding.IncomingContextEdges)
 	contextIDs := make([]string, len(closure))
 	for i, id := range closure {
 		contextIDs[i] = string(id)
@@ -506,16 +655,17 @@ func Prepare(req Request) (*Prepared, error) {
 	}
 
 	return &Prepared{
-		Req:          req,
-		Node:         node,
-		Binding:      binding,
-		ContextIDs:   contextIDs,
-		Def:          def,
-		StoryAppPath: storyAppPath,
-		Stages:       allStages,
-		NumRooms:     len(roomSeq),
-		Checks:       checks,
-		InitialWorld: initialWorld,
+		Req:           req,
+		Node:          node,
+		Binding:       binding,
+		ContextIDs:    contextIDs,
+		ContextDigest: readiness.ContextDigest,
+		Def:           def,
+		StoryAppPath:  storyAppPath,
+		Stages:        allStages,
+		NumRooms:      len(roomSeq),
+		Checks:        checks,
+		InitialWorld:  initialWorld,
 	}, nil
 }
 
@@ -666,18 +816,19 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 				return
 			}
 			title := artifactTitle(wb.Binding.ArtifactSchema)
-			produced := MaterializationArtifact{Kind: "doc", Title: title, Path: path, ProducedAt: time.Now().UTC().Format(time.RFC3339)}
+			produced := MaterializationArtifact{Kind: wb.Binding.ArtifactKind, Title: title, Path: path, ProducedAt: time.Now().UTC().Format(time.RFC3339)}
 			writtenArtifacts = append(writtenArtifacts, produced)
 			_ = AppendEvidence(wb.CatalogPath, string(wb.NodeID), EvidenceEntry{Kind: produced.Kind, Title: produced.Title, Path: produced.Path}, jobID, wb.Binding.Story)
 		}
 		finalizeWriteback := func(status string) {
 			_ = WriteMaterialization(wb.CatalogPath, string(wb.NodeID), MaterializationRecord{
-				JobID:     jobID,
-				Status:    status,
-				Story:     wb.Binding.Story,
-				Stages:    stageSnapshot(),
-				Artifacts: writtenArtifacts,
-				Checks:    checkResults,
+				JobID:         jobID,
+				Status:        status,
+				Story:         wb.Binding.Story,
+				Stages:        stageSnapshot(),
+				Artifacts:     writtenArtifacts,
+				Checks:        checkResults,
+				ContextDigest: p.ContextDigest,
 			})
 		}
 

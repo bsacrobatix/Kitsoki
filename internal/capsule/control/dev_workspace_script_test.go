@@ -74,6 +74,17 @@ func TestDevWorkspaceScriptProviderMapsProtectedLifecycle(t *testing.T) {
 	}
 }
 
+func TestExecScriptRunnerMarksNativeCreate(t *testing.T) {
+	root := t.TempDir()
+	output, err := (execScriptRunner{}).Run(context.Background(), root, "sh", "-c", "printf %s \"$KITSOKI_CAPSULE_NATIVE_CREATE\"")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(output); got != "1" {
+		t.Fatalf("native create marker = %q", got)
+	}
+}
+
 func TestDevWorkspaceScriptProviderRefusesMissingConfiguredBase(t *testing.T) {
 	project := t.TempDir()
 	runControlGit(t, project, "init", "-b", "main")

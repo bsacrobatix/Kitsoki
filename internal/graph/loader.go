@@ -221,11 +221,12 @@ type fileMaterializeCheck struct {
 }
 
 type fileMaterializeDecl struct {
-	Story        string                 `yaml:"story"`
-	ContextEdges []string               `yaml:"context_edges"`
-	Params       []fileMaterializeParam `yaml:"params"`
-	Gates        []string               `yaml:"gates"`
-	Checks       []fileMaterializeCheck `yaml:"checks"`
+	Story                string                 `yaml:"story"`
+	ContextEdges         []string               `yaml:"context_edges"`
+	IncomingContextEdges []string               `yaml:"incoming_context_edges"`
+	Params               []fileMaterializeParam `yaml:"params"`
+	Gates                []string               `yaml:"gates"`
+	Checks               []fileMaterializeCheck `yaml:"checks"`
 }
 
 type fileTypeDef struct {
@@ -261,6 +262,9 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 		}
 		for _, e := range ft.Materialize.ContextEdges {
 			md.ContextEdges = append(md.ContextEdges, EdgeField(e))
+		}
+		for _, e := range ft.Materialize.IncomingContextEdges {
+			md.IncomingContextEdges = append(md.IncomingContextEdges, EdgeField(e))
 		}
 		for _, p := range ft.Materialize.Params {
 			if p.SourceField != "" && p.SourceEdge != "" {

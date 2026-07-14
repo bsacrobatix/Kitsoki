@@ -315,6 +315,42 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 	// scalars, not the old splice's quoted strings — assert unquoted.
 	assert.Contains(t, catalogText, "job_id: "+start.JobID)
 	assert.Contains(t, catalogText, "status: complete")
+	assert.Contains(t, catalogText, "context_digest: sha256:", "materialization record must persist the freshness digest")
+}
+
+func TestMaterializeReadiness_ReportsStaleCompatibilityState(t *testing.T) {
+	root := materializeFixtureRoot(t)
+	ts := newMaterializeServerAt(t, root)
+	var readiness struct {
+		Ready         bool   `json:"ready"`
+		ContextDigest string `json:"context_digest"`
+		Stale         bool   `json:"stale"`
+		StaleStatus   string `json:"stale_status"`
+		StaleReason   string `json:"stale_reason"`
+	}
+	rpcCall(t, ts, "graph.materialize.readiness", map[string]any{
+		"catalog": "pog", "node_id": "wi-ready", "params": map[string]any{"audience": "public"},
+	}, &readiness)
+	require.True(t, readiness.Ready)
+	require.NotEmpty(t, readiness.ContextDigest)
+	assert.True(t, readiness.Stale)
+	assert.Equal(t, "needs_materialization", readiness.StaleStatus)
+	assert.Equal(t, "no_materialization_record", readiness.StaleReason)
+
+	// A historical completed record without context_digest is compatible on
+	// read, but deliberately unknown rather than falsely fresh.
+	catalogPath := filepath.Join(root, "pog", "catalog.yaml")
+	raw, err := os.ReadFile(catalogPath)
+	require.NoError(t, err)
+	updated := strings.Replace(string(raw), "    owner: brad\n", "    owner: brad\n    materialization:\n      job_id: old-job\n      status: complete\n", 1)
+	require.NotEqual(t, string(raw), updated)
+	require.NoError(t, os.WriteFile(catalogPath, []byte(updated), 0o644))
+	rpcCall(t, ts, "graph.materialize.readiness", map[string]any{
+		"catalog": "pog", "node_id": "wi-ready", "params": map[string]any{"audience": "public"},
+	}, &readiness)
+	assert.True(t, readiness.Stale)
+	assert.Equal(t, "unknown", readiness.StaleStatus)
+	assert.Equal(t, "materialization_record_missing_context_digest", readiness.StaleReason)
 }
 
 // TestMaterialize_Start_DrivesWebSession covers the seeded web-session path:
