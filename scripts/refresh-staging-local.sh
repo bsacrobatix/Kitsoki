@@ -1034,6 +1034,7 @@ if git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$capsule_st
   # flatten that merge and replay the whole historical staging delta.
   echo "refresh-staging-local: staging capsule already contains source/$base; skipping historical replay" >&2
   rebased_result="$capsule_start"
+  expected_result_tree="$capsule_tree"
 else
 combined_base="$(git -C "$staging_capsule" merge-base "$staging_start" "$base_start")" ||
   die "could not find the staging/base merge base"

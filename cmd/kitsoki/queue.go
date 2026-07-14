@@ -57,24 +57,20 @@ func queueStatusCmd() *cobra.Command {
 	return cmd
 }
 
-// process is deliberately fail-closed until a project supplies its protected
-// integration and deterministic-gate adapters. The queue package owns the
-// reusable injected processor; this CLI verb prevents an accidental direct
-// main mutation from becoming a default implementation.
+// process uses the managed staging-capsule lifecycle and requires an explicit
+// deterministic gate. It has no raw-main fallback.
 func queueProcessCmd() *cobra.Command {
-	var project string
+	var project, gate string
 	cmd := &cobra.Command{Use: "process", Aliases: []string{"drain"}, Short: "Process candidates through a configured protected integration", RunE: func(cmd *cobra.Command, _ []string) error {
-		state, err := (queue.Store{ProjectRoot: project}).List()
+		integration := queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}
+		state, err := (queue.Store{ProjectRoot: project}).Process(cmd.Context(), queue.ProcessDeps{Integration: integration, Gate: queue.ShellGate{Command: gate}})
 		if err != nil {
 			return err
-		}
-		for _, candidate := range state.Candidates {
-			if candidate.Status == queue.Queued || candidate.Status == queue.Running {
-				return fmt.Errorf("queue: local processing requires a project protected-integration and deterministic-gate adapter; refusing to mutate protected main directly")
-			}
 		}
 		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each speculative tree")
+	_ = cmd.MarkFlagRequired("gate")
 	return cmd
 }

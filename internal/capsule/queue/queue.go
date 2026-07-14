@@ -72,8 +72,10 @@ type Integration interface {
 	Land(context.Context, Speculation) error
 }
 type Speculation struct {
-	SHA      string   `json:"sha"`
-	Evidence []string `json:"evidence,omitempty"`
+	SHA           string   `json:"sha"`
+	Evidence      []string `json:"evidence,omitempty"`
+	WorkspaceID   string   `json:"workspace_id,omitempty"`
+	WorkspacePath string   `json:"workspace_path,omitempty"`
 }
 type Gate interface {
 	Run(context.Context, Speculation) (GateResult, error)
@@ -202,7 +204,7 @@ func eject(c *Candidate, at time.Time, reason, evidence string) {
 func activeAhead(cs []Candidate) []Candidate {
 	out := make([]Candidate, 0, len(cs))
 	for _, c := range cs {
-		if c.Status == Queued || c.Status == Running || c.Status == Landed {
+		if c.Status == Queued || c.Status == Running {
 			out = append(out, c)
 		}
 	}
