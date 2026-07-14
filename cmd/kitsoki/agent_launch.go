@@ -731,6 +731,13 @@ func buildRawInteractiveLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, er
 	// through the hidden repeatable --raw-arg flag. Keep those arguments last:
 	// explicit CLI input must retain its normal backend precedence over a
 	// profile's default model/effort settings.
+	//
+	// Codex rejects a repeated bypass flag. Raw interactive Codex launches add
+	// it above because it is part of Kitsoki's launch contract, so drop any
+	// caller copy forwarded verbatim by a launcher shim.
+	if backend == "codex" {
+		opts.RawArgs = withoutRawCodexBypassFlag(opts.RawArgs)
+	}
 	args = append(args, opts.RawArgs...)
 	return agentLaunchPlan{
 		Agent:        "raw",
@@ -798,6 +805,16 @@ func buildInteractiveCodexArgs(model, effort, workingDir string, addDirs []strin
 		args = append(args, prompt)
 	}
 	return args
+}
+
+func withoutRawCodexBypassFlag(args []string) []string {
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg != codexBypassApprovalsAndSandboxFlag {
+			filtered = append(filtered, arg)
+		}
+	}
+	return filtered
 }
 
 func buildRawInteractiveArgs(backend, model, effort, workingDir string, addDirs []string) []string {
