@@ -43,9 +43,16 @@ func createJobWorkspaceForTest(t *testing.T, ctx context.Context, root string, j
 	return filepath.Join(root, ".capsules", "workspaces", jobWorkspaceID(job.JobID))
 }
 
+func openManagedDevelopmentBaseRepo(t *testing.T) string {
+	t.Helper()
+	root := capsuletest.Open(t, "clean-repo")
+	gitExec(t, root, "branch", managedDevelopmentBase)
+	return root
+}
+
 func TestLandFeatureBranch_RealCommitOnSharedIntegrationBranch(t *testing.T) {
 	ctx := context.Background()
-	root := capsuletest.Open(t, "clean-repo")
+	root := openManagedDevelopmentBaseRepo(t)
 
 	// Simulate what runRealDispatch's per-job managed workspace left behind: a
 	// feature branch with a real commit beyond main.
@@ -86,7 +93,7 @@ func TestLandFeatureBranch_RealCommitOnSharedIntegrationBranch(t *testing.T) {
 
 func TestLandFeatureBranch_FailsClosedWithNoRealCommits(t *testing.T) {
 	ctx := context.Background()
-	root := capsuletest.Open(t, "clean-repo")
+	root := openManagedDevelopmentBaseRepo(t)
 
 	// A feature branch workspace that never diverged from main (no real fix
 	// landed) — landFeatureBranch must refuse rather than fabricate a success.

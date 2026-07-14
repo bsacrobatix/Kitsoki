@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"kitsoki/internal/capsule/control"
 )
 
 // ownerSentinelFile is the legacy basename of the per-worktree sentinel.
@@ -32,14 +34,14 @@ const cloneSentinelFile = ".kitsoki-clone"
 // fallback capsule that now holds the work. When Parked is false the helper
 // treated the source as clean or non-git and left it unchanged.
 type WorkspaceParkResult struct {
-	OK               bool   `json:"ok"`
-	Parked           bool   `json:"parked"`
-	SourceWorkspace  string `json:"source_workspace"`
+	OK                bool   `json:"ok"`
+	Parked            bool   `json:"parked"`
+	SourceWorkspace   string `json:"source_workspace"`
 	RecoveryWorkspace string `json:"recovery_workspace,omitempty"`
-	RecoveryBranch   string `json:"recovery_branch,omitempty"`
-	RecoveryCommit   string `json:"recovery_commit,omitempty"`
-	Cleaned          bool   `json:"cleaned,omitempty"`
-	Reason           string `json:"reason,omitempty"`
+	RecoveryBranch    string `json:"recovery_branch,omitempty"`
+	RecoveryCommit    string `json:"recovery_commit,omitempty"`
+	Cleaned           bool   `json:"cleaned,omitempty"`
+	Reason            string `json:"reason,omitempty"`
 }
 
 // writeOwnerSentinel records sid as the owning session of the worktree at path.
@@ -174,6 +176,7 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 		return Result{Error: "workspace.create: " + repoErr}, nil
 	}
 	base, _ := args["base"].(string)
+	base = developmentDefinitionBase(ctx, resolvedRepo, args, base)
 	// Explicit `id:` (from world.workspace_id) wins; fall back to the
 	// slashes-flattened branch for callers that only supply `name`.
 	// Without the explicit id, the on-disk dir basename diverged from
@@ -193,6 +196,28 @@ func worktreeCreate(ctx context.Context, repo string, args map[string]any) (Resu
 		return Result{Error: "workspace.create: " + errMsg}, nil
 	}
 	return Result{Data: data}, nil
+}
+
+func developmentDefinitionBase(ctx context.Context, repo string, args map[string]any, fallback string) string {
+	definition := strings.TrimSpace(worktreeStringArg(args, "definition"))
+	if definition == "" && strings.TrimSpace(fallback) == "main" {
+		definition = "development"
+	}
+	if definition == "" {
+		return fallback
+	}
+	def, err := (control.FileDefinitionStore{ProjectRoot: repo}).Get(ctx, definition)
+	if err != nil {
+		return fallback
+	}
+	if def.Source.Kind != control.SourceDevWorkspaceScript {
+		return fallback
+	}
+	base := strings.TrimSpace(def.Source.Development.Base)
+	if base == "" {
+		return fallback
+	}
+	return base
 }
 
 // resolveWorktreeRepo returns the absolute git toplevel used to anchor

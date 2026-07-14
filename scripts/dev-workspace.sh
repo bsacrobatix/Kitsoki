@@ -415,6 +415,55 @@ print(json.dumps(out, indent=2, sort_keys=True))
 PY
 }
 
+development_definition_field() {
+  local repo="$1"
+  local field="$2"
+  local file="$repo/.kitsoki/capsules/development.yaml"
+  [ -f "$file" ] || return 1
+  python3 - "$file" "$field" <<'PY'
+import sys
+
+path, field = sys.argv[1:]
+lines = open(path, encoding="utf-8").read().splitlines()
+in_development = False
+development_indent = -1
+for raw in lines:
+    stripped = raw.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    indent = len(raw) - len(raw.lstrip(" "))
+    if stripped == "development:":
+        in_development = True
+        development_indent = indent
+        continue
+    if in_development and indent <= development_indent:
+        break
+    if in_development and stripped.startswith(field + ":"):
+        value = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+        if value:
+            print(value)
+            sys.exit(0)
+sys.exit(1)
+PY
+}
+
+normalize_create_base() {
+  local repo="$1"
+  local base="$2"
+  local target="$3"
+  if [ "$base" != "main" ] || [ "$target" != "$DEFAULT_TARGET" ]; then
+    printf '%s\n' "$base"
+    return 0
+  fi
+  local definition_base
+  definition_base="$(development_definition_field "$repo" base 2>/dev/null || true)"
+  if [ -n "$definition_base" ]; then
+    printf '%s\n' "$definition_base"
+    return 0
+  fi
+  printf '%s\n' "$base"
+}
+
 adopt_native_capsule_workspace() {
   local repo="$1"
   local id="$2"
@@ -1010,6 +1059,7 @@ cmd_create() {
   validate_id "$id"
   [ -n "$branch" ] || branch="agent/$id"
   repo="$(repo_root "$repo")"
+  base="$(normalize_create_base "$repo" "$base" "$target")"
   root="$(resolve_root "$repo" "$root")"
   local path="$root/$id"
   local script_path="$repo/scripts/dev-workspace.sh"

@@ -52,6 +52,16 @@ func devWorkspaceCreateJSON(t *testing.T, id, path, branch, root string, reused 
 	return string(b)
 }
 
+func requireWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGitWorktree_RegisteredAsBuiltin(t *testing.T) {
 	r := host.NewRegistry()
 	host.RegisterBuiltins(r)
@@ -175,6 +185,85 @@ func TestGitWorktree_Create_Happy(t *testing.T) {
 	if !strings.Contains(gotPath, "/repo/.capsules/workspaces/feature-x") {
 		t.Fatalf("path: %s", gotPath)
 	}
+}
+
+func TestGitWorktree_Create_DevelopmentDefinitionBaseWins(t *testing.T) {
+	root := t.TempDir()
+	requireWriteFile(t, filepath.Join(root, ".kitsoki", "capsules", "development.yaml"), `schema: capsule-definition/v1
+id: development
+source:
+  kind: dev-workspace-script
+  development:
+    base: staging/local
+    target: staging/local
+`)
+	fr := newFakeRunner()
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "feature-x", filepath.Join(root, ".capsules", "workspaces", "feature-x"), "feature/x", filepath.Join(root, ".capsules", "workspaces"), false)}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":         "create",
+		"repo":       root,
+		"id":         "feature-x",
+		"name":       "feature/x",
+		"base":       "main",
+		"definition": "development",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	for _, call := range fr.calls {
+		if strings.HasPrefix(call, devWorkspaceCreatePrefix(t)) {
+			if !strings.Contains(call, "--base staging/local") {
+				t.Fatalf("script call used stale base instead of definition base: %s", call)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing dev-workspace create call in %v", fr.calls)
+}
+
+func TestGitWorktree_Create_DevelopmentDefinitionNormalizesLegacyMainBase(t *testing.T) {
+	root := t.TempDir()
+	requireWriteFile(t, filepath.Join(root, ".kitsoki", "capsules", "development.yaml"), `schema: capsule-definition/v1
+id: development
+source:
+  kind: dev-workspace-script
+  development:
+    base: staging/local
+    target: staging/local
+`)
+	fr := newFakeRunner()
+	fr.responses[devWorkspaceCreatePrefix(t)] = fakeResp{stdout: devWorkspaceCreateJSON(t, "feature-x", filepath.Join(root, ".capsules", "workspaces", "feature-x"), "feature/x", filepath.Join(root, ".capsules", "workspaces"), false)}
+	restore := host.SetExecRunnerForTest(fr.run)
+	defer restore()
+
+	res, err := host.GitWorktreeHandler(context.Background(), map[string]any{
+		"op":   "create",
+		"repo": root,
+		"id":   "feature-x",
+		"name": "feature/x",
+		"base": "main",
+	})
+	if err != nil {
+		t.Fatalf("infra: %v", err)
+	}
+	if res.Error != "" {
+		t.Fatalf("domain: %s", res.Error)
+	}
+	for _, call := range fr.calls {
+		if strings.HasPrefix(call, devWorkspaceCreatePrefix(t)) {
+			if !strings.Contains(call, "--base staging/local") {
+				t.Fatalf("script call used stale base instead of definition base: %s", call)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing dev-workspace create call in %v", fr.calls)
 }
 
 func TestGitWorktree_Create_EmptyRepoAnchorsAtGitTopLevel(t *testing.T) {
