@@ -45,4 +45,19 @@ grep -q '# locally customized' "$repo2/.kitsoki.local.yaml" || { echo "FAIL: div
 test -x "$repo2/.kitsoki/bin/claude" || { echo "FAIL: skip aborted the remaining install" >&2; exit 1; }
 test -x "$repo2/scripts/launch-policy-gate.sh" || { echo "FAIL: gate script missing after skip" >&2; exit 1; }
 echo "PASS: divergent-file skip continues installing"
+
+# The activation file must self-locate under zsh (BASH_SOURCE is unset there)
+# and keep PATH idempotent across repeated sourcing. It resolves physical
+# paths (pwd -P), so compare against the symlink-resolved repo root.
+repo_phys="$(cd "$repo" && pwd -P)"
+for shell in bash zsh; do
+  command -v "$shell" >/dev/null 2>&1 || continue
+  got="$("$shell" -c "source '$repo/.kitsoki/launch-policy.sh'; source '$repo/.kitsoki/launch-policy.sh'; printf '%s\n%s' \"\$KITSOKI_AGENT_CLAUDE_BIN\" \"\$PATH\"")"
+  bin_line="${got%%$'\n'*}"
+  path_line="${got#*$'\n'}"
+  [ "$bin_line" = "$repo_phys/.kitsoki/bin/claude" ] || { echo "FAIL: $shell resolved KITSOKI_AGENT_CLAUDE_BIN to $bin_line" >&2; exit 1; }
+  count="$(printf '%s' "$path_line" | tr ':' '\n' | grep -cx "$repo_phys/.kitsoki/bin")" || true
+  [ "$count" -eq 1 ] || { echo "FAIL: $shell PATH has $count shim entries after double-source" >&2; exit 1; }
+done
+echo "PASS: activation file resolves under bash and zsh with idempotent PATH"
 echo "PASS: launch-policy pack install and red-team gate"
