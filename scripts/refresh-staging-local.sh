@@ -36,6 +36,11 @@ no_fetch=0
 resume=0
 gate=""
 dirty_action="auto"
+# A replay is useful for a short, reviewable staging delta. For a long-lived
+# branch, its conflict surface grows with every historical commit even when
+# Git has already proven the final three-way tree. Prefer one auditable merge
+# commit above this limit. Set to 0 to always use the proven merge path.
+rebase_replay_limit="${KITSOKI_STAGING_REBASE_LIMIT:-64}"
 merge_tree_diagnostics=""
 
 usage() {
@@ -638,6 +643,10 @@ done
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+case "$rebase_replay_limit" in
+  ''|*[!0-9]*) die "KITSOKI_STAGING_REBASE_LIMIT must be a non-negative integer" ;;
+esac
+
 if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
   die "run this in the primary checkout, not a linked worktree or secondary checkout"
 fi
@@ -941,20 +950,33 @@ refuse_untracked_tree_collisions \
   "$base rebase" ||
   die "move or preserve the reported local paths before retrying"
 
-echo "refresh-staging-local: rebasing staging capsule onto source/$base" >&2
-git -C "$staging_capsule" rebase "$base_start"
-rebased_result="$(git -C "$staging_capsule" rev-parse HEAD)"
-rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
-if [ "$rebased_result_tree" != "$expected_result_tree" ]; then
-  echo "refresh-staging-local: sequential base rebase changed the independently proven tree; materializing a signed reconciliation merge" >&2
+echo "refresh-staging-local: integrating staging capsule with source/$base" >&2
+replay_count="$(git -C "$staging_capsule" rev-list --count "$base_start..$capsule_start")"
+if [ "$replay_count" -gt "$rebase_replay_limit" ]; then
+  echo "refresh-staging-local: staging replay has $replay_count commits (limit $rebase_replay_limit); materializing the independently proven reconciliation merge" >&2
   if ! rebased_result="$(materialize_expected_tree_merge \
     "$staging_capsule" "$expected_result_tree" "$base_start" \
-    "$capsule_start" "staging snapshot onto $base")"; then
+    "$capsule_start" "large staging snapshot onto $base")"; then
     restore_original_on_failure=1
-    die "refusing to continue: could not materialize the expected staging-on-base tree"
+    die "refusing to continue: could not materialize the large-history reconciliation tree"
   fi
+else
+  git -C "$staging_capsule" rebase "$base_start"
+  rebased_result="$(git -C "$staging_capsule" rev-parse HEAD)"
   rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
+  if [ "$rebased_result_tree" != "$expected_result_tree" ]; then
+    echo "refresh-staging-local: sequential base rebase changed the independently proven tree; materializing a signed reconciliation merge" >&2
+    if ! rebased_result="$(materialize_expected_tree_merge \
+      "$staging_capsule" "$expected_result_tree" "$base_start" \
+      "$capsule_start" "staging snapshot onto $base")"; then
+      restore_original_on_failure=1
+      die "refusing to continue: could not materialize the expected staging-on-base tree"
+    fi
+  fi
 fi
+rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
+[ "$rebased_result_tree" = "$expected_result_tree" ] ||
+  die "refusing to continue: staging integration changed the independently proven tree"
 git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$rebased_result" ||
   die "refusing to continue: rebased staging is not based on captured $base"
 
