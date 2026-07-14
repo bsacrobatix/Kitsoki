@@ -53,7 +53,11 @@ func TestDevStoryLandingQuickActionsUseBoundedPickerChrome(t *testing.T) {
 	require.LessOrEqual(t, renderedLineCount(rm.View()), maxChromeRows,
 		"quick-action picker chrome must stay bounded so normal-screen repaints do not stamp whole menus into scrollback")
 
-	for i := 0; i < 18; i++ {
+	// Press well past the current quick-action count so the cursor clamps on
+	// the last entry regardless of how many items landing.yaml declares —
+	// pinning this to the list's exact length is what broke the last time a
+	// quick action was added ahead of "look".
+	for i := 0; i < 40; i++ {
 		model, _ = tea.Model(rm).Update(tea.KeyMsg{Type: tea.KeyDown})
 		rm, ok = tuipkg.ExtractRootModel(model)
 		require.True(t, ok)

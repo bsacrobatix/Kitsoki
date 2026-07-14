@@ -73,6 +73,7 @@ tools/arena/tests/test_mcp_os_baseline.py	arena subsystem test
 tools/arena/tests/test_oss_to_arena_spec.py	arena subsystem test
 tools/arena/tests/test_paired_task_codeact.py	arena subsystem test
 tools/arena/tests/test_persona_qa_plugin.py	arena subsystem test
+tools/arena/tests/test_strict_mcp_corpus_lock.py	arena subsystem no-LLM strict-MCP corpus lock test
 tools/arena/tests/test_swarm_plugin.py	arena subsystem test
 tools/arena/tests/test_task_optimization_lifecycle.py	arena subsystem no-LLM task-optimization lifecycle test
 tools/arena/tests/test_task_optimization_runner.py	arena subsystem no-LLM task-optimization runner test
