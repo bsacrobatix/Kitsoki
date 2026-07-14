@@ -3,6 +3,7 @@ package starlark
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sort"
 
 	"go.starlark.net/starlark"
@@ -144,7 +145,48 @@ func goToStarlark(v any) (starlark.Value, error) {
 		}
 		return d, nil
 	default:
-		return nil, fmt.Errorf("cannot convert Go value of type %T to Starlark", v)
+		// Go-native handlers (host stubs, wrapped CLI output split into
+		// lines, structured records, …) commonly produce concretely-typed
+		// slices/maps ([]string, []map[string]any, …) instead of routing
+		// through a JSON decode (which would yield the []any/map[string]any
+		// shapes handled above). Convert any slice/map reflectively rather
+		// than requiring every caller to re-wrap its values into JSON-ish
+		// shapes by hand.
+		rv := reflect.ValueOf(v)
+		switch rv.Kind() {
+		case reflect.Slice, reflect.Array:
+			elems := make([]starlark.Value, rv.Len())
+			for i := 0; i < rv.Len(); i++ {
+				ev, err := goToStarlark(rv.Index(i).Interface())
+				if err != nil {
+					return nil, err
+				}
+				elems[i] = ev
+			}
+			return starlark.NewList(elems), nil
+		case reflect.Map:
+			if rv.Type().Key().Kind() != reflect.String {
+				return nil, fmt.Errorf("cannot convert Go value of type %T to Starlark", v)
+			}
+			d := starlark.NewDict(rv.Len())
+			keys := make([]string, 0, rv.Len())
+			for _, k := range rv.MapKeys() {
+				keys = append(keys, k.String())
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				ev, err := goToStarlark(rv.MapIndex(reflect.ValueOf(k).Convert(rv.Type().Key())).Interface())
+				if err != nil {
+					return nil, err
+				}
+				if err := d.SetKey(starlark.String(k), ev); err != nil {
+					return nil, err
+				}
+			}
+			return d, nil
+		default:
+			return nil, fmt.Errorf("cannot convert Go value of type %T to Starlark", v)
+		}
 	}
 }
 
