@@ -803,8 +803,9 @@ assert_contains "$remote_out" "local main does not contain origin/main"
 assert_contains "$remote_out" "Integration branch:"
 assert_contains "$remote_out" "complete the remote-main sync steps above"
 
-# An add/add conflict must become a real, resumable rebase in the managed
-# capsule instead of an opaque merge-tree refusal. The explicit resume still
+# An add/add conflict must become a real, resumable reconciliation merge in
+# the managed capsule instead of an opaque merge-tree refusal or a long
+# one-commit-at-a-time rebase. The explicit resume still
 # owns the gate and the primary-ref compare-and-swap.
 conflict_repo="$tmp/add-add-conflict-refresh"
 git_init "$conflict_repo"
@@ -835,11 +836,11 @@ assert_contains "$tmp/add-add-conflict-refresh.out" "has merge conflicts"
 assert_contains "$tmp/add-add-conflict-refresh.out" "--resume"
 [ "$(git -C "$conflict_repo" rev-parse staging/local)" = "$conflict_staging_before" ] ||
   fail "conflicted refresh moved primary staging"
-[ -d "$conflict_repo/.capsules/staging/local/.git/rebase-merge" ] ||
-  fail "conflicted refresh did not retain a rebase state"
+[ -f "$conflict_repo/.capsules/staging/local/.git/MERGE_HEAD" ] ||
+  fail "conflicted refresh did not retain a merge state"
 printf 'manual-resolution\n' >"$conflict_repo/.capsules/staging/local/conflict.txt"
 git -C "$conflict_repo/.capsules/staging/local" add conflict.txt
-GIT_EDITOR=true git -C "$conflict_repo/.capsules/staging/local" rebase --continue >/dev/null
+GIT_EDITOR=true git -C "$conflict_repo/.capsules/staging/local" commit --no-edit >/dev/null
 (
   cd "$conflict_repo"
   scripts/refresh-staging-local.sh --skip-remote --resume --gate true

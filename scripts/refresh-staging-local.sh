@@ -128,10 +128,8 @@ expected_tree_after_delta() {
   printf '%s\n' "$tree"
 }
 
-rebase_in_progress() {
-  local dir="$1" git_dir
-  git_dir="$(git -C "$dir" rev-parse --git-dir)" || return 1
-  [ -d "$dir/$git_dir/rebase-merge" ] || [ -d "$dir/$git_dir/rebase-apply" ]
+merge_in_progress() {
+  git -C "$1" rev-parse --verify --quiet MERGE_HEAD >/dev/null
 }
 
 merge_tree_has_conflicts() {
@@ -141,28 +139,32 @@ merge_tree_has_conflicts() {
   esac
 }
 
-begin_resumable_rebase() {
+begin_resumable_merge() {
   local dir="$1" target="$2" label="$3" resume_cmd="$4"
   echo "error: $label has merge conflicts; preserved recovery refs remain in place" >&2
   [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics" >&2
-  echo "refresh-staging-local: starting the managed rebase so the conflict can be resolved in the capsule" >&2
-  if git -C "$dir" rebase "$target"; then
-    die "$label merge analysis failed unexpectedly even though rebase completed; inspect recovery refs before retrying"
+  # A conflict means both histories matter.  Replaying a long staging history
+  # one commit at a time turns one semantic conflict into hundreds of fragile
+  # stops; a normal merge presents each file conflict once and preserves both
+  # parents for the later fast-forward promotion.
+  echo "refresh-staging-local: starting a managed reconciliation merge so each conflict is resolved once" >&2
+  if git -C "$dir" merge --no-ff "$target"; then
+    die "$label merge analysis failed unexpectedly even though the reconciliation merge completed; inspect recovery refs before retrying"
   fi
-  if rebase_in_progress "$dir"; then
+  if merge_in_progress "$dir"; then
     cat >&2 <<EOF
 
-Resolve the conflict in the managed staging capsule, then continue the rebase:
+Resolve the conflict in the managed staging capsule, then complete the merge:
   git -C "$dir" status
   # edit and git -C "$dir" add <resolved-paths>
-  git -C "$dir" rebase --continue
+  GIT_EDITOR=true git -C "$dir" commit
   $resume_cmd
 
-To abandon this attempt: git -C "$dir" rebase --abort
+To abandon this attempt: git -C "$dir" merge --abort
 EOF
     exit 2
   fi
-  die "$label merge analysis failed and did not create a resumable rebase; inspect the diagnostics and preserved refs"
+  die "$label merge analysis failed and did not create a resumable merge; inspect the diagnostics and preserved refs"
 }
 
 materialize_expected_tree_merge() {
@@ -897,7 +899,7 @@ expected_capsule_tree="$(expected_tree_after_delta \
   "$capsule_original_start" \
   "$staging_start")" || {
   merge_tree_has_conflicts || die "could not construct the expected post-snapshot capsule tree: ${merge_tree_diagnostics:-no diagnostics}"
-  begin_resumable_rebase "$staging_capsule" "$snapshot_ref" \
+  begin_resumable_merge "$staging_capsule" "$snapshot_ref" \
     "post-snapshot capsule tree" \
     "scripts/refresh-staging-local.sh --skip-remote --resume --base '$base' --staging-branch '$staging_branch' --staging-capsule '$staging_capsule'${gate:+ --gate '$gate'}"
 }
@@ -930,7 +932,7 @@ expected_result_tree="$(expected_tree_after_delta \
   "$capsule_start" \
   "$base_start")" || {
   merge_tree_has_conflicts || die "could not construct the expected staging-on-base tree: ${merge_tree_diagnostics:-no diagnostics}"
-  begin_resumable_rebase "$staging_capsule" "$base_start" \
+  begin_resumable_merge "$staging_capsule" "$base_start" \
     "staging-on-base tree" \
     "scripts/refresh-staging-local.sh --skip-remote --resume --base '$base' --staging-branch '$staging_branch' --staging-capsule '$staging_capsule'${gate:+ --gate '$gate'}"
 }
