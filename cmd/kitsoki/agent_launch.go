@@ -145,11 +145,40 @@ type standaloneCodexAgent struct {
 }
 
 type builtInAgentFrontmatter struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description"`
-	Model       string   `yaml:"model"`
-	Effort      string   `yaml:"effort"`
-	Tools       []string `yaml:"tools"`
+	Name        string        `yaml:"name"`
+	Description string        `yaml:"description"`
+	Model       string        `yaml:"model"`
+	Effort      string        `yaml:"effort"`
+	Tools       agentToolList `yaml:"tools"`
+}
+
+// agentToolList accepts both frontmatter spellings of a tool list: the YAML
+// sequence form and the Claude Code convention of one comma-separated scalar
+// (`tools: Bash, Read`), which the embedded agent library is authored in.
+type agentToolList []string
+
+func (t *agentToolList) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var joined string
+		if err := value.Decode(&joined); err != nil {
+			return err
+		}
+		*t = nil
+		for _, part := range strings.Split(joined, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				*t = append(*t, part)
+			}
+		}
+		return nil
+	default:
+		var list []string
+		if err := value.Decode(&list); err != nil {
+			return err
+		}
+		*t = list
+		return nil
+	}
 }
 
 // materializeBuiltInAgentLibrary is a seam for the embedded agent library. It
