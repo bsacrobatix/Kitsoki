@@ -410,8 +410,30 @@ out = {
     "root": data.get("root", os.path.dirname(path)),
     "reused": reused == "true",
 }
+
 print(json.dumps(out, indent=2, sort_keys=True))
 PY
+}
+
+adopt_native_capsule_workspace() {
+  local repo="$1"
+  local id="$2"
+  if [ "${KITSOKI_CAPSULE_NATIVE_CREATE:-}" = "1" ]; then
+    return 0
+  fi
+  # This is the Kitsoki migration bridge. Disposable repositories that copy the
+  # lifecycle helper do not carry the native definition/CLI and deliberately
+  # keep the helper usable without a Go toolchain.
+  if [ ! -f "$repo/.kitsoki/capsules/development.yaml" ] ||
+    [ ! -f "$repo/go.mod" ] || [ ! -d "$repo/cmd/kitsoki" ]; then
+    return 0
+  fi
+  local output
+  if ! output="$(cd "$repo" && go run ./cmd/kitsoki capsule workspace adopt-script --project "$repo" --id "$id" --json 2>&1)"; then
+    echo "error: could not register managed workspace $id for native Capsule CI" >&2
+    [ -z "$output" ] || printf '%s\n' "$output" >&2
+    return 1
+  fi
 }
 
 bootstrap_workspace() {
@@ -1018,6 +1040,7 @@ cmd_create() {
         bootstrap_workspace "$path" "$repo"
       fi
     fi
+    adopt_native_capsule_workspace "$repo" "$id"
     if [ "$json" = "1" ]; then
       emit_workspace_json "$path" true
     else
@@ -1074,6 +1097,7 @@ cmd_create() {
   head="$(git -C "$path" rev-parse HEAD)"
   write_manifests "$path" "$id" "$repo" "$root" "$branch" "$base" "$target" "$session_id" "$source_commit" "$head" "$script_path"
   release_initialization_lock
+  adopt_native_capsule_workspace "$repo" "$id"
 
   if [ "$bootstrap" = "1" ]; then
     # ManagedWorkspaceService consumes --json as a machine protocol. Bootstrap
@@ -1216,6 +1240,7 @@ cmd_commit() {
   git -C "$path" commit --signoff -m "$message"
   local sha
   sha="$(git -C "$path" rev-parse HEAD)"
+  adopt_native_capsule_workspace "$repo" "$(workspace_id_from_path "$path")"
   if [ "$json" = "1" ]; then
     python3 - "$path" "$sha" <<'PY'
 import json

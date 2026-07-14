@@ -803,4 +803,50 @@ assert_contains "$remote_out" "local main does not contain origin/main"
 assert_contains "$remote_out" "Integration branch:"
 assert_contains "$remote_out" "complete the remote-main sync steps above"
 
+# An add/add conflict must become a real, resumable reconciliation merge in
+# the managed capsule instead of an opaque merge-tree refusal or a long
+# one-commit-at-a-time rebase. The explicit resume still
+# owns the gate and the primary-ref compare-and-swap.
+conflict_repo="$tmp/add-add-conflict-refresh"
+git_init "$conflict_repo"
+copy_scripts "$conflict_repo"
+commit_file "$conflict_repo" base.txt base
+git -C "$conflict_repo" branch staging/local
+git -C "$conflict_repo" switch -q staging/local
+commit_file "$conflict_repo" conflict.txt staging-version
+git -C "$conflict_repo" switch -q main
+commit_file "$conflict_repo" conflict.txt main-version
+mkdir -p "$conflict_repo/.capsules/staging"
+git clone -q --no-local "$conflict_repo" "$conflict_repo/.capsules/staging/local"
+git -C "$conflict_repo/.capsules/staging/local" remote rename origin source
+git -C "$conflict_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$conflict_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$conflict_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$conflict_repo/.capsules/staging/local/.kitsoki-capsule"
+conflict_staging_before="$(git -C "$conflict_repo" rev-parse staging/local)"
+set +e
+(
+  cd "$conflict_repo"
+  scripts/refresh-staging-local.sh --skip-remote --gate true
+) >"$tmp/add-add-conflict-refresh.out" 2>&1
+conflict_status=$?
+set -e
+[ "$conflict_status" -eq 2 ] || fail "add/add refresh conflict should be resumable (got $conflict_status)"
+assert_contains "$tmp/add-add-conflict-refresh.out" "has merge conflicts"
+assert_contains "$tmp/add-add-conflict-refresh.out" "--resume"
+[ "$(git -C "$conflict_repo" rev-parse staging/local)" = "$conflict_staging_before" ] ||
+  fail "conflicted refresh moved primary staging"
+[ -f "$conflict_repo/.capsules/staging/local/.git/MERGE_HEAD" ] ||
+  fail "conflicted refresh did not retain a merge state"
+printf 'manual-resolution\n' >"$conflict_repo/.capsules/staging/local/conflict.txt"
+git -C "$conflict_repo/.capsules/staging/local" add conflict.txt
+GIT_EDITOR=true git -C "$conflict_repo/.capsules/staging/local" commit --no-edit >/dev/null
+(
+  cd "$conflict_repo"
+  scripts/refresh-staging-local.sh --skip-remote --resume --gate true
+) >"$tmp/add-add-conflict-refresh-resume.out" 2>&1
+assert_contains "$tmp/add-add-conflict-refresh-resume.out" "(resumed)"
+[ "$(git -C "$conflict_repo" show staging/local:conflict.txt)" = "manual-resolution" ] ||
+  fail "refresh resume did not import the manual resolution"
+
 echo "refresh-staging-local tests passed"

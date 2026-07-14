@@ -868,6 +868,32 @@ harness_profiles:
 	require.Equal(t, []string{"-m", "gpt-5.5", "-c", `model_reasoning_effort="medium"`, codexBypassApprovalsAndSandboxFlag, "-C", dir, "-m", "gpt-5.9", "-p", "hello"}, plan.Command[1:])
 }
 
+func TestAgentLaunchPlan_RawInteractiveCodexDeduplicatesBypassFlag(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(""), 0644))
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		RawInteractive: true,
+		Interactive:    true,
+		ConfigPath:     cfgPath,
+		WorkingDir:     dir,
+		RawArgs: []string{
+			codexBypassApprovalsAndSandboxFlag,
+			"-m", "gpt-5.9",
+			codexBypassApprovalsAndSandboxFlag,
+			"-p", "hello",
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		codexBypassApprovalsAndSandboxFlag,
+		"-C", dir,
+		"-m", "gpt-5.9",
+		"-p", "hello",
+	}, plan.Command[1:])
+}
+
 func TestAgentLaunchPlan_LaunchPolicyDeniesRawInteractive(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, ".kitsoki.yaml")

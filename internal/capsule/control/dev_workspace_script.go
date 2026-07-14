@@ -26,6 +26,10 @@ type execScriptRunner struct{}
 func (execScriptRunner) Run(ctx context.Context, dir, program string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
+	// The native manager has already reserved and owns this instance. Keep the
+	// script's direct-invocation admission bridge from racing that provisional
+	// record before Create can publish its final generation.
+	cmd.Env = append(os.Environ(), "KITSOKI_CAPSULE_NATIVE_CREATE=1")
 	return cmd.CombinedOutput()
 }
 
@@ -96,16 +100,6 @@ func (p DevWorkspaceScriptProvider) Integrate(ctx context.Context, _ Definition,
 	return nil
 }
 
-// WorkspaceMaterialized implements WorkspaceMaterializationVerifier: Create
-// only returns success after `dev-workspace.sh create` completes AND the
-// sentinel stat below passes, so its presence at in.Path is durable proof the
-// managed clone/worktree is real, not merely a directory that happens to
-// exist.
-func (DevWorkspaceScriptProvider) WorkspaceMaterialized(in Instance) bool {
-	_, err := os.Stat(filepath.Join(in.Path, instanceSentinel))
-	return err == nil
-}
-
 func (p DevWorkspaceScriptProvider) Close(ctx context.Context, in Instance) error {
 	root, err := projectRoot(p.ProjectRoot)
 	if err != nil {
@@ -134,4 +128,3 @@ func (p DevWorkspaceScriptProvider) runner() ScriptRunner {
 
 var _ WorkspaceProvider = DevWorkspaceScriptProvider{}
 var _ WorkspaceIntegrator = DevWorkspaceScriptProvider{}
-var _ WorkspaceMaterializationVerifier = DevWorkspaceScriptProvider{}

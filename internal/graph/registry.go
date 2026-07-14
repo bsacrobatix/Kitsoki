@@ -94,6 +94,21 @@ type ArtifactDecl struct {
 	Presentation string
 }
 
+// CanonicalArtifactKind returns the one persisted and wire-visible kind for an
+// artifact declaration. Presentation is the registry's semantic artifact kind
+// (for example, "document"), whereas Format describes its encoding (for
+// example, "markdown"). Older declarations that predate presentation retain a
+// truthful generic kind instead of letting callers invent incompatible aliases.
+func CanonicalArtifactKind(artifact *ArtifactDecl) string {
+	if artifact == nil {
+		return ""
+	}
+	if kind := strings.TrimSpace(artifact.Presentation); kind != "" {
+		return kind
+	}
+	return "artifact"
+}
+
 // MaterializeDecl is a type's `materialize:` binding.
 type MaterializeDecl struct {
 	// Story is a story root path (e.g. "stories/materialize-work-item"),
@@ -103,6 +118,11 @@ type MaterializeDecl struct {
 	// ContextEdges are edge field ids followed (recursively, through edges
 	// of the same kinds) to build the node's materialization context.
 	ContextEdges []EdgeField
+	// IncomingContextEdges are declared targeting edge fields whose sources
+	// belong in materialization context. They are deliberately opt-in: an app
+	// can include requirements that apply_to it without every inbound graph
+	// reference becoming materialization context.
+	IncomingContextEdges []EdgeField
 	// Params are invocation-time parameters (id/type/default/values),
 	// supplied before or at invocation.
 	Params []MaterializeParamDecl

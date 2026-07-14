@@ -58,6 +58,9 @@ type MaterializationRecord struct {
 	// command included) — the durable receipt that the node's gate was (or
 	// was not) machine-verified, and how to re-run the judgment.
 	Checks []CheckResult
+	// ContextDigest is the materialization input digest used by readiness to
+	// distinguish fresh results from changed declared context.
+	ContextDigest string
 }
 
 // MaterializationArtifact is one `materialization.artifacts[]` entry —
@@ -134,6 +137,9 @@ func renderMaterializationValue(rec MaterializationRecord) map[string]any {
 		"story":     rec.Story,
 		"stages":    stages,
 		"artifacts": artifacts,
+	}
+	if rec.ContextDigest != "" {
+		out["context_digest"] = rec.ContextDigest
 	}
 	if len(rec.Checks) > 0 {
 		checks := make([]any, len(rec.Checks))
