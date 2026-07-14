@@ -1971,6 +1971,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 
 	case "graph.rebase":
 		return s.graphRebaseRPC(params)
+
+	case "graph.canonicalize":
+		return s.graphCanonicalizeRPC(params)
 	// ── demo.* (A2, use-case-loop-plan §3.5): mockup/demo packet pipeline
 	// verbs, bare for the same caller-supplied-path reason as graph.* above.
 	case "demo.create":

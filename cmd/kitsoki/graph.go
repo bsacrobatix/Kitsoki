@@ -50,6 +50,7 @@ func graphCmd() *cobra.Command {
 	cmd.AddCommand(graphLintCmd())
 	cmd.AddCommand(graphProposeCmd())
 	cmd.AddCommand(graphApplyCmd())
+	cmd.AddCommand(graphCanonicalizeCmd())
 	cmd.AddCommand(graphQueryCmd())
 	cmd.AddCommand(graphRenderFeaturesCmd())
 	cmd.AddCommand(graphMaterializeCmd())
@@ -226,6 +227,59 @@ Exit code 0 on a successful apply (or a clean dry-run); non-zero on rejection.`,
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "preview the changeset without requiring authorization or committing")
+	return cmd
+}
+
+// graphCanonicalizeCmd — the out-of-band remedy the NEEDS_CANONICALIZATION
+// guard message has always demanded but never shipped: re-serialize every
+// block-scalar-bearing catalog file into marshalYAMLNode's canonical form
+// so the propose/authorize/apply lifecycle stops rejecting on formatting.
+// Calls internal/graph.Canonicalize directly (like lint --check-index)
+// because host.graph.* has no canonicalize op — this is repo maintenance,
+// not a graph write.
+func graphCanonicalizeCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "canonicalize <catalog-path>",
+		Short: "Re-serialize catalog files into canonical re-marshal form",
+		Long: `Rewrites every file backing the catalog at <catalog-path> that the
+NEEDS_CANONICALIZATION guard would reject — a file containing a hand-wrapped
+block scalar whose bytes differ from yaml.v3's own re-serialization — into
+that canonical form, comments preserved. Files without block scalars, or
+already canonical, are untouched. Run this once when propose/apply rejects
+with NEEDS_CANONICALIZATION; the reflow diff is deliberate and reviewable
+instead of smuggled into some later changeset's diff.
+
+Exit code 0 whether or not files changed; non-zero only on load/write errors.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			res, err := graph.Canonicalize(args[0], dryRun)
+			if err != nil {
+				return fmt.Errorf("graph canonicalize: %w", err)
+			}
+			out := cmd.OutOrStdout()
+			for _, s := range res.Skipped {
+				fmt.Fprintln(out, "skipped:", s)
+			}
+			if len(res.ChangedFiles) == 0 {
+				fmt.Fprintln(out, "graph canonicalize: already canonical, nothing to do")
+			} else {
+				verb := "rewrote"
+				if dryRun {
+					verb = "would rewrite"
+				}
+				fmt.Fprintf(out, "graph canonicalize: %s %d file(s):\n", verb, len(res.ChangedFiles))
+				for _, f := range res.ChangedFiles {
+					fmt.Fprintln(out, " ", f)
+				}
+			}
+			if len(res.Skipped) > 0 {
+				return fmt.Errorf("graph canonicalize: %d file(s) needed canonicalization but could not be written", len(res.Skipped))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report files that would be rewritten without touching disk")
 	return cmd
 }
 
