@@ -138,9 +138,12 @@ merge_in_progress() {
 }
 
 rebase_in_progress() {
-  local git_dir
-  git_dir="$(git -C "$1" rev-parse --git-dir)" || return 1
-  [ -d "$git_dir/rebase-merge" ] || [ -d "$git_dir/rebase-apply" ]
+  local dir="$1" merge_dir apply_dir
+  merge_dir="$(git -C "$1" rev-parse --git-path rebase-merge)" || return 1
+  apply_dir="$(git -C "$1" rev-parse --git-path rebase-apply)" || return 1
+  [ "${merge_dir#/}" != "$merge_dir" ] || merge_dir="$dir/$merge_dir"
+  [ "${apply_dir#/}" != "$apply_dir" ] || apply_dir="$dir/$apply_dir"
+  [ -d "$merge_dir" ] || [ -d "$apply_dir" ]
 }
 
 # A long-lived staging capsule can be left in an obsolete rebase after the
@@ -735,7 +738,12 @@ ensure_managed_capsule "$staging_capsule"
 
 source_branch="$(git -C "$staging_capsule" branch --show-current)"
 if [ "$source_branch" != "$staging_branch" ]; then
-  die "staging capsule $staging_capsule is on $source_branch, expected $staging_branch"
+  # During a rebase Git detaches HEAD even though the named staging branch is
+  # still the branch that will be updated by --continue/--abort.
+  if ! rebase_in_progress "$staging_capsule" ||
+     ! git -C "$staging_capsule" rev-parse --verify --quiet "refs/heads/$staging_branch" >/dev/null; then
+    die "staging capsule $staging_capsule is on $source_branch, expected $staging_branch"
+  fi
 fi
 
 git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null ||
@@ -841,10 +849,18 @@ if [ "$capsule_head" = "$staging_start" ] &&
   fi
   post_gate_dirty="$(source_dirty "$staging_capsule")"
   [ -z "$post_gate_dirty" ] || die "staging refresh gate left uncommitted changes"
+  # Import the proven no-op snapshot privately too. This is intentionally the
+  # same concurrency boundary as a normal refresh: a gate or another actor may
+  # advance the capsule between its proof and our final observations.
+  no_replay_import_ref="refs/kitsoki/refresh/no-replay-$(date -u +%Y%m%dT%H%M%SZ)-$$/import"
+  git -C "$repo_root" fetch "$staging_capsule" "$staging_start:$no_replay_import_ref"
+  [ "$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")" = "$staging_start" ] ||
+    die "staging capsule branch advanced while importing the proven result; rerun refresh"
   [ "$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")" = "$staging_start" ] ||
     die "staging branch advanced during no-replay refresh; rerun"
   [ "$(git -C "$repo_root" rev-parse "refs/heads/$base")" = "$base_primary_start" ] ||
     die "$base advanced during no-replay refresh; rerun"
+  git -C "$repo_root" update-ref -d "$no_replay_import_ref" >/dev/null 2>&1 || true
   printf '%s -> %s (already based on %s; no replay)\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")" "$base"
   printf 'staging capsule: %s\n' "$staging_capsule"
   printf 'base: %s (%s)\n' "$base" "$(git rev-parse --short "$base")"

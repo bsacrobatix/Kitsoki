@@ -830,6 +830,7 @@ printf 'resolved-in-primary-staging\n' >"$obsolete_rebase_repo/conflict.txt"
 git -C "$obsolete_rebase_repo" add conflict.txt
 git -C "$obsolete_rebase_repo" commit -q --no-edit
 primary_staging="$(git -C "$obsolete_rebase_repo" rev-parse staging/local)"
+git -C "$obsolete_rebase_repo" switch -q main
 set +e
 GIT_EDITOR=true git -C "$obsolete_rebase_repo/.capsules/staging/local" rebase main >"$tmp/obsolete-rebase-start.out" 2>&1
 obsolete_start_status=$?
