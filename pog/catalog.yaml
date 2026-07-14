@@ -1601,7 +1601,6 @@ nodes:
     edges:
       part_of: [product-kitsoki]
       demonstrates: [feature-web-inbox]
-
   # Product-tour rows retained until they gain a feature-spec source.
   - schema: kitsoki/doc/v0
     id: doc-agent-actions
@@ -2634,4 +2633,25 @@ nodes:
     schema: graph/changeset/v1
     status: proposed
     title: 'Review-handoff notification: async, link-carrying "go review and approve" primitive'
+    visibility: internal
+  - authored_by: claude/pog-convergence
+    created_at: "2026-07-14T04:47:25Z"
+    id: cs-10
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          fields:
+            summary: 'Ruled by Brad 2026-07-14 (parallel-agent gitflow convergence): `kitsoki agent launch` must offer a "raw agent" mode that grants a full-power agent — MCPs + bash + direct filesystem read/write — as a sanctioned last resort when the governed story/capsule path cannot do the job. It must stay a last resort: every raw launch records why the governed path was insufficient (a typed feedback/requirement node filed at launch or exit, not optional prose), so each use sparks a concrete improvement that makes that workaround unnecessary next time. The existing `--raw --interactive` pass-through (policy-checked native CLI launch) is adjacent but does not carry the mandatory improvement-filing loop; the requirement is the loop, not just the flag. Non-goal: raw mode must still pass agent_launch_policy preflight (protected roots/branches) — raw relaxes the tool surface, not git discipline.'
+          id: req-agent-launch-raw-mode-improvement-loop
+          schema: kitsoki/requirement/v0
+          status: proposed
+          title: kitsoki agent launch provides a raw full-power mode whose every use must spark an improvement
+          type_id: requirement
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: 'Raw-agent launch mode: sanctioned last-resort escape hatch that files its own obsolescence'
     visibility: internal
