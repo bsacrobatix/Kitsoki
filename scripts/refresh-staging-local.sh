@@ -1029,6 +1029,12 @@ if [ "$capsule_tree" != "$expected_capsule_tree" ]; then
 fi
 git -C "$staging_capsule" update-ref "$capsule_ref" "$capsule_start"
 
+if git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$capsule_start"; then
+  # A prior reconciliation merge already carries this base. Rebase would
+  # flatten that merge and replay the whole historical staging delta.
+  echo "refresh-staging-local: staging capsule already contains source/$base; skipping historical replay" >&2
+  rebased_result="$capsule_start"
+else
 combined_base="$(git -C "$staging_capsule" merge-base "$staging_start" "$base_start")" ||
   die "could not find the staging/base merge base"
 expected_result_tree="$(expected_tree_after_delta \
@@ -1069,6 +1075,7 @@ else
       die "refusing to continue: could not materialize the expected staging-on-base tree"
     fi
   fi
+fi
 fi
 rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
 [ "$rebased_result_tree" = "$expected_result_tree" ] ||
