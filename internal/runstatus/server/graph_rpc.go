@@ -34,6 +34,24 @@ func graphRPCClock() (clock.Clock, *rpcError) {
 	return clock.Real(), nil
 }
 
+// graphRejectDetails classifies raw reject-reason strings into the
+// structured {code, file, message} shape (internal/graph.RejectDetail) —
+// additive alongside the untouched reject_reasons array, so a browser
+// client can tell a repo-level needs_canonicalization condition from a
+// genuine per-changeset conflict without regexing message text.
+func graphRejectDetails(reasons []string) []any {
+	details := make([]any, len(reasons))
+	for i, r := range reasons {
+		d := objectgraph.ClassifyRejectReason(r)
+		m := map[string]any{"code": d.Code, "message": d.Message}
+		if d.File != "" {
+			m["file"] = d.File
+		}
+		details[i] = m
+	}
+	return details
+}
+
 func graphStringParam(params map[string]any, key string) string {
 	s, _ := params[key].(string)
 	return s
@@ -119,6 +137,7 @@ func (s *Server) graphProposeRPC(params map[string]any) (any, *rpcError) {
 		"lint":           lint,
 		"rejected":       len(res.RejectReasons) > 0 || len(res.Lint) > 0,
 		"reject_reasons": rejectReasons,
+		"reject_details": graphRejectDetails(res.RejectReasons),
 	}, nil
 }
 
@@ -158,6 +177,7 @@ func (s *Server) graphAuthorizeRPC(params map[string]any) (any, *rpcError) {
 	return map[string]any{
 		"rejected":       res.Rejected(),
 		"reject_reasons": rejectReasons,
+		"reject_details": graphRejectDetails(res.RejectReasons),
 		"lint_issues":    lintIssues,
 		"changed_files":  changedFiles,
 	}, nil
@@ -198,6 +218,7 @@ func (s *Server) graphWithdrawRPC(params map[string]any) (any, *rpcError) {
 	return map[string]any{
 		"rejected":       res.Rejected(),
 		"reject_reasons": rejectReasons,
+		"reject_details": graphRejectDetails(res.RejectReasons),
 		"lint_issues":    lintIssues,
 		"changed_files":  changedFiles,
 	}, nil
@@ -241,8 +262,43 @@ func (s *Server) graphRebaseRPC(params map[string]any) (any, *rpcError) {
 	return map[string]any{
 		"rejected":       res.Rejected(),
 		"reject_reasons": rejectReasons,
+		"reject_details": graphRejectDetails(res.RejectReasons),
 		"lint_issues":    lintIssues,
 		"changed_files":  changedFiles,
+	}, nil
+}
+
+// graphCanonicalizeRPC: {catalog | catalog_path[, dry_run]} ->
+// {changed_files, skipped, already_canonical} — the portal's fix-it button
+// for a NEEDS_CANONICALIZATION reject: re-serialize the catalog's
+// block-scalar-bearing files into canonical re-marshal form
+// (internal/graph.Canonicalize) so every queued changeset stops rejecting
+// on a repo-level formatting condition. Same allowlist gate as the other
+// graph.* verbs: a browser names catalogs by alias, never by raw path.
+func (s *Server) graphCanonicalizeRPC(params map[string]any) (any, *rpcError) {
+	catalogPath, rerr := resolveGraphCatalogParam(s.graphAllowlist(), graphStringParam(params, "catalog"), graphStringParam(params, "catalog_path"), "graph.canonicalize")
+	if rerr != nil {
+		return nil, rerr
+	}
+	if catalogPath == "" {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.canonicalize: missing 'catalog_path' (or 'catalog')"}
+	}
+	res, err := objectgraph.Canonicalize(catalogPath, graphBoolParam(params, "dry_run"))
+	if err != nil {
+		return nil, &rpcError{Code: codeServerError, Message: "graph.canonicalize: " + err.Error()}
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	skipped := make([]any, len(res.Skipped))
+	for i, s := range res.Skipped {
+		skipped[i] = s
+	}
+	return map[string]any{
+		"changed_files":     changedFiles,
+		"skipped":           skipped,
+		"already_canonical": len(res.ChangedFiles) == 0 && len(res.Skipped) == 0,
 	}, nil
 }
 
@@ -283,6 +339,7 @@ func (s *Server) graphApplyRPC(params map[string]any) (any, *rpcError) {
 	return map[string]any{
 		"rejected":       res.Rejected(),
 		"reject_reasons": rejectReasons,
+		"reject_details": graphRejectDetails(res.RejectReasons),
 		"lint_issues":    lintIssues,
 		"changed_files":  changedFiles,
 	}, nil
