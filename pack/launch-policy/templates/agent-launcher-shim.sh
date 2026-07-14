@@ -68,7 +68,6 @@ if [ "${1:-}" = "superagent" ]; then
     --id "$workspace_id" \
     --owner "$workspace_owner" >/dev/null
   working_dir="$install_root/.capsules/workspaces/$workspace_id"
-  config_path="$working_dir/.kitsoki.yaml"
   [ -d "$working_dir" ] || { echo "Kitsoki launcher shim: Capsule workspace was not created: $working_dir" >&2; exit 1; }
   echo "Kitsoki launcher shim: starting $backend superagent in $working_dir" >&2
 fi
