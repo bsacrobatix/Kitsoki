@@ -25,6 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner has no global git identity. Dozens of tests create real
+      # temp git repos/worktrees/capsule checkouts and commit into them
+      # (internal/capsule/reconcile, internal/orchestrator dogfood smokes,
+      # internal/mcp, cmd/kitsoki, …); without this those commits fail
+      # closed with "Author identity unknown / empty ident name", which
+      # looks like unrelated logic bugs across many packages at once.
+      - name: Configure git identity for test-created repos
+        run: |
+          git config --global user.email "ci@kitsoki.dev"
+          git config --global user.name "Kitsoki CI"
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

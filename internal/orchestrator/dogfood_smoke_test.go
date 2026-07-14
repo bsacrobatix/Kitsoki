@@ -58,6 +58,18 @@ func setupDogfoodRepo(t *testing.T) (repoRoot string, ticketID string) {
 		t.Skip("dogfood smoke tests use real git repos/worktrees; skipped under -short")
 	}
 
+	// A CI runner has no global git identity configured (unlike a real dev
+	// machine), and the pipeline's capsule/worktree checkouts (host.git,
+	// host.capsule_workspace) are separate clones that don't inherit the
+	// fixture repo's local .git/config — so `git commit` fails there with
+	// "empty ident name" even though the top-level init commit below
+	// succeeds. Env vars are honored by every git subprocess regardless of
+	// which checkout it runs in.
+	t.Setenv("GIT_AUTHOR_NAME", "Smoke Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "smoke@test.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "Smoke Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "smoke@test.invalid")
+
 	repoRoot = t.TempDir()
 
 	// Copy project-local stories, reusable stories, and issues from the live repo. We resolve the
