@@ -29,4 +29,20 @@ fi
 
 out="$("$pack_dir/install.sh" "$repo" --no-siblings)"
 grep -q 'no changes' <<<"$out" || { echo "FAIL: installer was not idempotent" >&2; exit 1; }
+
+# A divergent managed file must be skipped without aborting the rest of the
+# install, and the exit code must flag the partial convergence.
+repo2="$tmp/repo2"
+git init -q -b main "$repo2"
+git -C "$repo2" config user.name "Launch Policy Gate"
+git -C "$repo2" config user.email "launch-policy@example.invalid"
+git -C "$repo2" commit -q --allow-empty -m init
+echo "# locally customized" > "$repo2/.kitsoki.local.yaml"
+rc=0
+"$pack_dir/install.sh" "$repo2" --no-siblings 2>/dev/null || rc=$?
+[ "$rc" -eq 3 ] || { echo "FAIL: skip did not exit 3 (got $rc)" >&2; exit 1; }
+grep -q '# locally customized' "$repo2/.kitsoki.local.yaml" || { echo "FAIL: divergent file was overwritten" >&2; exit 1; }
+test -x "$repo2/.kitsoki/bin/claude" || { echo "FAIL: skip aborted the remaining install" >&2; exit 1; }
+test -x "$repo2/scripts/launch-policy-gate.sh" || { echo "FAIL: gate script missing after skip" >&2; exit 1; }
+echo "PASS: divergent-file skip continues installing"
 echo "PASS: launch-policy pack install and red-team gate"

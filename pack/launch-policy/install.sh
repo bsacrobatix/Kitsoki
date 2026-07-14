@@ -20,12 +20,14 @@ git -C "$target" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "$tar
 target="$(git -C "$target" rev-parse --show-toplevel)"
 
 changed=0
+skipped=0
 install_file() {
   local src="$1" dst="$2" mode="$3"
   if [ -e "$dst" ] && cmp -s "$src" "$dst"; then return; fi
   if [ -e "$dst" ] && [ "$force" -ne 1 ]; then
     echo "SKIP $dst differs locally (use --force after review)" >&2
-    return 3
+    skipped=$((skipped + 1))
+    return 0
   fi
   mkdir -p "$(dirname "$dst")"
   cp "$src" "$dst"
@@ -60,4 +62,11 @@ case "$hooks_dir" in /*) ;; *) hooks_dir="$target/$hooks_dir" ;; esac
 install_file "$pack_dir/git-hooks/reference-transaction" "$hooks_dir/reference-transaction" 0755
 
 mkdir -p "$target/.capsules/workspaces"
-if [ "$changed" -eq 0 ]; then echo "launch-policy install: no changes"; else echo "launch-policy install: $changed file(s) installed"; fi
+if [ "$changed" -eq 0 ] && [ "$skipped" -eq 0 ]; then
+  echo "launch-policy install: no changes"
+else
+  echo "launch-policy install: $changed file(s) installed, $skipped skipped"
+fi
+# Divergent managed files were left in place; signal the caller so automation
+# doesn't treat a partial install as converged.
+[ "$skipped" -eq 0 ] || exit 3
