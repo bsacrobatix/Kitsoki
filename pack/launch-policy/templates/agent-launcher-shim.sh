@@ -56,6 +56,23 @@ kitsoki_bin="${KITSOKI_BIN:-kitsoki}"
 # empty config and no-ops the moment the caller isn't sitting in the repo
 # root that owns .kitsoki.yaml.
 install_root="$(cd "$(dirname "$0")/../.." && pwd -P)"
-args=(agent launch --raw --interactive --backend "$backend" --working-dir "$PWD" --config "$install_root/.kitsoki.yaml")
+working_dir="$PWD"
+config_path="$install_root/.kitsoki.yaml"
+if [ "${1:-}" = "superagent" ]; then
+  shift
+  workspace_id="${backend}-$(date +%Y%m%d-%H%M%S)-$$"
+  workspace_owner="superagent/${backend}/$$"
+  "$kitsoki_bin" capsule workspace create \
+    --project "$install_root" \
+    --definition development \
+    --id "$workspace_id" \
+    --owner "$workspace_owner" >/dev/null
+  working_dir="$install_root/.capsules/workspaces/$workspace_id"
+  config_path="$working_dir/.kitsoki.yaml"
+  [ -d "$working_dir" ] || { echo "Kitsoki launcher shim: Capsule workspace was not created: $working_dir" >&2; exit 1; }
+  echo "Kitsoki launcher shim: starting $backend superagent in $working_dir" >&2
+fi
+
+args=(agent launch --raw --interactive --backend "$backend" --working-dir "$working_dir" --config "$config_path")
 for arg in "$@"; do args+=(--raw-arg "$arg"); done
 KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE=1 "$kitsoki_bin" "${args[@]}"
