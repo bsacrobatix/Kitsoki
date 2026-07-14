@@ -60,4 +60,5 @@ for shell in bash zsh; do
   [ "$count" -eq 1 ] || { echo "FAIL: $shell PATH has $count shim entries after double-source" >&2; exit 1; }
 done
 echo "PASS: activation file resolves under bash and zsh with idempotent PATH"
+"$pack_dir/test-delegation.sh"
 echo "PASS: launch-policy pack install and red-team gate"
