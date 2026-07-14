@@ -249,6 +249,13 @@ capabilities:
     verbs: ["host.graph.load"]
 ```
 
+The host vocabulary also includes the agent ladder (`host.agent.ask`,
+`decide`, `task`, `extract`, and `converse`) for project-supplied orchestration
+scripts. These are never implicit: the effect must grant each exact verb, and
+the call still passes through that verb's normal tool, provider, sandbox, and
+trace policy. Automated flows must replace agent calls with host-handler
+stubs/cassettes; granting an agent verb does not make a test live-spend safe.
+
 `http`, `fs`, `probe`, `github`, and `host` are opt-in: the matching `ctx`
 attribute is absent unless the effect grants it. The production adapter only
 installs the live HTTP client when `http` is granted and

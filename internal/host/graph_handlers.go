@@ -581,10 +581,13 @@ func registryWire(cat *objectgraph.Catalog) []map[string]any {
 				params := make([]map[string]any, 0, len(def.Materialize.Params))
 				for _, p := range def.Materialize.Params {
 					params = append(params, map[string]any{
-						"id":      p.ID,
-						"type":    p.Type,
-						"default": p.Default,
-						"values":  p.Values,
+						"id":           p.ID,
+						"type":         p.Type,
+						"default":      p.Default,
+						"values":       p.Values,
+						"required":     p.Required,
+						"source_field": p.SourceField,
+						"source_edge":  string(p.SourceEdge),
 					})
 				}
 				contextEdges := make([]string, 0, len(def.Materialize.ContextEdges))

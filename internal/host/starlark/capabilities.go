@@ -14,6 +14,11 @@ import (
 // metadata still grants a subset; this list is only the maximum vocabulary the
 // sandbox recognizes as intentionally callable from Starlark.
 var BuiltinHostVerbVocabulary = []string{
+	"host.agent.ask",
+	"host.agent.decide",
+	"host.agent.task",
+	"host.agent.extract",
+	"host.agent.converse",
 	"host.workspace_manager.get",
 	"host.graph.load",
 	"host.graph.lint",

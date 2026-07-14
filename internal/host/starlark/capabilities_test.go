@@ -25,3 +25,11 @@ func TestParseCapabilitiesAcceptsUnsignedFSMaxBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1048576, caps.FS.MaxBytes)
 }
+
+func TestParseCapabilitiesAcceptsExplicitAgentVerbs(t *testing.T) {
+	caps, err := starlarkhost.ParseCapabilities(map[string]any{
+		"host": map[string]any{"verbs": []any{"host.agent.ask", "host.agent.decide"}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"host.agent.ask", "host.agent.decide"}, caps.Host.Verbs)
+}

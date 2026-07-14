@@ -196,10 +196,13 @@ type fileEdgeField struct {
 }
 
 type fileMaterializeParam struct {
-	ID      string   `yaml:"id"`
-	Type    string   `yaml:"type"`
-	Default any      `yaml:"default"`
-	Values  []string `yaml:"values"`
+	ID          string   `yaml:"id"`
+	Type        string   `yaml:"type"`
+	Default     any      `yaml:"default"`
+	Values      []string `yaml:"values"`
+	Required    bool     `yaml:"required"`
+	SourceField string   `yaml:"source_field"`
+	SourceEdge  string   `yaml:"source_edge"`
 }
 
 type fileArtifactDecl struct {
@@ -260,11 +263,17 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 			md.ContextEdges = append(md.ContextEdges, EdgeField(e))
 		}
 		for _, p := range ft.Materialize.Params {
+			if p.SourceField != "" && p.SourceEdge != "" {
+				return TypeDef{}, "", fmt.Errorf("type %q materialize param %q: source_field and source_edge are mutually exclusive", ft.ID, p.ID)
+			}
 			md.Params = append(md.Params, MaterializeParamDecl{
-				ID:      p.ID,
-				Type:    p.Type,
-				Default: p.Default,
-				Values:  p.Values,
+				ID:          p.ID,
+				Type:        p.Type,
+				Default:     p.Default,
+				Values:      p.Values,
+				Required:    p.Required,
+				SourceField: p.SourceField,
+				SourceEdge:  EdgeField(p.SourceEdge),
 			})
 		}
 		for _, c := range ft.Materialize.Checks {

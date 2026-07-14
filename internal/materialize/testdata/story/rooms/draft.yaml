@@ -4,6 +4,7 @@ states:
     on_enter:
       - set:
           artifact_path: "{{ '.artifacts/' + world.node_id + '/brief.md' }}"
+          artifact_content: "# Script-produced fixture\n\nExact producer bytes."
           status: "drafted"
     view: "Drafting {{ world.artifact_path }}."
     on:

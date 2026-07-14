@@ -222,6 +222,102 @@ func gateValue(node *graph.Node, field string) (string, bool) {
 	return fmt.Sprint(raw), true
 }
 
+// ResolveParams builds the effective invocation input for a partial node.
+// Explicit invocation values win, followed by graph-backed sources, then the
+// declared default. A source_edge contributes the ordered target id list for
+// that edge, so adding graph edges can move an object from partial to ready
+// without duplicating those ids in a modal-only form.
+func ResolveParams(cat *graph.Catalog, node *graph.Node, params []graph.MaterializeParamDecl, overrides map[string]any) (map[string]any, []string) {
+	resolved := make(map[string]any, len(params))
+	var missing []string
+	for _, p := range params {
+		var value any
+		var set bool
+		if override, ok := overrides[p.ID]; ok && valuePresent(override) {
+			value, set = override, true
+		} else if p.SourceField != "" {
+			value, set = nodeFieldValue(node, p.SourceField)
+		} else if p.SourceEdge != "" {
+			if eff, ok := cat.Registry.Effective(node.TypeID); ok {
+				for _, decl := range eff.EdgeFields {
+					if decl.ID != p.SourceEdge {
+						continue
+					}
+					targets := node.EdgeTargets(decl)
+					if len(targets) > 0 {
+						ids := make([]string, len(targets))
+						for i, id := range targets {
+							ids[i] = string(id)
+						}
+						value, set = ids, true
+					}
+					break
+				}
+			}
+		}
+		if !set && valuePresent(p.Default) {
+			value, set = p.Default, true
+		}
+		if set {
+			resolved[p.ID] = value
+		} else if p.Required {
+			missing = append(missing, p.ID)
+		}
+	}
+	return resolved, missing
+}
+
+// Readiness is the shared engine guard for materialize(thing). Ready is true
+// only when every required node gate and parameter can be resolved.
+type Readiness struct {
+	Ready         bool
+	MissingGates  []string
+	MissingParams []string
+	Params        map[string]any
+}
+
+func MaterializeReadiness(cat *graph.Catalog, node *graph.Node, binding *Binding, overrides map[string]any) Readiness {
+	params, missingParams := ResolveParams(cat, node, binding.Params, overrides)
+	missingGates := UnmetGates(node, binding.Gates)
+	return Readiness{
+		Ready:         len(missingGates) == 0 && len(missingParams) == 0,
+		MissingGates:  missingGates,
+		MissingParams: missingParams,
+		Params:        params,
+	}
+}
+
+func valuePresent(v any) bool {
+	if v == nil {
+		return false
+	}
+	switch value := v.(type) {
+	case string:
+		return strings.TrimSpace(value) != ""
+	case []string:
+		return len(value) > 0
+	case []any:
+		return len(value) > 0
+	case map[string]any:
+		return len(value) > 0
+	}
+	return true
+}
+
+func nodeFieldValue(node *graph.Node, field string) (any, bool) {
+	switch field {
+	case "title":
+		return node.Title, node.Title != ""
+	case "status":
+		return node.Status, node.Status != ""
+	case "visibility":
+		return string(node.Visibility), node.Visibility != ""
+	default:
+		v, ok := node.Fields[field]
+		return v, ok && valuePresent(v)
+	}
+}
+
 // ContextClosure walks node's edges transitively, following only edge kinds
 // in edgeKinds (recursively, through the same kinds on every node reached —
 // the plan's "node's transitive closure, filtered by edge kinds the story
@@ -363,7 +459,12 @@ func Prepare(req Request) (*Prepared, error) {
 		return nil, err
 	}
 
-	if unmet := UnmetGates(node, binding.Gates); len(unmet) > 0 {
+	readiness := MaterializeReadiness(cat, node, binding, req.Params)
+	unmet := append([]string{}, readiness.MissingGates...)
+	for _, id := range readiness.MissingParams {
+		unmet = append(unmet, "param:"+id)
+	}
+	if len(unmet) > 0 {
 		return nil, &GateError{NodeID: req.NodeID, Unmet: unmet}
 	}
 
@@ -389,15 +490,16 @@ func Prepare(req Request) (*Prepared, error) {
 	checks := ResolveChecks(node, binding.Checks)
 	allStages := append(append([]string{}, roomSeq...), CheckStages(checks)...)
 
-	initialWorld := map[string]any{"node_id": string(req.NodeID)}
-	for _, p := range binding.Params {
-		v := p.Default
-		if override, ok := req.Params[p.ID]; ok {
-			v = override
-		}
-		if v != nil {
-			initialWorld[p.ID] = v
-		}
+	initialWorld := map[string]any{
+		"node_id": string(req.NodeID),
+		"node": map[string]any{
+			"id": string(node.ID), "type": node.TypeID, "title": node.Title,
+			"status": node.Status, "visibility": string(node.Visibility), "fields": node.Fields,
+		},
+		"context_ids": contextIDs,
+	}
+	for id, value := range readiness.Params {
+		initialWorld[id] = value
 	}
 	if gv, ok := gateValue(node, "gate"); ok {
 		initialWorld["gate"] = gv
@@ -552,7 +654,10 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 					return // already written this path
 				}
 			}
-			content := renderArtifactMarkdown(wb.Node, wb.Binding, w, wb.ContextIDs)
+			content, _ := w["artifact_content"].(string)
+			if content == "" {
+				content = renderArtifactMarkdown(wb.Node, wb.Binding, w, wb.ContextIDs)
+			}
 			fullPath := filepath.Join(wb.RepoRoot, path)
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 				return // best-effort: a write-back failure must not fail the materialize job itself
