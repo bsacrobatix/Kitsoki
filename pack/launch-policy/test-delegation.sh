@@ -44,6 +44,30 @@ kitsoki_bin="$tmp/kitsoki"
 cat > "$kitsoki_bin" <<SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "\$1" = "capsule" ] && [ "\$2" = "workspace" ] && [ "\$3" = "create" ]; then
+  project=""
+  workspace_id=""
+  while [ "\$#" -gt 0 ]; do
+    case "\$1" in
+      --project) project="\$2"; shift 2 ;;
+      --id) workspace_id="\$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [ -n "\$project" ] && [ -n "\$workspace_id" ]
+  workspace="\$project/.capsules/workspaces/\$workspace_id"
+  mkdir -p "\$workspace"
+  git init -q -b superagent-work "\$workspace"
+  git -C "\$workspace" config user.name "Launch Policy Acceptance"
+  git -C "\$workspace" config user.email "launch-policy@example.invalid"
+  git -C "\$workspace" commit -q --allow-empty -m init
+  # A real development Capsule carries the project config but not the
+  # source checkout's machine-local policy override. The superagent shim
+  # deliberately launches with this workspace config after creation.
+  printf '%s\\n' '# test superagent workspace config' > "\$workspace/.kitsoki.yaml"
+  printf '%s\\n' "\$workspace" >> "$tmp/capsule-workspaces.log"
+  exit 0
+fi
 cd "$repo_root"
 exec "$go_bin" run ./cmd/kitsoki "\$@"
 SCRIPT
@@ -141,7 +165,28 @@ grep -qx 'ARG:; rm -rf /' "$log" || fail "codex argv injection payload was alter
 grep -qx 'ARG:`whoami`' "$log" || fail "codex argv backtick payload was evaluated instead of passed through literally"
 echo "PASS: adversarial native argv (shell metacharacters, injection-shaped strings) survives unevaluated"
 
-# --- 4: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
+# --- 4: superagent creates a managed workspace before policy launch --------
+: > "$tmp/capsule-workspaces.log"
+for backend in claude codex; do
+  : > "$log"
+  run_launch "$backend" "$repo" superagent --model fast \
+    || fail "superagent $backend launch failed"
+  [ "$(grep -c "^=== $backend invocation ===$" "$log")" -eq 1 ] \
+    || fail "expected exactly one superagent $backend invocation, got: $(cat "$log")"
+  grep -qx 'ARG:--model' "$log" || fail "superagent $backend stripped native argv"
+  grep -qx 'ARG:fast' "$log" || fail "superagent $backend stripped native argv value"
+done
+while IFS= read -r workspace_path; do
+  [ -n "$workspace_path" ] && [ -d "$workspace_path" ] \
+    || fail "superagent did not create a Capsule workspace"
+  [ -f "$workspace_path/.kitsoki.yaml" ] \
+    || fail "superagent workspace did not receive launcher config"
+done < "$tmp/capsule-workspaces.log"
+[ "$(wc -l < "$tmp/capsule-workspaces.log" | tr -d ' ')" -eq 2 ] \
+  || fail "expected one Capsule workspace per superagent backend"
+echo "PASS: Claude and Codex superagents create managed Capsule workspaces before policy launch"
+
+# --- 5: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
 # Exercised implicitly by every run_launch call above (KITSOKI_AGENT_*_BIN is
 # always set to the shim path itself, matching the activation script). Prove
 # it explicitly and prove the hard depth-cap backstop fails fast instead of
