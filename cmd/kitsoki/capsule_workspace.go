@@ -18,7 +18,7 @@ import (
 // letting any onboarded project use the native manager directly.
 func capsuleWorkspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "workspace", Short: "Create and manage native Capsule workspaces"}
-	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd())
+	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceAdoptScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd())
 	return cmd
 }
 
@@ -97,6 +97,31 @@ func capsuleWorkspaceCreateCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("definition")
+	return cmd
+}
+
+func capsuleWorkspaceAdoptScriptCmd() *cobra.Command {
+	var project, id string
+	var jsonOut bool
+	cmd := &cobra.Command{Use: "adopt-script", Short: "Record a verified scripts/dev-workspace.sh clone for native Capsule CI", RunE: func(cmd *cobra.Command, args []string) error {
+		manager, err := capsuleWorkspaceManager(project)
+		if err != nil {
+			return err
+		}
+		h, err := manager.AdoptDevWorkspace(cmd.Context(), id)
+		if err != nil {
+			return err
+		}
+		view, err := capsuleWorkspaceView(cmd.Context(), manager, h)
+		if err != nil {
+			return err
+		}
+		return capsuleWorkspaceWrite(cmd, view, jsonOut)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&id, "id", "", "workspace id created by scripts/dev-workspace.sh")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
+	_ = cmd.MarkFlagRequired("id")
 	return cmd
 }
 func capsuleWorkspaceListCmd() *cobra.Command {

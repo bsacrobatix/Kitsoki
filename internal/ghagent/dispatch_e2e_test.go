@@ -1413,6 +1413,16 @@ func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
 	}
 }
 
+func TestRealDispatchPlanDefaultsJobWorkspaceToDevelopmentCapsuleBase(t *testing.T) {
+	plan, ok := realDispatchPlans["stories/bugfix"]
+	if !ok {
+		t.Fatal("stories/bugfix real dispatch plan is missing")
+	}
+	if got := plan.BaseWorld["base_branch"]; got != managedDevelopmentBase {
+		t.Fatalf("real dispatch base_branch = %q, want development Capsule base %q", got, managedDevelopmentBase)
+	}
+}
+
 func TestRunStorySession_RealDispatch_AlreadyFixedTriageSkipsMakerPipeline(t *testing.T) {
 	ctx := context.Background()
 	root, err := repoRoot()

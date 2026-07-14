@@ -36,6 +36,12 @@ no_fetch=0
 resume=0
 gate=""
 dirty_action="auto"
+# A replay is useful for a short, reviewable staging delta. For a long-lived
+# branch, its conflict surface grows with every historical commit even when
+# Git has already proven the final three-way tree. Prefer one auditable merge
+# commit above this limit. Set to 0 to always use the proven merge path.
+rebase_replay_limit="${KITSOKI_STAGING_REBASE_LIMIT:-64}"
+merge_tree_diagnostics=""
 
 usage() {
   cat >&2 <<EOF
@@ -110,13 +116,88 @@ source_dirty() {
 # settings and a moving worktree/index cannot weaken the proof, and a change
 # already present on new_base is handled as an ordinary clean merge.
 expected_tree_after_delta() {
-  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree
+  local dir="$1" old_base="$2" snapshot="$3" new_base="$4" tree status
+  merge_tree_diagnostics=""
+  set +e
   tree="$(git -C "$dir" merge-tree \
     --write-tree \
     --no-messages \
     --merge-base "$old_base" \
-    "$new_base" "$snapshot")" || return 1
+    "$new_base" "$snapshot" 2>&1)"
+  status=$?
+  set -e
+  if [ "$status" -ne 0 ]; then
+    merge_tree_diagnostics="$tree"
+    return "$status"
+  fi
   printf '%s\n' "$tree"
+}
+
+merge_in_progress() {
+  git -C "$1" rev-parse --verify --quiet MERGE_HEAD >/dev/null
+}
+
+rebase_in_progress() {
+  local dir="$1" merge_dir apply_dir
+  merge_dir="$(git -C "$1" rev-parse --git-path rebase-merge)" || return 1
+  apply_dir="$(git -C "$1" rev-parse --git-path rebase-apply)" || return 1
+  [ "${merge_dir#/}" != "$merge_dir" ] || merge_dir="$dir/$merge_dir"
+  [ "${apply_dir#/}" != "$apply_dir" ] || apply_dir="$dir/$apply_dir"
+  [ -d "$merge_dir" ] || [ -d "$apply_dir" ]
+}
+
+# A long-lived staging capsule can be left in an obsolete rebase after the
+# primary staging branch has moved on.  It is safe to abort only when the
+# rebase's original tip is already contained by the current primary staging
+# tip and that tip already contains the requested base.  In that case no
+# capsule-local work can be lost: the authoritative branch contains it all,
+# and the following fast path resets the capsule to that exact snapshot.
+recover_obsolete_staging_rebase() {
+  local dir="$1" original="$2" staging_tip="$3" base_tip="$4"
+  rebase_in_progress "$dir" || return 0
+  if ! git -C "$dir" merge-base --is-ancestor "$original" "$staging_tip" ||
+     ! git -C "$dir" merge-base --is-ancestor "$base_tip" "$staging_tip"; then
+    die "staging capsule has an active rebase whose original tip is not fully contained by current $staging_branch; preserve or finish it explicitly before refreshing"
+  fi
+  echo "refresh-staging-local: aborting obsolete staging rebase; its original tip is already contained by current $staging_branch" >&2
+  git -C "$dir" rebase --abort
+  [ "$(git -C "$dir" rev-parse HEAD)" = "$original" ] ||
+    die "staging rebase abort did not restore its recorded original tip"
+}
+
+merge_tree_has_conflicts() {
+  case "$merge_tree_diagnostics" in
+    *CONFLICT*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+begin_resumable_merge() {
+  local dir="$1" target="$2" label="$3" resume_cmd="$4"
+  echo "error: $label has merge conflicts; preserved recovery refs remain in place" >&2
+  [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics" >&2
+  # A conflict means both histories matter.  Replaying a long staging history
+  # one commit at a time turns one semantic conflict into hundreds of fragile
+  # stops; a normal merge presents each file conflict once and preserves both
+  # parents for the later fast-forward promotion.
+  echo "refresh-staging-local: starting a managed reconciliation merge so each conflict is resolved once" >&2
+  if git -C "$dir" merge --no-ff "$target"; then
+    die "$label merge analysis failed unexpectedly even though the reconciliation merge completed; inspect recovery refs before retrying"
+  fi
+  if merge_in_progress "$dir"; then
+    cat >&2 <<EOF
+
+Resolve the conflict in the managed staging capsule, then complete the merge:
+  git -C "$dir" status
+  # edit and git -C "$dir" add <resolved-paths>
+  GIT_EDITOR=true git -C "$dir" commit
+  $resume_cmd
+
+To abandon this attempt: git -C "$dir" merge --abort
+EOF
+    exit 2
+  fi
+  die "$label merge analysis failed and did not create a resumable merge; inspect the diagnostics and preserved refs"
 }
 
 materialize_expected_tree_merge() {
@@ -590,6 +671,10 @@ done
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+case "$rebase_replay_limit" in
+  ''|*[!0-9]*) die "KITSOKI_STAGING_REBASE_LIMIT must be a non-negative integer" ;;
+esac
+
 if [ "$(git rev-parse --git-dir)" != "$(git rev-parse --git-common-dir)" ]; then
   die "run this in the primary checkout, not a linked worktree or secondary checkout"
 fi
@@ -653,19 +738,47 @@ ensure_managed_capsule "$staging_capsule"
 
 source_branch="$(git -C "$staging_capsule" branch --show-current)"
 if [ "$source_branch" != "$staging_branch" ]; then
-  die "staging capsule $staging_capsule is on $source_branch, expected $staging_branch"
+  # During a rebase Git detaches HEAD even though the named staging branch is
+  # still the branch that will be updated by --continue/--abort.
+  if ! rebase_in_progress "$staging_capsule" ||
+     ! git -C "$staging_capsule" rev-parse --verify --quiet "refs/heads/$staging_branch" >/dev/null; then
+    die "staging capsule $staging_capsule is on $source_branch, expected $staging_branch"
+  fi
 fi
-dirty="$(source_dirty "$staging_capsule")"
-if [ -n "$dirty" ]; then
-  handle_dirty_staging_capsule "$staging_capsule" "$dirty" || exit 1
-fi
-git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
-  die "staging capsule has no 'source' remote: $staging_capsule"
 
 git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$base" >/dev/null ||
   die "base branch not found: $base"
 git -C "$repo_root" rev-parse --verify --quiet "refs/heads/$staging_branch" >/dev/null ||
   die "staging branch not found: $staging_branch"
+staging_start="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
+base_primary_start="$(git -C "$repo_root" rev-parse "refs/heads/$base")"
+
+# Do this before generic dirty handling: a rebase's conflict index is not
+# ordinary user work.  The narrow ancestry proof in this helper makes aborting
+# it safe, then the canonical fast path below restores the capsule from the
+# primary branch without replaying historical commits.
+if rebase_in_progress "$staging_capsule"; then
+  git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
+    die "staging capsule has no 'source' remote: $staging_capsule"
+  rebase_original="$(git -C "$staging_capsule" rev-parse --verify ORIG_HEAD)" ||
+    die "staging capsule has an active rebase without a readable ORIG_HEAD; do not overwrite it"
+  recover_obsolete_staging_rebase "$staging_capsule" "$rebase_original" "$staging_start" "$base_primary_start"
+  git -C "$staging_capsule" fetch source \
+    "+refs/heads/$staging_branch:refs/remotes/source/$staging_branch"
+  [ "$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$staging_branch")" = "$staging_start" ] ||
+    die "staging branch advanced while recovering an obsolete rebase; rerun"
+  git -C "$staging_capsule" reset --hard "refs/remotes/source/$staging_branch" >/dev/null
+fi
+
+dirty="$(source_dirty "$staging_capsule")"
+if [ -n "$dirty" ]; then
+  if [ "$resume" -eq 1 ] && rebase_in_progress "$staging_capsule"; then
+    die "cannot resume while the staging rebase is still in progress; resolve it, run git rebase --continue, then retry --resume"
+  fi
+  handle_dirty_staging_capsule "$staging_capsule" "$dirty" || exit 1
+fi
+git -C "$staging_capsule" remote get-url source >/dev/null 2>&1 ||
+  die "staging capsule has no 'source' remote: $staging_capsule"
 
 # A conflict deliberately leaves the managed capsule in place so its rebase can
 # be resolved there. An ordinary retry would otherwise replay that work from
@@ -708,8 +821,51 @@ fi
 # Capture the exact staging input before touching the capsule.  A workspace
 # merge may advance staging/local while this helper is rebasing; that new work
 # is authoritative and must never be replaced by a stale staging capsule.
-staging_start="$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")"
-base_primary_start="$(git -C "$repo_root" rev-parse "refs/heads/$base")"
+# Refresh the capsule's private tracking ref before the ancestry fast path;
+# otherwise a stale long-lived clone can manufacture replay work that primary
+# staging has already settled.
+capsule_upstream_before="$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$staging_branch")" ||
+  die "staging capsule cannot resolve its pre-refresh source/$staging_branch"
+if [ "$capsule_upstream_before" != "$staging_start" ]; then
+  upstream_recovery_ref="refs/kitsoki/staging-capsule-recovery/$capsule_upstream_before"
+  if git -C "$repo_root" rev-parse --verify --quiet "$upstream_recovery_ref" >/dev/null; then
+    [ "$(git -C "$repo_root" rev-parse "$upstream_recovery_ref")" = "$capsule_upstream_before" ] ||
+      die "content-addressed old capsule upstream recovery ref points at the wrong object"
+  else
+    git -C "$repo_root" fetch --no-tags "$staging_capsule" \
+      "refs/remotes/source/$staging_branch:$upstream_recovery_ref"
+  fi
+fi
+git -C "$staging_capsule" fetch source \
+  "+refs/heads/$staging_branch:refs/remotes/source/$staging_branch"
+capsule_head="$(git -C "$staging_capsule" rev-parse HEAD)"
+if [ "$capsule_head" = "$staging_start" ] &&
+   git -C "$staging_capsule" merge-base --is-ancestor "$base_primary_start" "$staging_start"; then
+  echo "refresh-staging-local: $staging_branch already contains $base; syncing the staging capsule without replay" >&2
+  copy_local_config
+  if [ -n "$gate" ]; then
+    echo "refresh-staging-local: running gate in $staging_capsule: $gate" >&2
+    (cd "$staging_capsule" && sh -c "$gate")
+  fi
+  post_gate_dirty="$(source_dirty "$staging_capsule")"
+  [ -z "$post_gate_dirty" ] || die "staging refresh gate left uncommitted changes"
+  # Import the proven no-op snapshot privately too. This is intentionally the
+  # same concurrency boundary as a normal refresh: a gate or another actor may
+  # advance the capsule between its proof and our final observations.
+  no_replay_import_ref="refs/kitsoki/refresh/no-replay-$(date -u +%Y%m%dT%H%M%SZ)-$$/import"
+  git -C "$repo_root" fetch "$staging_capsule" "$staging_start:$no_replay_import_ref"
+  [ "$(git -C "$staging_capsule" rev-parse "refs/heads/$staging_branch")" = "$staging_start" ] ||
+    die "staging capsule branch advanced while importing the proven result; rerun refresh"
+  [ "$(git -C "$repo_root" rev-parse "refs/heads/$staging_branch")" = "$staging_start" ] ||
+    die "staging branch advanced during no-replay refresh; rerun"
+  [ "$(git -C "$repo_root" rev-parse "refs/heads/$base")" = "$base_primary_start" ] ||
+    die "$base advanced during no-replay refresh; rerun"
+  git -C "$repo_root" update-ref -d "$no_replay_import_ref" >/dev/null 2>&1 || true
+  printf '%s -> %s (already based on %s; no replay)\n' "$staging_branch" "$(git rev-parse --short "$staging_branch")" "$base"
+  printf 'staging capsule: %s\n' "$staging_capsule"
+  printf 'base: %s (%s)\n' "$base" "$(git rev-parse --short "$base")"
+  exit 0
+fi
 capsule_upstream_start="$(git -C "$staging_capsule" rev-parse "refs/remotes/source/$staging_branch")" ||
   die "staging capsule cannot resolve its pre-refresh source/$staging_branch"
 capsule_original_start="$(git -C "$staging_capsule" rev-parse HEAD)"
@@ -846,8 +1002,12 @@ expected_capsule_tree="$(expected_tree_after_delta \
   "$staging_capsule" \
   "$capsule_delta_base_start" \
   "$capsule_original_start" \
-  "$staging_start")" ||
-  die "could not construct the expected post-snapshot capsule tree"
+  "$staging_start")" || {
+  merge_tree_has_conflicts || die "could not construct the expected post-snapshot capsule tree: ${merge_tree_diagnostics:-no diagnostics}"
+  begin_resumable_merge "$staging_capsule" "$snapshot_ref" \
+    "post-snapshot capsule tree" \
+    "scripts/refresh-staging-local.sh --skip-remote --resume --base '$base' --staging-branch '$staging_branch' --staging-capsule '$staging_capsule'${gate:+ --gate '$gate'}"
+}
 refuse_untracked_tree_collisions \
   "$staging_capsule" "$capsule_original_start" "$expected_capsule_tree" \
   "staging-snapshot rebase" ||
@@ -869,33 +1029,57 @@ if [ "$capsule_tree" != "$expected_capsule_tree" ]; then
 fi
 git -C "$staging_capsule" update-ref "$capsule_ref" "$capsule_start"
 
+if git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$capsule_start"; then
+  # A prior reconciliation merge already carries this base. Rebase would
+  # flatten that merge and replay the whole historical staging delta.
+  echo "refresh-staging-local: staging capsule already contains source/$base; skipping historical replay" >&2
+  rebased_result="$capsule_start"
+else
 combined_base="$(git -C "$staging_capsule" merge-base "$staging_start" "$base_start")" ||
   die "could not find the staging/base merge base"
 expected_result_tree="$(expected_tree_after_delta \
   "$staging_capsule" \
   "$combined_base" \
   "$capsule_start" \
-  "$base_start")" ||
-  die "could not construct the expected staging-on-base tree"
+  "$base_start")" || {
+  merge_tree_has_conflicts || die "could not construct the expected staging-on-base tree: ${merge_tree_diagnostics:-no diagnostics}"
+  begin_resumable_merge "$staging_capsule" "$base_start" \
+    "staging-on-base tree" \
+    "scripts/refresh-staging-local.sh --skip-remote --resume --base '$base' --staging-branch '$staging_branch' --staging-capsule '$staging_capsule'${gate:+ --gate '$gate'}"
+}
 refuse_untracked_tree_collisions \
   "$staging_capsule" "$capsule_start" "$expected_result_tree" \
   "$base rebase" ||
   die "move or preserve the reported local paths before retrying"
 
-echo "refresh-staging-local: rebasing staging capsule onto source/$base" >&2
-git -C "$staging_capsule" rebase "$base_start"
-rebased_result="$(git -C "$staging_capsule" rev-parse HEAD)"
-rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
-if [ "$rebased_result_tree" != "$expected_result_tree" ]; then
-  echo "refresh-staging-local: sequential base rebase changed the independently proven tree; materializing a signed reconciliation merge" >&2
+echo "refresh-staging-local: integrating staging capsule with source/$base" >&2
+replay_count="$(git -C "$staging_capsule" rev-list --count "$base_start..$capsule_start")"
+if [ "$replay_count" -gt "$rebase_replay_limit" ]; then
+  echo "refresh-staging-local: staging replay has $replay_count commits (limit $rebase_replay_limit); materializing the independently proven reconciliation merge" >&2
   if ! rebased_result="$(materialize_expected_tree_merge \
     "$staging_capsule" "$expected_result_tree" "$base_start" \
-    "$capsule_start" "staging snapshot onto $base")"; then
+    "$capsule_start" "large staging snapshot onto $base")"; then
     restore_original_on_failure=1
-    die "refusing to continue: could not materialize the expected staging-on-base tree"
+    die "refusing to continue: could not materialize the large-history reconciliation tree"
   fi
+else
+  git -C "$staging_capsule" rebase "$base_start"
+  rebased_result="$(git -C "$staging_capsule" rev-parse HEAD)"
   rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
+  if [ "$rebased_result_tree" != "$expected_result_tree" ]; then
+    echo "refresh-staging-local: sequential base rebase changed the independently proven tree; materializing a signed reconciliation merge" >&2
+    if ! rebased_result="$(materialize_expected_tree_merge \
+      "$staging_capsule" "$expected_result_tree" "$base_start" \
+      "$capsule_start" "staging snapshot onto $base")"; then
+      restore_original_on_failure=1
+      die "refusing to continue: could not materialize the expected staging-on-base tree"
+    fi
+  fi
 fi
+fi
+rebased_result_tree="$(git -C "$staging_capsule" rev-parse "$rebased_result^{tree}")"
+[ "$rebased_result_tree" = "$expected_result_tree" ] ||
+  die "refusing to continue: staging integration changed the independently proven tree"
 git -C "$staging_capsule" merge-base --is-ancestor "$base_start" "$rebased_result" ||
   die "refusing to continue: rebased staging is not based on captured $base"
 

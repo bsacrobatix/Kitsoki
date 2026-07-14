@@ -56,7 +56,17 @@ kitsoki_bin="${KITSOKI_BIN:-kitsoki}"
 # empty config and no-ops the moment the caller isn't sitting in the repo
 # root that owns .kitsoki.yaml.
 install_root="$(cd "$(dirname "$0")/../.." && pwd -P)"
-working_dir="$PWD"
+working_dir="$(pwd -P)"
+# Activation intentionally leaves this shim at the front of PATH while a shell
+# moves between directories. It owns policy only for its installation root;
+# outside that tree it must act like the native backend rather than applying a
+# repository-local allowlist to the whole machine. Re-enter the existing
+# depth-guard path so the real backend resolution and argv preservation remain
+# centralized.
+case "$working_dir/" in
+  "$install_root/"*) ;;
+  *) KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE=1 exec "$0" "$@" ;;
+esac
 config_path="$install_root/.kitsoki.yaml"
 if [ "${1:-}" = "superagent" ]; then
   shift

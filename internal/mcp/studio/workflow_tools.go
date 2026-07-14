@@ -243,6 +243,13 @@ func (srv *Server) handleWorkflowExport(
 
 func workflowFreshnessError(root, toolName string) string {
 	ping := buildPingOK()
+	// In-process Go tests execute a transient *.test binary whose build VCS
+	// revision can be inherited from the checkout that built the cached test
+	// binary.  It is not an attached Studio server and must not make unit tests
+	// depend on whichever real checkout is currently serving MCP.
+	if strings.HasSuffix(filepath.Base(ping.Executable), ".test") {
+		return ""
+	}
 	head := pingGitOutput(root, "rev-parse", "HEAD")
 	if head == "" || ping.Revision == "" || head == ping.Revision {
 		return ""
