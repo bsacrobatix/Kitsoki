@@ -4,11 +4,12 @@
 # installed shim script (only the claude/codex backends themselves are
 # faked, so no LLM ever runs):
 #
-#   1. policy denial blocks the backend (nothing gets invoked);
-#   2. policy approval delegates to the real backend exactly once;
-#   3. adversarial/native argv survives the round trip unmangled and
+#   1. an activated shim is transparent outside its installation tree;
+#   2. policy denial blocks the backend (nothing gets invoked);
+#   3. policy approval delegates to the real backend exactly once;
+#   4. adversarial/native argv survives the round trip unmangled and
 #      unevaluated (spaces, `--`, shell metacharacters);
-#   4. KITSOKI_AGENT_*_BIN pointing at the shim itself — the activation
+#   5. KITSOKI_AGENT_*_BIN pointing at the shim itself — the activation
 #      script's own standing configuration — does not recurse.
 set -euo pipefail
 pack_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -34,6 +35,12 @@ git init -q -b work "$workspace"
 git -C "$workspace" config user.name "Launch Policy Acceptance"
 git -C "$workspace" config user.email "launch-policy@example.invalid"
 git -C "$workspace" commit -q --allow-empty -m init
+
+# A directory outside the pack installation. A sourced activation file stays
+# on PATH after `cd`, so the shim must delegate natively here instead of
+# feeding this path through the install root's policy config.
+outside="$tmp/outside"
+mkdir -p "$outside"
 
 echo "running kitsoki through go run (real policy gate; only claude/codex backends are faked)..." >&2
 # Keep this proof on the source surface: the shim only needs an executable
@@ -135,7 +142,16 @@ run_with_timeout() {
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
-# --- 1: policy denial blocks the backend -----------------------------------
+# --- 1: activated shim is transparent outside the installation tree --------
+: > "$log"
+run_launch codex "$outside" --model ordinary \
+  || fail "out-of-tree codex launch did not delegate natively"
+[ "$(grep -c '^=== codex invocation ===$' "$log")" -eq 1 ] \
+  || fail "out-of-tree codex launch did not invoke the real backend exactly once: $(cat "$log")"
+grep -qx 'ARG:ordinary' "$log" || fail "out-of-tree codex argv was not preserved"
+echo "PASS: activated shim is transparent outside its installation tree"
+
+# --- 2: policy denial blocks the backend -----------------------------------
 : > "$log"
 if out="$(run_launch claude "$repo" --model x 2>&1)"; then
   fail "denied launch (protected primary checkout) was allowed"
@@ -144,7 +160,7 @@ grep -q "agent launch policy denied" <<<"$out" || fail "denial did not surface a
 [ ! -s "$log" ] || fail "denied launch still invoked a backend: $(cat "$log")"
 echo "PASS: policy denial blocks the backend before it is ever invoked"
 
-# --- 2+3: policy approval delegates exactly once, argv survives unmangled --
+# --- 3+4: policy approval delegates exactly once, argv survives unmangled --
 : > "$log"
 run_launch claude "$workspace" --model weird 'arg with spaces' -- --native-flag=1 '$(echo injected)' \
   || fail "approved claude launch failed"
@@ -155,7 +171,7 @@ grep -qx 'ARG:$(echo injected)' "$log" || fail "shell metacharacters in argv wer
 grep -qx 'ARG:--' "$log" || fail "the bare -- separator was lost"
 echo "PASS: policy approval delegates to the real backend exactly once, argv unmangled"
 
-# --- 2+3 again on codex, with shell-injection-shaped argv ------------------
+# --- 3+4 again on codex, with shell-injection-shaped argv ------------------
 : > "$log"
 run_launch codex "$workspace" -m fast '; rm -rf /' '`whoami`' \
   || fail "approved codex launch failed"
@@ -165,7 +181,7 @@ grep -qx 'ARG:; rm -rf /' "$log" || fail "codex argv injection payload was alter
 grep -qx 'ARG:`whoami`' "$log" || fail "codex argv backtick payload was evaluated instead of passed through literally"
 echo "PASS: adversarial native argv (shell metacharacters, injection-shaped strings) survives unevaluated"
 
-# --- 4: superagent creates a managed workspace before policy launch --------
+# --- 5: superagent creates a managed workspace before policy launch --------
 : > "$tmp/capsule-workspaces.log"
 for backend in claude codex; do
   : > "$log"
@@ -186,7 +202,7 @@ done < "$tmp/capsule-workspaces.log"
   || fail "expected one Capsule workspace per superagent backend"
 echo "PASS: Claude and Codex superagents create managed Capsule workspaces before policy launch"
 
-# --- 5: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
+# --- 6: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
 # Exercised implicitly by every run_launch call above (KITSOKI_AGENT_*_BIN is
 # always set to the shim path itself, matching the activation script). Prove
 # it explicitly and prove the hard depth-cap backstop fails fast instead of
