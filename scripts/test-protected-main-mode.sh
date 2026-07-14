@@ -576,4 +576,58 @@ set -e
 [ "$(git -C "$resume_repo" show main:conflict.txt)" = "manual-resolution" ] ||
   { echo "promotion resume did not land manual resolution" >&2; exit 1; }
 
+# A manual merge resolution already contains main as a parent. Promotion must
+# preserve that history instead of rebasing and replaying the entire staging
+# series. The shim makes any accidental `rebase source/main` a hard failure.
+merged_repo="$tmp/merged-resolution-promotion"
+git_init "$merged_repo"
+mkdir -p "$merged_repo/scripts"
+cp "$script_dir/merge-to-main.sh" "$merged_repo/scripts/merge-to-main.sh"
+chmod +x "$merged_repo/scripts/merge-to-main.sh"
+git -C "$merged_repo" add scripts/merge-to-main.sh
+git -C "$merged_repo" commit -q -m helper
+commit_file "$merged_repo" base.txt base
+git -C "$merged_repo" branch staging/local
+git -C "$merged_repo" switch -q staging/local
+commit_file "$merged_repo" conflict.txt staging-version
+git -C "$merged_repo" switch -q main
+commit_file "$merged_repo" conflict.txt main-version
+mkdir -p "$merged_repo/.capsules/staging"
+git -C "$merged_repo" clone --no-local "$merged_repo" "$merged_repo/.capsules/staging/local" >/dev/null
+git -C "$merged_repo/.capsules/staging/local" remote rename origin source
+git -C "$merged_repo/.capsules/staging/local" config user.name "Test User"
+git -C "$merged_repo/.capsules/staging/local" config user.email "test@example.invalid"
+git -C "$merged_repo/.capsules/staging/local" switch -q -c staging/local source/staging/local
+touch "$merged_repo/.capsules/staging/local/.kitsoki-capsule"
+set +e
+git -C "$merged_repo/.capsules/staging/local" merge --no-ff source/main >/dev/null 2>&1
+merge_resolution_status=$?
+set -e
+[ "$merge_resolution_status" -ne 0 ] || { echo "expected manual merge conflict" >&2; exit 1; }
+printf 'manual-merge-resolution\n' >"$merged_repo/.capsules/staging/local/conflict.txt"
+git -C "$merged_repo/.capsules/staging/local" add conflict.txt
+GIT_EDITOR=true git -C "$merged_repo/.capsules/staging/local" commit --no-edit >/dev/null
+merged_resolution_head="$(git -C "$merged_repo/.capsules/staging/local" rev-parse HEAD)"
+[ "$(git -C "$merged_repo/.capsules/staging/local" rev-list --parents -n 1 HEAD | wc -w | tr -d ' ')" = 3 ] ||
+  { echo "manual resolution was not a merge commit" >&2; exit 1; }
+git -C "$merged_repo" update-ref refs/heads/staging/local "$merged_resolution_head"
+no_rebase_shim="$tmp/no-rebase-shim"
+mkdir -p "$no_rebase_shim"
+cat >"$no_rebase_shim/git" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = -C ] && [ "${3:-}" = rebase ]; then
+  echo "unexpected source rebase" >&2
+  exit 91
+fi
+exec "${REAL_GIT:?}" "$@"
+SH
+chmod +x "$no_rebase_shim/git"
+(
+  cd "$merged_repo"
+  REAL_GIT="$(command -v git)" PATH="$no_rebase_shim:$PATH" scripts/merge-to-main.sh --gate true
+) >"$tmp/merged-resolution-promotion.out" 2>&1
+assert_contains "$tmp/merged-resolution-promotion.out" "source already contains source/main"
+[ "$(git -C "$merged_repo" show main:conflict.txt)" = "manual-merge-resolution" ] ||
+  { echo "merged resolution promotion changed the manual result" >&2; exit 1; }
+
 echo "merge-to-main protected-mode integration tests passed"

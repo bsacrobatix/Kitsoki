@@ -343,25 +343,33 @@ if [ -n "$source_dir" ]; then
   if git -C "$source_dir" remote get-url source >/dev/null 2>&1 && [ "$resume" != "1" ]; then
     git -C "$source_dir" fetch source main
     source_main="$(git -C "$source_dir" rev-parse --verify source/main)"
-    source_delta_base="$(git -C "$source_dir" merge-base "$source_original" "$source_main")" || {
-      echo "error: could not determine source/main merge base" >&2
-      exit 1
-    }
-    if ! expected_source_tree="$(expected_tree_after_delta \
-      "$source_dir" "$source_delta_base" "$source_original" "$source_main")"; then
-      if ! merge_tree_has_conflicts; then
-        echo "error: could not construct expected rebased source tree: ${merge_tree_diagnostics:-no diagnostics}" >&2
+    # A manual resolution may deliberately be a merge commit. If source/main
+    # is already in that history, rebasing would replay every historical
+    # staging commit and can manufacture conflicts that were already resolved.
+    # Preserve the proven merged lineage and proceed through the normal gate,
+    # source snapshot CAS, and protected-main fast-forward checks.
+    if git -C "$source_dir" merge-base --is-ancestor "$source_main" "$source_original"; then
+      echo "merge-to-main: source already contains source/main; preserving merged resolution history" >&2
+    else
+      source_delta_base="$(git -C "$source_dir" merge-base "$source_original" "$source_main")" || {
+        echo "error: could not determine source/main merge base" >&2
         exit 1
-      fi
-      echo "error: expected rebased source tree has merge conflicts; original retained at $source_original_recovery_ref" >&2
-      [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics" >&2
-      echo "merge-to-main: starting the managed source rebase so the conflict can be resolved in place" >&2
-      if git -C "$source_dir" rebase source/main; then
-        echo "error: merge analysis failed unexpectedly even though source rebase completed; inspect $source_original_recovery_ref" >&2
-        exit 1
-      fi
-      if rebase_in_progress "$source_dir"; then
-        cat >&2 <<EOF
+      }
+      if ! expected_source_tree="$(expected_tree_after_delta \
+        "$source_dir" "$source_delta_base" "$source_original" "$source_main")"; then
+        if ! merge_tree_has_conflicts; then
+          echo "error: could not construct expected rebased source tree: ${merge_tree_diagnostics:-no diagnostics}" >&2
+          exit 1
+        fi
+        echo "error: expected rebased source tree has merge conflicts; original retained at $source_original_recovery_ref" >&2
+        [ -z "$merge_tree_diagnostics" ] || printf '%s\n' "$merge_tree_diagnostics" >&2
+        echo "merge-to-main: starting the managed source rebase so the conflict can be resolved in place" >&2
+        if git -C "$source_dir" rebase source/main; then
+          echo "error: merge analysis failed unexpectedly even though source rebase completed; inspect $source_original_recovery_ref" >&2
+          exit 1
+        fi
+        if rebase_in_progress "$source_dir"; then
+          cat >&2 <<EOF
 
 Resolve the conflict in the managed source capsule, then:
   git -C "$source_dir" status
@@ -371,23 +379,24 @@ Resolve the conflict in the managed source capsule, then:
 
 To abandon this attempt: git -C "$source_dir" rebase --abort
 EOF
-        exit 2
+          exit 2
+        fi
+        echo "error: merge analysis failed and did not create a resumable source rebase; inspect $source_original_recovery_ref" >&2
+        exit 1
       fi
-      echo "error: merge analysis failed and did not create a resumable source rebase; inspect $source_original_recovery_ref" >&2
-      exit 1
-    fi
-    refuse_untracked_tree_collisions \
-      "$source_dir" "$source_original" "$expected_source_tree" "source rebase" || exit 1
-    git -C "$source_dir" rebase source/main
-    source_rebased="$(git -C "$source_dir" rev-parse --verify HEAD)"
-    if [ "$(git -C "$source_dir" rev-parse "$source_rebased^{tree}")" != "$expected_source_tree" ]; then
-      git -C "$source_dir" update-ref "refs/kitsoki/promotion-rebase-failed/$source_rebased" "$source_rebased" || true
-      if failed_source_dirty="$(source_dir_dirty "$source_dir")" && [ -z "$failed_source_dirty" ]; then
-        git -C "$source_dir" update-ref "refs/heads/$source_branch" "$source_original" "$source_rebased" || true
-        git -c submodule.recurse=false -C "$source_dir" reset --hard "$source_original" >/dev/null 2>&1 || true
+      refuse_untracked_tree_collisions \
+        "$source_dir" "$source_original" "$expected_source_tree" "source rebase" || exit 1
+      git -C "$source_dir" rebase source/main
+      source_rebased="$(git -C "$source_dir" rev-parse --verify HEAD)"
+      if [ "$(git -C "$source_dir" rev-parse "$source_rebased^{tree}")" != "$expected_source_tree" ]; then
+        git -C "$source_dir" update-ref "refs/kitsoki/promotion-rebase-failed/$source_rebased" "$source_rebased" || true
+        if failed_source_dirty="$(source_dir_dirty "$source_dir")" && [ -z "$failed_source_dirty" ]; then
+          git -C "$source_dir" update-ref "refs/heads/$source_branch" "$source_original" "$source_rebased" || true
+          git -c submodule.recurse=false -C "$source_dir" reset --hard "$source_original" >/dev/null 2>&1 || true
+        fi
+        echo "error: rebased source tree differs from the expected preserved tree; original retained at $source_original_recovery_ref" >&2
+        exit 1
       fi
-      echo "error: rebased source tree differs from the expected preserved tree; original retained at $source_original_recovery_ref" >&2
-      exit 1
     fi
   elif ! git -C "$source_dir" remote get-url source >/dev/null 2>&1; then
     echo "warning: source dir has no 'source' remote; skipping rebase onto local main before gate" >&2
