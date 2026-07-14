@@ -2655,3 +2655,59 @@ nodes:
     status: proposed
     title: 'Raw-agent launch mode: sanctioned last-resort escape hatch that files its own obsolescence'
     visibility: internal
+  - created_at: "2026-07-14T11:42:28Z"
+    id: cs-11
+    operations:
+      - changes:
+          - after:
+              - req-project-objects-data-primary
+              - req-project-objects-typed-edges
+              - req-project-objects-delta-roadmap
+              - req-project-objects-provenance
+              - req-member-catalog-changeset-bootstrap
+            before:
+              - req-project-objects-data-primary
+              - req-project-objects-typed-edges
+              - req-project-objects-delta-roadmap
+              - req-project-objects-provenance
+            path:
+              - edges
+              - requirements
+        kind: modified
+        node: feature-project-object-graph
+      - changes:
+          - after:
+              - req-project-objects-data-primary
+              - req-project-objects-typed-edges
+              - req-project-objects-provenance
+              - req-member-catalog-changeset-bootstrap
+            before:
+              - req-project-objects-data-primary
+              - req-project-objects-typed-edges
+              - req-project-objects-provenance
+            path:
+              - edges
+              - acceptance
+        kind: modified
+        node: usecase-agent-mines-backlog-into-graph
+      - after:
+          edges:
+            motivated_by:
+              - usecase-agent-mines-backlog-into-graph
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-project-object-graph
+          id: req-member-catalog-changeset-bootstrap
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          summary: Every generated or federated member catalog that supports graph proposal workflows must bootstrap the standard changeset registry type before proposal validation. A valid domain proposal must not fail merely because its own audited cs-N node has an unknown type; deterministic generation and lint must prove the lifecycle type is present without product-specific hand editing.
+          title: Generated member catalogs admit native graph proposals
+          visibility: public
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Bootstrap changeset lifecycle types in generated member catalogs
+    visibility: public
