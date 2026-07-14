@@ -36,7 +36,7 @@ func createJobWorkspaceForTest(t *testing.T, ctx context.Context, root string, j
 		"--repo", root,
 		"--id", jobWorkspaceID(job.JobID),
 		"--branch", jobFeatureBranch(job.JobID),
-		"--base", "main",
+		"--base", managedDevelopmentBase,
 		"--no-bootstrap",
 		"--json",
 	))

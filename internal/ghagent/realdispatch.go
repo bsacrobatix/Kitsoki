@@ -75,6 +75,13 @@ type realDispatchPlan struct {
 	BaseWorld map[string]any
 }
 
+// managedDevelopmentBase is the checked-in development Capsule's base branch.
+// Native gh-agent workspaces are created by the bugfix story through that
+// definition, so their implicit base must agree with it. Otherwise Capsule
+// control correctly rejects a script-created checkout as outside its declared
+// lifecycle.
+const managedDevelopmentBase = "staging/local"
+
 // realDispatchPlans is keyed by route.Story. Only stories/bugfix has a plan
 // today (see the package doc above for why).
 var realDispatchPlans = map[string]realDispatchPlan{
@@ -107,7 +114,7 @@ var realDispatchPlans = map[string]realDispatchPlan{
 		},
 		BaseWorld: map[string]any{
 			"bugfix_exit":                "open-PR",
-			"base_branch":                "main",
+			"base_branch":                managedDevelopmentBase,
 			"judge_confidence_threshold": 0.8,
 		},
 		Turns: []testrunner.FlowTurn{
@@ -658,7 +665,7 @@ func boolPtr(b bool) *bool { return &b }
 // integrate is returned as an error: a fix with no real landing must not be
 // reported as done (fail closed, no fabricated success).
 func landFeatureBranch(ctx context.Context, root string, route Route, job *jobs.GHJob, integrationBranch string) (string, error) {
-	base := "main"
+	base := managedDevelopmentBase
 	if v, ok := route.World["base_branch"].(string); ok && strings.TrimSpace(v) != "" {
 		base = strings.TrimSpace(v)
 	}
