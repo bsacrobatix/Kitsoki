@@ -30,6 +30,23 @@ fi
 out="$("$pack_dir/install.sh" "$repo" --no-siblings)"
 grep -q 'no changes' <<<"$out" || { echo "FAIL: installer was not idempotent" >&2; exit 1; }
 
+# The operating-principles managed block: created in AGENTS.md/README.md,
+# refreshed in place on upgrade, and everything outside the markers survives.
+grep -q 'BEGIN kitsoki:launch-policy' "$repo/AGENTS.md" || { echo "FAIL: AGENTS.md missing managed block" >&2; exit 1; }
+grep -q 'BEGIN kitsoki:launch-policy' "$repo/README.md" || { echo "FAIL: README.md missing managed block" >&2; exit 1; }
+printf '# My Repo\n\nlocal preamble\n\n' > "$repo/AGENTS.md"
+"$pack_dir/install.sh" "$repo" --no-siblings >/dev/null
+grep -q 'local preamble' "$repo/AGENTS.md" || { echo "FAIL: consumer AGENTS.md content lost" >&2; exit 1; }
+grep -q 'BEGIN kitsoki:launch-policy' "$repo/AGENTS.md" || { echo "FAIL: block not re-added to rewritten AGENTS.md" >&2; exit 1; }
+sed_i() { sed "$1" "$2" > "$2.tmp" && mv "$2.tmp" "$2"; }
+sed_i 's/Launch through the shims/HAND EDIT INSIDE BLOCK/' "$repo/AGENTS.md"
+"$pack_dir/install.sh" "$repo" --no-siblings >/dev/null
+grep -q 'HAND EDIT INSIDE BLOCK' "$repo/AGENTS.md" && { echo "FAIL: upgrade did not refresh block content" >&2; exit 1; }
+grep -q 'local preamble' "$repo/AGENTS.md" || { echo "FAIL: refresh clobbered content outside markers" >&2; exit 1; }
+count="$(grep -c 'BEGIN kitsoki:launch-policy' "$repo/AGENTS.md")"
+[ "$count" -eq 1 ] || { echo "FAIL: $count managed blocks after refresh" >&2; exit 1; }
+echo "PASS: operating-principles managed block upsert"
+
 # A divergent managed file must be skipped without aborting the rest of the
 # install, and the exit code must flag the partial convergence.
 repo2="$tmp/repo2"
