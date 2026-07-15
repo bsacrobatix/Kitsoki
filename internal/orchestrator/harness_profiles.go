@@ -113,7 +113,7 @@ func (o *Orchestrator) providersForDispatch() map[string]host.Provider {
 		if _, exists := out[name]; exists {
 			continue
 		}
-		prov := host.Provider{Model: p.Model, Effort: p.Effort}
+		prov := host.Provider{Backend: p.Backend, Model: p.Model, Effort: p.Effort}
 		if len(p.Env) > 0 {
 			prov.Env = make(map[string]string, len(p.Env))
 			for k, v := range p.Env {

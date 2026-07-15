@@ -41,6 +41,23 @@ harness_profiles:
     effort: medium
     efforts: [low, medium, high, xhigh, max]
 
+  # POG graph driver profiles are intentionally shared and ambient-auth only:
+  # they select the backend/model used by Kitsoki's launch planner while the
+  # agent definition supplies the graph-MCP-only toolbox.
+  pog-driver-codex:
+    backend: codex
+    model: gpt-5.5
+    models: [gpt-5.5]
+    effort: medium
+    efforts: [low, medium, high, xhigh, max]
+
+  pog-driver-claude:
+    backend: claude
+    model: opus
+    models: [opus]
+    effort: medium
+    efforts: [low, medium, high, xhigh, max]
+
   # Pinned small Codex cohort for task optimization. Keeping this distinct
   # prevents a larger model from silently standing in for the requested cell.
   codex-gpt54-mini:

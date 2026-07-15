@@ -209,8 +209,9 @@ func AgentProviderEnvFromCtx(ctx context.Context) map[string]string {
 // applyProvider resolves the provider for one agent invocation and returns the
 // context and agent to use downstream. Selection precedence (principle of least
 // surprise, mirroring system_prompt / tools): an effect's `with: { provider }`
-// arg wins over the resolved agent's Provider; neither set means the ambient
-// environment (the returned ctx/agent are unchanged).
+// arg wins over the resolved agent's Provider; with.profile is a readable alias
+// for selecting a named harness profile on one call. Neither set means the
+// ambient environment (the returned ctx/agent are unchanged).
 //
 // When a provider resolves:
 //   - its Env is installed via WithAgentProviderEnv so the claude exec layer
@@ -224,7 +225,15 @@ func AgentProviderEnvFromCtx(ctx context.Context) map[string]string {
 // where falling back to ambient is the safe behavior.
 func applyProvider(ctx context.Context, args map[string]any, agent Agent) (context.Context, Agent) {
 	explicitProvider := false
-	name, _ := args["harness"].(string)
+	explicitProfile := false
+	name, _ := args["profile"].(string)
+	if strings.TrimSpace(name) != "" {
+		explicitProfile = true
+		explicitProvider = true
+	}
+	if strings.TrimSpace(name) == "" {
+		name, _ = args["harness"].(string)
+	}
 	if strings.TrimSpace(name) != "" {
 		explicitProvider = true
 	}
@@ -275,6 +284,12 @@ func applyProvider(ctx context.Context, args map[string]any, agent Agent) (conte
 		agent.Effort = prov.Effort
 	}
 	ctx = WithAgentProviderEnv(ctx, prov.Env)
+	if explicitProfile {
+		ctx = WithActiveProfile(ctx, ActiveProfile{
+			Name:     name,
+			Provider: prov,
+		})
+	}
 	return ctx, agent
 }
 

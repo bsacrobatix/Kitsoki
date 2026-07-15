@@ -32,6 +32,8 @@ progressive determinism, the spectrum from CLI wizards to free agent
 workflows — see [`docs/architecture/concept.md`](docs/architecture/concept.md).
 For a reader-specific path through the docs, start at
 [`docs/README.md`](docs/README.md).
+For the internal Project Object Graph driver contract, see
+[`docs/pog-driver.md`](docs/pog-driver.md).
 
 Product site: [bsacrobatix.github.io/Kitsoki](https://bsacrobatix.github.io/Kitsoki/).
 

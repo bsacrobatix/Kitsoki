@@ -62,3 +62,34 @@ func TestApplyProvider_NamedProviderBeatsProfile(t *testing.T) {
 		t.Fatalf("named provider env should win: %+v", env)
 	}
 }
+
+// A host.agent.* effect can bind a named harness profile explicitly. The
+// binding should behave like the operator-selected active profile for model/env
+// and trace stamping, while still being scoped to this call.
+func TestApplyProvider_ExplicitProfileBinding(t *testing.T) {
+	ctx := WithProviders(context.Background(), map[string]Provider{
+		"pog-driver-codex": {
+			Backend: "codex",
+			Model:   "gpt-5.5",
+			Effort:  "high",
+			Env:     map[string]string{"OPENAI_BASE_URL": "https://api.openai.example/v1"},
+		},
+	})
+
+	ctx, agent := applyProvider(ctx, map[string]any{"profile": "pog-driver-codex"}, Agent{Model: "opus"})
+	if agent.Model != "gpt-5.5" {
+		t.Fatalf("profile model should win over agent default: got %q", agent.Model)
+	}
+	if agent.Effort != "high" {
+		t.Fatalf("profile effort should win over agent default: got %q", agent.Effort)
+	}
+	if AgentBackendFromContext(ctx).Name() != "codex" {
+		t.Fatalf("profile backend not installed: got %q", AgentBackendFromContext(ctx).Name())
+	}
+	if env := AgentProviderEnvFromCtx(ctx); env["OPENAI_BASE_URL"] != "https://api.openai.example/v1" {
+		t.Fatalf("profile env not installed: %+v", env)
+	}
+	if ActiveProfileNameFromCtx(ctx) != "pog-driver-codex" {
+		t.Fatalf("profile binding should stamp active profile, got %q", ActiveProfileNameFromCtx(ctx))
+	}
+}

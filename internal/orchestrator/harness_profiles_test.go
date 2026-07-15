@@ -197,6 +197,9 @@ func TestProvidersForDispatchIncludesHarnessProfiles(t *testing.T) {
 	if providers["synthetic-claude"].Env["ANTHROPIC_BASE_URL"] != "https://api.synthetic.new/anthropic" {
 		t.Fatalf("synthetic-claude harness profile env not merged: %+v", providers["synthetic-claude"])
 	}
+	if got := providers["synthetic-claude"].Backend; got != "claude" {
+		t.Fatalf("synthetic-claude backend not merged: %q", got)
+	}
 	if got := providers["synthetic-codex"].Env["OPENAI_BASE_URL"]; got != "story-wins" {
 		t.Fatalf("story provider should win profile name collision, got %q", got)
 	}
