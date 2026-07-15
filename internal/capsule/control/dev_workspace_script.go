@@ -2,6 +2,8 @@ package control
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -26,10 +28,6 @@ type execScriptRunner struct{}
 func (execScriptRunner) Run(ctx context.Context, dir, program string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, program, args...)
 	cmd.Dir = dir
-	// The native manager has already reserved and owns this instance. Keep the
-	// script's direct-invocation admission bridge from racing that provisional
-	// record before Create can publish its final generation.
-	cmd.Env = append(os.Environ(), "KITSOKI_CAPSULE_NATIVE_CREATE=1")
 	return cmd.CombinedOutput()
 }
 
@@ -39,6 +37,97 @@ func (execScriptRunner) Run(ctx context.Context, dir, program string, args ...st
 type DevWorkspaceScriptProvider struct {
 	ProjectRoot string
 	Runner      ScriptRunner
+}
+
+// CreateDevWorkspaceScript creates the durable instance record before asking
+// the compatibility script to create its checkout. The script is therefore a
+// materializer, never an identity-adoption path.
+func (m *Manager) CreateDevWorkspaceScript(ctx context.Context, req CreateRequest) (Handle, error) {
+	if strings.TrimSpace(req.DefinitionID) == "" {
+		req.DefinitionID = "development"
+	}
+	def, err := m.Definition(ctx, req.DefinitionID)
+	if err != nil {
+		return Handle{}, err
+	}
+	if def.Source.Kind != SourceDevWorkspaceScript {
+		return Handle{}, fmt.Errorf("capsule control: definition %q is not a dev-workspace-script definition", def.ID)
+	}
+	if _, err := m.Instances.Get(ctx, req.ID); err == nil {
+		return m.Create(ctx, req)
+	} else if !errors.Is(err, ErrNotFound) {
+		return Handle{}, err
+	}
+	root, err := m.workspaceRoot(def)
+	if err != nil {
+		return Handle{}, err
+	}
+	path, err := ResolveWorkspacePath(root, req.ID, false)
+	if err != nil {
+		return Handle{}, err
+	}
+	if _, err := os.Stat(path); err == nil {
+		return Handle{}, describeLegacyDevWorkspace(ctx, path, req.ID)
+	} else if !os.IsNotExist(err) {
+		return Handle{}, fmt.Errorf("capsule control: inspect workspace %q: %w", req.ID, err)
+	}
+	return m.Create(ctx, req)
+}
+
+// describeLegacyDevWorkspace refuses to backfill an instance for an existing
+// checkout. A manifest is immutable provenance, so a branch rewrite cannot be
+// repaired into a native CI identity after the fact.
+func describeLegacyDevWorkspace(ctx context.Context, path, id string) error {
+	raw, err := os.ReadFile(filepath.Join(path, ".kitsoki-dev-workspace.json"))
+	if err != nil {
+		return fmt.Errorf("capsule control: existing workspace %q is unregistered legacy state; create a fresh registered Capsule with a new id and replay its work: %w", id, err)
+	}
+	var manifest struct {
+		Branch string `json:"branch"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("capsule control: existing workspace %q has unreadable legacy manifest: %w", id, err)
+	}
+	branch, err := runGit(ctx, path, "branch", "--show-current")
+	if err != nil {
+		return fmt.Errorf("capsule control: inspect legacy workspace %q branch: %w", id, err)
+	}
+	branch = strings.TrimSpace(branch)
+	if branch == manifest.Branch && branch != "" {
+		return fmt.Errorf("capsule control: legacy workspace %q is unregistered but its Git branch %q matches its immutable manifest; resume it through the legacy script lifecycle without Capsule CI identity", id, branch)
+	}
+	return fmt.Errorf("capsule control: legacy workspace %q remains unregistered: immutable manifest branch %q differs from Git branch %q; create a fresh registered Capsule with a new id for the current branch and move or replay the work there", id, manifest.Branch, branch)
+}
+
+// VerifyDevWorkspaceScriptInstance is the CI/merge-queue admission check for
+// a registered compatibility workspace. It rejects any checkout whose
+// immutable script manifest no longer names the live Git branch. Older native
+// records may exist, but they cannot turn a rewritten legacy clone into valid
+// provenance.
+func (m *Manager) VerifyDevWorkspaceScriptInstance(ctx context.Context, in Instance) error {
+	if in.Provider != string(SourceDevWorkspaceScript) {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(in.Path, ".kitsoki-dev-workspace.json"))
+	if err != nil {
+		return fmt.Errorf("capsule control: registered workspace %q is missing its immutable dev-workspace manifest: %w", in.ID, err)
+	}
+	var manifest struct {
+		ID     string `json:"id"`
+		Branch string `json:"branch"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("capsule control: registered workspace %q has unreadable dev-workspace manifest: %w", in.ID, err)
+	}
+	branch, err := runGit(ctx, in.Path, "branch", "--show-current")
+	if err != nil {
+		return fmt.Errorf("capsule control: inspect registered workspace %q branch: %w", in.ID, err)
+	}
+	branch = strings.TrimSpace(branch)
+	if manifest.ID != in.ID || manifest.Branch == "" || branch == "" || manifest.Branch != branch || in.Branch != branch {
+		return fmt.Errorf("capsule control: workspace %q is unregistered legacy state for CI: immutable manifest branch %q, Git branch %q, recorded branch %q; create a fresh registered Capsule and replay the work", in.ID, manifest.Branch, branch, in.Branch)
+	}
+	return nil
 }
 
 func (DevWorkspaceScriptProvider) Name() string { return string(SourceDevWorkspaceScript) }

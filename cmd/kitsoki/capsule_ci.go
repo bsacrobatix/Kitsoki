@@ -41,6 +41,9 @@ func ciInputs(ctx context.Context, project, workspace, pipeline string, trigger 
 	if err != nil {
 		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
 	}
+	if err := m.VerifyDevWorkspaceScriptInstance(ctx, in); err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
 	workspacePath, err := m.WorkspacePath(ctx, control.Handle{ID: in.ID, Generation: in.Generation})
 	if err != nil {
 		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err

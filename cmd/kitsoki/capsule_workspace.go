@@ -18,7 +18,7 @@ import (
 // letting any onboarded project use the native manager directly.
 func capsuleWorkspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "workspace", Short: "Create and manage native Capsule workspaces"}
-	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceAdoptScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd())
+	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceCreateScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd())
 	return cmd
 }
 
@@ -80,6 +80,13 @@ func capsuleWorkspaceCreateCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		def, err := m.Definition(cmd.Context(), definition)
+		if err != nil {
+			return err
+		}
+		if def.Source.Kind == control.SourceDevWorkspaceScript {
+			return fmt.Errorf("capsule workspace create: definition %q uses scripts/dev-workspace.sh; use capsule workspace create-script", definition)
+		}
 		h, err := m.Create(cmd.Context(), control.CreateRequest{ID: id, DefinitionID: definition, Owner: owner})
 		if err != nil {
 			return err
@@ -100,15 +107,19 @@ func capsuleWorkspaceCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func capsuleWorkspaceAdoptScriptCmd() *cobra.Command {
-	var project, id string
+// capsuleWorkspaceCreateScriptCmd is the only supported bridge from the
+// protected clone lifecycle into Capsule CI. Manager creation persists the
+// immutable instance before it asks scripts/dev-workspace.sh to materialize a
+// checkout, so callers never receive a usable path without a CI identity.
+func capsuleWorkspaceCreateScriptCmd() *cobra.Command {
+	var project, id, owner string
 	var jsonOut bool
-	cmd := &cobra.Command{Use: "adopt-script", Short: "Record a verified scripts/dev-workspace.sh clone for native Capsule CI", RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "create-script", Short: "Create a registered scripts/dev-workspace.sh Capsule", RunE: func(cmd *cobra.Command, args []string) error {
 		manager, err := capsuleWorkspaceManager(project)
 		if err != nil {
 			return err
 		}
-		h, err := manager.AdoptDevWorkspace(cmd.Context(), id)
+		h, err := manager.CreateDevWorkspaceScript(cmd.Context(), control.CreateRequest{ID: id, DefinitionID: "development", Owner: owner})
 		if err != nil {
 			return err
 		}
@@ -119,7 +130,8 @@ func capsuleWorkspaceAdoptScriptCmd() *cobra.Command {
 		return capsuleWorkspaceWrite(cmd, view, jsonOut)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
-	cmd.Flags().StringVar(&id, "id", "", "workspace id created by scripts/dev-workspace.sh")
+	cmd.Flags().StringVar(&id, "id", "", "workspace id")
+	cmd.Flags().StringVar(&owner, "owner", "cli", "lease owner")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print JSON")
 	_ = cmd.MarkFlagRequired("id")
 	return cmd

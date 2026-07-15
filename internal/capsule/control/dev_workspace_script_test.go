@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,17 +75,6 @@ func TestDevWorkspaceScriptProviderMapsProtectedLifecycle(t *testing.T) {
 	}
 }
 
-func TestExecScriptRunnerMarksNativeCreate(t *testing.T) {
-	root := t.TempDir()
-	output, err := (execScriptRunner{}).Run(context.Background(), root, "sh", "-c", "printf %s \"$KITSOKI_CAPSULE_NATIVE_CREATE\"")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(output); got != "1" {
-		t.Fatalf("native create marker = %q", got)
-	}
-}
-
 func TestDevWorkspaceScriptProviderRefusesMissingConfiguredBase(t *testing.T) {
 	project := t.TempDir()
 	runControlGit(t, project, "init", "-b", "main")
@@ -102,6 +92,72 @@ func TestDevWorkspaceScriptProviderRefusesMissingConfiguredBase(t *testing.T) {
 	_, err := provider.Create(context.Background(), Definition{ID: "development", Source: Source{Kind: SourceDevWorkspaceScript, Development: DevelopmentSource{Base: "staging/local", Target: "staging/local"}}}, Instance{ID: "one", Path: filepath.Join(project, ".capsules", "one")})
 	if err == nil || !strings.Contains(err.Error(), "configured base") {
 		t.Fatalf("missing-base error %v", err)
+	}
+}
+
+func TestCreateDevWorkspaceScriptRefusesLegacyBranchMismatchWithoutRegisteringIt(t *testing.T) {
+	project := t.TempDir()
+	root := filepath.Join(project, ".capsules", "workspaces")
+	path := filepath.Join(root, "legacy")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runControlGit(t, path, "init", "-b", "agent/current")
+	if err := os.WriteFile(filepath.Join(path, ".kitsoki-dev-workspace.json"), []byte(`{"branch":"agent/original"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		Definitions: defs{"development": {ID: "development", Source: Source{Kind: SourceDevWorkspaceScript}}},
+		Instances:   NewMemoryInstanceStore(),
+		Providers:   map[string]WorkspaceProvider{string(SourceDevWorkspaceScript): DevWorkspaceScriptProvider{}},
+		Grant:       ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"development"}, Executors: []string{string(SourceDevWorkspaceScript)}},
+	}
+	_, err := manager.CreateDevWorkspaceScript(context.Background(), CreateRequest{ID: "legacy", DefinitionID: "development", Owner: "test"})
+	if err == nil || !strings.Contains(err.Error(), "remains unregistered") || !strings.Contains(err.Error(), "agent/original") || !strings.Contains(err.Error(), "agent/current") {
+		t.Fatalf("legacy mismatch error = %v", err)
+	}
+	if _, err := manager.Instances.Get(context.Background(), "legacy"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("legacy workspace was registered: %v", err)
+	}
+}
+
+func TestCreateDevWorkspaceScriptNamesMatchingLegacyAsResumeOnly(t *testing.T) {
+	project := t.TempDir()
+	root := filepath.Join(project, ".capsules", "workspaces")
+	path := filepath.Join(root, "legacy")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runControlGit(t, path, "init", "-b", "agent/legacy")
+	if err := os.WriteFile(filepath.Join(path, ".kitsoki-dev-workspace.json"), []byte(`{"branch":"agent/legacy"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		Definitions: defs{"development": {ID: "development", Source: Source{Kind: SourceDevWorkspaceScript}}},
+		Instances:   NewMemoryInstanceStore(),
+		Providers:   map[string]WorkspaceProvider{string(SourceDevWorkspaceScript): DevWorkspaceScriptProvider{}},
+		Grant:       ScopeGrant{ProjectRoot: project, WorkspaceRoots: []string{root}, Definitions: []string{"development"}, Executors: []string{string(SourceDevWorkspaceScript)}},
+	}
+	_, err := manager.CreateDevWorkspaceScript(context.Background(), CreateRequest{ID: "legacy", DefinitionID: "development", Owner: "test"})
+	if err == nil || !strings.Contains(err.Error(), "resume it through the legacy script lifecycle") {
+		t.Fatalf("matching legacy error = %v", err)
+	}
+}
+
+func TestVerifyDevWorkspaceScriptInstanceRejectsBranchDrift(t *testing.T) {
+	project := t.TempDir()
+	path := filepath.Join(project, ".capsules", "workspaces", "legacy")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runControlGit(t, path, "init", "-b", "agent/current")
+	if err := os.WriteFile(filepath.Join(path, ".kitsoki-dev-workspace.json"), []byte(`{"id":"legacy","branch":"agent/original"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{}
+	err := manager.VerifyDevWorkspaceScriptInstance(context.Background(), Instance{ID: "legacy", Provider: string(SourceDevWorkspaceScript), Path: path, Branch: "agent/current"})
+	if err == nil || !strings.Contains(err.Error(), "unregistered legacy state for CI") || !strings.Contains(err.Error(), "agent/original") {
+		t.Fatalf("branch drift error = %v", err)
 	}
 }
 

@@ -51,7 +51,7 @@ kitsoki_bin="$tmp/kitsoki"
 cat > "$kitsoki_bin" <<SCRIPT
 #!/usr/bin/env bash
 set -euo pipefail
-if [ "\$1" = "capsule" ] && [ "\$2" = "workspace" ] && [ "\$3" = "create" ]; then
+if [ "\$1" = "capsule" ] && [ "\$2" = "workspace" ] && [ "\$3" = "create-script" ]; then
   project=""
   workspace_id=""
   while [ "\$#" -gt 0 ]; do

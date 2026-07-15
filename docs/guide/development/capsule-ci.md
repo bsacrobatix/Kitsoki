@@ -51,7 +51,7 @@ scope. A failed or unavailable review is not promotion evidence, and ordinary
 branch landing must never spend implicitly.
 
 ```sh
-kitsoki capsule workspace create --id change-1 --definition development --owner developer
+kitsoki capsule workspace create-script --id change-1 --owner developer
 kitsoki capsule env resolve ci
 kitsoki capsule ci plan change --workspace change-1
 kitsoki capsule ci doctor change --workspace change-1 --json=false

@@ -72,9 +72,8 @@ if [ "${1:-}" = "superagent" ]; then
   shift
   workspace_id="${backend}-$(date +%Y%m%d-%H%M%S)-$$"
   workspace_owner="superagent/${backend}/$$"
-  "$kitsoki_bin" capsule workspace create \
+  "$kitsoki_bin" capsule workspace create-script \
     --project "$install_root" \
-    --definition development \
     --id "$workspace_id" \
     --owner "$workspace_owner"
   working_dir="$install_root/.capsules/workspaces/$workspace_id"

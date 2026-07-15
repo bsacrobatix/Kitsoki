@@ -68,27 +68,24 @@ metadata is local provenance rather than project source.
 ### Capsule CI admission
 
 Kitsoki's `development` Capsule definition uses the script as its protected
-clone provider. On a Kitsoki checkout, `create` (including an idempotent
-reacquire) and `commit` automatically verify the script-written manifest and
-record or refresh the matching native Capsule instance. That makes the same
-workspace addressable by both lifecycle surfaces:
+clone provider. Create a development Capsule through the native command; it
+first records the immutable Capsule identity, then asks the script provider to
+materialize the clone, and only returns the workspace after both steps succeed:
 
 ```sh
-scripts/dev-workspace.sh create --id change-1 --branch agent/change-1 --bootstrap
+go run ./cmd/kitsoki capsule workspace create-script --id change-1 --owner developer --json
 go run ./cmd/kitsoki capsule ci doctor change --workspace change-1
 ```
 
-The native record is derived only after the definition, sentinels, manifest
-paths, branch, and current Git HEAD agree. It is not a path override. A clone
-created before this bridge can be admitted explicitly without recreating or
-rewriting it:
+`scripts/dev-workspace.sh` remains the protected clone materializer and legacy
+resume surface, but it never registers or refreshes Capsule CI identity. A
+legacy workspace whose manifest branch matches its Git branch may be resumed
+through that legacy lifecycle. A mismatch remains permanently unregistered:
+create a fresh registered Capsule for the current branch and move or replay the
+work. Never rewrite a manifest to repair identity in place.
 
-```sh
-go run ./cmd/kitsoki capsule workspace adopt-script --id change-1 --json
-```
-
-Use the command from the owning protected checkout. It fails closed for a
-missing, foreign, malformed, or definition-mismatched workspace.
+`capsule ci` accepts only registered workspace ids, so an unregistered legacy
+clone cannot enter the CI or merge queue with false provenance.
 
 ## Commands
 
