@@ -2939,3 +2939,23 @@ nodes:
     status: proposed
     title: Expose model policy and terminal study evidence for Agent Runner
     visibility: internal
+  - authored_by: agent:pog-protected-catalog
+    created_at: "2026-07-15T13:48:49Z"
+    id: cs-15
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          fields:
+            summary: When mcp-graph runs with --write-via auto against a primary checkout protected by Git hooks and launch policy rather than filesystem mode bits, it must route writes through the managed Capsule workflow instead of directly modifying pog/catalog.yaml. The route must preserve proposal-only behavior, return the managed workspace and integration evidence on failure, and never require callers to hard-code --write-via capsule.
+          id: req-mcp-graph-protected-main-routing
+          schema: kitsoki/requirement/v0
+          status: proposed
+          title: mcp-graph auto routing recognizes Git-protected primary checkouts
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: MCP graph auto-routing must recognize Git-protected primary checkouts
+    visibility: internal
