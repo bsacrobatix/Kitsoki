@@ -251,6 +251,34 @@ func TestWriteMaterialization_ReplacesExistingBlock(t *testing.T) {
 	}
 }
 
+func TestWriteMaterialization_PreservesAttemptLineage(t *testing.T) {
+	path := writeFixture(t)
+	first := MaterializationRecord{JobID: "01FIRST", SessionID: "session-first", Status: "failed", Story: "story"}
+	second := MaterializationRecord{JobID: "01SECOND", SessionID: "session-second", Status: "complete", Story: "story"}
+	requireWriteMaterialization(t, path, "with-materialization", first)
+	requireWriteMaterialization(t, path, "with-materialization", second)
+
+	m := mustLoad(t, path).Nodes[graph.NodeID("with-materialization")].Fields["materialization"].(map[string]any)
+	if m["job_id"] != "01SECOND" || m["session_id"] != "session-second" {
+		t.Fatalf("latest summary = %v, want second attempt", m)
+	}
+	attempts, _ := m["attempts"].([]any)
+	if len(attempts) != 3 { // old fixture record plus both new attempts
+		t.Fatalf("attempts = %v, want preserved old plus two new attempts", attempts)
+	}
+	firstAttempt := attempts[1].(map[string]any)
+	if firstAttempt["job_id"] != "01FIRST" || firstAttempt["session_id"] != "session-first" || firstAttempt["status"] != "failed" {
+		t.Errorf("first attempt = %v", firstAttempt)
+	}
+}
+
+func requireWriteMaterialization(t *testing.T, path, nodeID string, rec MaterializationRecord) {
+	t.Helper()
+	if err := WriteMaterialization(path, nodeID, rec); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestNodeBlockRange_UnknownNode(t *testing.T) {
 	path := writeFixture(t)
 	if err := AppendEvidence(path, "no-such-node", EvidenceEntry{Kind: "doc", Title: "x", Path: "x.md"}, "job1", "stories/materialize-work-item"); err == nil {

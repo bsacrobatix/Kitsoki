@@ -120,7 +120,7 @@ func (o *Orchestrator) resolveAutoGate(ctx context.Context, sid app.SessionID, r
 		return
 	}
 
-	verdict, verr := o.invokeDecider(ctx, sid, res, candidates, tl)
+	verdict, callID, verr := o.invokeDecider(ctx, sid, res, candidates, tl)
 	names := candidateNames(candidates)
 	threshold := o.decider.threshold()
 	valid := verr == nil &&
@@ -137,7 +137,7 @@ func (o *Orchestrator) resolveAutoGate(ctx context.Context, sid app.SessionID, r
 		reason = fmt.Sprintf("chosen intent %q is not a gate candidate %v", verdict.Intent, names)
 	}
 
-	o.recordGate(res, state, names, "llm", verdict.Intent, verdict.Confidence, !valid, reason, verdict.Alternatives, threshold)
+	o.recordGate(res, state, names, "llm", verdict.Intent, verdict.Confidence, !valid, reason, verdict.Alternatives, threshold, string(sid), callID)
 
 	if tl != nil {
 		tl.Debug(ctx, trace.EvIntentEmitted,
@@ -170,7 +170,7 @@ func (o *Orchestrator) resolveAutoGate(ctx context.Context, sid app.SessionID, r
 
 // invokeDecider builds and dispatches a host.agent.decide call for the gate,
 // then parses the agent's submitted object into a judges.Verdict.
-func (o *Orchestrator) invokeDecider(ctx context.Context, sid app.SessionID, res *machine.TurnResult, candidates []machine.AllowedIntent, tl *trace.TurnLogger) (judges.Verdict, error) {
+func (o *Orchestrator) invokeDecider(ctx context.Context, sid app.SessionID, res *machine.TurnResult, candidates []machine.AllowedIntent, tl *trace.TurnLogger) (judges.Verdict, string, error) {
 	const verdictKey = "__engine_decider_verdict"
 
 	args := map[string]any{
@@ -198,25 +198,32 @@ func (o *Orchestrator) invokeDecider(ctx context.Context, sid app.SessionID, res
 	res.Events = append(res.Events, events...)
 	res.World = w
 	if err != nil {
-		return judges.Verdict{}, err
+		return judges.Verdict{}, "", err
+	}
+	callID := ""
+	for _, event := range events {
+		if event.Kind == store.AgentCalled && event.CallID != "" {
+			callID = event.CallID
+			break
+		}
 	}
 
 	raw, ok := res.World.Vars[verdictKey]
 	// Clean the scratch key out of world so it never persists to the journal.
 	delete(res.World.Vars, verdictKey)
 	if !ok || raw == nil {
-		return judges.Verdict{}, fmt.Errorf("decider: agent returned no submitted verdict")
+		return judges.Verdict{}, callID, fmt.Errorf("decider: agent returned no submitted verdict")
 	}
 
 	b, mErr := json.Marshal(raw)
 	if mErr != nil {
-		return judges.Verdict{}, fmt.Errorf("decider: marshal submitted: %w", mErr)
+		return judges.Verdict{}, callID, fmt.Errorf("decider: marshal submitted: %w", mErr)
 	}
 	var v judges.Verdict
 	if uErr := json.Unmarshal(b, &v); uErr != nil {
-		return judges.Verdict{}, fmt.Errorf("decider: parse verdict: %w", uErr)
+		return judges.Verdict{}, callID, fmt.Errorf("decider: parse verdict: %w", uErr)
 	}
-	return v, nil
+	return v, callID, nil
 }
 
 // applyDeciderIntent drives the judge's chosen intent as a transition on the
@@ -260,7 +267,7 @@ func (o *Orchestrator) applyDeciderIntent(ctx context.Context, sid app.SessionID
 // threshold is recorded so consumers can reproduce the auto-fire decision.
 // alternatives, when non-empty, carries the ranked runner-up scores from
 // the LLM judge so reviewers can see the full decision landscape.
-func (o *Orchestrator) recordGate(res *machine.TurnResult, state app.StatePath, candidates []string, decider, chosen string, confidence float64, bailed bool, reason string, alternatives []judges.IntentScore, threshold float64) {
+func (o *Orchestrator) recordGate(res *machine.TurnResult, state app.StatePath, candidates []string, decider, chosen string, confidence float64, bailed bool, reason string, alternatives []judges.IntentScore, threshold float64, identities ...string) {
 	payload := map[string]any{
 		"state":             string(state),
 		"available_intents": candidates,
@@ -275,6 +282,12 @@ func (o *Orchestrator) recordGate(res *machine.TurnResult, state app.StatePath, 
 	}
 	if len(alternatives) > 0 {
 		payload["alternatives"] = alternatives
+	}
+	if len(identities) > 0 && identities[0] != "" {
+		payload["session_id"] = identities[0]
+	}
+	if len(identities) > 1 && identities[1] != "" {
+		payload["call_id"] = identities[1]
 	}
 	res.Events = append(res.Events, newOrchestratorEvent(store.GateDecided, payload, 0))
 }

@@ -706,7 +706,7 @@ func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver Turn
 		SessionID: sessionID,
 		Kind:      "graph.materialize",
 		Payload:   payload,
-		Handler:   driveHandler(p, sched, driver),
+		Handler:   driveHandler(p, sched, driver, webSessionID),
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("materialize: submit job: %w", err)
@@ -761,7 +761,7 @@ func (d rigDriver) World(context.Context) (map[string]any, error) {
 // artifact's content to disk under the repo root and appends an evidence
 // entry to the catalog (writeback.go). On the job's terminal outcome
 // (success or failure) it upserts the node's `materialization:` block.
-func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Handler {
+func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionID string) host.Handler {
 	stages := p.Stages
 	wb := driveWriteback{
 		CatalogPath: p.Req.CatalogPath,
@@ -823,6 +823,7 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 		finalizeWriteback := func(status string) {
 			_ = WriteMaterialization(wb.CatalogPath, string(wb.NodeID), MaterializationRecord{
 				JobID:         jobID,
+				SessionID:     sessionID,
 				Status:        status,
 				Story:         wb.Binding.Story,
 				Stages:        stageSnapshot(),
@@ -896,6 +897,11 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 				finalizeWriteback("failed")
 				return host.Result{Error: fmt.Sprintf("materialize: room %q: %v", stages[i], err)}, nil
 			}
+			if failed, reason := failedNestedSession(worldNow()); failed {
+				heartbeat(i, "failed")
+				finalizeWriteback("failed")
+				return host.Result{Error: fmt.Sprintf("materialize: nested session failed: %s", reason)}, nil
+			}
 			heartbeat(i, "complete")
 			heartbeat(i+1, "in-progress")
 			writeArtifactIfPresent(worldNow())
@@ -906,6 +912,11 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 			heartbeat(p.NumRooms-1, "failed")
 			finalizeWriteback("failed")
 			return host.Result{Error: err.Error()}, nil
+		}
+		if failed, reason := failedNestedSession(finalWorld); failed {
+			heartbeat(p.NumRooms-1, "failed")
+			finalizeWriteback("failed")
+			return host.Result{Error: fmt.Sprintf("materialize: nested session failed: %s", reason)}, nil
 		}
 		heartbeat(p.NumRooms-1, "complete")
 		writeArtifactIfPresent(finalWorld)
@@ -941,6 +952,26 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver) host.Han
 			"world":         finalWorld,
 			"checks":        checkResultsWire(checkResults),
 		}}, nil
+	}
+}
+
+// failedNestedSession rejects a driver that reaches its final room after the
+// nested story has explicitly reported failure. A successful SubmitDirect only
+// means the transition was accepted; it does not prove the child succeeded.
+func failedNestedSession(w map[string]any) (bool, string) {
+	if w == nil {
+		return false, ""
+	}
+	status, _ := w["status"].(string)
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "failed", "failure", "error":
+		reason, _ := w["last_error"].(string)
+		if reason == "" {
+			reason = status
+		}
+		return true, reason
+	default:
+		return false, ""
 	}
 }
 

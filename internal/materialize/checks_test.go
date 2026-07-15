@@ -102,6 +102,55 @@ func TestRunCheck_FsRootPinnedToRepoRoot(t *testing.T) {
 	}
 }
 
+type failedTurnDriver struct{ world map[string]any }
+
+func (d *failedTurnDriver) Next(context.Context) error {
+	d.world["status"] = "failed"
+	d.world["last_error"] = "child redirected to failed"
+	return nil
+}
+
+func (d *failedTurnDriver) World(context.Context) (map[string]any, error) { return d.world, nil }
+
+func TestSubmit_NestedFailedSessionFailsOuterJob(t *testing.T) {
+	root := copyTestdataFixture(t)
+	prep, err := Prepare(Request{
+		CatalogPath: filepath.Join(root, "catalog.yaml"),
+		RepoRoot:    root,
+		NodeID:      "wi-ready",
+		Params:      map[string]any{"audience": "internal"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched := jobs.NewInMemoryScheduler()
+	driver := &failedTurnDriver{world: map[string]any{}}
+	jobID, _, err := prep.Submit(context.Background(), sched, driver, "nested-session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := sched.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	job, ok := sched.Get(jobID)
+	if !ok {
+		t.Fatal("missing job")
+	}
+	if job.Status != jobs.JobFailed || !strings.Contains(job.Error, "nested session failed") {
+		t.Fatalf("job = %+v, want nested failure", job)
+	}
+	cat, err := graph.LoadCatalog(filepath.Join(root, "catalog.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mat := cat.Nodes["wi-ready"].Fields["materialization"].(map[string]any)
+	if mat["status"] != "failed" || mat["session_id"] != "nested-session" {
+		t.Fatalf("materialization = %v, want failed nested-session record", mat)
+	}
+}
+
 // driveCheckedNode runs Start against the disposable fixture copy for nodeID
 // and returns the fixture root, terminal job, and collected stage events.
 func driveCheckedNode(t *testing.T, nodeID string) (string, *jobs.Job, []StageEvent) {

@@ -96,6 +96,8 @@ func TestEngineDecider_FiresChosenIntent(t *testing.T) {
 			require.Contains(t, string(ev.Payload), `"decider":"llm"`)
 			require.Contains(t, string(ev.Payload), `"chosen_intent":"path_b"`)
 			require.Contains(t, string(ev.Payload), `"bailed_to_human":false`)
+			require.Contains(t, string(ev.Payload), `"session_id"`)
+			require.Contains(t, string(ev.Payload), `"call_id"`)
 		}
 	}
 	require.True(t, gate["seen"], "a GateDecided event must record the llm decision")

@@ -49,7 +49,9 @@ type EvidenceEntry struct {
 // on job completion — the plan's instance-node shape (job_id, status, story,
 // stages, artifacts).
 type MaterializationRecord struct {
-	JobID     string
+	JobID string
+	// SessionID identifies the nested story session that produced this attempt.
+	SessionID string
 	Status    string
 	Story     string
 	Stages    []Stage
@@ -141,6 +143,9 @@ func renderMaterializationValue(rec MaterializationRecord) map[string]any {
 	if rec.ContextDigest != "" {
 		out["context_digest"] = rec.ContextDigest
 	}
+	if rec.SessionID != "" {
+		out["session_id"] = rec.SessionID
+	}
 	if len(rec.Checks) > 0 {
 		checks := make([]any, len(rec.Checks))
 		for i, c := range rec.Checks {
@@ -176,8 +181,58 @@ func renderMaterializationValue(rec MaterializationRecord) map[string]any {
 // replaces the previous block, and each call is its own system-authored
 // changeset (§3.3/§3.4).
 func WriteMaterialization(catalogPath, nodeID string, rec MaterializationRecord) error {
+	cat, err := graph.LoadCatalog(catalogPath)
+	if err != nil {
+		return fmt.Errorf("materialize: writeback: load catalog: %w", err)
+	}
+	node := cat.Nodes[graph.NodeID(nodeID)]
+	if node == nil {
+		return fmt.Errorf("materialize: writeback: node %q not found", nodeID)
+	}
+	after := renderMaterializationValue(rec)
+	// Keep the current convenient summary while retaining every terminal run.
+	// Old records that predate attempts[] are promoted once on the next write.
+	attempts := materializationAttempts(node.Fields["materialization"])
+	if !containsAttempt(attempts, rec.JobID) {
+		attempts = append(attempts, attemptValue(after))
+	}
+	after["attempts"] = attempts
 	title := fmt.Sprintf("materialize %s: write back status %q", nodeID, rec.Status)
-	return proposeAndApply(catalogPath, nodeID, title, "materialization", renderMaterializationValue(rec), rec.JobID, rec.Story)
+	return proposeAndApply(catalogPath, nodeID, title, "materialization", after, rec.JobID, rec.Story)
+}
+
+func materializationAttempts(raw any) []any {
+	current, _ := raw.(map[string]any)
+	if current == nil {
+		return nil
+	}
+	if attempts, ok := current["attempts"].([]any); ok {
+		return append([]any(nil), attempts...)
+	}
+	if current["job_id"] == nil {
+		return nil
+	}
+	return []any{attemptValue(current)}
+}
+
+func attemptValue(record map[string]any) map[string]any {
+	attempt := map[string]any{}
+	for _, key := range []string{"job_id", "session_id", "status", "story", "stages", "artifacts", "checks", "context_digest"} {
+		if value, ok := record[key]; ok {
+			attempt[key] = value
+		}
+	}
+	return attempt
+}
+
+func containsAttempt(attempts []any, jobID string) bool {
+	for _, raw := range attempts {
+		attempt, _ := raw.(map[string]any)
+		if attempt["job_id"] == jobID {
+			return true
+		}
+	}
+	return false
 }
 
 // AppendEvidence appends one evidence entry to nodeID's `evidence:` list in
