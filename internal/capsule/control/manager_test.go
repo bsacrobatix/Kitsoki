@@ -28,6 +28,9 @@ type provider struct {
 func (p *provider) Name() string { return p.name }
 func (p *provider) Create(_ context.Context, _ Definition, in Instance) (MaterializedWorkspace, error) {
 	p.calls++
+	if err := os.MkdirAll(in.Path, 0o755); err != nil {
+		return MaterializedWorkspace{}, err
+	}
 	return MaterializedWorkspace{Path: in.Path, Head: "abc"}, nil
 }
 func (p *provider) Close(context.Context, Instance) error { return nil }
@@ -56,6 +59,37 @@ func TestManagerLeaseIdempotencyAndStaleHandle(t *testing.T) {
 		t.Fatal("stale handle succeeded")
 	} else if got := fmt.Sprint(err); got == "" {
 		t.Fatal("missing stale error")
+	}
+}
+
+func TestManagerCreateRematerializesMissingPath(t *testing.T) {
+	root := t.TempDir()
+	p := &provider{name: "synthetic"}
+	store := NewMemoryInstanceStore()
+	m := &Manager{Definitions: defs{"clean": {ID: "clean", Schema: DefinitionSchema, Source: Source{Kind: SourceSynthetic, SyntheticSpec: "x"}, Digest: "sha256:x"}}, Instances: store, Providers: map[string]WorkspaceProvider{"synthetic": p}, Grant: ScopeGrant{ProjectRoot: root, WorkspaceRoots: []string{filepath.Join(root, ".capsules")}, Definitions: []string{"clean"}, Executors: []string{"synthetic"}}}
+	ctx := context.Background()
+
+	first, err := m.Create(ctx, CreateRequest{ID: "one", DefinitionID: "clean", Owner: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := store.Get(ctx, "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(in.Path); err != nil {
+		t.Fatal(err)
+	}
+
+	next, err := m.Create(ctx, CreateRequest{ID: "one", DefinitionID: "clean", Owner: "agent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == first || p.calls != 2 {
+		t.Fatalf("rematerialize handle=%#v first=%#v calls=%d", next, first, p.calls)
+	}
+	if _, err := os.Stat(in.Path); err != nil {
+		t.Fatalf("rematerialized path missing: %v", err)
 	}
 }
 

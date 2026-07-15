@@ -66,6 +66,14 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 		if existing.State == StateClosed {
 			return Handle{}, fmt.Errorf("%w: instance %q is closed", ErrInvalidState, req.ID)
 		}
+		if strings.TrimSpace(existing.Path) == "" {
+			return m.rematerialize(ctx, existing, def, provider)
+		}
+		if _, statErr := os.Stat(existing.Path); os.IsNotExist(statErr) {
+			return m.rematerialize(ctx, existing, def, provider)
+		} else if statErr != nil {
+			return Handle{}, fmt.Errorf("capsule control: inspect instance %q path: %w", req.ID, statErr)
+		}
 		return Handle{ID: existing.ID, Generation: existing.Generation}, nil
 	} else if !strings.Contains(err.Error(), ErrNotFound.Error()) {
 		return Handle{}, err
@@ -87,6 +95,37 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (Handle, error)
 		return Handle{}, err
 	}
 	_ = m.emit(ctx, "capsule.workspace.materializing", in)
+	materialized, err := provider.Create(ctx, def, in)
+	if err != nil {
+		_, _ = m.Instances.CompareAndSwap(ctx, in.ID, in.Generation, func(cur *Instance) error { cur.State = StateFailed; return nil })
+		_ = m.emit(ctx, "capsule.workspace.failed", in)
+		return Handle{}, err
+	}
+	in, err = m.Instances.CompareAndSwap(ctx, in.ID, in.Generation, func(cur *Instance) error {
+		cur.Path = materialized.Path
+		cur.SourceRef = materialized.SourceRef
+		cur.Head = materialized.Head
+		cur.Branch = materialized.Branch
+		cur.VerifierOverlays = append([]OverlayRef(nil), materialized.VerifierOverlays...)
+		cur.State = StateReady
+		return nil
+	})
+	if err != nil {
+		return Handle{}, err
+	}
+	_ = m.emit(ctx, "capsule.workspace.ready", in)
+	return Handle{ID: in.ID, Generation: in.Generation}, nil
+}
+
+func (m *Manager) rematerialize(ctx context.Context, existing Instance, def Definition, provider WorkspaceProvider) (Handle, error) {
+	in, err := m.Instances.CompareAndSwap(ctx, existing.ID, existing.Generation, func(cur *Instance) error {
+		cur.State = StateMaterializing
+		return nil
+	})
+	if err != nil {
+		return Handle{}, err
+	}
+	_ = m.emit(ctx, "capsule.workspace.rematerializing", in)
 	materialized, err := provider.Create(ctx, def, in)
 	if err != nil {
 		_, _ = m.Instances.CompareAndSwap(ctx, in.ID, in.Generation, func(cur *Instance) error { cur.State = StateFailed; return nil })

@@ -142,7 +142,14 @@ func gitCommit(ctx context.Context, workdir string, args map[string]any) (Result
 	stageAll, _ := args["stage_all"].(bool)
 	if stageAll {
 		if _, addStderr, addCode, addErr := cliExec(ctx, workdir, "git", "add", "-A"); addErr != nil || addCode != 0 {
-			return Result{Error: fmt.Sprintf("git.commit: stage_all: %s", strings.TrimSpace(addStderr))}, nil
+			msg := strings.TrimSpace(addStderr)
+			if msg == "" && addErr != nil {
+				msg = addErr.Error()
+			}
+			if msg == "" {
+				msg = fmt.Sprintf("git add exited with code %d (no output)", addCode)
+			}
+			return Result{Error: fmt.Sprintf("git.commit: stage_all: %s", msg)}, nil
 		}
 	}
 	// Optional files list; when empty, fall back to `git commit -a`.

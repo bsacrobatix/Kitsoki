@@ -31,6 +31,7 @@ func gitExec(t *testing.T, dir string, args ...string) string {
 
 func createJobWorkspaceForTest(t *testing.T, ctx context.Context, root string, job *jobs.GHJob) string {
 	t.Helper()
+	gitExec(t, root, "branch", "-f", managedDevelopmentBase, "main")
 	require.NoError(t, runDevWorkspace(ctx, root,
 		"create",
 		"--repo", root,

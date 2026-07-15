@@ -368,7 +368,7 @@ func seedDogfoodWorld(ticketID string) map[string]any {
 		"core__bf__bugfix_mode":            "full",
 		// Keep test gates out of the smoke harness so reproducing uses the
 		// agent artifact path directly (no deterministic shell gate failures).
-		"core__test_cmd": "",
+		"core__test_cmd":       "",
 		"core__quick_test_cmd": "",
 		// Deterministic smoke-path defaults for reproducing so the suite focuses on
 		// maker/checkpoint transitions and not the deterministic GREEN→RED repro
@@ -543,9 +543,9 @@ func TestDogfoodSmoke_TicketSearchFreeTextRoutesToWorkbench(t *testing.T) {
 	history, err := s.LoadHistory(sid)
 	require.NoError(t, err)
 	requireDogfoodHostArgAny(t, history, []string{
-		"host.gh.ticket.search",
-		"host.local_github.ticket.search",
-	}, "repo", nil)
+		"host.ticket_federation",
+		"host.ticket_federation.search",
+	}, "sources", nil)
 
 	// 2. In the strict ticket-search menu the operator does NOT pick a row —
 	//    they describe a piece of ad-hoc work in their own words (the exact
@@ -721,9 +721,9 @@ func TestDogfoodSmoke_StaleWorktreeRecoversOrFailsCleanly(t *testing.T) {
 	// future patch makes it idempotent), or core.landing (the redirect
 	// bounced through @exit:abandoned) are acceptable.
 	acceptable := map[app.StatePath]bool{
-		"core.bf.idle":        true,
-		"core.bf.reproducing": true,
-		"core.landing":        true,
+		"core.bf.idle":             true,
+		"core.bf.reproducing":      true,
+		"core.landing":             true,
 		"core.human_review_report": true,
 	}
 	require.True(t, acceptable[journey.State],
