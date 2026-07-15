@@ -2905,3 +2905,37 @@ nodes:
     status: proposed
     title: Prevent graph lifecycle writes from reformatting catalogs
     visibility: public
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-15T09:55:35Z"
+    id: cs-14
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          id: req-scenario-qa-explicit-model-policy
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          summary: Scenario QA and its persona alias must accept explicit driver/judge backend, model, profile, budget, and concurrency policy at the outer harness boundary, record the resolved policy in the run receipt, and reject unavailable choices before dispatch instead of hardcoding Sonnet while only parameterizing nested primary-story sessions.
+          title: Scenario QA honors an explicit driver and judge model policy
+          visibility: internal
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          id: req-runstatus-terminal-evidence-envelope
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          summary: 'A durable runstatus job must expose a routable job identity plus its typed terminal result: real report/completion-state URI, source digest, readiness, product-versus-infrastructure health, artifact roles, and harness/model provenance. Consumers must not have to infer study verification from job status, scrape trace events, or treat an internal session id as a route.'
+          title: Durable jobs expose a terminal evidence and readiness envelope
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Expose model policy and terminal study evidence for Agent Runner
+    visibility: internal
