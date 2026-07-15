@@ -24,10 +24,11 @@ const Schema = "capsule-merge-queue/v1"
 type Status string
 
 const (
-	Queued  Status = "queued"
-	Running Status = "running"
-	Landed  Status = "landed"
-	Ejected Status = "ejected"
+	Queued    Status = "queued"
+	Running   Status = "running"
+	RetryWait Status = "retry_wait"
+	Landed    Status = "landed"
+	Ejected   Status = "ejected"
 )
 
 type Candidate struct {
@@ -46,6 +47,7 @@ type Candidate struct {
 	Completed      time.Time `json:"completed_at,omitempty"`
 	SpeculativeSHA string    `json:"speculative_sha,omitempty"`
 	Evidence       []string  `json:"evidence,omitempty"`
+	RetryReason    string    `json:"retry_reason,omitempty"`
 	EjectionReason string    `json:"ejection_reason,omitempty"`
 }
 
@@ -138,12 +140,13 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 			return State{}, err
 		}
 		for i := range state.Candidates {
-			if state.Candidates[i].Status != Queued {
+			if state.Candidates[i].Status != Queued && state.Candidates[i].Status != RetryWait {
 				continue
 			}
 			c := &state.Candidates[i]
 			c.Status = Running
 			c.Started = now(deps)
+			c.RetryReason = ""
 			c.EjectionReason = ""
 			c.Evidence = nil
 			if err := write(path, state); err != nil {
@@ -152,36 +155,36 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 			ahead := activeAhead(state.Candidates[:i])
 			spec, err := deps.Integration.Speculate(ctx, *c, ahead)
 			if err != nil {
-				eject(c, now(deps), "speculation_failed", err.Error())
+				retry(c, now(deps), "speculation_failed", err.Error())
 				if err := write(path, state); err != nil {
 					return State{}, err
 				}
-				continue
+				break
 			}
 			c.SpeculativeSHA = spec.SHA
 			c.Evidence = append(c.Evidence, spec.Evidence...)
 			result, err := deps.Gate.Run(ctx, spec)
 			c.Evidence = append(c.Evidence, result.Evidence...)
 			if err != nil {
-				eject(c, now(deps), "gate_failed", err.Error())
+				retry(c, now(deps), "gate_failed", err.Error())
 				if err := write(path, state); err != nil {
 					return State{}, err
 				}
-				continue
+				break
 			}
 			if !result.Passed {
-				eject(c, now(deps), "gate_failed", "deterministic gate failed")
+				retry(c, now(deps), "gate_failed", "deterministic gate failed")
 				if err := write(path, state); err != nil {
 					return State{}, err
 				}
-				continue
+				break
 			}
 			if err := deps.Integration.Land(ctx, spec); err != nil {
-				eject(c, now(deps), "landing_failed", err.Error())
+				retry(c, now(deps), "landing_failed", err.Error())
 				if err := write(path, state); err != nil {
 					return State{}, err
 				}
-				continue
+				break
 			}
 			c.Status = Landed
 			c.Completed = now(deps)
@@ -191,6 +194,15 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 		}
 		return state, nil
 	})
+}
+
+func retry(c *Candidate, at time.Time, reason, evidence string) {
+	c.Status = RetryWait
+	c.Completed = at
+	c.RetryReason = reason
+	if evidence != "" {
+		c.Evidence = append(c.Evidence, evidence)
+	}
 }
 
 func eject(c *Candidate, at time.Time, reason, evidence string) {
@@ -204,7 +216,7 @@ func eject(c *Candidate, at time.Time, reason, evidence string) {
 func activeAhead(cs []Candidate) []Candidate {
 	out := make([]Candidate, 0, len(cs))
 	for _, c := range cs {
-		if c.Status == Queued || c.Status == Running {
+		if c.Status == Queued || c.Status == Running || c.Status == RetryWait {
 			out = append(out, c)
 		}
 	}

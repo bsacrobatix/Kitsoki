@@ -231,11 +231,20 @@ func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApply
 		return ApplyResult{}, err
 	}
 	resolved = strings.TrimSpace(resolved)
-	candidateIncluded, err := r.VCS.IsAncestor(ctx, instancePath, p.Candidate, resolved)
+	ancestryDir := r.ancestryDir(p.Workspace, p.Protected.Root)
+	if _, err := git(ctx, p.Workspace, "fetch", instancePath, resolved); err != nil {
+		return ApplyResult{}, err
+	}
+	if p.Protected.Root != "" {
+		if _, err := git(ctx, p.Protected.Root, "fetch", "--no-tags", instancePath, resolved); err != nil {
+			return ApplyResult{}, err
+		}
+	}
+	candidateIncluded, err := r.VCS.IsAncestor(ctx, ancestryDir, p.Candidate, resolved)
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	targetIncluded, err := r.VCS.IsAncestor(ctx, instancePath, p.Expected.Target, resolved)
+	targetIncluded, err := r.VCS.IsAncestor(ctx, ancestryDir, p.Expected.Target, resolved)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -250,7 +259,7 @@ func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApply
 			return ApplyResult{}, err
 		}
 	}
-	current, err := r.VCS.Observe(ctx, p.Workspace, p.TargetRef, p.Expected.Generation)
+	current, err := r.observe(ctx, p.Workspace, p.Protected.Root, p.TargetRef, p.Expected.Generation)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -260,10 +269,7 @@ func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApply
 		}
 		return ApplyResult{}, fmt.Errorf("capsule reconcile: stale plan")
 	}
-	if _, err := git(ctx, p.Workspace, "fetch", instancePath, resolved); err != nil {
-		return ApplyResult{}, err
-	}
-	if err := r.VCS.UpdateRef(ctx, p.Workspace, p.TargetRef, resolved, current.Target); err != nil {
+	if err := r.updateRef(ctx, p.Workspace, p.Protected.Root, p.TargetRef, resolved, current.Target); err != nil {
 		return ApplyResult{}, err
 	}
 	result := ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: resolved, Applied: true}

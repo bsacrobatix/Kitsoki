@@ -66,7 +66,7 @@ func TestConcurrentSubmitSerializesOneCandidate(t *testing.T) {
 	}
 }
 
-func TestProcessEjectsSpeculativeConflictAndKeepsEvidence(t *testing.T) {
+func TestProcessParksSpeculativeConflictAndKeepsEvidence(t *testing.T) {
 	store, first, second := queuedPair(t)
 	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
 		if c.ID == second.ID {
@@ -78,15 +78,15 @@ func TestProcessEjectsSpeculativeConflictAndKeepsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Candidates[0].Status != Landed || state.Candidates[1].Status != Ejected {
+	if state.Candidates[0].Status != Landed || state.Candidates[1].Status != RetryWait {
 		t.Fatalf("state=%#v", state.Candidates)
 	}
-	if state.Candidates[1].EjectionReason != "speculation_failed" || !strings.Contains(strings.Join(state.Candidates[1].Evidence, " "), "merge conflict") {
-		t.Fatalf("ejection=%#v", state.Candidates[1])
+	if state.Candidates[1].RetryReason != "speculation_failed" || !strings.Contains(strings.Join(state.Candidates[1].Evidence, " "), "merge conflict") {
+		t.Fatalf("retry=%#v", state.Candidates[1])
 	}
 }
 
-func TestConcurrentConflictingCandidatesLandOnlyFirst(t *testing.T) {
+func TestConcurrentConflictingCandidatesParkSecond(t *testing.T) {
 	store := Store{ProjectRoot: t.TempDir(), LockWait: time.Second}
 	shas := []string{strings.Repeat("d", 40), strings.Repeat("e", 40)}
 	var wg sync.WaitGroup
@@ -113,7 +113,7 @@ func TestConcurrentConflictingCandidatesLandOnlyFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Candidates[0].Status != Landed || state.Candidates[1].Status != Ejected || integration.landed != 1 {
+	if state.Candidates[0].Status != Landed || state.Candidates[1].Status != RetryWait || integration.landed != 1 {
 		t.Fatalf("state=%#v landed=%d", state.Candidates, integration.landed)
 	}
 }
@@ -137,8 +137,29 @@ func TestProcessRunsGateAgainstSpeculativeTreeAndDoesNotLandOnFailure(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if integration.landed != 0 || state.Candidates[0].Status != Ejected || state.Candidates[0].EjectionReason != "gate_failed" {
+	if integration.landed != 0 || state.Candidates[0].Status != RetryWait || state.Candidates[0].RetryReason != "gate_failed" {
 		t.Fatalf("landed=%d state=%#v", integration.landed, state.Candidates[0])
+	}
+}
+
+func TestRetryWaitCandidateBlocksLaterCandidatesUntilRepaired(t *testing.T) {
+	store, first, _ := queuedPair(t)
+	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+		if c.ID == first.ID {
+			return Speculation{SHA: "spec-" + c.SHA}, nil
+		}
+		t.Fatalf("later candidate should not run while first is parked")
+		return Speculation{}, nil
+	}}
+	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
+		return GateResult{Passed: false, Evidence: []string{"gate:red"}}, nil
+	})
+	state, err := store.Process(context.Background(), ProcessDeps{Integration: integration, Gate: gate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Candidates[0].Status != RetryWait || state.Candidates[1].Status != Queued {
+		t.Fatalf("state=%#v", state.Candidates)
 	}
 }
 

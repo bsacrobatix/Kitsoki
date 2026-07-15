@@ -43,19 +43,23 @@ type ObservedRefs struct {
 	Dirty         bool   `json:"dirty"`
 	Generation    uint64 `json:"generation"`
 }
+type ProjectIdentity struct {
+	Root string `json:"root"`
+}
 type Plan struct {
-	ID             string        `json:"id"`
-	Digest         string        `json:"digest"`
-	Operation      Operation     `json:"operation"`
-	Class          Class         `json:"class"`
-	Workspace      string        `json:"workspace"`
-	TargetRef      string        `json:"target_ref"`
-	Candidate      string        `json:"candidate"`
-	Expected       ObservedRefs  `json:"expected"`
-	Continuation   *Continuation `json:"continuation,omitempty"`
-	RequiredGate   string        `json:"required_gate,omitempty"`
-	RequiredEffect string        `json:"required_effect"`
-	CreatedAt      time.Time     `json:"created_at"`
+	ID             string          `json:"id"`
+	Digest         string          `json:"digest"`
+	Operation      Operation       `json:"operation"`
+	Class          Class           `json:"class"`
+	Workspace      string          `json:"workspace"`
+	Protected      ProjectIdentity `json:"protected_project,omitempty"`
+	TargetRef      string          `json:"target_ref"`
+	Candidate      string          `json:"candidate"`
+	Expected       ObservedRefs    `json:"expected"`
+	Continuation   *Continuation   `json:"continuation,omitempty"`
+	RequiredGate   string          `json:"required_gate,omitempty"`
+	RequiredEffect string          `json:"required_effect"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 type Continuation struct {
 	Schema         string       `json:"schema"`
@@ -99,6 +103,10 @@ type VCSProvider interface {
 	IsAncestor(context.Context, string, string, string) (bool, error)
 	UpdateRef(context.Context, string, string, string, string) error
 }
+type ProtectedVCSProvider interface {
+	ObserveProtected(context.Context, string, string, string, uint64) (ObservedRefs, error)
+	UpdateProtectedRef(context.Context, string, string, string, string, string) error
+}
 type PublishProvider interface {
 	Publish(context.Context, Plan, ObservedRefs) (ApplyResult, error)
 }
@@ -117,11 +125,12 @@ type Reconciler struct {
 	Now       func() time.Time
 }
 type PlanRequest struct {
-	Workspace    string
-	TargetRef    string
-	Operation    Operation
-	Generation   uint64
-	RequiredGate string
+	Workspace            string
+	ProtectedProjectRoot string
+	TargetRef            string
+	Operation            Operation
+	Generation           uint64
+	RequiredGate         string
 }
 
 func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
@@ -137,15 +146,15 @@ func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
 	if !ValidOperation(req.Operation) {
 		return Plan{}, fmt.Errorf("capsule reconcile: unsupported operation %q", req.Operation)
 	}
-	observed, err := r.VCS.Observe(ctx, req.Workspace, req.TargetRef, req.Generation)
+	observed, err := r.observe(ctx, req.Workspace, req.ProtectedProjectRoot, req.TargetRef, req.Generation)
 	if err != nil {
 		return Plan{}, err
 	}
-	class, err := r.classify(ctx, req.Workspace, observed)
+	class, err := r.classify(ctx, r.ancestryDir(req.Workspace, req.ProtectedProjectRoot), observed)
 	if err != nil {
 		return Plan{}, err
 	}
-	p := Plan{Operation: req.Operation, Class: class, Workspace: req.Workspace, TargetRef: req.TargetRef, Candidate: observed.WorkspaceHead, Expected: observed, RequiredGate: req.RequiredGate, RequiredEffect: effect(req.Operation), CreatedAt: r.now()}
+	p := Plan{Operation: req.Operation, Class: class, Workspace: req.Workspace, Protected: ProjectIdentity{Root: req.ProtectedProjectRoot}, TargetRef: req.TargetRef, Candidate: observed.WorkspaceHead, Expected: observed, RequiredGate: req.RequiredGate, RequiredEffect: effect(req.Operation), CreatedAt: r.now()}
 	if class == Diverged {
 		p.Continuation = conflictContinuation(p)
 	}
@@ -184,7 +193,7 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 			return ApplyResult{}, err
 		}
 	}
-	current, err := r.VCS.Observe(ctx, p.Workspace, p.TargetRef, p.Expected.Generation)
+	current, err := r.observe(ctx, p.Workspace, p.Protected.Root, p.TargetRef, p.Expected.Generation)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -215,7 +224,7 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 		return result, nil
 	}
 	if p.Operation == Promote || p.Operation == Integrate || p.Operation == Refresh {
-		ok, err := r.VCS.IsAncestor(ctx, p.Workspace, current.Target, p.Candidate)
+		ok, err := r.VCS.IsAncestor(ctx, r.ancestryDir(p.Workspace, p.Protected.Root), current.Target, p.Candidate)
 		if err != nil {
 			return ApplyResult{}, err
 		}
@@ -223,7 +232,7 @@ func (r Reconciler) Apply(ctx context.Context, p Plan, gateReceipt string) (Appl
 			return ApplyResult{}, fmt.Errorf("capsule reconcile: protected update is not fast-forward")
 		}
 	}
-	if err := r.VCS.UpdateRef(ctx, p.Workspace, p.TargetRef, p.Candidate, current.Target); err != nil {
+	if err := r.updateRef(ctx, p.Workspace, p.Protected.Root, p.TargetRef, p.Candidate, current.Target); err != nil {
 		return ApplyResult{}, err
 	}
 	result := ApplyResult{PlanDigest: p.Digest, OldTarget: current.Target, NewTarget: p.Candidate, Applied: true}
@@ -257,6 +266,31 @@ func (r Reconciler) classify(ctx context.Context, workspace string, o ObservedRe
 		return RemoteAhead, nil
 	}
 	return Diverged, nil
+}
+
+func (r Reconciler) observe(ctx context.Context, workspace, protectedRoot, target string, generation uint64) (ObservedRefs, error) {
+	if protectedRoot != "" {
+		if vcs, ok := r.VCS.(ProtectedVCSProvider); ok {
+			return vcs.ObserveProtected(ctx, workspace, protectedRoot, target, generation)
+		}
+	}
+	return r.VCS.Observe(ctx, workspace, target, generation)
+}
+
+func (r Reconciler) updateRef(ctx context.Context, workspace, protectedRoot, ref, next, old string) error {
+	if protectedRoot != "" {
+		if vcs, ok := r.VCS.(ProtectedVCSProvider); ok {
+			return vcs.UpdateProtectedRef(ctx, workspace, protectedRoot, ref, next, old)
+		}
+	}
+	return r.VCS.UpdateRef(ctx, workspace, ref, next, old)
+}
+
+func (r Reconciler) ancestryDir(workspace, protectedRoot string) string {
+	if protectedRoot != "" {
+		return protectedRoot
+	}
+	return workspace
 }
 
 // ValidOperation reports whether an operation is part of the fixed local
@@ -350,6 +384,24 @@ func (Git) Observe(ctx context.Context, dir, target string, generation uint64) (
 	}
 	return ObservedRefs{WorkspaceHead: strings.TrimSpace(head), Target: strings.TrimSpace(targetOID), Dirty: strings.TrimSpace(status) != "", Generation: generation}, nil
 }
+func (Git) ObserveProtected(ctx context.Context, workspace, protectedRoot, target string, generation uint64) (ObservedRefs, error) {
+	head, err := git(ctx, workspace, "rev-parse", "HEAD")
+	if err != nil {
+		return ObservedRefs{}, err
+	}
+	status, err := git(ctx, workspace, "status", "--porcelain")
+	if err != nil {
+		return ObservedRefs{}, err
+	}
+	if _, err := git(ctx, protectedRoot, "fetch", "--no-tags", workspace, strings.TrimSpace(head)); err != nil {
+		return ObservedRefs{}, err
+	}
+	targetOID, err := git(ctx, protectedRoot, "rev-parse", target)
+	if err != nil {
+		return ObservedRefs{}, err
+	}
+	return ObservedRefs{WorkspaceHead: strings.TrimSpace(head), Target: strings.TrimSpace(targetOID), Dirty: strings.TrimSpace(status) != "", Generation: generation}, nil
+}
 func (Git) IsAncestor(ctx context.Context, dir, a, b string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", a, b)
 	cmd.Dir = dir
@@ -368,6 +420,17 @@ func (Git) UpdateRef(ctx context.Context, dir, ref, next, old string) error {
 	}
 	_, err := git(ctx, dir, "update-ref", ref, next, old)
 	return err
+}
+func (Git) UpdateProtectedRef(ctx context.Context, workspace, protectedRoot, ref, next, old string) error {
+	if _, err := git(ctx, protectedRoot, "cat-file", "-e", next+"^{commit}"); err != nil {
+		if _, fetchErr := git(ctx, protectedRoot, "fetch", "--no-tags", workspace, "HEAD"); fetchErr != nil {
+			return fetchErr
+		}
+		if _, checkErr := git(ctx, protectedRoot, "cat-file", "-e", next+"^{commit}"); checkErr != nil {
+			return checkErr
+		}
+	}
+	return (Git{}).UpdateRef(ctx, protectedRoot, ref, next, old)
 }
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)

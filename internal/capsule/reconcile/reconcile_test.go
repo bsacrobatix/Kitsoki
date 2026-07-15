@@ -252,6 +252,50 @@ func TestApplyIsFastForwardOnlyAndStaleSafe(t *testing.T) {
 		t.Fatalf("missing stale event %#v", events)
 	}
 }
+
+func TestProtectedPromotionMovesSourceMainNotWorkspaceMain(t *testing.T) {
+	source := capsuletest.Open(t, "clean-repo")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	runGit(t, "", "clone", "--no-local", source, workspace)
+	runGit(t, workspace, "config", "user.name", "test")
+	runGit(t, workspace, "config", "user.email", "test@example.invalid")
+	base := strings.TrimSpace(runGitOutput(t, source, "rev-parse", "main"))
+	runGit(t, workspace, "checkout", "-b", "candidate")
+	if err := os.WriteFile(filepath.Join(workspace, "protected.txt"), []byte("protected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, workspace, "add", "protected.txt")
+	runGit(t, workspace, "commit", "-m", "candidate")
+	candidate := strings.TrimSpace(runGitOutput(t, workspace, "rev-parse", "HEAD"))
+
+	r := Reconciler{VCS: Git{}, Gates: GateVerifierFunc(func(_ context.Context, receipt string, p Plan) error {
+		if receipt != "ok" || p.Protected.Root != source {
+			return os.ErrPermission
+		}
+		return nil
+	})}
+	p, err := r.Plan(context.Background(), PlanRequest{Workspace: workspace, ProtectedProjectRoot: source, TargetRef: "main", Operation: Promote, Generation: 1, RequiredGate: "ci"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Class != LocalAhead || p.Candidate != candidate || p.Expected.Target != base {
+		t.Fatalf("plan %#v", p)
+	}
+	result, err := r.Apply(context.Background(), p, "ok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NewTarget != candidate {
+		t.Fatalf("result %#v", result)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, source, "rev-parse", "main")); got != candidate {
+		t.Fatalf("source main = %s, want %s", got, candidate)
+	}
+	if got := strings.TrimSpace(runGitOutput(t, workspace, "rev-parse", "main")); got != base {
+		t.Fatalf("workspace-local main moved to %s, want %s", got, base)
+	}
+}
+
 func TestPublishRequiresExplicitProvider(t *testing.T) {
 	dir := capsuletest.Open(t, "clean-repo")
 	runGit(t, dir, "checkout", "-b", "candidate")
