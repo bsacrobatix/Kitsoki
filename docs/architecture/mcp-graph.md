@@ -206,7 +206,9 @@ catalog ([`writevia.go`](../../internal/mcp/graphsrv/writevia.go)):
   workspace stays alive for the server's lifetime, and once it exists every
   read for that catalog routes to it too, so a proposed changeset is visible
   to the `graph.get`/`changeset`/`apply` calls that follow. The primary
-  checkout is never touched.
+  checkout is never touched. When a newly adopted repo has no `staging/local`
+  ref yet, the first default workspace starts from `main` and its merge creates
+  `staging/local`; later graph work starts from that staging ref normally.
 
 Resolution precedence, per bound catalog:
 

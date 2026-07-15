@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { StoryHeader } from "../../src/data/live-source.js";
-import type { SessionHeader } from "../../src/types.js";
+import type { ArtifactJobSummary, SessionHeader } from "../../src/types.js";
 import { markAutoNavDone } from "../../src/lib/auto-nav.js";
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ const listStories = vi.fn<[], Promise<StoryHeader[]>>();
 const rescanStories = vi.fn<[], Promise<StoryHeader[]>>();
 const newSession = vi.fn<[string], Promise<string>>();
 const listSessions = vi.fn<[], Promise<SessionHeader[]>>();
+const listArtifactJobs = vi.fn<[], Promise<ArtifactJobSummary[]>>();
 const driveOperation = vi.fn<[string], Promise<unknown>>();
 const artifactUrl = vi.fn<[string], string>((handle) => `/artifact/${encodeURIComponent(handle)}`);
 const setupStatus = vi.fn<[], Promise<{
@@ -38,6 +39,7 @@ vi.mock("../../src/data/live-source.js", () => ({
     rescanStories,
     newSession,
     listSessions,
+    listArtifactJobs,
     driveOperation,
     artifactUrl,
     setupStatus,
@@ -96,6 +98,7 @@ describe("HomeView", () => {
     rescanStories.mockReset();
     newSession.mockReset();
     listSessions.mockReset();
+    listArtifactJobs.mockReset();
     driveOperation.mockReset();
     artifactUrl.mockClear();
     setupStatus.mockReset();
@@ -110,6 +113,7 @@ describe("HomeView", () => {
     // Default: no auto-navigation (zero sessions).
     listStories.mockResolvedValue([]);
     listSessions.mockResolvedValue([]);
+    listArtifactJobs.mockResolvedValue([]);
     setupStatus.mockResolvedValue({ warnings: [] });
   });
 
@@ -242,6 +246,28 @@ describe("HomeView", () => {
     expect(rows).toHaveLength(2);
     const open = wrapper.find("[data-testid='session-open']");
     expect(open.attributes("href")).toBe("/s/sess-aaaa1111");
+    wrapper.unmount();
+  });
+
+  it("renders durable daemon jobs with stable open links", async () => {
+    listArtifactJobs.mockResolvedValue([{
+      job_id: "job-stable-1",
+      session_id: "internal-session-1",
+      app_id: "tasks",
+      story: "/repo/stories/tasks/app.yaml",
+      status: "interrupted",
+      phase: "implement",
+      summary: "Implement daemon mode",
+      run_url: "/s/job-stable-1",
+      updated_at: "2026-07-15T06:00:00Z",
+      interrupted_reason: "daemon_restarted",
+    }]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.findAll("[data-testid='artifact-job-row']")).toHaveLength(1);
+    expect(wrapper.find("[data-testid='artifact-job-status']").text()).toContain("interrupted");
+    expect(wrapper.find("[data-testid='artifact-job-open']").attributes("href")).toBe("/s/job-stable-1");
     wrapper.unmount();
   });
 

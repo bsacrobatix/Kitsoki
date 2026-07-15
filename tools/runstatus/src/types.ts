@@ -13,6 +13,19 @@ export interface SessionHeader {
   operation_run?: OperationRunSummary;
 }
 
+export interface ArtifactJobSummary {
+  job_id: string;
+  session_id?: string;
+  app_id: string;
+  story: string;
+  status: "running" | "awaiting_input" | "interrupted" | "done" | "failed" | "cancelled" | "archived";
+  phase?: string;
+  summary?: string;
+  run_url: string;
+  updated_at: string;
+  interrupted_reason?: string;
+}
+
 export interface OperationRunSummary {
   operation_id?: string;
   policy_id?: string;

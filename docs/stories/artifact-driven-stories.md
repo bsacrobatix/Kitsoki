@@ -38,6 +38,14 @@ The index consumes existing `artifact.emitted` events rather than introducing a 
 
 Artifact jobs make interruption explicit. On process startup, a caller can run `Store.SweepInterrupted(reason)` to mark `running` and `awaiting_input` rows as `interrupted`. The row remains listable and can offer a story-specific resume action, but the registry never pretends a dead goroutine survived.
 
+`kitsoki daemon` is the first end-to-end consumer. It registers each new web
+session as an artifact job, binds `daemon:<job-id>` as the persisted external
+session key, and restores that session under the same `/s/<job-id>` route after
+a restart. The web Home reads `runstatus.jobs.list` and renders current and
+recent daemon jobs. Process-bound child handlers still follow the interruption
+rule above; restoring the parent session is not permission to duplicate an
+unsafe side effect. See [the daemon runbook](../guide/development/daemon.md).
+
 ## Authoring model
 
 The remaining story-authoring work is intentionally not hidden in the registry package. Future slices add:
@@ -45,7 +53,8 @@ The remaining story-authoring work is intentionally not hidden in the registry p
 - `artifacts:` story declarations for workspace items and lifecycle policy.
 - `iface.instance.*` host calls for get-or-create workspaces, share, publish, dispose, and retention scans.
 - Dev-story migration from `design_workspace.star` / `publish_design.star` onto those host calls.
-- TUI/web artifact-job console rows, actions, and galleries.
+- TUI artifact-job rows and the remaining web actions/galleries. Web Home now
+  has the daemon-backed current-job list and stable open action.
 
 Until those slices land, stories can still use `host.artifacts_dir` for emitted artifacts and can register jobs from runtime integration code without changing YAML loader behavior.
 
@@ -55,6 +64,7 @@ The substrate is covered without real LLM or GitHub calls:
 
 ```sh
 go test ./internal/artifactjob
+go test ./cmd/kitsoki -run TestRegistry_DaemonRestoresStableJobAndState
 ```
 
 That test suite exercises memory and SQLite stores, interruption sweep, `/run/<job-id>` URL minting, and deterministic reindexing of `artifact.emitted` trace rows.

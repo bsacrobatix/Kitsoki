@@ -1,8 +1,7 @@
 # TUI/Web: artifact job console
 
-**Status:** Draft v2. Re-scoped from an instance-only console to the unified
-artifact-job console for durable runs, workspaces, sharing, and cleanup. Nothing
-implemented yet.
+**Status:** Partially shipped. Web Home lists daemon-backed artifact jobs with
+stable open links; TUI, galleries, lifecycle actions, and policy controls remain.
 **Kind:**   tui
 **Epic:**   ../artifact-driven-stories.md
 **Depends on:** [`artifact-job-registry.md`](artifact-job-registry.md),
@@ -113,7 +112,8 @@ and lifecycle policy.
 ```
 ## 1. Render
 - [ ] 1.1 `artifact_job_list` typed element + TUI renderer
-- [ ] 1.2 Web Home artifact-job table and in-session job drawer
+- [x] 1.2a Web Home artifact-job table with stable open action
+- [ ] 1.2b In-session job drawer
 - [ ] 1.3 ArtifactGallery consumes `runstatus.run.artifacts`
 - [ ] 1.4 Resume/open/share/publish/delete actions render from policy data
 

@@ -47,7 +47,58 @@ import (
 	"kitsoki/internal/webconfig"
 )
 
-func webCmd() *cobra.Command {
+func webCmd() *cobra.Command { return webServiceCmd(false) }
+
+func daemonCmd() *cobra.Command {
+	cmd := webServiceCmd(true)
+	cmd.AddCommand(daemonInstallSystemdCmd())
+	return cmd
+}
+
+func webServiceLongDescription(daemonMode bool) string {
+	if daemonMode {
+		return `Run Kitsoki as a persistent job service for task-oriented frontends.
+The daemon serves the multi-story web/RPC surface, but every new session also
+becomes a durable artifact job in SQLite with a stable /s/<job-id> link. On
+restart, daemon session jobs are reattached under their original IDs.
+
+Process-bound background handlers are not replayed blindly after a crash. Their
+scheduler rows remain explicitly failed or interrupted when execution safety
+cannot be proven, while the durable parent session and job link are restored.
+The HTTP surface assumes a trusted localhost or internal network; there is no
+authentication.`
+	}
+	return `Discover stories and serve the runstatus web UI over HTTP. The home screen
+lists the discovered stories and any live sessions; the operator starts a fresh
+session from a story or opens an existing one.
+
+Unlike 'kitsoki status serve' -- which tails a JSONL trace another process
+writes, read-only -- 'kitsoki web' hosts the orchestrators itself, so the browser
+observes (and drives) sessions running in this process. Sessions are
+process-local; use 'kitsoki daemon' when session jobs must survive restarts.
+
+Story directories resolve with the precedence flags > .kitsoki.yaml > ./stories:
+
+  kitsoki web                              # walk ./stories (or .kitsoki.yaml's story_dirs)
+  kitsoki web --stories-dir stories --stories-dir testdata/apps
+  kitsoki web --config ./my-kitsoki.yaml --addr 127.0.0.1:7777
+
+Deterministic (no-LLM) posture for UI development and Playwright tests applies
+to every session started from the home screen:
+
+  kitsoki web --stories-dir stories/prd --flow stories/prd/flows/happy_path.yaml
+
+With --flow, the flow fixture's host_handlers stub every host.* call and the
+harness is nil. --host-cassette backs host.* calls from a recorded cassette and
+is combinable with --flow.
+
+The runstatus SPA must be bundled into the binary (run 'make build', which runs
+'pnpm build' under tools/runstatus/); otherwise the page reports the UI as
+unbuilt. The HTTP surface assumes a trusted localhost or internal network;
+there is no authentication.`
+}
+
+func webServiceCmd(daemonMode bool) *cobra.Command {
 	var (
 		addr             string
 		harnessType      string
@@ -69,39 +120,17 @@ func webCmd() *cobra.Command {
 		kitsDir          string
 	)
 
+	use := "web"
+	short := "Serve the multi-story interactive browser UI (live sessions)"
+	if daemonMode {
+		use = "daemon"
+		short = "Run the persistent Kitsoki job and web service"
+	}
 	cmd := &cobra.Command{
-		Use:   "web",
-		Short: "Serve the multi-story interactive browser UI (live sessions)",
-		Long: `Discover stories and serve the runstatus web UI over HTTP. The home screen
-lists the discovered stories and any live sessions; the operator starts a fresh
-session from a story or opens an existing one.
-
-Unlike 'kitsoki status serve' — which tails a JSONL trace another process
-writes, read-only — 'kitsoki web' hosts the orchestrators itself, so the browser
-observes (and drives) sessions running in this process. Sessions are in-memory
-only and die with the process.
-
-Story directories resolve with the precedence flags > .kitsoki.yaml > ./stories:
-
-  kitsoki web                              # walk ./stories (or .kitsoki.yaml's story_dirs)
-  kitsoki web --stories-dir stories --stories-dir testdata/apps
-  kitsoki web --config ./my-kitsoki.yaml --addr 127.0.0.1:7777
-
-Deterministic (no-LLM) posture for UI development and Playwright tests — applies
-to EVERY session started from the home screen:
-
-  kitsoki web --stories-dir stories/prd --flow stories/prd/flows/happy_path.yaml
-
-With --flow, the flow fixture's host_handlers stub back every host.* call and
-the harness is nil — the browser drives each session by submitting intents
-(runstatus.session.submit) explicitly, with no LLM. --host-cassette backs host.*
-calls from a recorded cassette and is combinable with --flow.
-
-The runstatus SPA must be bundled into the binary (run 'make build', which runs
-'pnpm build' under tools/runstatus/); otherwise the page reports the UI as
-unbuilt. Assumes a trusted localhost / internal network; there is no
-authentication.`,
-		Args: cobra.NoArgs,
+		Use:   use,
+		Short: short,
+		Long:  webServiceLongDescription(daemonMode),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve the execution mode (execution-modes proposal). Staged by
 			// default, matching the TUI. Applies to every session.
@@ -296,6 +325,11 @@ authentication.`,
 
 			// ── Registry + initial story catalogue ──────────────────────────
 			registry := NewRegistry(cfg, dirs, base)
+			if daemonMode {
+				if err := registry.EnableDaemon(dbPath); err != nil {
+					return err
+				}
+			}
 			if maxSessions > 0 {
 				registry.SetMaxSessions(maxSessions)
 			}
@@ -374,6 +408,14 @@ authentication.`,
 			// session's background-turn fan-out reaches the runstatus.notification
 			// SSE feed. Set before any session.new call.
 			registry.SetNotifier(srv)
+			if daemonMode {
+				restored, restoreErr := registry.RestoreDaemonJobs(context.Background())
+				if restoreErr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: daemon restored %d job(s) with warnings: %v\n", restored, restoreErr)
+				} else if restored > 0 {
+					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: daemon restored %d job(s)\n", restored)
+				}
+			}
 			httpSrv := &http.Server{
 				Addr:    addr,
 				Handler: srv.Handler(),
@@ -396,7 +438,11 @@ authentication.`,
 				_ = httpSrv.Shutdown(shutCtx)
 			}()
 
-			fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: web UI (%d stories across %d dir(s)) on http://%s\n", len(stories), len(dirs), addr)
+			serviceName := "web UI"
+			if daemonMode {
+				serviceName = "daemon"
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: %s (%d stories across %d dir(s)) on http://%s\n", serviceName, len(stories), len(dirs), addr)
 			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				return fmt.Errorf("serve: %w", err)
 			}

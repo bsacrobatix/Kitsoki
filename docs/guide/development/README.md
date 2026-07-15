@@ -13,6 +13,8 @@ Practical reference for people changing Kitsoki itself.
   persona/scenario QA campaign against your own project: catalog setup, the
   `campaign_*` verbs, the local-vs-GitHub finding-sink policy, worker
   dispatch, and the Slidey rollup.
+- [`daemon.md`](daemon.md) — run persistent task-oriented jobs, integrate the
+  current-job RPC, and install the systemd user service.
 
 Related setup docs:
 

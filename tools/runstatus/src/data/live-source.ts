@@ -1,5 +1,6 @@
 import type {
   SessionHeader,
+  ArtifactJobSummary,
   AppDef,
   MermaidSnapshot,
   TraceEvent,
@@ -339,6 +340,10 @@ export class LiveSource implements DataSource {
 
   listSessions(): Promise<SessionHeader[]> {
     return this.client.post<SessionHeader[]>("runstatus.sessions.list", {});
+  }
+
+  listArtifactJobs(): Promise<ArtifactJobSummary[]> {
+    return this.client.post<ArtifactJobSummary[]>("runstatus.jobs.list", {});
   }
 
   listWork(): Promise<WorkListResult> {

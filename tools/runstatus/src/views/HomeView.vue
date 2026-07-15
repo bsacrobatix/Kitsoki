@@ -133,6 +133,45 @@
       </div>
     </section>
 
+    <section v-if="jobs.length > 0 || jobsError" class="home__section" data-testid="artifact-jobs">
+      <h2 class="home__subtitle">Current jobs</h2>
+      <div v-if="jobsError" class="home__status home__status--error" data-testid="artifact-jobs-error">
+        {{ jobsError }}
+      </div>
+      <table v-else class="home__table" data-testid="artifact-job-table">
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Status</th>
+            <th>Phase</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="job in jobs" :key="job.job_id" class="home__row" data-testid="artifact-job-row">
+            <td>
+              <div class="home__row-story">{{ job.summary || job.app_id }}</div>
+              <code class="home__row-path">{{ truncateId(job.job_id) }}</code>
+            </td>
+            <td>
+              <span class="home__operation-status" :class="jobStatusClass(job.status)" data-testid="artifact-job-status">
+                {{ job.status.replace('_', ' ') }}
+              </span>
+              <div v-if="job.interrupted_reason" class="home__operation-detail">
+                {{ job.interrupted_reason }}
+              </div>
+            </td>
+            <td><code>{{ job.phase || '—' }}</code></td>
+            <td class="home__row-activity">{{ formatDate(job.updated_at) }}</td>
+            <td class="home__row-actions">
+              <router-link class="home__link" data-testid="artifact-job-open" :to="job.run_url">Open</router-link>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <!-- ── Active sessions ─────────────────────────────────────────────── -->
     <section class="home__section">
       <h2 class="home__subtitle">Active sessions</h2>
@@ -304,7 +343,7 @@ import { useRouter } from "vue-router";
 import { autoNavDone, markAutoNavDone } from "../lib/auto-nav.js";
 import { LiveSource, type SetupWarning, type StoryHeader } from "../data/live-source.js";
 import { createDataSource } from "../data/source.js";
-import type { SessionHeader } from "../types.js";
+import type { ArtifactJobSummary, SessionHeader } from "../types.js";
 import { useTourStore } from "../stores/tour.js";
 import { kitNavLinks } from "../kits/kitLoader.js";
 
@@ -339,6 +378,8 @@ const setupWarnings = ref<SetupWarning[]>([]);
 
 const sessions = ref<SessionHeader[]>([]);
 const sessionsError = ref<string | null>(null);
+const jobs = ref<ArtifactJobSummary[]>([]);
+const jobsError = ref<string | null>(null);
 
 const startingPath = ref<string | null>(null);
 const startError = ref<string | null>(null);
@@ -428,7 +469,7 @@ onMounted(async () => {
     return;
   }
 
-  await Promise.all([loadStories(), loadSessions(), loadSetupWarnings()]);
+  await Promise.all([loadStories(), loadSessions(), loadArtifactJobs(), loadSetupWarnings()]);
   storiesLoading.value = false;
 
   // Auto-navigate when there is exactly one live session and no others. A
@@ -445,7 +486,7 @@ onMounted(async () => {
   markAutoNavDone();
 
   pollTimer = setInterval(() => {
-    void loadSessions();
+    void Promise.all([loadSessions(), loadArtifactJobs()]);
   }, POLL_MS);
 });
 
@@ -469,6 +510,22 @@ async function loadSessions(): Promise<void> {
   } catch (e) {
     sessionsError.value = errMsg(e);
   }
+}
+
+async function loadArtifactJobs(): Promise<void> {
+  try {
+    jobs.value = await source.listArtifactJobs();
+    jobsError.value = null;
+  } catch (e) {
+    jobsError.value = errMsg(e);
+  }
+}
+
+function jobStatusClass(status: ArtifactJobSummary["status"]): string {
+  if (status === "done") return "home__operation-status--completed";
+  if (status === "failed" || status === "cancelled") return "home__operation-status--failed";
+  if (status === "awaiting_input" || status === "interrupted") return "home__operation-status--waiting";
+  return "home__operation-status--running";
 }
 
 async function loadSetupWarnings(): Promise<void> {
@@ -1066,6 +1123,12 @@ function errMsg(e: unknown): string {
   color: #86efac;
   border: 1px solid color-mix(in srgb, #22c55e 42%, transparent);
   background: rgba(34, 197, 94, 0.12);
+}
+
+.home__operation-status--failed {
+  color: #fca5a5;
+  border: 1px solid color-mix(in srgb, #ef4444 42%, transparent);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .home__operation-detail {

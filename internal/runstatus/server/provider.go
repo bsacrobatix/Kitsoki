@@ -55,6 +55,30 @@ type SessionProvider interface {
 	Rescan() ([]StoryHeader, error)
 }
 
+// ArtifactJobProvider is the optional durable-job extension used by daemon
+// mode. Ordinary `kitsoki web` registries do not implement a backing store and
+// therefore return an empty list through the RPC surface.
+type ArtifactJobProvider interface {
+	ListArtifactJobs(ctx context.Context) ([]ArtifactJobSummary, error)
+}
+
+// ArtifactJobSummary is the stable, frontend-facing projection of a durable
+// artifact job. It deliberately carries links and lifecycle facts rather than
+// scheduler internals: a process-bound handler may be gone while this record
+// remains useful and restartable.
+type ArtifactJobSummary struct {
+	JobID             string    `json:"job_id"`
+	SessionID         string    `json:"session_id,omitempty"`
+	AppID             string    `json:"app_id"`
+	Story             string    `json:"story"`
+	Status            string    `json:"status"`
+	Phase             string    `json:"phase,omitempty"`
+	Summary           string    `json:"summary,omitempty"`
+	RunURL            string    `json:"run_url"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	InterruptedReason string    `json:"interrupted_reason,omitempty"`
+}
+
 // SeededSessionProvider is the optional per-session seed extension for
 // provider-backed live surfaces. Plain [SessionProvider] keeps the common
 // lifecycle method small; web-only deep links can opt into initial world values

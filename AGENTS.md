@@ -21,6 +21,16 @@ chmod the primary checkout except to repair the guard itself.
 See `docs/dev-workspaces.md` for the full lifecycle contract, metadata files,
 failure modes, recovery rules, and validation commands.
 
+When a project needs a long-running task-oriented Kitsoki service, use
+`kitsoki daemon` rather than wrapping `kitsoki web` in a generic process
+manager. Daemon mode owns stable artifact-job IDs, SQLite session bindings,
+restart restoration, and the `runstatus.jobs.list` frontend contract. Install
+its user service with `kitsoki daemon install-systemd`; keep credentials in the
+optional `~/.config/kitsoki/daemon.env`, and verify recovery with a real
+stop/start against the same database. Never claim arbitrary in-flight
+background handlers were resumed: only durable sessions are reattached, while
+non-idempotent process-bound work remains explicitly interrupted or failed.
+
 Local developer bug loops should stay local by default. File iterative,
 developer-found, or dogfood bugs as local artifact tickets under
 `.artifacts/issues/bugs` with their evidence sidecars under `.artifacts`; do not

@@ -1,6 +1,7 @@
 # Runtime: artifact job registry
 
-**Status:** Draft v1. Nothing implemented yet.
+**Status:** Partially shipped. Local store, trace index, daemon adoption, and
+restart proof are implemented; hosted Postgres and broader story adapters remain.
 **Kind:**   runtime
 **Epic:**   ../artifact-driven-stories.md
 
@@ -98,20 +99,20 @@ projection plus attachment handle.
 
 ```
 ## 1. Store
-- [ ] 1.1 Define `internal/artifactjob.Store` with Register, BindRun, Update, Attach, List, Get, Archive
-- [ ] 1.2 Local SQLite schema/migration beside the session store
+- [x] 1.1 Define `internal/artifactjob.Store` with Register, BindRun, Update, Attach, List, Get, Archive
+- [x] 1.2 Local SQLite schema/migration beside the session store
 - [ ] 1.3 Hosted Postgres schema with the same logical fields
-- [ ] 1.4 In-memory fake for deterministic unit and flow tests
+- [x] 1.4 In-memory fake for deterministic unit and flow tests
 
 ## 2. Integrate
 - [ ] 2.1 Session launch/register path for story-declared artifact jobs
 - [ ] 2.2 Background-job and operation lifecycle adapters update status/phase/terminal_artifact_handle
-- [ ] 2.3 Startup sweep marks process-bound active rows interrupted with a clear resume reason
-- [ ] 2.4 Run URL binding hook consumed by trace-artifact-service
+- [x] 2.3 Startup sweep marks process-bound active rows interrupted with a clear resume reason
+- [x] 2.4 Daemon session launch binds a stable run URL and restores it after restart
 
 ## 3. Prove + document
-- [ ] 3.1 Unit tests for register/attach/list/update across local fake + SQLite
-- [ ] 3.2 Restart test: active process-bound job becomes interrupted, terminal jobs remain terminal
+- [x] 3.1 Unit tests for register/attach/list/update across local fake + SQLite
+- [x] 3.2 Restart test: active daemon session is reattached under its stable job ID
 - [ ] 3.3 No-LLM flow fixture: register a dev-story job, leave, list, attach by job_id
 - [ ] 3.4 Document artifact jobs vs scheduler jobs in docs/stories/background-jobs/runtime.md
 ```

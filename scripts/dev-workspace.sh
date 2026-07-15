@@ -451,6 +451,17 @@ normalize_create_base() {
   local repo="$1"
   local base="$2"
   local target="$3"
+
+  # A repo adopting managed workspaces has no staging/local ref until its
+  # first successful merge. Bootstrap that first workspace from main while
+  # keeping staging/local as its target; subsequent creates use the staging
+  # ref normally. Explicit non-default bases must still fail when misspelled.
+  if [ "$base" = "$DEFAULT_BASE" ] && [ "$target" = "$DEFAULT_TARGET" ] &&
+    ! git -C "$repo" rev-parse --verify --quiet "${base}^{commit}" >/dev/null &&
+    ! git -C "$repo" rev-parse --verify --quiet "source/${base}^{commit}" >/dev/null; then
+    printf '%s\n' main
+    return 0
+  fi
   if [ "$base" != "main" ] || [ "$target" != "$DEFAULT_TARGET" ]; then
     printf '%s\n' "$base"
     return 0

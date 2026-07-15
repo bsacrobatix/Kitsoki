@@ -936,6 +936,17 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 	case "runstatus.sessions.list":
 		return s.provider.List(), nil
 
+	case "runstatus.jobs.list":
+		provider, ok := s.provider.(ArtifactJobProvider)
+		if !ok {
+			return []ArtifactJobSummary{}, nil
+		}
+		jobs, err := provider.ListArtifactJobs(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return jobs, nil
+
 	case "runstatus.work.list":
 		out, err := s.listWork(ctx)
 		if err != nil {
@@ -1187,7 +1198,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		return snap.Session, nil
+		header := snap.Session
+		if routeID, _ := params["session_id"].(string); routeID != "" {
+			header.SessionID = routeID
+		}
+		return header, nil
 
 	case "runstatus.session.app":
 		entry, rerr := s.resolve(params)

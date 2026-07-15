@@ -66,6 +66,27 @@ SH
   chmod +x "$repo/scripts/refresh-staging-local.sh"
 }
 
+# First-use adoption has no staging/local ref yet. The default create must
+# start from main and retain staging/local as its merge target so graph MCP and
+# other managed callers can establish the staging branch without a manual
+# bootstrap step.
+first_use_repo="$tmp/first-use-source"
+mkdir -p "$first_use_repo"
+git -C "$first_use_repo" init --quiet --initial-branch=main
+write_merge_helper "$first_use_repo"
+printf 'first use\n' >"$first_use_repo/README.md"
+gitc "$first_use_repo" add -A
+gitc "$first_use_repo" commit --quiet -m initial
+first_use_root="$tmp/first-use-workspaces"
+first_use_json="$("$dev_workspace" create --repo "$first_use_repo" --root "$first_use_root" --id first-use --branch agent/first-use --json)"
+first_use_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$first_use_json")"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["base"])' <"$first_use_workspace/.kitsoki-dev-workspace.json")" = "main" ] || fail "first default create did not bootstrap from main"
+[ "$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target"])' <"$first_use_workspace/.kitsoki-dev-workspace.json")" = "staging/local" ] || fail "first default create lost the staging target"
+printf 'staged first use\n' >"$first_use_workspace/first-use.txt"
+"$dev_workspace" commit --repo "$first_use_repo" --root "$first_use_root" "$first_use_workspace" --message 'test: first staging change' >/dev/null
+"$dev_workspace" merge --repo "$first_use_repo" --root "$first_use_root" "$first_use_workspace" --gate true --teardown >/dev/null
+[ "$(git -C "$first_use_repo" show staging/local:first-use.txt)" = "staged first use" ] || fail "first default merge did not establish staging/local"
+
 source_repo="$tmp/source"
 mkdir -p "$source_repo"
 git -C "$source_repo" init --quiet --initial-branch=main

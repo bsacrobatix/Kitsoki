@@ -198,6 +198,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(exportStatusCmd())
 	root.AddCommand(statusCmd())
 	root.AddCommand(webCmd())
+	root.AddCommand(daemonCmd())
 	root.AddCommand(tourCmd())
 	root.AddCommand(tourSpecCmd())
 	root.AddCommand(materializeCmd())

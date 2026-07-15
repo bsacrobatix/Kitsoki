@@ -43,6 +43,7 @@ import (
 
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
@@ -180,6 +181,12 @@ type SessionRegistry struct {
 	metaSelfStr  store.Store
 	metaSelfChat *chats.Store
 	metaSelfCtrl *metamode.Controller
+
+	// daemonStore owns the connection used by daemonJobs. It is separate from
+	// each live session runtime but points at the same SQLite file, so durable
+	// job identity survives registry and process teardown.
+	daemonStore store.Store
+	daemonJobs  artifactjob.Store
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -195,6 +202,24 @@ func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *Sess
 		sessions:    map[string]*entry{},
 		maxSessions: maxSessionsFromEnv(),
 	}
+}
+
+// EnableDaemon turns the registry into the persistent daemon session owner.
+// It is explicit rather than an environment toggle so ordinary `kitsoki web`
+// keeps its existing process-local behavior.
+func (r *SessionRegistry) EnableDaemon(dbPath string) error {
+	st, err := store.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open daemon store: %w", err)
+	}
+	jobs, err := artifactjob.NewSQLiteStore(st.DB())
+	if err != nil {
+		_ = st.Close()
+		return fmt.Errorf("open daemon artifact jobs: %w", err)
+	}
+	r.daemonStore = st
+	r.daemonJobs = jobs
+	return nil
 }
 
 // DefaultMaxLiveSessions is the fallback cap on concurrently live in-memory
@@ -334,6 +359,11 @@ func (r *SessionRegistry) endTurn(id string) {
 	}
 }
 
+func (r *SessionRegistry) finishTurn(id string) {
+	r.endTurn(id)
+	r.syncDaemonJob(id)
+}
+
 // trackingDriver wraps a live session's [server.Driver] so the registry can
 // enforce swarm-session-cap eviction safely: it marks the session mid-turn
 // (via beginTurn/endTurn) around every call that advances or could race the
@@ -362,37 +392,37 @@ func newTrackingDriver(reg *SessionRegistry, id string, inner server.Driver) ser
 
 func (d *trackingDriver) Turn(ctx context.Context, input string) (*orchestrator.TurnOutcome, error) {
 	d.reg.beginTurn(d.id)
-	defer d.reg.endTurn(d.id)
+	defer d.reg.finishTurn(d.id)
 	return d.Driver.Turn(ctx, input)
 }
 
 func (d *trackingDriver) SubmitDirect(ctx context.Context, intent string, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	d.reg.beginTurn(d.id)
-	defer d.reg.endTurn(d.id)
+	defer d.reg.finishTurn(d.id)
 	return d.Driver.SubmitDirect(ctx, intent, slots)
 }
 
 func (d *trackingDriver) ContinueTurn(ctx context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	d.reg.beginTurn(d.id)
-	defer d.reg.endTurn(d.id)
+	defer d.reg.finishTurn(d.id)
 	return d.Driver.ContinueTurn(ctx, slots)
 }
 
 func (d *trackingDriver) AskOffPath(ctx context.Context, input string) (string, error) {
 	d.reg.beginTurn(d.id)
-	defer d.reg.endTurn(d.id)
+	defer d.reg.finishTurn(d.id)
 	return d.Driver.AskOffPath(ctx, input)
 }
 
 func (d *trackingDriver) Teleport(ctx context.Context, notificationID string) (*orchestrator.TurnOutcome, error) {
 	d.reg.beginTurn(d.id)
-	defer d.reg.endTurn(d.id)
+	defer d.reg.finishTurn(d.id)
 	return d.Driver.Teleport(ctx, notificationID)
 }
 
 func (d *trackingDriver) RewindRoute(ctx context.Context, decisionID string, newClass orchestrator.ContextRouteClass, reason string, workspacePath string) (*orchestrator.TurnOutcome, error) {
 	d.reg.beginTurn(d.id)
-	defer d.reg.endTurn(d.id)
+	defer d.reg.finishTurn(d.id)
 	return d.Driver.RewindRoute(ctx, decisionID, newClass, reason, workspacePath)
 }
 
@@ -524,6 +554,9 @@ func (r *SessionRegistry) Close() {
 	if r.metaSelfStr != nil {
 		_ = r.metaSelfStr.Close()
 	}
+	if r.daemonStore != nil {
+		_ = r.daemonStore.Close()
+	}
 }
 
 // NewSession starts a fresh session for the story at storyPath, mirroring the
@@ -549,6 +582,7 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 	}
 	abs := loaded.path
 	def := loaded.def
+	id := uuid.NewString()
 
 	// Fail fast (never silently no-op a guarded turn): if the story gates a turn
 	// on an author ACL but the server was started with no configured operator
@@ -581,6 +615,12 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)
 	}
+	if r.daemonJobs != nil {
+		if err := rt.Store.BindExternalKey(ctx, sid, "daemon", id); err != nil {
+			_ = rt.Store.MarkAbandoned(ctx, sid)
+			return "", fmt.Errorf("bind daemon job %q: %w", id, err)
+		}
+	}
 
 	// In flow posture (--flow / --host-cassette), honor the fixture's
 	// initial_state / initial_world exactly as `test flows` and `record` do:
@@ -603,7 +643,11 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 		return "", fmt.Errorf("seed flow initial state: %w", err)
 	}
 
-	tracePath := store.DefaultTracePath(def.App.ID, "web", string(sid))
+	traceTransport, traceThread := "web", string(sid)
+	if r.daemonJobs != nil {
+		traceTransport, traceThread = "daemon", id
+	}
+	tracePath := store.DefaultTracePath(def.App.ID, traceTransport, traceThread)
 	if mkErr := os.MkdirAll(filepath.Dir(tracePath), 0o755); mkErr != nil {
 		return "", fmt.Errorf("create trace directory: %w", mkErr)
 	}
@@ -628,6 +672,37 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 		rt.DeferredAgentSink.SetSink(live)
 	}
 
+	daemonRegistered := false
+	if r.daemonJobs != nil {
+		_, err = r.daemonJobs.Register(ctx, artifactjob.RegisterRequest{
+			ID:         artifactjob.JobID(id),
+			SessionID:  sid,
+			AppID:      def.App.ID,
+			Story:      abs,
+			Origin:     artifactjob.Origin{Kind: "daemon", Ref: "daemon:" + id},
+			Status:     artifactjob.StatusRunning,
+			RunURL:     "/s/" + id,
+			TracePath:  tracePath,
+			Summary:    storyTitle(def),
+			Phase:      string(initialState),
+			Visibility: artifactjob.VisibilityLocal,
+			Owner:      r.base.DefaultActor,
+		})
+		if err != nil {
+			_ = rt.Store.MarkAbandoned(ctx, sid)
+			return "", fmt.Errorf("register daemon job: %w", err)
+		}
+		daemonRegistered = true
+		defer func() {
+			if ok || !daemonRegistered {
+				return
+			}
+			status := artifactjob.StatusFailed
+			summary := "daemon session initialization failed"
+			_, _ = r.daemonJobs.Update(context.Background(), artifactjob.JobID(id), artifactjob.Update{Status: &status, Summary: &summary})
+		}()
+	}
+
 	// Record the effective story as the first event so the trace self-describes
 	// even after a later hot-reload (matches `kitsoki run` and web.go).
 	if err := orch.RecordEffectiveStory(ctx, sid); err != nil {
@@ -640,7 +715,6 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 		return "", fmt.Errorf("run initial on_enter: %w", err)
 	}
 
-	id := uuid.NewString()
 	e := &entry{
 		StoryPath:     abs,
 		Def:           def,
@@ -681,6 +755,7 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 	r.currentSessionID = id
 	r.mu.Unlock()
 	r.cleanupEvicted(victim)
+	r.syncDaemonJob(id)
 
 	// The current session changed: notify subscribers (trace-only / graph-only
 	// surfaces follow this). Emitted outside the lock, after the value is
@@ -844,6 +919,9 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	driver := server.NewLockingDriver(server.OrchestratorDriver{Orch: orch, SID: sid, Jobs: rt.JobStore, Chats: rt.ChatStore, TraceHistory: live.History}, lock)
 
 	id := uuid.NewString()
+	if transportID == "daemon" && thread != "" {
+		id = thread
+	}
 	e := &entry{
 		StoryPath:     abs,
 		Def:           def,
@@ -852,6 +930,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 		loadedContent: loaded.raw,
 		rt:            rt,
 		sid:           sid,
+		sessionDir:    filepath.Dir(tracePath),
 		source:        live,
 		driver:        driver,
 		sink:          sink,
@@ -978,6 +1057,101 @@ func (r *SessionRegistry) List() []runstatus.SessionHeader {
 		out = append(out, hdr)
 	}
 	return out
+}
+
+// ListArtifactJobs implements server.ArtifactJobProvider. The durable list is
+// intentionally independent of the live-session map, so completed and
+// interrupted work remains visible after process teardown.
+func (r *SessionRegistry) ListArtifactJobs(ctx context.Context) ([]server.ArtifactJobSummary, error) {
+	if r.daemonJobs == nil {
+		return []server.ArtifactJobSummary{}, nil
+	}
+	jobs, err := r.daemonJobs.List(ctx, artifactjob.ListFilter{Limit: 200})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]server.ArtifactJobSummary, 0, len(jobs))
+	for _, job := range jobs {
+		out = append(out, server.ArtifactJobSummary{
+			JobID:             string(job.ID),
+			SessionID:         string(job.SessionID),
+			AppID:             job.AppID,
+			Story:             job.Story,
+			Status:            string(job.Status),
+			Phase:             job.Phase,
+			Summary:           job.Summary,
+			RunURL:            job.RunURL,
+			UpdatedAt:         job.UpdatedAt,
+			InterruptedReason: job.InterruptedReason,
+		})
+	}
+	return out, nil
+}
+
+// RestoreDaemonJobs reattaches every non-terminal daemon job to its persisted
+// session. The sweep records the crash boundary before any recovery attempt;
+// failed reattachments remain interrupted and visible instead of disappearing
+// or being reported as live.
+func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
+	if r.daemonJobs == nil {
+		return 0, nil
+	}
+	if _, err := r.daemonJobs.SweepInterrupted(ctx, "daemon_restarted"); err != nil {
+		return 0, fmt.Errorf("mark daemon jobs interrupted: %w", err)
+	}
+	jobs, err := r.daemonJobs.List(ctx, artifactjob.ListFilter{
+		Status: []artifactjob.Status{artifactjob.StatusInterrupted},
+		Limit:  1000,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list interrupted daemon jobs: %w", err)
+	}
+	var restored int
+	var restoreErrs []error
+	for _, job := range jobs {
+		if job.Origin.Kind != "daemon" || job.Story == "" {
+			continue
+		}
+		id, attachErr := r.AttachExternal(ctx, job.Story, "daemon:"+string(job.ID))
+		if attachErr != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("restore job %s: %w", job.ID, attachErr))
+			continue
+		}
+		if id != string(job.ID) {
+			restoreErrs = append(restoreErrs, fmt.Errorf("restore job %s returned unstable route %s", job.ID, id))
+			continue
+		}
+		r.syncDaemonJob(id)
+		restored++
+	}
+	return restored, errors.Join(restoreErrs...)
+}
+
+func (r *SessionRegistry) syncDaemonJob(id string) {
+	if r.daemonJobs == nil {
+		return
+	}
+	r.mu.Lock()
+	e := r.sessions[id]
+	r.mu.Unlock()
+	if e == nil || e.source == nil {
+		return
+	}
+	snap, err := e.source.Snapshot()
+	if err != nil {
+		return
+	}
+	status := artifactjob.StatusRunning
+	if snap.Session.Terminal {
+		status = artifactjob.StatusDone
+	}
+	phase := snap.Session.CurrentState
+	reason := ""
+	_, _ = r.daemonJobs.Update(context.Background(), artifactjob.JobID(id), artifactjob.Update{
+		Status:            &status,
+		Phase:             &phase,
+		InterruptedReason: &reason,
+	})
 }
 
 // Reload mirrors the FULL TUI /reload path (tui.go handleReloadSlash), which is

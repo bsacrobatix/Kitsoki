@@ -45,11 +45,16 @@ type stubProvider struct {
 	mu sync.Mutex
 
 	entries  map[string]server.Entry
+	jobs     []server.ArtifactJobSummary
 	stories  []server.StoryHeader
 	newFn    func(ctx context.Context, storyPath string) (string, error)
 	seededFn func(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error)
 	reloadFn func(ctx context.Context, sessionID string) (bool, error)
 	rescanFn func() ([]server.StoryHeader, error)
+}
+
+func (p *stubProvider) ListArtifactJobs(context.Context) ([]server.ArtifactJobSummary, error) {
+	return append([]server.ArtifactJobSummary(nil), p.jobs...), nil
 }
 
 func newStubProvider() *stubProvider {
@@ -150,6 +155,18 @@ func TestMulti_NewSessionRoundTrip(t *testing.T) {
 	var appOut app.AppDef
 	rpcCall(t, ts, "runstatus.session.app", map[string]any{"session_id": created.SessionID}, &appOut)
 	assert.Equal(t, "story-app", appOut.App.ID)
+}
+
+func TestMulti_SessionGetReturnsRoutableProviderID(t *testing.T) {
+	t.Parallel()
+	p := newStubProvider()
+	p.put("stable-job-id", runstatus.SessionHeader{SessionID: "internal-session-id", AppID: "story-app"}, testDef())
+	ts := httptest.NewServer(server.NewMulti(p).Handler())
+	defer ts.Close()
+
+	var header runstatus.SessionHeader
+	rpcCall(t, ts, "runstatus.session.get", map[string]any{"session_id": "stable-job-id"}, &header)
+	assert.Equal(t, "stable-job-id", header.SessionID)
 }
 
 func TestMulti_NewSessionInitialWorld(t *testing.T) {
@@ -288,6 +305,22 @@ func TestMulti_SessionsList(t *testing.T) {
 		ids[h.SessionID] = true
 	}
 	assert.True(t, ids["s1"] && ids["s2"], "both live sessions listed, got %+v", list)
+}
+
+func TestMulti_ArtifactJobsList(t *testing.T) {
+	t.Parallel()
+	p := newStubProvider()
+	p.jobs = []server.ArtifactJobSummary{{
+		JobID: "job-1", AppID: "tasks", Status: "running", Phase: "implement", RunURL: "/s/job-1",
+	}}
+	ts := httptest.NewServer(server.NewMulti(p).Handler())
+	defer ts.Close()
+
+	var list []server.ArtifactJobSummary
+	rpcCall(t, ts, "runstatus.jobs.list", map[string]any{}, &list)
+	require.Len(t, list, 1)
+	assert.Equal(t, "job-1", list[0].JobID)
+	assert.Equal(t, "/s/job-1", list[0].RunURL)
 }
 
 // TestMulti_NewSessionInvalidStory proves an invalid story surfaces as a

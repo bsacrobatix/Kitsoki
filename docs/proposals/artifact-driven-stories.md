@@ -1,6 +1,6 @@
 # Epic: persistent artifact jobs (durable runs, shareable artifacts)
 
-**Status:** In progress. The first substrate pass has shipped a local artifact-job registry and rebuildable run/artifact index in `internal/artifactjob`; the story-loader, dev-story adoption, runstatus serving, hosted store, and TUI/web console slices remain open.
+**Status:** In progress. The local registry and rebuildable run/artifact index are shipped, and daemon mode now adopts that substrate for restartable sessions plus Web Home current-job links. Story-loader declarations, dev-story adoption, hosted storage, TUI, galleries, and lifecycle actions remain open.
 **Kind:**   epic
 **Slices:** 6 (0/6 fully shipped; registry/index substrate implemented)
 
@@ -14,6 +14,9 @@ This pass moved the first durable primitives into narrative docs and code:
 - `artifactjob.RunIndex` indexes runs and emitted artifacts by `job_id` without rewriting trace bytes.
 - `artifactjob.ReindexTrace` rebuilds index rows from immutable JSONL and existing `artifact.emitted` events.
 - `artifactjob.RunURL` establishes the stable `/run/<job-id>` route contract.
+- `kitsoki daemon` registers session jobs, restores non-terminal sessions after
+  service restart, and exposes stable `/s/<job-id>` drive links through
+  `runstatus.jobs.list` and Web Home.
 - Narrative docs now live in [`../stories/artifact-driven-stories.md`](../stories/artifact-driven-stories.md) and [`../tracing/trace-artifact-service.md`](../tracing/trace-artifact-service.md).
 
 Validation: `go test ./internal/artifactjob`.
