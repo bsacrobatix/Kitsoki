@@ -6,6 +6,8 @@
 package graph
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"sort"
@@ -18,6 +20,8 @@ import (
 // consume the computed roadmap unchanged — the same contract an authored
 // decomposition.yaml change node uses.
 type ChangeNode struct {
+	// ID is an opaque content-derived identity for dependency wiring. Render
+	// Title (not ID) in user-facing plans and review surfaces.
 	ID         string
 	Title      string
 	Goal       string
@@ -145,9 +149,9 @@ func Diff(current, desired *Catalog) []ChangeNode {
 		}
 		switch kind {
 		case gapAdded:
-			changes = append(changes, buildChangeNode("add", desired.Nodes[id], gapped))
+			changes = append(changes, buildChangeNode("add", desired.Nodes[id], current, desired, gapped))
 		case gapModified:
-			changes = append(changes, buildChangeNode("modify", desired.Nodes[id], gapped))
+			changes = append(changes, buildChangeNode("modify", desired.Nodes[id], current, desired, gapped))
 		case gapRemoved:
 			changes = append(changes, buildRemovedChangeNode(current.Nodes[id]))
 		}
@@ -169,26 +173,49 @@ func structurallyDiffers(c, d *Node) bool {
 	return !reflect.DeepEqual(c.Fields, d.Fields)
 }
 
-func buildChangeNode(verb string, node *Node, gapped map[NodeID]gapKind) ChangeNode {
+func buildChangeNode(verb string, node *Node, current, desired *Catalog, gapped map[NodeID]gapKind) ChangeNode {
 	return ChangeNode{
-		ID:         verb + "-" + string(node.ID),
+		ID:         changeNodeID(verb, node),
 		Title:      verbTitle(verb, node.Title),
 		Goal:       stringFieldOr(node.Fields, "goal", node.Title),
 		Scope:      stringSliceField(node.Fields, "scope"),
 		Acceptance: stringSliceField(node.Fields, "acceptance"),
-		DependsOn:  projectDependsOn(node, gapped),
+		DependsOn:  projectDependsOn(node, current, desired, gapped),
 	}
 }
 
 func buildRemovedChangeNode(node *Node) ChangeNode {
 	return ChangeNode{
-		ID:         "remove-" + string(node.ID),
+		ID:         changeNodeID("remove", node),
 		Title:      verbTitle("remove", node.Title),
 		Goal:       fmt.Sprintf("Remove %s: present in the current graph, no longer wanted in the desired graph.", node.ID),
 		Scope:      stringSliceField(node.Fields, "scope"),
 		Acceptance: []string{fmt.Sprintf("%s no longer exists in the catalog", node.ID)},
 		DependsOn:  nil,
 	}
+}
+
+// changeNodeID derives a compact opaque identity from the operation and the
+// full target-node content. Independent edits to a same-named node therefore
+// do not manufacture the same roadmap ID, while re-running the same diff is
+// stable. The title remains the human-facing reference.
+func changeNodeID(verb string, node *Node) string {
+	content, err := yaml.Marshal(map[string]any{
+		"id":         node.ID,
+		"schema":     node.Schema,
+		"title":      node.Title,
+		"visibility": node.Visibility,
+		"sources":    node.Sources,
+		"edges":      node.Edges,
+		"fields":     node.Fields,
+	})
+	if err != nil {
+		// Catalogs loaded from YAML are marshalable. Keep Diff total for
+		// programmatic callers that supply an unusual Field value, though.
+		content = []byte(fmt.Sprintf("%#v", node))
+	}
+	digest := sha256.Sum256(append([]byte(verb+"\n"), content...))
+	return "change-" + hex.EncodeToString(digest[:12])
 }
 
 func verbTitle(verb, title string) string {
@@ -208,7 +235,7 @@ func verbTitle(verb, title string) string {
 // themselves part of the gap — a dependency already satisfied in current
 // has no roadmap work left, so it's dropped rather than emitted as a
 // depends_on the consumer would wait on forever.
-func projectDependsOn(node *Node, gapped map[NodeID]gapKind) []string {
+func projectDependsOn(node *Node, current, desired *Catalog, gapped map[NodeID]gapKind) []string {
 	raw, _ := node.Fields["depends_on"].([]any)
 	var kept []string
 	for _, r := range raw {
@@ -217,22 +244,27 @@ func projectDependsOn(node *Node, gapped map[NodeID]gapKind) []string {
 			continue
 		}
 		if _, isGap := gapped[NodeID(s)]; isGap {
-			kept = append(kept, prefixForGap(NodeID(s), gapped)+s)
+			depID := NodeID(s)
+			depNode := desired.Nodes[depID]
+			if gapped[depID] == gapRemoved {
+				depNode = current.Nodes[depID]
+			}
+			kept = append(kept, changeNodeID(string(prefixForGap(depID, gapped)), depNode))
 		}
 	}
 	return kept
 }
 
-// prefixForGap returns the verb prefix the OTHER gapped node's own emitted
-// ChangeNode.ID uses, so a depends_on entry names a real emitted id.
+// prefixForGap returns the operation the OTHER gapped node's emitted
+// ChangeNode represents, so a depends_on entry names its opaque identity.
 func prefixForGap(id NodeID, gapped map[NodeID]gapKind) string {
 	switch gapped[id] {
 	case gapAdded:
-		return "add-"
+		return "add"
 	case gapModified:
-		return "modify-"
+		return "modify"
 	case gapRemoved:
-		return "remove-"
+		return "remove"
 	default:
 		return ""
 	}

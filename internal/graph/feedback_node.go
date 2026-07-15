@@ -22,7 +22,7 @@ type FeedbackNodeSpec struct {
 	// taxonomy's declared order. See FeedbackNodeAfter for the mapping.
 	Fields []string
 	// NodeID is the fresh id for the new node (never a changeset's own
-	// cs-<n>, which Propose mints itself).
+	// opaque changeset id, which Propose mints itself).
 	NodeID string
 	// Title is the human-readable one-liner carried by the node.
 	Title string

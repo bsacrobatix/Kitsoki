@@ -62,6 +62,9 @@ func TestGraphHistoryOp_ChangesetEra(t *testing.T) {
 	if e0["changeset_id"] != "cs-1" {
 		t.Errorf("changeset_id = %v, want cs-1", e0["changeset_id"])
 	}
+	if summary, _ := e0["summary"].(string); !strings.Contains(summary, `changeset "Flip req-beta to done"`) || strings.Contains(summary, "cs-1") {
+		t.Errorf("summary = %q, want title-first changeset reference without opaque id", summary)
+	}
 	if e0["kind"] != "modified" {
 		t.Errorf("kind = %v, want modified", e0["kind"])
 	}

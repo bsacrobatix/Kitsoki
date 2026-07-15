@@ -46,7 +46,7 @@ func graphProposeCmd() *cobra.Command {
 		Use:   "propose <catalog-path>",
 		Short: "Propose a changeset against a catalog (CLI twin of mcp-graph's graph.propose)",
 		Long: `Reads a changeset from --file (or stdin), wraps it in a proper
-graph/changeset/v1 node — next free cs-N id, status: proposed, authored_by
+graph/changeset/v1 node — an opaque collision-resistant id, status: proposed, authored_by
 from --actor, created_at stamped — appends it to the catalog at
 <catalog-path>, and validates it exactly like mcp-graph's graph.propose
 tool: every operation is checked, and the candidate catalog is re-loaded
@@ -145,7 +145,7 @@ non-zero on rejection, printing every reject reason and lint issue.`,
 				fmt.Fprintln(out, "graph propose: validate-only clean, nothing written")
 				return nil
 			}
-			fmt.Fprintf(out, "graph propose: %s (%s) appended to %s\n", changesetID, status, path)
+			fmt.Fprintf(out, "graph propose: %q (%s) appended to %s [id: %s]\n", input.Title, status, path, changesetID)
 			return nil
 		},
 	}

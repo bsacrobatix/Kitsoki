@@ -327,7 +327,7 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 	// the exact same node shape this MCP carrier does — see its doc
 	// comment for the field-mapping judgment call. The new node's own id is
 	// a fresh id derived from the report id (never the changeset's own
-	// cs-<n>, which Propose mints itself). anchor.node is this carrier's
+	// opaque changeset id, which Propose mints itself). anchor.node is this carrier's
 	// only reliable target — filed_against lands empty when the caller
 	// didn't supply one, same as before.
 	targetNodeID := ""
@@ -340,8 +340,8 @@ func routeFeedbackToCatalogSink(ctx context.Context, deps *Deps, path, reportID 
 		Kind:         args.Kind,
 		TargetNodeID: targetNodeID,
 		NodeID:       "feedback-" + reportID,
-		Title:     args.Title,
-		ReportRef: reportID,
+		Title:        args.Title,
+		ReportRef:    reportID,
 	})
 
 	hostArgs := map[string]any{

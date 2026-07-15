@@ -235,7 +235,7 @@ func TestFeedbackIntake_CatalogSinkFiresForRoutedProducer(t *testing.T) {
 		t.Fatalf("no catalog sink in routed: %v (routing_errors: %v)", resp["routed"], resp["routing_errors"])
 	}
 	if !strings.HasPrefix(catalogRef, "cs-") {
-		t.Errorf("catalog ref = %q, want a cs-<n> changeset id", catalogRef)
+		t.Errorf("catalog ref = %q, want an opaque cs- changeset id", catalogRef)
 	}
 
 	// The proposed node rides the changeset's operations (propose never

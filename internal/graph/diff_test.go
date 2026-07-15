@@ -2,6 +2,7 @@ package graph
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -27,15 +28,13 @@ func TestDiff_GoldenRoadmap(t *testing.T) {
 
 	want := []ChangeNode{
 		{
-			ID:         "add-change-diff",
 			Title:      "Add: internal/graph diff",
 			Goal:       "Compute the roadmap delta between current and desired catalogs.",
 			Scope:      []string{"internal/graph/diff.go"},
 			Acceptance: []string{"go test ./internal/graph/... green"},
-			DependsOn:  []string{"modify-change-modify-target"},
+			DependsOn:  []string{got[2].ID},
 		},
 		{
-			ID:         "remove-change-legacy-cli",
 			Title:      "Remove: legacy graph CLI verb",
 			Goal:       "Remove change-legacy-cli: present in the current graph, no longer wanted in the desired graph.",
 			Scope:      []string{"cmd/kitsoki/legacy.go"},
@@ -43,7 +42,6 @@ func TestDiff_GoldenRoadmap(t *testing.T) {
 			DependsOn:  nil,
 		},
 		{
-			ID:         "modify-change-modify-target",
 			Title:      "Modify: internal/graph modify target",
 			Goal:       "Sharpen modify to reject stale field-change paths, not just stale values.",
 			Scope:      []string{"internal/graph/modify.go"},
@@ -51,9 +49,31 @@ func TestDiff_GoldenRoadmap(t *testing.T) {
 			DependsOn:  nil,
 		},
 	}
+	for i := range want {
+		if !strings.HasPrefix(got[i].ID, "change-") || len(got[i].ID) != len("change-")+24 {
+			t.Fatalf("change %q has non-opaque id %q", got[i].Title, got[i].ID)
+		}
+		want[i].ID = got[i].ID
+	}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Diff mismatch.\ngot:  %+v\nwant: %+v", got, want)
+	}
+}
+
+func TestDiff_ContentAddressedIDsSeparateDivergentSameNamedChanges(t *testing.T) {
+	base := &Node{ID: "req-shared", Schema: "graph/requirement/v0", Title: "Shared requirement", Visibility: VisibilityInternal, Fields: map[string]any{"goal": "original"}}
+	current := &Catalog{Nodes: map[NodeID]*Node{"req-shared": base}}
+	first := &Catalog{Nodes: map[NodeID]*Node{"req-shared": {ID: "req-shared", Schema: base.Schema, Title: base.Title, Visibility: base.Visibility, Fields: map[string]any{"goal": "first edit"}}}}
+	second := &Catalog{Nodes: map[NodeID]*Node{"req-shared": {ID: "req-shared", Schema: base.Schema, Title: base.Title, Visibility: base.Visibility, Fields: map[string]any{"goal": "second edit"}}}}
+
+	firstID := Diff(current, first)[0].ID
+	secondID := Diff(current, second)[0].ID
+	if again := Diff(current, first)[0].ID; firstID != again {
+		t.Fatalf("identical diff changed identity from %q to %q", firstID, again)
+	}
+	if firstID == secondID {
+		t.Fatalf("divergent edits of req-shared received the same roadmap id %q", firstID)
 	}
 }
 

@@ -377,7 +377,7 @@ func historyChangesetEntries(cat *objectgraph.Catalog, id string) []historyEntry
 				Ts:          ts,
 				ID:          string(targetID),
 				Kind:        string(kind),
-				Summary:     fmt.Sprintf("%s %s via changeset %s (%s)", targetID, kind, csID, node.Title),
+				Summary:     fmt.Sprintf("%s %s via changeset %q", targetID, kind, node.Title),
 				ChangesetID: string(csID),
 			})
 		}

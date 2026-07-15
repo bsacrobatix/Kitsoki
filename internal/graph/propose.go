@@ -1,6 +1,8 @@
 package graph
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -135,21 +137,20 @@ func rawOpsToAny(ops []map[string]any) []any {
 	return out
 }
 
-// nextChangesetID picks a fresh, collision-free "cs-<n>" id — the simplest
-// deterministic scheme that survives concurrent-ish propose calls within a
-// single process (each call reloads the catalog fresh).
-func nextChangesetID(cat *Catalog) NodeID {
-	n := 0
-	for _, node := range cat.Nodes {
-		if node.TypeID == "changeset" {
-			n++
-		}
-	}
+// nextChangesetID mints an opaque, collision-resistant changeset identity.
+// A catalog-local cs-N counter makes independent proposals based on the same
+// revision invent the same node, turning unrelated work into a merge
+// conflict. The title is the human reference; this value is only the stable
+// machine handle used by lifecycle operations.
+func nextChangesetID(cat *Catalog) (NodeID, error) {
 	for {
-		n++
-		candidate := NodeID(fmt.Sprintf("cs-%d", n))
+		var entropy [16]byte
+		if _, err := cryptorand.Read(entropy[:]); err != nil {
+			return "", fmt.Errorf("generate changeset id: %w", err)
+		}
+		candidate := NodeID("cs-" + hex.EncodeToString(entropy[:]))
 		if _, exists := cat.Nodes[candidate]; !exists {
-			return candidate
+			return candidate, nil
 		}
 	}
 }
@@ -182,7 +183,7 @@ func Propose(rootPath string, input ProposeInput, actor string, clk clock.Clock)
 	// File-level CAS (hazard guard #2): each attempt does a fresh
 	// LoadCatalog + id allocation; a concurrent writer landing in the
 	// window is detected right before copy-back and the whole attempt
-	// (including cs-<n> allocation) is redone against a fresh load.
+	// (including changeset identity allocation) is redone against a fresh load.
 	for attempt := 1; attempt <= casMaxAttempts; attempt++ {
 		res, retry, err := proposeOnce(rootPath, input, actor, clk)
 		if retry {
@@ -225,7 +226,10 @@ func proposeOnce(rootPath string, input ProposeInput, actor string, clk clock.Cl
 		return &ProposeResult{RejectReasons: reasons}, false, nil
 	}
 
-	id := nextChangesetID(cat)
+	id, err := nextChangesetID(cat)
+	if err != nil {
+		return nil, false, fmt.Errorf("graph propose: %w", err)
+	}
 	visibility := input.Visibility
 	if visibility == "" {
 		visibility = "internal"

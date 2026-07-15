@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -41,18 +43,22 @@ func TestGraphProposeCmd_AppendsProposedChangesetFromStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph propose must exit 0, got: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "cs-1 (proposed) appended") {
-		t.Fatalf("expected minted cs-1 in output, got:\n%s", out)
+	if !strings.Contains(out, `"proposed via CLI" (proposed) appended`) {
+		t.Fatalf("expected title-first propose output, got:\n%s", out)
 	}
 
 	cat, err := graph.LoadCatalog(root)
 	if err != nil {
 		t.Fatalf("reload catalog: %v", err)
 	}
-	node, ok := cat.Nodes["cs-1"]
-	if !ok {
-		t.Fatalf("expected changeset node cs-1 in the catalog after propose")
+	ids := changesetNodeIDs(cat)
+	if len(ids) != 1 {
+		t.Fatalf("expected one changeset node after propose, got %v", ids)
 	}
+	if !isOpaqueChangesetID(ids[0]) {
+		t.Fatalf("changeset id %q is not an opaque 128-bit identifier", ids[0])
+	}
+	node := cat.Nodes[ids[0]]
 	if node.Status != "proposed" {
 		t.Fatalf("changeset status: expected proposed, got %v", node.Status)
 	}
@@ -76,8 +82,15 @@ func TestGraphProposeCmd_MintsNextFreeChangesetID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second propose: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "cs-2 (proposed) appended") {
-		t.Fatalf("expected the second proposal to mint cs-2, got:\n%s", out)
+	if !strings.Contains(out, `"proposed via CLI" (proposed) appended`) {
+		t.Fatalf("expected title-first output for second proposal, got:\n%s", out)
+	}
+	cat, err := graph.LoadCatalog(root)
+	if err != nil {
+		t.Fatalf("reload catalog: %v", err)
+	}
+	if ids := changesetNodeIDs(cat); len(ids) != 2 || ids[0] == ids[1] {
+		t.Fatalf("expected two distinct opaque changeset ids, got %v", ids)
 	}
 }
 
@@ -101,8 +114,8 @@ func TestGraphProposeCmd_BareOperationsListNeedsTitleFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bare operations with --title must succeed, got: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "cs-1 (proposed) appended") {
-		t.Fatalf("expected cs-1 minted, got:\n%s", out)
+	if !strings.Contains(out, `"bare ops via flag" (proposed) appended`) {
+		t.Fatalf("expected title-first output, got:\n%s", out)
 	}
 }
 
@@ -125,8 +138,8 @@ func TestGraphProposeCmd_FromFileWithValidateOnlyWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload catalog: %v", err)
 	}
-	if _, ok := cat.Nodes["cs-1"]; ok {
-		t.Fatalf("--validate-only must not write a changeset node")
+	if ids := changesetNodeIDs(cat); len(ids) != 0 {
+		t.Fatalf("--validate-only must not write a changeset node: %v", ids)
 	}
 }
 
@@ -154,7 +167,27 @@ operations:
 	if lerr != nil {
 		t.Fatalf("reload catalog: %v", lerr)
 	}
-	if _, ok := cat.Nodes["cs-1"]; ok {
-		t.Fatalf("a rejected proposal must not write a changeset node")
+	if ids := changesetNodeIDs(cat); len(ids) != 0 {
+		t.Fatalf("a rejected proposal must not write a changeset node: %v", ids)
 	}
+}
+
+func changesetNodeIDs(cat *graph.Catalog) []graph.NodeID {
+	ids := make([]graph.NodeID, 0)
+	for id, node := range cat.Nodes {
+		if node.TypeID == "changeset" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+func isOpaqueChangesetID(id graph.NodeID) bool {
+	value := strings.TrimPrefix(string(id), "cs-")
+	if value == string(id) || len(value) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }

@@ -26,7 +26,7 @@ import (
 // content-digest mismatch immediately before copy-back, causes the whole
 // operation (fresh LoadCatalog, re-validate, rebuild scratch) to be retried
 // up to this many times before giving up with a CONFLICT reject reason.
-// This also covers cs-<n> id allocation races: a retry re-runs
+// This also covers changeset allocation races: a retry re-runs
 // nextChangesetID against a freshly reloaded catalog.
 const casMaxAttempts = 3
 
