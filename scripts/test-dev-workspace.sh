@@ -33,12 +33,11 @@ cat >"$repo/scripts/merge-to-main.sh" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 branch="${1:?branch required}"
-source_dir=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --source-dir)
-      source_dir="${2:?--source-dir requires a value}"
-      shift 2
+      echo "unexpected Kitsoki-only --source-dir argument" >&2
+      exit 99
       ;;
     --gate)
       shift 2
@@ -56,10 +55,6 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ "$(git branch --show-current)" = "main" ] || { echo "not on main" >&2; exit 1; }
-if [ -n "$source_dir" ]; then
-  git fetch "$source_dir" "$branch:refs/heads/capsule/test-main-land" >/dev/null
-  branch="capsule/test-main-land"
-fi
 git merge --ff-only "$branch"
 SH
   chmod +x "$repo/scripts/merge-to-main.sh"

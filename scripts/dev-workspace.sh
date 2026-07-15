@@ -1474,7 +1474,11 @@ cmd_merge() {
   local landed=0
   if [ "$target" = "main" ]; then
     local -a merge_args
-    merge_args=("$branch" "--source-dir" "$path")
+    # The proven workspace result is already imported into the primary
+    # checkout as this transport branch. Hand that branch to the repository's
+    # native protected-main helper; helpers need not implement a Kitsoki-only
+    # --source-dir extension.
+    merge_args=("$landing_branch")
     if [ -n "$gate" ]; then
       merge_args+=("--gate" "$gate")
     fi
