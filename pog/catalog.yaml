@@ -2711,3 +2711,172 @@ nodes:
     status: proposed
     title: Bootstrap changeset lifecycle types in generated member catalogs
     visibility: public
+  - created_at: "2026-07-15T09:07:53Z"
+    id: cs-12
+    operations:
+      - after:
+          edges:
+            acceptance:
+              - req-daemon-federation-ssh-trust
+              - req-daemon-federation-namespaced-jobs
+              - req-daemon-federation-partial-health
+              - req-daemon-federation-worker-self-contained
+              - req-daemon-federation-placement-profiles
+              - req-daemon-federation-ephemeral-boundary
+            exercises:
+              - feature-daemon-federation
+            part_of:
+              - product-kitsoki
+          fields:
+            summary: 'Trigger: An early adopter has local Claude/Codex subscription OAuth plus one or more VM or workstation workers with API-key or local-model capacity. Outcome: One local Kitsoki daemon shows namespaced jobs and honest worker health across all peers while each worker keeps a self-contained UI and executes with its own configured harness.'
+          id: usecase-developer-federates-daemon-workers
+          schema: kitsoki/use-case/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Developer federates local subscription harnesses with autonomous VM workers
+          type: use-case
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            requirements:
+              - req-daemon-federation-ssh-trust
+              - req-daemon-federation-namespaced-jobs
+              - req-daemon-federation-partial-health
+              - req-daemon-federation-worker-self-contained
+              - req-daemon-federation-placement-profiles
+              - req-daemon-federation-ephemeral-boundary
+            use_cases:
+              - usecase-developer-federates-daemon-workers
+          fields:
+            summary: Aggregate durable job status from multiple self-contained Kitsoki daemons over authenticated operator-managed transport, retaining worker provenance and truthful degraded-state reporting.
+          id: feature-daemon-federation
+          schema: kitsoki/feature/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Federated daemon workers
+          type: feature
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            motivated_by:
+              - usecase-developer-federates-daemon-workers
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-daemon-federation
+          fields:
+            summary: A controller must never require an unauthenticated public daemon bind. SSH transport uses an explicit identity, BatchMode, ExitOnForwardFailure, StrictHostKeyChecking, and a known-hosts file.
+          id: req-daemon-federation-ssh-trust
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Remote workers remain loopback-only and are reached with strict SSH host-key verification
+          type: requirement
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            motivated_by:
+              - usecase-developer-federates-daemon-workers
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-daemon-federation
+          fields:
+            summary: Every aggregated job reports worker id, label, placement, and original remote job id; the UI keys rows by worker plus job id and preserves an actionable worker URL.
+          id: req-daemon-federation-namespaced-jobs
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Federated jobs retain worker provenance and collision-free identity
+          type: requirement
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            motivated_by:
+              - usecase-developer-federates-daemon-workers
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-daemon-federation
+          fields:
+            summary: Status fan-out is concurrent and timeout-bounded. Per-worker connecting, online, degraded, or offline state and last error are visible without failing the aggregate jobs response.
+          id: req-daemon-federation-partial-health
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: One unavailable worker cannot hide healthy workers or local jobs
+          type: requirement
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            motivated_by:
+              - usecase-developer-federates-daemon-workers
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-daemon-federation
+          fields:
+            summary: A VM or workstation runs ordinary daemon mode with its own SQLite bindings, stable job routes, profiles, and restart contract; federation reads that public contract instead of sharing databases.
+          id: req-daemon-federation-worker-self-contained
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Every worker keeps its own durable jobs API and UI
+          type: requirement
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            motivated_by:
+              - usecase-developer-federates-daemon-workers
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-daemon-federation
+          fields:
+            summary: Configuration records placement and capability metadata without exposing credentials. Local subscription OAuth stays local; VM and workstation workers use their own API-key or local-model profiles.
+          id: req-daemon-federation-placement-profiles
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Worker placement supports thin cloud harnesses and powerful local-model workstations
+          type: requirement
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            motivated_by:
+              - usecase-developer-federates-daemon-workers
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-daemon-federation
+          fields:
+            summary: The initial worker registry is static, while create, readiness, drain, destroy, and cost metadata fit behind a provider interface so per-second cloud VMs can be added without changing job identity or UI contracts.
+          id: req-daemon-federation-ephemeral-boundary
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-daemon-federation-20260715
+          status: proposed
+          title: Ephemeral VM lifecycle is a phase-two provisioner boundary
+          type: requirement
+          visibility: public
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Define federated daemon workers and autonomous placement contract
+    visibility: internal
