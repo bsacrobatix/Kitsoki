@@ -521,10 +521,18 @@ export class LiveSource implements DataSource {
     });
   }
 
-  sendTurn(sessionId: string, input: string): Promise<TurnResult> {
+  sendTurn(sessionId: string, input: string, slots: Record<string, unknown> = {}): Promise<TurnResult> {
     return this.client.post<TurnResult>("runstatus.session.turn", {
       session_id: sessionId,
       input,
+      ...(Object.keys(slots).length > 0 ? { slots } : {}),
+    });
+  }
+
+  async patchWorld(sessionId: string, patch: Record<string, unknown>): Promise<void> {
+    await this.client.post<{ ok: boolean }>("runstatus.session.patch_world", {
+      session_id: sessionId,
+      patch,
     });
   }
 

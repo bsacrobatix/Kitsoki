@@ -221,7 +221,9 @@ export interface DataSource {
     anchor?: import("../lib/annotationAnchor.js").AnnotationAnchor
   ): Promise<TurnResult>;
   /** Free-text turn: hand raw input to the interpreter to pick an intent. */
-  sendTurn(sessionId: string, input: string): Promise<TurnResult>;
+  sendTurn(sessionId: string, input: string, slots?: Record<string, unknown>): Promise<TurnResult>;
+  /** Patch live session world vars without advancing a turn. */
+  patchWorld?(sessionId: string, patch: Record<string, unknown>): Promise<void>;
   /** Supply missing slots to a clarifying turn and continue. */
   continueTurn(
     sessionId: string,

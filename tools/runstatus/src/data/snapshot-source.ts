@@ -127,7 +127,11 @@ export class SnapshotSource implements DataSource {
     return this.readOnly("submit");
   }
 
-  sendTurn(_sessionId: string, _input: string): Promise<TurnResult> {
+  sendTurn(
+    _sessionId: string,
+    _input: string,
+    _slots?: Record<string, unknown>
+  ): Promise<TurnResult> {
     return this.readOnly("sendTurn");
   }
 

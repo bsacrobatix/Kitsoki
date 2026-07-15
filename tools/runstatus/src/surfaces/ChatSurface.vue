@@ -102,7 +102,7 @@ import ActivityFeed from "../components/ActivityFeed.vue";
 import ChatTranscript from "../components/ChatTranscript.vue";
 import InputBar from "../components/InputBar.vue";
 import { resolveEmbedBoot } from "../lib/embedBoot.js";
-import { EmbedHost } from "../lib/embedHost.js";
+import { EmbedHost, type EmbedContext } from "../lib/embedHost.js";
 
 const store = useRunStore();
 
@@ -120,6 +120,7 @@ let source: DataSource | null = null;
 // live server, exactly as HomeView does.
 let live: LiveSource | null = null;
 let unsubscribe: (() => void) | null = null;
+let stopEmbedContext: (() => void) | null = null;
 
 const sessionId = ref<string | null>(null);
 const loading = ref(true);
@@ -209,13 +210,39 @@ async function ensureStories(): Promise<void> {
 // loses — hosts that care should send world_seed).
 let bootContext: Record<string, unknown> | null = null;
 
+function cleanPortalContext(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!ctx) return null;
+  const { kitsoki: _kitsoki, v: _v, ...rest } = ctx as Record<string, unknown>;
+  return Object.keys(rest).length > 0 ? rest : null;
+}
+
+function contextPatch(ctx: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const cleaned = cleanPortalContext(ctx);
+  const patch: Record<string, unknown> = {};
+  const catalog = typeof cleaned?.catalog === "string" ? cleaned.catalog : boot.catalog;
+  const scope = typeof cleaned?.scope === "string" ? cleaned.scope : boot.scope;
+  if (catalog) patch.catalog = catalog;
+  if (scope) patch.scope_key = scope;
+  if (cleaned) patch.portal_context = cleaned;
+  return patch;
+}
+
+async function applyLatestHostSnapshot(): Promise<void> {
+  if (!source || !sessionId.value || !source.patchWorld) return;
+  const latest = embedHost.latest() as EmbedContext | null;
+  const patch = contextPatch(latest ?? bootContext);
+  if (Object.keys(patch).length === 0) return;
+  await source.patchWorld(sessionId.value, patch);
+}
+
 onMounted(async () => {
   source = createDataSource();
+  stopEmbedContext = embedHost.startContextListener();
   embedHost.sendReady();
   if (boot.worldSeed) {
-    bootContext = boot.worldSeed;
+    bootContext = cleanPortalContext(boot.worldSeed);
   } else if (boot.story || boot.autostart) {
-    bootContext = (await embedHost.waitForContext()) as Record<string, unknown> | null;
+    bootContext = cleanPortalContext((await embedHost.waitForContext()) as Record<string, unknown> | null);
   }
   try {
     const current = await source.getCurrentSession();
@@ -233,6 +260,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   unsubscribe?.();
+  stopEmbedContext?.();
   store.teardown();
 });
 
@@ -257,9 +285,7 @@ async function onStart(): Promise<void> {
     // boot — both fold into world.portal_context/catalog/scope_key so the
     // agent's very first turn already has them via relevant_world.
     const initialWorld: Record<string, unknown> = {};
-    if (boot.catalog) initialWorld.catalog = boot.catalog;
-    if (boot.scope) initialWorld.scope_key = boot.scope;
-    if (bootContext) initialWorld.portal_context = bootContext;
+    Object.assign(initialWorld, contextPatch(bootContext));
     const id = await live.newSession(storyPath, { initialWorld });
     await adopt(id);
     embedHost.sendEvent("session_started", { session_id: id });
@@ -277,6 +303,7 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
   pending.value = true;
   error.value = null;
   try {
+    await applyLatestHostSnapshot();
     await fn();
     embedHost.sendEvent("turn_done", { session_id: sessionId.value ?? undefined });
   } catch (e) {
@@ -290,7 +317,7 @@ async function runTurn(fn: () => Promise<unknown>): Promise<void> {
 
 function onSend(text: string, _intentName: string): void {
   if (!source || !sessionId.value) return;
-  void runTurn(() => store.sendText(source!, sessionId.value!, text));
+  void runTurn(() => store.sendText(source!, sessionId.value!, text, _intentName));
 }
 
 function onIntent(name: string, slots: Record<string, unknown>, displayLabel?: string): void {

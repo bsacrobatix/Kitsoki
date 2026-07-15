@@ -962,7 +962,7 @@ export const useRunStore = defineStore("run", () => {
       capturedStream = out.streamedText;
       capturedItems = out.stream;
     } else {
-      result = await source.sendTurn(sessionId, text);
+      result = await source.sendTurn(sessionId, text, viewSlots);
     }
     // Tag the user entry with its turn number so the routing chip can recover
     // provenance from the event log (chatEntries) once the turn.start +

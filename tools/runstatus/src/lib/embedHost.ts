@@ -49,6 +49,8 @@ function referrerOrigin(): string | null {
 
 export class EmbedHost {
   private readonly targetOrigin: string;
+  private latestContext: EmbedContext | null = null;
+  private contextUnsubscribe: (() => void) | null = null;
 
   constructor(originParam: string | null) {
     this.targetOrigin = originParam || referrerOrigin() || "*";
@@ -67,6 +69,29 @@ export class EmbedHost {
     this.post({ kitsoki: "event", v: 0, type, ...extra });
   }
 
+  latest(): EmbedContext | null {
+    return this.latestContext;
+  }
+
+  /**
+   * Keep listening for host context messages for the lifetime of the embed.
+   * The host can post a fresh snapshot after boot; ChatSurface reads the latest
+   * value immediately before dispatching a turn.
+   */
+  startContextListener(): () => void {
+    if (this.contextUnsubscribe) return this.contextUnsubscribe;
+    const onMessage = (ev: MessageEvent) => {
+      if (!isEmbedContext(ev.data)) return;
+      this.latestContext = ev.data;
+    };
+    window.addEventListener("message", onMessage);
+    this.contextUnsubscribe = () => {
+      window.removeEventListener("message", onMessage);
+      this.contextUnsubscribe = null;
+    };
+    return this.contextUnsubscribe;
+  }
+
   /**
    * Resolve with the first `context` message received, or null once
    * `timeoutMs` elapses with none. Used once at boot so autostart's
@@ -78,6 +103,7 @@ export class EmbedHost {
       let settled = false;
       const onMessage = (ev: MessageEvent) => {
         if (!isEmbedContext(ev.data)) return;
+        this.latestContext = ev.data;
         if (settled) return;
         settled = true;
         window.removeEventListener("message", onMessage);

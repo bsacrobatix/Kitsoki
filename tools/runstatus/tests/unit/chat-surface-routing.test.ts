@@ -49,6 +49,9 @@ const dataSource = {
   getTrace: vi.fn().mockResolvedValue({ events: [], last_turn: 0 }),
   subscribe: vi.fn().mockReturnValue(() => {}),
   view: vi.fn().mockResolvedValue(OPENING_VIEW),
+  patchWorld: vi.fn().mockResolvedValue(undefined),
+  sendTurn: vi.fn().mockResolvedValue(OPENING_VIEW),
+  submit: vi.fn().mockResolvedValue(OPENING_VIEW),
 };
 
 vi.mock("../../src/data/source.js", () => ({
@@ -115,5 +118,69 @@ describe("ChatSurface — routing chip binding", () => {
     expect(chip.exists()).toBe(true);
     expect(chip.find(".chat-routing__intent").text()).toBe("git.commit");
     expect(chip.find(".chat-routing__tier").text()).toBe("semantic");
+  });
+
+  it("patches the latest host context before free-text and intent dispatch", async () => {
+    const calls: string[] = [];
+    dataSource.patchWorld.mockImplementation(async () => {
+      calls.push("patch");
+    });
+    dataSource.sendTurn.mockImplementation(async () => {
+      calls.push("send");
+      return OPENING_VIEW;
+    });
+    dataSource.submit.mockImplementation(async () => {
+      calls.push("submit");
+      return OPENING_VIEW;
+    });
+
+    const wrapper = mount(ChatSurface, {
+      global: {
+        stubs: {
+          ActivityFeed: true,
+          ChatTranscript: true,
+          InputBar: {
+            template: `
+              <div>
+                <button data-testid="stub-send" @click="$emit('send', 'fix selected requirement', 'discuss')">send</button>
+                <button data-testid="stub-intent" @click="$emit('intent', 'apply', { target: 'node-a' })">intent</button>
+              </div>
+            `,
+          },
+        },
+      },
+    });
+    await flushPromises();
+
+    window.dispatchEvent(new MessageEvent("message", {
+      data: {
+        kitsoki: "context",
+        v: 0,
+        catalog: "pog",
+        scope: "feature-a",
+        node_ids: ["req-a"],
+        filters: { lifecycle: "definition" },
+        instruction: "use the selected requirement",
+      },
+    }));
+
+    await wrapper.find("[data-testid='stub-send']").trigger("click");
+    await flushPromises();
+    expect(calls.slice(0, 2)).toEqual(["patch", "send"]);
+    expect(dataSource.patchWorld).toHaveBeenLastCalledWith("sess-1", {
+      catalog: "pog",
+      scope_key: "feature-a",
+      portal_context: {
+        catalog: "pog",
+        scope: "feature-a",
+        node_ids: ["req-a"],
+        filters: { lifecycle: "definition" },
+        instruction: "use the selected requirement",
+      },
+    });
+
+    await wrapper.find("[data-testid='stub-intent']").trigger("click");
+    await flushPromises();
+    expect(calls.slice(2, 4)).toEqual(["patch", "submit"]);
   });
 });
