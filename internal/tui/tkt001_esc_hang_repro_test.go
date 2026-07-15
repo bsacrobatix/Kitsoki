@@ -82,13 +82,19 @@ func TestTKT001_EscBannerDismiss_BlocksEventLoop(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 
-	// Press ESC — the banner dismiss path — and time how long Update() takes.
-	start := time.Now()
-	rm.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	elapsed := time.Since(start)
+	// Press ESC — the banner dismiss path — while the transaction remains held.
+	// The regression signal is whether Update() returns before the DB write can
+	// complete, not whether a contended test machine schedules it in a few
+	// milliseconds.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	}()
 
-	// Regression guard: Update() must return in microseconds because
-	// MarkNotificationRead is dispatched as a tea.Cmd, not called synchronously.
-	assert.Less(t, elapsed, 10*time.Millisecond,
-		"TKT-001 regression: Update() returned in %v; expected <10ms (sync DB call would block on held transaction)", elapsed)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		assert.Fail(t, "TKT-001 regression: Update() did not return while the notification DB transaction was held")
+	}
 }
