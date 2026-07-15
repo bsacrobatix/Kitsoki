@@ -2880,3 +2880,28 @@ nodes:
     status: proposed
     title: Define federated daemon workers and autonomous placement contract
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-15T09:53:45Z"
+    id: cs-13
+    operations:
+      - after:
+          edges:
+            motivated_by:
+              - usecase-agent-mines-backlog-into-graph
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-project-object-graph
+          id: req-graph-write-diff-locality
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          summary: 'Propose, authorize, apply, withdraw, and rebase must preserve every untouched catalog byte or reject before mutation with a precise canonicalization remedy. Acceptance covers a valid single-file catalog using non-encoder-equivalent YAML layout: proposing one changeset yields a bounded diff containing only that changeset, while repeated writes remain bounded; canonicalization is explicit, idempotent, and protected against later branch or writer regressions.'
+          title: Graph writes never reformat unrelated catalog content
+          visibility: public
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Prevent graph lifecycle writes from reformatting catalogs
+    visibility: public
