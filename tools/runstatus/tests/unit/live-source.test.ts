@@ -119,6 +119,17 @@ describe("LiveSource", () => {
     expect(body.method).toBe("runstatus.jobs.list");
   });
 
+	it("listWorkers calls runstatus.workers.list", async () => {
+		fetchMock.mockResolvedValueOnce(rpcOk([{ id: "build-vm", health: "online" }]));
+		const src = new LiveSource("/");
+		const workers = await src.listWorkers();
+		expect(workers[0]!.id).toBe("build-vm");
+		const body = JSON.parse(
+			(fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string
+		) as { method: string };
+		expect(body.method).toBe("runstatus.workers.list");
+	});
+
   it("listWork calls runstatus.work.list", async () => {
     fetchMock.mockResolvedValueOnce(
       rpcOk({

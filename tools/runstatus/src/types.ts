@@ -24,6 +24,20 @@ export interface ArtifactJobSummary {
   run_url: string;
   updated_at: string;
   interrupted_reason?: string;
+	worker_id?: string;
+	worker_label?: string;
+	placement?: string;
+	open_url?: string;
+}
+
+export interface WorkerSummary {
+	id: string;
+	label: string;
+	placement: string;
+	health: "connecting" | "online" | "degraded" | "offline";
+	last_seen?: string;
+	last_error?: string;
+	job_count: number;
 }
 
 export interface OperationRunSummary {

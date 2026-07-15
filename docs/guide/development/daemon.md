@@ -24,6 +24,100 @@ can read the same records through JSON-RPC:
 Bind only to trusted localhost or an authenticated internal proxy. The daemon
 does not add HTTP authentication.
 
+## Federate VM and workstation workers
+
+Each worker is an ordinary self-contained daemon: it owns its SQLite database,
+profiles, jobs API, stable session links, and restart behavior. A local
+controller may aggregate several workers by adding machine-local configuration
+to `.kitsoki.local.yaml`:
+
+Worker IDs are lowercase slugs and must be unique; `local` is reserved for the
+controller's own daemon.
+
+```yaml
+daemon_federation:
+  workers:
+    - id: thin-do
+      label: Thin DigitalOcean worker
+      placement: thin
+      endpoint: http://127.0.0.1:17777
+      tunnel:
+        host: 203.0.113.10
+        user: kitsoki
+        local_port: 17777
+        remote_host: 127.0.0.1
+        remote_port: 7777
+        identity_file: /home/me/.ssh/kitsoki-worker
+        known_hosts_file: /home/me/.ssh/known_hosts
+
+    - id: gx10
+      label: GX10 local-model workstation
+      placement: local-model
+      endpoint: http://127.0.0.1:17778
+      tunnel:
+        host: gx10.lan
+        user: kitsoki
+        local_port: 17778
+        remote_host: 127.0.0.1
+        remote_port: 7777
+        identity_file: /home/me/.ssh/kitsoki-worker
+        known_hosts_file: /home/me/.ssh/known_hosts
+```
+
+Starting the local `kitsoki daemon` supervises one strict OpenSSH local forward
+per `tunnel` entry. It uses batch mode, fails when forwarding cannot be
+established, verifies the host against the explicit known-hosts file, and
+reconnects after a dropped SSH process. An `endpoint` without `tunnel` is also
+supported for an operator-provided authenticated HTTPS/private-network path.
+
+The Home view shows local and remote worker health plus their durable jobs.
+`runstatus.jobs.list` remains an array and adds `worker_id`, `worker_label`,
+`placement`, and `open_url`; job IDs are not rewritten. Consumers must key a
+federated row by `(worker_id, job_id)`. `runstatus.workers.list` returns
+`connecting`, `online`, `degraded`, or `offline` health, last-seen/error, and
+job count without exposing SSH targets or key paths. Polling is concurrent and
+partial: an offline worker remains visible but cannot hide local or healthy
+worker jobs.
+
+Keep subscription OAuth where its CLI login lives. A typical early-adopter
+topology is:
+
+- local daemon: native Claude/Codex CLI profiles using ambient subscription
+  authentication;
+- thin VM: Claude/Codex CLI retargeted to an OpenAI- or Anthropic-compatible
+  API through VM-local environment variables;
+- powerful workstation/GX10: a `builtin.local_llm` profile or an API profile
+  pointing at that machine's model server.
+
+Do not copy local subscription credential stores to a VM as part of federation.
+Worker credentials belong in that worker's `~/.config/kitsoki/daemon.env` or
+other provider-native secret store.
+
+### Worker deployment
+
+Install Kitsoki on the worker, configure its local profiles, and keep the
+daemon on loopback:
+
+```sh
+kitsoki daemon install-systemd --addr 127.0.0.1:7777 \
+  --working-directory /opt/kitsoki-worker
+systemctl --user daemon-reload
+systemctl --user enable --now kitsoki-daemon
+curl --fail --silent http://127.0.0.1:7777/rpc \
+  -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"runstatus.jobs.list","params":{}}'
+```
+
+The curl probe must run on the worker or through an SSH tunnel. Never expose
+port 7777 publicly; daemon HTTP has no authentication.
+
+### Ephemeral workers (phase 2)
+
+The phase-one registry is static. A later provisioner owns create, readiness,
+drain, destroy, and cost metadata for per-second VMs. Provisioning must not
+change the stable `(worker_id, job_id)` contract or make the UI report a VM as
+destroyed before its durable jobs and evidence have been drained.
+
 ## Restart contract
 
 Daemon-created jobs persist these facts before they are exposed: job ID,

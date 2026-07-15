@@ -947,6 +947,17 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return jobs, nil
 
+	case "runstatus.workers.list":
+		provider, ok := s.provider.(WorkerProvider)
+		if !ok {
+			return []WorkerSummary{}, nil
+		}
+		workers, err := provider.ListWorkers(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return workers, nil
+
 	case "runstatus.work.list":
 		out, err := s.listWork(ctx)
 		if err != nil {

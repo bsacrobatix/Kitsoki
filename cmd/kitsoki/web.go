@@ -41,6 +41,7 @@ import (
 
 	"kitsoki/internal/assignment"
 	"kitsoki/internal/capsule"
+	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/testrunner"
@@ -328,6 +329,12 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 			if daemonMode {
 				if err := registry.EnableDaemon(dbPath); err != nil {
 					return err
+				}
+				if len(cfg.DaemonFederation.Workers) > 0 {
+					tunnels := &daemonfederation.TunnelManager{Workers: cfg.DaemonFederation.Workers}
+					tunnels.Start(cmd.Context())
+					defer tunnels.Close()
+					registry.SetDaemonFederation(&daemonfederation.Pool{Workers: cfg.DaemonFederation.Workers})
 				}
 			}
 			if maxSessions > 0 {

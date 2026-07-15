@@ -67,6 +67,24 @@
 #   wrapper_bin: /Users/Shared/kitsoki/agent-bin
 #   capsule_root: /Users/Shared/kitsoki/capsules
 
+# Optional static daemon federation. Each remote daemon stays bound to its own
+# loopback; the local controller supervises a strict SSH forward and aggregates
+# jobs/health. Use one unique local_port per worker.
+# daemon_federation:
+#   workers:
+#     - id: build-vm
+#       label: Build VM
+#       placement: thin # thin | workstation | local-model
+#       endpoint: http://127.0.0.1:17777
+#       tunnel:
+#         host: worker.example
+#         user: kitsoki
+#         local_port: 17777
+#         remote_host: 127.0.0.1
+#         remote_port: 7777
+#         identity_file: /home/me/.ssh/kitsoki-worker
+#         known_hosts_file: /home/me/.ssh/known_hosts
+
 harness_profiles:
   # codex with its own config/auth (no retarget). codex has a model selector;
   # reasoning effort for codex is not wired (it ignores --effort), so no efforts.

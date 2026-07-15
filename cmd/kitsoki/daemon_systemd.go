@@ -128,11 +128,31 @@ TimeoutStopSec=15
 
 [Install]
 WantedBy=default.target
-`, systemdQuote(opts.WorkingDirectory), strings.Join(args, " ")), nil
+`, systemdPath(opts.WorkingDirectory), strings.Join(args, " ")), nil
 }
 
 func systemdQuote(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, `"`, `\"`)
 	return `"` + value + `"`
+}
+
+// systemdPath escapes a path for directives such as WorkingDirectory that do
+// not apply command-line quote parsing. Percent is doubled to prevent specifier
+// expansion; other non-portable bytes use systemd's C-style hex escape.
+func systemdPath(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		switch {
+		case c == '%':
+			out.WriteString("%%")
+		case c == '/' || c == '.' || c == '_' || c == '-' ||
+			(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'):
+			out.WriteByte(c)
+		default:
+			fmt.Fprintf(&out, `\x%02x`, c)
+		}
+	}
+	return out.String()
 }

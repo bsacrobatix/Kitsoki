@@ -133,27 +133,62 @@
       </div>
     </section>
 
+    <section
+      v-if="workers.length > 1 || workers.some((worker) => worker.health !== 'online')"
+      class="home__section"
+      data-testid="daemon-workers"
+    >
+      <h2 class="home__subtitle">Workers</h2>
+      <div class="home__table-scroll">
+        <table class="home__table" data-testid="daemon-worker-table">
+          <thead>
+            <tr><th>Worker</th><th>Placement</th><th>Health</th><th>Jobs</th><th>Last seen</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="worker in workers" :key="worker.id" class="home__row" data-testid="daemon-worker-row">
+              <td>
+                <div class="home__row-story">{{ worker.label }}</div>
+                <code class="home__row-path">{{ worker.id }}</code>
+              </td>
+              <td>{{ worker.placement }}</td>
+              <td>
+                <span class="home__operation-status" :class="workerHealthClass(worker.health)" data-testid="daemon-worker-health">
+                  {{ worker.health }}
+                </span>
+                <div v-if="worker.last_error" class="home__operation-detail">{{ worker.last_error }}</div>
+              </td>
+              <td>{{ worker.job_count }}</td>
+              <td class="home__row-activity">{{ worker.last_seen ? formatDate(worker.last_seen) : '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section v-if="jobs.length > 0 || jobsError" class="home__section" data-testid="artifact-jobs">
       <h2 class="home__subtitle">Current jobs</h2>
       <div v-if="jobsError" class="home__status home__status--error" data-testid="artifact-jobs-error">
         {{ jobsError }}
       </div>
-      <table v-else class="home__table" data-testid="artifact-job-table">
-        <thead>
-          <tr>
-            <th>Job</th>
-            <th>Status</th>
-            <th>Phase</th>
-            <th>Updated</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="job in jobs" :key="job.job_id" class="home__row" data-testid="artifact-job-row">
+      <div v-else class="home__table-scroll">
+        <table class="home__table" data-testid="artifact-job-table">
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Worker</th>
+              <th>Status</th>
+              <th>Phase</th>
+              <th>Updated</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="job in jobs" :key="`${job.worker_id || 'local'}:${job.job_id}`" class="home__row" data-testid="artifact-job-row">
             <td>
               <div class="home__row-story">{{ job.summary || job.app_id }}</div>
               <code class="home__row-path">{{ truncateId(job.job_id) }}</code>
             </td>
+            <td><div>{{ job.worker_label || 'Local' }}</div><code>{{ job.placement || 'local' }}</code></td>
             <td>
               <span class="home__operation-status" :class="jobStatusClass(job.status)" data-testid="artifact-job-status">
                 {{ job.status.replace('_', ' ') }}
@@ -165,11 +200,26 @@
             <td><code>{{ job.phase || '—' }}</code></td>
             <td class="home__row-activity">{{ formatDate(job.updated_at) }}</td>
             <td class="home__row-actions">
-              <router-link class="home__link" data-testid="artifact-job-open" :to="job.run_url">Open</router-link>
+              <a
+                v-if="job.open_url && /^https?:/.test(job.open_url)"
+                class="home__link"
+                data-testid="artifact-job-open"
+                :href="job.open_url"
+                target="_blank"
+                rel="noopener noreferrer"
+              >Open</a>
+              <router-link
+                v-else-if="!job.worker_id || job.worker_id === 'local'"
+                class="home__link"
+                data-testid="artifact-job-open"
+                :to="job.open_url || job.run_url"
+              >Open</router-link>
+              <span v-else class="home__row-activity" title="Remote job URL is unavailable">Unavailable</span>
             </td>
-          </tr>
-        </tbody>
-      </table>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- ── Active sessions ─────────────────────────────────────────────── -->
@@ -343,7 +393,7 @@ import { useRouter } from "vue-router";
 import { autoNavDone, markAutoNavDone } from "../lib/auto-nav.js";
 import { LiveSource, type SetupWarning, type StoryHeader } from "../data/live-source.js";
 import { createDataSource } from "../data/source.js";
-import type { ArtifactJobSummary, SessionHeader } from "../types.js";
+import type { ArtifactJobSummary, SessionHeader, WorkerSummary } from "../types.js";
 import { useTourStore } from "../stores/tour.js";
 import { kitNavLinks } from "../kits/kitLoader.js";
 
@@ -380,6 +430,7 @@ const sessions = ref<SessionHeader[]>([]);
 const sessionsError = ref<string | null>(null);
 const jobs = ref<ArtifactJobSummary[]>([]);
 const jobsError = ref<string | null>(null);
+const workers = ref<WorkerSummary[]>([]);
 
 const startingPath = ref<string | null>(null);
 const startError = ref<string | null>(null);
@@ -469,7 +520,7 @@ onMounted(async () => {
     return;
   }
 
-  await Promise.all([loadStories(), loadSessions(), loadArtifactJobs(), loadSetupWarnings()]);
+	await Promise.all([loadStories(), loadSessions(), loadArtifactJobs(), loadWorkers(), loadSetupWarnings()]);
   storiesLoading.value = false;
 
   // Auto-navigate when there is exactly one live session and no others. A
@@ -486,7 +537,7 @@ onMounted(async () => {
   markAutoNavDone();
 
   pollTimer = setInterval(() => {
-    void Promise.all([loadSessions(), loadArtifactJobs()]);
+	void Promise.all([loadSessions(), loadArtifactJobs(), loadWorkers()]);
   }, POLL_MS);
 });
 
@@ -521,11 +572,25 @@ async function loadArtifactJobs(): Promise<void> {
   }
 }
 
+async function loadWorkers(): Promise<void> {
+	try {
+		workers.value = await source.listWorkers();
+	} catch {
+		workers.value = [];
+	}
+}
+
 function jobStatusClass(status: ArtifactJobSummary["status"]): string {
   if (status === "done") return "home__operation-status--completed";
   if (status === "failed" || status === "cancelled") return "home__operation-status--failed";
   if (status === "awaiting_input" || status === "interrupted") return "home__operation-status--waiting";
   return "home__operation-status--running";
+}
+
+function workerHealthClass(health: WorkerSummary["health"]): string {
+	if (health === "online") return "home__operation-status--completed";
+	if (health === "offline") return "home__operation-status--failed";
+	return "home__operation-status--waiting";
 }
 
 async function loadSetupWarnings(): Promise<void> {
@@ -1010,6 +1075,15 @@ function errMsg(e: unknown): string {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.875rem;
+}
+
+.home__table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.home__table-scroll .home__table {
+  min-width: 42rem;
 }
 
 .home__table th {

@@ -62,6 +62,13 @@ type ArtifactJobProvider interface {
 	ListArtifactJobs(ctx context.Context) ([]ArtifactJobSummary, error)
 }
 
+// WorkerProvider exposes daemon federation health without leaking transport
+// credentials or SSH paths. One unreachable worker must remain a row rather
+// than turning the whole federation request into an error.
+type WorkerProvider interface {
+	ListWorkers(ctx context.Context) ([]WorkerSummary, error)
+}
+
 // ArtifactJobSummary is the stable, frontend-facing projection of a durable
 // artifact job. It deliberately carries links and lifecycle facts rather than
 // scheduler internals: a process-bound handler may be gone while this record
@@ -77,6 +84,20 @@ type ArtifactJobSummary struct {
 	RunURL            string    `json:"run_url"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	InterruptedReason string    `json:"interrupted_reason,omitempty"`
+	WorkerID          string    `json:"worker_id,omitempty"`
+	WorkerLabel       string    `json:"worker_label,omitempty"`
+	Placement         string    `json:"placement,omitempty"`
+	OpenURL           string    `json:"open_url,omitempty"`
+}
+
+type WorkerSummary struct {
+	ID        string    `json:"id"`
+	Label     string    `json:"label"`
+	Placement string    `json:"placement"`
+	Health    string    `json:"health"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+	LastError string    `json:"last_error,omitempty"`
+	JobCount  int       `json:"job_count"`
 }
 
 // SeededSessionProvider is the optional per-session seed extension for

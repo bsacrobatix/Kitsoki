@@ -45,6 +45,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
@@ -187,6 +188,7 @@ type SessionRegistry struct {
 	// job identity survives registry and process teardown.
 	daemonStore store.Store
 	daemonJobs  artifactjob.Store
+	federation  *daemonfederation.Pool
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -220,6 +222,10 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	r.daemonStore = st
 	r.daemonJobs = jobs
 	return nil
+}
+
+func (r *SessionRegistry) SetDaemonFederation(pool *daemonfederation.Pool) {
+	r.federation = pool
 }
 
 // DefaultMaxLiveSessions is the fallback cap on concurrently live in-memory
@@ -1063,26 +1069,68 @@ func (r *SessionRegistry) List() []runstatus.SessionHeader {
 // intentionally independent of the live-session map, so completed and
 // interrupted work remains visible after process teardown.
 func (r *SessionRegistry) ListArtifactJobs(ctx context.Context) ([]server.ArtifactJobSummary, error) {
-	if r.daemonJobs == nil {
-		return []server.ArtifactJobSummary{}, nil
+	out := []server.ArtifactJobSummary{}
+	if r.daemonJobs != nil {
+		jobs, err := r.daemonJobs.List(ctx, artifactjob.ListFilter{Limit: 200})
+		if err != nil {
+			return nil, err
+		}
+		out = make([]server.ArtifactJobSummary, 0, len(jobs))
+		for _, job := range jobs {
+			out = append(out, server.ArtifactJobSummary{
+				JobID:             string(job.ID),
+				SessionID:         string(job.SessionID),
+				AppID:             job.AppID,
+				Story:             job.Story,
+				Status:            string(job.Status),
+				Phase:             job.Phase,
+				Summary:           job.Summary,
+				RunURL:            job.RunURL,
+				UpdatedAt:         job.UpdatedAt,
+				InterruptedReason: job.InterruptedReason,
+				WorkerID:          "local",
+				WorkerLabel:       "Local",
+				Placement:         "local",
+				OpenURL:           job.RunURL,
+			})
+		}
 	}
-	jobs, err := r.daemonJobs.List(ctx, artifactjob.ListFilter{Limit: 200})
-	if err != nil {
-		return nil, err
+	if r.federation != nil {
+		snapshot := r.federation.Get(ctx)
+		for _, job := range snapshot.Jobs {
+			out = append(out, server.ArtifactJobSummary{
+				JobID: job.JobID, SessionID: job.SessionID, AppID: job.AppID,
+				Story: job.Story, Status: job.Status, Phase: job.Phase,
+				Summary: job.Summary, RunURL: job.RunURL, UpdatedAt: job.UpdatedAt,
+				InterruptedReason: job.InterruptedReason, WorkerID: job.WorkerID,
+				WorkerLabel: job.WorkerLabel, Placement: job.Placement, OpenURL: job.OpenURL,
+			})
+		}
 	}
-	out := make([]server.ArtifactJobSummary, 0, len(jobs))
-	for _, job := range jobs {
-		out = append(out, server.ArtifactJobSummary{
-			JobID:             string(job.ID),
-			SessionID:         string(job.SessionID),
-			AppID:             job.AppID,
-			Story:             job.Story,
-			Status:            string(job.Status),
-			Phase:             job.Phase,
-			Summary:           job.Summary,
-			RunURL:            job.RunURL,
-			UpdatedAt:         job.UpdatedAt,
-			InterruptedReason: job.InterruptedReason,
+	return out, nil
+}
+
+func (r *SessionRegistry) ListWorkers(ctx context.Context) ([]server.WorkerSummary, error) {
+	if r.daemonJobs == nil && r.federation == nil {
+		return []server.WorkerSummary{}, nil
+	}
+	localJobs := 0
+	if r.daemonJobs != nil {
+		jobs, err := r.daemonJobs.List(ctx, artifactjob.ListFilter{Limit: 200})
+		if err != nil {
+			return nil, err
+		}
+		localJobs = len(jobs)
+	}
+	out := []server.WorkerSummary{{ID: "local", Label: "Local", Placement: "local", Health: "online", LastSeen: time.Now().UTC(), JobCount: localJobs}}
+	if r.federation == nil {
+		return out, nil
+	}
+	for _, worker := range r.federation.Get(ctx).Workers {
+		out = append(out, server.WorkerSummary{
+			ID: worker.ID, Label: worker.Label, Placement: worker.Placement,
+			Health: worker.Health, LastSeen: worker.LastSeen,
+			LastError: worker.LastError, JobCount: worker.JobCount,
 		})
 	}
 	return out, nil

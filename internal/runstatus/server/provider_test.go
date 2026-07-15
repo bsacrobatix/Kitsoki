@@ -46,6 +46,7 @@ type stubProvider struct {
 
 	entries  map[string]server.Entry
 	jobs     []server.ArtifactJobSummary
+	workers  []server.WorkerSummary
 	stories  []server.StoryHeader
 	newFn    func(ctx context.Context, storyPath string) (string, error)
 	seededFn func(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error)
@@ -55,6 +56,10 @@ type stubProvider struct {
 
 func (p *stubProvider) ListArtifactJobs(context.Context) ([]server.ArtifactJobSummary, error) {
 	return append([]server.ArtifactJobSummary(nil), p.jobs...), nil
+}
+
+func (p *stubProvider) ListWorkers(context.Context) ([]server.WorkerSummary, error) {
+	return append([]server.WorkerSummary(nil), p.workers...), nil
 }
 
 func newStubProvider() *stubProvider {
@@ -321,6 +326,20 @@ func TestMulti_ArtifactJobsList(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Equal(t, "job-1", list[0].JobID)
 	assert.Equal(t, "/s/job-1", list[0].RunURL)
+}
+
+func TestMulti_WorkersList(t *testing.T) {
+	t.Parallel()
+	p := newStubProvider()
+	p.workers = []server.WorkerSummary{{ID: "build-vm", Label: "Build VM", Placement: "thin", Health: "online", JobCount: 2}}
+	ts := httptest.NewServer(server.NewMulti(p).Handler())
+	defer ts.Close()
+
+	var list []server.WorkerSummary
+	rpcCall(t, ts, "runstatus.workers.list", map[string]any{}, &list)
+	require.Len(t, list, 1)
+	assert.Equal(t, "build-vm", list[0].ID)
+	assert.Equal(t, "online", list[0].Health)
 }
 
 // TestMulti_NewSessionInvalidStory proves an invalid story surfaces as a

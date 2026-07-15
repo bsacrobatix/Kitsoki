@@ -78,6 +78,44 @@ func TestLoad_ReadsStoryDirs(t *testing.T) {
 	}
 }
 
+func TestLoadReadsDaemonFederationFromLocalOverride(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, DefaultConfigFile)
+	if err := os.WriteFile(base, []byte("story_dirs: [./stories]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := LocalConfigPath(base)
+	body := `daemon_federation:
+  workers:
+    - id: build-vm
+      label: Build VM
+      placement: thin
+      endpoint: http://127.0.0.1:17777
+      tunnel:
+        host: worker.example
+        user: kitsoki
+        local_port: 17777
+        remote_host: 127.0.0.1
+        remote_port: 7777
+        identity_file: keys/worker
+        known_hosts_file: keys/known_hosts
+`
+	if err := os.WriteFile(local, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.DaemonFederation.Workers) != 1 {
+		t.Fatalf("workers = %#v", cfg.DaemonFederation.Workers)
+	}
+	tunnel := cfg.DaemonFederation.Workers[0].Tunnel
+	if tunnel.IdentityFile != filepath.Join(dir, "keys", "worker") {
+		t.Fatalf("identity_file = %q", tunnel.IdentityFile)
+	}
+}
+
 func TestLoad_InterceptValidBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultConfigFile)

@@ -34,6 +34,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
 )
 
@@ -125,6 +126,10 @@ type WebConfig struct {
 	// catalog. Absent ⇒ every bundle stays local-JSONL-only. Validated in
 	// Load via resolveFeedbackRouting.
 	FeedbackRouting map[string]FeedbackRoute `yaml:"feedback_routing,omitempty"`
+
+	// DaemonFederation is machine-local worker discovery for kitsoki daemon.
+	// Workers are independent loopback-only daemons; secrets remain in the local override.
+	DaemonFederation daemonfederation.Config `yaml:"daemon_federation,omitempty"`
 }
 
 // FeedbackRoute is one producer's `feedback_routing:` rule. The node type
@@ -508,6 +513,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveFeedbackRouting(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.DaemonFederation.Validate(path); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	return cfg, nil
 }
 
@@ -666,6 +674,9 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if local.ProjectProfile != "" {
 		out.ProjectProfile = local.ProjectProfile
+	}
+	if len(local.DaemonFederation.Workers) > 0 {
+		out.DaemonFederation = local.DaemonFederation
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)

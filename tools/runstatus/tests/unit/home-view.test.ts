@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { StoryHeader } from "../../src/data/live-source.js";
-import type { ArtifactJobSummary, SessionHeader } from "../../src/types.js";
+import type { ArtifactJobSummary, SessionHeader, WorkerSummary } from "../../src/types.js";
 import { markAutoNavDone } from "../../src/lib/auto-nav.js";
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -19,6 +19,7 @@ const rescanStories = vi.fn<[], Promise<StoryHeader[]>>();
 const newSession = vi.fn<[string], Promise<string>>();
 const listSessions = vi.fn<[], Promise<SessionHeader[]>>();
 const listArtifactJobs = vi.fn<[], Promise<ArtifactJobSummary[]>>();
+const listWorkers = vi.fn<[], Promise<WorkerSummary[]>>();
 const driveOperation = vi.fn<[string], Promise<unknown>>();
 const artifactUrl = vi.fn<[string], string>((handle) => `/artifact/${encodeURIComponent(handle)}`);
 const setupStatus = vi.fn<[], Promise<{
@@ -40,6 +41,7 @@ vi.mock("../../src/data/live-source.js", () => ({
     newSession,
     listSessions,
     listArtifactJobs,
+	listWorkers,
     driveOperation,
     artifactUrl,
     setupStatus,
@@ -99,6 +101,7 @@ describe("HomeView", () => {
     newSession.mockReset();
     listSessions.mockReset();
     listArtifactJobs.mockReset();
+	listWorkers.mockReset();
     driveOperation.mockReset();
     artifactUrl.mockClear();
     setupStatus.mockReset();
@@ -114,6 +117,7 @@ describe("HomeView", () => {
     listStories.mockResolvedValue([]);
     listSessions.mockResolvedValue([]);
     listArtifactJobs.mockResolvedValue([]);
+	listWorkers.mockResolvedValue([{ id: "local", label: "Local", placement: "local", health: "online", job_count: 0 }]);
     setupStatus.mockResolvedValue({ warnings: [] });
   });
 
@@ -268,6 +272,42 @@ describe("HomeView", () => {
     expect(wrapper.findAll("[data-testid='artifact-job-row']")).toHaveLength(1);
     expect(wrapper.find("[data-testid='artifact-job-status']").text()).toContain("interrupted");
     expect(wrapper.find("[data-testid='artifact-job-open']").attributes("href")).toBe("/s/job-stable-1");
+    wrapper.unmount();
+  });
+
+  it("renders federated worker health and remote job links", async () => {
+    listWorkers.mockResolvedValue([
+      { id: "local", label: "Local", placement: "local", health: "online", job_count: 0 },
+      { id: "build-vm", label: "Build VM", placement: "thin", health: "offline", job_count: 0, last_error: "connection refused" },
+    ]);
+    listArtifactJobs.mockResolvedValue([{
+      job_id: "same", app_id: "tasks", story: "stories/tasks/app.yaml", status: "running",
+      run_url: "/s/same", open_url: "http://127.0.0.1:17777/s/same",
+      updated_at: "2026-07-15T06:00:00Z", worker_id: "build-vm",
+      worker_label: "Build VM", placement: "thin",
+    }]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.findAll("[data-testid='daemon-worker-row']")).toHaveLength(2);
+    expect(wrapper.findAll("[data-testid='daemon-worker-health']")[1]!.text()).toBe("offline");
+    const open = wrapper.find("[data-testid='artifact-job-open']");
+    expect(open.attributes("href")).toBe("http://127.0.0.1:17777/s/same");
+    expect(open.attributes("target")).toBe("_blank");
+    wrapper.unmount();
+  });
+
+  it("does not navigate to a rejected remote job URL", async () => {
+    listArtifactJobs.mockResolvedValue([{
+      job_id: "remote-job", app_id: "bugfix", story: "stories/bugfix/app.yaml", status: "running",
+      run_url: "https://untrusted.example/s/remote-job", updated_at: "2026-07-15T00:00:00Z",
+      worker_id: "worker-one", worker_label: "Worker one", placement: "thin",
+    }]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='artifact-job-open']").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Unavailable");
     wrapper.unmount();
   });
 

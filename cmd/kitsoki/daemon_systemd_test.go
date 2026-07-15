@@ -18,9 +18,13 @@ func TestRenderDaemonSystemdUnit(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Contains(t, unit, `ExecStart="/home/test user/.local/bin/kitsoki" daemon`)
-	assert.Contains(t, unit, `WorkingDirectory="/srv/task frontend"`)
+	assert.Contains(t, unit, `WorkingDirectory=/srv/task\x20frontend`)
 	assert.Contains(t, unit, `EnvironmentFile=-%h/.config/kitsoki/daemon.env`)
 	assert.Contains(t, unit, "Restart=on-failure")
+}
+
+func TestSystemdPathEscapesSpecifiersAndBackslashes(t *testing.T) {
+	assert.Equal(t, `/srv/100%%/task\x5cname`, systemdPath(`/srv/100%/task\name`))
 }
 
 func TestRenderDaemonSystemdUnitRejectsNewlines(t *testing.T) {
