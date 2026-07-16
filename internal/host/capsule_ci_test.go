@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestCapsuleCIProjectChecksBuildsTypedVerdictAndEvidence(t *testing.T) {
@@ -43,6 +44,92 @@ func TestCapsuleCIProjectChecksBuildsTypedVerdictAndEvidence(t *testing.T) {
 	if artifact["outcome"] != "failed" {
 		t.Fatalf("artifact = %#v", artifact)
 	}
+}
+
+func TestCapsuleCIProjectChecksDefaultHostCommandHasNoDeadline(t *testing.T) {
+	root := capsuleCIProfileRoot(t)
+	called := 0
+	result, err := NewCapsuleCIProjectChecksHandler(CapsuleCICommandRunnerFunc(func(ctx context.Context, _ string, _ string) (string, int, error) {
+		called++
+		if _, ok := ctx.Deadline(); ok {
+			t.Fatal("trusted local host command unexpectedly received a deadline")
+		}
+		return "ok\n", 0, nil
+	}))(context.Background(), map[string]any{"workdir": root, "pipeline": "change"})
+	if err != nil || result.Error != "" || called != 2 {
+		t.Fatalf("result=%+v calls=%d err=%v", result, called, err)
+	}
+}
+
+func TestCapsuleCIProjectChecksSealsDeclaredTimeoutAndClassifiesIt(t *testing.T) {
+	root := capsuleCIProfileRoot(t)
+	result, err := NewCapsuleCIProjectChecksHandler(CapsuleCICommandRunnerFunc(func(ctx context.Context, _ string, _ string) (string, int, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok || time.Until(deadline) > time.Second {
+			t.Fatalf("command deadline = %v, %v", deadline, ok)
+		}
+		return "timed out\n", -1, context.DeadlineExceeded
+	}))(context.Background(), map[string]any{"workdir": root, "job_id": "timeout", "pipeline": "change", "command_timeout": "50ms"})
+	if err != nil || result.Error != "" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	artifact := readCapsuleCIArtifact(t, root, "timeout")
+	checks := artifact["checks"].([]any)
+	entry := checks[0].(map[string]any)
+	if entry["error_kind"] != "timeout" || entry["error"] != context.DeadlineExceeded.Error() {
+		t.Fatalf("timeout evidence = %#v", entry)
+	}
+}
+
+func TestCapsuleCIProjectChecksPreservesCallerCancellation(t *testing.T) {
+	root := capsuleCIProfileRoot(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := NewCapsuleCIProjectChecksHandler(CapsuleCICommandRunnerFunc(func(ctx context.Context, _ string, _ string) (string, int, error) {
+		return "cancelled\n", -1, ctx.Err()
+	}))(ctx, map[string]any{"workdir": root, "job_id": "cancelled", "pipeline": "change"})
+	if err != nil || result.Error != "" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	artifact := readCapsuleCIArtifact(t, root, "cancelled")
+	entry := artifact["checks"].([]any)[0].(map[string]any)
+	if entry["error_kind"] != "cancelled" {
+		t.Fatalf("cancellation evidence = %#v", entry)
+	}
+}
+
+func TestShellCapsuleCICommandRunnerDistinguishesTimeoutFromExitFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, exitCode, err := (shellCapsuleCICommandRunner{}).Run(ctx, t.TempDir(), "sleep 1")
+	if exitCode != -1 || err != context.DeadlineExceeded {
+		t.Fatalf("timeout run = exit %d, err %v", exitCode, err)
+	}
+}
+
+func capsuleCIProfileRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".kitsoki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "project-profile.yaml"), []byte("schema: project-profile/v1\nid: example\ncommands:\n  test: go test ./...\n  build: go build ./...\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func readCapsuleCIArtifact(t *testing.T, root, jobID string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, ".artifacts", "capsule-ci", "checks", jobID+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact map[string]any
+	if err := json.Unmarshal(raw, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	return artifact
 }
 
 func TestCapsuleCIProjectChecksParksWhenCommandsAreMissing(t *testing.T) {

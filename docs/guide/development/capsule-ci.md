@@ -347,6 +347,20 @@ The optional `--verdict file.json` run input is for an explicit external story
 adapter. It is not an authority bypass: the verdict still has to match the
 envelope and promotion eligibility is derived from its outcome and evidence.
 
+### Project-command deadlines
+
+Trusted local host execution has no implicit project-command deadline. Set a
+positive `command_timeout` on the pipeline when the project deliberately wants
+one; it is sealed into the execution envelope and passed to the story's project
+check host. A command stopped by that deadline is recorded as `error_kind:
+timeout`; caller cancellation remains `error_kind: cancelled`.
+
+```yaml
+pipelines:
+  change:
+    command_timeout: 30m
+```
+
 ## Least-authority agents
 
 Run the standalone server when a coding agent should receive only one scoped

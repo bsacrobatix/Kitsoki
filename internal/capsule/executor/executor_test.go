@@ -60,6 +60,7 @@ func TestSealRejectsIncompleteOrInconsistentEnvelope(t *testing.T) {
 		{name: "network policy", want: "network policy", edit: func(e *Envelope) { e.Policy.Network = "sometimes" }},
 		{name: "sandbox mismatch", want: "does not match environment lock", edit: func(e *Envelope) { e.Policy.MinimumSandbox = "container" }},
 		{name: "external write", want: "external-write policy", edit: func(e *Envelope) { e.Policy.ExternalWrite = "maybe" }},
+		{name: "command timeout", want: "command timeout", edit: func(e *Envelope) { e.Policy.CommandTimeout = "0" }},
 		{name: "denied agent fields", want: "denied agents", edit: func(e *Envelope) { e.Policy.Agents.MaxCostUSD = 1 }},
 		{name: "allowed agent budget", want: "finite positive budget", edit: func(e *Envelope) {
 			e.Policy.Agents = AgentPolicy{Policy: "allow", Profiles: []string{"reviewer"}, OnUnavailable: "needs_input"}
@@ -80,6 +81,16 @@ func TestSealRejectsIncompleteOrInconsistentEnvelope(t *testing.T) {
 				t.Fatalf("Seal() error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestSealNormalizesDeclaredCommandTimeout(t *testing.T) {
+	envelope, err := Seal(Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "workspace", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story", Environment: testEnvironmentLock(t), Policy: Policy{Network: "none", CommandTimeout: "60s"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Policy.CommandTimeout != "1m0s" {
+		t.Fatalf("command timeout = %q", envelope.Policy.CommandTimeout)
 	}
 }
 

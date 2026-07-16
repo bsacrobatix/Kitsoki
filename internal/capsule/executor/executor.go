@@ -31,9 +31,13 @@ type Capabilities struct {
 	Cancellable     bool     `json:"cancellable"`
 }
 type Policy struct {
-	Network        string      `json:"network"`
-	MinimumSandbox string      `json:"minimum_sandbox"`
-	ExternalWrite  string      `json:"external_write"`
+	Network        string `json:"network"`
+	MinimumSandbox string `json:"minimum_sandbox"`
+	ExternalWrite  string `json:"external_write"`
+	// CommandTimeout is the optional, sealed wall-clock deadline for each
+	// project command launched by a Capsule CI story. Empty means no deadline;
+	// trusted local host execution must not invent one.
+	CommandTimeout string      `json:"command_timeout,omitempty"`
 	Agents         AgentPolicy `json:"agents"`
 }
 type AgentPolicy struct {
@@ -286,6 +290,13 @@ func normalizeAndValidatePolicy(policy Policy, lock environment.Lock) (Policy, e
 	}
 	if policy.ExternalWrite != "deny" && policy.ExternalWrite != "allow" {
 		return Policy{}, fmt.Errorf("capsule executor: invalid external-write policy %q", policy.ExternalWrite)
+	}
+	if policy.CommandTimeout != "" {
+		d, err := time.ParseDuration(policy.CommandTimeout)
+		if err != nil || d <= 0 {
+			return Policy{}, fmt.Errorf("capsule executor: command timeout must be a positive duration")
+		}
+		policy.CommandTimeout = d.String()
 	}
 	// V1 can prove external-write denial only when egress is denied or routed
 	// through a supervised replay boundary. A live network plus "deny" would be

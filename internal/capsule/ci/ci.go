@@ -38,16 +38,17 @@ type Config struct {
 	Cleanup            CleanupPolicy       `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
 }
 type Pipeline struct {
-	Story       string         `yaml:"story" json:"story"`
-	Triggers    []string       `yaml:"triggers" json:"triggers"`
-	Environment string         `yaml:"environment,omitempty" json:"environment,omitempty"`
-	Executor    string         `yaml:"executor,omitempty" json:"executor,omitempty"`
-	Mode        string         `yaml:"mode,omitempty" json:"mode,omitempty"`
-	Required    bool           `yaml:"required,omitempty" json:"required,omitempty"`
-	Permissions Permissions    `yaml:"permissions,omitempty" json:"permissions,omitempty"`
-	Agents      Agents         `yaml:"agents,omitempty" json:"agents,omitempty"`
-	Cleanup     CleanupPolicy  `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
-	Result      ResultContract `yaml:"result" json:"result"`
+	Story          string         `yaml:"story" json:"story"`
+	Triggers       []string       `yaml:"triggers" json:"triggers"`
+	Environment    string         `yaml:"environment,omitempty" json:"environment,omitempty"`
+	Executor       string         `yaml:"executor,omitempty" json:"executor,omitempty"`
+	Mode           string         `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Required       bool           `yaml:"required,omitempty" json:"required,omitempty"`
+	CommandTimeout string         `yaml:"command_timeout,omitempty" json:"command_timeout,omitempty"`
+	Permissions    Permissions    `yaml:"permissions,omitempty" json:"permissions,omitempty"`
+	Agents         Agents         `yaml:"agents,omitempty" json:"agents,omitempty"`
+	Cleanup        CleanupPolicy  `yaml:"cleanup,omitempty" json:"cleanup,omitempty"`
+	Result         ResultContract `yaml:"result" json:"result"`
 }
 type Permissions struct {
 	Network       string `yaml:"network,omitempty" json:"network,omitempty"`
@@ -191,6 +192,12 @@ func Validate(project string, cfg Config) error {
 		}
 		if p.Mode != "" && p.Mode != "one-shot" && p.Mode != "staged" {
 			return fmt.Errorf("capsule ci pipeline %q: invalid mode", name)
+		}
+		if p.CommandTimeout != "" {
+			d, err := time.ParseDuration(p.CommandTimeout)
+			if err != nil || d <= 0 {
+				return fmt.Errorf("capsule ci pipeline %q: command_timeout must be a positive duration", name)
+			}
 		}
 		if p.Permissions.Network != "" && p.Permissions.Network != "none" && p.Permissions.Network != "replay" && p.Permissions.Network != "live" {
 			return fmt.Errorf("capsule ci pipeline %q: invalid network", name)
@@ -479,7 +486,7 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	if err != nil {
 		return Pipeline{}, executor.Envelope{}, err
 	}
-	e, err := executor.Seal(executor.Envelope{JobID: "pending", ProjectID: filepath.Base(s.ProjectRoot), DefinitionDigest: req.DefinitionDigest, Instance: req.Workspace, SourceDigest: req.SourceDigest, StoryPath: p.Story, StoryDigest: req.StoryDigest, Environment: lock, Trigger: triggerMap(req.Trigger), Policy: executor.Policy{Network: defaultNetwork(p.Permissions.Network), MinimumSandbox: lock.Sandbox, ExternalWrite: defaultExternal(p.Permissions.ExternalWrite), Agents: executor.AgentPolicy{Policy: defaultAgentPolicy(p.Agents.Policy), Profiles: append([]string(nil), p.Agents.Profiles...), MaxCostUSD: p.Agents.MaxCostUSD, OnUnavailable: p.Agents.OnUnavailable}}})
+	e, err := executor.Seal(executor.Envelope{JobID: "pending", ProjectID: filepath.Base(s.ProjectRoot), DefinitionDigest: req.DefinitionDigest, Instance: req.Workspace, SourceDigest: req.SourceDigest, StoryPath: p.Story, StoryDigest: req.StoryDigest, Environment: lock, Trigger: triggerMap(req.Trigger), Policy: executor.Policy{Network: defaultNetwork(p.Permissions.Network), MinimumSandbox: lock.Sandbox, ExternalWrite: defaultExternal(p.Permissions.ExternalWrite), CommandTimeout: p.CommandTimeout, Agents: executor.AgentPolicy{Policy: defaultAgentPolicy(p.Agents.Policy), Profiles: append([]string(nil), p.Agents.Profiles...), MaxCostUSD: p.Agents.MaxCostUSD, OnUnavailable: p.Agents.OnUnavailable}}})
 	return p, e, err
 }
 func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {

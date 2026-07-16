@@ -631,6 +631,35 @@ func TestValidateAllowedAgentsRequireBudgetAndFallback(t *testing.T) {
 	}
 }
 
+func TestPipelineCommandTimeoutIsValidatedAndSealed(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	ciPath := filepath.Join(root, ".kitsoki", "ci.yaml")
+	raw, err := os.ReadFile(ciPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("    command_timeout: 45s\n")...)
+	if err := os.WriteFile(ciPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{ProjectRoot: root, Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}}
+	_, envelope, err := service.Plan(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Policy.CommandTimeout != "45s" {
+		t.Fatalf("sealed command timeout = %q", envelope.Policy.CommandTimeout)
+	}
+	raw = []byte(strings.Replace(string(raw), "command_timeout: 45s", "command_timeout: 0", 1))
+	if err := os.WriteFile(ciPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "command_timeout must be a positive duration") {
+		t.Fatalf("expected invalid command timeout rejection, got %v", err)
+	}
+}
+
 func ciRewriteClient(t *testing.T, server *httptest.Server) *http.Client {
 	t.Helper()
 	transport := http.DefaultTransport.(*http.Transport).Clone()

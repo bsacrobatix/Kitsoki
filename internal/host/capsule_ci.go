@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,13 +32,17 @@ func (f CapsuleCICommandRunnerFunc) Run(ctx context.Context, workdir, command st
 type shellCapsuleCICommandRunner struct{}
 
 func (shellCapsuleCICommandRunner) Run(ctx context.Context, workdir, command string) (string, int, error) {
-	commandCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(commandCtx, "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.Dir = workdir
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return string(out), 0, nil
+	}
+	// CommandContext commonly returns an ExitError after it kills the child.
+	// Check the context first so a declared deadline or caller cancellation is
+	// never misreported as an ordinary project exit failure.
+	if ctx.Err() != nil {
+		return string(out), -1, ctx.Err()
 	}
 	if exit, ok := err.(*exec.ExitError); ok {
 		return string(out), exit.ExitCode(), nil
@@ -73,6 +78,10 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 			commands = map[string]any{}
 		}
 		jobID := safeArtifactID(capsuleCIStringArg(args, "job_id", "run"))
+		commandTimeout, err := capsuleCICommandTimeout(args)
+		if err != nil {
+			return Result{Error: fmt.Sprintf("host.capsule_ci.project_checks: command_timeout: %v", err), FailureKind: FailureFatal}, nil
+		}
 		evidenceRel := filepath.ToSlash(filepath.Join(".artifacts", "capsule-ci", "checks", jobID+".json"))
 		evidenceRef := "file:" + evidenceRel
 		checks := make([]map[string]any, 0, 2)
@@ -87,7 +96,13 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 				continue
 			}
 			started := time.Now().UTC()
-			log, exitCode, runErr := runner.Run(ctx, workdir, command)
+			runCtx := ctx
+			cancel := func() {}
+			if commandTimeout > 0 {
+				runCtx, cancel = context.WithTimeout(ctx, commandTimeout)
+			}
+			log, exitCode, runErr := runner.Run(runCtx, workdir, command)
+			cancel()
 			outcome := "passed"
 			if runErr != nil || exitCode != 0 {
 				outcome = "failed"
@@ -97,6 +112,7 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 			entry := map[string]any{"id": check.id, "command": command, "exit_code": exitCode, "outcome": outcome, "started_at": started, "finished_at": time.Now().UTC(), "log": boundedCheckLog(log)}
 			if runErr != nil {
 				entry["error"] = runErr.Error()
+				entry["error_kind"] = capsuleCICommandErrorKind(runErr)
 			}
 			commandEvidence = append(commandEvidence, entry)
 		}
@@ -128,6 +144,29 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 			"envelope_digest":    capsuleCIStringArg(args, "envelope_digest", ""),
 		}
 		return Result{Data: map[string]any{"ok": allPassed && len(checks) > 0, "checks": checks, "evidence": evidenceRef, "verdict": verdict}}, nil
+	}
+}
+
+func capsuleCICommandTimeout(args map[string]any) (time.Duration, error) {
+	raw := strings.TrimSpace(capsuleCIStringArg(args, "command_timeout", ""))
+	if raw == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("must be a positive duration")
+	}
+	return d, nil
+}
+
+func capsuleCICommandErrorKind(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	default:
+		return "runner"
 	}
 }
 
