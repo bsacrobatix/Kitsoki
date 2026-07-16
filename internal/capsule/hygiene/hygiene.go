@@ -156,6 +156,25 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 		Candidates:             []Candidate{},
 	}
 
+	var goCandidate Candidate
+	if opts.IncludeGoBuildCache {
+		goCandidate, err = goCacheCandidate(ctx, opts)
+		if err != nil {
+			return Plan{}, err
+		}
+		if goCandidate.Path != "" {
+			quickPlan := plan
+			quickPlan.Candidates = append(quickPlan.Candidates, goCandidate)
+			quickPlan, err = finishPlan(root, opts, quickPlan)
+			if err != nil {
+				return Plan{}, err
+			}
+			if quickPlanSatisfiesHeadroom(quickPlan) {
+				return quickPlan, nil
+			}
+		}
+	}
+
 	nestedProjects, projectCandidates, err := nestedCapsuleProjects(ctx, root, opts, minAge)
 	if err != nil {
 		return Plan{}, err
@@ -184,15 +203,18 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 		plan.Candidates = append(plan.Candidates, cacheCandidates...)
 	}
 	if opts.IncludeGoBuildCache {
-		goCandidate, err := goCacheCandidate(ctx, opts)
-		if err != nil {
-			return Plan{}, err
-		}
 		if goCandidate.Path != "" {
 			plan.Candidates = append(plan.Candidates, goCandidate)
 		}
 	}
 	return finishPlan(root, opts, plan)
+}
+
+func quickPlanSatisfiesHeadroom(plan Plan) bool {
+	return plan.Disk.Known &&
+		plan.Disk.MinFreeBytes > 0 &&
+		plan.Disk.BelowMinimum &&
+		plan.Disk.ProjectedFreeBytes >= plan.Disk.MinFreeBytes
 }
 
 func finishPlan(root string, opts Options, plan Plan) (Plan, error) {

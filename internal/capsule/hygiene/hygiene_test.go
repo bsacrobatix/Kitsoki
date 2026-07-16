@@ -105,6 +105,86 @@ func TestProjectCacheAndGoCacheRequireExplicitInclusion(t *testing.T) {
 	}
 }
 
+func TestBuildPlanShortCircuitsWhenGoCacheSatisfiesHeadroom(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	writeManagedWorkspace(t, root, "old", control.StateIntegrated, now.Add(-72*time.Hour), false)
+	goCache := filepath.Join(t.TempDir(), "gocache")
+	if err := os.MkdirAll(goCache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goCache, "blob"), make([]byte, 80), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:         root,
+		KeepWorkspaces:      -1,
+		MinWorkspaceAge:     -1,
+		IncludeGoBuildCache: true,
+		GoCachePath:         goCache,
+		MinFreeBytes:        100,
+		Now:                 func() time.Time { return now },
+		ReadDiskUsage: func(string) (DiskUsage, error) {
+			return DiskUsage{Known: true, CapacityBytes: 1000, FreeBytes: 50}, nil
+		},
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			t.Fatal("workspace activity probe should not run when Go cache alone satisfies headroom")
+			return WorkspaceActivity{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Candidates) != 1 || plan.Candidates[0].Kind != "go-build-cache" {
+		t.Fatalf("candidates=%#v", plan.Candidates)
+	}
+	if plan.Disk.ProjectedFreeBytes != 130 || !plan.Disk.BelowMinimum {
+		t.Fatalf("disk=%#v", plan.Disk)
+	}
+}
+
+func TestBuildPlanFallsBackToWorkspaceInventoryWhenGoCacheDoesNotSatisfyHeadroom(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	writeManagedWorkspace(t, root, "old", control.StateIntegrated, now.Add(-72*time.Hour), false)
+	goCache := filepath.Join(t.TempDir(), "gocache")
+	if err := os.MkdirAll(goCache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goCache, "blob"), make([]byte, 20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	activityChecks := 0
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:         root,
+		KeepWorkspaces:      -1,
+		MinWorkspaceAge:     -1,
+		IncludeGoBuildCache: true,
+		GoCachePath:         goCache,
+		MinFreeBytes:        100,
+		Now:                 func() time.Time { return now },
+		ReadDiskUsage: func(string) (DiskUsage, error) {
+			return DiskUsage{Known: true, CapacityBytes: 1000, FreeBytes: 50}, nil
+		},
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			activityChecks++
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activityChecks == 0 {
+		t.Fatal("workspace activity probe was not run after Go cache proved insufficient")
+	}
+	assertWorkspaceCandidate(t, plan, "old", true, "outside retention")
+	if _, ok := findCandidate(plan, func(c Candidate) bool { return c.Kind == "go-build-cache" }); !ok {
+		t.Fatalf("go cache candidate missing from fallback plan: %#v", plan.Candidates)
+	}
+}
+
 func TestApplyUsesInjectedGoCacheCleaner(t *testing.T) {
 	root := t.TempDir()
 	goCache := filepath.Join(t.TempDir(), "gocache")
@@ -119,6 +199,51 @@ func TestApplyUsesInjectedGoCacheCleaner(t *testing.T) {
 		cleaned = true
 		return nil
 	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cleaned || len(result.Removed) != 1 || result.Removed[0].Kind != "go-build-cache" {
+		t.Fatalf("result=%#v cleaned=%v", result, cleaned)
+	}
+}
+
+func TestApplyShortCircuitedGoCachePlanDoesNotCloseWorkspaces(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	writeManagedWorkspace(t, root, "old", control.StateIntegrated, now.Add(-72*time.Hour), false)
+	goCache := filepath.Join(t.TempDir(), "gocache")
+	if err := os.MkdirAll(goCache, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goCache, "blob"), make([]byte, 80), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cleaned := false
+
+	result, err := Apply(context.Background(), Options{
+		ProjectRoot:         root,
+		KeepWorkspaces:      -1,
+		MinWorkspaceAge:     -1,
+		IncludeGoBuildCache: true,
+		GoCachePath:         goCache,
+		MinFreeBytes:        100,
+		Now:                 func() time.Time { return now },
+		ReadDiskUsage: func(string) (DiskUsage, error) {
+			return DiskUsage{Known: true, CapacityBytes: 1000, FreeBytes: 50}, nil
+		},
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			t.Fatal("workspace activity probe should not run for a short-circuited Go cache apply")
+			return WorkspaceActivity{}, nil
+		},
+		CleanGoCache: func(context.Context) error {
+			cleaned = true
+			return nil
+		},
+		CloseWorkspace: func(context.Context, string, Candidate) error {
+			t.Fatal("workspace close should not run for a short-circuited Go cache apply")
+			return nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1417,6 +1542,15 @@ func runHygieneCommand(t *testing.T, dir, name string, args ...string) string {
 		t.Fatalf("%s %v: %v: %s", name, args, err, out)
 	}
 	return string(out)
+}
+
+func findCandidate(plan Plan, match func(Candidate) bool) (Candidate, bool) {
+	for _, candidate := range plan.Candidates {
+		if match(candidate) {
+			return candidate, true
+		}
+	}
+	return Candidate{}, false
 }
 
 func assertWorkspaceCandidate(t *testing.T, plan Plan, id string, safe bool, reason string) Candidate {
