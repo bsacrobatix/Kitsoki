@@ -3045,3 +3045,28 @@ nodes:
     status: proposed
     title: Bound Capsule CI doctor hygiene inventory
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-16T12:45:09Z"
+    id: cs-97eb91c12a54ead5c2edf0ed2b952f03
+    operations:
+      - after:
+          edges:
+            motivated_by: []
+            part_of:
+              - product-kitsoki
+            required_by: []
+          fields:
+            summary: A project’s Capsule-CI pipeline must be able to declare the timeout for its local test/build command, including an explicit no-timeout mode for trusted local host execution. The runner must preserve cancellation and report a timeout distinctly; it must not impose an undocumented 15-minute ceiling that can fail a valid deterministic repository gate.
+          id: req-capsule-ci-configurable-timeout
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-agent-feedback
+          status: proposed
+          title: Capsule CI uses a declared local-command timeout
+          type_id: requirement
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Make local Capsule-CI command timeout declarative
+    visibility: internal
