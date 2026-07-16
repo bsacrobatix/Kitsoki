@@ -68,6 +68,31 @@ case "$working_dir/" in
   *) KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE=1 exec "$0" "$@" ;;
 esac
 config_path="$install_root/.kitsoki.yaml"
+if [ "${1:-}" = "pog-drive" ]; then
+  shift
+  if [ "$backend" != "codex" ]; then
+    echo "Kitsoki launcher shim: pog-drive currently supports the Codex backend only" >&2
+    exit 2
+  fi
+  workspace_id="pog-driver-${backend}-$(date +%Y%m%d-%H%M%S)-$$"
+  workspace_owner="pog-driver/${backend}/$$"
+  "$kitsoki_bin" capsule workspace create-script \
+    --project "$install_root" \
+    --id "$workspace_id" \
+    --owner "$workspace_owner"
+  working_dir="$install_root/.capsules/workspaces/$workspace_id"
+  [ -d "$working_dir" ] || { echo "Kitsoki launcher shim: POG Capsule workspace was not created: $working_dir" >&2; exit 1; }
+  echo "Kitsoki launcher shim: starting pog-driver in $working_dir" >&2
+  pog_args=(agent launch --agent pog-driver --profile pog-driver-codex --backend codex --working-dir "$working_dir" --config "$config_path")
+  if [ "$#" -gt 0 ]; then
+    task=""
+    for part in "$@"; do task="${task:+$task }$part"; done
+    pog_args+=(--task "$task" --exec)
+  else
+    pog_args+=(--interactive)
+  fi
+  KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE=1 exec "$kitsoki_bin" "${pog_args[@]}"
+fi
 if [ "${1:-}" = "superagent" ]; then
   shift
   workspace_id="${backend}-$(date +%Y%m%d-%H%M%S)-$$"

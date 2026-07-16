@@ -82,6 +82,10 @@ POLICY
   printf '%s\\n' "\$workspace" >> "$tmp/capsule-workspaces.log"
   exit 0
 fi
+if [ "\$1" = "agent" ] && [ "\$2" = "launch" ] && [ "\$4" = "pog-driver" ]; then
+  printf '%s\n' "\$@" > "$tmp/pog-driver-launch.log"
+  exit 0
+fi
 cd "$repo_root"
 exec "$go_bin" run ./cmd/kitsoki "\$@"
 SCRIPT
@@ -209,7 +213,20 @@ done < "$tmp/capsule-workspaces.log"
   || fail "expected one Capsule workspace per superagent backend"
 echo "PASS: Claude and Codex superagents create managed Capsule workspaces before policy launch"
 
-# --- 6: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
+# --- 6: pog-drive creates a Capsule and launches the bounded driver ---------
+: > "$tmp/capsule-workspaces.log"
+: > "$tmp/pog-driver-launch.log"
+run_launch codex "$repo" pog-drive "inspect graph" \
+  || fail "pog-drive launch failed"
+grep -qx 'agent' "$tmp/pog-driver-launch.log" || fail "pog-drive did not route through kitsoki agent launch"
+grep -qx 'pog-driver' "$tmp/pog-driver-launch.log" || fail "pog-drive did not select the pog-driver agent"
+grep -qx -- '--task' "$tmp/pog-driver-launch.log" || fail "pog-drive did not pass a task"
+grep -qx -- '--exec' "$tmp/pog-driver-launch.log" || fail "pog-drive task launch was not executable"
+pog_workspace="$(head -n 1 "$tmp/capsule-workspaces.log")"
+[ -d "$pog_workspace" ] || fail "pog-drive did not create a Capsule workspace"
+echo "PASS: pog-drive creates a Capsule before launching the bounded driver"
+
+# --- 7: KITSOKI_AGENT_*_BIN pointing at the shim does not recurse ----------
 # Exercised implicitly by every run_launch call above (KITSOKI_AGENT_*_BIN is
 # always set to the shim path itself, matching the activation script). Prove
 # it explicitly and prove the hard depth-cap backstop fails fast instead of
