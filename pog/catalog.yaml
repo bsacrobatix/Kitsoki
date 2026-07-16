@@ -2999,3 +2999,26 @@ nodes:
     status: proposed
     title: Add governed study coordinator and browser-research worker requirements
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-16T04:58:24Z"
+    id: cs-21e24f80c75d8fde74f7649820d0bf67
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-kitsoki-doctor
+          id: req-capsule-ci-doctor-resolves-source-project
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-operator-report
+          status: proposed
+          summary: When `kitsoki capsule ci doctor <pipeline> --workspace <id>` runs from inside a managed script-backed Capsule without `--project`, it must resolve the immutable source project from `.kitsoki-dev-workspace.json` before opening the instance store. If metadata is absent, unreadable, outside the current workspace, or inconsistent with the requested id, it must fail closed with a precise diagnostic and the explicit `--project` recovery command. A valid source-backed invocation must yield the same readiness verdict as the explicit source-project invocation.
+          title: Capsule CI doctor resolves the source project inside a managed Capsule
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Resolve Capsule CI project roots from managed workspace metadata
+    visibility: internal
