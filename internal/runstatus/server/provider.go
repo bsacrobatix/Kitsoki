@@ -8,6 +8,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/runstatus"
+	"kitsoki/internal/study"
 	"kitsoki/internal/video"
 )
 
@@ -60,6 +61,18 @@ type SessionProvider interface {
 // therefore return an empty list through the RPC surface.
 type ArtifactJobProvider interface {
 	ListArtifactJobs(ctx context.Context) ([]ArtifactJobSummary, error)
+}
+
+// StudyProvider exposes the durable parent study coordinator. It remains
+// distinct from artifact jobs: a study has its own waves, cells and immutable
+// evidence lineage and must never be projected into unrelated job rows.
+type StudyProvider interface {
+	SubmitStudy(context.Context, study.SubmitRequest) (study.Study, bool, error)
+	GetStudy(context.Context, string) (study.Snapshot, error)
+	ListStudies(context.Context) ([]study.Study, error)
+	StudyEvents(context.Context, string, int64) ([]study.Event, error)
+	RetryStudyCell(context.Context, string, string) (study.Attempt, error)
+	CancelStudyCell(context.Context, string, string) error
 }
 
 // WorkerProvider exposes daemon federation health without leaking transport

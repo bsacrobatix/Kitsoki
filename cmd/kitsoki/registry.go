@@ -51,6 +51,7 @@ import (
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
+	"kitsoki/internal/study"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
 )
@@ -188,6 +189,7 @@ type SessionRegistry struct {
 	// job identity survives registry and process teardown.
 	daemonStore store.Store
 	daemonJobs  artifactjob.Store
+	studies     study.Store
 	federation  *daemonfederation.Pool
 }
 
@@ -221,7 +223,50 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	}
 	r.daemonStore = st
 	r.daemonJobs = jobs
+	studies, err := study.NewSQLiteStore(st.DB())
+	if err != nil {
+		_ = st.Close()
+		return fmt.Errorf("open daemon studies: %w", err)
+	}
+	r.studies = studies
 	return nil
+}
+
+func (r *SessionRegistry) SubmitStudy(ctx context.Context, req study.SubmitRequest) (study.Study, bool, error) {
+	if r.studies == nil {
+		return study.Study{}, false, errors.New("study coordinator is unavailable outside daemon mode")
+	}
+	return r.studies.Submit(ctx, req)
+}
+func (r *SessionRegistry) GetStudy(ctx context.Context, id string) (study.Snapshot, error) {
+	if r.studies == nil {
+		return study.Snapshot{}, errors.New("study coordinator is unavailable outside daemon mode")
+	}
+	return r.studies.Get(ctx, id)
+}
+func (r *SessionRegistry) ListStudies(ctx context.Context) ([]study.Study, error) {
+	if r.studies == nil {
+		return []study.Study{}, nil
+	}
+	return r.studies.List(ctx)
+}
+func (r *SessionRegistry) StudyEvents(ctx context.Context, id string, since int64) ([]study.Event, error) {
+	if r.studies == nil {
+		return []study.Event{}, nil
+	}
+	return r.studies.Events(ctx, id, since)
+}
+func (r *SessionRegistry) RetryStudyCell(ctx context.Context, id, cell string) (study.Attempt, error) {
+	if r.studies == nil {
+		return study.Attempt{}, errors.New("study coordinator is unavailable outside daemon mode")
+	}
+	return r.studies.Retry(ctx, id, cell)
+}
+func (r *SessionRegistry) CancelStudyCell(ctx context.Context, id, cell string) error {
+	if r.studies == nil {
+		return errors.New("study coordinator is unavailable outside daemon mode")
+	}
+	return r.studies.Cancel(ctx, id, cell)
 }
 
 func (r *SessionRegistry) SetDaemonFederation(pool *daemonfederation.Pool) {

@@ -40,6 +40,28 @@ export interface WorkerSummary {
 	job_count: number;
 }
 
+export interface StudyPlan {
+  revision: string;
+  digest: string;
+  waves: Array<{ wave_id: string; order: number; cells: Array<{ cell_id: string; depends_on?: string[]; worker?: string }> }>;
+  budget: { limit: number; used?: number; currency?: string };
+  policy?: Record<string, string>;
+  worker_bindings?: Record<string, string>;
+}
+
+export interface StudySummary {
+  study_id: string;
+  plan: StudyPlan;
+  phase: string;
+  attention?: { kind: string; reason: string; cell_id?: string };
+  budget: { limit: number; used: number; currency?: string };
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StudySnapshot { study: StudySummary; cells: Array<{ study_id: string; wave_id: string; cell_id: string; phase: string; blocked_reason?: string; worker?: string; attempts: Array<{ attempt_id: string; number: number; phase: string; cost: number; result_digest?: string; failure_kind?: string; created_at: string; finished_at?: string }> }> }
+export interface StudyEvent { study_id: string; sequence: number; at: string; kind: string; wave_id?: string; cell_id?: string; attempt_id?: string; detail?: Record<string, string> }
+
 export interface OperationRunSummary {
   operation_id?: string;
   policy_id?: string;

@@ -2959,3 +2959,43 @@ nodes:
     status: proposed
     title: MCP graph auto-routing must recognize Git-protected primary checkouts
     visibility: internal
+  - authored_by: agent/codex-20260716-093108-86836
+    created_at: "2026-07-16T04:21:14Z"
+    id: cs-8b4c9970ed8f4830d6ec80137b549d15
+    operations:
+      - after:
+          fields:
+            edges:
+              part_of:
+                - product-kitsoki
+            gate: Deterministic cassette flow submits a four-wave study, creates attention and a retry, restarts the daemon, and proves the same identity, ordered event history, child identifiers, lineage, and accumulated costs without a live LLM.
+            summary: A digest-bound study submission must persist its parent, waves, cells, immutable attempts, event sequence, attention, and budget through daemon restart; retries add lineage rather than replacing terminal evidence.
+          id: req-agent-runner-durable-study-coordinator
+          schema: kitsoki/requirement/v0
+          sources:
+            - .context/agent-runner-ar3-ar4-brief.md
+          status: proposed
+          title: Governed studies retain durable parent identity and evidence lineage
+          type_id: requirement
+          visibility: internal
+        kind: added
+      - after:
+          fields:
+            edges:
+              part_of:
+                - product-kitsoki
+            gate: Fixture sites produce a source-digested result and rrweb receipt for interaction plus an honest access or bot failure, with no public network or live LLM request.
+            summary: Waves one and three must use approved public-source roots, source-digest each result, retain explicit unknowns and typed access failures, and attach redacted rrweb evidence when interaction occurs without routing the work through a persona or writing a consumer graph.
+          id: req-agent-runner-governed-browser-research
+          schema: kitsoki/requirement/v0
+          sources:
+            - .context/agent-runner-ar3-ar4-brief.md
+          status: proposed
+          title: Browser research produces bounded public evidence with typed failures
+          type_id: requirement
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Add governed study coordinator and browser-research worker requirements
+    visibility: internal

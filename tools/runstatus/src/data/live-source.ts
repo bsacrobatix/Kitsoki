@@ -2,6 +2,10 @@ import type {
   SessionHeader,
   ArtifactJobSummary,
 	WorkerSummary,
+	StudyPlan,
+	StudySummary,
+	StudySnapshot,
+	StudyEvent,
   AppDef,
   MermaidSnapshot,
   TraceEvent,
@@ -346,6 +350,16 @@ export class LiveSource implements DataSource {
   listArtifactJobs(): Promise<ArtifactJobSummary[]> {
     return this.client.post<ArtifactJobSummary[]>("runstatus.jobs.list", {});
   }
+
+  submitStudy(idempotencyKey: string, plan: StudyPlan): Promise<{ study: StudySummary; created: boolean }> {
+    return this.client.post("runstatus.studies.submit", { idempotency_key: idempotencyKey, plan });
+  }
+
+  listStudies(): Promise<StudySummary[]> { return this.client.post("runstatus.studies.list", {}); }
+  getStudy(studyId: string): Promise<StudySnapshot> { return this.client.post("runstatus.study.get", { study_id: studyId }); }
+  studyEvents(studyId: string, sinceSequence = 0): Promise<StudyEvent[]> { return this.client.post("runstatus.study.events", { study_id: studyId, since_sequence: sinceSequence }); }
+  retryStudyCell(studyId: string, cellId: string): Promise<StudySnapshot["cells"][number]["attempts"][number]> { return this.client.post("runstatus.study.retry", { study_id: studyId, cell_id: cellId }); }
+  cancelStudyCell(studyId: string, cellId: string): Promise<{ ok: boolean }> { return this.client.post("runstatus.study.cancel", { study_id: studyId, cell_id: cellId }); }
 
 	listWorkers(): Promise<WorkerSummary[]> {
 		return this.client.post<WorkerSummary[]>("runstatus.workers.list", {});

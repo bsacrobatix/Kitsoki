@@ -21,6 +21,7 @@ import (
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
+	"kitsoki/internal/study"
 )
 
 // stubSource is a minimal in-memory [server.Source] for the routing tests: it
@@ -47,6 +48,7 @@ type stubProvider struct {
 	entries  map[string]server.Entry
 	jobs     []server.ArtifactJobSummary
 	workers  []server.WorkerSummary
+	studies  *study.MemoryStore
 	stories  []server.StoryHeader
 	newFn    func(ctx context.Context, storyPath string) (string, error)
 	seededFn func(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error)
@@ -60,6 +62,31 @@ func (p *stubProvider) ListArtifactJobs(context.Context) ([]server.ArtifactJobSu
 
 func (p *stubProvider) ListWorkers(context.Context) ([]server.WorkerSummary, error) {
 	return append([]server.WorkerSummary(nil), p.workers...), nil
+}
+
+func (p *stubProvider) studyStore() *study.MemoryStore {
+	if p.studies == nil {
+		p.studies = study.NewMemoryStore()
+	}
+	return p.studies
+}
+func (p *stubProvider) SubmitStudy(ctx context.Context, req study.SubmitRequest) (study.Study, bool, error) {
+	return p.studyStore().Submit(ctx, req)
+}
+func (p *stubProvider) GetStudy(ctx context.Context, id string) (study.Snapshot, error) {
+	return p.studyStore().Get(ctx, id)
+}
+func (p *stubProvider) ListStudies(ctx context.Context) ([]study.Study, error) {
+	return p.studyStore().List(ctx)
+}
+func (p *stubProvider) StudyEvents(ctx context.Context, id string, since int64) ([]study.Event, error) {
+	return p.studyStore().Events(ctx, id, since)
+}
+func (p *stubProvider) RetryStudyCell(ctx context.Context, id, cell string) (study.Attempt, error) {
+	return p.studyStore().Retry(ctx, id, cell)
+}
+func (p *stubProvider) CancelStudyCell(ctx context.Context, id, cell string) error {
+	return p.studyStore().Cancel(ctx, id, cell)
 }
 
 func newStubProvider() *stubProvider {
@@ -326,6 +353,24 @@ func TestMulti_ArtifactJobsList(t *testing.T) {
 	require.Len(t, list, 1)
 	assert.Equal(t, "job-1", list[0].JobID)
 	assert.Equal(t, "/s/job-1", list[0].RunURL)
+}
+
+func TestMulti_StudySubmitAndQuery(t *testing.T) {
+	t.Parallel()
+	p := newStubProvider()
+	ts := httptest.NewServer(server.NewMulti(p).Handler())
+	defer ts.Close()
+	params := map[string]any{"idempotency_key": "study-key", "plan": map[string]any{"revision": "r1", "digest": "sha256:plan", "waves": []any{map[string]any{"wave_id": "w1", "order": 1, "cells": []any{map[string]any{"cell_id": "c1"}}}}, "budget": map[string]any{"limit": 5}}}
+	var submitted struct {
+		Study   study.Study `json:"study"`
+		Created bool        `json:"created"`
+	}
+	rpcCall(t, ts, "runstatus.studies.submit", params, &submitted)
+	require.True(t, submitted.Created)
+	var got study.Snapshot
+	rpcCall(t, ts, "runstatus.study.get", map[string]any{"study_id": submitted.Study.ID}, &got)
+	require.Equal(t, submitted.Study.ID, got.Study.ID)
+	require.Len(t, got.Cells, 1)
 }
 
 func TestMulti_WorkersList(t *testing.T) {

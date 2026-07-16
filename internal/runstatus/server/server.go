@@ -103,6 +103,7 @@ import (
 	"kitsoki/internal/runstatus/harrec"
 	"kitsoki/internal/runstatus/web"
 	"kitsoki/internal/store"
+	"kitsoki/internal/study"
 	"kitsoki/internal/userfacing"
 	"kitsoki/internal/world"
 )
@@ -946,6 +947,92 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, serverErr(err)
 		}
 		return jobs, nil
+
+	case "runstatus.studies.submit":
+		provider, ok := s.provider.(StudyProvider)
+		if !ok {
+			return nil, &rpcError{Code: codeReadOnly, Message: "study coordinator is available only in daemon mode"}
+		}
+		var req study.SubmitRequest
+		if err := decodeParams(params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		out, created, err := provider.SubmitStudy(ctx, req)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		return map[string]any{"study": out, "created": created}, nil
+
+	case "runstatus.studies.list":
+		provider, ok := s.provider.(StudyProvider)
+		if !ok {
+			return []study.Study{}, nil
+		}
+		out, err := provider.ListStudies(ctx)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return out, nil
+
+	case "runstatus.study.get":
+		provider, ok := s.provider.(StudyProvider)
+		if !ok {
+			return nil, &rpcError{Code: codeReadOnly, Message: "study coordinator is available only in daemon mode"}
+		}
+		id := stringParam(params, "study_id")
+		if id == "" {
+			return nil, invalidParams(fmt.Errorf("study_id is required"))
+		}
+		out, err := provider.GetStudy(ctx, id)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return out, nil
+
+	case "runstatus.study.events":
+		provider, ok := s.provider.(StudyProvider)
+		if !ok {
+			return []study.Event{}, nil
+		}
+		id := stringParam(params, "study_id")
+		if id == "" {
+			return nil, invalidParams(fmt.Errorf("study_id is required"))
+		}
+		since, _ := intParam(params, "since_sequence")
+		out, err := provider.StudyEvents(ctx, id, int64(since))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return out, nil
+
+	case "runstatus.study.retry":
+		provider, ok := s.provider.(StudyProvider)
+		if !ok {
+			return nil, &rpcError{Code: codeReadOnly, Message: "study coordinator is available only in daemon mode"}
+		}
+		id, cell := stringParam(params, "study_id"), stringParam(params, "cell_id")
+		if id == "" || cell == "" {
+			return nil, invalidParams(fmt.Errorf("study_id and cell_id are required"))
+		}
+		out, err := provider.RetryStudyCell(ctx, id, cell)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		return out, nil
+
+	case "runstatus.study.cancel":
+		provider, ok := s.provider.(StudyProvider)
+		if !ok {
+			return nil, &rpcError{Code: codeReadOnly, Message: "study coordinator is available only in daemon mode"}
+		}
+		id, cell := stringParam(params, "study_id"), stringParam(params, "cell_id")
+		if id == "" || cell == "" {
+			return nil, invalidParams(fmt.Errorf("study_id and cell_id are required"))
+		}
+		if err := provider.CancelStudyCell(ctx, id, cell); err != nil {
+			return nil, invalidParams(err)
+		}
+		return map[string]bool{"ok": true}, nil
 
 	case "runstatus.workers.list":
 		provider, ok := s.provider.(WorkerProvider)
@@ -2184,6 +2271,18 @@ func serverErr(err error) *rpcError {
 	// orchestrator internals); the full chain rides along in Data for logs/dev
 	// tools. Without this the red banner showed raw wrapped Go errors verbatim.
 	return &rpcError{Code: codeServerError, Message: userfacing.Error(err), Data: err.Error()}
+}
+
+func invalidParams(err error) *rpcError {
+	return &rpcError{Code: codeServerError, Message: userfacing.Error(err), Data: err.Error()}
+}
+
+func decodeParams(params map[string]any, out any) error {
+	b, err := json.Marshal(params)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
 }
 
 // traceResult is the runstatus.session.trace response shape.
