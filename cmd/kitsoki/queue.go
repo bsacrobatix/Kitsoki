@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -71,10 +72,10 @@ func queueStatusCmd() *cobra.Command {
 // worker is the durable owner of preparation leases and protected finalization.
 // `process` remains available for scripts that want one compatibility drain.
 func queueWorkerCmd() *cobra.Command {
-	var project, gate, workerID string
+	var project, gate, target, resolver, repair, workerID string
 	var once bool
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
-		deps := queue.ProcessDeps{Integration: queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}, Gate: queue.ShellGate{Command: gate}, WorkerID: workerID, GateVersion: gate}
+		deps := queueProcessDeps(project, gate, target, resolver, repair, workerID)
 		worker := queue.Worker{Store: queue.Store{ProjectRoot: project}, Deps: deps}
 		for {
 			progressed, err := worker.RunOnce(cmd.Context())
@@ -105,6 +106,9 @@ func queueWorkerCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each prepared tree")
+	cmd.Flags().StringVar(&target, "target", "", "protected destination ref; defaults to staging/local integration")
+	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
+	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
 	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token")
 	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step")
 	_ = cmd.MarkFlagRequired("gate")
@@ -114,10 +118,9 @@ func queueWorkerCmd() *cobra.Command {
 // process uses the managed staging-capsule lifecycle and requires an explicit
 // deterministic gate. It has no raw-main fallback.
 func queueProcessCmd() *cobra.Command {
-	var project, gate string
+	var project, gate, target, resolver, repair string
 	cmd := &cobra.Command{Use: "process", Aliases: []string{"drain"}, Short: "Process candidates through a configured protected integration", RunE: func(cmd *cobra.Command, _ []string) error {
-		integration := queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}
-		state, err := (queue.Store{ProjectRoot: project}).Process(cmd.Context(), queue.ProcessDeps{Integration: integration, Gate: queue.ShellGate{Command: gate}})
+		state, err := (queue.Store{ProjectRoot: project}).Process(cmd.Context(), queueProcessDeps(project, gate, target, resolver, repair, ""))
 		if err != nil {
 			return err
 		}
@@ -125,6 +128,34 @@ func queueProcessCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each speculative tree")
+	cmd.Flags().StringVar(&target, "target", "", "protected destination ref; defaults to staging/local integration")
+	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
+	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
 	_ = cmd.MarkFlagRequired("gate")
 	return cmd
+}
+
+// queueProcessDeps preserves the existing staging/local drain by default. An
+// explicit destination switches both preparation and finalization to the same
+// protected ref, so the final compare-and-swap cannot land somewhere else.
+func queueProcessDeps(project, gate, target, resolver, repair, workerID string) queue.ProcessDeps {
+	deps := queue.ProcessDeps{
+		Gate:        queue.ShellGate{Command: gate},
+		WorkerID:    workerID,
+		GateVersion: gate,
+	}
+	if strings.TrimSpace(target) == "" {
+		deps.Integration = queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}
+	} else {
+		deps.Integration = queue.ProtectedIntegration{
+			ProjectRoot:     project,
+			TargetRef:       target,
+			ResolverCommand: resolver,
+		}
+		deps.Finalizer = queue.ProtectedFinalizer{ProjectRoot: project, TargetRef: target}
+	}
+	if strings.TrimSpace(repair) != "" {
+		deps.Repairer = queue.ShellRepairer{Command: repair}
+	}
+	return deps
 }
