@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 	"kitsoki/internal/capsule/queue"
@@ -12,7 +13,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd())
 	return cmd
 }
 func queueSubmitCmd() *cobra.Command {
@@ -46,14 +47,67 @@ func queueSubmitCmd() *cobra.Command {
 }
 func queueStatusCmd() *cobra.Command {
 	var project string
+	var jsonOut bool
 	cmd := &cobra.Command{Use: "status", Aliases: []string{"list"}, Short: "Show durable merge-queue candidates", RunE: func(cmd *cobra.Command, _ []string) error {
 		state, err := (queue.Store{ProjectRoot: project}).List()
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+		if jsonOut {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+		}
+		for _, candidate := range state.Candidates {
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), queue.StatusLine(candidate, time.Now().UTC())); err != nil {
+				return err
+			}
+		}
+		return nil
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the durable queue record as JSON")
+	return cmd
+}
+
+// worker is the durable owner of preparation leases and protected finalization.
+// `process` remains available for scripts that want one compatibility drain.
+func queueWorkerCmd() *cobra.Command {
+	var project, gate, workerID string
+	var once bool
+	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
+		deps := queue.ProcessDeps{Integration: queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}, Gate: queue.ShellGate{Command: gate}, WorkerID: workerID, GateVersion: gate}
+		worker := queue.Worker{Store: queue.Store{ProjectRoot: project}, Deps: deps}
+		for {
+			progressed, err := worker.RunOnce(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if once {
+				state, err := (queue.Store{ProjectRoot: project}).List()
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+			}
+			if !progressed {
+				select {
+				case <-cmd.Context().Done():
+					return cmd.Context().Err()
+				case <-time.After(250 * time.Millisecond):
+				}
+				continue
+			}
+			select {
+			case <-cmd.Context().Done():
+				return cmd.Context().Err()
+			case <-time.After(250 * time.Millisecond):
+			}
+		}
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each prepared tree")
+	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token")
+	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step")
+	_ = cmd.MarkFlagRequired("gate")
 	return cmd
 }
 

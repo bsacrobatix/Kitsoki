@@ -1,7 +1,7 @@
-// Package queue provides the durable, receipt-bound admission and processing
-// state for the Capsule merge queue. Git integration is deliberately injected:
-// the queue serializes candidates and records evidence, while the protected
-// workspace lifecycle remains the only component permitted to land a tree.
+// Package queue persists receipt-bound merge candidates and coordinates their
+// preparation and protected finalization. Expensive preparation never holds
+// the state lock; protected ref updates remain injected and compare-and-swap
+// based.
 package queue
 
 import (
@@ -19,45 +19,77 @@ import (
 	"kitsoki/internal/capsule/receipt"
 )
 
-const Schema = "capsule-merge-queue/v1"
+const (
+	Schema = "capsule-merge-queue/v1"
+)
 
 type Status string
 
 const (
-	Queued    Status = "queued"
-	Running   Status = "running"
-	RetryWait Status = "retry_wait"
-	Landed    Status = "landed"
-	Ejected   Status = "ejected"
+	Queued             Status = "queued"
+	Preparing          Status = "preparing"
+	WaitingForFIFO     Status = "waiting_for_fifo"
+	Gating             Status = "gating"
+	ReadyToFinalize    Status = "ready_to_finalize"
+	Finalizing         Status = "finalizing"
+	Reprepare          Status = "reprepare"
+	NeedsConflictInput Status = "needs_conflict_input"
+	RetryWait          Status = "retry_wait"
+	Landed             Status = "landed"
+	Rejected           Status = "rejected"
+
+	// Running and Ejected retain source compatibility with v1 callers.
+	Running Status = Preparing
+	Ejected Status = Rejected
 )
 
 type Candidate struct {
-	ID             string    `json:"id"`
-	ProjectID      string    `json:"project_id"`
-	Branch         string    `json:"branch"`
-	SHA            string    `json:"sha"`
-	ReceiptID      string    `json:"receipt_id"`
-	ReceiptRef     string    `json:"receipt_ref,omitempty"`
-	Backend        string    `json:"backend"`
-	Paths          []string  `json:"paths,omitempty"`
-	Position       int       `json:"position"`
-	Status         Status    `json:"status"`
-	Submitted      time.Time `json:"submitted_at"`
-	Started        time.Time `json:"started_at,omitempty"`
-	Completed      time.Time `json:"completed_at,omitempty"`
-	SpeculativeSHA string    `json:"speculative_sha,omitempty"`
-	ValidatedSHA   string    `json:"validated_sha,omitempty"`
-	WorkspaceID    string    `json:"workspace_id,omitempty"`
-	WorkspacePath  string    `json:"workspace_path,omitempty"`
-	Evidence       []string  `json:"evidence,omitempty"`
-	RetryReason    string    `json:"retry_reason,omitempty"`
-	EjectionReason string    `json:"ejection_reason,omitempty"`
+	ID                    string    `json:"id"`
+	ProjectID             string    `json:"project_id"`
+	Sequence              uint64    `json:"sequence"`
+	Branch                string    `json:"branch"`
+	SHA                   string    `json:"sha"`
+	ReceiptID             string    `json:"receipt_id"`
+	ReceiptRef            string    `json:"receipt_ref,omitempty"`
+	ReceiptDigest         string    `json:"receipt_digest,omitempty"`
+	Backend               string    `json:"backend"`
+	Paths                 []string  `json:"paths,omitempty"`
+	Position              int       `json:"position"`
+	Status                Status    `json:"status"`
+	Phase                 Status    `json:"phase,omitempty"`
+	Submitted             time.Time `json:"submitted_at"`
+	Started               time.Time `json:"started_at,omitempty"`
+	PhaseStartedAt        time.Time `json:"phase_started_at,omitempty"`
+	Completed             time.Time `json:"completed_at,omitempty"`
+	WorkerID              string    `json:"worker_id,omitempty"`
+	LeaseExpiresAt        time.Time `json:"lease_expires_at,omitempty"`
+	Attempt               int       `json:"attempt,omitempty"`
+	RetryAt               time.Time `json:"retry_at,omitempty"`
+	BaseSHA               string    `json:"base_sha,omitempty"`
+	TreeSHA               string    `json:"tree_sha,omitempty"`
+	GateVersion           string    `json:"gate_version,omitempty"`
+	DependencyFingerprint string    `json:"dependency_fingerprint,omitempty"`
+	IntegrationRef        string    `json:"integration_ref,omitempty"`
+	WorkspaceID           string    `json:"workspace_id,omitempty"`
+	WorkspacePath         string    `json:"workspace_path,omitempty"`
+	ConflictContinuation  string    `json:"conflict_continuation,omitempty"`
+	GateLog               string    `json:"gate_log,omitempty"`
+	GateEvidence          []string  `json:"gate_evidence,omitempty"`
+	FinalizationLog       string    `json:"finalization_log,omitempty"`
+	ResultMainSHA         string    `json:"result_main_sha,omitempty"`
+	Failure               string    `json:"failure,omitempty"`
+	SpeculativeSHA        string    `json:"speculative_sha,omitempty"` // v1 compatibility
+	ValidatedSHA          string    `json:"validated_sha,omitempty"`   // v1 compatibility
+	Evidence              []string  `json:"evidence,omitempty"`
+	RetryReason           string    `json:"retry_reason,omitempty"`
+	EjectionReason        string    `json:"ejection_reason,omitempty"`
 }
 
 type State struct {
 	Schema     string      `json:"schema"`
 	Candidates []Candidate `json:"candidates"`
 }
+
 type PathScopeManifest struct {
 	Schema string   `json:"schema"`
 	Paths  []string `json:"paths,omitempty"`
@@ -70,37 +102,56 @@ type Submit struct {
 	Now                 time.Time
 }
 
-// Integration constructs a speculative tree from the current target and the
-// preceding queued candidates, then lands only through the protected lifecycle.
+// Integration materializes an immutable integration tree. Land remains for
+// staging/local compatibility; protected targets use Finalizer instead.
 type Integration interface {
 	Speculate(context.Context, Candidate, []Candidate) (Speculation, error)
 	Land(context.Context, Speculation) error
 }
 type Speculation struct {
-	SHA           string   `json:"sha"`
-	Evidence      []string `json:"evidence,omitempty"`
-	WorkspaceID   string   `json:"workspace_id,omitempty"`
-	WorkspacePath string   `json:"workspace_path,omitempty"`
+	SHA            string   `json:"sha"`
+	BaseSHA        string   `json:"base_sha,omitempty"`
+	IntegrationRef string   `json:"integration_ref,omitempty"`
+	Evidence       []string `json:"evidence,omitempty"`
+	WorkspaceID    string   `json:"workspace_id,omitempty"`
+	WorkspacePath  string   `json:"workspace_path,omitempty"`
 }
 type Gate interface {
 	Run(context.Context, Speculation) (GateResult, error)
 }
 type GateResult struct {
-	Passed   bool     `json:"passed"`
-	Evidence []string `json:"evidence,omitempty"`
+	Passed                bool     `json:"passed"`
+	Evidence              []string `json:"evidence,omitempty"`
+	Log                   string   `json:"log,omitempty"`
+	GateVersion           string   `json:"gate_version,omitempty"`
+	DependencyFingerprint string   `json:"dependency_fingerprint,omitempty"`
 }
 type ProcessDeps struct {
-	Integration Integration
-	Gate        Gate
-	Repairer    Repairer
-	Now         func() time.Time
+	Integration           Integration
+	Gate                  Gate
+	Repairer              Repairer
+	Finalizer             Finalizer
+	Now                   func() time.Time
+	WorkerID              string
+	Lease                 time.Duration
+	GateVersion           string
+	DependencyFingerprint string
 }
 
-// Repairer performs at most one bounded repair attempt for a failed gate. A
-// candidate remains in retry_wait if the repair cannot make the gate green.
-// Queue persistence deliberately outlives any individual repair process.
 type Repairer interface {
 	Repair(context.Context, Speculation, error) ([]string, error)
+}
+
+// Finalizer owns the final protected compare-and-swap. It is called only with
+// a short durable finalization lease held by the worker.
+type Finalizer interface {
+	Finalize(context.Context, Candidate) (FinalizeResult, error)
+}
+type FinalizeResult struct {
+	OldMainSHA string `json:"old_main_sha,omitempty"`
+	NewMainSHA string `json:"new_main_sha,omitempty"`
+	Log        string `json:"log,omitempty"`
+	Stale      bool   `json:"stale,omitempty"`
 }
 
 type Store struct {
@@ -122,7 +173,8 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 		if now.IsZero() {
 			now = time.Now().UTC()
 		}
-		c := Candidate{ID: candidateID(in.SHA, in.Receipt.ReceiptID), ProjectID: in.Receipt.ProjectID, Branch: in.Branch, SHA: in.SHA, ReceiptID: in.Receipt.ReceiptID, ReceiptRef: in.ReceiptRef, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: len(state.Candidates) + 1, Status: Queued, Submitted: now}
+		seq := nextSequence(state.Candidates)
+		c := Candidate{ID: candidateID(in.SHA, in.Receipt.ReceiptID), ProjectID: in.Receipt.ProjectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, ReceiptID: in.Receipt.ReceiptID, ReceiptRef: in.ReceiptRef, ReceiptDigest: in.Receipt.Integrity.ContentDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now}
 		state.Candidates = append(state.Candidates, c)
 		return c, nil
 	})
@@ -130,139 +182,45 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 
 func (s Store) List() (State, error) { return s.readState() }
 
-// Process drains candidates in submission order. A recovered running entry is
-// retried deterministically; no terminal candidate can be duplicated.
+// Process is retained for existing callers. It drains available work through a
+// worker; each gate still runs after the short state claim has been released.
 func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
-	if deps.Integration == nil || deps.Gate == nil {
-		return State{}, fmt.Errorf("queue: integration and gate are required")
-	}
-	return s.withLock(func(path string) (State, error) {
-		state, err := read(path)
+	w := Worker{Store: s, Deps: deps}
+	for {
+		progressed, err := w.RunOnce(ctx)
 		if err != nil {
 			return State{}, err
 		}
-		for i := range state.Candidates {
-			if state.Candidates[i].Status == Running {
-				state.Candidates[i].Status = Queued
-				state.Candidates[i].Started = time.Time{}
-			}
+		if !progressed {
+			return s.List()
 		}
-		if err := write(path, state); err != nil {
-			return State{}, err
-		}
-		for i := range state.Candidates {
-			if state.Candidates[i].Status != Queued && state.Candidates[i].Status != RetryWait {
-				continue
-			}
-			c := &state.Candidates[i]
-			c.Status = Running
-			c.Started = now(deps)
-			c.RetryReason = ""
-			c.EjectionReason = ""
-			c.Evidence = nil
-			c.ValidatedSHA = ""
-			if err := write(path, state); err != nil {
-				return State{}, err
-			}
-			ahead := activeAhead(state.Candidates[:i])
-			spec, err := deps.Integration.Speculate(ctx, *c, ahead)
-			c.SpeculativeSHA = spec.SHA
-			c.WorkspaceID = spec.WorkspaceID
-			c.WorkspacePath = spec.WorkspacePath
-			c.Evidence = append(c.Evidence, spec.Evidence...)
-			if err != nil {
-				retry(c, now(deps), "speculation_failed", err.Error())
-				if err := write(path, state); err != nil {
-					return State{}, err
-				}
-				break
-			}
-			result, err := deps.Gate.Run(ctx, spec)
-			c.Evidence = append(c.Evidence, result.Evidence...)
-			if err != nil {
-				retry(c, now(deps), "gate_failed", err.Error())
-				if err := write(path, state); err != nil {
-					return State{}, err
-				}
-				break
-			}
-			if !result.Passed {
-				if deps.Repairer != nil {
-					repairEvidence, repairErr := deps.Repairer.Repair(ctx, spec, fmt.Errorf("deterministic gate failed"))
-					c.Evidence = append(c.Evidence, repairEvidence...)
-					if repairErr == nil {
-						retried, retryErr := deps.Gate.Run(ctx, spec)
-						c.Evidence = append(c.Evidence, retried.Evidence...)
-						if retryErr == nil && retried.Passed {
-							c.ValidatedSHA = spec.SHA
-							if err := deps.Integration.Land(ctx, spec); err == nil {
-								c.Status = Landed
-								c.Completed = now(deps)
-								if err := write(path, state); err != nil {
-									return State{}, err
-								}
-								continue
-							} else {
-								repairErr = err
-							}
-						}
-						if retryErr != nil {
-							repairErr = retryErr
-						}
-					}
-					if repairErr != nil {
-						c.Evidence = append(c.Evidence, "queue:repair:"+repairErr.Error())
-					}
-				}
-				retry(c, now(deps), "gate_failed", "deterministic gate failed")
-				if err := write(path, state); err != nil {
-					return State{}, err
-				}
-				break
-			}
-			if err := deps.Integration.Land(ctx, spec); err != nil {
-				retry(c, now(deps), "landing_failed", err.Error())
-				if err := write(path, state); err != nil {
-					return State{}, err
-				}
-				break
-			}
-			c.ValidatedSHA = spec.SHA
-			c.Status = Landed
-			c.Completed = now(deps)
-			if err := write(path, state); err != nil {
-				return State{}, err
-			}
-		}
-		return state, nil
-	})
-}
-
-func retry(c *Candidate, at time.Time, reason, evidence string) {
-	c.Status = RetryWait
-	c.Completed = at
-	c.RetryReason = reason
-	if evidence != "" {
-		c.Evidence = append(c.Evidence, evidence)
 	}
 }
 
-func eject(c *Candidate, at time.Time, reason, evidence string) {
-	c.Status = Ejected
-	c.Completed = at
-	c.EjectionReason = reason
-	if evidence != "" {
-		c.Evidence = append(c.Evidence, evidence)
+func nextSequence(cs []Candidate) uint64 {
+	var max uint64
+	for _, c := range cs {
+		if c.Sequence > max {
+			max = c.Sequence
+		}
 	}
+	return max + 1
 }
 func activeAhead(cs []Candidate) []Candidate {
 	out := make([]Candidate, 0, len(cs))
 	for _, c := range cs {
-		if c.Status == Queued || c.Status == Running || c.Status == RetryWait {
+		if !terminal(c.phase()) {
 			out = append(out, c)
 		}
 	}
 	return out
+}
+func terminal(p Status) bool { return p == Landed || p == Rejected }
+func (c Candidate) phase() Status {
+	if c.Phase != "" {
+		return c.Phase
+	}
+	return c.Status
 }
 func now(deps ProcessDeps) time.Time {
 	if deps.Now != nil {
@@ -347,10 +305,37 @@ func read(path string) (State, error) {
 	if state.Schema != Schema {
 		return State{}, fmt.Errorf("queue: unsupported state schema %q", state.Schema)
 	}
-	return state, nil
+	return normalize(state), nil
+}
+func normalize(state State) State {
+	for i := range state.Candidates {
+		c := &state.Candidates[i]
+		if c.Sequence == 0 {
+			c.Sequence = uint64(i + 1)
+		}
+		c.Position = int(c.Sequence)
+		if c.Phase == "" {
+			c.Phase = c.Status
+		}
+		if c.Phase == Running {
+			c.Phase = Reprepare
+		}
+		if c.Phase == "" {
+			c.Phase = Queued
+		}
+		if c.Status == "" {
+			c.Status = c.Phase
+		}
+		if c.ReceiptDigest == "" {
+			c.ReceiptDigest = c.ReceiptID
+		}
+	}
+	state.Schema = Schema
+	sort.SliceStable(state.Candidates, func(i, j int) bool { return state.Candidates[i].Sequence < state.Candidates[j].Sequence })
+	return state
 }
 func write(path string, state State) error {
-	state.Schema = Schema
+	state = normalize(state)
 	raw, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -405,4 +390,24 @@ func cleanPaths(paths []string) []string {
 	out := append([]string(nil), paths...)
 	sort.Strings(out)
 	return out
+}
+
+// StatusLine is the stable, single-line human representation used by the CLI.
+func StatusLine(c Candidate, at time.Time) string {
+	elapsed := at.Sub(c.Submitted).Round(time.Second)
+	if c.Submitted.IsZero() {
+		elapsed = 0
+	}
+	next := "worker"
+	switch c.phase() {
+	case NeedsConflictInput:
+		next = "conflict input"
+	case RetryWait:
+		next = "retry"
+	case ReadyToFinalize:
+		next = "finalize"
+	case Landed:
+		next = "complete"
+	}
+	return fmt.Sprintf("%d %s %s owner=%s elapsed=%s base=%s tree=%s next=%s logs=%s", c.Sequence, c.ID, c.phase(), c.WorkerID, elapsed, c.BaseSHA, c.TreeSHA, next, first(c.GateLog, c.FinalizationLog, c.WorkspacePath))
 }

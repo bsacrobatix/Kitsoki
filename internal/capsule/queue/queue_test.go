@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -173,23 +174,22 @@ func TestProcessRunsOneBoundedRepairBeforeParkingRedGate(t *testing.T) {
 	}
 }
 
-func TestRetryWaitCandidateBlocksLaterCandidatesUntilRepaired(t *testing.T) {
+func TestRetryWaitHeadAllowsLaterPreparationButBlocksFinalization(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
 		if c.ID == first.ID {
 			return Speculation{SHA: "spec-" + c.SHA}, nil
 		}
-		t.Fatalf("later candidate should not run while first is parked")
-		return Speculation{}, nil
+		return Speculation{SHA: "spec-" + c.SHA}, nil
 	}}
-	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
-		return GateResult{Passed: false, Evidence: []string{"gate:red"}}, nil
+	gate := gateFunc(func(_ context.Context, spec Speculation) (GateResult, error) {
+		return GateResult{Passed: spec.SHA != "spec-"+first.SHA, Evidence: []string{"gate:red"}}, nil
 	})
 	state, err := store.Process(context.Background(), ProcessDeps{Integration: integration, Gate: gate})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Candidates[0].Status != RetryWait || state.Candidates[1].Status != Queued {
+	if state.Candidates[0].Status != RetryWait || state.Candidates[1].Status != ReadyToFinalize {
 		t.Fatalf("state=%#v", state.Candidates)
 	}
 }
@@ -244,7 +244,11 @@ type fakeIntegration struct {
 }
 
 func (f *fakeIntegration) Speculate(ctx context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
-	return f.speculate(ctx, c, ahead)
+	spec, err := f.speculate(ctx, c, ahead)
+	if spec.BaseSHA == "" {
+		spec.BaseSHA = "base-" + c.SHA
+	}
+	return spec, err
 }
 func (f *fakeIntegration) Land(context.Context, Speculation) error { f.landed++; return nil }
 
@@ -263,12 +267,132 @@ type repairFunc func(context.Context, Speculation, error) ([]string, error)
 func (f repairFunc) Repair(ctx context.Context, s Speculation, err error) ([]string, error) {
 	return f(ctx, s, err)
 }
+
+type finalizerFunc func(context.Context, Candidate) (FinalizeResult, error)
+
+func (f finalizerFunc) Finalize(ctx context.Context, c Candidate) (FinalizeResult, error) {
+	return f(ctx, c)
+}
+
 func TestSubmitRejectsReceiptForAnotherCandidate(t *testing.T) {
 	_, err := (Store{ProjectRoot: t.TempDir()}).Submit(Submit{Branch: "agent-a", SHA: strings.Repeat("a", 40), Receipt: testReceipt(t, strings.Repeat("b", 40))})
 	if err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestWorkersPrepareConcurrentlyAndFinalizeInFIFOOrder(t *testing.T) {
+	store, first, second := queuedPair(t)
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+		entered <- c.ID
+		<-release
+		return Speculation{SHA: "tree-" + c.SHA}, nil
+	}}
+	var mu sync.Mutex
+	var finalized []string
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, WorkerID: "worker", GateVersion: "test", Finalizer: finalizerFunc(func(_ context.Context, c Candidate) (FinalizeResult, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		finalized = append(finalized, c.ID)
+		return FinalizeResult{OldMainSHA: c.BaseSHA, NewMainSHA: c.TreeSHA}, nil
+	})}
+	workers := []Worker{{Store: store, Deps: deps}, {Store: store, Deps: deps}}
+	var wg sync.WaitGroup
+	for _, worker := range workers {
+		wg.Add(1)
+		go func(worker Worker) { defer wg.Done(); _, _ = worker.RunOnce(context.Background()) }(worker)
+	}
+	got := map[string]bool{<-entered: true, <-entered: true}
+	if !got[first.ID] || !got[second.ID] {
+		t.Fatalf("prepared=%v", got)
+	}
+	close(release)
+	wg.Wait()
+	if _, err := workers[0].RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workers[1].RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{first.ID, second.ID}; !reflect.DeepEqual(finalized, want) {
+		t.Fatalf("finalization order=%v want=%v", finalized, want)
+	}
+}
+
+func TestFinalizerStaleBaseForcesReprepareWithoutLanding(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("9", 40)
+	if _, err := store.Submit(Submit{Branch: "agent/stale", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+		t.Fatal(err)
+	}
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+		return Speculation{SHA: "tree-" + c.SHA}, nil
+	}}, Gate: passingGate{}, GateVersion: "test", Finalizer: finalizerFunc(func(context.Context, Candidate) (FinalizeResult, error) { return FinalizeResult{Stale: true}, nil })}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Candidates[0].Status != Reprepare || state.Candidates[0].ResultMainSHA != "" {
+		t.Fatalf("candidate=%#v", state.Candidates[0])
+	}
+}
+
+func TestExpiredLeaseIsReclaimedWithAttemptEvidence(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("8", 40)
+	c, err := store.Submit(Submit{Branch: "agent/lease", SHA: sha, Receipt: testReceipt(t, sha)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Candidates[0].Phase, state.Candidates[0].Status = Preparing, Preparing
+	state.Candidates[0].WorkerID = "crashed"
+	state.Candidates[0].LeaseExpiresAt = time.Now().Add(-time.Second)
+	_, path, err := store.paths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := write(path, state); err != nil {
+		t.Fatal(err)
+	}
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+		return Speculation{SHA: "tree-" + c.SHA}, nil
+	}}, Gate: passingGate{}, GateVersion: "test"}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state, err = store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Candidates[0].ID != c.ID || state.Candidates[0].Attempt != 1 || state.Candidates[0].Status != ReadyToFinalize {
+		t.Fatalf("candidate=%#v", state.Candidates[0])
+	}
+}
+
+func TestPreparedTupleRejectsIdentityMismatch(t *testing.T) {
+	c := Candidate{SHA: strings.Repeat("1", 40), ReceiptDigest: "receipt", BaseSHA: "base", TreeSHA: "tree", GateVersion: "gate"}
+	c.DependencyFingerprint = preparedFingerprint(c)
+	if err := validatePreparedTuple(c); err != nil {
+		t.Fatal(err)
+	}
+	c.TreeSHA = "other-tree"
+	if err := validatePreparedTuple(c); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func testReceipt(t *testing.T, sha string) receipt.Receipt {
 	t.Helper()
 	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "definition", Toolchains: map[string]string{}, Network: "none", Sandbox: "process"})

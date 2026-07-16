@@ -92,7 +92,7 @@ func TestProtectedIntegrationPersistsDivergedContinuationInsteadOfEjecting(t *te
 		t.Fatal(err)
 	}
 	candidate := state.Candidates[0]
-	if candidate.Status != RetryWait || candidate.RetryReason != "speculation_failed" || candidate.WorkspacePath == "" {
+	if candidate.Status != NeedsConflictInput || candidate.WorkspacePath == "" {
 		t.Fatalf("candidate=%#v", candidate)
 	}
 	if entries, err := filepath.Glob(filepath.Join(root, ".capsules", "sync", "*.integration.json")); err != nil || len(entries) != 1 {

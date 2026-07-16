@@ -204,6 +204,8 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		Integration: queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand},
 		Gate:        queue.ShellGate{Command: opts.GateCommand},
 		Repairer:    repairer,
+		Finalizer:   queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},
+		GateVersion: opts.Pipeline + ":" + opts.GateCommand,
 	})
 	if err != nil {
 		return capsulePromoteResult{}, err
@@ -214,34 +216,10 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		out.Status = "retry_wait"
 		return out, nil
 	}
-	if queued.WorkspacePath == "" || queued.SpeculativeSHA == "" || queued.ValidatedSHA != queued.SpeculativeSHA {
-		return out, fmt.Errorf("capsule promote: landed queue candidate is missing its protected integration workspace")
+	if queued.ResultMainSHA == "" {
+		return out, fmt.Errorf("capsule promote: landed queue candidate is missing protected CAS result")
 	}
-	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
-		Workspace:            queued.WorkspacePath,
-		ProtectedProjectRoot: root,
-		TargetRef:            opts.TargetRef,
-		Operation:            reconcile.Promote,
-		ReceiptCandidate:     candidateSHA,
-		RequiredGate:         opts.Pipeline,
-	})
-	if err != nil {
-		return capsulePromoteResult{}, err
-	}
-	if plan.Candidate != queued.ValidatedSHA {
-		return out, fmt.Errorf("capsule promote: protected integration changed after queue validation")
-	}
-	out.Plan = plan
-	if plan.Continuation != nil {
-		out.Status = "retry_wait"
-		return out, nil
-	}
-	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: root}}).Apply(ctx, plan, stored.Receipt.ReceiptID)
-	if err != nil {
-		return out, err
-	}
-	out.Promotion = result
-	out.ProtectedMainSHA = result.NewTarget
+	out.ProtectedMainSHA = queued.ResultMainSHA
 	out.Status = "promoted"
 	return out, nil
 }

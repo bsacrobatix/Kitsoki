@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/capsule/reconcile"
+	"kitsoki/internal/capsule/record"
 )
 
 // StagingIntegration is the local production adapter for a protected project.
@@ -60,7 +61,7 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 	if err != nil {
 		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, err
 	}
-	spec := Speculation{SHA: plan.Candidate, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:reconcile-plan=" + plan.Digest}}
+	spec := Speculation{SHA: plan.Candidate, BaseSHA: plan.Expected.Target, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:reconcile-plan=" + plan.Digest}}
 	if plan.Continuation == nil {
 		if plan.Class != reconcile.LocalAhead && plan.Class != reconcile.UpToDate {
 			return spec, fmt.Errorf("queue: protected integration is %s", plan.Class)
@@ -106,6 +107,45 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 }
 
 func (p ProtectedIntegration) Land(context.Context, Speculation) error { return nil }
+
+// ProtectedFinalizer is the only queue adapter that mutates a protected ref.
+// It repeats the identity checks immediately before reconcile.Apply, whose git
+// update-ref expected-old argument provides the protected compare-and-swap.
+type ProtectedFinalizer struct {
+	ProjectRoot string
+	TargetRef   string
+}
+
+func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (FinalizeResult, error) {
+	if err := validatePreparedTuple(c); err != nil {
+		return FinalizeResult{}, err
+	}
+	target := p.TargetRef
+	if strings.TrimSpace(target) == "" {
+		target = "main"
+	}
+	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
+		Workspace: c.WorkspacePath, ProtectedProjectRoot: p.ProjectRoot, TargetRef: target,
+		Operation: reconcile.Promote, ReceiptCandidate: c.SHA, RequiredGate: c.GateVersion,
+	})
+	if err != nil {
+		return FinalizeResult{}, err
+	}
+	if plan.Expected.Target != c.BaseSHA {
+		return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: "prepared base no longer matches protected target"}, nil
+	}
+	if plan.Candidate != c.TreeSHA || c.ValidatedSHA != c.TreeSHA {
+		return FinalizeResult{}, fmt.Errorf("queue: prepared tree changed after deterministic gate")
+	}
+	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: p.ProjectRoot}}).Apply(ctx, plan, c.ReceiptID)
+	if err != nil {
+		if strings.Contains(err.Error(), "stale plan") {
+			return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: err.Error()}, nil
+		}
+		return FinalizeResult{}, err
+	}
+	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: "protected CAS applied"}, nil
+}
 
 func (p ProtectedIntegration) root() (string, error) {
 	root, err := filepath.Abs(p.ProjectRoot)
@@ -202,7 +242,11 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, _ []Cand
 	if err != nil {
 		return Speculation{}, err
 	}
-	return Speculation{SHA: sha, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:speculative-workspace=" + filepath.ToSlash(filepath.Join(".capsules", "workspaces", id))}}, nil
+	base, err := gitOutput(ctx, workspace, "rev-parse", "HEAD^")
+	if err != nil {
+		return Speculation{}, err
+	}
+	return Speculation{SHA: sha, BaseSHA: base, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:speculative-workspace=" + filepath.ToSlash(filepath.Join(".capsules", "workspaces", id))}}, nil
 }
 
 // Land delegates staging/local mutation to the established protected
