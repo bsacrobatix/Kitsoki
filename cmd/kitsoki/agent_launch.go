@@ -516,7 +516,7 @@ func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOpti
 	if err != nil {
 		return opts, nil, err
 	}
-	if in.State != control.StateReady {
+	if !codeactCapsuleLaunchable(in.State) {
 		return opts, nil, fmt.Errorf("protected-root CodeAct Capsule %q is %s; wait for it to become ready before launch", id, in.State)
 	}
 	path, err := filepath.Abs(in.Path)
@@ -553,10 +553,14 @@ var createProtectedRootCodeactCapsule = func(ctx context.Context, projectRoot, i
 	if err := manager.VerifyDevWorkspaceScriptInstance(ctx, in); err != nil {
 		return control.Instance{}, fmt.Errorf("verify protected-root CodeAct Capsule %q: %w", id, err)
 	}
-	if in.State != control.StateReady {
+	if !codeactCapsuleLaunchable(in.State) {
 		return control.Instance{}, fmt.Errorf("protected-root CodeAct Capsule %q is %s; its lifecycle has not completed", id, in.State)
 	}
 	return in, nil
+}
+
+func codeactCapsuleLaunchable(state control.State) bool {
+	return state == control.StateReady || state == control.StateDirty || state == control.StateCommitted
 }
 
 func protectedProjectRoot(policy host.AgentLaunchPolicy, workingDir string) string {
