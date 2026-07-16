@@ -7,12 +7,12 @@
 # checkpoint that runs ONLY when you choose to open a PR.
 #
 # Two modes:
-#   (default)  LOCAL gate — run `make test` here, then `gh pr create`.
-#              Fast and offline. `make test` is the SAME suite CI runs.
-#   --ci       CI gate    — push the branch, trigger the CI workflow on it,
-#              wait for it to finish, and open the PR only if CI is green.
-#              Authoritative (runs on Linux, exactly what the PR check will do)
-#              but slower; use it when a change is platform-sensitive.
+#   (default)  LOCAL gate — run low-contention `make test` here, then
+#              `gh pr create`. It is fast/offline and forbids browser launches.
+#   --ci       PUSH gate  — run `make push-gate` here, push the branch, trigger
+#              the CI workflow, wait for it to finish, and open the PR only if CI
+#              is green. This is intentionally heavier and includes browser
+#              validation before spending remote capacity.
 #
 # Any args after the optional mode flag pass through to `gh pr create`
 # (e.g. --fill, --draft, --base main, --title "...", --body "...").
@@ -52,7 +52,18 @@ if [ "$branch" = "main" ]; then
 fi
 
 if [ "$mode" = "local" ]; then
-	echo "open-pr: running 'make test' as a local pre-PR gate (the same suite CI runs)…"
+	upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+	if [ -z "$upstream" ]; then
+		echo "error: local PR mode would need to publish '$branch' first." >&2
+		echo "       use 'make pr-ci' so the push gate, including browser validation, runs before pushing." >&2
+		exit 1
+	fi
+	if [ "$(git rev-list --count "$upstream"..HEAD)" != "0" ]; then
+		echo "error: '$branch' has commits not pushed to $upstream." >&2
+		echo "       use 'make pr-ci' so the push gate, including browser validation, runs before pushing." >&2
+		exit 1
+	fi
+	echo "open-pr: running low-contention 'make test' as a local pre-PR gate…"
 	if ! make test; then
 		echo "" >&2
 		echo "open-pr: tests FAILED — not opening a PR. Fix the failures (or use 'make pr-ci'" >&2
@@ -64,6 +75,13 @@ if [ "$mode" = "local" ]; then
 fi
 
 # ── CI gate ──────────────────────────────────────────────────────────────────
+echo "open-pr: running 'make push-gate' before pushing '$branch'…"
+if ! make push-gate; then
+	echo "" >&2
+	echo "open-pr: push gate FAILED — not pushing or opening a PR." >&2
+	exit 1
+fi
+
 echo "open-pr: pushing '$branch' to origin…"
 git push -u origin HEAD
 

@@ -51,46 +51,61 @@ No CGO, no managed services, no Docker required to develop.
 
 ---
 
-## 3. Build, vet, test
+## 3. Build, Vet, Test
 
 ```sh
 go build ./...          # build every package
 go build -o kitsoki ./cmd/kitsoki   # build the CLI
 go vet ./...            # vet every package
-go test ./...           # run every test
+go test ./...           # run Go tests only
 go test -race ./...     # plus the race detector (recommended in CI)
 go mod tidy             # keep go.mod / go.sum honest
 ```
 
-The full test suite is fast — under 10 seconds on a modern laptop —
-because almost everything that matters runs against an in-memory
-SQLite or a fake clock.
+Most product behavior is tested without live LLMs or browsers: Go tests,
+deterministic story flows, Vitest, generated-feature checks, and policy checks.
+Browser-backed Playwright suites are explicit push/readiness gates, not part of
+the everyday local loop.
 
-### 3.1 `make test` — the authoritative suite
+### 3.1 `make test` — Local Non-Browser Gate
 
 `go test ./...` does **not** exercise the shipped stories under `stories/`.
-`make test` does both:
+`make test` runs the local low-contention gate:
 
 ```sh
 make test
 ```
 
-It runs `go test ./...` **and** replays every story's deterministic Mode-2 flow
-fixtures (no LLM, no cost — see [`docs/tracing/testing.md`](../../tracing/testing.md)),
-collecting *every* failure across both before exiting (it never bails early), and
-writes a full rotated report to `.artifacts/test-reports/`. Dependencies are just
-Go, `bash` and `jq` — no `pnpm`/SPA build is needed to test (a committed
-`internal/runstatus/web/assets/.gitkeep` satisfies the `//go:embed`). **`make test`
-is the suite CI runs and the suite the pre-PR gate runs** — treat green `make test`
-as the bar for any change.
+It runs short Go tests with bounded package parallelism, deterministic Mode-2
+story flows with bounded flow parallelism, runstatus Vitest, feature/media
+contracts, session-mining/product-journey script tests, and the Python file
+policy. It sets a browser-launch guard, so accidental `playwright`, Chrome, or
+Chromium calls fail loudly. It also avoids overlapping the Node lane with the Go
+and flow lanes by default to reduce local CPU/I/O contention. The full report is
+written under `.artifacts/test-reports/`.
 
-### 3.2 Continuous integration
+### 3.2 Push And Browser Gates
+
+Use the heavier gates only at a remote-readiness boundary:
+
+```sh
+make test-full     # exhaustive non-browser gate; used by CI
+make test-browser  # explicit no-LLM Playwright/browser gate
+make push-gate     # test-full + test-browser before pushing/remote validation
+```
+
+Browser-backed tests are intentionally absent from `make test`. Run
+`make test-browser` when a change touches browser-visible behavior, and run
+`make push-gate` before publishing a branch or asking remote CI/merge queues to
+spend capacity.
+
+### 3.3 Continuous Integration
 
 CI lives in [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml) and runs
 on every push to `main` and every PR targeting `main` (plus on-demand via
-`workflow_dispatch`). It is one job: check out, set up Go from `go.mod`, and run
-`make test` on `ubuntu-latest`. Concurrency is capped per-ref with
-`cancel-in-progress`, so a new push supersedes the previous run.
+`workflow_dispatch`). The test job runs `make test-full` on `ubuntu-latest`.
+Concurrency is capped per-ref with `cancel-in-progress`, so a new push supersedes
+the previous run.
 
 Tests must be **cross-platform and hermetic** — CI is Linux, most contributors
 are on macOS. Two macOS-specific traps to avoid when writing tests:
@@ -103,24 +118,23 @@ are on macOS. Two macOS-specific traps to avoid when writing tests:
   under `t.TempDir()` overflows it (`connect: invalid argument`). Put test sockets
   under a short base (`/tmp/…`).
 
-### 3.3 Opening a PR — the pre-PR gate
+### 3.4 Opening A PR
 
-Push half-finished or non-building branches freely. The gate runs **only** when
-you choose to open a PR (there's no point opening one CI will fail):
+Push half-finished or non-building branches only when that is intentional. The
+PR helpers separate local review from remote publication:
 
 ```sh
-make pr                       # LOCAL gate: runs `make test`, then `gh pr create`
+make pr                       # LOCAL gate: requires pushed branch, runs `make test`, then `gh pr create`
 make pr ARGS="--fill --draft" # extra args pass through to `gh pr create`
-make pr-ci                    # CI gate: push branch, trigger + watch the real CI
-                              # run on Linux, open the PR only if it goes green
+make pr-ci                    # PUSH gate: runs `make push-gate`, pushes branch,
+                              # triggers + watches CI, opens PR only if green
 ```
 
-Use `make pr` (fast, offline — the same suite CI runs) by default; reach for
-`make pr-ci` when a change is platform-sensitive and you want the authoritative
-Linux result before opening the PR. Both are thin wrappers over
+Use `make pr` only when the branch already exists on the remote and has no
+unpushed commits. If opening the PR would require a push, use `make pr-ci` so the
+push gate runs before touching `origin`. Both targets are thin wrappers over
 [`scripts/open-pr.sh`](../../../scripts/open-pr.sh) and need the `gh` CLI
-(`gh auth login`). `make pr-ci` relies on the `workflow_dispatch` trigger to run
-CI on your branch on demand without CI firing on every push.
+(`gh auth login`).
 
 ---
 

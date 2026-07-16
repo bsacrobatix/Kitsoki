@@ -113,7 +113,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup setup-visual-qa-deps bootstrap-workspace bootstrap-worktree build build-lean install uninstall test test-full test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup setup-visual-qa-deps bootstrap-workspace bootstrap-worktree build build-lean install uninstall test test-full test-browser push-gate test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local vscode-install-local-in-place \
 	vscode-stage-runstatus-temp vscode-runstatus-spa-temp vscode-stage-package-temp vscode-package-temp vscode-stage-embed-overlay-temp vscode-install-binary-temp check-vscode-code-cli
@@ -407,23 +407,39 @@ web-dev-logs:
 	  echo "tailing $$latest" >&2; \
 	  tail -f "$$latest"
 
-# test runs the short Go unit tests, the Mode-2 deterministic story flow suites,
-# the runstatus Vitest suite, the feature catalog, AND the session-mining no-LLM
-# invariants (== mining-test) — all without an LLM or cost. The flow suites guard
-# the shipped stories under stories/, the web suite guards tools/runstatus/, and
-# the mining suites guard tools/session-mining/, none of which `go test ./...`
-# covers by itself. scripts/run-tests.sh collects every failure across all suites
-# (never bails early), prints a terse summary on success / full detail on
-# failure, and always writes a rotated full report to .artifacts/test-reports/.
+# test runs the local low-contention, non-browser gate: short Go tests, Mode-2
+# deterministic story flow suites, runstatus Vitest, feature catalog, and
+# session-mining no-LLM invariants. It deliberately forbids Playwright/Chrome and
+# caps local parallelism so everyday agent work does not contend with browser
+# stacks or broad CI-style fan-out.
 test: embed-skills
 	$(call runstatus_pnpm_install,--silent)
-	@KITSOKI_REQUIRE_VITEST=1 KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short}" ./scripts/run-tests.sh
+	@KITSOKI_REQUIRE_VITEST=1 \
+	 KITSOKI_FORBID_BROWSER_TESTS=1 \
+	 KITSOKI_TEST_PARALLEL_NODE="$${KITSOKI_TEST_PARALLEL_NODE:-0}" \
+	 KITSOKI_FLOW_JOBS="$${KITSOKI_FLOW_JOBS:-2}" \
+	 KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short -p 4}" \
+	 ./scripts/run-tests.sh
 
-# test-full preserves the exhaustive Go lane for CI/release gates and local
-# validation of integration/property tests skipped by -short.
+# test-full preserves the exhaustive non-browser lane for CI/release gates and
+# local validation of integration/property tests skipped by -short.
 test-full: embed-skills
 	$(call runstatus_pnpm_install,--silent)
 	@KITSOKI_REQUIRE_VITEST=1 ./scripts/run-tests.sh
+
+# test-browser is the explicit no-LLM browser gate. Keep it out of `make test`;
+# run it before pushing/remote validation when the change touches browser-visible
+# behavior or when you need full push readiness locally.
+test-browser: setup-visual-qa-deps web
+	$(call runstatus_pnpm_install,--silent)
+	cd $(RUNSTATUS_DIR) && WEB_CHAT_PACE=0 pnpm exec playwright test --project=chromium
+	$(MAKE) --no-print-directory mcp-demo-fast
+	$(MAKE) --no-print-directory tui-bridge-test
+
+# push-gate is intentionally heavier than the local loop. It is the local
+# checkpoint before pushing to origin or asking remote CI/merge queues to spend
+# capacity.
+push-gate: test-full test-browser
 
 # pr / pr-ci gate PR creation on a green test run, then open the PR with `gh`.
 # Push half-finished branches freely; this is the checkpoint that runs only when
@@ -432,11 +448,10 @@ test-full: embed-skills
 #   make pr ARGS="--fill"
 #   make pr-ci ARGS="--draft --title 'wip: x'"
 #
-#   pr     LOCAL gate — runs `make test` here, then opens the PR. Fast/offline;
-#          it's the SAME suite CI runs.
-#   pr-ci  CI gate    — pushes the branch, triggers the CI workflow on it, waits
-#          for it to go green (Linux — exactly the PR check), then opens the PR.
-# See scripts/open-pr.sh and docs/guide/development/developer-guide.md (§3.3).
+#   pr     LOCAL gate — runs low-contention `make test`, then opens the PR.
+#   pr-ci  PUSH gate  — runs `make push-gate`, pushes, triggers CI, waits for it
+#          to go green (Linux — exactly the PR check), then opens the PR.
+# See scripts/open-pr.sh and docs/guide/development/developer-guide.md (§3.4).
 .PHONY: pr pr-ci
 ARGS ?=
 pr:

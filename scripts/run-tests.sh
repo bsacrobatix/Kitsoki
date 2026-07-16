@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# run-tests.sh — concise runner for the full kitsoki test suite.
+# run-tests.sh — concise runner for the kitsoki non-browser test suite.
 #
-# Runs eight suites and NEVER bails early — every failure across all is
+# Runs eight non-browser suites and NEVER bails early — every failure across all is
 # collected before we exit:
 #   1. go test $KITSOKI_GO_TEST_FLAGS ./...
 #   2. Starlark static validation     (host.starlark.run parse + resolve)
@@ -25,7 +25,10 @@
 #               the most recent $KEEP reports retained (older ones rotated out).
 #
 # Used by `make test`; direct runs still skip Node-backed lanes when their
-# dependencies are absent unless KITSOKI_REQUIRE_VITEST=1 is set.
+# dependencies are absent unless KITSOKI_REQUIRE_VITEST=1 is set. Browser-backed
+# Playwright/Chrome suites belong in `make test-browser` / `make push-gate`, not
+# this runner. Set KITSOKI_FORBID_BROWSER_TESTS=1 to fail loudly if a local lane
+# accidentally tries to launch a browser command.
 #
 # Timeout knobs (seconds, all overridable): KITSOKI_TEST_GO_TIMEOUT_SECONDS=300,
 # KITSOKI_TEST_BUILD_TIMEOUT_SECONDS=120, KITSOKI_TEST_STARLARK_TIMEOUT_SECONDS=120,
@@ -67,6 +70,24 @@ cleanup() {
 	rm -rf "$TMP" ./.kitsoki-flows
 }
 trap cleanup EXIT
+
+if [ "${KITSOKI_FORBID_BROWSER_TESTS:-0}" = "1" ]; then
+	BROWSER_GUARD_DIR="$TMP/no-browser-bin"
+	mkdir -p "$BROWSER_GUARD_DIR"
+	for bin in playwright chromium chromium-browser google-chrome chrome; do
+		cat >"$BROWSER_GUARD_DIR/$bin" <<'EOF'
+#!/usr/bin/env bash
+echo "error: browser-backed tests are disabled in this local test lane; run 'make test-browser' or 'make push-gate' before pushing instead." >&2
+exit 127
+EOF
+		chmod +x "$BROWSER_GUARD_DIR/$bin"
+	done
+	export PATH="$BROWSER_GUARD_DIR:$PATH"
+	mkdir -p "$BROWSER_GUARD_DIR/playwright-browsers-empty"
+	export PLAYWRIGHT_BROWSERS_PATH="$BROWSER_GUARD_DIR/playwright-browsers-empty"
+	export CHROME_BIN="$BROWSER_GUARD_DIR/chrome"
+	export KITSOKI_BROWSER_TESTS_FORBIDDEN=1
+fi
 
 if [ -t 1 ]; then
 	RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; BOLD=$'\e[1m'; DIM=$'\e[2m'; RST=$'\e[0m'
@@ -151,21 +172,35 @@ if ! run_timed "$BUILD_TIMEOUT_SECONDS" "build flow runner" go build -o "$FLOW_B
 	flow_failures=1
 fi
 
-# Start the web UI unit suite early so its wall time overlaps with the Go and
-# story lanes. The Make targets install deps first and set KITSOKI_REQUIRE_VITEST
-# so this lane is mandatory for `make test` / `make test-full`; direct script
-# runs keep the existing "skip optional Node-backed checks when deps are absent"
-# behavior.
+# Start the web UI unit suite early by default so its wall time overlaps with
+# the Go and story lanes. Local developer targets can set
+# KITSOKI_TEST_PARALLEL_NODE=0 to avoid CPU/I/O contention with Go and flow work.
+# The Make targets install deps first and set KITSOKI_REQUIRE_VITEST so this lane
+# is mandatory for `make test` / `make test-full`; direct script runs keep the
+# existing "skip optional Node-backed checks when deps are absent" behavior.
 if command -v pnpm >/dev/null 2>&1 && [ -d tools/runstatus/node_modules ]; then
-	(
-		cd tools/runstatus || exit 2
-		# node_modules may be an immutable cache shared by multiple capsules.
-		# Invoking pnpm here revalidates its absolute workspace-state path and can
-		# try to purge that read-only cache; the validated package binary is the
-		# stable execution boundary after the Makefile's dependency restore.
-		run_timed "$VITEST_TIMEOUT_SECONDS" "runstatus vitest" ./node_modules/.bin/vitest run
-	) >"$VITEST_OUT" 2>&1 &
-	vitest_pid=$!
+	if [ "${KITSOKI_TEST_PARALLEL_NODE:-1}" = "0" ]; then
+		(
+			cd tools/runstatus || exit 2
+			# node_modules may be an immutable cache shared by multiple capsules.
+			# Invoking pnpm here revalidates its absolute workspace-state path and can
+			# try to purge that read-only cache; the validated package binary is the
+			# stable execution boundary after the Makefile's dependency restore.
+			run_timed "$VITEST_TIMEOUT_SECONDS" "runstatus vitest" ./node_modules/.bin/vitest run
+		) >"$VITEST_OUT" 2>&1
+		vitest_rc=$?
+		[ "$vitest_rc" -ne 0 ] && vitest_failures=1
+	else
+		(
+			cd tools/runstatus || exit 2
+			# node_modules may be an immutable cache shared by multiple capsules.
+			# Invoking pnpm here revalidates its absolute workspace-state path and can
+			# try to purge that read-only cache; the validated package binary is the
+			# stable execution boundary after the Makefile's dependency restore.
+			run_timed "$VITEST_TIMEOUT_SECONDS" "runstatus vitest" ./node_modules/.bin/vitest run
+		) >"$VITEST_OUT" 2>&1 &
+		vitest_pid=$!
+	fi
 else
 	if [ "$vitest_required" = "1" ]; then
 		vitest_failures=1
