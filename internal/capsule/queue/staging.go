@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"kitsoki/internal/capsule/reconcile"
 )
 
 // StagingIntegration is the local production adapter for a protected project.
@@ -18,6 +20,147 @@ type StagingIntegration struct {
 	ProjectRoot string
 	GateCommand string
 	Runner      CommandRunner
+}
+
+// ProtectedIntegration prepares the exact tree that will be compare-and-swap
+// promoted to the protected source target. It deliberately retains its managed
+// workspace after queue admission: the promotion reconciler consumes that tree
+// and Capsule-local branch refs never become the source of truth.
+//
+// Divergent histories are handed to reconcile, which persists a continuation
+// artifact and integration checkout. ResolverCommand is an optional bounded
+// command supplied by project policy; without it the candidate remains in
+// retry_wait with the continuation available for a later queue pass.
+type ProtectedIntegration struct {
+	ProjectRoot     string
+	TargetRef       string
+	ResolverCommand string
+	Runner          CommandRunner
+}
+
+func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+	root, err := p.root()
+	if err != nil {
+		return Speculation{}, err
+	}
+	target := p.TargetRef
+	if strings.TrimSpace(target) == "" {
+		target = "main"
+	}
+	id := "queue-" + c.ID
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	workspace := filepath.Join(workspaceRoot, id)
+	branch := "queue/candidate/" + c.ID
+	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", c.SHA, "--target", target); err != nil {
+		return Speculation{}, err
+	}
+	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
+		Workspace: workspace, ProtectedProjectRoot: root, TargetRef: target, Operation: reconcile.Promote,
+	})
+	if err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, err
+	}
+	spec := Speculation{SHA: plan.Candidate, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:reconcile-plan=" + plan.Digest}}
+	if plan.Continuation == nil {
+		if plan.Class != reconcile.LocalAhead && plan.Class != reconcile.UpToDate {
+			return spec, fmt.Errorf("queue: protected integration is %s", plan.Class)
+		}
+		return spec, nil
+	}
+	artifact, artifactPath, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeConflictArtifact(ctx, plan, root)
+	if err != nil {
+		return spec, err
+	}
+	instance, instanceArtifact, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeIntegrationInstance(ctx, plan, root)
+	if err != nil {
+		return spec, err
+	}
+	instancePath := filepath.Join(root, filepath.FromSlash(instance.InstancePath))
+	spec.WorkspaceID = artifact.ContinuationToken
+	spec.WorkspacePath = instancePath
+	spec.Evidence = append(spec.Evidence,
+		"queue:continuation="+artifact.ContinuationToken,
+		"queue:conflict-artifact="+relativePath(root, artifactPath),
+		"queue:integration-artifact="+relativePath(root, instanceArtifact),
+	)
+	if strings.TrimSpace(p.ResolverCommand) != "" {
+		output, resolveErr := p.runner().Run(ctx, instancePath, "sh", "-c", p.ResolverCommand)
+		spec.Evidence = append(spec.Evidence, commandEvidence("queue:resolver", output)...)
+		if resolveErr != nil {
+			return spec, fmt.Errorf("queue: resolver continuation %s: %w", artifact.ContinuationToken, resolveErr)
+		}
+	}
+	status, err := gitOutput(ctx, instancePath, "status", "--porcelain")
+	if err != nil {
+		return spec, err
+	}
+	if status != "" {
+		return spec, fmt.Errorf("queue: resolver unavailable or incomplete; continuation %s is retained", artifact.ContinuationToken)
+	}
+	sha, err := gitOutput(ctx, instancePath, "rev-parse", "HEAD")
+	if err != nil {
+		return spec, err
+	}
+	spec.SHA = sha
+	return spec, nil
+}
+
+func (p ProtectedIntegration) Land(context.Context, Speculation) error { return nil }
+
+func (p ProtectedIntegration) root() (string, error) {
+	root, err := filepath.Abs(p.ProjectRoot)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(filepath.Join(root, "scripts", "dev-workspace.sh")); err != nil {
+		return "", fmt.Errorf("queue: managed workspace lifecycle unavailable: %w", err)
+	}
+	return root, nil
+}
+
+func (p ProtectedIntegration) run(ctx context.Context, dir, program string, args ...string) error {
+	output, err := p.runner().Run(ctx, dir, program, args...)
+	if err != nil {
+		return fmt.Errorf("queue: lifecycle %s: %w%s", filepath.Base(program), err, outputSuffix(output))
+	}
+	return nil
+}
+
+func (p ProtectedIntegration) runner() CommandRunner {
+	if p.Runner != nil {
+		return p.Runner
+	}
+	return execCommandRunner{}
+}
+
+// ShellRepairer is intentionally opt-in. The caller sets a project-owned
+// repair profile; failure merely preserves the queue entry for the next pass.
+type ShellRepairer struct {
+	Command string
+	Runner  CommandRunner
+}
+
+func (r ShellRepairer) Repair(ctx context.Context, spec Speculation, _ error) ([]string, error) {
+	if strings.TrimSpace(r.Command) == "" {
+		return nil, fmt.Errorf("repair profile is unavailable")
+	}
+	if strings.TrimSpace(spec.WorkspacePath) == "" {
+		return nil, fmt.Errorf("repair workspace is unavailable")
+	}
+	runner := r.Runner
+	if runner == nil {
+		runner = execCommandRunner{}
+	}
+	output, err := runner.Run(ctx, spec.WorkspacePath, "sh", "-c", r.Command)
+	return commandEvidence("queue:repair", output), err
+}
+
+func relativePath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }
 
 // CommandRunner makes lifecycle composition testable without weakening the

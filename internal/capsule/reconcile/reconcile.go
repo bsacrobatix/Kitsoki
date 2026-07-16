@@ -47,19 +47,23 @@ type ProjectIdentity struct {
 	Root string `json:"root"`
 }
 type Plan struct {
-	ID             string          `json:"id"`
-	Digest         string          `json:"digest"`
-	Operation      Operation       `json:"operation"`
-	Class          Class           `json:"class"`
-	Workspace      string          `json:"workspace"`
-	Protected      ProjectIdentity `json:"protected_project,omitempty"`
-	TargetRef      string          `json:"target_ref"`
-	Candidate      string          `json:"candidate"`
-	Expected       ObservedRefs    `json:"expected"`
-	Continuation   *Continuation   `json:"continuation,omitempty"`
-	RequiredGate   string          `json:"required_gate,omitempty"`
-	RequiredEffect string          `json:"required_effect"`
-	CreatedAt      time.Time       `json:"created_at"`
+	ID        string          `json:"id"`
+	Digest    string          `json:"digest"`
+	Operation Operation       `json:"operation"`
+	Class     Class           `json:"class"`
+	Workspace string          `json:"workspace"`
+	Protected ProjectIdentity `json:"protected_project,omitempty"`
+	TargetRef string          `json:"target_ref"`
+	Candidate string          `json:"candidate"`
+	// ReceiptCandidate is the immutable Capsule CI source digest. It may differ
+	// from Candidate when Candidate is a resolved integration commit that
+	// preserves the receipt-bound source tree and the protected target.
+	ReceiptCandidate string        `json:"receipt_candidate,omitempty"`
+	Expected         ObservedRefs  `json:"expected"`
+	Continuation     *Continuation `json:"continuation,omitempty"`
+	RequiredGate     string        `json:"required_gate,omitempty"`
+	RequiredEffect   string        `json:"required_effect"`
+	CreatedAt        time.Time     `json:"created_at"`
 }
 type Continuation struct {
 	Schema         string       `json:"schema"`
@@ -131,6 +135,7 @@ type PlanRequest struct {
 	Operation            Operation
 	Generation           uint64
 	RequiredGate         string
+	ReceiptCandidate     string
 }
 
 func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
@@ -154,7 +159,7 @@ func (r Reconciler) Plan(ctx context.Context, req PlanRequest) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	p := Plan{Operation: req.Operation, Class: class, Workspace: req.Workspace, Protected: ProjectIdentity{Root: req.ProtectedProjectRoot}, TargetRef: req.TargetRef, Candidate: observed.WorkspaceHead, Expected: observed, RequiredGate: req.RequiredGate, RequiredEffect: effect(req.Operation), CreatedAt: r.now()}
+	p := Plan{Operation: req.Operation, Class: class, Workspace: req.Workspace, Protected: ProjectIdentity{Root: req.ProtectedProjectRoot}, TargetRef: req.TargetRef, Candidate: observed.WorkspaceHead, ReceiptCandidate: req.ReceiptCandidate, Expected: observed, RequiredGate: req.RequiredGate, RequiredEffect: effect(req.Operation), CreatedAt: r.now()}
 	if class == Diverged {
 		p.Continuation = conflictContinuation(p)
 	}

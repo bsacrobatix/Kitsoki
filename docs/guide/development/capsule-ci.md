@@ -420,6 +420,40 @@ a publish plan carries the `remote_publish` effect and cannot apply through the
 local Git reconciler. A remote publication provider must be explicitly granted
 and injected before a publish plan can be applied.
 
+### Queue-backed protected promotion
+
+For a managed development workspace, use the single promotion entry point:
+
+```sh
+kitsoki capsule promote --current --wait
+```
+
+It snapshots dirty workspace content into a signed-off candidate commit, runs
+the declared Capsule CI pipeline, persists the receipt-bound candidate in the
+local queue, validates the exact speculative integration tree, and then
+compare-and-swaps the registered protected project's target ref. The result
+reports the protected source SHA; it never updates a Capsule-local `main` ref.
+
+The candidate's CI receipt remains bound to its original source digest. When
+integration produces a distinct merge commit, the reconciliation plan records
+that digest as receipt provenance and verifies that the integrated tree is the
+one which passed the deterministic queue gate before source promotion.
+
+Conflicts and red gates are durable `retry_wait` states, not ejections. A
+diverged candidate receives the normal reconciliation conflict artifact and
+retained integration checkout under `.capsules/sync/`. Project policy may
+provide one bounded resolver or repair command per queue pass:
+
+```sh
+kitsoki capsule promote --current --wait \
+  --resolver 'project-gitops resolve-continuation' \
+  --repair 'project-gitops repair-gate'
+```
+
+An unavailable or unsuccessful command records evidence and leaves the queue
+entry in `retry_wait`; a later invocation resumes the same continuation. The
+queue never silently drops the candidate or treats a failed repair as green.
+
 When a stored plan is diverged, materialize the deterministic conflict input
 and managed integration instance for a resolver/reviewer story before
 attempting continuation:

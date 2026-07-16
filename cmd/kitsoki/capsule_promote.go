@@ -46,7 +46,7 @@ type capsulePromoteResult struct {
 }
 
 func capsulePromoteCmd() *cobra.Command {
-	var project, workspace, pipeline, target, gate, message string
+	var project, workspace, pipeline, target, gate, message, resolver, repair string
 	var current, wait, jsonOut bool
 	cmd := &cobra.Command{
 		Use:   "promote",
@@ -62,13 +62,15 @@ func capsulePromoteCmd() *cobra.Command {
 				target = "main"
 			}
 			result, err := runCapsulePromote(cmd.Context(), capsulePromoteOptions{
-				ProjectRoot: project,
-				WorkspaceID: workspace,
-				Pipeline:    pipeline,
-				TargetRef:   target,
-				GateCommand: gate,
-				Message:     message,
-				Wait:        wait,
+				ProjectRoot:     project,
+				WorkspaceID:     workspace,
+				Pipeline:        pipeline,
+				TargetRef:       target,
+				GateCommand:     gate,
+				Message:         message,
+				ResolverCommand: resolver,
+				RepairCommand:   repair,
+				Wait:            wait,
 			})
 			if err != nil {
 				return err
@@ -83,19 +85,23 @@ func capsulePromoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&target, "target", "main", "protected source target branch")
 	cmd.Flags().StringVar(&gate, "gate", "git diff --check", "deterministic queue gate command")
 	cmd.Flags().StringVar(&message, "message", "capsule promote candidate", "snapshot commit message when the workspace is dirty")
+	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded project-owned resolver command for retained conflict continuations")
+	cmd.Flags().StringVar(&repair, "repair", "", "bounded project-owned repair command for a red deterministic gate")
 	cmd.Flags().BoolVar(&wait, "wait", false, "process the local queue and apply protected-main CAS before returning")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	return cmd
 }
 
 type capsulePromoteOptions struct {
-	ProjectRoot string
-	WorkspaceID string
-	Pipeline    string
-	TargetRef   string
-	GateCommand string
-	Message     string
-	Wait        bool
+	ProjectRoot     string
+	WorkspaceID     string
+	Pipeline        string
+	TargetRef       string
+	GateCommand     string
+	Message         string
+	ResolverCommand string
+	RepairCommand   string
+	Wait            bool
 }
 
 func resolvePromoteWorkspace(project, workspace string, current bool) (devWorkspaceManifest, error) {
@@ -190,28 +196,40 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	if !opts.Wait {
 		return out, nil
 	}
+	var repairer queue.Repairer
+	if strings.TrimSpace(opts.RepairCommand) != "" {
+		repairer = queue.ShellRepairer{Command: opts.RepairCommand}
+	}
 	state, err := qstore.Process(ctx, queue.ProcessDeps{
-		Integration: queue.StagingIntegration{ProjectRoot: root, GateCommand: opts.GateCommand},
+		Integration: queue.ProtectedIntegration{ProjectRoot: root, TargetRef: opts.TargetRef, ResolverCommand: opts.ResolverCommand},
 		Gate:        queue.ShellGate{Command: opts.GateCommand},
+		Repairer:    repairer,
 	})
 	if err != nil {
 		return capsulePromoteResult{}, err
 	}
 	out.QueueState = state
-	if !queueCandidateLanded(state, qcandidate.ID) {
+	queued, ok := queueCandidate(state, qcandidate.ID)
+	if !ok || queued.Status != queue.Landed {
 		out.Status = "retry_wait"
 		return out, nil
 	}
+	if queued.WorkspacePath == "" || queued.SpeculativeSHA == "" || queued.ValidatedSHA != queued.SpeculativeSHA {
+		return out, fmt.Errorf("capsule promote: landed queue candidate is missing its protected integration workspace")
+	}
 	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
-		Workspace:            workspacePath,
+		Workspace:            queued.WorkspacePath,
 		ProtectedProjectRoot: root,
 		TargetRef:            opts.TargetRef,
 		Operation:            reconcile.Promote,
-		Generation:           instance.Generation,
+		ReceiptCandidate:     candidateSHA,
 		RequiredGate:         opts.Pipeline,
 	})
 	if err != nil {
 		return capsulePromoteResult{}, err
+	}
+	if plan.Candidate != queued.ValidatedSHA {
+		return out, fmt.Errorf("capsule promote: protected integration changed after queue validation")
 	}
 	out.Plan = plan
 	if plan.Continuation != nil {
@@ -274,13 +292,13 @@ func storydigestCompute(root, storyPath string) (string, error) {
 	return story.Digest, nil
 }
 
-func queueCandidateLanded(state queue.State, id string) bool {
+func queueCandidate(state queue.State, id string) (queue.Candidate, bool) {
 	for _, candidate := range state.Candidates {
 		if candidate.ID == id {
-			return candidate.Status == queue.Landed
+			return candidate, true
 		}
 	}
-	return false
+	return queue.Candidate{}, false
 }
 
 func gitDirty(ctx context.Context, dir string) (bool, error) {

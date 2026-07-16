@@ -142,6 +142,37 @@ func TestProcessRunsGateAgainstSpeculativeTreeAndDoesNotLandOnFailure(t *testing
 	}
 }
 
+func TestProcessRunsOneBoundedRepairBeforeParkingRedGate(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("f", 40)
+	if _, err := store.Submit(Submit{Branch: "agent/f", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+		t.Fatal(err)
+	}
+	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
+		return Speculation{SHA: "speculative", WorkspacePath: t.TempDir()}, nil
+	}}
+	runs := 0
+	gate := gateFunc(func(context.Context, Speculation) (GateResult, error) {
+		runs++
+		return GateResult{Passed: runs == 2}, nil
+	})
+	repairs := 0
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: integration,
+		Gate:        gate,
+		Repairer: repairFunc(func(context.Context, Speculation, error) ([]string, error) {
+			repairs++
+			return []string{"repair:attempted"}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Candidates[0].Status != Landed || repairs != 1 || runs != 2 || integration.landed != 1 {
+		t.Fatalf("state=%#v repairs=%d runs=%d landed=%d", state.Candidates, repairs, runs, integration.landed)
+	}
+}
+
 func TestRetryWaitCandidateBlocksLaterCandidatesUntilRepaired(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
@@ -226,6 +257,12 @@ func (passingGate) Run(context.Context, Speculation) (GateResult, error) {
 type gateFunc func(context.Context, Speculation) (GateResult, error)
 
 func (f gateFunc) Run(ctx context.Context, s Speculation) (GateResult, error) { return f(ctx, s) }
+
+type repairFunc func(context.Context, Speculation, error) ([]string, error)
+
+func (f repairFunc) Repair(ctx context.Context, s Speculation, err error) ([]string, error) {
+	return f(ctx, s, err)
+}
 func TestSubmitRejectsReceiptForAnotherCandidate(t *testing.T) {
 	_, err := (Store{ProjectRoot: t.TempDir()}).Submit(Submit{Branch: "agent-a", SHA: strings.Repeat("a", 40), Receipt: testReceipt(t, strings.Repeat("b", 40))})
 	if err == nil || !strings.Contains(err.Error(), "does not match") {

@@ -43,7 +43,11 @@ func (g PromotionGate) Verify(_ context.Context, receiptID string, plan reconcil
 	if verified.Status != "valid" || !verified.PromotionEligible {
 		return fmt.Errorf("capsule sync: gate receipt is not promotion eligible")
 	}
-	if r.Envelope.SourceDigest != plan.Candidate {
+	expectedCandidate := plan.Candidate
+	if plan.ReceiptCandidate != "" {
+		expectedCandidate = plan.ReceiptCandidate
+	}
+	if r.Envelope.SourceDigest != expectedCandidate {
 		return fmt.Errorf("capsule sync: gate receipt candidate does not match reconciliation plan")
 	}
 	if r.JobID == "" || filepath.Base(r.JobID) != r.JobID {

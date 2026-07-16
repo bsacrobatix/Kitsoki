@@ -41,6 +41,68 @@ func TestStagingIntegrationProcessesReceiptBoundCandidateThroughProtectedStaging
 	}
 }
 
+func TestProtectedIntegrationRetainsExactCandidateWorkspaceForSourcePromotion(t *testing.T) {
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+	commit(t, root, "candidate.txt", "candidate\n", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/candidate", sha)
+	git(t, root, "reset", "--hard", base)
+
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{Branch: "agent/candidate", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := state.Candidates[0]
+	if candidate.Status != Landed || candidate.SpeculativeSHA != sha || candidate.ValidatedSHA != sha || candidate.WorkspacePath == "" {
+		t.Fatalf("candidate=%#v", candidate)
+	}
+	if got := git(t, candidate.WorkspacePath, "rev-parse", "HEAD"); got != sha {
+		t.Fatalf("integration head=%s, want %s", got, sha)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != base {
+		t.Fatalf("source main=%s, want unchanged %s", got, base)
+	}
+}
+
+func TestProtectedIntegrationPersistsDivergedContinuationInsteadOfEjecting(t *testing.T) {
+	root := protectedQueueRepo(t)
+	git(t, root, "checkout", "-b", "agent/conflict")
+	commit(t, root, "base.txt", "candidate\n", "candidate")
+	candidateSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "checkout", "main")
+	commit(t, root, "base.txt", "target\n", "target")
+
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{Branch: "agent/conflict", SHA: candidateSHA, Receipt: testReceipt(t, candidateSHA)}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := state.Candidates[0]
+	if candidate.Status != RetryWait || candidate.RetryReason != "speculation_failed" || candidate.WorkspacePath == "" {
+		t.Fatalf("candidate=%#v", candidate)
+	}
+	if entries, err := filepath.Glob(filepath.Join(root, ".capsules", "sync", "*.integration.json")); err != nil || len(entries) != 1 {
+		t.Fatalf("integration artifacts=%v err=%v", entries, err)
+	}
+	if got := git(t, root, "rev-parse", "main"); got == candidateSHA {
+		t.Fatal("conflicting candidate moved protected main")
+	}
+}
+
 func TestShellGateRejectsDirtySpeculativeWorkspace(t *testing.T) {
 	root := t.TempDir()
 	git(t, root, "init", "-b", "main")

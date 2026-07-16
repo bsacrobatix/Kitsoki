@@ -45,4 +45,8 @@ func TestPromotionGateRequiresMatchingVerifiedCandidateReceipt(t *testing.T) {
 	if err := gate.Verify(context.Background(), stored.Receipt.ReceiptID, plan); err == nil {
 		t.Fatal("accepted receipt for another candidate")
 	}
+	plan = reconcile.Plan{Candidate: "resolved-integration", ReceiptCandidate: "candidate"}
+	if err := gate.Verify(context.Background(), stored.Receipt.ReceiptID, plan); err != nil {
+		t.Fatalf("accepted integration provenance: %v", err)
+	}
 }

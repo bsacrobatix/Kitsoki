@@ -46,6 +46,9 @@ type Candidate struct {
 	Started        time.Time `json:"started_at,omitempty"`
 	Completed      time.Time `json:"completed_at,omitempty"`
 	SpeculativeSHA string    `json:"speculative_sha,omitempty"`
+	ValidatedSHA   string    `json:"validated_sha,omitempty"`
+	WorkspaceID    string    `json:"workspace_id,omitempty"`
+	WorkspacePath  string    `json:"workspace_path,omitempty"`
 	Evidence       []string  `json:"evidence,omitempty"`
 	RetryReason    string    `json:"retry_reason,omitempty"`
 	EjectionReason string    `json:"ejection_reason,omitempty"`
@@ -89,7 +92,15 @@ type GateResult struct {
 type ProcessDeps struct {
 	Integration Integration
 	Gate        Gate
+	Repairer    Repairer
 	Now         func() time.Time
+}
+
+// Repairer performs at most one bounded repair attempt for a failed gate. A
+// candidate remains in retry_wait if the repair cannot make the gate green.
+// Queue persistence deliberately outlives any individual repair process.
+type Repairer interface {
+	Repair(context.Context, Speculation, error) ([]string, error)
 }
 
 type Store struct {
@@ -149,11 +160,16 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 			c.RetryReason = ""
 			c.EjectionReason = ""
 			c.Evidence = nil
+			c.ValidatedSHA = ""
 			if err := write(path, state); err != nil {
 				return State{}, err
 			}
 			ahead := activeAhead(state.Candidates[:i])
 			spec, err := deps.Integration.Speculate(ctx, *c, ahead)
+			c.SpeculativeSHA = spec.SHA
+			c.WorkspaceID = spec.WorkspaceID
+			c.WorkspacePath = spec.WorkspacePath
+			c.Evidence = append(c.Evidence, spec.Evidence...)
 			if err != nil {
 				retry(c, now(deps), "speculation_failed", err.Error())
 				if err := write(path, state); err != nil {
@@ -161,8 +177,6 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 				}
 				break
 			}
-			c.SpeculativeSHA = spec.SHA
-			c.Evidence = append(c.Evidence, spec.Evidence...)
 			result, err := deps.Gate.Run(ctx, spec)
 			c.Evidence = append(c.Evidence, result.Evidence...)
 			if err != nil {
@@ -173,6 +187,33 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 				break
 			}
 			if !result.Passed {
+				if deps.Repairer != nil {
+					repairEvidence, repairErr := deps.Repairer.Repair(ctx, spec, fmt.Errorf("deterministic gate failed"))
+					c.Evidence = append(c.Evidence, repairEvidence...)
+					if repairErr == nil {
+						retried, retryErr := deps.Gate.Run(ctx, spec)
+						c.Evidence = append(c.Evidence, retried.Evidence...)
+						if retryErr == nil && retried.Passed {
+							c.ValidatedSHA = spec.SHA
+							if err := deps.Integration.Land(ctx, spec); err == nil {
+								c.Status = Landed
+								c.Completed = now(deps)
+								if err := write(path, state); err != nil {
+									return State{}, err
+								}
+								continue
+							} else {
+								repairErr = err
+							}
+						}
+						if retryErr != nil {
+							repairErr = retryErr
+						}
+					}
+					if repairErr != nil {
+						c.Evidence = append(c.Evidence, "queue:repair:"+repairErr.Error())
+					}
+				}
 				retry(c, now(deps), "gate_failed", "deterministic gate failed")
 				if err := write(path, state); err != nil {
 					return State{}, err
@@ -186,6 +227,7 @@ func (s Store) Process(ctx context.Context, deps ProcessDeps) (State, error) {
 				}
 				break
 			}
+			c.ValidatedSHA = spec.SHA
 			c.Status = Landed
 			c.Completed = now(deps)
 			if err := write(path, state); err != nil {
