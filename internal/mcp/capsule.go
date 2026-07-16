@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -721,11 +722,30 @@ func (s *CapsuleServer) ciSummary(_ context.Context, _ *mcpsdk.CallToolRequest, 
 }
 func capsuleCIHygienePlanner(project string) ci.HygienePlanner {
 	return ci.HygienePlannerFunc(func(ctx context.Context, policy ci.CleanupPolicy) (ci.HygieneReport, error) {
-		plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: project, KeepRuns: policy.KeepRuns, IncludeCapsuleCache: policy.IncludeCapsuleCache})
+		var progress hygiene.Progress
+		plan, err := hygiene.BuildPlan(ctx, hygiene.Options{
+			ProjectRoot:         project,
+			KeepRuns:            policy.KeepRuns,
+			IncludeCapsuleCache: policy.IncludeCapsuleCache,
+			ReportProgress:      func(p hygiene.Progress) { progress = p },
+		})
+		report := ci.HygieneReport{Phase: progress.Phase, ProgressCompleted: progress.Completed, ProgressTotal: progress.Total}
 		if err != nil {
-			return ci.HygieneReport{}, err
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return report, ci.HygieneDiagnosticError{
+					Message:           "Capsule hygiene inventory timed out",
+					Phase:             progress.Phase,
+					ProgressCompleted: progress.Completed,
+					ProgressTotal:     progress.Total,
+					Cause:             ctx.Err(),
+				}
+			}
+			return report, err
 		}
-		return ci.HygieneReport{Schema: plan.Schema, Candidates: len(plan.Candidates), TotalBytes: plan.TotalBytes}, nil
+		report.Schema = plan.Schema
+		report.Candidates = len(plan.Candidates)
+		report.TotalBytes = plan.TotalBytes
+		return report, nil
 	})
 }
 func (s *CapsuleServer) cleanupPlan(ctx context.Context, _ *mcpsdk.CallToolRequest, a capsuleCleanupArgs) (*mcpsdk.CallToolResult, any, error) {

@@ -21,6 +21,8 @@ const DoctorSchema = "capsule-ci-doctor/v1"
 
 var ErrDoctorNotReady = errors.New("capsule ci: doctor checks failed")
 
+const defaultDoctorHygieneTimeout = 2 * time.Minute
+
 type DoctorCheck struct {
 	ID       string         `json:"id"`
 	Outcome  string         `json:"outcome"`
@@ -109,6 +111,9 @@ type Doctor struct {
 	Workspace   WorkspaceProbe
 	LookupEnv   func(string) (string, bool)
 	Now         func() time.Time
+	// HygieneTimeout bounds the disk/workspace hygiene inventory during
+	// readiness checks. Zero uses the production default.
+	HygieneTimeout time.Duration
 }
 
 // Check performs a no-spend preflight. It may contact the selected executor's
@@ -330,13 +335,25 @@ func (d Doctor) checkHygiene(ctx context.Context, policy CleanupPolicy, add func
 		add(DoctorCheck{ID: "hygiene-debt", Outcome: "failed", Summary: "Workspace/run hygiene probe is not configured", Remedies: []string{"configure the Capsule hygiene planner for doctor"}})
 		return
 	}
-	report, err := d.Hygiene.PlanHygiene(ctx, policy)
+	timeout := d.HygieneTimeout
+	if timeout <= 0 {
+		timeout = defaultDoctorHygieneTimeout
+	}
+	hygieneCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	report, err := d.Hygiene.PlanHygiene(hygieneCtx, policy)
 	if err != nil {
-		add(failedDoctorCheck("disk-capacity", err, "run kitsoki capsule cleanup plan and repair inventory or filesystem errors"))
-		add(failedDoctorCheck("hygiene-debt", err, "run kitsoki capsule cleanup plan and repair inventory or filesystem errors"))
+		diskCheck, debtCheck := failedHygieneDoctorChecks(err, report, timeout)
+		add(diskCheck)
+		add(debtCheck)
 		return
 	}
-	diskDetails := map[string]any{"known": report.DiskKnown, "capacity_bytes": report.DiskCapacityBytes, "free_bytes": report.DiskFreeBytes, "minimum_free_bytes": report.DiskMinimumBytes, "below_minimum": report.DiskBelowMinimum}
+	diskDetails := hygieneReportDetails(report)
+	diskDetails["known"] = report.DiskKnown
+	diskDetails["capacity_bytes"] = report.DiskCapacityBytes
+	diskDetails["free_bytes"] = report.DiskFreeBytes
+	diskDetails["minimum_free_bytes"] = report.DiskMinimumBytes
+	diskDetails["below_minimum"] = report.DiskBelowMinimum
 	if !report.DiskKnown {
 		add(DoctorCheck{ID: "disk-capacity", Outcome: "warning", Summary: "Filesystem free space could not be determined", Details: diskDetails, Remedies: []string{"check free space before starting remote or multi-workspace CI"}})
 	} else if report.DiskBelowMinimum {
@@ -344,12 +361,58 @@ func (d Doctor) checkHygiene(ctx context.Context, policy CleanupPolicy, add func
 	} else {
 		add(DoctorCheck{ID: "disk-capacity", Outcome: "passed", Summary: "Filesystem has sufficient free space", Details: diskDetails})
 	}
-	hygieneDetails := map[string]any{"candidates": report.Candidates, "reclaimable_bytes": report.TotalBytes, "max_reclaimable_bytes": policy.MaxReclaimableBytes, "evidence_ref": report.EvidenceRef}
+	hygieneDetails := hygieneReportDetails(report)
+	hygieneDetails["candidates"] = report.Candidates
+	hygieneDetails["reclaimable_bytes"] = report.TotalBytes
+	hygieneDetails["max_reclaimable_bytes"] = policy.MaxReclaimableBytes
+	hygieneDetails["evidence_ref"] = report.EvidenceRef
 	if policy.MaxReclaimableBytes > 0 && report.TotalBytes > policy.MaxReclaimableBytes {
 		add(DoctorCheck{ID: "hygiene-debt", Outcome: "failed", Summary: "Reclaimable Capsule data exceeds pipeline policy", Details: hygieneDetails, Remedies: []string{"run kitsoki capsule cleanup plan, review candidates, and apply cleanup before CI"}})
 	} else {
 		add(DoctorCheck{ID: "hygiene-debt", Outcome: "passed", Summary: "Reclaimable Capsule data is within pipeline policy", Details: hygieneDetails})
 	}
+}
+
+func failedHygieneDoctorChecks(err error, report HygieneReport, timeout time.Duration) (DoctorCheck, DoctorCheck) {
+	summary := boundedDoctorText(err.Error())
+	details := hygieneReportDetails(report)
+	details["timeout"] = timeout.String()
+	var diagnostic HygieneDiagnosticError
+	if errors.As(err, &diagnostic) {
+		if diagnostic.Phase != "" {
+			details["phase"] = diagnostic.Phase
+		}
+		if diagnostic.ProgressTotal > 0 {
+			details["progress_completed"] = diagnostic.ProgressCompleted
+			details["progress_total"] = diagnostic.ProgressTotal
+		}
+		if diagnostic.Timeout > 0 {
+			details["timeout"] = diagnostic.Timeout.String()
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		details["diagnostic"] = "timeout"
+		if phase, _ := details["phase"].(string); phase != "" {
+			summary = "Capsule hygiene inventory timed out during " + phase
+		} else {
+			summary = "Capsule hygiene inventory timed out"
+		}
+	}
+	remedies := []string{"run kitsoki capsule cleanup plan and repair inventory or filesystem errors"}
+	return DoctorCheck{ID: "disk-capacity", Outcome: "failed", Summary: summary, Details: details, Remedies: remedies},
+		DoctorCheck{ID: "hygiene-debt", Outcome: "failed", Summary: summary, Details: details, Remedies: remedies}
+}
+
+func hygieneReportDetails(report HygieneReport) map[string]any {
+	details := map[string]any{}
+	if report.Phase != "" {
+		details["phase"] = report.Phase
+	}
+	if report.ProgressTotal > 0 {
+		details["progress_completed"] = report.ProgressCompleted
+		details["progress_total"] = report.ProgressTotal
+	}
+	return details
 }
 
 func validateDoctorCapabilities(capabilities executor.Capabilities, policy executor.Policy) error {

@@ -102,6 +102,47 @@ func TestDoctorReportsCredentialDiskHygieneAndWorkspaceFailuresWithRemedies(t *t
 	}
 }
 
+func TestDoctorBoundsHygieneInventoryWithStructuredTimeout(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	writeDoctorStory(t, root)
+	doctor := Doctor{
+		ProjectRoot: root,
+		Env:         environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Executors:   ExecutorSelectorFunc(func(context.Context, string) (executor.Provider, error) { return &failureInjectionProvider{}, nil }),
+		Workspace: WorkspaceProbeFunc(func(context.Context, string) (WorkspaceInspection, error) {
+			return WorkspaceInspection{Path: "workspace", Head: "sha256:source", Branch: "agent/test"}, nil
+		}),
+		Hygiene: HygienePlannerFunc(func(ctx context.Context, _ CleanupPolicy) (HygieneReport, error) {
+			<-ctx.Done()
+			return HygieneReport{Phase: "workspace-inventory", ProgressCompleted: 2, ProgressTotal: 5}, HygieneDiagnosticError{
+				Message:           "Capsule hygiene inventory timed out",
+				Phase:             "workspace-inventory",
+				ProgressCompleted: 2,
+				ProgressTotal:     5,
+				Cause:             ctx.Err(),
+			}
+		}),
+		HygieneTimeout: time.Nanosecond,
+	}
+	report, err := doctor.Check(context.Background(), DoctorRequest{Pipeline: "change", Workspace: control.Instance{ID: "w", State: control.StateReady, Generation: 1, DefinitionDigest: "sha256:def", Head: "sha256:source"}, WorkspacePath: "workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Ready {
+		t.Fatalf("report unexpectedly ready: %#v", report)
+	}
+	for _, id := range []string{"disk-capacity", "hygiene-debt"} {
+		check := doctorCheckByID(report.Checks, id)
+		if check == nil || check.Outcome != "failed" || !strings.Contains(check.Summary, "workspace-inventory") {
+			t.Fatalf("check %s: %#v", id, check)
+		}
+		if check.Details["diagnostic"] != "timeout" || check.Details["phase"] != "workspace-inventory" || check.Details["progress_completed"] != 2 || check.Details["progress_total"] != 5 {
+			t.Fatalf("check %s details: %#v", id, check.Details)
+		}
+	}
+}
+
 func TestDoctorRejectsRemoteMissingRequiredWorkerEnvironmentWithoutRun(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)

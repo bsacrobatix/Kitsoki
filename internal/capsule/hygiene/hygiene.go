@@ -52,6 +52,7 @@ type Options struct {
 	ReadDiskUsage         func(string) (DiskUsage, error)
 	ReadWorkspaceActivity func(context.Context, []string) (WorkspaceActivity, error)
 	CloseWorkspace        func(context.Context, string, Candidate) error
+	ReportProgress        func(Progress)
 	BeforeApply           func(Candidate)
 	Now                   func() time.Time
 	// ClearInactiveMerged limits cleanup to workspaces whose work is already
@@ -60,6 +61,15 @@ type Options struct {
 	// intentionally used by the no-argument operator clear command, not by the
 	// broader retention-based hygiene pass.
 	ClearInactiveMerged bool
+}
+
+// Progress identifies the inventory phase currently being inspected. Callers
+// that need bounded readiness diagnostics can surface the last reported phase
+// when a context deadline interrupts hygiene planning.
+type Progress struct {
+	Phase     string
+	Completed int
+	Total     int
 }
 
 type Candidate struct {
@@ -155,9 +165,15 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 		WorkspaceBytesMeasured: opts.MeasureWorkspaceBytes,
 		Candidates:             []Candidate{},
 	}
+	reportProgress := func(phase string, completed, total int) {
+		if opts.ReportProgress != nil {
+			opts.ReportProgress(Progress{Phase: phase, Completed: completed, Total: total})
+		}
+	}
 
 	var goCandidate Candidate
 	if opts.IncludeGoBuildCache {
+		reportProgress("go-build-cache", 0, 1)
 		goCandidate, err = goCacheCandidate(ctx, opts)
 		if err != nil {
 			return Plan{}, err
@@ -170,44 +186,64 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 				return Plan{}, err
 			}
 			if quickPlanSatisfiesHeadroom(quickPlan) {
+				reportProgress("complete", 1, 1)
 				return quickPlan, nil
 			}
 		}
+		reportProgress("go-build-cache", 1, 1)
 	}
 
+	reportProgress("nested-capsule-projects", 0, 1)
 	nestedProjects, projectCandidates, err := nestedCapsuleProjects(ctx, root, opts, minAge)
 	if err != nil {
 		return Plan{}, err
 	}
+	reportProgress("nested-capsule-projects", 1, 1)
+	reportProgress("workspace-inventory", 0, len(nestedProjects)+1)
 	workspaceCandidates, err := workspaceCandidates(ctx, root, nestedProjects, opts, keepWorkspaces, minAge)
 	if err != nil {
 		return Plan{}, err
 	}
+	reportProgress("workspace-inventory", len(nestedProjects)+1, len(nestedProjects)+1)
 	plan.Candidates = append(plan.Candidates, workspaceCandidates...)
 	if !opts.ClearInactiveMerged {
 		plan.Candidates = append(plan.Candidates, projectCandidates...)
 	}
 	if opts.ClearInactiveMerged {
-		return finishPlan(root, opts, plan)
+		reportProgress("finalize", 0, 1)
+		plan, err = finishPlan(root, opts, plan)
+		if err == nil {
+			reportProgress("complete", 1, 1)
+		}
+		return plan, err
 	}
+	reportProgress("ci-run-inventory", 0, 1)
 	runCandidates, err := ciRunCandidates(root, keepRuns)
 	if err != nil {
 		return Plan{}, err
 	}
+	reportProgress("ci-run-inventory", 1, 1)
 	plan.Candidates = append(plan.Candidates, runCandidates...)
 	if opts.IncludeCapsuleCache {
+		reportProgress("capsule-cache-inventory", 0, 1)
 		cacheCandidates, err := projectCacheCandidates(ctx, root)
 		if err != nil {
 			return Plan{}, err
 		}
 		plan.Candidates = append(plan.Candidates, cacheCandidates...)
+		reportProgress("capsule-cache-inventory", 1, 1)
 	}
 	if opts.IncludeGoBuildCache {
 		if goCandidate.Path != "" {
 			plan.Candidates = append(plan.Candidates, goCandidate)
 		}
 	}
-	return finishPlan(root, opts, plan)
+	reportProgress("finalize", 0, 1)
+	plan, err = finishPlan(root, opts, plan)
+	if err == nil {
+		reportProgress("complete", 1, 1)
+	}
+	return plan, err
 }
 
 func quickPlanSatisfiesHeadroom(plan Plan) bool {
@@ -566,11 +602,18 @@ func nestedCapsuleProjectWorkspaceState(ctx context.Context, root string) (works
 }
 
 func workspaceCandidates(ctx context.Context, root string, nested []nestedCapsuleProject, opts Options, keep int, minAge time.Duration) ([]Candidate, error) {
+	reportProgress := func(completed, total int) {
+		if opts.ReportProgress != nil {
+			opts.ReportProgress(Progress{Phase: "workspace-inventory", Completed: completed, Total: total})
+		}
+	}
+	totalRoots := len(nested) + 1
 	out, err := workspaceCandidatesForRoot(ctx, root, opts, minAge)
 	if err != nil {
 		return nil, err
 	}
-	for _, child := range nested {
+	reportProgress(1, totalRoots)
+	for i, child := range nested {
 		candidates, childErr := workspaceCandidatesForRoot(ctx, child.Root, opts, minAge)
 		if childErr != nil {
 			return nil, childErr
@@ -583,6 +626,7 @@ func workspaceCandidates(ctx context.Context, root string, nested []nestedCapsul
 			candidates[i] = decorated
 		}
 		out = append(out, candidates...)
+		reportProgress(i+2, totalRoots)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	eligible := make([]int, 0, len(out))

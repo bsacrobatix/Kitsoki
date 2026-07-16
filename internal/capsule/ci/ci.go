@@ -375,6 +375,9 @@ type HygieneReport struct {
 	Candidates        int    `json:"candidates"`
 	TotalBytes        int64  `json:"total_bytes"`
 	EvidenceRef       string `json:"evidence_ref,omitempty"`
+	Phase             string `json:"phase,omitempty"`
+	ProgressCompleted int    `json:"progress_completed,omitempty"`
+	ProgressTotal     int    `json:"progress_total,omitempty"`
 	DiskKnown         bool   `json:"disk_known,omitempty"`
 	DiskCapacityBytes int64  `json:"disk_capacity_bytes,omitempty"`
 	DiskFreeBytes     int64  `json:"disk_free_bytes,omitempty"`
@@ -385,6 +388,29 @@ type HygienePlannerFunc func(context.Context, CleanupPolicy) (HygieneReport, err
 
 func (f HygienePlannerFunc) PlanHygiene(ctx context.Context, policy CleanupPolicy) (HygieneReport, error) {
 	return f(ctx, policy)
+}
+
+type HygieneDiagnosticError struct {
+	Message           string
+	Phase             string
+	ProgressCompleted int
+	ProgressTotal     int
+	Timeout           time.Duration
+	Cause             error
+}
+
+func (e HygieneDiagnosticError) Error() string {
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	if strings.TrimSpace(e.Phase) != "" {
+		return "Capsule hygiene inventory interrupted during " + e.Phase
+	}
+	return "Capsule hygiene inventory interrupted"
+}
+
+func (e HygieneDiagnosticError) Unwrap() error {
+	return e.Cause
 }
 
 type RunRequest struct {

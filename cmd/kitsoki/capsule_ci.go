@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -198,11 +199,38 @@ func persistCapsuleCIRunFailure(project string, result ci.RunResult, runErr erro
 
 func capsuleCIHygienePlanner(project string) ci.HygienePlanner {
 	return ci.HygienePlannerFunc(func(ctx context.Context, policy ci.CleanupPolicy) (ci.HygieneReport, error) {
-		plan, err := hygiene.BuildPlan(ctx, hygiene.Options{ProjectRoot: project, KeepRuns: policy.KeepRuns, MinFreeBytes: 10 << 30, MeasureWorkspaceBytes: policy.MaxReclaimableBytes > 0, IncludeCapsuleCache: policy.IncludeCapsuleCache, IncludeGoBuildCache: policy.IncludeGoBuildCache})
+		var progress hygiene.Progress
+		plan, err := hygiene.BuildPlan(ctx, hygiene.Options{
+			ProjectRoot:           project,
+			KeepRuns:              policy.KeepRuns,
+			MinFreeBytes:          10 << 30,
+			MeasureWorkspaceBytes: policy.MaxReclaimableBytes > 0,
+			IncludeCapsuleCache:   policy.IncludeCapsuleCache,
+			IncludeGoBuildCache:   policy.IncludeGoBuildCache,
+			ReportProgress:        func(p hygiene.Progress) { progress = p },
+		})
+		report := ci.HygieneReport{Phase: progress.Phase, ProgressCompleted: progress.Completed, ProgressTotal: progress.Total}
 		if err != nil {
-			return ci.HygieneReport{}, err
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return report, ci.HygieneDiagnosticError{
+					Message:           "Capsule hygiene inventory timed out",
+					Phase:             progress.Phase,
+					ProgressCompleted: progress.Completed,
+					ProgressTotal:     progress.Total,
+					Cause:             ctx.Err(),
+				}
+			}
+			return report, err
 		}
-		return ci.HygieneReport{Schema: plan.Schema, Candidates: len(plan.Candidates), TotalBytes: plan.TotalBytes, DiskKnown: plan.Disk.Known, DiskCapacityBytes: plan.Disk.CapacityBytes, DiskFreeBytes: plan.Disk.FreeBytes, DiskMinimumBytes: plan.Disk.MinFreeBytes, DiskBelowMinimum: plan.Disk.BelowMinimum}, nil
+		report.Schema = plan.Schema
+		report.Candidates = len(plan.Candidates)
+		report.TotalBytes = plan.TotalBytes
+		report.DiskKnown = plan.Disk.Known
+		report.DiskCapacityBytes = plan.Disk.CapacityBytes
+		report.DiskFreeBytes = plan.Disk.FreeBytes
+		report.DiskMinimumBytes = plan.Disk.MinFreeBytes
+		report.DiskBelowMinimum = plan.Disk.BelowMinimum
+		return report, nil
 	})
 }
 
