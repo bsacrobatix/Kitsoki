@@ -39,8 +39,8 @@ const (
 	Rejected           Status = "rejected"
 
 	// Running and Ejected retain source compatibility with v1 callers.
-	Running Status = Preparing
-	Ejected Status = Rejected
+	Running Status = "running"
+	Ejected Status = "ejected"
 )
 
 type Candidate struct {
@@ -319,6 +319,9 @@ func normalize(state State) State {
 		}
 		if c.Phase == Running {
 			c.Phase = Reprepare
+		}
+		if c.Status == Ejected {
+			c.Status, c.Phase = Rejected, Rejected
 		}
 		if c.Phase == "" {
 			c.Phase = Queued

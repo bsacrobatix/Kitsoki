@@ -283,6 +283,7 @@ func TestSubmitRejectsReceiptForAnotherCandidate(t *testing.T) {
 
 func TestWorkersPrepareConcurrentlyAndFinalizeInFIFOOrder(t *testing.T) {
 	store, first, second := queuedPair(t)
+	store.LockWait = time.Second
 	entered := make(chan string, 2)
 	release := make(chan struct{})
 	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
@@ -300,9 +301,14 @@ func TestWorkersPrepareConcurrentlyAndFinalizeInFIFOOrder(t *testing.T) {
 	})}
 	workers := []Worker{{Store: store, Deps: deps}, {Store: store, Deps: deps}}
 	var wg sync.WaitGroup
+	errs := make(chan error, len(workers))
 	for _, worker := range workers {
 		wg.Add(1)
-		go func(worker Worker) { defer wg.Done(); _, _ = worker.RunOnce(context.Background()) }(worker)
+		go func(worker Worker) {
+			defer wg.Done()
+			_, err := worker.RunOnce(context.Background())
+			errs <- err
+		}(worker)
 	}
 	got := map[string]bool{<-entered: true, <-entered: true}
 	if !got[first.ID] || !got[second.ID] {
@@ -310,6 +316,12 @@ func TestWorkersPrepareConcurrentlyAndFinalizeInFIFOOrder(t *testing.T) {
 	}
 	close(release)
 	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := workers[0].RunOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
