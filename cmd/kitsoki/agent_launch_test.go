@@ -159,6 +159,28 @@ states:
 	require.Contains(t, strings.Join(plan.Command, " "), "mcp_servers.kitsoki-graph.enabled=true")
 }
 
+func TestAgentLaunchPlan_POGDriverUsesNarrowMCPsAndDisablesShell(t *testing.T) {
+	dir := t.TempDir()
+	isolateLaunchCodexHome(t, dir)
+	t.Setenv(host.CodexBinEnv, "/bin/codex-test")
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AgentName:  "pog-driver",
+		Backend:    "codex",
+		WorkingDir: dir,
+		Task:       "Inspect the graph.",
+	})
+	require.NoError(t, err)
+	for _, cleanup := range plan.cleanups {
+		t.Cleanup(cleanup)
+	}
+	command := strings.Join(plan.Command, " ")
+	require.Contains(t, command, "mcp_servers.kitsoki-codeact.enabled=true")
+	require.Contains(t, command, "mcp_servers.kitsoki-graph.enabled=true")
+	require.Contains(t, command, "mcp_servers.kitsoki-agent-launch.enabled=true")
+	require.NotContains(t, command, "mcp_servers.kitsoki.enabled=true")
+	require.Contains(t, plan.Command, "--disable="+launchCodexShellToolFeature)
+}
+
 func TestAgentLaunchPlan_CodeactModeStoryAgentOnlyAllowsCodeactTool(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(host.AgentBinEnv, "/bin/claude-test")

@@ -180,6 +180,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(mcpBashCmd())
 	root.AddCommand(mcpCodeactCmd())
 	root.AddCommand(mcpGraphCmd())
+	root.AddCommand(mcpAgentLaunchCmd())
 	root.AddCommand(mcpOperatorAskCmd())
 	root.AddCommand(bugCmd())
 	root.AddCommand(issuesCmd())

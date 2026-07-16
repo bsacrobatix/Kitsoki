@@ -55,6 +55,21 @@ Open an interactive Codex TUI in CodeAct mode:
 kitsoki agent launch --agent codeact-worker --mode codeact --backend codex
 ```
 
+### POG driver
+
+POG can use the packaged pog-driver with CodeAct, propose-mode graph MCP, and
+a small allowlisted Kitsoki delegation server. It has no Studio MCP and Codex
+shell access is disabled. Run it from a managed POG capsule with:
+
+    source .kitsoki/launch-policy.sh
+    kitsoki agent launch --agent pog-driver --profile pog-driver-codex --backend codex --config .kitsoki.yaml --working-dir "$PWD" --task-file .context/pog-task.md --exec
+
+The delegation MCP is mounted separately as kitsoki-agent-launch. Its
+agent.launch_plan and agent.launch tools accept only names supplied by the
+server's --allow-agent flags. Mount it directly with:
+
+    kitsoki mcp-agent-launch --allow-agent codeact-worker --allow-agent pog-driver
+
 Open a raw backend CLI without any app, agent file, MCP wrapper, or Kitsoki
 replacement prompt:
 

@@ -1110,6 +1110,26 @@ func parseBuiltInAgentMarkdown(raw []byte) (builtInAgentFrontmatter, string, err
 }
 
 func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, instructions string) string {
+	servers := map[string]any{"kitsoki": map[string]any{"command": "kitsoki", "args": []string{"mcp"}}}
+	switch agentName {
+	case "pog-driver":
+		servers = map[string]any{
+			"kitsoki-agent-launch": map[string]any{
+				"command": "kitsoki",
+				"args":    []string{"mcp-agent-launch", "--allow-agent", "codeact-worker", "--allow-agent", "pog-driver"},
+			},
+			"kitsoki-codeact": map[string]any{
+				"command": "kitsoki",
+				"args":    []string{"mcp-codeact", "--working-dir", ".", "--capabilities-json", `{"fs":true,"vcs":"read"}`},
+			},
+			"kitsoki-graph": map[string]any{
+				"command": "kitsoki",
+				"args":    []string{"mcp-graph", "--catalog", "pog/catalog.yaml", "--mode", "propose", "--feedback-sink", "local"},
+			},
+		}
+	case "codeact-worker":
+		servers = nil
+	}
 	return renderStandaloneCodexAgentTOML(standaloneCodexAgent{
 		Name:                  firstLaunchNonEmpty(front.Name, agentName),
 		Description:           front.Description,
@@ -1118,7 +1138,7 @@ func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, ins
 		DeveloperInstructions: instructions,
 		// Packaged agents are Studio-MCP contracts. Rendering this server only for
 		// the isolated launch keeps normal Codex sessions untouched.
-		MCPServers: map[string]any{"kitsoki": map[string]any{"command": "kitsoki", "args": []string{"mcp"}}},
+		MCPServers: servers,
 	})
 }
 
@@ -1647,7 +1667,8 @@ func shouldDisableStandaloneCodexShell(mode, backend, requestedName string, agen
 	if mode == launchModeCodeact {
 		return true
 	}
-	return requestedName == launchStudioMCPDriverAgentName || agent.Name == launchStudioMCPDriverAgentName
+	return requestedName == launchStudioMCPDriverAgentName || agent.Name == launchStudioMCPDriverAgentName ||
+		requestedName == "pog-driver" || agent.Name == "pog-driver"
 }
 
 func shouldDisableCodexAppsForMCPServers(backend string, mcpServers map[string]any) bool {
