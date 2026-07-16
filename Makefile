@@ -415,13 +415,13 @@ web-dev-logs:
 # covers by itself. scripts/run-tests.sh collects every failure across all suites
 # (never bails early), prints a terse summary on success / full detail on
 # failure, and always writes a rotated full report to .artifacts/test-reports/.
-test:
+test: embed-skills
 	$(call runstatus_pnpm_install,--silent)
 	@KITSOKI_REQUIRE_VITEST=1 KITSOKI_GO_TEST_FLAGS="$${KITSOKI_GO_TEST_FLAGS:--short}" ./scripts/run-tests.sh
 
 # test-full preserves the exhaustive Go lane for CI/release gates and local
 # validation of integration/property tests skipped by -short.
-test-full:
+test-full: embed-skills
 	$(call runstatus_pnpm_install,--silent)
 	@KITSOKI_REQUIRE_VITEST=1 ./scripts/run-tests.sh
 
