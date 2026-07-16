@@ -47,7 +47,7 @@ type capsulePromoteResult struct {
 
 func capsulePromoteCmd() *cobra.Command {
 	var project, workspace, pipeline, target, gate, message, resolver, repair string
-	var current, wait, jsonOut bool
+	var current, wait, jsonOut, skipTests bool
 	cmd := &cobra.Command{
 		Use:   "promote",
 		Short: "Promote a receipt-bound Capsule candidate through queue and protected-main CAS",
@@ -70,6 +70,7 @@ func capsulePromoteCmd() *cobra.Command {
 				Message:         message,
 				ResolverCommand: resolver,
 				RepairCommand:   repair,
+				SkipTests:       skipTests,
 				Wait:            wait,
 			})
 			if err != nil {
@@ -87,6 +88,7 @@ func capsulePromoteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&message, "message", "capsule promote candidate", "snapshot commit message when the workspace is dirty")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded project-owned resolver command for retained conflict continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded project-owned repair command for a red deterministic gate")
+	cmd.Flags().BoolVar(&skipTests, "skip-tests", false, "emergency override: bypass Capsule CI receipt admission; recorded in the durable queue candidate")
 	cmd.Flags().BoolVar(&wait, "wait", false, "process the local queue and apply protected-main CAS before returning")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	return cmd
@@ -101,6 +103,7 @@ type capsulePromoteOptions struct {
 	Message         string
 	ResolverCommand string
 	RepairCommand   string
+	SkipTests       bool
 	Wait            bool
 }
 
@@ -172,23 +175,30 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 			return capsulePromoteResult{}, err
 		}
 	}
-	stored, err := runPromoteCI(ctx, root, instance, opts.Pipeline)
-	if err != nil {
-		return capsulePromoteResult{}, err
+	var stored record.Stored
+	candidateSHA := instance.Head
+	if !opts.SkipTests {
+		stored, err = runPromoteCI(ctx, root, instance, opts.Pipeline)
+		if err != nil {
+			return capsulePromoteResult{}, err
+		}
+		candidateSHA = stored.Receipt.Envelope.SourceDigest
 	}
-	candidateSHA := stored.Receipt.Envelope.SourceDigest
 	branch, err := gitTrim(ctx, workspacePath, "branch", "--show-current")
 	if err != nil {
 		return capsulePromoteResult{}, err
 	}
 	qstore := queue.Store{ProjectRoot: root}
-	qcandidate, err := qstore.Submit(queue.Submit{
-		Branch:     branch,
-		SHA:        candidateSHA,
-		Receipt:    stored.Receipt,
-		ReceiptRef: stored.ReceiptPath,
-		Backend:    "local",
-	})
+	var qcandidate queue.Candidate
+	if !opts.SkipTests {
+		qcandidate, err = qstore.Submit(queue.Submit{
+			Branch: branch, SHA: candidateSHA, Receipt: stored.Receipt, ReceiptRef: stored.ReceiptPath, Backend: "local",
+		})
+	} else {
+		qcandidate, err = qstore.Submit(queue.Submit{
+			Branch: branch, SHA: candidateSHA, Admission: queue.EmergencySkipTestsAdmission, Backend: "local",
+		})
+	}
 	if err != nil {
 		return capsulePromoteResult{}, err
 	}

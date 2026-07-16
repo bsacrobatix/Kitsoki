@@ -124,10 +124,15 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	if strings.TrimSpace(target) == "" {
 		target = "main"
 	}
-	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
+	planRequest := reconcile.PlanRequest{
 		Workspace: c.WorkspacePath, ProtectedProjectRoot: p.ProjectRoot, TargetRef: target,
-		Operation: reconcile.Promote, ReceiptCandidate: c.SHA, RequiredGate: c.GateVersion,
-	})
+		Operation: reconcile.Promote,
+	}
+	if c.admission() == ReceiptAdmission {
+		planRequest.ReceiptCandidate = c.SHA
+		planRequest.RequiredGate = c.GateVersion
+	}
+	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, planRequest)
 	if err != nil {
 		return FinalizeResult{}, err
 	}
@@ -137,7 +142,11 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	if plan.Candidate != c.TreeSHA || c.ValidatedSHA != c.TreeSHA {
 		return FinalizeResult{}, fmt.Errorf("queue: prepared tree changed after deterministic gate")
 	}
-	result, err := (reconcile.Reconciler{VCS: reconcile.Git{}, Gates: record.PromotionGate{ProjectRoot: p.ProjectRoot}}).Apply(ctx, plan, c.ReceiptID)
+	reconciler := reconcile.Reconciler{VCS: reconcile.Git{}}
+	if c.admission() == ReceiptAdmission {
+		reconciler.Gates = record.PromotionGate{ProjectRoot: p.ProjectRoot}
+	}
+	result, err := reconciler.Apply(ctx, plan, c.ReceiptID)
 	if err != nil {
 		if strings.Contains(err.Error(), "stale plan") {
 			return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: err.Error()}, nil

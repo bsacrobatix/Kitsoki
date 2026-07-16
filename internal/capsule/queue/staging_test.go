@@ -72,6 +72,39 @@ func TestProtectedIntegrationRetainsExactCandidateWorkspaceForSourcePromotion(t 
 	}
 }
 
+func TestProtectedFinalizerAllowsExplicitEmergencySkipTestsAdmission(t *testing.T) {
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+	commit(t, root, "candidate.txt", "candidate\n", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/emergency", sha)
+	git(t, root, "reset", "--hard", base)
+
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{Branch: "agent/emergency", SHA: sha, Admission: EmergencySkipTestsAdmission}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: queueProtectedIntegration(root),
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+		GateVersion: "emergency-skip-tests:git diff --check",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Candidates) != 1 || state.Candidates[0].Status != Landed || state.Candidates[0].Admission != EmergencySkipTestsAdmission {
+		t.Fatalf("queue state=%#v", state.Candidates)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != sha {
+		t.Fatalf("main=%s, want emergency candidate %s", got, sha)
+	}
+}
+
+func queueProtectedIntegration(root string) ProtectedIntegration {
+	return ProtectedIntegration{ProjectRoot: root, TargetRef: "main"}
+}
+
 func TestProtectedIntegrationPersistsDivergedContinuationInsteadOfEjecting(t *testing.T) {
 	root := protectedQueueRepo(t)
 	git(t, root, "checkout", "-b", "agent/conflict")

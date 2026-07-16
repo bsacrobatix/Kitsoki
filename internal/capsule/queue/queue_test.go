@@ -281,6 +281,21 @@ func TestSubmitRejectsReceiptForAnotherCandidate(t *testing.T) {
 	}
 }
 
+func TestSubmitEmergencySkipTestsIsExplicitAndDoesNotForgeAReceipt(t *testing.T) {
+	sha := strings.Repeat("e", 40)
+	store := Store{ProjectRoot: t.TempDir()}
+	candidate, err := store.Submit(Submit{Branch: "agent/emergency", SHA: sha, Admission: EmergencySkipTestsAdmission})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Admission != EmergencySkipTestsAdmission || candidate.ReceiptID != "" || candidate.ReceiptDigest != string(EmergencySkipTestsAdmission) {
+		t.Fatalf("candidate=%#v", candidate)
+	}
+	if _, err := store.Submit(Submit{Branch: "agent/emergency", SHA: sha, Admission: EmergencySkipTestsAdmission, Receipt: testReceipt(t, sha)}); err == nil || !strings.Contains(err.Error(), "cannot carry") {
+		t.Fatalf("emergency submission accepted a receipt: %v", err)
+	}
+}
+
 func TestWorkersPrepareConcurrentlyAndFinalizeInFIFOOrder(t *testing.T) {
 	store, first, second := queuedPair(t)
 	store.LockWait = time.Second

@@ -453,6 +453,18 @@ integration produces a distinct merge commit, the reconciliation plan records
 that digest as receipt provenance and verifies that the integrated tree is the
 one which passed the deterministic queue gate before source promotion.
 
+`--skip-tests` is the explicit emergency path when no Capsule CI receipt can
+be produced. It bypasses the entire Capsule CI admission, not just the queue
+gate, and records `admission: emergency_skip_tests` in the durable queue
+candidate. It still prepares the candidate in a managed workspace, runs the
+requested deterministic queue gate, and compare-and-swaps the protected target;
+it never fabricates a promotion-eligible receipt. Use it only with an explicit
+gate choice appropriate to the emergency, for example:
+
+```sh
+kitsoki capsule promote --current --wait --skip-tests --gate ':'
+```
+
 Conflicts and red gates are durable `retry_wait` states, not ejections. A
 diverged candidate receives the normal reconciliation conflict artifact and
 retained integration checkout under `.capsules/sync/`. Project policy may

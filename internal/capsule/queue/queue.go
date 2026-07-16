@@ -23,6 +23,17 @@ const (
 	Schema = "capsule-merge-queue/v1"
 )
 
+// Admission records how a candidate was authorized to enter the queue.
+// ReceiptAdmission is the normal path. EmergencySkipTestsAdmission is an
+// explicit operator override used only by `capsule promote --skip-tests`; it
+// remains visible in the durable queue record and never masquerades as CI.
+type Admission string
+
+const (
+	ReceiptAdmission            Admission = "receipt"
+	EmergencySkipTestsAdmission Admission = "emergency_skip_tests"
+)
+
 type Status string
 
 const (
@@ -49,6 +60,7 @@ type Candidate struct {
 	Sequence              uint64    `json:"sequence"`
 	Branch                string    `json:"branch"`
 	SHA                   string    `json:"sha"`
+	Admission             Admission `json:"admission"`
 	ReceiptID             string    `json:"receipt_id"`
 	ReceiptRef            string    `json:"receipt_ref,omitempty"`
 	ReceiptDigest         string    `json:"receipt_digest,omitempty"`
@@ -99,6 +111,7 @@ type Submit struct {
 	Receipt             receipt.Receipt
 	ReceiptRef, Backend string
 	Paths               []string
+	Admission           Admission
 	Now                 time.Time
 }
 
@@ -165,7 +178,7 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 	}
 	return s.mutate(func(state *State) (Candidate, error) {
 		for _, c := range state.Candidates {
-			if c.SHA == in.SHA && c.ReceiptID == in.Receipt.ReceiptID {
+			if c.SHA == in.SHA && c.admission() == in.admission() && c.ReceiptID == in.Receipt.ReceiptID {
 				return c, nil
 			}
 		}
@@ -174,7 +187,17 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 			now = time.Now().UTC()
 		}
 		seq := nextSequence(state.Candidates)
-		c := Candidate{ID: candidateID(in.SHA, in.Receipt.ReceiptID), ProjectID: in.Receipt.ProjectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, ReceiptID: in.Receipt.ReceiptID, ReceiptRef: in.ReceiptRef, ReceiptDigest: in.Receipt.Integrity.ContentDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now}
+		admission := in.admission()
+		receiptID, receiptRef, receiptDigest, projectID := in.Receipt.ReceiptID, in.ReceiptRef, in.Receipt.Integrity.ContentDigest, in.Receipt.ProjectID
+		if admission == EmergencySkipTestsAdmission {
+			receiptID, receiptRef, receiptDigest = "", "", string(admission)
+			projectID = filepath.Base(mustAbs(s.ProjectRoot))
+		}
+		identity := receiptID
+		if identity == "" {
+			identity = string(admission)
+		}
+		c := Candidate{ID: candidateID(in.SHA, identity), ProjectID: projectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now}
 		state.Candidates = append(state.Candidates, c)
 		return c, nil
 	})
@@ -282,11 +305,20 @@ func validate(in Submit) error {
 	if len(in.SHA) != 40 || strings.Trim(in.SHA, "0123456789abcdef") != "" {
 		return fmt.Errorf("queue: candidate SHA must be a lowercase full git SHA")
 	}
-	if got := receipt.Verify(in.Receipt, nil, false); got.Status != "valid" || !got.PromotionEligible {
-		return fmt.Errorf("queue: receipt is not a valid promotion-eligible capsule CI receipt")
-	}
-	if in.Receipt.Envelope.SourceDigest != in.SHA {
-		return fmt.Errorf("queue: receipt candidate SHA does not match submission")
+	switch in.admission() {
+	case ReceiptAdmission:
+		if got := receipt.Verify(in.Receipt, nil, false); got.Status != "valid" || !got.PromotionEligible {
+			return fmt.Errorf("queue: receipt is not a valid promotion-eligible capsule CI receipt")
+		}
+		if in.Receipt.Envelope.SourceDigest != in.SHA {
+			return fmt.Errorf("queue: receipt candidate SHA does not match submission")
+		}
+	case EmergencySkipTestsAdmission:
+		if in.Receipt.ReceiptID != "" {
+			return fmt.Errorf("queue: emergency skip-tests admission cannot carry a Capsule CI receipt")
+		}
+	default:
+		return fmt.Errorf("queue: unsupported candidate admission %q", in.Admission)
 	}
 	return nil
 }
@@ -332,10 +364,35 @@ func normalize(state State) State {
 		if c.ReceiptDigest == "" {
 			c.ReceiptDigest = c.ReceiptID
 		}
+		if c.Admission == "" {
+			c.Admission = ReceiptAdmission
+		}
 	}
 	state.Schema = Schema
 	sort.SliceStable(state.Candidates, func(i, j int) bool { return state.Candidates[i].Sequence < state.Candidates[j].Sequence })
 	return state
+}
+
+func (in Submit) admission() Admission {
+	if in.Admission == "" {
+		return ReceiptAdmission
+	}
+	return in.Admission
+}
+
+func (c Candidate) admission() Admission {
+	if c.Admission == "" {
+		return ReceiptAdmission
+	}
+	return c.Admission
+}
+
+func mustAbs(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
 }
 func write(path string, state State) error {
 	state = normalize(state)
