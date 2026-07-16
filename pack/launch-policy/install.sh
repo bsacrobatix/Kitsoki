@@ -35,6 +35,15 @@ install_file() {
   changed=$((changed + 1))
   echo "installed ${dst#$target/}"
 }
+install_pack_owned_file() {
+  local src="$1" dst="$2" mode="$3"
+  if [ -e "$dst" ] && cmp -s "$src" "$dst"; then return; fi
+  mkdir -p "$(dirname "$dst")"
+  cp "$src" "$dst"
+  chmod "$mode" "$dst"
+  changed=$((changed + 1))
+  echo "installed ${dst#$target/}"
+}
 
 roots="    - ."
 if [ "$siblings" -eq 1 ]; then
@@ -53,8 +62,8 @@ install_file "$policy_tmp" "$target/.kitsoki.local.yaml" 0644
 install_file "$pack_dir/.claude/hooks/block-bare-checkout.sh" "$target/.claude/hooks/block-bare-checkout.sh" 0755
 install_file "$pack_dir/templates/settings.json" "$target/.claude/settings.json" 0644
 install_file "$pack_dir/scripts/launch-policy-gate.sh" "$target/scripts/launch-policy-gate.sh" 0755
-install_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/claude" 0755
-install_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/codex" 0755
+install_pack_owned_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/claude" 0755
+install_pack_owned_file "$pack_dir/templates/agent-launcher-shim.sh" "$target/.kitsoki/bin/codex" 0755
 install_file "$pack_dir/templates/launcher-env.sh" "$target/.kitsoki/launch-policy.sh" 0644
 
 # The main-pinning git hook belongs only in a primary checkout. A managed

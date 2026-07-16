@@ -27,6 +27,15 @@ if git -C "$repo" checkout -q -b should-be-blocked 2>/dev/null; then
 fi
 (cd "$repo" && scripts/launch-policy-gate.sh)
 
+# Generated launcher shims are pack-owned. A stale installed shim must be
+# upgraded without requiring --force, otherwise `codex superagent` can keep
+# calling the wrong workspace creation surface after the template is fixed.
+sed_i() { sed "$1" "$2" > "$2.tmp" && mv "$2.tmp" "$2"; }
+sed_i 's/capsule workspace create-script/capsule workspace create \\\n    --definition development/' "$repo/.kitsoki/bin/codex"
+"$pack_dir/install.sh" "$repo" --no-siblings >/dev/null
+grep -q 'capsule workspace create-script' "$repo/.kitsoki/bin/codex" || { echo "FAIL: stale codex shim was not upgraded" >&2; exit 1; }
+grep -q 'capsule workspace create-script' "$repo/.kitsoki/bin/claude" || { echo "FAIL: claude shim missing create-script" >&2; exit 1; }
+
 out="$("$pack_dir/install.sh" "$repo" --no-siblings)"
 grep -q 'no changes' <<<"$out" || { echo "FAIL: installer was not idempotent" >&2; exit 1; }
 
@@ -38,7 +47,6 @@ printf '# My Repo\n\nlocal preamble\n\n' > "$repo/AGENTS.md"
 "$pack_dir/install.sh" "$repo" --no-siblings >/dev/null
 grep -q 'local preamble' "$repo/AGENTS.md" || { echo "FAIL: consumer AGENTS.md content lost" >&2; exit 1; }
 grep -q 'BEGIN kitsoki:launch-policy' "$repo/AGENTS.md" || { echo "FAIL: block not re-added to rewritten AGENTS.md" >&2; exit 1; }
-sed_i() { sed "$1" "$2" > "$2.tmp" && mv "$2.tmp" "$2"; }
 sed_i 's/Launch through the shims/HAND EDIT INSIDE BLOCK/' "$repo/AGENTS.md"
 "$pack_dir/install.sh" "$repo" --no-siblings >/dev/null
 grep -q 'HAND EDIT INSIDE BLOCK' "$repo/AGENTS.md" && { echo "FAIL: upgrade did not refresh block content" >&2; exit 1; }
