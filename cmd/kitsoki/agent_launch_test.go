@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/host"
 )
 
@@ -934,6 +935,39 @@ agent_launch_policy:
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "agent launch policy denied")
 	require.Contains(t, err.Error(), "inside protected root")
+}
+
+func TestPrepareProtectedRootCodeactLaunch_UsesManagedCapsuleAndReportsLifecycle(t *testing.T) {
+	project := t.TempDir()
+	workspace := filepath.Join(project, ".capsules", "workspaces", "codeact-test")
+	require.NoError(t, os.MkdirAll(workspace, 0755))
+	cfgPath := filepath.Join(project, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  protected_roots: [.]
+  allowed_roots: [.capsules/workspaces]
+`), 0644))
+	previous := createProtectedRootCodeactCapsule
+	createProtectedRootCodeactCapsule = func(_ context.Context, gotProject, id, owner string) (control.Instance, error) {
+		require.Equal(t, project, gotProject)
+		require.Equal(t, "resume-me", id)
+		require.Equal(t, "test-owner", owner)
+		return control.Instance{ID: id, Generation: 7, Path: workspace, Branch: "agent/resume-me", State: control.StateReady, Lease: control.Lease{Owner: owner}}, nil
+	}
+	t.Cleanup(func() { createProtectedRootCodeactCapsule = previous })
+
+	opts, provenance, err := prepareProtectedRootCodeactLaunch(context.Background(), agentLaunchOptions{
+		Mode: "codeact", ConfigPath: cfgPath, WorkingDir: project, CapsuleID: "resume-me", CapsuleOwner: "test-owner",
+	})
+	require.NoError(t, err)
+	require.Equal(t, workspace, opts.WorkingDir)
+	require.NotNil(t, provenance)
+	require.Equal(t, "resume-me", provenance.ID)
+	require.Equal(t, uint64(7), provenance.Generation)
+	require.Contains(t, provenance.Resume, "--capsule resume-me")
+	require.Contains(t, provenance.Close, "workspace close")
+	require.Contains(t, provenance.Promote, "capsule promote")
 }
 
 func TestAgentLaunchPlan_FreestandingCodexAgentLocalOverrideExtendsBase(t *testing.T) {

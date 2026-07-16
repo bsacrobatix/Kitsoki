@@ -9,12 +9,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/baseskills"
+	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/webconfig"
@@ -43,28 +45,31 @@ type agentLaunchOptions struct {
 	Exec                    bool
 	Interactive             bool
 	RawInteractive          bool
+	CapsuleID               string
+	CapsuleOwner            string
 }
 
 type agentLaunchPlan struct {
-	App          string                    `json:"app,omitempty"`
-	AgentFile    string                    `json:"agent_file,omitempty"`
-	Agent        string                    `json:"agent,omitempty"`
-	Profile      string                    `json:"profile,omitempty"`
-	Backend      string                    `json:"backend"`
-	Mode         string                    `json:"mode,omitempty"`
-	Binary       string                    `json:"binary"`
-	WorkingDir   string                    `json:"working_dir"`
-	Model        string                    `json:"model,omitempty"`
-	Effort       string                    `json:"effort,omitempty"`
-	Tools        []string                  `json:"tools,omitempty"`
-	Env          map[string]string         `json:"env,omitempty"`
-	Command      []string                  `json:"command"`
-	Stdin        string                    `json:"stdin,omitempty"`
-	RunAsUser    string                    `json:"run_as_user,omitempty"`
-	DryRun       bool                      `json:"dry_run"`
-	Interactive  bool                      `json:"interactive,omitempty"`
-	FutureNotes  []string                  `json:"future_notes,omitempty"`
-	LaunchPolicy *host.AgentLaunchDecision `json:"launch_policy,omitempty"`
+	App          string                        `json:"app,omitempty"`
+	AgentFile    string                        `json:"agent_file,omitempty"`
+	Agent        string                        `json:"agent,omitempty"`
+	Profile      string                        `json:"profile,omitempty"`
+	Backend      string                        `json:"backend"`
+	Mode         string                        `json:"mode,omitempty"`
+	Binary       string                        `json:"binary"`
+	WorkingDir   string                        `json:"working_dir"`
+	Model        string                        `json:"model,omitempty"`
+	Effort       string                        `json:"effort,omitempty"`
+	Tools        []string                      `json:"tools,omitempty"`
+	Env          map[string]string             `json:"env,omitempty"`
+	Command      []string                      `json:"command"`
+	Stdin        string                        `json:"stdin,omitempty"`
+	RunAsUser    string                        `json:"run_as_user,omitempty"`
+	DryRun       bool                          `json:"dry_run"`
+	Interactive  bool                          `json:"interactive,omitempty"`
+	FutureNotes  []string                      `json:"future_notes,omitempty"`
+	LaunchPolicy *host.AgentLaunchDecision     `json:"launch_policy,omitempty"`
+	Capsule      *agentLaunchCapsuleProvenance `json:"capsule,omitempty"`
 	// ProfileResolution is the secret-free, local catalog evidence used to
 	// construct this dry-run. It lets callers prove that a requested model and
 	// effort came from the selected profile rather than an operator-authored
@@ -74,6 +79,20 @@ type agentLaunchPlan struct {
 	providerEnv map[string]string
 	claudeArgs  []string
 	cleanups    []func()
+}
+
+// agentLaunchCapsuleProvenance is emitted with a launch plan so an operator
+// can resume, close, or promote the exact workspace that received the agent.
+// The native capsule commands remain the lifecycle authority.
+type agentLaunchCapsuleProvenance struct {
+	ID         string `json:"id"`
+	Generation uint64 `json:"generation"`
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	Owner      string `json:"owner"`
+	Resume     string `json:"resume"`
+	Close      string `json:"close"`
+	Promote    string `json:"promote"`
 }
 
 type agentLaunchProfileResolution struct {
@@ -224,10 +243,15 @@ selected backend's hard controls: Claude allowed/disallowed tools or Codex
 By default this prints a redacted JSON launch plan for task-backed launches.
 Freestanding Codex launch with no task opens Codex interactively.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			plan, err := buildAgentLaunchPlan(opts)
+			launchOpts, provenance, err := prepareProtectedRootCodeactLaunch(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
+			plan, err := buildAgentLaunchPlan(launchOpts)
+			if err != nil {
+				return err
+			}
+			plan.Capsule = provenance
 			for _, cleanup := range plan.cleanups {
 				defer cleanup()
 			}
@@ -263,6 +287,8 @@ Freestanding Codex launch with no task opens Codex interactively.`,
 	cmd.Flags().StringArrayVar(&opts.AddDirs, "add-dir", nil, "additional directory made available to the launched agent")
 	cmd.Flags().StringArrayVar(&opts.Env, "env", nil, "extra environment override KEY=VALUE; values are redacted from dry-run output")
 	cmd.Flags().StringArrayVar(&opts.RawArgs, "raw-arg", nil, "raw backend argument; only for launcher shims used with --raw --interactive")
+	cmd.Flags().StringVar(&opts.CapsuleID, "capsule", "", "reuse this managed Capsule for a protected-root CodeAct launch; omitted creates a new Capsule")
+	cmd.Flags().StringVar(&opts.CapsuleOwner, "capsule-owner", "agent-launch", "owner recorded on a protected-root CodeAct Capsule")
 	_ = cmd.Flags().MarkHidden("raw-arg")
 	cmd.Flags().BoolVar(&opts.Exec, "exec", false, "actually run a task-backed external CLI; task-backed default is a no-provider dry run")
 	cmd.Flags().BoolVar(&opts.Interactive, "interactive", false, "force an interactive Codex session instead of one-shot codex exec; implied when freestanding launch has no task")
@@ -458,6 +484,93 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 		FutureNotes:       launchFutureNotes(opts.Mode),
 		ProfileResolution: launchProfileResolution(profileName, profile),
 	}, nil
+}
+
+// prepareProtectedRootCodeactLaunch turns the one interactive exception we
+// support into a normal, policy-approved workspace launch. It intentionally
+// runs before plan construction: the policy must see the materialized Capsule,
+// never a protected checkout with a special-case allow rule.
+func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOptions) (agentLaunchOptions, *agentLaunchCapsuleProvenance, error) {
+	mode, err := normalizeAgentLaunchMode(opts.Mode)
+	if err != nil || mode != launchModeCodeact || opts.RawInteractive {
+		return opts, nil, err
+	}
+	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
+	if err != nil {
+		return opts, nil, err
+	}
+	launchCfg, err := loadLaunchConfig(opts.ConfigPath)
+	if err != nil {
+		return opts, nil, err
+	}
+	projectRoot := protectedProjectRoot(launchCfg.AgentLaunchPolicy, workingDir)
+	if projectRoot == "" {
+		return opts, nil, nil
+	}
+
+	id := strings.TrimSpace(opts.CapsuleID)
+	if id == "" {
+		id = fmt.Sprintf("codeact-%s", time.Now().UTC().Format("20060102-150405.000000000"))
+	}
+	in, err := createProtectedRootCodeactCapsule(ctx, projectRoot, id, opts.CapsuleOwner)
+	if err != nil {
+		return opts, nil, err
+	}
+	if in.State != control.StateReady {
+		return opts, nil, fmt.Errorf("protected-root CodeAct Capsule %q is %s; wait for it to become ready before launch", id, in.State)
+	}
+	path, err := filepath.Abs(in.Path)
+	if err != nil {
+		return opts, nil, err
+	}
+	provenance := &agentLaunchCapsuleProvenance{
+		ID:         in.ID,
+		Generation: in.Generation,
+		Path:       path,
+		Branch:     in.Branch,
+		Owner:      in.Lease.Owner,
+		Resume:     fmt.Sprintf("kitsoki agent launch --mode codeact --capsule %s --working-dir %s", in.ID, projectRoot),
+		Close:      fmt.Sprintf("kitsoki capsule workspace close --project %s --id %s", projectRoot, in.ID),
+		Promote:    fmt.Sprintf("kitsoki capsule promote --project %s --workspace %s", projectRoot, in.ID),
+	}
+	opts.WorkingDir = path
+	return opts, provenance, nil
+}
+
+var createProtectedRootCodeactCapsule = func(ctx context.Context, projectRoot, id, owner string) (control.Instance, error) {
+	manager, err := capsuleWorkspaceManager(projectRoot)
+	if err != nil {
+		return control.Instance{}, fmt.Errorf("prepare protected-root CodeAct Capsule: %w", err)
+	}
+	handle, err := manager.CreateDevWorkspaceScript(ctx, control.CreateRequest{ID: id, DefinitionID: "development", Owner: owner})
+	if err != nil {
+		return control.Instance{}, fmt.Errorf("prepare protected-root CodeAct Capsule %q: %w", id, err)
+	}
+	in, err := manager.Instances.Get(ctx, handle.ID)
+	if err != nil {
+		return control.Instance{}, fmt.Errorf("read protected-root CodeAct Capsule %q: %w", id, err)
+	}
+	if err := manager.VerifyDevWorkspaceScriptInstance(ctx, in); err != nil {
+		return control.Instance{}, fmt.Errorf("verify protected-root CodeAct Capsule %q: %w", id, err)
+	}
+	if in.State != control.StateReady {
+		return control.Instance{}, fmt.Errorf("protected-root CodeAct Capsule %q is %s; its lifecycle has not completed", id, in.State)
+	}
+	return in, nil
+}
+
+func protectedProjectRoot(policy host.AgentLaunchPolicy, workingDir string) string {
+	policy = policy.Normalized()
+	for _, root := range policy.ProtectedRoots {
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		if filepath.Clean(abs) == filepath.Clean(workingDir) {
+			return abs
+		}
+	}
+	return ""
 }
 
 func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
