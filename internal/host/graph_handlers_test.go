@@ -239,3 +239,165 @@ func TestGraphHandler_Query(t *testing.T) {
 		t.Errorf("expected node_id usecase-developer-traces-requirement-to-proof, got %v", res.Data["node_id"])
 	}
 }
+
+// impactFixturePath is a purpose-built catalog (linear 3-level inbound
+// chain, an inbound cycle, a second edge kind, and an unrelated component —
+// see the file's header comment) for host.graph.query{mode:"impact"}'s
+// transitive option. Shared with internal/graph's TransitiveImpact unit
+// tests (../graph/neighbors_test.go's impactFixturePath) via the same file.
+const impactFixturePath = "testdata/graph-impact-fixture.yaml"
+
+// TestGraphHandler_Query_Impact_DefaultIsByteCompatOneHop is the byte-compat
+// regression test for the transitive option: when transitive is
+// absent/false, the response must carry exactly the same key set as before
+// the option existed — no "transitive", "edge_kinds", or "impact_closure"
+// key at all (not even a false/empty one) — and "references" must remain
+// the original one-row-per-(node,edge_field) one-hop list.
+func TestGraphHandler_Query_Impact_DefaultIsByteCompatOneHop(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": impactFixturePath,
+		"mode":         "impact",
+		"target":       "target",
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(query impact): %v", err)
+	}
+
+	wantKeys := []string{"node_id", "current_type", "explain_type", "references", "incompatible_refs"}
+	if len(res.Data) != len(wantKeys) {
+		t.Fatalf("default response has %d keys %v, want exactly %v", len(res.Data), res.Data, wantKeys)
+	}
+	for _, k := range wantKeys {
+		if _, ok := res.Data[k]; !ok {
+			t.Errorf("missing expected key %q in default (non-transitive) response: %v", k, res.Data)
+		}
+	}
+	for _, forbidden := range []string{"transitive", "edge_kinds", "impact_closure"} {
+		if _, ok := res.Data[forbidden]; ok {
+			t.Errorf("default (transitive absent) response unexpectedly carries %q — byte-compat broken: %v", forbidden, res.Data)
+		}
+	}
+
+	refs, ok := res.Data["references"].([]any)
+	if !ok || len(refs) != 3 {
+		t.Fatalf("expected exactly 3 one-hop references (blk1/blocks, c1/depends_on, cy1/depends_on), got %v", res.Data["references"])
+	}
+}
+
+// TestGraphHandler_Query_Impact_Transitive exercises transitive:true end to
+// end through the host op: the closure covers all 6 transitively impacted
+// nodes (see graph-impact-fixture.yaml), in deterministic BFS order, while
+// "references" stays exactly the one-hop list from the default-mode test
+// above — transitive mode is additive, not a replacement.
+func TestGraphHandler_Query_Impact_Transitive(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": impactFixturePath,
+		"mode":         "impact",
+		"target":       "target",
+		"transitive":   true,
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(query impact transitive): %v", err)
+	}
+	if res.Data["transitive"] != true {
+		t.Errorf("expected transitive=true echoed back, got %v", res.Data["transitive"])
+	}
+	if _, ok := res.Data["edge_kinds"]; ok {
+		t.Errorf("edge_kinds should be absent from the response when not supplied, got %v", res.Data["edge_kinds"])
+	}
+
+	refs, ok := res.Data["references"].([]any)
+	if !ok || len(refs) != 3 {
+		t.Fatalf("expected references to remain the 3-row one-hop list even in transitive mode, got %v", res.Data["references"])
+	}
+
+	closure, ok := res.Data["impact_closure"].([]any)
+	if !ok {
+		t.Fatalf("expected impact_closure list, got %T %v", res.Data["impact_closure"], res.Data["impact_closure"])
+	}
+	if len(closure) != 6 {
+		t.Fatalf("expected 6 impacted nodes, got %d: %+v", len(closure), closure)
+	}
+
+	first, ok := closure[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected impact_closure[0] to be an object, got %T", closure[0])
+	}
+	if first["node"] != "blk1" || first["edge_field"] != "blocks" || first["depth"] != 1 {
+		t.Errorf("impact_closure[0] = %+v, want node=blk1 edge_field=blocks depth=1 (deterministic BFS order)", first)
+	}
+	path, ok := first["path"].([]any)
+	if !ok || len(path) != 2 || path[0] != "blk1" || path[1] != "target" {
+		t.Errorf("impact_closure[0].path = %v, want [blk1 target]", first["path"])
+	}
+}
+
+// TestGraphHandler_Query_Impact_EdgeKindsFilter checks that edge_kinds
+// restricts the transitive walk and is echoed back in the response.
+func TestGraphHandler_Query_Impact_EdgeKindsFilter(t *testing.T) {
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": impactFixturePath,
+		"mode":         "impact",
+		"target":       "target",
+		"transitive":   true,
+		"edge_kinds":   []any{"depends_on"},
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(query impact transitive edge_kinds): %v", err)
+	}
+
+	closure, ok := res.Data["impact_closure"].([]any)
+	if !ok {
+		t.Fatalf("expected impact_closure list, got %v", res.Data["impact_closure"])
+	}
+	if len(closure) != 5 {
+		t.Fatalf("expected 5 impacted nodes when filtered to depends_on (blk1 excluded), got %d: %+v", len(closure), closure)
+	}
+	for _, row := range closure {
+		m, _ := row.(map[string]any)
+		if m["node"] == "blk1" {
+			t.Fatalf("blk1 (blocks-only referencer) unexpectedly present when filtered to depends_on: %+v", closure)
+		}
+	}
+
+	edgeKinds, ok := res.Data["edge_kinds"].([]any)
+	if !ok || len(edgeKinds) != 1 || edgeKinds[0] != "depends_on" {
+		t.Errorf("expected edge_kinds echoed back as [depends_on], got %v", res.Data["edge_kinds"])
+	}
+}
+
+// TestGraphHandler_Query_Impact_EdgeKindsRequiresTransitive checks the
+// least-surprise guard: edge_kinds is meaningless without transitive:true,
+// so it is rejected rather than silently ignored.
+func TestGraphHandler_Query_Impact_EdgeKindsRequiresTransitive(t *testing.T) {
+	_, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": impactFixturePath,
+		"mode":         "impact",
+		"target":       "target",
+		"edge_kinds":   []any{"depends_on"},
+	})
+	if err == nil {
+		t.Fatal("expected an error when edge_kinds is set without transitive:true")
+	}
+}
+
+// TestGraphHandler_Query_Impact_UnknownEdgeKind checks edge_kinds entries
+// are validated against the registry's declared edge vocabulary, the same
+// way host.graph.neighbors' edges filter already is.
+func TestGraphHandler_Query_Impact_UnknownEdgeKind(t *testing.T) {
+	_, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "query",
+		"catalog_path": impactFixturePath,
+		"mode":         "impact",
+		"target":       "target",
+		"transitive":   true,
+		"edge_kinds":   []any{"not-a-real-edge"},
+	})
+	if err == nil {
+		t.Fatal("expected an error for an unknown edge_kinds entry")
+	}
+}

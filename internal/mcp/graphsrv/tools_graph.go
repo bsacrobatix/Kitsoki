@@ -941,22 +941,26 @@ const graphImpactInputSchema = `{
   "properties": {
     "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
     "id": {"type": "string", "description": "Node id to assess."},
-    "to_type": {"type": "string", "description": "If retyping to this type id, also report incompatible inbound refs."}
+    "to_type": {"type": "string", "description": "If retyping to this type id, also report incompatible inbound refs."},
+    "transitive": {"type": "boolean", "description": "Walk inbound references transitively (BFS over declared edge kinds) instead of stopping at one hop. Adds an impact_closure field to the response; references is unchanged either way. Default false."},
+    "edge_kinds": {"type": "array", "items": {"type": "string"}, "description": "Restrict the transitive walk to these declared edge field ids (e.g. \"depends_on\"). Only valid together with transitive: true; default is every declared edge field."}
   },
   "required": ["id"],
   "additionalProperties": false
 }`
 
 type graphImpactArgs struct {
-	Catalog string `json:"catalog,omitempty"`
-	ID      string `json:"id"`
-	ToType  string `json:"to_type,omitempty"`
+	Catalog    string   `json:"catalog,omitempty"`
+	ID         string   `json:"id"`
+	ToType     string   `json:"to_type,omitempty"`
+	Transitive bool     `json:"transitive,omitempty"`
+	EdgeKinds  []string `json:"edge_kinds,omitempty"`
 }
 
 func registerGraphImpactTool(srv *mcpsdk.Server, deps *Deps) {
 	srv.AddTool(&mcpsdk.Tool{
 		Name:        "graph.impact",
-		Description: "Predict what retyping or removing a node would break: its type explanation, every inbound reference, and (with to_type) which of those refs would become type-incompatible. Call before retype/remove; propose will reject what this predicts.",
+		Description: "Predict what retyping or removing a node would break: its type explanation, every inbound reference, and (with to_type) which of those refs would become type-incompatible. With transitive:true, also walk inbound references transitively (optionally filtered to edge_kinds) and return the full impact closure, one row per node with its depth and discovery path. Call before retype/remove; propose will reject what this predicts.",
 		InputSchema: json.RawMessage(graphImpactInputSchema),
 	}, recorded(deps, "graph.impact", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 		return handleGraphImpact(ctx, deps, req)
@@ -973,6 +977,9 @@ func handleGraphImpact(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequ
 	if args.ID == "" {
 		return errorResult(NewError(CodeValidation, "graph.impact: `id` is required", "")), nil
 	}
+	if len(args.EdgeKinds) > 0 && !args.Transitive {
+		return errorResult(NewError(CodeValidation, "graph.impact: `edge_kinds` is only valid together with `transitive: true`", "")), nil
+	}
 	path, _, alias, errPayload := deps.resolveRead(args.Catalog)
 	if errPayload != nil {
 		return errorResult(errPayload), nil
@@ -982,6 +989,12 @@ func handleGraphImpact(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequ
 	deps.applyScope(alias, hostArgs)
 	if args.ToType != "" {
 		hostArgs["to_type"] = args.ToType
+	}
+	if args.Transitive {
+		hostArgs["transitive"] = true
+	}
+	if len(args.EdgeKinds) > 0 {
+		hostArgs["edge_kinds"] = args.EdgeKinds
 	}
 	res, err := deps.Registry.Invoke(ctx, "host.graph.query", hostArgs)
 	if err != nil {

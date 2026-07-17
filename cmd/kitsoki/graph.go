@@ -353,6 +353,8 @@ func graphQueryCmd() *cobra.Command {
 	var modeExplainType string
 	var modeImpact string
 	var toType string
+	var transitive bool
+	var edgeKinds []string
 	cmd := &cobra.Command{
 		Use:   "query <catalog-path>",
 		Short: "Query relationships, types, or impact of changes in the catalog",
@@ -372,13 +374,27 @@ func graphQueryCmd() *cobra.Command {
 			} else {
 				return fmt.Errorf("must specify one of --refs-to, --explain-type, or --impact")
 			}
+			if (transitive || len(edgeKinds) > 0) && mode != "impact" {
+				return fmt.Errorf("--transitive/--edge-kinds only apply to --impact")
+			}
+			if len(edgeKinds) > 0 && !transitive {
+				return fmt.Errorf("--edge-kinds requires --transitive")
+			}
 
-			res, err := invokeGraphOp("query", map[string]any{
+			hostArgs := map[string]any{
 				"catalog_path": path,
 				"mode":         mode,
 				"target":       target,
 				"to_type":      toType,
-			})
+			}
+			if transitive {
+				hostArgs["transitive"] = true
+			}
+			if len(edgeKinds) > 0 {
+				hostArgs["edge_kinds"] = edgeKinds
+			}
+
+			res, err := invokeGraphOp("query", hostArgs)
 			if err != nil {
 				return fmt.Errorf("graph query: %w", err)
 			}
@@ -392,6 +408,8 @@ func graphQueryCmd() *cobra.Command {
 	cmd.Flags().StringVar(&modeExplainType, "explain-type", "", "explain effective type structure")
 	cmd.Flags().StringVar(&modeImpact, "impact", "", "preview impact of node ID")
 	cmd.Flags().StringVar(&toType, "to-type", "", "target type for --impact retype check")
+	cmd.Flags().BoolVar(&transitive, "transitive", false, "with --impact, walk inbound references transitively instead of stopping at one hop")
+	cmd.Flags().StringSliceVar(&edgeKinds, "edge-kinds", nil, "with --impact --transitive, restrict the walk to these declared edge field ids (default: all)")
 	return cmd
 }
 

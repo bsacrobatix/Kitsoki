@@ -784,7 +784,27 @@ func graphQueryOp(args map[string]any) (Result, error) {
 		return graphQueryExplainType(cat, target)
 	case "impact":
 		toType := graphStringArg(args, "to_type")
-		return graphQueryImpact(cat, target, toType)
+		transitive := graphBoolArg(args, "transitive")
+		edgeKinds, err := graphStringListArg(args, "edge_kinds")
+		if err != nil {
+			return Result{}, fmt.Errorf("host.graph.query: %w", err)
+		}
+		if len(edgeKinds) > 0 && !transitive {
+			return Result{}, fmt.Errorf("host.graph.query: %q is only valid with %q: true", "edge_kinds", "transitive")
+		}
+		if len(edgeKinds) > 0 {
+			known := graphAllEdgeFieldIDs(cat)
+			knownSet := make(map[string]bool, len(known))
+			for _, k := range known {
+				knownSet[k] = true
+			}
+			for _, e := range edgeKinds {
+				if !knownSet[e] {
+					return Result{}, fmt.Errorf("host.graph.query: unknown edge_kinds entry %q (known: %v)", e, known)
+				}
+			}
+		}
+		return graphQueryImpact(cat, target, toType, transitive, edgeKinds)
 	default:
 		return Result{}, fmt.Errorf("host.graph.query: unknown mode %q", mode)
 	}
@@ -852,7 +872,27 @@ func graphQueryExplainType(cat *objectgraph.Catalog, typeID string) (Result, err
 	}}, nil
 }
 
-func graphQueryImpact(cat *objectgraph.Catalog, targetID string, toType string) (Result, error) {
+// graphQueryImpact answers host.graph.query{mode:"impact"}. Its default
+// shape (transitive=false) is the original one-hop contract: refs is
+// exactly graphQueryRefsTo's one row per (referencing node, edge field)
+// pair reaching targetID directly, unchanged since this predates the
+// transitive option — callers depending on that exact shape when transitive
+// is omitted/false must see byte-identical output, so the "transitive" and
+// "edge_kinds" response keys below are added ONLY when transitive is true
+// (never present, not even as false/empty, in the default response).
+//
+// transitive=true additionally computes the closure over inbound edges
+// (internal/graph.TransitiveImpact) restricted to edgeKinds (empty =
+// every declared edge field): "impact_closure" lists every transitively
+// impacted node exactly once, at its shallowest depth, with the edge field
+// and path of the hop that discovered it — see ImpactedNode's doc comment.
+// This is deliberately a second, additive field rather than a replacement
+// for "references": "references" keeps meaning "direct one-hop refs,
+// unfiltered", and "impact_closure" means "the BFS closure, respecting
+// edge_kinds" — a node with two distinct edge fields into targetID gets two
+// rows in "references" but one row (its shallowest hop) in
+// "impact_closure".
+func graphQueryImpact(cat *objectgraph.Catalog, targetID string, toType string, transitive bool, edgeKinds []string) (Result, error) {
 	node, exists := cat.Nodes[objectgraph.NodeID(targetID)]
 	if !exists {
 		return Result{}, fmt.Errorf("node %q not found", targetID)
@@ -897,11 +937,51 @@ func graphQueryImpact(cat *objectgraph.Catalog, targetID string, toType string) 
 		}
 	}
 
-	return Result{Data: map[string]any{
+	out := map[string]any{
 		"node_id":           targetID,
 		"current_type":      node.TypeID,
 		"explain_type":      typeData,
 		"references":        refs,
 		"incompatible_refs": incompatibleRefs,
-	}}, nil
+	}
+
+	if transitive {
+		edgeFields := make([]objectgraph.EdgeField, len(edgeKinds))
+		for i, e := range edgeKinds {
+			edgeFields[i] = objectgraph.EdgeField(e)
+		}
+		closure := objectgraph.TransitiveImpact(cat, objectgraph.NodeID(targetID), edgeFields)
+		out["transitive"] = true
+		if len(edgeKinds) > 0 {
+			out["edge_kinds"] = stringSliceToAny(edgeKinds)
+		}
+		out["impact_closure"] = wireImpactClosure(closure)
+	}
+
+	return Result{Data: out}, nil
+}
+
+// wireImpactClosure renders a TransitiveImpact closure onto the wire: one
+// object per impacted node with its discovery edge field, BFS depth, and
+// path (node down to root, inclusive of both ends). nil (not an empty
+// slice) when the closure is empty, matching graphQueryRefsTo's "references"
+// nil-when-empty convention above.
+func wireImpactClosure(nodes []objectgraph.ImpactedNode) []any {
+	if len(nodes) == 0 {
+		return nil
+	}
+	out := make([]any, 0, len(nodes))
+	for _, n := range nodes {
+		path := make([]any, 0, len(n.Path))
+		for _, p := range n.Path {
+			path = append(path, string(p))
+		}
+		out = append(out, map[string]any{
+			"node":       string(n.Node),
+			"edge_field": string(n.EdgeField),
+			"depth":      n.Depth,
+			"path":       path,
+		})
+	}
+	return out
 }

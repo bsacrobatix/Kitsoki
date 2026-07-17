@@ -1,0 +1,92 @@
+schema: project-object-graph/seed-catalog/v0
+catalog:
+  id: graph-impact-test-fixture-catalog
+# Purpose-built for host.graph.query{mode:"impact", transitive:true} /
+# internal/graph.TransitiveImpact coverage: a linear 3-level inbound chain
+# (c1 -> c2 -> c3, all depends_on), a 2-node inbound cycle one hop off the
+# main chain (cy1 <-> cy2, both depends_on — must not infinite-loop or
+# double-count), a second declared edge kind (blocks) on a single direct
+# referencer (blk1) to exercise the edge_kinds filter, and an unrelated
+# component (other -> other2) that must never appear in target's closure.
+type_registry:
+  - id: core-node
+    schema: graph-type/v0
+    extends: null
+    required_fields: [id, schema, title, status, visibility]
+  - id: item
+    schema: graph-type/v0
+    extends: core-node
+    edge_fields:
+      - id: depends_on
+        target_type: item
+        cardinality: many
+      - id: blocks
+        target_type: item
+        cardinality: many
+nodes:
+  - schema: graph/item/v0
+    id: target
+    title: Target node
+    status: active
+    visibility: internal
+  # Linear inbound chain toward target: c1 (depth 1) <- c2 (depth 2) <- c3
+  # (depth 3).
+  - schema: graph/item/v0
+    id: c1
+    title: Chain depth 1
+    status: active
+    visibility: internal
+    edges:
+      depends_on: [target]
+  - schema: graph/item/v0
+    id: c2
+    title: Chain depth 2
+    status: active
+    visibility: internal
+    edges:
+      depends_on: [c1]
+  - schema: graph/item/v0
+    id: c3
+    title: Chain depth 3
+    status: active
+    visibility: internal
+    edges:
+      depends_on: [c2]
+  # Inbound cycle one hop off target: cy1 (depth 1) and cy2 (depth 2) depend
+  # on each other as well as on the chain toward target.
+  - schema: graph/item/v0
+    id: cy1
+    title: Cycle member 1
+    status: active
+    visibility: internal
+    edges:
+      depends_on: [target, cy2]
+  - schema: graph/item/v0
+    id: cy2
+    title: Cycle member 2
+    status: active
+    visibility: internal
+    edges:
+      depends_on: [cy1]
+  # Direct referencer via a different declared edge field, for the
+  # edge_kinds filter.
+  - schema: graph/item/v0
+    id: blk1
+    title: Blocks target directly
+    status: active
+    visibility: internal
+    edges:
+      blocks: [target]
+  # Unrelated component — must never appear in target's impact closure.
+  - schema: graph/item/v0
+    id: other
+    title: Unrelated referencer
+    status: active
+    visibility: internal
+    edges:
+      depends_on: [other2]
+  - schema: graph/item/v0
+    id: other2
+    title: Unrelated leaf
+    status: active
+    visibility: internal

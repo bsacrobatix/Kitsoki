@@ -287,6 +287,57 @@ func TestGraphServer_ImpactWrapsQuery(t *testing.T) {
 	if _, ok := m["references"]; !ok {
 		t.Fatalf("expected references, got %+v", m)
 	}
+	if _, ok := m["impact_closure"]; ok {
+		t.Fatalf("default (transitive omitted) graph.impact must not carry impact_closure — byte-compat broken: %+v", m)
+	}
+}
+
+// TestGraphServer_ImpactTransitive wires transitive:true through
+// graph.impact end to end (MCP tool -> host.graph.query -> internal/graph.
+// TransitiveImpact). req-alpha's inbound closure in fixturePath is:
+// depth 1 uc-alpha (covers), depth 2 req-iso-gamma (acceptance) — uc-alpha
+// also covers req-iso-gamma, and req-iso-gamma's own acceptance edge points
+// back at uc-alpha, so this incidentally also covers cycle-safety (uc-alpha
+// must appear exactly once, not revisited via the req-iso-gamma->uc-alpha
+// back edge).
+func TestGraphServer_ImpactTransitive(t *testing.T) {
+	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
+	defer done()
+
+	m, isErr := callTool(t, cs, "graph.impact", map[string]any{"id": "req-alpha", "transitive": true})
+	if isErr {
+		t.Fatalf("graph.impact (transitive) returned an error: %+v", m)
+	}
+	if m["transitive"] != true {
+		t.Fatalf("expected transitive=true echoed back, got %+v", m)
+	}
+	closure, ok := m["impact_closure"].([]any)
+	if !ok {
+		t.Fatalf("expected impact_closure list, got %T %+v", m["impact_closure"], m)
+	}
+	if len(closure) != 2 {
+		t.Fatalf("expected 2 impacted nodes (uc-alpha depth 1, req-iso-gamma depth 2), got %d: %+v", len(closure), closure)
+	}
+	first, _ := closure[0].(map[string]any)
+	if first["node"] != "uc-alpha" || first["edge_field"] != "covers" {
+		t.Fatalf("impact_closure[0] = %+v, want node=uc-alpha edge_field=covers", first)
+	}
+	second, _ := closure[1].(map[string]any)
+	if second["node"] != "req-iso-gamma" {
+		t.Fatalf("impact_closure[1] = %+v, want node=req-iso-gamma", second)
+	}
+}
+
+// TestGraphServer_ImpactEdgeKindsRequiresTransitive checks the tool-level
+// validation guard fires before the call ever reaches host.graph.query.
+func TestGraphServer_ImpactEdgeKindsRequiresTransitive(t *testing.T) {
+	cs, done := connectGraphServer(t, graphsrv.Config{CatalogFlags: []string{fixturePath}})
+	defer done()
+
+	m, isErr := callTool(t, cs, "graph.impact", map[string]any{"id": "req-alpha", "edge_kinds": []any{"covers"}})
+	if !isErr {
+		t.Fatalf("expected an error when edge_kinds is set without transitive:true, got %+v", m)
+	}
 }
 
 // TestGraphServer_ToolsListByteCeiling is the golden byte-ceiling test

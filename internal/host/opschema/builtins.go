@@ -366,11 +366,15 @@ func registerGraphBuiltins(r *Registry) {
 		Output: fields("layers", "list"),
 	})
 	r.Register("host.graph", "query", Op{
-		Input: fields("catalog_path", "string", "mode", "string", "target", "string", "to_type", "string"),
+		Input: fields(
+			"catalog_path", "string", "mode", "string", "target", "string", "to_type", "string",
+			"transitive", "bool", "edge_kinds", "list",
+		),
 		Output: fields(
 			"references", "list", "type_id", "string", "schema", "string", "extends", "string",
 			"summary", "string", "required_fields", "list", "edge_fields", "list", "ancestry", "list",
 			"node_id", "string", "current_type", "string", "explain_type", "object", "incompatible_refs", "list",
+			"transitive", "bool", "impact_closure", "list",
 		),
 	})
 	r.Register("host.graph", "get", Op{

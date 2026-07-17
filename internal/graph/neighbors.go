@@ -185,6 +185,88 @@ func Neighbors(cat *Catalog, root NodeID, direction NeighborsDirection, edgeKind
 	return triples
 }
 
+// ImpactedNode is one node transitively reachable from a TransitiveImpact
+// root by walking inbound edges — i.e. a node whose removal/retype could
+// ripple through to the root. Unlike NeighborTriple (one row per edge),
+// each node the closure reaches appears exactly once, described by the
+// discovery hop that first reached it during the BFS.
+type ImpactedNode struct {
+	// Node is the impacted node's id.
+	Node NodeID
+	// EdgeField is the edge field of the discovery hop: the declared edge
+	// that Node itself carries, pointing at Parent (Path[1]).
+	EdgeField EdgeField
+	// Depth is the BFS depth from the root (1 = a direct inbound
+	// reference to root).
+	Depth int
+	// Path is the discovery chain from Node down to the root, inclusive
+	// of both ends: Path[0] == Node, Path[len(Path)-1] == root.
+	Path []NodeID
+}
+
+// TransitiveImpact walks inbound edges from root transitively — BFS,
+// cycle-safe, deterministic — optionally restricted to edgeKinds (empty
+// means every declared edge field, matching Neighbors' convention). It is
+// the closure host.graph.query's impact mode's `transitive: true` option
+// needs (graph-mcp: transitive impact closure): "who ultimately depends on
+// root, directly or indirectly, and by what path."
+//
+// root itself is never included, even if a cycle loops back to it. Each
+// reachable node appears exactly once, at the shallowest depth it is first
+// discovered, with the edge field and path of that discovery hop — the
+// same single-discovery-per-node BFS-tree semantics Neighbors already
+// implements for direction "in" (see its doc comment), reused here rather
+// than reimplemented: TransitiveImpact calls Neighbors(root, DirectionIn,
+// edgeKinds, <depth bound covering the whole graph>, 0) and folds its
+// edge-level triples down to one row per node by keeping only the first
+// (deterministically ordered) triple that discovers each node — exactly
+// the triple Neighbors itself used to decide whether to enqueue that node,
+// so the fold requires no BFS logic of its own.
+//
+// The depth bound passed to Neighbors is len(cat.Nodes): with a visited
+// set preventing revisits, no simple path can exceed that many hops, so
+// this is "unbounded" for any real catalog without needing a sentinel
+// value Neighbors would have to special-case.
+func TransitiveImpact(cat *Catalog, root NodeID, edgeKinds []EdgeField) []ImpactedNode {
+	maxDepth := len(cat.Nodes)
+	if maxDepth < 1 {
+		maxDepth = 1
+	}
+	triples := Neighbors(cat, root, DirectionIn, edgeKinds, maxDepth, 0)
+
+	// path[n] is the discovery chain from n down to root, inclusive of
+	// both ends. Seeded with root itself so a depth-1 child's path can
+	// append onto it uniformly with every deeper child.
+	path := map[NodeID][]NodeID{root: {root}}
+	discovered := map[NodeID]bool{root: true}
+
+	var out []ImpactedNode
+	for _, t := range triples {
+		child, parent := t.From, t.To
+		if discovered[child] {
+			// Either an extra (non-tree) inbound edge onto an
+			// already-discovered node, or a cycle hop back onto root —
+			// in both cases the node keeps its first (shallowest)
+			// discovery, per the doc comment.
+			continue
+		}
+		discovered[child] = true
+
+		childPath := make([]NodeID, 0, len(path[parent])+1)
+		childPath = append(childPath, child)
+		childPath = append(childPath, path[parent]...)
+		path[child] = childPath
+
+		out = append(out, ImpactedNode{
+			Node:      child,
+			EdgeField: t.EdgeField,
+			Depth:     t.Depth,
+			Path:      childPath,
+		})
+	}
+	return out
+}
+
 // sortNeighborHops orders hops deterministically: by the "other end" node
 // id, then edge field, then direction — so Neighbors' output (and BFS
 // enqueue order) never depends on map iteration order.
