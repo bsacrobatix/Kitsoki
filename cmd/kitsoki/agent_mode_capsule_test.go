@@ -3,9 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsuletest"
 )
 
 func TestAgentModeCapsuleID(t *testing.T) {
@@ -53,4 +58,35 @@ func TestAgentModeCapsuleProvisioner_CreateFailurePropagates(t *testing.T) {
 	if _, err := agentModeCapsuleProvisioner(context.Background(), "/proj", "x"); err == nil {
 		t.Fatal("expected create failure to propagate")
 	}
+}
+
+// TestCreateProtectedRootCapsule_SelfKindDefinition proves the shared
+// protected-root materializer handles a generic (non-script) `development`
+// definition — the studio-sassfully shape: `source.kind: self`, no
+// scripts/dev-workspace.sh — through Manager.Create, including reacquire on a
+// second call. Hermetic: the project is the clean-repo capsule fixture.
+func TestCreateProtectedRootCapsule_SelfKindDefinition(t *testing.T) {
+	project := capsuletest.Open(t, "clean-repo")
+	capsDir := filepath.Join(project, ".kitsoki", "capsules")
+	require.NoError(t, os.MkdirAll(capsDir, 0o755))
+	const devYAML = `schema: capsule-definition/v1
+id: development
+description: Self-clone workspace for the current checkout.
+source:
+  kind: self
+policy:
+  network: none
+`
+	require.NoError(t, os.WriteFile(filepath.Join(capsDir, "development.yaml"), []byte(devYAML), 0o600))
+
+	ctx := context.Background()
+	in, err := createProtectedRootCapsule(ctx, project, "agent-mode-demo", agentModeCapsuleOwner, "agent-mode")
+	require.NoError(t, err, "a self-kind development definition must materialize through Manager.Create")
+	require.Equal(t, "agent-mode-demo", in.ID)
+	require.DirExists(t, in.Path)
+	require.True(t, codeactCapsuleLaunchable(in.State), "state = %s", in.State)
+
+	again, err := createProtectedRootCapsule(ctx, project, "agent-mode-demo", agentModeCapsuleOwner, "agent-mode")
+	require.NoError(t, err, "a second call must reacquire, not conflict")
+	require.Equal(t, in.Path, again.Path, "reacquire must land in the same workspace")
 }

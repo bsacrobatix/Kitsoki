@@ -135,6 +135,10 @@ Agent mode adds no sandbox machinery; it composes the existing gates:
    agent (`agent-mode-<name>`, owner `agent-mode`), so repeat runs and
    `--continue` reacquire the same workspace; close it with
    `kitsoki capsule workspace close --project <root> --id agent-mode-<name>`.
+   Materialization follows the project's `development` capsule definition:
+   a `dev-workspace-script` definition goes through `scripts/dev-workspace.sh`,
+   while any other kind (e.g. `self` in repos without that script) clones
+   through the generic capsule manager with the same reacquire semantics.
    Any other denial — or a provisioning failure — fails the load with the
    auditable decision plus capsule guidance: run from a managed capsule
    workspace (`scripts/dev-workspace.sh create` / `kitsoki capsule`) or

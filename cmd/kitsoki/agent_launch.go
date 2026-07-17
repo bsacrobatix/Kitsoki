@@ -500,14 +500,28 @@ var createProtectedRootCodeactCapsule = func(ctx context.Context, projectRoot, i
 // createProtectedRootCapsule is the shared materializer behind the two
 // protected-root exceptions (the CodeAct launch above, agent mode's
 // auto-capsule in agent_mode_capsule.go): create or reacquire a registered
-// dev-workspace-script Capsule and verify it is launchable. label only
-// flavors error messages.
+// Capsule from the project's `development` definition and verify it is
+// launchable. A dev-workspace-script definition goes through the
+// compatibility script path; any other kind (e.g. `self` in repos without
+// scripts/dev-workspace.sh) materializes through the generic Manager.Create,
+// which owns the same reacquire/rematerialize semantics. label only flavors
+// error messages.
 func createProtectedRootCapsule(ctx context.Context, projectRoot, id, owner, label string) (control.Instance, error) {
 	manager, err := capsuleWorkspaceManager(projectRoot)
 	if err != nil {
 		return control.Instance{}, fmt.Errorf("prepare protected-root %s Capsule: %w", label, err)
 	}
-	handle, err := manager.CreateDevWorkspaceScript(ctx, control.CreateRequest{ID: id, DefinitionID: "development", Owner: owner})
+	def, err := manager.Definition(ctx, "development")
+	if err != nil {
+		return control.Instance{}, fmt.Errorf("prepare protected-root %s Capsule: %w", label, err)
+	}
+	req := control.CreateRequest{ID: id, DefinitionID: "development", Owner: owner}
+	var handle control.Handle
+	if def.Source.Kind == control.SourceDevWorkspaceScript {
+		handle, err = manager.CreateDevWorkspaceScript(ctx, req)
+	} else {
+		handle, err = manager.Create(ctx, req)
+	}
 	if err != nil {
 		return control.Instance{}, fmt.Errorf("prepare protected-root %s Capsule %q: %w", label, id, err)
 	}
