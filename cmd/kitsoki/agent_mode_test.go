@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -23,6 +24,7 @@ import (
 
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/baseskills"
+	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/host"
 	"kitsoki/internal/webconfig"
 )
@@ -383,4 +385,76 @@ developer_instructions = "You edit files in the project."
 		require.Error(t, err, "the injected policy must run the synthesis-time preflight")
 		assert.Contains(t, err.Error(), "agent mode preflight")
 	})
+}
+
+// TestLoadAgentSchemeApp_ProtectedRootAutoCapsule proves the protected-root
+// auto-capsule exception end to end through loadAgentSchemeAppWithPolicy (the
+// shared CLI + web/daemon registry path): a write agent started from a
+// protected checkout materializes a managed capsule workspace (stable
+// agent-mode-<name> id, agent-mode owner) and the synthesized root's workdir
+// — the dir every dispatch reads — is the capsule, not the protected root.
+func TestLoadAgentSchemeApp_ProtectedRootAutoCapsule(t *testing.T) {
+	dir := withProjectAgent(t)
+	const writerTOML = `name = "writer"
+description = "Demo write agent"
+developer_instructions = "You edit files in the project."
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki", "agents", "writer.toml"), []byte(writerTOML), 0o600))
+
+	capsuleDir := t.TempDir()
+	var gotRoot, gotID, gotOwner string
+	prev := createProtectedRootAgentModeCapsule
+	createProtectedRootAgentModeCapsule = func(_ context.Context, projectRoot, id, owner string) (control.Instance, error) {
+		gotRoot, gotID, gotOwner = projectRoot, id, owner
+		return control.Instance{ID: id, Path: capsuleDir, Branch: "agent/" + id}, nil
+	}
+	t.Cleanup(func() { createProtectedRootAgentModeCapsule = prev })
+
+	policy := host.AgentLaunchPolicy{Enabled: true, ProtectedRoots: []string{dir}}
+	def, err := loadAgentSchemeAppWithPolicy("writer", policy)
+	require.NoError(t, err, "a protected-root write agent must auto-provision, not deny")
+
+	require.Equal(t, "agent-mode-writer", gotID)
+	require.Equal(t, agentModeCapsuleOwner, gotOwner)
+	// The policy hands the provisioner the RESOLVED protected root (macOS
+	// /var → /private/var), so compare symlink-resolved paths.
+	resolvedDir, rerr := filepath.EvalSymlinks(dir)
+	require.NoError(t, rerr)
+	require.Equal(t, resolvedDir, filepath.Clean(gotRoot))
+
+	workdir, ok := def.World["workdir"]
+	require.True(t, ok, "write agents synthesize a workdir world var")
+	resolvedCapsule, rerr := filepath.EvalSymlinks(capsuleDir)
+	require.NoError(t, rerr)
+	gotWorkdir, _ := workdir.Default.(string)
+	resolvedWorkdir, rerr := filepath.EvalSymlinks(gotWorkdir)
+	require.NoError(t, rerr)
+	assert.Equal(t, resolvedCapsule, resolvedWorkdir, "dispatch workdir must be the capsule")
+	assert.Equal(t, gotWorkdir, os.Getenv(host.AppDirEnv), "KITSOKI_APP_DIR must publish the capsule dir")
+}
+
+// TestLoadAgentSchemeApp_ProtectedRootProvisioningFailureDenies pins the
+// degraded path: when capsule materialization fails, the operator gets the
+// standard auditable denial with the provisioning failure appended — never a
+// silent allow.
+func TestLoadAgentSchemeApp_ProtectedRootProvisioningFailureDenies(t *testing.T) {
+	dir := withProjectAgent(t)
+	const writerTOML = `name = "writer"
+description = "Demo write agent"
+developer_instructions = "You edit files in the project."
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".kitsoki", "agents", "writer.toml"), []byte(writerTOML), 0o600))
+
+	prev := createProtectedRootAgentModeCapsule
+	createProtectedRootAgentModeCapsule = func(context.Context, string, string, string) (control.Instance, error) {
+		return control.Instance{}, errors.New("no development capsule definition")
+	}
+	t.Cleanup(func() { createProtectedRootAgentModeCapsule = prev })
+
+	policy := host.AgentLaunchPolicy{Enabled: true, ProtectedRoots: []string{dir}}
+	_, err := loadAgentSchemeAppWithPolicy("writer", policy)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agent mode preflight")
+	assert.Contains(t, err.Error(), "auto-capsule provisioning")
+	assert.Contains(t, err.Error(), "no development capsule definition")
 }

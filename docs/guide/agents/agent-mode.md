@@ -123,15 +123,24 @@ agent call already honors.
 
 Agent mode adds no sandbox machinery; it composes the existing gates:
 
-1. **Launch-policy preflight** — synthesizing a `write` or `external` agent
-   runs the [`agent_launch_policy`](launch-policy.md) check (verb
-   `agent.mode`) against the session working directory *before any session
-   exists*. A denial fails the load with the auditable decision plus capsule
-   guidance: run from a managed capsule workspace
-   (`scripts/dev-workspace.sh create` / `kitsoki capsule`) or extend
-   `allowed_roots`. Read-only agents never dispatch mutating work and are
-   exempt. In-session dispatches are gated again by the same policy on the
-   orchestrator context.
+1. **Launch-policy preflight with auto-capsule** — synthesizing a `write` or
+   `external` agent runs the [`agent_launch_policy`](launch-policy.md) check
+   (verb `agent.mode`) against the session working directory *before any
+   session exists*. When the working directory sits inside a **protected
+   root** (e.g. running `kitsoki run agent:pog-driver` from the protected
+   project checkout), agent mode does what the CodeAct launch path does:
+   it materializes a managed capsule workspace and runs the session there —
+   the policy is then evaluated against the capsule, never a protected
+   checkout with a special-case allow rule. The workspace id is stable per
+   agent (`agent-mode-<name>`, owner `agent-mode`), so repeat runs and
+   `--continue` reacquire the same workspace; close it with
+   `kitsoki capsule workspace close --project <root> --id agent-mode-<name>`.
+   Any other denial — or a provisioning failure — fails the load with the
+   auditable decision plus capsule guidance: run from a managed capsule
+   workspace (`scripts/dev-workspace.sh create` / `kitsoki capsule`) or
+   extend `allowed_roots`. Read-only agents never dispatch mutating work and
+   are exempt. In-session dispatches are gated again by the same policy on
+   the orchestrator context (they read the capsule `workdir`).
 2. **Write-mode gate** — a write agent's workbench room starts
    `read_only`; every mutating tool call holds for an operator write-mode
    grant (or a headless deny). This, not the static tool list, is the

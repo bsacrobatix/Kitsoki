@@ -494,23 +494,32 @@ func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOpti
 }
 
 var createProtectedRootCodeactCapsule = func(ctx context.Context, projectRoot, id, owner string) (control.Instance, error) {
+	return createProtectedRootCapsule(ctx, projectRoot, id, owner, "CodeAct")
+}
+
+// createProtectedRootCapsule is the shared materializer behind the two
+// protected-root exceptions (the CodeAct launch above, agent mode's
+// auto-capsule in agent_mode_capsule.go): create or reacquire a registered
+// dev-workspace-script Capsule and verify it is launchable. label only
+// flavors error messages.
+func createProtectedRootCapsule(ctx context.Context, projectRoot, id, owner, label string) (control.Instance, error) {
 	manager, err := capsuleWorkspaceManager(projectRoot)
 	if err != nil {
-		return control.Instance{}, fmt.Errorf("prepare protected-root CodeAct Capsule: %w", err)
+		return control.Instance{}, fmt.Errorf("prepare protected-root %s Capsule: %w", label, err)
 	}
 	handle, err := manager.CreateDevWorkspaceScript(ctx, control.CreateRequest{ID: id, DefinitionID: "development", Owner: owner})
 	if err != nil {
-		return control.Instance{}, fmt.Errorf("prepare protected-root CodeAct Capsule %q: %w", id, err)
+		return control.Instance{}, fmt.Errorf("prepare protected-root %s Capsule %q: %w", label, id, err)
 	}
 	in, err := manager.Instances.Get(ctx, handle.ID)
 	if err != nil {
-		return control.Instance{}, fmt.Errorf("read protected-root CodeAct Capsule %q: %w", id, err)
+		return control.Instance{}, fmt.Errorf("read protected-root %s Capsule %q: %w", label, id, err)
 	}
 	if err := manager.VerifyDevWorkspaceScriptInstance(ctx, in); err != nil {
-		return control.Instance{}, fmt.Errorf("verify protected-root CodeAct Capsule %q: %w", id, err)
+		return control.Instance{}, fmt.Errorf("verify protected-root %s Capsule %q: %w", label, id, err)
 	}
 	if !codeactCapsuleLaunchable(in.State) {
-		return control.Instance{}, fmt.Errorf("protected-root CodeAct Capsule %q is %s; its lifecycle has not completed", id, in.State)
+		return control.Instance{}, fmt.Errorf("protected-root %s Capsule %q is %s; its lifecycle has not completed", label, id, in.State)
 	}
 	return in, nil
 }

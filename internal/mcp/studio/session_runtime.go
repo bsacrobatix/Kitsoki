@@ -176,7 +176,7 @@ func (rt *sessionRuntime) Close() {
 // backend (synthetic, codex, …) instead of the static default — the same
 // remap `kitsoki turn --profile` applies. An empty map leaves the session on the
 // legacy default-backend path (selectedProfile is then ignored).
-func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, failClosedAgentReplay bool, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer, agentLaunchPolicy host.AgentLaunchPolicy) (*sessionRuntime, error) {
+func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harness.Harness, profiles map[string]orchestrator.HarnessProfile, selectedProfile string, initialWorld map[string]any, hostCassette string, failClosedAgentReplay bool, resolver app.ImportResolver, chatStore *chats.Store, configureHosts HostRegistryConfigurer, agentLaunchPolicy host.AgentLaunchPolicy, agentCapsuleProvisioner agentroot.CapsuleProvisioner) (*sessionRuntime, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -231,7 +231,16 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 		var agentDef agentroot.Def
 		agentDef, err = agentroot.Resolve(agentName, agentroot.Sources{})
 		if err == nil {
-			def, err = agentroot.Synthesize(agentDef, agentroot.Options{LaunchPolicy: agentLaunchPolicy})
+			// Protected-root auto-capsule: a write/external agent whose
+			// working dir (the server cwd) sits in a protected checkout gets
+			// a materialized capsule workspace instead of a denial, the same
+			// exception the CodeAct launch path supports. The synthesized
+			// workdir — and therefore every dispatch — targets the capsule.
+			var workingDir string
+			workingDir, _, err = agentroot.EnsureWorkingDir(ctx, agentDef, agentLaunchPolicy, nil, "", agentCapsuleProvisioner)
+			if err == nil {
+				def, err = agentroot.Synthesize(agentDef, agentroot.Options{WorkingDir: workingDir, LaunchPolicy: agentLaunchPolicy})
+			}
 		}
 	} else {
 		def, err = app.LoadWithResolver(storyPath, nil, resolver)

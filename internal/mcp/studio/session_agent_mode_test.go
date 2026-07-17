@@ -142,3 +142,36 @@ func TestSessionNew_AgentScheme_LaunchPolicyPreflightDenies(t *testing.T) {
 	require.Contains(t, contentText(res), "agent mode preflight",
 		"the rejection must be the synthesis-time preflight denial, not a later dispatch error")
 }
+
+// TestSessionNew_AgentScheme_ProtectedRootAutoCapsule proves the studio head
+// carries the protected-root auto-capsule seam: with the server cwd inside a
+// configured protected root and a provisioner injected via
+// SetAgentCapsuleProvisioner, session.new over a write agent materializes the
+// capsule (the fake records the call) and opens the session there instead of
+// surfacing the preflight denial. Dropping the provisioner pass-through in
+// handles.go/session_runtime.go makes this fail with the denial.
+func TestSessionNew_AgentScheme_ProtectedRootAutoCapsule(t *testing.T) {
+	withStudioProjectAgents(t)
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+	ctx := context.Background()
+	srv, sess := newReplayServer(t)
+	sess.SetAgentLaunchPolicy(host.AgentLaunchPolicy{Enabled: true, ProtectedRoots: []string{cwd}})
+	capsuleDir := t.TempDir()
+	var gotAgent string
+	sess.SetAgentCapsuleProvisioner(func(_ context.Context, protectedRoot, agentName string) (agentroot.Provisioned, error) {
+		gotAgent = agentName
+		return agentroot.Provisioned{Path: capsuleDir, ID: "agent-mode-" + agentName}, nil
+	})
+	cs := connectInProcess(ctx, t, srv)
+
+	res, err := openAgentSession(ctx, t, cs, "studio-scribe")
+	require.NoError(t, err)
+	require.False(t, res.IsError, "a protected-root write agent must auto-provision, not deny: %s", contentText(res))
+	require.Equal(t, "studio-scribe", gotAgent, "the injected provisioner must be consulted")
+
+	var ok studio.SessionOpenOK
+	require.NoError(t, json.Unmarshal([]byte(contentText(res)), &ok))
+	require.True(t, ok.OK)
+	require.Equal(t, agentroot.RoomName, ok.State)
+}

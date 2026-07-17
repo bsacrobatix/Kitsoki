@@ -1492,15 +1492,28 @@ func loadAgentSchemeApp(name string) (*app.AppDef, error) {
 // mirroring publishAppDir's ordering contract (the loader's env-var validator
 // fires inside Synthesize's app.LoadBytes pass).
 func loadAgentSchemeAppWithPolicy(name string, policy host.AgentLaunchPolicy) (*app.AppDef, error) {
-	workingDir, err := os.Getwd()
+	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, fmt.Errorf("agent mode: resolve working directory: %w", err)
 	}
-	_ = os.Setenv(host.AppDirEnv, workingDir)
 	def, err := agentroot.Resolve(name, agentroot.Sources{Materialize: materializeBuiltInAgentLibrary})
 	if err != nil {
 		return nil, fmt.Errorf("load app %q: %w", agentroot.Scheme+name, err)
 	}
+	// Protected-root auto-capsule: a write/external agent started from a
+	// protected checkout gets a materialized capsule workspace instead of a
+	// denial, the same exception the CodeAct launch path supports. The policy
+	// is then evaluated against the capsule, so KITSOKI_APP_DIR publishes the
+	// effective working dir.
+	workingDir, provisioned, err := agentroot.EnsureWorkingDir(context.Background(), def, policy, nil, cwd, agentModeCapsuleProvisioner)
+	if err != nil {
+		return nil, fmt.Errorf("load app %q: %w", agentroot.Scheme+name, err)
+	}
+	if provisioned != nil {
+		fmt.Fprintf(os.Stderr, "agent mode: working in managed capsule workspace %s (id %s) under protected root %s\nagent mode: close it with: kitsoki capsule workspace close --project %s --id %s\n",
+			provisioned.Path, provisioned.ID, provisioned.ProtectedRoot, provisioned.ProtectedRoot, provisioned.ID)
+	}
+	_ = os.Setenv(host.AppDirEnv, workingDir)
 	appDef, err := agentroot.Synthesize(def, agentroot.Options{
 		WorkingDir:   workingDir,
 		LaunchPolicy: policy,

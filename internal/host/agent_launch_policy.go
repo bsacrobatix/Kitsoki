@@ -289,6 +289,21 @@ func stringInList(value string, list []string) bool {
 	return false
 }
 
+// MatchProtectedRoot returns the configured protected root containing path
+// (the resolved root, matching the decision's ProtectedRoot field), or "" when
+// path is outside every protected root. Callers that can materialize a
+// policy-approved workspace under a protected project (agent mode's
+// auto-capsule provisioning) use this to find the project root to provision
+// against after a denial.
+func (p AgentLaunchPolicy) MatchProtectedRoot(path string) string {
+	for _, root := range p.Normalized().ProtectedRoots {
+		if root != "" && pathContains(root, path) {
+			return resolveExistingPath(root)
+		}
+	}
+	return ""
+}
+
 func CheckAgentLaunchPolicy(ctx context.Context, verb, agentName, workingDir string) (AgentLaunchDecision, error) {
 	return AgentLaunchPolicyFromContext(ctx).Check(ctx, verb, agentName, workingDir)
 }

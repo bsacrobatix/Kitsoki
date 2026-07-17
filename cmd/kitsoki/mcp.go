@@ -286,6 +286,7 @@ docs land):
 			if policy := agentLaunchPolicyFromConfig(webCfg); policy.Enabled {
 				sess.SetAgentLaunchPolicy(policy)
 			}
+			sess.SetAgentCapsuleProvisioner(agentModeCapsuleProvisioner)
 			studioBugPrivacyChecker = bugPrivacyCheckerFromConfig(webCfg, "")
 
 			// Optionally bind an initial authoring workspace. Loading is
