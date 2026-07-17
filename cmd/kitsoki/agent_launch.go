@@ -199,9 +199,13 @@ selected backend's hard controls: Claude allowed/disallowed tools or Codex
 By default this prints a redacted JSON launch plan for task-backed launches.
 Freestanding Codex launch with no task opens Codex interactively.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			launchOpts, provenance, err := prepareProtectedRootCodeactLaunch(cmd.Context(), opts)
+			launchOpts, provenance, err := prepareProtectedRootLaunch(cmd.Context(), opts)
 			if err != nil {
 				return err
+			}
+			if provenance != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "agent launch: working in managed capsule workspace %s (id %s)\nagent launch: close it with: %s\n",
+					provenance.Path, provenance.ID, provenance.Close)
 			}
 			plan, err := buildAgentLaunchPlan(launchOpts)
 			if err != nil {
@@ -442,14 +446,30 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	}, nil
 }
 
-// prepareProtectedRootCodeactLaunch turns the one interactive exception we
-// support into a normal, policy-approved workspace launch. It intentionally
-// runs before plan construction: the policy must see the materialized Capsule,
-// never a protected checkout with a special-case allow rule.
-func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOptions) (agentLaunchOptions, *agentLaunchCapsuleProvenance, error) {
+// prepareProtectedRootLaunch turns the interactive exceptions we support into
+// normal, policy-approved workspace launches. It intentionally runs before
+// plan construction: the policy must see the materialized Capsule, never a
+// protected checkout with a special-case allow rule. Two launch shapes
+// qualify when the working directory sits inside a protected root:
+//
+//   - CodeAct mode (non-raw): a fresh timestamped Capsule per launch unless
+//     --capsule names one to reuse (the original exception).
+//   - Raw interactive (the `claude`/`codex` launcher shims): a STABLE
+//     `interactive-<backend>` Capsule, so day-to-day `cd repo && claude`
+//     lands in the same governed workspace every time and in-progress work
+//     is still there on the next launch; --capsule overrides the id. The
+//     `superagent` shim arm keeps pre-creating its own fresh workspace.
+//
+// Every other launch shape keeps the plain preflight denial.
+func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (agentLaunchOptions, *agentLaunchCapsuleProvenance, error) {
 	mode, err := normalizeAgentLaunchMode(opts.Mode)
-	if err != nil || mode != launchModeCodeact || opts.RawInteractive {
+	if err != nil {
 		return opts, nil, err
+	}
+	codeact := mode == launchModeCodeact && !opts.RawInteractive
+	rawInteractive := opts.RawInteractive && opts.Interactive
+	if !codeact && !rawInteractive {
+		return opts, nil, nil
 	}
 	workingDir, err := resolveStandaloneLaunchWorkingDir(opts.WorkingDir)
 	if err != nil {
@@ -459,21 +479,30 @@ func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOpti
 	if err != nil {
 		return opts, nil, err
 	}
-	projectRoot := protectedProjectRoot(launchCfg.AgentLaunchPolicy, workingDir)
+	projectRoot := launchCfg.AgentLaunchPolicy.MatchProtectedRoot(workingDir)
 	if projectRoot == "" {
 		return opts, nil, nil
 	}
 
 	id := strings.TrimSpace(opts.CapsuleID)
-	if id == "" {
+	create := createProtectedRootCodeactCapsule
+	resumeFlags := fmt.Sprintf("--mode codeact --capsule %%s --working-dir %s", projectRoot)
+	if rawInteractive {
+		create = createProtectedRootInteractiveCapsule
+		backend := rawInteractiveLaunchBackend(opts, launchCfg)
+		if id == "" {
+			id = "interactive-" + backend
+		}
+		resumeFlags = fmt.Sprintf("--raw --interactive --backend %s --capsule %%s --working-dir %s", backend, projectRoot)
+	} else if id == "" {
 		id = fmt.Sprintf("codeact-%s", time.Now().UTC().Format("20060102-150405.000000000"))
 	}
-	in, err := createProtectedRootCodeactCapsule(ctx, projectRoot, id, opts.CapsuleOwner)
+	in, err := create(ctx, projectRoot, id, opts.CapsuleOwner)
 	if err != nil {
 		return opts, nil, err
 	}
 	if !codeactCapsuleLaunchable(in.State) {
-		return opts, nil, fmt.Errorf("protected-root CodeAct Capsule %q is %s; wait for it to become ready before launch", id, in.State)
+		return opts, nil, fmt.Errorf("protected-root Capsule %q is %s; wait for it to become ready before launch", id, in.State)
 	}
 	path, err := filepath.Abs(in.Path)
 	if err != nil {
@@ -485,7 +514,7 @@ func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOpti
 		Path:       path,
 		Branch:     in.Branch,
 		Owner:      in.Lease.Owner,
-		Resume:     fmt.Sprintf("kitsoki agent launch --mode codeact --capsule %s --working-dir %s", in.ID, projectRoot),
+		Resume:     fmt.Sprintf("kitsoki agent launch "+resumeFlags, in.ID),
 		Close:      fmt.Sprintf("kitsoki capsule workspace close --project %s --id %s", projectRoot, in.ID),
 		Promote:    fmt.Sprintf("kitsoki capsule promote --project %s --workspace %s", projectRoot, in.ID),
 	}
@@ -493,8 +522,21 @@ func prepareProtectedRootCodeactLaunch(ctx context.Context, opts agentLaunchOpti
 	return opts, provenance, nil
 }
 
+// rawInteractiveLaunchBackend mirrors buildRawInteractiveLaunchPlan's backend
+// resolution (explicit flag › profile backend › codex) for the stable
+// interactive Capsule id — the resolved plan later re-derives the same value.
+func rawInteractiveLaunchBackend(opts agentLaunchOptions, launchCfg launchConfig) string {
+	profileName := firstLaunchNonEmpty(opts.Profile, launchCfg.DefaultProfile)
+	profile := launchCfg.Profiles[profileName]
+	return firstLaunchNonEmpty(opts.Backend, profile.Backend, "codex")
+}
+
 var createProtectedRootCodeactCapsule = func(ctx context.Context, projectRoot, id, owner string) (control.Instance, error) {
 	return createProtectedRootCapsule(ctx, projectRoot, id, owner, "CodeAct")
+}
+
+var createProtectedRootInteractiveCapsule = func(ctx context.Context, projectRoot, id, owner string) (control.Instance, error) {
+	return createProtectedRootCapsule(ctx, projectRoot, id, owner, "interactive")
 }
 
 // createProtectedRootCapsule is the shared materializer behind the two
@@ -542,19 +584,6 @@ func codeactCapsuleLaunchable(state control.State) bool {
 	return state == control.StateReady || state == control.StateDirty || state == control.StateCommitted
 }
 
-func protectedProjectRoot(policy host.AgentLaunchPolicy, workingDir string) string {
-	policy = policy.Normalized()
-	for _, root := range policy.ProtectedRoots {
-		abs, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		if filepath.Clean(abs) == filepath.Clean(workingDir) {
-			return abs
-		}
-	}
-	return ""
-}
 
 func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	agentPath, renderedCleanup, err := resolveStandaloneAgentFile(opts.AgentName, opts.AgentFile, opts.AgentTemplate)

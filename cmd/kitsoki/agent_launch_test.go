@@ -948,16 +948,18 @@ agent_launch_policy:
   protected_roots: [.]
   allowed_roots: [.capsules/workspaces]
 `), 0644))
+	resolvedProject, err := filepath.EvalSymlinks(project)
+	require.NoError(t, err)
 	previous := createProtectedRootCodeactCapsule
 	createProtectedRootCodeactCapsule = func(_ context.Context, gotProject, id, owner string) (control.Instance, error) {
-		require.Equal(t, project, gotProject)
+		require.Equal(t, resolvedProject, gotProject)
 		require.Equal(t, "resume-me", id)
 		require.Equal(t, "test-owner", owner)
 		return control.Instance{ID: id, Generation: 7, Path: workspace, Branch: "agent/resume-me", State: control.StateReady, Lease: control.Lease{Owner: owner}}, nil
 	}
 	t.Cleanup(func() { createProtectedRootCodeactCapsule = previous })
 
-	opts, provenance, err := prepareProtectedRootCodeactLaunch(context.Background(), agentLaunchOptions{
+	opts, provenance, err := prepareProtectedRootLaunch(context.Background(), agentLaunchOptions{
 		Mode: "codeact", ConfigPath: cfgPath, WorkingDir: project, CapsuleID: "resume-me", CapsuleOwner: "test-owner",
 	})
 	require.NoError(t, err)
@@ -968,6 +970,70 @@ agent_launch_policy:
 	require.Contains(t, provenance.Resume, "--capsule resume-me")
 	require.Contains(t, provenance.Close, "workspace close")
 	require.Contains(t, provenance.Promote, "capsule promote")
+}
+
+// TestPrepareProtectedRootLaunch_RawInteractiveStableCapsule proves the
+// launcher-shim path (`claude`/`codex` → --raw --interactive) materializes a
+// STABLE per-backend Capsule from a protected root: id interactive-<backend>,
+// working dir rewritten to the workspace, and provenance carrying the resume
+// command. The plan's later policy check then sees the Capsule, not the
+// protected checkout.
+func TestPrepareProtectedRootLaunch_RawInteractiveStableCapsule(t *testing.T) {
+	project := t.TempDir()
+	workspace := filepath.Join(project, ".capsules", "workspaces", "interactive-claude")
+	require.NoError(t, os.MkdirAll(workspace, 0755))
+	cfgPath := filepath.Join(project, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  protected_roots: [.]
+  allowed_roots: [.capsules/workspaces]
+`), 0644))
+	resolvedProject, err := filepath.EvalSymlinks(project)
+	require.NoError(t, err)
+	previous := createProtectedRootInteractiveCapsule
+	createProtectedRootInteractiveCapsule = func(_ context.Context, gotProject, id, owner string) (control.Instance, error) {
+		require.Equal(t, resolvedProject, gotProject)
+		require.Equal(t, "interactive-claude", id, "the id must be stable per backend, not timestamped")
+		return control.Instance{ID: id, Generation: 3, Path: workspace, Branch: "agent/interactive-claude", State: control.StateReady, Lease: control.Lease{Owner: owner}}, nil
+	}
+	t.Cleanup(func() { createProtectedRootInteractiveCapsule = previous })
+
+	opts, provenance, err := prepareProtectedRootLaunch(context.Background(), agentLaunchOptions{
+		RawInteractive: true, Interactive: true, Backend: "claude", ConfigPath: cfgPath, WorkingDir: project,
+	})
+	require.NoError(t, err)
+	require.Equal(t, workspace, opts.WorkingDir)
+	require.NotNil(t, provenance)
+	require.Equal(t, "interactive-claude", provenance.ID)
+	require.Contains(t, provenance.Resume, "--raw --interactive --backend claude --capsule interactive-claude")
+	require.Contains(t, provenance.Close, "workspace close")
+}
+
+// TestPrepareProtectedRootLaunch_RawInteractiveOutsideProtectedRootNoCapsule
+// pins the pass-through: a raw interactive launch from an ordinary directory
+// provisions nothing and leaves the working dir untouched.
+func TestPrepareProtectedRootLaunch_RawInteractiveOutsideProtectedRootNoCapsule(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  protected_roots: [/nonexistent-protected-root]
+`), 0644))
+	previous := createProtectedRootInteractiveCapsule
+	createProtectedRootInteractiveCapsule = func(context.Context, string, string, string) (control.Instance, error) {
+		t.Fatal("must not provision outside a protected root")
+		return control.Instance{}, nil
+	}
+	t.Cleanup(func() { createProtectedRootInteractiveCapsule = previous })
+
+	opts, provenance, err := prepareProtectedRootLaunch(context.Background(), agentLaunchOptions{
+		RawInteractive: true, Interactive: true, Backend: "claude", ConfigPath: cfgPath, WorkingDir: dir,
+	})
+	require.NoError(t, err)
+	require.Nil(t, provenance)
+	require.Equal(t, dir, opts.WorkingDir)
 }
 
 func TestAgentLaunchPlan_FreestandingCodexAgentLocalOverrideExtendsBase(t *testing.T) {

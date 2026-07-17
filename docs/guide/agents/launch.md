@@ -318,6 +318,23 @@ When `.kitsoki.yaml` / `.kitsoki.local.yaml` enables
 protected roots, protected branches, and non-capsule workspaces before emitting
 a command plan. The same guard applies to raw interactive sessions.
 
+Two launch shapes turn a protected-root working directory into a managed
+Capsule instead of a denial — the policy is then evaluated against the
+materialized workspace, never the protected checkout:
+
+- **CodeAct mode** provisions a fresh timestamped Capsule per launch
+  (`codeact-<timestamp>`); pass `--capsule <id>` to reuse one.
+- **Raw interactive** (the `claude` / `codex` launcher shims) provisions a
+  **stable** per-backend Capsule (`interactive-<backend>`), so day-to-day
+  `cd repo && claude` reacquires the same governed workspace and in-progress
+  work is still there on the next launch. `--capsule <id>` overrides the id;
+  the `superagent` shim arm keeps pre-creating its own fresh workspace.
+
+Materialization follows the project's `development` capsule definition: a
+`dev-workspace-script` definition goes through `scripts/dev-workspace.sh`,
+any other kind (e.g. `self`) clones through the generic capsule manager.
+Task-backed normal-mode launches keep the plain denial.
+
 Launch policy is a preflight guard, not a kernel/filesystem sandbox. Use it to
 keep agents out of the protected checkout and inside opened capsules. The
 macOS `run_as_user` wrapper path is temporarily disabled, so write-capable
