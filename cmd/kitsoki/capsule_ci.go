@@ -310,6 +310,15 @@ func capsuleCIStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Self-heal before reporting: a "host"-style run whose driving
+			// process died mid-run (e.g. SIGTERM to the process group) would
+			// otherwise be stuck reporting stage "running" forever, since
+			// nothing else ever writes its terminal state. This is a no-op
+			// for durable/remote executors and for runs that are genuinely
+			// still in flight.
+			if reconciled, ok, reconcileErr := store.ReconcileOrphaned(job); reconcileErr == nil && ok {
+				record = reconciled
+			}
 			if refresh {
 				controller, err := capsuleCIExecutionController(cmd.Context(), project, record)
 				if err != nil {
@@ -459,6 +468,19 @@ func capsuleCICancelCmd() *cobra.Command {
 		}
 		if record.Result.Job.Status != artifactjob.StatusRunning && record.Result.Job.Status != artifactjob.StatusInterrupted {
 			return fmt.Errorf("capsule ci: job %s cannot be cancelled from %s", job, record.Result.Job.Status)
+		}
+		// Executors like "host" run synchronously in the `kitsoki` process
+		// that started them and have no durable ExecutionController to
+		// cancel through — if that process died (e.g. SIGTERM to the process
+		// group while a gate script was still running) the job is stuck
+		// reporting "running" forever with no way to reach it remotely. If
+		// the recorded driving PID is confirmed dead, resolve the job to a
+		// terminal state here instead of failing with "does not support
+		// cancellation/status control". If the process is still alive, fall
+		// through to the normal controller-based path below (which
+		// correctly refuses to force-cancel a live host job).
+		if reconciled, ok, reconcileErr := store.ReconcileOrphaned(job); reconcileErr == nil && ok {
+			return capsuleWorkspaceWrite(cmd, reconciled, jsonOut)
 		}
 		controller, err := capsuleCIExecutionController(cmd.Context(), project, record)
 		if err != nil {

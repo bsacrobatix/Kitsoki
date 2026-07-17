@@ -586,6 +586,83 @@ func (s FileRunStore) Cancel(id string) (RunRecord, error) {
 	return record, nil
 }
 
+// orphanedProcessAlive is overridden in tests to avoid depending on real OS
+// process liveness.
+var orphanedProcessAlive = processAlive
+
+// ReconcileOrphaned detects a run that is stuck in a non-terminal stage
+// because the in-process executor driving it (e.g. "host") died without
+// writing a terminal run.json — for example the outer shell sent SIGTERM to
+// the whole process group while a gate script was still running, killing
+// `kitsoki capsule promote` before its synchronous Service.Run call could
+// reach the terminal observe() at the end of the run. Executors that hand
+// execution off to a durable, independently-queryable worker (remote/
+// container providers implementing executor.ExecutionController) do not
+// need this: their liveness is not tied to this PID, and callers should use
+// their ExecutionController instead.
+//
+// It reports (record, reconciled, err). reconciled is true only when the
+// record was actually rewritten to a terminal state; false (with no error)
+// means the run is still legitimately running, is already terminal, or has
+// no recorded PID to check.
+func (s FileRunStore) ReconcileOrphaned(id string) (RunRecord, bool, error) {
+	if err := validateRunID(id); err != nil {
+		return RunRecord{}, false, err
+	}
+	record, err := s.Get(id)
+	if err != nil {
+		return RunRecord{}, false, err
+	}
+	if record.Result.Terminal {
+		return record, false, nil
+	}
+	switch record.Result.Job.Status {
+	case artifactjob.StatusRunning, artifactjob.StatusInterrupted:
+	default:
+		return record, false, nil
+	}
+	if record.Result.PID <= 0 {
+		// No recorded driving process (older record, or an executor that
+		// never captured one) — nothing to reconcile from here.
+		return record, false, nil
+	}
+	if orphanedProcessAlive(record.Result.PID) {
+		return record, false, nil
+	}
+	now := time.Now().UTC()
+	// infra_failed is the existing outcome used elsewhere in this package
+	// (ci.go's terminal status mapping) for failures that are not a verdict
+	// about the code under test; StatusFailed is its matching job status.
+	record.Result.Job.Status = artifactjob.StatusFailed
+	record.Result.Verdict = orphanedVerdict(record.Result)
+	record.Result.Stage = RunStageFailed
+	record.Result.Terminal = true
+	record.Result.UpdatedAt = now
+	record.Result.Job.UpdatedAt = now
+	if record.DiagnosticError == "" {
+		record.DiagnosticError = fmt.Sprintf("capsule ci: run orphaned: driving process %d is no longer running (likely killed mid-run, e.g. SIGTERM to the process group)", record.Result.PID)
+	}
+	if err := s.Write(record); err != nil {
+		return RunRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func orphanedVerdict(result RunResult) Verdict {
+	return Verdict{
+		Schema:            VerdictSchema,
+		Pipeline:          result.Pipeline,
+		Outcome:           "infra_failed",
+		Summary:           "Capsule CI run was orphaned: its driving process exited (e.g. killed by SIGTERM) without recording a terminal result. Reconciled automatically by `capsule ci status`/`capsule ci cancel`.",
+		Checks:            []Check{},
+		PromotionEligible: false,
+		SourceDigest:      result.Envelope.SourceDigest,
+		StoryDigest:       result.Envelope.StoryDigest,
+		EnvironmentDigest: result.Envelope.Environment.Digest,
+		EnvelopeDigest:    result.Envelope.Digest,
+	}
+}
+
 // RecordExecutorStatus persists the latest durable worker fact and projects it
 // conservatively onto the controller run. A remote "completed" execution is
 // not a completed CI run until the controller validates/collects its verdict

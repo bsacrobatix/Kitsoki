@@ -1001,6 +1001,86 @@ func TestFileRunStoreCancelParksOrRunningJob(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreReconcileOrphanedTerminatesDeadHostRun(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	orig := orphanedProcessAlive
+	defer func() { orphanedProcessAlive = orig }()
+	orphanedProcessAlive = func(pid int) bool { return false }
+
+	if err := store.Write(RunRecord{JobID: "job-orphaned", Result: RunResult{
+		Job:      artifactjob.Job{ID: "job-orphaned", Status: artifactjob.StatusRunning},
+		Stage:    RunStageRunning,
+		PID:      424242,
+		Pipeline: "change",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, reconciled, err := store.ReconcileOrphaned("job-orphaned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reconciled {
+		t.Fatalf("expected reconciliation to happen")
+	}
+	if got.Result.Job.Status != artifactjob.StatusFailed {
+		t.Fatalf("job status = %s, want failed", got.Result.Job.Status)
+	}
+	if got.Result.Stage != RunStageFailed || !got.Result.Terminal {
+		t.Fatalf("stage/terminal = %s/%v, want failed/true", got.Result.Stage, got.Result.Terminal)
+	}
+	if got.Result.Verdict.Outcome != "infra_failed" || got.Result.Verdict.PromotionEligible {
+		t.Fatalf("verdict = %#v", got.Result.Verdict)
+	}
+	if got.DiagnosticError == "" {
+		t.Fatalf("expected a diagnostic error explaining the orphaned run")
+	}
+
+	// A second call is a no-op: the record is already terminal.
+	again, reconciledAgain, err := store.ReconcileOrphaned("job-orphaned")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconciledAgain {
+		t.Fatalf("expected no-op on an already-terminal record")
+	}
+	if again.Result.Job.Status != artifactjob.StatusFailed {
+		t.Fatalf("unexpected mutation on no-op reconcile: %#v", again)
+	}
+}
+
+func TestFileRunStoreReconcileOrphanedLeavesLiveOrUnknownRunsAlone(t *testing.T) {
+	store := FileRunStore{ProjectRoot: t.TempDir()}
+	orig := orphanedProcessAlive
+	defer func() { orphanedProcessAlive = orig }()
+
+	// A live PID must not be reconciled away.
+	orphanedProcessAlive = func(pid int) bool { return true }
+	if err := store.Write(RunRecord{JobID: "job-alive", Result: RunResult{
+		Job:   artifactjob.Job{ID: "job-alive", Status: artifactjob.StatusRunning},
+		Stage: RunStageRunning,
+		PID:   os.Getpid(),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, reconciled, err := store.ReconcileOrphaned("job-alive"); err != nil || reconciled {
+		t.Fatalf("reconciled=%v err=%v, want unreconciled/no error for a live pid", reconciled, err)
+	}
+
+	// A run with no recorded PID (e.g. a durable/remote executor, or an
+	// older record) cannot be diagnosed from here and must be left alone.
+	orphanedProcessAlive = func(pid int) bool { return false }
+	if err := store.Write(RunRecord{JobID: "job-no-pid", Result: RunResult{
+		Job:   artifactjob.Job{ID: "job-no-pid", Status: artifactjob.StatusRunning},
+		Stage: RunStageRunning,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, reconciled, err := store.ReconcileOrphaned("job-no-pid"); err != nil || reconciled {
+		t.Fatalf("reconciled=%v err=%v, want unreconciled/no error without a recorded pid", reconciled, err)
+	}
+}
+
 func TestFileRunStoreRejectsTraversalJobIDs(t *testing.T) {
 	store := FileRunStore{ProjectRoot: t.TempDir()}
 	for _, id := range []string{"../outside", "nested/job", "", strings.Repeat("a", 129)} {

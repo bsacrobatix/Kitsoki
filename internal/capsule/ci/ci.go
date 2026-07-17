@@ -440,6 +440,14 @@ type RunResult struct {
 	StartedAt time.Time         `json:"started_at,omitempty"`
 	UpdatedAt time.Time         `json:"updated_at,omitempty"`
 	Terminal  bool              `json:"terminal,omitempty"`
+	// PID is the OS process id of the `kitsoki` process driving this run. It
+	// is only meaningful for in-process executors (e.g. "host") where the
+	// run's liveness is exactly this process's liveness: those executors run
+	// the pipeline synchronously in the same process instead of handing
+	// execution to a durable, independently-queryable worker. Durable/remote
+	// executors have their own ExecutionController and do not need this
+	// field. See FileRunStore.ReconcileOrphaned in run_store.go.
+	PID int `json:"pid,omitempty"`
 }
 
 func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.Envelope, error) {
@@ -529,6 +537,16 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	}
 	if provider == nil {
 		return s.failRegistered(ctx, result, fmt.Errorf("capsule ci: no provider for executor %q", p.Executor))
+	}
+	// Only record this process's PID for executors that have no other way to
+	// report durable status: a provider whose Capabilities advertise
+	// Cancellable (and so implements executor.ExecutionController, see
+	// capsuleCIExecutionController in cmd/kitsoki/capsule_ci.go) is queryable
+	// independently of this process's liveness, and PID-based staleness
+	// detection would be actively wrong for it (a remote/async job can
+	// legitimately keep running after the CLI that launched it exits).
+	if capabilities, describeErr := provider.Describe(ctx); describeErr == nil && !capabilities.Cancellable {
+		result.PID = os.Getpid()
 	}
 	result, err = s.observe(ctx, result, RunStagePreparing, false, nil)
 	if err != nil {
