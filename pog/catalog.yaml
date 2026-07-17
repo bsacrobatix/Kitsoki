@@ -3070,3 +3070,27 @@ nodes:
     status: proposed
     title: Make local Capsule-CI command timeout declarative
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-17T08:38:51Z"
+    id: cs-5a30ae0185f61c4aee7d99618fce6711
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          fields:
+            filed_against: graph-mcp
+            requested_by: POG portfolio (agent:pog-gitflow-brief, 2026-07-17)
+            summary: 'ClaimRegistry (internal/mcp/graphsrv/claims.go) is process-local, so two fleet agents each attaching their own `kitsoki mcp-graph` hold claims on the same node in two disjoint registries — graph_claim provides no actual mutual exclusion between them. Needed: a shared backing (claims served by one shared graph endpoint, or a durable registry file/service keyed by catalog+node with the existing ClaimProvenance semantics: live-holder refusal, dead-holder atomic transfer, transferred_from). The registry comment already anticipates this seam: ''durable/federated backing can replace it without changing MCP request or result semantics.'' Concrete consumer: POG''s portal diagram-studio proposal (.context/portal-diagram-studio-proposal.md §3.6 F-a) runs parallel per-node generation agents whose claims are currently advisory-only.'
+          id: req-durable-claim-registry
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          title: Graph claims coordinate across separately-launched agent MCP processes
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Durable/shared graph claim registry across agent MCP processes
+    visibility: internal
