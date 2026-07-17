@@ -607,6 +607,13 @@ func (s *CapsuleServer) ciStatus(ctx context.Context, _ *mcpsdk.CallToolRequest,
 		if err != nil {
 			return capsuleErr(err), nil, nil
 		}
+		// Self-heal before reporting: a "host"-style run whose driving process
+		// died mid-run (e.g. SIGTERM to the process group) would otherwise be
+		// stuck reporting stage "running" forever. No-op for durable/remote
+		// executors and for runs that are genuinely still in flight.
+		if reconciled, ok, reconcileErr := store.ReconcileOrphaned(a.Job); reconcileErr == nil && ok {
+			run = reconciled
+		}
 		if a.Refresh {
 			controller, err := s.ciExecutionController(ctx, run)
 			if err != nil {
@@ -654,6 +661,17 @@ func (s *CapsuleServer) ciCancel(ctx context.Context, _ *mcpsdk.CallToolRequest,
 	}
 	if run.Result.Job.Status != artifactjob.StatusRunning && run.Result.Job.Status != artifactjob.StatusInterrupted {
 		return capsuleErr(fmt.Errorf("capsule ci: job %s cannot be cancelled from %s", a.Job, run.Result.Job.Status)), nil, nil
+	}
+	// Executors like "host" run synchronously in the process that started
+	// them and have no durable ExecutionController to cancel through — if
+	// that process died the job is stuck reporting "running" forever with no
+	// way to reach it remotely. If the recorded driving PID is confirmed
+	// dead, resolve the job to a terminal state here instead of failing with
+	// "does not support cancellation/status control". If the process is
+	// still alive, fall through to the normal controller-based path below
+	// (which correctly refuses to force-cancel a live host job).
+	if reconciled, ok, reconcileErr := store.ReconcileOrphaned(a.Job); reconcileErr == nil && ok {
+		return nil, map[string]any{"ok": true, "run": reconciled}, nil
 	}
 	controller, err := s.ciExecutionController(ctx, run)
 	if err != nil {
