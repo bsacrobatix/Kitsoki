@@ -626,6 +626,9 @@ func (rt *sessionRuntime) turnSuspendableResult(ctx context.Context, input strin
 	turnCtx := host.WithOperatorPrompter(turnBase, prompter)
 	turnCtx = host.WithKitsokiSessionID(turnCtx, string(rt.sid))
 	go func() {
+		// Release the turn context once the turn has fully completed; the
+		// early cancelTurn below handles the request-cancelled path.
+		defer cancelTurn()
 		broker.finish(run(turnCtx))
 		rt.clearInFlightIf(broker)
 	}()

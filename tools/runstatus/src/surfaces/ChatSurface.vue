@@ -102,7 +102,7 @@ import ActivityFeed from "../components/ActivityFeed.vue";
 import ChatTranscript from "../components/ChatTranscript.vue";
 import InputBar from "../components/InputBar.vue";
 import { resolveEmbedBoot } from "../lib/embedBoot.js";
-import { EmbedHost, type EmbedContext } from "../lib/embedHost.js";
+import { EmbedHost } from "../lib/embedHost.js";
 
 const store = useRunStore();
 
@@ -229,7 +229,7 @@ function contextPatch(ctx: Record<string, unknown> | null | undefined): Record<s
 
 async function applyLatestHostSnapshot(): Promise<void> {
   if (!source || !sessionId.value || !source.patchWorld) return;
-  const latest = embedHost.latest() as EmbedContext | null;
+  const latest = embedHost.latest() as Record<string, unknown> | null;
   const patch = contextPatch(latest ?? bootContext);
   if (Object.keys(patch).length === 0) return;
   await source.patchWorld(sessionId.value, patch);
