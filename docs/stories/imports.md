@@ -330,6 +330,12 @@ The downstream as-a-dependency case (resolving dev-story when it is not the
 in-repo `@kitsoki/dev-story`) is deferred to `kitsoki-as-dependency`; v1 targets
 the in-repo dogfood.
 
+The implicit root has a sibling: the `agent:<name>` scheme
+([agent mode](../guide/agents/agent-mode.md)) synthesizes a one-room story
+around a resolved agent definition the same way — an in-memory AppDef, the
+normal load pipeline, and an injected reloader closure instead of a file to
+re-read.
+
 ## `exits:` — the child-side contract
 
 Children declare their named return points:

@@ -1,0 +1,8 @@
+# demo-agent — the agent_mode_smoke fixture's WRITE agent (no sandbox_mode,
+# so agentroot.Resolve assigns the full write toolbox and effect write; see
+# internal/agentroot/agentroot.go defFromStandalone). agent:demo-agent
+# synthesizes the workbench shape that ../app.yaml pins — the equivalence is
+# asserted by internal/testrunner/flows_agent_mode_test.go.
+name = "demo-agent"
+description = "Agent-mode smoke workbench agent"
+developer_instructions = "You are the agent-mode smoke agent: pick up the operator's request and get it done."

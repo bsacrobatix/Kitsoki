@@ -27,6 +27,12 @@ KITSOKI_AGENT=copilot kitsoki run story.yaml
 There is no per-room/per-invocation backend selector — it is one choice for the
 whole session (a story author targets the *verb contract*, not a specific CLI).
 
+Do not confuse the two agent spellings: `--agent claude|copilot|codex|agy`
+selects the **backend CLI**, while an `agent:<name>` story path selects an
+**agent definition** to run as an [agent-mode session](agent-mode.md). They
+compose — `kitsoki run agent:kitsoki-explainer --agent codex` runs the
+`kitsoki-explainer` definition on the codex backend.
+
 Binary resolution per backend:
 
 | Backend | binary | override env |

@@ -159,6 +159,8 @@ func composePromptAndBanner(m RootModel) (promptLine, bannerLine string) {
 		promptLine = m.sessionsPanel.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeStorySelector:
 		promptLine = m.storySelector.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
+	case ModeAgentSelector:
+		promptLine = m.agentSelector.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeAwaitingLLM:
 		caption := "thinking… (Ctrl+C to cancel)"
 		if m.pendingKind == pendingDeterministic {

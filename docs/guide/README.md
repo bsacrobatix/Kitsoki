@@ -12,6 +12,8 @@ runtime boundaries, or rationale behind those steps.
 - [`agents/`](agents/README.md) — launch Codex/Claude/Copilot-backed agents,
   configure harness profiles, understand backend/provider selection, and keep
   coding agents out of unsafe workspaces.
+- [`agents/agent-mode.md`](agents/agent-mode.md) — run an agent as an
+  in-kitsoki session with `kitsoki run agent:<name>`.
 - [`agents/mcp.md`](agents/mcp.md) — use Kitsoki from Codex/Claude through
   Studio MCP, dynamic workflows, stories, CodeAct, and `kitsoki agent launch`.
 

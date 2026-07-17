@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/testrunner"
 )
 
@@ -40,7 +41,8 @@ intent or a free-text input resolved via the recording), and assertions
 checked after each turn.
 
 Default flow glob: <app-dir>/flows/*.yaml
-Override with --flows.
+Override with --flows. The agent:<name> scheme has no app directory, so
+--flows is required there.
 
 Exit codes:
   0  all flows pass
@@ -53,7 +55,12 @@ Exit codes:
 			// Resolve default glob.
 			flowsGlob := strings.Join(flowsGlobs, ",")
 			if flowsGlob == "" {
-				flowsGlob = defaultFlowsGlob(appPath)
+				resolved, globErr := resolveDefaultFlowsGlob(appPath)
+				if globErr != nil {
+					fmt.Fprintf(os.Stderr, "kitsoki test flows: %v\n", globErr)
+					os.Exit(2)
+				}
+				flowsGlob = resolved
 			}
 
 			opts := testrunner.FlowOptions{
@@ -99,6 +106,18 @@ Exit codes:
 			"intended for single-fixture reconstruction so the fresh trace carries turn.end.view)")
 
 	return cmd
+}
+
+// resolveDefaultFlowsGlob returns the glob to use when --flows is not set.
+// The `agent:<name>` virtual story path has no app directory to derive a
+// default from — requiring --flows keeps a stray ./flows/ directory in the
+// cwd from silently running unrelated fixtures against the synthesized agent
+// root (docs/guide/agents/agent-mode.md documents the flag as required).
+func resolveDefaultFlowsGlob(appPath string) (string, error) {
+	if _, ok := agentroot.IsAgentPath(appPath); ok {
+		return "", fmt.Errorf("%q is a synthesized agent root with no app directory to default flow fixtures from; pass --flows <glob>", appPath)
+	}
+	return defaultFlowsGlob(appPath), nil
 }
 
 // defaultFlowsGlob returns the glob to use when --flows is not set.

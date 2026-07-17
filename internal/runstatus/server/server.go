@@ -28,6 +28,7 @@
 //
 //	runstatus.stories.list       {}                                  → []StoryHeader
 //	runstatus.stories.rescan     {}                                  → []StoryHeader
+//	runstatus.agents.list        {}                                  → []AgentInfo
 //	runstatus.setup.status       {}                                  → {warnings}
 //	runstatus.kits.list          {}                                  → []KitHeader (S3b/c)
 //	kit.<kit>.<iface>.<op>       {...}                                → kit endpoint result (S3b fallback)
@@ -1094,6 +1095,17 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, lifecycleErr(err)
 		}
 		return stories, nil
+
+	case "runstatus.agents.list":
+		provider, ok := s.provider.(AgentLister)
+		if !ok {
+			return []AgentInfo{}, nil
+		}
+		agents, err := provider.ListAgents()
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return agents, nil
 
 	case "runstatus.session.new":
 		storyPath, _ := params["story_path"].(string)

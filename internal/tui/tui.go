@@ -83,6 +83,10 @@ const (
 	// ModeStorySelector is active while /stories owns the keyboard. Arrow keys
 	// navigate the discovered story catalogue; Enter launches one; Esc closes.
 	ModeStorySelector
+	// ModeAgentSelector is active while /agents owns the keyboard. Arrow keys
+	// navigate the discovered agent catalogue; Enter launches the agent's
+	// `agent:<name>` session through the same story-switch loop; Esc closes.
+	ModeAgentSelector
 	// ModeWorldView is active while /world's dedicated hierarchical
 	// viewer owns the pane. Arrow keys move the cursor; Enter expands
 	// or collapses nodes; q/Esc returns to chat.
@@ -175,6 +179,7 @@ type RootModel struct {
 	metaMode         metaModel
 	sessionsPanel    sessionsPanelModel
 	storySelector    storySelectorModel
+	agentSelector    agentSelectorModel
 	worldView        worldViewModel
 	prompt           textarea.Model
 
@@ -275,6 +280,12 @@ type RootModel struct {
 	// story. The TUI invokes it synchronously before quitting; the caller then
 	// restarts a fresh Bubble Tea program for the selected app.yaml.
 	storySwitch func(StoryOption)
+
+	// agentSwitch is installed by the CLI when /agents should launch a selected
+	// agent. The TUI invokes it synchronously before quitting; the caller then
+	// restarts a fresh Bubble Tea program for `agent:<name>` — the same
+	// story-switch outer loop /stories rides.
+	agentSwitch func(AgentOption)
 
 	// clk is the injectable time source used by the inbox polling ticker.
 	// When nil, clock.Real() is used. Tests inject a *clock.Fake so they can
@@ -723,6 +734,20 @@ func WithStorySelector(stories []StoryOption, discoverErr error, onSelect func(S
 	}
 }
 
+// WithAgentSelector wires the discovered agent catalogue behind /agents. The
+// callback is invoked when the user selects a row; callers that only need a
+// read-only selector may pass nil.
+func WithAgentSelector(agents []AgentOption, discoverErr error, onSelect func(AgentOption)) RootModelOption {
+	return func(m *RootModel) {
+		errText := ""
+		if discoverErr != nil {
+			errText = discoverErr.Error()
+		}
+		m.agentSelector.SetAgents(agents, errText)
+		m.agentSwitch = onSelect
+	}
+}
+
 // WithMetaStreamSink wires a *MetaStreamSink into the RootModel so
 // meta-mode Send calls stream live progress lines into the chat
 // transcript. The sink itself is unbound at construction time; the
@@ -857,6 +882,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 		metaMode:         newMetaModel(),
 		sessionsPanel:    newSessionsPanelModel(),
 		storySelector:    newStorySelectorModel(),
+		agentSelector:    newAgentSelectorModel(),
 		prompt:           ti,
 		spinner:          sp,
 		openArtifact:     osOpenArtifact,
@@ -1254,6 +1280,11 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.mode == ModeStorySelector {
 		return m.updateStorySelector(msg)
 	}
+	// If the agent selector is active, it owns the keyboard until the user picks
+	// an agent or hits Esc.
+	if m.mode == ModeAgentSelector {
+		return m.updateAgentSelector(msg)
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -1303,6 +1334,9 @@ func (m RootModel) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case storySelectorChoiceMsg:
 		return m.handleStorySelectorChoice(msg)
+
+	case agentSelectorChoiceMsg:
+		return m.handleAgentSelectorChoice(msg)
 
 	case metaEnterDoneMsg:
 		return m.handleMetaEnterDone(msg)
@@ -2472,6 +2506,9 @@ func (m RootModel) handleSlashCommand(cmd string) (tea.Model, tea.Cmd) {
 
 	case "/stories":
 		return m.openStorySelector()
+
+	case "/agents":
+		return m.openAgentSelector()
 
 	case "/ide":
 		return m.handleIDESlash(parts[1:])
@@ -4467,6 +4504,68 @@ func (m RootModel) handleStorySelectorChoice(msg storySelectorChoiceMsg) (tea.Mo
 	return m, tea.Quit
 }
 
+func (m RootModel) openAgentSelector() (tea.Model, tea.Cmd) {
+	if len(m.agentSelector.agents) == 0 {
+		msg := "(agents: no agents discovered"
+		if m.agentSelector.err != "" {
+			msg += " - " + m.agentSelector.err
+		}
+		msg += ")"
+		m.transcript.AppendBlock(blocks.New(m.transcript.width, m.currentTheme()).SlashOutput(msg))
+		return m, nil
+	}
+	m.mode = ModeAgentSelector
+	m.agentSelector.Open(m.appPath)
+	m.resetLiveOverlayRowLimit(liveOverlayPrompt)
+	return m, nil
+}
+
+func (m RootModel) updateAgentSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case agentSelectorChoiceMsg:
+		return m.handleAgentSelectorChoice(msg)
+	case tea.WindowSizeMsg:
+		return m.handleWindowSize(msg)
+	case tea.KeyMsg:
+		if msg.Type == tea.KeyCtrlC {
+			m.mode = ModeOnPath
+			m.agentSelector.Close()
+			m.transcript.AppendSystem("(agent selection cancelled)")
+			return m, nil
+		}
+		updated, cmd := m.agentSelector.Update(msg)
+		m.agentSelector = updated
+		if !m.agentSelector.IsActive() && m.mode == ModeAgentSelector {
+			m.mode = ModeOnPath
+		}
+		return m, cmd
+	default:
+		return m, nil
+	}
+}
+
+func (m RootModel) handleAgentSelectorChoice(msg agentSelectorChoiceMsg) (tea.Model, tea.Cmd) {
+	m.mode = ModeOnPath
+	m.agentSelector.Close()
+	if strings.TrimSpace(msg.agent.Name) == "" {
+		m.transcript.AppendSystem("(agents: selected agent has no name)")
+		return m, nil
+	}
+	if m.agentSwitch == nil {
+		m.transcript.AppendBlock(blocks.New(m.transcript.width, m.currentTheme()).SlashOutput(
+			"(agents: agent launching is not wired in this session)"))
+		return m, nil
+	}
+	if sameAgentPath(m.appPath, msg.agent.StoryPath()) {
+		m.transcript.AppendBlock(blocks.New(m.transcript.width, m.currentTheme()).SlashOutput(
+			"(agents: already running " + agentSelectorLabel(msg.agent) + ")"))
+		return m, nil
+	}
+	m.agentSwitch(msg.agent)
+	m.quitting = true
+	return m, tea.Quit
+}
+
 // updateDisambiguating handles input while the disambiguation model is
 // presenting a candidate list. The prompt area is the normal textarea;
 // Enter intercepts the typed pick (number or canonical intent name) and
@@ -5042,6 +5141,8 @@ func (m RootModel) View() string {
 		promptLine = m.sessionsPanel.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeStorySelector:
 		promptLine = m.storySelector.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
+	case ModeAgentSelector:
+		promptLine = m.agentSelector.ChromeView(m.width, m.liveOverlayRenderRows(liveOverlayPrompt))
 	case ModeAwaitingLLM:
 		// Keep the textarea visible during in-flight so the user
 		// can type the next message — Enter enqueues. A muted
@@ -5359,6 +5460,8 @@ func modeLabel(mode Mode) string {
 		return "sessions"
 	case ModeStorySelector:
 		return "stories"
+	case ModeAgentSelector:
+		return "agents"
 	case ModeSlotFilling:
 		return "slot-fill"
 	case ModeDisambiguating:

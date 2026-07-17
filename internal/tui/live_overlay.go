@@ -89,7 +89,7 @@ func (m *RootModel) tightenLiveOverlayRowLimit() bool {
 
 func (m RootModel) activeLiveOverlayPlacement() (liveOverlayPlacement, bool) {
 	switch m.mode {
-	case ModeChoosing, ModeMenu, ModeMetaSessions, ModeStorySelector:
+	case ModeChoosing, ModeMenu, ModeMetaSessions, ModeStorySelector, ModeAgentSelector:
 		return liveOverlayPrompt, true
 	case ModeOperatorQuestion:
 		return liveOverlayTranscriptLine, true

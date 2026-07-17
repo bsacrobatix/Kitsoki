@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { flushPromises, mount } from "@vue/test-utils";
-import type { StoryHeader } from "../../src/data/live-source.js";
+import type { AgentInfo, StoryHeader } from "../../src/data/live-source.js";
 import type { ArtifactJobSummary, SessionHeader, WorkerSummary } from "../../src/types.js";
 import { markAutoNavDone } from "../../src/lib/auto-nav.js";
 
@@ -16,6 +16,7 @@ import { markAutoNavDone } from "../../src/lib/auto-nav.js";
 
 const listStories = vi.fn<[], Promise<StoryHeader[]>>();
 const rescanStories = vi.fn<[], Promise<StoryHeader[]>>();
+const listAgents = vi.fn<[], Promise<AgentInfo[]>>();
 const newSession = vi.fn<[string], Promise<string>>();
 const listSessions = vi.fn<[], Promise<SessionHeader[]>>();
 const listArtifactJobs = vi.fn<[], Promise<ArtifactJobSummary[]>>();
@@ -38,6 +39,7 @@ vi.mock("../../src/data/live-source.js", () => ({
   LiveSource: vi.fn().mockImplementation(() => ({
     listStories,
     rescanStories,
+    listAgents,
     newSession,
     listSessions,
     listArtifactJobs,
@@ -76,6 +78,17 @@ function story(over: Partial<StoryHeader> = {}): StoryHeader {
   };
 }
 
+function agent(over: Partial<AgentInfo> = {}): AgentInfo {
+  return {
+    name: "demo",
+    source: "project",
+    description: "A demo agent.",
+    effect: "read",
+    story_path: "agent:demo",
+    ...over,
+  };
+}
+
 function session(over: Partial<SessionHeader> = {}): SessionHeader {
   return {
     session_id: "abcdef1234",
@@ -98,6 +111,7 @@ describe("HomeView", () => {
   beforeEach(() => {
     listStories.mockReset();
     rescanStories.mockReset();
+    listAgents.mockReset();
     newSession.mockReset();
     listSessions.mockReset();
     listArtifactJobs.mockReset();
@@ -115,6 +129,7 @@ describe("HomeView", () => {
     sessionStorage.clear();
     // Default: no auto-navigation (zero sessions).
     listStories.mockResolvedValue([]);
+    listAgents.mockResolvedValue([]);
     listSessions.mockResolvedValue([]);
     listArtifactJobs.mockResolvedValue([]);
 	listWorkers.mockResolvedValue([{ id: "local", label: "Local", placement: "local", health: "online", job_count: 0 }]);
@@ -235,6 +250,99 @@ describe("HomeView", () => {
 
     expect(rescanStories).toHaveBeenCalledTimes(1);
     expect(wrapper.findAll("[data-testid='story-card']")).toHaveLength(2);
+    wrapper.unmount();
+  });
+
+  // ── Agents section (agent mode) ────────────────────────────────────────────
+
+  it("renders an agent card per catalog row", async () => {
+    listAgents.mockResolvedValue([
+      agent({ name: "reviewer", effect: "read", source: "project", story_path: "agent:reviewer" }),
+      agent({ name: "fixer", effect: "write", source: "builtin", story_path: "agent:fixer" }),
+    ]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    const cards = wrapper.findAll("[data-testid='agent-card']");
+    expect(cards).toHaveLength(2);
+    expect(wrapper.findAll("[data-testid='agent-name']").map((c) => c.text())).toEqual([
+      "reviewer",
+      "fixer",
+    ]);
+    expect(wrapper.findAll("[data-testid='agent-effect']").map((c) => c.text())).toEqual([
+      "read",
+      "write",
+    ]);
+    expect(wrapper.findAll("[data-testid='agent-source']").map((c) => c.text())).toEqual([
+      "project",
+      "builtin",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("flattens a multi-line agent description to its first line", async () => {
+    listAgents.mockResolvedValue([
+      agent({ description: "Reviews diffs for bugs.\nSecond line of prose.\nThird." }),
+    ]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='agent-description']").text()).toBe(
+      "Reviews diffs for bugs."
+    );
+    wrapper.unmount();
+  });
+
+  it("hides the agents section when the catalog is empty", async () => {
+    listAgents.mockResolvedValue([]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='agents-section']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("hides the agents section when agents.list is unsupported (RPC rejects)", async () => {
+    // An older server without runstatus.agents.list must not break the home
+    // screen — the section is best-effort, like the workers table.
+    listAgents.mockRejectedValue(new Error("method not found"));
+    listStories.mockResolvedValue([story()]);
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='agents-section']").exists()).toBe(false);
+    expect(wrapper.findAll("[data-testid='story-card']")).toHaveLength(1);
+    wrapper.unmount();
+  });
+
+  it("agent New session calls newSession with the agent: story path then navigates", async () => {
+    listAgents.mockResolvedValue([agent({ name: "reviewer", story_path: "agent:reviewer" })]);
+    newSession.mockResolvedValue("agent-sess-id");
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    await wrapper.find("[data-testid='agent-new-session-btn']").trigger("click");
+    await flushPromises();
+
+    expect(newSession).toHaveBeenCalledWith("agent:reviewer");
+    // A fresh session is live and meant to be driven → opens on the chat surface.
+    expect(push).toHaveBeenCalledWith("/s/agent-sess-id/chat");
+    wrapper.unmount();
+  });
+
+  it("surfaces a structured error on the agent card when newSession fails (no navigation)", async () => {
+    listAgents.mockResolvedValue([agent()]);
+    newSession.mockRejectedValue(new Error("launch policy denied"));
+    const wrapper = mount(HomeView, mountOpts);
+    await flushPromises();
+
+    await wrapper.find("[data-testid='agent-new-session-btn']").trigger("click");
+    await flushPromises();
+
+    expect(push).not.toHaveBeenCalled();
+    expect(wrapper.find("[data-testid='agent-new-session-error']").text()).toContain(
+      "launch policy denied"
+    );
     wrapper.unmount();
   });
 

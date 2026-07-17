@@ -1,0 +1,36 @@
+# agent_discuss — the machine-level invariant under the conversational shape
+# a READ agent synthesizes (../app_readonly.yaml, pinned against
+# agentroot.Synthesize for agents/demo-qa.toml): driving the synthesized
+# `agent_discuss` intent (internal/app/offramp_capture.go) through the bare
+# machine takes the no-op self-arc and leaves the room resting exactly where
+# it was, with world untouched.
+#
+# On LIVE surfaces this intent never reaches the machine: the orchestrator
+# diverts it to a persistent per-room converse turn (ModeOffPath — no
+# transition, no world mutation) via maybeConversationDivert. That converse
+# behavior is the genuinely-LLM step and is exercised by
+# internal/orchestrator/offramp_conversation_test.go and — for agent mode's
+# synthesized root specifically — cmd/kitsoki's
+# TestSessionCreateContinue_AgentScheme (real session pipeline, stubbed
+# host.agent.converse). The same split git-ops
+# stories/git-ops/flows/workbench_discuss.yaml documents. What a flow CAN pin
+# — and this one does — is the floor the lane rests on: a conversational turn
+# is structurally incapable of corrupting the room.
+
+test_kind: flow
+app: ../app_readonly.yaml
+initial_state: agent
+initial_world: {}
+
+turns:
+  # The synthesized conversational intent self-loops the room — the machine
+  # never mutates world off it, and the room's menu is intact for the next
+  # turn. `message` is the synthesized intent's one required slot.
+  - intent:
+      name: agent_discuss
+      slots:
+        message: "what can you tell me about this project?"
+    expect_state: agent
+    expect_world_unchanged: true
+
+expect_no_errors: true

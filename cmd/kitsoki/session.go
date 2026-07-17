@@ -24,6 +24,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
@@ -34,6 +35,7 @@ import (
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
 	"kitsoki/internal/transport"
+	"kitsoki/internal/webconfig"
 	"kitsoki/internal/world"
 )
 
@@ -1433,6 +1435,15 @@ func publishAppDir(appPath string) {
 // Errors are formatted identically to the previous inline "load app
 // %q: %w" wrapper so call-site diagnostics stay stable.
 func loadAppWithEnv(appPath string) (*app.AppDef, error) {
+	// An `agent:<name>` arg is a virtual story path: resolve the named agent
+	// definition and synthesize the one-room agent root in memory
+	// (internal/agentroot) instead of loading a file. Checked before any
+	// path-shaped handling so the scheme string never reaches filepath.Abs.
+	// This single head-check gives `run`, `session create/continue`, `turn`,
+	// `test flows`, `drive`, `render`, and `inspect` the scheme for free.
+	if name, ok := agentroot.IsAgentPath(appPath); ok {
+		return loadAgentSchemeApp(name)
+	}
 	// A top-level `@kitsoki/<name>` arg resolves from the embedded story library
 	// (or the --kitsoki-repo / $KITSOKI_REPO override) — so a binary-only user
 	// with no kitsoki checkout can launch a shipped story directly, e.g.
@@ -1453,6 +1464,51 @@ func loadAppWithEnv(appPath string) (*app.AppDef, error) {
 		return nil, fmt.Errorf("load app %q: %w", appPath, err)
 	}
 	return def, nil
+}
+
+// loadAgentSchemeApp is the `agent:<name>` twin of the disk-load branch in
+// loadAppWithEnv, for the bare-CLI path only: it reads the cwd .kitsoki.yaml
+// agent_launch_policy block — the same file every other CLI launch surface
+// consults — and delegates to loadAgentSchemeAppWithPolicy. Server surfaces
+// (web/daemon registry, MCP studio) must NOT go through this head: they carry
+// an already-resolved policy from their --config file and inject it via
+// loadAgentSchemeAppWithPolicy / agentroot.Synthesize directly, so the
+// synthesis-time preflight is evaluated against the operator's configuration
+// rather than whatever .kitsoki.yaml happens to sit in the server's cwd.
+func loadAgentSchemeApp(name string) (*app.AppDef, error) {
+	webCfg, err := webconfig.Load(webconfig.DefaultConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	return loadAgentSchemeAppWithPolicy(name, agentLaunchPolicyFromConfig(webCfg))
+}
+
+// loadAgentSchemeAppWithPolicy resolves the agent definition through the
+// launch path's search order (project .kitsoki/agents → .codex/agents →
+// ~/.codex/agents → embedded agent library → builtin registry) and
+// synthesizes the one-room agent root under the GIVEN write/external
+// launch-policy preflight. A synthesized root has no app.yaml on disk, so the
+// stable KITSOKI_APP_DIR is the session working directory — published FIRST,
+// mirroring publishAppDir's ordering contract (the loader's env-var validator
+// fires inside Synthesize's app.LoadBytes pass).
+func loadAgentSchemeAppWithPolicy(name string, policy host.AgentLaunchPolicy) (*app.AppDef, error) {
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("agent mode: resolve working directory: %w", err)
+	}
+	_ = os.Setenv(host.AppDirEnv, workingDir)
+	def, err := agentroot.Resolve(name, agentroot.Sources{Materialize: materializeBuiltInAgentLibrary})
+	if err != nil {
+		return nil, fmt.Errorf("load app %q: %w", agentroot.Scheme+name, err)
+	}
+	appDef, err := agentroot.Synthesize(def, agentroot.Options{
+		WorkingDir:   workingDir,
+		LaunchPolicy: policy,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load app %q: %w", agentroot.Scheme+name, err)
+	}
+	return appDef, nil
 }
 
 // resolveKitsokiAppArg maps a top-level `@kitsoki/<name>` app argument to a

@@ -107,6 +107,27 @@ export interface StoryHeader {
 }
 
 /**
+ * AgentInfo is one agent-catalog row as the home screen's agents section
+ * renders it. It mirrors `server.AgentInfo` (internal/runstatus/server/provider.go):
+ *
+ *   - name is the agent's catalog name; story_path is the virtual story path
+ *     ("agent:<name>") session.new accepts, precomputed by the server so the
+ *     client never string-builds the scheme.
+ *   - source is the search-order winner (project|library|builtin); shadows
+ *     lists lower-priority sources that also define the name.
+ *   - effect is the resolved effect class (read|write|external|pure) — the
+ *     catalog's write-capability badge.
+ */
+export interface AgentInfo {
+  name: string;
+  source: string;
+  description?: string;
+  effect: string;
+  shadows?: string[];
+  story_path: string;
+}
+
+/**
  * One notification as it rides the wire. `jobs.Notification` has NO json tags,
  * so it serializes with Go's PascalCase field names — read these EXACTLY (not
  * camelCase, not snake_case). Applies to both the notifications.list array and
@@ -1047,6 +1068,15 @@ export class LiveSource implements DataSource {
   /** Re-scan the configured story directories and return the fresh catalogue. */
   rescanStories(): Promise<StoryHeader[]> {
     return this.client.post<StoryHeader[]>("runstatus.stories.rescan", {});
+  }
+
+  /**
+   * List the unified agent catalog (project TOML → embedded library → builtin
+   * registry). Providers without agent-mode support answer [] rather than an
+   * error, so the home screen's agents section simply stays hidden there.
+   */
+  listAgents(): Promise<AgentInfo[]> {
+    return this.client.post<AgentInfo[]>("runstatus.agents.list", {});
   }
 
   /** Read session-independent setup warnings for the home screen. */

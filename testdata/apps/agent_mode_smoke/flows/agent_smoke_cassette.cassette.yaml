@@ -1,0 +1,34 @@
+# Host cassette for agent_smoke.yaml. One host.agent.task episode standing in
+# for the synthesized agent-mode workbench's on_enter dispatch
+# (internal/agentroot/synthesize.go → internal/app/workbench.go).
+# response.data.submitted matches the synthesized effect's
+# `bind: {agent_note: submitted}` and the fixture's acceptance schema
+# (schemas/agent-mode-note.json: summary required, details optional).
+# replay: any because agent_smoke.yaml's turn 2 re-dispatches the same call
+# to prove the read-only floor holds across repeated work.
+#
+# There is deliberately NO host.agent.converse episode: the flow harness's
+# direct-intent path can never reach the off-ramp converse handler (see
+# agent_smoke.yaml's header comment), and strict_cassette_coverage: true
+# would fail the fixture on a dead episode.
+kind: host_cassette
+app_id: agent:demo-agent
+app_version: "fixture"
+match_on: [handler]
+
+episodes:
+  - id: agent_dispatch
+    match: { handler: host.agent.task }
+    replay: any
+    response:
+      data:
+        ok: true
+        submitted:
+          summary: "Surveyed the repo and summarized its layout."
+          details: "Stayed read-only; a write-mode grant would be needed to change anything."
+    agent:
+      verb: task
+      agent: demo-agent
+      model: ""
+      duration_ms: 500
+      response: "Surveyed the repo and summarized its layout."

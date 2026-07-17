@@ -116,6 +116,51 @@
       </div>
     </section>
 
+    <!-- ── Agents ──────────────────────────────────────────────────────── -->
+    <!-- The unified agent catalog (runstatus.agents.list). Each card starts
+         a normal session bound to the virtual story path "agent:<name>" —
+         the server synthesizes the one-room AppDef, so the click lands on
+         the exact same chat surface a story session uses. Hidden when the
+         provider reports no agents (single-entry/read-only providers). -->
+    <section v-if="agents.length > 0" class="home__section" data-testid="agents-section">
+      <h2 class="home__subtitle">Agents</h2>
+      <div class="home__cards">
+        <div
+          v-for="agent in agents"
+          :key="agent.story_path"
+          class="home__card"
+          data-testid="agent-card"
+          :data-agent-name="agent.name"
+        >
+          <div class="home__card-head">
+            <span class="home__card-title" data-testid="agent-name">{{ agent.name }}</span>
+            <span class="home__badge home__badge--effect" data-testid="agent-effect">{{ agent.effect }}</span>
+          </div>
+          <code class="home__card-path" data-testid="agent-source">{{ agent.source }}</code>
+          <p v-if="agent.description" class="home__card-desc" data-testid="agent-description">
+            {{ agentDescription(agent) }}
+          </p>
+          <div class="home__card-actions">
+            <button
+              class="home__btn"
+              data-testid="agent-new-session-btn"
+              :disabled="startingPath === agent.story_path"
+              @click="onNewAgentSession(agent)"
+            >
+              {{ startingPath === agent.story_path ? "Starting…" : "New session" }}
+            </button>
+          </div>
+          <div
+            v-if="startError && startErrorPath === agent.story_path"
+            class="home__status home__status--error"
+            data-testid="agent-new-session-error"
+          >
+            {{ startError }}
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── Kits (S5): a generic nav section for any installed kit's       -->
     <!-- provides.ui entries flagged nav:true (kitLoader.ts) — this view   -->
     <!-- has no idea which kits, if any, are installed. Empty (and hidden) -->
@@ -391,7 +436,7 @@ import { useRouter } from "vue-router";
 // full rationale (persisted in sessionStorage; also marked spent by the session
 // views so a tab that opens straight into a session can still reach "/").
 import { autoNavDone, markAutoNavDone } from "../lib/auto-nav.js";
-import { LiveSource, type SetupWarning, type StoryHeader } from "../data/live-source.js";
+import { LiveSource, type AgentInfo, type SetupWarning, type StoryHeader } from "../data/live-source.js";
 import { createDataSource } from "../data/source.js";
 import type { ArtifactJobSummary, SessionHeader, WorkerSummary } from "../types.js";
 import { useTourStore } from "../stores/tour.js";
@@ -425,6 +470,8 @@ const storiesLoading = ref(true);
 const storiesError = ref<string | null>(null);
 const rescanning = ref(false);
 const setupWarnings = ref<SetupWarning[]>([]);
+
+const agents = ref<AgentInfo[]>([]);
 
 const sessions = ref<SessionHeader[]>([]);
 const sessionsError = ref<string | null>(null);
@@ -520,7 +567,7 @@ onMounted(async () => {
     return;
   }
 
-	await Promise.all([loadStories(), loadSessions(), loadArtifactJobs(), loadWorkers(), loadSetupWarnings()]);
+	await Promise.all([loadStories(), loadAgents(), loadSessions(), loadArtifactJobs(), loadWorkers(), loadSetupWarnings()]);
   storiesLoading.value = false;
 
   // Auto-navigate when there is exactly one live session and no others. A
@@ -551,6 +598,16 @@ async function loadStories(): Promise<void> {
     storiesError.value = null;
   } catch (e) {
     storiesError.value = errMsg(e);
+  }
+}
+
+async function loadAgents(): Promise<void> {
+  // Best-effort like loadWorkers: an older server without the agents.list RPC
+  // (or a provider without agent-mode support) just leaves the section hidden.
+  try {
+    agents.value = await source.listAgents();
+  } catch {
+    agents.value = [];
   }
 }
 
@@ -632,6 +689,25 @@ async function onNewSession(story: StoryHeader): Promise<void> {
   }
 }
 
+async function onNewAgentSession(agent: AgentInfo): Promise<void> {
+  // Same lifecycle as onNewSession: the agent's virtual story path
+  // ("agent:<name>", precomputed by the server) is the story_path
+  // runstatus.session.new takes — an agent session IS a story session.
+  const path = agent.story_path || `agent:${agent.name}`;
+  startingPath.value = path;
+  startError.value = null;
+  startErrorPath.value = null;
+  try {
+    const id = await source.newSession(path);
+    router.push(`/s/${id}/chat`);
+  } catch (e) {
+    startError.value = errMsg(e);
+    startErrorPath.value = path;
+  } finally {
+    startingPath.value = null;
+  }
+}
+
 async function onSetupWarningAction(warning: SetupWarning): Promise<void> {
   const story = setupWarningStory(warning);
   if (!story) return;
@@ -659,6 +735,13 @@ async function onDriveOperation(s: SessionHeader): Promise<void> {
 // completed.
 function onTakeTour(): void {
   useTourStore().start(true);
+}
+
+function agentDescription(agent: AgentInfo): string {
+  // Project TOML descriptions can be multi-line prose; the card shows the
+  // first line only (same flattening `kitsoki agent list` applies).
+  const first = (agent.description ?? "").split("\n", 1)[0] ?? "";
+  return first.trim();
 }
 
 function storyTitle(story: StoryHeader): string {
@@ -982,6 +1065,20 @@ function errMsg(e: unknown): string {
   font-size: 0.75rem;
   color: var(--k-fg-code, #7dd3fc);
   word-break: break-all;
+}
+
+.home__card-desc {
+  color: var(--k-fg-muted, #94a3b8);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+/* Effect-class badge on agent cards — neutral (informational) rather than the
+   green "live" badge stories use. */
+.home__badge--effect {
+  background: var(--k-bg-hover, #1e293b);
+  color: var(--k-fg-muted, #94a3b8);
+  border: 1px solid var(--k-border-subtle, #334155);
 }
 
 .home__card-actions {

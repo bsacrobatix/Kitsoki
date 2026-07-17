@@ -1,0 +1,36 @@
+# agent_mode_smoke (read-only shape) — the sibling pin to ./app.yaml: what
+# agentroot.Synthesize emits for agents/demo-qa.toml, a READ agent
+# (sandbox_mode: read-only). Read|pure|external agents do NOT take the
+# workbench shape (expandOneWorkbench rejects read-only agents; external is
+# rejected by validateWriteMode over the workbench's forced
+# write_mode: read_only) — they get the conversational off-ramp directly:
+# `agent_off_ramp: {agent: <name>, capture_free_text: true}`, whose loader
+# pass (internal/app/offramp_capture.go) synthesizes the `agent_discuss`
+# intent + default_intent + a no-op self-arc.
+#
+# Same disk-path rationale as ./app.yaml's header comment; the same
+# FixtureMatchesSynthesizedRoot test pins this file against the real
+# Resolve + Synthesize output for demo-qa.
+app:
+  id: agent:demo-qa
+  version: fixture # synthesized roots stamp a content hash; see ./app.yaml
+  title: Agent-mode smoke read-only Q&A agent
+
+agents:
+  demo-qa:
+    # Verbatim agents/demo-qa.toml developer_instructions.
+    system_prompt: "You answer questions about the project without changing anything."
+    # sandbox_mode: read-only resolves to the read surface (projectReadToolbox);
+    # conversational agents carry a bare tools: list, not a toolbox.
+    tools: [Read, Grep, Glob]
+
+root: agent
+
+states:
+  agent:
+    description: Agent-mode smoke read-only Q&A agent
+    agent_off_ramp:
+      agent: demo-qa
+      capture_free_text: true
+    view:
+      - prose: "Chat with demo-qa."

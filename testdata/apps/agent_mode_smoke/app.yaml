@@ -1,0 +1,83 @@
+# agent_mode_smoke — synthetic no-LLM regression for agent mode's synthesized
+# root (internal/agentroot, .context/agent-mode-design.md §5.2): the one-room
+# story `agent:<name>` produces for a WRITE agent.
+#
+# WHY A CHECKED-IN app.yaml INSTEAD OF THE agent:demo-agent SCHEME: the flow
+# harness (internal/testrunner.RunFlows, and `kitsoki test flows`, which
+# passes its app argument straight through — cmd/kitsoki/test_flows.go) loads
+# the app via app.LoadWithResolver from a DISK PATH; the agent-scheme head
+# checks live in cmd/kitsoki's session/registry loaders and MCP studio, not
+# in the testrunner's loadAppForRun. So this file pins, byte-for-byte in
+# shape, what agentroot.Synthesize emits for agents/demo-agent.toml (modulo
+# the per-machine values: version content hash, absolute workdir default and
+# absolute materialized acceptance-schema path). The pin cannot drift
+# silently: flows_agent_mode_test.go's FixtureMatchesSynthesizedRoot test
+# re-resolves the TOML through the real agentroot.Resolve + Synthesize and
+# asserts this file desugars to the same structural shape.
+#
+# The shape itself (see internal/agentroot/synthesize.go): a write agent gets
+# ONE room named `agent` carrying a `workbench:` block — the proven
+# landing-room macro (internal/app/workbench.go) — which desugars to
+# write_mode: read_only + agent_off_ramp + the synthesized on_enter
+# host.agent.task dispatch + the `agent_capture` default_intent. The flows
+# beside this file exercise that desugared shape end-to-end with NO LLM,
+# mirroring testdata/apps/workbench_smoke/ turn for turn.
+app:
+  id: agent:demo-agent
+  # Synthesized roots stamp a 12-hex content hash of the resolved agent
+  # definition here (resume drift detection); any string loads, so the
+  # checked-in pin uses a label instead.
+  version: fixture
+  title: Agent-mode smoke workbench agent
+
+world:
+  # Synthesize defaults this to the absolute Options.WorkingDir; the
+  # synthesized dispatch reads {{ world.workdir }} for working_dir. The
+  # dispatch is cassette-stubbed in every flow here, so "." is fine.
+  workdir: { type: string, default: "." }
+
+toolboxes:
+  # Project TOML agents declare no tool list; agentroot.Resolve assigns the
+  # full write surface from sandbox_mode (defFromStandalone) and Synthesize
+  # wraps it in this toolbox so the workbench's WS-vocabulary invariant
+  # (toolbox: + effect:) holds.
+  agent_mode_toolbox:
+    tools: [Read, Grep, Glob, Edit, Write, Bash]
+    effect: write
+
+agents:
+  demo-agent:
+    # Verbatim agents/demo-agent.toml developer_instructions — the
+    # equivalence test compares this string against the resolved Def's.
+    system_prompt: "You are the agent-mode smoke agent: pick up the operator's request and get it done."
+    toolbox: agent_mode_toolbox
+
+root: agent
+
+states:
+  agent:
+    description: Agent-mode smoke workbench agent
+    workbench:
+      agent: demo-agent
+      # Synthesize passes the dispatch prompt INLINE (host.agent.task's
+      # context.prompt is path-or-inline); this mirrors
+      # internal/agentroot/synthesize.go workbenchPrompt for demo-agent.
+      prompt: |
+        You are demo-agent, dispatched from an agent session.
+
+        The operator's request:
+
+        > {{ args.request }}
+
+        Carry out the request in the working directory. You start read-only: attempt
+        any change you need and the runtime will surface it to the operator for a
+        write-mode grant; if the grant is declined or you are headless, stay
+        read-only and describe precisely what you would change instead.
+
+        When done, submit the close-out note through the validator tool: a one-line
+        summary (required) plus optional details.
+      # Synthesize materializes this schema to an absolute cache/SchemaDir
+      # path; the fixture keeps the same contract file in-tree.
+      acceptance_schema: schemas/agent-mode-note.json
+    view:
+      - prose: "Agent workbench — describe what you want demo-agent to do, in your own words. Work runs read-only until you grant write mode."

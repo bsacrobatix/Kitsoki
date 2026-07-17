@@ -313,6 +313,33 @@ no-op floor in `stories/git-ops/flows/workbench_discuss.yaml`; the
 command-vs-prose routing split in
 `stories/git-ops/intents/workbench_conversation.yaml`.
 
+## The synthesized agent root (`agent:<name>`)
+
+Agent mode ([guide](../guide/agents/agent-mode.md)) is a *programmatic
+consumer* of this contract: `agentroot.Synthesize`
+(`internal/agentroot/synthesize.go`) builds a one-room story around a
+resolved agent definition, emits it as YAML, and runs it through the normal
+load pipeline — so `expandWorkbenches` / `expandOffRampCaptures` and every
+invariant above apply to the synthesized shape exactly as to a hand-written
+one. Shape selection follows the same effect rules this page defines:
+
+- a **write** agent synthesizes a `workbench:` room (the agent's resolved
+  tool surface becomes a synthesized WS toolbox; the acceptance schema is a
+  minimal summary-only note materialized to a cache dir);
+- a **read/pure** agent synthesizes the conversational lane
+  (`agent_off_ramp: {capture_free_text: true}`) — the workbench invariant
+  correctly rejects it;
+- an **external** agent *also* takes the conversational shape: the macro
+  always sets `write_mode: read_only`, and `validateWriteMode` rejects that
+  posture over an agent with external side effects, so the conservative
+  conversational shape wins. It keeps the write/external launch-policy
+  preflight regardless.
+
+The app id is the virtual story path `agent:<name>`; the version is a content
+hash of the resolved definition, so session resume detects definition drift
+the way story edits already do. No desugaring or validation behavior is
+special-cased for the synthesized root — that is the point.
+
 ## What this is not
 
 - Not a new execution engine — every synthesized primitive already existed

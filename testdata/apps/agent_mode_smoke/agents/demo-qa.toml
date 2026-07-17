@@ -1,0 +1,9 @@
+# demo-qa — the agent_mode_smoke fixture's READ-ONLY agent (sandbox_mode
+# read-only, so agentroot.Resolve assigns the [Read, Grep, Glob] surface and
+# effect read). agent:demo-qa synthesizes the conversational off-ramp shape
+# that ../app_readonly.yaml pins — the equivalence is asserted by
+# internal/testrunner/flows_agent_mode_test.go.
+name = "demo-qa"
+description = "Agent-mode smoke read-only Q&A agent"
+developer_instructions = "You answer questions about the project without changing anything."
+sandbox_mode = "read-only"

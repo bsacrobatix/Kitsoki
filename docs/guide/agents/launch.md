@@ -11,6 +11,11 @@ policy decision that would be used. Add `--exec` only when you want to run a
 task-backed backend CLI. Interactive launches are different: a freestanding
 launch with no task, or `--raw --interactive`, opens the native backend CLI.
 
+`agent launch` forks an **external process**. Its in-kitsoki counterpart is
+[agent mode](agent-mode.md) (`kitsoki run agent:<name>`), which resolves the
+same agent definitions through the same search order but runs them as a
+governed, resumable kitsoki session instead of a native CLI.
+
 ## Use Cases
 
 Dry-run a story agent from a story `app.yaml`:

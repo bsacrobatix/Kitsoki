@@ -81,6 +81,7 @@ func slashCommandCatalogue(m RootModel) []SlashCommandSpec {
 	specs := []SlashCommandSpec{
 		{Name: "/help", Description: "show commands"},
 		{Name: "/stories", Description: "open the story selector"},
+		{Name: "/agents", Description: "open the agent selector"},
 		{Name: "/bug", Usage: "/bug [description]", Description: "file a bug report with TUI evidence"},
 		{Name: "/route", Usage: "/route up|down|retry <intent|help|workbench|meta>", Description: "rate or reroute the last routed turn"},
 		{Name: "/ideas", Usage: "/ideas <text>", Description: "capture an idea without interrupting the session"},

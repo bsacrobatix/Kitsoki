@@ -422,6 +422,7 @@ func TestTUIResizeDoesNotClearNormalScreen(t *testing.T) {
 		{"meta", tuipkg.ModeMeta},
 		{"meta-sessions", tuipkg.ModeMetaSessions},
 		{"story-selector", tuipkg.ModeStorySelector},
+		{"agent-selector", tuipkg.ModeAgentSelector},
 		{"world-view", tuipkg.ModeWorldView},
 		{"choosing", tuipkg.ModeChoosing},
 		{"operator-question", tuipkg.ModeOperatorQuestion},

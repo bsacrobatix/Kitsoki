@@ -31,6 +31,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"kitsoki/internal/agent"
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
@@ -220,7 +221,21 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	rt.tap = &activityTap{}
 	rt.closers = append(rt.closers, func() { _ = sink.Close() })
 
-	def, err := app.LoadWithResolver(storyPath, nil, resolver)
+	// `agent:<name>` is a virtual story path: resolve the agent definition and
+	// synthesize the one-room agent root in memory (internal/agentroot) instead
+	// of loading a file, so MCP session_new accepts the same scheme every other
+	// loader head does. The write/external launch-policy preflight reuses the
+	// policy this runtime already carries.
+	var def *app.AppDef
+	if agentName, ok := agentroot.IsAgentPath(storyPath); ok {
+		var agentDef agentroot.Def
+		agentDef, err = agentroot.Resolve(agentName, agentroot.Sources{})
+		if err == nil {
+			def, err = agentroot.Synthesize(agentDef, agentroot.Options{LaunchPolicy: agentLaunchPolicy})
+		}
+	} else {
+		def, err = app.LoadWithResolver(storyPath, nil, resolver)
+	}
 	if err != nil {
 		rt.Close()
 		return nil, &openError{Code: ErrBadRequest, Msg: fmt.Sprintf("session: load story %q: %v", storyPath, err)}

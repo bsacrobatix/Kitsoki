@@ -41,6 +41,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pmezard/go-difflib/difflib"
 
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
 	"kitsoki/internal/artifactjob"
@@ -556,7 +557,53 @@ func (r *SessionRegistry) synthesizeImplicitRoot() (*storyLoad, error) {
 	}, nil
 }
 
+// synthesizeAgentRoot builds the storyLoad for an `agent:<name>` virtual
+// story path. Like the implicit root, the synthesized AppDef has no file on
+// disk: `synthetic` suppresses the on-disk staleness diff, and the injected
+// reloader re-resolves the agent definition and re-synthesizes so
+// runstatus.session.reload picks up an agent TOML / library edit.
+//
+// The synthesis-time write/external preflight runs against the registry's
+// already-resolved launch policy (r.base.AgentLaunchPolicy — the `kitsoki web
+// --config` file that also gates in-session dispatches), NOT the cwd
+// .kitsoki.yaml the bare-CLI loadAgentSchemeApp head reads: a daemon's
+// working directory is unrelated to the operator's configuration. Mirrors
+// the MCP studio head (internal/mcp/studio/session_runtime.go).
+func (r *SessionRegistry) synthesizeAgentRoot(storyPath string) (*storyLoad, error) {
+	name, ok := agentroot.IsAgentPath(storyPath)
+	if !ok {
+		return nil, fmt.Errorf("not an agent story path: %q", storyPath)
+	}
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve agent root cwd: %w", err)
+	}
+	load := func() (*app.AppDef, error) {
+		return loadAgentSchemeAppWithPolicy(name, r.base.AgentLaunchPolicy)
+	}
+	def, err := load()
+	if err != nil {
+		return nil, err
+	}
+	return &storyLoad{
+		path:      storyPath,
+		def:       def,
+		reloader:  load,
+		synthetic: true,
+		repoRoot:  repoRoot,
+	}, nil
+}
+
 func (r *SessionRegistry) loadStory(storyPath string) (*storyLoad, error) {
+	// The `agent:<name>` scheme is a virtual story path — synthesize the agent
+	// root before any path-shaped handling (parallel to the implicit-root
+	// branch below). newSession, NewSessionSeeded, AttachExternal, and daemon
+	// restore all flow through here, so every provider surface accepts
+	// `runstatus.session.new {story_path: "agent:<name>"}` with zero RPC
+	// contract change.
+	if _, ok := agentroot.IsAgentPath(storyPath); ok {
+		return r.synthesizeAgentRoot(storyPath)
+	}
 	abs, err := filepath.Abs(storyPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolve story path %q: %w", storyPath, err)
@@ -1320,6 +1367,33 @@ func (r *SessionRegistry) ListStories() []server.StoryHeader {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.storyHeadersLocked()
+}
+
+// ListAgents implements the optional [server.AgentLister] extension: the
+// unified agent catalog (project TOML → embedded library → builtin registry)
+// mapped onto the wire shape, so the SPA home screen renders the same catalog
+// `kitsoki agent list` prints. Name collisions are deterministic: the row is
+// the search-order winner and Shadows names the losing sources.
+func (r *SessionRegistry) ListAgents() ([]server.AgentInfo, error) {
+	infos, err := agentroot.List(agentroot.Sources{Materialize: materializeBuiltInAgentLibrary})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]server.AgentInfo, 0, len(infos))
+	for _, info := range infos {
+		row := server.AgentInfo{
+			Name:        info.Name,
+			Source:      string(info.Source),
+			Description: info.Description,
+			Effect:      string(info.Effect),
+			StoryPath:   agentroot.Scheme + info.Name,
+		}
+		for _, s := range info.Shadows {
+			row.Shadows = append(row.Shadows, string(s))
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 // Staleness compares the session's currently-loaded app.yaml bytes against the

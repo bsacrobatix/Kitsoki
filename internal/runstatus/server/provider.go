@@ -75,6 +75,36 @@ type StudyProvider interface {
 	CancelStudyCell(context.Context, string, string) error
 }
 
+// AgentLister is the optional agent-catalog extension of [SessionProvider]:
+// the read side of `runstatus.agents.list`, mirroring ListStories for the
+// unified agent catalog (project TOML → embedded library → builtin registry).
+// A provider that does not implement it (e.g. the single-entry adapter)
+// reports an empty catalog rather than an error — agent mode is an additive
+// surface, never a required one.
+type AgentLister interface {
+	ListAgents() ([]AgentInfo, error)
+}
+
+// AgentInfo is one agent-catalog row as the SPA home screen's agents section
+// renders it. The provider maps agentroot.Info onto this shape — the server
+// never imports agentroot (the same inversion StoryHeader applies).
+//
+//   - Name is the agent's catalog name; StoryPath is the virtual story path
+//     ("agent:<name>") session.new accepts, precomputed so clients never
+//     string-build the scheme.
+//   - Source is the search-order winner (project|library|builtin); Shadows
+//     lists lower-priority sources that also define the name.
+//   - Effect is the resolved effect class (read|write|external|pure) — the
+//     catalog's write-capability badge.
+type AgentInfo struct {
+	Name        string   `json:"name"`
+	Source      string   `json:"source"`
+	Description string   `json:"description,omitempty"`
+	Effect      string   `json:"effect"`
+	Shadows     []string `json:"shadows,omitempty"`
+	StoryPath   string   `json:"story_path"`
+}
+
 // WorkerProvider exposes daemon federation health without leaking transport
 // credentials or SSH paths. One unreachable worker must remain a row rather
 // than turning the whole federation request into an error.

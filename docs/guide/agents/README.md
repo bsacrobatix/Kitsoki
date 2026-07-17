@@ -2,8 +2,16 @@
 
 Operational reference for launching and configuring external coding agents.
 
-Start with [`launch.md`](launch.md) when you want `kitsoki agent launch` to
-produce or run a concrete backend command.
+Start with [`agent-mode.md`](agent-mode.md) when you want to run an agent as
+an in-kitsoki session (`kitsoki run agent:<name>`), or with
+[`launch.md`](launch.md) when you want `kitsoki agent launch` to produce or
+run a concrete backend command.
+
+## Agent Sessions
+
+- [`agent-mode.md`](agent-mode.md) — `agent:<name>` sessions: the unified
+  agent catalog (`kitsoki agent list`, `/agents`, home cards), resolution
+  order, the synthesized one-room story, and the sandboxing composition.
 
 ## Launching
 

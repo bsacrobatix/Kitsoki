@@ -1,0 +1,86 @@
+# agent_smoke — end-to-end, no-LLM regression for the synthesized agent-mode
+# workbench root (.context/agent-mode-design.md §5.2), driving capture →
+# dispatch → off-ramp against ../app.yaml (the pinned agentroot.Synthesize
+# shape for agents/demo-agent.toml). Mirrors
+# testdata/apps/workbench_smoke/flows/workbench_walk.yaml turn for turn, on a
+# host_cassette (kind: host_cassette) instead of host_handlers so the
+# dispatch writes real AgentCalled/AgentReturned trace events —
+# flows_agent_mode_test.go asserts their state_path provenance.
+#
+# Per the flow-authoring gotcha the harness bypasses the INITIAL state's
+# on_enter — initial_state: agent does NOT fire agent's on_enter at flow
+# start. Turn 1 drives the synthesized `agent_capture` intent, which
+# self-targets agent (workbench.go's synthesized capture arc), which is what
+# actually fires on_enter for the first time.
+#
+# OFF-RAMP Q&A SCOPE: the design asks the fixture to drive the off-ramp Q&A
+# through a host.agent.converse cassette episode, but the flow harness cannot
+# reach that handler: intent: turns go through orchestrator.RunIntentWithInput,
+# which has no conversation-lane divert (that lives in submitDirect/Turn —
+# orchestrator.go's maybeConversationDivert), and its maybeOffRamp interception
+# fires only on genuine no-match codes (UNKNOWN_INTENT / INTENT_UNKNOWN /
+# LLM_CLARIFICATION) that machine.Validate never produces for a direct intent
+# (an undeclared name rejects as INTENT_NOT_ALLOWED_IN_STATE). This is the
+# same split every off-ramp fixture documents (dev-story
+# landing_off_ramp.yaml, git-ops workbench_discuss.yaml): the flow pins the
+# machine floor the live converse rests on, while the voiced converse itself
+# is exercised by internal/orchestrator/offramp*_test.go and — for agent mode
+# specifically — cmd/kitsoki's TestSessionCreateContinue_AgentScheme, which
+# submits the synthesized discuss intent through the real session pipeline
+# against a stubbed host.agent.converse.
+
+test_kind: flow
+app: ../app.yaml
+initial_state: agent
+initial_world: {}
+
+host_cassette: agent_smoke_cassette.cassette.yaml
+# Every episode must actually play — proves the synthesized on_enter dispatch
+# really went through the cassette rather than silently not firing.
+strict_cassette_coverage: true
+
+turns:
+  # 1. Free-text capture. `agent_capture` (the workbench macro's synthesized
+  #    default_intent for the `agent` room) stores the utterance into
+  #    agent_request and self-targets agent, firing on_enter for the first
+  #    time (initial-state bypass above): the synthesized host.agent.task
+  #    dispatch replays from the cassette and binds agent_note: submitted.
+  - intent: { name: agent_capture, slots: { request: "summarize the repo layout" } }
+    expect_state: agent
+    expect_host_calls:
+      - handler: host.agent.task
+    expect_world:
+      agent_request: "summarize the repo layout"
+      agent_note:
+        summary: "Surveyed the repo and summarized its layout."
+        details: "Stayed read-only; a write-mode grant would be needed to change anything."
+
+  # 2. Read-only floor across a repeated dispatch. workbench: sets
+  #    write_mode: read_only on agent; a flow cannot drive the in-process
+  #    write-mode gate itself (the whole host.agent.task subprocess is
+  #    replayed — internal/host/write_mode_gate_test.go owns the grant/deny
+  #    mechanics). What IS observable: a second capture clears agent_note
+  #    (re-arming the Once guard) and re-dispatches the same replay:any
+  #    episode, and the room never leaves the read-only floor to do it.
+  - intent: { name: agent_capture, slots: { request: "summarize the repo layout" } }
+    expect_state: agent
+    expect_host_calls:
+      - handler: host.agent.task
+    expect_world:
+      agent_request: "summarize the repo layout"
+      agent_note:
+        summary: "Surveyed the repo and summarized its layout."
+        details: "Stayed read-only; a write-mode grant would be needed to change anything."
+
+  # 3. Off-ramp residual path (machine floor). The workbench also synthesizes
+  #    agent_off_ramp: {agent: demo-agent}; an utterance mapping to no
+  #    declared intent is rejected WITHOUT advancing state or mutating world —
+  #    the read-only floor the live voiced converse answer rests on (see the
+  #    header comment for where the converse itself is exercised).
+  - intent: { name: __unmapped_free_text__, slots: {} }
+    expect_error:
+      code: INTENT_NOT_ALLOWED_IN_STATE
+    expect_state: agent
+    expect_world_unchanged: true
+
+expect_no_errors: false

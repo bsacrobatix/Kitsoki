@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "agent_mode_note",
+  "description": "Close-out note for an agent-mode workbench dispatch. Only summary is required; the schema stays open so the agent may attach anything.",
+  "type": "object",
+  "required": ["summary"],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One line: what the agent did or found this turn."
+    },
+    "details": {
+      "type": "string",
+      "description": "Optional longer markdown narrative of the exploration / change."
+    }
+  },
+  "additionalProperties": true
+}

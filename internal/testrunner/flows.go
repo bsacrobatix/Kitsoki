@@ -20,6 +20,7 @@ import (
 	"github.com/goccy/go-yaml"
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/app"
 	"kitsoki/internal/clock"
 	"kitsoki/internal/expr"
@@ -86,6 +87,22 @@ func loadAppForRun(appPath string, resolver app.ImportResolver) (*app.AppDef, er
 	appDirLoadMu.Lock()
 	defer appDirLoadMu.Unlock()
 	publishAppDirForTestrunner(appPath)
+	if name, ok := agentroot.IsAgentPath(appPath); ok {
+		// agent:<name> — resolve + synthesize the one-room root instead of a
+		// disk load, so `kitsoki test flows agent:<name> --flows <fixture>`
+		// exercises the exact AppDef a session would run. Zero Options match
+		// the harness posture: no launch policy (flows never dispatch a live
+		// agent — host.agent.* is cassette/stub-bound) and cwd as workdir.
+		def, err := agentroot.Resolve(name, agentroot.Sources{})
+		if err != nil {
+			return nil, fmt.Errorf("load app %q: %w", appPath, err)
+		}
+		appDef, err := agentroot.Synthesize(def, agentroot.Options{})
+		if err != nil {
+			return nil, fmt.Errorf("load app %q: %w", appPath, err)
+		}
+		return appDef, nil
+	}
 	return app.LoadWithResolver(appPath, nil, resolver)
 }
 
@@ -1239,6 +1256,12 @@ func runFlowFile(ctx context.Context, def *app.AppDef, m machine.Machine, appPat
 		// fixtures that opt in.
 		fixDef, fixM := def, m
 		if len(fixture.HostBindings) > 0 {
+			if _, isAgent := agentroot.IsAgentPath(appPath); isAgent {
+				// A synthesized agent root declares no hosts: block, so there
+				// is no interface binding to override — reject rather than
+				// silently ignore the fixture's intent.
+				return nil, fmt.Errorf("fixture in %q: host_bindings is not supported with the agent:<name> scheme (synthesized roots declare no host interfaces)", filePath)
+			}
 			overriddenDef, lerr := app.LoadWithResolver(appPath, fixture.HostBindings, opts.ImportResolver)
 			if lerr != nil {
 				return nil, fmt.Errorf("fixture in %q: load with host_bindings: %w", filePath, lerr)

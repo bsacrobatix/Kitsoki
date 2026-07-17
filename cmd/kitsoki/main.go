@@ -24,6 +24,7 @@ import (
 	"github.com/muesli/termenv"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/app"
 	"kitsoki/internal/buildinfo"
 	"kitsoki/internal/chats"
@@ -325,6 +326,26 @@ func tuiStoryOptions(cfg webconfig.WebConfig) ([]tui.StoryOption, error) {
 	return options, nil
 }
 
+// tuiAgentOptions builds the /agents selector catalogue from the merged agent
+// sources (project + library + builtins) — the same view `kitsoki agent list`
+// renders. Discovery errors are surfaced in the selector, not fatal.
+func tuiAgentOptions() ([]tui.AgentOption, error) {
+	infos, err := agentroot.List(agentroot.Sources{Materialize: materializeBuiltInAgentLibrary})
+	if err != nil {
+		return nil, err
+	}
+	options := make([]tui.AgentOption, 0, len(infos))
+	for _, info := range infos {
+		options = append(options, tui.AgentOption{
+			Name:        info.Name,
+			Source:      string(info.Source),
+			Description: info.Description,
+			Effect:      string(info.Effect),
+		})
+	}
+	return options, nil
+}
+
 func runCmd() *cobra.Command {
 	var (
 		harnessType   string
@@ -423,6 +444,12 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					storySwitch := func(story tui.StoryOption) {
 						selectedStoryPath = story.Path
 					}
+					agentOptions, agentDiscoverErr := tuiAgentOptions()
+					agentSwitch := func(agent tui.AgentOption) {
+						// Selection re-enters the same outer loop /stories uses;
+						// loadAppWithEnv accepts the agent:<name> scheme directly.
+						selectedStoryPath = agent.StoryPath()
+					}
 					harnessProfiles, defaultProfile := harnessProfilesFromConfig(webCfg)
 					bugPrivacyRuntime := bugPrivacyRuntimeConfig{
 						AgentBackend:         resolveAgentBackend(agentBackend),
@@ -449,6 +476,18 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 						def, err = loadAppWithEnv(appPath)
 						if err != nil {
 							return err
+						}
+						if _, isAgent := agentroot.IsAgentPath(appPath); isAgent {
+							// An `agent:<name>` root is synthesized in memory — there is
+							// no app.yaml to re-read on /reload — so inject a reloader
+							// that re-resolves the agent definition and re-synthesizes,
+							// the mirror of the implicit-root reloader below. An agent
+							// TOML / library edit takes effect on the same Reload +
+							// RerunOnEnter path a story file edit travels.
+							agentPath := appPath
+							reloader = func() (*app.AppDef, error) {
+								return loadAppWithEnv(agentPath)
+							}
 						}
 					} else {
 						repoRoot, rrErr := os.Getwd()
@@ -701,6 +740,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 							tui.WithJournalWriter(jw),
 							tui.WithJournalReader(jr),
 							tui.WithStorySelector(storyOptions, storyDiscoverErr, storySwitch),
+							tui.WithAgentSelector(agentOptions, agentDiscoverErr, agentSwitch),
 							tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 							tui.WithBugTicketRepo(ticketRepo),
 							tui.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
@@ -897,6 +937,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 						tui.WithJournalReader(jr),
 						tui.WithInitialTypedView(initialTypedView, initialTypedEnv, initialTypedRR),
 						tui.WithStorySelector(storyOptions, storyDiscoverErr, storySwitch),
+						tui.WithAgentSelector(agentOptions, agentDiscoverErr, agentSwitch),
 						tui.WithTraceHistory(func() (store.History, error) { return s.LoadHistory(sid) }),
 						tui.WithBugTicketRepo(ticketRepo),
 						tui.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),

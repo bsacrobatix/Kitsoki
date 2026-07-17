@@ -31,9 +31,11 @@ import (
 	"net"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/agentroot"
 	"kitsoki/internal/host"
 )
 
@@ -57,6 +59,8 @@ Subcommands:
   converse — free-form conversation with optional chat transcript
   launch   — resolve a story agents: entry + harness profile into a Claude/Codex
              launch plan; dry-run by default, --exec to run
+  list     — the unified agent catalog (project TOML → library → builtins)
+  run      — start an interactive agent session (sugar for run agent:<name>)
 
 Trace continuity:
   When KITSOKI_SESSION_ID is set (or --parent-session is passed), events
@@ -75,6 +79,115 @@ Auto-delegation:
 	cmd.AddCommand(agentTaskCmd())
 	cmd.AddCommand(agentConverseCmd())
 	cmd.AddCommand(agentLaunchCmd())
+	cmd.AddCommand(agentListCmd())
+	cmd.AddCommand(agentRunCmd())
+
+	return cmd
+}
+
+// agentListCmd implements `kitsoki agent list`: the unified agent-mode
+// catalog over agentroot.List — the same merged view the TUI /agents selector
+// and the web home agents section render (design: agent-mode §2.3).
+func agentListCmd() *cobra.Command {
+	var jsonOut bool
+
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List the unified agent catalog (project TOML → embedded library → builtins)",
+		Long: `List every agent addressable as agent:<name>, merged across the
+search order: project .kitsoki/agents / .codex/agents / ~/.codex/agents TOML
+files, the embedded agent library, and the builtin registry.
+
+A name defined by several sources appears once — the search-order winner —
+with the shadowed sources reported (deterministic collision resolution).
+Start a session in one with 'kitsoki run agent:<name>' or
+'kitsoki agent run <name>'.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			infos, err := agentroot.List(agentroot.Sources{Materialize: materializeBuiltInAgentLibrary})
+			if err != nil {
+				return err
+			}
+			if jsonOut {
+				enc := json.NewEncoder(cmd.OutOrStdout())
+				enc.SetIndent("", "  ")
+				return enc.Encode(infos)
+			}
+			w := tabwriter.NewWriter(cmd.OutOrStdout(), 2, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tSOURCE\tEFFECT\tDESCRIPTION")
+			for _, info := range infos {
+				source := string(info.Source)
+				if len(info.Shadows) > 0 {
+					shadows := make([]string, 0, len(info.Shadows))
+					for _, s := range info.Shadows {
+						shadows = append(shadows, string(s))
+					}
+					source += " (shadows " + strings.Join(shadows, ", ") + ")"
+				}
+				// Table mode is one row per agent: a multi-line project TOML
+				// description would break the tabwriter columns, so keep only
+				// its first line (the JSON form carries the full text).
+				description := info.Description
+				if idx := strings.IndexByte(description, '\n'); idx >= 0 {
+					description = strings.TrimSpace(description[:idx])
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", info.Name, source, info.Effect, description)
+			}
+			return w.Flush()
+		},
+	}
+
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit the catalog as JSON")
+
+	return cmd
+}
+
+// agentRunCmd implements `kitsoki agent run <name>`: pure sugar that
+// delegates to the run path exactly as `kitsoki run agent:<name>`. Flag
+// parsing is disabled so every trailing flag (--continue, --harness, --db, …)
+// passes through untouched, and the delegation re-dispatches through a full
+// newRootCmd() tree — NOT a detached runCmd() — so the root's persistent
+// flags (--kitsoki-repo, --staged, --semantic-routing) parse exactly as they
+// do for `kitsoki run agent:<name>`, PersistentPreRunE included.
+func agentRunCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:                "run <name> [run flags...]",
+		Short:              "Start an interactive agent session (sugar for `kitsoki run agent:<name>`)",
+		DisableFlagParsing: true,
+		// The usage line is embedded in the errors below; the inner dispatch
+		// owns flag-error usage rendering, so never dump this command's usage
+		// on top of an already-reported inner failure.
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// DisableFlagParsing keeps a conventional leading `--` separator
+			// in args; drop it so `kitsoki agent run -- <name>` addresses the
+			// same session `kitsoki run -- agent:<name>` does.
+			if len(args) > 0 && args[0] == "--" {
+				args = args[1:]
+			}
+			if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+				return cmd.Help()
+			}
+			if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+				return fmt.Errorf("agent run: agent name required (usage: kitsoki agent run <name> [run flags...])")
+			}
+			name := args[0]
+			if _, ok := agentroot.IsAgentPath(agentroot.Scheme + name); !ok {
+				return fmt.Errorf("agent run: invalid agent name %q (must be non-empty with no path separators)", name)
+			}
+			root := newRootCmd()
+			root.SetArgs(append([]string{"run", agentroot.Scheme + name}, args[1:]...))
+			root.SetOut(cmd.OutOrStdout())
+			root.SetErr(cmd.ErrOrStderr())
+			root.SetIn(cmd.InOrStdin())
+			root.SetContext(cmd.Context())
+			// The returned error propagates to the OUTER root, which reports
+			// it once (sentinel exit codes like EX_TEMPFAIL survive intact);
+			// silence the inner tree so it isn't printed twice.
+			root.SilenceErrors = true
+			return root.Execute()
+		},
+	}
 
 	return cmd
 }
