@@ -21,6 +21,8 @@ import (
 	"kitsoki/internal/capsule/storydigest"
 	"kitsoki/internal/capsule/storylauncher"
 	"kitsoki/internal/host"
+	"kitsoki/internal/webconfig"
+	"kitsoki/internal/workerregistry"
 )
 
 func capsuleCICmd() *cobra.Command {
@@ -116,7 +118,7 @@ func capsuleCIPlanCmd() *cobra.Command {
 	return cmd
 }
 func capsuleCIRunCmd() *cobra.Command {
-	var project, workspace, verdictPath, fakeReceiptSigner, triggerPath string
+	var project, workspace, verdictPath, fakeReceiptSigner, triggerPath, workerID, lane string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "run <pipeline>", Args: cobra.ExactArgs(1), Short: "Run declared Capsule CI with a story-produced typed verdict", RunE: func(cmd *cobra.Command, args []string) error {
 		trigger, err := capsuleCIReadTrigger(cmd, triggerPath, args[0])
@@ -126,6 +128,11 @@ func capsuleCIRunCmd() *cobra.Command {
 		m, in, p, planned, workspacePath, err := ciInputs(cmd.Context(), project, workspace, args[0], trigger)
 		if err != nil {
 			return err
+		}
+		if workerID != "" {
+			if err := checkCapsuleCIPlacement(project, args[0], lane, workerID); err != nil {
+				return err
+			}
 		}
 		var launcher ci.Launcher
 		if verdictPath != "" {
@@ -151,7 +158,7 @@ func capsuleCIRunCmd() *cobra.Command {
 			return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 		})
 		service := ci.Service{ProjectRoot: workspacePath, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project), Observer: record.FileRunObserver{ProjectRoot: project}}
-		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, Trigger: trigger})
+		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, Trigger: trigger, ExecutorOverride: workerID})
 		if err != nil {
 			return persistCapsuleCIRunFailure(project, result, err)
 		}
@@ -175,8 +182,52 @@ func capsuleCIRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&verdictPath, "verdict", "", "optional externally produced capsule-ci-verdict/v1 JSON; omit to drive the declared story engine")
 	cmd.Flags().StringVar(&fakeReceiptSigner, "fake-receipt-signer", "", "deterministic local/test receipt signer id for projects requiring signed receipts")
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	cmd.Flags().StringVar(&workerID, "worker", "", "pin this dispatch to a registered worker id, overriding the pipeline's declared executor (still policy-checked: see agent_launch_policy.placement)")
+	cmd.Flags().StringVar(&lane, "lane", "", "placement policy lane for this dispatch when --worker is set (default: the pipeline name)")
 	_ = cmd.MarkFlagRequired("workspace")
 	return cmd
+}
+
+// checkCapsuleCIPlacement enforces SA-I7 at launch preflight for a --worker
+// pinned dispatch: the worker id must resolve in the project's worker
+// registry (.kitsoki.yaml / .kitsoki.local.yaml `workers:`, falling back to
+// legacy daemon_federation.workers[]), and — when the project's
+// agent_launch_policy declares a placement policy — the worker's advertised
+// class must satisfy the lane's allowed worker_classes. It never touches the
+// sealed envelope; the existing ci.Executors.Select / cfg.Remotes checks in
+// internal/capsule/ci remain the separate, later gate that resolves the
+// actual dispatch transport.
+func checkCapsuleCIPlacement(project, pipeline, lane, workerID string) error {
+	if lane == "" {
+		lane = pipeline
+	}
+	base := filepath.Join(project, webconfig.DefaultConfigFile)
+	cfg, err := webconfig.Load(base)
+	if err != nil {
+		return fmt.Errorf("capsule ci: load config for placement check: %w", err)
+	}
+	reg, err := workerregistry.Load(base, webconfig.LocalConfigPath(base))
+	if err != nil {
+		return fmt.Errorf("capsule ci: load worker registry for placement check: %w", err)
+	}
+	entry, ok := reg.Find(workerID)
+	if !ok {
+		return fmt.Errorf("capsule ci: --worker %q is not a registered worker", workerID)
+	}
+	if !entry.Enabled {
+		return fmt.Errorf("capsule ci: --worker %q is registered but disabled", workerID)
+	}
+	if cfg.AgentLaunchPolicy == nil {
+		return nil
+	}
+	policy := cfg.AgentLaunchPolicy.Normalized()
+	if len(policy.Placement) == 0 {
+		return nil
+	}
+	if _, err := policy.CheckPlacement(host.PlacementTarget{Lane: lane, WorkerID: entry.ID, WorkerClass: entry.Placement}); err != nil {
+		return fmt.Errorf("capsule ci: %w", err)
+	}
+	return nil
 }
 
 func persistCapsuleCIRunFailure(project string, result ci.RunResult, runErr error) error {

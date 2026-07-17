@@ -62,6 +62,83 @@ throwaway git repositories inside capsule workspaces.
 Use [`kitsoki capsule open`](../development/capsules.md) to create an opened capsule
 workspace, then pass that path as the agent `working_dir`.
 
+## Placement Policy (Federation)
+
+`agent_launch_policy.placement:` is the launch-preflight gate for **remote**
+dispatch, layered on top of the local `working_dir` checks above. It is part
+of the standing-autonomy proposal's federation work (§9 "Federation", ask 4:
+unified worker registry + placement policy) and enforces invariant **SA-I7**:
+remote execution happens only through sealed envelopes against registered,
+enabled workers whose advertised capabilities satisfy the lane's policy;
+placement violations fail at launch preflight, not at runtime.
+
+```yaml
+agent_launch_policy:
+  enabled: true
+  placement:
+    research:
+      worker_classes: [thin, workstation, local-model]
+      network_profiles: [research-egress]
+    build:
+      worker_classes: [thin, workstation]
+      network_profiles: [git-mirror, package-mirror]
+    fix:
+      worker_classes: [thin, workstation]
+      network_profiles: [git-mirror, package-mirror]
+    # delivery (queue worker, protected-main CAS) is intentionally absent:
+    # a lane with no entry in `placement:` cannot be pinned to any remote
+    # worker at all once placement is configured (see below).
+```
+
+Semantics:
+
+- `placement:` is a map of **lane name -> `{worker_classes, network_profiles}`**.
+  Lane names are caller-defined strings (e.g. a Capsule CI pipeline name, or
+  `--lane` on `kitsoki capsule ci run --worker <id>`).
+- An **absent or empty `placement:` map** (every policy configured before
+  this field existed, and any policy that simply omits it) means placement is
+  **not enforced** — every existing `Check(...)` call site keeps working
+  exactly as before. This is the backward-compatibility contract.
+- Once `placement:` is non-empty, a lane **not listed** in the map is denied
+  for any remote-worker pin — this is how the proposal's delivery lane
+  (queue worker, protected-main CAS) stays local-only: never add it here.
+- `worker_classes` names one of the worker registry's placement classes
+  (`thin`, `workstation`, `local-model` — see
+  [worker-registry.md](../development/worker-registry.md)). Empty means no
+  class restriction for that lane.
+- `network_profiles` names the permitted network profile(s) for that lane's
+  dispatch. Empty means no network restriction for that lane.
+
+Enforcement lives in `AgentLaunchPolicy.CheckPlacement` in
+`internal/host/agent_launch_policy.go`, a companion to `Check` (not a
+replacement — `Check` still governs the local working-directory/branch/capsule
+preflight). It is wired into `kitsoki capsule ci run --worker <id>` today
+(see worker-registry.md's CLI section); other remote-dispatch call sites can
+adopt it the same way as federation work continues.
+
+**This is a separate, earlier gate than `executor.ValidateCapabilities`**
+(see [worker-registry.md](../development/worker-registry.md)), the
+sealed-envelope `Policy`-vs-`Capabilities` check in
+`internal/capsule/executor`: `CheckPlacement` runs at launch preflight against
+the worker's advertised *class*, before any sealed envelope exists;
+`ValidateCapabilities` remains untouched as the runtime enforcement layer that
+follows it. A lane can never silently escalate isolation or egress by only
+satisfying one gate.
+
+On denial, `CheckPlacement` returns a deterministic error. Two exact forms:
+
+```
+agent launch policy denied: lane "delivery" has no placement policy entry and placement is configured, so it may not target any remote worker
+```
+
+```
+agent launch policy denied: lane "build" targets worker "vm-b" (class "workstation") which does not satisfy placement policy (allowed classes: [thin])
+```
+
+```
+agent launch policy denied: lane "build" targets worker "vm-b" with network profile "open" which does not satisfy placement policy (allowed network profiles: [git-mirror])
+```
+
 ## Enforcement Surface
 
 The same policy is installed for:

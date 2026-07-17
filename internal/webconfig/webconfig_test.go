@@ -116,6 +116,76 @@ func TestLoadReadsDaemonFederationFromLocalOverride(t *testing.T) {
 	}
 }
 
+func TestLoad_ReadsCanonicalWorkersFromLocalOverride(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, DefaultConfigFile)
+	if err := os.WriteFile(base, []byte("story_dirs: [./stories]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := LocalConfigPath(base)
+	body := `workers:
+  - id: build-vm
+    label: Build VM
+    placement: workstation
+    endpoint: http://127.0.0.1:17777
+    enabled: true
+    capabilities:
+      placements: [container]
+      isolation: sandboxed
+      networks: [git-mirror]
+`
+	if err := os.WriteFile(local, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Workers) != 1 || cfg.Workers[0].ID != "build-vm" {
+		t.Fatalf("workers = %#v", cfg.Workers)
+	}
+	if cfg.Workers[0].Capabilities.Isolation != "sandboxed" {
+		t.Fatalf("capabilities = %#v", cfg.Workers[0].Capabilities)
+	}
+}
+
+func TestLoad_InvalidWorkersBlockErrors(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, DefaultConfigFile)
+	if err := os.WriteFile(base, []byte("story_dirs: [./stories]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := LocalConfigPath(base)
+	body := "workers:\n  - id: bad id\n    label: Bad\n    placement: thin\n"
+	if err := os.WriteFile(local, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(base); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestLoad_WorkersLocalOverrideWinsWhole(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, DefaultConfigFile)
+	baseBody := "story_dirs: [./stories]\nworkers:\n  - id: shared-vm\n    label: Shared VM\n    placement: thin\n    enabled: true\n"
+	if err := os.WriteFile(base, []byte(baseBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := LocalConfigPath(base)
+	localBody := "workers:\n  - id: personal-vm\n    label: Personal VM\n    placement: thin\n    enabled: false\n"
+	if err := os.WriteFile(local, []byte(localBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Workers) != 1 || cfg.Workers[0].ID != "personal-vm" {
+		t.Fatalf("workers = %#v", cfg.Workers)
+	}
+}
+
 func TestLoad_InterceptValidBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, DefaultConfigFile)

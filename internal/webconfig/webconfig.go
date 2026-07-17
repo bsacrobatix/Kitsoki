@@ -36,6 +36,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
+	"kitsoki/internal/workerregistry"
 )
 
 // DefaultConfigFile is the checked-in, shared config file Load looks for in the
@@ -130,6 +131,17 @@ type WebConfig struct {
 	// DaemonFederation is machine-local worker discovery for kitsoki daemon.
 	// Workers are independent loopback-only daemons; secrets remain in the local override.
 	DaemonFederation daemonfederation.Config `yaml:"daemon_federation,omitempty"`
+
+	// Workers is the canonical, machine-local worker registry (standing-autonomy
+	// proposal §9 "Federation"): the superset of daemon_federation.workers[]
+	// identity/tunnel fields and capsule CI remotes[] credential fields, plus
+	// advertised Capabilities and an enabled bit. Empty means no canonical
+	// registry is configured; `kitsoki worker list` and placement policy then
+	// fall back to reading daemon_federation.workers[] for back-compat — see
+	// internal/workerregistry's package doc. Belongs in .kitsoki.local.yaml,
+	// never the checked-in .kitsoki.yaml, since Endpoint/Tunnel/CredentialEnv
+	// are machine-local or secret-bearing.
+	Workers []workerregistry.Entry `yaml:"workers,omitempty"`
 }
 
 // FeedbackRoute is one producer's `feedback_routing:` rule. The node type
@@ -516,6 +528,11 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.DaemonFederation.Validate(path); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if workersCfg := (workerregistry.Config{Workers: cfg.Workers}); len(workersCfg.Workers) > 0 {
+		if err := workersCfg.Validate(path); err != nil {
+			return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+		}
+	}
 	return cfg, nil
 }
 
@@ -677,6 +694,9 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if len(local.DaemonFederation.Workers) > 0 {
 		out.DaemonFederation = local.DaemonFederation
+	}
+	if len(local.Workers) > 0 {
+		out.Workers = local.Workers
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)

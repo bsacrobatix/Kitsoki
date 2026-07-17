@@ -109,3 +109,93 @@ func TestAgentLaunchPolicy_DeniesProtectedRootUnlessAllowedRootCarvesOut(t *test
 		t.Fatalf("expected allowed decision, got %#v", decision)
 	}
 }
+
+func TestAgentLaunchPolicy_CheckPlacement(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		policy    host.AgentLaunchPolicy
+		target    host.PlacementTarget
+		wantErr   string
+		wantAllow bool
+	}{
+		{
+			name:      "no placement policy configured passes through",
+			policy:    host.AgentLaunchPolicy{Enabled: true},
+			target:    host.PlacementTarget{Lane: "research", WorkerID: "vm-a", WorkerClass: "workstation"},
+			wantAllow: true,
+		},
+		{
+			name: "lane not in placement map is denied when placement is configured",
+			policy: host.AgentLaunchPolicy{
+				Enabled:   true,
+				Placement: map[string]host.PlacementLanePolicy{"research": {WorkerClasses: []string{"thin", "workstation"}}},
+			},
+			target:  host.PlacementTarget{Lane: "delivery", WorkerID: "vm-a", WorkerClass: "workstation"},
+			wantErr: `agent launch policy denied: lane "delivery" has no placement policy entry and placement is configured, so it may not target any remote worker`,
+		},
+		{
+			name: "worker class satisfies allowed classes",
+			policy: host.AgentLaunchPolicy{
+				Enabled:   true,
+				Placement: map[string]host.PlacementLanePolicy{"research": {WorkerClasses: []string{"thin", "workstation"}}},
+			},
+			target:    host.PlacementTarget{Lane: "research", WorkerID: "vm-a", WorkerClass: "workstation"},
+			wantAllow: true,
+		},
+		{
+			name: "worker class outside allowed classes is denied with exact message",
+			policy: host.AgentLaunchPolicy{
+				Enabled:   true,
+				Placement: map[string]host.PlacementLanePolicy{"build": {WorkerClasses: []string{"thin"}}},
+			},
+			target:  host.PlacementTarget{Lane: "build", WorkerID: "vm-b", WorkerClass: "workstation"},
+			wantErr: `agent launch policy denied: lane "build" targets worker "vm-b" (class "workstation") which does not satisfy placement policy (allowed classes: [thin])`,
+		},
+		{
+			name: "network profile outside allowed profiles is denied with exact message",
+			policy: host.AgentLaunchPolicy{
+				Enabled: true,
+				Placement: map[string]host.PlacementLanePolicy{
+					"build": {WorkerClasses: []string{"thin"}, NetworkProfiles: []string{"git-mirror"}},
+				},
+			},
+			target:  host.PlacementTarget{Lane: "build", WorkerID: "vm-b", WorkerClass: "thin", NetworkProfile: "open"},
+			wantErr: `agent launch policy denied: lane "build" targets worker "vm-b" with network profile "open" which does not satisfy placement policy (allowed network profiles: [git-mirror])`,
+		},
+		{
+			name: "empty worker classes on lane means no class restriction",
+			policy: host.AgentLaunchPolicy{
+				Enabled:   true,
+				Placement: map[string]host.PlacementLanePolicy{"research": {}},
+			},
+			target:    host.PlacementTarget{Lane: "research", WorkerID: "vm-a", WorkerClass: "anything"},
+			wantAllow: true,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			decision, err := tc.policy.CheckPlacement(tc.target)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error, got decision %#v", decision)
+				}
+				if err.Error() != tc.wantErr {
+					t.Fatalf("error = %q, want %q", err.Error(), tc.wantErr)
+				}
+				if decision.Allowed {
+					t.Fatalf("expected denied decision, got %#v", decision)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected no error, got %v (decision=%#v)", err, decision)
+			}
+			if decision.Allowed != tc.wantAllow {
+				t.Fatalf("decision.Allowed = %v, want %v (%#v)", decision.Allowed, tc.wantAllow, decision)
+			}
+		})
+	}
+}

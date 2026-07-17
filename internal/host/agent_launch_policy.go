@@ -31,6 +31,58 @@ type AgentLaunchPolicy struct {
 	ProtectedBranches []string `yaml:"protected_branches,omitempty" json:"protected_branches,omitempty"`
 	ProtectedRoots    []string `yaml:"protected_roots,omitempty" json:"protected_roots,omitempty"`
 	AllowedRoots      []string `yaml:"allowed_roots,omitempty" json:"allowed_roots,omitempty"`
+
+	// Placement is the federation placement policy matrix (standing-autonomy
+	// proposal §9 "Federation", invariant SA-I7): lane name -> allowed worker
+	// classes / network profiles for a remote dispatch. A lane absent from
+	// this map, or a nil/empty Placement map altogether, means placement is
+	// not enforced for that lane — CheckPlacement passes through, so existing
+	// callers that never call CheckPlacement (every current Check(...) call
+	// site) are completely unaffected. This is a SEPARATE, EARLIER gate than
+	// internal/capsule/executor's ValidateCapabilities (the sealed-envelope
+	// Policy-vs-Capabilities check applied at execution prepare time):
+	// CheckPlacement runs at launch preflight against the worker's advertised
+	// *class*, before any sealed envelope exists; ValidateCapabilities stays
+	// untouched as the runtime enforcement layer that follows it.
+	Placement map[string]PlacementLanePolicy `yaml:"placement,omitempty" json:"placement,omitempty"`
+}
+
+// PlacementLanePolicy is one lane's placement rule: the worker placement
+// classes ("thin", "workstation", "local-model" — see
+// internal/daemonfederation's Placement* constants, reused verbatim rather
+// than redeclared) and network profiles permitted to run that lane's
+// dispatches. Empty WorkerClasses or NetworkProfiles means "no restriction"
+// on that dimension; a lane simply absent from AgentLaunchPolicy.Placement
+// cannot be remotely dispatched at all once any Placement policy is
+// configured (see CheckPlacement) — this is how the proposal's delivery lane
+// (queue worker, protected-main CAS) stays local-only: never add it to the
+// map.
+type PlacementLanePolicy struct {
+	WorkerClasses   []string `yaml:"worker_classes,omitempty" json:"worker_classes,omitempty"`
+	NetworkProfiles []string `yaml:"network_profiles,omitempty" json:"network_profiles,omitempty"`
+}
+
+// PlacementTarget describes one remote dispatch's requested lane and the
+// worker it is about to be pinned to, for CheckPlacement.
+type PlacementTarget struct {
+	Lane           string
+	WorkerID       string
+	WorkerClass    string
+	NetworkProfile string
+}
+
+// PlacementDecision is the auditable result of a placement preflight check,
+// mirroring AgentLaunchDecision's shape for consistent logging/event
+// recording.
+type PlacementDecision struct {
+	Allowed         bool     `json:"allowed"`
+	Reason          string   `json:"reason,omitempty"`
+	Lane            string   `json:"lane"`
+	WorkerID        string   `json:"worker_id,omitempty"`
+	WorkerClass     string   `json:"worker_class,omitempty"`
+	NetworkProfile  string   `json:"network_profile,omitempty"`
+	AllowedClasses  []string `json:"allowed_classes,omitempty"`
+	AllowedNetworks []string `json:"allowed_networks,omitempty"`
 }
 
 // AgentLaunchDecision is the auditable result of checking a launch directory.
@@ -176,6 +228,65 @@ func (p AgentLaunchPolicy) Check(ctx context.Context, verb, agentName, workingDi
 
 	decision.Reason = "allowed"
 	return decision, nil
+}
+
+// CheckPlacement enforces SA-I7 ("remote execution happens only through
+// sealed envelopes against registered, enabled workers whose advertised
+// capabilities satisfy the lane's policy; placement violations fail at
+// launch preflight, not at runtime"). It is a companion to Check, not a
+// replacement: Check governs the local working-directory/branch/capsule
+// preflight; CheckPlacement additionally governs whether a specific lane may
+// target a specific remote worker class/network profile at all, and runs
+// BEFORE the sealed-envelope Policy-vs-Capabilities gate in
+// internal/capsule/executor.ValidateCapabilities.
+//
+// Backward compatibility: a nil or empty Placement map on the policy (the
+// zero value, and every policy configured before this field existed) makes
+// CheckPlacement always allow — placement is opt-in per deployment. A lane
+// present in the map that the target's class or network profile does not
+// satisfy is denied with a deterministic, tested error message.
+func (p AgentLaunchPolicy) CheckPlacement(target PlacementTarget) (PlacementDecision, error) {
+	lane := strings.TrimSpace(target.Lane)
+	decision := PlacementDecision{
+		Allowed:        true,
+		Lane:           lane,
+		WorkerID:       strings.TrimSpace(target.WorkerID),
+		WorkerClass:    strings.TrimSpace(target.WorkerClass),
+		NetworkProfile: strings.TrimSpace(target.NetworkProfile),
+	}
+	if len(p.Placement) == 0 {
+		decision.Reason = "no placement policy configured"
+		return decision, nil
+	}
+	rule, ok := p.Placement[lane]
+	if !ok {
+		decision.Reason = fmt.Sprintf("lane %q has no placement policy entry", lane)
+		decision.Allowed = false
+		return decision, fmt.Errorf("agent launch policy denied: lane %q has no placement policy entry and placement is configured, so it may not target any remote worker", lane)
+	}
+	decision.AllowedClasses = append([]string(nil), rule.WorkerClasses...)
+	decision.AllowedNetworks = append([]string(nil), rule.NetworkProfiles...)
+	if len(rule.WorkerClasses) > 0 && !stringInList(decision.WorkerClass, rule.WorkerClasses) {
+		decision.Allowed = false
+		decision.Reason = fmt.Sprintf("worker class %q not in allowed classes %v", decision.WorkerClass, rule.WorkerClasses)
+		return decision, fmt.Errorf("agent launch policy denied: lane %q targets worker %q (class %q) which does not satisfy placement policy (allowed classes: %v)", lane, decision.WorkerID, decision.WorkerClass, rule.WorkerClasses)
+	}
+	if len(rule.NetworkProfiles) > 0 && !stringInList(decision.NetworkProfile, rule.NetworkProfiles) {
+		decision.Allowed = false
+		decision.Reason = fmt.Sprintf("network profile %q not in allowed profiles %v", decision.NetworkProfile, rule.NetworkProfiles)
+		return decision, fmt.Errorf("agent launch policy denied: lane %q targets worker %q with network profile %q which does not satisfy placement policy (allowed network profiles: %v)", lane, decision.WorkerID, decision.NetworkProfile, rule.NetworkProfiles)
+	}
+	decision.Reason = "allowed"
+	return decision, nil
+}
+
+func stringInList(value string, list []string) bool {
+	for _, v := range list {
+		if v == value {
+			return true
+		}
+	}
+	return false
 }
 
 func CheckAgentLaunchPolicy(ctx context.Context, verb, agentName, workingDir string) (AgentLaunchDecision, error) {

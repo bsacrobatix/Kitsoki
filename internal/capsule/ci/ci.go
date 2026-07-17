@@ -427,6 +427,17 @@ type RunRequest struct {
 	SourceDigest     string
 	StoryDigest      string
 	Trigger          Trigger
+
+	// ExecutorOverride, when non-empty, replaces the pipeline's declared
+	// Executor for this one dispatch (per-worker pinning, e.g. `kitsoki
+	// capsule ci run --worker <id>` — standing-autonomy proposal §9
+	// "Federation" ask 4). It is applied in Service.Run AFTER Plan seals the
+	// envelope, so it never changes the sealed envelope's digest or its
+	// Policy; it only changes which configured executor (built-in or
+	// cfg.Remotes entry) actually receives the already-sealed dispatch. The
+	// name must still resolve via Executors.Select like any other executor
+	// name — this field does not bypass remote configuration.
+	ExecutorOverride string
 }
 type RunResult struct {
 	Job       artifactjob.Job   `json:"job"`
@@ -504,6 +515,12 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	p, envelope, err := s.Plan(ctx, req)
 	if err != nil {
 		return RunResult{}, err
+	}
+	if req.ExecutorOverride != "" {
+		// Applied after the envelope is already sealed by Plan: pinning a
+		// dispatch to a specific worker changes routing only, never the
+		// sealed Policy/digest the worker executes against.
+		p.Executor = req.ExecutorOverride
 	}
 	job, err := s.Jobs.Register(ctx, artifactjob.RegisterRequest{AppID: "capsule-ci", Story: envelope.StoryPath, Origin: artifactjob.Origin{Kind: req.Trigger.Kind, Ref: req.Trigger.Ref}, WorkspaceInstanceID: artifactjob.InstanceID(req.Workspace.ID), Owner: "capsule-ci"})
 	if err != nil {

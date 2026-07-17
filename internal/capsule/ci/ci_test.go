@@ -225,6 +225,47 @@ func TestServiceSelectsTheDeclaredPipelineExecutor(t *testing.T) {
 	}
 }
 
+// TestServiceRunExecutorOverridePinsDispatchWithoutChangingEnvelope covers
+// the --worker per-dispatch pinning override (standing-autonomy proposal §9
+// "Federation" ask 4): RunRequest.ExecutorOverride must route to the
+// overriding executor even though the pipeline declares no executor (so
+// defaults to "host"), and the sealed envelope digest must be identical to
+// an unoverridden run — pinning changes routing only, never what is sealed.
+func TestServiceRunExecutorOverridePinsDispatchWithoutChangingEnvelope(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	newService := func() Service {
+		return Service{ProjectRoot: root, Jobs: newFixedJobStore("job-executor-override"), Env: environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })}, Executors: fixtureBuiltinExecutors(), Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+			return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+		})}
+	}
+	req := RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}}
+
+	baseline, err := newService().Run(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseline.Executor != "" {
+		t.Fatalf("expected declared (default/empty -> host builtin) executor, got %q", baseline.Executor)
+	}
+
+	overridden := req
+	overridden.ExecutorOverride = "remote-fake"
+	result, err := newService().Run(context.Background(), overridden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Executor != "remote-fake" {
+		t.Fatalf("expected overridden executor remote-fake, got %q", result.Executor)
+	}
+	if result.Execution.ExecutionID == "" || !strings.HasPrefix(result.Execution.ExecutionID, "remote-") {
+		t.Fatalf("expected remote-fake execution, got %#v", result.Execution)
+	}
+	if result.Envelope.Digest != baseline.Envelope.Digest {
+		t.Fatalf("executor override must not change the sealed envelope digest: baseline=%q overridden=%q", baseline.Envelope.Digest, result.Envelope.Digest)
+	}
+}
+
 func TestServiceRunFailureReturnsFailedJobAndExecutorEvents(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)
