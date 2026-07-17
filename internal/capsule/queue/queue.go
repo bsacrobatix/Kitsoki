@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,6 +19,12 @@ import (
 
 	"kitsoki/internal/capsule/receipt"
 )
+
+// ErrBusy indicates the state lock is held by a concurrent caller and could
+// not be acquired within Store.LockWait. Callers that need a bounded,
+// receipt-typed result (rather than a hang or an opaque error) should
+// errors.Is against this to distinguish contention from other failures.
+var ErrBusy = errors.New("queue: serializer busy")
 
 const (
 	Schema = "capsule-merge-queue/v1"
@@ -431,7 +438,7 @@ func lock(path string, wait time.Duration) (func(), error) {
 			return nil, fmt.Errorf("queue: acquire serializer: %w", err)
 		}
 		if wait <= 0 || time.Now().After(deadline) {
-			return nil, fmt.Errorf("queue: acquire serializer: %w", err)
+			return nil, fmt.Errorf("queue: acquire serializer: %w: %w", ErrBusy, err)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

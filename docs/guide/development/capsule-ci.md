@@ -442,11 +442,19 @@ For a managed development workspace, use the single promotion entry point:
 kitsoki capsule promote --current --wait
 ```
 
-It snapshots dirty workspace content into a signed-off candidate commit, runs
-the declared Capsule CI pipeline, persists the receipt-bound candidate in the
+It runs the same bounded, no-spend `capsule ci doctor` readiness preflight
+first (hygiene inventory bound by `HygieneTimeout`, default two minutes),
+snapshots dirty workspace content into a signed-off candidate commit, runs the
+declared Capsule CI pipeline, persists the receipt-bound candidate in the
 local queue, validates the exact speculative integration tree, and then
 compare-and-swaps the registered protected project's target ref. The result
 reports the protected source SHA; it never updates a Capsule-local `main` ref.
+
+Every `capsule promote` invocation resolves to a typed `status` within a
+bound instead of hanging without a receipt: `not_ready` (the doctor preflight
+failed — the report and its remedies are attached), `busy` (the local queue
+state lock was held by a concurrent caller), `queued`, `retry_wait`, or
+`promoted`.
 
 The candidate's CI receipt remains bound to its original source digest. When
 integration produces a distinct merge commit, the reconciliation plan records

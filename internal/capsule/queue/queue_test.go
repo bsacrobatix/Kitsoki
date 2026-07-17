@@ -2,7 +2,10 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -64,6 +67,42 @@ func TestConcurrentSubmitSerializesOneCandidate(t *testing.T) {
 	}
 	if len(state.Candidates) != 1 {
 		t.Fatalf("candidates=%#v", state.Candidates)
+	}
+}
+
+// TestSubmitReturnsTypedBusyWithinBoundOnLockContention guards the
+// receipt-bound promotion path: a caller with a zero LockWait (the default
+// used by `capsule promote`) must get a fast, errors.Is-detectable ErrBusy
+// rather than hanging or surfacing an opaque os.IsExist error when the
+// state lock is already held.
+func TestSubmitReturnsTypedBusyWithinBoundOnLockContention(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".capsules", "queue")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(dir, "state.lock")
+	f, err := os.OpenFile(lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close(); _ = os.Remove(lockFile) }()
+
+	sha := strings.Repeat("a", 40)
+	in := Submit{Branch: "agent/a", SHA: sha, Receipt: testReceipt(t, sha)}
+	store := Store{ProjectRoot: root}
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.Submit(in)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrBusy) {
+			t.Fatalf("want ErrBusy, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Submit did not return within bound while the lock was held")
 	}
 }
 

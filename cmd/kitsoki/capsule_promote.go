@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,17 @@ type devWorkspaceManifest struct {
 	Workspace string `json:"workspace"`
 }
 
+// Promote status values. Every runCapsulePromote return path resolves to one
+// of these within a bound instead of hanging without a receipt: readiness
+// and lock contention are reported as typed results, not opaque errors.
+const (
+	PromoteStatusNotReady  = "not_ready"
+	PromoteStatusBusy      = "busy"
+	PromoteStatusQueued    = "queued"
+	PromoteStatusRetryWait = "retry_wait"
+	PromoteStatusPromoted  = "promoted"
+)
+
 type capsulePromoteResult struct {
 	Schema           string                `json:"schema"`
 	Status           string                `json:"status"`
@@ -38,6 +50,7 @@ type capsulePromoteResult struct {
 	WorkspaceID      string                `json:"workspace_id"`
 	CandidateSHA     string                `json:"candidate_sha"`
 	ReceiptID        string                `json:"receipt_id"`
+	Doctor           *ci.DoctorReport      `json:"doctor,omitempty"`
 	QueueCandidate   queue.Candidate       `json:"queue_candidate"`
 	QueueState       queue.State           `json:"queue_state,omitempty"`
 	Plan             reconcile.Plan        `json:"plan,omitempty"`
@@ -161,6 +174,13 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	if err != nil {
 		return capsulePromoteResult{}, err
 	}
+	report, err := capsulePromoteDoctorCheck(ctx, root, opts.Pipeline, instance, workspacePath)
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
+	if !report.Ready {
+		return capsulePromoteResult{Schema: "capsule-promote/v1", Status: PromoteStatusNotReady, ProjectRoot: root, WorkspaceID: instance.ID, Doctor: &report}, nil
+	}
 	dirty, err := gitDirty(ctx, workspacePath)
 	if err != nil {
 		return capsulePromoteResult{}, err
@@ -200,9 +220,12 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		})
 	}
 	if err != nil {
+		if errors.Is(err, queue.ErrBusy) {
+			return capsulePromoteResult{Schema: "capsule-promote/v1", Status: PromoteStatusBusy, ProjectRoot: root, WorkspaceID: instance.ID, CandidateSHA: candidateSHA, ReceiptID: stored.Receipt.ReceiptID}, nil
+		}
 		return capsulePromoteResult{}, err
 	}
-	out := capsulePromoteResult{Schema: "capsule-promote/v1", Status: "queued", ProjectRoot: root, WorkspaceID: instance.ID, CandidateSHA: candidateSHA, ReceiptID: stored.Receipt.ReceiptID, QueueCandidate: qcandidate}
+	out := capsulePromoteResult{Schema: "capsule-promote/v1", Status: PromoteStatusQueued, ProjectRoot: root, WorkspaceID: instance.ID, CandidateSHA: candidateSHA, ReceiptID: stored.Receipt.ReceiptID, QueueCandidate: qcandidate}
 	if !opts.Wait {
 		return out, nil
 	}
@@ -218,20 +241,39 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		GateVersion: opts.Pipeline + ":" + opts.GateCommand,
 	})
 	if err != nil {
+		if errors.Is(err, queue.ErrBusy) {
+			out.Status = PromoteStatusBusy
+			return out, nil
+		}
 		return capsulePromoteResult{}, err
 	}
 	out.QueueState = state
 	queued, ok := queueCandidate(state, qcandidate.ID)
 	if !ok || queued.Status != queue.Landed {
-		out.Status = "retry_wait"
+		out.Status = PromoteStatusRetryWait
 		return out, nil
 	}
 	if queued.ResultMainSHA == "" {
 		return out, fmt.Errorf("capsule promote: landed queue candidate is missing protected CAS result")
 	}
 	out.ProtectedMainSHA = queued.ResultMainSHA
-	out.Status = "promoted"
+	out.Status = PromoteStatusPromoted
 	return out, nil
+}
+
+// capsulePromoteDoctorCheck runs the same bounded, no-spend readiness
+// preflight as `capsule ci doctor` (hygiene inventory bound by
+// ci.Doctor.HygieneTimeout) so promote returns a typed not-ready result
+// within a bound instead of proceeding into a run that may hang.
+func capsulePromoteDoctorCheck(ctx context.Context, root, pipeline string, instance control.Instance, workspacePath string) (ci.DoctorReport, error) {
+	cfg, err := ci.Load(workspacePath)
+	if err != nil {
+		cfg = ci.Config{}
+	}
+	executors := ci.NewConfiguredExecutors(cfg)
+	executors.ProjectRoot = workspacePath
+	doctor := ci.Doctor{ProjectRoot: workspacePath, Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Hygiene: capsuleCIHygienePlanner(root), Workspace: ci.GitWorkspaceProbe{}}
+	return doctor.Check(ctx, ci.DoctorRequest{Pipeline: pipeline, Workspace: instance, WorkspacePath: workspacePath})
 }
 
 func runPromoteCI(ctx context.Context, project string, instance control.Instance, pipeline string) (record.Stored, error) {
