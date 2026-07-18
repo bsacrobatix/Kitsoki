@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/capsule"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
@@ -30,8 +32,27 @@ func capsuleCICmd() *cobra.Command {
 	cmd.AddCommand(capsuleCIPlanCmd(), capsuleCIRunCmd(), capsuleCIDoctorCmd(), capsuleCIStatusCmd(), capsuleCIDiagnoseCmd(), capsuleCISummaryCmd(), capsuleCICancelCmd(), capsuleCIGitHubCmd())
 	return cmd
 }
+
+// capsuleCIProjectRoot resolves Capsule CI's default project against the
+// protected source checkout recorded by a managed workspace. The controller's
+// instance store and run evidence live under that source root, while CI inputs
+// still come from the exact committed workspace selected by the instance.
+// Explicit non-dot paths remain authoritative.
+func capsuleCIProjectRoot(project string) (string, error) {
+	project = strings.TrimSpace(project)
+	if project == "" {
+		project = "."
+	}
+	if filepath.Clean(project) == "." {
+		if sourceRoot := capsule.ManagedSourceRootFromCWD(); sourceRoot != "" {
+			project = sourceRoot
+		}
+	}
+	return filepath.Abs(project)
+}
+
 func ciInputs(ctx context.Context, project, workspace, pipeline string, trigger ci.Trigger) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, string, error) {
-	root, err := filepath.Abs(project)
+	root, err := capsuleCIProjectRoot(project)
 	if err != nil {
 		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
 	}
@@ -100,6 +121,11 @@ func capsuleCIPlanCmd() *cobra.Command {
 	var project, workspace, triggerPath string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "plan <pipeline>", Args: cobra.ExactArgs(1), Short: "Build a sealed story-native CI envelope", RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		project, err = capsuleCIProjectRoot(project)
+		if err != nil {
+			return err
+		}
 		trigger, err := capsuleCIReadTrigger(cmd, triggerPath, args[0])
 		if err != nil {
 			return err
@@ -121,6 +147,11 @@ func capsuleCIRunCmd() *cobra.Command {
 	var project, workspace, verdictPath, fakeReceiptSigner, triggerPath, workerID, lane string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "run <pipeline>", Args: cobra.ExactArgs(1), Short: "Run declared Capsule CI with a story-produced typed verdict", RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		project, err = capsuleCIProjectRoot(project)
+		if err != nil {
+			return err
+		}
 		trigger, err := capsuleCIReadTrigger(cmd, triggerPath, args[0])
 		if err != nil {
 			return err
@@ -289,7 +320,7 @@ func capsuleCIDoctorCmd() *cobra.Command {
 	var project, workspace string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "doctor <pipeline>", Args: cobra.ExactArgs(1), Short: "Run a no-spend Capsule CI readiness preflight", RunE: func(cmd *cobra.Command, args []string) error {
-		root, err := filepath.Abs(project)
+		root, err := capsuleCIProjectRoot(project)
 		if err != nil {
 			return err
 		}
@@ -355,6 +386,11 @@ func capsuleCIStatusCmd() *cobra.Command {
 	var project, job string
 	var jsonOut, refresh bool
 	cmd := &cobra.Command{Use: "status", Short: "Read persisted Capsule CI run records", RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		project, err = capsuleCIProjectRoot(project)
+		if err != nil {
+			return err
+		}
 		store := ci.FileRunStore{ProjectRoot: project}
 		if job != "" {
 			record, err := store.Get(job)
@@ -413,6 +449,11 @@ func capsuleCISummaryCmd() *cobra.Command {
 	var limit int
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "summary", Short: "Project a provider-safe Capsule CI status summary", RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		project, err = capsuleCIProjectRoot(project)
+		if err != nil {
+			return err
+		}
 		summary, err := (ci.FileRunStore{ProjectRoot: project}).ProviderSummary(limit)
 		if err != nil {
 			return err
@@ -435,12 +476,16 @@ func capsuleCIDiagnoseCmd() *cobra.Command {
 	var stallAfter time.Duration
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "diagnose", Short: "Summarize one persisted Capsule CI failure and its local evidence", RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		project, err = capsuleCIProjectRoot(project)
+		if err != nil {
+			return err
+		}
 		if latest == (job != "") {
 			return fmt.Errorf("capsule ci: choose exactly one of --job or --latest")
 		}
 		store := ci.FileRunStore{ProjectRoot: project}
 		var diagnosis ci.RunDiagnosis
-		var err error
 		if latest {
 			diagnosis, err = store.DiagnoseLatest(stallAfter)
 		} else {
@@ -505,6 +550,11 @@ func capsuleCICancelCmd() *cobra.Command {
 	var project, job string
 	var jsonOut bool
 	cmd := &cobra.Command{Use: "cancel", Short: "Cancel a persisted running or parked Capsule CI job", RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
+		project, err = capsuleCIProjectRoot(project)
+		if err != nil {
+			return err
+		}
 		store := ci.FileRunStore{ProjectRoot: project}
 		record, err := store.Get(job)
 		if err != nil {

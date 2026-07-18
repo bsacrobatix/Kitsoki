@@ -69,6 +69,11 @@ func capsuleCIGitHubCheckCmd() *cobra.Command {
 		Use:   "check",
 		Short: "Project a Capsule CI run record to a GitHub check-run payload",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			project, err = capsuleCIProjectRoot(project)
+			if err != nil {
+				return err
+			}
 			record, err := (ci.FileRunStore{ProjectRoot: project}).Get(job)
 			if err != nil {
 				return err
@@ -95,6 +100,11 @@ func capsuleCIGitHubPublishCheckCmd() *cobra.Command {
 		Use:   "publish-check",
 		Short: "Publish a Capsule CI run record as a GitHub check run",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var err error
+			project, err = capsuleCIProjectRoot(project)
+			if err != nil {
+				return err
+			}
 			record, err := (ci.FileRunStore{ProjectRoot: project}).Get(job)
 			if err != nil {
 				return err
