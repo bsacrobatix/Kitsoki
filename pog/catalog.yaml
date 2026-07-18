@@ -3094,3 +3094,63 @@ nodes:
     status: proposed
     title: Durable/shared graph claim registry across agent MCP processes
     visibility: internal
+  - authored_by: agent:claude-fable-dogfood
+    created_at: "2026-07-18T01:04:32Z"
+    id: cs-18f1d91a4f12bb38c7f0566a7a011e16
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          id: req-agent-mode-conversational-workdir-threading
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-agent-mode-dogfood-20260718
+          status: proposed
+          summary: 'Bug (dogfood 2026-07-18, `kitsoki run agent:pog-driver` from the protected POG root): agentroot.EnsureWorkingDir auto-provisions the capsule (agent-mode-pog-driver) and announces it, but agentroot.Synthesize threads the effective working dir only into the workbench branch (world.workdir). The conversational branch (external agents like pog-driver) seeds no world workdir and only sets the synthesized agent cwd when the def declares one, so the conversation lane''s host.agent.converse falls back to the process cwd — the protected checkout — and the launch policy denies every turn ("working_dir /Users/brad/code/POG is outside allowed agent roots"). Requirement: every Synthesize branch must pin the session''s converse working dir to the EnsureWorkingDir result (agent cwd fallback and/or world workdir), so the policy preflight sees the provisioned capsule.'
+          title: Synthesized conversational agent rooms must run in the effective working dir
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          id: req-agent-converse-auto-capsule
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-agent-mode-dogfood-20260718
+          status: proposed
+          summary: 'host.agent.converse (internal/host/agent_converse.go) calls RequireAgentLaunchAllowed raw: a working dir under a protected root is a hard denial. Agent-mode session launch (cmd/kitsoki/session.go → agentroot.EnsureWorkingDir) and the claude/codex superagent shim instead materialize a policy-approved capsule workspace and re-check against it. Requirement: the converse preflight must route through the same EnsureWorkingDir + capsule-provisioner seam so a protected-root converse auto-provisions (stable id, reacquired on resume) instead of failing the operator''s turn; plain denial remains for non-protected violations and nil provisioners.'
+          title: host.agent.converse preflight auto-provisions capsules like agent-mode launch
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          id: req-conversation-lane-inherits-room-agent-voice
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-agent-mode-dogfood-20260718
+          status: proposed
+          summary: 'In a mode: conversational story room, maybeConversationDivert intercepts the capture intent before the room''s arc runs and builds its own converse call from the off-ramp/off-path voice. A room whose arc invokes host.agent.converse with a named agent (e.g. POG''s pog-driver story: agent driver, capsule cwd, restricted toolbox, permission mode ask) but declares no off_path/agent_off_ramp voice gets the zero voice: the lane converses agentless with default bypassPermissions, no system prompt, no model pin, and no agent cwd — both a launch-policy denial under protected roots and a silent permissions/persona regression. Requirement: the lane must default its voice to the agent named by the room''s capture-arc converse invoke; load-time validation should flag conversational rooms where the lane voice and arc agent diverge.'
+          title: Conversation lane inherits the capture arc's agent voice
+          visibility: public
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          id: req-agent-mode-pure-proxy
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-agent-mode-dogfood-20260718
+          status: proposed
+          summary: 'Operator feedback (2026-07-18): `kitsoki run agent:<name>` is expected to be a pure interactive proxy to the selected backend (claude, codex, ...) — no story, no rooms, no intent routing. Today the synthesized one-room app runs the full routing stack (deterministic / semantic / local-LLM / main-LLM lanes render in the transcript) before every chat turn reaches the agent. Requirement: in agent mode the operator''s free text goes straight to the agent converse turn — routing lanes, intent capture, and off-path machinery must not sit between the operator and the backend (or must be provably zero-cost and invisible), preserving the "nice kitsoki wrapper around claude/codex" contract of session persistence, transcripts, and launch policy.'
+          title: Agent mode is a thin proxy to the selected backend
+          visibility: public
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Agent-mode conversational lane launch-policy gaps (POG dogfood 2026-07-18)
+    visibility: internal
