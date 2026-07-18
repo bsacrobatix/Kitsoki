@@ -238,7 +238,7 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 	cmd := exec.CommandContext(ctx, bin, cliArgs...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Dir = workingDir
-	cmd.Env = envWithProvider(envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sessionID), AgentProviderEnvFromCtx(ctx))
+	cmd.Env = envWithProvider(envWithSessionID(envWithShimPassThrough(envWithKitsokiBinOnPath(os.Environ())), sessionID), AgentProviderEnvFromCtx(ctx))
 	// When kitsoki holds the one IDE link, scrub the auto-connect signals so the
 	// inner claude doesn't open its own socket (shared decision #1). No-op (env
 	// untouched) when no link is connected. Outermost wrap so it sees the
@@ -359,7 +359,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	cmd := exec.CommandContext(ctx, bin, inv.Args...)
 	cmd.Stdin = strings.NewReader(inv.Stdin)
 	cmd.Dir = inv.WorkingDir
-	cmd.Env = envWithProvider(envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sid), AgentProviderEnvFromCtx(ctx))
+	cmd.Env = envWithProvider(envWithSessionID(envWithShimPassThrough(envWithKitsokiBinOnPath(os.Environ())), sid), AgentProviderEnvFromCtx(ctx))
 	// IDE auto-connect scrub (shared decision #1) — outermost wrap, gated on a
 	// connected link in ctx; no-op otherwise so the env is byte-identical to
 	// today on every headless/flow path.
@@ -1174,6 +1174,34 @@ func claudeExitErrorMessage(exitCode int, stderr, stdout string) string {
 		return stdout
 	}
 	return fmt.Sprintf("claude exited with code %d", exitCode)
+}
+
+// agentLaunchShimActiveEnv is the launch-policy shims' pass-through marker
+// (.kitsoki/bin/{claude,codex}): a shim entered with a positive depth resolves
+// the real backend binary and execs it, instead of applying the repo's
+// operator-launch policy to the argv.
+const agentLaunchShimActiveEnv = "KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE"
+
+// envWithShimPassThrough marks a kitsoki-managed backend fork as a
+// policy-approved launch for the repo launch-policy shims. The dispatch
+// already passed kitsoki's own agent-launch policy (its working dir is the
+// checked, possibly auto-provisioned capsule), so when PATH resolves the
+// backend CLI to a shim, the shim must pass through to the real binary — an
+// unmarked fork is instead treated as a raw operator launch and rejected
+// (codex's --dangerously-bypass-approvals-and-sandbox trips the shim's
+// protected-root read-only gate). Any inherited depth is reset to 1: the fork
+// begins a fresh approved chain, and a stale outer depth (e.g. a kitsoki
+// session itself started through the shims) would otherwise trip the shim's
+// recursion guard when more than one repo's shim dir sits on PATH.
+func envWithShimPassThrough(env []string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, agentLaunchShimActiveEnv+"=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, agentLaunchShimActiveEnv+"=1")
 }
 
 // envWithKitsokiBinOnPath returns a copy of env with the kitsoki

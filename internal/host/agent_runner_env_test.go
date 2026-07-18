@@ -61,3 +61,38 @@ func findPathLine(t *testing.T, env []string) string {
 	require.Len(t, matches, 1, "expected exactly one PATH entry, got %v", matches)
 	return matches[0]
 }
+
+// TestEnvWithShimPassThrough_MarksApprovedLaunch pins the launch-policy shim
+// contract for kitsoki-managed backend forks: the subprocess env must carry
+// KITSOKI_AGENT_LAUNCH_SHIM_ACTIVE=1 so a PATH-resolved .kitsoki/bin shim
+// passes through to the real binary instead of re-gating the dispatch as a
+// raw operator launch (protected-root read-only denial).
+func TestEnvWithShimPassThrough_MarksApprovedLaunch(t *testing.T) {
+	got := envWithShimPassThrough([]string{"PATH=/usr/bin", "HOME=/home/x"})
+	require.Contains(t, got, agentLaunchShimActiveEnv+"=1")
+	require.Contains(t, got, "HOME=/home/x")
+}
+
+// TestEnvWithShimPassThrough_ResetsInheritedDepth pins the depth reset: a
+// kitsoki session that was itself started through the shims inherits a
+// positive depth, and forwarding it would trip the shim's recursion guard
+// when more than one repo's shim dir sits on PATH. Every kitsoki-managed
+// fork starts a fresh approved chain at depth 1, with exactly one marker
+// entry in the env.
+func TestEnvWithShimPassThrough_ResetsInheritedDepth(t *testing.T) {
+	for _, inherited := range []string{"0", "2", "3"} {
+		got := envWithShimPassThrough([]string{
+			"PATH=/usr/bin",
+			agentLaunchShimActiveEnv + "=" + inherited,
+		})
+		count := 0
+		for _, kv := range got {
+			if strings.HasPrefix(kv, agentLaunchShimActiveEnv+"=") {
+				count++
+				require.Equal(t, agentLaunchShimActiveEnv+"=1", kv,
+					"inherited depth %s must be reset to 1", inherited)
+			}
+		}
+		require.Equal(t, 1, count, "exactly one marker entry (inherited %s)", inherited)
+	}
+}

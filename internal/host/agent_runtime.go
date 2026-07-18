@@ -178,7 +178,7 @@ func sandboxStringList(raw any, name string) ([]string, string) {
 }
 
 func (s AgentSandboxSpec) launchSpec(ctx context.Context, command string, args []string, stdin, workingDir, sessionID string) agentruntime.LaunchSpec {
-	env := envWithProvider(envWithSessionID(envWithKitsokiBinOnPath(os.Environ()), sessionID), AgentProviderEnvFromCtx(ctx))
+	env := envWithProvider(envWithSessionID(envWithShimPassThrough(envWithKitsokiBinOnPath(os.Environ())), sessionID), AgentProviderEnvFromCtx(ctx))
 	if l := IDELinkFromContext(ctx); l != nil && l.Connected() {
 		env = envScrubIDE(env)
 	}
