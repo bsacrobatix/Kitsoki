@@ -611,6 +611,44 @@ func TestResolve_LibraryMCPServersReachAgentMode(t *testing.T) {
 	}
 }
 
+// TestResolve_ProjectOverlayKeepsPackagedToolContract pins the federated-graph
+// override shape: a project overlay that only swaps an MCP server command must
+// inherit the embedded base's tool list and external effect (via the rendered
+// `tools` field), not fall back to the generic sandbox_mode write toolbox —
+// and must keep the base's other packaged servers.
+func TestResolve_ProjectOverlayKeepsPackagedToolContract(t *testing.T) {
+	libRoot := t.TempDir()
+	writeLibraryAgent(t, libRoot, "pog-driver",
+		"tools: mcp__kitsoki-codeact__*, mcp__kitsoki-graph__*", "Drive POG.")
+	projDir := filepath.Join(t.TempDir(), "agents")
+	writeProjectAgent(t, projDir, "pog-driver.toml",
+		"[mcp_servers.kitsoki-graph]\ncommand = \"bash\"\nargs = [\"scripts/pog-driver-mcp.sh\"]\n")
+
+	def, err := Resolve("pog-driver", Sources{
+		ProjectDirs: []string{projDir},
+		Materialize: func(context.Context) (string, error) { return libRoot, nil },
+	})
+	if err != nil {
+		t.Fatalf("Resolve(pog-driver): %v", err)
+	}
+	if def.Source != SourceProject {
+		t.Fatalf("source = %s, want project", def.Source)
+	}
+	if len(def.Tools) != 2 || def.Tools[1] != "mcp__kitsoki-graph__*" {
+		t.Fatalf("tools = %v, want the packaged mcp__* contract", def.Tools)
+	}
+	if def.Effect != effect.External {
+		t.Fatalf("effect = %s, want external", def.Effect)
+	}
+	graph, ok := def.MCPServers["kitsoki-graph"].(map[string]any)
+	if !ok || graph["command"] != "bash" {
+		t.Fatalf("kitsoki-graph server = %v, want overridden bash launcher", def.MCPServers["kitsoki-graph"])
+	}
+	if _, ok := def.MCPServers["kitsoki-codeact"]; !ok {
+		t.Fatalf("servers = %v, want base kitsoki-codeact preserved", def.MCPServers)
+	}
+}
+
 // TestSynthesize_RealBuiltinsRoundTrip resolves every real builtin (in-memory
 // registry, no embedded library, no project dirs) and synthesizes it — a
 // smoke test that arbitrary real prompts/tool surfaces survive the YAML

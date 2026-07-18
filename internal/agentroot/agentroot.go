@@ -219,11 +219,15 @@ func resolveProjectDef(name, path string, materialize LibraryMaterializer) (Def,
 	return defFromStandalone(name, agent, abs), nil
 }
 
-// defFromStandalone projects a loaded TOML agent onto Def. A TOML agent
-// declares no tool list, so the effect (and the synthesized tool surface)
-// derive from sandbox_mode: read-only stays a conversational read agent,
-// anything else gets the full write toolbox — the write-mode gate, not the
-// static list, is the runtime protection (room-workbench contract).
+// defFromStandalone projects a loaded TOML agent onto Def. A declared
+// `tools` list (authored, or inherited from the embedded base through the
+// overlay render) wins with its derived effect, so a project overlay keeps a
+// packaged agent's contract — e.g. pog-driver stays a graph-only external
+// agent when only its MCP server command is overridden. Without one, the
+// effect (and the synthesized tool surface) derive from sandbox_mode:
+// read-only stays a conversational read agent, anything else gets the full
+// write toolbox — the write-mode gate, not the static list, is the runtime
+// protection (room-workbench contract).
 func defFromStandalone(name string, agent StandaloneCodexAgent, path string) Def {
 	def := Def{
 		Name:         name,
@@ -236,7 +240,10 @@ func defFromStandalone(name string, agent StandaloneCodexAgent, path string) Def
 		Source:       SourceProject,
 		Path:         path,
 	}
-	if strings.TrimSpace(agent.SandboxMode) == "read-only" {
+	if len(agent.Tools) > 0 {
+		def.Tools = append([]string(nil), agent.Tools...)
+		def.Effect = effect.FromTools(agent.Tools)
+	} else if strings.TrimSpace(agent.SandboxMode) == "read-only" {
 		def.Tools = append([]string(nil), projectReadToolbox...)
 		def.Effect = effect.Read
 	} else {

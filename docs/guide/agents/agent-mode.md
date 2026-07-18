@@ -149,11 +149,15 @@ Agent mode adds no sandbox machinery; it composes the existing gates:
    `read_only`; every mutating tool call holds for an operator write-mode
    grant (or a headless deny). This, not the static tool list, is the
    runtime protection.
-3. **Project TOML mapping** — a freestanding TOML agent declares no tool
-   list, so its surface derives from `sandbox_mode`: `read-only` resolves to
-   a read agent with `[Read, Grep, Glob]`; anything else resolves to a write
-   agent with the full `[Read, Grep, Glob, Edit, Write, Bash]` workbench
-   surface behind the gates above.
+3. **Project TOML mapping** — a freestanding TOML agent may declare an
+   explicit `tools = ["..."]` allowlist; when present (authored, or inherited
+   from the embedded base through a partial overlay) it wins together with
+   its derived effect class, so an overlay that only swaps an MCP server
+   command keeps the packaged agent's contract. Without one, the surface
+   derives from `sandbox_mode`: `read-only` resolves to a read agent with
+   `[Read, Grep, Glob]`; anything else resolves to a write agent with the
+   full `[Read, Grep, Glob, Edit, Write, Bash]` workbench surface behind the
+   gates above.
 
 ## Agent mode vs `kitsoki agent launch`
 

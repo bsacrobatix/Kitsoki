@@ -31,7 +31,12 @@ type StandaloneCodexAgent struct {
 	Model                       string
 	Effort                      string
 	SandboxMode                 string
-	MCPServers                  map[string]any
+	// Tools is an explicit tool allowlist (`tools = ["mcp__x__*", ...]`).
+	// When declared it wins over the sandbox_mode-derived surface, letting a
+	// project overlay keep a packaged agent's tool contract (e.g. pog-driver's
+	// graph-only mcp__* set) while overriding other fields.
+	Tools      []string
+	MCPServers map[string]any
 }
 
 // LibraryMaterializer materializes the embedded agent library and returns the
@@ -285,6 +290,10 @@ func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, ins
 		Model:                 front.Model,
 		Effort:                front.Effort,
 		DeveloperInstructions: instructions,
+		// The frontmatter tool list rides the rendered TOML so a project
+		// overlay inherits the packaged contract instead of the generic
+		// sandbox_mode-derived surface.
+		Tools: append([]string(nil), front.Tools...),
 		// Rendering these servers only for the isolated launch keeps normal
 		// Codex sessions untouched.
 		MCPServers: builtInAgentMCPServers(agentName),
@@ -380,6 +389,9 @@ func mergeStandaloneCodexAgents(parent, child StandaloneCodexAgent) StandaloneCo
 	if child.SandboxMode != "" {
 		merged.SandboxMode = child.SandboxMode
 	}
+	if len(child.Tools) > 0 {
+		merged.Tools = append([]string(nil), child.Tools...)
+	}
 	if child.DeveloperInstructionsAppend != "" {
 		merged.DeveloperInstructions = strings.TrimSpace(merged.DeveloperInstructions) + "\n\n" + strings.TrimSpace(child.DeveloperInstructionsAppend)
 	}
@@ -442,6 +454,9 @@ func renderStandaloneCodexAgentTOML(agent StandaloneCodexAgent) string {
 	}
 	if strings.TrimSpace(agent.SandboxMode) != "" {
 		fmt.Fprintf(&b, "sandbox_mode = %s\n", TOMLString(agent.SandboxMode))
+	}
+	if len(agent.Tools) > 0 {
+		fmt.Fprintf(&b, "tools = %s\n", tomlStringArray(agent.Tools))
 	}
 	fmt.Fprintf(&b, "developer_instructions = %s\n", TOMLString(agent.DeveloperInstructions))
 	for _, name := range sortedStandaloneMCPServerNames(agent.MCPServers) {
@@ -542,6 +557,8 @@ func parseStandaloneCodexAgentTOML(src string) (StandaloneCodexAgent, error) {
 			agent.Effort = parseLaunchTOMLString(val)
 		case "sandbox_mode":
 			agent.SandboxMode = parseLaunchTOMLString(val)
+		case "tools":
+			agent.Tools = parseLaunchTOMLStringArray(val)
 		default:
 			// Ignore Codex-agent fields that are useful to Codex itself but not
 			// needed for launch planning, such as description variants.
