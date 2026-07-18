@@ -199,6 +199,16 @@ func Synthesize(def Def, opts Options) (*app.AppDef, error) {
 		if len(def.Tools) > 0 {
 			agentDecl["tools"] = append([]string(nil), def.Tools...)
 		}
+		// The conversational lane has no world.workdir threading — the
+		// synthesized decl's cwd is the only channel to the converse dispatch.
+		// External agents just passed the preflight against workingDir, so that
+		// (possibly auto-provisioned capsule) path must be where they actually
+		// run; leaving cwd to def.Cwd or the process cwd would re-enter the
+		// protected root the policy already steered away from. Mirrors the
+		// workbench precedence, where world.workdir wins over the declared cwd.
+		if def.Effect == effect.External {
+			agentDecl["cwd"] = workingDir
+		}
 		// Conversational shape (read/pure/external): capture_free_text makes
 		// the room's off-ramp the deterministic free-text sink
 		// (expandOffRampCaptures synthesizes the `<room>_discuss` intent +

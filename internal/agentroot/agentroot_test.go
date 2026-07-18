@@ -437,6 +437,53 @@ func TestSynthesize_ExternalAgentGetsOffRampWithPreflight(t *testing.T) {
 	}
 }
 
+// TestSynthesize_ExternalAgentCwdIsEffectiveWorkingDir pins the
+// conversational-lane working-dir threading: an external agent's converse
+// dispatch reads the synthesized decl's cwd (there is no world.workdir in the
+// off-ramp shape), so the decl cwd must be the preflight-checked effective
+// working dir — including when the definition declares its own cwd. Otherwise
+// a session whose working dir was auto-provisioned into a capsule would
+// converse back in the protected root the policy steered away from.
+func TestSynthesize_ExternalAgentCwdIsEffectiveWorkingDir(t *testing.T) {
+	allow := func(context.Context, string, string, string) (host.AgentLaunchDecision, error) {
+		return host.AgentLaunchDecision{Enabled: true, Allowed: true, Reason: "allowed"}, nil
+	}
+	for _, tc := range []struct {
+		name   string
+		defCwd string
+	}{
+		{name: "no declared cwd", defCwd: ""},
+		{name: "declared cwd is overridden by the checked working dir", defCwd: "/somewhere/else"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workingDir := t.TempDir()
+			def := Def{
+				Name:         "filer",
+				SystemPrompt: "You file bugs.",
+				Tools:        []string{"Read", "mcp__bug__create"},
+				Effect:       effect.External,
+				Cwd:          tc.defCwd,
+				Source:       SourceBuiltin,
+			}
+			appDef, err := Synthesize(def, Options{
+				WorkingDir:  workingDir,
+				SchemaDir:   t.TempDir(),
+				CheckPolicy: allow,
+			})
+			if err != nil {
+				t.Fatalf("Synthesize: %v", err)
+			}
+			decl := appDef.Agents["filer"]
+			if decl == nil {
+				t.Fatal("synthesized root lost the agent decl")
+			}
+			if decl.Cwd != workingDir {
+				t.Fatalf("synthesized decl cwd = %q, want effective working dir %q", decl.Cwd, workingDir)
+			}
+		})
+	}
+}
+
 // TestSynthesize_RealBuiltinsRoundTrip resolves every real builtin (in-memory
 // registry, no embedded library, no project dirs) and synthesizes it — a
 // smoke test that arbitrary real prompts/tool surfaces survive the YAML
