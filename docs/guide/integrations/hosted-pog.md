@@ -84,9 +84,12 @@ scripts/deploy-hosted-pog.sh --verify # read-only live verification later
 ```
 
 The helper refuses either a Kitsoki revision or selected POG revision that is
-not contained in its protected `main`. It builds Kitsoki for Linux, creates a
-Git bundle from POG `main`, checks the uploaded binary's SHA-256, and invokes
-the versioned remote installer. The installer then:
+not contained in its protected `main`. It also refuses a POG revision that
+predates the separate `POG_KITSOKI_BROWSER_URL` seam; without that seam the
+server could work while browsers were incorrectly sent to their own
+`127.0.0.1`. It builds Kitsoki for Linux, creates a Git bundle from POG `main`,
+checks the uploaded binary's SHA-256, and invokes the versioned remote
+installer. The installer then:
 
 1. installs immutable POG and Kitsoki releases under `/opt/pog/releases/<sha>`
    and `/opt/kitsoki-hosted-pog/releases/<sha>` without replacing the existing

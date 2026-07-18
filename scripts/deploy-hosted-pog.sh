@@ -45,6 +45,10 @@ KITSOKI_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 git -C "$ROOT" merge-base --is-ancestor "$KITSOKI_SHA" main || { echo "Kitsoki HEAD ($KITSOKI_SHA) is not contained in Kitsoki main" >&2; exit 2; }
 pog_sha="$(git -C "$POG_ROOT" rev-parse "$POG_REF^{commit}")"
 git -C "$POG_ROOT" merge-base --is-ancestor "$pog_sha" main || { echo "$POG_REF ($pog_sha) is not contained in POG main" >&2; exit 2; }
+git -C "$POG_ROOT" show "$pog_sha:portal/vite.config.ts" | grep -q 'POG_KITSOKI_BROWSER_URL' || {
+	echo "POG $pog_sha does not support the separate hosted browser URL; promote the hosted-POG compatibility change first" >&2
+	exit 2
+}
 
 cat <<EOF
 deploy-hosted-pog:
