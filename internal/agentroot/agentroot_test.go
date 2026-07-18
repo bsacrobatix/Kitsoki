@@ -561,6 +561,56 @@ func TestResolve_LibraryBackendFrontmatter(t *testing.T) {
 	}
 }
 
+// TestResolve_LibraryMCPServersReachAgentMode pins the packaged-MCP contract
+// for agent mode: a library agent resolves with the same builtInAgentMCPServers
+// set `agent launch` renders, and Synthesize carries it into the decl —
+// otherwise `agent:pog-driver` allowlists mcp__kitsoki-graph__* tools that no
+// attached server provides.
+func TestResolve_LibraryMCPServersReachAgentMode(t *testing.T) {
+	libRoot := t.TempDir()
+	writeLibraryAgent(t, libRoot, "pog-driver",
+		"tools: mcp__kitsoki-codeact__*, mcp__kitsoki-graph__*", "Drive POG.")
+	writeLibraryAgent(t, libRoot, "other-driver",
+		"tools: mcp__kitsoki__*", "Drive studio.")
+	src := Sources{Materialize: func(context.Context) (string, error) { return libRoot, nil }}
+
+	def, err := Resolve("pog-driver", src)
+	if err != nil {
+		t.Fatalf("Resolve(pog-driver): %v", err)
+	}
+	for _, server := range []string{"kitsoki-graph", "kitsoki-codeact", "kitsoki-agent-launch"} {
+		if _, ok := def.MCPServers[server]; !ok {
+			t.Fatalf("pog-driver MCPServers = %v, want %s attached", def.MCPServers, server)
+		}
+	}
+
+	other, err := Resolve("other-driver", src)
+	if err != nil {
+		t.Fatalf("Resolve(other-driver): %v", err)
+	}
+	if _, ok := other.MCPServers["kitsoki"]; !ok || len(other.MCPServers) != 1 {
+		t.Fatalf("other-driver MCPServers = %v, want the default Studio server", other.MCPServers)
+	}
+
+	appDef, err := Synthesize(def, Options{
+		WorkingDir: t.TempDir(),
+		SchemaDir:  t.TempDir(),
+		CheckPolicy: func(context.Context, string, string, string) (host.AgentLaunchDecision, error) {
+			return host.AgentLaunchDecision{Enabled: true, Allowed: true, Reason: "allowed"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+	decl := appDef.Agents["pog-driver"]
+	if decl == nil || decl.MCP == nil {
+		t.Fatalf("synthesized decl mcp = %+v, want servers attached", decl)
+	}
+	if _, ok := decl.MCP.Servers["kitsoki-graph"]; !ok {
+		t.Fatalf("synthesized mcp servers = %v, want kitsoki-graph", decl.MCP.Servers)
+	}
+}
+
 // TestSynthesize_RealBuiltinsRoundTrip resolves every real builtin (in-memory
 // registry, no embedded library, no project dirs) and synthesizes it — a
 // smoke test that arbitrary real prompts/tool surfaces survive the YAML

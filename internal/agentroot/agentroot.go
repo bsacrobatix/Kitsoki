@@ -283,7 +283,11 @@ func resolveLibraryDef(name string, materialize LibraryMaterializer) (Def, bool,
 		Effort:       front.Effort,
 		Tools:        append([]string(nil), front.Tools...),
 		Effect:       effect.FromTools(front.Tools),
-		Source:       SourceLibrary,
+		// The packaged MCP contract rides the definition into agent mode;
+		// without it a session allowlists mcp__* tools no server provides
+		// (`agent launch` renders the same set via renderBuiltInAgentTOML).
+		MCPServers: builtInAgentMCPServers(name),
+		Source:     SourceLibrary,
 	}, true, nil
 }
 

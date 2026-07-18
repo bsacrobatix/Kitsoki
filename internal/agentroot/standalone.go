@@ -248,11 +248,17 @@ func parseBuiltInAgentMarkdown(raw []byte) (builtInAgentFrontmatter, string, err
 	return front, strings.TrimSpace(text[end+5:]), nil
 }
 
-func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, instructions string) string {
-	servers := map[string]any{"kitsoki": map[string]any{"command": "kitsoki", "args": []string{"mcp"}}}
+// builtInAgentMCPServers returns the MCP server set packaged with an embedded
+// library agent. Packaged agents are Studio-MCP contracts, so the default is
+// the Studio server; named agents override it, and codeact-worker attaches
+// nothing (its server comes from the CodeAct launch mode). Shared by the
+// standalone launch render and agent-mode library resolution so
+// `agent launch` and `agent:<name>` sessions expose the same tool surface —
+// a library agent whose tools name mcp__* families is unusable without them.
+func builtInAgentMCPServers(agentName string) map[string]any {
 	switch agentName {
 	case "pog-driver":
-		servers = map[string]any{
+		return map[string]any{
 			"kitsoki-agent-launch": map[string]any{
 				"command": "kitsoki",
 				"args":    []string{"mcp-agent-launch", "--allow-agent", "codeact-worker", "--allow-agent", "pog-driver"},
@@ -267,17 +273,21 @@ func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, ins
 			},
 		}
 	case "codeact-worker":
-		servers = nil
+		return nil
 	}
+	return map[string]any{"kitsoki": map[string]any{"command": "kitsoki", "args": []string{"mcp"}}}
+}
+
+func renderBuiltInAgentTOML(agentName string, front builtInAgentFrontmatter, instructions string) string {
 	return renderStandaloneCodexAgentTOML(StandaloneCodexAgent{
 		Name:                  firstNonEmpty(front.Name, agentName),
 		Description:           front.Description,
 		Model:                 front.Model,
 		Effort:                front.Effort,
 		DeveloperInstructions: instructions,
-		// Packaged agents are Studio-MCP contracts. Rendering this server only for
-		// the isolated launch keeps normal Codex sessions untouched.
-		MCPServers: servers,
+		// Rendering these servers only for the isolated launch keeps normal
+		// Codex sessions untouched.
+		MCPServers: builtInAgentMCPServers(agentName),
 	})
 }
 
