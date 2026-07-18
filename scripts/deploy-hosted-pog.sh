@@ -82,7 +82,8 @@ deploy-hosted-pog:
   public URL:     ${PUBLIC_BASE_URL%/}
   GitHub admin:   $ADMIN
   topology:       Caddy -> Kitsoki /auth/check -> POG 127.0.0.1:5183
-  unchanged:      signed GitHub webhook, agent health/run/deck routes
+  access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
+  public protocol: OAuth endpoints and the HMAC-verified GitHub webhook only
 EOF
 
 if [ "$mode" = "dry-run" ]; then
