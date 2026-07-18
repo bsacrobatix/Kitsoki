@@ -505,7 +505,13 @@ describe("LiveSource", () => {
     // But LiveSource calls this.getTrace internally in subscribe, so we
     // intercept at the fetch level for trace calls.
     let traceCallCount = 0;
-    fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+    fetchMock.mockImplementation((url: string, init: RequestInit) => {
+      // The transport's onerror handler probes GET auth/me (webauth 401
+      // detection) before scheduling reconnect — a bodyless request this
+      // RPC-only mock must tolerate without touching the trace-call counter.
+      if (typeof url === "string" && url.endsWith("auth/me")) {
+        return Promise.resolve(new Response("", { status: 404 }));
+      }
       const body = JSON.parse(init.body as string) as { method: string; id: number };
       if (body.method === "runstatus.session.subscribe") {
         return Promise.resolve(rpcOk({ subscription_id: "sub-5" }, body.id));

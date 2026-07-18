@@ -106,6 +106,7 @@ import (
 	"kitsoki/internal/store"
 	"kitsoki/internal/study"
 	"kitsoki/internal/userfacing"
+	"kitsoki/internal/webauth"
 	"kitsoki/internal/world"
 )
 
@@ -118,9 +119,12 @@ const bugRecorderCapacity = 256
 // appended events. localhost debug tool; 500ms is responsive without busy-spin.
 const defaultPollInterval = 500 * time.Millisecond
 
-// actorHeader is the request header a fronting proxy / future auth layer sets to
-// attribute a drive turn to a real operator. It is the highest-precedence
-// identity source (above the `actor` RPC param and the configured default).
+// actorHeader is the request header that attributes a drive turn to a real
+// operator. It is the highest-precedence identity source (above the `actor`
+// RPC param and the configured default). When the login gate is installed
+// (WithAuth), the webauth middleware is its authoritative writer — it
+// overwrites any client-supplied value with the session user's GitHub login.
+// Without the gate (trusted localhost) a fronting proxy may set it.
 const actorHeader = "X-Kitsoki-Actor"
 
 // actorCtxKey keys the request's resolved operator identity in the dispatch
@@ -180,6 +184,10 @@ type Server struct {
 	// defaultActor is the lowest-precedence operator identity injected as
 	// slots.author on a drive turn (see WithDefaultActor). Empty = none.
 	defaultActor string
+
+	// auth is the login/session gate mounted over the HTTP surface, or nil
+	// for the historical trusted-localhost no-auth posture (see WithAuth).
+	auth *webauth.Manager
 
 	mu     sync.Mutex
 	subs   map[string]*subscription
@@ -364,6 +372,7 @@ type serverConfig struct {
 	feedbackRouting           map[string]FeedbackRoute
 	storyDirs                 []string
 	assignments               assignment.Store
+	auth                      *webauth.Manager
 }
 
 // WithAssignmentStore enables the persisted room-assignment RPC family. The
@@ -509,6 +518,16 @@ func WithDefaultActor(actor string) Option {
 	return func(c *serverConfig) { c.defaultActor = actor }
 }
 
+// WithAuth installs the invitation-only GitHub login gate (internal/webauth)
+// over the whole HTTP surface: Handler mounts the /auth/* routes and wraps
+// every other route in the session check, which also makes the gate the
+// authoritative writer of the X-Kitsoki-Actor header. Nil (the default)
+// preserves the trusted-localhost posture with no auth at all. `kitsoki web` /
+// `kitsoki daemon` wire this when the effective auth mode is "required".
+func WithAuth(m *webauth.Manager) Option {
+	return func(c *serverConfig) { c.auth = m }
+}
+
 // New builds a Server that serves the run recorded in the JSONL trace at
 // tracePath, interpreted against def — the read-only `kitsoki status serve`
 // path. The lifecycle RPCs (stories.*, session.new/reload) report
@@ -551,6 +570,7 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		poll:                      cfg.poll,
 		assignments:               cfg.assignments,
 		defaultActor:              cfg.defaultActor,
+		auth:                      cfg.auth,
 		subs:                      make(map[string]*subscription),
 		notifs:                    newNotifBuffer(),
 		questions:                 newQuestionBuffer(),
@@ -734,12 +754,20 @@ func (s *Server) Handler() http.Handler {
 	// Installed-kit UI static assets (S3c vertical slice — see kit_ui.go).
 	mux.HandleFunc("/kit/", s.handleKitUI)
 	mux.HandleFunc("/", s.handleIndex)
+	// The login gate (WithAuth) wraps the WHOLE mux — every route above,
+	// including /rpc, the SSE streams, /point, /artifact/, and the SPA — and
+	// mounts its own /auth/* routes, which it exempts from the session check.
+	var h http.Handler = mux
+	if s.auth != nil {
+		s.auth.Mount(mux)
+		h = s.auth.Wrap(h)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if kitPathHasTraversal(r) {
 			http.NotFound(w, r)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		h.ServeHTTP(w, r)
 	})
 }
 
@@ -854,9 +882,10 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Carry the request's operator identity header (if any) into the dispatch
-	// context so the drive RPCs can resolve slots.author. `kitsoki web` has no
-	// authentication (trusted localhost); this header is the hook a fronting
-	// proxy / future auth layer uses to attribute a turn to a real principal.
+	// context so the drive RPCs can resolve slots.author. When the login gate
+	// is installed (WithAuth) the webauth middleware has already overwritten
+	// this header with the authenticated principal; on a trusted-localhost
+	// deployment it is whatever the client or a fronting proxy set.
 	ctx := r.Context()
 	if actor := strings.TrimSpace(r.Header.Get(actorHeader)); actor != "" {
 		ctx = context.WithValue(ctx, actorCtxKey{}, actor)

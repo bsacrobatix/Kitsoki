@@ -48,11 +48,16 @@ import (
 	"kitsoki/internal/webconfig"
 )
 
-func webCmd() *cobra.Command { return webServiceCmd(false) }
+func webCmd() *cobra.Command {
+	cmd := webServiceCmd(false)
+	cmd.AddCommand(webInviteCmd())
+	return cmd
+}
 
 func daemonCmd() *cobra.Command {
 	cmd := webServiceCmd(true)
 	cmd.AddCommand(daemonInstallSystemdCmd())
+	cmd.AddCommand(webInviteCmd())
 	return cmd
 }
 
@@ -66,8 +71,11 @@ restart, daemon session jobs are reattached under their original IDs.
 Process-bound background handlers are not replayed blindly after a crash. Their
 scheduler rows remain explicitly failed or interrupted when execution safety
 cannot be proven, while the durable parent session and job link are restored.
-The HTTP surface assumes a trusted localhost or internal network; there is no
-authentication.`
+
+Authentication follows the .kitsoki.yaml auth: block (mode off|required|auto,
+default auto): a loopback --addr serves the historical trusted-localhost
+posture with no login, while a non-loopback bind requires invitation-only
+GitHub sign-in. Mint invite links with 'kitsoki web invite <name>'.`
 	}
 	return `Discover stories and serve the runstatus web UI over HTTP. The home screen
 lists the discovered stories and any live sessions; the operator starts a fresh
@@ -95,8 +103,12 @@ is combinable with --flow.
 
 The runstatus SPA must be bundled into the binary (run 'make build', which runs
 'pnpm build' under tools/runstatus/); otherwise the page reports the UI as
-unbuilt. The HTTP surface assumes a trusted localhost or internal network;
-there is no authentication.`
+unbuilt.
+
+Authentication follows the .kitsoki.yaml auth: block (mode off|required|auto,
+default auto): a loopback --addr serves the historical trusted-localhost
+posture with no login, while a non-loopback bind requires invitation-only
+GitHub sign-in. Mint invite links with 'kitsoki web invite <name>'.`
 }
 
 func webServiceCmd(daemonMode bool) *cobra.Command {
@@ -282,6 +294,19 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				return err
 			}
 			dirs := webconfig.Resolve(storyDirs, cfg)
+
+			// ── Login gate (public deployments) ─────────────────────────────
+			// Collapses auth.mode off/required/auto against the listen addr;
+			// loopback binds stay authless by default. Fails fast on a
+			// required-but-unconfigured GitHub OAuth App.
+			authMgr, authClose, err := buildWebAuth(cfg.Auth, addr, dbPath, cmd.ErrOrStderr())
+			if err != nil {
+				restoreLogging()
+				return err
+			}
+			if authClose != nil {
+				defer func() { _ = authClose() }()
+			}
 			harnessProfiles, defaultProfile := harnessProfilesFromConfig(cfg)
 			bugPrivacyRuntime := bugPrivacyRuntimeConfig{
 				AgentBackend:         resolveAgentBackend(agentBackend),
@@ -410,6 +435,7 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				server.WithKits(kits),
 				server.WithFeedbackRouting(feedbackRouting),
 				server.WithStoryDirs(dirs),
+				server.WithAuth(authMgr),
 			)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification

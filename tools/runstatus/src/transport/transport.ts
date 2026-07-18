@@ -108,6 +108,21 @@ function nextBackoff(attempt: number): number {
 }
 
 /**
+ * When the server runs the webauth login gate (public deployments), an expired
+ * or missing session turns every RPC into HTTP 401. Bounce the whole tab to
+ * the login page, preserving the current location as ?next=. Guarded so
+ * repeated 401s from in-flight calls only navigate once.
+ */
+let redirectingToLogin = false;
+
+function redirectToLogin(): void {
+  if (typeof window === "undefined" || redirectingToLogin) return;
+  redirectingToLogin = true;
+  const next = encodeURIComponent(window.location.pathname + window.location.search);
+  window.location.assign(`/auth/login?next=${next}`);
+}
+
+/**
  * HttpTransport — the production browser transport. Holds the EXACT fetch /
  * EventSource bodies that previously lived inline in JsonRpcClient.post /
  * .subscribe and LiveSource.turnStream / .metaStream / .subscribeNotifications /
@@ -147,6 +162,7 @@ export class HttpTransport implements RpcTransport {
     }
 
     if (!resp.ok) {
+      if (resp.status === 401) redirectToLogin();
       this.lastError = {
         method,
         code: resp.status,
@@ -209,6 +225,18 @@ export class HttpTransport implements RpcTransport {
         es?.close();
         es = null;
 
+        // EventSource cannot observe HTTP status, so a stream killed by the
+        // login gate's 401 looks like any network blip. Probe /auth/me (cheap,
+        // gate-exempt) before reconnecting: a 401 there means the session is
+        // gone — bounce to login instead of reconnect-looping forever. Any
+        // other outcome (200 authed, 404 on auth-off servers, network error)
+        // keeps the existing reconnect behavior.
+        void fetch(`${this.base}auth/me`)
+          .then((probe) => {
+            if (probe.status === 401) redirectToLogin();
+          })
+          .catch(() => {});
+
         const delay = nextBackoff(backoffAttempt++);
         reconnectTimer = setTimeout(() => {
           if (closed) return;
@@ -251,6 +279,7 @@ export class HttpTransport implements RpcTransport {
       body: JSON.stringify(body),
     });
     if (!resp.ok) {
+      if (resp.status === 401) redirectToLogin();
       throw new Error(`${path}: HTTP ${resp.status} ${resp.statusText}`);
     }
     if (!resp.body) {

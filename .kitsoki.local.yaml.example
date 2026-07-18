@@ -67,6 +67,17 @@
 #   wrapper_bin: /Users/Shared/kitsoki/agent-bin
 #   capsule_root: /Users/Shared/kitsoki/capsules
 
+# Optional GitHub OAuth App client secret for the web login gate
+# (internal/webauth). mode/public_url/admins/client_id are safe to check in to
+# the shared .kitsoki.yaml; only the secret needs to live here. Register the
+# OAuth App's callback URL as <public_url>/auth/github/callback. Auth is only
+# required when the server binds a non-loopback --addr (auth.mode: auto,
+# the default) — a plain `kitsoki web` on 127.0.0.1 needs none of this.
+#
+# auth:
+#   github:
+#     client_secret: "${KITSOKI_GH_CLIENT_SECRET}"
+
 # Optional static daemon federation. Each remote daemon stays bound to its own
 # loopback; the local controller supervises a strict SSH forward and aggregates
 # jobs/health. Use one unique local_port per worker.

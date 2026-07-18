@@ -132,6 +132,13 @@ type WebConfig struct {
 	// Workers are independent loopback-only daemons; secrets remain in the local override.
 	DaemonFederation daemonfederation.Config `yaml:"daemon_federation,omitempty"`
 
+	// Auth configures invitation-only GitHub sign-in for the web/daemon HTTP
+	// surface (internal/webauth). Nil ⇒ mode "auto": auth is required exactly
+	// when the server binds a non-loopback address. The client secret is
+	// secret-bearing and belongs in .kitsoki.local.yaml via ${VAR}. Validated
+	// in Load via resolveAuth (see auth.go).
+	Auth *AuthConfig `yaml:"auth,omitempty"`
+
 	// Workers is the canonical, machine-local worker registry (standing-autonomy
 	// proposal §9 "Federation"): the superset of daemon_federation.workers[]
 	// identity/tunnel fields and capsule CI remotes[] credential fields, plus
@@ -525,6 +532,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveFeedbackRouting(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveAuth(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.DaemonFederation.Validate(path); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -740,7 +750,42 @@ func mergeConfig(base, local WebConfig) WebConfig {
 		}
 		out.FeedbackRouting = merged
 	}
+	// Field-merged (like Root), NOT block-replaced: the intended split is a
+	// checked-in base block (mode, admins, public_url, client_id) with only
+	// the client_secret restated in the gitignored local file.
+	if local.Auth != nil {
+		out.Auth = mergeAuthConfig(base.Auth, local.Auth)
+	}
 	return out
+}
+
+// mergeAuthConfig folds a local `auth:` block over the base one, set-field
+// wins. Admins replaces whole when set (a list is one coherent value).
+func mergeAuthConfig(base, local *AuthConfig) *AuthConfig {
+	if base == nil {
+		out := *local
+		return &out
+	}
+	out := *base
+	if local.Mode != "" {
+		out.Mode = local.Mode
+	}
+	if local.GitHub.ClientID != "" {
+		out.GitHub.ClientID = local.GitHub.ClientID
+	}
+	if local.GitHub.ClientSecret != "" {
+		out.GitHub.ClientSecret = local.GitHub.ClientSecret
+	}
+	if local.PublicURL != "" {
+		out.PublicURL = local.PublicURL
+	}
+	if len(local.Admins) > 0 {
+		out.Admins = local.Admins
+	}
+	if local.SessionTTL != "" {
+		out.SessionTTL = local.SessionTTL
+	}
+	return &out
 }
 
 // projectProfile is the minimal project-profile/v1 surface the implicit-root
