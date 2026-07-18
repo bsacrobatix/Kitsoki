@@ -23,14 +23,18 @@ current="/opt/pog/current"
 kitsoki_release_root="/opt/kitsoki-hosted-pog/releases"
 kitsoki_release="$kitsoki_release_root/$kitsoki_sha"
 kitsoki_current="/opt/kitsoki-hosted-pog/current"
+node_release_root="/opt/kitsoki-hosted-pog/node"
+node_current="$node_release_root/current"
 tmp_release=""
 tmp_kitsoki_release=""
+tmp_node_release=""
 
 cleanup_incomplete_release() {
 	status=$?
 	if [ "$status" -ne 0 ]; then
 		[ -z "$tmp_release" ] || rm -rf -- "$tmp_release"
 		[ -z "$tmp_kitsoki_release" ] || rm -rf -- "$tmp_kitsoki_release"
+		[ -z "$tmp_node_release" ] || rm -rf -- "$tmp_node_release"
 	fi
 	exit "$status"
 }
@@ -43,15 +47,43 @@ trap cleanup_incomplete_release EXIT
 [[ "$admin" =~ ^[A-Za-z0-9-]+$ ]] || die "invalid GitHub admin login"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service pog-portal.service hosted-pog.yaml Caddyfile; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
+# shellcheck disable=SC1091 -- uploaded beside this installer.
+. "$stage/node-runtime.env"
+node_version="${KITSOKI_HOSTED_POG_NODE_VERSION:-}"
+node_archive="${KITSOKI_HOSTED_POG_NODE_ARCHIVE:-}"
+node_url="${KITSOKI_HOSTED_POG_NODE_URL:-}"
+node_sha256="${KITSOKI_HOSTED_POG_NODE_SHA256:-}"
+[[ "$node_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "invalid hosted POG Node version"
+[ "$node_archive" = "node-$node_version-linux-x64.tar.xz" ] || die "Node archive does not match its version"
+[ "$node_url" = "https://nodejs.org/download/release/$node_version/$node_archive" ] || die "Node URL is not the pinned official release URL"
+[[ "$node_sha256" =~ ^[0-9a-f]{64}$ ]] || die "invalid hosted POG Node SHA-256"
+[ -f "$stage/$node_archive" ] || die "staged Node archive is missing: $node_archive"
+printf '%s  %s\n' "$node_sha256" "$stage/$node_archive" | sha256sum -c - >/dev/null || die "staged Node archive checksum mismatch"
+node_release="$node_release_root/$node_version"
+
 if ! id -u pog >/dev/null 2>&1; then
 	useradd --system --home-dir /var/lib/pog --shell /usr/sbin/nologin pog
 fi
-install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root"
+install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root" "$node_release_root"
 install -d -o pog -g pog -m 0750 /var/lib/pog /var/cache/pog /var/lib/kitsoki-pog /var/cache/kitsoki-pog
 install -d -o pog -g pog -m 0750 /var/lib/pog/feedback/hosted /var/lib/pog/graph-mcp /var/lib/pog/streams
+
+if [ ! -x "$node_release/bin/node" ]; then
+	[ ! -e "$node_release" ] || die "Node release path exists but is incomplete: $node_release"
+	tmp_node_release="$node_release.installing.$$"
+	[ ! -e "$tmp_node_release" ] || die "temporary Node release path already exists: $tmp_node_release"
+	install -d -m 0755 "$tmp_node_release"
+	tar --no-same-owner -xJf "$stage/$node_archive" -C "$tmp_node_release" --strip-components=1
+	[ "$("$tmp_node_release/bin/node" --version)" = "$node_version" ] || die "extracted Node version does not match $node_version"
+	"$tmp_node_release/bin/node" --no-warnings -e 'require("node:sqlite")' || die "Node $node_version does not provide node:sqlite"
+	mv "$tmp_node_release" "$node_release"
+	tmp_node_release=""
+fi
+[ "$("$node_release/bin/node" --version)" = "$node_version" ] || die "installed Node release does not match $node_version"
+"$node_release/bin/node" --no-warnings -e 'require("node:sqlite")' || die "installed Node release has no node:sqlite"
 
 if [ ! -d "$kitsoki_release" ]; then
 	tmp_kitsoki_release="$kitsoki_release.installing.$$"
@@ -73,8 +105,8 @@ if [ ! -d "$release/.git" ]; then
 	git clone --no-checkout --quiet "$stage/pog.bundle" "$tmp_release"
 	chown -R pog:pog "$tmp_release"
 	runuser -u pog -- git -C "$tmp_release" checkout --detach --quiet "$pog_sha"
-	runuser -u pog -- env HOME=/var/lib/pog /usr/local/bin/npm --prefix "$tmp_release/portal" ci --no-audit --no-fund
-	runuser -u pog -- env HOME=/var/lib/pog /usr/local/bin/npm --prefix "$tmp_release/portal" run build
+	runuser -u pog -- env HOME=/var/lib/pog PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" "$node_release/bin/npm" --prefix "$tmp_release/portal" ci --no-audit --no-fund
+	runuser -u pog -- env HOME=/var/lib/pog PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" "$node_release/bin/npm" --prefix "$tmp_release/portal" run build
 	install -d -o pog -g pog -m 0750 "$tmp_release/.artifacts"
 	mv "$tmp_release" "$release"
 	tmp_release=""
@@ -109,11 +141,18 @@ if [ -L "$kitsoki_current" ]; then
 elif [ -e "$kitsoki_current" ]; then
 	die "$kitsoki_current exists and is not a symlink"
 fi
+previous_node_current=""
+if [ -L "$node_current" ]; then
+	previous_node_current="$(readlink -f "$node_current")"
+elif [ -e "$node_current" ]; then
+	die "$node_current exists and is not a symlink"
+fi
 previous_caddy="$stage/Caddyfile.previous"
 cp /etc/caddy/Caddyfile "$previous_caddy"
 caddy_changed=0
 current_changed=0
 kitsoki_current_changed=0
+node_current_changed=0
 
 rollback() {
 	status=$?
@@ -131,7 +170,13 @@ rollback() {
 		elif [ "$kitsoki_current_changed" -eq 1 ] && [ -L "$kitsoki_current" ]; then
 			unlink "$kitsoki_current"
 		fi
-		if [ -n "$previous_current" ] && [ -n "$previous_kitsoki_current" ]; then
+		if [ -n "$previous_node_current" ] && [ -d "$previous_node_current" ]; then
+			ln -s "$previous_node_current" "$node_current.rollback.$$"
+			mv -Tf "$node_current.rollback.$$" "$node_current"
+		elif [ "$node_current_changed" -eq 1 ] && [ -L "$node_current" ]; then
+			unlink "$node_current"
+		fi
+		if [ -n "$previous_current" ] && [ -n "$previous_kitsoki_current" ] && [ -n "$previous_node_current" ]; then
 			systemctl restart kitsoki-pog.service pog-portal.service >/dev/null 2>&1 || true
 		else
 			systemctl stop pog-portal.service kitsoki-pog.service >/dev/null 2>&1 || true
@@ -151,6 +196,9 @@ current_changed=1
 ln -s "$kitsoki_release" "$kitsoki_current.next.$$"
 mv -Tf "$kitsoki_current.next.$$" "$kitsoki_current"
 kitsoki_current_changed=1
+ln -s "$node_release" "$node_current.next.$$"
+mv -Tf "$node_current.next.$$" "$node_current"
+node_current_changed=1
 install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$stage/pog-portal.service" /etc/systemd/system/pog-portal.service

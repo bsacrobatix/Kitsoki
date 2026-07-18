@@ -12,6 +12,14 @@ ADMIN="${KITSOKI_HOSTED_POG_ADMIN:-bsacrobatix}"
 GH_CLIENT_ID="${KITSOKI_HOSTED_POG_GH_CLIENT_ID:-}"
 GH_APP_PROFILE="${KITSOKI_HOSTED_POG_GH_APP_PROFILE:-$HOME/.config/kitsoki/gh-app/bsacrobatix-kitsoki-test/kitsoki.env}"
 GOCACHE="${GOCACHE:-/private/tmp/kitsoki-gocache}"
+NODE_RUNTIME_FILE="$ROOT/deploy/hosted-pog/node-runtime.env"
+[ -f "$NODE_RUNTIME_FILE" ] || { echo "missing hosted POG Node runtime contract: $NODE_RUNTIME_FILE" >&2; exit 2; }
+# shellcheck disable=SC1090 -- this is a tracked deployment contract.
+. "$NODE_RUNTIME_FILE"
+NODE_VERSION="${KITSOKI_HOSTED_POG_NODE_VERSION:-}"
+NODE_ARCHIVE="${KITSOKI_HOSTED_POG_NODE_ARCHIVE:-}"
+NODE_URL="${KITSOKI_HOSTED_POG_NODE_URL:-}"
+NODE_SHA256="${KITSOKI_HOSTED_POG_NODE_SHA256:-}"
 
 mode="dry-run"
 case "${1:-}" in
@@ -25,6 +33,10 @@ esac
 [ -n "$PUBLIC_BASE_URL" ] || { echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required" >&2; exit 2; }
 [[ "$PUBLIC_BASE_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo "public base URL must be an https origin with no path" >&2; exit 2; }
 [[ "$ADMIN" =~ ^[A-Za-z0-9-]+$ ]] || { echo "KITSOKI_HOSTED_POG_ADMIN is not a valid GitHub login" >&2; exit 2; }
+[[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid hosted POG Node version" >&2; exit 2; }
+[ "$NODE_ARCHIVE" = "node-$NODE_VERSION-linux-x64.tar.xz" ] || { echo "hosted POG Node archive does not match its version" >&2; exit 2; }
+[ "$NODE_URL" = "https://nodejs.org/download/release/$NODE_VERSION/$NODE_ARCHIVE" ] || { echo "hosted POG Node URL is not the pinned official release URL" >&2; exit 2; }
+[[ "$NODE_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "invalid hosted POG Node SHA-256" >&2; exit 2; }
 
 verify() {
 	expect_public_status() {
@@ -105,6 +117,7 @@ deploy-hosted-pog:
   public URL:     ${PUBLIC_BASE_URL%/}
   GitHub admin:   $ADMIN
   GitHub login:   Device Flow using client ID from the local App profile
+  Node runtime:   $NODE_VERSION (pinned official linux-x64 archive)
   topology:       Caddy -> Kitsoki /auth/check -> POG 127.0.0.1:5183
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
   public protocol: GitHub Device Flow endpoints and the HMAC-verified webhook only
@@ -135,7 +148,9 @@ trap cleanup EXIT
 
 GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,pog-portal.service} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service} "$local_stage/"
+curl --fail --location --silent --show-error --retry 3 --output "$local_stage/$NODE_ARCHIVE" "$NODE_URL"
+printf '%s  %s\n' "$NODE_SHA256" "$local_stage/$NODE_ARCHIVE" | shasum -a 256 -c - >/dev/null
 
 ssh "$REMOTE" "install -d -m 0700 '$remote_stage'"
 scp "$local_stage"/* "$REMOTE:$remote_stage/"

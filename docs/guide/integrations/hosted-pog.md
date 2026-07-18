@@ -78,22 +78,27 @@ not contained in its protected `main`. It also refuses a POG revision that
 predates the separate `POG_KITSOKI_BROWSER_URL` seam; without that seam the
 server could work while browsers were incorrectly sent to their own
 `127.0.0.1`. It builds Kitsoki for Linux, creates a Git bundle from POG `main`,
-checks the uploaded binary's SHA-256, and invokes the versioned remote
-installer. The installer then:
+checks the uploaded binary's SHA-256, downloads and locally verifies the pinned
+Node archive, and invokes the versioned remote installer. The installer then:
 
-1. installs immutable POG and Kitsoki releases under `/opt/pog/releases/<sha>`
+1. verifies the uploaded Node.js linux-x64 archive again against the official
+   SHA-256 declared in `deploy/hosted-pog/node-runtime.env` and installs it
+   under `/opt/kitsoki-hosted-pog/node/<version>`; both the POG build and
+   service use this runtime rather than the VM's ambient Node;
+2. installs immutable POG and Kitsoki releases under `/opt/pog/releases/<sha>`
    and `/opt/kitsoki-hosted-pog/releases/<sha>` without replacing the existing
    GitHub agent's `/usr/local/bin/kitsoki`;
-2. runs `npm ci` and the POG typecheck/production build before activation;
-3. atomically moves `/opt/pog/current` to that release;
-4. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
-5. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes;
-6. validates the candidate Caddyfile before installing it;
-7. reloads Caddy and verifies anonymous denial across POG, feedback, health,
+3. runs `npm ci` and the POG typecheck/production build before activation;
+4. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
+   verified releases;
+5. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
+6. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes;
+7. validates the candidate Caddyfile before installing it;
+8. reloads Caddy and verifies anonymous denial across POG, feedback, health,
    runs, and evidence while checking agent health over loopback.
 
-If activation fails after either symlink changes, the installer restores the
-previous POG and Kitsoki release targets and Caddyfile before returning
+If activation fails after a symlink changes, the installer restores the
+previous POG, Kitsoki, and Node release targets and Caddyfile before returning
 non-zero. Failed release directories remain available for diagnosis; they are
 never treated as active.
 
@@ -132,7 +137,8 @@ scripts/deploy-hosted-pog.sh --verify
 
 ssh root@206.189.84.218 \
   'systemctl is-active kitsoki-gh-agent caddy kitsoki-pog pog-portal; \
-   systemctl --no-pager --full status kitsoki-pog pog-portal'
+   systemctl --no-pager --full status kitsoki-pog pog-portal; \
+   /opt/kitsoki-hosted-pog/node/current/bin/node --version'
 
 ssh root@206.189.84.218 \
   'journalctl -u kitsoki-pog -u pog-portal -u caddy --since "30 minutes ago" --no-pager'
@@ -197,9 +203,12 @@ Common failures:
   ID.
 - Public root returns `502`: check `kitsoki-pog`; this is the intended
   fail-closed state while auth is unavailable.
-- Loopback portal is down but auth is healthy: inspect `pog-portal` logs and
-  the immutable release's `portal/package-lock.json`; do not point Caddy at an
-  ad hoc process.
+- A build reports a missing Node built-in such as `node:sqlite`: update the
+  pinned runtime contract and official checksum through review; do not fall
+  back to the VM's ambient `/usr/local/bin/node`.
+- Loopback portal is down but auth is healthy: inspect `pog-portal` logs, the
+  pinned Node target, and the immutable release's `portal/package-lock.json`;
+  do not point Caddy at an ad hoc process.
 - Loopback `/healthz` fails while POG works: the existing GitHub-agent service
   is unhealthy; the public route intentionally returns `401`. Treat that as a
   separate incident and use

@@ -11,6 +11,7 @@ for required in \
   "$assets/Caddyfile" \
   "$assets/hosted-pog.yaml" \
   "$assets/kitsoki-pog.service" \
+  "$assets/node-runtime.env" \
   "$assets/pog-portal.service"; do
   [ -f "$required" ] || { echo "missing hosted POG deployment asset: $required" >&2; exit 1; }
 done
@@ -35,6 +36,14 @@ grep -q 'login-gated portal, API, agent health/run/deck, and evidence routes' "$
 grep -q 'GitHub Device Flow endpoints and the HMAC-verified webhook only' "$deploy"
 grep -q 'github.com/login/device/code' "$deploy"
 grep -q '/opt/kitsoki-hosted-pog/current/kitsoki' "$assets/kitsoki-pog.service"
+grep -q '^KITSOKI_HOSTED_POG_NODE_VERSION=v[0-9]' "$assets/node-runtime.env"
+grep -Eq '^KITSOKI_HOSTED_POG_NODE_SHA256=[0-9a-f]{64}$' "$assets/node-runtime.env"
+grep -q 'nodejs.org/download/release/' "$assets/node-runtime.env"
+grep -q 'shasum -a 256 -c' "$deploy"
+grep -q 'sha256sum -c' "$assets/install.sh"
+grep -q 'require(.*node:sqlite' "$assets/install.sh"
+grep -q '/opt/kitsoki-hosted-pog/node/current/bin/npm' "$assets/pog-portal.service"
+grep -q 'previous_node_current' "$assets/install.sh"
 grep -q 'npm.* run build' "$assets/install.sh"
 grep -q 'caddy validate' "$assets/install.sh"
 grep -q 'expect_public_status 401 /decks/access-probe' "$deploy"
