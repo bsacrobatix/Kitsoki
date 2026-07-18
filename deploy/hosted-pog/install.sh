@@ -111,8 +111,8 @@ if [ ! -d "$release/.git" ]; then
 	mv "$tmp_release" "$release"
 	tmp_release=""
 fi
-[ "$(git -C "$release" rev-parse HEAD)" = "$pog_sha" ] || die "release checkout does not match requested SHA"
-[ -z "$(git -C "$release" status --porcelain --untracked-files=no)" ] || die "release checkout has tracked changes: $release"
+[ "$(runuser -u pog -- git -C "$release" rev-parse HEAD)" = "$pog_sha" ] || die "release checkout does not match requested SHA"
+[ -z "$(runuser -u pog -- git -C "$release" status --porcelain --untracked-files=no)" ] || die "release checkout has tracked changes: $release"
 [ -x "$release/portal/node_modules/.bin/vite" ] || die "release dependencies are incomplete"
 [ -f "$release/portal/dist/index.html" ] || die "release build output is missing"
 
