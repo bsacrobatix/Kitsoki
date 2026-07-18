@@ -125,8 +125,10 @@ ln -sfn /opt/kitsoki "$release_root/Kitsoki"
 
 rendered_config="$stage/hosted-pog.rendered.yaml"
 rendered_caddy="$stage/Caddyfile.rendered"
+rendered_portal_service="$stage/pog-portal.service.rendered"
 sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" -e "s|__GITHUB_CLIENT_ID__|$github_client_id|g" "$stage/hosted-pog.yaml" >"$rendered_config"
 sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/Caddyfile" >"$rendered_caddy"
+sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/pog-portal.service" >"$rendered_portal_service"
 caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 
 previous_current=""
@@ -201,7 +203,7 @@ mv -Tf "$node_current.next.$$" "$node_current"
 node_current_changed=1
 install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
-install -m 0644 "$stage/pog-portal.service" /etc/systemd/system/pog-portal.service
+install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
 systemctl daemon-reload
 systemctl enable kitsoki-pog.service pog-portal.service >/dev/null
 systemctl restart kitsoki-pog.service
@@ -215,7 +217,7 @@ done
 
 systemctl restart pog-portal.service
 for _ in $(seq 1 60); do
-	if curl -fsS -o /dev/null http://127.0.0.1:5183/api/catalog 2>/dev/null; then
+	if curl -fsS -o /dev/null -H "Host: $public_host" http://127.0.0.1:5183/api/catalog 2>/dev/null; then
 		portal_ready=1
 		break
 	fi

@@ -92,7 +92,8 @@ Node archive, and invokes the versioned remote installer. The installer then:
 4. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
    verified releases;
 5. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
-6. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes;
+6. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes,
+   including the real public `Host` header that Vite receives from Caddy;
 7. validates the candidate Caddyfile before installing it;
 8. reloads Caddy and verifies anonymous denial across POG, feedback, health,
    runs, and evidence while checking agent health over loopback.
@@ -105,8 +106,10 @@ never treated as active.
 POG's server APIs currently live in the Vite `configureServer` plugin, so a
 static `vite preview` deployment would silently omit important routes. The
 systemd service intentionally runs the real Vite server and uses the production
-build as its pre-activation compile/type gate. Revisit that choice when POG
-gains a standalone production HTTP server.
+build as its pre-activation compile/type gate. The installer renders the
+validated public hostname into Vite's additional allowed-host setting; keep
+that setting scoped to the deployment origin instead of disabling Vite's host
+check. Revisit that choice when POG gains a standalone production HTTP server.
 
 ## Invite a person
 
@@ -209,6 +212,9 @@ Common failures:
 - Loopback portal is down but auth is healthy: inspect `pog-portal` logs, the
   pinned Node target, and the immutable release's `portal/package-lock.json`;
   do not point Caddy at an ad hoc process.
+- Login succeeds but POG returns a Vite `host is not allowed` response: rerun
+  the versioned deploy so `pog-portal.service` is rendered with the validated
+  public host, then use `--verify`; do not set Vite to accept every hostname.
 - Loopback `/healthz` fails while POG works: the existing GitHub-agent service
   is unhealthy; the public route intentionally returns `401`. Treat that as a
   separate incident and use

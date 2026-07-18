@@ -15,6 +15,10 @@ Environment=POG_CATALOG=/opt/pog/current/pog/catalog.yaml
 Environment=POG_PROJECT_ROOT=/opt/pog/current
 Environment=POG_KITSOKI_URL=http://127.0.0.1:7777
 Environment=POG_KITSOKI_BROWSER_URL=
+# Vite rejects unknown Host headers before its POG plugins run. The installer
+# renders this from the validated deployment origin so authenticated requests
+# forwarded by Caddy can reach the portal without accepting arbitrary hosts.
+Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=__PUBLIC_HOST__
 Environment=POG_RUNNER_URL=http://127.0.0.1:7777
 Environment=POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki
 Environment=POG_FEEDBACK_LOCAL_LEDGER=/var/lib/pog/feedback/feedback.jsonl

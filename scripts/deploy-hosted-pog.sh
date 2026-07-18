@@ -32,6 +32,8 @@ esac
 [ -n "$REMOTE" ] || { echo "KITSOKI_GH_AGENT_REMOTE is required" >&2; exit 2; }
 [ -n "$PUBLIC_BASE_URL" ] || { echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required" >&2; exit 2; }
 [[ "$PUBLIC_BASE_URL" =~ ^https://[A-Za-z0-9.-]+/?$ ]] || { echo "public base URL must be an https origin with no path" >&2; exit 2; }
+PUBLIC_HOST="${PUBLIC_BASE_URL%/}"
+PUBLIC_HOST="${PUBLIC_HOST#https://}"
 [[ "$ADMIN" =~ ^[A-Za-z0-9-]+$ ]] || { echo "KITSOKI_HOSTED_POG_ADMIN is not a valid GitHub login" >&2; exit 2; }
 [[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid hosted POG Node version" >&2; exit 2; }
 [ "$NODE_ARCHIVE" = "node-$NODE_VERSION-linux-x64.tar.xz" ] || { echo "hosted POG Node archive does not match its version" >&2; exit 2; }
@@ -72,8 +74,8 @@ verify() {
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
 	grep -q '/auth/github/device/start' <<<"$login_page"
-	ssh "$REMOTE" 'set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:7777/auth/me)" = 401; curl -fsS -o /dev/null http://127.0.0.1:5183/api/catalog; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null'
-	echo "hosted-pog verify: services active; anonymous route-family matrix denied; GitHub Device Flow entrypoint reachable; unsigned webhook denied; loopback health=ok"
+	ssh "$REMOTE" "set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test \"\$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/auth/me)\" = 401; curl -fsS -o /dev/null -H 'Host: $PUBLIC_HOST' http://127.0.0.1:5183/api/catalog; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null"
+	echo "hosted-pog verify: services active; anonymous route-family matrix denied; GitHub Device Flow entrypoint reachable; unsigned webhook denied; public Host accepted by POG; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then
