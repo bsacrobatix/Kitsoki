@@ -52,6 +52,7 @@ const (
 	Finalizing         Status = "finalizing"
 	Reprepare          Status = "reprepare"
 	NeedsConflictInput Status = "needs_conflict_input"
+	NeedsInput         Status = "needs_input"
 	RetryWait          Status = "retry_wait"
 	Landed             Status = "landed"
 	Rejected           Status = "rejected"
@@ -102,6 +103,12 @@ type Candidate struct {
 	Evidence              []string  `json:"evidence,omitempty"`
 	RetryReason           string    `json:"retry_reason,omitempty"`
 	EjectionReason        string    `json:"ejection_reason,omitempty"`
+	EmergencySequence     uint64    `json:"emergency_sequence,omitempty"`
+	ParkedAt              time.Time `json:"parked_at,omitempty"`
+	ParkedBy              string    `json:"parked_by,omitempty"`
+	OverrideGate          bool      `json:"override_gate,omitempty"`
+	OverrideBy            string    `json:"override_by,omitempty"`
+	OverrideReason        string    `json:"override_reason,omitempty"`
 }
 
 type State struct {
@@ -156,6 +163,51 @@ type ProcessDeps struct {
 	Lease                 time.Duration
 	GateVersion           string
 	DependencyFingerprint string
+
+	// Retry policy. A red gate or failed speculation moves the candidate to
+	// the back of the line in retry_wait with exponential backoff; once
+	// MaxAttempts is exhausted the candidate parks as needs_input instead of
+	// spinning. Zero values take the defaults below.
+	RetryDelay    time.Duration // default 5m
+	MaxRetryDelay time.Duration // default 30m
+	MaxAttempts   int           // default 5
+}
+
+const (
+	DefaultRetryDelay    = 5 * time.Minute
+	DefaultMaxRetryDelay = 30 * time.Minute
+	DefaultMaxAttempts   = 5
+)
+
+func (d ProcessDeps) retryDelay() time.Duration {
+	return firstDuration(d.RetryDelay, DefaultRetryDelay)
+}
+func (d ProcessDeps) maxRetryDelay() time.Duration {
+	return firstDuration(d.MaxRetryDelay, DefaultMaxRetryDelay)
+}
+func (d ProcessDeps) maxAttempts() int {
+	if d.MaxAttempts > 0 {
+		return d.MaxAttempts
+	}
+	return DefaultMaxAttempts
+}
+
+// HarnessError marks a failure of the queue's own machinery (a resolver or
+// gate harness that could not launch) rather than a red result from a harness
+// that ran. Harness failures park the candidate immediately as needs_input:
+// burning bounded retry attempts on a broken launch path only delays every
+// candidate behind it in the FIFO.
+type HarnessError struct{ Err error }
+
+func (e HarnessError) Error() string { return "queue harness: " + e.Err.Error() }
+func (e HarnessError) Unwrap() error { return e.Err }
+
+// Harness wraps err so the worker classifies it as a harness failure.
+func Harness(err error) error {
+	if err == nil {
+		return nil
+	}
+	return HarnessError{Err: err}
 }
 
 type Repairer interface {
@@ -168,10 +220,11 @@ type Finalizer interface {
 	Finalize(context.Context, Candidate) (FinalizeResult, error)
 }
 type FinalizeResult struct {
-	OldMainSHA string `json:"old_main_sha,omitempty"`
-	NewMainSHA string `json:"new_main_sha,omitempty"`
-	Log        string `json:"log,omitempty"`
-	Stale      bool   `json:"stale,omitempty"`
+	OldMainSHA         string `json:"old_main_sha,omitempty"`
+	NewMainSHA         string `json:"new_main_sha,omitempty"`
+	Log                string `json:"log,omitempty"`
+	Stale              bool   `json:"stale,omitempty"`
+	PreservedWIPBranch string `json:"preserved_wip_branch,omitempty"`
 }
 
 type Store struct {
@@ -205,6 +258,27 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 			identity = string(admission)
 		}
 		c := Candidate{ID: candidateID(in.SHA, identity), ProjectID: projectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now}
+		// A resubmission of the same SHA (fresh receipt) supersedes any active
+		// prior candidate rather than racing it in the FIFO, and inherits its
+		// durable attempt count so bounded retries cannot be reset by
+		// resubmitting. (POG carried a retry-ledger sidecar for exactly this.)
+		for i := range state.Candidates {
+			prior := &state.Candidates[i]
+			if prior.SHA != in.SHA || terminal(prior.phase()) {
+				continue
+			}
+			if prior.Attempt > c.Attempt {
+				c.Attempt = prior.Attempt
+			}
+			if prior.EmergencySequence != 0 && c.EmergencySequence == 0 {
+				c.EmergencySequence = prior.EmergencySequence
+			}
+			prior.Status, prior.Phase = Rejected, Rejected
+			prior.WorkerID, prior.LeaseExpiresAt = "", time.Time{}
+			prior.EjectionReason = "superseded_by_resubmission"
+			prior.Evidence = append(prior.Evidence, fmt.Sprintf("queue:superseded-by=%s at %s", c.ID, now.Format(time.RFC3339)))
+			c.Evidence = append(c.Evidence, fmt.Sprintf("queue:supersedes=%s attempts_inherited=%d", prior.ID, c.Attempt))
+		}
 		state.Candidates = append(state.Candidates, c)
 		return c, nil
 	})
@@ -246,6 +320,45 @@ func activeAhead(cs []Candidate) []Candidate {
 	return out
 }
 func terminal(p Status) bool { return p == Landed || p == Rejected }
+
+// parked candidates wait on explicit human input; they are skipped by workers
+// and never block later candidates from preparing or finalizing.
+func parked(p Status) bool { return p == NeedsInput || p == NeedsConflictInput }
+
+// before reports whether a orders ahead of b for claiming and finalization:
+// the emergency lane first (FIFO within itself), then durable Position.
+func before(a, b Candidate) bool {
+	if (a.EmergencySequence != 0) != (b.EmergencySequence != 0) {
+		return a.EmergencySequence != 0
+	}
+	if a.EmergencySequence != 0 && a.EmergencySequence != b.EmergencySequence {
+		return a.EmergencySequence < b.EmergencySequence
+	}
+	if a.Position != b.Position {
+		return a.Position < b.Position
+	}
+	return a.Sequence < b.Sequence
+}
+
+func nextPosition(cs []Candidate) int {
+	max := 0
+	for _, c := range cs {
+		if c.Position > max {
+			max = c.Position
+		}
+	}
+	return max + 1
+}
+
+func nextEmergencySequence(cs []Candidate) uint64 {
+	var max uint64
+	for _, c := range cs {
+		if c.EmergencySequence > max {
+			max = c.EmergencySequence
+		}
+	}
+	return max + 1
+}
 func (c Candidate) phase() Status {
 	if c.Phase != "" {
 		return c.Phase
@@ -352,7 +465,11 @@ func normalize(state State) State {
 		if c.Sequence == 0 {
 			c.Sequence = uint64(i + 1)
 		}
-		c.Position = int(c.Sequence)
+		// Position is durable queue ordering: failures requeue to the back
+		// without rewriting the immutable admission Sequence.
+		if c.Position == 0 {
+			c.Position = int(c.Sequence)
+		}
 		if c.Phase == "" {
 			c.Phase = c.Status
 		}

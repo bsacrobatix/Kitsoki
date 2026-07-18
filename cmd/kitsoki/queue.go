@@ -15,6 +15,35 @@ import (
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
 	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd())
+	cmd.AddCommand(
+		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
+		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
+		queueOpCmd("resume", "Return a parked or retry-waiting candidate to the queue with a fresh attempt budget", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Resume(op) }),
+		queueOpCmd("emergency", "Move a candidate into the priority emergency lane", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.MarkEmergency(op) }),
+		queueOpCmd("override", "Human immediate-merge: emergency priority plus a durable, attributed gate waiver", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Override(op) }),
+		queueOpCmd("reject", "Remove a candidate from the queue; branches and evidence are retained", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Reject(op) }),
+	)
+	return cmd
+}
+
+// queueOpCmd is the shared shape of the human-override verbs. Every verb is
+// audited: the acting user and reason land in the candidate's durable
+// evidence.
+func queueOpCmd(verb, short string, run func(queue.Store, queue.Op) (queue.Candidate, error)) *cobra.Command {
+	var project, actor, reason string
+	cmd := &cobra.Command{Use: verb + " <candidate-id>", Short: short, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(actor) == "" {
+			actor = os.Getenv("USER")
+		}
+		c, err := run(queue.Store{ProjectRoot: project}, queue.Op{ID: args[0], Actor: actor, Reason: reason})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(c)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&actor, "actor", "", "acting operator recorded in evidence (defaults to $USER)")
+	cmd.Flags().StringVar(&reason, "reason", "", "human reason recorded in evidence")
 	return cmd
 }
 func queueSubmitCmd() *cobra.Command {
@@ -74,8 +103,11 @@ func queueStatusCmd() *cobra.Command {
 func queueWorkerCmd() *cobra.Command {
 	var project, gate, target, resolver, repair, workerID string
 	var once bool
+	var retryDelay, maxRetryDelay time.Duration
+	var maxAttempts int
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
 		deps := queueProcessDeps(project, gate, target, resolver, repair, workerID)
+		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts
 		worker := queue.Worker{Store: queue.Store{ProjectRoot: project}, Deps: deps}
 		for {
 			progressed, err := worker.RunOnce(cmd.Context())
@@ -111,6 +143,9 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
 	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token")
 	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step")
+	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
+	cmd.Flags().DurationVar(&maxRetryDelay, "max-retry-delay", queue.DefaultMaxRetryDelay, "backoff ceiling for repeated failures")
+	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
 	_ = cmd.MarkFlagRequired("gate")
 	return cmd
 }

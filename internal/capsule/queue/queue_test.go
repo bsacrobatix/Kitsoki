@@ -213,12 +213,12 @@ func TestProcessRunsOneBoundedRepairBeforeParkingRedGate(t *testing.T) {
 	}
 }
 
-func TestRetryWaitHeadAllowsLaterPreparationButBlocksFinalization(t *testing.T) {
+// A failing head requeues to the back of the line in retry_wait; it delays
+// only itself, and the candidate behind it lands. The protected base CAS at
+// finalization remains the correctness guard.
+func TestRetryWaitHeadRequeuesToBackAndTrainContinues(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
-		if c.ID == first.ID {
-			return Speculation{SHA: "spec-" + c.SHA}, nil
-		}
 		return Speculation{SHA: "spec-" + c.SHA}, nil
 	}}
 	gate := gateFunc(func(_ context.Context, spec Speculation) (GateResult, error) {
@@ -228,8 +228,14 @@ func TestRetryWaitHeadAllowsLaterPreparationButBlocksFinalization(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Candidates[0].Status != RetryWait || state.Candidates[1].Status != ReadyToFinalize {
+	if state.Candidates[0].Status != RetryWait || state.Candidates[1].Status != Landed {
 		t.Fatalf("state=%#v", state.Candidates)
+	}
+	if state.Candidates[0].Position <= state.Candidates[1].Position {
+		t.Fatalf("failed head did not requeue to the back: %#v", state.Candidates)
+	}
+	if state.Candidates[0].RetryAt.IsZero() {
+		t.Fatalf("retry_wait candidate has no durable retry_at: %#v", state.Candidates[0])
 	}
 }
 

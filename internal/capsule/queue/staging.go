@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
@@ -37,6 +38,9 @@ type ProtectedIntegration struct {
 	TargetRef       string
 	ResolverCommand string
 	Runner          CommandRunner
+	// KitsokiBin overrides the binary used to launch the git-ops
+	// conflict_resolver; the running executable is used when empty.
+	KitsokiBin string
 }
 
 func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Candidate) (Speculation, error) {
@@ -84,11 +88,20 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 		"queue:conflict-artifact="+relativePath(root, artifactPath),
 		"queue:integration-artifact="+relativePath(root, instanceArtifact),
 	)
-	if strings.TrimSpace(p.ResolverCommand) != "" {
-		output, resolveErr := p.runner().Run(ctx, instancePath, "sh", "-c", p.ResolverCommand)
-		spec.Evidence = append(spec.Evidence, commandEvidence("queue:resolver", output)...)
+	if len(instance.ConflictPaths) == 0 {
+		// Divergent histories whose changes are disjoint merge cleanly; the
+		// train continues without any resolver. Only the commit is missing.
+		if _, err := gitOutput(ctx, instancePath, "rev-parse", "-q", "--verify", "MERGE_HEAD"); err == nil {
+			if _, err := gitOutput(ctx, instancePath, "-c", "user.name=kitsoki-queue", "-c", "user.email=queue@kitsoki.invalid", "commit", "--no-edit"); err != nil {
+				return spec, err
+			}
+			spec.Evidence = append(spec.Evidence, "queue:disjoint-histories-merged-automatically")
+		}
+	} else {
+		evidence, resolveErr := p.resolveConflicts(ctx, root, instancePath, artifact.ContinuationToken, instance.ConflictPaths)
+		spec.Evidence = append(spec.Evidence, evidence...)
 		if resolveErr != nil {
-			return spec, fmt.Errorf("queue: resolver continuation %s: %w", artifact.ContinuationToken, resolveErr)
+			return spec, resolveErr
 		}
 	}
 	status, err := gitOutput(ctx, instancePath, "status", "--porcelain")
@@ -114,6 +127,9 @@ func (p ProtectedIntegration) Land(context.Context, Speculation) error { return 
 type ProtectedFinalizer struct {
 	ProjectRoot string
 	TargetRef   string
+	// SkipWIPPreservation disables the dirty-checkout capture; only tests
+	// exercising the CAS in isolation should set it.
+	SkipWIPPreservation bool
 }
 
 func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (FinalizeResult, error) {
@@ -123,6 +139,17 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	target := p.TargetRef
 	if strings.TrimSpace(target) == "" {
 		target = "main"
+	}
+	// A dirty protected checkout never blocks the train and never loses data:
+	// the work is captured on an immutable preserved-WIP branch and the
+	// checkout restored clean before the ref CAS.
+	var preserved string
+	if !p.SkipWIPPreservation {
+		var err error
+		preserved, err = PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
+		if err != nil {
+			return FinalizeResult{}, fmt.Errorf("queue: protected checkout WIP preservation: %w", err)
+		}
 	}
 	planRequest := reconcile.PlanRequest{
 		Workspace: c.WorkspacePath, ProtectedProjectRoot: p.ProjectRoot, TargetRef: target,
@@ -153,7 +180,17 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 		}
 		return FinalizeResult{}, err
 	}
-	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: "protected CAS applied"}, nil
+	log := "protected CAS applied"
+	if preserved != "" {
+		log += "; preserved protected-checkout WIP on " + preserved
+	}
+	// The CAS only moves the ref; when the target branch is the protected
+	// checkout's HEAD the worktree must follow it, or the old tree lingers as
+	// apparent local modifications.
+	if err := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget); err != nil {
+		log += "; checkout sync failed: " + err.Error()
+	}
+	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: log, PreservedWIPBranch: preserved}, nil
 }
 
 func (p ProtectedIntegration) root() (string, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -49,20 +50,26 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 				c.Failure = "worker lease expired; preserved attempt evidence requires reprepare"
 			}
 		}
+		var pick *Candidate
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
-			if c.phase() != Queued && c.phase() != Reprepare {
+			if c.phase() != Queued && c.phase() != Reprepare && c.phase() != RetryWait {
 				continue
 			}
 			if !c.RetryAt.IsZero() && n.Before(c.RetryAt) {
 				continue
 			}
-			w.lease(c, Preparing, n)
-			c.Attempt++
-			c.Started = n
-			c.Failure = ""
-			claimed, ok = *c, true
-			return state, write(path, state)
+			if pick == nil || before(*c, *pick) {
+				pick = c
+			}
+		}
+		if pick != nil {
+			w.lease(pick, Preparing, n)
+			pick.Attempt++
+			pick.Started = n
+			pick.Failure = ""
+			pick.RetryAt = time.Time{}
+			claimed, ok = *pick, true
 		}
 		return state, write(path, state)
 	})
@@ -75,12 +82,15 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		return err
 	}
 	spec, specErr := w.Deps.Integration.Speculate(ctx, c, ahead)
-	if err := w.update(c.ID, func(cur *Candidate) {
+	if err := w.update(c.ID, func(state *State, cur *Candidate) {
+		if w.operatorIntervened(cur, "speculation") {
+			return
+		}
 		cur.SpeculativeSHA, cur.TreeSHA, cur.BaseSHA = spec.SHA, spec.SHA, spec.BaseSHA
 		cur.IntegrationRef, cur.WorkspaceID, cur.WorkspacePath = spec.IntegrationRef, spec.WorkspaceID, spec.WorkspacePath
 		cur.Evidence = append(cur.Evidence, spec.Evidence...)
 		if specErr != nil {
-			w.failPreparation(cur, specErr)
+			w.failPreparation(state, cur, specErr)
 			return
 		}
 		w.lease(cur, Gating, now(w.Deps))
@@ -90,18 +100,31 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 	if specErr != nil {
 		return nil
 	}
-	result, gateErr := w.Deps.Gate.Run(ctx, spec)
-	if (gateErr != nil || !result.Passed) && w.Deps.Repairer != nil {
-		repairEvidence, repairErr := w.Deps.Repairer.Repair(ctx, spec, firstGateError(gateErr))
-		result.Evidence = append(result.Evidence, repairEvidence...)
-		if repairErr == nil {
-			result, gateErr = w.Deps.Gate.Run(ctx, spec)
+	var result GateResult
+	var gateErr error
+	if c.OverrideGate {
+		// Operator override: a human explicitly approved this candidate for
+		// immediate landing. The integration tree is still built and the
+		// protected CAS still applies; only the deterministic gate is waived,
+		// and the waiver is recorded durably.
+		result = GateResult{Passed: true, GateVersion: "operator-override/v1", Evidence: []string{fmt.Sprintf("queue:gate-overridden-by=%s reason=%s", first(c.OverrideBy, "operator"), first(c.OverrideReason, "unspecified"))}}
+	} else {
+		result, gateErr = w.Deps.Gate.Run(ctx, spec)
+		if (gateErr != nil || !result.Passed) && w.Deps.Repairer != nil {
+			repairEvidence, repairErr := w.Deps.Repairer.Repair(ctx, spec, firstGateError(gateErr))
 			result.Evidence = append(result.Evidence, repairEvidence...)
-		} else if gateErr == nil {
-			gateErr = repairErr
+			if repairErr == nil {
+				result, gateErr = w.Deps.Gate.Run(ctx, spec)
+				result.Evidence = append(result.Evidence, repairEvidence...)
+			} else if gateErr == nil {
+				gateErr = repairErr
+			}
 		}
 	}
-	return w.update(c.ID, func(cur *Candidate) {
+	return w.update(c.ID, func(state *State, cur *Candidate) {
+		if w.operatorIntervened(cur, "gate") {
+			return
+		}
 		cur.Evidence = append(cur.Evidence, result.Evidence...)
 		cur.GateEvidence = append(cur.GateEvidence, result.Evidence...)
 		cur.GateLog = result.Log
@@ -109,11 +132,11 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			if gateErr == nil {
 				gateErr = fmt.Errorf("deterministic gate failed")
 			}
-			w.failGate(cur, gateErr)
+			w.failGate(state, cur, gateErr)
 			return
 		}
 		if cur.TreeSHA == "" || cur.BaseSHA == "" {
-			w.failGate(cur, fmt.Errorf("prepared result is missing base or tree identity"))
+			w.failGate(state, cur, fmt.Errorf("prepared result is missing base or tree identity"))
 			return
 		}
 		cur.GateVersion = first(result.GateVersion, w.Deps.GateVersion, "deterministic-gate/v1")
@@ -124,6 +147,17 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 	})
 }
 
+// operatorIntervened reports whether the candidate was parked or rejected by an
+// operator while this worker held its lease. Worker results never clobber a
+// durable operator decision; the discarded outcome is recorded as evidence.
+func (w Worker) operatorIntervened(cur *Candidate, stage string) bool {
+	if parked(cur.phase()) || terminal(cur.phase()) {
+		cur.Evidence = append(cur.Evidence, fmt.Sprintf("queue:%s result discarded; operator moved candidate to %s", stage, cur.phase()))
+		return true
+	}
+	return false
+}
+
 func (w Worker) finalize(ctx context.Context) (bool, error) {
 	var candidate Candidate
 	var ok bool
@@ -132,17 +166,27 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		if err != nil {
 			return State{}, err
 		}
+		// The finalization head is the first candidate in claim order that is
+		// still on the train. Parked candidates (needs_input /
+		// needs_conflict_input) and retry-waiting candidates whose timer has
+		// not elapsed are skipped: a stuck candidate delays only itself.
+		n := now(w.Deps)
+		var head *Candidate
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
-			if terminal(c.phase()) {
+			if terminal(c.phase()) || parked(c.phase()) {
 				continue
 			}
-			if c.phase() != ReadyToFinalize {
-				return state, write(path, state)
+			if c.phase() == RetryWait && !c.RetryAt.IsZero() && n.Before(c.RetryAt) {
+				continue
 			}
-			w.lease(c, Finalizing, now(w.Deps))
-			candidate, ok = *c, true
-			return state, write(path, state)
+			if head == nil || before(*c, *head) {
+				head = c
+			}
+		}
+		if head != nil && head.phase() == ReadyToFinalize {
+			w.lease(head, Finalizing, n)
+			candidate, ok = *head, true
 		}
 		return state, write(path, state)
 	})
@@ -155,15 +199,27 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 	} else {
 		err = w.Deps.Integration.Land(ctx, Speculation{SHA: candidate.TreeSHA, BaseSHA: candidate.BaseSHA, IntegrationRef: candidate.IntegrationRef, WorkspaceID: candidate.WorkspaceID, WorkspacePath: candidate.WorkspacePath})
 	}
-	if updateErr := w.update(candidate.ID, func(cur *Candidate) {
+	if updateErr := w.update(candidate.ID, func(state *State, cur *Candidate) {
+		if w.operatorIntervened(cur, "finalization") {
+			return
+		}
 		cur.FinalizationLog = result.Log
-		if err != nil || result.Stale || result.NewMainSHA == "" && w.Deps.Finalizer != nil {
-			cur.Phase, cur.Status, cur.WorkerID, cur.LeaseExpiresAt = Reprepare, Reprepare, "", time.Time{}
-			if err != nil {
-				cur.Failure = err.Error()
-			} else {
-				cur.Failure = "protected base changed after gate; reprepare required"
+		if err != nil {
+			// Hard finalization failure consumes a bounded attempt; only a
+			// stale base (normal train movement) re-prepares for free.
+			cur.WorkerID, cur.LeaseExpiresAt, cur.Failure = "", time.Time{}, err.Error()
+			cur.Evidence = append(cur.Evidence, err.Error())
+			var harness HarnessError
+			if errors.As(err, &harness) {
+				w.park(cur, "finalization_harness_failure")
+				return
 			}
+			w.retryOrPark(state, cur, "finalization_failed")
+			return
+		}
+		if result.Stale || result.NewMainSHA == "" && w.Deps.Finalizer != nil {
+			cur.Phase, cur.Status, cur.WorkerID, cur.LeaseExpiresAt = Reprepare, Reprepare, "", time.Time{}
+			cur.Failure = "protected base changed after gate; reprepare required"
 			return
 		}
 		cur.Phase, cur.Status, cur.WorkerID, cur.LeaseExpiresAt, cur.Completed = Landed, Landed, "", time.Time{}, now(w.Deps)
@@ -188,7 +244,7 @@ func (w Worker) ahead(sequence uint64) ([]Candidate, error) {
 	}
 	return out, nil
 }
-func (w Worker) update(id string, mutate func(*Candidate)) error {
+func (w Worker) update(id string, mutate func(*State, *Candidate)) error {
 	_, err := w.Store.withLock(func(path string) (State, error) {
 		state, err := read(path)
 		if err != nil {
@@ -196,7 +252,7 @@ func (w Worker) update(id string, mutate func(*Candidate)) error {
 		}
 		for i := range state.Candidates {
 			if state.Candidates[i].ID == id {
-				mutate(&state.Candidates[i])
+				mutate(&state, &state.Candidates[i])
 				return state, write(path, state)
 			}
 		}
@@ -207,17 +263,71 @@ func (w Worker) update(id string, mutate func(*Candidate)) error {
 func (w Worker) lease(c *Candidate, phase Status, at time.Time) {
 	c.Phase, c.Status, c.PhaseStartedAt, c.WorkerID, c.LeaseExpiresAt = phase, phase, at, first(w.Deps.WorkerID, "queue-worker"), at.Add(firstDuration(w.Deps.Lease, 30*time.Second))
 }
-func (w Worker) failPreparation(c *Candidate, err error) {
+func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
 	c.Evidence = append(c.Evidence, err.Error())
+	var harness HarnessError
+	if errors.As(err, &harness) {
+		w.park(c, "resolver_harness_failure")
+		return
+	}
 	if strings.Contains(err.Error(), "continuation") {
 		c.Phase, c.Status, c.ConflictContinuation = NeedsConflictInput, NeedsConflictInput, err.Error()
-	} else {
-		c.Phase, c.Status, c.RetryReason = RetryWait, RetryWait, "speculation_failed"
+		return
 	}
+	w.retryOrPark(state, c, "speculation_failed")
 }
-func (w Worker) failGate(c *Candidate, err error) {
-	c.WorkerID, c.LeaseExpiresAt, c.Phase, c.Status, c.RetryReason, c.Failure = "", time.Time{}, RetryWait, RetryWait, "gate_failed", err.Error()
+func (w Worker) failGate(state *State, c *Candidate, err error) {
+	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
+	var harness HarnessError
+	if errors.As(err, &harness) {
+		w.park(c, "gate_harness_failure")
+		return
+	}
+	w.retryOrPark(state, c, "gate_failed")
+}
+
+// retryOrPark applies the bounded retry policy: requeue to the back of the
+// line under exponential backoff, or park as needs_input once attempts are
+// exhausted. Both outcomes are durable and human-recoverable (kick / resume /
+// override), so a failing candidate can delay only itself, never wedge the
+// train, and never spin unbounded.
+func (w Worker) retryOrPark(state *State, c *Candidate, reason string) {
+	if c.Attempt >= w.Deps.maxAttempts() {
+		w.park(c, reason)
+		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:max attempts (%d) exhausted; parked as needs_input", c.Attempt))
+		c.RetryReason = "max_attempts_exhausted"
+		return
+	}
+	n := now(w.Deps)
+	c.Phase, c.Status, c.RetryReason = RetryWait, RetryWait, reason
+	c.RetryAt = n.Add(backoff(w.Deps.retryDelay(), w.Deps.maxRetryDelay(), c.Attempt))
+	c.Position = nextPosition(state.Candidates)
+	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:attempt %d/%d failed (%s); retry_at=%s position=%d", c.Attempt, w.Deps.maxAttempts(), reason, c.RetryAt.Format(time.RFC3339), c.Position))
+}
+
+func (w Worker) park(c *Candidate, reason string) {
+	c.Phase, c.Status, c.RetryReason = NeedsInput, NeedsInput, reason
+	c.WorkerID, c.LeaseExpiresAt, c.RetryAt = "", time.Time{}, time.Time{}
+	c.ParkedAt = now(w.Deps)
+	c.ParkedBy = "queue-worker"
+}
+
+func backoff(base, max time.Duration, attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	d := base
+	for i := 1; i < attempt; i++ {
+		d *= 2
+		if d >= max {
+			return max
+		}
+	}
+	if d > max {
+		return max
+	}
+	return d
 }
 func first(values ...string) string {
 	for _, v := range values {
