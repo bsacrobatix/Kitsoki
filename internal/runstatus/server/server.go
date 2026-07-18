@@ -2132,6 +2132,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if result, rerr, handled := s.dispatchMaterialize(ctx, method, params); handled {
 			return result, rerr
 		}
+		// ── Capsule merge queue (queue.*: operator verbs over
+		// internal/capsule/queue, no story/session) ───────────────────────
+		if result, rerr, handled := s.dispatchQueue(ctx, method, params); handled {
+			return result, rerr
+		}
 		return nil, &rpcError{Code: codeMethodMissing, Message: "unknown method: " + method}
 	}
 }
