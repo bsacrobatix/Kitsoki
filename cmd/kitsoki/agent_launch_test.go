@@ -122,6 +122,45 @@ states:
 	require.Contains(t, denied, "Write")
 }
 
+// A write-effect agent (edits files, no network egress) must keep its write
+// tools in normal mode. tools:[Read,Edit] with no explicit effect: infers to
+// effect "write" (internal/effect.FromTools), which is more privileged than
+// "read" — the launch must not fold it into the read-only strip the way it
+// previously conflated any external_side_effect:false declaration (including
+// write-effect ones, not just pure/read) with read-only. This is the exact
+// shape of the git-ops conflict_resolver agent (stories/git-ops/app.yaml).
+func TestAgentLaunchPlan_WriteEffectAgentKeepsMutationTools(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(host.AgentBinEnv, "/bin/claude-test")
+	appPath := filepath.Join(dir, "app.yaml")
+	require.NoError(t, os.WriteFile(appPath, []byte(`
+app: { id: launch-test, version: 0.1.0, title: Launch Test }
+hosts: [host.agent.ask]
+agents:
+  resolver:
+    system_prompt: "Edit only the conflicted files."
+    tools: [Read, Edit]
+world: {}
+intents: {}
+root: idle
+states:
+  idle: { view: "idle" }
+`), 0644))
+
+	plan, err := buildAgentLaunchPlan(agentLaunchOptions{
+		AppPath:    appPath,
+		ConfigPath: filepath.Join(dir, ".kitsoki.yaml"),
+		AgentName:  "resolver",
+		Task:       "resolve conflicts",
+	})
+	require.NoError(t, err)
+	require.Contains(t, plan.Command, "--permission-mode")
+	require.Contains(t, plan.Command, "bypassPermissions")
+	denied := flagValue(t, plan.Command, "--disallowedTools")
+	require.NotContains(t, denied, "Edit")
+	require.NotContains(t, denied, "Write")
+}
+
 func TestAgentLaunchPlan_MCPOnlyStoryAgentDisablesCodexShell(t *testing.T) {
 	dir := t.TempDir()
 	isolateLaunchCodexHome(t, dir)

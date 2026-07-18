@@ -19,6 +19,7 @@ import (
 	"kitsoki/internal/baseskills"
 	"kitsoki/internal/capsule"
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/effect"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/webconfig"
@@ -1498,8 +1499,18 @@ func buildLaunchClaudeArgs(decl *app.AgentDecl, model, effort, permissionMode st
 	return args
 }
 
+// launchDeclIsReadOnly reports whether decl's effect tier is no more
+// privileged than Read (pure/read). A write-effect agent — one whose tools
+// mutate local state but never reach outside it, e.g. a Read/Edit conflict
+// resolver — is not read-only and must keep its write tools; only
+// ExternalSideEffect==true previously escaped the read-only strip, which
+// wrongly caught every write-effect agent alongside genuinely read-only ones.
+func launchDeclIsReadOnly(decl *app.AgentDecl) bool {
+	return decl != nil && decl.Effect != "" && decl.Effect.LessEqual(effect.Read)
+}
+
 func launchDefaultPermissionMode(decl *app.AgentDecl) string {
-	if decl != nil && decl.ExternalSideEffect != nil && !*decl.ExternalSideEffect {
+	if launchDeclIsReadOnly(decl) {
 		return "default"
 	}
 	return "bypassPermissions"
@@ -1507,7 +1518,7 @@ func launchDefaultPermissionMode(decl *app.AgentDecl) string {
 
 func launchDeniedTools(decl *app.AgentDecl, permissionMode string) []string {
 	denied := []string{"AskUserQuestion", "Agent", "Task"}
-	readOnly := permissionMode == "denyAll" || (decl != nil && decl.ExternalSideEffect != nil && !*decl.ExternalSideEffect)
+	readOnly := permissionMode == "denyAll" || launchDeclIsReadOnly(decl)
 	if readOnly {
 		denied = append(denied, "Write", "Edit", "MultiEdit", "NotebookEdit", "Bash")
 	}
