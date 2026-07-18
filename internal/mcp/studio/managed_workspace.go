@@ -119,6 +119,16 @@ func NewManagedWorkspaceService(root, scriptPath string, runner WorkspaceCommand
 	return &ManagedWorkspaceService{root: filepath.Clean(absRoot), repo: repoRoot, scriptPath: scriptPath, runner: runner, objectives: objectives, now: now, workspaces: map[string]ManagedWorkspace{}}, nil
 }
 
+// projectRoot reports the repository root the managed workspace root lives
+// under. Production sets repo during construction; the test path (injected
+// runner) derives it from the conventional <repo>/.capsules/workspaces layout.
+func (s *ManagedWorkspaceService) projectRoot() string {
+	if s.repo != "" {
+		return s.repo
+	}
+	return filepath.Dir(filepath.Dir(s.root))
+}
+
 type WorkspaceCreateInput struct {
 	ObjectiveID string `json:"objective_id"`
 	ID          string `json:"id"`

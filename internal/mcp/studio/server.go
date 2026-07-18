@@ -43,6 +43,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/bugprivacy"
+	"kitsoki/internal/capsule/queue"
 	starlarkhost "kitsoki/internal/host/starlark"
 	"kitsoki/internal/mcp/graphsrv"
 
@@ -347,6 +348,7 @@ func (srv *Server) registerOperatingSystemTools() {
 	RegisterManagedWorkspaceTools(srv.mcpSrv, os.Workspaces, os.Guard)
 	RegisterWorkspaceCodeactTool(srv.mcpSrv, os.Codeact)
 	RegisterGateTools(srv.mcpSrv, os.Gates)
+	RegisterQueueTools(srv.mcpSrv, queue.Store{ProjectRoot: os.Workspaces.projectRoot()})
 	srv.registerDiagnoseExplainTools()
 }
 
