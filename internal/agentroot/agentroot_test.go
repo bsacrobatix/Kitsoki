@@ -484,6 +484,83 @@ func TestSynthesize_ExternalAgentCwdIsEffectiveWorkingDir(t *testing.T) {
 	}
 }
 
+// TestSynthesize_DeclaredBackendPinsProvider pins the backend half of the
+// agent's voice: a definition that declares backend: (e.g. pog-driver's codex
+// + gpt-5.5) must synthesize a providers: entry the decl references, so
+// applyProvider forces that backend on every dispatch instead of pairing the
+// definition's model with the session's ambient backend or active harness
+// profile.
+func TestSynthesize_DeclaredBackendPinsProvider(t *testing.T) {
+	allow := func(context.Context, string, string, string) (host.AgentLaunchDecision, error) {
+		return host.AgentLaunchDecision{Enabled: true, Allowed: true, Reason: "allowed"}, nil
+	}
+	def := Def{
+		Name:         "driver",
+		SystemPrompt: "You drive.",
+		Backend:      "codex",
+		Model:        "gpt-5.5",
+		Tools:        []string{"Read", "mcp__graph__propose"},
+		Effect:       effect.External,
+		Source:       SourceLibrary,
+	}
+	appDef, err := Synthesize(def, Options{
+		WorkingDir:  t.TempDir(),
+		SchemaDir:   t.TempDir(),
+		CheckPolicy: allow,
+	})
+	if err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+	prov := appDef.Providers[backendProviderName]
+	if prov == nil || prov.Backend != "codex" {
+		t.Fatalf("synthesized provider %q = %+v, want backend codex", backendProviderName, prov)
+	}
+	decl := appDef.Agents["driver"]
+	if decl == nil {
+		t.Fatal("synthesized root lost the agent decl")
+	}
+	if decl.Provider != backendProviderName {
+		t.Fatalf("decl provider = %q, want %q", decl.Provider, backendProviderName)
+	}
+	if decl.Model != "gpt-5.5" {
+		t.Fatalf("decl model = %q, want the declared gpt-5.5 (provider must not displace it)", decl.Model)
+	}
+
+	def.Backend = ""
+	appDef, err = Synthesize(def, Options{
+		WorkingDir:  t.TempDir(),
+		SchemaDir:   t.TempDir(),
+		CheckPolicy: allow,
+	})
+	if err != nil {
+		t.Fatalf("Synthesize (no backend): %v", err)
+	}
+	if len(appDef.Providers) != 0 {
+		t.Fatalf("backendless definition synthesized providers %v, want none (ambient backend)", appDef.Providers)
+	}
+	if appDef.Agents["driver"].Provider != "" {
+		t.Fatalf("backendless decl provider = %q, want empty", appDef.Agents["driver"].Provider)
+	}
+}
+
+// TestResolve_LibraryBackendFrontmatter pins backend: as a library-frontmatter
+// field — a definition like pog-driver.md pairs its codex model with
+// backend: codex and must resolve with both.
+func TestResolve_LibraryBackendFrontmatter(t *testing.T) {
+	libRoot := t.TempDir()
+	writeLibraryAgent(t, libRoot, "driver",
+		"backend: codex\nmodel: gpt-5.5\ntools: Read", "Driver instructions.")
+	def, err := Resolve("driver", Sources{
+		Materialize: func(context.Context) (string, error) { return libRoot, nil },
+	})
+	if err != nil {
+		t.Fatalf("Resolve(driver): %v", err)
+	}
+	if def.Backend != "codex" || def.Model != "gpt-5.5" {
+		t.Fatalf("resolved backend/model = %q/%q, want codex/gpt-5.5", def.Backend, def.Model)
+	}
+}
+
 // TestSynthesize_RealBuiltinsRoundTrip resolves every real builtin (in-memory
 // registry, no embedded library, no project dirs) and synthesizes it — a
 // smoke test that arbitrary real prompts/tool surfaces survive the YAML

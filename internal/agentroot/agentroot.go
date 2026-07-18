@@ -107,8 +107,16 @@ type Def struct {
 	Name         string `json:"name"`
 	Description  string `json:"description,omitempty"`
 	SystemPrompt string `json:"system_prompt"`
-	Model        string `json:"model,omitempty"`
-	Effort       string `json:"effort,omitempty"`
+	// Backend pins the coding-agent CLI this definition speaks through
+	// ("claude" | "codex" | "copilot"). A definition's model is only
+	// meaningful on its own backend (gpt-5.5 does not exist behind claude),
+	// so the backend is part of the agent's voice: Synthesize threads it into
+	// a synthesized provider that wins over the session's active harness
+	// profile, the same precedence the declared model already gets. Empty
+	// means the ambient/session backend.
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 	// Tools is the resolved tool surface. Project TOML agents declare no tool
 	// list, so Resolve assigns one from SandboxMode (see resolveProjectDef);
 	// library/builtin agents carry their declared list.
@@ -270,6 +278,7 @@ func resolveLibraryDef(name string, materialize LibraryMaterializer) (Def, bool,
 		Name:         name,
 		Description:  front.Description,
 		SystemPrompt: instructions,
+		Backend:      front.Backend,
 		Model:        front.Model,
 		Effort:       front.Effort,
 		Tools:        append([]string(nil), front.Tools...),

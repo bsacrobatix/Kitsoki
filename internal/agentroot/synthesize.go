@@ -22,6 +22,10 @@ import (
 // (app_id: "agent:<name>", room: "agent", scope_key).
 const RoomName = "agent"
 
+// backendProviderName is the synthesized providers: entry that pins a
+// definition-declared backend (Def.Backend) onto every dispatch of the agent.
+const backendProviderName = "agent_mode_backend"
+
 // PolicyCheckFunc matches host.AgentLaunchPolicy.Check — the injectable seam
 // for the synthesis-time launch-policy preflight.
 type PolicyCheckFunc func(ctx context.Context, verb, agentName, workingDir string) (host.AgentLaunchDecision, error)
@@ -147,6 +151,18 @@ func Synthesize(def Def, opts Options) (*app.AppDef, error) {
 
 	agentDecl := map[string]any{
 		"system_prompt": def.SystemPrompt,
+	}
+	// A declared backend is part of the agent's voice: its model/tool surface
+	// only exists on that backend, so dispatching through the session's
+	// ambient backend (or active harness profile) would pair e.g. a codex
+	// model with the claude CLI. The provider reference makes applyProvider
+	// force the backend for every dispatch of this agent, with the same
+	// declared-over-profile precedence the model already has.
+	if backend := strings.TrimSpace(def.Backend); backend != "" {
+		doc["providers"] = map[string]any{
+			backendProviderName: map[string]any{"backend": backend},
+		}
+		agentDecl["provider"] = backendProviderName
 	}
 	if strings.TrimSpace(def.Model) != "" {
 		agentDecl["model"] = def.Model

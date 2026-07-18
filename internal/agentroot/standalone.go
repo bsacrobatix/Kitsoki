@@ -50,6 +50,7 @@ func (m LibraryMaterializer) orDefault() LibraryMaterializer {
 type builtInAgentFrontmatter struct {
 	Name        string        `yaml:"name"`
 	Description string        `yaml:"description"`
+	Backend     string        `yaml:"backend"`
 	Model       string        `yaml:"model"`
 	Effort      string        `yaml:"effort"`
 	Tools       agentToolList `yaml:"tools"`

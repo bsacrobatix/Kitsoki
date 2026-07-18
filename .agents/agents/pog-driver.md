@@ -1,5 +1,6 @@
 ---
 name: pog-driver
+backend: codex
 model: gpt-5.5
 effort: medium
 description: Drive POG through its object graph and bounded code actions, with narrowly allowlisted Kitsoki delegation.
