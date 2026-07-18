@@ -59,10 +59,11 @@ def main():
         "dogfood-marathon-tui",
     }
     expected_scenario_count = len(expected_active_scenarios)
+    expected_persona_count = 9
 
-    _check("full persona corpus has no undeclared draft backlog", len(personas) == 8)
+    _check("full persona corpus has no undeclared draft backlog", len(personas) == expected_persona_count)
     _check("full scenario corpus has no undeclared mined backlog", len(scenarios) == expected_scenario_count)
-    _check("active persona corpus is runnable", len(active_personas) == 8)
+    _check("active persona corpus is runnable", len(active_personas) == expected_persona_count)
     _check("active scenario corpus is runnable", len(active_scenarios) == expected_scenario_count)
     _check("active scenarios are the natural-use contract", {item["id"] for item in active_scenarios} == expected_active_scenarios)
     _check("mined scenarios are draft only", not any(item["id"].startswith("mined-scn-") for item in active_scenarios))
@@ -80,9 +81,9 @@ def main():
     _check("full corpus validation passes cleanly", result["status"] == "valid")
     _check("full corpus validation has no errors", result["errors"] == 0)
     _check("full corpus validation has no warnings", result["warnings"] == 0)
-    _check("validation reports active personas", result["personas"] == 8)
+    _check("validation reports active personas", result["personas"] == expected_persona_count)
     _check("validation reports active scenarios", result["scenarios"] == expected_scenario_count)
-    _check("validation reports all personas", result["all_personas"] == 8)
+    _check("validation reports all personas", result["all_personas"] == expected_persona_count)
     _check("validation reports all scenarios", result["all_scenarios"] == expected_scenario_count)
     _check("validation reports no draft personas", result["draft_personas"] == 0)
     _check("validation reports no draft scenarios", result["draft_scenarios"] == 0)
