@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -16,6 +17,15 @@ import (
 func fakeGitHub(t *testing.T, wantCode string, tokenErr string, user GitHubUser, userStatus int) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
+	mux.HandleFunc("/login/device/code", func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "cid", r.Form.Get("client_id"))
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code": "server-device-code", "user_code": "ABCD-1234",
+			"verification_uri": "https://github.example/device", "expires_in": 900, "interval": 1,
+		})
+	})
 	mux.HandleFunc("/login/oauth/access_token", func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		if wantCode != "" {
@@ -46,6 +56,7 @@ func clientFor(srv *httptest.Server) *GitHubClient {
 		ClientID:     "cid",
 		ClientSecret: "csecret",
 		AuthorizeURL: srv.URL + "/login/oauth/authorize",
+		DeviceURL:    srv.URL + "/login/device/code",
 		TokenURL:     srv.URL + "/login/oauth/access_token",
 		UserURL:      srv.URL + "/user",
 	}
@@ -83,6 +94,51 @@ func TestGitHubClient_Exchange_ErrorResponse(t *testing.T) {
 	_, err := c.Exchange(context.Background(), "wrong", "https://kitsoki.example.com/auth/github/callback")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "bad_verification_code")
+}
+
+func TestGitHubClient_DeviceAuthorizationAndPoll(t *testing.T) {
+	t.Parallel()
+	want := GitHubUser{ID: 100, Login: "octocat", Name: "The Octocat"}
+	srv := fakeGitHub(t, "", "", want, http.StatusOK)
+	c := clientFor(srv)
+
+	auth, err := c.StartDeviceAuthorization(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "server-device-code", auth.DeviceCode)
+	assert.Equal(t, "ABCD-1234", auth.UserCode)
+	assert.Equal(t, "https://github.example/device", auth.VerificationURI)
+	assert.Equal(t, time.Second, auth.Interval)
+
+	result, err := c.PollDeviceAuthorization(context.Background(), auth.DeviceCode)
+	require.NoError(t, err)
+	assert.Equal(t, DevicePollComplete, result.State)
+	assert.Equal(t, "fake-token", result.AccessToken)
+}
+
+func TestGitHubClient_DevicePollPendingAndSlowDown(t *testing.T) {
+	t.Parallel()
+	responses := []map[string]any{
+		{"error": "authorization_pending"},
+		{"error": "slow_down", "interval": 9},
+	}
+	var calls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(responses[calls])
+		calls++
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	c := &GitHubClient{ClientID: "cid", TokenURL: srv.URL + "/token"}
+
+	result, err := c.PollDeviceAuthorization(context.Background(), "device")
+	require.NoError(t, err)
+	assert.Equal(t, DevicePollPending, result.State)
+	result, err = c.PollDeviceAuthorization(context.Background(), "device")
+	require.NoError(t, err)
+	assert.Equal(t, DevicePollSlowDown, result.State)
+	assert.Equal(t, 9*time.Second, result.Interval)
 }
 
 func TestGitHubClient_FetchUser_NonOK(t *testing.T) {

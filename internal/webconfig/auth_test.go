@@ -25,6 +25,7 @@ func TestLoad_AuthValid(t *testing.T) {
   session_ttl: 168h
   github:
     client_id: abc123
+    device_flow: true
 `)
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -43,6 +44,9 @@ func TestLoad_AuthValid(t *testing.T) {
 	}
 	if cfg.Auth.GitHub.ClientID != "abc123" {
 		t.Errorf("ClientID = %q", cfg.Auth.GitHub.ClientID)
+	}
+	if !cfg.Auth.GitHub.DeviceFlow {
+		t.Error("DeviceFlow = false, want true")
 	}
 }
 

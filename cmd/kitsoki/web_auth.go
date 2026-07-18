@@ -42,8 +42,11 @@ func buildWebAuth(a *webconfig.AuthConfig, addr, dbPath string, warnTo io.Writer
 	if !resolveAuthRequired(a, addr) {
 		return nil, nil, nil
 	}
-	if a == nil || a.GitHub.ClientID == "" || a.GitHub.ClientSecret == "" {
-		return nil, nil, fmt.Errorf("auth is required for --addr %s but auth.github.client_id/client_secret are not configured; set them in .kitsoki.local.yaml (or set auth.mode: off to serve without login)", addr)
+	if a == nil || a.GitHub.ClientID == "" {
+		return nil, nil, fmt.Errorf("auth is required for --addr %s but auth.github.client_id is not configured; set it in .kitsoki.local.yaml (or set auth.mode: off to serve without login)", addr)
+	}
+	if !a.GitHub.DeviceFlow && a.GitHub.ClientSecret == "" {
+		return nil, nil, fmt.Errorf("auth is required for --addr %s but callback login needs auth.github.client_secret; configure it or explicitly set auth.github.device_flow: true", addr)
 	}
 	ttl := webauth.DefaultSessionTTL
 	if a.SessionTTL != "" {
@@ -65,6 +68,7 @@ func buildWebAuth(a *webconfig.AuthConfig, addr, dbPath string, warnTo io.Writer
 		PublicURL:  a.PublicURL,
 		Admins:     a.Admins,
 		SessionTTL: ttl,
+		DeviceFlow: a.GitHub.DeviceFlow,
 	})
 	return mgr, closeStore, nil
 }

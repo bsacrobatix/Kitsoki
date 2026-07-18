@@ -16,14 +16,14 @@ __PUBLIC_HOST__ {
 		output file /var/log/caddy/access.log
 	}
 
-	# OAuth endpoints must remain reachable before a session exists. They expose
-	# only the login protocol; Kitsoki validates invite codes, GitHub state, and
-	# sessions before it creates an authenticated browser session.
+	# GitHub login endpoints must remain reachable before a session exists. They
+	# expose only the login protocol; Kitsoki validates invite codes, GitHub
+	# identity, device attempts, and sessions before creating a browser session.
 	handle /auth/* {
 		reverse_proxy 127.0.0.1:7777
 	}
 
-	# GitHub cannot present a browser session. This is the sole non-OAuth bypass
+	# GitHub cannot present a browser session. This is the sole non-login bypass
 	# and the GitHub agent rejects every request without a valid HMAC signature.
 	handle /gh-agent/webhook {
 		reverse_proxy 127.0.0.1:8787

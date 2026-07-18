@@ -101,6 +101,30 @@ func TestBuildWebAuth_RequiredWithoutCredsFailsFast(t *testing.T) {
 	assert.Contains(t, err.Error(), "client_id")
 }
 
+func TestBuildWebAuth_CallbackFlowWithoutSecretFailsFast(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sessions.db")
+	cfg := &webconfig.AuthConfig{
+		Mode:   "required",
+		GitHub: webconfig.GitHubAuthConfig{ClientID: "cid"},
+	}
+	_, _, err := buildWebAuth(cfg, "0.0.0.0:7777", dbPath, &bytes.Buffer{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "client_secret")
+}
+
+func TestBuildWebAuth_DeviceFlowNeedsOnlyClientID(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sessions.db")
+	cfg := &webconfig.AuthConfig{
+		Mode:   "required",
+		GitHub: webconfig.GitHubAuthConfig{ClientID: "cid", DeviceFlow: true},
+	}
+	mgr, closeFn, err := buildWebAuth(cfg, "0.0.0.0:7777", dbPath, &bytes.Buffer{})
+	require.NoError(t, err)
+	require.NotNil(t, mgr)
+	require.NotNil(t, closeFn)
+	_ = closeFn()
+}
+
 func TestBuildWebAuth_OffReturnsNilManager(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "sessions.db")
 	mgr, closeFn, err := buildWebAuth(nil, "127.0.0.1:7777", dbPath, &bytes.Buffer{})

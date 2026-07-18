@@ -10,8 +10,8 @@ operator has explicitly invited can get in.
 
 There is no identity provider of kitsoki's own and no password. An
 operator mints a one-time invite link tied to a person; opening it and
-completing a standard GitHub OAuth web flow associates that person's
-GitHub account with the invite and starts a browser session. From then on
+completing either GitHub's callback-based web flow or Device Flow associates
+that person's GitHub account with the invite and starts a browser session. From then on
 they sign in with GitHub directly — the invite is consumed on first use.
 Admins are defined locally: either `--admin` on the invite, or a GitHub
 login listed in `auth.admins` (no invite needed for those). The
@@ -24,7 +24,8 @@ gated by role yet.
 `auto`). Auto collapses against the listen address
 (`webauth.IsLoopbackAddr`, `internal/webauth/addr.go`): a loopback
 `--addr` (the `127.0.0.1:7777` default) stays open with no login; any
-other bind requires it. `required` with no GitHub OAuth App configured
+other bind requires it. `required` with no GitHub App client ID configured—or
+with neither an explicitly selected Device Flow nor a web-flow secret—
 fails the server at startup rather than serving open or silently
 unusable — see `buildWebAuth` in `cmd/kitsoki/web_auth.go`.
 
@@ -36,8 +37,12 @@ auth:
   admins: [your-github-login]
   session_ttl: 720h                       # default 30 days
   github:
-    client_id: <OAuth App client id>
+    client_id: <GitHub App client id>
+    device_flow: true                    # no callback or client secret
 ```
+
+For callback-based web flow instead, omit `device_flow` and add the secret in
+the gitignored local config:
 
 ```yaml
 # .kitsoki.local.yaml (gitignored — the secret lives here)
@@ -46,8 +51,10 @@ auth:
     client_secret: "${KITSOKI_GH_CLIENT_SECRET}"
 ```
 
-Register a GitHub OAuth App with callback URL
-`<public_url>/auth/github/callback` and put its client id/secret above.
+Register `<public_url>/auth/github/callback` on the GitHub App when using the
+web flow. When using Device Flow, enable that feature in the GitHub App settings;
+no callback or client secret is used. Both flows fetch the GitHub profile once,
+discard the access token, and then share the same invite/session path.
 
 ## Inviting someone
 
@@ -85,6 +92,15 @@ sequenceDiagram
     Gate->>Gate: X-Kitsoki-Actor := session user's GitHub login
 ```
 
+With `auth.github.device_flow: true`, the login button instead creates a
+short-lived device authorization. Kitsoki keeps the GitHub `device_code`
+server-side, shows only the one-time `user_code`, and polls GitHub from the
+server. The browser poll requires both an opaque HttpOnly attempt cookie and a
+separate page-bound token. Once GitHub returns an access token, the flow rejoins
+the same `fetch user → redeem invite → create session` path shown above. Pending
+attempts are memory-only, expiry-bounded, and capped; a restart only requires
+the person to begin login again.
+
 `Manager.Wrap` (`internal/runstatus/server/server.go`'s `Handler()`,
 gated by `WithAuth`) sits over the whole mux and exempts only `/auth/*`.
 An authenticated request has its `X-Kitsoki-Actor` header **overwritten**
@@ -117,5 +133,5 @@ plaintext exists solely in the printed invite link and the cookie itself.
   them.
 - **No email delivery.** Invite links are printed for the operator to
   share manually.
-- **No GitHub token retained.** The OAuth access token is used once
+- **No GitHub token retained.** The GitHub access token is used once
   (`FetchUser`) and discarded.

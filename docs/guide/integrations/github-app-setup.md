@@ -210,8 +210,7 @@ scripts/deploy-gh-agent.sh --yes
 
 This deploys the webhook/job service only. To host POG on the same VM and make
 the whole human-readable domain invitation-only—including agent health, run,
-and evidence URLs—follow the additional OAuth callback/client-secret setup and
-fail-closed Caddy routing in
+and evidence URLs—follow the Device Flow login and fail-closed Caddy routing in
 [`hosted-pog.md`](hosted-pog.md). Do not add POG to the catch-all proxy in this
 runbook by hand.
 

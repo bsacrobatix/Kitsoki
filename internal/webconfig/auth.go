@@ -25,9 +25,10 @@ type AuthConfig struct {
 	// Mode is off | required | auto (default auto — required iff the listen
 	// address is non-loopback).
 	Mode string `yaml:"mode,omitempty"`
-	// GitHub carries the OAuth App credentials. Required when auth is
-	// effectively on (validated at server startup, where the listen address
-	// is known).
+	// GitHub carries the selected GitHub App login flow and credentials.
+	// ClientID is required when auth is effectively on; ClientSecret is only
+	// required for callback login (validated at server startup, where the
+	// listen address is known).
 	GitHub GitHubAuthConfig `yaml:"github,omitempty"`
 	// PublicURL is the externally visible base URL, e.g.
 	// https://kitsoki.example.com. It anchors the OAuth redirect_uri
@@ -43,11 +44,13 @@ type AuthConfig struct {
 	SessionTTL string `yaml:"session_ttl,omitempty"`
 }
 
-// GitHubAuthConfig is the OAuth App credential pair. Both fields support
-// ${VAR} expansion against the process environment.
+// GitHubAuthConfig selects and configures the GitHub user-authentication flow.
+// ClientID is always required when auth is on. Callback-based web flow also
+// requires ClientSecret; DeviceFlow deliberately does not.
 type GitHubAuthConfig struct {
 	ClientID     string `yaml:"client_id,omitempty"`
 	ClientSecret string `yaml:"client_secret,omitempty"`
+	DeviceFlow   bool   `yaml:"device_flow,omitempty"`
 }
 
 // resolveAuth validates the `auth:` block fail-fast at load, mirroring

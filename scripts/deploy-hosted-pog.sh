@@ -9,6 +9,8 @@ PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-}"
 POG_ROOT="${KITSOKI_HOSTED_POG_ROOT:-$HOME/code/POG}"
 POG_REF="${KITSOKI_HOSTED_POG_REF:-main}"
 ADMIN="${KITSOKI_HOSTED_POG_ADMIN:-bsacrobatix}"
+GH_CLIENT_ID="${KITSOKI_HOSTED_POG_GH_CLIENT_ID:-}"
+GH_APP_PROFILE="${KITSOKI_HOSTED_POG_GH_APP_PROFILE:-$HOME/.config/kitsoki/gh-app/bsacrobatix-kitsoki-test/kitsoki.env}"
 GOCACHE="${GOCACHE:-/private/tmp/kitsoki-gocache}"
 
 mode="dry-run"
@@ -37,7 +39,7 @@ verify() {
 
 	# Every content handler in the Caddyfile has a representative anonymous
 	# probe. HTML navigation redirects into login; non-HTML/API traffic is
-	# rejected directly. The OAuth entrypoint and signed-webhook transport are
+	# rejected directly. The GitHub login entrypoint and signed-webhook transport are
 	# the only deliberate protocol exceptions.
 	expect_public_status 302 / -H 'Accept: text/html'
 	expect_public_status 401 /assets/access-probe.js
@@ -54,15 +56,36 @@ verify() {
 	expect_public_status 401 /decks/access-probe
 	expect_public_status 401 /auth/me
 	expect_public_status 200 /auth/login
+	expect_public_status 410 /auth/github/device/poll -X POST
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
+	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
+	grep -q '/auth/github/device/start' <<<"$login_page"
 	ssh "$REMOTE" 'set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:7777/auth/me)" = 401; curl -fsS -o /dev/null http://127.0.0.1:5183/api/catalog; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null'
-	echo "hosted-pog verify: services active; anonymous route-family matrix denied; OAuth entrypoint reachable; unsigned webhook denied; loopback health=ok"
+	echo "hosted-pog verify: services active; anonymous route-family matrix denied; GitHub Device Flow entrypoint reachable; unsigned webhook denied; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then
 	verify
 	exit 0
 fi
+
+if [ -z "$GH_CLIENT_ID" ] && [ -f "$GH_APP_PROFILE" ]; then
+	profile_line="$(grep -E '^KITSOKI_GH_APP_CLIENT_ID=' "$GH_APP_PROFILE" | tail -n 1 || true)"
+	GH_CLIENT_ID="${profile_line#KITSOKI_GH_APP_CLIENT_ID=}"
+fi
+[[ "$GH_CLIENT_ID" =~ ^[A-Za-z0-9._-]+$ ]] || {
+	echo "set KITSOKI_HOSTED_POG_GH_CLIENT_ID or provide a generated Kitsoki App profile at $GH_APP_PROFILE" >&2
+	exit 2
+}
+if ! device_probe="$(curl -sS -X POST -H 'Accept: application/json' -d "client_id=$GH_CLIENT_ID" https://github.com/login/device/code)"; then
+	echo "could not probe GitHub Device Flow for the configured App client ID" >&2
+	exit 1
+fi
+grep -q '"device_code"' <<<"$device_probe" || {
+	echo "GitHub Device Flow is not enabled for the configured App client ID" >&2
+	exit 1
+}
+unset device_probe
 
 [ -d "$POG_ROOT/.git" ] || { echo "POG checkout is missing at $POG_ROOT" >&2; exit 2; }
 KITSOKI_SHA="$(git -C "$ROOT" rev-parse HEAD)"
@@ -81,17 +104,18 @@ deploy-hosted-pog:
   remote:         $REMOTE
   public URL:     ${PUBLIC_BASE_URL%/}
   GitHub admin:   $ADMIN
+  GitHub login:   Device Flow using client ID from the local App profile
   topology:       Caddy -> Kitsoki /auth/check -> POG 127.0.0.1:5183
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
-  public protocol: OAuth endpoints and the HMAC-verified GitHub webhook only
+  public protocol: GitHub Device Flow endpoints and the HMAC-verified webhook only
 EOF
 
 if [ "$mode" = "dry-run" ]; then
 	cat <<'EOF'
 
-dry run only. The remote must already contain /etc/kitsoki/hosted-pog.env
-with KITSOKI_GH_APP_CLIENT_ID and KITSOKI_GH_APP_CLIENT_SECRET. Re-run with
---yes to build, upload, activate, and verify; use --verify for read-only checks.
+dry run only. Re-run with --yes to build, upload, activate, and verify; use
+--verify for read-only checks. Device Flow requires no client secret or OAuth
+callback; the GitHub App must keep Device Flow enabled.
 EOF
 	exit 0
 fi
@@ -119,5 +143,5 @@ local_binary_sha="$(shasum -a 256 "$local_stage/kitsoki" | awk '{print $1}')"
 remote_binary_sha="$(ssh "$REMOTE" "sha256sum '$remote_stage/kitsoki' | awk '{print \$1}'")"
 [ "$local_binary_sha" = "$remote_binary_sha" ] || { echo "uploaded Kitsoki binary checksum mismatch" >&2; exit 1; }
 
-ssh "$REMOTE" "KITSOKI_HOSTED_POG_ADMIN='$ADMIN' bash '$remote_stage/install.sh' '$pog_sha' '$KITSOKI_SHA' '${PUBLIC_BASE_URL%/}'"
+ssh "$REMOTE" "KITSOKI_HOSTED_POG_ADMIN='$ADMIN' bash '$remote_stage/install.sh' '$pog_sha' '$KITSOKI_SHA' '${PUBLIC_BASE_URL%/}' '$GH_CLIENT_ID'"
 verify

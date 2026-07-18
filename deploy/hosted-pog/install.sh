@@ -9,14 +9,14 @@ die() {
 }
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
-[ "$#" -eq 3 ] || die "usage: install.sh <pog-commit-sha> <kitsoki-commit-sha> <public-base-url>"
+[ "$#" -eq 4 ] || die "usage: install.sh <pog-commit-sha> <kitsoki-commit-sha> <public-base-url> <github-client-id>"
 
 pog_sha="$1"
 kitsoki_sha="$2"
 public_base_url="${3%/}"
+github_client_id="$4"
 stage="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 admin="${KITSOKI_HOSTED_POG_ADMIN:-bsacrobatix}"
-env_file="/etc/kitsoki/hosted-pog.env"
 release_root="/opt/pog/releases"
 release="$release_root/$pog_sha"
 current="/opt/pog/current"
@@ -39,16 +39,13 @@ trap cleanup_incomplete_release EXIT
 [[ "$pog_sha" =~ ^[0-9a-f]{40}$ ]] || die "invalid POG commit SHA"
 [[ "$kitsoki_sha" =~ ^[0-9a-f]{40}$ ]] || die "invalid Kitsoki commit SHA"
 [[ "$public_base_url" =~ ^https://[A-Za-z0-9.-]+$ ]] || die "public base URL must be an https origin with no path"
+[[ "$github_client_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid GitHub App client ID"
 [[ "$admin" =~ ^[A-Za-z0-9-]+$ ]] || die "invalid GitHub admin login"
 public_host="${public_base_url#https://}"
 
 for file in pog.bundle kitsoki kitsoki-pog.service pog-portal.service hosted-pog.yaml Caddyfile; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
-[ -f "$env_file" ] || die "$env_file is missing; configure the GitHub OAuth client id and secret first"
-grep -Eq '^[[:space:]]*KITSOKI_GH_APP_CLIENT_ID=.+' "$env_file" || die "$env_file has no KITSOKI_GH_APP_CLIENT_ID"
-grep -Eq '^[[:space:]]*KITSOKI_GH_APP_CLIENT_SECRET=.+' "$env_file" || die "$env_file has no KITSOKI_GH_APP_CLIENT_SECRET"
-
 if ! id -u pog >/dev/null 2>&1; then
 	useradd --system --home-dir /var/lib/pog --shell /usr/sbin/nologin pog
 fi
@@ -96,7 +93,7 @@ ln -sfn /opt/kitsoki "$release_root/Kitsoki"
 
 rendered_config="$stage/hosted-pog.rendered.yaml"
 rendered_caddy="$stage/Caddyfile.rendered"
-sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" "$stage/hosted-pog.yaml" >"$rendered_config"
+sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" -e "s|__GITHUB_CLIENT_ID__|$github_client_id|g" "$stage/hosted-pog.yaml" >"$rendered_config"
 sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/Caddyfile" >"$rendered_caddy"
 caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 
@@ -204,7 +201,10 @@ expect_public_status 401 /run/access-probe
 expect_public_status 401 /decks/access-probe
 expect_public_status 401 /auth/me
 expect_public_status 200 /auth/login
+expect_public_status 410 /auth/github/device/poll -X POST
 expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
+login_page="$(curl -fsS "$public_base_url/auth/login")"
+grep -q '/auth/github/device/start' <<<"$login_page"
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 
 trap - EXIT

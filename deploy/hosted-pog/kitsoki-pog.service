@@ -10,7 +10,6 @@ Group=pog
 WorkingDirectory=/opt/pog/current
 Environment=HOME=/var/lib/kitsoki-pog
 Environment=XDG_CACHE_HOME=/var/cache/kitsoki-pog
-EnvironmentFile=/etc/kitsoki/hosted-pog.env
 ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki daemon --config /etc/kitsoki/hosted-pog.yaml --db /var/lib/kitsoki-pog/sessions.db --addr 127.0.0.1:7777 --stories-dir /opt/pog/current/stories --kits-dir /opt/pog/current/kits
 Restart=on-failure
 RestartSec=3s

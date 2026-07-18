@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,11 +19,14 @@ import (
 const (
 	sessionCookie = "kitsoki_session"
 	stateCookie   = "kitsoki_oauth_state"
+	deviceCookie  = "kitsoki_device_state"
 )
 
 // stateTTL bounds how long a login attempt may sit between /auth/github/start
 // and the callback.
 const stateTTL = 10 * time.Minute
+
+const maxPendingDeviceLogins = 128
 
 // DefaultSessionTTL is the cookie-session lifetime when auth.session_ttl is
 // not configured: 30 days.
@@ -47,6 +51,10 @@ type Config struct {
 	Admins []string
 	// SessionTTL is the browser-session lifetime; zero ⇒ DefaultSessionTTL.
 	SessionTTL time.Duration
+	// DeviceFlow selects GitHub's Device Flow instead of the callback-based
+	// web flow. It requires only a client ID and is intended for deployments
+	// whose GitHub App already has Device Flow enabled.
+	DeviceFlow bool
 }
 
 // Manager owns the /auth/* HTTP surface and the request gate. Build one with
@@ -56,13 +64,26 @@ type Manager struct {
 	store *Store
 	gh    *GitHubClient
 	cfg   Config
+
+	deviceMu sync.Mutex
+	devices  map[string]*pendingDeviceLogin
+}
+
+type pendingDeviceLogin struct {
+	deviceCode    string
+	pollTokenHash string
+	payload       statePayload
+	expiresAt     time.Time
+	nextPollAt    time.Time
+	interval      time.Duration
+	inFlight      bool
 }
 
 func NewManager(store *Store, gh *GitHubClient, cfg Config) *Manager {
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = DefaultSessionTTL
 	}
-	return &Manager{store: store, gh: gh, cfg: cfg}
+	return &Manager{store: store, gh: gh, cfg: cfg, devices: make(map[string]*pendingDeviceLogin)}
 }
 
 // Mount registers the /auth/* routes. They are also skipped by Wrap, so login
@@ -72,6 +93,8 @@ func (m *Manager) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/invite", m.handleInvite)
 	mux.HandleFunc("/auth/github/start", m.handleStart)
 	mux.HandleFunc("/auth/github/callback", m.handleCallback)
+	mux.HandleFunc("/auth/github/device/start", m.handleDeviceStart)
+	mux.HandleFunc("/auth/github/device/poll", m.handleDevicePoll)
 	mux.HandleFunc("/auth/logout", m.handleLogout)
 	mux.HandleFunc("/auth/me", m.handleMe)
 	mux.HandleFunc("/auth/check", m.handleCheck)
@@ -134,10 +157,15 @@ func (m *Manager) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if invite := q.Get("invite"); invite != "" {
 		startQ.Set("invite", invite)
 	}
+	startPath := "/auth/github/start?" + startQ.Encode()
+	if m.cfg.DeviceFlow {
+		startPath = "/auth/github/device/start?" + startQ.Encode()
+	}
 	renderLoginPage(w, loginPageData{
-		StartURL: "/auth/github/start?" + startQ.Encode(),
-		Invited:  q.Get("invite") != "",
-		Error:    q.Get("err"),
+		StartURL:   startPath,
+		Invited:    q.Get("invite") != "",
+		Error:      q.Get("err"),
+		DeviceFlow: m.cfg.DeviceFlow,
 	})
 }
 
@@ -173,6 +201,10 @@ type statePayload struct {
 }
 
 func (m *Manager) handleStart(w http.ResponseWriter, r *http.Request) {
+	if m.cfg.DeviceFlow {
+		http.NotFound(w, r)
+		return
+	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -202,6 +234,234 @@ func (m *Manager) handleStart(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, m.gh.AuthCodeURL(state, m.redirectURI(r)), http.StatusFound)
+}
+
+// ── GitHub Device Flow ────────────────────────────────────────────────────
+
+// handleDeviceStart creates one short-lived GitHub device authorization and
+// renders the one-time code. The GitHub device_code never reaches the browser;
+// it is kept in a bounded in-memory set and addressed by an opaque HttpOnly
+// cookie plus a second page-bound polling token.
+func (m *Manager) handleDeviceStart(w http.ResponseWriter, r *http.Request) {
+	if !m.cfg.DeviceFlow {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	now := time.Now()
+	m.deviceMu.Lock()
+	m.pruneDevicesLocked(now)
+	full := len(m.devices) >= maxPendingDeviceLogins
+	m.deviceMu.Unlock()
+	if full {
+		renderMessagePage(w, http.StatusServiceUnavailable, "Sign-in is temporarily busy. Try again shortly.")
+		return
+	}
+
+	auth, err := m.gh.StartDeviceAuthorization(r.Context())
+	if err != nil {
+		renderMessagePage(w, http.StatusBadGateway, "GitHub sign-in is temporarily unavailable. Try again.")
+		return
+	}
+	attemptToken, attemptHash, err := NewToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	pollToken, pollHash, err := NewToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	pending := &pendingDeviceLogin{
+		deviceCode:    auth.DeviceCode,
+		pollTokenHash: pollHash,
+		payload: statePayload{
+			Next:   sanitizeNext(r.URL.Query().Get("next")),
+			Invite: r.URL.Query().Get("invite"),
+		},
+		expiresAt:  now.Add(auth.ExpiresIn),
+		nextPollAt: now,
+		interval:   auth.Interval,
+	}
+	m.deviceMu.Lock()
+	m.pruneDevicesLocked(now)
+	if len(m.devices) >= maxPendingDeviceLogins {
+		m.deviceMu.Unlock()
+		renderMessagePage(w, http.StatusServiceUnavailable, "Sign-in is temporarily busy. Try again shortly.")
+		return
+	}
+	m.devices[attemptHash] = pending
+	m.deviceMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     deviceCookie,
+		Value:    attemptToken,
+		Path:     "/auth/",
+		MaxAge:   int(auth.ExpiresIn.Seconds()),
+		HttpOnly: true,
+		Secure:   m.secureCookies(r),
+		SameSite: http.SameSiteStrictMode,
+	})
+	renderDevicePage(w, devicePageData{
+		UserCode:        auth.UserCode,
+		VerificationURI: auth.VerificationURI,
+		PollToken:       pollToken,
+		PollIntervalMS:  int64(auth.Interval / time.Millisecond),
+	})
+}
+
+func (m *Manager) handleDevicePoll(w http.ResponseWriter, r *http.Request) {
+	if !m.cfg.DeviceFlow {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	cookie, err := r.Cookie(deviceCookie)
+	if err != nil || cookie.Value == "" {
+		writeDeviceJSON(w, http.StatusGone, "expired", "This sign-in attempt expired. Start again.", 0, "")
+		return
+	}
+	key := HashToken(cookie.Value)
+	now := time.Now()
+	m.deviceMu.Lock()
+	m.pruneDevicesLocked(now)
+	pending, ok := m.devices[key]
+	if !ok {
+		m.deviceMu.Unlock()
+		m.clearDeviceCookie(w, r)
+		writeDeviceJSON(w, http.StatusGone, "expired", "This sign-in attempt expired. Start again.", 0, "")
+		return
+	}
+	if HashToken(r.Header.Get("X-Kitsoki-Device-Token")) != pending.pollTokenHash {
+		m.deviceMu.Unlock()
+		writeDeviceJSON(w, http.StatusForbidden, "forbidden", "Invalid sign-in poll.", 0, "")
+		return
+	}
+	if pending.inFlight || now.Before(pending.nextPollAt) {
+		retry := pending.nextPollAt.Sub(now)
+		if retry < time.Second {
+			retry = time.Second
+		}
+		m.deviceMu.Unlock()
+		writeDeviceJSON(w, http.StatusAccepted, "pending", "", retry, "")
+		return
+	}
+	pending.inFlight = true
+	deviceCode := pending.deviceCode
+	m.deviceMu.Unlock()
+
+	result, pollErr := m.gh.PollDeviceAuthorization(r.Context(), deviceCode)
+	now = time.Now()
+	m.deviceMu.Lock()
+	current, stillPending := m.devices[key]
+	if !stillPending || current != pending {
+		m.deviceMu.Unlock()
+		m.clearDeviceCookie(w, r)
+		writeDeviceJSON(w, http.StatusGone, "expired", "This sign-in attempt expired. Start again.", 0, "")
+		return
+	}
+	pending.inFlight = false
+	if pollErr != nil {
+		delete(m.devices, key)
+		m.deviceMu.Unlock()
+		m.clearDeviceCookie(w, r)
+		writeDeviceJSON(w, http.StatusBadGateway, "error", "GitHub sign-in failed. Start again.", 0, "")
+		return
+	}
+	switch result.State {
+	case DevicePollPending:
+		pending.nextPollAt = now.Add(pending.interval)
+		retry := pending.interval
+		m.deviceMu.Unlock()
+		writeDeviceJSON(w, http.StatusAccepted, "pending", "", retry, "")
+		return
+	case DevicePollSlowDown:
+		if result.Interval > pending.interval {
+			pending.interval = result.Interval
+		} else {
+			pending.interval += 5 * time.Second
+		}
+		pending.nextPollAt = now.Add(pending.interval)
+		retry := pending.interval
+		m.deviceMu.Unlock()
+		writeDeviceJSON(w, http.StatusAccepted, "pending", "", retry, "")
+		return
+	case DevicePollComplete:
+		delete(m.devices, key)
+		payload := pending.payload
+		m.deviceMu.Unlock()
+		m.clearDeviceCookie(w, r)
+		gh, err := m.gh.FetchUser(r.Context(), result.AccessToken)
+		if err != nil {
+			writeDeviceJSON(w, http.StatusBadGateway, "error", "Could not read your GitHub profile. Start again.", 0, "")
+			return
+		}
+		user, err := m.resolveUser(r.Context(), gh, payload.Invite)
+		if errors.Is(err, errNotInvited) {
+			writeDeviceJSON(w, http.StatusForbidden, "forbidden", "This GitHub account has no invitation. Ask the operator for an invite link.", 0, "")
+			return
+		}
+		if err != nil {
+			writeDeviceJSON(w, http.StatusInternalServerError, "error", "Sign-in could not be completed. Start again.", 0, "")
+			return
+		}
+		if err := m.issueSession(w, r, user); err != nil {
+			writeDeviceJSON(w, http.StatusInternalServerError, "error", "Sign-in could not be completed. Start again.", 0, "")
+			return
+		}
+		next := payload.Next
+		if next == "" {
+			next = "/"
+		}
+		writeDeviceJSON(w, http.StatusOK, "complete", "", 0, next)
+		return
+	default:
+		delete(m.devices, key)
+		m.deviceMu.Unlock()
+		m.clearDeviceCookie(w, r)
+		writeDeviceJSON(w, http.StatusBadGateway, "error", "GitHub sign-in failed. Start again.", 0, "")
+	}
+}
+
+func (m *Manager) pruneDevicesLocked(now time.Time) {
+	for key, pending := range m.devices {
+		if !now.Before(pending.expiresAt) {
+			delete(m.devices, key)
+		}
+	}
+}
+
+func (m *Manager) clearDeviceCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     deviceCookie,
+		Value:    "",
+		Path:     "/auth/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   m.secureCookies(r),
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func writeDeviceJSON(w http.ResponseWriter, status int, state, message string, retry time.Duration, next string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	out := struct {
+		Status       string `json:"status"`
+		Message      string `json:"message,omitempty"`
+		RetryAfterMS int64  `json:"retry_after_ms,omitempty"`
+		Next         string `json:"next,omitempty"`
+	}{Status: state, Message: message, RetryAfterMS: int64(retry / time.Millisecond), Next: next}
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // ── /auth/github/callback ─────────────────────────────────────────────────
@@ -242,10 +502,21 @@ func (m *Manager) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionToken, err := m.store.CreateSession(r.Context(), user.ID, m.cfg.SessionTTL)
-	if err != nil {
+	if err := m.issueSession(w, r, user); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
+	}
+	next := payload.Next
+	if next == "" {
+		next = "/"
+	}
+	http.Redirect(w, r, next, http.StatusFound)
+}
+
+func (m *Manager) issueSession(w http.ResponseWriter, r *http.Request, user User) error {
+	sessionToken, err := m.store.CreateSession(r.Context(), user.ID, m.cfg.SessionTTL)
+	if err != nil {
+		return err
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -256,11 +527,7 @@ func (m *Manager) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Secure:   m.secureCookies(r),
 		SameSite: http.SameSiteLaxMode,
 	})
-	next := payload.Next
-	if next == "" {
-		next = "/"
-	}
-	http.Redirect(w, r, next, http.StatusFound)
+	return nil
 }
 
 // errNotInvited marks a GitHub account with no user row, no valid invite, and

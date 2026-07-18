@@ -7,6 +7,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,12 +32,16 @@ func noRedirectClient(t *testing.T) *http.Client {
 // GitHub server, plus a stub protected handler so Wrap's gate can be
 // exercised end to end.
 func buildTestManager(t *testing.T, admins []string) (*httptest.Server, *httptest.Server, *Manager) {
+	return buildTestManagerConfig(t, Config{Admins: admins})
+}
+
+func buildTestManagerConfig(t *testing.T, cfg Config) (*httptest.Server, *httptest.Server, *Manager) {
 	t.Helper()
 	store := newTestStore(t)
 	ghUser := GitHubUser{ID: 55, Login: "carol", Name: "Carol"}
 	gh := fakeGitHub(t, "", "", ghUser, http.StatusOK)
 
-	mgr := NewManager(store, clientFor(gh), Config{Admins: admins})
+	mgr := NewManager(store, clientFor(gh), cfg)
 
 	// Mirror server.Handler's composition: Mount registers /auth/* on the
 	// SAME mux that Wrap's bypass delegates to for those paths, and every
@@ -253,6 +258,118 @@ func TestManager_FullInviteLoginFlow(t *testing.T) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestManager_DeviceFlowAdminLoginCreatesSession(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManagerConfig(t, Config{Admins: []string{"carol"}, DeviceFlow: true})
+	client := noRedirectClient(t)
+
+	resp, err := client.Get(srv.URL + "/auth/login?next=%2Fportfolio")
+	require.NoError(t, err)
+	loginBody := readAll(t, resp)
+	_ = resp.Body.Close()
+	assert.Contains(t, string(loginBody), `method="post"`)
+	assert.Contains(t, string(loginBody), "/auth/github/device/start")
+
+	pollToken := startDeviceLogin(t, client, srv.URL, "/auth/github/device/start?next=%2Fportfolio")
+	pollReq, err := http.NewRequest(http.MethodPost, srv.URL+"/auth/github/device/poll", nil)
+	require.NoError(t, err)
+	pollReq.Header.Set("X-Kitsoki-Device-Token", pollToken)
+	resp, err = client.Do(pollReq)
+	require.NoError(t, err)
+	pollBody := readAll(t, resp)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var result map[string]any
+	require.NoError(t, json.Unmarshal(pollBody, &result))
+	assert.Equal(t, "complete", result["status"])
+	assert.Equal(t, "/portfolio", result["next"])
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/some/protected", nil)
+	require.NoError(t, err)
+	resp, err = client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "carol", resp.Header.Get("X-Seen-Actor"))
+}
+
+func TestManager_DeviceFlowUnknownAccountWithoutInviteIsForbidden(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManagerConfig(t, Config{DeviceFlow: true})
+	client := noRedirectClient(t)
+	pollToken := startDeviceLogin(t, client, srv.URL, "/auth/github/device/start")
+
+	pollReq, err := http.NewRequest(http.MethodPost, srv.URL+"/auth/github/device/poll", nil)
+	require.NoError(t, err)
+	pollReq.Header.Set("X-Kitsoki-Device-Token", pollToken)
+	resp, err := client.Do(pollReq)
+	require.NoError(t, err)
+	body := readAll(t, resp)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Contains(t, string(body), "no invitation")
+
+	resp, err = client.Get(srv.URL + "/auth/me")
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestManager_DeviceFlowRedeemsInvite(t *testing.T) {
+	t.Parallel()
+	srv, _, mgr := buildTestManagerConfig(t, Config{DeviceFlow: true})
+	_, inviteCode, err := mgr.store.CreateInvite(context.Background(), "Carol", RoleUser)
+	require.NoError(t, err)
+	client := noRedirectClient(t)
+	pollToken := startDeviceLogin(t, client, srv.URL, "/auth/github/device/start?invite="+url.QueryEscape(inviteCode))
+
+	pollReq, err := http.NewRequest(http.MethodPost, srv.URL+"/auth/github/device/poll", nil)
+	require.NoError(t, err)
+	pollReq.Header.Set("X-Kitsoki-Device-Token", pollToken)
+	resp, err := client.Do(pollReq)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	user, ok, err := mgr.store.UserByGitHubID(context.Background(), 55)
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, RoleUser, user.Role)
+	_, err = mgr.store.LookupInvite(context.Background(), inviteCode)
+	assert.ErrorIs(t, err, ErrInviteNotFound)
+}
+
+func TestManager_DeviceFlowRejectsWrongPollToken(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManagerConfig(t, Config{Admins: []string{"carol"}, DeviceFlow: true})
+	client := noRedirectClient(t)
+	_ = startDeviceLogin(t, client, srv.URL, "/auth/github/device/start")
+
+	pollReq, err := http.NewRequest(http.MethodPost, srv.URL+"/auth/github/device/poll", nil)
+	require.NoError(t, err)
+	pollReq.Header.Set("X-Kitsoki-Device-Token", "wrong")
+	resp, err := client.Do(pollReq)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+func startDeviceLogin(t *testing.T, client *http.Client, baseURL, path string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, baseURL+path, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	body := readAll(t, resp)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, string(body), "ABCD-1234")
+	assert.NotContains(t, string(body), "server-device-code", "the server-side device code must never reach the browser")
+	match := regexp.MustCompile(`data-poll-token="([^"]+)"`).FindSubmatch(body)
+	require.Len(t, match, 2)
+	return string(match[1])
 }
 
 func TestManager_CallbackWithBadStateIsRejected(t *testing.T) {
