@@ -102,6 +102,45 @@ func TestManager_UnauthenticatedSSEGets401(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 }
 
+func TestManager_ForwardAuthRedirectsHTMLToLoginWithOriginalURI(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManager(t, nil)
+	client := noRedirectClient(t)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/auth/check", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "text/html")
+	req.Header.Set("X-Forwarded-Method", http.MethodGet)
+	req.Header.Set("X-Forwarded-Uri", "/portfolio?repo=pog")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusFound, resp.StatusCode)
+	loc, err := resp.Location()
+	require.NoError(t, err)
+	assert.Equal(t, "/auth/login", loc.Path)
+	assert.Equal(t, "/portfolio?repo=pog", loc.Query().Get("next"))
+}
+
+func TestManager_ForwardAuthRejectsAPIWith401(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManager(t, nil)
+	client := noRedirectClient(t)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/auth/check", nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-Forwarded-Method", http.MethodPost)
+	req.Header.Set("X-Forwarded-Uri", "/api/streams/rpc")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	assert.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+}
+
 func TestManager_FullInviteLoginFlow(t *testing.T) {
 	t.Parallel()
 	srv, _, mgr := buildTestManager(t, nil)
@@ -180,6 +219,17 @@ func TestManager_FullInviteLoginFlow(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "carol", resp.Header.Get("X-Seen-Actor"), "spoofed header must be overwritten with the session identity")
+
+	// The reverse-proxy check accepts the same session and returns the actor as
+	// a response header for Caddy's copy_headers directive.
+	checkReq, err := http.NewRequest(http.MethodGet, srv.URL+"/auth/check", nil)
+	require.NoError(t, err)
+	checkReq.Header.Set(actorHeader, "someone-else")
+	resp, err = client.Do(checkReq)
+	require.NoError(t, err)
+	_ = resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "carol", resp.Header.Get(actorHeader))
 
 	// 6. /auth/me reports the identity.
 	resp, err = client.Get(srv.URL + "/auth/me")

@@ -1,0 +1,12 @@
+story_dirs:
+  - /opt/pog/current/stories
+
+auth:
+  mode: required
+  public_url: __PUBLIC_BASE_URL__
+  github:
+    client_id: ${KITSOKI_GH_APP_CLIENT_ID}
+    client_secret: ${KITSOKI_GH_APP_CLIENT_SECRET}
+  admins:
+    - __GITHUB_ADMIN__
+  session_ttl: 168h

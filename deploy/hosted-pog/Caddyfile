@@ -1,0 +1,56 @@
+{
+	email admin@slothattax.me
+	acme_ca https://acme-v02.api.letsencrypt.org/directory
+}
+
+(pog_login) {
+	request_header -X-Kitsoki-Actor
+	forward_auth 127.0.0.1:7777 {
+		uri /auth/check
+		copy_headers X-Kitsoki-Actor
+	}
+}
+
+__PUBLIC_HOST__ {
+	log {
+		output file /var/log/caddy/access.log
+	}
+
+	# OAuth endpoints must remain reachable before a session exists. The
+	# Kitsoki auth service validates invite codes, GitHub state, and sessions.
+	handle /auth/* {
+		reverse_proxy 127.0.0.1:7777
+	}
+
+	# GitHub's signed webhook and deploy health probe cannot require a browser
+	# session. Existing bot run/evidence URLs retain their current routing.
+	@gh_agent path /healthz /gh-agent/webhook /api/ready /api/runs /api/run/* /runs /runs/* /run/*
+	handle @gh_agent {
+		reverse_proxy 127.0.0.1:8787
+	}
+	handle /decks/* {
+		root * /var/lib/kitsoki-gh-agent
+		try_files {path} {path}.html
+		file_server
+	}
+
+	# These are POG-owned surfaces even though their backing services are not
+	# the Vite process. They receive the same fail-closed session check.
+	handle_path /constructor-studio/decks/* {
+		import pog_login
+		root * /srv/slidey-decks
+		file_server
+	}
+	handle /api/feedback* {
+		import pog_login
+		reverse_proxy 127.0.0.1:8788
+	}
+
+	# POG owns the remaining origin, including its root-relative assets and all
+	# of its Vite server API routes. If Kitsoki auth is unavailable,
+	# forward_auth fails closed and this upstream is never reached.
+	handle {
+		import pog_login
+		reverse_proxy 127.0.0.1:5183
+	}
+}

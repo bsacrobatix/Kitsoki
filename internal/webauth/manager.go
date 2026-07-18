@@ -74,6 +74,7 @@ func (m *Manager) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("/auth/github/callback", m.handleCallback)
 	mux.HandleFunc("/auth/logout", m.handleLogout)
 	mux.HandleFunc("/auth/me", m.handleMe)
+	mux.HandleFunc("/auth/check", m.handleCheck)
 }
 
 // Wrap is the gate: every non-/auth/ request needs a live session cookie.
@@ -385,6 +386,43 @@ func (m *Manager) handleMe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── /auth/check ──────────────────────────────────────────────
+
+// handleCheck is the reverse-proxy authentication seam. Caddy's
+// forward_auth directive clones the original request as a GET, adds
+// X-Forwarded-Method and X-Forwarded-Uri, and considers any 2xx response
+// authenticated. A live session therefore gets a small 200 response carrying
+// the authoritative actor header for the upstream. An unauthenticated browser
+// page load is redirected into the normal Kitsoki login flow while API/SSE
+// traffic receives the same fail-fast 401 JSON as Manager.Wrap.
+//
+// Keeping this check inside Manager is important: the proxy never learns the
+// session-store schema and never accepts a client-supplied identity header.
+func (m *Manager) handleCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	user, ok := m.sessionUser(r)
+	if !ok {
+		r.Header.Del(actorHeader)
+		method := r.Header.Get("X-Forwarded-Method")
+		if method == "" {
+			method = r.Method
+		}
+		if (method == http.MethodGet || method == http.MethodHead) && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			next := sanitizeNext(r.Header.Get("X-Forwarded-Uri"))
+			http.Redirect(w, r, loginPath(next), http.StatusFound)
+			return
+		}
+		writeUnauthenticated(w)
+		return
+	}
+	w.Header().Set(actorHeader, user.GitHubLogin)
+	w.WriteHeader(http.StatusOK)
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────
 
 // redirectURI is the OAuth callback URL registered with the GitHub App:
@@ -426,6 +464,10 @@ func loginURL(u *url.URL) string {
 	if u.RawQuery != "" {
 		next += "?" + u.RawQuery
 	}
+	return loginPath(next)
+}
+
+func loginPath(next string) string {
 	if next = sanitizeNext(next); next == "" || next == "/" {
 		return "/auth/login"
 	}
