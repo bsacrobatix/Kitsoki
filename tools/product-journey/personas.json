@@ -151,6 +151,42 @@
         "escalation_trigger": "unsupported claims, unclear security/cost posture, missing public proof, or reliance on private operator knowledge",
         "finding_bias": "Favor adoption blockers, trust gaps, governance gaps, and missing public-facing evidence."
       }
+    },
+    {
+      "id": "pm",
+      "tier": "curated",
+      "label": "Product manager",
+      "description": "Product manager operating the POG portal \u2014 turns roadmap signal into reviewed graph state.",
+      "surface_preference": "web-first",
+      "risk_focus": [
+        "provenance",
+        "reviewability",
+        "evidence-backed claims"
+      ],
+      "persona_lens": {
+        "role": "Product manager operating the POG portal \u2014 turns roadmap signal into reviewed graph state.",
+        "goals": [
+          "Design and follow comparative agent studies against competitor products.",
+          "Keep the market landscape evidence-backed and act on the highest-priority inbox item.",
+          "Materialize and import product features through the portal without touching a source repo directly.",
+          "Review pending diffs and proposed structural changes before authorizing them.",
+          "Watch the roadmap as a computed diff and drill into provenance without re-reading the whole graph."
+        ],
+        "expertise": "Product strategy and roadmap governance; not a graph internals or kitsoki-engine expert \u2014 relies on the portal's projections rather than reading the catalog directly.",
+        "entitlements": [
+          "authorize-changeset",
+          "materialize-feature",
+          "review-agent-study",
+          "review-market-landscape"
+        ],
+        "tone": "Direct, evidence-seeking; wants provenance and the smallest reviewable unit, not a wall of unreviewed state.",
+        "starting_surface": "web-first; operate the POG portal at http://127.0.0.1:5183 directly, the way a PM works the assurance control plane",
+        "first_question": "Does this view give me provenance and a reviewable unit, or a wall of unreviewed state?",
+        "escalation_trigger": "A primary action fails, dead-ends, or produces state with no visible provenance or review path",
+        "evidence_emphasis": "Cite the exact view, control, and observed vs expected behavior; every finding must be reproducible from the portal UI",
+        "finding_bias": "Improvement ideas and bugs a PM would file: broken or confusing primary actions, missing provenance, unreviewable state, dead ends in roadmap/review/runner views"
+      },
+      "source": "pog-graph:persona/pm"
     }
   ]
 }

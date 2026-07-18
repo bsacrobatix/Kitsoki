@@ -66,6 +66,8 @@ turns:
             - tui
             - --live-budget-minutes
             - 20
+            - --driver
+            - kitsoki-mcp
             - --json-output
           cwd: "."
       - handler: host.starlark.run

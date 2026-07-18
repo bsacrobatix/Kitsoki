@@ -5,6 +5,7 @@ inputs:
   default_target:              { type: string, required: false }
   default_seed:                { type: string, required: false }
   default_profile:             { type: string, required: false }
+  default_driver:              { type: string, required: false }
   default_live_budget_minutes: { type: int, required: false }
   default_pause:               { type: string, required: false }
   default_parallel:            { type: string, required: false }
@@ -17,6 +18,7 @@ outputs:
   target:               { type: string }
   seed:                 { type: string }
   live_profile:         { type: string }
+  driver:               { type: string }
   live_budget_minutes:  { type: int }
   pause:                { type: string }
   parallel:             { type: string }

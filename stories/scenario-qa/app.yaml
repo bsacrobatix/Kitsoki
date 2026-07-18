@@ -112,7 +112,24 @@ agents:
       screenshot. Capture the evidence this transport's contract requires,
       then report what you actually captured — you do not grade yourself.
     model: claude-sonnet-4-6
-    tools: [Read, Grep, Glob, Bash, mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_act]
+    tools: [Read, Grep, Glob, Bash, mcp__kitsoki__studio_ping, mcp__kitsoki__studio_handles, mcp__kitsoki__session_new, mcp__kitsoki__session_attach, mcp__kitsoki__session_drive, mcp__kitsoki__session_submit, mcp__kitsoki__session_continue, mcp__kitsoki__session_status, mcp__kitsoki__session_world, mcp__kitsoki__session_trace, mcp__kitsoki__session_close, mcp__kitsoki__render_tui, mcp__kitsoki__render_tui_png, mcp__kitsoki__visual_open, mcp__kitsoki__visual_observe, mcp__kitsoki__visual_act, mcp__browser__browser_navigate, mcp__browser__browser_click, mcp__browser__browser_fill, mcp__browser__browser_scroll, mcp__browser__browser_press, mcp__browser__browser_snapshot, mcp__browser__browser_find, mcp__browser__browser_batch, mcp__browser__observe, mcp__browser__act, mcp__browser__browser_close]
+    # The web/vscode evidence contract needs the visual.* family, which only the
+    # legacy studio profile registers; the auto-attached server defaults to
+    # strict, so declare the studio server explicitly with the legacy profile.
+    # The browser server backs external-web driver manifests (e.g. pog-portal):
+    # Playwright-based deterministic primitives plus Stagehand observe/act for
+    # products that are real web apps rather than kitsoki stories.
+    mcp:
+      servers:
+        kitsoki:
+          command: kitsoki
+          args: [mcp, --stories-dir, stories, --operating-profile, legacy]
+        browser:
+          command: node
+          args: [tools/browser-mcp/server.mjs]
+          env:
+            KITSOKI_REPO: "."
+            KITSOKI_AGENT_CMD: kitsoki
     effect: external
   judge:
     system_prompt: >-
@@ -137,6 +154,7 @@ world:
   target:               { type: string, default: "" }   # --project, or primary_story override for an ad-hoc scenario
   seed:                 { type: string, default: "scenario-qa" }
   live_profile:         { type: string, default: "" }   # harness profile the driver passes to nested live session.new calls
+  driver:               { type: string, default: "" }   # driver manifest id/path for run.py --driver; empty = run.py's default (kitsoki-mcp)
   live_budget_minutes:  { type: int, default: 0 }   # caller override for run.py --live-budget-minutes; 0 = run.py's own default (20)
   mode:                 { type: string, default: "catalog" } # catalog | adhoc
   pause:                { type: string, default: "auto" } # auto (default: drain every leg without an operator turn) | each-leg (opt-out: pause at `recording` for an explicit "next transport")

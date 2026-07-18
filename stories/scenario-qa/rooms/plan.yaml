@@ -99,6 +99,8 @@ states:
             - "{{ world.transport_arg }}"
             - --live-budget-minutes
             - "{{ world.live_budget_minutes > 0 ? world.live_budget_minutes : 20 }}"
+            - --driver
+            - "{{ world.driver != '' ? world.driver : 'kitsoki-mcp' }}"
             - --json-output
           cwd: "."
           fail_on_error: true

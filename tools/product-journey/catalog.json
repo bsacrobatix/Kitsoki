@@ -9,7 +9,12 @@
       "local_repo_env": "BUGFIX_BAKEOFF_REPO",
       "run_command": "BUGFIX_BAKEOFF_REPO=<path> make gears-bakeoff",
       "run_mode": "external-benchmark",
-      "pilot_bugs": ["bug1", "bug4", "bug5", "bug9"],
+      "pilot_bugs": [
+        "bug1",
+        "bug4",
+        "bug5",
+        "bug9"
+      ],
       "status": "validated",
       "notes": "Sister project and first production slice. Uses existing external manifest + suite."
     },
@@ -32,6 +37,17 @@
       "run_mode": "local-oracle",
       "status": "validated",
       "notes": "Perspective validated with a deterministic local oracle built from the real nil-Memory guard fix."
+    },
+    {
+      "id": "pog-portal",
+      "label": "POG portal (Assurance Control Plane)",
+      "stack": "vue",
+      "run_mode": "local-oracle",
+      "local_repo_env": "POG_REPO",
+      "validation_command": "true",
+      "product_url": "http://127.0.0.1:5183",
+      "status": "validated",
+      "notes": "POG portal web app at http://127.0.0.1:5183 \u2014 graph-native product surface for persona QA; feedback filed via the portal's embedded sassfully widget."
     }
   ],
   "perspectives": [

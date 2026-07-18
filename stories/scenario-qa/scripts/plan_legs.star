@@ -178,10 +178,22 @@ def main(ctx):
     primary_story = ctx.inputs.get("primary_story", "")
     scenario = _draft_scenario(description, primary_story)
 
+    # The driver manifest may declare its own per-transport evidence contract
+    # (e.g. an external-web driver whose real evidence unit is a persisted DOM
+    # snapshot rather than a PNG). For an ad-hoc scenario that manifest
+    # contract, when present, is the honest one to pin on the leg — the
+    # built-in transport profile assumes the kitsoki studio visual stack.
+    driver_contracts = plan.get("driver", {}).get("evidence_contract", {})
+    if type(driver_contracts) != "dict":
+        driver_contracts = {}
+
     legs = []
     for leg in carrier_legs:
         drafted = dict(leg)
         transport = leg.get("transport", "tui")
+        manifest_contract = driver_contracts.get(transport, {})
+        if type(manifest_contract) == "dict" and len(manifest_contract) > 0:
+            drafted["transport_evidence_contract"] = manifest_contract
         drafted["scenario"] = scenario["id"]
         drafted["label"] = scenario["label"]
         drafted["primary_story"] = scenario["primary_story"]
@@ -189,6 +201,18 @@ def main(ctx):
         drafted["success_criteria"] = scenario["success_criteria"]
         drafted["evidence_dir"] = "evidence/" + scenario["id"] + "/" + transport
         drafted["leg_id"] = scenario["id"] + "::" + transport
+        # An ad-hoc scenario must not inherit the carrier's quality gate: the
+        # carrier's minimum_evidence names its own code artifacts (candidate
+        # diff, oracle output, ...), which an ad-hoc behavior check can never
+        # produce, so the judge would always grade the leg "unsupported". Gate
+        # the drafted scenario on its own contract instead: transport evidence
+        # of the described behavior, per the leg's transport_evidence_contract.
+        contract = drafted.get("transport_evidence_contract", {})
+        evidence_kind = contract.get("evidence_kind", "")
+        drafted["quality_gate"] = {
+            "minimum_evidence": [evidence_kind] if evidence_kind != "" else [],
+            "done_when": "The described behavior was driven on this transport and every claim in success_criteria is backed by a persisted evidence file in evidence_dir.",
+        }
         legs.append(drafted)
 
     annotated_legs, summary = _annotate_legs(legs, mode, live_profile)

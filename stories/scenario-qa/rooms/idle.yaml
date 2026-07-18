@@ -175,6 +175,7 @@ states:
                   default_target: "{{ world.target }}"
                   default_seed: "{{ world.seed }}"
                   default_profile: "{{ world.live_profile }}"
+                  default_driver: "{{ world.driver }}"
                   default_live_budget_minutes: "{{ world.live_budget_minutes }}"
                   default_pause: "{{ world.pause }}"
                   default_parallel: "{{ world.parallel }}"
@@ -186,6 +187,7 @@ states:
                 target: target
                 seed: seed
                 live_profile: live_profile
+                driver: driver
                 live_budget_minutes: live_budget_minutes
                 pause: pause
                 parallel: parallel
@@ -346,6 +348,7 @@ states:
                   default_target: "{{ world.target }}"
                   default_seed: "{{ world.seed }}"
                   default_profile: "{{ world.live_profile }}"
+                  default_driver: "{{ world.driver }}"
                   default_live_budget_minutes: "{{ world.live_budget_minutes }}"
                   default_pause: "{{ world.pause }}"
               bind:
@@ -356,6 +359,7 @@ states:
                 target: target
                 seed: seed
                 live_profile: live_profile
+                driver: driver
                 live_budget_minutes: live_budget_minutes
                 pause: pause
                 mode: mode

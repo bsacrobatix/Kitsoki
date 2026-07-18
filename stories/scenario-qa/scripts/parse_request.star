@@ -118,6 +118,8 @@ def _extract_key_values(text):
             opts["seed"] = value
         elif key in ["profile", "live_profile"]:
             opts["profile"] = value
+        elif key in ["driver", "driver_manifest"]:
+            opts["driver"] = value
         elif key in ["budget", "live_budget", "live_budget_minutes"]:
             opts["live_budget_minutes"] = value
         elif key == "pause":
@@ -236,6 +238,7 @@ def main(ctx):
         "target": _slug(opts.get("target", ctx.inputs.get("default_target", ""))),
         "seed": opts.get("seed", ctx.inputs.get("default_seed", "scenario-qa")),
         "live_profile": opts.get("profile", ctx.inputs.get("default_profile", "")),
+        "driver": opts.get("driver", ctx.inputs.get("default_driver", "")),
         "live_budget_minutes": _int_or_default(
             opts.get("live_budget_minutes", ""),
             ctx.inputs.get("default_live_budget_minutes", 0),

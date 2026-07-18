@@ -1,0 +1,113 @@
+{
+  "id": "pog-portal",
+  "label": "POG portal via local browser-mcp (Playwright + Stagehand)",
+  "app_kind": "web",
+  "launch": {
+    "ready": {
+      "http": "http://127.0.0.1:5183/",
+      "timeout_s": 30
+    }
+  },
+  "capabilities": {
+    "visual.open": [
+      "mcp__browser__browser_navigate"
+    ],
+    "visual.observe": [
+      "mcp__browser__browser_snapshot",
+      "mcp__browser__browser_find",
+      "mcp__browser__observe"
+    ],
+    "visual.act": [
+      "mcp__browser__browser_click",
+      "mcp__browser__browser_fill",
+      "mcp__browser__browser_press",
+      "mcp__browser__browser_scroll",
+      "mcp__browser__browser_batch",
+      "mcp__browser__act"
+    ],
+    "session.open": [
+      "mcp__browser__browser_navigate"
+    ],
+    "session.status": [
+      "mcp__browser__browser_snapshot"
+    ],
+    "session.submit": [
+      "mcp__browser__browser_click",
+      "mcp__browser__browser_press"
+    ],
+    "session.drive": [
+      "mcp__browser__browser_click",
+      "mcp__browser__browser_fill",
+      "mcp__browser__browser_press",
+      "mcp__browser__browser_batch"
+    ],
+    "session.inspect": [
+      "mcp__browser__browser_snapshot",
+      "mcp__browser__browser_find"
+    ],
+    "session.trace": [
+      "mcp__browser__browser_snapshot"
+    ],
+    "render.tui": [
+      "mcp__browser__browser_snapshot"
+    ]
+  },
+  "affordances": {
+    "portal-page": "[data-testid=pog-portal-page]",
+    "reload": "[data-testid=app-reload]",
+    "open-market-research": "[data-testid=app-open-market-research]",
+    "market-research-view": "[data-testid=market-research-view]",
+    "market-research-filter": "[data-testid=market-research-kind-filter]",
+    "market-research-matrix": "[data-testid=market-research-matrix]",
+    "market-dimension-row": "[data-testid=market-dimension-row]",
+    "open-human-inbox": "[data-testid=app-open-human-inbox]",
+    "human-action-inbox": "[data-testid=human-action-inbox]",
+    "human-action-filter": "[data-testid=human-action-filter]",
+    "human-action-row": "[data-testid=human-action-row]",
+    "open-full-graph": "[data-testid=app-open-full-graph]",
+    "full-graph-modal": "[data-testid=app-graph-modal]",
+    "close-full-graph": "[data-testid=app-close-full-graph]",
+    "catalog-panel": "[data-testid=catalog-panel]",
+    "object-listing": "[data-testid=object-listing]",
+    "lifecycle-pill-roadmap": "[data-testid=lifecycle-pill-roadmap]",
+    "clear-lifecycle": "[data-testid=clear-lifecycle]",
+    "back-to-list": "[data-testid=back-to-list]",
+    "artifact-board": "[data-testid=artifact-board]",
+    "artifact-story-note": "[data-testid=artifact-story-note]",
+    "artifact-gates": "[data-testid=artifact-gates]",
+    "artifact-materialize-btn": "[data-testid=artifact-materialize-btn]",
+    "artifact-materialize-cancel": "[data-testid=artifact-materialize-cancel]",
+    "artifact-job": "[data-testid=artifact-job]",
+    "artifact-job-pill": "[data-testid=artifact-job-pill]",
+    "artifact-stage-list": "[data-testid=artifact-stage-list]",
+    "artifact-produced-list": "[data-testid=artifact-produced-list]",
+    "new-item": "[data-testid=new-item]",
+    "composer": "[data-testid=composer]",
+    "composer-kind": "[data-testid=composer-kind]",
+    "composer-title": "[data-testid=composer-title]",
+    "composer-status": "[data-testid=composer-status]",
+    "composer-submit": "[data-testid=composer-submit]",
+    "composer-close": "[data-testid=composer-close]",
+    "status-select": "[data-testid=status-select]",
+    "add-link": "[data-testid=add-link]",
+    "add-link-kind": "[data-testid=add-link-kind]",
+    "add-link-search": "[data-testid=add-link-search]",
+    "changes-pill": "[data-testid=changes-pill]",
+    "changes-panel": "[data-testid=changes-panel]",
+    "changes-close": "[data-testid=changes-close]"
+  },
+  "evidence_contract": {
+    "web": {
+      "primary_tool": "mcp__browser__browser_snapshot",
+      "evidence_kind": "dom_snapshot",
+      "level": "interaction-level"
+    }
+  },
+  "notes": [
+    "The product under test is the POG portal at http://127.0.0.1:5183 \u2014 a real web app, NOT a kitsoki story. Do not call mcp__kitsoki__session_new for the primary_story; browse the portal directly with mcp__browser__browser_navigate.",
+    "browser_snapshot returns a ref-based interactive-element snapshot (JSON), the evidence unit for this driver. Persist every snapshot you rely on as a file in the leg's evidence_dir (write the JSON yourself) before citing it.",
+    "Use affordances (data-testid selectors) for deterministic clicks; browser_find locates elements from the latest snapshot; observe/act are Stagehand-grounded for anything the affordance map does not cover.",
+    "The QA objective is to find and file real product feedback: improvement ideas and bugs. File findings through the portal's own embedded feedback widget so they enter the reviewed-feedback autonomous-fix loop, and include the run id in the report text so the finding is attributable to this QA run."
+  ],
+  "oracles": []
+}
