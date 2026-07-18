@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -16,6 +17,7 @@ import (
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/app"
 	"kitsoki/internal/baseskills"
+	"kitsoki/internal/capsule"
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
@@ -454,13 +456,19 @@ func buildAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 //
 //   - CodeAct mode (non-raw): a fresh timestamped Capsule per launch unless
 //     --capsule names one to reuse (the original exception).
-//   - Raw interactive (the `claude`/`codex` launcher shims): a STABLE
-//     `interactive-<backend>` Capsule, so day-to-day `cd repo && claude`
-//     lands in the same governed workspace every time and in-progress work
-//     is still there on the next launch; --capsule overrides the id. The
-//     `superagent` shim arm keeps pre-creating its own fresh workspace.
+//   - Raw interactive (the `claude`/`codex` launcher shims): a UNIQUE
+//     per-launch `interactive-<backend>-…` Capsule. The id must never be a
+//     fixed per-backend name: concurrent independent sessions would silently
+//     share (and stomp) one workspace, defeating the isolation the policy
+//     exists to provide. Resuming earlier work is explicit via --capsule <id>
+//     (the provenance's Resume command); abandoned workspaces are owned by
+//     capsule hygiene, not by id reuse.
 //
-// Every other launch shape keeps the plain preflight denial.
+// A working directory that already sits inside a managed Capsule workspace is
+// preserved verbatim: the caller (e.g. the `superagent` shim arm) has already
+// materialized its own isolated Capsule, and redirecting that launch into a
+// different Capsule would abandon it. Every other launch shape keeps the
+// plain preflight denial.
 func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (agentLaunchOptions, *agentLaunchCapsuleProvenance, error) {
 	mode, err := normalizeAgentLaunchMode(opts.Mode)
 	if err != nil {
@@ -483,6 +491,9 @@ func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (a
 	if projectRoot == "" {
 		return opts, nil, nil
 	}
+	if capsuleRoot := managedCapsuleRootWithin(workingDir, projectRoot); capsuleRoot != "" {
+		return opts, nil, nil
+	}
 
 	id := strings.TrimSpace(opts.CapsuleID)
 	create := createProtectedRootCodeactCapsule
@@ -491,7 +502,7 @@ func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (a
 		create = createProtectedRootInteractiveCapsule
 		backend := rawInteractiveLaunchBackend(opts, launchCfg)
 		if id == "" {
-			id = "interactive-" + backend
+			id = uniqueInteractiveCapsuleID(backend)
 		}
 		resumeFlags = fmt.Sprintf("--raw --interactive --backend %s --capsule %%s --working-dir %s", backend, projectRoot)
 	} else if id == "" {
@@ -520,6 +531,55 @@ func prepareProtectedRootLaunch(ctx context.Context, opts agentLaunchOptions) (a
 	}
 	opts.WorkingDir = path
 	return opts, provenance, nil
+}
+
+// interactiveCapsuleSeq disambiguates raw-interactive Capsule ids minted in
+// the same second by one process; the pid component covers separate processes.
+var interactiveCapsuleSeq atomic.Uint64
+
+// uniqueInteractiveCapsuleID mints a per-launch raw-interactive Capsule id.
+// Uniqueness is load-bearing: a repeated id makes independent sessions share
+// one workspace, branch, and MCP root (the protected-workspace isolation
+// failure this replaced-fixed-id design caused).
+func uniqueInteractiveCapsuleID(backend string) string {
+	return fmt.Sprintf("interactive-%s-%s-%d-%d",
+		backend,
+		time.Now().UTC().Format("20060102-150405"),
+		os.Getpid(),
+		interactiveCapsuleSeq.Add(1))
+}
+
+// managedCapsuleRootWithin walks from dir up to (but excluding) projectRoot
+// looking for a managed Capsule workspace sentinel. A launch whose working
+// directory already sits inside a Capsule must be preserved, never redirected
+// into a different Capsule: the caller (superagent shims, resumed sessions)
+// picked that workspace deliberately. projectRoot itself is excluded so a
+// stray sentinel at a protected root cannot disable the protected-root
+// exception handling.
+func managedCapsuleRootWithin(dir, projectRoot string) string {
+	dir = resolveLaunchExistingPath(dir)
+	projectRoot = resolveLaunchExistingPath(projectRoot)
+	for dir != projectRoot {
+		if info, err := os.Stat(filepath.Join(dir, capsule.SentinelFile)); err == nil && !info.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+	return ""
+}
+
+func resolveLaunchExistingPath(path string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return filepath.Clean(path)
 }
 
 // rawInteractiveLaunchBackend mirrors buildRawInteractiveLaunchPlan's backend
@@ -583,7 +643,6 @@ func createProtectedRootCapsule(ctx context.Context, projectRoot, id, owner, lab
 func codeactCapsuleLaunchable(state control.State) bool {
 	return state == control.StateReady || state == control.StateDirty || state == control.StateCommitted
 }
-
 
 func buildStandaloneAgentLaunchPlan(opts agentLaunchOptions) (agentLaunchPlan, error) {
 	agentPath, renderedCleanup, err := resolveStandaloneAgentFile(opts.AgentName, opts.AgentFile, opts.AgentTemplate)

@@ -325,10 +325,16 @@ materialized workspace, never the protected checkout:
 - **CodeAct mode** provisions a fresh timestamped Capsule per launch
   (`codeact-<timestamp>`); pass `--capsule <id>` to reuse one.
 - **Raw interactive** (the `claude` / `codex` launcher shims) provisions a
-  **stable** per-backend Capsule (`interactive-<backend>`), so day-to-day
-  `cd repo && claude` reacquires the same governed workspace and in-progress
-  work is still there on the next launch. `--capsule <id>` overrides the id;
-  the `superagent` shim arm keeps pre-creating its own fresh workspace.
+  **unique** per-launch Capsule (`interactive-<backend>-<timestamp>-<pid>-<seq>`),
+  so concurrent independent sessions never share a workspace, branch, or MCP
+  root. Resume earlier work explicitly with `--capsule <id>` (the launch
+  provenance prints the exact resume command); abandoned workspaces are
+  reclaimed by capsule hygiene.
+
+A working directory that is already inside a managed Capsule workspace is
+preserved verbatim — the launcher never reclassifies it as protected-root or
+redirects it into a different Capsule. This is how the `superagent` shim arm's
+pre-created workspace stays the actual session workspace.
 
 Materialization follows the project's `development` capsule definition: a
 `dev-workspace-script` definition goes through `scripts/dev-workspace.sh`,

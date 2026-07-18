@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/capsule"
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/host"
 )
@@ -972,16 +973,15 @@ agent_launch_policy:
 	require.Contains(t, provenance.Promote, "capsule promote")
 }
 
-// TestPrepareProtectedRootLaunch_RawInteractiveStableCapsule proves the
-// launcher-shim path (`claude`/`codex` → --raw --interactive) materializes a
-// STABLE per-backend Capsule from a protected root: id interactive-<backend>,
-// working dir rewritten to the workspace, and provenance carrying the resume
-// command. The plan's later policy check then sees the Capsule, not the
-// protected checkout.
-func TestPrepareProtectedRootLaunch_RawInteractiveStableCapsule(t *testing.T) {
+// TestPrepareProtectedRootLaunch_RawInteractiveUniqueCapsulePerLaunch proves
+// the launcher-shim path (`claude`/`codex` → --raw --interactive) materializes
+// a UNIQUE Capsule per launch from a protected root. A fixed per-backend id
+// (the old `interactive-<backend>` design) made concurrent independent
+// sessions silently share one workspace, branch, and MCP root — defeating
+// protected-workspace isolation. Resume of earlier work is explicit via
+// --capsule, carried in provenance.
+func TestPrepareProtectedRootLaunch_RawInteractiveUniqueCapsulePerLaunch(t *testing.T) {
 	project := t.TempDir()
-	workspace := filepath.Join(project, ".capsules", "workspaces", "interactive-claude")
-	require.NoError(t, os.MkdirAll(workspace, 0755))
 	cfgPath := filepath.Join(project, ".kitsoki.yaml")
 	require.NoError(t, os.WriteFile(cfgPath, []byte(`
 agent_launch_policy:
@@ -992,22 +992,77 @@ agent_launch_policy:
 	resolvedProject, err := filepath.EvalSymlinks(project)
 	require.NoError(t, err)
 	previous := createProtectedRootInteractiveCapsule
+	var ids []string
 	createProtectedRootInteractiveCapsule = func(_ context.Context, gotProject, id, owner string) (control.Instance, error) {
 		require.Equal(t, resolvedProject, gotProject)
-		require.Equal(t, "interactive-claude", id, "the id must be stable per backend, not timestamped")
-		return control.Instance{ID: id, Generation: 3, Path: workspace, Branch: "agent/interactive-claude", State: control.StateReady, Lease: control.Lease{Owner: owner}}, nil
+		require.True(t, strings.HasPrefix(id, "interactive-claude-"),
+			"unique id must keep the interactive-<backend>- prefix, got %q", id)
+		ids = append(ids, id)
+		workspace := filepath.Join(project, ".capsules", "workspaces", id)
+		require.NoError(t, os.MkdirAll(workspace, 0755))
+		return control.Instance{ID: id, Generation: 1, Path: workspace, Branch: "agent/" + id, State: control.StateReady, Lease: control.Lease{Owner: owner}}, nil
 	}
 	t.Cleanup(func() { createProtectedRootInteractiveCapsule = previous })
 
-	opts, provenance, err := prepareProtectedRootLaunch(context.Background(), agentLaunchOptions{
-		RawInteractive: true, Interactive: true, Backend: "claude", ConfigPath: cfgPath, WorkingDir: project,
+	launch := func() (agentLaunchOptions, *agentLaunchCapsuleProvenance) {
+		opts, provenance, err := prepareProtectedRootLaunch(context.Background(), agentLaunchOptions{
+			RawInteractive: true, Interactive: true, Backend: "claude", ConfigPath: cfgPath, WorkingDir: project,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, provenance)
+		return opts, provenance
+	}
+	optsA, provA := launch()
+	optsB, provB := launch()
+	require.Len(t, ids, 2)
+	require.NotEqual(t, ids[0], ids[1], "independent launches must never share a Capsule id")
+	require.NotEqual(t, optsA.WorkingDir, optsB.WorkingDir, "independent launches must never share a working dir")
+	require.NotEqual(t, provA.Branch, provB.Branch, "independent launches must never share a branch")
+	require.Contains(t, provA.Resume, "--raw --interactive --backend claude --capsule "+provA.ID)
+	require.Contains(t, provA.Close, "workspace close")
+}
+
+// TestPrepareProtectedRootLaunch_PreservesManagedCapsuleWorkingDir pins the
+// superagent regression: a launch whose --working-dir already sits inside a
+// managed Capsule workspace (sentinel present) must be preserved verbatim —
+// never reclassified as protected-root and redirected into a different
+// Capsule, which would silently abandon the pre-created isolated workspace.
+func TestPrepareProtectedRootLaunch_PreservesManagedCapsuleWorkingDir(t *testing.T) {
+	project := t.TempDir()
+	workspace := filepath.Join(project, ".capsules", "workspaces", "superagent-20260718-123456-777")
+	require.NoError(t, os.MkdirAll(workspace, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(workspace, capsule.SentinelFile), []byte("kitsoki\n"), 0644))
+	cfgPath := filepath.Join(project, ".kitsoki.yaml")
+	require.NoError(t, os.WriteFile(cfgPath, []byte(`
+agent_launch_policy:
+  enabled: true
+  protected_roots: [.]
+  allowed_roots: [.capsules/workspaces]
+`), 0644))
+	failCreate := func(context.Context, string, string, string) (control.Instance, error) {
+		t.Fatal("must not provision a Capsule when the working dir is already inside one")
+		return control.Instance{}, nil
+	}
+	prevInteractive := createProtectedRootInteractiveCapsule
+	prevCodeact := createProtectedRootCodeactCapsule
+	createProtectedRootInteractiveCapsule = failCreate
+	createProtectedRootCodeactCapsule = failCreate
+	t.Cleanup(func() {
+		createProtectedRootInteractiveCapsule = prevInteractive
+		createProtectedRootCodeactCapsule = prevCodeact
 	})
-	require.NoError(t, err)
-	require.Equal(t, workspace, opts.WorkingDir)
-	require.NotNil(t, provenance)
-	require.Equal(t, "interactive-claude", provenance.ID)
-	require.Contains(t, provenance.Resume, "--raw --interactive --backend claude --capsule interactive-claude")
-	require.Contains(t, provenance.Close, "workspace close")
+
+	for name, launchOpts := range map[string]agentLaunchOptions{
+		"raw interactive": {RawInteractive: true, Interactive: true, Backend: "claude", ConfigPath: cfgPath, WorkingDir: workspace},
+		"codeact":         {Mode: "codeact", ConfigPath: cfgPath, WorkingDir: workspace},
+	} {
+		t.Run(name, func(t *testing.T) {
+			opts, provenance, err := prepareProtectedRootLaunch(context.Background(), launchOpts)
+			require.NoError(t, err)
+			require.Nil(t, provenance)
+			require.Equal(t, workspace, opts.WorkingDir)
+		})
+	}
 }
 
 // TestPrepareProtectedRootLaunch_RawInteractiveOutsideProtectedRootNoCapsule
