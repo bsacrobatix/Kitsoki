@@ -208,9 +208,10 @@ When the commands look right, deploy and restart the service:
 scripts/deploy-gh-agent.sh --yes
 ```
 
-This deploys the webhook/job service only. To host POG on the same VM behind
-Kitsoki's GitHub browser login, including the additional OAuth callback/client
-secret setup and fail-closed Caddy routing, follow
+This deploys the webhook/job service only. To host POG on the same VM and make
+the whole human-readable domain invitation-only—including agent health, run,
+and evidence URLs—follow the additional OAuth callback/client-secret setup and
+fail-closed Caddy routing in
 [`hosted-pog.md`](hosted-pog.md). Do not add POG to the catch-all proxy in this
 runbook by hand.
 
@@ -225,7 +226,7 @@ ssh "$KITSOKI_GH_AGENT_REMOTE" "install -m 755 /tmp/kitsoki-ghagent.<pid> /usr/l
 git archive --format=tar HEAD | ssh "$KITSOKI_GH_AGENT_REMOTE" "mkdir -p /opt/kitsoki && tar -x -C /opt/kitsoki"
 ssh "$KITSOKI_GH_AGENT_REMOTE" "sha256sum /usr/local/bin/kitsoki | awk '{print \$1}'"
 ssh "$KITSOKI_GH_AGENT_REMOTE" 'chmod 755 /usr/local/bin/kitsoki && systemctl restart kitsoki-gh-agent'
-curl -fsS "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/healthz"
+ssh "$KITSOKI_GH_AGENT_REMOTE" 'curl -fsS http://127.0.0.1:8787/healthz'
 ```
 
 The deploy helper uploads to a temporary path, compares the local linux/amd64
@@ -238,7 +239,7 @@ relying on direct overwrite of the running executable.
 Useful read-only smoke checks:
 
 ```
-curl -fsS "$KITSOKI_GH_AGENT_PUBLIC_BASE_URL/healthz"
+ssh "$KITSOKI_GH_AGENT_REMOTE" 'curl -fsS http://127.0.0.1:8787/healthz'
 ssh "$KITSOKI_GH_AGENT_REMOTE" 'systemctl is-active kitsoki-gh-agent && systemctl is-active caddy'
 ssh "$KITSOKI_GH_AGENT_REMOTE" 'python3 - <<'"'"'PY'"'"'
 import sqlite3
@@ -348,9 +349,12 @@ The verifier is read-only and strict by default. It checks the four `.context`
 evidence notes, `/api/run` JSON, read-only `gh_jobs` rows, capture plans, rrweb
 clips, developer-arc media, and generated Slidey deck. HTML and MP4 exports are
 verified only when those optional paths are supplied.
-The evidence notes must show `/healthz` returned `ok`, `/run/<job-id>` returned
-HTTP 2xx, `/api/run/<job-id>` returned JSON, and the VM `gh_jobs` row was fetched
-successfully with `created_at` / `updated_at` timestamps.
+The evidence notes must show loopback `/healthz` returned `ok`, loopback
+`/run/<job-id>` returned HTTP 2xx, loopback `/api/run/<job-id>` returned JSON,
+and the VM `gh_jobs` row was fetched successfully with `created_at` /
+`updated_at` timestamps. On a hosted-POG origin, anonymous requests to those
+public URLs must be denied; use a real invited browser session for separate
+public-origin UX evidence.
 
 Prepare the gated `kitsoki-ui-qa` feature/scenario files:
 

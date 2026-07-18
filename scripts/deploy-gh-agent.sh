@@ -42,7 +42,11 @@ scp_cmd=(scp "$OUT" "$REMOTE:$REMOTE_TMP")
 install_cmd=(ssh "$REMOTE" "install -m 755 '$REMOTE_TMP' '$REMOTE_BIN' && rm -f '$REMOTE_TMP'")
 sync_repo_cmd=(ssh "$REMOTE" "mkdir -p '$REMOTE_REPO' && tar -x -C '$REMOTE_REPO'")
 ssh_cmd=(ssh "$REMOTE" "chmod 755 '$REMOTE_BIN' && systemctl restart '$SERVICE'")
-health_cmd=(curl -fsS "$PUBLIC_BASE_URL/healthz")
+# The hosted-POG Caddy policy intentionally requires an invited browser
+# session even for health and readiness URLs. Verify the service over its
+# loopback-only listener so agent upgrades remain compatible with a private
+# public origin and never need a session cookie in deployment automation.
+health_cmd=(ssh "$REMOTE" "curl -fsS http://127.0.0.1:8787/healthz")
 HEALTH_ATTEMPTS="${KITSOKI_GH_AGENT_HEALTH_ATTEMPTS:-12}"
 HEALTH_SLEEP_SECONDS="${KITSOKI_GH_AGENT_HEALTH_SLEEP_SECONDS:-2}"
 

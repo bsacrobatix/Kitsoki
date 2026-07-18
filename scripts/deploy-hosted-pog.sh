@@ -25,14 +25,38 @@ esac
 [[ "$ADMIN" =~ ^[A-Za-z0-9-]+$ ]] || { echo "KITSOKI_HOSTED_POG_ADMIN is not a valid GitHub login" >&2; exit 2; }
 
 verify() {
-	local root_status auth_status
-	root_status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Accept: text/html' "${PUBLIC_BASE_URL%/}/")"
-	[ "$root_status" = "302" ] || { echo "expected anonymous POG root to redirect, got HTTP $root_status" >&2; return 1; }
-	auth_status="$(curl -sS -o /dev/null -w '%{http_code}' "${PUBLIC_BASE_URL%/}/auth/me")"
-	[ "$auth_status" = "401" ] || { echo "expected anonymous auth probe to return 401, got HTTP $auth_status" >&2; return 1; }
-	curl -fsS "${PUBLIC_BASE_URL%/}/healthz" >/dev/null
-	ssh "$REMOTE" 'set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:7777/auth/me)" = 401; curl -fsS -o /dev/null http://127.0.0.1:5183/api/catalog; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null'
-	echo "hosted-pog verify: services active; anonymous root=302, auth probe=401, agent health=ok"
+	expect_public_status() {
+		local expected="$1" path="$2" actual
+		shift 2
+		actual="$(curl -sS -o /dev/null -w '%{http_code}' "$@" "${PUBLIC_BASE_URL%/}$path")"
+		[ "$actual" = "$expected" ] || {
+			echo "expected anonymous $path to return HTTP $expected, got HTTP $actual" >&2
+			return 1
+		}
+	}
+
+	# Every content handler in the Caddyfile has a representative anonymous
+	# probe. HTML navigation redirects into login; non-HTML/API traffic is
+	# rejected directly. The OAuth entrypoint and signed-webhook transport are
+	# the only deliberate protocol exceptions.
+	expect_public_status 302 / -H 'Accept: text/html'
+	expect_public_status 401 /assets/access-probe.js
+	expect_public_status 401 /api/catalog
+	expect_public_status 401 /rpc
+	expect_public_status 401 /api/feedback
+	expect_public_status 401 /constructor-studio/decks/access-probe
+	expect_public_status 401 /healthz
+	expect_public_status 401 /api/ready
+	expect_public_status 401 /api/runs
+	expect_public_status 401 /api/run/access-probe
+	expect_public_status 401 /runs
+	expect_public_status 401 /run/access-probe
+	expect_public_status 401 /decks/access-probe
+	expect_public_status 401 /auth/me
+	expect_public_status 200 /auth/login
+	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
+	ssh "$REMOTE" 'set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:7777/auth/me)" = 401; curl -fsS -o /dev/null http://127.0.0.1:5183/api/catalog; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null'
+	echo "hosted-pog verify: services active; anonymous route-family matrix denied; OAuth entrypoint reachable; unsigned webhook denied; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then

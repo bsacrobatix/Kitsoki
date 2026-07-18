@@ -182,11 +182,30 @@ install -m 0644 "$rendered_caddy" /etc/caddy/Caddyfile
 caddy_changed=1
 systemctl reload caddy
 
-public_status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Accept: text/html' "$public_base_url/")"
-[ "$public_status" = "302" ] || die "public POG root did not redirect to login (HTTP $public_status)"
-auth_status="$(curl -sS -o /dev/null -w '%{http_code}' "$public_base_url/auth/me")"
-[ "$auth_status" = "401" ] || die "public auth probe did not reject an anonymous request (HTTP $auth_status)"
-curl -fsS "$public_base_url/healthz" >/dev/null
+expect_public_status() {
+	local expected="$1" path="$2" actual
+	shift 2
+	actual="$(curl -sS -o /dev/null -w '%{http_code}' "$@" "$public_base_url$path")"
+	[ "$actual" = "$expected" ] || die "anonymous $path returned HTTP $actual, expected HTTP $expected"
+}
+
+expect_public_status 302 / -H 'Accept: text/html'
+expect_public_status 401 /assets/access-probe.js
+expect_public_status 401 /api/catalog
+expect_public_status 401 /rpc
+expect_public_status 401 /api/feedback
+expect_public_status 401 /constructor-studio/decks/access-probe
+expect_public_status 401 /healthz
+expect_public_status 401 /api/ready
+expect_public_status 401 /api/runs
+expect_public_status 401 /api/run/access-probe
+expect_public_status 401 /runs
+expect_public_status 401 /run/access-probe
+expect_public_status 401 /decks/access-probe
+expect_public_status 401 /auth/me
+expect_public_status 200 /auth/login
+expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
+curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 
 trap - EXIT
-echo "hosted-pog install: active POG $pog_sha at $public_base_url (anonymous access fails closed)"
+echo "hosted-pog install: active POG $pog_sha at $public_base_url (all content requires an invited session)"

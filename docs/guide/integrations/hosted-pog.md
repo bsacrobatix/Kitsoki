@@ -3,7 +3,8 @@
 This runbook deploys the POG portal on the existing `@kitsoki` test VM at
 `https://kitsoki-test.slothattax.me`. POG remains its own Node/Vite process;
 Kitsoki supplies the invitation-only GitHub login and session store; Caddy
-enforces the boundary before any POG-owned upstream is reached.
+enforces the boundary before any human-readable upstream is reached. The
+domain is private as a whole, not merely the new POG routes.
 
 Use the versioned assets under [`deploy/hosted-pog/`](../../../deploy/hosted-pog/)
 and the idempotent [`scripts/deploy-hosted-pog.sh`](../../../scripts/deploy-hosted-pog.sh).
@@ -12,14 +13,14 @@ configuration as the primary deployment path.
 
 ## Topology and security boundary
 
-| Public route | Upstream | Authentication |
+| Route | Upstream | Authentication |
 |---|---|---|
 | `/auth/*` | Kitsoki on `127.0.0.1:7777` | Public entry to login, invite, callback, logout, and session probes |
 | `/`, POG assets, POG `/api/*`, `/rpc*` | POG Vite on `127.0.0.1:5183` | Kitsoki `/auth/check` through Caddy `forward_auth` |
 | `/api/feedback*` | Existing feedback intake on `127.0.0.1:8788` | Same POG login gate |
 | `/constructor-studio/decks/*` | Existing deck store | Same POG login gate |
-| `/gh-agent/webhook`, `/healthz` | GitHub agent on `127.0.0.1:8787` | Public by protocol; webhook payloads remain HMAC-verified |
-| `/run/*`, `/runs*`, `/api/run/*`, `/api/runs`, `/decks/*` | Existing GitHub-agent run/evidence surface | Existing behavior is unchanged |
+| `/healthz`, `/api/ready`, `/run/*`, `/runs*`, `/api/run/*`, `/api/runs`, `/decks/*` | Existing GitHub-agent health/run/evidence surface | Same invitation-only login gate |
+| `/gh-agent/webhook` | GitHub agent on `127.0.0.1:8787` | Browser-session bypass by protocol; every payload remains HMAC-verified |
 
 Caddy removes any client-supplied `X-Kitsoki-Actor`, asks the Kitsoki auth
 service to resolve the `kitsoki_session` cookie, and copies only Kitsoki's
@@ -29,8 +30,11 @@ JSON. If the auth service is stopped or unreachable, Caddy returns an upstream
 failure and does **not** fall through to POG. A broken login service is
 therefore closed, not open.
 
-The public exceptions above are deliberate. Do not add a POG asset, API, deck,
-health route, or alternate hostname outside the authenticated handlers.
+The only public exceptions are the OAuth protocol surface and GitHub's signed
+webhook receiver. Neither exposes portal, run, health, readiness, feedback, or
+evidence content. Do not add an asset, API, deck, diagnostic route, or alternate
+hostname outside the authenticated handlers. An invalid or unsigned webhook
+must return `401`.
 
 ## One-time GitHub App setup
 
@@ -99,7 +103,8 @@ installer. The installer then:
 4. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
 5. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes;
 6. validates the candidate Caddyfile before installing it;
-7. reloads Caddy and verifies public fail-closed behavior plus agent health.
+7. reloads Caddy and verifies anonymous denial across POG, feedback, health,
+   runs, and evidence while checking agent health over loopback.
 
 If activation fails after either symlink changes, the installer restores the
 previous POG and Kitsoki release targets and Caddyfile before returning
@@ -148,14 +153,29 @@ ssh root@206.189.84.218 \
   'journalctl -u kitsoki-pog -u pog-portal -u caddy --since "30 minutes ago" --no-pager'
 ```
 
-Expected anonymous probes:
+Expected anonymous probes (no session cookie):
 
 ```sh
 curl -sS -o /dev/null -w '%{http_code}\n' \
   -H 'Accept: text/html' https://kitsoki-test.slothattax.me/ # 302
 curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/auth/me                 # 401
-curl -fsS https://kitsoki-test.slothattax.me/healthz         # ok
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/healthz                 # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/api/runs                # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  -X POST -H 'Content-Type: application/json' --data '{}' \
+  https://kitsoki-test.slothattax.me/gh-agent/webhook        # 401
+```
+
+The public login page itself returns `200`; it is a protocol entrypoint, not
+authorization. A GitHub account that is neither the configured admin nor bound
+through a live one-time invite cannot obtain a session that reaches content.
+Check operational health from the VM instead of weakening the public policy:
+
+```sh
+ssh root@206.189.84.218 'curl -fsS http://127.0.0.1:8787/healthz'
 ```
 
 After signing in, verify the root portal, `/api/catalog`, a direct routed page,
@@ -190,8 +210,9 @@ Common failures:
 - Loopback portal is down but auth is healthy: inspect `pog-portal` logs and
   the immutable release's `portal/package-lock.json`; do not point Caddy at an
   ad hoc process.
-- `/healthz` fails while POG works: the existing GitHub-agent service is
-  unhealthy; treat that as a separate incident and use
+- Loopback `/healthz` fails while POG works: the existing GitHub-agent service
+  is unhealthy; the public route intentionally returns `401`. Treat that as a
+  separate incident and use
   [`github-app-setup.md`](github-app-setup.md).
 
 The deployed checkout is a review/operator surface, not the source authority.

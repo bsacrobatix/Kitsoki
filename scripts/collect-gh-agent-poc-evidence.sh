@@ -37,7 +37,7 @@ Options:
 
 Environment:
   KITSOKI_GH_AGENT_PUBLIC_BASE_URL  required public run service URL
-  KITSOKI_GH_AGENT_REMOTE           required only with --remote-db
+  KITSOKI_GH_AGENT_REMOTE           required for private-origin loopback probes
   KITSOKI_GH_AGENT_REMOTE_DB        default /var/lib/kitsoki-gh-agent/gh-jobs.sqlite
   KITSOKI_GH_AGENT_EVIDENCE_DIR     default .context
 
@@ -97,12 +97,16 @@ if [ -z "$PUBLIC_BASE_URL" ]; then
 	echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required" >&2
 	exit 2
 fi
-if [ "$with_remote_db" -eq 1 ] && [ -z "$REMOTE" ]; then
-	echo "KITSOKI_GH_AGENT_REMOTE is required with --remote-db" >&2
+if [ -z "$REMOTE" ]; then
+	echo "KITSOKI_GH_AGENT_REMOTE is required for private-origin loopback probes" >&2
 	exit 2
 fi
 if [[ ! "$case_slug" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
 	echo "--case must be a filesystem-safe slug" >&2
+	exit 2
+fi
+if [[ ! "$job_id" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+	echo "--job-id must contain only letters, digits, dot, underscore, or hyphen" >&2
 	exit 2
 fi
 
@@ -151,21 +155,21 @@ head_rev="$(git rev-parse --short HEAD 2>/dev/null || true)"
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 
 health_status="not checked"
-if curl -fsS "${PUBLIC_BASE_URL%/}/healthz" >"$tmp_health" 2>&1; then
+if ssh "$REMOTE" 'curl -fsS http://127.0.0.1:8787/healthz' >"$tmp_health" 2>&1; then
 	health_status="$(tr '\n' ' ' <"$tmp_health" | sed 's/[[:space:]]*$//')"
 else
 	health_status="FAILED: $(tr '\n' ' ' <"$tmp_health" | sed 's/[[:space:]]*$//')"
 fi
 
 api_status="not checked"
-if curl -fsS "$api_url" >"$tmp_api" 2>&1; then
+if ssh "$REMOTE" "curl -fsS 'http://127.0.0.1:8787/api/run/$job_id'" >"$tmp_api" 2>&1; then
 	api_status="ok"
 else
 	api_status="FAILED: $(tr '\n' ' ' <"$tmp_api" | sed 's/[[:space:]]*$//')"
 fi
 
 run_status="not checked"
-if curl -fsSI "$run_url" >"$tmp_run_headers" 2>&1; then
+if ssh "$REMOTE" "curl -fsSI 'http://127.0.0.1:8787/run/$job_id'" >"$tmp_run_headers" 2>&1; then
 	run_status="$(sed -n '1p' "$tmp_run_headers")"
 else
 	run_status="FAILED: $(tr '\n' ' ' <"$tmp_run_headers" | sed 's/[[:space:]]*$//')"
@@ -216,9 +220,9 @@ mkdir -p "$OUT_DIR"
 	printf -- '- Notes: %s\n\n' "${notes:-"-"}"
 
 	printf '## Checks\n\n'
-	printf -- '- Health: `%s`\n' "$health_status"
-	printf -- '- Run page: `%s`\n' "$run_status"
-	printf -- '- API JSON: `%s`\n' "$api_status"
+	printf -- '- Loopback health: `%s`\n' "$health_status"
+	printf -- '- Loopback run page: `%s`\n' "$run_status"
+	printf -- '- Loopback API JSON: `%s`\n' "$api_status"
 	printf -- '- Remote DB: `%s`\n\n' "$db_status"
 
 	printf '## `/api/run/%s`\n\n' "$job_id"
