@@ -36,6 +36,13 @@ var BuiltinHostVerbVocabulary = []string{
 	"host.ui_qa.run",
 	"host.corpus.prove",
 	"host.corpus.freeze_receipt",
+	"host.queue.status",
+	"host.queue.kick",
+	"host.queue.park",
+	"host.queue.resume",
+	"host.queue.emergency",
+	"host.queue.override",
+	"host.queue.reject",
 }
 
 // CapabilitySpec is the normalized runtime authority for a Starlark run. Pure

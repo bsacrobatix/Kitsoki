@@ -601,6 +601,12 @@ func RegisterBuiltins(r *Registry) {
 	// injected into args["op"].
 	r.Register("host.graph", GraphHandler)
 
+	// Capsule merge queue operator surface — host.queue.* (status plus the
+	// six audited human-override verbs; see queue_handlers.go). Registered
+	// bare so the registry's longest-prefix fallback resolves every
+	// host.queue.<op> call here with <op> injected into args["op"].
+	r.Register("host.queue", QueueHandler)
+
 	// Use-case loop A2 — host.demo.* (mockup/demo packet pipeline: create,
 	// record, doctor; see demo_handlers.go). Registered bare so the
 	// registry's longest-prefix fallback resolves every host.demo.<op>

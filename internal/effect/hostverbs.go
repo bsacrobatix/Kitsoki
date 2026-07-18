@@ -253,6 +253,25 @@ var builtinVerbTable = map[string]verbEffect{
 		},
 	},
 
+	// host.queue — capsule merge queue operator surface
+	// (internal/host/queue_handlers.go over internal/capsule/queue). status
+	// reads the durable state file; the six operator verbs mutate it under
+	// the state lock, appending audited evidence. All local-file, no LLM —
+	// but evidence lines carry wall-clock timestamps, so mutations are not
+	// replay-deterministic.
+	"host.queue": {
+		class: Write, deterministic: false, // fallback for an unrecognised op
+		ops: map[string]opEffect{
+			"status":    {class: Read, deterministic: true},
+			"kick":      {class: Write, deterministic: false},
+			"park":      {class: Write, deterministic: false},
+			"resume":    {class: Write, deterministic: false},
+			"emergency": {class: Write, deterministic: false},
+			"override":  {class: Write, deterministic: false},
+			"reject":    {class: Write, deterministic: false},
+		},
+	},
+
 	// host.demo — mockup/demo packet pipeline (create-mockup.mjs,
 	// record-tour.mjs, demo-doctor.mjs) exec'd via a resolved script root.
 	// create writes generated mockup assets deterministically from its
