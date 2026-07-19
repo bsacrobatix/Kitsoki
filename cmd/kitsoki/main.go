@@ -213,6 +213,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(workflowCmd())
 	root.AddCommand(capsuleCmd())
 	root.AddCommand(workerCmd())
+	root.AddCommand(vmpoolCmd())
 	root.AddCommand(queueCmd())
 	root.AddCommand(waveCmd())
 	root.AddCommand(gitopsCmd())

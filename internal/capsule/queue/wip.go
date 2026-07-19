@@ -199,10 +199,36 @@ func restoreCapturedPaths(ctx context.Context, root string, skip []string) error
 		if skipSet[path] {
 			continue
 		}
-		if _, err := gitOutput(ctx, root, "cat-file", "-e", "HEAD:"+path); err == nil {
+		if headType, err := gitOutput(ctx, root, "cat-file", "-t", "HEAD:"+path); err == nil {
 			// Tracked in HEAD: checkout restores both the index entry and
 			// the worktree content in one step, correctly reverting
 			// modified, staged-modified, and deleted-from-worktree cases.
+			//
+			// Exception: when HEAD recorded path as a plain file (blob) but
+			// the checkout now has a non-empty directory there, `git
+			// checkout -q HEAD -- path` recursively removes that directory
+			// to recreate the file — silently destroying whatever is inside
+			// it that isn't the tracked file itself (confirmed by repro: an
+			// untracked nested file vanishes with no warning, and the only
+			// sign anything went wrong is an incidental ENOTDIR surfacing
+			// later from unrelated cleanup of a sibling porcelain entry).
+			// This function cannot prove that content is preserved anywhere
+			// else, so — per this file's own rule of never destroying
+			// unread content — it refuses the destructive checkout and
+			// fails loudly instead, leaving the directory completely
+			// untouched. A HEAD directory (tree) colliding with a worktree
+			// directory is not this hazard: checkout only updates the
+			// tracked entries within it and never recursively wipes it.
+			if headType == "blob" {
+				full := filepath.Join(root, filepath.FromSlash(path))
+				collides, entries, statErr := nonEmptyDirectoryAt(full)
+				if statErr != nil {
+					return statErr
+				}
+				if collides {
+					return &RestoreTypeCollisionError{Path: path, Entries: entries}
+				}
+			}
 			if _, err := gitOutput(ctx, root, "checkout", "-q", "HEAD", "--", path); err != nil {
 				return err
 			}
@@ -219,6 +245,49 @@ func restoreCapturedPaths(ctx context.Context, root string, skip []string) error
 		}
 	}
 	return nil
+}
+
+// RestoreTypeCollisionError is returned by restoreCapturedPaths (and
+// therefore surfaces through PreserveWIP) when a captured path's HEAD
+// content is a tracked file but the checkout now holds a non-empty
+// directory there. Destructively restoring the tracked file would require
+// recursively removing that directory, and nothing in this function can
+// prove the directory's content is preserved anywhere else — so the restore
+// is refused instead, and the path is left exactly as found. When this
+// arose through PreserveWIP, the checkout's full pre-restore state
+// (including this directory) was already captured onto the preserved-WIP
+// branch before restoreCapturedPaths ever ran; this error just means the
+// automatic cleanup step won't also try to reconcile the collision, and it
+// must be resolved by hand.
+type RestoreTypeCollisionError struct {
+	Path    string
+	Entries int
+}
+
+func (e *RestoreTypeCollisionError) Error() string {
+	return fmt.Sprintf("queue: refusing to restore %s: HEAD has a file at this path but the checkout now has a non-empty directory there (%d entries); leaving it untouched rather than silently deleting it — inspect the directory (and, if this ran through PreserveWIP, the preserved-WIP branch) before resolving manually", e.Path, e.Entries)
+}
+
+// nonEmptyDirectoryAt reports whether full currently exists on disk as a
+// directory containing at least one entry. A path that does not exist, or
+// exists but is not a directory, or is an empty directory, is not a
+// collision: there is nothing there a destructive checkout could destroy.
+func nonEmptyDirectoryAt(full string) (collides bool, entries int, err error) {
+	info, err := os.Lstat(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, 0, nil
+		}
+		return false, 0, err
+	}
+	if !info.IsDir() {
+		return false, 0, nil
+	}
+	list, err := os.ReadDir(full)
+	if err != nil {
+		return false, 0, err
+	}
+	return len(list) > 0, len(list), nil
 }
 
 // porcelainPaths extracts the path from each `git status --porcelain
