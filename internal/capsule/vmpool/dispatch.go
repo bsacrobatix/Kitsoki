@@ -238,14 +238,29 @@ func (d *Dispatcher) Lease(ctx context.Context, spec LeaseSpec) (*WorkerLease, e
 	release := func(ctx context.Context) error {
 		return leasePool.Release(ctx, worker.ID)
 	}
+	// In preserve mode a pre-ready failure keeps the instance for post-mortem
+	// instead of destroying it; the durable record carries the reclaim hint.
+	cleanup := release
+	if leasePool.PreserveFailed {
+		cleanup = func(ctx context.Context) error {
+			current := worker
+			if state, loadErr := leasePool.Store.Load(); loadErr == nil {
+				if fresh, ok := state.WorkerByID(worker.ID); ok {
+					current = fresh
+				}
+			}
+			_, failErr := leasePool.destroyAndFail(ctx, current, "lease failed before ready")
+			return failErr
+		}
+	}
 
 	ready, err := d.waitReady(ctx, &leasePool, worker.ID, spec.PollInterval, spec.ReadyTimeout)
 	if err != nil {
-		return nil, failLease(ctx, release, err)
+		return nil, failLease(ctx, cleanup, err)
 	}
 
 	if err := leasePool.MarkRunning(ctx, ready.ID, jobID); err != nil {
-		return nil, failLease(ctx, release, fmt.Errorf("vmpool: lease: mark running: %w", err))
+		return nil, failLease(ctx, cleanup, fmt.Errorf("vmpool: lease: mark running: %w", err))
 	}
 	// Best-effort read-back so WorkerLease.Worker reflects StatusRunning
 	// rather than the pre-MarkRunning StatusReady snapshot; MarkRunning

@@ -47,6 +47,10 @@ type Worker struct {
 	LastActivityAt time.Time `json:"last_activity_at,omitzero"`
 	TerminalAt     time.Time `json:"terminal_at,omitzero"`
 	Error          string    `json:"error,omitempty"`
+	// Preserved marks a failed worker whose instance was deliberately kept
+	// running for post-mortem; Reconcile treats it as known, not orphaned,
+	// until an explicit Release.
+	Preserved bool `json:"preserved,omitempty"`
 }
 
 // Instance is the provider-neutral view of a cloud VM.

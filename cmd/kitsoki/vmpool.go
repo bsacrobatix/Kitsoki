@@ -131,7 +131,7 @@ func vmpoolSmokeCmd() *cobra.Command {
 	var common vmpoolCommonFlags
 	var cfgFlags vmpoolConfigFlags
 	var jobID string
-	var keep bool
+	var keep, preserveFailed bool
 	cmd := &cobra.Command{
 		Use:          "smoke",
 		Short:        "Boot one ephemeral worker from the base image, verify its worker service, destroy it",
@@ -142,6 +142,7 @@ func vmpoolSmokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			pool.PreserveFailed = preserveFailed
 			dispatcher := &vmpool.Dispatcher{Pool: pool}
 			started := time.Now()
 			lease, err := dispatcher.Lease(cmd.Context(), vmpool.LeaseSpec{JobID: jobID})
@@ -179,6 +180,7 @@ func vmpoolSmokeCmd() *cobra.Command {
 	addVMPoolConfigFlags(cmd, &cfgFlags)
 	cmd.Flags().StringVar(&jobID, "job", "smoke", "job id for the smoke lease")
 	cmd.Flags().BoolVar(&keep, "keep", false, "keep the worker running after the probe (release manually via vmpool release)")
+	cmd.Flags().BoolVar(&preserveFailed, "preserve-failed", true, "on failure, keep the instance running for post-mortem (reclaim via vmpool release)")
 	return cmd
 }
 

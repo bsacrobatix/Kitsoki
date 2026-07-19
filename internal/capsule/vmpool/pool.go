@@ -50,6 +50,22 @@ type Pool struct {
 	// Health probes the worker service on a provisioning instance. Nil
 	// always reports healthy.
 	Health func(context.Context, Worker) error
+
+	// PreserveFailed keeps a failed worker's instance running (skipping the
+	// automatic destroy) so its boot logs and state can be examined; the
+	// operator reclaims it explicitly via Release or reap --repair. Cloud
+	// spend continues while preserved — pair with MaxLifetime discipline.
+	PreserveFailed bool
+}
+
+// first returns the first non-empty string.
+func first(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (p *Pool) now() time.Time {
@@ -291,20 +307,28 @@ func (p *Pool) health(ctx context.Context, w Worker) error {
 	return p.Health(ctx, w)
 }
 
-// destroyAndFail destroys w's instance (idempotent; a no-op if w has no
-// instance yet) and marks it StatusFailed with reason, provided it is still
-// non-terminal at write time.
+// destroyAndFail marks w StatusFailed with reason, provided it is still
+// non-terminal at write time. Unless the pool preserves failures, the
+// instance is destroyed (idempotent; a no-op if w has no instance yet); with
+// PreserveFailed set the instance is kept running for post-mortem — the
+// durable record notes the preservation and the operator reclaims it later
+// via Release/reap, so a failure is never diagnosed blind.
 func (p *Pool) destroyAndFail(ctx context.Context, w Worker, reason string) (Worker, error) {
-	if w.InstanceID != "" {
+	preserved := p.PreserveFailed && w.InstanceID != ""
+	if w.InstanceID != "" && !preserved {
 		if err := p.Provisioner.Destroy(ctx, w.InstanceID); err != nil {
 			return Worker{}, fmt.Errorf("vmpool: destroy instance %s: %w", w.InstanceID, err)
 		}
+	}
+	if preserved {
+		reason += fmt.Sprintf(" [instance %s preserved for post-mortem: ssh root@%s, /var/log/kitsoki-worker/boot.log, cloud-init status; reclaim with vmpool release %s]", w.InstanceID, first(w.PublicIP, "<ip pending>"), w.ID)
 	}
 	return p.applyIf(w.ID,
 		func(cur *Worker) bool { return !cur.Status.Terminal() },
 		func(cur *Worker, now time.Time) {
 			cur.Status = StatusFailed
 			cur.Error = reason
+			cur.Preserved = preserved
 			cur.TerminalAt = now
 		})
 }
@@ -380,7 +404,9 @@ func (p *Pool) Release(ctx context.Context, workerID string) error {
 	if !ok {
 		return fmt.Errorf("vmpool: worker %s not found", workerID)
 	}
-	if w.Status.Terminal() {
+	// A preserved failure is terminal but still owns a live instance; Release
+	// is exactly its reclaim path.
+	if w.Status.Terminal() && !w.Preserved {
 		return nil
 	}
 	if w.InstanceID != "" {
@@ -395,6 +421,7 @@ func (p *Pool) Release(ctx context.Context, workerID string) error {
 		}
 		cur := &state.Workers[idx]
 		if cur.Status.Terminal() {
+			cur.Preserved = false
 			return nil
 		}
 		cur.Status = StatusDestroyed
@@ -420,7 +447,10 @@ func (p *Pool) Reconcile(ctx context.Context) (ReconcileReport, error) {
 
 	knownInstance := make(map[string]bool, len(state.Workers))
 	for _, w := range state.Workers {
-		if !w.Status.Terminal() && w.InstanceID != "" {
+		// A preserved failure's instance is intentionally kept for
+		// post-mortem: it is known, not an orphan, until explicitly
+		// released.
+		if (!w.Status.Terminal() || w.Preserved) && w.InstanceID != "" {
 			knownInstance[w.InstanceID] = true
 		}
 	}
