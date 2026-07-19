@@ -3154,3 +3154,25 @@ nodes:
     status: proposed
     title: Agent-mode conversational lane launch-policy gaps (POG dogfood 2026-07-18)
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-19T00:13:34Z"
+    id: cs-5e4f2a3414cb8017dbe38c9dabf655f4
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+          fields:
+            summary: Runner clients (POG colony drain, dispatchers, reapers) need a supported API to mark a runner session completed/abandoned instead of guarded direct sqlite writes. Today the only writers of sessions.status are MarkCompleted/MarkAbandoned in internal/store/sqlite.go, neither reachable from the /rpc surface (internal/runstatus/server/server.go dispatch() has no runstatus.session.complete/abandon; session.cancel only aborts an in-flight streamed turn). Every session created via runstatus.session.new stays active forever, forcing POG to ship a sqlite-writing reaper (scripts/runner-session-reaper.mjs) as a workaround. Filed cross-repo from POG's autonomous feedback pipeline (report 01KXSW9MDWBWJWR4SWB2S25FF9) via claude-fable-5 overnight operator, authorized by brad 2026-07-18.
+          id: req-runstatus-session-lifecycle-rpc
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-pog-feedback-01KXSW9MDWBWJWR4SWB2S25FF9
+          status: proposed
+          title: Runstatus daemon exposes a session-lifecycle RPC instead of write-only-at-creation status
+          visibility: public
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: 'Add requirement: session-lifecycle RPC for runstatus daemon (from POG feedback 01KXSW9MDWBWJWR4SWB2S25FF9)'
+    visibility: internal
