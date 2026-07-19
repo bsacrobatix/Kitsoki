@@ -151,6 +151,86 @@ func TestDirtyProtectedCheckoutIsPreservedNotLostAndTrainContinues(t *testing.T)
 	}
 }
 
+// TestWorkerPathFinalizationCleansDirtyCheckoutWithUnreadableFile is A8: the
+// full worker path (Store.Process → Worker.finalize → ProtectedFinalizer,
+// not PreserveWIP called directly) landing a candidate against a protected
+// checkout that is dirty with both ordinary content AND a permission-denied
+// file. It must land clean — HEAD synced to the new tip, checkout clean —
+// while leaving the unreadable file's content completely untouched, exactly
+// the property A4's WIP-preservation hardening exists to guarantee end to
+// end through the real finalization path, not just in PreserveWIP isolation.
+func TestWorkerPathFinalizationCleansDirtyCheckoutWithUnreadableFile(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permissions; this test needs a non-root process")
+	}
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+	commit(t, root, "candidate.txt", "candidate\n", "candidate")
+	sha := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/candidate", sha)
+	git(t, root, "reset", "--hard", base)
+
+	if err := os.WriteFile(filepath.Join(root, "base.txt"), []byte("uncommitted local edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	locked := filepath.Join(root, "locked.txt")
+	if err := os.WriteFile(locked, []byte("original locked content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o644) })
+
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{Branch: "agent/candidate", SHA: sha, Receipt: persistedReceipt(t, root, sha)}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Process(context.Background(), ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := state.Candidates[0]
+	if c.phase() != Landed {
+		t.Fatalf("candidate did not land: %#v", c)
+	}
+	if got := git(t, root, "rev-parse", "main"); got != sha {
+		t.Fatalf("main=%s want %s", got, sha)
+	}
+	if head := git(t, root, "rev-parse", "HEAD"); head != sha {
+		t.Fatalf("checkout HEAD=%s not synced to new main %s", head, sha)
+	}
+	// Clean except for the one path that could never be backed up.
+	status := strings.TrimSpace(git(t, root, "status", "--porcelain", "--untracked-files=all", "--", ".", ":(exclude).capsules"))
+	if status != "?? locked.txt" {
+		t.Fatalf("protected checkout not clean (modulo the unreadable file): %q", status)
+	}
+	if !strings.Contains(c.FinalizationLog, "could not be read and were left untouched") {
+		t.Fatalf("finalization log missing the skipped-path evidence: %q", c.FinalizationLog)
+	}
+	info, err := os.Lstat(locked)
+	if err != nil {
+		t.Fatalf("locked.txt should still exist untouched: %v", err)
+	}
+	if info.Mode().Perm() != 0o000 {
+		t.Fatalf("locked.txt permissions changed: %v", info.Mode().Perm())
+	}
+	if err := os.Chmod(locked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(locked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "original locked content" {
+		t.Fatalf("locked.txt content changed: %q", got)
+	}
+}
+
 func TestOverrideLandsThroughProtectedCASOnRealRepo(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")

@@ -284,7 +284,7 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	// The CAS only moves the ref; when the target branch is the protected
 	// checkout's HEAD the worktree must follow it, or the old tree lingers as
 	// apparent local modifications.
-	if err := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget); err != nil {
+	if err := syncProtectedCheckout(ctx, p.ProjectRoot, target, result.OldTarget, wipSkipped); err != nil {
 		log += "; checkout sync failed: " + err.Error()
 	}
 	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: log, PreservedWIPBranch: preserved}, nil

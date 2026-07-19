@@ -296,7 +296,12 @@ func preservedBranchName(ctx context.Context, root string, at time.Time) (string
 // so cleanliness is judged against the old target tree: only a worktree that
 // still exactly matches the pre-CAS tip (callers preserve WIP first) is
 // eligible for a hard sync.
-func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) error {
+// tolerateUntracked lists paths that are expected to still be untracked —
+// WIP preservation's own skipped (unreadable) paths, deliberately left
+// exactly as found — so their presence must not itself look like a race
+// that appeared mid-finalization. Anything untracked beyond that set still
+// refuses the hard sync exactly as before.
+func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string, tolerateUntracked []string) error {
 	head, err := gitOutput(ctx, root, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil || head != strings.TrimPrefix(target, "refs/heads/") {
 		return nil // detached or different branch checked out; ref move is enough
@@ -306,12 +311,18 @@ func syncProtectedCheckout(ctx context.Context, root, target, oldSHA string) err
 			return fmt.Errorf("queue: protected worktree does not match pre-finalization tip %s; refusing hard sync", oldSHA)
 		}
 	}
-	untracked, err := gitOutput(ctx, root, append([]string{"ls-files", "--others", "--exclude-standard"}, wipPathspec()...)...)
+	untrackedOut, err := gitOutput(ctx, root, append([]string{"ls-files", "--others", "--exclude-standard"}, wipPathspec()...)...)
 	if err != nil {
 		return err
 	}
-	if untracked != "" {
-		return fmt.Errorf("queue: untracked files appeared in protected checkout during finalization; refusing hard sync")
+	var untracked []string
+	for _, line := range strings.Split(untrackedOut, "\n") {
+		if line != "" {
+			untracked = append(untracked, line)
+		}
+	}
+	if unexpected := setDiff(untracked, tolerateUntracked); len(unexpected) > 0 {
+		return fmt.Errorf("queue: untracked files appeared in protected checkout during finalization; refusing hard sync: %s", strings.Join(unexpected, ", "))
 	}
 	_, err = gitOutput(ctx, root, "reset", "-q", "--hard", head)
 	return err
