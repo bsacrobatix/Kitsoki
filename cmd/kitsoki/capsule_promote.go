@@ -249,6 +249,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		Finalizer:   queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},
 		GateVersion: opts.Pipeline + ":" + opts.GateCommand,
 		TargetRef:   opts.TargetRef,
+		GateMemo:    queue.FileGateMemo{ProjectRoot: root},
 	})
 	if err != nil {
 		if errors.Is(err, queue.ErrBusy) {

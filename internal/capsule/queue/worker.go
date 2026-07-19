@@ -117,6 +117,13 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// protected CAS still applies; only the deterministic gate is waived,
 		// and the waiver is recorded durably.
 		result = GateResult{Passed: true, GateVersion: "operator-override/v1", Evidence: []string{fmt.Sprintf("queue:gate-overridden-by=%s reason=%s", first(c.OverrideBy, "operator"), first(c.OverrideReason, "unspecified"))}}
+	} else if memo, ok := w.gateMemoLookup(spec.SHA); ok {
+		// This exact tree already passed this exact gate identity — a
+		// reprepare onto an unchanged tree (a stale-base Reprepare whose
+		// fresh classification still lands here, or a retry after an
+		// unrelated environmental failure) does not need to pay for the
+		// gate again.
+		result = memo
 	} else {
 		w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
 		if (gateErr != nil || !result.Passed) && w.Deps.Repairer != nil {
@@ -128,6 +135,9 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			} else if gateErr == nil {
 				gateErr = repairErr
 			}
+		}
+		if gateErr == nil && result.Passed {
+			w.gateMemoStore(spec.SHA, result)
 		}
 	}
 	return w.update(c.ID, func(state *State, cur *Candidate) {
@@ -362,6 +372,18 @@ func (w Worker) renewLease(id string) error {
 			cur.LeaseExpiresAt = now(w.Deps).Add(firstDuration(w.Deps.Lease, 30*time.Second))
 		}
 	})
+}
+func (w Worker) gateMemoLookup(treeSHA string) (GateResult, bool) {
+	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
+		return GateResult{}, false
+	}
+	return w.Deps.GateMemo.Lookup(treeSHA, w.Deps.GateVersion)
+}
+func (w Worker) gateMemoStore(treeSHA string, result GateResult) {
+	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
+		return
+	}
+	_ = w.Deps.GateMemo.Store(treeSHA, w.Deps.GateVersion, result)
 }
 func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()

@@ -214,6 +214,9 @@ type ProcessDeps struct {
 	// TargetRef selects the only candidate partition this worker may mutate.
 	// Empty retains supervisor compatibility for legacy in-process callers.
 	TargetRef string
+	// GateMemo, when set, skips a gate run whose exact (tree, GateVersion)
+	// pair already passed — see GateMemo's doc. Nil disables memoization.
+	GateMemo GateMemo
 
 	// Retry policy. A red gate or failed speculation moves the candidate to
 	// the back of the line in retry_wait with exponential backoff; once

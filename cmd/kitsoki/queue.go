@@ -218,6 +218,7 @@ func queueProcessDeps(project, gate, target, resolver, repair, workerID string) 
 		WorkerID:    workerID,
 		GateVersion: gate,
 		TargetRef:   target,
+		GateMemo:    queue.FileGateMemo{ProjectRoot: project},
 	}
 	if target == "staging/local" {
 		deps.Integration = queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}
