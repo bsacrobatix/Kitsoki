@@ -39,6 +39,8 @@ grep -qF 'client_secret: ${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}' "$assets/hosted
 grep -q 'EnvironmentFile=/etc/kitsoki/hosted-pog.env' "$assets/kitsoki-pog.service"
 grep -q 'gh-client-secret' "$deploy"
 grep -q 'chmod 0600 "$local_stage/gh-client-secret"' "$deploy"
+grep -q "KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=//p.*hosted-pog.env" "$deploy"
+grep -q 'Repeat deployments should not require copying a root-only production secret' "$deploy"
 grep -q 'install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env' "$assets/install.sh"
 grep -q 'POG_KITSOKI_BROWSER_URL=' "$assets/pog-portal.service"
 grep -q 'POG_PORTFOLIO_MEMBERS=pog,constructor-studio' "$assets/pog-portal.service"

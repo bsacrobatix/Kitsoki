@@ -162,8 +162,21 @@ if [ -z "$GH_CLIENT_SECRET" ] && [ -f "$GH_APP_PROFILE" ]; then
 	GH_CLIENT_SECRET="${secret_line#KITSOKI_GH_APP_CLIENT_SECRET=}"
 	unset secret_line
 fi
+# Repeat deployments should not require copying a root-only production secret
+# back onto the operator's workstation. Reuse the exact value already installed
+# by a prior successful release. The fixed remote command does not put the
+# secret in argv, and command substitution keeps it out of deploy output and
+# local files. A first install still fails closed below when no explicit,
+# profile, or installed value exists.
+if [ -z "$GH_CLIENT_SECRET" ]; then
+	if ! GH_CLIENT_SECRET="$(ssh "$REMOTE" \
+		"sed -n 's/^KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=//p' /etc/kitsoki/hosted-pog.env 2>/dev/null | head -n 1")"; then
+		echo "could not inspect the existing remote hosted POG OAuth credential" >&2
+		exit 1
+	fi
+fi
 [[ "$GH_CLIENT_SECRET" =~ ^[A-Za-z0-9._-]+$ ]] || {
-	echo "callback login needs the GitHub App client secret: set KITSOKI_HOSTED_POG_GH_CLIENT_SECRET (or GH_KITSOKI_TEST_CLIENT_SECRET), or add KITSOKI_GH_APP_CLIENT_SECRET to $GH_APP_PROFILE" >&2
+	echo "callback login needs the GitHub App client secret: set KITSOKI_HOSTED_POG_GH_CLIENT_SECRET (or GH_KITSOKI_TEST_CLIENT_SECRET), add KITSOKI_GH_APP_CLIENT_SECRET to $GH_APP_PROFILE, or install it through an initial deployment" >&2
 	exit 2
 }
 # Exchange a bogus code: valid credentials answer bad_verification_code, a

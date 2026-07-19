@@ -70,9 +70,12 @@ directly as `KITSOKI_HOSTED_POG_GH_CLIENT_ID`.
 The client secret is supplied to the deploy helper as
 `KITSOKI_HOSTED_POG_GH_CLIENT_SECRET` (or the operator's conventional
 `GH_KITSOKI_TEST_CLIENT_SECRET`), or as a `KITSOKI_GH_APP_CLIENT_SECRET` line
-in the local App profile. The helper validates the credential pair against
-GitHub before touching the VM, ships the secret inside the 0700 staged upload
-(never on the ssh command line), and installs it as root-only
+in the local App profile. On repeat deployments, when neither local source is
+set, the helper reuses the value already installed in the remote root-only
+`/etc/kitsoki/hosted-pog.env`; an initial deployment still requires an explicit
+or profile value. The helper validates the credential pair against GitHub
+before touching the VM, ships the secret inside the 0700 staged upload (never
+on the ssh command line), and installs it as root-only
 `/etc/kitsoki/hosted-pog.env`; systemd injects it into the service, so the
 `pog` user never reads the file and the rendered YAML stays secret-free via a
 `${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}` reference.
