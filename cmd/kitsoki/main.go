@@ -214,6 +214,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(capsuleCmd())
 	root.AddCommand(workerCmd())
 	root.AddCommand(queueCmd())
+	root.AddCommand(waveCmd())
 	root.AddCommand(gitopsCmd())
 	root.AddCommand(ticketProviderCmd())
 	root.AddCommand(doctorCmd())
