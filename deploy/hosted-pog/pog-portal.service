@@ -21,13 +21,15 @@ Environment=POG_KITSOKI_BROWSER_URL=
 Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=__PUBLIC_HOST__
 Environment=POG_RUNNER_URL=http://127.0.0.1:7777
 Environment=POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki
-Environment=POG_FEEDBACK_LOCAL_LEDGER=/var/lib/pog/feedback/feedback.jsonl
-Environment=POG_GRAPH_FEEDBACK_LEDGER=/var/lib/pog/graph-mcp/feedback.jsonl
-Environment=POG_FEEDBACK_TRIAGE_LEDGER=/var/lib/pog/feedback/triage.jsonl
-Environment=POG_FEEDBACK_HOSTED_DIR=/var/lib/pog/feedback/hosted
-Environment=POG_FEEDBACK_AUTO_REPRODUCTION_LEDGER=/var/lib/pog/feedback/auto-reproduction-bindings.json
-Environment=POG_FEEDBACK_DECISIONS_LEDGER=/var/lib/pog/feedback/decisions.jsonl
-Environment=POG_STREAMS_DIR=/var/lib/pog/streams
+Environment=POG_FEEDBACK_LOCAL_LEDGER=/var/lib/pog/runtime/feedback/feedback.jsonl
+Environment=POG_GRAPH_FEEDBACK_LEDGER=/var/lib/pog/runtime/graph-mcp/feedback.jsonl
+Environment=POG_FEEDBACK_TRIAGE_LEDGER=/var/lib/pog/runtime/feedback/triage.jsonl
+Environment=POG_FEEDBACK_HOSTED_DIR=/var/lib/pog/runtime/feedback/hosted
+Environment=POG_FEEDBACK_AUTO_REPRODUCTION_LEDGER=/var/lib/pog/runtime/feedback/auto-reproduction-bindings.json
+Environment=POG_FEEDBACK_DECISIONS_LEDGER=/var/lib/pog/runtime/feedback/decisions.jsonl
+Environment=POG_FEEDBACK_COMPLETIONS_DIR=/var/lib/pog/runtime/feedback/completions
+Environment=POG_AGENT_RUNNER_DB=/var/lib/pog/runtime/agent-runner/sessions.db
+Environment=POG_STREAMS_DIR=/var/lib/pog/runtime/streams
 ExecStart=/opt/kitsoki-hosted-pog/node/current/bin/npm --prefix /opt/pog/current/portal run dev -- --host 127.0.0.1 --port 5183 --strictPort
 Restart=on-failure
 RestartSec=3s

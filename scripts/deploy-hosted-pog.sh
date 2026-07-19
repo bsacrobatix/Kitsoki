@@ -13,6 +13,7 @@ GH_CLIENT_ID="${KITSOKI_HOSTED_POG_GH_CLIENT_ID:-}"
 GH_APP_PROFILE="${KITSOKI_HOSTED_POG_GH_APP_PROFILE:-$HOME/.config/kitsoki/gh-app/bsacrobatix-kitsoki-test/kitsoki.env}"
 GOCACHE="${GOCACHE:-/private/tmp/kitsoki-gocache}"
 NODE_RUNTIME_FILE="$ROOT/deploy/hosted-pog/node-runtime.env"
+STATE_PACKAGER="$ROOT/scripts/package-hosted-pog-state.sh"
 [ -f "$NODE_RUNTIME_FILE" ] || { echo "missing hosted POG Node runtime contract: $NODE_RUNTIME_FILE" >&2; exit 2; }
 # shellcheck disable=SC1090 -- this is a tracked deployment contract.
 . "$NODE_RUNTIME_FILE"
@@ -22,12 +23,25 @@ NODE_URL="${KITSOKI_HOSTED_POG_NODE_URL:-}"
 NODE_SHA256="${KITSOKI_HOSTED_POG_NODE_SHA256:-}"
 
 mode="dry-run"
-case "${1:-}" in
-	"") ;;
-	--yes) mode="deploy" ;;
-	--verify) mode="verify" ;;
-	*) echo "usage: scripts/deploy-hosted-pog.sh [--yes|--verify]" >&2; exit 2 ;;
-esac
+sync_local_state=0
+for arg in "$@"; do
+	case "$arg" in
+		--yes)
+			[ "$mode" = "dry-run" ] || { echo "choose only one of --yes or --verify" >&2; exit 2; }
+			mode="deploy"
+			;;
+		--verify)
+			[ "$mode" = "dry-run" ] || { echo "choose only one of --yes or --verify" >&2; exit 2; }
+			mode="verify"
+			;;
+		--sync-local-state) sync_local_state=1 ;;
+		*) echo "usage: scripts/deploy-hosted-pog.sh [--yes|--verify] [--sync-local-state]" >&2; exit 2 ;;
+	esac
+done
+[ "$mode" != "verify" ] || [ "$sync_local_state" -eq 0 ] || {
+	echo "--sync-local-state changes remote state and cannot be combined with --verify" >&2
+	exit 2
+}
 
 [ -n "$REMOTE" ] || { echo "KITSOKI_GH_AGENT_REMOTE is required" >&2; exit 2; }
 [ -n "$PUBLIC_BASE_URL" ] || { echo "KITSOKI_GH_AGENT_PUBLIC_BASE_URL is required" >&2; exit 2; }
@@ -74,8 +88,8 @@ verify() {
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
 	grep -q '/auth/github/device/start' <<<"$login_page"
-	ssh "$REMOTE" "set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test \"\$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/auth/me)\" = 401; curl -fsS -o /dev/null -H 'Host: $PUBLIC_HOST' http://127.0.0.1:5183/api/catalog; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null"
-	echo "hosted-pog verify: services active; anonymous route-family matrix denied; GitHub Device Flow entrypoint reachable; unsigned webhook denied; public Host accepted by POG; loopback health=ok"
+	ssh "$REMOTE" "set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test \"\$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/auth/me)\" = 401; test -L /var/lib/pog/runtime; test -L /opt/pog/current/.artifacts; catalog=\"\$(curl -fsS -H 'Host: $PUBLIC_HOST' http://127.0.0.1:5183/api/catalog)\"; printf '%s' \"\$catalog\" | /opt/kitsoki-hosted-pog/node/current/bin/node -e 'const fs=require(\"node:fs\"); const graph=JSON.parse(fs.readFileSync(0,\"utf8\")); const products=(graph.comparison_catalogs??[]).map((entry)=>entry.id); const repos=[...new Set((graph.nodes??[]).map((node)=>node.attrs?.repo).filter(Boolean))].sort(); if(products.join(\",\")!==\"pog,constructor-studio\"||repos.join(\",\")!==\"constructor-studio,pog\"){console.error(JSON.stringify({products,repos}));process.exit(1)}'; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null"
+	echo "hosted-pog verify: services active; exact products=pog,constructor-studio; versioned runtime active; anonymous route-family matrix denied; GitHub Device Flow entrypoint reachable; unsigned webhook denied; public Host accepted by POG; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then
@@ -121,6 +135,8 @@ deploy-hosted-pog:
   GitHub login:   Device Flow using client ID from the local App profile
   Node runtime:   $NODE_VERSION (pinned official linux-x64 archive)
   topology:       Caddy -> Kitsoki /auth/check -> POG 127.0.0.1:5183
+  products:       POG and Constructor Studio only
+  local state:    $([ "$sync_local_state" -eq 1 ] && echo 'bounded portal-state snapshot enabled' || echo 'preserve hosted runtime (no local import)')
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
   public protocol: GitHub Device Flow endpoints and the HMAC-verified webhook only
 EOF
@@ -130,7 +146,10 @@ if [ "$mode" = "dry-run" ]; then
 
 dry run only. Re-run with --yes to build, upload, activate, and verify; use
 --verify for read-only checks. Device Flow requires no client secret or OAuth
-callback; the GitHub App must keep Device Flow enabled.
+callback; the GitHub App must keep Device Flow enabled. Add
+--sync-local-state to publish the bounded local feedback, graph-feedback,
+streams, colony, and runner-session state. Divergent remote files fail closed
+instead of being overwritten.
 EOF
 	exit 0
 fi
@@ -151,6 +170,16 @@ trap cleanup EXIT
 GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
 cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service} "$local_stage/"
+state_mode="preserve"
+if [ "$sync_local_state" -eq 1 ]; then
+	[ -x "$STATE_PACKAGER" ] || { echo "missing hosted POG state packager: $STATE_PACKAGER" >&2; exit 2; }
+	"$STATE_PACKAGER" "$POG_ROOT" "$pog_sha" "$local_stage"
+	state_mode="sync"
+fi
+[ "$(git -C "$POG_ROOT" rev-parse "$POG_REF^{commit}")" = "$pog_sha" ] || {
+	echo "POG $POG_REF advanced while the release/state snapshot was being prepared; rerun so source and state share one declared revision" >&2
+	exit 1
+}
 curl --fail --location --silent --show-error --retry 3 --output "$local_stage/$NODE_ARCHIVE" "$NODE_URL"
 printf '%s  %s\n' "$NODE_SHA256" "$local_stage/$NODE_ARCHIVE" | shasum -a 256 -c - >/dev/null
 
@@ -160,5 +189,5 @@ local_binary_sha="$(shasum -a 256 "$local_stage/kitsoki" | awk '{print $1}')"
 remote_binary_sha="$(ssh "$REMOTE" "sha256sum '$remote_stage/kitsoki' | awk '{print \$1}'")"
 [ "$local_binary_sha" = "$remote_binary_sha" ] || { echo "uploaded Kitsoki binary checksum mismatch" >&2; exit 1; }
 
-ssh "$REMOTE" "KITSOKI_HOSTED_POG_ADMIN='$ADMIN' bash '$remote_stage/install.sh' '$pog_sha' '$KITSOKI_SHA' '${PUBLIC_BASE_URL%/}' '$GH_CLIENT_ID'"
+ssh "$REMOTE" "KITSOKI_HOSTED_POG_ADMIN='$ADMIN' bash '$remote_stage/install.sh' '$pog_sha' '$KITSOKI_SHA' '${PUBLIC_BASE_URL%/}' '$GH_CLIENT_ID' '$state_mode'"
 verify

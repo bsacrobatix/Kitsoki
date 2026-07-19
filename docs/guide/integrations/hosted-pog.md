@@ -6,6 +6,12 @@ Kitsoki supplies the invitation-only GitHub login and session store; Caddy
 enforces the boundary before any human-readable upstream is reached. The
 domain is private as a whole, not merely the new POG routes.
 
+The hosted product selector is intentionally limited to two products:
+`pog` and `constructor-studio`. POG's other repository tracks remain visible
+as program/dependency objects in the POG graph, but their sibling catalogs are
+not mounted as additional hosted products. The installer verifies this exact
+product set from the live `/api/catalog` response before activation succeeds.
+
 Use the versioned assets under [`deploy/hosted-pog/`](../../../deploy/hosted-pog/)
 and the idempotent [`scripts/deploy-hosted-pog.sh`](../../../scripts/deploy-hosted-pog.sh).
 Do not hand-edit the live Caddyfile or create an untracked process-manager
@@ -72,6 +78,27 @@ scripts/deploy-hosted-pog.sh --yes    # build, activate, and verify
 scripts/deploy-hosted-pog.sh --verify # read-only live verification later
 ```
 
+To seed the host with the state currently visible in the local POG portal, add
+the explicit state-sync flag:
+
+```sh
+scripts/deploy-hosted-pog.sh --yes --sync-local-state
+```
+
+The bounded snapshot includes every local state root the portal consumes:
+feedback and its evidence/lifecycle records, graph-MCP feedback, streams,
+colony telemetry/research/supervisor records, and a consistent SQLite backup
+of runner sessions. It deliberately excludes the rest of `.artifacts`, such
+as caches, compiled binaries, render scratch, temporary workspaces, logs, and
+local runner PIDs. Those files can be several gigabytes, are not product state,
+and in the PID case are actively unsafe to copy to another machine.
+
+State sync is additive and conflict-closed. Missing local files are added and
+byte-identical files are accepted. If a same-path hosted file has diverged,
+the installer stops before moving any active symlink and prints every conflict;
+it never silently overwrites work created by hosted users. A normal `--yes`
+deploy preserves the active hosted runtime without importing local state.
+
 The dry run also makes a non-authorizing Device Flow prerequisite probe. The
 helper refuses either a Kitsoki revision or selected POG revision that is
 not contained in its protected `main`. It also refuses a POG revision that
@@ -89,19 +116,26 @@ Node archive, and invokes the versioned remote installer. The installer then:
    and `/opt/kitsoki-hosted-pog/releases/<sha>` without replacing the existing
    GitHub agent's `/usr/local/bin/kitsoki`;
 3. runs `npm ci` and the POG typecheck/production build before activation;
-4. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
+4. preserves `/var/lib/pog/runtime`, or, with `--sync-local-state`, verifies the
+   uploaded snapshot checksum and manifest, builds a conflict-free versioned
+   runtime, and atomically moves the runtime symlink;
+5. binds the release's ignored `.artifacts` path to that versioned runtime so
+   every portal state reader uses the same durable data;
+6. removes sibling-catalog discovery and verifies the live products are exactly
+   POG and Constructor Studio;
+7. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
    verified releases;
-5. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
-6. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes,
+8. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
+9. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes,
    including the real public `Host` header that Vite receives from Caddy;
-7. validates the candidate Caddyfile before installing it;
-8. reloads Caddy and verifies anonymous denial across POG, feedback, health,
+10. validates the candidate Caddyfile before installing it;
+11. reloads Caddy and verifies anonymous denial across POG, feedback, health,
    runs, and evidence while checking agent health over loopback.
 
 If activation fails after a symlink changes, the installer restores the
-previous POG, Kitsoki, and Node release targets and Caddyfile before returning
-non-zero. Failed release directories remain available for diagnosis; they are
-never treated as active.
+previous POG, Kitsoki, Node, and runtime targets plus the Caddyfile before
+returning non-zero. Failed release/state directories remain available for
+diagnosis; they are never treated as active.
 
 POG's server APIs currently live in the Vite `configureServer` plugin, so a
 static `vite preview` deployment would silently omit important routes. The
@@ -141,7 +175,9 @@ scripts/deploy-hosted-pog.sh --verify
 ssh root@206.189.84.218 \
   'systemctl is-active kitsoki-gh-agent caddy kitsoki-pog pog-portal; \
    systemctl --no-pager --full status kitsoki-pog pog-portal; \
-   /opt/kitsoki-hosted-pog/node/current/bin/node --version'
+   /opt/kitsoki-hosted-pog/node/current/bin/node --version; \
+   readlink -f /var/lib/pog/runtime; \
+   cat /var/lib/pog/runtime/.hosted-pog-local-state.json 2>/dev/null || true'
 
 ssh root@206.189.84.218 \
   'journalctl -u kitsoki-pog -u pog-portal -u caddy --since "30 minutes ago" --no-pager'
@@ -177,8 +213,10 @@ ssh root@206.189.84.218 'curl -fsS http://127.0.0.1:8787/healthz'
 ```
 
 After signing in, verify the root portal, `/api/catalog`, a direct routed page,
-the feedback widget, and a Constructor Studio deck in a real browser. A root
-page alone is not sufficient proof that every protected POG upstream works.
+the feedback widget, the streams/campaign surfaces, runner history, and a
+Constructor Studio deck in a real browser. The product switcher must contain
+only POG and Constructor Studio. A root page alone is not sufficient proof that
+every protected POG upstream works.
 
 ## Rollback and recovery
 
@@ -196,6 +234,14 @@ and redeploy it through the same gate:
 export KITSOKI_HOSTED_POG_REF=<full-pog-commit-sha>
 scripts/deploy-hosted-pog.sh --yes
 ```
+
+A source rollback preserves the active runtime by default. State snapshots and
+the mutable runtime releases created from them remain under
+`/opt/kitsoki-hosted-pog/state-releases/` and
+`/var/lib/pog/runtime-releases/`; the installer records the imported SHA-256 in
+the active runtime. Do not repoint these symlinks by hand during an ordinary
+deployment. If a state-sync conflict occurs, inspect the named files and make
+an explicit data reconciliation before retrying.
 
 Common failures:
 
@@ -219,8 +265,15 @@ Common failures:
   is unhealthy; the public route intentionally returns `401`. Treat that as a
   separate incident and use
   [`github-app-setup.md`](github-app-setup.md).
+- State sync reports divergent hosted files: do not delete or overwrite the
+  hosted runtime. Reconcile the exact paths reported by the installer, retain
+  both histories where appropriate, rebuild the local snapshot, and retry.
+- The product selector shows a third repository: treat this as a failed
+  deployment contract. Run `--verify`, inspect `/opt/pog/releases/Kitsoki` and
+  the loopback `/api/catalog`, and redeploy through the versioned installer;
+  do not hide the extra product only in client-side navigation.
 
 The deployed checkout is a review/operator surface, not the source authority.
 Tracked POG work must still land through POG's protected Capsule/promotion
-workflow; `/var/lib/pog` holds hosted feedback and stream artifacts, and the
-next immutable release replaces the active source tree.
+workflow. `/var/lib/pog/runtime` holds the durable hosted portal state and is
+preserved across ordinary immutable source releases.

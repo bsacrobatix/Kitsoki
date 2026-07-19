@@ -9,12 +9,13 @@ die() {
 }
 
 [ "$(id -u)" -eq 0 ] || die "must run as root"
-[ "$#" -eq 4 ] || die "usage: install.sh <pog-commit-sha> <kitsoki-commit-sha> <public-base-url> <github-client-id>"
+[ "$#" -eq 5 ] || die "usage: install.sh <pog-commit-sha> <kitsoki-commit-sha> <public-base-url> <github-client-id> <preserve|sync>"
 
 pog_sha="$1"
 kitsoki_sha="$2"
 public_base_url="${3%/}"
 github_client_id="$4"
+state_mode="$5"
 stage="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 admin="${KITSOKI_HOSTED_POG_ADMIN:-bsacrobatix}"
 release_root="/opt/pog/releases"
@@ -25,9 +26,14 @@ kitsoki_release="$kitsoki_release_root/$kitsoki_sha"
 kitsoki_current="/opt/kitsoki-hosted-pog/current"
 node_release_root="/opt/kitsoki-hosted-pog/node"
 node_current="$node_release_root/current"
+state_release_root="/opt/kitsoki-hosted-pog/state-releases"
+runtime_release_root="/var/lib/pog/runtime-releases"
+runtime_current="/var/lib/pog/runtime"
 tmp_release=""
 tmp_kitsoki_release=""
 tmp_node_release=""
+tmp_state_release=""
+tmp_runtime_release=""
 
 cleanup_incomplete_release() {
 	status=$?
@@ -35,6 +41,8 @@ cleanup_incomplete_release() {
 		[ -z "$tmp_release" ] || rm -rf -- "$tmp_release"
 		[ -z "$tmp_kitsoki_release" ] || rm -rf -- "$tmp_kitsoki_release"
 		[ -z "$tmp_node_release" ] || rm -rf -- "$tmp_node_release"
+		[ -z "$tmp_state_release" ] || rm -rf -- "$tmp_state_release"
+		[ -z "$tmp_runtime_release" ] || rm -rf -- "$tmp_runtime_release"
 	fi
 	exit "$status"
 }
@@ -45,6 +53,7 @@ trap cleanup_incomplete_release EXIT
 [[ "$public_base_url" =~ ^https://[A-Za-z0-9.-]+$ ]] || die "public base URL must be an https origin with no path"
 [[ "$github_client_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid GitHub App client ID"
 [[ "$admin" =~ ^[A-Za-z0-9-]+$ ]] || die "invalid GitHub admin login"
+[ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
 for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile; do
@@ -67,9 +76,9 @@ node_release="$node_release_root/$node_version"
 if ! id -u pog >/dev/null 2>&1; then
 	useradd --system --home-dir /var/lib/pog --shell /usr/sbin/nologin pog
 fi
-install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root" "$node_release_root"
+install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root" "$node_release_root" "$state_release_root"
 install -d -o pog -g pog -m 0750 /var/lib/pog /var/cache/pog /var/lib/kitsoki-pog /var/cache/kitsoki-pog
-install -d -o pog -g pog -m 0750 /var/lib/pog/feedback/hosted /var/lib/pog/graph-mcp /var/lib/pog/streams
+install -d -o pog -g pog -m 0750 "$runtime_release_root"
 
 if [ ! -x "$node_release/bin/node" ]; then
 	[ ! -e "$node_release" ] || die "Node release path exists but is incomplete: $node_release"
@@ -107,7 +116,6 @@ if [ ! -d "$release/.git" ]; then
 	runuser -u pog -- git -C "$tmp_release" checkout --detach --quiet "$pog_sha"
 	runuser -u pog -- env HOME=/var/lib/pog PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" "$node_release/bin/npm" --prefix "$tmp_release/portal" ci --no-audit --no-fund
 	runuser -u pog -- env HOME=/var/lib/pog PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" "$node_release/bin/npm" --prefix "$tmp_release/portal" run build
-	install -d -o pog -g pog -m 0750 "$tmp_release/.artifacts"
 	mv "$tmp_release" "$release"
 	tmp_release=""
 fi
@@ -116,12 +124,135 @@ fi
 [ -x "$release/portal/node_modules/.bin/vite" ] || die "release dependencies are incomplete"
 [ -f "$release/portal/dist/index.html" ] || die "release build output is missing"
 
-# POG's federation records ../Kitsoki. Each immutable release therefore sees
-# the already-deployed GitHub-agent checkout through this stable sibling.
+# Hosted POG has exactly two products: the POG home catalog and the embedded
+# Constructor Studio catalog. Never make sibling repositories discoverable by
+# accident; tracks such as Kitsoki remain graph context, not hosted products.
 if [ -e "$release_root/Kitsoki" ] && [ ! -L "$release_root/Kitsoki" ]; then
 	die "$release_root/Kitsoki exists and is not a symlink"
 fi
-ln -sfn /opt/kitsoki "$release_root/Kitsoki"
+
+# Migrate the pre-runtime-layout state without deleting it. The new service
+# paths and release-local .artifacts symlink switch together during activation.
+if [ -e "$runtime_current" ] && [ ! -L "$runtime_current" ]; then
+	die "$runtime_current exists and is not a symlink"
+fi
+if [ ! -L "$runtime_current" ]; then
+	bootstrap_runtime="$runtime_release_root/bootstrap-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+	tmp_runtime_release="$bootstrap_runtime.installing"
+	install -d -o pog -g pog -m 0750 "$tmp_runtime_release"
+	for legacy_root in feedback graph-mcp streams colony agent-runner; do
+		[ ! -e "/var/lib/pog/$legacy_root" ] || cp -a "/var/lib/pog/$legacy_root" "$tmp_runtime_release/$legacy_root"
+	done
+	install -d -o pog -g pog -m 0750 "$tmp_runtime_release/feedback/hosted" "$tmp_runtime_release/graph-mcp" "$tmp_runtime_release/streams"
+	chown -R pog:pog "$tmp_runtime_release"
+	mv "$tmp_runtime_release" "$bootstrap_runtime"
+	tmp_runtime_release=""
+	ln -s "$bootstrap_runtime" "$runtime_current.next.$$"
+	mv -Tf "$runtime_current.next.$$" "$runtime_current"
+fi
+
+prepared_runtime="$(readlink -f "$runtime_current")"
+[ -d "$prepared_runtime" ] || die "active POG runtime target is missing"
+state_digest=""
+if [ "$state_mode" = "sync" ]; then
+	[ -f "$stage/pog-state.tar.gz" ] || die "staged local-state archive is missing"
+	[ -f "$stage/pog-state.sha256" ] || die "staged local-state checksum is missing"
+	state_digest="$(tr -d '[:space:]' <"$stage/pog-state.sha256")"
+	[[ "$state_digest" =~ ^[0-9a-f]{64}$ ]] || die "invalid local-state SHA-256"
+	printf '%s  %s\n' "$state_digest" "$stage/pog-state.tar.gz" | sha256sum -c - >/dev/null \
+		|| die "staged local-state archive checksum mismatch"
+
+	state_members="$stage/pog-state.members"
+	tar -tzf "$stage/pog-state.tar.gz" >"$state_members"
+	while IFS= read -r member; do
+		case "$member" in
+			./|./manifest.json|./feedback|./feedback/*|./graph-mcp|./graph-mcp/*|./streams|./streams/*|./colony|./colony/*|./agent-runner|./agent-runner/|./agent-runner/sessions.db) ;;
+			*) die "local-state archive contains an unexpected path: $member" ;;
+		esac
+	done <"$state_members"
+	if tar -tvzf "$stage/pog-state.tar.gz" | awk 'substr($1,1,1) != "-" && substr($1,1,1) != "d" { bad=1 } END { exit bad ? 0 : 1 }'; then
+		die "local-state archive contains a link or special file"
+	fi
+
+	state_release="$state_release_root/$state_digest"
+	if [ ! -d "$state_release" ]; then
+		tmp_state_release="$state_release.installing.$$"
+		[ ! -e "$tmp_state_release" ] || die "temporary local-state release already exists: $tmp_state_release"
+		install -d -m 0750 "$tmp_state_release"
+		tar --no-same-owner -xzf "$stage/pog-state.tar.gz" -C "$tmp_state_release"
+		[ -f "$tmp_state_release/manifest.json" ] || die "local-state manifest is missing"
+		chown -R root:root "$tmp_state_release"
+		mv "$tmp_state_release" "$state_release"
+		tmp_state_release=""
+	fi
+	state_content_digest="$("$node_release/bin/node" -e '
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[1];
+const expectedPogSha = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+if (manifest.schema !== "kitsoki/hosted-pog-local-state/v1" || manifest.pog_sha !== expectedPogSha || !/^[0-9a-f]{64}$/.test(manifest.content_sha256 ?? "")) process.exit(2);
+const hash = crypto.createHash("sha256");
+function walk(directory, prefix = "") {
+  const entries = fs.readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => !(prefix === "" && entry.name === "manifest.json"))
+    .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  for (const entry of entries) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) walk(absolute, relative);
+    else if (entry.isFile()) {
+      const content = fs.readFileSync(absolute);
+      hash.update(relative); hash.update("\0");
+      hash.update(String(content.length)); hash.update("\0");
+      hash.update(content);
+    } else process.exit(3);
+  }
+}
+walk(root);
+const actual = hash.digest("hex");
+if (actual !== manifest.content_sha256) process.exit(4);
+process.stdout.write(actual);
+' "$state_release" "$pog_sha")" || die "local-state manifest or content digest is invalid"
+
+	active_state_digest=""
+	[ ! -f "$prepared_runtime/.hosted-pog-local-state.sha256" ] \
+		|| active_state_digest="$(tr -d '[:space:]' <"$prepared_runtime/.hosted-pog-local-state.sha256")"
+	active_state_pog_sha=""
+	[ ! -f "$prepared_runtime/.hosted-pog-local-state.json" ] \
+		|| active_state_pog_sha="$("$node_release/bin/node" -e 'try { process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).pog_sha ?? "") } catch {}' "$prepared_runtime/.hosted-pog-local-state.json")"
+	if [ "$active_state_digest" != "$state_content_digest" ] || [ "$active_state_pog_sha" != "$pog_sha" ]; then
+		runtime_release="$runtime_release_root/local-$state_content_digest-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+		tmp_runtime_release="$runtime_release.installing"
+		install -d -o pog -g pog -m 0750 "$tmp_runtime_release"
+		cp -a "$prepared_runtime/." "$tmp_runtime_release/"
+		state_conflicts="$stage/pog-state.conflicts"
+		: >"$state_conflicts"
+		while IFS= read -r -d '' source_file; do
+			relative_file="${source_file#"$state_release/"}"
+			[ "$relative_file" != "manifest.json" ] || continue
+			target_file="$tmp_runtime_release/$relative_file"
+			if [ -e "$target_file" ]; then
+				cmp -s "$source_file" "$target_file" || echo "$relative_file" >>"$state_conflicts"
+				continue
+			fi
+			install -d -o pog -g pog -m 0750 "$(dirname "$target_file")"
+			cp -p "$source_file" "$target_file"
+		done < <(find "$state_release" -type f -print0)
+		if [ -s "$state_conflicts" ]; then
+			echo "hosted-pog install: local-state sync conflicts with hosted files:" >&2
+			sed 's/^/  - /' "$state_conflicts" >&2
+			die "local-state sync refused to overwrite divergent hosted state"
+		fi
+		cp "$state_release/manifest.json" "$tmp_runtime_release/.hosted-pog-local-state.json"
+		printf '%s\n' "$state_content_digest" >"$tmp_runtime_release/.hosted-pog-local-state.sha256"
+		chown -R pog:pog "$tmp_runtime_release"
+		mv "$tmp_runtime_release" "$runtime_release"
+		tmp_runtime_release=""
+		prepared_runtime="$runtime_release"
+	fi
+fi
 
 rendered_config="$stage/hosted-pog.rendered.yaml"
 rendered_caddy="$stage/Caddyfile.rendered"
@@ -149,12 +280,32 @@ if [ -L "$node_current" ]; then
 elif [ -e "$node_current" ]; then
 	die "$node_current exists and is not a symlink"
 fi
+previous_runtime="$(readlink -f "$runtime_current")"
+[ -d "$previous_runtime" ] || die "previous POG runtime target is missing"
+previous_portfolio_link=""
+if [ -L "$release_root/Kitsoki" ]; then
+	previous_portfolio_link="$(readlink "$release_root/Kitsoki")"
+fi
+release_artifacts_mode="missing"
+release_artifacts_target=""
+if [ -L "$release/.artifacts" ]; then
+	release_artifacts_mode="symlink"
+	release_artifacts_target="$(readlink "$release/.artifacts")"
+elif [ -d "$release/.artifacts" ]; then
+	[ -z "$(find "$release/.artifacts" -mindepth 1 -print -quit)" ] || die "$release/.artifacts is not empty"
+	release_artifacts_mode="directory"
+elif [ -e "$release/.artifacts" ]; then
+	die "$release/.artifacts exists and is not a directory or symlink"
+fi
 previous_caddy="$stage/Caddyfile.previous"
 cp /etc/caddy/Caddyfile "$previous_caddy"
 caddy_changed=0
 current_changed=0
 kitsoki_current_changed=0
 node_current_changed=0
+runtime_current_changed=0
+portfolio_link_changed=0
+release_artifacts_changed=0
 
 rollback() {
 	status=$?
@@ -178,6 +329,21 @@ rollback() {
 		elif [ "$node_current_changed" -eq 1 ] && [ -L "$node_current" ]; then
 			unlink "$node_current"
 		fi
+		if [ "$runtime_current_changed" -eq 1 ]; then
+			ln -s "$previous_runtime" "$runtime_current.rollback.$$"
+			mv -Tf "$runtime_current.rollback.$$" "$runtime_current"
+		fi
+		if [ "$portfolio_link_changed" -eq 1 ] && [ -n "$previous_portfolio_link" ]; then
+			ln -s "$previous_portfolio_link" "$release_root/Kitsoki.rollback.$$"
+			mv -Tf "$release_root/Kitsoki.rollback.$$" "$release_root/Kitsoki"
+		fi
+		if [ "$release_artifacts_changed" -eq 1 ] && [ "$previous_current" = "$release" ]; then
+			[ ! -L "$release/.artifacts" ] || unlink "$release/.artifacts"
+			case "$release_artifacts_mode" in
+				directory) install -d -o pog -g pog -m 0750 "$release/.artifacts" ;;
+				symlink) ln -s "$release_artifacts_target" "$release/.artifacts" ;;
+			esac
+		fi
 		if [ -n "$previous_current" ] && [ -n "$previous_kitsoki_current" ] && [ -n "$previous_node_current" ]; then
 			systemctl restart kitsoki-pog.service pog-portal.service >/dev/null 2>&1 || true
 		else
@@ -191,6 +357,37 @@ rollback() {
 	exit "$status"
 }
 trap rollback EXIT
+
+systemctl stop pog-portal.service >/dev/null 2>&1 || true
+
+# Remove the historical sibling link before starting the candidate. This is
+# what makes the two-product contract independent of future files under
+# /opt/kitsoki.
+if [ -L "$release_root/Kitsoki" ]; then
+	unlink "$release_root/Kitsoki"
+	portfolio_link_changed=1
+fi
+
+if [ -L "$release/.artifacts" ]; then
+	[ "$(readlink "$release/.artifacts")" = "$runtime_current" ] || {
+		unlink "$release/.artifacts"
+		ln -s "$runtime_current" "$release/.artifacts"
+		release_artifacts_changed=1
+	}
+elif [ -d "$release/.artifacts" ]; then
+	rmdir "$release/.artifacts"
+	ln -s "$runtime_current" "$release/.artifacts"
+	release_artifacts_changed=1
+else
+	ln -s "$runtime_current" "$release/.artifacts"
+	release_artifacts_changed=1
+fi
+
+if [ "$prepared_runtime" != "$previous_runtime" ]; then
+	ln -s "$prepared_runtime" "$runtime_current.next.$$"
+	mv -Tf "$runtime_current.next.$$" "$runtime_current"
+	runtime_current_changed=1
+fi
 
 ln -s "$release" "$current.next.$$"
 mv -Tf "$current.next.$$" "$current"
@@ -225,6 +422,24 @@ for _ in $(seq 1 60); do
 done
 [ "${portal_ready:-0}" = "1" ] || die "POG portal did not become ready"
 
+catalog_json="$(curl -fsS -H "Host: $public_host" http://127.0.0.1:5183/api/catalog)"
+printf '%s' "$catalog_json" | "$node_release/bin/node" -e '
+const fs = require("node:fs");
+const graph = JSON.parse(fs.readFileSync(0, "utf8"));
+const products = (graph.comparison_catalogs ?? []).map((entry) => entry.id);
+const repos = [...new Set((graph.nodes ?? []).map((node) => node.attrs?.repo).filter(Boolean))].sort();
+if (products.join(",") !== "pog,constructor-studio" || repos.join(",") !== "constructor-studio,pog") {
+  console.error(JSON.stringify({ products, repos }));
+  process.exit(1);
+}
+' || die "hosted catalog does not contain exactly POG and Constructor Studio"
+[ -L "$release/.artifacts" ] && [ "$(readlink -f "$release/.artifacts")" = "$(readlink -f "$runtime_current")" ] \
+	|| die "POG release is not bound to the versioned runtime"
+if [ "$state_mode" = "sync" ]; then
+	[ "$(tr -d '[:space:]' <"$runtime_current/.hosted-pog-local-state.sha256")" = "$state_content_digest" ] \
+		|| die "active POG runtime does not match the uploaded local-state snapshot"
+fi
+
 install -m 0644 "$rendered_caddy" /etc/caddy/Caddyfile
 caddy_changed=1
 systemctl reload caddy
@@ -258,4 +473,4 @@ grep -q '/auth/github/device/start' <<<"$login_page"
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 
 trap - EXIT
-echo "hosted-pog install: active POG $pog_sha at $public_base_url (all content requires an invited session)"
+echo "hosted-pog install: active POG $pog_sha at $public_base_url (products=pog,constructor-studio; state=$state_mode; all content requires an invited session)"
