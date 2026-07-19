@@ -88,7 +88,9 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 	if err != nil {
 		return err
 	}
-	spec, specErr := w.Deps.Integration.Speculate(ctx, c, ahead)
+	var spec Speculation
+	var specErr error
+	w.heartbeat(ctx, c.ID, func() { spec, specErr = w.Deps.Integration.Speculate(ctx, c, ahead) })
 	if err := w.update(c.ID, func(state *State, cur *Candidate) {
 		if w.operatorIntervened(cur, "speculation") {
 			return
@@ -116,12 +118,12 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// and the waiver is recorded durably.
 		result = GateResult{Passed: true, GateVersion: "operator-override/v1", Evidence: []string{fmt.Sprintf("queue:gate-overridden-by=%s reason=%s", first(c.OverrideBy, "operator"), first(c.OverrideReason, "unspecified"))}}
 	} else {
-		result, gateErr = w.Deps.Gate.Run(ctx, spec)
+		w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
 		if (gateErr != nil || !result.Passed) && w.Deps.Repairer != nil {
 			repairEvidence, repairErr := w.Deps.Repairer.Repair(ctx, spec, firstGateError(gateErr))
 			result.Evidence = append(result.Evidence, repairEvidence...)
 			if repairErr == nil {
-				result, gateErr = w.Deps.Gate.Run(ctx, spec)
+				w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
 				result.Evidence = append(result.Evidence, repairEvidence...)
 			} else if gateErr == nil {
 				gateErr = repairErr
@@ -156,6 +158,10 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		} else {
 			cur.Phase, cur.Status = ReadyToFinalize, ReadyToFinalize
 		}
+		// A clean preparation ends whatever environmental-failure streak this
+		// candidate was on; stale streak state must not linger into a later,
+		// unrelated environmental blip.
+		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
 	})
 }
 
@@ -209,11 +215,13 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	var result FinalizeResult
-	if w.Deps.Finalizer != nil {
-		result, err = w.Deps.Finalizer.Finalize(ctx, candidate)
-	} else {
-		err = w.Deps.Integration.Land(ctx, Speculation{SHA: candidate.TreeSHA, BaseSHA: candidate.BaseSHA, IntegrationRef: candidate.IntegrationRef, WorkspaceID: candidate.WorkspaceID, WorkspacePath: candidate.WorkspacePath})
-	}
+	w.heartbeat(ctx, candidate.ID, func() {
+		if w.Deps.Finalizer != nil {
+			result, err = w.Deps.Finalizer.Finalize(ctx, candidate)
+		} else {
+			err = w.Deps.Integration.Land(ctx, Speculation{SHA: candidate.TreeSHA, BaseSHA: candidate.BaseSHA, IntegrationRef: candidate.IntegrationRef, WorkspaceID: candidate.WorkspaceID, WorkspacePath: candidate.WorkspacePath})
+		}
+	})
 	if updateErr := w.update(candidate.ID, func(state *State, cur *Candidate) {
 		if w.operatorIntervened(cur, "finalization") {
 			return
@@ -229,6 +237,11 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 				w.park(cur, "finalization_harness_failure")
 				return
 			}
+			var envErr EnvError
+			if errors.As(err, &envErr) {
+				w.retryOrParkEnv(cur, "finalization_failed")
+				return
+			}
 			w.retryOrPark(state, cur, "finalization_failed")
 			return
 		}
@@ -241,6 +254,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		cur.Phase, cur.Status, cur.WorkerID, cur.LeaseExpiresAt, cur.Completed = Landed, Landed, "", time.Time{}, now(w.Deps)
 		cur.ResultMainSHA = first(result.NewMainSHA, cur.TreeSHA)
 		cur.FinalizationLog = first(result.Log, cur.FinalizationLog)
+		cur.EnvRetries, cur.FirstEnvFailureAt = 0, time.Time{}
 	}); updateErr != nil {
 		return true, updateErr
 	}
@@ -296,6 +310,59 @@ func (w Worker) update(id string, mutate func(*State, *Candidate)) error {
 func (w Worker) lease(c *Candidate, phase Status, at time.Time) {
 	c.Phase, c.Status, c.PhaseStartedAt, c.WorkerID, c.LeaseExpiresAt = phase, phase, at, first(w.Deps.WorkerID, "queue-worker"), at.Add(firstDuration(w.Deps.Lease, 30*time.Second))
 }
+
+// heartbeat renews c's lease on a ticker for the duration of fn, so a
+// long-running Speculate/Gate.Run/Finalize call — which can run well past a
+// single lease window (the deterministic gate in particular may be a full
+// CI run) — never has its lease reclaimed by a second worker mid-operation.
+// The renewal is advisory: it only ever extends a lease this worker still
+// actively holds in an in-flight phase (see renewLease), so a candidate an
+// operator has since parked or rejected is never touched by it.
+func (w Worker) heartbeat(ctx context.Context, id string, fn func()) {
+	lease := firstDuration(w.Deps.Lease, 30*time.Second)
+	interval := lease / 3
+	if interval < 50*time.Millisecond {
+		interval = 50 * time.Millisecond
+	}
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = w.renewLease(id)
+			}
+		}
+	}()
+	fn()
+	close(done)
+	<-stopped
+}
+
+// renewLease extends id's lease if, and only if, it is still actively held
+// by this worker in one of the in-flight phases (Preparing, Gating,
+// Finalizing). It never changes phase or any other field — a candidate that
+// has already moved on (lease reclaimed elsewhere, operator intervention)
+// is left completely untouched, so the heartbeat can never resurrect a
+// stolen or parked candidate's lease.
+func (w Worker) renewLease(id string) error {
+	return w.update(id, func(_ *State, cur *Candidate) {
+		if cur.WorkerID != first(w.Deps.WorkerID, "queue-worker") {
+			return
+		}
+		switch cur.phase() {
+		case Preparing, Gating, Finalizing:
+			cur.LeaseExpiresAt = now(w.Deps).Add(firstDuration(w.Deps.Lease, 30*time.Second))
+		}
+	})
+}
 func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
 	c.Evidence = append(c.Evidence, err.Error())
@@ -306,6 +373,11 @@ func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	}
 	if strings.Contains(err.Error(), "continuation") {
 		c.Phase, c.Status, c.ConflictContinuation = NeedsConflictInput, NeedsConflictInput, err.Error()
+		return
+	}
+	var envErr EnvError
+	if errors.As(err, &envErr) {
+		w.retryOrParkEnv(c, "speculation_failed")
 		return
 	}
 	w.retryOrPark(state, c, "speculation_failed")
@@ -337,6 +409,36 @@ func (w Worker) retryOrPark(state *State, c *Candidate, reason string) {
 	c.RetryAt = n.Add(backoff(w.Deps.retryDelay(), w.Deps.maxRetryDelay(), c.Attempt))
 	c.Position = nextPosition(state.Candidates)
 	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:attempt %d/%d failed (%s); retry_at=%s position=%d", c.Attempt, w.Deps.maxAttempts(), reason, c.RetryAt.Format(time.RFC3339), c.Position))
+}
+
+// retryOrParkEnv applies the environmental retry policy: a short fixed
+// backoff that does not consume the bounded product-failure attempt budget
+// — the claim-time increment in claimPreparation is rolled back here — and
+// is bounded by wall-clock time elapsed since this candidate's current
+// environmental-failure streak began, not by an attempt count. The
+// candidate keeps its queue position: an environmental failure said nothing
+// about this candidate's own tree, so unlike retryOrPark it does not need
+// to lose its place in line, only to be skipped by claim/finalize while its
+// timer is running (the same skip every retry_wait candidate already gets).
+// A candidate stuck in a persistently degraded environment still eventually
+// parks instead of retrying forever.
+func (w Worker) retryOrParkEnv(c *Candidate, reason string) {
+	n := now(w.Deps)
+	if c.Attempt > 0 {
+		c.Attempt--
+	}
+	if c.FirstEnvFailureAt.IsZero() {
+		c.FirstEnvFailureAt = n
+	}
+	c.EnvRetries++
+	if n.Sub(c.FirstEnvFailureAt) >= w.Deps.maxEnvDuration() {
+		w.park(c, reason+"_environment_degraded")
+		c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environment degraded for %s since %s; parked as needs_input", n.Sub(c.FirstEnvFailureAt).Round(time.Second), c.FirstEnvFailureAt.Format(time.RFC3339)))
+		return
+	}
+	c.Phase, c.Status, c.RetryReason = RetryWait, RetryWait, reason
+	c.RetryAt = n.Add(w.Deps.envRetryDelay())
+	c.Evidence = append(c.Evidence, fmt.Sprintf("queue:environmental failure (%s), retry %d, retry_at=%s", reason, c.EnvRetries, c.RetryAt.Format(time.RFC3339)))
 }
 
 func (w Worker) park(c *Candidate, reason string) {

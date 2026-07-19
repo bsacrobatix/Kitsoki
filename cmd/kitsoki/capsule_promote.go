@@ -204,6 +204,15 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		}
 		candidateSHA = stored.Receipt.Envelope.SourceDigest
 	}
+	// The candidate commit exists only in the managed dev-workspace clone at
+	// this point. Publish it into the protected project root before the
+	// queue admits it: queue.Store.Submit's own reachability check refuses
+	// admission of a candidate whose commit isn't resolvable here, and a
+	// worker preparing this candidate later fetches from the project root,
+	// not from this workspace directly.
+	if _, err := gitTrim(ctx, root, "fetch", "--no-tags", workspacePath, candidateSHA); err != nil {
+		return capsulePromoteResult{}, fmt.Errorf("capsule promote: publish candidate %s into %s: %w", candidateSHA, root, err)
+	}
 	branch, err := gitTrim(ctx, workspacePath, "branch", "--show-current")
 	if err != nil {
 		return capsulePromoteResult{}, err

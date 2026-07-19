@@ -57,13 +57,13 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 	workspace := filepath.Join(workspaceRoot, id)
 	branch := "queue/candidate/" + c.ID
 	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", c.SHA, "--target", target); err != nil {
-		return Speculation{}, err
+		return Speculation{}, Environmental(err)
 	}
 	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
 		Workspace: workspace, ProtectedProjectRoot: root, TargetRef: target, Operation: reconcile.Promote,
 	})
 	if err != nil {
-		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, err
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 	}
 	spec := Speculation{SHA: plan.Candidate, BaseSHA: plan.Expected.Target, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:reconcile-plan=" + plan.Digest}}
 	if plan.Continuation == nil {
@@ -74,11 +74,11 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 	}
 	artifact, artifactPath, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeConflictArtifact(ctx, plan, root)
 	if err != nil {
-		return spec, err
+		return spec, Environmental(err)
 	}
 	instance, instanceArtifact, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).MaterializeIntegrationInstance(ctx, plan, root)
 	if err != nil {
-		return spec, err
+		return spec, Environmental(err)
 	}
 	instancePath := filepath.Join(root, filepath.FromSlash(instance.InstancePath))
 	spec.WorkspaceID = artifact.ContinuationToken
@@ -144,11 +144,12 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	// the work is captured on an immutable preserved-WIP branch and the
 	// checkout restored clean before the ref CAS.
 	var preserved string
+	var wipSkipped []string
 	if !p.SkipWIPPreservation {
 		var err error
-		preserved, err = PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
+		preserved, wipSkipped, err = PreserveWIP(ctx, p.ProjectRoot, time.Now().UTC())
 		if err != nil {
-			return FinalizeResult{}, fmt.Errorf("queue: protected checkout WIP preservation: %w", err)
+			return FinalizeResult{}, Environmental(fmt.Errorf("queue: protected checkout WIP preservation: %w", err))
 		}
 	}
 	planRequest := reconcile.PlanRequest{
@@ -161,7 +162,7 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	}
 	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, planRequest)
 	if err != nil {
-		return FinalizeResult{}, err
+		return FinalizeResult{}, Environmental(err)
 	}
 	if plan.Expected.Target != c.BaseSHA {
 		return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: "prepared base no longer matches protected target"}, nil
@@ -178,11 +179,20 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 		if strings.Contains(err.Error(), "stale plan") {
 			return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: err.Error()}, nil
 		}
+		// Apply's failure modes mix transient CAS/lock contention with
+		// genuine policy rejection (e.g. record.PromotionGate refusing a
+		// receipt) — the two need very different retry treatment and Apply
+		// does not currently distinguish them, so this stays product-
+		// classified (bounded attempts) rather than risk giving a real
+		// policy rejection hours of environmental retry noise.
 		return FinalizeResult{}, err
 	}
 	log := "protected CAS applied"
 	if preserved != "" {
 		log += "; preserved protected-checkout WIP on " + preserved
+	}
+	if len(wipSkipped) > 0 {
+		log += fmt.Sprintf("; %d path(s) could not be read and were left untouched in the checkout: %s", len(wipSkipped), strings.Join(wipSkipped, ", "))
 	}
 	// The CAS only moves the ref; when the target branch is the protected
 	// checkout's HEAD the worktree must follow it, or the old tree lingers as

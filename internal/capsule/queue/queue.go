@@ -139,6 +139,8 @@ type Candidate struct {
 	RuntimeReceipt           string             `json:"runtime_receipt,omitempty"`
 	RequiredReceiptIDs       []string           `json:"required_receipt_ids,omitempty"`
 	Approval                 *Approval          `json:"approval,omitempty"`
+	EnvRetries               int                `json:"env_retries,omitempty"`
+	FirstEnvFailureAt        time.Time          `json:"first_env_failure_at,omitempty"`
 }
 
 // Approval is the steward decision bound to the exact prepared state.
@@ -220,12 +222,23 @@ type ProcessDeps struct {
 	RetryDelay    time.Duration // default 5m
 	MaxRetryDelay time.Duration // default 30m
 	MaxAttempts   int           // default 5
+
+	// Environmental retry policy (queue.EnvError, see Environmental). A
+	// short fixed backoff, bounded by wall-clock time elapsed since the
+	// candidate's current environmental-failure streak began rather than by
+	// an attempt count, so a transient fetch/lock/workspace-create failure
+	// never burns the product-failure attempt budget above. Zero values
+	// take the defaults below.
+	EnvRetryDelay  time.Duration // default 30s
+	MaxEnvDuration time.Duration // default 2h
 }
 
 const (
-	DefaultRetryDelay    = 5 * time.Minute
-	DefaultMaxRetryDelay = 30 * time.Minute
-	DefaultMaxAttempts   = 5
+	DefaultRetryDelay     = 5 * time.Minute
+	DefaultMaxRetryDelay  = 30 * time.Minute
+	DefaultMaxAttempts    = 5
+	DefaultEnvRetryDelay  = 30 * time.Second
+	DefaultMaxEnvDuration = 2 * time.Hour
 )
 
 func (d ProcessDeps) retryDelay() time.Duration {
@@ -239,6 +252,12 @@ func (d ProcessDeps) maxAttempts() int {
 		return d.MaxAttempts
 	}
 	return DefaultMaxAttempts
+}
+func (d ProcessDeps) envRetryDelay() time.Duration {
+	return firstDuration(d.EnvRetryDelay, DefaultEnvRetryDelay)
+}
+func (d ProcessDeps) maxEnvDuration() time.Duration {
+	return firstDuration(d.MaxEnvDuration, DefaultMaxEnvDuration)
 }
 
 // HarnessError marks a failure of the queue's own machinery (a resolver or
@@ -257,6 +276,30 @@ func Harness(err error) error {
 		return nil
 	}
 	return HarnessError{Err: err}
+}
+
+// EnvError marks a failure caused by transient infrastructure state — a
+// target not yet fetched into a workspace, lock contention, a
+// workspace-create race — rather than a genuinely red gate or a broken
+// harness. An environmental failure gets a short fixed backoff and does not
+// consume the bounded product-failure attempt budget; a wall-clock bound
+// (not an attempt count) still eventually parks a candidate stuck in a
+// persistently degraded environment, so this can never spin unbounded
+// either. Adapters classify their own errors as environmental at the exact
+// git/filesystem operation that failed; the worker never string-matches an
+// error to guess its class.
+type EnvError struct{ Err error }
+
+func (e EnvError) Error() string { return "queue environment: " + e.Err.Error() }
+func (e EnvError) Unwrap() error { return e.Err }
+
+// Environmental wraps err so the worker classifies it as an environmental
+// failure instead of a product failure.
+func Environmental(err error) error {
+	if err == nil {
+		return nil
+	}
+	return EnvError{Err: err}
 }
 
 type Repairer interface {
@@ -289,6 +332,9 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 	if err := validate(in); err != nil {
 		return Candidate{}, err
 	}
+	if err := s.publishCandidateRef(in); err != nil {
+		return Candidate{}, err
+	}
 	return s.mutate(func(state *State) (Candidate, error) {
 		for _, c := range state.Candidates {
 			if c.SHA == in.SHA && c.TargetRef == in.targetRef() && c.admission() == in.admission() && c.ReceiptID == in.Receipt.ReceiptID {
@@ -306,10 +352,7 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 			receiptID, receiptRef, receiptDigest = "", "", string(admission)
 			projectID = filepath.Base(mustAbs(s.ProjectRoot))
 		}
-		identity := receiptID
-		if identity == "" {
-			identity = string(admission)
-		}
+		identity := in.identity()
 		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs)}
 		// A resubmission of the same SHA (fresh receipt) supersedes any active
 		// prior candidate rather than racing it in the FIFO, and inherits its
@@ -637,6 +680,67 @@ func (c Candidate) finalizationPolicy() FinalizationPolicy {
 		return AutonomousFinalization
 	}
 	return c.FinalizationPolicy
+}
+
+// identity is the receipt-or-admission identity candidateID hashes together
+// with the SHA (and, since target-binding landed, the target ref). Factored
+// out so Submit's pre-admission ref anchor and the durable candidate record
+// compute the exact same ID.
+func (in Submit) identity() string {
+	receiptID := in.Receipt.ReceiptID
+	if in.admission() == EmergencySkipTestsAdmission {
+		receiptID = ""
+	}
+	if receiptID == "" {
+		return string(in.admission())
+	}
+	return receiptID
+}
+
+// candidateRefName is the durable ref namespace that anchors a queued
+// candidate's commit object against GC for the candidate's lifetime — the
+// same namespace an operator previously had to publish into by hand
+// (refs/kitsoki/queue-candidates/<candidate-id>) when a worker retried a SHA
+// that was never made resolvable outside the workspace that produced it.
+func candidateRefName(id string) string {
+	return "refs/kitsoki/queue-candidates/" + id
+}
+
+// publishCandidateRef refuses admission of a candidate whose commit is not
+// yet resolvable in the project, and otherwise anchors it under
+// candidateRefName so a later worker attempt — possibly against a reused or
+// stale-fetched workspace — can always find the object regardless of what
+// happens to whatever produced it. The candidate object itself must already
+// be reachable in s.ProjectRoot before Submit is called (e.g. `capsule
+// promote` fetches its dev-workspace commit into the project root first);
+// publishCandidateRef only anchors it, it does not transfer it.
+//
+// Skipped when s.ProjectRoot is not a git repository at all: several queue
+// unit tests deliberately exercise pure state-machine semantics against a
+// bare temp directory (see the package doc's "unit fakes" testing tier) and
+// never intend to touch git. Any git-backed ProjectRoot — every real
+// deployment, and the package's real-git end-to-end test tier — gets the
+// check.
+func (s Store) publishCandidateRef(in Submit) error {
+	root, err := filepath.Abs(s.ProjectRoot)
+	if err != nil {
+		return err
+	}
+	if _, err := gitOutput(context.Background(), root, "rev-parse", "--git-dir"); err != nil {
+		return nil
+	}
+	if _, err := gitOutput(context.Background(), root, "cat-file", "-e", in.SHA+"^{commit}"); err != nil {
+		return fmt.Errorf("queue: candidate %s is not a resolvable commit in %s; publish it into the project before submitting: %w", in.SHA, root, err)
+	}
+	// The ref name must be computed with the exact same inputs Submit's
+	// mutate closure uses for the real candidate ID (including targetRef,
+	// since target-binding landed) or this anchor points at a ref no
+	// candidate actually has.
+	ref := candidateRefName(candidateID(in.SHA, in.identity(), in.targetRef()))
+	if _, err := gitOutput(context.Background(), root, "update-ref", ref, in.SHA); err != nil {
+		return fmt.Errorf("queue: anchor candidate ref %s: %w", ref, err)
+	}
+	return nil
 }
 
 func (c Candidate) admission() Admission {

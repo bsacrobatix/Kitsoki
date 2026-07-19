@@ -66,6 +66,140 @@ func TestFailedCandidateBacksOffExponentiallyAndParksAtMaxAttempts(t *testing.T)
 	}
 }
 
+// TestEnvironmentalSpeculationFailureRetriesWithoutBurningAttempts pins the
+// classification split a plain speculation_failed used to lack: a
+// queue.Environmental-wrapped error (a missing object not yet fetched, a
+// workspace-create race — never a red gate) gets a short fixed backoff and
+// never burns the bounded product-failure attempt budget, unlike
+// TestFailedCandidateBacksOffExponentiallyAndParksAtMaxAttempts above.
+func TestEnvironmentalSpeculationFailureRetriesWithoutBurningAttempts(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	store := Store{ProjectRoot: t.TempDir()}
+	candidate, err := store.Submit(Submit{Branch: "agent/a", SHA: sha, Receipt: testReceipt(t, sha)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
+		return Speculation{}, Environmental(fmt.Errorf("fetch failed: not a valid object"))
+	}}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: time.Hour, Now: func() time.Time { return clock }}
+	worker := Worker{Store: store, Deps: deps}
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		progressed, err := worker.RunOnce(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !progressed {
+			t.Fatalf("attempt %d: expected worker to make progress", attempt)
+		}
+		c := mustGet(t, store, candidate.ID)
+		if c.phase() != RetryWait || c.Attempt != 0 {
+			t.Fatalf("attempt %d: phase=%s attempt=%d (want product attempt budget untouched)", attempt, c.phase(), c.Attempt)
+		}
+		if c.EnvRetries != attempt {
+			t.Fatalf("attempt %d: env_retries=%d, want %d", attempt, c.EnvRetries, attempt)
+		}
+		if got := c.RetryAt.Sub(clock); got != 30*time.Second {
+			t.Fatalf("attempt %d: env backoff=%s, want fixed 30s (not exponential)", attempt, got)
+		}
+		clock = c.RetryAt.Add(time.Second)
+	}
+}
+
+// TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount pins the
+// other half of the same policy: a candidate stuck in a persistently
+// degraded environment still eventually parks, bounded by wall-clock time
+// since the failure streak began rather than by an attempt count that
+// environmental failures deliberately do not consume.
+func TestEnvironmentalFailureParksAfterWallClockBoundNotAttemptCount(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	store := Store{ProjectRoot: t.TempDir()}
+	candidate, err := store.Submit(Submit{Branch: "agent/a", SHA: sha, Receipt: testReceipt(t, sha)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	integration := &fakeIntegration{speculate: func(context.Context, Candidate, []Candidate) (Speculation, error) {
+		return Speculation{}, Environmental(fmt.Errorf("workspace create: lock held"))
+	}}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: 90 * time.Second, Now: func() time.Time { return clock }}
+	worker := Worker{Store: store, Deps: deps}
+
+	var c Candidate
+	for i := 0; i < 10; i++ {
+		progressed, err := worker.RunOnce(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !progressed {
+			t.Fatalf("iteration %d: expected worker to make progress", i)
+		}
+		c = mustGet(t, store, candidate.ID)
+		if c.phase() == NeedsInput {
+			break
+		}
+		if c.Attempt != 0 {
+			t.Fatalf("iteration %d: environmental failure burned the attempt budget: %d", i, c.Attempt)
+		}
+		clock = c.RetryAt.Add(time.Second)
+	}
+	if c.phase() != NeedsInput {
+		t.Fatalf("candidate never parked after the wall-clock bound: phase=%s", c.phase())
+	}
+	if !strings.Contains(c.RetryReason, "environment_degraded") {
+		t.Fatalf("retry reason=%q, want it to identify environment degradation, not max attempts", c.RetryReason)
+	}
+	if c.Attempt != 0 {
+		t.Fatalf("parked candidate burned the product attempt budget: %d", c.Attempt)
+	}
+}
+
+// TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation guards against
+// stale streak state: once a candidate clears an environmental blip and
+// prepares cleanly, EnvRetries/FirstEnvFailureAt must not linger to bias a
+// later, unrelated environmental failure's wall-clock bound.
+func TestEnvironmentalFailureStreakResetsOnSuccessfulPreparation(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	store := Store{ProjectRoot: t.TempDir()}
+	candidate, err := store.Submit(Submit{Branch: "agent/a", SHA: sha, Receipt: testReceipt(t, sha)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 7, 18, 0, 0, 0, 0, time.UTC)
+	failed := false
+	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+		if !failed {
+			failed = true
+			return Speculation{}, Environmental(fmt.Errorf("fetch failed"))
+		}
+		return Speculation{SHA: "spec-" + c.SHA}, nil
+	}}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, EnvRetryDelay: 30 * time.Second, MaxEnvDuration: time.Hour, Now: func() time.Time { return clock }}
+	worker := Worker{Store: store, Deps: deps}
+
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c := mustGet(t, store, candidate.ID)
+	if c.EnvRetries != 1 || c.FirstEnvFailureAt.IsZero() {
+		t.Fatalf("expected the first environmental failure to be recorded: %#v", c)
+	}
+	clock = c.RetryAt.Add(time.Second)
+
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c = mustGet(t, store, candidate.ID)
+	if c.phase() != ReadyToFinalize {
+		t.Fatalf("expected candidate to reach ready_to_finalize, got %s", c.phase())
+	}
+	if c.EnvRetries != 0 || !c.FirstEnvFailureAt.IsZero() {
+		t.Fatalf("expected the environmental streak to reset on success: env_retries=%d first_env_failure_at=%v", c.EnvRetries, c.FirstEnvFailureAt)
+	}
+}
+
 func TestKickClearsRetryTimerWithoutTouchingAttempts(t *testing.T) {
 	store, first, _ := queuedPair(t)
 	drain(t, store, ProcessDeps{Integration: specIntegration(), Gate: failingGate()})

@@ -136,11 +136,12 @@ func queueStatusCmd() *cobra.Command {
 func queueWorkerCmd() *cobra.Command {
 	var project, gate, target, resolver, repair, workerID string
 	var once bool
-	var retryDelay, maxRetryDelay time.Duration
+	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration time.Duration
 	var maxAttempts int
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
 		deps := queueProcessDeps(project, gate, target, resolver, repair, workerID)
 		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts
+		deps.EnvRetryDelay, deps.MaxEnvDuration = envRetryDelay, maxEnvDuration
 		worker := queue.Worker{Store: queue.Store{ProjectRoot: project}, Deps: deps}
 		for {
 			progressed, err := worker.RunOnce(cmd.Context())
@@ -179,6 +180,8 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
 	cmd.Flags().DurationVar(&maxRetryDelay, "max-retry-delay", queue.DefaultMaxRetryDelay, "backoff ceiling for repeated failures")
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
+	cmd.Flags().DurationVar(&envRetryDelay, "env-retry-delay", queue.DefaultEnvRetryDelay, "fixed backoff before retrying an environmental failure (fetch/lock/workspace-create); does not consume the attempt budget")
+	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_input")
 	_ = cmd.MarkFlagRequired("gate")
 	return cmd
 }

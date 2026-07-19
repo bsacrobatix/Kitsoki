@@ -455,6 +455,47 @@ func TestSubmitEmergencySkipTestsIsExplicitAndDoesNotForgeAReceipt(t *testing.T)
 	}
 }
 
+// TestSubmitRefusesCandidateNotResolvableInGitBackedProject guards the
+// inverse of the no-fetch bug: a worker retrying a candidate whose commit
+// was never published into the project used to hang in speculation_failed
+// until an operator hand-published refs/kitsoki/queue-candidates/<id>.
+// Submit must now refuse admission outright when the project root is a real
+// git repository and the SHA is not resolvable there.
+func TestSubmitRefusesCandidateNotResolvableInGitBackedProject(t *testing.T) {
+	root := protectedQueueRepo(t)
+	sha := strings.Repeat("b", 40)
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{Branch: "agent/ghost", SHA: sha, Receipt: persistedReceipt(t, root, sha)}); err == nil {
+		t.Fatal("expected Submit to refuse a candidate whose commit is not resolvable in the project")
+	}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Candidates) != 0 {
+		t.Fatalf("candidate should not have been admitted: %#v", state.Candidates)
+	}
+}
+
+// TestSubmitAnchorsCandidateRefInGitBackedProject guards the ref-anchoring
+// half of the same fix: an admitted candidate's commit must be reachable
+// from a durable refs/kitsoki/queue-candidates/<id> ref independent of
+// whatever workspace or branch originally produced it, so it survives GC
+// and stays fetchable across worker retries.
+func TestSubmitAnchorsCandidateRefInGitBackedProject(t *testing.T) {
+	root := protectedQueueRepo(t)
+	sha := git(t, root, "rev-parse", "HEAD")
+	store := Store{ProjectRoot: root}
+	candidate, err := store.Submit(Submit{Branch: "agent/anchor", SHA: sha, Receipt: persistedReceipt(t, root, sha)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := candidateRefName(candidate.ID)
+	if got := git(t, root, "rev-parse", ref); got != sha {
+		t.Fatalf("candidate ref %s = %s, want %s", ref, got, sha)
+	}
+}
+
 func TestWorkersPrepareConcurrentlyAndFinalizeInFIFOOrder(t *testing.T) {
 	store, first, second := queuedPair(t)
 	store.LockWait = time.Second
@@ -564,6 +605,58 @@ func TestExpiredLeaseIsReclaimedWithAttemptEvidence(t *testing.T) {
 	}
 	if state.Candidates[0].ID != c.ID || state.Candidates[0].Attempt != 1 || state.Candidates[0].Status != ReadyToFinalize {
 		t.Fatalf("candidate=%#v", state.Candidates[0])
+	}
+}
+
+// TestHeartbeatKeepsLeaseAliveDuringLongRunningSpeculation guards the fix
+// for the fact that a single 30s lease used to be set once at claim time and
+// never renewed while the actual Speculate/Gate.Run/Finalize call was still
+// in flight — a deterministic gate that legitimately runs longer than one
+// lease window (the doc's own "full CI" case) would have its lease reclaimed
+// by a second worker mid-operation, forcing an unnecessary reprepare. A
+// short real lease here stands in for that: without the heartbeat, it would
+// clearly have expired well before speculation finishes.
+func TestHeartbeatKeepsLeaseAliveDuringLongRunningSpeculation(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir(), LockWait: time.Second}
+	sha := strings.Repeat("7", 40)
+	if _, err := store.Submit(Submit{Branch: "agent/heartbeat", SHA: sha, Receipt: testReceipt(t, sha)}); err != nil {
+		t.Fatal(err)
+	}
+	block := make(chan struct{})
+	entered := make(chan struct{})
+	integration := &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+		close(entered)
+		<-block
+		return Speculation{SHA: "tree-" + c.SHA}, nil
+	}}
+	deps := ProcessDeps{Integration: integration, Gate: passingGate{}, GateVersion: "test", Lease: 300 * time.Millisecond}
+	worker := Worker{Store: store, Deps: deps}
+
+	done := make(chan error, 1)
+	go func() { _, err := worker.RunOnce(context.Background()); done <- err }()
+	<-entered
+
+	// Wait well past the original lease window while speculation is still
+	// blocked. If the heartbeat were not renewing it, a second worker would
+	// see it as expired and reclaim it into Reprepare.
+	time.Sleep(600 * time.Millisecond)
+	second := Worker{Store: store, Deps: deps}
+	if _, ok, err := second.claimPreparation(); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("a second worker claimed a candidate whose lease the heartbeat should still be renewing")
+	}
+
+	close(block)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Candidates[0].Phase != ReadyToFinalize || state.Candidates[0].Attempt != 1 {
+		t.Fatalf("candidate=%#v (want a single attempt, no stolen-lease reprepare)", state.Candidates[0])
 	}
 }
 

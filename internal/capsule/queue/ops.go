@@ -161,6 +161,7 @@ func (s Store) Resume(op Op) (Candidate, error) {
 		c.Attempt = 0
 		c.RetryAt, c.ParkedAt = time.Time{}, time.Time{}
 		c.ParkedBy, c.RetryReason, c.Failure, c.ConflictContinuation = "", "", "", ""
+		c.EnvRetries, c.FirstEnvFailureAt = 0, time.Time{}
 		return nil
 	})
 }
