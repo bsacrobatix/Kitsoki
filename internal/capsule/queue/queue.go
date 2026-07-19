@@ -311,6 +311,13 @@ type Repairer interface {
 
 // Finalizer owns the final protected compare-and-swap. It is called only with
 // a short durable finalization lease held by the worker.
+// Finalizer lands a gated candidate onto the protected target. Invocation is
+// at-least-once: a worker that outlives its lease (slow, not dead) may invoke
+// Finalize concurrently with the worker that reclaimed the candidate, so
+// implementations MUST be compare-and-swap idempotent against the target ref —
+// the CAS loser reports Stale, never a second landing. The worker's lease
+// fencing then discards the stale result; durable state converges to exactly
+// one landing.
 type Finalizer interface {
 	Finalize(context.Context, Candidate) (FinalizeResult, error)
 }
@@ -408,15 +415,6 @@ func nextSequence(cs []Candidate) uint64 {
 		}
 	}
 	return max + 1
-}
-func activeAhead(cs []Candidate) []Candidate {
-	out := make([]Candidate, 0, len(cs))
-	for _, c := range cs {
-		if !terminal(c.phase()) {
-			out = append(out, c)
-		}
-	}
-	return out
 }
 func terminal(p Status) bool { return p == Landed || p == Rejected }
 

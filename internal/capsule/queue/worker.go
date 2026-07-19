@@ -92,7 +92,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 	var specErr error
 	w.heartbeat(ctx, c.ID, func() { spec, specErr = w.Deps.Integration.Speculate(ctx, c, ahead) })
 	if err := w.update(c.ID, func(state *State, cur *Candidate) {
-		if w.operatorIntervened(cur, "speculation") {
+		if w.operatorIntervened(cur, "speculation") || w.leaseLost(cur, Preparing, "speculation") {
 			return
 		}
 		cur.SpeculativeSHA, cur.TreeSHA, cur.BaseSHA = spec.SHA, spec.SHA, spec.BaseSHA
@@ -130,8 +130,20 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			repairEvidence, repairErr := w.Deps.Repairer.Repair(ctx, spec, firstGateError(gateErr))
 			result.Evidence = append(result.Evidence, repairEvidence...)
 			if repairErr == nil {
-				w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
-				result.Evidence = append(result.Evidence, repairEvidence...)
+				// A successful repair commits into the speculative workspace, so
+				// the tree identity the rerun gate validates — and the finalizer
+				// later CAS-checks — must follow the repaired HEAD. Leaving the
+				// pre-repair SHA behind wedges every repaired candidate at
+				// finalization ("prepared tree changed after deterministic gate").
+				if head, headErr := workspaceHead(ctx, spec.WorkspacePath); headErr != nil {
+					gateErr = headErr
+				} else {
+					if head != "" {
+						spec.SHA = head
+					}
+					w.heartbeat(ctx, c.ID, func() { result, gateErr = w.Deps.Gate.Run(ctx, spec) })
+					result.Evidence = append(result.Evidence, repairEvidence...)
+				}
 			} else if gateErr == nil {
 				gateErr = repairErr
 			}
@@ -141,7 +153,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		}
 	}
 	return w.update(c.ID, func(state *State, cur *Candidate) {
-		if w.operatorIntervened(cur, "gate") {
+		if w.operatorIntervened(cur, "gate") || w.leaseLost(cur, Gating, "gate") {
 			return
 		}
 		cur.Evidence = append(cur.Evidence, result.Evidence...)
@@ -154,6 +166,9 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			w.failGate(state, cur, gateErr)
 			return
 		}
+		// spec.SHA may have advanced past the first closure's snapshot when a
+		// repair committed into the workspace; the durable identity follows it.
+		cur.SpeculativeSHA, cur.TreeSHA = spec.SHA, spec.SHA
 		if cur.TreeSHA == "" || cur.BaseSHA == "" {
 			w.failGate(state, cur, fmt.Errorf("prepared result is missing base or tree identity"))
 			return
@@ -184,6 +199,23 @@ func (w Worker) operatorIntervened(cur *Candidate, stage string) bool {
 		return true
 	}
 	return false
+}
+
+// leaseLost is the fencing check for delayed workers: it reports whether this
+// worker no longer holds cur's lease in the expected in-flight phase. A worker
+// that is slow — not dead — (GC pause, CPU pressure, remote-worker lag) can
+// blow past its lease TTL, have the candidate reclaimed by another worker, and
+// only then return from its in-flight call; without this check its stale
+// result would be applied on top of the reclaiming worker's, double-running
+// finalization. The stale outcome is discarded and recorded as evidence; the
+// reclaiming worker owns the candidate. Relies on WorkerID being unique per
+// worker, which the CLI guarantees (base, base-1..N).
+func (w Worker) leaseLost(cur *Candidate, expected Status, stage string) bool {
+	if cur.WorkerID == first(w.Deps.WorkerID, "queue-worker") && cur.phase() == expected {
+		return false
+	}
+	cur.Evidence = append(cur.Evidence, fmt.Sprintf("queue:%s result from worker %s discarded; lease no longer held (candidate is %s, worker %q)", stage, first(w.Deps.WorkerID, "queue-worker"), cur.phase(), cur.WorkerID))
+	return true
 }
 
 func (w Worker) finalize(ctx context.Context) (bool, error) {
@@ -235,6 +267,20 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 	if updateErr := w.update(candidate.ID, func(state *State, cur *Candidate) {
 		if w.operatorIntervened(cur, "finalization") {
 			return
+		}
+		// A successful compare-and-swap is authoritative even when this
+		// worker's lease has lapsed: exactly one CAS can win per target
+		// revision, so the ref genuinely moved and refusing to record it
+		// would leave the durable state claiming un-landed while the target
+		// advanced (livelocking on repeated stale finalizations). Fencing
+		// therefore discards only stale and failed results from a lapsed
+		// lease.
+		landed := err == nil && !result.Stale && !(result.NewMainSHA == "" && w.Deps.Finalizer != nil)
+		if !landed && w.leaseLost(cur, Finalizing, "finalization") {
+			return
+		}
+		if landed && (cur.WorkerID != first(w.Deps.WorkerID, "queue-worker") || cur.phase() != Finalizing) {
+			cur.Evidence = append(cur.Evidence, fmt.Sprintf("queue:finalization CAS won by worker %s after lease loss; landing recorded authoritatively", first(w.Deps.WorkerID, "queue-worker")))
 		}
 		cur.FinalizationLog = result.Log
 		if err != nil {

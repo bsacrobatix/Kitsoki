@@ -352,6 +352,25 @@ func (r ShellRepairer) Repair(ctx context.Context, spec Speculation, _ error) ([
 	return commandEvidence("queue:repair", output), err
 }
 
+// workspaceHead reads the current HEAD of a speculative workspace, used to
+// refresh the durable tree identity after a repairer commits into it. A
+// backend whose speculation carries no git workspace (empty path, or a path
+// that is not a git worktree — stub and remote integrations) reports no
+// identity change rather than an error.
+func workspaceHead(ctx context.Context, workspacePath string) (string, error) {
+	if strings.TrimSpace(workspacePath) == "" {
+		return "", nil
+	}
+	if _, err := os.Stat(filepath.Join(workspacePath, ".git")); err != nil {
+		return "", nil
+	}
+	out, err := gitOutput(ctx, workspacePath, "rev-parse", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("queue: read repaired workspace HEAD: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 func relativePath(root, path string) string {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
@@ -400,7 +419,10 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 		}
 	}
 	if err := s.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", createBase, "--target", "staging/local"); err != nil {
-		return Speculation{}, err
+		// Workspace creation is infrastructure, not a verdict on the
+		// candidate: classify environmental so a transient create race burns
+		// the lenient env-retry budget, matching ProtectedIntegration.
+		return Speculation{}, Environmental(err)
 	}
 	var stackEvidence []string
 	if err := s.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {

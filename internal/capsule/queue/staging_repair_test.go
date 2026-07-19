@@ -127,12 +127,15 @@ func TestWorkerShellRepairerFixesRedGateThenCandidateLands(t *testing.T) {
 	if !hasEvidence(c, "queue:repair:") {
 		t.Fatalf("candidate missing repair evidence: %v", c.Evidence)
 	}
-	// NOTE: at the time this test was written the candidate does NOT reach
-	// Landed here -- see the "repair commits a new tree but TreeSHA is never
-	// refreshed" finding in the final report. This assertion pins whatever
-	// the real current behavior is (do not weaken it to make a genuine bug
-	// disappear).
-	t.Logf("candidate after repaired-gate processing: phase=%s failure=%q evidence=%v", c.phase(), c.Failure, c.Evidence)
+	if c.phase() != Landed {
+		t.Fatalf("repaired candidate did not land: phase=%s failure=%q evidence=%v", c.phase(), c.Failure, c.Evidence)
+	}
+	if c.ResultMainSHA == "" {
+		t.Fatalf("landed repaired candidate missing result main SHA: %#v", c)
+	}
+	if got := git(t, root, "show", "main:candidate.txt"); !strings.Contains(got, "FIXED") {
+		t.Fatalf("landing branch does not contain the repaired content: %q", got)
+	}
 }
 
 func TestWorkerParksCandidateWhenShellRepairerCannotFixRedGate(t *testing.T) {
@@ -434,10 +437,32 @@ func TestStagingIntegrationSpeculateRequiresGateCommandAndManagedWorkspaceLifecy
 // pins a real inconsistency between the two Integration adapters: unlike
 // ProtectedIntegration.Speculate (which wraps its dev-workspace.sh create
 // failure with Environmental, see
-// TestProtectedIntegrationSpeculateWrapsWorkspaceCreateFailureAsEnvironmental
-// above), StagingIntegration.Speculate returns the same class of failure
-// completely unwrapped. See the final report for why that matters.
-func TestStagingIntegrationSpeculateWorkspaceCreateFailureIsNotClassifiedEnvironmental(t *testing.T) {
+// Workspace creation is infrastructure, not a candidate verdict: both
+// Integration adapters must classify its failure environmental so transient
+// create races burn the lenient env-retry budget, never the bounded
+// product-failure budget.
+func TestStagingIntegrationSpeculateWorkspaceCreateFailureIsEnvironmental(t *testing.T) {
+	root := protectedQueueRepo(t)
+	// Force the create step itself to fail: the lifecycle script exists (so
+	// the availability precondition passes) but refuses to create.
+	script := filepath.Join(root, "scripts", "dev-workspace.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho workspace host out of disk >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := StagingIntegration{ProjectRoot: root, GateCommand: "true"}
+	_, err := s.Speculate(context.Background(), Candidate{ID: "envcase", SHA: strings.Repeat("0", 40)}, nil)
+	if err == nil {
+		t.Fatal("want an error when workspace creation fails")
+	}
+	var envErr EnvError
+	if !errors.As(err, &envErr) {
+		t.Fatalf("StagingIntegration.Speculate workspace-create failure not classified environmental: %v", err)
+	}
+}
+
+// A merge failure on the candidate's own SHA remains a product failure, never
+// environmental — only the infrastructure step upgrades the retry budget.
+func TestStagingIntegrationSpeculateMergeFailureStaysProductClassified(t *testing.T) {
 	root := protectedQueueRepo(t)
 	s := StagingIntegration{ProjectRoot: root, GateCommand: "true"}
 	_, err := s.Speculate(context.Background(), Candidate{ID: "bogus", SHA: strings.Repeat("0", 40)}, nil)
@@ -446,7 +471,6 @@ func TestStagingIntegrationSpeculateWorkspaceCreateFailureIsNotClassifiedEnviron
 	}
 	var envErr EnvError
 	if errors.As(err, &envErr) {
-		t.Fatalf("StagingIntegration.Speculate now classifies a workspace-create failure as environmental (%v); "+
-			"if this was fixed intentionally, update this test (and the final-report finding) to match", err)
+		t.Fatalf("merge failure misclassified environmental: %v", err)
 	}
 }
