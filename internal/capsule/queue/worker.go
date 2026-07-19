@@ -38,13 +38,16 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 	var claimed Candidate
 	var ok bool
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, err := read(path)
+		state, _, err := w.Store.read(path)
 		if err != nil {
 			return State{}, err
 		}
 		n := now(w.Deps)
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
+			if !w.matchesTarget(*c) {
+				continue
+			}
 			if (c.phase() == Preparing || c.phase() == Gating || c.phase() == Finalizing) && !c.LeaseExpiresAt.IsZero() && !n.Before(c.LeaseExpiresAt) {
 				c.Phase, c.Status, c.WorkerID, c.LeaseExpiresAt = Reprepare, Reprepare, "", time.Time{}
 				c.Failure = "worker lease expired; preserved attempt evidence requires reprepare"
@@ -53,6 +56,9 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 		var pick *Candidate
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
+			if !w.matchesTarget(*c) {
+				continue
+			}
 			if c.phase() != Queued && c.phase() != Reprepare && c.phase() != RetryWait {
 				continue
 			}
@@ -168,7 +174,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 	var candidate Candidate
 	var ok bool
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, err := read(path)
+		state, _, err := w.Store.read(path)
 		if err != nil {
 			return State{}, err
 		}
@@ -180,6 +186,9 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		var head *Candidate
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
+			if !w.matchesTarget(*c) {
+				continue
+			}
 			if terminal(c.phase()) || parked(c.phase()) {
 				continue
 			}
@@ -244,21 +253,38 @@ func (w Worker) ahead(sequence uint64) ([]Candidate, error) {
 		return nil, err
 	}
 	var out []Candidate
+	var target, project string
 	for _, c := range state.Candidates {
-		if c.Sequence < sequence && !terminal(c.phase()) {
+		if c.Sequence == sequence {
+			target, project = c.TargetRef, c.ProjectID
+			break
+		}
+	}
+	for _, c := range state.Candidates {
+		if c.Sequence < sequence && c.TargetRef == target && c.ProjectID == project && !terminal(c.phase()) {
 			out = append(out, c)
 		}
 	}
 	return out, nil
 }
+
+func (w Worker) targetRef() string { return strings.TrimSpace(w.Deps.TargetRef) }
+
+func (w Worker) matchesTarget(c Candidate) bool {
+	target := w.targetRef()
+	return target == "" || c.TargetRef == target
+}
 func (w Worker) update(id string, mutate func(*State, *Candidate)) error {
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, err := read(path)
+		state, _, err := w.Store.read(path)
 		if err != nil {
 			return State{}, err
 		}
 		for i := range state.Candidates {
 			if state.Candidates[i].ID == id {
+				if !w.matchesTarget(state.Candidates[i]) {
+					return State{}, fmt.Errorf("queue: worker target %q refuses candidate %s for target %q", w.targetRef(), id, state.Candidates[i].TargetRef)
+				}
 				mutate(&state, &state.Candidates[i])
 				return state, write(path, state)
 			}
@@ -356,11 +382,11 @@ func fingerprint(values ...string) string {
 }
 
 func preparedFingerprint(c Candidate) string {
-	return fingerprint(c.ReceiptDigest, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion)
+	return fingerprint(c.ReceiptDigest, c.TargetRef, c.TargetBaseSHAAtAdmission, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion)
 }
 
 func approvalFingerprint(c Candidate) string {
-	return fingerprint(preparedFingerprint(c), c.ManifestDigest, c.RuntimeInstance, c.RuntimeReceipt, strings.Join(c.RequiredReceiptIDs, "\x00"))
+	return fingerprint(preparedFingerprint(c), string(c.TargetPolicy), c.ManifestDigest, c.RuntimeInstance, c.RuntimeReceipt, strings.Join(c.RequiredReceiptIDs, "\x00"))
 }
 
 func validateRequiredReceipts(c Candidate) error {

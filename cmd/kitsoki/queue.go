@@ -14,7 +14,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -71,7 +71,7 @@ func queueOpCmd(verb, short string, run func(queue.Store, queue.Op) (queue.Candi
 	return cmd
 }
 func queueSubmitCmd() *cobra.Command {
-	var project, branch, sha, receiptPath, backend, policy, manifest, runtimeInstance, runtimeReceipt string
+	var project, branch, sha, receiptPath, backend, policy, manifest, runtimeInstance, runtimeReceipt, target, targetBase, targetPolicy string
 	var paths []string
 	var requiredReceipts []string
 	cmd := &cobra.Command{Use: "submit", Short: "Admit a receipt-bound candidate", RunE: func(cmd *cobra.Command, _ []string) error {
@@ -83,7 +83,7 @@ func queueSubmitCmd() *cobra.Command {
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return fmt.Errorf("queue: parse receipt: %w", err)
 		}
-		c, err := (queue.Store{ProjectRoot: project}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
+		c, err := (queue.Store{ProjectRoot: project}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, TargetRef: target, TargetBaseSHAAtAdmission: targetBase, TargetPolicy: queue.TargetPolicy(targetPolicy), FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
 		if err != nil {
 			return err
 		}
@@ -94,6 +94,9 @@ func queueSubmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&sha, "sha", "", "full candidate git SHA")
 	cmd.Flags().StringVar(&receiptPath, "receipt", "", "capsule CI receipt JSON")
 	cmd.Flags().StringVar(&backend, "backend", "local", "dispatch backend")
+	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref bound at admission")
+	cmd.Flags().StringVar(&targetBase, "target-base-sha", "", "protected target SHA observed at admission")
+	cmd.Flags().StringVar(&targetPolicy, "target-policy", string(queue.WaveAutoPolicy), "target policy: wave-auto or steward-approved")
 	cmd.Flags().StringSliceVar(&paths, "path", nil, "changed path (repeatable)")
 	cmd.Flags().StringVar(&policy, "finalization-policy", string(queue.AutonomousFinalization), "finalization policy: autonomous or steward_review")
 	cmd.Flags().StringVar(&manifest, "manifest", "", "immutable wave or release manifest digest required by steward_review")
@@ -168,7 +171,7 @@ func queueWorkerCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each prepared tree")
-	cmd.Flags().StringVar(&target, "target", "", "protected destination ref; defaults to staging/local integration")
+	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
 	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token")
@@ -193,7 +196,7 @@ func queueProcessCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each speculative tree")
-	cmd.Flags().StringVar(&target, "target", "", "protected destination ref; defaults to staging/local integration")
+	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
 	_ = cmd.MarkFlagRequired("gate")
@@ -204,12 +207,16 @@ func queueProcessCmd() *cobra.Command {
 // explicit destination switches both preparation and finalization to the same
 // protected ref, so the final compare-and-swap cannot land somewhere else.
 func queueProcessDeps(project, gate, target, resolver, repair, workerID string) queue.ProcessDeps {
+	if strings.TrimSpace(target) == "" {
+		target = "staging/local"
+	}
 	deps := queue.ProcessDeps{
 		Gate:        queue.ShellGate{Command: gate},
 		WorkerID:    workerID,
 		GateVersion: gate,
+		TargetRef:   target,
 	}
-	if strings.TrimSpace(target) == "" {
+	if target == "staging/local" {
 		deps.Integration = queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}
 	} else {
 		deps.Integration = queue.ProtectedIntegration{
@@ -223,4 +230,23 @@ func queueProcessDeps(project, gate, target, resolver, repair, workerID string) 
 		deps.Repairer = queue.ShellRepairer{Command: repair}
 	}
 	return deps
+}
+
+// queueMigrateCmd is the only v1 upgrade path. It requires an explicit
+// operator-selected target before the queue state is rewritten as v2.
+func queueMigrateCmd() *cobra.Command {
+	var project, target, base, policy string
+	cmd := &cobra.Command{Use: "migrate", Short: "Explicitly migrate a legacy merge queue to target-bound v2", RunE: func(cmd *cobra.Command, _ []string) error {
+		state, err := (queue.Store{ProjectRoot: project, LegacyTargetRef: target, LegacyTargetBaseSHAAtAdmission: base, LegacyTargetPolicy: queue.TargetPolicy(policy)}).List()
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&target, "target", "", "target ref to bind every legacy candidate to")
+	cmd.Flags().StringVar(&base, "target-base-sha", "", "target SHA observed at legacy migration")
+	cmd.Flags().StringVar(&policy, "target-policy", string(queue.WaveAutoPolicy), "target policy: wave-auto or steward-approved")
+	_ = cmd.MarkFlagRequired("target")
+	return cmd
 }

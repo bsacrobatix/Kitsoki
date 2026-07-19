@@ -27,7 +27,17 @@ import (
 var ErrBusy = errors.New("queue: serializer busy")
 
 const (
-	Schema = "capsule-merge-queue/v1"
+	Schema       = "capsule-merge-queue/v2"
+	legacySchema = "capsule-merge-queue/v1"
+)
+
+// TargetPolicy records the authorization model for a protected destination.
+// It is durable so workers cannot reinterpret the target from local flags.
+type TargetPolicy string
+
+const (
+	WaveAutoPolicy        TargetPolicy = "wave-auto"
+	StewardApprovedPolicy TargetPolicy = "steward-approved"
 )
 
 // Admission records how a candidate was authorized to enter the queue.
@@ -74,58 +84,61 @@ const (
 )
 
 type Candidate struct {
-	ID                    string             `json:"id"`
-	ProjectID             string             `json:"project_id"`
-	Sequence              uint64             `json:"sequence"`
-	Branch                string             `json:"branch"`
-	SHA                   string             `json:"sha"`
-	Admission             Admission          `json:"admission"`
-	ReceiptID             string             `json:"receipt_id"`
-	ReceiptRef            string             `json:"receipt_ref,omitempty"`
-	ReceiptDigest         string             `json:"receipt_digest,omitempty"`
-	Backend               string             `json:"backend"`
-	Paths                 []string           `json:"paths,omitempty"`
-	Position              int                `json:"position"`
-	Status                Status             `json:"status"`
-	Phase                 Status             `json:"phase,omitempty"`
-	Submitted             time.Time          `json:"submitted_at"`
-	Started               time.Time          `json:"started_at,omitempty"`
-	PhaseStartedAt        time.Time          `json:"phase_started_at,omitempty"`
-	Completed             time.Time          `json:"completed_at,omitempty"`
-	WorkerID              string             `json:"worker_id,omitempty"`
-	LeaseExpiresAt        time.Time          `json:"lease_expires_at,omitempty"`
-	Attempt               int                `json:"attempt,omitempty"`
-	RetryAt               time.Time          `json:"retry_at,omitempty"`
-	BaseSHA               string             `json:"base_sha,omitempty"`
-	TreeSHA               string             `json:"tree_sha,omitempty"`
-	GateVersion           string             `json:"gate_version,omitempty"`
-	DependencyFingerprint string             `json:"dependency_fingerprint,omitempty"`
-	IntegrationRef        string             `json:"integration_ref,omitempty"`
-	WorkspaceID           string             `json:"workspace_id,omitempty"`
-	WorkspacePath         string             `json:"workspace_path,omitempty"`
-	ConflictContinuation  string             `json:"conflict_continuation,omitempty"`
-	GateLog               string             `json:"gate_log,omitempty"`
-	GateEvidence          []string           `json:"gate_evidence,omitempty"`
-	FinalizationLog       string             `json:"finalization_log,omitempty"`
-	ResultMainSHA         string             `json:"result_main_sha,omitempty"`
-	Failure               string             `json:"failure,omitempty"`
-	SpeculativeSHA        string             `json:"speculative_sha,omitempty"` // v1 compatibility
-	ValidatedSHA          string             `json:"validated_sha,omitempty"`   // v1 compatibility
-	Evidence              []string           `json:"evidence,omitempty"`
-	RetryReason           string             `json:"retry_reason,omitempty"`
-	EjectionReason        string             `json:"ejection_reason,omitempty"`
-	EmergencySequence     uint64             `json:"emergency_sequence,omitempty"`
-	ParkedAt              time.Time          `json:"parked_at,omitempty"`
-	ParkedBy              string             `json:"parked_by,omitempty"`
-	OverrideGate          bool               `json:"override_gate,omitempty"`
-	OverrideBy            string             `json:"override_by,omitempty"`
-	OverrideReason        string             `json:"override_reason,omitempty"`
-	FinalizationPolicy    FinalizationPolicy `json:"finalization_policy,omitempty"`
-	ManifestDigest        string             `json:"manifest_digest,omitempty"`
-	RuntimeInstance       string             `json:"runtime_instance,omitempty"`
-	RuntimeReceipt        string             `json:"runtime_receipt,omitempty"`
-	RequiredReceiptIDs    []string           `json:"required_receipt_ids,omitempty"`
-	Approval              *Approval          `json:"approval,omitempty"`
+	ID                       string             `json:"id"`
+	ProjectID                string             `json:"project_id"`
+	TargetRef                string             `json:"target_ref"`
+	TargetBaseSHAAtAdmission string             `json:"target_base_sha_at_admission,omitempty"`
+	TargetPolicy             TargetPolicy       `json:"target_policy"`
+	Sequence                 uint64             `json:"sequence"`
+	Branch                   string             `json:"branch"`
+	SHA                      string             `json:"sha"`
+	Admission                Admission          `json:"admission"`
+	ReceiptID                string             `json:"receipt_id"`
+	ReceiptRef               string             `json:"receipt_ref,omitempty"`
+	ReceiptDigest            string             `json:"receipt_digest,omitempty"`
+	Backend                  string             `json:"backend"`
+	Paths                    []string           `json:"paths,omitempty"`
+	Position                 int                `json:"position"`
+	Status                   Status             `json:"status"`
+	Phase                    Status             `json:"phase,omitempty"`
+	Submitted                time.Time          `json:"submitted_at"`
+	Started                  time.Time          `json:"started_at,omitempty"`
+	PhaseStartedAt           time.Time          `json:"phase_started_at,omitempty"`
+	Completed                time.Time          `json:"completed_at,omitempty"`
+	WorkerID                 string             `json:"worker_id,omitempty"`
+	LeaseExpiresAt           time.Time          `json:"lease_expires_at,omitempty"`
+	Attempt                  int                `json:"attempt,omitempty"`
+	RetryAt                  time.Time          `json:"retry_at,omitempty"`
+	BaseSHA                  string             `json:"base_sha,omitempty"`
+	TreeSHA                  string             `json:"tree_sha,omitempty"`
+	GateVersion              string             `json:"gate_version,omitempty"`
+	DependencyFingerprint    string             `json:"dependency_fingerprint,omitempty"`
+	IntegrationRef           string             `json:"integration_ref,omitempty"`
+	WorkspaceID              string             `json:"workspace_id,omitempty"`
+	WorkspacePath            string             `json:"workspace_path,omitempty"`
+	ConflictContinuation     string             `json:"conflict_continuation,omitempty"`
+	GateLog                  string             `json:"gate_log,omitempty"`
+	GateEvidence             []string           `json:"gate_evidence,omitempty"`
+	FinalizationLog          string             `json:"finalization_log,omitempty"`
+	ResultMainSHA            string             `json:"result_main_sha,omitempty"`
+	Failure                  string             `json:"failure,omitempty"`
+	SpeculativeSHA           string             `json:"speculative_sha,omitempty"` // v1 compatibility
+	ValidatedSHA             string             `json:"validated_sha,omitempty"`   // v1 compatibility
+	Evidence                 []string           `json:"evidence,omitempty"`
+	RetryReason              string             `json:"retry_reason,omitempty"`
+	EjectionReason           string             `json:"ejection_reason,omitempty"`
+	EmergencySequence        uint64             `json:"emergency_sequence,omitempty"`
+	ParkedAt                 time.Time          `json:"parked_at,omitempty"`
+	ParkedBy                 string             `json:"parked_by,omitempty"`
+	OverrideGate             bool               `json:"override_gate,omitempty"`
+	OverrideBy               string             `json:"override_by,omitempty"`
+	OverrideReason           string             `json:"override_reason,omitempty"`
+	FinalizationPolicy       FinalizationPolicy `json:"finalization_policy,omitempty"`
+	ManifestDigest           string             `json:"manifest_digest,omitempty"`
+	RuntimeInstance          string             `json:"runtime_instance,omitempty"`
+	RuntimeReceipt           string             `json:"runtime_receipt,omitempty"`
+	RequiredReceiptIDs       []string           `json:"required_receipt_ids,omitempty"`
+	Approval                 *Approval          `json:"approval,omitempty"`
 }
 
 // Approval is the steward decision bound to the exact prepared state.
@@ -146,17 +159,20 @@ type PathScopeManifest struct {
 	Paths  []string `json:"paths,omitempty"`
 }
 type Submit struct {
-	Branch, SHA         string
-	Receipt             receipt.Receipt
-	ReceiptRef, Backend string
-	Paths               []string
-	Admission           Admission
-	FinalizationPolicy  FinalizationPolicy
-	ManifestDigest      string
-	RuntimeInstance     string
-	RuntimeReceipt      string
-	RequiredReceiptIDs  []string
-	Now                 time.Time
+	Branch, SHA              string
+	TargetRef                string
+	TargetBaseSHAAtAdmission string
+	TargetPolicy             TargetPolicy
+	Receipt                  receipt.Receipt
+	ReceiptRef, Backend      string
+	Paths                    []string
+	Admission                Admission
+	FinalizationPolicy       FinalizationPolicy
+	ManifestDigest           string
+	RuntimeInstance          string
+	RuntimeReceipt           string
+	RequiredReceiptIDs       []string
+	Now                      time.Time
 }
 
 // Integration materializes an immutable integration tree. Land remains for
@@ -193,6 +209,9 @@ type ProcessDeps struct {
 	Lease                 time.Duration
 	GateVersion           string
 	DependencyFingerprint string
+	// TargetRef selects the only candidate partition this worker may mutate.
+	// Empty retains supervisor compatibility for legacy in-process callers.
+	TargetRef string
 
 	// Retry policy. A red gate or failed speculation moves the candidate to
 	// the back of the line in retry_wait with exponential backoff; once
@@ -260,6 +279,10 @@ type FinalizeResult struct {
 type Store struct {
 	ProjectRoot string
 	LockWait    time.Duration
+	// LegacyTargetRef is the required explicit binding used to migrate v1 state.
+	LegacyTargetRef                string
+	LegacyTargetBaseSHAAtAdmission string
+	LegacyTargetPolicy             TargetPolicy
 }
 
 func (s Store) Submit(in Submit) (Candidate, error) {
@@ -268,7 +291,7 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 	}
 	return s.mutate(func(state *State) (Candidate, error) {
 		for _, c := range state.Candidates {
-			if c.SHA == in.SHA && c.admission() == in.admission() && c.ReceiptID == in.Receipt.ReceiptID {
+			if c.SHA == in.SHA && c.TargetRef == in.targetRef() && c.admission() == in.admission() && c.ReceiptID == in.Receipt.ReceiptID {
 				return c, nil
 			}
 		}
@@ -287,14 +310,14 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 		if identity == "" {
 			identity = string(admission)
 		}
-		c := Candidate{ID: candidateID(in.SHA, identity), ProjectID: projectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs)}
+		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs)}
 		// A resubmission of the same SHA (fresh receipt) supersedes any active
 		// prior candidate rather than racing it in the FIFO, and inherits its
 		// durable attempt count so bounded retries cannot be reset by
 		// resubmitting. (POG carried a retry-ledger sidecar for exactly this.)
 		for i := range state.Candidates {
 			prior := &state.Candidates[i]
-			if prior.SHA != in.SHA || terminal(prior.phase()) {
+			if prior.SHA != in.SHA || prior.TargetRef != c.TargetRef || terminal(prior.phase()) {
 				continue
 			}
 			if prior.Attempt > c.Attempt {
@@ -403,16 +426,26 @@ func now(deps ProcessDeps) time.Time {
 }
 
 func (s Store) readState() (State, error) {
-	_, path, err := s.paths()
-	if err != nil {
-		return State{}, err
-	}
-	return read(path)
+	var out State
+	_, err := s.withLock(func(path string) (State, error) {
+		state, migrated, err := s.read(path)
+		if err != nil {
+			return State{}, err
+		}
+		if migrated {
+			if err := write(path, state); err != nil {
+				return State{}, err
+			}
+		}
+		out = state
+		return state, nil
+	})
+	return out, err
 }
 func (s Store) mutate(fn func(*State) (Candidate, error)) (Candidate, error) {
 	var out Candidate
 	_, err := s.withLock(func(path string) (State, error) {
-		state, err := read(path)
+		state, _, err := s.read(path)
 		if err != nil {
 			return State{}, err
 		}
@@ -455,6 +488,12 @@ func validate(in Submit) error {
 	if len(in.SHA) != 40 || strings.Trim(in.SHA, "0123456789abcdef") != "" {
 		return fmt.Errorf("queue: candidate SHA must be a lowercase full git SHA")
 	}
+	if strings.ContainsAny(in.targetRef(), "\n\r") {
+		return fmt.Errorf("queue: target_ref is invalid")
+	}
+	if policy := in.targetPolicy(); policy != WaveAutoPolicy && policy != StewardApprovedPolicy {
+		return fmt.Errorf("queue: unsupported target_policy %q", policy)
+	}
 	switch in.admission() {
 	case ReceiptAdmission:
 		if got := receipt.Verify(in.Receipt, nil, false); got.Status != "valid" || !got.PromotionEligible {
@@ -480,22 +519,41 @@ func validate(in Submit) error {
 	}
 	return nil
 }
-func read(path string) (State, error) {
+func (s Store) read(path string) (State, bool, error) {
 	raw, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return State{Schema: Schema, Candidates: []Candidate{}}, nil
+		return State{Schema: Schema, Candidates: []Candidate{}}, false, nil
 	}
 	if err != nil {
-		return State{}, err
+		return State{}, false, err
 	}
 	var state State
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return State{}, fmt.Errorf("queue: parse state: %w", err)
+		return State{}, false, fmt.Errorf("queue: parse state: %w", err)
+	}
+	if state.Schema == legacySchema {
+		if strings.TrimSpace(s.LegacyTargetRef) == "" {
+			return State{}, false, fmt.Errorf("queue: legacy state requires explicit migration target_ref")
+		}
+		for i := range state.Candidates {
+			c := &state.Candidates[i]
+			c.TargetRef = strings.TrimSpace(s.LegacyTargetRef)
+			c.TargetBaseSHAAtAdmission = strings.TrimSpace(s.LegacyTargetBaseSHAAtAdmission)
+			c.TargetPolicy = s.legacyTargetPolicy()
+			c.Evidence = append(c.Evidence, fmt.Sprintf("queue:migrated-v1 target_ref=%s target_policy=%s", c.TargetRef, c.TargetPolicy))
+		}
+		state.Schema = Schema
+		return normalize(state), true, nil
 	}
 	if state.Schema != Schema {
-		return State{}, fmt.Errorf("queue: unsupported state schema %q", state.Schema)
+		return State{}, false, fmt.Errorf("queue: unsupported state schema %q", state.Schema)
 	}
-	return normalize(state), nil
+	for _, c := range state.Candidates {
+		if strings.TrimSpace(c.TargetRef) == "" || c.TargetPolicy == "" {
+			return State{}, false, fmt.Errorf("queue: v2 candidate %s is missing durable target binding", c.ID)
+		}
+	}
+	return normalize(state), false, nil
 }
 func normalize(state State) State {
 	for i := range state.Candidates {
@@ -551,6 +609,27 @@ func (in Submit) finalizationPolicy() FinalizationPolicy {
 		return AutonomousFinalization
 	}
 	return in.FinalizationPolicy
+}
+
+func (in Submit) targetRef() string {
+	if strings.TrimSpace(in.TargetRef) == "" {
+		return "main"
+	}
+	return strings.TrimSpace(in.TargetRef)
+}
+
+func (in Submit) targetPolicy() TargetPolicy {
+	if in.TargetPolicy == "" {
+		return WaveAutoPolicy
+	}
+	return in.TargetPolicy
+}
+
+func (s Store) legacyTargetPolicy() TargetPolicy {
+	if s.LegacyTargetPolicy == "" {
+		return WaveAutoPolicy
+	}
+	return s.LegacyTargetPolicy
 }
 
 func (c Candidate) finalizationPolicy() FinalizationPolicy {
@@ -616,8 +695,8 @@ func lock(path string, wait time.Duration) (func(), error) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
-func candidateID(sha, receiptID string) string {
-	sum := sha256.Sum256([]byte(sha + "\n" + receiptID))
+func candidateID(sha, receiptID string, target ...string) string {
+	sum := sha256.Sum256([]byte(sha + "\n" + receiptID + "\n" + strings.Join(target, "\n")))
 	return "queue-" + hex.EncodeToString(sum[:])[:12]
 }
 func defaultBackend(v string) string {

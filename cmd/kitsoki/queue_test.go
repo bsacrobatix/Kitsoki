@@ -18,6 +18,7 @@ func TestQueueProcessDepsDefaultsToStagingIntegration(t *testing.T) {
 	require.Nil(t, deps.Finalizer)
 	require.Nil(t, deps.Repairer)
 	require.Equal(t, "worker-1", deps.WorkerID)
+	require.Equal(t, "staging/local", deps.TargetRef)
 }
 
 func TestQueueProcessDepsUsesRequestedProtectedTarget(t *testing.T) {
@@ -33,4 +34,5 @@ func TestQueueProcessDepsUsesRequestedProtectedTarget(t *testing.T) {
 	repairer, ok := deps.Repairer.(queue.ShellRepairer)
 	require.True(t, ok)
 	require.Equal(t, "repair-gate", repairer.Command)
+	require.Equal(t, "release/2026.07", deps.TargetRef)
 }

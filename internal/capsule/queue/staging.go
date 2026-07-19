@@ -44,14 +44,14 @@ type ProtectedIntegration struct {
 }
 
 func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+	if c.TargetRef != p.targetRef() {
+		return Speculation{}, fmt.Errorf("queue: protected integration target %q refuses candidate %s for target %q", p.targetRef(), c.ID, c.TargetRef)
+	}
 	root, err := p.root()
 	if err != nil {
 		return Speculation{}, err
 	}
-	target := p.TargetRef
-	if strings.TrimSpace(target) == "" {
-		target = "main"
-	}
+	target := p.targetRef()
 	id := "queue-" + c.ID
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	workspace := filepath.Join(workspaceRoot, id)
@@ -136,9 +136,9 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	if err := validatePreparedTuple(c); err != nil {
 		return FinalizeResult{}, err
 	}
-	target := p.TargetRef
-	if strings.TrimSpace(target) == "" {
-		target = "main"
+	target := p.targetRef()
+	if c.TargetRef != target {
+		return FinalizeResult{}, fmt.Errorf("queue: protected finalizer target %q refuses candidate %s for target %q", target, c.ID, c.TargetRef)
 	}
 	// A dirty protected checkout never blocks the train and never loses data:
 	// the work is captured on an immutable preserved-WIP branch and the
@@ -191,6 +191,20 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 		log += "; checkout sync failed: " + err.Error()
 	}
 	return FinalizeResult{OldMainSHA: result.OldTarget, NewMainSHA: result.NewTarget, Log: log, PreservedWIPBranch: preserved}, nil
+}
+
+func (p ProtectedIntegration) targetRef() string {
+	if strings.TrimSpace(p.TargetRef) == "" {
+		return "main"
+	}
+	return strings.TrimSpace(p.TargetRef)
+}
+
+func (p ProtectedFinalizer) targetRef() string {
+	if strings.TrimSpace(p.TargetRef) == "" {
+		return "main"
+	}
+	return strings.TrimSpace(p.TargetRef)
 }
 
 func (p ProtectedIntegration) root() (string, error) {

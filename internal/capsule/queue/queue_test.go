@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -155,6 +156,119 @@ func TestConcurrentConflictingCandidatesParkSecond(t *testing.T) {
 	}
 	if state.Candidates[0].Status != Landed || state.Candidates[1].Status != RetryWait || integration.landed != 1 {
 		t.Fatalf("state=%#v landed=%d", state.Candidates, integration.landed)
+	}
+}
+
+func TestTargetWorkersPartitionClaimsAndFinalizeOnlyTheirTarget(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir(), LockWait: time.Second}
+	shaA, shaB := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	a, err := store.Submit(Submit{Branch: "agent/a", SHA: shaA, Receipt: testReceipt(t, shaA), TargetRef: "wave/alpha", TargetBaseSHAAtAdmission: "base-alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := store.Submit(Submit{Branch: "agent/b", SHA: shaB, Receipt: testReceipt(t, shaB), TargetRef: "wave/beta", TargetBaseSHAAtAdmission: "base-beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var finalized []Candidate
+	deps := func(target string) ProcessDeps {
+		return ProcessDeps{TargetRef: target, GateVersion: "test", Integration: &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+			return Speculation{SHA: "tree-" + c.SHA, BaseSHA: c.TargetBaseSHAAtAdmission}, nil
+		}}, Gate: passingGate{}, Finalizer: finalizerFunc(func(_ context.Context, c Candidate) (FinalizeResult, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			finalized = append(finalized, c)
+			return FinalizeResult{OldMainSHA: c.BaseSHA, NewMainSHA: c.TreeSHA}, nil
+		})}
+	}
+	workers := []Worker{{Store: store, Deps: deps("wave/alpha")}, {Store: store, Deps: deps("wave/beta")}}
+	var wg sync.WaitGroup
+	for _, worker := range workers {
+		wg.Add(1)
+		go func(w Worker) {
+			defer wg.Done()
+			_, err := w.RunOnce(context.Background())
+			if err != nil {
+				t.Errorf("prepare: %v", err)
+			}
+		}(worker)
+	}
+	wg.Wait()
+	for _, worker := range workers {
+		if _, err := worker.RunOnce(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(finalized) != 2 {
+		t.Fatalf("finalized=%#v", finalized)
+	}
+	seen := map[string]string{}
+	for _, candidate := range finalized {
+		seen[candidate.ID] = candidate.TargetRef
+	}
+	if seen[a.ID] != "wave/alpha" || seen[b.ID] != "wave/beta" {
+		t.Fatalf("finalized targets=%v", seen)
+	}
+}
+
+func TestWrongTargetWorkerLeavesCandidateUntouched(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("c", 40)
+	candidate, err := store.Submit(Submit{Branch: "agent/c", SHA: sha, Receipt: testReceipt(t, sha), TargetRef: "wave/alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	progressed, err := (Worker{Store: store, Deps: ProcessDeps{TargetRef: "wave/beta", Integration: specIntegration(), Gate: passingGate{}}}).RunOnce(context.Background())
+	if err != nil || progressed {
+		t.Fatalf("progressed=%v err=%v", progressed, err)
+	}
+	after, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || after.Candidates[0].ID != candidate.ID {
+		t.Fatalf("candidate mutated: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestLegacyMigrationRequiresExplicitTargetAndPreservesApprovalState(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".capsules", "queue")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := State{Schema: legacySchema, Candidates: []Candidate{{ID: "legacy", SHA: strings.Repeat("d", 40), Branch: "agent/d", ProjectID: "project", Status: AwaitingApproval, FinalizationPolicy: StewardReviewFinalization, ManifestDigest: "manifest", Evidence: []string{"receipt:path", "operator:note"}}}}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (Store{ProjectRoot: root}).List(); err == nil || !strings.Contains(err.Error(), "explicit migration target_ref") {
+		t.Fatalf("err=%v", err)
+	}
+	store := Store{ProjectRoot: root, LegacyTargetRef: "wave/alpha", LegacyTargetBaseSHAAtAdmission: "base", LegacyTargetPolicy: StewardApprovedPolicy}
+	state, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := state.Candidates[0]
+	if state.Schema != Schema || c.TargetRef != "wave/alpha" || c.TargetBaseSHAAtAdmission != "base" || c.TargetPolicy != StewardApprovedPolicy || c.Phase != AwaitingApproval || !strings.Contains(strings.Join(c.Evidence, " "), "receipt:path") {
+		t.Fatalf("migration=%#v", state)
+	}
+	again, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(state, again) {
+		t.Fatalf("migration not idempotent: first=%#v second=%#v", state, again)
 	}
 }
 

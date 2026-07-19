@@ -212,11 +212,11 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	var qcandidate queue.Candidate
 	if !opts.SkipTests {
 		qcandidate, err = qstore.Submit(queue.Submit{
-			Branch: branch, SHA: candidateSHA, Receipt: stored.Receipt, ReceiptRef: stored.ReceiptPath, Backend: "local",
+			Branch: branch, SHA: candidateSHA, Receipt: stored.Receipt, ReceiptRef: stored.ReceiptPath, Backend: "local", TargetRef: opts.TargetRef,
 		})
 	} else {
 		qcandidate, err = qstore.Submit(queue.Submit{
-			Branch: branch, SHA: candidateSHA, Admission: queue.EmergencySkipTestsAdmission, Backend: "local",
+			Branch: branch, SHA: candidateSHA, Admission: queue.EmergencySkipTestsAdmission, Backend: "local", TargetRef: opts.TargetRef,
 		})
 	}
 	if err != nil {
@@ -239,6 +239,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 		Repairer:    repairer,
 		Finalizer:   queue.ProtectedFinalizer{ProjectRoot: root, TargetRef: opts.TargetRef},
 		GateVersion: opts.Pipeline + ":" + opts.GateCommand,
+		TargetRef:   opts.TargetRef,
 	})
 	if err != nil {
 		if errors.Is(err, queue.ErrBusy) {
