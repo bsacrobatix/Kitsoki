@@ -1,0 +1,20 @@
+schema: capsule-runtime/v1
+commands:
+  web-dev:
+    argv: [go, run, ./cmd/kitsoki, web]
+services:
+  web:
+    command: web-dev
+    working_dir: .
+    ports:
+      http:
+        protocol: http
+        env: PORT
+        exposure: review
+    health:
+      port: http
+      path: /healthz
+      timeout: 60s
+profiles:
+  local:
+    provider: host
