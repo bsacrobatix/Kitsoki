@@ -10,6 +10,10 @@ POG_ROOT="${KITSOKI_HOSTED_POG_ROOT:-$HOME/code/POG}"
 POG_REF="${KITSOKI_HOSTED_POG_REF:-main}"
 ADMIN="${KITSOKI_HOSTED_POG_ADMIN:-bsacrobatix}"
 GH_CLIENT_ID="${KITSOKI_HOSTED_POG_GH_CLIENT_ID:-}"
+# Callback (authorization-code) login needs the GitHub App client secret.
+# GH_KITSOKI_TEST_CLIENT_SECRET is the operator's conventional env name for
+# this deployment's secret; the generic name wins when both are set.
+GH_CLIENT_SECRET="${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET:-${GH_KITSOKI_TEST_CLIENT_SECRET:-}}"
 GH_APP_PROFILE="${KITSOKI_HOSTED_POG_GH_APP_PROFILE:-$HOME/.config/kitsoki/gh-app/bsacrobatix-kitsoki-test/kitsoki.env}"
 GOCACHE="${GOCACHE:-/private/tmp/kitsoki-gocache}"
 NODE_RUNTIME_FILE="$ROOT/deploy/hosted-pog/node-runtime.env"
@@ -88,12 +92,13 @@ verify() {
 	expect_public_status 401 /decks/access-probe
 	expect_public_status 401 /auth/me
 	expect_public_status 200 /auth/login
-	expect_public_status 410 /auth/github/device/poll -X POST
+	expect_public_status 302 /auth/github/start
+	expect_public_status 404 /auth/github/device/poll -X POST
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
-	grep -q '/auth/github/device/start' <<<"$login_page"
+	grep -q '/auth/github/start' <<<"$login_page"
 	ssh "$REMOTE" "set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test \"\$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/auth/me)\" = 401; test -L /var/lib/pog/runtime; test -L /opt/pog/current/.artifacts; catalog=\"\$(curl -fsS -H 'Host: $PUBLIC_HOST' http://127.0.0.1:5183/api/catalog)\"; printf '%s' \"\$catalog\" | /opt/kitsoki-hosted-pog/node/current/bin/node -e 'const fs=require(\"node:fs\"); const graph=JSON.parse(fs.readFileSync(0,\"utf8\")); const products=(graph.comparison_catalogs??[]).map((entry)=>entry.id); const repos=[...new Set((graph.nodes??[]).map((node)=>node.attrs?.repo).filter(Boolean))].sort(); if(products.join(\",\")!==\"pog,constructor-studio\"||repos.join(\",\")!==\"constructor-studio,pog\"){console.error(JSON.stringify({products,repos}));process.exit(1)}'; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null"
-	echo "hosted-pog verify: services active; exact products=pog,constructor-studio; versioned runtime active; anonymous route-family matrix denied; GitHub Device Flow entrypoint reachable; unsigned webhook denied; public Host accepted by POG; loopback health=ok"
+	echo "hosted-pog verify: services active; exact products=pog,constructor-studio; versioned runtime active; anonymous route-family matrix denied; GitHub OAuth login entrypoint reachable; unsigned webhook denied; public Host accepted by POG; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then
@@ -109,15 +114,31 @@ fi
 	echo "set KITSOKI_HOSTED_POG_GH_CLIENT_ID or provide a generated Kitsoki App profile at $GH_APP_PROFILE" >&2
 	exit 2
 }
-if ! device_probe="$(curl -sS -X POST -H 'Accept: application/json' -d "client_id=$GH_CLIENT_ID" https://github.com/login/device/code)"; then
-	echo "could not probe GitHub Device Flow for the configured App client ID" >&2
+if [ -z "$GH_CLIENT_SECRET" ] && [ -f "$GH_APP_PROFILE" ]; then
+	secret_line="$(grep -E '^KITSOKI_GH_APP_CLIENT_SECRET=' "$GH_APP_PROFILE" | tail -n 1 || true)"
+	GH_CLIENT_SECRET="${secret_line#KITSOKI_GH_APP_CLIENT_SECRET=}"
+	unset secret_line
+fi
+[[ "$GH_CLIENT_SECRET" =~ ^[A-Za-z0-9._-]+$ ]] || {
+	echo "callback login needs the GitHub App client secret: set KITSOKI_HOSTED_POG_GH_CLIENT_SECRET (or GH_KITSOKI_TEST_CLIENT_SECRET), or add KITSOKI_GH_APP_CLIENT_SECRET to $GH_APP_PROFILE" >&2
+	exit 2
+}
+# Exchange a bogus code: valid credentials answer bad_verification_code, a
+# wrong secret answers incorrect_client_credentials. Neither response carries
+# the secret, so the failure output is safe to print.
+if ! cred_probe="$(curl -sS -X POST -H 'Accept: application/json' \
+	--data-urlencode "client_id=$GH_CLIENT_ID" \
+	--data-urlencode "client_secret=$GH_CLIENT_SECRET" \
+	--data-urlencode "code=kitsoki-deploy-credential-preflight" \
+	https://github.com/login/oauth/access_token)"; then
+	echo "could not probe GitHub OAuth credentials for the configured App client ID" >&2
 	exit 1
 fi
-grep -q '"device_code"' <<<"$device_probe" || {
-	echo "GitHub Device Flow is not enabled for the configured App client ID" >&2
+grep -q '"bad_verification_code"' <<<"$cred_probe" || {
+	echo "GitHub rejected the configured OAuth client credentials: $cred_probe" >&2
 	exit 1
 }
-unset device_probe
+unset cred_probe
 
 [ -d "$POG_ROOT/.git" ] || { echo "POG checkout is missing at $POG_ROOT" >&2; exit 2; }
 KITSOKI_SHA="$(git -C "$ROOT" rev-parse HEAD)"
@@ -136,21 +157,23 @@ deploy-hosted-pog:
   remote:         $REMOTE
   public URL:     ${PUBLIC_BASE_URL%/}
   GitHub admin:   $ADMIN
-  GitHub login:   Device Flow using client ID from the local App profile
+  GitHub login:   OAuth authorization-code flow (callback ${PUBLIC_BASE_URL%/}/auth/github/callback)
   Node runtime:   $NODE_VERSION (pinned official linux-x64 archive)
   topology:       Caddy -> Kitsoki /auth/check -> POG 127.0.0.1:5183
   products:       POG and Constructor Studio only
   local state:    $([ "$sync_local_state" -eq 1 ] && echo 'bounded portal-state snapshot enabled' || echo 'preserve hosted runtime (no local import)')
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
-  public protocol: GitHub Device Flow endpoints and the HMAC-verified webhook only
+  public protocol: GitHub OAuth login endpoints and the HMAC-verified webhook only
 EOF
 
 if [ "$mode" = "dry-run" ]; then
 	cat <<'EOF'
 
 dry run only. Re-run with --yes to build, upload, activate, and verify; use
---verify for read-only checks. Device Flow requires no client secret or OAuth
-callback; the GitHub App must keep Device Flow enabled. Add
+--verify for read-only checks. Callback login requires the GitHub App client
+secret and <public-url>/auth/github/callback registered as the App's callback
+URL; the secret is shipped inside the staged upload and installed as a
+root-only env file, never placed on the ssh command line. Add
 --sync-local-state to publish the bounded local feedback, graph-feedback,
 streams, colony, and runner-session state. Divergent remote files fail closed
 instead of being overwritten.
@@ -174,6 +197,10 @@ trap cleanup EXIT
 GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
 cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service,state-content-digest.mjs} "$local_stage/"
+# The client secret travels inside the 0700 stage directories (local mktemp,
+# remote install -d) instead of the ssh argv, which would be visible in ps.
+printf '%s\n' "$GH_CLIENT_SECRET" >"$local_stage/gh-client-secret"
+chmod 0600 "$local_stage/gh-client-secret"
 state_mode="preserve"
 if [ "$sync_local_state" -eq 1 ]; then
 	[ -x "$STATE_PACKAGER" ] || { echo "missing hosted POG state packager: $STATE_PACKAGER" >&2; exit 2; }

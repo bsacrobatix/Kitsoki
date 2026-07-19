@@ -6,7 +6,7 @@ auth:
   public_url: __PUBLIC_BASE_URL__
   github:
     client_id: __GITHUB_CLIENT_ID__
-    device_flow: true
+    client_secret: ${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}
   admins:
     - __GITHUB_ADMIN__
   session_ttl: 168h

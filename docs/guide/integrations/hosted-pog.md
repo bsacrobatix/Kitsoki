@@ -21,7 +21,7 @@ configuration as the primary deployment path.
 
 | Route | Upstream | Authentication |
 |---|---|---|
-| `/auth/*` | Kitsoki on `127.0.0.1:7777` | Public entry to login, invite, GitHub Device Flow polling, logout, and session probes |
+| `/auth/*` | Kitsoki on `127.0.0.1:7777` | Public entry to login, invite, the GitHub OAuth redirect/callback, logout, and session probes |
 | `/`, POG assets, POG `/api/*`, `/rpc*` | POG Vite on `127.0.0.1:5183` | Kitsoki `/auth/check` through Caddy `forward_auth` |
 | `/api/feedback*` | Existing feedback intake on `127.0.0.1:8788` | Same POG login gate |
 | `/constructor-studio/decks/*` | Existing deck store | Same POG login gate |
@@ -44,23 +44,33 @@ must return `401`.
 
 ## GitHub App prerequisite
 
-This deployment uses GitHub Device Flow. It preserves the same GitHub identity,
-invite redemption, returning-user, admin, and Kitsoki session semantics without
-placing a client secret on the VM or registering a callback URL. On first login,
-the person copies a one-time code from Kitsoki, opens GitHub, and authorizes the
-App; the browser then continues automatically. The resulting GitHub access token
-is used once to fetch identity and discarded.
+This deployment uses the normal GitHub OAuth authorization-code (callback)
+flow: clicking **Sign in with GitHub** redirects to GitHub's authorize page and
+GitHub redirects straight back, signed in. Identity, invite redemption,
+returning-user, admin, and Kitsoki session semantics are unchanged from the
+earlier Device Flow configuration. The resulting GitHub access token is used
+once to fetch identity and discarded.
 
-The `bsacrobatix-kitsoki-test` App must have **Enable Device Flow** selected in
-its GitHub App settings. The deploy helper probes this prerequisite before it
-builds or changes the VM. The App client ID is public configuration and is read
-from the generated local profile at
+The `bsacrobatix-kitsoki-test` App must register
+`https://kitsoki-test.slothattax.me/auth/github/callback` as a callback URL and
+have a generated client secret. The App client ID is public configuration and
+is read from the generated local profile at
 `~/.config/kitsoki/gh-app/bsacrobatix-kitsoki-test/kitsoki.env`. Override that
 path with `KITSOKI_HOSTED_POG_GH_APP_PROFILE`, or provide the non-secret value
 directly as `KITSOKI_HOSTED_POG_GH_CLIENT_ID`.
 
-Do not add an OAuth client secret, App private key, webhook secret, installation
-token, or user PAT to the hosted POG config. Device Flow needs none of them.
+The client secret is supplied to the deploy helper as
+`KITSOKI_HOSTED_POG_GH_CLIENT_SECRET` (or the operator's conventional
+`GH_KITSOKI_TEST_CLIENT_SECRET`), or as a `KITSOKI_GH_APP_CLIENT_SECRET` line
+in the local App profile. The helper validates the credential pair against
+GitHub before touching the VM, ships the secret inside the 0700 staged upload
+(never on the ssh command line), and installs it as root-only
+`/etc/kitsoki/hosted-pog.env`; systemd injects it into the service, so the
+`pog` user never reads the file and the rendered YAML stays secret-free via a
+`${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}` reference.
+
+Do not add an App private key, webhook secret, installation token, or user PAT
+to the hosted POG config. Callback login needs none of them.
 
 ## Deploy or upgrade
 
@@ -103,7 +113,10 @@ divergent same-path file stops the install before any active symlink moves and
 prints every conflict. A normal `--yes` deploy preserves the active hosted
 runtime without importing local state.
 
-The dry run also makes a non-authorizing Device Flow prerequisite probe. The
+The dry run also makes a non-authorizing OAuth credential preflight: it
+exchanges a deliberately bogus code and requires GitHub to answer
+`bad_verification_code` (valid client ID and secret); a wrong secret answers
+`incorrect_client_credentials` and stops the deploy before the VM changes. The
 helper refuses either a Kitsoki revision or selected POG revision that is
 not contained in its protected `main`. It also refuses a POG revision that
 predates the separate `POG_KITSOKI_BROWSER_URL` seam; without that seam the
@@ -206,15 +219,17 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/api/streams             # 401
 curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/api/agent-runner/reaped-sessions # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/auth/github/start       # 302 to github.com
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
-  https://kitsoki-test.slothattax.me/auth/github/device/poll # 410
+  https://kitsoki-test.slothattax.me/auth/github/device/poll # 404 (Device Flow off)
 curl -sS -o /dev/null -w '%{http_code}\n' \
   -X POST -H 'Content-Type: application/json' --data '{}' \
   https://kitsoki-test.slothattax.me/gh-agent/webhook        # 401
 ```
 
-The public login page itself returns `200`, and a poll with no matching
-HttpOnly attempt cookie returns `410`; these are protocol entrypoints, not
+The public login page itself returns `200`, and the OAuth start redirect to
+GitHub returns `302`; these are protocol entrypoints, not
 authorization. A GitHub account that is neither the configured admin nor bound
 through a live one-time invite receives `403` and cannot obtain a session that
 reaches content.
@@ -257,11 +272,16 @@ an explicit data reconciliation before retrying.
 
 Common failures:
 
-- The deploy helper reports Device Flow is disabled: enable it on the existing
-  GitHub App; never weaken `auth.mode` or bypass Caddy.
+- The deploy helper reports `incorrect_client_credentials`: the client secret
+  does not match the App's client ID — regenerate the secret in the App's
+  settings and update the env var/profile; never weaken `auth.mode` or bypass
+  Caddy.
 - The deploy helper cannot find a client ID: regenerate the local GitHub App
   profile or set `KITSOKI_HOSTED_POG_GH_CLIENT_ID` to the App's public client
   ID.
+- GitHub shows a `redirect_uri` mismatch on the authorize page: register
+  `https://kitsoki-test.slothattax.me/auth/github/callback` as the App's
+  callback URL; no redeploy is needed afterward.
 - Public root returns `502`: check `kitsoki-pog`; this is the intended
   fail-closed state while auth is unavailable.
 - A build reports a missing Node built-in such as `node:sqlite`: update the

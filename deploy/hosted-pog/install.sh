@@ -56,9 +56,11 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
+github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
+[[ "$github_client_secret" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid GitHub App client secret"
 # shellcheck disable=SC1091 -- uploaded beside this installer.
 . "$stage/node-runtime.env"
 node_version="${KITSOKI_HOSTED_POG_NODE_VERSION:-}"
@@ -388,6 +390,10 @@ ln -s "$node_release" "$node_current.next.$$"
 mv -Tf "$node_current.next.$$" "$node_current"
 node_current_changed=1
 install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
+# The rendered config references ${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}; the
+# value lives in this root-only env file read by systemd, never by the pog user.
+printf 'KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=%s\n' "$github_client_secret" >"$stage/hosted-pog.env"
+install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
 systemctl daemon-reload
@@ -459,10 +465,11 @@ expect_public_status 401 /run/access-probe
 expect_public_status 401 /decks/access-probe
 expect_public_status 401 /auth/me
 expect_public_status 200 /auth/login
-expect_public_status 410 /auth/github/device/poll -X POST
+expect_public_status 302 /auth/github/start
+expect_public_status 404 /auth/github/device/poll -X POST
 expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 login_page="$(curl -fsS "$public_base_url/auth/login")"
-grep -q '/auth/github/device/start' <<<"$login_page"
+grep -q '/auth/github/start' <<<"$login_page"
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 
 trap - EXIT
