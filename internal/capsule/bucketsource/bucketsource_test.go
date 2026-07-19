@@ -348,3 +348,111 @@ states:
     terminal: true
     view: [{ prose: passed }]
 `
+
+// TestMirrorTerminalMirrorsArtifactsNestedAndSkipsSymlink covers Phase 3
+// artifact durability: every regular file under <runDir>/artifacts/ lands at
+// runs/<id>/artifacts/<relative-path>, nested directories included, while
+// symlinks are skipped rather than dereferenced.
+func TestMirrorTerminalMirrorsArtifactsNestedAndSkipsSymlink(t *testing.T) {
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	runDir := t.TempDir()
+	artifactsDir := filepath.Join(runDir, "artifacts")
+	write(t, filepath.Join(artifactsDir, "top.txt"), "top")
+	write(t, filepath.Join(artifactsDir, "nested", "deep.txt"), "deep")
+	linkPath := filepath.Join(artifactsDir, "link.txt")
+	if err := os.Symlink(filepath.Join(artifactsDir, "top.txt"), linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	record := workerserver.RunRecord{ExecutionID: "exec-artifacts-1"}
+	if err := mirror.MirrorTerminal(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorTerminal: %v", err)
+	}
+
+	assertObject(t, store, "runs/exec-artifacts-1/artifacts/top.txt", "top")
+	assertObject(t, store, "runs/exec-artifacts-1/artifacts/nested/deep.txt", "deep")
+	if _, err := store.Head(context.Background(), "runs/exec-artifacts-1/artifacts/link.txt"); err == nil {
+		t.Fatalf("symlink should not be mirrored")
+	}
+}
+
+func TestMirrorTerminalSkipsOversizedArtifact(t *testing.T) {
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	runDir := t.TempDir()
+	artifactsDir := filepath.Join(runDir, "artifacts")
+	write(t, filepath.Join(artifactsDir, "small.txt"), "small")
+	bigPath := filepath.Join(artifactsDir, "big.bin")
+	bigFile, err := os.Create(bigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Truncate to a sparse file past the cap; no bytes are actually written
+	// or read since the size check runs before opening the file for upload.
+	if err := bigFile.Truncate(bucketsource.DefaultMaxArtifactBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := bigFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	record := workerserver.RunRecord{ExecutionID: "exec-artifacts-2"}
+	if err := mirror.MirrorTerminal(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorTerminal: %v", err)
+	}
+	assertObject(t, store, "runs/exec-artifacts-2/artifacts/small.txt", "small")
+	if _, err := store.Head(context.Background(), "runs/exec-artifacts-2/artifacts/big.bin"); err == nil {
+		t.Fatalf("oversized artifact should be skipped, not mirrored")
+	}
+}
+
+// artifactFailingStore fails Put for one key so tests can prove artifact
+// mirroring aggregates errors (via errors.Join) instead of aborting the walk
+// partway through.
+type artifactFailingStore struct {
+	objectstore.Store
+	failKey string
+}
+
+func (s *artifactFailingStore) Put(ctx context.Context, key string, body io.Reader, size int64, opts objectstore.PutOptions) (objectstore.Meta, error) {
+	if key == s.failKey {
+		io.Copy(io.Discard, body)
+		return objectstore.Meta{}, fmt.Errorf("simulated put failure")
+	}
+	return s.Store.Put(ctx, key, body, size, opts)
+}
+
+func TestMirrorTerminalArtifactPutFailureAggregatesButContinues(t *testing.T) {
+	runDir := t.TempDir()
+	artifactsDir := filepath.Join(runDir, "artifacts")
+	write(t, filepath.Join(artifactsDir, "good.txt"), "good")
+	write(t, filepath.Join(artifactsDir, "bad.txt"), "bad")
+
+	failKey := "runs/exec-artifacts-3/artifacts/bad.txt"
+	store := &artifactFailingStore{Store: objectstore.NewFake(), failKey: failKey}
+	mirror := bucketsource.OutputMirror{Store: store}
+
+	record := workerserver.RunRecord{ExecutionID: "exec-artifacts-3"}
+	err := mirror.MirrorTerminal(context.Background(), record, runDir)
+	if err == nil || !strings.Contains(err.Error(), "bad.txt") {
+		t.Fatalf("MirrorTerminal error = %v, want mention of bad.txt", err)
+	}
+	assertObject(t, store, "runs/exec-artifacts-3/artifacts/good.txt", "good")
+}
+
+func assertObject(t *testing.T, store objectstore.Store, key, want string) {
+	t.Helper()
+	rc, _, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get %s: %v", key, err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != want {
+		t.Fatalf("object %s = %q, want %q", key, data, want)
+	}
+}

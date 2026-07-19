@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,6 +29,11 @@ const (
 	DefaultRunPrefix       = "runs"
 	DefaultPresignTTL      = time.Hour
 	bundleContentType      = "application/vnd.git.bundle"
+
+	// DefaultMaxArtifactBytes caps the size of an individual artifact file
+	// mirrored to the bucket. Oversized files are skipped rather than
+	// failing the whole mirror, since artifact mirroring is best-effort.
+	DefaultMaxArtifactBytes = int64(64 << 20)
 )
 
 // SourceObjectMeta is the sidecar written next to each published bundle so
@@ -158,6 +164,17 @@ func (m OutputMirror) MirrorTerminal(ctx context.Context, record workerserver.Ru
 	if m.Store == nil {
 		return fmt.Errorf("bucketsource: object store is required")
 	}
+	var errs []error
+	if err := m.mirrorTrace(ctx, record, runDir); err != nil {
+		errs = append(errs, err)
+	}
+	if err := m.mirrorArtifacts(ctx, record, runDir); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+func (m OutputMirror) mirrorTrace(ctx context.Context, record workerserver.RunRecord, runDir string) error {
 	tracePath := filepath.Join(runDir, "story-trace.jsonl")
 	info, err := os.Stat(tracePath)
 	if err != nil {
@@ -178,6 +195,69 @@ func (m OutputMirror) MirrorTerminal(ctx context.Context, record workerserver.Ru
 		return fmt.Errorf("bucketsource: mirror story trace: %w", err)
 	}
 	return nil
+}
+
+// mirrorArtifacts walks <runDir>/artifacts and uploads every regular file to
+// runs/<execution-id>/artifacts/<relative-path>. Mirroring is best-effort:
+// symlinks and oversized files are skipped rather than failing the run, and
+// per-file upload failures are aggregated so one bad file does not stop the
+// rest from landing.
+func (m OutputMirror) mirrorArtifacts(ctx context.Context, record workerserver.RunRecord, runDir string) error {
+	artifactsDir := filepath.Join(runDir, "artifacts")
+	root, err := os.Lstat(artifactsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !root.IsDir() {
+		return nil
+	}
+	var errs []error
+	walkErr := filepath.WalkDir(artifactsDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			errs = append(errs, err)
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			// Symlinks (and other irregular entries) are skipped: their
+			// target may point outside the sandboxed run directory.
+			return nil
+		}
+		rel, err := filepath.Rel(artifactsDir, path)
+		if err != nil {
+			errs = append(errs, err)
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("bucketsource: stat artifact %s: %w", rel, err))
+			return nil
+		}
+		if info.Size() > DefaultMaxArtifactBytes {
+			// Oversized artifacts are skipped, not fatal.
+			return nil
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("bucketsource: open artifact %s: %w", rel, err))
+			return nil
+		}
+		defer file.Close()
+		key := m.prefix() + "/" + record.ExecutionID + "/artifacts/" + filepath.ToSlash(rel)
+		if _, err := m.Store.Put(ctx, key, file, info.Size(), objectstore.PutOptions{}); err != nil {
+			errs = append(errs, fmt.Errorf("bucketsource: mirror artifact %s: %w", rel, err))
+		}
+		return nil
+	})
+	if walkErr != nil {
+		errs = append(errs, walkErr)
+	}
+	return errors.Join(errs...)
 }
 
 var _ workerserver.OutputSink = OutputMirror{}
