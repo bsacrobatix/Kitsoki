@@ -184,3 +184,178 @@ func TestOverrideLandsThroughProtectedCASOnRealRepo(t *testing.T) {
 		t.Fatalf("main=%s want %s", got, sha)
 	}
 }
+
+// TestTrainStackingChainsSpeculationAndCascadesOnLanding is the core B3
+// proof: two independent, non-conflicting candidates queued back to back.
+// Before stacking, preparing the second candidate always speculated against
+// the live target — identical work to the first — and landing the first
+// always staled the second's base, forcing a full reprepare (re-speculate,
+// re-gate) even though the second's own change never touched anything the
+// first landed. With stacking, the second candidate's workspace chains onto
+// the first's already-speculated tree, and landing the first must NOT stale
+// the second: it lands on its first attempt, with the first's landed
+// content already baked into what its gate validated.
+func TestTrainStackingChainsSpeculationAndCascadesOnLanding(t *testing.T) {
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+
+	commit(t, root, "first.txt", "first\n", "first")
+	firstSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/first", firstSHA)
+	git(t, root, "reset", "--hard", base)
+
+	commit(t, root, "second.txt", "second\n", "second")
+	secondSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/second", secondSHA)
+	git(t, root, "reset", "--hard", base)
+
+	store := Store{ProjectRoot: root}
+	firstC, err := store.Submit(Submit{Branch: "agent/first", SHA: firstSHA, Receipt: persistedReceipt(t, root, firstSHA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondC, err := store.Submit(Submit{Branch: "agent/second", SHA: secondSHA, Receipt: persistedReceipt(t, root, secondSHA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worker := Worker{Store: store, Deps: ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+	}}
+
+	// Prepare the first candidate: claim+speculate+gate.
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := mustGet(t, store, firstC.ID)
+	if first.phase() != ReadyToFinalize {
+		t.Fatalf("first candidate not ready: %#v", first)
+	}
+
+	// Prepare the second candidate: it must chain onto the first's tree.
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := mustGet(t, store, secondC.ID)
+	if second.phase() != ReadyToFinalize {
+		t.Fatalf("second candidate not ready: %#v", second)
+	}
+	stacked := false
+	for _, e := range second.Evidence {
+		if e == "queue:stacked-on="+first.ID {
+			stacked = true
+		}
+	}
+	if !stacked {
+		t.Fatalf("second candidate did not record stacking onto the first: evidence=%v", second.Evidence)
+	}
+	// The second candidate's prepared tree must contain BOTH files: proof
+	// it actually chained onto the first's speculative tree, not just its
+	// own commit.
+	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":first.txt"); err != nil {
+		t.Fatalf("second candidate's tree is missing first.txt (did not stack): %v", err)
+	}
+	if _, err := gitOutput(context.Background(), second.WorkspacePath, "cat-file", "-e", second.TreeSHA+":second.txt"); err != nil {
+		t.Fatalf("second candidate's tree is missing second.txt: %v", err)
+	}
+
+	// Finalize the first candidate: it lands.
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first = mustGet(t, store, firstC.ID)
+	if first.phase() != Landed {
+		t.Fatalf("first candidate did not land: %#v", first)
+	}
+
+	// Finalize the second candidate: since it was already stacked on the
+	// first's landed tree, this must land on the very next pass — no
+	// reprepare cycle, no second gate run.
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second = mustGet(t, store, secondC.ID)
+	if second.phase() != Landed {
+		t.Fatalf("second candidate did not cascade-land after the first: %#v", second)
+	}
+	if second.Attempt != 1 {
+		t.Fatalf("second candidate needed %d attempts, want exactly 1 (stacking should have avoided a reprepare)", second.Attempt)
+	}
+	if got := git(t, root, "show", "main:first.txt"); strings.TrimSpace(got) != "first" {
+		t.Fatalf("main missing first.txt content: %q", got)
+	}
+	if got := git(t, root, "show", "main:second.txt"); strings.TrimSpace(got) != "second" {
+		t.Fatalf("main missing second.txt content: %q", got)
+	}
+}
+
+// TestTrainStackingFallsBackToUnstackedOnConflict guards the safety valve:
+// two candidates that both touch the same file cannot both be included in
+// one stacked tree. The second candidate must not fail outright over a
+// conflict that is not its own fault — it falls back to speculating against
+// the live target directly, exactly the pre-stacking behavior, and still
+// prepares successfully (landing order/conflict resolution against the
+// live target is unchanged, orthogonal machinery this test does not need
+// to exercise).
+func TestTrainStackingFallsBackToUnstackedOnConflict(t *testing.T) {
+	root := protectedQueueRepo(t)
+	base := git(t, root, "rev-parse", "HEAD")
+
+	commit(t, root, "shared.txt", "from-first\n", "first touches shared.txt")
+	firstSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/first", firstSHA)
+	git(t, root, "reset", "--hard", base)
+
+	commit(t, root, "shared.txt", "from-second\n", "second touches shared.txt too")
+	secondSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "branch", "agent/second", secondSHA)
+	git(t, root, "reset", "--hard", base)
+
+	store := Store{ProjectRoot: root}
+	firstC, err := store.Submit(Submit{Branch: "agent/first", SHA: firstSHA, Receipt: persistedReceipt(t, root, firstSHA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondC, err := store.Submit(Submit{Branch: "agent/second", SHA: secondSHA, Receipt: persistedReceipt(t, root, secondSHA)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	worker := Worker{Store: store, Deps: ProcessDeps{
+		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
+		Gate:        ShellGate{Command: "git diff --check"},
+		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
+	}}
+
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := mustGet(t, store, firstC.ID)
+	if first.phase() != ReadyToFinalize {
+		t.Fatalf("first candidate not ready: %#v", first)
+	}
+
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	second := mustGet(t, store, secondC.ID)
+	if second.phase() != ReadyToFinalize {
+		t.Fatalf("second candidate should still prepare after falling back: %#v", second)
+	}
+	fellBack := false
+	for _, e := range second.Evidence {
+		if e == "queue:stack-conflict-with="+first.ID+" fell-back-to-unstacked" {
+			fellBack = true
+		}
+	}
+	if !fellBack {
+		t.Fatalf("second candidate did not record the stack-conflict fallback: evidence=%v", second.Evidence)
+	}
+	// The fallback tree must be the second candidate's own unstacked
+	// content, not a half-merged state.
+	if got := git(t, root, "show", second.TreeSHA+":shared.txt"); strings.TrimSpace(got) != "from-second" {
+		t.Fatalf("fallback tree has wrong shared.txt content: %q", got)
+	}
+}

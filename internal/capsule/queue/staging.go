@@ -43,7 +43,7 @@ type ProtectedIntegration struct {
 	KitsokiBin string
 }
 
-func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
 	if c.TargetRef != p.targetRef() {
 		return Speculation{}, fmt.Errorf("queue: protected integration target %q refuses candidate %s for target %q", p.targetRef(), c.ID, c.TargetRef)
 	}
@@ -56,8 +56,56 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	workspace := filepath.Join(workspaceRoot, id)
 	branch := "queue/candidate/" + c.ID
-	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", c.SHA, "--target", target); err != nil {
+
+	// Train stacking: base this candidate's workspace on the closest active
+	// candidate ahead's already-speculated tree instead of always on its
+	// own commit (which is itself based on whatever target looked like at
+	// admission time). This is what turns per-candidate gates from mutually
+	// exclusive into additive — when the predecessor lands, its tree
+	// becomes the new target, and this candidate's own base already is
+	// that tree, so finalize's ordinary fresh re-Plan/CAS check passes
+	// without a reprepare instead of unconditionally going stale. A missing
+	// or unfetchable predecessor tree just means there is nothing to stack
+	// onto yet; that is not an error, it is every candidate's situation
+	// today.
+	createBase, stackedOn := c.SHA, ""
+	if stackTree, predID, predWorkspace := stackBaseFor(ahead); stackTree != "" {
+		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", predWorkspace, stackTree); err == nil {
+			createBase, stackedOn = stackTree, predID
+		}
+	}
+	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", createBase, "--target", target); err != nil {
 		return Speculation{}, Environmental(err)
+	}
+	var stackEvidence []string
+	if stackedOn != "" {
+		if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", root, c.SHA); err != nil {
+			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+		}
+		if err := p.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
+			// The predecessor's changes conflict with this candidate's own
+			// changes. This is content, not infrastructure, but it is also
+			// not this candidate's own fault — retrying the identical merge
+			// would fail identically every time, so failing the candidate
+			// (or routing it through the target-divergence conflict
+			// machinery, which is shaped for candidate-vs-target divergence
+			// with receipt/gate identity considerations that don't apply
+			// here) would be wrong. Fall back to the always-safe unstacked
+			// base instead: abort the merge and re-point the branch
+			// directly at the candidate's own commit, exactly the
+			// pre-stacking behavior. Losing this round's stacking headroom
+			// is always safe; failing over a conflict with an unrelated
+			// candidate it merely happened to queue behind is not.
+			if _, abortErr := gitOutput(ctx, workspace, "merge", "--abort"); abortErr != nil {
+				return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(fmt.Errorf("queue: abort failed stack merge onto %s: %w", stackedOn, abortErr))
+			}
+			if _, err := gitOutput(ctx, workspace, "checkout", "-B", branch, c.SHA); err != nil {
+				return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
+			}
+			stackEvidence = []string{"queue:stack-conflict-with=" + stackedOn + " fell-back-to-unstacked"}
+		} else {
+			stackEvidence = []string{"queue:stacked-on=" + stackedOn}
+		}
 	}
 	plan, err := (reconcile.Reconciler{VCS: reconcile.Git{}}).Plan(ctx, reconcile.PlanRequest{
 		Workspace: workspace, ProtectedProjectRoot: root, TargetRef: target, Operation: reconcile.Promote,
@@ -65,7 +113,7 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 	if err != nil {
 		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 	}
-	spec := Speculation{SHA: plan.Candidate, BaseSHA: plan.Expected.Target, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:reconcile-plan=" + plan.Digest}}
+	spec := Speculation{SHA: plan.Candidate, BaseSHA: plan.Expected.Target, WorkspaceID: id, WorkspacePath: workspace, Evidence: append([]string{"queue:reconcile-plan=" + plan.Digest}, stackEvidence...)}
 	if plan.Continuation == nil {
 		if plan.Class != reconcile.LocalAhead && plan.Class != reconcile.UpToDate {
 			return spec, fmt.Errorf("queue: protected integration is %s", plan.Class)
@@ -121,6 +169,32 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, _ []Ca
 
 func (p ProtectedIntegration) Land(context.Context, Speculation) error { return nil }
 
+// stackBaseFor picks the closest active candidate ahead whose speculative
+// tree and workspace are both already known, so a candidate can chain onto
+// it instead of always speculating against whatever the target looked like
+// at its own admission time. ahead is not assumed sorted; "closest" means
+// highest Sequence — the most recently admitted candidate with a usable
+// tree, i.e. nearest in the train to the one asking. A candidate still in
+// its very first Preparing pass (no TreeSHA yet) or whose workspace has
+// since gone away is simply skipped, never an error: there is nothing to
+// stack onto yet, which is every candidate's situation before this existed.
+func stackBaseFor(ahead []Candidate) (treeSHA, id, workspacePath string) {
+	var best *Candidate
+	for i := range ahead {
+		c := &ahead[i]
+		if c.TreeSHA == "" || c.WorkspacePath == "" {
+			continue
+		}
+		if best == nil || c.Sequence > best.Sequence {
+			best = c
+		}
+	}
+	if best == nil {
+		return "", "", ""
+	}
+	return best.TreeSHA, best.ID, best.WorkspacePath
+}
+
 // ProtectedFinalizer is the only queue adapter that mutates a protected ref.
 // It repeats the identity checks immediately before reconcile.Apply, whose git
 // update-ref expected-old argument provides the protected compare-and-swap.
@@ -165,7 +239,20 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 		return FinalizeResult{}, Environmental(err)
 	}
 	if plan.Expected.Target != c.BaseSHA {
-		return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: "prepared base no longer matches protected target"}, nil
+		// The protected target moved since this candidate's base was
+		// observed at speculation time. That is not automatically stale:
+		// plan.Class was just freshly computed against the live target, and
+		// if it is still LocalAhead/UpToDate, this candidate's prepared
+		// tree already contains the new target as an ancestor — exactly
+		// what happens when a candidate was chained onto the predecessor
+		// that just landed (train stacking, see Speculate) rather than
+		// waiting for it. Landing is still a plain fast-forward from the
+		// new target and the deterministic gate already validated this
+		// exact tree (checked next); only a target that moved to something
+		// this tree does NOT already contain is genuine staleness.
+		if plan.Class != reconcile.LocalAhead && plan.Class != reconcile.UpToDate {
+			return FinalizeResult{OldMainSHA: plan.Expected.Target, Stale: true, Log: "prepared base no longer matches protected target"}, nil
+		}
 	}
 	if plan.Candidate != c.TreeSHA || c.ValidatedSHA != c.TreeSHA {
 		return FinalizeResult{}, fmt.Errorf("queue: prepared tree changed after deterministic gate")
@@ -293,7 +380,7 @@ func (execCommandRunner) Run(ctx context.Context, dir, program string, args ...s
 	return cmd.CombinedOutput()
 }
 
-func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, _ []Candidate) (Speculation, error) {
+func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []Candidate) (Speculation, error) {
 	root, err := s.root()
 	if err != nil {
 		return Speculation{}, err
@@ -302,11 +389,41 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, _ []Cand
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	workspace := filepath.Join(workspaceRoot, id)
 	branch := "queue/speculative/" + c.ID
-	if err := s.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", "staging/local", "--target", "staging/local"); err != nil {
+
+	// Train stacking: see the comment in ProtectedIntegration.Speculate.
+	// Here the merge step already exists unconditionally, so stacking is
+	// just choosing what to base the workspace on before it.
+	createBase, stackedOn := "staging/local", ""
+	if stackTree, predID, predWorkspace := stackBaseFor(ahead); stackTree != "" {
+		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", predWorkspace, stackTree); err == nil {
+			createBase, stackedOn = stackTree, predID
+		}
+	}
+	if err := s.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", createBase, "--target", "staging/local"); err != nil {
 		return Speculation{}, err
 	}
+	var stackEvidence []string
 	if err := s.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
-		return Speculation{}, fmt.Errorf("queue: speculative merge %s: %w", c.SHA, err)
+		if stackedOn == "" {
+			return Speculation{}, fmt.Errorf("queue: speculative merge %s: %w", c.SHA, err)
+		}
+		// The predecessor's changes conflict with this candidate's own —
+		// not this candidate's fault, and retrying the identical merge
+		// would fail identically forever. Fall back to the always-safe
+		// unstacked base: re-point the branch at the live target and merge
+		// again, exactly the pre-stacking behavior.
+		if _, abortErr := gitOutput(ctx, workspace, "merge", "--abort"); abortErr != nil {
+			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, fmt.Errorf("queue: abort failed stack merge onto %s: %w", stackedOn, abortErr)
+		}
+		if _, err := gitOutput(ctx, workspace, "checkout", "-B", branch, "source/staging/local"); err != nil {
+			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, err
+		}
+		if err := s.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
+			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, fmt.Errorf("queue: speculative merge %s: %w", c.SHA, err)
+		}
+		stackEvidence = []string{"queue:stack-conflict-with=" + stackedOn + " fell-back-to-unstacked"}
+	} else if stackedOn != "" {
+		stackEvidence = []string{"queue:stacked-on=" + stackedOn}
 	}
 	sha, err := gitOutput(ctx, workspace, "rev-parse", "HEAD")
 	if err != nil {
@@ -316,7 +433,8 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, _ []Cand
 	if err != nil {
 		return Speculation{}, err
 	}
-	return Speculation{SHA: sha, BaseSHA: base, WorkspaceID: id, WorkspacePath: workspace, Evidence: []string{"queue:speculative-workspace=" + filepath.ToSlash(filepath.Join(".capsules", "workspaces", id))}}, nil
+	evidence := append([]string{"queue:speculative-workspace=" + filepath.ToSlash(filepath.Join(".capsules", "workspaces", id))}, stackEvidence...)
+	return Speculation{SHA: sha, BaseSHA: base, WorkspaceID: id, WorkspacePath: workspace, Evidence: evidence}, nil
 }
 
 // Land delegates staging/local mutation to the established protected
