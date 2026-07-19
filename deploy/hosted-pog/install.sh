@@ -117,14 +117,27 @@ if [ ! -d "$release/.git" ]; then
 	chown -R pog:pog "$tmp_release"
 	runuser -u pog -- git -C "$tmp_release" checkout --detach --quiet "$pog_sha"
 	runuser -u pog -- env HOME=/var/lib/pog PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" "$node_release/bin/npm" --prefix "$tmp_release/portal" ci --no-audit --no-fund
-	runuser -u pog -- env HOME=/var/lib/pog PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" "$node_release/bin/npm" --prefix "$tmp_release/portal" run build
+	runuser -u pog -- env \
+		HOME=/var/lib/pog \
+		PATH="$node_release/bin:/usr/local/bin:/usr/bin:/bin" \
+		POG_PORTAL_ROOT="$tmp_release/portal" \
+		POG_CATALOG="$tmp_release/pog/catalog.yaml" \
+		POG_PROJECT_ROOT="$tmp_release" \
+		POG_PORTFOLIO_MEMBERS=pog,constructor-studio \
+		POG_KITSOKI_URL=http://127.0.0.1:7778 \
+		POG_KITSOKI_BROWSER_URL= \
+		POG_RUNNER_URL=http://127.0.0.1:7778 \
+		"$node_release/bin/npm" --prefix "$tmp_release/portal" run build
+	runuser -u pog -- "$node_release/bin/node" --check "$tmp_release/portal/server/server.mjs"
 	mv "$tmp_release" "$release"
 	tmp_release=""
 fi
 [ "$(runuser -u pog -- git -C "$release" rev-parse HEAD)" = "$pog_sha" ] || die "release checkout does not match requested SHA"
 [ -z "$(runuser -u pog -- git -C "$release" status --porcelain --untracked-files=no)" ] || die "release checkout has tracked changes: $release"
-[ -x "$release/portal/node_modules/.bin/vite" ] || die "release dependencies are incomplete"
 [ -f "$release/portal/dist/index.html" ] || die "release build output is missing"
+[ -f "$release/portal/server/server.mjs" ] || die "release production server is missing"
+[ -f "$release/portal/server/server.mjs.map" ] || die "release production server source map is missing"
+runuser -u pog -- "$node_release/bin/node" --check "$release/portal/server/server.mjs"
 
 # Hosted POG has exactly two products: the POG home catalog and the embedded
 # Constructor Studio catalog. Never make sibling repositories discoverable by
@@ -250,7 +263,7 @@ rendered_caddy="$stage/Caddyfile.rendered"
 rendered_portal_service="$stage/pog-portal.service.rendered"
 sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" -e "s|__GITHUB_CLIENT_ID__|$github_client_id|g" "$stage/hosted-pog.yaml" >"$rendered_config"
 sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/Caddyfile" >"$rendered_caddy"
-sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/pog-portal.service" >"$rendered_portal_service"
+sed -e "s|__POG_RELEASE_SHA__|$pog_sha|g" "$stage/pog-portal.service" >"$rendered_portal_service"
 caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 
 previous_current=""
@@ -290,7 +303,20 @@ elif [ -e "$release/.artifacts" ]; then
 fi
 previous_caddy="$stage/Caddyfile.previous"
 cp /etc/caddy/Caddyfile "$previous_caddy"
+previous_kitsoki_service="$stage/kitsoki-pog.service.previous"
+previous_portal_service="$stage/pog-portal.service.previous"
+had_previous_kitsoki_service=0
+had_previous_portal_service=0
+if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
+	cp /etc/systemd/system/kitsoki-pog.service "$previous_kitsoki_service"
+	had_previous_kitsoki_service=1
+fi
+if [ -f /etc/systemd/system/pog-portal.service ]; then
+	cp /etc/systemd/system/pog-portal.service "$previous_portal_service"
+	had_previous_portal_service=1
+fi
 caddy_changed=0
+services_changed=0
 current_changed=0
 kitsoki_current_changed=0
 node_current_changed=0
@@ -301,7 +327,7 @@ release_artifacts_changed=0
 rollback() {
 	status=$?
 	if [ "$status" -ne 0 ]; then
-		echo "hosted-pog install failed; restoring the prior release targets and Caddyfile" >&2
+		echo "hosted-pog install failed; restoring the prior release targets, service units, and Caddyfile" >&2
 		if [ -n "$previous_current" ] && [ -d "$previous_current" ]; then
 			ln -s "$previous_current" "$current.rollback.$$"
 			mv -Tf "$current.rollback.$$" "$current"
@@ -335,14 +361,27 @@ rollback() {
 				symlink) ln -s "$release_artifacts_target" "$release/.artifacts" ;;
 			esac
 		fi
-		if [ -n "$previous_current" ] && [ -n "$previous_kitsoki_current" ] && [ -n "$previous_node_current" ]; then
-			systemctl restart kitsoki-pog.service pog-portal.service >/dev/null 2>&1 || true
-		else
-			systemctl stop pog-portal.service kitsoki-pog.service >/dev/null 2>&1 || true
+		if [ "$services_changed" -eq 1 ]; then
+			if [ "$had_previous_kitsoki_service" -eq 1 ]; then
+				install -m 0644 "$previous_kitsoki_service" /etc/systemd/system/kitsoki-pog.service
+			else
+				rm -f /etc/systemd/system/kitsoki-pog.service
+			fi
+			if [ "$had_previous_portal_service" -eq 1 ]; then
+				install -m 0644 "$previous_portal_service" /etc/systemd/system/pog-portal.service
+			else
+				rm -f /etc/systemd/system/pog-portal.service
+			fi
+			systemctl daemon-reload >/dev/null 2>&1 || true
 		fi
 		if [ "$caddy_changed" -eq 1 ]; then
 			install -m 0644 "$previous_caddy" /etc/caddy/Caddyfile
 			systemctl reload caddy >/dev/null 2>&1 || true
+		fi
+		if [ -n "$previous_current" ] && [ -n "$previous_kitsoki_current" ] && [ -n "$previous_node_current" ]; then
+			systemctl restart kitsoki-pog.service pog-portal.service >/dev/null 2>&1 || true
+		else
+			systemctl stop pog-portal.service kitsoki-pog.service >/dev/null 2>&1 || true
 		fi
 	fi
 	exit "$status"
@@ -396,12 +435,13 @@ printf 'KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=%s\n' "$github_client_secret" >"$sta
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
+services_changed=1
 systemctl daemon-reload
 systemctl enable kitsoki-pog.service pog-portal.service >/dev/null
 systemctl restart kitsoki-pog.service
 
 for _ in $(seq 1 60); do
-	status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/auth/me 2>/dev/null || true)"
+	status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/me 2>/dev/null || true)"
 	[ "$status" = "401" ] && break
 	sleep 1
 done
@@ -409,15 +449,24 @@ done
 
 systemctl restart pog-portal.service
 for _ in $(seq 1 60); do
-	if curl -fsS -o /dev/null -H "Host: $public_host" http://127.0.0.1:5183/api/catalog 2>/dev/null; then
+	if curl -fsS -o /dev/null http://127.0.0.1:7777/api/portal-health 2>/dev/null; then
 		portal_ready=1
 		break
 	fi
 	sleep 1
 done
-[ "${portal_ready:-0}" = "1" ] || die "POG portal did not become ready"
+[ "${portal_ready:-0}" = "1" ] || die "POG production portal did not become ready on port 7777"
 
-catalog_json="$(curl -fsS -H "Host: $public_host" http://127.0.0.1:5183/api/catalog)"
+health_json="$(curl -fsS http://127.0.0.1:7777/api/portal-health)"
+printf '%s' "$health_json" | "$node_release/bin/node" -e '
+const fs = require("node:fs");
+const health = JSON.parse(fs.readFileSync(0, "utf8"));
+if (health.ok !== true || health.service !== "pog-portal" || health.mode !== "production" || health.revision !== process.argv[1]) {
+  console.error(JSON.stringify(health));
+  process.exit(1);
+}
+' "$pog_sha" || die "POG production health does not identify the activated revision"
+catalog_json="$(curl -fsS http://127.0.0.1:7777/api/catalog)"
 printf '%s' "$catalog_json" | "$node_release/bin/node" -e '
 const fs = require("node:fs");
 const graph = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -428,6 +477,22 @@ if (products.join(",") !== "pog,constructor-studio" || repos.join(",") !== "cons
   process.exit(1);
 }
 ' || die "hosted catalog does not contain exactly POG and Constructor Studio"
+curl -fsS http://127.0.0.1:7777/api/feedback-reports | "$node_release/bin/node" -e '
+const fs = require("node:fs");
+const body = JSON.parse(fs.readFileSync(0, "utf8"));
+if (!Array.isArray(body.reports)) process.exit(1);
+' || die "POG feedback reports are not served by the production portal"
+portal_pid="$(systemctl show --property MainPID --value pog-portal.service)"
+[[ "$portal_pid" =~ ^[1-9][0-9]*$ ]] || die "POG production portal has no main process"
+portal_command="$(tr '\0' ' ' <"/proc/$portal_pid/cmdline")"
+case "$portal_command" in
+	*server/server.mjs*"--addr 127.0.0.1:7777"*) ;;
+	*) die "POG service is not running the production server on port 7777: $portal_command" ;;
+esac
+case "$portal_command" in
+	*vite*|*"npm run dev"*) die "POG service unexpectedly runs Vite: $portal_command" ;;
+esac
+[ -z "$(ss -ltnH 'sport = :5183')" ] || die "legacy Vite port 5183 is still listening"
 [ -L "$release/.artifacts" ] && [ "$(readlink -f "$release/.artifacts")" = "$(readlink -f "$runtime_current")" ] \
 	|| die "POG release is not bound to the versioned runtime"
 if [ "$state_mode" = "sync" ]; then
@@ -449,6 +514,7 @@ expect_public_status() {
 expect_public_status 302 / -H 'Accept: text/html'
 expect_public_status 401 /assets/access-probe.js
 expect_public_status 401 /api/catalog
+expect_public_status 401 /api/portal-health
 expect_public_status 401 /api/feedback-reports
 expect_public_status 401 /api/colony
 expect_public_status 401 /api/streams
@@ -473,4 +539,4 @@ grep -q '/auth/github/start' <<<"$login_page"
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 
 trap - EXIT
-echo "hosted-pog install: active POG $pog_sha at $public_base_url (products=pog,constructor-studio; state=$state_mode; all content requires an invited session)"
+echo "hosted-pog install: active production POG $pog_sha on 127.0.0.1:7777 at $public_base_url (products=pog,constructor-studio; state=$state_mode; no Vite runtime; all content requires an invited session)"

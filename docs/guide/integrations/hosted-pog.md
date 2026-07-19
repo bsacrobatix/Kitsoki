@@ -1,10 +1,12 @@
 # Host POG behind Kitsoki GitHub login
 
 This runbook deploys the POG portal on the existing `@kitsoki` test VM at
-`https://kitsoki-test.slothattax.me`. POG remains its own Node/Vite process;
-Kitsoki supplies the invitation-only GitHub login and session store; Caddy
-enforces the boundary before any human-readable upstream is reached. The
-domain is private as a whole, not merely the new POG routes.
+`https://kitsoki-test.slothattax.me`. The built POG Node service owns
+`127.0.0.1:7777`; Kitsoki supplies invitation-only GitHub login, RPC, and the
+session store on `127.0.0.1:7778`; Caddy enforces the boundary before any
+human-readable upstream is reached. Vite is a build dependency only and must
+never run on the VM. The domain is private as a whole, not merely the new POG
+routes.
 
 The hosted product selector is intentionally limited to two products:
 `pog` and `constructor-studio`. POG's other repository tracks remain visible
@@ -21,9 +23,9 @@ configuration as the primary deployment path.
 
 | Route | Upstream | Authentication |
 |---|---|---|
-| `/auth/*` | Kitsoki on `127.0.0.1:7777` | Public entry to login, invite, the GitHub OAuth redirect/callback, logout, and session probes |
-| `/`, POG assets, POG `/api/*`, `/rpc*` | POG Vite on `127.0.0.1:5183` | Kitsoki `/auth/check` through Caddy `forward_auth` |
-| `/api/feedback*` | Existing feedback intake on `127.0.0.1:8788` | Same POG login gate |
+| `/auth/*` | Kitsoki on `127.0.0.1:7778` | Public entry to login, invite, the GitHub OAuth redirect/callback, logout, and session probes |
+| `/`, built POG assets, POG `/api/*`, `/rpc*` | Production POG on `127.0.0.1:7777` | Kitsoki `/auth/check` through Caddy `forward_auth` |
+| Exact `/api/feedback` | Existing hosted feedback intake on `127.0.0.1:8788` | Same POG login gate |
 | `/constructor-studio/decks/*` | Existing deck store | Same POG login gate |
 | `/healthz`, `/api/ready`, `/run/*`, `/runs*`, `/api/run/*`, `/api/runs`, `/decks/*` | Existing GitHub-agent health/run/evidence surface | Same invitation-only login gate |
 | `/gh-agent/webhook` | GitHub agent on `127.0.0.1:8787` | Browser-session bypass by protocol; every payload remains HMAC-verified |
@@ -41,6 +43,12 @@ webhook receiver. Neither exposes portal, run, health, readiness, feedback, or
 evidence content. Do not add an asset, API, deck, diagnostic route, or alternate
 hostname outside the authenticated handlers. An invalid or unsigned webhook
 must return `401`.
+
+The feedback-intake matcher is deliberately exact. `/api/feedback-reports`
+and `/api/feedback-autonomy/*` are POG-owned production APIs; routing them with
+an `/api/feedback*` wildcard sends them to the intake service and makes durable
+POG state appear to disappear. The asset test and live verifier both retain a
+tripwire for that boundary.
 
 ## GitHub App prerequisite
 
@@ -118,10 +126,8 @@ exchanges a deliberately bogus code and requires GitHub to answer
 `bad_verification_code` (valid client ID and secret); a wrong secret answers
 `incorrect_client_credentials` and stops the deploy before the VM changes. The
 helper refuses either a Kitsoki revision or selected POG revision that is
-not contained in its protected `main`. It also refuses a POG revision that
-predates the separate `POG_KITSOKI_BROWSER_URL` seam; without that seam the
-server could work while browsers were incorrectly sent to their own
-`127.0.0.1`. It builds Kitsoki for Linux, creates a Git bundle from POG `main`,
+not contained in its protected `main`. It also refuses a POG revision without
+the bundled production-server contract. It builds Kitsoki for Linux, creates a Git bundle from POG `main`,
 checks the uploaded binary's SHA-256, downloads and locally verifies the pinned
 Node archive, and invokes the versioned remote installer. The installer then:
 
@@ -132,35 +138,41 @@ Node archive, and invokes the versioned remote installer. The installer then:
 2. installs immutable POG and Kitsoki releases under `/opt/pog/releases/<sha>`
    and `/opt/kitsoki-hosted-pog/releases/<sha>` without replacing the existing
    GitHub agent's `/usr/local/bin/kitsoki`;
-3. runs `npm ci` and the POG typecheck/production build before activation;
+3. runs `npm ci`, the POG typecheck/client build, and the self-contained
+   production-server build before activation; the server artifact receives
+   the explicit `pog,constructor-studio` allowlist and loopback Kitsoki URLs;
 4. preserves `/var/lib/pog/runtime`, or, with `--sync-local-state`, verifies the
    uploaded snapshot checksum and manifest, builds a conflict-free versioned
    runtime, and atomically moves the runtime symlink;
 5. binds the release's ignored `.artifacts` path to that versioned runtime so
    every portal state reader uses the same durable data;
-6. removes sibling-catalog discovery and verifies the live products are exactly
-   POG and Constructor Studio;
+6. removes historical sibling discovery, enforces the explicit hosted member
+   allowlist, and verifies the live products are exactly POG and Constructor Studio;
 7. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
    verified releases;
-8. installs and restarts `kitsoki-pog.service` and `pog-portal.service`;
-9. waits for loopback auth (`401` when anonymous) and catalog (`200`) probes,
-   including the real public `Host` header that Vite receives from Caddy;
+8. installs and restarts Kitsoki auth/RPC on 7778 and the built POG production
+   service on 7777;
+9. verifies revision-bound production health, the exact catalog, reviewed
+   feedback ownership, the production command line, and absence of a 5183
+   listener before changing Caddy;
 10. validates the candidate Caddyfile before installing it;
 11. reloads Caddy and verifies anonymous denial across POG, feedback, health,
    runs, and evidence while checking agent health over loopback.
 
 If activation fails after a symlink changes, the installer restores the
-previous POG, Kitsoki, Node, and runtime targets plus the Caddyfile before
-returning non-zero. Failed release/state directories remain available for
-diagnosis; they are never treated as active.
+previous POG, Kitsoki, Node, and runtime targets, both prior systemd units, and
+the Caddyfile before returning non-zero. This matters for the one-time
+5183-to-7777 cutover: a failed first activation can still restart the previous
+Vite-backed release while it rolls back. Failed release/state directories
+remain available for diagnosis; they are never treated as active.
 
-POG's server APIs currently live in the Vite `configureServer` plugin, so a
-static `vite preview` deployment would silently omit important routes. The
-systemd service intentionally runs the real Vite server and uses the production
-build as its pre-activation compile/type gate. The installer renders the
-validated public hostname into Vite's additional allowed-host setting; keep
-that setting scoped to the deployment origin instead of disabling Vite's host
-check. Revisit that choice when POG gains a standalone production HTTP server.
+POG's production server reuses the same registered portal API middleware as
+development, then serves only the built `dist/` assets and narrow same-origin
+proxies. Do not replace it with `vite preview`: preview omits the operational
+APIs. Do not replace it with `npm run dev`: that reintroduces a development
+server, watcher, HMR machinery, and a 5183 dependency. The deployed command
+must contain `server/server.mjs --addr 127.0.0.1:7777`; `--verify` rejects a
+Vite command or any remaining 5183 listener.
 
 ## Invite a person
 
@@ -193,6 +205,9 @@ ssh root@206.189.84.218 \
   'systemctl is-active kitsoki-gh-agent caddy kitsoki-pog pog-portal; \
    systemctl --no-pager --full status kitsoki-pog pog-portal; \
    /opt/kitsoki-hosted-pog/node/current/bin/node --version; \
+   curl -fsS http://127.0.0.1:7777/api/portal-health; \
+   test "$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:7778/auth/me)" = 401; \
+   test -z "$(ss -ltnH "sport = :5183")"; \
    readlink -f /var/lib/pog/runtime; \
    cat /var/lib/pog/runtime/.hosted-pog-local-state.json 2>/dev/null || true'
 
@@ -211,6 +226,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/healthz                 # 401
 curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/api/runs                # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/api/portal-health       # 401
 curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/api/feedback-reports    # 401
 curl -sS -o /dev/null -w '%{http_code}\n' \
@@ -236,7 +253,9 @@ reaches content.
 Check operational health from the VM instead of weakening the public policy:
 
 ```sh
-ssh root@206.189.84.218 'curl -fsS http://127.0.0.1:8787/healthz'
+ssh root@206.189.84.218 \
+  'curl -fsS http://127.0.0.1:7777/api/portal-health; \
+   curl -fsS http://127.0.0.1:8787/healthz'
 ```
 
 After signing in, verify the root portal, `/api/catalog`, a direct routed page,
@@ -282,17 +301,21 @@ Common failures:
 - GitHub shows a `redirect_uri` mismatch on the authorize page: register
   `https://kitsoki-test.slothattax.me/auth/github/callback` as the App's
   callback URL; no redeploy is needed afterward.
-- Public root returns `502`: check `kitsoki-pog`; this is the intended
-  fail-closed state while auth is unavailable.
+- Public root returns `502`: check both `kitsoki-pog` (auth/RPC on 7778) and
+  `pog-portal` (production POG on 7777). Caddy remains fail-closed while auth
+  is unavailable.
 - A build reports a missing Node built-in such as `node:sqlite`: update the
   pinned runtime contract and official checksum through review; do not fall
   back to the VM's ambient `/usr/local/bin/node`.
 - Loopback portal is down but auth is healthy: inspect `pog-portal` logs, the
-  pinned Node target, and the immutable release's `portal/package-lock.json`;
+  pinned Node target, `portal/dist/index.html`, and `portal/server/server.mjs`;
   do not point Caddy at an ad hoc process.
-- Login succeeds but POG returns a Vite `host is not allowed` response: rerun
-  the versioned deploy so `pog-portal.service` is rendered with the validated
-  public host, then use `--verify`; do not set Vite to accept every hostname.
+- `--verify` finds Vite or a 5183 listener: stop. The versioned unit was not
+  activated cleanly or an untracked process survived. Inspect the PID and
+  redeploy; do not declare the service production-ready while either exists.
+- Feedback reports, autonomy queue, or scoreboard disappear after login:
+  inspect Caddy for an accidental `/api/feedback*` wildcard. Only exact
+  `/api/feedback` belongs to 8788; every longer POG route goes to 7777.
 - Loopback `/healthz` fails while POG works: the existing GitHub-agent service
   is unhealthy; the public route intentionally returns `401`. Treat that as a
   separate incident and use

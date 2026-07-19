@@ -5,7 +5,7 @@
 
 (pog_login) {
 	request_header -X-Kitsoki-Actor
-	forward_auth 127.0.0.1:7777 {
+	forward_auth 127.0.0.1:7778 {
 		uri /auth/check
 		copy_headers X-Kitsoki-Actor
 	}
@@ -20,7 +20,7 @@ __PUBLIC_HOST__ {
 	# expose only the login protocol; Kitsoki validates invite codes, GitHub
 	# identity, device attempts, and sessions before creating a browser session.
 	handle /auth/* {
-		reverse_proxy 127.0.0.1:7777
+		reverse_proxy 127.0.0.1:7778
 	}
 
 	# GitHub cannot present a browser session. This is the sole non-login bypass
@@ -45,22 +45,27 @@ __PUBLIC_HOST__ {
 	}
 
 	# These are POG-owned surfaces even though their backing services are not
-	# the Vite process. They receive the same fail-closed session check.
+	# the production portal process. They receive the same fail-closed check.
 	handle_path /constructor-studio/decks/* {
 		import pog_login
 		root * /srv/slidey-decks
 		file_server
 	}
-	handle /api/feedback* {
+	# The external hosted feedback sink owns only its exact public endpoint.
+	# POG's /api/feedback-reports and /api/feedback-autonomy/* routes must fall
+	# through to the production portal; a wildcard here made those datasets
+	# look as if they had disappeared.
+	@hosted_feedback path /api/feedback
+	handle @hosted_feedback {
 		import pog_login
 		reverse_proxy 127.0.0.1:8788
 	}
 
 	# POG owns the remaining origin, including its root-relative assets and all
-	# of its Vite server API routes. If Kitsoki auth is unavailable,
+	# production API routes. If Kitsoki auth is unavailable,
 	# forward_auth fails closed and this upstream is never reached.
 	handle {
 		import pog_login
-		reverse_proxy 127.0.0.1:5183
+		reverse_proxy 127.0.0.1:7777
 	}
 }

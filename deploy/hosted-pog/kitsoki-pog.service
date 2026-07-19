@@ -1,7 +1,9 @@
 [Unit]
-Description=Kitsoki authenticated host for the POG portal
+Description=Kitsoki authentication and RPC backend for hosted POG
 Wants=network-online.target
 After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=10
 
 [Service]
 Type=simple
@@ -13,8 +15,8 @@ Environment=XDG_CACHE_HOME=/var/cache/kitsoki-pog
 # Carries KITSOKI_HOSTED_POG_GH_CLIENT_SECRET, referenced as ${VAR} from the
 # rendered hosted-pog.yaml. Root-owned 0600; systemd reads it, not the pog user.
 EnvironmentFile=/etc/kitsoki/hosted-pog.env
-ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki daemon --config /etc/kitsoki/hosted-pog.yaml --db /var/lib/kitsoki-pog/sessions.db --addr 127.0.0.1:7777 --stories-dir /opt/pog/current/stories --kits-dir /opt/pog/current/kits
-Restart=on-failure
+ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki daemon --config /etc/kitsoki/hosted-pog.yaml --db /var/lib/kitsoki-pog/sessions.db --addr 127.0.0.1:7778 --stories-dir /opt/pog/current/stories --kits-dir /opt/pog/current/kits
+Restart=always
 RestartSec=3s
 TimeoutStopSec=30s
 KillSignal=SIGTERM

@@ -76,6 +76,7 @@ verify() {
 	expect_public_status 302 / -H 'Accept: text/html'
 	expect_public_status 401 /assets/access-probe.js
 	expect_public_status 401 /api/catalog
+	expect_public_status 401 /api/portal-health
 	expect_public_status 401 /api/feedback-reports
 	expect_public_status 401 /api/colony
 	expect_public_status 401 /api/streams
@@ -97,8 +98,50 @@ verify() {
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
 	grep -q '/auth/github/start' <<<"$login_page"
-	ssh "$REMOTE" "set -eu; systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal; test \"\$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7777/auth/me)\" = 401; test -L /var/lib/pog/runtime; test -L /opt/pog/current/.artifacts; catalog=\"\$(curl -fsS -H 'Host: $PUBLIC_HOST' http://127.0.0.1:5183/api/catalog)\"; printf '%s' \"\$catalog\" | /opt/kitsoki-hosted-pog/node/current/bin/node -e 'const fs=require(\"node:fs\"); const graph=JSON.parse(fs.readFileSync(0,\"utf8\")); const products=(graph.comparison_catalogs??[]).map((entry)=>entry.id); const repos=[...new Set((graph.nodes??[]).map((node)=>node.attrs?.repo).filter(Boolean))].sort(); if(products.join(\",\")!==\"pog,constructor-studio\"||repos.join(\",\")!==\"constructor-studio,pog\"){console.error(JSON.stringify({products,repos}));process.exit(1)}'; curl -fsS -o /dev/null http://127.0.0.1:8787/healthz; caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null"
-	echo "hosted-pog verify: services active; exact products=pog,constructor-studio; versioned runtime active; anonymous route-family matrix denied; GitHub OAuth login entrypoint reachable; unsigned webhook denied; public Host accepted by POG; loopback health=ok"
+	ssh "$REMOTE" bash -s -- "$PUBLIC_HOST" <<'REMOTE_VERIFY'
+set -euo pipefail
+public_host="$1"
+node_bin=/opt/kitsoki-hosted-pog/node/current/bin/node
+systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal
+test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/me)" = 401
+test -L /var/lib/pog/runtime
+test -L /opt/pog/current/.artifacts
+health="$(curl -fsS http://127.0.0.1:7777/api/portal-health)"
+active_pog_sha="$(basename "$(readlink -f /opt/pog/current)")"
+printf '%s' "$health" | "$node_bin" -e '
+const fs=require("node:fs");
+const health=JSON.parse(fs.readFileSync(0,"utf8"));
+if(health.ok!==true||health.service!=="pog-portal"||health.mode!=="production"||health.revision!==process.argv[1]){
+  console.error(JSON.stringify(health));
+  process.exit(1);
+}' "$active_pog_sha"
+catalog="$(curl -fsS -H "Host: $public_host" http://127.0.0.1:7777/api/catalog)"
+printf '%s' "$catalog" | "$node_bin" -e '
+const fs=require("node:fs");
+const graph=JSON.parse(fs.readFileSync(0,"utf8"));
+const products=(graph.comparison_catalogs??[]).map((entry)=>entry.id);
+const repos=[...new Set((graph.nodes??[]).map((node)=>node.attrs?.repo).filter(Boolean))].sort();
+if(products.join(",")!=="pog,constructor-studio"||repos.join(",")!=="constructor-studio,pog"){
+  console.error(JSON.stringify({products,repos}));
+  process.exit(1);
+}'
+curl -fsS http://127.0.0.1:7777/api/feedback-reports | "$node_bin" -e '
+const fs=require("node:fs");
+if(!Array.isArray(JSON.parse(fs.readFileSync(0,"utf8")).reports)) process.exit(1);'
+portal_pid="$(systemctl show --property MainPID --value pog-portal.service)"
+portal_command="$(tr '\0' ' ' <"/proc/$portal_pid/cmdline")"
+case "$portal_command" in
+  *server/server.mjs*"--addr 127.0.0.1:7777"*) ;;
+  *) echo "unexpected POG service command: $portal_command" >&2; exit 1 ;;
+esac
+case "$portal_command" in
+  *vite*|*"npm run dev"*) echo "Vite is running in the POG service: $portal_command" >&2; exit 1 ;;
+esac
+test -z "$(ss -ltnH 'sport = :5183')"
+curl -fsS -o /dev/null http://127.0.0.1:8787/healthz
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+REMOTE_VERIFY
+	echo "hosted-pog verify: production POG active on 127.0.0.1:7777; Kitsoki auth/RPC active on 127.0.0.1:7778; no Vite command or 5183 listener; exact products=pog,constructor-studio; reviewed feedback route owned by POG; versioned runtime active; anonymous route-family matrix denied; GitHub OAuth entrypoint reachable; unsigned webhook denied; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then
@@ -145,8 +188,9 @@ KITSOKI_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 git -C "$ROOT" merge-base --is-ancestor "$KITSOKI_SHA" main || { echo "Kitsoki HEAD ($KITSOKI_SHA) is not contained in Kitsoki main" >&2; exit 2; }
 pog_sha="$(git -C "$POG_ROOT" rev-parse "$POG_REF^{commit}")"
 git -C "$POG_ROOT" merge-base --is-ancestor "$pog_sha" main || { echo "$POG_REF ($pog_sha) is not contained in POG main" >&2; exit 2; }
-git -C "$POG_ROOT" show "$pog_sha:portal/vite.config.ts" | grep -q 'POG_KITSOKI_BROWSER_URL' || {
-	echo "POG $pog_sha does not support the separate hosted browser URL; promote the hosted-POG compatibility change first" >&2
+git -C "$POG_ROOT" show "$pog_sha:portal/package.json" | grep -q 'build:server' \
+	&& git -C "$POG_ROOT" cat-file -e "$pog_sha:portal/src/server/production.ts" || {
+	echo "POG $pog_sha does not contain the production portal server; promote that change first" >&2
 	exit 2
 }
 
@@ -159,7 +203,7 @@ deploy-hosted-pog:
   GitHub admin:   $ADMIN
   GitHub login:   OAuth authorization-code flow (callback ${PUBLIC_BASE_URL%/}/auth/github/callback)
   Node runtime:   $NODE_VERSION (pinned official linux-x64 archive)
-  topology:       Caddy -> Kitsoki /auth/check -> POG 127.0.0.1:5183
+  topology:       Caddy -> Kitsoki /auth/check 127.0.0.1:7778 -> production POG 127.0.0.1:7777
   products:       POG and Constructor Studio only
   local state:    $([ "$sync_local_state" -eq 1 ] && echo 'bounded portal-state snapshot enabled' || echo 'preserve hosted runtime (no local import)')
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
