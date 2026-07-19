@@ -2,7 +2,7 @@
 // exposed as a host verb family so starlark glue (ctx.host.call) can inspect
 // and steer the queue without shelling out to `kitsoki queue`.
 //
-// Seven ops, registered bare at "host.queue" (longest-prefix convention, see
+// Nine ops, registered bare at "host.queue" (longest-prefix convention, see
 // host.graph / host.demo — the registry injects the dropped suffix as
 // args["op"]):
 //
@@ -12,6 +12,8 @@
 //	resume    {id[, actor, reason]}  -> re-queue a parked candidate with a fresh attempt budget
 //	emergency {id[, actor, reason]}  -> move a candidate into the priority emergency lane
 //	override  {id[, actor, reason]}  -> human immediate-merge: emergency lane + durable attributed gate waiver
+//	approve   {id, manifest[, actor, reason, tree, receipt_digest]} -> steward approval of current prepared tuple
+//	unapprove {id[, actor, reason]}  -> withdraw a steward approval
 //	reject    {id[, actor, reason]}  -> terminal removal; branches and evidence retained
 //
 // Every op resolves the queue from args["project"] (project root, default
@@ -49,11 +51,33 @@ func QueueHandler(_ context.Context, args map[string]any) (Result, error) {
 		return queueOperatorOp(store, args, "emergency", queue.Store.MarkEmergency)
 	case "override":
 		return queueOperatorOp(store, args, "override", queue.Store.Override)
+	case "approve":
+		return queueApprovalOp(store, args)
+	case "unapprove":
+		return queueOperatorOp(store, args, "unapprove", queue.Store.Unapprove)
 	case "reject":
 		return queueOperatorOp(store, args, "reject", queue.Store.Reject)
 	default:
-		return Result{}, fmt.Errorf("host.queue: unknown op %q (want one of status, kick, park, resume, emergency, override, reject)", op)
+		return Result{}, fmt.Errorf("host.queue: unknown op %q (want one of status, kick, park, resume, emergency, override, approve, unapprove, reject)", op)
 	}
+}
+
+func queueApprovalOp(store queue.Store, args map[string]any) (Result, error) {
+	id, _ := args["id"].(string)
+	actor, _ := args["actor"].(string)
+	reason, _ := args["reason"].(string)
+	manifest, _ := args["manifest"].(string)
+	tree, _ := args["tree"].(string)
+	receiptDigest, _ := args["receipt_digest"].(string)
+	c, err := store.Approve(queue.ApprovalOp{ID: id, Actor: actor, Reason: reason, ManifestDigest: manifest, TreeSHA: tree, ReceiptDigest: receiptDigest})
+	if err != nil {
+		return Result{Error: "host.queue.approve: " + err.Error()}, nil
+	}
+	data, err := queueJSONMap("candidate", c)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Data: data}, nil
 }
 
 // queueStoreArg resolves the queue store from args["project"] (default "."),

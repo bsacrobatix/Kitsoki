@@ -21,6 +21,88 @@ type Op struct {
 	Now    time.Time
 }
 
+// ApprovalOp carries the state identities a steward observed. Every non-empty
+// value is compared with the durable candidate before approval is recorded.
+type ApprovalOp struct {
+	ID, Actor, Reason string
+	ManifestDigest    string
+	TreeSHA           string
+	ReceiptDigest     string
+	Now               time.Time
+}
+
+func (o ApprovalOp) at() time.Time {
+	if o.Now.IsZero() {
+		return time.Now().UTC()
+	}
+	return o.Now.UTC()
+}
+
+func (o ApprovalOp) actor() string {
+	if strings.TrimSpace(o.Actor) == "" {
+		return "operator"
+	}
+	return o.Actor
+}
+
+// Approve records a steward decision only after the prepared tuple, required
+// receipts, and supplied review identities match current durable state.
+func (s Store) Approve(op ApprovalOp) (Candidate, error) {
+	if strings.TrimSpace(op.ID) == "" {
+		return Candidate{}, fmt.Errorf("queue: approve requires a candidate id")
+	}
+	return s.mutate(func(state *State) (Candidate, error) {
+		for i := range state.Candidates {
+			c := &state.Candidates[i]
+			if c.ID != op.ID {
+				continue
+			}
+			if c.finalizationPolicy() != StewardReviewFinalization {
+				return Candidate{}, fmt.Errorf("queue: candidate %s does not require steward approval", c.ID)
+			}
+			if c.phase() != AwaitingApproval {
+				return Candidate{}, fmt.Errorf("queue: approve requires awaiting_approval; candidate %s is %s", c.ID, c.phase())
+			}
+			if err := validatePreparedTuple(*c); err != nil {
+				return Candidate{}, fmt.Errorf("queue: approve requires green current gate: %w", err)
+			}
+			if strings.TrimSpace(op.ManifestDigest) == "" || op.ManifestDigest != c.ManifestDigest {
+				return Candidate{}, fmt.Errorf("queue: approval manifest digest does not match current candidate")
+			}
+			if op.TreeSHA != "" && op.TreeSHA != c.TreeSHA {
+				return Candidate{}, fmt.Errorf("queue: approval tree SHA does not match current candidate")
+			}
+			if op.ReceiptDigest != "" && op.ReceiptDigest != c.ReceiptDigest {
+				return Candidate{}, fmt.Errorf("queue: approval receipt digest does not match current candidate")
+			}
+			if err := validateRequiredReceipts(*c); err != nil {
+				return Candidate{}, err
+			}
+			c.Approval = &Approval{Actor: op.actor(), Reason: first(op.Reason, "steward approval"), At: op.at(), Fingerprint: approvalFingerprint(*c)}
+			c.Phase, c.Status = ReadyToFinalize, ReadyToFinalize
+			c.Evidence = append(c.Evidence, fmt.Sprintf("queue:approve by %s at %s reason=%s", c.Approval.Actor, c.Approval.At.Format(time.RFC3339), c.Approval.Reason))
+			return *c, nil
+		}
+		return Candidate{}, fmt.Errorf("queue: unknown candidate %q", op.ID)
+	})
+}
+
+// Unapprove withdraws a decision. A finalizing worker cannot overwrite the
+// returned awaiting_approval state when it later records its result.
+func (s Store) Unapprove(op Op) (Candidate, error) {
+	return s.operate(op, "unapprove", func(_ *State, c *Candidate) error {
+		if c.finalizationPolicy() != StewardReviewFinalization {
+			return fmt.Errorf("queue: candidate %s does not require steward approval", c.ID)
+		}
+		if c.phase() != ReadyToFinalize && c.phase() != Finalizing {
+			return fmt.Errorf("queue: unapprove requires ready_to_finalize or finalizing; candidate %s is %s", c.ID, c.phase())
+		}
+		c.Approval = nil
+		c.Phase, c.Status, c.WorkerID, c.LeaseExpiresAt = AwaitingApproval, AwaitingApproval, "", time.Time{}
+		return nil
+	})
+}
+
 func (o Op) at() time.Time {
 	if o.Now.IsZero() {
 		return time.Now().UTC()
@@ -120,6 +202,11 @@ func (s Store) Override(op Op) (Candidate, error) {
 			c.Attempt = 0
 			c.RetryAt, c.ParkedAt = time.Time{}, time.Time{}
 			c.ParkedBy, c.RetryReason, c.Failure, c.ConflictContinuation = "", "", "", ""
+		}
+		// Override remains the explicit human emergency/waiver path. It is
+		// distinct from a normal steward approval and can release its hold.
+		if c.phase() == AwaitingApproval {
+			c.Phase, c.Status = ReadyToFinalize, ReadyToFinalize
 		}
 		return nil
 	})

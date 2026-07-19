@@ -64,6 +64,7 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 			}
 		}
 		if pick != nil {
+			clearApproval(pick)
 			w.lease(pick, Preparing, n)
 			pick.Attempt++
 			pick.Started = n
@@ -143,7 +144,12 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// The CI receipt seals the candidate environment; this binds that receipt
 		// and the effective gate version to this exact prospective tree.
 		cur.DependencyFingerprint = preparedFingerprint(*cur)
-		cur.ValidatedSHA, cur.Phase, cur.Status, cur.WorkerID, cur.LeaseExpiresAt = cur.TreeSHA, ReadyToFinalize, ReadyToFinalize, "", time.Time{}
+		cur.ValidatedSHA, cur.WorkerID, cur.LeaseExpiresAt = cur.TreeSHA, "", time.Time{}
+		if cur.finalizationPolicy() == StewardReviewFinalization && !cur.OverrideGate {
+			cur.Phase, cur.Status = AwaitingApproval, AwaitingApproval
+		} else {
+			cur.Phase, cur.Status = ReadyToFinalize, ReadyToFinalize
+		}
 	})
 }
 
@@ -151,7 +157,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 // operator while this worker held its lease. Worker results never clobber a
 // durable operator decision; the discarded outcome is recorded as evidence.
 func (w Worker) operatorIntervened(cur *Candidate, stage string) bool {
-	if parked(cur.phase()) || terminal(cur.phase()) {
+	if parked(cur.phase()) || terminal(cur.phase()) || cur.phase() == AwaitingApproval {
 		cur.Evidence = append(cur.Evidence, fmt.Sprintf("queue:%s result discarded; operator moved candidate to %s", stage, cur.phase()))
 		return true
 	}
@@ -184,7 +190,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 				head = c
 			}
 		}
-		if head != nil && head.phase() == ReadyToFinalize {
+		if head != nil && head.phase() == ReadyToFinalize && finalizationAuthorized(*head) {
 			w.lease(head, Finalizing, n)
 			candidate, ok = *head, true
 		}
@@ -218,6 +224,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 			return
 		}
 		if result.Stale || result.NewMainSHA == "" && w.Deps.Finalizer != nil {
+			clearApproval(cur)
 			cur.Phase, cur.Status, cur.WorkerID, cur.LeaseExpiresAt = Reprepare, Reprepare, "", time.Time{}
 			cur.Failure = "protected base changed after gate; reprepare required"
 			return
@@ -350,6 +357,39 @@ func fingerprint(values ...string) string {
 
 func preparedFingerprint(c Candidate) string {
 	return fingerprint(c.ReceiptDigest, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion)
+}
+
+func approvalFingerprint(c Candidate) string {
+	return fingerprint(preparedFingerprint(c), c.ManifestDigest, c.RuntimeInstance, c.RuntimeReceipt, strings.Join(c.RequiredReceiptIDs, "\x00"))
+}
+
+func validateRequiredReceipts(c Candidate) error {
+	for _, id := range c.RequiredReceiptIDs {
+		if id != c.ReceiptID {
+			return fmt.Errorf("queue: required receipt %q is not present on current candidate", id)
+		}
+	}
+	return nil
+}
+
+func finalizationAuthorized(c Candidate) bool {
+	if c.OverrideGate {
+		return true
+	}
+	if c.finalizationPolicy() != StewardReviewFinalization {
+		return true
+	}
+	if c.Approval == nil || c.Approval.Fingerprint != approvalFingerprint(c) {
+		return false
+	}
+	return validateRequiredReceipts(c) == nil && validatePreparedTuple(c) == nil
+}
+
+func clearApproval(c *Candidate) {
+	if c.Approval != nil {
+		c.Evidence = append(c.Evidence, "queue:approval invalidated by repreparation")
+	}
+	c.Approval = nil
 }
 
 func validatePreparedTuple(c Candidate) error {

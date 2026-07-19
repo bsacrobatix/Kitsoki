@@ -266,6 +266,142 @@ func TestOperatorParkWinsOverInFlightWorkerResult(t *testing.T) {
 	}
 }
 
+func TestStewardApprovalHoldsThenPermitsExactlyOneFinalization(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("7", 40)
+	candidate, err := store.Submit(Submit{Branch: "wave/review", SHA: sha, Receipt: testReceipt(t, sha), FinalizationPolicy: StewardReviewFinalization, ManifestDigest: "sha256:manifest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var finalized int
+	worker := Worker{Store: store, Deps: ProcessDeps{
+		Integration: specIntegration(), Gate: passingGate{}, GateVersion: "test-gate",
+		Finalizer: finalizerFunc(func(context.Context, Candidate) (FinalizeResult, error) {
+			finalized++
+			return FinalizeResult{NewMainSHA: "landed-tree"}, nil
+		}),
+	}}
+	if progressed, err := worker.RunOnce(context.Background()); err != nil || !progressed {
+		t.Fatalf("prepare progressed=%v err=%v", progressed, err)
+	}
+	prepared := mustGet(t, store, candidate.ID)
+	if prepared.phase() != AwaitingApproval || prepared.Approval != nil {
+		t.Fatalf("prepared candidate = %#v", prepared)
+	}
+	if progressed, err := worker.RunOnce(context.Background()); err != nil || progressed {
+		t.Fatalf("unapproved finalization progressed=%v err=%v", progressed, err)
+	}
+	if finalized != 0 {
+		t.Fatalf("finalized before approval: %d", finalized)
+	}
+	approved, err := store.Approve(ApprovalOp{ID: candidate.ID, Actor: "brad", Reason: "reviewed", ManifestDigest: "sha256:manifest", TreeSHA: prepared.TreeSHA, ReceiptDigest: prepared.ReceiptDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.phase() != ReadyToFinalize || approved.Approval == nil || !hasEvidence(approved, "queue:approve by brad") {
+		t.Fatalf("approval = %#v", approved)
+	}
+	if progressed, err := worker.RunOnce(context.Background()); err != nil || !progressed {
+		t.Fatalf("finalize progressed=%v err=%v", progressed, err)
+	}
+	if progressed, err := worker.RunOnce(context.Background()); err != nil || progressed {
+		t.Fatalf("second finalization progressed=%v err=%v", progressed, err)
+	}
+	if finalized != 1 || mustGet(t, store, candidate.ID).phase() != Landed {
+		t.Fatalf("finalizations=%d candidate=%#v", finalized, mustGet(t, store, candidate.ID))
+	}
+}
+
+func TestStewardApprovalRejectsStaleIdentityWithoutMutation(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("6", 40)
+	candidate, err := store.Submit(Submit{Branch: "wave/review", SHA: sha, Receipt: testReceipt(t, sha), FinalizationPolicy: StewardReviewFinalization, ManifestDigest: "sha256:manifest", RequiredReceiptIDs: []string{"other-receipt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: specIntegration(), Gate: passingGate{}, GateVersion: "test-gate"}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	before := mustGet(t, store, candidate.ID)
+	for _, op := range []ApprovalOp{
+		{ID: candidate.ID, ManifestDigest: "sha256:stale"},
+		{ID: candidate.ID, ManifestDigest: before.ManifestDigest, TreeSHA: "stale-tree"},
+		{ID: candidate.ID, ManifestDigest: before.ManifestDigest, ReceiptDigest: "stale-receipt"},
+		{ID: candidate.ID, ManifestDigest: before.ManifestDigest},
+	} {
+		if _, err := store.Approve(op); err == nil {
+			t.Fatalf("approval %+v unexpectedly succeeded", op)
+		}
+		after := mustGet(t, store, candidate.ID)
+		if after.phase() != AwaitingApproval || after.Approval != nil || fmt.Sprint(after.Evidence) != fmt.Sprint(before.Evidence) {
+			t.Fatalf("failed approval mutated candidate: %#v", after)
+		}
+	}
+}
+
+func TestUnapproveWinsOverInFlightFinalization(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("5", 40)
+	candidate, err := store.Submit(Submit{Branch: "wave/review", SHA: sha, Receipt: testReceipt(t, sha), FinalizationPolicy: StewardReviewFinalization, ManifestDigest: "sha256:manifest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: specIntegration(), Gate: passingGate{}, GateVersion: "test-gate", Finalizer: finalizerFunc(func(context.Context, Candidate) (FinalizeResult, error) {
+		close(entered)
+		<-release
+		return FinalizeResult{NewMainSHA: "landed-tree"}, nil
+	})}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prepared := mustGet(t, store, candidate.ID)
+	if _, err := store.Approve(ApprovalOp{ID: candidate.ID, ManifestDigest: prepared.ManifestDigest}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := worker.RunOnce(context.Background()); done <- err }()
+	<-entered
+	if _, err := store.Unapprove(Op{ID: candidate.ID, Actor: "brad", Reason: "new evidence"}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	got := mustGet(t, store, candidate.ID)
+	if got.phase() != AwaitingApproval || got.ResultMainSHA != "" || got.Approval != nil || !hasEvidence(got, "result discarded; operator moved candidate") {
+		t.Fatalf("unapprove was overwritten: %#v", got)
+	}
+}
+
+func TestStaleFinalizationInvalidatesStewardApproval(t *testing.T) {
+	store := Store{ProjectRoot: t.TempDir()}
+	sha := strings.Repeat("4", 40)
+	candidate, err := store.Submit(Submit{Branch: "wave/review", SHA: sha, Receipt: testReceipt(t, sha), FinalizationPolicy: StewardReviewFinalization, ManifestDigest: "sha256:manifest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := Worker{Store: store, Deps: ProcessDeps{Integration: specIntegration(), Gate: passingGate{}, GateVersion: "test-gate", Finalizer: finalizerFunc(func(context.Context, Candidate) (FinalizeResult, error) {
+		return FinalizeResult{Stale: true, Log: "base moved"}, nil
+	})}}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prepared := mustGet(t, store, candidate.ID)
+	if _, err := store.Approve(ApprovalOp{ID: candidate.ID, ManifestDigest: prepared.ManifestDigest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := mustGet(t, store, candidate.ID)
+	if got.phase() != Reprepare || got.Approval != nil || !hasEvidence(got, "approval invalidated by repreparation") {
+		t.Fatalf("stale finalization did not invalidate approval: %#v", got)
+	}
+}
+
 func TestResubmissionSupersedesActiveCandidateAndInheritsAttempts(t *testing.T) {
 	store := Store{ProjectRoot: t.TempDir()}
 	sha := strings.Repeat("a", 40)

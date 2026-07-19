@@ -48,6 +48,7 @@ const (
 	Preparing          Status = "preparing"
 	WaitingForFIFO     Status = "waiting_for_fifo"
 	Gating             Status = "gating"
+	AwaitingApproval   Status = "awaiting_approval"
 	ReadyToFinalize    Status = "ready_to_finalize"
 	Finalizing         Status = "finalizing"
 	Reprepare          Status = "reprepare"
@@ -62,53 +63,77 @@ const (
 	Ejected Status = "ejected"
 )
 
+// FinalizationPolicy controls whether a green prepared candidate may advance
+// directly to the protected CAS or requires an explicit steward approval.
+// It is deliberately independent from target policy.
+type FinalizationPolicy string
+
+const (
+	AutonomousFinalization    FinalizationPolicy = "autonomous"
+	StewardReviewFinalization FinalizationPolicy = "steward_review"
+)
+
 type Candidate struct {
-	ID                    string    `json:"id"`
-	ProjectID             string    `json:"project_id"`
-	Sequence              uint64    `json:"sequence"`
-	Branch                string    `json:"branch"`
-	SHA                   string    `json:"sha"`
-	Admission             Admission `json:"admission"`
-	ReceiptID             string    `json:"receipt_id"`
-	ReceiptRef            string    `json:"receipt_ref,omitempty"`
-	ReceiptDigest         string    `json:"receipt_digest,omitempty"`
-	Backend               string    `json:"backend"`
-	Paths                 []string  `json:"paths,omitempty"`
-	Position              int       `json:"position"`
-	Status                Status    `json:"status"`
-	Phase                 Status    `json:"phase,omitempty"`
-	Submitted             time.Time `json:"submitted_at"`
-	Started               time.Time `json:"started_at,omitempty"`
-	PhaseStartedAt        time.Time `json:"phase_started_at,omitempty"`
-	Completed             time.Time `json:"completed_at,omitempty"`
-	WorkerID              string    `json:"worker_id,omitempty"`
-	LeaseExpiresAt        time.Time `json:"lease_expires_at,omitempty"`
-	Attempt               int       `json:"attempt,omitempty"`
-	RetryAt               time.Time `json:"retry_at,omitempty"`
-	BaseSHA               string    `json:"base_sha,omitempty"`
-	TreeSHA               string    `json:"tree_sha,omitempty"`
-	GateVersion           string    `json:"gate_version,omitempty"`
-	DependencyFingerprint string    `json:"dependency_fingerprint,omitempty"`
-	IntegrationRef        string    `json:"integration_ref,omitempty"`
-	WorkspaceID           string    `json:"workspace_id,omitempty"`
-	WorkspacePath         string    `json:"workspace_path,omitempty"`
-	ConflictContinuation  string    `json:"conflict_continuation,omitempty"`
-	GateLog               string    `json:"gate_log,omitempty"`
-	GateEvidence          []string  `json:"gate_evidence,omitempty"`
-	FinalizationLog       string    `json:"finalization_log,omitempty"`
-	ResultMainSHA         string    `json:"result_main_sha,omitempty"`
-	Failure               string    `json:"failure,omitempty"`
-	SpeculativeSHA        string    `json:"speculative_sha,omitempty"` // v1 compatibility
-	ValidatedSHA          string    `json:"validated_sha,omitempty"`   // v1 compatibility
-	Evidence              []string  `json:"evidence,omitempty"`
-	RetryReason           string    `json:"retry_reason,omitempty"`
-	EjectionReason        string    `json:"ejection_reason,omitempty"`
-	EmergencySequence     uint64    `json:"emergency_sequence,omitempty"`
-	ParkedAt              time.Time `json:"parked_at,omitempty"`
-	ParkedBy              string    `json:"parked_by,omitempty"`
-	OverrideGate          bool      `json:"override_gate,omitempty"`
-	OverrideBy            string    `json:"override_by,omitempty"`
-	OverrideReason        string    `json:"override_reason,omitempty"`
+	ID                    string             `json:"id"`
+	ProjectID             string             `json:"project_id"`
+	Sequence              uint64             `json:"sequence"`
+	Branch                string             `json:"branch"`
+	SHA                   string             `json:"sha"`
+	Admission             Admission          `json:"admission"`
+	ReceiptID             string             `json:"receipt_id"`
+	ReceiptRef            string             `json:"receipt_ref,omitempty"`
+	ReceiptDigest         string             `json:"receipt_digest,omitempty"`
+	Backend               string             `json:"backend"`
+	Paths                 []string           `json:"paths,omitempty"`
+	Position              int                `json:"position"`
+	Status                Status             `json:"status"`
+	Phase                 Status             `json:"phase,omitempty"`
+	Submitted             time.Time          `json:"submitted_at"`
+	Started               time.Time          `json:"started_at,omitempty"`
+	PhaseStartedAt        time.Time          `json:"phase_started_at,omitempty"`
+	Completed             time.Time          `json:"completed_at,omitempty"`
+	WorkerID              string             `json:"worker_id,omitempty"`
+	LeaseExpiresAt        time.Time          `json:"lease_expires_at,omitempty"`
+	Attempt               int                `json:"attempt,omitempty"`
+	RetryAt               time.Time          `json:"retry_at,omitempty"`
+	BaseSHA               string             `json:"base_sha,omitempty"`
+	TreeSHA               string             `json:"tree_sha,omitempty"`
+	GateVersion           string             `json:"gate_version,omitempty"`
+	DependencyFingerprint string             `json:"dependency_fingerprint,omitempty"`
+	IntegrationRef        string             `json:"integration_ref,omitempty"`
+	WorkspaceID           string             `json:"workspace_id,omitempty"`
+	WorkspacePath         string             `json:"workspace_path,omitempty"`
+	ConflictContinuation  string             `json:"conflict_continuation,omitempty"`
+	GateLog               string             `json:"gate_log,omitempty"`
+	GateEvidence          []string           `json:"gate_evidence,omitempty"`
+	FinalizationLog       string             `json:"finalization_log,omitempty"`
+	ResultMainSHA         string             `json:"result_main_sha,omitempty"`
+	Failure               string             `json:"failure,omitempty"`
+	SpeculativeSHA        string             `json:"speculative_sha,omitempty"` // v1 compatibility
+	ValidatedSHA          string             `json:"validated_sha,omitempty"`   // v1 compatibility
+	Evidence              []string           `json:"evidence,omitempty"`
+	RetryReason           string             `json:"retry_reason,omitempty"`
+	EjectionReason        string             `json:"ejection_reason,omitempty"`
+	EmergencySequence     uint64             `json:"emergency_sequence,omitempty"`
+	ParkedAt              time.Time          `json:"parked_at,omitempty"`
+	ParkedBy              string             `json:"parked_by,omitempty"`
+	OverrideGate          bool               `json:"override_gate,omitempty"`
+	OverrideBy            string             `json:"override_by,omitempty"`
+	OverrideReason        string             `json:"override_reason,omitempty"`
+	FinalizationPolicy    FinalizationPolicy `json:"finalization_policy,omitempty"`
+	ManifestDigest        string             `json:"manifest_digest,omitempty"`
+	RuntimeInstance       string             `json:"runtime_instance,omitempty"`
+	RuntimeReceipt        string             `json:"runtime_receipt,omitempty"`
+	RequiredReceiptIDs    []string           `json:"required_receipt_ids,omitempty"`
+	Approval              *Approval          `json:"approval,omitempty"`
+}
+
+// Approval is the steward decision bound to the exact prepared state.
+type Approval struct {
+	Actor       string    `json:"actor"`
+	Reason      string    `json:"reason"`
+	At          time.Time `json:"at"`
+	Fingerprint string    `json:"fingerprint"`
 }
 
 type State struct {
@@ -126,6 +151,11 @@ type Submit struct {
 	ReceiptRef, Backend string
 	Paths               []string
 	Admission           Admission
+	FinalizationPolicy  FinalizationPolicy
+	ManifestDigest      string
+	RuntimeInstance     string
+	RuntimeReceipt      string
+	RequiredReceiptIDs  []string
 	Now                 time.Time
 }
 
@@ -257,7 +287,7 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 		if identity == "" {
 			identity = string(admission)
 		}
-		c := Candidate{ID: candidateID(in.SHA, identity), ProjectID: projectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now}
+		c := Candidate{ID: candidateID(in.SHA, identity), ProjectID: projectID, Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs)}
 		// A resubmission of the same SHA (fresh receipt) supersedes any active
 		// prior candidate rather than racing it in the FIFO, and inherits its
 		// durable attempt count so bounded retries cannot be reset by
@@ -440,6 +470,14 @@ func validate(in Submit) error {
 	default:
 		return fmt.Errorf("queue: unsupported candidate admission %q", in.Admission)
 	}
+	switch in.finalizationPolicy() {
+	case AutonomousFinalization, StewardReviewFinalization:
+	default:
+		return fmt.Errorf("queue: unsupported finalization policy %q", in.FinalizationPolicy)
+	}
+	if in.finalizationPolicy() == StewardReviewFinalization && strings.TrimSpace(in.ManifestDigest) == "" {
+		return fmt.Errorf("queue: steward_review finalization requires a manifest digest")
+	}
 	return nil
 }
 func read(path string) (State, error) {
@@ -491,6 +529,10 @@ func normalize(state State) State {
 		if c.Admission == "" {
 			c.Admission = ReceiptAdmission
 		}
+		if c.FinalizationPolicy == "" {
+			c.FinalizationPolicy = AutonomousFinalization
+		}
+		c.RequiredReceiptIDs = cleanStrings(c.RequiredReceiptIDs)
 	}
 	state.Schema = Schema
 	sort.SliceStable(state.Candidates, func(i, j int) bool { return state.Candidates[i].Sequence < state.Candidates[j].Sequence })
@@ -502,6 +544,20 @@ func (in Submit) admission() Admission {
 		return ReceiptAdmission
 	}
 	return in.Admission
+}
+
+func (in Submit) finalizationPolicy() FinalizationPolicy {
+	if in.FinalizationPolicy == "" {
+		return AutonomousFinalization
+	}
+	return in.FinalizationPolicy
+}
+
+func (c Candidate) finalizationPolicy() FinalizationPolicy {
+	if c.FinalizationPolicy == "" {
+		return AutonomousFinalization
+	}
+	return c.FinalizationPolicy
 }
 
 func (c Candidate) admission() Admission {
@@ -576,6 +632,21 @@ func cleanPaths(paths []string) []string {
 	return out
 }
 
+func cleanStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for value := range seen {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // StatusLine is the stable, single-line human representation used by the CLI.
 func StatusLine(c Candidate, at time.Time) string {
 	elapsed := at.Sub(c.Submitted).Round(time.Second)
@@ -590,6 +661,8 @@ func StatusLine(c Candidate, at time.Time) string {
 		next = "retry"
 	case ReadyToFinalize:
 		next = "finalize"
+	case AwaitingApproval:
+		next = "steward approval"
 	case Landed:
 		next = "complete"
 	}

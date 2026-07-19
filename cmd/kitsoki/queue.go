@@ -21,8 +21,32 @@ func queueCmd() *cobra.Command {
 		queueOpCmd("resume", "Return a parked or retry-waiting candidate to the queue with a fresh attempt budget", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Resume(op) }),
 		queueOpCmd("emergency", "Move a candidate into the priority emergency lane", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.MarkEmergency(op) }),
 		queueOpCmd("override", "Human immediate-merge: emergency priority plus a durable, attributed gate waiver", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Override(op) }),
+		queueApproveCmd(),
+		queueOpCmd("unapprove", "Withdraw a steward approval and return the candidate to the approval hold", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Unapprove(op) }),
 		queueOpCmd("reject", "Remove a candidate from the queue; branches and evidence are retained", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Reject(op) }),
 	)
+	return cmd
+}
+
+func queueApproveCmd() *cobra.Command {
+	var project, actor, reason, manifest, tree, receiptDigest string
+	cmd := &cobra.Command{Use: "approve <candidate-id>", Short: "Record a steward approval bound to the current prepared candidate", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if strings.TrimSpace(actor) == "" {
+			actor = os.Getenv("USER")
+		}
+		c, err := (queue.Store{ProjectRoot: project}).Approve(queue.ApprovalOp{ID: args[0], Actor: actor, Reason: reason, ManifestDigest: manifest, TreeSHA: tree, ReceiptDigest: receiptDigest})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(c)
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&actor, "actor", "", "acting steward recorded in evidence (defaults to $USER)")
+	cmd.Flags().StringVar(&reason, "reason", "", "steward reason recorded in evidence")
+	cmd.Flags().StringVar(&manifest, "manifest", "", "current immutable wave or release manifest digest")
+	cmd.Flags().StringVar(&tree, "tree", "", "optional prospective tree SHA to verify")
+	cmd.Flags().StringVar(&receiptDigest, "receipt-digest", "", "optional gate receipt digest to verify")
+	_ = cmd.MarkFlagRequired("manifest")
 	return cmd
 }
 
@@ -47,8 +71,9 @@ func queueOpCmd(verb, short string, run func(queue.Store, queue.Op) (queue.Candi
 	return cmd
 }
 func queueSubmitCmd() *cobra.Command {
-	var project, branch, sha, receiptPath, backend string
+	var project, branch, sha, receiptPath, backend, policy, manifest, runtimeInstance, runtimeReceipt string
 	var paths []string
+	var requiredReceipts []string
 	cmd := &cobra.Command{Use: "submit", Short: "Admit a receipt-bound candidate", RunE: func(cmd *cobra.Command, _ []string) error {
 		raw, err := os.ReadFile(receiptPath)
 		if err != nil {
@@ -58,7 +83,7 @@ func queueSubmitCmd() *cobra.Command {
 		if err := json.Unmarshal(raw, &r); err != nil {
 			return fmt.Errorf("queue: parse receipt: %w", err)
 		}
-		c, err := (queue.Store{ProjectRoot: project}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths})
+		c, err := (queue.Store{ProjectRoot: project}).Submit(queue.Submit{Branch: branch, SHA: sha, Receipt: r, Backend: backend, Paths: paths, FinalizationPolicy: queue.FinalizationPolicy(policy), ManifestDigest: manifest, RuntimeInstance: runtimeInstance, RuntimeReceipt: runtimeReceipt, RequiredReceiptIDs: requiredReceipts})
 		if err != nil {
 			return err
 		}
@@ -70,6 +95,11 @@ func queueSubmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&receiptPath, "receipt", "", "capsule CI receipt JSON")
 	cmd.Flags().StringVar(&backend, "backend", "local", "dispatch backend")
 	cmd.Flags().StringSliceVar(&paths, "path", nil, "changed path (repeatable)")
+	cmd.Flags().StringVar(&policy, "finalization-policy", string(queue.AutonomousFinalization), "finalization policy: autonomous or steward_review")
+	cmd.Flags().StringVar(&manifest, "manifest", "", "immutable wave or release manifest digest required by steward_review")
+	cmd.Flags().StringVar(&runtimeInstance, "runtime-instance", "", "optional exact runtime instance identifier required for review")
+	cmd.Flags().StringVar(&runtimeReceipt, "runtime-receipt", "", "optional runtime receipt identifier required for review")
+	cmd.Flags().StringSliceVar(&requiredReceipts, "required-receipt", nil, "additional receipt id required before approval (repeatable)")
 	_ = cmd.MarkFlagRequired("branch")
 	_ = cmd.MarkFlagRequired("sha")
 	_ = cmd.MarkFlagRequired("receipt")
