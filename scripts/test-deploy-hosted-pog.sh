@@ -5,8 +5,10 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 deploy="$root/scripts/deploy-hosted-pog.sh"
 packager="$root/scripts/package-hosted-pog-state.sh"
 assets="$root/deploy/hosted-pog"
+digest_tool="$assets/state-content-digest.mjs"
 
 bash -n "$deploy" "$packager" "$assets/install.sh"
+node --check "$digest_tool"
 
 for required in \
   "$assets/Caddyfile" \
@@ -14,6 +16,7 @@ for required in \
   "$assets/kitsoki-pog.service" \
   "$assets/node-runtime.env" \
   "$assets/pog-portal.service" \
+	"$digest_tool" \
   "$packager"; do
   [ -f "$required" ] || { echo "missing hosted POG deployment asset: $required" >&2; exit 1; }
 done
@@ -55,6 +58,8 @@ grep -q 'products.join.*pog,constructor-studio' "$assets/install.sh"
 grep -q 'exact products=pog,constructor-studio' "$deploy"
 grep -q 'state mode must be preserve or sync' "$assets/install.sh"
 grep -q 'local-state sync refused to overwrite divergent hosted state' "$assets/install.sh"
+grep -q 'active_state_pristine' "$assets/install.sh"
+grep -q 'state-content-digest.mjs' "$deploy"
 grep -q 'runtime_current_changed' "$assets/install.sh"
 grep -q 'ln -s.*runtime_current.*release/.artifacts' "$assets/install.sh"
 grep -q 'package-hosted-pog-state.sh' "$deploy"
@@ -127,6 +132,25 @@ jq -e '
 [ ! -e "$fixture/unpacked/colony/runner-watch.log" ]
 [ ! -e "$fixture/unpacked/bin/private-cache" ]
 [ "$(sqlite3 "$fixture/unpacked/agent-runner/sessions.db" 'SELECT id FROM sessions;')" = "session-local" ]
+expected_content_digest="$(jq -r .content_sha256 "$fixture/unpacked/manifest.json")"
+[ "$(node "$digest_tool" "$fixture/unpacked" manifest.json 0123456789012345678901234567890123456789)" = "$expected_content_digest" ]
+mv "$fixture/unpacked/manifest.json" "$fixture/unpacked/.hosted-pog-local-state.json"
+printf '%s\n' "$expected_content_digest" >"$fixture/unpacked/.hosted-pog-local-state.sha256"
+[ "$(node "$digest_tool" "$fixture/unpacked" .hosted-pog-local-state.json)" = "$expected_content_digest" ]
+touch "$fixture/unpacked/agent-runner/sessions.db-wal"
+printf '%032d' 0 >"$fixture/unpacked/agent-runner/sessions.db-shm"
+[ "$(node "$digest_tool" "$fixture/unpacked" .hosted-pog-local-state.json)" = "$expected_content_digest" ]
+printf '%s\n' 'hosted WAL mutation' >"$fixture/unpacked/agent-runner/sessions.db-wal"
+if node "$digest_tool" "$fixture/unpacked" .hosted-pog-local-state.json >/dev/null 2>&1; then
+  echo "digest tool accepted a non-empty hosted SQLite WAL" >&2
+  exit 1
+fi
+: >"$fixture/unpacked/agent-runner/sessions.db-wal"
+printf '%s\n' 'hosted mutation' >>"$fixture/unpacked/feedback/feedback.jsonl"
+if node "$digest_tool" "$fixture/unpacked" .hosted-pog-local-state.json >/dev/null 2>&1; then
+  echo "digest tool accepted divergent hosted state" >&2
+  exit 1
+fi
 
 trap - EXIT
 cleanup

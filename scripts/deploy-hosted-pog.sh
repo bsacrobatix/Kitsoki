@@ -173,7 +173,7 @@ trap cleanup EXIT
 
 GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service,state-content-digest.mjs} "$local_stage/"
 state_mode="preserve"
 if [ "$sync_local_state" -eq 1 ]; then
 	[ -x "$STATE_PACKAGER" ] || { echo "missing hosted POG state packager: $STATE_PACKAGER" >&2; exit 2; }

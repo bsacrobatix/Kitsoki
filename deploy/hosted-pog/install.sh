@@ -185,36 +185,10 @@ if [ "$state_mode" = "sync" ]; then
 		mv "$tmp_state_release" "$state_release"
 		tmp_state_release=""
 	fi
-	state_content_digest="$("$node_release/bin/node" -e '
-const crypto = require("node:crypto");
-const fs = require("node:fs");
-const path = require("node:path");
-const root = process.argv[1];
-const expectedPogSha = process.argv[2];
-const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
-if (manifest.schema !== "kitsoki/hosted-pog-local-state/v1" || manifest.pog_sha !== expectedPogSha || !/^[0-9a-f]{64}$/.test(manifest.content_sha256 ?? "")) process.exit(2);
-const hash = crypto.createHash("sha256");
-function walk(directory, prefix = "") {
-  const entries = fs.readdirSync(directory, { withFileTypes: true })
-    .filter((entry) => !(prefix === "" && entry.name === "manifest.json"))
-    .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-  for (const entry of entries) {
-    const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const absolute = path.join(directory, entry.name);
-    if (entry.isDirectory()) walk(absolute, relative);
-    else if (entry.isFile()) {
-      const content = fs.readFileSync(absolute);
-      hash.update(relative); hash.update("\0");
-      hash.update(String(content.length)); hash.update("\0");
-      hash.update(content);
-    } else process.exit(3);
-  }
-}
-walk(root);
-const actual = hash.digest("hex");
-if (actual !== manifest.content_sha256) process.exit(4);
-process.stdout.write(actual);
-' "$state_release" "$pog_sha")" || die "local-state manifest or content digest is invalid"
+	state_digest_tool="$stage/state-content-digest.mjs"
+	[ -f "$state_digest_tool" ] || die "staged local-state digest tool is missing"
+	state_content_digest="$("$node_release/bin/node" "$state_digest_tool" "$state_release" manifest.json "$pog_sha")" \
+		|| die "local-state manifest or content digest is invalid"
 
 	active_state_digest=""
 	[ ! -f "$prepared_runtime/.hosted-pog-local-state.sha256" ] \
@@ -222,30 +196,45 @@ process.stdout.write(actual);
 	active_state_pog_sha=""
 	[ ! -f "$prepared_runtime/.hosted-pog-local-state.json" ] \
 		|| active_state_pog_sha="$("$node_release/bin/node" -e 'try { process.stdout.write(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).pog_sha ?? "") } catch {}' "$prepared_runtime/.hosted-pog-local-state.json")"
-	if [ "$active_state_digest" != "$state_content_digest" ] || [ "$active_state_pog_sha" != "$pog_sha" ]; then
+	active_state_pristine=0
+	if [ -f "$prepared_runtime/.hosted-pog-local-state.json" ] && [ -f "$prepared_runtime/.hosted-pog-local-state.sha256" ]; then
+		active_state_content_digest="$("$node_release/bin/node" "$state_digest_tool" \
+			"$prepared_runtime" .hosted-pog-local-state.json 2>/dev/null || true)"
+		if [ -n "$active_state_content_digest" ] && [ "$active_state_content_digest" = "$active_state_digest" ]; then
+			active_state_pristine=1
+		fi
+	fi
+	if [ "$active_state_digest" != "$state_content_digest" ] || [ "$active_state_pog_sha" != "$pog_sha" ] || [ "$active_state_pristine" -ne 1 ]; then
 		runtime_release="$runtime_release_root/local-$state_content_digest-$(date -u +%Y%m%dT%H%M%SZ)-$$"
 		tmp_runtime_release="$runtime_release.installing"
 		install -d -o pog -g pog -m 0750 "$tmp_runtime_release"
-		cp -a "$prepared_runtime/." "$tmp_runtime_release/"
-		state_conflicts="$stage/pog-state.conflicts"
-		: >"$state_conflicts"
-		while IFS= read -r -d '' source_file; do
-			relative_file="${source_file#"$state_release/"}"
-			[ "$relative_file" != "manifest.json" ] || continue
-			target_file="$tmp_runtime_release/$relative_file"
-			if [ -e "$target_file" ]; then
-				cmp -s "$source_file" "$target_file" || echo "$relative_file" >>"$state_conflicts"
-				continue
+		if [ "$active_state_pristine" -eq 1 ]; then
+			# The active runtime still hashes exactly to the prior imported
+			# snapshot, so replacing it cannot discard hosted-only work.
+			cp -a "$state_release/." "$tmp_runtime_release/"
+			mv "$tmp_runtime_release/manifest.json" "$tmp_runtime_release/.hosted-pog-local-state.json"
+		else
+			cp -a "$prepared_runtime/." "$tmp_runtime_release/"
+			state_conflicts="$stage/pog-state.conflicts"
+			: >"$state_conflicts"
+			while IFS= read -r -d '' source_file; do
+				relative_file="${source_file#"$state_release/"}"
+				[ "$relative_file" != "manifest.json" ] || continue
+				target_file="$tmp_runtime_release/$relative_file"
+				if [ -e "$target_file" ]; then
+					cmp -s "$source_file" "$target_file" || echo "$relative_file" >>"$state_conflicts"
+					continue
+				fi
+				install -d -o pog -g pog -m 0750 "$(dirname "$target_file")"
+				cp -p "$source_file" "$target_file"
+			done < <(find "$state_release" -type f -print0)
+			if [ -s "$state_conflicts" ]; then
+				echo "hosted-pog install: local-state sync conflicts with hosted files:" >&2
+				sed 's/^/  - /' "$state_conflicts" >&2
+				die "local-state sync refused to overwrite divergent hosted state"
 			fi
-			install -d -o pog -g pog -m 0750 "$(dirname "$target_file")"
-			cp -p "$source_file" "$target_file"
-		done < <(find "$state_release" -type f -print0)
-		if [ -s "$state_conflicts" ]; then
-			echo "hosted-pog install: local-state sync conflicts with hosted files:" >&2
-			sed 's/^/  - /' "$state_conflicts" >&2
-			die "local-state sync refused to overwrite divergent hosted state"
+			cp "$state_release/manifest.json" "$tmp_runtime_release/.hosted-pog-local-state.json"
 		fi
-		cp "$state_release/manifest.json" "$tmp_runtime_release/.hosted-pog-local-state.json"
 		printf '%s\n' "$state_content_digest" >"$tmp_runtime_release/.hosted-pog-local-state.sha256"
 		chown -R pog:pog "$tmp_runtime_release"
 		mv "$tmp_runtime_release" "$runtime_release"

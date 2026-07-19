@@ -93,11 +93,15 @@ as caches, compiled binaries, render scratch, temporary workspaces, logs, and
 local runner PIDs. Those files can be several gigabytes, are not product state,
 and in the PID case are actively unsafe to copy to another machine.
 
-State sync is additive and conflict-closed. Missing local files are added and
-byte-identical files are accepted. If a same-path hosted file has diverged,
-the installer stops before moving any active symlink and prints every conflict;
-it never silently overwrites work created by hosted users. A normal `--yes`
-deploy preserves the active hosted runtime without importing local state.
+State sync is conflict-closed. On a repeat sync, the installer first hashes the
+entire active runtime against its prior import manifest. The SQLite shared-memory
+sidecar and an empty WAL are treated as transient; a non-empty WAL is a hosted
+change and closes the update path. If the runtime is still exactly the imported
+snapshot, the new snapshot can safely replace it because no hosted-only work
+exists to lose. Otherwise, only missing or byte-identical files are accepted. A
+divergent same-path file stops the install before any active symlink moves and
+prints every conflict. A normal `--yes` deploy preserves the active hosted
+runtime without importing local state.
 
 The dry run also makes a non-authorizing Device Flow prerequisite probe. The
 helper refuses either a Kitsoki revision or selected POG revision that is
