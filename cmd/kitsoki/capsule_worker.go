@@ -137,7 +137,7 @@ func capsuleWorkerRunCmd() *cobra.Command {
 }
 
 func capsuleWorkerServeCmd() *cobra.Command {
-	var listen, root, certFile, keyFile, tokenEnv, isolation, agentBackend string
+	var listen, root, certFile, keyFile, tokenEnv, isolation, agentBackend, configPath string
 	var networks, passEnv []string
 	var maxBundleBytes int64
 	var requestTimeout, cleanupInterval, minTerminalAge, minSourceAge time.Duration
@@ -148,6 +148,21 @@ func capsuleWorkerServeCmd() *cobra.Command {
 		SilenceUsage: true,
 		Args:         cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var outputs workerserver.OutputSink
+			if configPath != "" {
+				values, err := loadWorkerEnvConfig(configPath)
+				if err != nil {
+					return err
+				}
+				opts := workerServeOptions{listen: listen, root: root, certFile: certFile, keyFile: keyFile, tokenEnv: tokenEnv, isolation: isolation, agentBackend: agentBackend, networks: networks, passEnv: passEnv}
+				applyWorkerEnvConfig(values, cmd.Flags().Changed, &opts)
+				listen, root, certFile, keyFile, tokenEnv, isolation, agentBackend = opts.listen, opts.root, opts.certFile, opts.keyFile, opts.tokenEnv, opts.isolation, opts.agentBackend
+				networks, passEnv = opts.networks, opts.passEnv
+				outputs, err = workerOutputsFromEnv(values)
+				if err != nil {
+					return err
+				}
+			}
 			if root == "" || certFile == "" || keyFile == "" || tokenEnv == "" {
 				return fmt.Errorf("--root, --tls-cert, --tls-key, and --token-env are required")
 			}
@@ -179,6 +194,7 @@ func capsuleWorkerServeCmd() *cobra.Command {
 				},
 				Runner:      capsuleWorkerProcessRunner(agentBackend, passEnv),
 				Environment: environment.Verifier{Probe: environment.HostProbe()},
+				Outputs:     outputs,
 			})
 			if err != nil {
 				return err
@@ -226,6 +242,7 @@ func capsuleWorkerServeCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&configPath, "config", "", "KEY=VALUE env file supplying serve options (VM worker boot contract: "+workerConfigDefaults+")")
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:7443", "HTTPS listen address")
 	cmd.Flags().StringVar(&root, "root", "", "durable worker source/run root")
 	cmd.Flags().StringVar(&certFile, "tls-cert", "", "TLS certificate with the worker host/IP in its SAN")
