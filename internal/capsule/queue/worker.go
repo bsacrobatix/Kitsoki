@@ -457,6 +457,14 @@ func (w Worker) failGate(state *State, c *Candidate, err error) {
 		w.park(c, "gate_harness_failure")
 		return
 	}
+	// A remote gate can fail environmentally (worker died, transport lost)
+	// without any verdict on the candidate; that burns the lenient env-retry
+	// budget, matching speculation and finalization.
+	var envErr EnvError
+	if errors.As(err, &envErr) {
+		w.retryOrParkEnv(c, "gate_failed")
+		return
+	}
 	w.retryOrPark(state, c, "gate_failed")
 }
 

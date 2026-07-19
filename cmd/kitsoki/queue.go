@@ -209,13 +209,27 @@ func queueSummaryLine(s queue.StatusSummary) string {
 // worker is the durable owner of preparation leases and protected finalization.
 // `process` remains available for scripts that want one compatibility drain.
 func queueWorkerCmd() *cobra.Command {
-	var project, gate, target, resolver, repair, workerID string
+	var project, gate, target, resolver, repair, workerID, executorName, executorPipeline string
 	var once bool
 	var concurrency int
 	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration time.Duration
 	var maxAttempts int
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
+		if strings.TrimSpace(gate) != "" && strings.TrimSpace(executorName) != "" {
+			return fmt.Errorf("queue worker: --gate and --executor are mutually exclusive")
+		}
+		if strings.TrimSpace(gate) == "" && strings.TrimSpace(executorName) == "" {
+			return fmt.Errorf("queue worker: exactly one of --gate or --executor is required")
+		}
 		deps := queueProcessDeps(project, gate, target, resolver, repair, workerID)
+		if strings.TrimSpace(executorName) != "" {
+			pipeline := executorPipeline
+			if strings.TrimSpace(pipeline) == "" {
+				pipeline = "change"
+			}
+			deps.Gate = queue.ExecutorGate{ProjectRoot: project, Executor: executorName, Pipeline: pipeline}
+			deps.GateVersion = fmt.Sprintf("executor:%s:%s", executorName, pipeline)
+		}
 		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts
 		deps.EnvRetryDelay, deps.MaxEnvDuration = envRetryDelay, maxEnvDuration
 		n := concurrency
@@ -278,6 +292,8 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
 	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token (suffixed -1.. -N under --concurrency)")
+	cmd.Flags().StringVar(&executorName, "executor", "", "named capsule CI executor (from the project's .kitsoki/ci.yaml catalog) to run the deterministic gate remotely through internal/capsule/ci, instead of --gate's local shell command; mutually exclusive with --gate")
+	cmd.Flags().StringVar(&executorPipeline, "executor-pipeline", "change", "capsule CI pipeline name dispatched via --executor")
 	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step per concurrent worker")
 	cmd.Flags().IntVar(&concurrency, "concurrency", 1, "number of preparation workers to run concurrently in this process; each claims and prepares independently, only the FIFO/emergency head ever finalizes")
 	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
@@ -285,7 +301,6 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
 	cmd.Flags().DurationVar(&envRetryDelay, "env-retry-delay", queue.DefaultEnvRetryDelay, "fixed backoff before retrying an environmental failure (fetch/lock/workspace-create); does not consume the attempt budget")
 	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_input")
-	_ = cmd.MarkFlagRequired("gate")
 	return cmd
 }
 
