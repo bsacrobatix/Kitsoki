@@ -54,6 +54,10 @@ type HTTPRemoteWorker struct {
 	// envelope. Configured Capsule CI remotes always set this; nil is retained
 	// only for adapters whose scheduler pre-materializes source out of band.
 	Source SourceBundler
+	// SourceObjects, when set, routes source transport through shared object
+	// storage: the bundle is published to the bucket and the worker receives a
+	// presigned fetch reference instead of the raw bytes.
+	SourceObjects SourceObjects
 }
 
 func (w HTTPRemoteWorker) Describe(ctx context.Context) (Capabilities, error) {
@@ -198,17 +202,36 @@ func (w HTTPRemoteWorker) ensureSource(ctx context.Context, prepared Prepared, s
 		return nil
 	}
 	fields["source_cache"] = "miss"
+	if w.SourceObjects != nil {
+		fields["source_transport"] = "bucket"
+	}
 	if sink != nil {
 		if err := sink.Emit(ctx, Event{Kind: "capsule.executor.source.uploading", At: time.Now().UTC(), EnvelopeDigest: prepared.Envelope.Digest, ExecutionID: prepared.ID, Outcome: "running", Fields: fields}); err != nil {
 			return fmt.Errorf("capsule executor: persist source-upload event: %w", err)
 		}
 	}
-	put := newRemoteCallMetadata(http.MethodPut, path, w.Endpoint)
-	_, err = w.callWithMetadataAccept(ctx, &put, remoteRawBody{Data: bundle.Data, ContentType: "application/vnd.git.bundle", Headers: map[string]string{"X-Kitsoki-Bundle-Digest": bundle.Digest}}, nil, nil)
+	var put remoteCallMetadata
+	if w.SourceObjects != nil {
+		request, ensureErr := w.SourceObjects.EnsureBundle(ctx, bundle)
+		if ensureErr != nil {
+			return fmt.Errorf("capsule executor: publish source to object store: %w", ensureErr)
+		}
+		if validateErr := ValidateSourceFetchRequest(request, 0); validateErr != nil {
+			return fmt.Errorf("capsule executor: source object reference: %w", validateErr)
+		}
+		put = newRemoteCallMetadata(http.MethodPost, path, w.Endpoint)
+		_, err = w.callWithMetadataAccept(ctx, &put, request, nil, nil)
+	} else {
+		put = newRemoteCallMetadata(http.MethodPut, path, w.Endpoint)
+		_, err = w.callWithMetadataAccept(ctx, &put, remoteRawBody{Data: bundle.Data, ContentType: "application/vnd.git.bundle", Headers: map[string]string{"X-Kitsoki-Bundle-Digest": bundle.Digest}}, nil, nil)
+	}
 	if err != nil {
 		return err
 	}
 	fields = put.fields()
+	if w.SourceObjects != nil {
+		fields["source_transport"] = "bucket"
+	}
 	fields["source_digest"] = bundle.Head
 	fields["bundle_digest"] = bundle.Digest
 	fields["bundle_bytes"] = bundle.Size

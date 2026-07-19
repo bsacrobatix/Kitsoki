@@ -41,6 +41,23 @@ func (f EnvironmentVerifierFunc) Verify(ctx context.Context, root string, lock e
 	return f(ctx, root, lock)
 }
 
+// SourceFetcher downloads at most max bytes from a controller-supplied fetch
+// URL (normally a presigned object-store link). The default enforces https.
+type SourceFetcher func(ctx context.Context, url string, max int64) ([]byte, error)
+
+// OutputSink mirrors durable run state to shared object storage so results
+// survive the worker host itself (an ephemeral VM may be destroyed right
+// after — or in a failure, during — a run). Mirroring is best-effort: errors
+// are recorded on the run timeline but never fail the run, because the
+// worker's local durable root remains the primary record.
+type OutputSink interface {
+	// MirrorRun uploads the small run record checkpoint.
+	MirrorRun(ctx context.Context, record RunRecord) error
+	// MirrorTerminal uploads the full run output set (trace, artifacts) for a
+	// terminal record; runDir is the worker-local run directory.
+	MirrorTerminal(ctx context.Context, record RunRecord, runDir string) error
+}
+
 type Config struct {
 	Root           string
 	Token          string
@@ -50,6 +67,12 @@ type Config struct {
 	Runner         Runner
 	Environment    EnvironmentVerifier
 	Now            func() time.Time
+	// SourceFetcher serves POST /v1/capsules/sources/{head} fetch-by-reference
+	// requests; nil installs a bounded https-only default.
+	SourceFetcher SourceFetcher
+	// Outputs, when set, mirrors run records and terminal outputs to shared
+	// object storage.
+	Outputs OutputSink
 }
 
 type Server struct {
@@ -105,6 +128,9 @@ func New(cfg Config) (*Server, error) {
 	if cfg.Now == nil {
 		cfg.Now = func() time.Time { return time.Now().UTC() }
 	}
+	if cfg.SourceFetcher == nil {
+		cfg.SourceFetcher = defaultSourceFetcher
+	}
 	if cfg.Capabilities.ID == "" {
 		// A bare worker process has no portable network confinement. Operators
 		// may advertise none/replay only when the enclosing container, VM, or
@@ -125,6 +151,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/capsules/capabilities", s.capabilities)
 	mux.HandleFunc("HEAD /v1/capsules/sources/{head}", s.sourceHead)
 	mux.HandleFunc("PUT /v1/capsules/sources/{head}", s.sourcePut)
+	mux.HandleFunc("POST /v1/capsules/sources/{head}", s.sourceFetch)
 	mux.HandleFunc("POST /v1/capsules/validate", s.validate)
 	mux.HandleFunc("POST /v1/capsules/run", s.run)
 	mux.HandleFunc("GET /v1/capsules/executions/{id}", s.executionGet)
@@ -196,6 +223,47 @@ func (s *Server) sourcePut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bundle := executor.SourceBundle{Schema: executor.SourceBundleSchema, Format: executor.SourceBundleFormat, Head: head, Digest: bundleDigest, Size: int64(len(data)), Data: data}
+	if err := executor.ValidateSourceBundle(bundle, s.cfg.MaxBundleBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), requestID(r))
+		return
+	}
+	if err := s.storeSource(r.Context(), bundle); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), requestID(r))
+		return
+	}
+	writeJSON(w, http.StatusCreated, SourceMeta{Schema: SourceMetaSchema, Head: head, BundleDigest: bundle.Digest, Size: bundle.Size, StoredAt: s.cfg.Now()})
+}
+
+// sourceFetch accepts a fetch-by-reference request: instead of carrying the
+// bundle bytes, the controller names a time-limited URL (a presigned object
+// store link) plus the expected digest and size. The worker downloads,
+// verifies, and stores exactly as if the bytes had been PUT directly.
+func (s *Server) sourceFetch(w http.ResponseWriter, r *http.Request) {
+	head, err := cleanObjectID(r.PathValue("head"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), requestID(r))
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var request executor.SourceFetchRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid source fetch request", requestID(r))
+		return
+	}
+	if err := executor.ValidateSourceFetchRequest(request, s.cfg.MaxBundleBytes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error(), requestID(r))
+		return
+	}
+	data, err := s.cfg.SourceFetcher(r.Context(), request.URL, request.Size)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, boundedError(fmt.Errorf("fetch source object: %w", err)), requestID(r))
+		return
+	}
+	bundle := executor.SourceBundle{Schema: executor.SourceBundleSchema, Format: executor.SourceBundleFormat, Head: head, Digest: request.Digest, Size: int64(len(data)), Data: data}
+	if bundle.Size != request.Size {
+		writeError(w, http.StatusBadGateway, "fetched source object size does not match reference", requestID(r))
+		return
+	}
 	if err := executor.ValidateSourceBundle(bundle, s.cfg.MaxBundleBytes); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error(), requestID(r))
 		return
@@ -330,56 +398,56 @@ func (s *Server) execute(ctx context.Context, prepared executor.Prepared, reqID 
 	runDir := s.runDir(prepared.ID)
 	workspace := filepath.Join(runDir, "workspace")
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
-		return s.fail(record, prepared, "materialize", err)
+		return s.fail(ctx, record, prepared, "materialize", err)
 	}
 	record.Stage = "materializing_source"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.source.materializing", "running", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(record, prepared, "materialize", fmt.Errorf("capsule worker: persist materializing-source checkpoint: %w", err))
+		return s.fail(ctx, record, prepared, "materialize", fmt.Errorf("capsule worker: persist materializing-source checkpoint: %w", err))
 	}
 	if err := cloneBundle(ctx, s.sourceBundlePath(prepared.Envelope.SourceDigest), workspace, prepared.Envelope.SourceDigest); err != nil {
-		return s.fail(record, prepared, "materialize", err)
+		return s.fail(ctx, record, prepared, "materialize", err)
 	}
 	storyPath, err := confinedStoryPath(workspace, prepared.Envelope.StoryPath)
 	if err != nil {
-		return s.fail(record, prepared, "verify_story", err)
+		return s.fail(ctx, record, prepared, "verify_story", err)
 	}
 	digest, err := storydigest.Compute(workspace, storyPath)
 	if err != nil {
-		return s.fail(record, prepared, "verify_story", err)
+		return s.fail(ctx, record, prepared, "verify_story", err)
 	}
 	if digest.Digest != prepared.Envelope.StoryDigest {
-		return s.fail(record, prepared, "verify_story", fmt.Errorf("capsule worker: story closure digest mismatch: got %s, want %s", digest.Digest, prepared.Envelope.StoryDigest))
+		return s.fail(ctx, record, prepared, "verify_story", fmt.Errorf("capsule worker: story closure digest mismatch: got %s, want %s", digest.Digest, prepared.Envelope.StoryDigest))
 	}
 	record.Stage = "verifying_environment"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.environment.verifying", "running", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(record, prepared, "verify_environment", err)
+		return s.fail(ctx, record, prepared, "verify_environment", err)
 	}
 	if err := s.cfg.Environment.Verify(ctx, workspace, prepared.Envelope.Environment); err != nil {
-		return s.fail(record, prepared, "verify_environment", err)
+		return s.fail(ctx, record, prepared, "verify_environment", err)
 	}
 	record.Stage = "environment_verified"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.environment.verified", "passed", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(record, prepared, "verify_environment", err)
+		return s.fail(ctx, record, prepared, "verify_environment", err)
 	}
 	record.Stage = "running_story"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.story.started", "running", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(record, prepared, "running_story", fmt.Errorf("capsule worker: persist running-story checkpoint: %w", err))
+		return s.fail(ctx, record, prepared, "running_story", fmt.Errorf("capsule worker: persist running-story checkpoint: %w", err))
 	}
 	tracePath := filepath.Join(runDir, "story-trace.jsonl")
 	result, err := s.cfg.Runner(ctx, workspace, prepared, tracePath)
 	if err != nil {
-		return s.fail(record, prepared, "running_story", err)
+		return s.fail(ctx, record, prepared, "running_story", err)
 	}
 	if result.ExitCode != 0 {
-		return s.fail(record, prepared, "running_story", fmt.Errorf("capsule worker: runner reported non-zero exit code %d", result.ExitCode))
+		return s.fail(ctx, record, prepared, "running_story", fmt.Errorf("capsule worker: runner reported non-zero exit code %d", result.ExitCode))
 	}
 	result.ExecutionID = prepared.ID
 	if result.Provider == nil {
@@ -393,13 +461,14 @@ func (s *Server) execute(ctx context.Context, prepared executor.Prepared, reqID 
 	record.TerminalAt = s.cfg.Now()
 	record.UpdatedAt = record.TerminalAt
 	s.appendEvent(&record, prepared, "capsule.worker.completed", "passed", "")
+	s.mirrorOutputs(ctx, &record, prepared)
 	if err := s.writeRun(record); err != nil {
-		return s.fail(record, prepared, "persist_terminal", fmt.Errorf("capsule worker: persist completed checkpoint: %w", err))
+		return s.fail(ctx, record, prepared, "persist_terminal", fmt.Errorf("capsule worker: persist completed checkpoint: %w", err))
 	}
 	return record, result, nil
 }
 
-func (s *Server) fail(record RunRecord, prepared executor.Prepared, stage string, err error) (RunRecord, executor.Result, error) {
+func (s *Server) fail(ctx context.Context, record RunRecord, prepared executor.Prepared, stage string, err error) (RunRecord, executor.Result, error) {
 	if current, readErr := s.readRun(record.ExecutionID); readErr == nil && current.EnvelopeDigest == record.EnvelopeDigest && len(current.Events) > len(record.Events) {
 		record.Events = current.Events
 	}
@@ -416,6 +485,7 @@ func (s *Server) fail(record RunRecord, prepared executor.Prepared, stage string
 	record.TerminalAt = s.cfg.Now()
 	record.UpdatedAt = record.TerminalAt
 	s.appendEvent(&record, prepared, eventKind, record.Status, record.Error)
+	s.mirrorOutputs(ctx, &record, prepared)
 	if persistErr := s.writeRun(record); persistErr != nil {
 		combined := errors.Join(err, fmt.Errorf("capsule worker: persist terminal %s checkpoint: %w", record.Status, persistErr))
 		record.Error = boundedError(combined)
@@ -553,7 +623,60 @@ func (s *Server) appendEvent(record *RunRecord, prepared executor.Prepared, kind
 }
 
 func (s *Server) writeRun(record RunRecord) error {
-	return writeJSONFile(s.runRecordPath(record.ExecutionID), record)
+	if err := writeJSONFile(s.runRecordPath(record.ExecutionID), record); err != nil {
+		return err
+	}
+	// Best-effort checkpoint mirror; the local durable root is authoritative,
+	// so bucket unavailability must never fail or block a run for long.
+	if s.cfg.Outputs != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = s.cfg.Outputs.MirrorRun(ctx, record)
+	}
+	return nil
+}
+
+// mirrorOutputs uploads the terminal output set (trace and artifacts) and
+// records the outcome on the run timeline. The mirrored run.json is written by
+// the following writeRun, so the bucket copy includes this event too.
+func (s *Server) mirrorOutputs(ctx context.Context, record *RunRecord, prepared executor.Prepared) {
+	if s.cfg.Outputs == nil {
+		return
+	}
+	mirrorCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+	defer cancel()
+	outcome, errText := "passed", ""
+	if err := s.cfg.Outputs.MirrorTerminal(mirrorCtx, *record, s.runDir(record.ExecutionID)); err != nil {
+		outcome, errText = "failed", boundedError(err)
+	}
+	record.UpdatedAt = s.cfg.Now()
+	s.appendEvent(record, prepared, "capsule.worker.outputs.mirrored", outcome, errText)
+}
+
+func defaultSourceFetcher(ctx context.Context, fetchURL string, max int64) ([]byte, error) {
+	if !strings.HasPrefix(fetchURL, "https://") {
+		return nil, fmt.Errorf("capsule worker: source fetch URL must use https")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("capsule worker: source fetch returned %s", response.Status)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("capsule worker: source object exceeds referenced size %d", max)
+	}
+	return data, nil
 }
 
 func (s *Server) readRun(id string) (RunRecord, error) {

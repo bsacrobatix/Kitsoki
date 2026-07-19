@@ -1,0 +1,350 @@
+package bucketsource_test
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"kitsoki/internal/capsule/bucketsource"
+	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/environment"
+	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/storydigest"
+	"kitsoki/internal/capsule/workerserver"
+	"kitsoki/internal/capsuletest"
+	"kitsoki/internal/objectstore"
+)
+
+// countingStore wraps a Store and counts Puts per key so tests can assert
+// write-once semantics for frozen sources.
+type countingStore struct {
+	objectstore.Store
+	mu   sync.Mutex
+	puts map[string]int
+}
+
+func (c *countingStore) Put(ctx context.Context, key string, body io.Reader, size int64, opts objectstore.PutOptions) (objectstore.Meta, error) {
+	c.mu.Lock()
+	if c.puts == nil {
+		c.puts = map[string]int{}
+	}
+	c.puts[key]++
+	c.mu.Unlock()
+	return c.Store.Put(ctx, key, body, size, opts)
+}
+
+func (c *countingStore) putCount(key string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.puts[key]
+}
+
+// fakeFetcher resolves the Fake store's opaque presign URLs back into reads,
+// standing in for the https fetch a production worker performs.
+func fakeFetcher(store objectstore.Store) workerserver.SourceFetcher {
+	return func(ctx context.Context, fetchURL string, max int64) ([]byte, error) {
+		u, err := url.Parse(fetchURL)
+		if err != nil || u.Scheme != "fake-presign" || u.Host != "get" {
+			return nil, fmt.Errorf("unexpected fetch URL %q", fetchURL)
+		}
+		rc, _, err := store.Get(ctx, strings.TrimPrefix(u.Path, "/"))
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		return io.ReadAll(io.LimitReader(rc, max+1))
+	}
+}
+
+type collectingSink struct {
+	mu     sync.Mutex
+	events []executor.Event
+}
+
+func (c *collectingSink) Emit(_ context.Context, event executor.Event) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, event)
+	return nil
+}
+
+func (c *collectingSink) find(kind string) []executor.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var out []executor.Event
+	for _, event := range c.events {
+		if event.Kind == kind {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+// TestBucketTransportEndToEnd drives the full path: controller publishes the
+// bundle to the (fake) bucket and sends a fetch reference; the worker
+// downloads, verifies, materializes, runs the story, and mirrors run record +
+// trace back to the bucket. A second fresh worker sharing the bucket then
+// exercises the bucket cache hit: the frozen bundle is never uploaded twice.
+func TestBucketTransportEndToEnd(t *testing.T) {
+	project := capsuletest.Open(t, "clean-repo")
+	storyRel := filepath.ToSlash(filepath.Join(".kitsoki", "stories", "ci", "app.yaml"))
+	write(t, filepath.Join(project, storyRel), passingStory)
+	envRel := writeEnvironment(t, project)
+	git(t, project, "add", storyRel, envRel)
+	git(t, project, "-c", "user.name=Capsule Test", "-c", "user.email=capsule@example.invalid", "commit", "-m", "Add no-LLM CI story")
+	head := strings.TrimSpace(git(t, project, "rev-parse", "HEAD"))
+	closure, err := storydigest.Compute(project, storyRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envLock, err := (environment.Resolver{ProjectRoot: project}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bucket := &countingStore{Store: objectstore.NewFake()}
+	publisher := bucketsource.Publisher{Store: bucket, PresignTTL: time.Hour}
+	runner := func(ctx context.Context, workspace string, prepared executor.Prepared, tracePath string) (executor.Result, error) {
+		if err := os.WriteFile(tracePath, []byte(`{"kind":"story.turn","outcome":"passed"}`+"\n"), 0o600); err != nil {
+			return executor.Result{}, err
+		}
+		return executor.Result{ExitCode: 0, VerdictArtifact: "verdict:bucket-e2e"}, nil
+	}
+
+	newWorker := func(root string) *httptest.Server {
+		worker, err := workerserver.New(workerserver.Config{
+			Root:          root,
+			Token:         "test-token",
+			RequireAuth:   true,
+			Capabilities:  isolatedTestCapabilities(),
+			Runner:        runner,
+			Environment:   environment.Verifier{},
+			SourceFetcher: fakeFetcher(bucket),
+			Outputs:       bucketsource.OutputMirror{Store: bucket},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		server := httptest.NewTLSServer(worker.Handler())
+		t.Cleanup(server.Close)
+		return server
+	}
+
+	envelope, err := executor.Seal(executor.Envelope{
+		JobID:            "job-bucket-e2e",
+		ProjectID:        "bucket-test",
+		DefinitionDigest: "sha256:def",
+		Instance:         control.Handle{ID: "workspace", Generation: 1},
+		SourceDigest:     head,
+		StoryPath:        storyRel,
+		StoryDigest:      closure.Digest,
+		Environment:      envLock,
+		Trigger:          map[string]any{"kind": "local", "requested_pipeline": "change"},
+		Policy:           executor.Policy{Network: "none", ExternalWrite: "deny"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runOn := func(server *httptest.Server, id string, sink *collectingSink) executor.Result {
+		controller := executor.HTTPRemoteWorker{
+			Endpoint:   server.URL,
+			Client:     server.Client(),
+			Credential: func(context.Context) (string, error) { return "test-token", nil },
+			Source: executor.SourceBundlerFunc(func(ctx context.Context, _ executor.Envelope) (executor.SourceBundle, error) {
+				return executor.GitBundle(ctx, project, head, 0)
+			}),
+			SourceObjects: publisher,
+		}
+		prepared := executor.Prepared{ID: id, Envelope: envelope, Placement: "remote", Applied: envelope.Policy}
+		result, err := controller.Run(context.Background(), prepared, nil, sink)
+		if err != nil {
+			t.Fatalf("run %s: %v", id, err)
+		}
+		return result
+	}
+
+	bundleKey := "sources/" + head + "/bundle.git"
+	metaKey := "sources/" + head + "/meta.json"
+
+	sink := &collectingSink{}
+	result := runOn(newWorker(t.TempDir()), "bucket-e2e-1", sink)
+	if result.ExecutionID != "bucket-e2e-1" {
+		t.Fatalf("result = %+v", result)
+	}
+	if got := bucket.putCount(bundleKey); got != 1 {
+		t.Fatalf("bundle uploaded %d times, want 1", got)
+	}
+	if _, err := bucket.Head(context.Background(), metaKey); err != nil {
+		t.Fatalf("meta.json not published: %v", err)
+	}
+	uploads := sink.find("capsule.executor.source.uploading")
+	if len(uploads) != 1 || uploads[0].Fields["source_transport"] != "bucket" {
+		t.Fatalf("source.uploading events = %+v", uploads)
+	}
+
+	// Run record + trace mirrored under runs/<id>/ with terminal status and
+	// the outputs.mirrored marker.
+	var mirrored workerserver.RunRecord
+	readJSONObject(t, bucket, "runs/bucket-e2e-1/run.json", &mirrored)
+	if mirrored.Status != "completed" || mirrored.Stage != "terminal" {
+		t.Fatalf("mirrored run = %+v", mirrored)
+	}
+	if !hasEvent(mirrored.Events, "capsule.worker.outputs.mirrored") {
+		t.Fatalf("mirrored run missing outputs.mirrored event: %+v", mirrored.Events)
+	}
+	trace, _, err := bucket.Get(context.Background(), "runs/bucket-e2e-1/story-trace.jsonl")
+	if err != nil {
+		t.Fatalf("story trace not mirrored: %v", err)
+	}
+	traceData, _ := io.ReadAll(trace)
+	trace.Close()
+	if !strings.Contains(string(traceData), "story.turn") {
+		t.Fatalf("mirrored trace = %q", traceData)
+	}
+
+	// A brand-new worker (empty source cache) sharing the bucket: controller
+	// republish is skipped, fetch reference reuses the frozen copy.
+	sink2 := &collectingSink{}
+	result2 := runOn(newWorker(t.TempDir()), "bucket-e2e-2", sink2)
+	if result2.ExecutionID != "bucket-e2e-2" {
+		t.Fatalf("result2 = %+v", result2)
+	}
+	if got := bucket.putCount(bundleKey); got != 1 {
+		t.Fatalf("frozen bundle re-uploaded (%d puts), want write-once", got)
+	}
+	if _, err := bucket.Head(context.Background(), "runs/bucket-e2e-2/run.json"); err != nil {
+		t.Fatalf("second run record not mirrored: %v", err)
+	}
+}
+
+func TestPublisherRejectsForeignMetadata(t *testing.T) {
+	store := objectstore.NewFake()
+	head := strings.Repeat("a", 40)
+	// Publish a sidecar claiming a different head at this key.
+	rogue, _ := json.Marshal(bucketsource.SourceObjectMeta{Schema: bucketsource.SourceObjectMetaSchema, Head: strings.Repeat("b", 40), BundleDigest: "sha256:rogue", Size: 3})
+	if _, err := store.Put(context.Background(), "sources/"+head+"/meta.json", strings.NewReader(string(rogue)), int64(len(rogue)), objectstore.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("xyz")
+	bundle := executor.SourceBundle{Schema: executor.SourceBundleSchema, Format: executor.SourceBundleFormat, Head: head, Digest: sha256Digest(data), Size: 3, Data: data}
+	_, err := bucketsource.Publisher{Store: store}.EnsureBundle(context.Background(), bundle)
+	if err == nil || !strings.Contains(err.Error(), "names head") {
+		t.Fatalf("EnsureBundle error = %v", err)
+	}
+}
+
+func readJSONObject(t *testing.T, store objectstore.Store, key string, out any) {
+	t.Helper()
+	rc, _, err := store.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get %s: %v", key, err)
+	}
+	defer rc.Close()
+	if err := json.NewDecoder(rc).Decode(out); err != nil {
+		t.Fatalf("decode %s: %v", key, err)
+	}
+}
+
+func hasEvent(events []executor.Event, kind string) bool {
+	for _, event := range events {
+		if event.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func sha256Digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func write(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeEnvironment(t *testing.T, project string) string {
+	t.Helper()
+	rel := filepath.ToSlash(filepath.Join(".kitsoki", "environments", "ci.yaml"))
+	write(t, filepath.Join(project, rel), "schema: capsule-environment/v1\nid: ci\nnetwork: none\nsandbox: supervised\n")
+	return rel
+}
+
+func isolatedTestCapabilities() executor.Capabilities {
+	return executor.Capabilities{ID: "capsule-http-worker", Placements: []string{"remote"}, Isolation: "supervised", Networks: []string{"none", "replay"}, Cancellable: true}
+}
+
+func git(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return string(out)
+}
+
+const passingStory = `app:
+  id: remote-worker-test
+  version: 0.1.0
+  title: Remote worker test
+  author: Test
+  license: CC0
+world:
+  ci_job_id: { type: string, default: "" }
+  ci_pipeline: { type: string, default: "" }
+  ci_trigger: { type: object, default: {} }
+  ci_source: { type: object, default: {} }
+  ci_workspace: { type: object, default: {} }
+  ci_environment: { type: object, default: {} }
+  ci_policy: { type: object, default: {} }
+  ci_verdict: { type: object, default: {} }
+intents:
+  run: { description: run, examples: [run], priority: 1 }
+root: idle
+states:
+  idle:
+    view: [{ prose: ready }]
+    on:
+      run:
+        - target: done
+          effects:
+            - set:
+                ci_verdict:
+                  schema: capsule-ci-verdict/v1
+                  pipeline: "{{ world.ci_pipeline }}"
+                  outcome: passed
+                  summary: no-LLM remote proof
+                  checks:
+                    - id: deterministic
+                      kind: deterministic
+                      outcome: passed
+                      evidence: [worker:test]
+                  promotion_eligible: true
+                  source_digest: "{{ world.ci_source.digest }}"
+                  story_digest: "{{ world.ci_trigger.story_digest }}"
+                  environment_digest: "{{ world.ci_environment.digest }}"
+                  envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+  done:
+    terminal: true
+    view: [{ prose: passed }]
+`
