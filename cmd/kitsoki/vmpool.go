@@ -59,7 +59,7 @@ func vmpoolCmd() *cobra.Command {
 		Long: "Operate the DigitalOcean-backed ephemeral-worker pool (internal/capsule/vmpool): inspect and reconcile\n" +
 			"durable pool state, and author the base image every worker boots from.\n\n" + vmpoolSecurityNote,
 	}
-	cmd.AddCommand(vmpoolStatusCmd(), vmpoolReleaseCmd(), vmpoolReapCmd(), vmpoolImageCmd(), vmpoolSmokeCmd())
+	cmd.AddCommand(vmpoolStatusCmd(), vmpoolReleaseCmd(), vmpoolReapCmd(), vmpoolImageCmd(), vmpoolSmokeCmd(), vmpoolRoundtripCmd())
 	return cmd
 }
 
