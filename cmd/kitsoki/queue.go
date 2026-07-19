@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -136,47 +138,75 @@ func queueStatusCmd() *cobra.Command {
 func queueWorkerCmd() *cobra.Command {
 	var project, gate, target, resolver, repair, workerID string
 	var once bool
+	var concurrency int
 	var retryDelay, maxRetryDelay, envRetryDelay, maxEnvDuration time.Duration
 	var maxAttempts int
 	cmd := &cobra.Command{Use: "worker", Short: "Run the merge-train worker", RunE: func(cmd *cobra.Command, _ []string) error {
 		deps := queueProcessDeps(project, gate, target, resolver, repair, workerID)
 		deps.RetryDelay, deps.MaxRetryDelay, deps.MaxAttempts = retryDelay, maxRetryDelay, maxAttempts
 		deps.EnvRetryDelay, deps.MaxEnvDuration = envRetryDelay, maxEnvDuration
-		worker := queue.Worker{Store: queue.Store{ProjectRoot: project}, Deps: deps}
-		for {
-			progressed, err := worker.RunOnce(cmd.Context())
-			if err != nil {
+		n := concurrency
+		if n < 1 {
+			n = 1
+		}
+		store := queue.Store{ProjectRoot: project}
+		if n > 1 {
+			// n goroutines in this one process share the same durable
+			// state.json and its file lock. That contention is brief (the
+			// lock is held only for the short claim/update, never across a
+			// gate run — see the queue package doc), but with the default
+			// zero LockWait any two goroutines racing that file lock at the
+			// same instant fail each other outright with ErrBusy instead of
+			// the brief wait a real conflict deserves.
+			store.LockWait = 2 * time.Second
+		}
+		if n == 1 {
+			if err := runQueueWorkerLoop(cmd.Context(), store, deps, once); err != nil {
 				return err
 			}
-			if once {
-				state, err := (queue.Store{ProjectRoot: project}).List()
+		} else {
+			// Each of the n loops claims and prepares independently under
+			// its own worker-id lease (leases already isolate concurrent
+			// claimants, and the B1 heartbeat keeps a long gate's lease
+			// alive) — only the FIFO/emergency head ever finalizes, so
+			// concurrent workers cannot land out of order or double-land.
+			base := first(workerID, "queue-worker")
+			var wg sync.WaitGroup
+			errs := make(chan error, n)
+			for i := 1; i <= n; i++ {
+				workerDeps := deps
+				workerDeps.WorkerID = fmt.Sprintf("%s-%d", base, i)
+				wg.Add(1)
+				go func(d queue.ProcessDeps) {
+					defer wg.Done()
+					errs <- runQueueWorkerLoop(cmd.Context(), store, d, once)
+				}(workerDeps)
+			}
+			wg.Wait()
+			close(errs)
+			for err := range errs {
 				if err != nil {
 					return err
 				}
-				return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
-			}
-			if !progressed {
-				select {
-				case <-cmd.Context().Done():
-					return cmd.Context().Err()
-				case <-time.After(250 * time.Millisecond):
-				}
-				continue
-			}
-			select {
-			case <-cmd.Context().Done():
-				return cmd.Context().Err()
-			case <-time.After(250 * time.Millisecond):
 			}
 		}
+		if !once {
+			return nil
+		}
+		state, err := (queue.Store{ProjectRoot: project}).List()
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&gate, "gate", "", "deterministic command run against each prepared tree")
 	cmd.Flags().StringVar(&target, "target", "staging/local", "protected destination ref")
 	cmd.Flags().StringVar(&resolver, "resolver", "", "bounded resolver command for protected-target continuations")
 	cmd.Flags().StringVar(&repair, "repair", "", "bounded repair command for a red deterministic gate")
-	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token")
-	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step")
+	cmd.Flags().StringVar(&workerID, "worker-id", "", "durable worker owner token (suffixed -1.. -N under --concurrency)")
+	cmd.Flags().BoolVar(&once, "once", false, "perform one claim, preparation, or finalization step per concurrent worker")
+	cmd.Flags().IntVar(&concurrency, "concurrency", 1, "number of preparation workers to run concurrently in this process; each claims and prepares independently, only the FIFO/emergency head ever finalizes")
 	cmd.Flags().DurationVar(&retryDelay, "retry-delay", queue.DefaultRetryDelay, "base backoff before a failed candidate is retried")
 	cmd.Flags().DurationVar(&maxRetryDelay, "max-retry-delay", queue.DefaultMaxRetryDelay, "backoff ceiling for repeated failures")
 	cmd.Flags().IntVar(&maxAttempts, "max-attempts", queue.DefaultMaxAttempts, "attempts before a failing candidate parks as needs_input")
@@ -184,6 +214,46 @@ func queueWorkerCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&maxEnvDuration, "max-env-duration", queue.DefaultMaxEnvDuration, "wall-clock bound on a persistent environmental-failure streak before parking as needs_input")
 	_ = cmd.MarkFlagRequired("gate")
 	return cmd
+}
+
+// runQueueWorkerLoop drives one worker's claim/prepare/finalize loop to
+// completion (--once: exactly one step) or until ctx is cancelled. It never
+// prints; the caller decides when and how often to report state, so running
+// several of these concurrently under --concurrency does not interleave or
+// duplicate output.
+func runQueueWorkerLoop(ctx context.Context, store queue.Store, deps queue.ProcessDeps, once bool) error {
+	worker := queue.Worker{Store: store, Deps: deps}
+	for {
+		progressed, err := worker.RunOnce(ctx)
+		if err != nil {
+			return err
+		}
+		if once {
+			return nil
+		}
+		if !progressed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(250 * time.Millisecond):
+			}
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+func first(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // process uses the managed staging-capsule lifecycle and requires an explicit
