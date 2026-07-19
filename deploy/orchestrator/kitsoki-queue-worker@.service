@@ -1,0 +1,73 @@
+[Unit]
+Description=Kitsoki merge-queue worker for %i (kitsoki queue worker)
+Documentation=file:///opt/kitsoki-orchestrator/current/deploy/orchestrator/README.md
+Wants=network-online.target
+After=network-online.target kitsoki-daemon.service
+
+# Not used by the P0 topology (one project, one worker: plain
+# kitsoki-queue-worker.service is enough — see README.md). Instantiate this
+# template only when the orchestrator hosts more than one project/target pair,
+# e.g. `systemctl enable --now kitsoki-queue-worker@pog-main.service` and a
+# second `kitsoki-queue-worker@other-project.service`, each reading its own
+# %i-scoped env file below so they never share PROJECT_ROOT/TARGET/state.
+
+[Service]
+Type=simple
+User=kitsoki
+Group=kitsoki
+UMask=0027
+Environment=HOME=/var/lib/kitsoki
+Environment=XDG_CACHE_HOME=/var/lib/kitsoki/.cache
+
+# %i is the instance name from the unit suffix (e.g. "pog-main"), giving each
+# instance its own env file instead of sharing the base unit's
+# /etc/kitsoki/queue-worker.env. Same knobs, same single-file-edit-and-restart
+# contract, just per-instance: deploy/orchestrator/README.md.
+EnvironmentFile=/etc/kitsoki/queue-worker-%i.env
+
+ExecStart=/usr/local/bin/kitsoki queue worker \
+	--project "${PROJECT_ROOT}" \
+	--target "${TARGET}" \
+	--gate "${GATE}" \
+	--worker-id "queue-worker-%i" \
+	--concurrency "${CONCURRENCY}" \
+	--retry-delay "${RETRY_DELAY}" \
+	--max-retry-delay "${MAX_RETRY_DELAY}" \
+	--max-attempts "${MAX_ATTEMPTS}"
+
+Restart=always
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=8
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kitsoki-queue-worker-%i
+
+# Same pragmatic hardening rationale as kitsoki-queue-worker.service.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+StateDirectory=kitsoki
+StateDirectoryMode=0750
+LogsDirectory=kitsoki
+LogsDirectoryMode=0750
+PrivateTmp=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

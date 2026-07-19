@@ -1,0 +1,97 @@
+[Unit]
+Description=Kitsoki merge-queue worker (kitsoki queue worker)
+Documentation=file:///opt/kitsoki-orchestrator/current/deploy/orchestrator/README.md
+Wants=network-online.target
+After=network-online.target kitsoki-daemon.service
+
+[Service]
+Type=simple
+User=kitsoki
+Group=kitsoki
+UMask=0027
+# kitsoki's home is /var/lib/kitsoki (see provision.sh), not /home/<user>, so
+# it stays reachable under ProtectHome=true below. `kitsoki daemon
+# install-systemd` and any git identity config resolve relative to this HOME.
+Environment=HOME=/var/lib/kitsoki
+Environment=XDG_CACHE_HOME=/var/lib/kitsoki/.cache
+
+# All operator-tunable state (project root, protected target, gate command,
+# concurrency, retry budget) lives in this one file. Bumping the concurrency
+# knob is: edit CONCURRENCY here, then `systemctl restart kitsoki-queue-worker`
+# — see deploy/orchestrator/README.md.
+EnvironmentFile=/etc/kitsoki/queue-worker.env
+
+# `kitsoki queue worker` (cmd/kitsoki/queue.go) requires --gate; --project,
+# --target, --concurrency, and the retry/backoff flags all default sanely but
+# are pinned explicitly here so a missing env var fails loudly instead of
+# silently reverting to a default that disagrees with the env file's intent.
+# ${VAR} expansion in ExecStart is systemd's own Environment=/EnvironmentFile=
+# substitution (systemd >= 233); no shell is involved.
+ExecStart=/usr/local/bin/kitsoki queue worker \
+	--project "${PROJECT_ROOT}" \
+	--target "${TARGET}" \
+	--gate "${GATE}" \
+	--concurrency "${CONCURRENCY}" \
+	--retry-delay "${RETRY_DELAY}" \
+	--max-retry-delay "${MAX_RETRY_DELAY}" \
+	--max-attempts "${MAX_ATTEMPTS}"
+
+# The worker's own claim/prepare/finalize loop already retries candidate-level
+# failures under its durable backoff; Restart=always covers the *process*
+# dying outright (panic, OOM-kill, host hiccup). RestartSec plus the
+# StartLimit* pair gives it a few quick bounces before systemd gives up and
+# leaves the unit failed for an operator to look at, instead of hammering a
+# persistently broken host in a tight crash loop forever.
+Restart=always
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=8
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+
+# Logs go to journald only (no StandardOutPath file to rotate/manage by hand);
+# see README.md "Log locations" for the journalctl invocations.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kitsoki-queue-worker
+
+# --- Hardening -------------------------------------------------------------
+# This service shells out to `git` against a live working tree (fetch,
+# checkout, merge, push to the local protected ref) and runs an arbitrary
+# operator-supplied --gate command (POG: `node scripts/kitsoki-ci.mjs`), so it
+# needs a writable project tree, a writable HOME for git/npm/node caches, and
+# the ability to spawn subprocesses with normal syscalls. ProtectSystem=strict
+# (whole-FS read-only except explicit ReadWritePaths) fights that on every
+# gate run; ProtectSystem=full (read-only /usr,/boot,/etc only) is the
+# pragmatic middle ground, with StateDirectory=/LogsDirectory= below granting
+# exactly the write access this unit needs. MemoryDenyWriteExecute is
+# deliberately NOT set: the gate spawns Node, whose V8 JIT needs W^X pages.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+# StateDirectory=/LogsDirectory= create (mode 0750, kitsoki:kitsoki) and
+# implicitly add to the read-write set /var/lib/kitsoki and /var/log/kitsoki
+# regardless of ProtectSystem=full above — no separate ReadWritePaths needed.
+# PROJECT_ROOT in queue-worker.env is expected to live under
+# /var/lib/kitsoki/<name> for exactly this reason (see provision.sh).
+StateDirectory=kitsoki
+StateDirectoryMode=0750
+LogsDirectory=kitsoki
+LogsDirectoryMode=0750
+PrivateTmp=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
