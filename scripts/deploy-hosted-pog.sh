@@ -72,6 +72,10 @@ verify() {
 	expect_public_status 302 / -H 'Accept: text/html'
 	expect_public_status 401 /assets/access-probe.js
 	expect_public_status 401 /api/catalog
+	expect_public_status 401 /api/feedback-reports
+	expect_public_status 401 /api/colony
+	expect_public_status 401 /api/streams
+	expect_public_status 401 /api/agent-runner/reaped-sessions
 	expect_public_status 401 /rpc
 	expect_public_status 401 /api/feedback
 	expect_public_status 401 /constructor-studio/decks/access-probe

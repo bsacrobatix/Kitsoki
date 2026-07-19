@@ -194,6 +194,14 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/healthz                 # 401
 curl -sS -o /dev/null -w '%{http_code}\n' \
   https://kitsoki-test.slothattax.me/api/runs                # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/api/feedback-reports    # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/api/colony              # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/api/streams             # 401
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  https://kitsoki-test.slothattax.me/api/agent-runner/reaped-sessions # 401
 curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
   https://kitsoki-test.slothattax.me/auth/github/device/poll # 410
 curl -sS -o /dev/null -w '%{http_code}\n' \
