@@ -4,6 +4,9 @@ Documentation=file:///opt/kitsoki-orchestrator/current/deploy/orchestrator/READM
 Wants=network-online.target
 After=network-online.target kitsoki-daemon.service
 
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
 [Service]
 Type=simple
 User=kitsoki
@@ -44,8 +47,6 @@ ExecStart=/usr/local/bin/kitsoki queue worker \
 # persistently broken host in a tight crash loop forever.
 Restart=always
 RestartSec=5s
-StartLimitIntervalSec=300
-StartLimitBurst=8
 TimeoutStopSec=30s
 KillSignal=SIGTERM
 

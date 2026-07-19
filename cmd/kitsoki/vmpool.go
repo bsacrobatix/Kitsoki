@@ -59,7 +59,7 @@ func vmpoolCmd() *cobra.Command {
 		Long: "Operate the DigitalOcean-backed ephemeral-worker pool (internal/capsule/vmpool): inspect and reconcile\n" +
 			"durable pool state, and author the base image every worker boots from.\n\n" + vmpoolSecurityNote,
 	}
-	cmd.AddCommand(vmpoolStatusCmd(), vmpoolReleaseCmd(), vmpoolReapCmd(), vmpoolImageCmd())
+	cmd.AddCommand(vmpoolStatusCmd(), vmpoolReleaseCmd(), vmpoolReapCmd(), vmpoolImageCmd(), vmpoolSmokeCmd())
 	return cmd
 }
 
@@ -120,6 +120,66 @@ func (f vmpoolConfigFlags) config() vmpool.Config {
 		ActivityTimeout:  f.activityTimeout,
 		MaxLifetime:      f.maxLifetime,
 	}.WithDefaults()
+}
+
+// vmpoolSmokeCmd is the live worker-plane proof: lease one ephemeral worker
+// from the configured base image, wait for its worker service to answer the
+// authenticated capabilities probe over pinned TLS, then release/destroy it.
+// This is a paid operation (one droplet for a few minutes) and the sanctioned
+// preflight before pointing dispatch at a new image.
+func vmpoolSmokeCmd() *cobra.Command {
+	var common vmpoolCommonFlags
+	var cfgFlags vmpoolConfigFlags
+	var jobID string
+	var keep bool
+	cmd := &cobra.Command{
+		Use:          "smoke",
+		Short:        "Boot one ephemeral worker from the base image, verify its worker service, destroy it",
+		SilenceUsage: true,
+		Args:         cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			pool, err := vmpoolBuildPool(common, cfgFlags)
+			if err != nil {
+				return err
+			}
+			dispatcher := &vmpool.Dispatcher{Pool: pool}
+			started := time.Now()
+			lease, err := dispatcher.Lease(cmd.Context(), vmpool.LeaseSpec{JobID: jobID})
+			if err != nil {
+				return fmt.Errorf("vmpool smoke: %w", err)
+			}
+			caps, capsErr := lease.Remote.Describe(cmd.Context())
+			result := map[string]any{
+				"worker_id":    lease.Worker.ID,
+				"instance":     lease.Worker.InstanceID,
+				"endpoint":     lease.Endpoint,
+				"ready_after":  time.Since(started).Round(time.Second).String(),
+				"capabilities": caps,
+			}
+			if capsErr != nil {
+				result["capabilities_error"] = capsErr.Error()
+			}
+			if !keep {
+				if releaseErr := lease.Release(cmd.Context()); releaseErr != nil {
+					result["release_error"] = releaseErr.Error()
+				} else {
+					result["released"] = true
+				}
+			}
+			if err := json.NewEncoder(cmd.OutOrStdout()).Encode(result); err != nil {
+				return err
+			}
+			if capsErr != nil {
+				return fmt.Errorf("vmpool smoke: worker service probe failed: %w", capsErr)
+			}
+			return nil
+		},
+	}
+	addVMPoolCommonFlags(cmd, &common)
+	addVMPoolConfigFlags(cmd, &cfgFlags)
+	cmd.Flags().StringVar(&jobID, "job", "smoke", "job id for the smoke lease")
+	cmd.Flags().BoolVar(&keep, "keep", false, "keep the worker running after the probe (release manually via vmpool release)")
+	return cmd
 }
 
 // vmpoolBuildPool resolves the Provisioner and assembles a Pool over the

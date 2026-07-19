@@ -11,6 +11,9 @@ After=network-online.target kitsoki-daemon.service
 # second `kitsoki-queue-worker@other-project.service`, each reading its own
 # %i-scoped env file below so they never share PROJECT_ROOT/TARGET/state.
 
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
 [Service]
 Type=simple
 User=kitsoki
@@ -37,8 +40,6 @@ ExecStart=/usr/local/bin/kitsoki queue worker \
 
 Restart=always
 RestartSec=5s
-StartLimitIntervalSec=300
-StartLimitBurst=8
 TimeoutStopSec=30s
 KillSignal=SIGTERM
 
