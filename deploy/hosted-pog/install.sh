@@ -126,7 +126,7 @@ if [ ! -d "$release/.git" ]; then
 		POG_PORTFOLIO_MEMBERS=pog,constructor-studio \
 		POG_KITSOKI_URL=http://127.0.0.1:7778 \
 		POG_KITSOKI_BROWSER_URL= \
-		POG_RUNNER_URL=http://127.0.0.1:7778 \
+		POG_RUNNER_URL= \
 		"$node_release/bin/npm" --prefix "$tmp_release/portal" run build
 	runuser -u pog -- "$node_release/bin/node" --check "$tmp_release/portal/server/server.mjs"
 	mv "$tmp_release" "$release"

@@ -140,7 +140,8 @@ Node archive, and invokes the versioned remote installer. The installer then:
    GitHub agent's `/usr/local/bin/kitsoki`;
 3. runs `npm ci`, the POG typecheck/client build, and the self-contained
    production-server build before activation; the server artifact receives
-   the explicit `pog,constructor-studio` allowlist and loopback Kitsoki URLs;
+   the explicit `pog,constructor-studio` allowlist, while browser links are
+   built same-origin and only the systemd runtime receives loopback upstreams;
 4. preserves `/var/lib/pog/runtime`, or, with `--sync-local-state`, verifies the
    uploaded snapshot checksum and manifest, builds a conflict-free versioned
    runtime, and atomically moves the runtime symlink;
