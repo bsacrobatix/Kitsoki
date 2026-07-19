@@ -36,6 +36,7 @@ func capsuleCmd() *cobra.Command {
 	cmd.AddCommand(capsuleMCPCommand())
 	cmd.AddCommand(capsuleWorkerCmd())
 	cmd.AddCommand(capsulePlaygroundCmd())
+	cmd.AddCommand(capsuleReleaseCmd())
 	return cmd
 }
 
