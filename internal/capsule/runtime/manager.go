@@ -59,7 +59,7 @@ func (m *Manager) Up(ctx context.Context, req UpRequest) (Receipt, error) {
 		return Receipt{}, fmt.Errorf("%w: requested %s, workspace is %s", ErrSourceMismatch, req.SourceSHA, ws.Head)
 	}
 	now := m.now()
-	r := Record{ID: req.ID, Owner: req.Owner, Generation: req.Workspace.Generation, SourceSHA: req.SourceSHA, SourceRef: ws.SourceRef, DefinitionDigest: m.Definition.Digest, Profile: req.Profile, Provider: profile.Provider, Purpose: req.Purpose, State: StateStarting, Workspace: req.Workspace, StartedAt: now}
+	r := Record{ID: req.ID, Owner: req.Owner, Generation: req.Workspace.Generation, SourceSHA: req.SourceSHA, SourceRef: ws.SourceRef, SourceManifestDigest: SourceManifestDigest(ws.SourceRef, req.SourceSHA), DefinitionDigest: m.Definition.Digest, Profile: req.Profile, Provider: profile.Provider, Purpose: req.Purpose, State: StateStarting, Workspace: req.Workspace, StartedAt: now}
 	if req.TTL > 0 {
 		r.ExpiresAt = now.Add(req.TTL)
 	}
@@ -88,7 +88,7 @@ func (m *Manager) Up(ctx context.Context, req UpRequest) (Receipt, error) {
 			if err != nil {
 				return fail(fmt.Errorf("capsule runtime: allocate %s/%s: %w", name, role, err))
 			}
-			if lease.RuntimeID != req.ID || lease.Owner != req.Owner || lease.Generation != r.Generation || lease.Service != name || lease.Role != role || lease.Port <= 0 {
+			if lease.RuntimeID != req.ID || lease.Owner != req.Owner || lease.Generation != r.Generation || lease.Service != name || lease.Role != role || lease.Exposure != port.Exposure || lease.Port <= 0 {
 				_ = m.Endpoints.Release(ctx, lease)
 				return fail(fmt.Errorf("capsule runtime: broker returned invalid lease for %s/%s", name, role))
 			}

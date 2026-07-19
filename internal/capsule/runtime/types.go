@@ -76,11 +76,11 @@ type EndpointRequest struct {
 	Generation                                                                       uint64
 }
 type EndpointLease struct {
-	ID, Address, URL                string
-	Port                            int
-	RuntimeID, Owner, Service, Role string
-	Generation                      uint64
-	ExpiresAt                       time.Time
+	ID, Address, URL                          string
+	Port                                      int
+	RuntimeID, Owner, Service, Role, Exposure string
+	Generation                                uint64
+	ExpiresAt                                 time.Time
 }
 
 type ProcessLauncher interface {
@@ -140,15 +140,22 @@ const (
 )
 
 type Record struct {
-	ID, Owner, SourceSHA, SourceRef, DefinitionDigest, Profile, Provider string
-	Generation                                                           uint64
-	Purpose                                                              Purpose
-	State                                                                State
-	Workspace                                                            control.Handle
-	Services                                                             []ServiceReceipt
-	StartedAt, StoppedAt, ExpiresAt                                      time.Time
-	Failure                                                              string
+	ID, Owner, SourceSHA, SourceRef, SourceManifestDigest, DefinitionDigest, Profile, Provider string
+	Generation                                                                                 uint64
+	Purpose                                                                                    Purpose
+	State                                                                                      State
+	Workspace                                                                                  control.Handle
+	Services                                                                                   []ServiceReceipt
+	StartedAt, StoppedAt, ExpiresAt                                                            time.Time
+	Failure                                                                                    string
 }
+
+// SourceManifestDigest identifies the immutable source facts a runtime was
+// materialized from. It is intentionally distinct from a mutable source ref.
+func SourceManifestDigest(sourceRef, sourceSHA string) string {
+	return digestSourceManifest(sourceRef, sourceSHA)
+}
+
 type ServiceReceipt struct {
 	Name, ProcessID string
 	Endpoints       []EndpointLease

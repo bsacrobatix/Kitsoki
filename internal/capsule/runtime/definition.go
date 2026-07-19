@@ -108,6 +108,16 @@ func canonical(d Definition) Definition {
 	return d
 }
 
+func digestSourceManifest(sourceRef, sourceSHA string) string {
+	raw, _ := json.Marshal(struct {
+		Schema    string `json:"schema"`
+		SourceRef string `json:"source_ref"`
+		SourceSHA string `json:"source_sha"`
+	}{Schema: "capsule-runtime-source/v1", SourceRef: sourceRef, SourceSHA: sourceSHA})
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // JSON maps already serialize in key order; these copies prevent caller maps
 // being mutated while sealing and make the normalization intent explicit.
 func sortedCommands(in map[string]Command) map[string]Command           { return copyMap(in) }

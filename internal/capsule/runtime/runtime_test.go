@@ -39,7 +39,7 @@ func TestManagerUpBindsExactSourceAndStopsOnlyOwnedProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Record.State != StateReady || len(r.Record.Services) != 1 || !r.Record.Services[0].HealthPassed {
+	if r.Record.State != StateReady || r.Record.SourceManifestDigest != SourceManifestDigest("refs/heads/review", "abc") || len(r.Record.Services) != 1 || !r.Record.Services[0].HealthPassed {
 		t.Fatalf("unexpected receipt: %#v", r)
 	}
 	if len(broker.requests) != 1 || broker.requests[0].DefinitionDigest != r.Record.DefinitionDigest || broker.requests[0].Generation != 7 {
@@ -144,7 +144,7 @@ type fakeBroker struct {
 
 func (b *fakeBroker) Allocate(_ context.Context, r EndpointRequest) (EndpointLease, error) {
 	b.requests = append(b.requests, r)
-	return EndpointLease{ID: "lease-" + r.Role, Port: 43101, RuntimeID: r.RuntimeID, Owner: r.Owner, Generation: r.Generation, Service: r.Service, Role: r.Role}, nil
+	return EndpointLease{ID: "lease-" + r.Role, Port: 43101, RuntimeID: r.RuntimeID, Owner: r.Owner, Generation: r.Generation, Service: r.Service, Role: r.Role, Exposure: r.Exposure}, nil
 }
 func (b *fakeBroker) Release(_ context.Context, l EndpointLease) error {
 	b.released = append(b.released, l)
