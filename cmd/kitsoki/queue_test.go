@@ -143,6 +143,80 @@ func TestQueueWorkerConcurrencyDrainsMultipleCandidatesInOnePass(t *testing.T) {
 	}
 }
 
+type fakeCLIFinalizer struct{}
+
+func (fakeCLIFinalizer) Finalize(_ context.Context, c queue.Candidate) (queue.FinalizeResult, error) {
+	return queue.FinalizeResult{NewMainSHA: c.TreeSHA}, nil
+}
+
+// TestQueueSweepCmdDryRunReportsWithoutMutatingAndApplyRejectsSuperseded
+// exercises the actual cobra command end to end: dry-run (the default) must
+// report the plan without touching state; --apply must reject only the
+// superseded entry (another candidate for the identical commit already
+// landed) and leave a merely-parked candidate untouched.
+func TestQueueSweepCmdDryRunReportsWithoutMutatingAndApplyRejectsSuperseded(t *testing.T) {
+	project := t.TempDir()
+	store := queue.Store{ProjectRoot: project}
+	dupSHA := strings.Repeat("d", 40)
+
+	landedTwin, err := store.Submit(queue.Submit{Branch: "agent/landed-twin", SHA: dupSHA, Receipt: testCLIReceipt(t, dupSHA)})
+	require.NoError(t, err)
+	fakeDeps := queue.ProcessDeps{
+		Integration: fakeCLIIntegration{speculate: func(_ context.Context, c queue.Candidate, _ []queue.Candidate) (queue.Speculation, error) {
+			return queue.Speculation{SHA: "tree-" + c.SHA, BaseSHA: "base-" + c.SHA}, nil
+		}},
+		Gate: fakeCLIGate{}, GateVersion: "test/v1", Finalizer: fakeCLIFinalizer{},
+	}
+	_, err = store.Process(context.Background(), fakeDeps)
+	require.NoError(t, err)
+	landed, err := store.Get(landedTwin.ID)
+	require.NoError(t, err)
+	require.Equal(t, queue.Landed, landed.Phase)
+
+	// A second, unrelated parked candidate for the same commit: superseded.
+	superseded, err := store.Submit(queue.Submit{Branch: "agent/superseded", SHA: dupSHA, Admission: queue.EmergencySkipTestsAdmission})
+	require.NoError(t, err)
+	_, err = store.Park(queue.Op{ID: superseded.ID, Actor: "test", Reason: "gate_failed"})
+	require.NoError(t, err)
+
+	// A merely-parked candidate for a different commit: not superseded, must
+	// survive both the dry run and the apply untouched.
+	otherSHA := strings.Repeat("f", 40)
+	other, err := store.Submit(queue.Submit{Branch: "agent/other", SHA: otherSHA, Receipt: testCLIReceipt(t, otherSHA)})
+	require.NoError(t, err)
+	_, err = store.Park(queue.Op{ID: other.ID, Actor: "test", Reason: "gate_failed"})
+	require.NoError(t, err)
+
+	dryRun := queueSweepCmd()
+	dryRun.SetArgs([]string{"--project", project})
+	dryRun.SetOut(new(strings.Builder))
+	require.NoError(t, dryRun.Execute())
+
+	state, err := store.List()
+	require.NoError(t, err)
+	byID := map[string]queue.Candidate{}
+	for _, c := range state.Candidates {
+		byID[c.ID] = c
+	}
+	require.Equal(t, queue.NeedsInput, byID[superseded.ID].Phase, "dry-run sweep must not mutate state")
+	require.Equal(t, queue.NeedsInput, byID[other.ID].Phase)
+
+	apply := queueSweepCmd()
+	apply.SetArgs([]string{"--project", project, "--apply", "--actor", "test"})
+	apply.SetOut(new(strings.Builder))
+	require.NoError(t, apply.Execute())
+
+	state, err = store.List()
+	require.NoError(t, err)
+	byID = map[string]queue.Candidate{}
+	for _, c := range state.Candidates {
+		byID[c.ID] = c
+	}
+	require.Equal(t, queue.Rejected, byID[superseded.ID].Phase)
+	require.Contains(t, byID[superseded.ID].EjectionReason, "identical commit")
+	require.Equal(t, queue.NeedsInput, byID[other.ID].Phase, "a merely-parked, non-superseded candidate must never be auto-rejected")
+}
+
 func testCLIReceipt(t *testing.T, sha string) receipt.Receipt {
 	t.Helper()
 	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "definition", Toolchains: map[string]string{}, Network: "none", Sandbox: "process"})

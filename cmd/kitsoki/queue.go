@@ -16,7 +16,7 @@ import (
 
 func queueCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "queue", Short: "Submit verified candidates to the Capsule merge queue"}
-	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd())
+	cmd.AddCommand(queueSubmitCmd(), queueStatusCmd(), queueProcessCmd(), queueWorkerCmd(), queueMigrateCmd(), queueSweepCmd())
 	cmd.AddCommand(
 		queueOpCmd("kick", "Clear a retry_wait candidate's backoff timer for an immediate retry", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Kick(op) }),
 		queueOpCmd("park", "Move a candidate to needs_input so it stops delaying the train", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Park(op) }),
@@ -49,6 +49,46 @@ func queueApproveCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tree, "tree", "", "optional prospective tree SHA to verify")
 	cmd.Flags().StringVar(&receiptDigest, "receipt-digest", "", "optional gate receipt digest to verify")
 	_ = cmd.MarkFlagRequired("manifest")
+	return cmd
+}
+
+// queueSweepCmd triages parked (needs_input / needs_conflict_input)
+// candidates in bulk: classify superseded / environment_degraded / stale /
+// unclassified, and — by default only report the plan (--dry-run is
+// implicit; pass --apply to act). The only classification --apply ever
+// acts on is superseded, via the existing audited Reject verb; every other
+// classification is surfaced for a human, never auto-mutated. See
+// queue.Store.Sweep's doc for why.
+func queueSweepCmd() *cobra.Command {
+	var project, actor, reason string
+	var staleAfter time.Duration
+	var apply bool
+	cmd := &cobra.Command{Use: "sweep", Short: "Bulk-triage parked candidates: classify superseded/stale/environment-degraded, --apply to reject the superseded ones", RunE: func(cmd *cobra.Command, _ []string) error {
+		store := queue.Store{ProjectRoot: project}
+		plan, err := store.Sweep(time.Time{}, staleAfter)
+		if err != nil {
+			return err
+		}
+		if !apply {
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(plan)
+		}
+		if strings.TrimSpace(actor) == "" {
+			actor = os.Getenv("USER")
+		}
+		acted, err := store.ApplySweep(plan, actor, reason)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			Plan  queue.SweepPlan   `json:"plan"`
+			Acted []queue.Candidate `json:"acted"`
+		}{Plan: plan, Acted: acted})
+	}}
+	cmd.Flags().StringVar(&project, "project", ".", "project root")
+	cmd.Flags().StringVar(&actor, "actor", "", "acting operator recorded in evidence for --apply (defaults to $USER)")
+	cmd.Flags().StringVar(&reason, "reason", "", "override the per-entry sweep reason recorded in evidence for --apply")
+	cmd.Flags().DurationVar(&staleAfter, "stale-after", queue.DefaultSweepStaleAfter, "how long a parked candidate sits untouched before it is classified stale")
+	cmd.Flags().BoolVar(&apply, "apply", false, "execute the plan's proposed actions (reject superseded candidates); without this flag the sweep only reports the plan")
 	return cmd
 }
 
