@@ -23,6 +23,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/objectstore"
 )
 
 const Schema = "capsule-ci/v1"
@@ -67,9 +68,26 @@ type ResultContract struct {
 	ParkExits []string `yaml:"park_exits,omitempty" json:"park_exits,omitempty"`
 }
 type Remote struct {
-	Endpoint      string `yaml:"endpoint" json:"endpoint"`
-	CredentialEnv string `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
-	CAFile        string `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
+	Endpoint      string        `yaml:"endpoint" json:"endpoint"`
+	CredentialEnv string        `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
+	CAFile        string        `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
+	SourceBucket  *SourceBucket `yaml:"source_bucket,omitempty" json:"source_bucket,omitempty"`
+}
+
+// SourceBucket opts a configured remote into bucket-mediated source transport
+// (internal/capsule/bucketsource): the sealed source bundle is published to
+// shared object storage and the worker receives a presigned fetch reference
+// instead of the raw bundle bytes over the controller→worker HTTP channel.
+// Only the bucket URL and credential env var *names* are checked in; the
+// credential values are resolved from the environment at executor
+// construction time, never at config-validation time, so doctor and other
+// no-spend flows can validate this block without the env vars being set.
+type SourceBucket struct {
+	URL        string `yaml:"url" json:"url"`
+	KeyEnv     string `yaml:"key_env" json:"key_env"`
+	SecretEnv  string `yaml:"secret_env" json:"secret_env"`
+	Prefix     string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
+	PresignTTL string `yaml:"presign_ttl,omitempty" json:"presign_ttl,omitempty"`
 }
 type ReceiptPolicy struct {
 	RequireSignature bool   `yaml:"require_signature,omitempty" json:"require_signature,omitempty"`
@@ -167,6 +185,11 @@ func Validate(project string, cfg Config) error {
 			}
 			if _, err := os.Stat(filepath.Join(project, clean)); err != nil {
 				return fmt.Errorf("capsule ci remote %q: ca_file: %w", name, err)
+			}
+		}
+		if remote.SourceBucket != nil {
+			if err := validateSourceBucket(name, *remote.SourceBucket); err != nil {
+				return err
 			}
 		}
 	}
@@ -896,6 +919,39 @@ func isBuiltinExecutor(name string) bool {
 		return false
 	}
 }
+
+// validateSourceBucket checks the checked-in shape of an opted-in
+// bucket-mediated source transport block: the bucket URL must be a parseable
+// virtual-hosted bucket URL, key_env/secret_env must be valid env var names
+// (never resolved here — see SourceBucket doc comment), and prefix must stay
+// inside the bucket namespace. It deliberately never reads the environment,
+// so a checked-in source_bucket block with unset credentials still validates
+// cleanly in doctor and other no-spend contexts.
+func validateSourceBucket(name string, sb SourceBucket) error {
+	if _, err := objectstore.ParseBucketURL(sb.URL); err != nil {
+		return fmt.Errorf("capsule ci remote %q: source_bucket url: %w", name, err)
+	}
+	if !validEnvName(sb.KeyEnv) {
+		return fmt.Errorf("capsule ci remote %q: source_bucket key_env is invalid", name)
+	}
+	if !validEnvName(sb.SecretEnv) {
+		return fmt.Errorf("capsule ci remote %q: source_bucket secret_env is invalid", name)
+	}
+	if sb.Prefix != "" {
+		clean := filepath.Clean(sb.Prefix)
+		if filepath.IsAbs(sb.Prefix) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("capsule ci remote %q: source_bucket prefix must not escape the bucket namespace", name)
+		}
+	}
+	if sb.PresignTTL != "" {
+		d, err := time.ParseDuration(sb.PresignTTL)
+		if err != nil || d < 0 {
+			return fmt.Errorf("capsule ci remote %q: source_bucket presign_ttl must be a non-negative duration", name)
+		}
+	}
+	return nil
+}
+
 func validEnvName(name string) bool {
 	if name == "" {
 		return false

@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
+	"kitsoki/internal/capsule/bucketsource"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/objectstore"
 )
 
 // BuiltinExecutors is the no-credential local executor catalog. A production
@@ -111,7 +114,46 @@ func (e ConfiguredExecutors) Select(ctx context.Context, name string) (executor.
 			return token, nil
 		}
 	}
+	if remote.SourceBucket != nil {
+		objects, err := newSourceObjects(name, *remote.SourceBucket)
+		if err != nil {
+			return nil, err
+		}
+		worker.SourceObjects = objects
+	}
 	return executor.NewRemoteProvider(worker), nil
+}
+
+// newSourceObjects resolves a checked-in source_bucket block into a live
+// bucketsource.Publisher. Unlike remote.CredentialEnv (whose lookup is
+// deferred to request time via worker.Credential), this reads the bucket
+// credential env vars eagerly: standing up the object-store client here, once,
+// lets every subsequent run reuse it instead of re-resolving credentials per
+// request, and lets a missing/invalid credential surface as a clear
+// executor-selection error naming the configured env vars rather than an
+// opaque failure deep inside the first upload.
+func newSourceObjects(name string, sb SourceBucket) (executor.SourceObjects, error) {
+	cfg, err := objectstore.ParseBucketURL(sb.URL)
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: remote %q source_bucket url: %w", name, err)
+	}
+	cfg.KeyEnv = sb.KeyEnv
+	cfg.SecretEnv = sb.SecretEnv
+	store, err := objectstore.NewSpaces(cfg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: remote %q source bucket credentials (set %s and %s): %w", name, sb.KeyEnv, sb.SecretEnv, err)
+	}
+	prefix := sb.Prefix
+	if prefix == "" {
+		prefix = bucketsource.DefaultSourcePrefix
+	}
+	ttl := bucketsource.DefaultPresignTTL
+	if sb.PresignTTL != "" {
+		if d, err := time.ParseDuration(sb.PresignTTL); err == nil && d > 0 {
+			ttl = d
+		}
+	}
+	return bucketsource.Publisher{Store: store, Prefix: prefix, PresignTTL: ttl}, nil
 }
 
 var _ ExecutorSelector = ConfiguredExecutors{}

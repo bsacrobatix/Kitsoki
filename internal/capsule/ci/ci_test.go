@@ -640,6 +640,67 @@ func TestValidateRejectsUndeclaredRemoteExecutor(t *testing.T) {
 	}
 }
 
+// TestLoadAcceptsRemoteSourceBucketWithoutCredentialsInEnvironment is the
+// end-to-end no-spend guarantee for the feature: Load runs Validate as part
+// of every config read (which is what doctor's "project-config" check calls),
+// and it must succeed for a checked-in source_bucket block even though this
+// test never sets the referenced env vars. Only executor construction
+// (ConfiguredExecutors.Select, covered in executors_test.go) reads them.
+func TestLoadAcceptsRemoteSourceBucketWithoutCredentialsInEnvironment(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte(`
+    executor: remote
+remotes:
+  remote:
+    endpoint: https://worker.invalid
+    source_bucket:
+      url: https://kitsoki-test.sgp1.digitaloceanspaces.com
+      key_env: KITSOKI_NEVER_SET_SOURCE_BUCKET_KEY
+      secret_env: KITSOKI_NEVER_SET_SOURCE_BUCKET_SECRET
+`)...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load must not require source_bucket credentials to be set: %v", err)
+	}
+	sb := cfg.Remotes["remote"].SourceBucket
+	if sb == nil || sb.KeyEnv != "KITSOKI_NEVER_SET_SOURCE_BUCKET_KEY" || sb.SecretEnv != "KITSOKI_NEVER_SET_SOURCE_BUCKET_SECRET" {
+		t.Fatalf("source_bucket %#v", sb)
+	}
+}
+
+func TestLoadRejectsRemoteSourceBucketWithBadURL(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte(`
+    executor: remote
+remotes:
+  remote:
+    endpoint: https://worker.invalid
+    source_bucket:
+      url: not-a-bucket-url
+      key_env: K
+      secret_env: S
+`)...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "source_bucket url") {
+		t.Fatalf("expected source_bucket url rejection, got %v", err)
+	}
+}
+
 func TestValidateRequiresReceiptSignerWhenSignaturesAreRequired(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)

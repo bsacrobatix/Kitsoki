@@ -331,6 +331,12 @@ remotes:
     endpoint: https://capsule-worker.example
     credential_env: KITSOKI_CAPSULE_WORKER_TOKEN
     ca_file: .kitsoki/certs/capsule-worker-ca.pem # optional private CA
+    source_bucket: # optional: route source transport through shared object storage
+      url: https://kitsoki-test.sgp1.digitaloceanspaces.com # virtual-hosted bucket URL
+      key_env: DO_SPACES_KEY_ID
+      secret_env: DO_KITSOKI_TEST_API_KEY
+      prefix: sources    # optional, default "sources"
+      presign_ttl: 1h    # optional, default 1h
 
 pipelines:
   change:
@@ -342,6 +348,18 @@ file. If present, the variable must be set by the launching operator process;
 the value is read only when the HTTP request is made and is sent as an
 authorization header. `ca_file` must be project-relative, contain PEM
 certificates, and cannot disable hostname/SAN verification.
+
+`source_bucket` opts the remote into the bucket-mediated source transport from
+`internal/capsule/bucketsource`: the sealed source bundle is published
+write-once to the bucket and the worker receives a presigned fetch reference
+instead of the raw bytes over the controller→worker HTTP channel, which is
+faster and resumable for large sources and needs no storage credentials on the
+worker. `url` must be a virtual-hosted bucket URL (`bucket.region.host`);
+`key_env`/`secret_env` name the Spaces access key and secret environment
+variables the same way `credential_env` names the worker token — checked-in as
+names only, and read from the environment only when the executor is
+constructed, never during config validation or `doctor`. A remote with no
+`source_bucket` block is unaffected and behaves exactly as before.
 
 The optional `--verdict file.json` run input is for an explicit external story
 adapter. It is not an authority bypass: the verdict still has to match the
