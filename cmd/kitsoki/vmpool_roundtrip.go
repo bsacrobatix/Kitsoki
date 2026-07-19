@@ -99,7 +99,10 @@ func vmpoolRunRoundtrip(ctx context.Context, pool *vmpool.Pool, store objectstor
 		StoryDigest:      closure.Digest,
 		Environment:      envLock,
 		Trigger:          map[string]any{"kind": "local", "requested_pipeline": "change"},
-		Policy:           executor.Policy{Network: "live", ExternalWrite: "deny"},
+		// live+allow: the bare droplet worker truthfully advertises live
+		// networking, and deny cannot be enforced alongside it. The story is
+		// deterministic and writes nothing external regardless.
+		Policy: executor.Policy{Network: "live", ExternalWrite: "allow"},
 	})
 	if err != nil {
 		return nil, err
