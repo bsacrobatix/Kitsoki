@@ -47,6 +47,21 @@ func TestQueueProcessDepsUsesRequestedProtectedTarget(t *testing.T) {
 	require.Equal(t, "release/2026.07", deps.TargetRef)
 }
 
+func TestQueueSummaryLineFormatsPhasesAndRetryReasons(t *testing.T) {
+	summary := queue.StatusSummary{
+		PhaseCounts:       map[queue.Status]int{queue.Queued: 2, queue.Landed: 1},
+		RetryReasonCounts: map[string]int{"gate_failed": 1},
+		TrainDepth:        2,
+		ParkedCount:       0,
+	}
+	line := queueSummaryLine(summary)
+	require.Contains(t, line, "train_depth=2")
+	require.Contains(t, line, "parked=0")
+	require.Contains(t, line, "queued=2")
+	require.Contains(t, line, "landed=1")
+	require.Contains(t, line, "gate_failed=1")
+}
+
 func TestQueueProcessDepsSetsGateMemo(t *testing.T) {
 	deps := queueProcessDeps("/project", "make test", "", "", "", "worker-1")
 	memo, ok := deps.GateMemo.(queue.FileGateMemo)

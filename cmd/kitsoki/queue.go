@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -158,11 +159,15 @@ func queueStatusCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		now := time.Now().UTC()
 		if jsonOut {
-			return json.NewEncoder(cmd.OutOrStdout()).Encode(state)
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(queue.Report(state, now))
+		}
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), queueSummaryLine(queue.Summarize(state, now))); err != nil {
+			return err
 		}
 		for _, candidate := range state.Candidates {
-			if _, err := fmt.Fprintln(cmd.OutOrStdout(), queue.StatusLine(candidate, time.Now().UTC())); err != nil {
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), queue.StatusLine(candidate, now)); err != nil {
 				return err
 			}
 		}
@@ -171,6 +176,34 @@ func queueStatusCmd() *cobra.Command {
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the durable queue record as JSON")
 	return cmd
+}
+
+// queueSummaryLine is the single-line human roll-up printed above the
+// per-candidate StatusLines: train depth, parked count/age, and per-phase
+// and per-retry-reason counts — "where did the last N minutes go" without
+// eyeballing every candidate line.
+func queueSummaryLine(s queue.StatusSummary) string {
+	phases := make([]string, 0, len(s.PhaseCounts))
+	for phase, n := range s.PhaseCounts {
+		phases = append(phases, fmt.Sprintf("%s=%d", phase, n))
+	}
+	sort.Strings(phases)
+	line := fmt.Sprintf("train_depth=%d parked=%d", s.TrainDepth, s.ParkedCount)
+	if s.OldestParkedAge != "" {
+		line += " oldest_parked=" + s.OldestParkedAge
+	}
+	if len(phases) > 0 {
+		line += " phases[" + strings.Join(phases, " ") + "]"
+	}
+	if len(s.RetryReasonCounts) > 0 {
+		reasons := make([]string, 0, len(s.RetryReasonCounts))
+		for reason, n := range s.RetryReasonCounts {
+			reasons = append(reasons, fmt.Sprintf("%s=%d", reason, n))
+		}
+		sort.Strings(reasons)
+		line += " retry_reasons[" + strings.Join(reasons, " ") + "]"
+	}
+	return line
 }
 
 // worker is the durable owner of preparation leases and protected finalization.
