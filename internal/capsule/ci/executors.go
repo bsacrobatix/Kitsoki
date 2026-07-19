@@ -81,6 +81,9 @@ func (e ConfiguredExecutors) Select(ctx context.Context, name string) (executor.
 	if !ok {
 		return nil, fmt.Errorf("capsule ci: executor %q is not configured", name)
 	}
+	if remote.Pool != nil {
+		return newPoolProvider(name, *remote.Pool, e.Source, e.ProjectRoot)
+	}
 	client := e.Client
 	if remote.CAFile != "" {
 		if client != nil {

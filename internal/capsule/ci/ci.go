@@ -68,10 +68,49 @@ type ResultContract struct {
 	ParkExits []string `yaml:"park_exits,omitempty" json:"park_exits,omitempty"`
 }
 type Remote struct {
-	Endpoint      string        `yaml:"endpoint" json:"endpoint"`
+	Endpoint      string        `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
 	CredentialEnv string        `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
 	CAFile        string        `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
 	SourceBucket  *SourceBucket `yaml:"source_bucket,omitempty" json:"source_bucket,omitempty"`
+	// Pool, when set, declares this remote as a POOL-backed executor instead
+	// of a fixed HTTP endpoint: every execution leases a fresh ephemeral
+	// DigitalOcean worker from internal/capsule/vmpool.Dispatcher, runs
+	// exactly one Capsule CI execution on it, and destroys it afterward
+	// (see pool_executor.go). Endpoint, CredentialEnv, CAFile, and
+	// SourceBucket describe a fixed-endpoint remote and do not apply to a
+	// pool remote; Validate rejects a Remote that sets both. PoolExecutor
+	// carries its own SourceBucket for pool-mediated source transport.
+	Pool *PoolExecutor `yaml:"pool,omitempty" json:"pool,omitempty"`
+}
+
+// PoolExecutor configures a POOL-backed executor (Remote.Pool). TokenEnv
+// names the controller environment variable holding the DigitalOcean API
+// token; like Remote.CredentialEnv and SourceBucket.KeyEnv/SecretEnv, only
+// the env var *name* is checked in and validated here, never its value, so
+// doctor's no-spend preflight validates this block without the token being
+// set and without leasing a worker. Image, Size, and Region mirror
+// vmpool.Config's CreateParams; unlike Size/Region, Image is allowed to be
+// empty at validate time (a still-to-be-published snapshot reference is a
+// valid checked-in state) and instead fails fast at executor-selection/Run
+// time with a clear error, before any lease is attempted.
+type PoolExecutor struct {
+	TokenEnv      string   `yaml:"token_env" json:"token_env"`
+	Image         string   `yaml:"image,omitempty" json:"image,omitempty"`
+	Size          string   `yaml:"size" json:"size"`
+	Region        string   `yaml:"region" json:"region"`
+	VPCUUID       string   `yaml:"vpc_uuid,omitempty" json:"vpc_uuid,omitempty"`
+	SSHKeyIDs     []string `yaml:"ssh_key_ids,omitempty" json:"ssh_key_ids,omitempty"`
+	MaxConcurrent int      `yaml:"max_concurrent,omitempty" json:"max_concurrent,omitempty"`
+	// SourceBucket, when set, mediates source transport to the leased worker
+	// through shared object storage the same way Remote.SourceBucket does
+	// for a fixed endpoint, and also configures the worker's output mirror
+	// (see vmpool.LeaseSpec.BucketURL/OutputsKeyEnv/OutputsSecretEnv): both
+	// share the one bucket declared here. vmpool.Dispatcher.Lease always
+	// publishes through bucketsource.Publisher's own default prefix/TTL, so
+	// unlike a fixed-endpoint remote's SourceBucket, Prefix and PresignTTL
+	// are not supported here (Validate rejects them rather than silently
+	// ignoring them).
+	SourceBucket *SourceBucket `yaml:"source_bucket,omitempty" json:"source_bucket,omitempty"`
 }
 
 // SourceBucket opts a configured remote into bucket-mediated source transport
@@ -170,6 +209,15 @@ func Validate(project string, cfg Config) error {
 	for name, remote := range cfg.Remotes {
 		if strings.TrimSpace(name) == "" || isBuiltinExecutor(name) {
 			return fmt.Errorf("capsule ci remote %q: invalid executor name", name)
+		}
+		if remote.Pool != nil {
+			if remote.Endpoint != "" || remote.CredentialEnv != "" || remote.CAFile != "" || remote.SourceBucket != nil {
+				return fmt.Errorf("capsule ci remote %q: pool executors cannot also set endpoint, credential_env, ca_file, or source_bucket", name)
+			}
+			if err := validatePoolExecutor(name, *remote.Pool); err != nil {
+				return err
+			}
+			continue
 		}
 		u, err := url.Parse(remote.Endpoint)
 		if err != nil || u.Scheme != "https" || u.Host == "" {
@@ -947,6 +995,43 @@ func validateSourceBucket(name string, sb SourceBucket) error {
 		d, err := time.ParseDuration(sb.PresignTTL)
 		if err != nil || d < 0 {
 			return fmt.Errorf("capsule ci remote %q: source_bucket presign_ttl must be a non-negative duration", name)
+		}
+	}
+	return nil
+}
+
+// validatePoolExecutor checks the checked-in shape of a POOL-backed executor
+// (Remote.Pool): token_env must be a valid env var name (never resolved
+// here, matching validateSourceBucket's no-spend contract), size and region
+// must be explicit and non-empty (this checked-in block always names them
+// rather than silently inheriting vmpool.Config's defaults), and an optional
+// source_bucket is checked the same way a fixed-endpoint remote's is, minus
+// the prefix/presign_ttl overrides vmpool's Dispatcher.Lease does not yet
+// support for a pool-mediated remote.
+func validatePoolExecutor(name string, pool PoolExecutor) error {
+	if !validEnvName(pool.TokenEnv) {
+		return fmt.Errorf("capsule ci remote %q: pool token_env is invalid", name)
+	}
+	if strings.TrimSpace(pool.Size) == "" {
+		return fmt.Errorf("capsule ci remote %q: pool size is required", name)
+	}
+	if strings.TrimSpace(pool.Region) == "" {
+		return fmt.Errorf("capsule ci remote %q: pool region is required", name)
+	}
+	if pool.MaxConcurrent < 0 {
+		return fmt.Errorf("capsule ci remote %q: pool max_concurrent must be >= 0", name)
+	}
+	for _, id := range pool.SSHKeyIDs {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("capsule ci remote %q: pool ssh_key_ids must not contain empty entries", name)
+		}
+	}
+	if pool.SourceBucket != nil {
+		if err := validateSourceBucket(name, *pool.SourceBucket); err != nil {
+			return err
+		}
+		if pool.SourceBucket.Prefix != "" || pool.SourceBucket.PresignTTL != "" {
+			return fmt.Errorf("capsule ci remote %q: pool source_bucket does not support prefix or presign_ttl overrides", name)
 		}
 	}
 	return nil
