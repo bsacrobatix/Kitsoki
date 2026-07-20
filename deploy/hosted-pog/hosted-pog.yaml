@@ -10,3 +10,9 @@ auth:
   admins:
     - __GITHUB_ADMIN__
   session_ttl: 168h
+  # Headless same-host automation (the POG colony runner) authenticates with
+  # a bearer token instead of a browser session. Name-only here; install.sh
+  # mints/reuses the value in /etc/kitsoki/hosted-pog.env and mirrors it to
+  # the colony runner as POG_RUNNER_TOKEN. See docs/architecture/web-auth.md.
+  service_tokens:
+    colony: KITSOKI_COLONY_TOKEN

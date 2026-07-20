@@ -42,6 +42,16 @@ grep -q 'chmod 0600 "$local_stage/gh-client-secret"' "$deploy"
 grep -q "KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=//p.*hosted-pog.env" "$deploy"
 grep -q 'Repeat deployments should not require copying a root-only production secret' "$deploy"
 grep -q 'install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env' "$assets/install.sh"
+# Colony service-token contract: the yaml template names the env var (never a
+# value), install.sh reuses-or-mints the token into the root-only env file,
+# proves it authenticates via /auth/check, and mirrors it to the colony
+# runner as POG_RUNNER_TOKEN through a root-only EnvironmentFile drop-in.
+grep -q 'colony: KITSOKI_COLONY_TOKEN' "$assets/hosted-pog.yaml"
+grep -q "KITSOKI_COLONY_TOKEN=//p' /etc/kitsoki/hosted-pog.env" "$assets/install.sh"
+grep -q "printf 'KITSOKI_COLONY_TOKEN=%s" "$assets/install.sh"
+grep -q 'Authorization: Bearer \$colony_token" http://127.0.0.1:7778/auth/check' "$assets/install.sh"
+grep -q 'install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-runner.env' "$assets/install.sh"
+grep -q 'pog-colony-runner.service.d/runner-token.conf' "$assets/install.sh"
 grep -q 'POG_KITSOKI_BROWSER_URL=' "$assets/pog-portal.service"
 grep -q 'POG_PORTFOLIO_MEMBERS=pog,constructor-studio' "$assets/pog-portal.service"
 grep -q 'POG_KITSOKI_URL=http://127.0.0.1:7778' "$assets/pog-portal.service"

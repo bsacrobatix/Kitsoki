@@ -61,6 +61,15 @@ for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.s
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
 [[ "$github_client_secret" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid GitHub App client secret"
+# Colony service token: reuse the installed value across deployments (same
+# posture as the reused OAuth client secret) and mint one on first install.
+# The value lives only in root-only env files on this host; the rendered
+# hosted-pog.yaml names the env var, never the value.
+colony_token="$(sed -n 's/^KITSOKI_COLONY_TOKEN=//p' /etc/kitsoki/hosted-pog.env 2>/dev/null | head -n 1)"
+if [ -z "$colony_token" ]; then
+	colony_token="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+fi
+[[ "$colony_token" =~ ^[0-9a-f]{16,}$ ]] || die "invalid colony service token"
 # shellcheck disable=SC1091 -- uploaded beside this installer.
 . "$stage/node-runtime.env"
 node_version="${KITSOKI_HOSTED_POG_NODE_VERSION:-}"
@@ -431,7 +440,10 @@ node_current_changed=1
 install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 # The rendered config references ${KITSOKI_HOSTED_POG_GH_CLIENT_SECRET}; the
 # value lives in this root-only env file read by systemd, never by the pog user.
-printf 'KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=%s\n' "$github_client_secret" >"$stage/hosted-pog.env"
+{
+	printf 'KITSOKI_HOSTED_POG_GH_CLIENT_SECRET=%s\n' "$github_client_secret"
+	printf 'KITSOKI_COLONY_TOKEN=%s\n' "$colony_token"
+} >"$stage/hosted-pog.env"
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
@@ -446,6 +458,27 @@ for _ in $(seq 1 60); do
 	sleep 1
 done
 [ "${status:-}" = "401" ] || die "Kitsoki auth service did not become ready"
+
+# The colony bearer contract must actually authenticate before anything
+# depends on it: /auth/check is the same seam Caddy's forward_auth and
+# Manager.Wrap use for service tokens.
+token_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $colony_token" http://127.0.0.1:7778/auth/check 2>/dev/null || true)"
+[ "$token_status" = "200" ] || die "colony service token did not authenticate against /auth/check (got ${token_status:-none})"
+bare_status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/check 2>/dev/null || true)"
+[ "$bare_status" = "401" ] || die "unauthenticated /auth/check unexpectedly returned ${bare_status:-none}"
+
+# Mirror the token to the POG colony runner (if this host runs one) as
+# POG_RUNNER_TOKEN — the env var POG's runner-auth.mjs sends as a bearer.
+# The drop-in references a root-only env file so the secret never sits in a
+# world-readable unit file.
+if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
+	printf 'POG_RUNNER_TOKEN=%s\n' "$colony_token" >"$stage/pog-colony-runner.env"
+	install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-runner.env
+	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
+	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf
+	systemctl daemon-reload
+	systemctl restart pog-colony-runner.service
+fi
 
 systemctl restart pog-portal.service
 for _ in $(seq 1 60); do
