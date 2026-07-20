@@ -117,6 +117,29 @@ probes `GET /auth/me` when an `EventSource` errors (the only way to infer
 a `401` there, since `EventSource` hides HTTP status) before deciding
 whether to reconnect or redirect.
 
+## Service tokens (headless clients)
+
+A headless same-host service (a colony runner driving the Agent Runner
+RPC, a cron driver) cannot complete a browser login. `auth.service_tokens`
+maps a service name to the environment variable **name** holding its
+bearer token:
+
+```yaml
+# .kitsoki.yaml (safe to check in — names only, never values)
+auth:
+  service_tokens:
+    colony: KITSOKI_COLONY_TOKEN
+```
+
+The value is resolved at server startup (typically from
+`~/.config/kitsoki/daemon.env`); an unset env var disables that service
+with a warning, and a token shorter than 16 characters is a hard startup
+error (`openssl rand -hex 32` makes a good one). A request presenting
+`Authorization: Bearer <token>` that matches a resolved token — compared
+in constant time via sha256 digests — passes `Manager.Wrap` and the
+forward-auth `/auth/check` seam with `X-Kitsoki-Actor: service:<name>`.
+No session is created; every request re-presents the token.
+
 ## Storage
 
 Three SQLite tables (`webauth_users`, `webauth_invites`,
