@@ -145,7 +145,7 @@ func capsuleCIPlanCmd() *cobra.Command {
 }
 func capsuleCIRunCmd() *cobra.Command {
 	var project, workspace, verdictPath, fakeReceiptSigner, triggerPath, workerID, lane string
-	var jsonOut bool
+	var jsonOut, detach bool
 	cmd := &cobra.Command{Use: "run <pipeline>", Args: cobra.ExactArgs(1), Short: "Run declared Capsule CI with a story-produced typed verdict", RunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		project, err = capsuleCIProjectRoot(project)
@@ -189,9 +189,21 @@ func capsuleCIRunCmd() *cobra.Command {
 			return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 		})
 		service := ci.Service{ProjectRoot: workspacePath, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project), Observer: record.FileRunObserver{ProjectRoot: project}}
-		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, Trigger: trigger, ExecutorOverride: workerID})
+		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, Trigger: trigger, ExecutorOverride: workerID, Detach: detach})
 		if err != nil {
 			return persistCapsuleCIRunFailure(project, result, err)
+		}
+		if detach && !result.Terminal {
+			// A detached dispatch has no verdict or receipt yet; persist the
+			// non-terminal record (job id + execution id) and return. The
+			// terminal record, verdict, and receipt land when `capsule ci
+			// status --job <id> --refresh` reconciles the worker's durable
+			// bucket run records.
+			if err := (ci.FileRunStore{ProjectRoot: project}).Write(ci.RunRecord{JobID: string(result.Job.ID), Result: result}); err != nil {
+				return err
+			}
+			_ = m
+			return capsuleWorkspaceWrite(cmd, result, jsonOut)
 		}
 		signer, err := capsuleFakeReceiptSigner(fakeReceiptSigner)
 		if err != nil {
@@ -215,6 +227,7 @@ func capsuleCIRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
 	cmd.Flags().StringVar(&workerID, "worker", "", "pin this dispatch to a registered worker id, overriding the pipeline's declared executor (still policy-checked: see agent_launch_policy.placement)")
 	cmd.Flags().StringVar(&lane, "lane", "", "placement policy lane for this dispatch when --worker is set (default: the pipeline name)")
+	cmd.Flags().BoolVar(&detach, "detach", false, "dispatch the sealed envelope asynchronously and return the run result (job id + execution id) immediately; reconcile terminal state with 'capsule ci status --job <id> --refresh' (pool executors with source_bucket only)")
 	_ = cmd.MarkFlagRequired("workspace")
 	return cmd
 }
@@ -407,15 +420,7 @@ func capsuleCIStatusCmd() *cobra.Command {
 				record = reconciled
 			}
 			if refresh {
-				controller, err := capsuleCIExecutionController(cmd.Context(), project, record)
-				if err != nil {
-					return err
-				}
-				status, err := controller.Status(cmd.Context(), record.Result.Execution.ExecutionID)
-				if err != nil {
-					return err
-				}
-				record, err = store.RecordExecutorStatus(job, status)
+				record, err = capsuleCIRefreshJob(cmd, project, job, store, record)
 				if err != nil {
 					return err
 				}
@@ -583,7 +588,7 @@ func capsuleCICancelCmd() *cobra.Command {
 		if reconciled, ok, reconcileErr := store.ReconcileOrphaned(job); reconcileErr == nil && ok {
 			return capsuleWorkspaceWrite(cmd, reconciled, jsonOut)
 		}
-		controller, err := capsuleCIExecutionController(cmd.Context(), project, record)
+		controller, _, err := capsuleCIExecutionController(cmd.Context(), project, record)
 		if err != nil {
 			return err
 		}
@@ -607,50 +612,97 @@ func capsuleCICancelCmd() *cobra.Command {
 	return cmd
 }
 
-func capsuleCIExecutionController(ctx context.Context, project string, run ci.RunRecord) (executor.ExecutionController, error) {
+func capsuleCIExecutionController(ctx context.Context, project string, run ci.RunRecord) (executor.ExecutionController, ci.Pipeline, error) {
 	if run.Result.Execution.ExecutionID == "" {
-		return nil, fmt.Errorf("capsule ci: job %s has no durable execution id", run.JobID)
+		return nil, ci.Pipeline{}, fmt.Errorf("capsule ci: job %s has no durable execution id", run.JobID)
 	}
 	root, err := filepath.Abs(project)
 	if err != nil {
-		return nil, err
+		return nil, ci.Pipeline{}, err
 	}
 	manager, err := capsuleWorkspaceManager(root)
 	if err != nil {
-		return nil, err
+		return nil, ci.Pipeline{}, err
 	}
 	workspaceRoot, err := manager.WorkspacePath(ctx, run.Result.Envelope.Instance)
 	if err != nil {
-		return nil, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w", err)
+		return nil, ci.Pipeline{}, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w", err)
 	}
 	cfg, err := ci.Load(workspaceRoot)
 	if err != nil {
-		return nil, err
+		return nil, ci.Pipeline{}, err
 	}
+	pipeline := cfg.Pipelines[run.Result.Pipeline]
 	executorName := run.Result.Executor
 	if executorName == "" {
-		if pipeline, ok := cfg.Pipelines[run.Result.Pipeline]; ok {
-			executorName = pipeline.Executor
-		}
+		executorName = pipeline.Executor
 	}
 	configured := ci.NewConfiguredExecutors(cfg)
 	configured.ProjectRoot = workspaceRoot
 	provider, err := configured.Select(ctx, executorName)
 	if err != nil {
-		return nil, err
+		return nil, ci.Pipeline{}, err
 	}
-	capabilities, err := provider.Describe(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !capabilities.Cancellable {
-		return nil, fmt.Errorf("capsule ci: executor %q does not support cancellation/status control", executorName)
-	}
+	// The provider's own ExecutionController implementation is the authority
+	// on what it can answer: pool executors expose bucket-backed Status while
+	// advertising Cancellable: false (their RequestCancel refuses with a
+	// typed error), so a Capabilities.Cancellable gate here would wrongly
+	// foreclose detached status reconciliation.
 	controller, ok := provider.(executor.ExecutionController)
 	if !ok {
-		return nil, fmt.Errorf("capsule ci: executor %q does not expose durable status/cancellation", executorName)
+		return nil, ci.Pipeline{}, fmt.Errorf("capsule ci: executor %q does not expose durable status/cancellation", executorName)
 	}
-	return controller, nil
+	return controller, pipeline, nil
+}
+
+// capsuleCIRefreshJob reconciles one persisted job from its executor's
+// durable status: it records the latest executor fact, collects the verdict
+// and receipt when a remote-completed execution carries one, and releases a
+// detached executor's leased worker once the run is terminal.
+func capsuleCIRefreshJob(cmd *cobra.Command, project, job string, store ci.FileRunStore, run ci.RunRecord) (ci.RunRecord, error) {
+	controller, pipeline, err := capsuleCIExecutionController(cmd.Context(), project, run)
+	if err != nil {
+		return run, err
+	}
+	status, err := controller.Status(cmd.Context(), run.Result.Execution.ExecutionID)
+	if err != nil {
+		return run, err
+	}
+	run, err = store.RecordExecutorStatus(job, status)
+	if err != nil {
+		return run, err
+	}
+	if status.Status == "completed" && !run.Result.Terminal && len(status.Result.VerdictJSON) > 0 {
+		var verdict ci.Verdict
+		if err := json.Unmarshal(status.Result.VerdictJSON, &verdict); err != nil {
+			return run, fmt.Errorf("capsule ci: parse collected verdict for job %s: %w", job, err)
+		}
+		verdict = ci.NormalizeVerdict(verdict)
+		if err := ci.ValidateVerdict(verdict, run.Result.Envelope, pipeline.Result); err != nil {
+			return run, fmt.Errorf("capsule ci: collected verdict for job %s: %w", job, err)
+		}
+		run, err = store.FinalizeCollected(job, verdict, status.Result)
+		if err != nil {
+			return run, err
+		}
+		stored, err := record.PersistWithOptions(project, run.Result, record.PersistOptions{})
+		if err != nil {
+			return run, fmt.Errorf("capsule ci: persist collected receipt for job %s: %w", job, err)
+		}
+		run.ReceiptID = stored.Receipt.ReceiptID
+		run.ReceiptVerification = stored.Verification.Status
+		if err := store.Write(run); err != nil {
+			return run, err
+		}
+	}
+	if run.Result.Terminal {
+		if releaser, ok := controller.(executor.DetachedReleaser); ok && run.Result.Envelope.JobID != "" {
+			if err := releaser.ReleaseDetached(cmd.Context(), run.Result.Envelope.JobID); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: capsule ci: release detached worker for job %s: %v\n", job, err)
+			}
+		}
+	}
+	return run, nil
 }
 
 type ciLauncher struct{ verdict ci.Verdict }

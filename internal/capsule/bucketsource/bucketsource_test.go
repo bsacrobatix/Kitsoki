@@ -441,6 +441,62 @@ func TestMirrorTerminalArtifactPutFailureAggregatesButContinues(t *testing.T) {
 	assertObject(t, store, "runs/exec-artifacts-3/artifacts/good.txt", "good")
 }
 
+// TestMirrorWIPWithoutWorkspaceDirIsANoOp covers a run that failed (or was
+// otherwise terminal) before its workspace was ever materialized: MirrorWIP
+// must return nil and store nothing, since ExportWIP has no workspace to
+// inspect.
+func TestMirrorWIPWithoutWorkspaceDirIsANoOp(t *testing.T) {
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	runDir := t.TempDir() // no "workspace" subdirectory created
+
+	record := workerserver.RunRecord{ExecutionID: "exec-wip-no-workspace", SourceDigest: "sha256:sealed"}
+	if err := mirror.MirrorWIP(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorWIP: %v", err)
+	}
+	if _, err := store.Head(context.Background(), "runs/exec-wip-no-workspace/wip/refs.bundle"); err == nil {
+		t.Fatalf("expected no bundle stored when the run has no workspace dir")
+	}
+	if _, err := store.Head(context.Background(), "runs/exec-wip-no-workspace/wip/wip.json"); err == nil {
+		t.Fatalf("expected no wip.json stored when the run has no workspace dir")
+	}
+}
+
+// TestMirrorWIPWithWorkspaceCommitBeyondSealedHeadExports covers the
+// durability-critical path end to end through OutputMirror.MirrorWIP: a
+// run's workspace has a commit beyond the sealed source head, and MirrorWIP
+// (via ExportWIP) publishes runs/<id>/wip/refs.bundle and wip.json.
+func TestMirrorWIPWithWorkspaceCommitBeyondSealedHeadExports(t *testing.T) {
+	repoDir, sealedHead := initWIPRepo(t)
+	write(t, filepath.Join(repoDir, "b.txt"), "b\n")
+	wipGit(t, repoDir, "add", "b.txt")
+	wipGit(t, repoDir, "commit", "-q", "-m", "second")
+	newHead := strings.TrimSpace(wipGit(t, repoDir, "rev-parse", "HEAD"))
+
+	runDir := t.TempDir()
+	workspace := filepath.Join(runDir, "workspace")
+	if err := os.Rename(repoDir, workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	record := workerserver.RunRecord{ExecutionID: "exec-wip-mirror-1", SourceDigest: sealedHead}
+	if err := mirror.MirrorWIP(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorWIP: %v", err)
+	}
+
+	wantKey := "runs/exec-wip-mirror-1/wip/refs.bundle"
+	if _, err := store.Head(context.Background(), wantKey); err != nil {
+		t.Fatalf("expected bundle stored at %s: %v", wantKey, err)
+	}
+	var sidecar bucketsource.WIPExport
+	readJSONObject(t, store, "runs/exec-wip-mirror-1/wip/wip.json", &sidecar)
+	if sidecar.Head != newHead || sidecar.SealedHead != sealedHead || sidecar.BundleKey != wantKey {
+		t.Fatalf("sidecar = %+v, want head=%s sealed=%s key=%s", sidecar, newHead, sealedHead, wantKey)
+	}
+}
+
 func assertObject(t *testing.T, store objectstore.Store, key, want string) {
 	t.Helper()
 	rc, _, err := store.Get(context.Background(), key)

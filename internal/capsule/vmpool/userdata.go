@@ -18,6 +18,12 @@ type BootSpec struct {
 	ListenAddr string
 	Identity   ServerIdentity
 	Env        map[string]string
+	// User, when set, runs the kitsoki-worker service as this pre-existing
+	// image user instead of root, so credentials the image bakes for that
+	// user (agent CLI auth state, HOME-relative config) are usable by story
+	// steps. The boot script chowns the worker's config, durable root, and
+	// log directories to it and fails the boot early if the user is missing.
+	User string
 }
 
 // heredocMarker identifies one embedded here-document block within the
@@ -105,8 +111,15 @@ func GenerateUserData(spec BootSpec) (string, error) {
 	writeHeredoc(&b, markerEnv, "/etc/kitsoki-worker/env", envLines)
 	b.WriteString("chmod 0600 /etc/kitsoki-worker/env\n")
 	b.WriteString("\n")
+	if spec.User != "" {
+		fmt.Fprintf(&b, "log 'boot: preparing service user %s'\n", spec.User)
+		fmt.Fprintf(&b, "id -u %s >/dev/null\n", spec.User)
+		b.WriteString("mkdir -p /var/lib/kitsoki-worker\n")
+		fmt.Fprintf(&b, "chown -R %s: /etc/kitsoki-worker /var/lib/kitsoki-worker /var/log/kitsoki-worker\n", spec.User)
+		b.WriteString("\n")
+	}
 	b.WriteString("log 'boot: writing kitsoki-worker systemd unit'\n")
-	writeHeredoc(&b, markerUnit, "/etc/systemd/system/kitsoki-worker.service", unitLines())
+	writeHeredoc(&b, markerUnit, "/etc/systemd/system/kitsoki-worker.service", unitLines(spec.User))
 	b.WriteString("\n")
 	b.WriteString("log 'boot: enabling kitsoki-worker service'\n")
 	b.WriteString("systemctl daemon-reload\n")
@@ -129,8 +142,8 @@ func writeHeredoc(b *strings.Builder, marker heredocMarker, path string, lines [
 	fmt.Fprintf(b, "%s\n", marker)
 }
 
-func unitLines() []string {
-	return []string{
+func unitLines(user string) []string {
+	lines := []string{
 		"[Unit]",
 		"Description=Kitsoki capsule worker",
 		"After=network-online.target",
@@ -138,13 +151,24 @@ func unitLines() []string {
 		"",
 		"[Service]",
 		"Type=simple",
+	}
+	if user != "" {
+		lines = append(lines, "User="+user)
+	}
+	lines = append(lines,
+		// systemd does not source /etc/environment on its own; loading it
+		// here lets credentials baked into the image reach the worker
+		// process, where KITSOKI_WORKER_PASS_ENV can name them for story
+		// steps. The leading '-' keeps an absent file non-fatal.
+		"EnvironmentFile=-/etc/environment",
 		"ExecStart=/usr/local/bin/kitsoki capsule worker serve --config /etc/kitsoki-worker/env",
 		"Restart=on-failure",
 		"RestartSec=2",
 		"",
 		"[Install]",
 		"WantedBy=multi-user.target",
-	}
+	)
+	return lines
 }
 
 // buildEnvLines renders the KEY=VALUE lines written to
@@ -215,6 +239,10 @@ func validateBootSpec(spec BootSpec) error {
 		}
 	}
 
+	if spec.User != "" && !ValidUserName(spec.User) {
+		return fmt.Errorf("vmpool: generate user data: User %q is not a valid unix user name", spec.User)
+	}
+
 	for k, v := range spec.Env {
 		if k == "" {
 			return fmt.Errorf("vmpool: generate user data: Env key must not be empty")
@@ -243,6 +271,26 @@ func validateBootSpec(spec BootSpec) error {
 	}
 
 	return nil
+}
+
+// ValidUserName accepts only a conservative useradd-compatible name.
+// BootSpec.User is interpolated into the boot script and systemd unit
+// outside any heredoc, so anything beyond this character set is rejected
+// rather than escaped. Exported so ci config validation can apply the same
+// rule at no-spend validate time.
+func ValidUserName(user string) bool {
+	if len(user) == 0 || len(user) > 32 {
+		return false
+	}
+	for i, r := range user {
+		switch {
+		case r >= 'a' && r <= 'z', r == '_':
+		case i > 0 && (r >= '0' && r <= '9' || r == '-'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // validatePrivateKeyPEM requires the decoded PEM block to parse as either an

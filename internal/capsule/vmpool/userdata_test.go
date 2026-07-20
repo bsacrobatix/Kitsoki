@@ -239,6 +239,103 @@ func TestGenerateUserDataRejectsMissingFields(t *testing.T) {
 	}
 }
 
+// TestGenerateUserDataWithUserEmitsServiceUserSetup covers BootSpec.User:
+// the systemd unit runs as the named user, the boot script waits on the
+// user existing, and the worker's config/durable/log directories are chowned
+// to it before the unit starts.
+func TestGenerateUserDataWithUserEmitsServiceUserSetup(t *testing.T) {
+	spec := validSpec(t)
+	spec.User = "kitsoki"
+	script, err := GenerateUserData(spec)
+	if err != nil {
+		t.Fatalf("GenerateUserData: %v", err)
+	}
+
+	for _, want := range []string{
+		"User=kitsoki",
+		"EnvironmentFile=-/etc/environment",
+		"id -u kitsoki",
+		"chown -R kitsoki: /etc/kitsoki-worker /var/lib/kitsoki-worker /var/log/kitsoki-worker",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("expected script to contain %q", want)
+		}
+	}
+
+	// The unit heredoc must remain balanced (exactly one open + one close)
+	// even with the extra User= line inserted into unitLines.
+	open := strings.Count(script, "<<'"+string(markerUnit)+"'")
+	closeCount := strings.Count(script, "\n"+string(markerUnit)+"\n")
+	if open != 1 || closeCount != 1 {
+		t.Fatalf("unit heredoc unbalanced: open=%d close=%d", open, closeCount)
+	}
+}
+
+// TestGenerateUserDataWithoutUserOmitsServiceUserSetup covers the default
+// (root) path: no User= line in the unit and no service-user prep, but the
+// EnvironmentFile line is unconditional so image-baked /etc/environment
+// credentials still reach the worker process.
+func TestGenerateUserDataWithoutUserOmitsServiceUserSetup(t *testing.T) {
+	spec := validSpec(t)
+	spec.User = ""
+	script, err := GenerateUserData(spec)
+	if err != nil {
+		t.Fatalf("GenerateUserData: %v", err)
+	}
+
+	if strings.Contains(script, "User=") {
+		t.Fatalf("expected no User= line when BootSpec.User is unset, got:\n%s", script)
+	}
+	if !strings.Contains(script, "EnvironmentFile=-/etc/environment") {
+		t.Fatalf("expected EnvironmentFile line even without a service user")
+	}
+	if strings.Contains(script, "id -u ") || strings.Contains(script, "chown -R") {
+		t.Fatalf("expected no service-user prep without BootSpec.User")
+	}
+}
+
+func TestValidateBootSpecRejectsInvalidUser(t *testing.T) {
+	base := validSpec(t)
+
+	for _, bad := range []string{"bad user", "Bad", "-lead", strings.Repeat("a", 33)} {
+		spec := base
+		spec.User = bad
+		if _, err := GenerateUserData(spec); err == nil {
+			t.Fatalf("expected error for invalid user %q", bad)
+		}
+	}
+
+	for _, good := range []string{"kitsoki", "_svc", "a-b_c9"} {
+		spec := base
+		spec.User = good
+		if _, err := GenerateUserData(spec); err != nil {
+			t.Fatalf("expected user %q to validate, got %v", good, err)
+		}
+	}
+}
+
+func TestValidUserName(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"kitsoki", true},
+		{"_svc", true},
+		{"a-b_c9", true},
+		{"", false},
+		{"bad user", false},
+		{"Bad", false},
+		{"-lead", false},
+		{strings.Repeat("a", 32), true},
+		{strings.Repeat("a", 33), false},
+	}
+	for _, tc := range cases {
+		if got := ValidUserName(tc.name); got != tc.want {
+			t.Fatalf("ValidUserName(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestGenerateUserDataRejectsBadPEM(t *testing.T) {
 	spec := validSpec(t)
 	spec.Identity.CertPEM = []byte("not a pem block at all")

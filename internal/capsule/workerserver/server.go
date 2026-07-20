@@ -56,6 +56,11 @@ type OutputSink interface {
 	// MirrorTerminal uploads the full run output set (trace, artifacts) for a
 	// terminal record; runDir is the worker-local run directory.
 	MirrorTerminal(ctx context.Context, record RunRecord, runDir string) error
+	// MirrorWIP uploads committed work-in-progress from the run's workspace
+	// (refs beyond the sealed source head) for a terminal record, so agent
+	// commits survive the worker host. A workspace still at the sealed head —
+	// or one that was never materialized — mirrors nothing.
+	MirrorWIP(ctx context.Context, record RunRecord, runDir string) error
 }
 
 type Config struct {
@@ -363,6 +368,35 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"error": terminal.Error, "result": terminal.Result, "run": terminal})
 		return
 	}
+	// Detached dispatch: register the run durably, respond 202 with the
+	// non-terminal record, and drive the story in a background goroutine whose
+	// context outlives this request. The caller reconciles terminal state from
+	// the durable run record (locally via GET /executions/{id}, or from the
+	// bucket-mirrored runs/<execution-id>/run.json after this host is gone).
+	if r.URL.Query().Get("detach") == "1" {
+		runCtx, cancel := context.WithCancel(context.WithoutCancel(r.Context()))
+		if !s.activate(prepared.ID, cancel) {
+			cancel()
+			writeError(w, http.StatusConflict, "execution is already running", requestID(r))
+			return
+		}
+		record, err := s.registerRun(prepared, requestID(r))
+		if err != nil {
+			cancel()
+			s.deactivate(prepared.ID)
+			writeError(w, http.StatusInternalServerError, boundedError(err), requestID(r))
+			return
+		}
+		go func() {
+			defer func() {
+				cancel()
+				s.deactivate(prepared.ID)
+			}()
+			_, _, _ = s.executeRegistered(runCtx, record, prepared)
+		}()
+		writeJSON(w, http.StatusAccepted, map[string]any{"run": s.projectRun(record)})
+		return
+	}
 	runCtx, cancel := context.WithCancel(r.Context())
 	if !s.activate(prepared.ID, cancel) {
 		cancel()
@@ -386,15 +420,30 @@ func (s *Server) run(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"result": result, "run": record})
 }
 
-func (s *Server) execute(ctx context.Context, prepared executor.Prepared, reqID string) (RunRecord, executor.Result, error) {
+// registerRun durably persists the initial "registered" checkpoint for a new
+// execution, so both the synchronous and detached run paths hand out a record
+// that already survives this process.
+func (s *Server) registerRun(prepared executor.Prepared, reqID string) (RunRecord, error) {
 	now := s.cfg.Now()
 	record := RunRecord{Schema: RunRecordSchema, ExecutionID: prepared.ID, EnvelopeDigest: prepared.Envelope.Digest, SourceDigest: prepared.Envelope.SourceDigest, StoryDigest: prepared.Envelope.StoryDigest, RequestID: reqID, Status: "running", Stage: "registered", StartedAt: now, UpdatedAt: now}
 	s.appendEvent(&record, prepared, "capsule.worker.registered", "running", "")
 	if err := s.writeRun(record); err != nil {
 		persistErr := fmt.Errorf("capsule worker: persist registered checkpoint: %w", err)
 		record.Error = boundedError(persistErr)
-		return record, executor.Result{}, persistErr
+		return record, persistErr
 	}
+	return record, nil
+}
+
+func (s *Server) execute(ctx context.Context, prepared executor.Prepared, reqID string) (RunRecord, executor.Result, error) {
+	record, err := s.registerRun(prepared, reqID)
+	if err != nil {
+		return record, executor.Result{}, err
+	}
+	return s.executeRegistered(ctx, record, prepared)
+}
+
+func (s *Server) executeRegistered(ctx context.Context, record RunRecord, prepared executor.Prepared) (RunRecord, executor.Result, error) {
 	runDir := s.runDir(prepared.ID)
 	workspace := filepath.Join(runDir, "workspace")
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
@@ -651,6 +700,12 @@ func (s *Server) mirrorOutputs(ctx context.Context, record *RunRecord, prepared 
 	}
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(record, prepared, "capsule.worker.outputs.mirrored", outcome, errText)
+	wipOutcome, wipErrText := "passed", ""
+	if err := s.cfg.Outputs.MirrorWIP(mirrorCtx, *record, s.runDir(record.ExecutionID)); err != nil {
+		wipOutcome, wipErrText = "failed", boundedError(err)
+	}
+	record.UpdatedAt = s.cfg.Now()
+	s.appendEvent(record, prepared, "capsule.worker.wip.mirrored", wipOutcome, wipErrText)
 }
 
 func defaultSourceFetcher(ctx context.Context, fetchURL string, max int64) ([]byte, error) {

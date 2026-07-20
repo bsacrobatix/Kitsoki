@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -491,6 +493,214 @@ func TestWorkerCancellationIsRequestedThenDurablyTerminalAndIdempotent(t *testin
 	retryRaw := readAndClose(t, retry)
 	if retry.StatusCode != http.StatusConflict || calls.Load() != 1 || !bytes.Contains(retryRaw, []byte(`"status":"cancelled"`)) {
 		t.Fatalf("retry = %d calls=%d: %s", retry.StatusCode, calls.Load(), retryRaw)
+	}
+}
+
+// fakeOutputSink implements workerserver.OutputSink, recording every call it
+// receives so tests can assert on invocation counts/args without a real
+// object store.
+type fakeOutputSink struct {
+	mu             sync.Mutex
+	mirrorRunCalls int
+	terminalCalls  []workerserver.RunRecord
+	wipCalls       []workerserver.RunRecord
+}
+
+func (f *fakeOutputSink) MirrorRun(_ context.Context, _ workerserver.RunRecord) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.mirrorRunCalls++
+	return nil
+}
+
+func (f *fakeOutputSink) MirrorTerminal(_ context.Context, record workerserver.RunRecord, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.terminalCalls = append(f.terminalCalls, record)
+	return nil
+}
+
+func (f *fakeOutputSink) MirrorWIP(_ context.Context, record workerserver.RunRecord, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.wipCalls = append(f.wipCalls, record)
+	return nil
+}
+
+func (f *fakeOutputSink) wipCallCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.wipCalls)
+}
+
+func (f *fakeOutputSink) lastWIPExecutionID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.wipCalls) == 0 {
+		return ""
+	}
+	return f.wipCalls[len(f.wipCalls)-1].ExecutionID
+}
+
+var _ workerserver.OutputSink = (*fakeOutputSink)(nil)
+
+// TestWorkerMirrorsWIPAfterSuccessfulTerminalRun covers the new MirrorWIP
+// leg of mirrorOutputs on the success path: it must run after
+// MirrorTerminal and the run's timeline must record the
+// "capsule.worker.wip.mirrored" event alongside the existing
+// "capsule.worker.outputs.mirrored" event.
+func TestWorkerMirrorsWIPAfterSuccessfulTerminalRun(t *testing.T) {
+	project := capsuletest.Open(t, "clean-repo")
+	storyRel := "story/app.yaml"
+	write(t, filepath.Join(project, storyRel), passingStory)
+	envRel := writeEnvironment(t, project)
+	git(t, project, "add", storyRel, envRel)
+	git(t, project, "-c", "user.name=Capsule Test", "-c", "user.email=capsule@example.invalid", "commit", "-m", "Add WIP-mirror fixture")
+	head := strings.TrimSpace(git(t, project, "rev-parse", "HEAD"))
+	closure, err := storydigest.Compute(project, storyRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envLock, err := (environment.Resolver{ProjectRoot: project}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := executor.GitBundle(context.Background(), project, head, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &fakeOutputSink{}
+	worker, err := workerserver.New(workerserver.Config{
+		Root:         t.TempDir(),
+		Capabilities: isolatedTestCapabilities(),
+		Environment:  environment.Verifier{},
+		Outputs:      sink,
+		Runner: func(context.Context, string, executor.Prepared, string) (executor.Result, error) {
+			return executor.Result{ExitCode: 0, VerdictArtifact: "verdict:ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(worker.Handler())
+	t.Cleanup(server.Close)
+	upload, _ := http.NewRequest(http.MethodPut, server.URL+"/v1/capsules/sources/"+head, bytes.NewReader(bundle.Data))
+	upload.Header.Set("X-Kitsoki-Bundle-Digest", bundle.Digest)
+	response, err := http.DefaultClient.Do(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readAndClose(t, response)
+
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job-wip-success", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: head, StoryPath: storyRel, StoryDigest: closure.Digest, Environment: envLock, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := executor.Prepared{ID: "wip-success", Envelope: envelope, Placement: "remote", Applied: envelope.Policy}
+	body, _ := json.Marshal(map[string]any{"prepared": prepared})
+	run, err := http.Post(server.URL+"/v1/capsules/run", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := readAndClose(t, run)
+	if run.StatusCode != http.StatusOK {
+		t.Fatalf("run = %d: %s", run.StatusCode, raw)
+	}
+	var completed struct {
+		Run workerserver.RunRecord `json:"run"`
+	}
+	if err := json.Unmarshal(raw, &completed); err != nil {
+		t.Fatal(err)
+	}
+	if !hasEvent(completed.Run.Events, "capsule.worker.outputs.mirrored") {
+		t.Fatalf("expected outputs.mirrored event, got %+v", completed.Run.Events)
+	}
+	if !hasEvent(completed.Run.Events, "capsule.worker.wip.mirrored") {
+		t.Fatalf("expected wip.mirrored event, got %+v", completed.Run.Events)
+	}
+	if sink.wipCallCount() != 1 {
+		t.Fatalf("MirrorWIP called %d times, want 1", sink.wipCallCount())
+	}
+	if sink.lastWIPExecutionID() != prepared.ID {
+		t.Fatalf("MirrorWIP execution id = %q, want %q", sink.lastWIPExecutionID(), prepared.ID)
+	}
+}
+
+// TestWorkerMirrorsWIPOnFailingRun covers mirrorOutputs' fail() call site:
+// MirrorWIP must still run (best-effort) even when the runner itself fails,
+// since a worker's runner can fail after having already made commits in the
+// workspace that are worth recovering.
+func TestWorkerMirrorsWIPOnFailingRun(t *testing.T) {
+	project := capsuletest.Open(t, "clean-repo")
+	storyRel := "story/app.yaml"
+	write(t, filepath.Join(project, storyRel), passingStory)
+	envRel := writeEnvironment(t, project)
+	git(t, project, "add", storyRel, envRel)
+	git(t, project, "-c", "user.name=Capsule Test", "-c", "user.email=capsule@example.invalid", "commit", "-m", "Add WIP-mirror failure fixture")
+	head := strings.TrimSpace(git(t, project, "rev-parse", "HEAD"))
+	closure, err := storydigest.Compute(project, storyRel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envLock, err := (environment.Resolver{ProjectRoot: project}).Resolve(context.Background(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := executor.GitBundle(context.Background(), project, head, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &fakeOutputSink{}
+	worker, err := workerserver.New(workerserver.Config{
+		Root:         t.TempDir(),
+		Capabilities: isolatedTestCapabilities(),
+		Environment:  environment.Verifier{},
+		Outputs:      sink,
+		Runner: func(context.Context, string, executor.Prepared, string) (executor.Result, error) {
+			return executor.Result{}, errors.New("simulated runner failure")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(worker.Handler())
+	t.Cleanup(server.Close)
+	upload, _ := http.NewRequest(http.MethodPut, server.URL+"/v1/capsules/sources/"+head, bytes.NewReader(bundle.Data))
+	upload.Header.Set("X-Kitsoki-Bundle-Digest", bundle.Digest)
+	response, err := http.DefaultClient.Do(upload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readAndClose(t, response)
+
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job-wip-fail", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: head, StoryPath: storyRel, StoryDigest: closure.Digest, Environment: envLock, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := executor.Prepared{ID: "wip-fail", Envelope: envelope, Placement: "remote", Applied: envelope.Policy}
+	body, _ := json.Marshal(map[string]any{"prepared": prepared})
+	run, err := http.Post(server.URL+"/v1/capsules/run", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := readAndClose(t, run)
+	if run.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("run = %d: %s", run.StatusCode, raw)
+	}
+	var failed struct {
+		Run workerserver.RunRecord `json:"run"`
+	}
+	if err := json.Unmarshal(raw, &failed); err != nil {
+		t.Fatal(err)
+	}
+	if !hasEvent(failed.Run.Events, "capsule.worker.wip.mirrored") {
+		t.Fatalf("expected wip.mirrored event on failure path, got %+v", failed.Run.Events)
+	}
+	if sink.wipCallCount() != 1 {
+		t.Fatalf("MirrorWIP called %d times on failure path, want 1", sink.wipCallCount())
+	}
+	if sink.lastWIPExecutionID() != prepared.ID {
+		t.Fatalf("MirrorWIP execution id = %q, want %q", sink.lastWIPExecutionID(), prepared.ID)
 	}
 }
 

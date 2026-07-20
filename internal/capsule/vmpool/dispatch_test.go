@@ -388,6 +388,51 @@ func TestDspLeaseOutputsEnvWiresWorkerBootEnv(t *testing.T) {
 	}
 }
 
+// TestDspLeaseThreadsUserAndPassEnvIntoBootUserData covers LeaseSpec.User
+// and a KITSOKI_WORKER_PASS_ENV entry in LeaseSpec.Env: both must reach the
+// generated user data unchanged, since Lease wires spec.User onto
+// BootSpec.User and merges spec.Env directly into the boot env.
+func TestDspLeaseThreadsUserAndPassEnvIntoBootUserData(t *testing.T) {
+	root := t.TempDir()
+	cfg := dspTestConfig()
+	fake := NewFake()
+	pool := dspNewPool(root, cfg, fake)
+
+	sleep := dspInstantSleep(func(call int) {
+		if call == 1 {
+			dspActivateAll(context.Background(), t, fake, cfg.Tag, "203.0.113.15", "10.0.0.15")
+		}
+	})
+	dispatcher := &Dispatcher{Pool: pool, Sleep: sleep, HealthProbe: dspAlwaysHealthy}
+
+	spec := LeaseSpec{
+		JobID: "job8",
+		User:  "kitsoki",
+		Env: map[string]string{
+			"KITSOKI_WORKER_PASS_ENV": "SYNTHETIC_API_KEY",
+		},
+	}
+	lease, err := dispatcher.Lease(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Lease: %v", err)
+	}
+	t.Cleanup(func() { _ = lease.Release(context.Background()) })
+
+	created := fake.Created()
+	if len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	userData := created[0].UserData
+	for _, want := range []string{
+		"User=kitsoki",
+		"KITSOKI_WORKER_PASS_ENV=SYNTHETIC_API_KEY",
+	} {
+		if !strings.Contains(userData, want) {
+			t.Fatalf("user data missing %q", want)
+		}
+	}
+}
+
 func TestDspLeaseConcurrentDoesNotRaceOnSharedPool(t *testing.T) {
 	root := t.TempDir()
 	cfg := dspTestConfig()

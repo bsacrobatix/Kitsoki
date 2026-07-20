@@ -427,6 +427,58 @@ HTTPS-remote selection. Remote workers own source materialization and story
 execution for the sealed envelope they receive; the local controller validates
 the returned typed verdict against that envelope before persisting receipts.
 
+### Pool-backed executors
+
+A `remotes.<name>.pool` block dispatches each execution to a fresh ephemeral
+VM worker (DigitalOcean droplet) instead of a fixed endpoint. Alongside the
+provisioning fields (`token_env`, `image`, `size`, `region`, optional
+`vpc_uuid`/`ssh_key_ids`/`max_concurrent`) and the shared `source_bucket`
+transport, the block declares the worker's agent surface:
+
+- `user:` runs the worker service as that pre-existing image user (systemd
+  `User=`) so credentials the image bakes for it — agent CLI auth state,
+  HOME-relative config — are usable by story steps. The generated unit also
+  loads `/etc/environment` (`EnvironmentFile=-`), so image-baked values reach
+  the worker process.
+- `pass_env:` names the environment variables the worker may forward from its
+  own process environment into story steps (written to the boot env file as
+  `KITSOKI_WORKER_PASS_ENV`). Names only are checked in and validated;
+  values resolve worker-side and never transit the controller, config, user
+  data, or logs.
+- `agent_backend:` selects the worker's agent CLI backend
+  (`KITSOKI_WORKER_AGENT_BACKEND`), the same contract as `capsule worker
+  serve --agent-backend`.
+
+Story steps learn where to drop artifacts from `KITSOKI_RUN_ARTIFACTS_DIR`
+(exported into the story subprocess); everything under it mirrors to
+`runs/<execution-id>/artifacts/**` at terminal. Committed work the story
+creates beyond the sealed source head is exported at terminal (success and
+failure alike) to `runs/<execution-id>/wip/refs.bundle` + `wip.json`, so
+in-flight agent commits survive worker loss.
+
+### Detached pool dispatch
+
+`capsule ci run <pipeline> --detach` dispatches the sealed envelope
+asynchronously: the worker durably registers the run and the command returns
+the non-terminal `RunResult` (job id + execution id) immediately, instead of
+holding the controller→worker HTTP call open for the story's full duration.
+Detached dispatch requires the pool's `source_bucket`, because terminal state
+is reconciled from the worker's bucket-mirrored run records
+(`runs/<execution-id>/run.json`), not a live worker endpoint:
+
+```
+kitsoki capsule ci status --job <id> --refresh
+```
+
+records the latest durable worker fact; when the remote execution completed
+with a verdict, refresh validates and collects it, persists the receipt, and
+promotes the run to terminal. Once terminal, refresh also releases the
+detached droplet. `execution_id` is present in run projections from the first
+non-terminal status response, so a caller that loses its controller mid-run
+can still locate the worker's durable records and WIP bundle. Out-of-band
+cancellation of a detached execution is not supported; the worker's
+max-lifetime reaper and release-at-reconciliation bound its cost.
+
 ## Compatibility
 
 The native `capsule workspace` commands are the general-project API available

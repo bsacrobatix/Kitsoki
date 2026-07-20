@@ -76,8 +76,11 @@ type LeaseSpec struct {
 	BucketURL                       string
 	OutputsKeyEnv, OutputsSecretEnv string
 	Env                             map[string]string // extra env for the worker boot; may not redefine a reserved or outputs key
-	PollInterval                    time.Duration     // default DefaultLeasePollInterval
-	ReadyTimeout                    time.Duration     // default Config.ProvisionTimeout
+	// User, when set, runs the worker service as this pre-existing image
+	// user instead of root (see BootSpec.User).
+	User         string
+	PollInterval time.Duration // default DefaultLeasePollInterval
+	ReadyTimeout time.Duration // default Config.ProvisionTimeout
 }
 
 // withDefaults fills zero fields with lease defaults, using cfg (the Pool's
@@ -216,6 +219,7 @@ func (d *Dispatcher) Lease(ctx context.Context, spec LeaseSpec) (*WorkerLease, e
 		ListenAddr: fmt.Sprintf("0.0.0.0:%d", spec.ListenPort),
 		Identity:   identity,
 		Env:        env,
+		User:       spec.User,
 	}
 
 	// A shallow copy of *d.Pool, scoped to this lease: UserData and Health

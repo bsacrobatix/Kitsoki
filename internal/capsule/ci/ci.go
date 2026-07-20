@@ -23,6 +23,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/vmpool"
 	"kitsoki/internal/objectstore"
 )
 
@@ -111,6 +112,22 @@ type PoolExecutor struct {
 	// are not supported here (Validate rejects them rather than silently
 	// ignoring them).
 	SourceBucket *SourceBucket `yaml:"source_bucket,omitempty" json:"source_bucket,omitempty"`
+	// User, when set, runs the leased worker's service as this pre-existing
+	// image user instead of root, so credentials the image bakes for that
+	// user (agent CLI auth state) are usable by story steps. See
+	// vmpool.BootSpec.User.
+	User string `yaml:"user,omitempty" json:"user,omitempty"`
+	// PassEnv names environment variables the worker may forward from its
+	// own process environment (e.g. values baked into the image's
+	// /etc/environment) into story steps. Names only are checked in and
+	// validated; values are resolved worker-side, never by the controller,
+	// and never appear in config, user data, or logs.
+	PassEnv []string `yaml:"pass_env,omitempty" json:"pass_env,omitempty"`
+	// AgentBackend, when set, selects the worker's agent CLI backend for
+	// agent-enabled stories (written to the boot env file as
+	// KITSOKI_WORKER_AGENT_BACKEND, the same contract `capsule worker serve
+	// --agent-backend` reads).
+	AgentBackend string `yaml:"agent_backend,omitempty" json:"agent_backend,omitempty"`
 }
 
 // SourceBucket opts a configured remote into bucket-mediated source transport
@@ -509,6 +526,14 @@ type RunRequest struct {
 	// name must still resolve via Executors.Select like any other executor
 	// name — this field does not bypass remote configuration.
 	ExecutorOverride string
+
+	// Detach, when true, dispatches the sealed envelope to the executor and
+	// returns the non-terminal RunResult (with job id and execution id) as
+	// soon as the worker has durably registered the run, instead of waiting
+	// for story terminal. Only executors implementing
+	// executor.DetachedStarter (pool executors) support it; terminal state is
+	// reconciled later via `capsule ci status --job <id> --refresh`.
+	Detach bool
 }
 type RunResult struct {
 	Job       artifactjob.Job   `json:"job"`
@@ -633,7 +658,10 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	// independently of this process's liveness, and PID-based staleness
 	// detection would be actively wrong for it (a remote/async job can
 	// legitimately keep running after the CLI that launched it exits).
-	if capabilities, describeErr := provider.Describe(ctx); describeErr == nil && !capabilities.Cancellable {
+	// A detached run's liveness is the remote worker's, never this process's:
+	// recording our PID would let ReconcileOrphaned wrongly terminalize the
+	// job the moment this CLI exits.
+	if capabilities, describeErr := provider.Describe(ctx); describeErr == nil && !capabilities.Cancellable && !req.Detach {
 		result.PID = os.Getpid()
 	}
 	result, err = s.observe(ctx, result, RunStagePreparing, false, nil)
@@ -669,6 +697,30 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		}
 		return observerErr
 	})
+	if req.Detach {
+		starter, ok := provider.(executor.DetachedStarter)
+		if !ok {
+			return s.failRegistered(ctx, result, fmt.Errorf("capsule ci: executor %q does not support detached dispatch", p.Executor))
+		}
+		status, detachErr := starter.StartDetached(ctx, prepared, sink)
+		eventMu.Lock()
+		result.Events = append([]executor.Event(nil), events...)
+		if detachErr == nil && observerErr != nil {
+			detachErr = observerErr
+		}
+		eventMu.Unlock()
+		if detachErr != nil {
+			return s.failRegistered(ctx, result, detachErr)
+		}
+		if status.ExecutionID != "" {
+			result.Execution.ExecutionID = status.ExecutionID
+		}
+		result, err = s.observe(ctx, result, RunStageRunning, false, nil)
+		if err != nil {
+			return s.failWithoutObservation(ctx, result, fmt.Errorf("capsule ci: persist detached checkpoint: %w", err))
+		}
+		return result, nil
+	}
 	execution, runErr := provider.Run(ctx, prepared, func(ctx context.Context, prepared executor.Prepared) (executor.Result, error) {
 		if s.Launcher == nil {
 			return executor.Result{}, fmt.Errorf("capsule ci: no local launcher is configured")
@@ -1033,6 +1085,17 @@ func validatePoolExecutor(name string, pool PoolExecutor) error {
 		if pool.SourceBucket.Prefix != "" || pool.SourceBucket.PresignTTL != "" {
 			return fmt.Errorf("capsule ci remote %q: pool source_bucket does not support prefix or presign_ttl overrides", name)
 		}
+	}
+	for _, envName := range pool.PassEnv {
+		if !validEnvName(envName) {
+			return fmt.Errorf("capsule ci remote %q: pool pass_env entry %q is not a valid environment variable name", name, envName)
+		}
+	}
+	if pool.User != "" && !vmpool.ValidUserName(pool.User) {
+		return fmt.Errorf("capsule ci remote %q: pool user %q is not a valid unix user name", name, pool.User)
+	}
+	if backend := pool.AgentBackend; backend != strings.TrimSpace(backend) || strings.ContainsAny(backend, " \t\n,") {
+		return fmt.Errorf("capsule ci remote %q: pool agent_backend %q must be a single token", name, backend)
 	}
 	return nil
 }

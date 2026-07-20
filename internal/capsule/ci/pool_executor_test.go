@@ -158,6 +158,42 @@ func TestValidatePoolExecutorNeverReadsCredentialsFromEnvironment(t *testing.T) 
 	}
 }
 
+// TestValidatePoolExecutorRejectsBadPassEnvUserAgentBackend covers the
+// PassEnv/User/AgentBackend validation added alongside vmpool's service-user
+// and pass-env support: each field is checked independently, and a valid
+// combination of all three is accepted.
+func TestValidatePoolExecutorRejectsBadPassEnvUserAgentBackend(t *testing.T) {
+	valid := PoolExecutor{TokenEnv: "DO_TOKEN", Size: "s-1vcpu-1gb", Region: "sgp1"}
+
+	badPassEnv := valid
+	badPassEnv.PassEnv = []string{"not-an-env-name"}
+	if err := validatePoolExecutor("vm-pool", badPassEnv); err == nil || !strings.Contains(err.Error(), "pass_env") {
+		t.Fatalf("expected pass_env rejection, got %v", err)
+	}
+
+	badUser := valid
+	badUser.User = "Bad User"
+	if err := validatePoolExecutor("vm-pool", badUser); err == nil || !strings.Contains(err.Error(), "user") {
+		t.Fatalf("expected user rejection, got %v", err)
+	}
+
+	for _, bad := range []string{"agent backend", "agent,backend", "agent\tbackend", " agent-backend", "agent-backend "} {
+		badBackend := valid
+		badBackend.AgentBackend = bad
+		if err := validatePoolExecutor("vm-pool", badBackend); err == nil || !strings.Contains(err.Error(), "agent_backend") {
+			t.Fatalf("expected agent_backend rejection for %q, got %v", bad, err)
+		}
+	}
+
+	validCombo := valid
+	validCombo.PassEnv = []string{"SYNTHETIC_API_KEY"}
+	validCombo.User = "kitsoki"
+	validCombo.AgentBackend = "claude"
+	if err := validatePoolExecutor("vm-pool", validCombo); err != nil {
+		t.Fatalf("valid pass_env/user/agent_backend combination rejected: %v", err)
+	}
+}
+
 // -- ConfiguredExecutors.Select ---------------------------------------------
 
 func TestConfiguredExecutorsSelectPoolReturnsPoolProvider(t *testing.T) {
@@ -390,6 +426,52 @@ func TestPoolProviderRunLeasesRunsAndReleases(t *testing.T) {
 	}
 	if created, destroyed := len(fixture.fake.Created()), len(fixture.fake.Destroyed()); created != 1 || destroyed != 1 {
 		t.Fatalf("created=%d destroyed=%d, want lease+release exactly once", created, destroyed)
+	}
+}
+
+// TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData covers
+// Run's threading of cfg.User/PassEnv/AgentBackend into the lease it takes:
+// PassEnv is joined into KITSOKI_WORKER_PASS_ENV, AgentBackend into
+// KITSOKI_WORKER_AGENT_BACKEND, and User onto the boot user data's
+// systemd User= line — all observable on the fake provisioner's created
+// instance.
+func TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubRun(t, executor.Result{ExitCode: 0}, nil)
+	cfg := PoolExecutor{
+		TokenEnv:     "DO_TOKEN",
+		Image:        "img",
+		Size:         "s-1vcpu-1gb",
+		Region:       "sgp1",
+		User:         "kitsoki",
+		PassEnv:      []string{"SYNTHETIC_API_KEY", "OTHER_KEY"},
+		AgentBackend: "claude",
+	}
+	provider, err := newPoolProvider("vm-pool", cfg, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.Run(context.Background(), poolTestPrepared(t, "job-run-wired", "exec-run-wired"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+
+	created := fixture.fake.Created()
+	if len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	userData := created[0].UserData
+	for _, want := range []string{
+		"User=kitsoki",
+		"KITSOKI_WORKER_PASS_ENV=SYNTHETIC_API_KEY,OTHER_KEY",
+		"KITSOKI_WORKER_AGENT_BACKEND=claude",
+	} {
+		if !strings.Contains(userData, want) {
+			t.Fatalf("user data missing %q\nfull user data:\n%s", want, userData)
+		}
 	}
 }
 

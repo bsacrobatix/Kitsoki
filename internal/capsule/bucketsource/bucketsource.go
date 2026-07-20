@@ -197,6 +197,26 @@ func (m OutputMirror) mirrorTrace(ctx context.Context, record workerserver.RunRe
 	return nil
 }
 
+// MirrorWIP exports committed work-in-progress from the run's workspace
+// (refs the story moved beyond the sealed source head) to
+// runs/<execution-id>/wip/refs.bundle + wip.json via ExportWIP. A run that
+// failed before its workspace was materialized, or whose workspace never
+// moved past the sealed head, mirrors nothing and returns nil.
+func (m OutputMirror) MirrorWIP(ctx context.Context, record workerserver.RunRecord, runDir string) error {
+	if m.Store == nil {
+		return fmt.Errorf("bucketsource: object store is required")
+	}
+	workspace := filepath.Join(runDir, "workspace")
+	if _, err := os.Stat(workspace); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	_, err := ExportWIP(ctx, m.Store, m.prefix(), record.ExecutionID, workspace, record.SourceDigest)
+	return err
+}
+
 // mirrorArtifacts walks <runDir>/artifacts and uploads every regular file to
 // runs/<execution-id>/artifacts/<relative-path>. Mirroring is best-effort:
 // symlinks and oversized files are skipped rather than failing the run, and

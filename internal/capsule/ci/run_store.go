@@ -68,6 +68,11 @@ type RunProjection struct {
 	StartedAt           time.Time          `json:"started_at,omitempty"`
 	UpdatedAt           time.Time          `json:"updated_at,omitempty"`
 	Terminal            bool               `json:"terminal,omitempty"`
+	// ExecutionID is the durable executor-side handle, present as soon as the
+	// run is prepared — including every non-terminal status response — so a
+	// caller that loses its controller mid-run can still locate the worker's
+	// durable records (runs/<execution-id>/... in the output bucket).
+	ExecutionID string `json:"execution_id,omitempty"`
 }
 
 const RunDiagnosisSchema = "capsule-ci-run-diagnosis/v1"
@@ -318,6 +323,7 @@ func (s FileRunStore) Project(record RunRecord) RunProjection {
 	projection.Stage = record.Result.Stage
 	projection.StartedAt = record.Result.StartedAt
 	projection.Terminal = runResultTerminal(record.Result)
+	projection.ExecutionID = record.Result.Execution.ExecutionID
 	if projection.SourceDigest == "" {
 		projection.SourceDigest = record.Result.Envelope.SourceDigest
 	}
@@ -725,6 +731,50 @@ func (s FileRunStore) RecordExecutorStatus(id string, status executor.ExecutionS
 	default:
 		return RunRecord{}, fmt.Errorf("capsule ci: unsupported executor status %q", status.Status)
 	}
+	if err := s.Write(record); err != nil {
+		return RunRecord{}, err
+	}
+	return record, nil
+}
+
+// FinalizeCollected promotes a detached execution that RecordExecutorStatus
+// left at the collecting stage (remote status "completed") to a terminal run
+// carrying its validated verdict and full execution result. The caller is
+// responsible for having normalized and validated the verdict against the
+// sealed envelope and pipeline result policy first.
+func (s FileRunStore) FinalizeCollected(id string, verdict Verdict, execution executor.Result) (RunRecord, error) {
+	if err := validateRunID(id); err != nil {
+		return RunRecord{}, err
+	}
+	record, err := s.Get(id)
+	if err != nil {
+		return RunRecord{}, err
+	}
+	if record.Result.Terminal {
+		return record, nil
+	}
+	if execution.ExecutionID == "" || execution.ExecutionID != record.Result.Execution.ExecutionID {
+		return RunRecord{}, fmt.Errorf("capsule ci: collected execution does not describe job %s", id)
+	}
+	status := artifactjob.StatusDone
+	switch verdict.Outcome {
+	case "infra_failed":
+		status = artifactjob.StatusFailed
+	case "needs_input":
+		status = artifactjob.StatusAwaitingInput
+	}
+	now := time.Now().UTC()
+	record.Result.Verdict = verdict
+	record.Result.Execution = execution
+	record.Result.Job.Status = status
+	record.Result.Job.Summary = verdict.Summary
+	record.Result.Job.UpdatedAt = now
+	record.Result.UpdatedAt = now
+	record.Result.Stage = RunStageFinished
+	// Matches the synchronous path's terminal observation: a finished run is
+	// terminal even when its verdict is needs_input (resume is a new run).
+	record.Result.Terminal = true
+	record.DiagnosticError = ""
 	if err := s.Write(record); err != nil {
 		return RunRecord{}, err
 	}

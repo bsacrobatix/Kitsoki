@@ -171,6 +171,58 @@ func (w HTTPRemoteWorker) Run(ctx context.Context, prepared Prepared, _ Task, si
 	return response.Result, err
 }
 
+// StartDetached publishes the sealed source exactly like Run, then dispatches
+// the prepared execution with detach=1: the worker durably registers the run
+// and answers 202 immediately while the story executes in the background.
+// The returned ExecutionStatus is the worker's initial (normally
+// non-terminal) durable record; terminal state is reconciled later from the
+// worker's durable run records. A worker that already holds a terminal record
+// for this execution returns it directly (same replay behavior as Run).
+func (w HTTPRemoteWorker) StartDetached(ctx context.Context, prepared Prepared, sink EventSink) (ExecutionStatus, error) {
+	validated, err := ValidatePrepared(prepared)
+	if err != nil {
+		return ExecutionStatus{}, err
+	}
+	prepared = validated
+	if w.Source != nil {
+		if err := w.ensureSource(ctx, prepared, sink); err != nil {
+			return ExecutionStatus{}, err
+		}
+	}
+	meta := newRemoteCallMetadata(http.MethodPost, "/v1/capsules/run?detach=1", w.Endpoint)
+	if sink != nil {
+		fields := meta.fields()
+		fields["detach"] = true
+		if err := sink.Emit(ctx, Event{Kind: "capsule.executor.started", At: meta.StartedAt, EnvelopeDigest: prepared.Envelope.Digest, ExecutionID: prepared.ID, Outcome: "running", Fields: fields}); err != nil {
+			return ExecutionStatus{}, fmt.Errorf("capsule executor: persist remote start event: %w", err)
+		}
+	}
+	var response struct {
+		Run   ExecutionStatus `json:"run"`
+		Error string          `json:"error,omitempty"`
+	}
+	// Conflict/unprocessable replay a terminal record for an execution the
+	// worker already ran; the normalized status carries that outcome.
+	if _, err := w.callWithMetadataAccept(ctx, &meta, map[string]Prepared{"prepared": prepared}, &response, map[int]bool{http.StatusConflict: true, http.StatusUnprocessableEntity: true}); err != nil {
+		return ExecutionStatus{}, err
+	}
+	status, err := normalizeExecutionStatus(response.Run, prepared.ID)
+	if err != nil {
+		return ExecutionStatus{}, remoteCallError{Method: meta.Method, Path: meta.Path, Host: meta.Host, RequestID: meta.RequestID, Status: meta.Status, Duration: meta.Duration, Kind: "status", Body: sanitizeRemoteBody([]byte(response.Error)), Cause: err}
+	}
+	if sink != nil {
+		fields := meta.fields()
+		fields["detach"] = true
+		fields["worker_request_id"] = status.RequestID
+		fields["worker_status"] = status.Status
+		fields["worker_stage"] = status.Stage
+		if emitErr := sink.Emit(ctx, Event{Kind: "capsule.executor.detached", At: time.Now().UTC(), EnvelopeDigest: prepared.Envelope.Digest, ExecutionID: prepared.ID, Outcome: "running", Fields: fields}); emitErr != nil {
+			return ExecutionStatus{}, fmt.Errorf("capsule executor: persist remote detach event: %w", emitErr)
+		}
+	}
+	return status, nil
+}
+
 func (w HTTPRemoteWorker) ensureSource(ctx context.Context, prepared Prepared, sink EventSink) error {
 	bundle, err := w.Source.Bundle(ctx, prepared.Envelope)
 	if err != nil {

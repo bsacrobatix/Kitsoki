@@ -358,9 +358,16 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv []string) workerser
 		if agentBackend != "" {
 			args = append(args, "--agent-backend", agentBackend)
 		}
+		// The artifacts dir is the worker's mirror source (everything under it
+		// lands at runs/<execution-id>/artifacts/** at terminal); exporting it
+		// makes artifact placement a contract instead of run-layout inference.
+		artifactsDir := filepath.Join(runDir, "artifacts")
+		if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+			return executor.Result{}, err
+		}
 		process := exec.CommandContext(ctx, executable, args...)
 		process.Dir = workspace
-		process.Env = capsuleWorkerChildEnv(passEnv)
+		process.Env = append(capsuleWorkerChildEnv(passEnv), "KITSOKI_RUN_ARTIFACTS_DIR="+artifactsDir)
 		var stdout, stderr bytes.Buffer
 		process.Stdout = &stdout
 		process.Stderr = &stderr

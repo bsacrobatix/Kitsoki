@@ -145,6 +145,25 @@ type ExecutionController interface {
 	RequestCancel(context.Context, string) (ExecutionStatus, error)
 }
 
+// DetachedStarter is an optional Provider extension for asynchronous
+// dispatch: StartDetached hands the sealed prepared execution to a worker and
+// returns as soon as the worker has durably registered it, without waiting
+// for story terminal. Terminal state is reconciled later through an
+// ExecutionController (for pool executors, backed by the worker's durable
+// bucket run records rather than a live worker endpoint).
+type DetachedStarter interface {
+	StartDetached(ctx context.Context, prepared Prepared, sink EventSink) (ExecutionStatus, error)
+}
+
+// DetachedReleaser is an optional extension for executors whose detached
+// workers hold billable resources after StartDetached returns (an ephemeral
+// pool droplet stays alive to run the story). ReleaseDetached destroys the
+// worker leased for jobID once its execution has been reconciled terminal;
+// it is idempotent and safe to call for a job with no live worker.
+type DetachedReleaser interface {
+	ReleaseDetached(ctx context.Context, jobID string) error
+}
+
 type Task func(context.Context, Prepared) (Result, error)
 type Provider interface {
 	Describe(context.Context) (Capabilities, error)

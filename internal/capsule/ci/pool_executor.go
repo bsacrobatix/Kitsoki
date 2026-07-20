@@ -2,14 +2,18 @@ package ci
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"kitsoki/internal/capsule/bucketsource"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/vmpool"
+	"kitsoki/internal/capsule/workerserver"
 	"kitsoki/internal/objectstore"
 )
 
@@ -151,24 +155,19 @@ func (p *poolProvider) AcceptPrepared(_ context.Context, prepared executor.Prepa
 // non-nil ci.Service.Run error as environmental/retryable regardless of its
 // concrete type (see executor_gate.go's runErr handling), so no further
 // remote-call-error wrapping is needed for that classification to work.
-func (p *poolProvider) Run(ctx context.Context, prepared executor.Prepared, task executor.Task, sink executor.EventSink) (executor.Result, error) {
-	validated, err := executor.ValidatePrepared(prepared)
-	if err != nil {
-		return executor.Result{}, err
-	}
-	prepared = validated
-
+// buildPool constructs the vmpool.Pool for this executor's configuration.
+// PreserveFailed keeps a pre-ready lease failure's instance for post-mortem
+// instead of destroying it blind.
+func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 	provisioner, err := ciVMPoolNewProvisioner(p.cfg.TokenEnv)
 	if err != nil {
-		return executor.Result{}, fmt.Errorf("capsule ci: pool executor %q: %w", p.name, err)
+		return nil, fmt.Errorf("capsule ci: pool executor %q: %w", p.name, err)
 	}
-
 	root := p.projectRoot
 	if root == "" {
 		root = "."
 	}
-
-	pool := &vmpool.Pool{
+	return &vmpool.Pool{
 		Store:       &vmpool.Store{ProjectRoot: root, LockWait: ciVMPoolStoreLockWait},
 		Provisioner: provisioner,
 		Config: vmpool.Config{
@@ -179,22 +178,37 @@ func (p *poolProvider) Run(ctx context.Context, prepared executor.Prepared, task
 			VPCUUID:       p.cfg.VPCUUID,
 			SSHKeyIDs:     append([]string(nil), p.cfg.SSHKeyIDs...),
 		},
-		// A pre-ready lease failure keeps its instance for post-mortem
-		// instead of destroying it blind; a post-ready failure (this
-		// method's own runErr below) is still always released explicitly —
-		// see the Run doc comment.
 		PreserveFailed: true,
+	}, nil
+}
+
+// leaseWorker acquires one fresh ephemeral worker for jobID with this
+// executor's full boot configuration (pass_env/agent_backend/user surface and
+// optional bucket transport).
+func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.WorkerLease, error) {
+	pool, err := p.buildPool()
+	if err != nil {
+		return nil, err
 	}
 	dispatcher := &vmpool.Dispatcher{Pool: pool}
 	if ciVMPoolDispatcherHook != nil {
 		ciVMPoolDispatcherHook(dispatcher)
 	}
 
-	leaseSpec := vmpool.LeaseSpec{JobID: prepared.Envelope.JobID}
+	leaseSpec := vmpool.LeaseSpec{JobID: jobID, User: p.cfg.User, Env: map[string]string{}}
+	if len(p.cfg.PassEnv) > 0 {
+		// Names only: the worker resolves each value from its own process
+		// environment (see cmd/kitsoki capsuleWorkerChildEnv); no credential
+		// value ever transits the controller or the boot user data.
+		leaseSpec.Env["KITSOKI_WORKER_PASS_ENV"] = strings.Join(p.cfg.PassEnv, ",")
+	}
+	if p.cfg.AgentBackend != "" {
+		leaseSpec.Env["KITSOKI_WORKER_AGENT_BACKEND"] = p.cfg.AgentBackend
+	}
 	if p.cfg.SourceBucket != nil {
 		store, err := newPoolObjectStore(p.name, *p.cfg.SourceBucket)
 		if err != nil {
-			return executor.Result{}, err
+			return nil, err
 		}
 		leaseSpec.Objects = store
 		leaseSpec.BucketURL = p.cfg.SourceBucket.URL
@@ -204,7 +218,21 @@ func (p *poolProvider) Run(ctx context.Context, prepared executor.Prepared, task
 
 	lease, err := dispatcher.Lease(ctx, leaseSpec)
 	if err != nil {
-		return executor.Result{}, fmt.Errorf("capsule ci: pool executor %q: lease worker: %w", p.name, err)
+		return nil, fmt.Errorf("capsule ci: pool executor %q: lease worker: %w", p.name, err)
+	}
+	return lease, nil
+}
+
+func (p *poolProvider) Run(ctx context.Context, prepared executor.Prepared, task executor.Task, sink executor.EventSink) (executor.Result, error) {
+	validated, err := executor.ValidatePrepared(prepared)
+	if err != nil {
+		return executor.Result{}, err
+	}
+	prepared = validated
+
+	lease, err := p.leaseWorker(ctx, prepared.Envelope.JobID)
+	if err != nil {
+		return executor.Result{}, err
 	}
 
 	remote := lease.Remote
@@ -234,15 +262,141 @@ func (p *poolProvider) Cancel(context.Context, string) error {
 	return fmt.Errorf("capsule ci: pool executor %q does not support out-of-band cancellation; cancel the run's context instead", p.name)
 }
 
+// StartDetached leases a fresh ephemeral worker, publishes the sealed source,
+// and dispatches the prepared execution asynchronously: the worker registers
+// the run durably and this method returns its initial execution status
+// without waiting for story terminal. Unlike Run, the leased droplet
+// deliberately stays alive after this returns — it is executing the story —
+// and is destroyed later by ReleaseDetached once `capsule ci status
+// --refresh` reconciles a terminal state from the worker's bucket-mirrored
+// run records. Detached dispatch therefore requires source_bucket: without
+// output mirroring there would be no durable record to reconcile from after
+// the worker host is gone.
+func (p *poolProvider) StartDetached(ctx context.Context, prepared executor.Prepared, sink executor.EventSink) (executor.ExecutionStatus, error) {
+	validated, err := executor.ValidatePrepared(prepared)
+	if err != nil {
+		return executor.ExecutionStatus{}, err
+	}
+	prepared = validated
+	if p.cfg.SourceBucket == nil {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: detached dispatch requires source_bucket (terminal state is reconciled from the worker's bucket run records)", p.name)
+	}
+
+	lease, err := p.leaseWorker(ctx, prepared.Envelope.JobID)
+	if err != nil {
+		return executor.ExecutionStatus{}, err
+	}
+	remote := lease.Remote
+	remote.Source = p.source
+
+	status, err := poolRemoteStartDetached(ctx, remote, prepared, sink)
+	if err != nil {
+		// The dispatch never started; release the droplet rather than leak it.
+		if relErr := lease.Release(context.WithoutCancel(ctx)); relErr != nil {
+			err = fmt.Errorf("%w (also failed to release worker: %v)", err, relErr)
+		}
+		return executor.ExecutionStatus{}, err
+	}
+	return status, nil
+}
+
+// poolRemoteStartDetached mirrors poolRemoteRun's test seam for the detached
+// dispatch call (see poolRemoteRun's doc comment for why these are package
+// vars rather than direct method calls).
+var poolRemoteStartDetached = func(ctx context.Context, remote executor.HTTPRemoteWorker, prepared executor.Prepared, sink executor.EventSink) (executor.ExecutionStatus, error) {
+	return remote.StartDetached(ctx, prepared, sink)
+}
+
+// Status implements executor.ExecutionController for detached pool
+// executions by reading the worker's durable bucket run record
+// (runs/<execution-id>/run.json) instead of a live worker endpoint: the
+// droplet's minted single-job transport credential died with the dispatching
+// process, and the droplet itself may already be gone.
+func (p *poolProvider) Status(ctx context.Context, id string) (executor.ExecutionStatus, error) {
+	if p.cfg.SourceBucket == nil {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: status requires source_bucket", p.name)
+	}
+	store, err := newPoolObjectStore(p.name, *p.cfg.SourceBucket)
+	if err != nil {
+		return executor.ExecutionStatus{}, err
+	}
+	key := bucketsource.DefaultRunPrefix + "/" + id + "/run.json"
+	rc, _, err := store.Get(ctx, key)
+	if err != nil {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: read durable run record %s: %w", p.name, key, err)
+	}
+	defer rc.Close()
+	var record workerserver.RunRecord
+	if err := json.NewDecoder(io.LimitReader(rc, 8<<20)).Decode(&record); err != nil {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: decode durable run record %s: %w", p.name, key, err)
+	}
+	if record.Schema != workerserver.RunRecordSchema || record.ExecutionID != id {
+		return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q: durable run record %s does not describe execution %s", p.name, key, id)
+	}
+	return executor.ExecutionStatus{
+		Schema:         executor.ExecutionStatusSchema,
+		ExecutionID:    record.ExecutionID,
+		EnvelopeDigest: record.EnvelopeDigest,
+		RequestID:      record.RequestID,
+		Status:         record.Status,
+		Stage:          record.Stage,
+		StartedAt:      record.StartedAt,
+		UpdatedAt:      record.UpdatedAt,
+		TerminalAt:     record.TerminalAt,
+		Error:          record.Error,
+		Events:         record.Events,
+		Result:         record.Result,
+		Agent:          record.Agent,
+		Cleanup:        record.Cleanup,
+	}, nil
+}
+
+// RequestCancel is not supported for pool executions: after a detached
+// dispatch the controller holds no live credential for the worker (see
+// Status), so there is no authenticated path to request cancellation.
+func (p *poolProvider) RequestCancel(context.Context, string) (executor.ExecutionStatus, error) {
+	return executor.ExecutionStatus{}, fmt.Errorf("capsule ci: pool executor %q does not support out-of-band cancellation of a detached execution; the worker's max-lifetime reaper and ReleaseDetached bound its cost", p.name)
+}
+
+// ReleaseDetached destroys the ephemeral worker leased for jobID once its
+// detached execution has been reconciled terminal. It is a no-op when the
+// worker record is already terminal (or absent), so repeated reconciliation
+// polls stay idempotent.
+func (p *poolProvider) ReleaseDetached(ctx context.Context, jobID string) error {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return fmt.Errorf("capsule ci: pool executor %q: release: job id is required", p.name)
+	}
+	pool, err := p.buildPool()
+	if err != nil {
+		return err
+	}
+	workers, err := pool.List()
+	if err != nil {
+		return fmt.Errorf("capsule ci: pool executor %q: release: %w", p.name, err)
+	}
+	for _, w := range workers {
+		if w.JobID != jobID || w.Status.Terminal() {
+			continue
+		}
+		if err := pool.Release(ctx, w.ID); err != nil {
+			return fmt.Errorf("capsule ci: pool executor %q: release worker %s: %w", p.name, w.ID, err)
+		}
+	}
+	return nil
+}
+
 // newPoolObjectStore resolves a pool executor's source_bucket into a live
-// objectstore.Store for vmpool.LeaseSpec.Objects. Unlike
+// objectstore.Store for vmpool.LeaseSpec.Objects and for reading back
+// detached executions' durable run records. A package var so tests can
+// substitute objectstore.NewFake without real bucket credentials. Unlike
 // executors.go's newSourceObjects (which wraps the store in a
 // bucketsource.Publisher configured with the remote's own prefix/TTL),
 // vmpool.Dispatcher.Lease performs that wrapping itself with
 // bucketsource's package defaults — see PoolExecutor.SourceBucket's doc
 // comment for why prefix/presign_ttl overrides are rejected at validate
 // time instead of silently ignored here.
-func newPoolObjectStore(name string, sb SourceBucket) (objectstore.Store, error) {
+var newPoolObjectStore = func(name string, sb SourceBucket) (objectstore.Store, error) {
 	cfg, err := objectstore.ParseBucketURL(sb.URL)
 	if err != nil {
 		return nil, fmt.Errorf("capsule ci: pool executor %q source_bucket url: %w", name, err)
@@ -258,3 +412,6 @@ func newPoolObjectStore(name string, sb SourceBucket) (objectstore.Store, error)
 
 var _ executor.Provider = (*poolProvider)(nil)
 var _ executor.PreparedAcceptor = (*poolProvider)(nil)
+var _ executor.DetachedStarter = (*poolProvider)(nil)
+var _ executor.DetachedReleaser = (*poolProvider)(nil)
+var _ executor.ExecutionController = (*poolProvider)(nil)
