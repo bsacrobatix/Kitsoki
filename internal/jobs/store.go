@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strings"
 	"time"
 
 	"kitsoki/internal/app"
@@ -84,6 +86,12 @@ func NewJobStore(db *sql.DB, opts ...JobStoreOption) (*JobStore, error) {
 	if _, err := db.Exec(jobsSchemaDDL); err != nil {
 		return nil, fmt.Errorf("jobs.NewJobStore: schema migration: %w", err)
 	}
+	// owner_pid records which OS process' scheduler owns a non-terminal row,
+	// so SweepStaleJobs can distinguish a crashed owner's orphans from rows
+	// legitimately owned by a live sibling scheduler on the same database.
+	if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN owner_pid INTEGER`); err != nil && !isSQLiteDuplicateColumn(err) {
+		return nil, fmt.Errorf("jobs.NewJobStore: compatibility migration: %w", err)
+	}
 	js := &JobStore{db: db}
 	for _, o := range opts {
 		o(js)
@@ -127,8 +135,8 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 		INSERT OR REPLACE INTO jobs
 		  (id, session_id, kind, status, origin_state, origin_proposal_id,
 		   payload, progress, result, error, retry_count,
-		   created_at, updated_at, started_at, finished_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		   created_at, updated_at, started_at, finished_at, owner_pid)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		j.ID, string(j.SessionID), j.Kind, string(j.Status),
 		string(j.OriginState), j.OriginProposalID,
 		string(payloadJSON),
@@ -140,6 +148,7 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 		j.UpdatedAt.UnixMilli(),
 		startedAtMs,
 		finishedAtMs,
+		os.Getpid(),
 	)
 	if err != nil {
 		return err
@@ -168,19 +177,58 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 	return nil
 }
 
-// SweepStaleJobs marks any row whose status is "running" or "awaiting_input"
-// as failed with error=ErrProcessDied. Intended to be called once at scheduler
-// construction: when a fresh process starts, no in-memory goroutine can own
-// those rows, so by definition they are orphans from a prior crashed or
-// killed process. Returns the number of rows affected.
+// sweepProcessAlive reports whether the recorded owner of a non-terminal job
+// row is still a live OS process. A package var so tests can simulate dead
+// and live owners deterministically.
+var sweepProcessAlive = processAlive
+
+// SweepStaleJobs marks orphaned non-terminal rows — status "running" or
+// "awaiting_input" whose recorded owner_pid is no longer a live process (or
+// was never recorded, for rows predating the owner_pid migration) — as
+// failed with error=ErrProcessDied. Called at scheduler construction.
+//
+// Ownership matters because more than one scheduler can share one SQLite
+// file at a time: the daemon builds a runtime (and scheduler) per hosted
+// session, and parallel CLI invocations share the project store. A sweep
+// that treated every non-terminal row as an orphan would fail the sibling
+// sessions' freshly submitted jobs the moment a new session started —
+// exactly the concurrent-dispatch stall observed on the hosted POG
+// orchestrator. Returns the number of rows swept.
 func (js *JobStore) SweepStaleJobs(ctx context.Context) (int64, error) {
+	rows, err := js.db.QueryContext(ctx, `
+		SELECT id, owner_pid FROM jobs WHERE status IN (?, ?)`,
+		string(JobRunning), string(JobAwaitingInput))
+	if err != nil {
+		return 0, fmt.Errorf("jobs.SweepStaleJobs: %w", err)
+	}
+	var orphans []any
+	func() {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var ownerPID sql.NullInt64
+			if err = rows.Scan(&id, &ownerPID); err != nil {
+				return
+			}
+			if !ownerPID.Valid || !sweepProcessAlive(int(ownerPID.Int64)) {
+				orphans = append(orphans, id)
+			}
+		}
+		err = rows.Err()
+	}()
+	if err != nil {
+		return 0, fmt.Errorf("jobs.SweepStaleJobs: %w", err)
+	}
+	if len(orphans) == 0 {
+		return 0, nil
+	}
 	now := time.Now().UnixMilli()
+	args := append([]any{string(JobFailed), ErrProcessDied, now, now}, orphans...)
 	res, err := js.db.ExecContext(ctx, `
 		UPDATE jobs
 		SET status = ?, error = ?, finished_at = ?, updated_at = ?
-		WHERE status IN (?, ?)`,
-		string(JobFailed), ErrProcessDied, now, now,
-		string(JobRunning), string(JobAwaitingInput))
+		WHERE id IN (?`+strings.Repeat(",?", len(orphans)-1)+`)`,
+		args...)
 	if err != nil {
 		return 0, fmt.Errorf("jobs.SweepStaleJobs: %w", err)
 	}

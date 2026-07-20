@@ -44,19 +44,49 @@ func TestJobStore_SweepStaleJobs(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	// Seed: one running, one awaiting_input, one already-done, one already-failed.
+	// Seed: one running, one awaiting_input, one already-done, one
+	// already-failed — all owned by this live test process via UpsertJob —
+	// plus one running row from a legacy schema (owner never recorded).
 	for _, j := range []*jobs.Job{
 		makeTestJob("01J0000000000000000000001R", jobs.JobRunning),
 		makeTestJob("01J0000000000000000000001W", jobs.JobAwaitingInput),
 		makeTestJob("01J0000000000000000000001D", jobs.JobDone),
 		makeTestJob("01J0000000000000000000001F", jobs.JobFailed),
+		makeTestJob("01J0000000000000000000001L", jobs.JobRunning),
 	} {
 		if err := js.UpsertJob(ctx, j); err != nil {
 			t.Fatalf("UpsertJob: %v", err)
 		}
 	}
+	if _, err := db.Exec(`UPDATE jobs SET owner_pid = NULL WHERE id = '01J0000000000000000000001L'`); err != nil {
+		t.Fatalf("clear owner_pid: %v", err)
+	}
 
+	// A sweep while every recorded owner is alive must not touch owned
+	// rows: a sibling scheduler on the same database legitimately holds
+	// them (the concurrent-dispatch regression). Only the ownerless legacy
+	// row is an orphan.
 	n, err := js.SweepStaleJobs(ctx)
+	if err != nil {
+		t.Fatalf("SweepStaleJobs (live owners): %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected only the ownerless row swept while owners are alive, got %d", n)
+	}
+	for _, id := range []string{"01J0000000000000000000001R", "01J0000000000000000000001W"} {
+		got, err := js.GetJob(ctx, id)
+		if err != nil {
+			t.Fatalf("GetJob(%s): %v", id, err)
+		}
+		if got.Status == jobs.JobFailed {
+			t.Fatalf("%s: live-owned row was swept", id)
+		}
+	}
+
+	// Once the owner is dead, the same rows are orphans.
+	restore := jobs.SetSweepProcessAliveForTest(func(int) bool { return false })
+	defer restore()
+	n, err = js.SweepStaleJobs(ctx)
 	if err != nil {
 		t.Fatalf("SweepStaleJobs: %v", err)
 	}
