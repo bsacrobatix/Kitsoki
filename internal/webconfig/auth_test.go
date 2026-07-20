@@ -121,3 +121,27 @@ func TestLoad_AuthLocalOverrideMergesSecret(t *testing.T) {
 		t.Errorf("ClientSecret = %q, want the local override expanded and merged in", cfg.Auth.GitHub.ClientSecret)
 	}
 }
+
+func TestLoad_AuthServiceTokensValidAndInvalid(t *testing.T) {
+	cfg, err := loadConfigText(t, `auth:
+  mode: required
+  github:
+    client_id: abc123
+    device_flow: true
+  service_tokens:
+    colony: KITSOKI_COLONY_TOKEN
+`)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := cfg.Auth.ServiceTokens["colony"]; got != "KITSOKI_COLONY_TOKEN" {
+		t.Errorf("ServiceTokens[colony] = %q, want KITSOKI_COLONY_TOKEN", got)
+	}
+
+	if _, err := loadConfigText(t, `auth:
+  service_tokens:
+    colony: "not an env name"
+`); err == nil {
+		t.Fatal("load with invalid service token env name succeeded, want error")
+	}
+}

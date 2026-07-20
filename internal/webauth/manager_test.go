@@ -461,3 +461,73 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	require.NoError(t, err)
 	return u
 }
+
+func TestManager_ServiceTokenBearerPassesGateWithServiceActor(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManagerConfig(t, Config{ServiceTokens: map[string]string{"colony": "0123456789abcdef0123456789abcdef"}})
+	client := noRedirectClient(t)
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/rpc", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer 0123456789abcdef0123456789abcdef")
+	// A spoofed identity header must be overwritten by the gate.
+	req.Header.Set("X-Kitsoki-Actor", "spoofed")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "service:colony", resp.Header.Get("X-Seen-Actor"))
+}
+
+func TestManager_ServiceTokenWrongOrMissingStays401(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManagerConfig(t, Config{ServiceTokens: map[string]string{"colony": "0123456789abcdef0123456789abcdef"}})
+	client := noRedirectClient(t)
+
+	for name, header := range map[string]string{
+		"wrong token":  "Bearer ffffffffffffffffffffffffffffffff",
+		"empty bearer": "Bearer ",
+		"basic scheme": "Basic 0123456789abcdef0123456789abcdef",
+	} {
+		req, err := http.NewRequest(http.MethodPost, srv.URL+"/rpc", nil)
+		require.NoError(t, err)
+		if header != "" {
+			req.Header.Set("Authorization", header)
+		}
+		resp, err := client.Do(req)
+		require.NoError(t, err, name)
+		resp.Body.Close()
+		assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, name)
+	}
+}
+
+func TestManager_ServiceTokenForwardAuthCheckReturnsServiceActor(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManagerConfig(t, Config{ServiceTokens: map[string]string{"colony": "0123456789abcdef0123456789abcdef"}})
+	client := noRedirectClient(t)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/auth/check", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer 0123456789abcdef0123456789abcdef")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "service:colony", resp.Header.Get("X-Kitsoki-Actor"))
+}
+
+func TestManager_NoServiceTokensConfiguredIgnoresBearer(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := buildTestManager(t, nil)
+	client := noRedirectClient(t)
+
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/rpc", nil)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer 0123456789abcdef0123456789abcdef")
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}

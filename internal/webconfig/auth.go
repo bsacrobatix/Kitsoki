@@ -42,6 +42,14 @@ type AuthConfig struct {
 	// SessionTTL is the browser-session lifetime as a Go duration string.
 	// Empty ⇒ webauth.DefaultSessionTTL (30 days).
 	SessionTTL string `yaml:"session_ttl,omitempty"`
+	// ServiceTokens maps a service name to the environment variable NAME
+	// holding its bearer token, e.g. {colony: KITSOKI_COLONY_TOKEN}. Only the
+	// env var name is checked in; the value is resolved at server startup
+	// (typically from ~/.config/kitsoki/daemon.env). A request presenting
+	// `Authorization: Bearer <token>` matching a resolved token passes the
+	// login gate with actor "service:<name>" — the headless-automation path
+	// (same-host colony runners, cron drivers) that has no browser session.
+	ServiceTokens map[string]string `yaml:"service_tokens,omitempty"`
 }
 
 // GitHubAuthConfig selects and configures the GitHub user-authentication flow.
@@ -101,6 +109,14 @@ func (cfg *WebConfig) resolveAuth() error {
 	for i, admin := range a.Admins {
 		if strings.TrimSpace(admin) == "" {
 			return fmt.Errorf("auth.admins[%d] is empty", i)
+		}
+	}
+	for name, envName := range a.ServiceTokens {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("auth.service_tokens has an empty service name")
+		}
+		if strings.TrimSpace(envName) == "" || strings.ContainsAny(envName, " \t=") {
+			return fmt.Errorf("auth.service_tokens.%s: %q is not an environment variable name (values are never checked in; name the env var holding the token)", name, envName)
 		}
 	}
 	return nil

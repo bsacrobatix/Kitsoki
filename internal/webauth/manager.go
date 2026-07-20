@@ -2,6 +2,8 @@ package webauth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -55,6 +57,14 @@ type Config struct {
 	// web flow. It requires only a client ID and is intended for deployments
 	// whose GitHub App already has Device Flow enabled.
 	DeviceFlow bool
+	// ServiceTokens maps a service name to its resolved bearer-token value.
+	// A request carrying `Authorization: Bearer <token>` that matches one of
+	// these (constant-time, by sha256) passes the gate with actor
+	// "service:<name>" and no session — the headless-automation path for
+	// same-host services (colony runners, cron drivers) that cannot complete
+	// a browser login. Tokens are resolved from operator-named env vars at
+	// startup (see webconfig.AuthConfig.ServiceTokens) and never persisted.
+	ServiceTokens map[string]string
 }
 
 // Manager owns the /auth/* HTTP surface and the request gate. Build one with
@@ -64,6 +74,10 @@ type Manager struct {
 	store *Store
 	gh    *GitHubClient
 	cfg   Config
+
+	// serviceTokenHashes holds sha256(token) per service name so request
+	// tokens compare in constant time against fixed-length digests.
+	serviceTokenHashes map[string][32]byte
 
 	deviceMu sync.Mutex
 	devices  map[string]*pendingDeviceLogin
@@ -83,7 +97,14 @@ func NewManager(store *Store, gh *GitHubClient, cfg Config) *Manager {
 	if cfg.SessionTTL <= 0 {
 		cfg.SessionTTL = DefaultSessionTTL
 	}
-	return &Manager{store: store, gh: gh, cfg: cfg, devices: make(map[string]*pendingDeviceLogin)}
+	hashes := make(map[string][32]byte, len(cfg.ServiceTokens))
+	for name, token := range cfg.ServiceTokens {
+		if name == "" || token == "" {
+			continue
+		}
+		hashes[name] = sha256.Sum256([]byte(token))
+	}
+	return &Manager{store: store, gh: gh, cfg: cfg, serviceTokenHashes: hashes, devices: make(map[string]*pendingDeviceLogin)}
 }
 
 // Mount registers the /auth/* routes. They are also skipped by Wrap, so login
@@ -114,6 +135,11 @@ func (m *Manager) Wrap(next http.Handler) http.Handler {
 		}
 		user, ok := m.sessionUser(r)
 		if !ok {
+			if service, ok := m.serviceActor(r); ok {
+				r.Header.Set(actorHeader, service)
+				next.ServeHTTP(w, r)
+				return
+			}
 			// Never let a spoofed identity header through an unauthenticated
 			// rejection path either.
 			r.Header.Del(actorHeader)
@@ -127,6 +153,28 @@ func (m *Manager) Wrap(next http.Handler) http.Handler {
 		r.Header.Set(actorHeader, user.GitHubLogin)
 		next.ServeHTTP(w, r)
 	})
+}
+
+// serviceActor resolves an `Authorization: Bearer <token>` header to a
+// configured service identity ("service:<name>"). Comparison is by sha256
+// digest in constant time, so neither token length nor content leaks through
+// timing. No session is created — every request re-presents the token.
+func (m *Manager) serviceActor(r *http.Request) (string, bool) {
+	if len(m.serviceTokenHashes) == 0 {
+		return "", false
+	}
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	token = strings.TrimSpace(token)
+	if !ok || token == "" {
+		return "", false
+	}
+	got := sha256.Sum256([]byte(token))
+	for name, want := range m.serviceTokenHashes {
+		if subtle.ConstantTimeCompare(got[:], want[:]) == 1 {
+			return "service:" + name, true
+		}
+	}
+	return "", false
 }
 
 // sessionUser resolves the request's session cookie to a live user.
@@ -673,6 +721,11 @@ func (m *Manager) handleCheck(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	user, ok := m.sessionUser(r)
 	if !ok {
+		if service, ok := m.serviceActor(r); ok {
+			w.Header().Set(actorHeader, service)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		r.Header.Del(actorHeader)
 		method := r.Header.Get("X-Forwarded-Method")
 		if method == "" {

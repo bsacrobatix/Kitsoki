@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -64,13 +65,44 @@ func buildWebAuth(a *webconfig.AuthConfig, addr, dbPath string, warnTo io.Writer
 	if err != nil {
 		return nil, nil, fmt.Errorf("open auth store: %w", err)
 	}
+	tokens, err := resolveServiceTokens(a.ServiceTokens, warnTo)
+	if err != nil {
+		_ = closeStore()
+		return nil, nil, err
+	}
 	mgr := webauth.NewManager(store, webauth.NewGitHubClient(a.GitHub.ClientID, a.GitHub.ClientSecret), webauth.Config{
-		PublicURL:  a.PublicURL,
-		Admins:     a.Admins,
-		SessionTTL: ttl,
-		DeviceFlow: a.GitHub.DeviceFlow,
+		PublicURL:     a.PublicURL,
+		Admins:        a.Admins,
+		SessionTTL:    ttl,
+		DeviceFlow:    a.GitHub.DeviceFlow,
+		ServiceTokens: tokens,
 	})
 	return mgr, closeStore, nil
+}
+
+// resolveServiceTokens turns the config's service→env-var-name map into
+// service→token values. An unset env var disables that service's token with a
+// warning (the deployment may legitimately not run that service); a set but
+// weak token is a hard startup error — better to fail fast than accept a
+// guessable bearer credential on a public surface.
+func resolveServiceTokens(named map[string]string, warnTo io.Writer) (map[string]string, error) {
+	if len(named) == 0 {
+		return nil, nil
+	}
+	const minServiceTokenLen = 16
+	tokens := make(map[string]string, len(named))
+	for name, envName := range named {
+		value := os.Getenv(envName)
+		if value == "" {
+			fmt.Fprintf(warnTo, "kitsoki: auth.service_tokens.%s: env var %s is not set; bearer access for this service is disabled\n", name, envName)
+			continue
+		}
+		if len(value) < minServiceTokenLen {
+			return nil, fmt.Errorf("auth.service_tokens.%s: env var %s holds a token shorter than %d characters; mint a stronger secret (e.g. `openssl rand -hex 32`)", name, envName, minServiceTokenLen)
+		}
+		tokens[name] = value
+	}
+	return tokens, nil
 }
 
 // webInviteCmd implements `kitsoki web invite` (also mounted under `kitsoki
