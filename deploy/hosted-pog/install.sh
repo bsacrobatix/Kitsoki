@@ -91,6 +91,48 @@ install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root" "$node_r
 install -d -o pog -g pog -m 0750 /var/lib/pog /var/cache/pog /var/lib/kitsoki-pog /var/cache/kitsoki-pog
 install -d -o pog -g pog -m 0750 "$runtime_release_root"
 
+# Portfolio members federated onto the hosted site, beyond POG's own home
+# catalog and the embedded Constructor Studio product. The set is authoritative
+# from members.manifest (staged by the local deploy half); each line is
+# "<repo-dir> <commit-sha> <catalog-id>", where repo-dir is the POG_MEMBER_ROOTS
+# key (basename of the track's repo: field) and catalog-id joins
+# POG_PORTFOLIO_MEMBERS. Each member is deployed read-only from its own git
+# bundle to /opt/pog/members/<repo-dir> so the portal can roll its catalog into
+# the graph. This deliberately supersedes the former pog+constructor-studio-only
+# restriction: sibling catalogs (including private ones) are federated onto the
+# auth-gated site by design. Resolution is deterministic — POG_MEMBER_ROOTS
+# below plus POG_PORTFOLIO_ROOT=/opt/pog/current in pog-portal.service — so no
+# member depends on host-layout guesswork (POG portal/src/server/
+# federation-roots.ts). Replacement is in place per member (brief window); the
+# hosted site is a single-tenant test host, not a rollback-critical release.
+members_root="/opt/pog/members"
+install -d -o pog -g pog -m 0755 "$members_root"
+member_roots=""
+member_ids=""
+if [ -f "$stage/members.manifest" ]; then
+	while read -r member_dir member_sha member_id _rest; do
+		[ -n "$member_dir" ] || continue
+		[[ "$member_dir" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid member repo dir: $member_dir"
+		[[ "$member_sha" =~ ^[0-9a-f]{40}$ ]] || die "invalid member commit sha for $member_dir"
+		[[ "$member_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid member catalog id: $member_id"
+		[ -f "$stage/member-$member_dir.bundle" ] || die "staged member bundle is missing: member-$member_dir.bundle"
+		member_dest="$members_root/$member_dir"
+		tmp_member="$member_dest.installing.$$"
+		rm -rf "$tmp_member"
+		git clone --no-checkout --quiet "$stage/member-$member_dir.bundle" "$tmp_member"
+		chown -R pog:pog "$tmp_member"
+		runuser -u pog -- git -C "$tmp_member" checkout --detach --quiet "$member_sha"
+		[ -f "$tmp_member/pog/catalog.yaml" ] || die "member $member_dir bundle lacks pog/catalog.yaml"
+		rm -rf "$member_dest"
+		mv "$tmp_member" "$member_dest"
+		member_roots="${member_roots:+$member_roots,}$member_dir=$member_dest"
+		member_ids="${member_ids:+$member_ids,}$member_id"
+	done <"$stage/members.manifest"
+fi
+# The two products always present: POG's home catalog and the embedded
+# Constructor Studio product (repo: . inside the POG release).
+portfolio_members="pog,constructor-studio${member_ids:+,$member_ids}"
+
 if [ ! -x "$node_release/bin/node" ]; then
 	[ ! -e "$node_release" ] || die "Node release path exists but is incomplete: $node_release"
 	tmp_node_release="$node_release.installing.$$"
@@ -132,7 +174,9 @@ if [ ! -d "$release/.git" ]; then
 		POG_PORTAL_ROOT="$tmp_release/portal" \
 		POG_CATALOG="$tmp_release/pog/catalog.yaml" \
 		POG_PROJECT_ROOT="$tmp_release" \
-		POG_PORTFOLIO_MEMBERS=pog,constructor-studio \
+		POG_PORTFOLIO_ROOT="$tmp_release" \
+		POG_MEMBER_ROOTS="$member_roots" \
+		POG_PORTFOLIO_MEMBERS="$portfolio_members" \
 		POG_KITSOKI_URL=http://127.0.0.1:7778 \
 		POG_KITSOKI_BROWSER_URL= \
 		POG_RUNNER_URL= \
@@ -148,12 +192,10 @@ fi
 [ -f "$release/portal/server/server.mjs.map" ] || die "release production server source map is missing"
 runuser -u pog -- "$node_release/bin/node" --check "$release/portal/server/server.mjs"
 
-# Hosted POG has exactly two products: the POG home catalog and the embedded
-# Constructor Studio catalog. Never make sibling repositories discoverable by
-# accident; tracks such as Kitsoki remain graph context, not hosted products.
-if [ -e "$release_root/Kitsoki" ] && [ ! -L "$release_root/Kitsoki" ]; then
-	die "$release_root/Kitsoki exists and is not a symlink"
-fi
+# Portfolio members were deployed above under /opt/pog/members and are exposed
+# through POG_MEMBER_ROOTS/POG_PORTFOLIO_MEMBERS. The former guard that refused
+# any sibling repository is intentionally gone: hosting the full portfolio is
+# now the contract (operator-selected via the local deploy half's member list).
 
 # Migrate the pre-runtime-layout state without deleting it. The new service
 # paths and release-local .artifacts symlink switch together during activation.
@@ -272,7 +314,11 @@ rendered_caddy="$stage/Caddyfile.rendered"
 rendered_portal_service="$stage/pog-portal.service.rendered"
 sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" -e "s|__GITHUB_CLIENT_ID__|$github_client_id|g" "$stage/hosted-pog.yaml" >"$rendered_config"
 sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/Caddyfile" >"$rendered_caddy"
-sed -e "s|__POG_RELEASE_SHA__|$pog_sha|g" "$stage/pog-portal.service" >"$rendered_portal_service"
+sed \
+	-e "s|__POG_RELEASE_SHA__|$pog_sha|g" \
+	-e "s|__POG_MEMBER_ROOTS__|$member_roots|g" \
+	-e "s|__POG_PORTFOLIO_MEMBERS__|$portfolio_members|g" \
+	"$stage/pog-portal.service" >"$rendered_portal_service"
 caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 
 previous_current=""

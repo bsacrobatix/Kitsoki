@@ -8,6 +8,30 @@ REMOTE="${KITSOKI_GH_AGENT_REMOTE:-}"
 PUBLIC_BASE_URL="${KITSOKI_GH_AGENT_PUBLIC_BASE_URL:-}"
 POG_ROOT="${KITSOKI_HOSTED_POG_ROOT:-$HOME/code/POG}"
 POG_REF="${KITSOKI_HOSTED_POG_REF:-main}"
+# Portfolio members federated onto the hosted site beyond POG's home catalog
+# and the embedded Constructor Studio product. Each entry is
+#   <catalog-id>:<repo-dir>:<source-checkout>:<ref>
+# where <repo-dir> is the basename of the track's repo: field in POG's
+# pog/catalog.yaml (the POG_MEMBER_ROOTS key on the host) and <catalog-id> is
+# the resolved id the portal exposes (the POG_PORTFOLIO_MEMBERS entry). Members
+# are bundled from <ref> — usually main, but a member whose pog/catalog.yaml is
+# generated onto a branch names that branch (gears-rust). Each field is
+# per-member env-overridable so operators can retarget a checkout or ref
+# without editing this contract. NOTE: this publishes each member's catalog on
+# the auth-gated hosted site — including private repos (gears-rust, slidey).
+HOSTED_MEMBERS=(
+	"kitsoki:Kitsoki:${KITSOKI_HOSTED_POG_MEMBER_KITSOKI_ROOT:-$ROOT}:${KITSOKI_HOSTED_POG_MEMBER_KITSOKI_REF:-main}"
+	"gears-rust:gears-rust:${KITSOKI_HOSTED_POG_MEMBER_GEARS_ROOT:-$HOME/code/gears-rust}:${KITSOKI_HOSTED_POG_MEMBER_GEARS_REF:-docs/kitsoki-integration}"
+	"sassfully:studio-sassfully:${KITSOKI_HOSTED_POG_MEMBER_SASSFULLY_ROOT:-$HOME/code/studio-sassfully}:${KITSOKI_HOSTED_POG_MEMBER_SASSFULLY_REF:-main}"
+	"slidey:slidey:${KITSOKI_HOSTED_POG_MEMBER_SLIDEY_ROOT:-$HOME/code/slidey}:${KITSOKI_HOSTED_POG_MEMBER_SLIDEY_REF:-main}"
+)
+HOSTED_MEMBER_IDS=""
+for member_entry in "${HOSTED_MEMBERS[@]}"; do
+	HOSTED_MEMBER_IDS="${HOSTED_MEMBER_IDS:+$HOSTED_MEMBER_IDS,}${member_entry%%:*}"
+done
+# Full hosted product set (POG home + embedded Constructor Studio + federated
+# members), sorted, for the post-deploy verification assertion below.
+HOSTED_PRODUCTS_SORTED="$(printf 'pog\nconstructor-studio\n%b\n' "${HOSTED_MEMBER_IDS//,/\\n}" | sort -u | paste -sd, -)"
 ADMIN="${KITSOKI_HOSTED_POG_ADMIN:-bsacrobatix}"
 GH_CLIENT_ID="${KITSOKI_HOSTED_POG_GH_CLIENT_ID:-}"
 # Callback (authorization-code) login needs the GitHub App client secret.
@@ -98,9 +122,10 @@ verify() {
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
 	grep -q '/auth/github/start' <<<"$login_page"
-	ssh "$REMOTE" bash -s -- "$PUBLIC_HOST" <<'REMOTE_VERIFY'
+	ssh "$REMOTE" bash -s -- "$PUBLIC_HOST" "$HOSTED_PRODUCTS_SORTED" <<'REMOTE_VERIFY'
 set -euo pipefail
 public_host="$1"
+expected_products="$2"
 node_bin=/opt/kitsoki-hosted-pog/node/current/bin/node
 systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal
 test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/me)" = 401
@@ -119,12 +144,14 @@ catalog="$(curl -fsS -H "Host: $public_host" http://127.0.0.1:7777/api/catalog)"
 printf '%s' "$catalog" | "$node_bin" -e '
 const fs=require("node:fs");
 const graph=JSON.parse(fs.readFileSync(0,"utf8"));
-const products=(graph.comparison_catalogs??[]).map((entry)=>entry.id);
-const repos=[...new Set((graph.nodes??[]).map((node)=>node.attrs?.repo).filter(Boolean))].sort();
-if(products.join(",")!=="pog,constructor-studio"||repos.join(",")!=="constructor-studio,pog"){
-  console.error(JSON.stringify({products,repos}));
+const expected=process.argv[1];
+const products=[...new Set((graph.comparison_catalogs??[]).map((entry)=>entry.id))].sort().join(",");
+const repos=[...new Set((graph.nodes??[]).map((node)=>node.attrs?.repo).filter(Boolean))].sort().join(",");
+const unavailable=(graph.federation?.unavailable??[]).map((u)=>u.repo);
+if(products!==expected||repos!==expected||unavailable.length){
+  console.error(JSON.stringify({expected,products,repos,unavailable}));
   process.exit(1);
-}'
+}' "$expected_products"
 curl -fsS http://127.0.0.1:7777/api/feedback-reports | "$node_bin" -e '
 const fs=require("node:fs");
 if(!Array.isArray(JSON.parse(fs.readFileSync(0,"utf8")).reports)) process.exit(1);'
@@ -141,7 +168,7 @@ test -z "$(ss -ltnH 'sport = :5183')"
 curl -fsS -o /dev/null http://127.0.0.1:8787/healthz
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 REMOTE_VERIFY
-	echo "hosted-pog verify: production POG active on 127.0.0.1:7777; Kitsoki auth/RPC active on 127.0.0.1:7778; no Vite command or 5183 listener; exact products=pog,constructor-studio; reviewed feedback route owned by POG; versioned runtime active; anonymous route-family matrix denied; GitHub OAuth entrypoint reachable; unsigned webhook denied; loopback health=ok"
+	echo "hosted-pog verify: production POG active on 127.0.0.1:7777; Kitsoki auth/RPC active on 127.0.0.1:7778; no Vite command or 5183 listener; products=$HOSTED_PRODUCTS_SORTED with no unavailable federation members; reviewed feedback route owned by POG; versioned runtime active; anonymous route-family matrix denied; GitHub OAuth entrypoint reachable; unsigned webhook denied; loopback health=ok"
 }
 
 if [ "$mode" = "verify" ]; then
@@ -217,7 +244,7 @@ deploy-hosted-pog:
   GitHub login:   OAuth authorization-code flow (callback ${PUBLIC_BASE_URL%/}/auth/github/callback)
   Node runtime:   $NODE_VERSION (pinned official linux-x64 archive)
   topology:       Caddy -> Kitsoki /auth/check 127.0.0.1:7778 -> production POG 127.0.0.1:7777
-  products:       POG and Constructor Studio only
+  products:       pog, constructor-studio, and federated members: $HOSTED_MEMBER_IDS
   local state:    $([ "$sync_local_state" -eq 1 ] && echo 'bounded portal-state snapshot enabled' || echo 'preserve hosted runtime (no local import)')
   access policy:  login-gated portal, API, agent health/run/deck, and evidence routes
   public protocol: GitHub OAuth login endpoints and the HMAC-verified webhook only
@@ -253,6 +280,23 @@ trap cleanup EXIT
 
 GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
+# Bundle each federated portfolio member from its declared source and ref, and
+# record it in members.manifest for install.sh. A declared ref that lacks
+# pog/catalog.yaml is a hard error: deploying it would silently drop that
+# product from the hosted catalog — the very failure this whole change fixes.
+: >"$local_stage/members.manifest"
+for member_entry in "${HOSTED_MEMBERS[@]}"; do
+	IFS=: read -r member_id member_dir member_root member_ref <<<"$member_entry"
+	[ -n "$member_id" ] && [ -n "$member_dir" ] && [ -n "$member_root" ] && [ -n "$member_ref" ] \
+		|| { echo "malformed HOSTED_MEMBERS entry: $member_entry" >&2; exit 2; }
+	[ -d "$member_root/.git" ] || { echo "member $member_id: not a git checkout at $member_root" >&2; exit 2; }
+	git -C "$member_root" cat-file -e "$member_ref:pog/catalog.yaml" 2>/dev/null \
+		|| { echo "member $member_id: ref '$member_ref' has no pog/catalog.yaml in $member_root" >&2; exit 2; }
+	member_sha="$(git -C "$member_root" rev-parse "$member_ref^{commit}")"
+	git -C "$member_root" bundle create "$local_stage/member-$member_dir.bundle" "$member_ref"
+	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
+	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
+done
 cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service,state-content-digest.mjs} "$local_stage/"
 # The client secret travels inside the 0700 stage directories (local mktemp,
 # remote install -d) instead of the ssh argv, which would be visible in ps.

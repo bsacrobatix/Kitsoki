@@ -20,7 +20,15 @@ Environment=POG_PORTAL_ROOT=/opt/pog/current/portal
 Environment=POG_PORTAL_STATIC_ROOT=/opt/pog/current/portal/dist
 Environment=POG_CATALOG=/opt/pog/current/pog/catalog.yaml
 Environment=POG_PROJECT_ROOT=/opt/pog/current
-Environment=POG_PORTFOLIO_MEMBERS=pog,constructor-studio
+# Federation is pinned deterministically (see POG portal/src/server/
+# federation-roots.ts). POG_PORTFOLIO_ROOT is the checkout the tracks' repo:
+# fields resolve against; POG_MEMBER_ROOTS points each federated sibling at its
+# own read-only checkout under /opt/pog/members (install.sh deploys them and
+# renders both values). Without these the server falls back to a heuristic that
+# finds no siblings on a deployed host and silently drops every member.
+Environment=POG_PORTFOLIO_ROOT=/opt/pog/current
+Environment=POG_MEMBER_ROOTS=__POG_MEMBER_ROOTS__
+Environment=POG_PORTFOLIO_MEMBERS=__POG_PORTFOLIO_MEMBERS__
 Environment=POG_KITSOKI_URL=http://127.0.0.1:7778
 Environment=POG_KITSOKI_BROWSER_URL=
 Environment=POG_RUNNER_URL=http://127.0.0.1:7778
