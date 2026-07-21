@@ -940,7 +940,14 @@ imports:
     # Project bugfix's maker handoff → the delivery-tail's world. gate_command is
     # the regression gate (same command verify re-runs on the merged commit);
     # workspace_branch/worktree_path are the maker's worktree; main_worktree_path
-    # is "." (the integration tree, where integrate/verify/cleanup run).
+    # is the SAME maker worktree. dev-workspace.sh provisions each workspace as a
+    # standalone `git clone --origin source` (NOT a linked git-worktree), so the
+    # maker clone is self-contained: it carries the fix branch AND source/<base>
+    # + the base object, and `checkout -B <base_branch>`+merge inside it has no
+    # "branch already checked out in another worktree" conflict. Pointing the
+    # integration tree at "." was only correct for the legacy shared-worktree
+    # model where "." was the live repo with a local main; on a leased pool
+    # worker "." is the run root (no refs) and integrate died resolving the base.
     world_in:
       # The tail re-verifies landing_gate on the merged commit: the regression
       # gate when the ticket had a repro_command, else default_landing_gate.
@@ -949,7 +956,7 @@ imports:
       workspace_branch:   "{{ world.feature_branch }}"
       worktree_path:      "{{ world.worktree_path }}"
       base_branch:        "{{ world.base_branch }}"
-      main_worktree_path: "."
+      main_worktree_path: "{{ world.worktree_path }}"
       brief:              "{{ world.ticket_id }} — {{ world.ticket_title }}"
     exits:
       # ship-it's @exit:shipped → bugfix @exit:shipped, carrying the merged sha up.
