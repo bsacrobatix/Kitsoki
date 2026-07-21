@@ -355,6 +355,27 @@ states:
       # bare "Fix applied — " with a dangling em-dash. Truthiness skips nil/empty.
       - when: "(world.implement_artifact.summary_title ?? '') != '' || (world.propose_fix_artifact.summary_title ?? '') != ''"
         say: "Fix applied — {{ world.implement_artifact.summary_title|default:world.propose_fix_artifact.summary_title }}"
+
+      # Autonomous terminal advance: in any non-human judge_mode, fire `accept`
+      # once the implement artifact has bound. Implementing is a pure ACTION
+      # room (it applies the fix; there is no judgement to make here — the real
+      # confidence gate lives in testing's llm_verdict). WITHOUT this the room
+      # parks at bf.implementing waiting for a human `continue`: the dispatch
+      # cascade legitimately halts here (implementing is the first room with no
+      # judge in on_enter — see stories/dev-story/flows/bf_llm_auto_advance),
+      # but after the implementer agent runs and binds implement_artifact,
+      # nothing re-fires the cascade, so an autonomous (llm) worker applies the
+      # fix, submits applied:true, then rests forever — never reaching a
+      # terminal @exit, so the pog-bugfix CI wrapper has no exit to translate
+      # and reports the empty `verdict schema ""`. The accept handler routes on
+      # the artifact (applied==false → @exit:needs-human; applied==true →
+      # testing / implementation_gating), so a blanket accept is safe. Guard on
+      # `.applied != nil` so it only fires once the payload has bound (the
+      # decomposed re-entry clears implement_artifact to {}, whose `.applied`
+      # is nil, so the next item's agent runs before this re-fires). Same guard
+      # shape as testing.yaml / triaging.yaml.
+      - when: "world.judge_mode != 'human' && world.implement_artifact.applied != nil"
+        emit_intent: accept
     on:
       accept:
         # No decomposed item advances without an independently executed gate.
