@@ -97,9 +97,24 @@ states:
               if [ -z "$BRANCH" ]; then
                 emit --arg e "no branch to integrate (maker handoff empty)" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:$e}'
               fi
-              BASE_SHA=$(git -C "$MAIN_WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
+              # Resolve the integration ref to a real SHA. Use --verify --quiet:
+              # a BARE `git rev-parse main` (no --verify) LENIENTLY ECHOES the arg
+              # ("main") when it is not a ref, instead of failing — and on leased
+              # pool workers the maker/integration trees are `git clone --origin
+              # source` clones where the integration branch exists ONLY as
+              # `source/main` (dev-workspace.sh cuts the feature branch from the
+              # base COMMIT and never materializes a local `main`). The lenient
+              # echo made BASE_SHA the literal string "main", which passed the
+              # emptiness guard and then poisoned merge-base/rebase downstream
+              # (`fatal: invalid upstream ''`). --verify forces a real failure, and
+              # the `source/` fallback resolves the remote-tracking ref that the
+              # clone actually has. In the git-worktree self-host loop the first
+              # form resolves, so the fallback is a no-op there.
+              BASE_SHA=$(git -C "$MAIN_WT" rev-parse --verify --quiet "$INTEGRATION^{commit}" 2>/dev/null \
+                || git -C "$MAIN_WT" rev-parse --verify --quiet "source/$INTEGRATION^{commit}" 2>/dev/null \
+                || echo "")
               if [ -z "$BASE_SHA" ]; then
-                emit --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found")}'
+                emit --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found (tried "+$int+" and source/"+$int+")")}'
               fi
               # CLEAN-MAIN GUARD (#clean-main): refuse to integrate into a DIRTY
               # integration tree. The `git merge --no-ff` below, and the build-fail
@@ -138,13 +153,13 @@ states:
               # source` (dev-workspace.sh's provider on leased pool workers), the
               # integration branch exists there only as `source/main`, so the bare
               # name "main" does NOT resolve in $WORKTREE and merge-base returned
-              # empty -> `rebase --onto $BASE_SHA "" $BRANCH` died with the cryptic
+              # empty → `rebase --onto $BASE_SHA "" $BRANCH` died with the cryptic
               # `fatal: invalid upstream ''`. BASE_SHA is a full sha copied into the
               # clone's object store, so it always resolves. (In the git-worktree
               # self-hosting loop both name and sha resolve, so this is a no-op there.)
               MB=$(git -C "$WORKTREE" merge-base "$BRANCH" "$BASE_SHA" 2>/dev/null || echo "")
               if [ -z "$MB" ]; then
-                emit --arg br "$BRANCH" --arg base "$BASE_SHA" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("no merge-base between "+$br+" and integration base "+$base+" - the maker worktree shares no history with the integration tree (disjoint clone roots?)")}'
+                emit --arg br "$BRANCH" --arg base "$BASE_SHA" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("no merge-base between "+$br+" and integration base "+$base+" — the maker worktree shares no history with the integration tree (disjoint clone roots?)")}'
               fi
               REBASE_EXIT=0
               REBASE_OUT=$(git -C "$WORKTREE" rebase --onto "$BASE_SHA" "$MB" "$BRANCH" 2>&1) || REBASE_EXIT=$?
@@ -154,11 +169,21 @@ states:
               fi
               # Merge the rebased branch into INTEGRATION in MAIN_WT (merge does
               # NOT check out the source branch, so no worktree-lock conflict).
-              PRE_MERGE_SHA=$(git -C "$MAIN_WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
+              # PRE_MERGE_SHA is BASE_SHA (already the resolved integration HEAD
+              # sha): the worker's integration tree is frozen for the run, so no
+              # concurrent move to absorb, and a bare rev-parse "$INTEGRATION"
+              # would leniently echo "main" in the clone (same trap as BASE_SHA).
+              PRE_MERGE_SHA="$BASE_SHA"
               # Capture the checkout exit (#checkout): a failed checkout emits a
               # clear error rather than tripping the trap's generic message.
+              # `checkout -B "$INTEGRATION" "$BASE_SHA"` deterministically
+              # materializes a LOCAL integration branch at the resolved base sha —
+              # required because the clone has only `source/main`, not a local
+              # `main`, so a bare `checkout main` relies on DWIM (fragile/ambiguous).
+              # In the self-host loop BASE_SHA == main's current HEAD, so -B is a
+              # no-op reset onto itself.
               CO_EXIT=0
-              CO_OUT=$(git -C "$MAIN_WT" checkout "$INTEGRATION" 2>&1) || CO_EXIT=$?
+              CO_OUT=$(git -C "$MAIN_WT" checkout -B "$INTEGRATION" "$BASE_SHA" 2>&1) || CO_EXIT=$?
               if [ "$CO_EXIT" -ne 0 ]; then
                 emit --arg out "$CO_OUT" --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("could not checkout "+$int+": "+$out)}'
               fi
