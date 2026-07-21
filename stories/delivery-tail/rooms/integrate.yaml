@@ -132,9 +132,20 @@ states:
                 fi
               fi
               # Rebase the branch onto CURRENT integration HEAD, IN ITS OWN
-              # worktree. merge-base is computed against the live INTEGRATION ref
-              # (re-read here, so a concurrent moved-main is absorbed).
-              MB=$(git -C "$WORKTREE" merge-base "$BRANCH" "$INTEGRATION" 2>/dev/null || echo "")
+              # worktree. merge-base is computed against BASE_SHA (the integration
+              # HEAD *sha* resolved in MAIN_WT above), NOT the branch NAME
+              # $INTEGRATION: when the maker worktree is a `git clone --origin
+              # source` (dev-workspace.sh's provider on leased pool workers), the
+              # integration branch exists there only as `source/main`, so the bare
+              # name "main" does NOT resolve in $WORKTREE and merge-base returned
+              # empty -> `rebase --onto $BASE_SHA "" $BRANCH` died with the cryptic
+              # `fatal: invalid upstream ''`. BASE_SHA is a full sha copied into the
+              # clone's object store, so it always resolves. (In the git-worktree
+              # self-hosting loop both name and sha resolve, so this is a no-op there.)
+              MB=$(git -C "$WORKTREE" merge-base "$BRANCH" "$BASE_SHA" 2>/dev/null || echo "")
+              if [ -z "$MB" ]; then
+                emit --arg br "$BRANCH" --arg base "$BASE_SHA" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("no merge-base between "+$br+" and integration base "+$base+" - the maker worktree shares no history with the integration tree (disjoint clone roots?)")}'
+              fi
               REBASE_EXIT=0
               REBASE_OUT=$(git -C "$WORKTREE" rebase --onto "$BASE_SHA" "$MB" "$BRANCH" 2>&1) || REBASE_EXIT=$?
               if [ "$REBASE_EXIT" -ne 0 ]; then
