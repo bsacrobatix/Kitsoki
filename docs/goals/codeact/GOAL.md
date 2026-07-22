@@ -25,7 +25,7 @@ along the way is filed and fixed, never worked around outside the engine.
 - **G2 — Verb wiring.** `verb: codeact` in the invoke schema (`capabilities:`,
   `budget:`, `goal:`, `schema:`, `bind:`); loader validates capabilities
   against the registered builtin set at load time; taxonomy docs
-  (`prior-art.md §6.4`) gain the row.
+  (`prior-art.md §7.4`) gain the row.
   *Gate: loader-validation unit tests (unknown capability → load error) + a
   story flow fixture exercising a codeact room with a stubbed agent.*
 - **G3 — Tracing + replay (the differentiator).** Every snippet + observation

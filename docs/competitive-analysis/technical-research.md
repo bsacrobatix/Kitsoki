@@ -130,7 +130,7 @@ The 2026 academic and OSS literature has converged on essentially this exact pat
 
 ### 4.1 Choice
 
-Kitsoki's MCP server registers a single `transition` tool with `{intent, slots}` payload, not a typed tool per intent or per state. ([`docs/architecture/prior-art.md` §5][prior-art])
+Kitsoki's MCP server registers a single `transition` tool with `{intent, slots}` payload, not a typed tool per intent or per state. ([`docs/architecture/prior-art.md` §6][prior-art])
 
 ### 4.2 Justification
 
@@ -300,7 +300,7 @@ Kitsoki's audit-grade buyer (per [`domain-research.md`][domain]) explicitly want
 - [`README.md` — top-level overview][readme]
 - [`docs/architecture/overview.md` — layers, packages, data flow, persistence model][architecture]
 - [`docs/stories/state-machine.md` — rooms, phases, states, intents, slots, world, guards][state-machine]
-- [`docs/architecture/prior-art.md` — comparative grounding, including §5 on single-tool MCP design][prior-art]
+- [`docs/architecture/prior-art.md` — comparative grounding, including §6 on single-tool MCP design][prior-art]
 - [`docs/architecture/semantic-routing.md` — the four-tier routing stack reference][semantic-routing]
 - [`docs/architecture/transports.md` — multi-surface session abstraction][transports]
 - [`docs/tracing/testing.md` — Mode 1 (intent pass-rate) and Mode 2 (deterministic flow) tests][testing]

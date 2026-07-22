@@ -152,7 +152,7 @@ Three pain points appear in every published 2026 comparison and align directly w
 
 1. **"My LLM agent can't reproduce its own decisions."** Most deployments fail audit replay ([DFAH][dfah]); decision determinism and task accuracy are *not correlated* — a system can be accurate but non-deterministic, which is the worst failure mode for compliance.
 2. **"Every commit costs me LLM tokens to test."** No pure-agentic framework has a credible no-LLM regression-test story. Kitsoki's flow tests do.
-3. **"I'm exposing the LLM to actions it shouldn't be allowed to invent."** Tool-use frameworks expose typed tool lists per state; the LLM can still pick wrong tools, mis-fill slots, or hallucinate flags. Kitsoki's single-tool `transition` design with validator-as-gatekeeper closes this gap ([docs/architecture/prior-art.md §5][prior-art]).
+3. **"I'm exposing the LLM to actions it shouldn't be allowed to invent."** Tool-use frameworks expose typed tool lists per state; the LLM can still pick wrong tools, mis-fill slots, or hallucinate flags. Kitsoki's single-tool `transition` design with validator-as-gatekeeper closes this gap ([docs/architecture/prior-art.md §6][prior-art]).
 
 ---
 

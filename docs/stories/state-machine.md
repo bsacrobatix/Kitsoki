@@ -395,7 +395,7 @@ With one generic tool the harness's job is uniform across apps and
 across states: call `transition` with one of the intents listed in the
 system prompt for the current state. The validator turns the resulting
 `{intent, slots}` into the appropriate structured error envelope when
-the LLM picks something invalid — see [`prior-art.md` §5](../architecture/prior-art.md#5-why-one-generic-mcp-tool-not-per-state-typed-tools)
+the LLM picks something invalid — see [`prior-art.md` §6](../architecture/prior-art.md#6-why-one-generic-mcp-tool-not-per-state-typed-tools)
 for the full comparison.
 
 Error codes the machine emits — full list in `internal/intent`:

@@ -1,11 +1,14 @@
 # Prior Art
 
-Kitsoki sits in the overlap of four established traditions: interactive
+Kitsoki sits in the overlap of five established traditions: interactive
 fiction parsers, statechart frameworks, conversational-AI dialogue
-managers, and LLM orchestration libraries. None of these on their own
-gives the shape kitsoki wants — free-text input, an author-declared
-finite intent alphabet, deterministic transitions, replayable history
-— but every one of them contributes a piece. This document records
+managers, LLM orchestration libraries, and the low-code automation /
+data-app / BPM platforms most teams actually reach for first. None of
+these on their own gives the shape kitsoki wants — free-text input, an
+author-declared finite intent alphabet, deterministic transitions,
+replayable history — but every one of them contributes a piece
+(and the fifth contributes something better than a piece: most of
+them are *hosts*, not rivals — see §5). This document records
 the comparison so the design rationale stays legible as the system
 evolves: when a design question comes back, the answer often involves
 "we already chose A over B because…".
@@ -405,7 +408,7 @@ done. The claim is capability — code gives loops, conditionals, and
 composition in one action, so agents do more in fewer steps than a
 JSON-tool-call format allows.
 
-Kitsoki's `transition` tool (§5) is exactly the constrained format CodeAct
+Kitsoki's `transition` tool (§6) is exactly the constrained format CodeAct
 argues against — deliberately: CodeAct wants a more capable autonomous
 agent, kitsoki wants a workflow where "the model probably does the right
 thing" isn't enough (`concept.md` §1). But kitsoki doesn't reject
@@ -417,7 +420,7 @@ author-declared capability allowlist, each step executed in a traced,
 budget-bounded thread, observations (a return dict or a structured error
 envelope) feed back, and a final `done(payload)` is schema-gated before
 control returns to the state machine. It slots into the agent-verb taxonomy
-(§6.4) between the finite intent alphabet (max control, min expressivity)
+(§7.4) between the finite intent alphabet (max control, min expressivity)
 and `task` (max expressivity, min control) — composable like `task`, but
 every action traced, deterministic-by-construction, bounded, and
 no-LLM-replayable.
@@ -515,7 +518,180 @@ trajectory replays identically regardless of which transport produced it.
 
 ---
 
-## 5. Why one generic MCP tool, not per-state typed tools
+## 5. Low-code automation, data apps, and BPM platforms
+
+§§1–4 compare kitsoki to things engineers choose deliberately. This
+section compares it to what teams are *already running* when the
+question "should we build this on kitsoki?" comes up. n8n, Airtable,
+and Appian are the three rungs of that ladder — self-hosted
+integration automation, the spreadsheet-database that ate operations,
+and enterprise BPM — and each is more likely to be the real incumbent
+for a given workflow than CALM or LangGraph ever will be.
+
+The tradition shares one assumption, and it is the assumption kitsoki
+inverts:
+
+> The process is a **diagram or a table that an operator drives**, and
+> the LLM is a node inside it holding whatever credentials that node
+> was given.
+
+Kitsoki puts the LLM at the *edge* as a recognizer, and makes the
+process a typed artifact in git whose blast radius the loader checks.
+Everything below follows from that one difference.
+
+### 5a. n8n
+
+Node-based workflow automation on a visual canvas: trigger nodes,
+several hundred integration nodes, a `Code` node for JS/Python, and
+`Execute Sub-workflow` for decomposition. Self-hostable under a
+fair-code licence, which makes it the default answer whenever "we
+can't send this to a SaaS" is a constraint. Its LLM story is the
+LangChain-derived `AI Agent` node — tools attached to an agent that
+picks among them.
+
+The execution model is the load-bearing difference. An n8n *execution*
+is a payload of items flowing node-to-node, triggered by an event and
+finished when the last node returns; it is a **run, not a session**.
+Human-in-the-loop exists (`Wait` with a webhook resume, Slack/email
+approval nodes) but it is pause-and-resume on a run, not a state that
+holds an intent allowlist while a human deliberates for three days
+across two conversations.
+
+Sub-workflows pass a data payload in via the `Execute Sub-workflow
+Trigger`'s declared input fields and return the last node's output
+([n8n — Sub-workflows](https://docs.n8n.io/build/flow-logic/break-workflows-into-smaller-parts)).
+That's a real parameter contract — closer to kitsoki's `world_in:`
+than CALM's global slot bag. What it lacks is the other half:
+the child's *capabilities* are fixed inside the child, because
+credentials bind to nodes. Running the same pipeline against Jira in
+production and local files in a fixture means duplicating the
+workflow, not rebinding an interface (§7.3).
+
+### 5b. Airtable
+
+A relational-ish database with views, an interface builder,
+automations (trigger → actions, including a scripting action), AI
+fields that write a computed value into a column, and — since the
+Omni/Cobuilder generation — an LLM that assembles the schema and UI
+from a prompt.
+
+Airtable's model of a process is a **`Status` single-select on a
+record**, moved by a human in a view or by an automation. That sounds
+primitive next to a statechart, and as a formalism it is: no guards,
+no per-state action allowlist, no validation beyond field types, no
+replay past revision history. But it is the most successful workflow
+substrate in this document by adoption, for reasons kitsoki should
+take seriously — the operator surface is free. Filter, sort, and group
+every in-flight instance; hand a non-technical owner the base; get a
+form and a mobile app without asking anyone. Kitsoki has none of that
+and is not trying to.
+
+Airtable's AI fields are also, quietly, the most *contained* LLM
+integration in this section: a field agent's write target is one
+column on one record. That is a real blast-radius boundary, arrived at
+by data-model accident rather than by design, and it is narrower than
+what n8n's or Appian's agents get.
+
+### 5c. Appian
+
+Enterprise low-code BPM. Process models are BPMN and the model *is*
+the runtime — "that model isn't just the starting point for building
+your process, it is the process"
+([Appian — Process Modeling](https://docs.appian.com/suite/help/25.4/process_modeling.html)).
+Around it: SAIL interfaces, Records and Data Fabric, task assignment
+to users and groups with SLA timers and escalation, RPA, process
+mining, and the compliance posture (FedRAMP, HIPAA, SOC) that makes it
+the answer in regulated industries. Since 25.4, Agent Studio builds AI
+agents from a prompt plus reusable tools that "connect to your data
+fabric and processes," dropped into a process model via the
+`Execute AI Agent` smart service
+([Appian — Agent Studio](https://docs.appian.com/suite/help/25.4/agent-studio.html)).
+
+Appian is the closest thing in this document to "durable process with
+human tasks, typed data, and an audit trail" — the things kitsoki
+argues for, shipped at enterprise scale a decade ago. The divergences
+are authorship and enforcement. Process models are objects in a
+proprietary repository with Appian's own versioning, authored in
+Appian Designer; they are not text you review in a pull request,
+bisect, or hand to a coding agent. And an `Execute AI Agent` node's
+constraint on what the agent may do is the prompt plus which tools
+were attached — configuration, not a loader-checked property of the
+*call kind* (§7.4).
+
+### The important part: these are hosts, not rivals
+
+For most of §§1–4 the framing is "kitsoki instead of X." Here it is
+usually **"kitsoki on top of X."** Kitsoki already draws its boundary
+at the host interface, and these platforms sit on the far side of it:
+
+```yaml
+host_bindings:
+  ticket: host.airtable      # the record, the views, the human owner
+  effector: host.n8n         # a webhook into 400+ integrations
+  inbox: host.appian         # the enterprise task queue and its SLAs
+```
+
+An `invoke` into an n8n webhook is a perfectly good effect. An
+Airtable base is a perfectly good `ticket` binding — it is a better
+one than a flat file for anything a human has to browse. Kitsoki has
+no connector marketplace and no UI builder, and building either would
+be a strategic error. What kitsoki contributes is the layer none of
+them have: **the process itself as a reviewable, testable, importable
+artifact with the LLM's blast radius enforced rather than configured.**
+
+### Steal
+
+1. **n8n's per-node execution inspector and pinned data.** Seeing the
+   exact input and output items at every node, and freezing one node's
+   output so downstream iteration doesn't re-hit live APIs, is the
+   best authoring loop in this document. Kitsoki has the ingredients
+   (`session_trace`, cassettes) but not the "pin this one
+   `on_enter` result and iterate the rest" ergonomic.
+2. **n8n's workflow-level error workflow.** A named handler that
+   catches any failure anywhere in the run. Kitsoki has per-effect
+   `on_error:`; a story-level default error route is the missing
+   piece — the current alternative is remembering to write `on_error:`
+   everywhere.
+3. **Airtable's "process state is a queryable field."** The
+   many-instances-at-once operator view — all sessions in state X,
+   grouped by phase, sorted by age — is something kitsoki's event log
+   already has the data for and nothing currently reads. The daemon's
+   job list is the embryonic version.
+4. **Appian's timers and escalation on a human task.** Every
+   `_awaiting_reply` state in kitsoki waits forever. Appian's
+   assign-to-group, SLA timer, reassign, and escalate vocabulary is
+   the mature version of a gap kitsoki genuinely has — most visible on
+   the `judge_mode=human` path of §7.1.
+5. **Appian's process mining.** Mining real instances to find the
+   state where everything piles up. Kitsoki's per-session event logs
+   are exactly the input this needs.
+
+### Avoid
+
+1. **Canvas-as-source** (n8n, Appian). When node UUIDs and canvas
+   coordinates live in the artifact, diffs are unreadable, merges
+   conflict on layout, and two agents cannot work the same process in
+   parallel. Kitsoki's source is text and any layout is derived —
+   which is also why an agent can edit a story at all.
+2. **Hosted-only state** (Airtable, Appian). If the process cannot run
+   on a laptop against a fixture, the millisecond test surface of
+   §7.5 cannot exist, and the authoring loop is bounded by a network
+   round-trip to someone else's environment.
+3. **Agent-with-tools *as* the process** (Appian's `Execute AI Agent`,
+   n8n's `AI Agent` node). The third appearance of the same critique
+   levelled at CX Playbooks (§3) and LangGraph's `Supervisor` (§4a) —
+   the recognizer encroaching on the manager. It is the default
+   shape being shipped across the entire industry right now, which is
+   precisely why kitsoki keeps refusing it.
+4. **Letting per-seat or per-execution pricing shape the
+   architecture.** Metered runs push authors toward fewer, fatter
+   steps that do more per LLM call. Kitsoki's cost model rewards the
+   opposite: many small steps, most of which never reach an LLM at all
+   (§7.8, semantic routing tiers).
+
+---
+
+## 6. Why one generic MCP tool, not per-state typed tools
 
 The most consequential MCP design choice was to register a single
 `transition` tool with `{intent, slots}` payload, instead of a typed
@@ -548,14 +724,19 @@ gatekeeper rather than the schema.
 
 ---
 
-## 6. Why kitsoki, given that CALM, Dialogflow CX, and LangGraph all exist
+## 7. Why kitsoki, given that CALM, CX, LangGraph, n8n, Airtable, and Appian all exist
 
 The honest reading of §§3–4 is that kitsoki's *separation of
 recognizer from dialog manager*, *event-sourced replay*, and *typed
 slot-filling with validation feedback* are no longer differentiators.
 CALM ships them. Dialogflow CX ships them. LangGraph ships the
 graph + checkpointer half. Anyone claiming "kitsoki is the first
-deterministic-core conversational engine" is several years late.
+deterministic-core conversational engine" is several years late. §5
+adds a blunter version of the same problem: for most workflows the
+real incumbent is not a framework at all, it's an n8n canvas, an
+Airtable base with a `Status` column, or an Appian process model — all
+of which already work, already have an operator UI, and already have
+someone maintaining them.
 
 This section is the worked example of what *is* differentiated. It
 uses `stories/bugfix/` — the seven-room bugfix pipeline — because it
@@ -564,7 +745,7 @@ story. If a competing framework can express the same story with the
 same guarantees and at comparable cost, kitsoki is redundant. If it
 can't, the gap names what kitsoki is for.
 
-### 6.1 Judge polymorphism with one `on_enter` chain
+### 7.1 Judge polymorphism with one `on_enter` chain
 
 The bugfix story has three judge modes — `human`, `llm`, and
 `llm_then_human` — selected by `world.judge_mode`. The defining
@@ -623,7 +804,7 @@ checkpoints become seven near-identical functions with a shared
 helper. The contract that "all seven have identical shape" lives in
 code review, not in a loader-enforced schema.
 
-### 6.2 Cycle budgets as a declarative pattern
+### 7.2 Cycle budgets as a declarative pattern
 
 The bugfix story declares per-phase budgets:
 
@@ -655,7 +836,7 @@ also by hand. Neither framework has a *named* concept of a
 phase-scoped retry budget that an author can declare and the engine
 enforces.
 
-### 6.3 Sub-story imports with capability rebinding
+### 7.3 Sub-story imports with capability rebinding
 
 The bugfix story is *importable*. The dev-story and kitsoki-dev
 stories embed it under an alias:
@@ -708,7 +889,7 @@ sub-apps. LangGraph subgraphs come closest (with explicit state
 mapping) but have no notion of a capability surface that the parent
 rebinds per child instance.
 
-### 6.4 Agent-verb taxonomy with per-verb guarantees
+### 7.4 Agent-verb taxonomy with per-verb guarantees
 
 Each agent call in `bugfix` carries an `agent:` selecting a persona,
 and uses the verb dictated by the call's blast radius
@@ -738,7 +919,7 @@ accidentally writes a file corrupts the workspace mid-pipeline. The
 `decide` verb makes that a loader-enforced property, not a
 code-review property.
 
-### 6.5 Flow fixtures as deterministic state-graph tests
+### 7.5 The determinism surface: fixtures, cassettes, capsules, sandbox
 
 `stories/bugfix/flows/` contains 25 YAML fixtures, each a scripted
 sequence of intents-with-slots that exercises a path through the
@@ -773,39 +954,179 @@ This is downstream of [memory: tests must be fast]: a story author
 runs the full bugfix fixture suite on every YAML edit and gets
 feedback in under a second.
 
-### 6.6 The composite picture
+#### The fixtures are the visible layer of a larger commitment
 
-| Mechanism | CALM | DF CX | LangGraph | Kitsoki |
-|---|---|---|---|---|
-| Recognizer/manager split | ✓ | ✓ | partial | ✓ |
-| Event-sourced replay | ✓ | partial | ✓ | ✓ |
-| Typed slot validation w/ retry | ✓ | ✓ | DIY | ✓ |
-| Conversation-driven dev | ✓ mature | ✓ | DIY | embryonic |
-| Per-state intent allowlist | flow-scoped | page-scoped | DIY | ✓ |
-| **`emit_intent` synthesised turn** | DIY action | DIY webhook | DIY | ✓ declarative, depth-capped |
-| **Declarative cycle budgets** | DIY | DIY | DIY | ✓ phase template |
-| **Sub-story imports w/ capability rebinding** | flow link | none | subgraph (no rebind) | ✓ `host_bindings` |
-| **World isolation + projection per import** | none | none | partial | ✓ `world_in:` / per-exit `set:` |
-| **`emit_intent` resolution across import depth** | n/a | n/a | n/a | ✓ `IntentAliases` walk |
-| **Agent-verb blast-radius taxonomy** | one action type | webhook | one node | ✓ ask / decide / task / extract / converse / codeact |
-| **Sandbox-enforced read-only LLM call** | DIY | none | DIY | ✓ verb-level |
-| **Semantic routing tiers before LLM** | NLU adapter | route matcher | DIY | ✓ four tiers |
-| **Multi-surface transport (TUI / MCP / Jira / file)** | channels DIY | CX channels | LangServe | ✓ first-class |
-| **Meta-mode read-only sidebar agent** | none | none | none | ✓ |
-| **Background jobs + mid-flight clarification** | none | none | `interrupt()` | ✓ `host.RequestClarification` |
-| **Flow fixtures = state-graph tests (ms)** | minutes | service-level | DIY | ✓ |
+Fast state-graph tests are one consequence of a property that runs
+deeper than any single row of the §7.7 table: **every source of
+nondeterminism in kitsoki has a named, recorded, replayable seam**,
+and no automated gate is permitted to cross one live. Four seams, four
+mechanisms:
+
+| Seam | Mechanism |
+|---|---|
+| The agent's *decision* | episode-level `host_cassette` — a recorded episode replaces a whole handler ([`hosts.md`](hosts.md)) |
+| The agent's *I/O* | exchange-level HTTP cassettes with declared match fields and `record_mode: none \| once \| new_episodes \| all` |
+| The *repository* under a workspace verb | hermetic capsules — `capsules/<name>/capsule.yaml` + `capsuletest.Open(t, …)` instead of ad-hoc `git init` |
+| The *executor* running agent work | the fake executor that capsule CI's gates run against |
+
+The cost of the equivalent elsewhere is the point. CALM's e2e tests
+stub the LLM but still run NLU → command generator → policy → action
+server, in minutes. LangGraph gives you a checkpointer and leaves the
+rest as an engineering exercise; recording an agent's HTTP at
+exchange granularity *and* its decisions at episode granularity *and*
+its git fixture is three separate homegrown systems per project. n8n
+re-runs an execution against pinned node data by hand. Appian requires
+an environment. Airtable has nothing.
+
+Two consequences that are not obvious from "we have good tests":
+
+1. **Cost is bounded by policy, not by discipline.** No automated gate
+   in this repository can reach a real model — a rule the whole
+   `Steal`/`Avoid` framing above quietly assumes. Anywhere else on
+   this list, "our CI accidentally spent money" is a live failure
+   mode; here it is a structural impossibility.
+2. **A recorded trajectory is a reproduction.** A bug in an agent
+   interaction replays into a failing test rather than into a
+   paragraph describing what the model did that day —
+   `internal/host/agent_converse_replay_repro_test.go` exists because
+   that is the normal way a bug is filed here.
+
+#### Starlark: the sandbox is not the differentiator, the unification is
+
+Sandboxed code execution is table stakes in 2026 — E2B, Modal,
+`smolagents`' sandboxed executors, n8n's Pyodide `Code` node.
+Starlark itself is unremarkable too (Bazel, Buck, Tilt, Drone). What
+is not commodity is that kitsoki uses **one interpreter with one
+capability model for three different jobs**:
+
+- author-written glue (`host.starlark.run`),
+- agent-written exploratory code (`agent.codeact`, §4c),
+- and the frozen artifact a promoted trajectory becomes.
+
+Because they share a substrate, the action space *is* the set of Go
+builtins the author exposed — loader-checked exactly like every other
+verb's blast radius (§7.4) — so there is no ambient I/O to sandbox
+against in the first place, every builtin call lands in the same event
+log every other effect writes to, and a recorded trajectory replays
+with zero LLM and zero live side effects. The competitors' sandboxes
+are containment bolted onto a general-purpose interpreter; the
+question they answer is "what damage can this contain?" Kitsoki's
+question is the narrower and more useful one: "what was this call ever
+able to touch?" — answerable from the YAML, before it runs.
+
+That is also what makes the promotion ratchet of §4c possible at all:
+swapping an exploratory `agent.codeact` invoke for a deterministic
+`host.starlark.run` on a committed `.star` file is a one-line change
+precisely because nothing about the capability surface or the trace
+changes underneath it.
+
+### 7.6 The same story on n8n, Airtable, and Appian
+
+§§7.1–7.5 costed the bugfix story against frameworks an engineer
+picks. Costing it against the platforms a team already runs is a
+different exercise, because two of the three would get a working
+version of it up faster than kitsoki would — and then stop being able
+to change it safely.
+
+**n8n.** The seven checkpointed rooms become a canvas with `Wait`
+nodes and webhook resumes; the judge is an LLM node with an `IF` on
+`judge_mode`. This is achievable, and for a one-team pipeline with a
+handful of integrations it is the pragmatic choice. Where it stops:
+the three judge modes are three branch subtrees on a canvas, not one
+`on_enter` chain, so "all seven checkpoints have identical shape"
+(§7.1) has no enforcement and drifts on the first hurried edit. The
+cycle budgets of §7.2 are `Code` nodes incrementing a static-data
+counter with an `IF` after each. The import of §7.3 gets the input
+contract but not the rebinding — production-Jira and fixture-local
+are two copies of the workflow. And the 25 fixtures of §7.5 have no
+analogue at all: you re-run executions against pinned data, by hand,
+one path at a time.
+
+**Airtable.** A `Bugs` table, a `Phase` single-select, an automation
+per transition, an AI field for the judge verdict. Fastest to a demo
+by a wide margin, and the resulting operator surface — every bug in
+flight, grouped by phase, owned by a name — is better than anything
+kitsoki ships. Where it stops is earlier than n8n: there is no
+guard language, so nothing prevents a record moving from `reproducing`
+straight to `done`; the cycle budget is a number a human is trusted
+not to ignore; and the story is not an artifact — it is a base
+configuration that cannot be diffed, reviewed, imported into another
+base, or run offline. The correct reading of Airtable here is §5's:
+bind it as `host.airtable` for the ticket and keep the process in
+YAML.
+
+**Appian.** Expresses the most of it. Seven checkpoints as BPMN user
+tasks with real assignment, SLA timers, and escalation — strictly
+better than kitsoki's wait-forever `_awaiting_reply`. Durable
+instances, typed records, a compliance-grade audit trail. Where it
+diverges is on the two properties §7.4 and §7.5 are about: the judge's
+inability to write files is a matter of which tools were attached to
+the agent and what the prompt says, reviewed by a human, rather than a
+property of the verb the loader checks; and validating a change means
+deploying objects to an environment and running instances, not running
+25 YAML fixtures in under a second on a laptop. Add the licensing and
+the proprietary object repository and the artifact stops being
+something you can hand to a coding agent, bisect, or fork.
+
+The summary across all three: **they win on time-to-first-working and
+on operator surface; kitsoki wins on the second edit and every edit
+after it.** If a workflow is going to be written once and watched by a
+human forever, these platforms are the right answer and kitsoki is
+overhead. If it is going to be changed repeatedly, reviewed, forked
+per team, run in CI, and given progressively more LLM autonomy, then
+"the process is a diffable artifact whose LLM blast radius is
+loader-checked and whose full state graph tests in milliseconds" is
+worth more than the head start.
+
+### 7.7 The composite picture
+
+| Mechanism | CALM | DF CX | LangGraph | n8n | Airtable | Appian | Kitsoki |
+|---|---|---|---|---|---|---|---|
+| Recognizer/manager split | ✓ | ✓ | partial | agent node | none | agent + tools | ✓ |
+| Event-sourced replay | ✓ | partial | ✓ | execution log | revision history | instance history | ✓ |
+| Typed slot validation w/ retry | ✓ | ✓ | DIY | DIY | field types | ✓ | ✓ |
+| Conversation-driven dev | ✓ mature | ✓ | DIY | n/a | n/a | n/a | embryonic |
+| Per-state intent allowlist | flow-scoped | page-scoped | DIY | none | none | none | ✓ |
+| **`emit_intent` synthesised turn** | DIY action | DIY webhook | DIY | DIY | DIY | DIY | ✓ declarative, depth-capped |
+| **Declarative cycle budgets** | DIY | DIY | DIY | DIY | DIY | DIY | ✓ phase template |
+| **Sub-story imports w/ capability rebinding** | flow link | none | subgraph (no rebind) | sub-workflow (no rebind) | none | sub-process (no rebind) | ✓ `host_bindings` |
+| **World isolation + projection per import** | none | none | partial | ✓ in/out payload | none | ✓ process params | ✓ `world_in:` / per-exit `set:` |
+| **`emit_intent` resolution across import depth** | n/a | n/a | n/a | n/a | n/a | n/a | ✓ `IntentAliases` walk |
+| **Agent-verb blast-radius taxonomy** | one action type | webhook | one node | one agent node | field-scoped agent | agent + tools | ✓ ask / decide / task / extract / converse / codeact |
+| **Sandbox-enforced read-only LLM call** | DIY | none | DIY | none | column-scoped write | none | ✓ verb-level |
+| **Semantic routing tiers before LLM** | NLU adapter | route matcher | DIY | none | none | none | ✓ four tiers |
+| **Multi-surface transport (TUI / MCP / Jira / file)** | channels DIY | CX channels | LangServe | webhook / chat | web + mobile | portals / sites | ✓ first-class |
+| **Meta-mode read-only sidebar agent** | none | none | none | none | none | none | ✓ |
+| **Background jobs + mid-flight clarification** | none | none | `interrupt()` | `Wait` node | none | ✓ tasks + timers | ✓ `host.RequestClarification` |
+| **Process is a diffable text artifact in git** | ✓ | export blob | ✓ Python | JSON + canvas coords | none | proprietary objects | ✓ YAML |
+| **Runs locally against a fixture, no service** | ✓ | none | ✓ | ✓ self-host | none | none | ✓ |
+| **Flow fixtures = state-graph tests (ms)** | minutes | service-level | DIY | manual re-run | none | env deploy | ✓ |
+| **Agent decisions cassette-able (episode-level)** | stubbed | none | DIY | none | none | none | ✓ `host_cassette` |
+| **Agent I/O cassette-able (exchange-level)** | DIY | none | DIY | pinned data | none | none | ✓ + `record_mode` |
+| **Hermetic repo/workspace fixtures** | n/a | n/a | DIY | none | none | none | ✓ capsules |
+| **No automated gate can reach a real model** | convention | n/a | convention | convention | n/a | convention | ✓ policy + fake executor |
+| **Agent-written code: capability allowlist, not container** | n/a | n/a | sandbox opt-in | vm-sandboxed `Code` node (author-written) | n/a | RPA / tools | ✓ Starlark, loader-checked |
+| **One interpreter for author glue, agent code, frozen artifact** | none | none | none | none | none | none | ✓ promotion ratchet |
+| *Prebuilt integration catalog* | few | few | tool libs | ✓ 400+ | ✓ + sync | ✓ enterprise | ✗ host handlers |
+| *Non-technical operator UI (grid / form / inbox)* | none | ✓ | none | partial | ✓✓ | ✓✓ | ✗ |
+| *Human-task SLA timers + escalation* | none | none | none | partial | none | ✓✓ | ✗ |
 
 The pattern: the columns to the left match kitsoki on the
-*conversational* core. The rows in **bold** are where kitsoki is
+*conversational* core, and the three platform columns match or beat it
+on operator surface and integration breadth — the *italic* rows are
+where kitsoki simply loses, and where §5's "bind them as hosts"
+conclusion comes from. The rows in **bold** are where kitsoki is
 either uniquely declarative, uniquely composable, or uniquely fast
 to author against. They are not separate features; they are
 consequences of the same architectural commitment per
 [memory: kitsoki moat is architecture] — *separate interpretive
 decisions from deterministic execution, with pluggable operators per
 decision and every decision recorded.* CALM, CX, and LangGraph each
-make that commitment at the top level but not all the way down.
+make that commitment at the top level but not all the way down; n8n,
+Airtable, and Appian make the opposite one — the operator drives, and
+the LLM is a node with credentials.
 
-### 6.7 What "worth the effort to continue" means
+### 7.8 What "worth the effort to continue" means
 
 Kitsoki should not be sold as "deterministic conversational AI" —
 that battle is over and there are three winners already. The
@@ -821,17 +1142,47 @@ defensible pitch is narrower and more specific:
    property** — not a code-review property. The judge cannot write
    files; the proposer cannot mutate state; the runtime enforces it.
 3. **A semantic-routing stack that pushes most turns off the LLM
-   entirely** — four deterministic tiers before LLM fallback, with
-   a promotion ladder from "LLM decision in trace" → "synonym" →
-   "slot template" → "deterministic edge."
-4. **A test surface that runs the state graph in milliseconds** —
-   so authoring loops are seconds, not minutes.
+   entirely** — four deterministic tiers before LLM fallback
+   ([`semantic-routing.md` §1](semantic-routing.md)), with a
+   documented promotion path from "LLM decision in trace" → "synonym"
+   → "slot template" → "deterministic edge." Deliberately manual, not
+   auto-promoting. The direction of travel is the differentiator: a
+   kitsoki story gets *cheaper and more deterministic* the longer it
+   runs, where every other system on this list has a fixed per-turn
+   LLM cost that only a hand-rolled cache changes.
+4. **A determinism surface with a named seam per source of
+   nondeterminism** — state graph, agent decision, agent I/O,
+   repository, executor — so the state graph tests in milliseconds,
+   an agent bug files as a replayable test, and no automated gate can
+   reach a real model (§7.5). This is the least glamorous item and
+   probably the most decisive one: it is what makes points 1–3
+   editable by an agent without a human watching every turn.
+5. **One sandboxed interpreter shared by author glue, agent-written
+   code, and the frozen artifact a trajectory promotes into** — where
+   the guarantee is not "the container held" but "the loader can tell
+   you what this call was ever able to touch" (§7.5, §4c).
+6. **A process artifact an agent can safely edit** — text in git,
+   diffable, reviewable in a PR, bisectable, forkable per team. This
+   is the one §5 makes urgent: the moment the thing changing your
+   workflow is itself an LLM, a canvas of node UUIDs and a hosted base
+   configuration stop being viable substrates, and everything in
+   points 2, 4, and 5 becomes the safety net rather than a nicety.
 
 These are the things that make the bugfix story possible in 408 lines
 of YAML + 25 flow fixtures, importable into a parent story without
 modification, with three judge modes and seven retry-bounded
 checkpoints. None of CALM, CX, or LangGraph can produce that
 artifact at that cost today. That gap is what kitsoki is for.
+
+And the inverse, stated plainly so nobody has to discover it the
+expensive way: if the requirement is a connector to a SaaS nobody has
+integrated yet, a grid a non-technical owner maintains, a task inbox
+with SLAs, or a workflow that will be written once and never seriously
+changed, then n8n, Airtable, or Appian is the right answer and kitsoki
+is overhead. The productive question is almost never "which one" —
+it's which layer each owns. They own the integrations, the records,
+and the humans. Kitsoki owns the process semantics and the LLM's
+blast radius, and calls the rest through `host_bindings:`.
 
 ---
 
@@ -873,6 +1224,22 @@ artifact at that cost today. That gap is what kitsoki is for.
   https://cloud.google.com/dialogflow/cx/docs/concept/generative-fallback
 - Google Cloud — Dialogflow CX Playbooks.
   https://cloud.google.com/dialogflow/cx/docs/concept/playbook
+- n8n — Break workflows into smaller parts (sub-workflows).
+  https://docs.n8n.io/build/flow-logic/break-workflows-into-smaller-parts
+- n8n — Execute Sub-workflow node.
+  https://docs.n8n.io/integrations/builtin/core-nodes/n8n-nodes-base.executeworkflow
+- Airtable — Automations overview.
+  https://support.airtable.com/docs/getting-started-with-airtable-automations
+- Airtable — Using Airtable AI in fields (field agents).
+  https://support.airtable.com/docs/using-airtable-ai-in-fields
+- Airtable — Using Omni AI in Airtable.
+  https://support.airtable.com/docs/using-omni-ai-in-airtable
+- Appian — Process Modeling with Appian.
+  https://docs.appian.com/suite/help/25.4/process_modeling.html
+- Appian — Agent Studio.
+  https://docs.appian.com/suite/help/25.4/agent-studio.html
+- Appian — Create and configure an AI agent.
+  https://docs.appian.com/suite/help/25.4/create-and-configure-ai-agent.html
 - LangGraph — Low-level concepts.
   https://langchain-ai.github.io/langgraph/concepts/low_level/
 - LangGraph — Persistence.
