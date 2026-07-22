@@ -24,10 +24,14 @@ import (
 )
 
 // TestGFlowUnhandledGate_PassesWhenBannerPresent proves the positive case:
-// dispatchHostCalls (host_dispatch.go) now runs the post-loop view through
-// applyErrorBannerSeam whenever a call failed with no on_error: declared
-// (the unhandledFailure flag), so both the domain- and infra-failure
-// fixtures pass the gate without an opt-in assertion doing the work.
+// dispatchHostCalls (host_dispatch.go) always appends the durable,
+// unclearable world.error_log entry for a call that fails with no
+// on_error: declared (regardless of whether the view goes on to surface
+// it), so both the domain- and infra-failure fixtures pass the gate —
+// which asserts durability, not view visibility — without an opt-in
+// assertion doing the work. (These particular fixtures also happen to keep
+// the applyErrorBannerSeam banner in the final view, since working_unhandled
+// has nowhere else to go, but that is incidental to what this gate checks.)
 func TestGFlowUnhandledGate_PassesWhenBannerPresent(t *testing.T) {
 	const appPath = "../../testdata/apps/error_banner/app.yaml"
 

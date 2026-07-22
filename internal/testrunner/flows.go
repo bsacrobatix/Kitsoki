@@ -1577,7 +1577,7 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 		if errs := assertNoSilentOnErrorBounce(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
 			tr.Failures = append(tr.Failures, errs...)
 		}
-		if errs := assertNoSilentUnhandledHostError(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
+		if errs := assertNoSilentUnhandledHostError(filePath, i, tr.Events, currentWorld); len(errs) > 0 {
 			tr.Failures = append(tr.Failures, errs...)
 		}
 
@@ -2000,7 +2000,7 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		if errs := assertNoSilentOnErrorBounce(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
 			tr.Failures = append(tr.Failures, errs...)
 		}
-		if errs := assertNoSilentUnhandledHostError(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
+		if errs := assertNoSilentUnhandledHostError(filePath, i, tr.Events, currentWorld); len(errs) > 0 {
 			tr.Failures = append(tr.Failures, errs...)
 		}
 		// expect_slots.
@@ -3139,19 +3139,34 @@ func assertNoSilentOnErrorBounce(filePath string, turnIdx int, events []store.Ev
 // a host call that fails with NO `on_error:` declared does not redirect —
 // dispatch continues to the next call in the same on_enter block — so it
 // never emits the intent="on_error" TransitionApplied the other gate looks
-// for. The never-silent obligation still applies: internal/orchestrator's
-// dispatchHostCalls now runs the post-loop view through the same
-// applyErrorBannerSeam whenever a call in the batch failed unhandled (see
-// the `unhandledFailure` flag in host_dispatch.go).
+// for.
 //
-// The gate scans the turn's events for a TransitionApplied whose intent is
-// "on_error" first — if one fired, assertNoSilentOnErrorBounce already
-// covers this turn and this gate is a no-op, avoiding a double report for
-// the same underlying failure surfaced via two different event shapes.
-// Absent that, any HostReturned event carrying a non-empty "error" must be
-// surfaced in the rendered view (banner marker or the raw message), exactly
-// like the redirect gate's surfaced check.
-func assertNoSilentUnhandledHostError(filePath string, turnIdx int, events []store.Event, view string, lastError string) []string {
+// Unlike assertNoSilentOnErrorBounce, this gate does NOT require the
+// failure to appear in the rendered *view*. The user's requirement is
+// durability, not visibility: "let's also make sure it's never possible to
+// swallow errors — maybe we don't surface them but they should never
+// disappear". Plenty of legitimate best-effort host calls (host.ide.
+// get_diagnostics with no IDE attached, host.starlark.run, a fixture's
+// host.git.commit) fail, keep the chain going, and get rendered over by a
+// later transition in the same turn — the banner is gone from the final
+// view by design, even though the failure happened. Requiring the view to
+// carry it would make this gate fail exactly the correct, durable
+// behaviour it exists to protect.
+//
+// What must never happen is the failure vanishing from world.error_log —
+// the append-only, engine-reserved history (internal/orchestrator/
+// error_log.go) that a story cannot clear. So the gate scans the turn's
+// events for a TransitionApplied whose intent is "on_error" first — if one
+// fired, assertNoSilentOnErrorBounce already covers this turn (its
+// contract is different: an explicit on_error: room genuinely must show
+// the failure) and this gate is a no-op, avoiding a double report for the
+// same underlying failure surfaced via two different event shapes. Absent
+// that, every HostReturned event carrying a non-empty "error" in the turn
+// must have a matching world.error_log entry (matched on message, and on
+// namespace when the HostReturned payload carries one) in the post-turn
+// world — proving the runtime recorded it durably even though it chose not
+// to (or could not) surface it in the view.
+func assertNoSilentUnhandledHostError(filePath string, turnIdx int, events []store.Event, w world.World) []string {
 	for _, ev := range events {
 		if string(ev.Kind) != string(store.TransitionApplied) || ev.Payload == nil {
 			continue
@@ -3166,6 +3181,8 @@ func assertNoSilentUnhandledHostError(filePath string, turnIdx int, events []sto
 		}
 	}
 
+	errorLog, _ := w.Vars[app.ErrorLogWorldKey].([]any)
+
 	var failures []string
 	for _, ev := range events {
 		if string(ev.Kind) != string(store.HostReturned) || ev.Payload == nil {
@@ -3179,16 +3196,38 @@ func assertNoSilentUnhandledHostError(filePath string, turnIdx int, events []sto
 		if errMsg == "" {
 			continue
 		}
-		surfaced := strings.Contains(view, orchestrator.ErrorBannerMarker) ||
-			(lastError != "" && strings.Contains(view, lastError))
-		if !surfaced {
-			namespace, _ := payload["namespace"].(string)
+		namespace, _ := payload["namespace"].(string)
+		if !errorLogContains(errorLog, errMsg, namespace) {
 			failures = append(failures, fmt.Sprintf(
-				"G-FLOW: %s turn %d host call %q failed with no on_error: arc declared, but the rendered view does not contain the never-silent error banner marker %q (nor the raw failure message) — an unhandled host failure must still surface the failure via the banner seam or a view that renders {{ world.last_error }}, not advance silently",
-				filePath, turnIdx+1, namespace, orchestrator.ErrorBannerMarker))
+				"G-FLOW: %s turn %d host call %q failed with no on_error: arc declared, but no world.error_log entry records the failure %q — an unhandled host failure must always be durably recorded (world.error_log is append-only and engine-reserved precisely so it can never be swallowed), even when the rendered view does not surface it",
+				filePath, turnIdx+1, namespace, errMsg))
 		}
 	}
 	return failures
+}
+
+// errorLogContains reports whether world.error_log (as read from
+// world.World.Vars[app.ErrorLogWorldKey]) already holds an entry for the
+// given failure message. namespace, when non-empty, must also match the
+// entry's "namespace" field — HostReturned events without a namespace (the
+// legacy/machine-only runner path) match on message alone.
+func errorLogContains(log []any, message, namespace string) bool {
+	for _, raw := range log {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if msg, _ := entry["message"].(string); msg != message {
+			continue
+		}
+		if namespace != "" {
+			if ns, _ := entry["namespace"].(string); ns != namespace {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // matchEvent checks if an actual store.Event matches an expected FlowEvent.

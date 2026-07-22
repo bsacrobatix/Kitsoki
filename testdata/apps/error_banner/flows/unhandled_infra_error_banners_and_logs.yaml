@@ -4,6 +4,10 @@
 # world.error_log entry with class: host_infra (no exit_code/stderr — an
 # infra failure never reaches a host process to produce them).
 #
+# As with the domain sibling: the automatic G-FLOW gate
+# (assertNoSilentUnhandledHostError) only requires the error_log entry —
+# durability, not visibility. See that fixture's comment for the full note.
+#
 # To run:
 #   go run ./cmd/kitsoki test flows testdata/apps/error_banner/app.yaml
 

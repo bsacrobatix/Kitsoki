@@ -5,6 +5,17 @@
 # the no-on_error path — and (b) append a world.error_log entry with
 # class: host_domain, carrying exit_code/stderr from the stub's Data.
 #
+# (a) and (b) are both true HERE because working_unhandled has nowhere else
+# to go, so the seam's banner ends up in the final view. That is incidental
+# to what the automatic G-FLOW gate (assertNoSilentUnhandledHostError,
+# internal/testrunner/flows.go) actually enforces: the gate's contract is
+# durability, not visibility — it only requires (b), a matching
+# world.error_log entry, and does not look at the rendered view at all. A
+# best-effort host call whose surrounding chain re-renders over the banner
+# before the turn ends (host.ide.get_diagnostics with no IDE attached,
+# host.starlark.run, ...) is still gate-clean as long as error_log recorded
+# it.
+#
 # working_unhandled has no `on:` handlers, so the session simply stays there
 # after the failed call — dispatch is NOT aborted (no behavior change to the
 # no-on_error continue-the-chain contract), it just never had a next call to
