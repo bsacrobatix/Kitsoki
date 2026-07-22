@@ -95,7 +95,16 @@ func capsuleWorkerRunCmd() *cobra.Command {
 			if workspace != "" {
 				launchPolicy = host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{workspace}}
 			}
-			verdict, err := storylauncher.Launcher{StoryPath: storyPath, ProjectRoot: workspace, EventSink: sink, AgentBackend: agentBackend, AgentLaunchPolicy: launchPolicy}.Launch(cmd.Context(), prepared)
+			launcher := storylauncher.Launcher{StoryPath: storyPath, ProjectRoot: workspace, AgentBackend: agentBackend, AgentLaunchPolicy: launchPolicy}
+			// Only hand over a non-nil sink. Assigning a nil *store.JSONLSink to
+			// the interface-typed EventSink field yields a typed-nil interface
+			// that still satisfies `!= nil`, so the launcher would enable
+			// WithEventSinkAuthority and loadJourney would call History() on a
+			// nil receiver. Same guard as the session path (session.go).
+			if sink != nil {
+				launcher.EventSink = sink
+			}
+			verdict, err := launcher.Launch(cmd.Context(), prepared)
 			verdict = ci.NormalizeVerdict(verdict)
 			state := executor.CompletionState{Schema: executor.CompletionStateSchema, Outcome: "passed"}
 			if err == nil {

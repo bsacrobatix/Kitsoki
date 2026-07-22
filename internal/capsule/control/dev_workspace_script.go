@@ -156,7 +156,18 @@ func (p DevWorkspaceScriptProvider) Create(ctx context.Context, def Definition, 
 		// commit) with no local branch refs, so the configured base (e.g.
 		// "main") does not resolve. The detached HEAD IS the base to branch
 		// from there, so fall back to it rather than failing the whole story.
-		if _, headErr := runGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}"); headErr == nil {
+		//
+		// The fallback is gated on HEAD actually being detached. An ordinary
+		// checkout sitting on a branch that simply lacks the configured base
+		// (e.g. a project with no local staging/local) is a misconfiguration,
+		// not a pool worker: silently branching from whatever HEAD happens to
+		// be would base the workspace on the wrong history.
+		detached := false
+		if _, symErr := runGit(ctx, root, "symbolic-ref", "--quiet", "HEAD"); symErr != nil {
+			detached = true
+		}
+		_, headErr := runGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}")
+		if detached && headErr == nil {
 			base = "HEAD"
 		} else {
 			return MaterializedWorkspace{}, fmt.Errorf("dev workspace script: configured base %q is unavailable in this checkout; run from the protected project checkout or refresh its local branch: %w", base, err)
