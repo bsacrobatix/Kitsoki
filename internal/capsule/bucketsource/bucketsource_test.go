@@ -497,6 +497,95 @@ func TestMirrorWIPWithWorkspaceCommitBeyondSealedHeadExports(t *testing.T) {
 	}
 }
 
+// TestMirrorWIPExportsFromManagedCloneUnderWorkspace covers the whole-loop
+// pog-bugfix layout: the sealed top-level <runDir>/workspace stays clean at the
+// sealed head while the fix is committed into a managed clone under
+// <workspace>/.capsules/workspaces/<id>/ (its own .git, gitignored by the
+// top-level checkout). MirrorWIP must export the CLONE's committed work to the
+// canonical runs/<id>/wip/refs.bundle — not find the top-level clean and
+// mirror nothing (the regression that left runs/<exec>/wip/ empty on a shipped
+// worker run). The bundle's first head must be the shipped clone HEAD so the
+// POG dispatch recovery (git bundle list-heads NR==1) recovers exactly it.
+func TestMirrorWIPExportsFromManagedCloneUnderWorkspace(t *testing.T) {
+	// Top-level sealed workspace, left clean at the sealed head, ignoring
+	// .capsules/ exactly as real project checkouts do so the nested clone is
+	// invisible to the top-level `git status`/`for-each-ref`.
+	top, _ := initWIPRepo(t)
+	write(t, filepath.Join(top, ".gitignore"), ".capsules/\n")
+	wipGit(t, top, "add", ".gitignore")
+	wipGit(t, top, "commit", "-q", "-m", "ignore capsules")
+	sealedHead := strings.TrimSpace(wipGit(t, top, "rev-parse", "HEAD"))
+
+	// Managed clone (own object store) carrying the fix on an agent/<id>
+	// branch — the branch name `agent/…` sorts before `main`, so the shipped
+	// commit is `git bundle list-heads`' first entry.
+	clone := filepath.Join(top, ".capsules", "workspaces", "cap-1")
+	if err := os.MkdirAll(filepath.Dir(clone), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "clone", "-q", "--origin", "source", top, clone).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	wipGit(t, clone, "config", "user.name", "Capsule WIP Test")
+	wipGit(t, clone, "config", "user.email", "wip@example.invalid")
+	wipGit(t, clone, "checkout", "-q", "-b", "agent/cap-1")
+	write(t, filepath.Join(clone, "fix.txt"), "fix\n")
+	wipGit(t, clone, "add", "fix.txt")
+	wipGit(t, clone, "commit", "-q", "-m", "the fix")
+	shipped := strings.TrimSpace(wipGit(t, clone, "rev-parse", "HEAD"))
+
+	runDir := t.TempDir()
+	workspace := filepath.Join(runDir, "workspace")
+	if err := os.Rename(top, workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	record := workerserver.RunRecord{ExecutionID: "exec-wip-clone-1", SourceDigest: sealedHead}
+	if err := mirror.MirrorWIP(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorWIP: %v", err)
+	}
+
+	wantKey := "runs/exec-wip-clone-1/wip/refs.bundle"
+	if _, err := store.Head(context.Background(), wantKey); err != nil {
+		t.Fatalf("expected bundle stored at %s (managed clone must be exported): %v", wantKey, err)
+	}
+	var sidecar bucketsource.WIPExport
+	readJSONObject(t, store, "runs/exec-wip-clone-1/wip/wip.json", &sidecar)
+	if sidecar.Head != shipped {
+		t.Fatalf("sidecar.Head = %s, want shipped clone head %s", sidecar.Head, shipped)
+	}
+
+	// The recovered bundle must clone back to the shipped commit.
+	rc, _, err := store.Get(context.Background(), wantKey)
+	if err != nil {
+		t.Fatalf("get bundle: %v", err)
+	}
+	defer rc.Close()
+	bundleDir := t.TempDir()
+	bundlePath := filepath.Join(bundleDir, "refs.bundle")
+	out, err := os.Create(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := out.ReadFrom(rc); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	listed, err := exec.Command("git", "bundle", "list-heads", bundlePath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git bundle list-heads: %v: %s", err, listed)
+	}
+	firstHead := ""
+	if fields := strings.Fields(strings.SplitN(strings.TrimSpace(string(listed)), "\n", 2)[0]); len(fields) > 0 {
+		firstHead = fields[0]
+	}
+	if firstHead != shipped {
+		t.Fatalf("bundle first list-heads entry = %s, want shipped %s (POG recovery keys off NR==1)", firstHead, shipped)
+	}
+}
+
 func assertObject(t *testing.T, store objectstore.Store, key, want string) {
 	t.Helper()
 	rc, _, err := store.Get(context.Background(), key)

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/objectstore"
@@ -144,4 +145,55 @@ func gitOutputWIP(ctx context.Context, root string, args ...string) (string, err
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
+}
+
+// SelectWIPRoot picks the git repository whose committed work the WIP export
+// should bundle for a terminal run.
+//
+// The whole-loop pog-bugfix story (and any dev-workspace-backed lane) commits
+// its fix into a managed CLONE under
+// <workspace>/.capsules/workspaces/<id>/ — a repository with its OWN .git and
+// object store, and gitignored (".capsules/") by the top-level sealed
+// checkout. Inspecting only <runDir>/workspace therefore finds the top-level
+// repo clean (HEAD still at the sealed head, the clone invisible to
+// `git status`/`for-each-ref`) and exports NOTHING, so the shipped fix never
+// reaches runs/<execution-id>/wip/refs.bundle and dies with the ephemeral
+// worker. See the POG dispatch recovery seam (feedback-wip-recovery.sh /
+// feedback-dispatch-backend.sh) that probes exactly that key.
+//
+// This returns the managed clone that carries committed work beyond
+// sealedHead (most-recently-modified wins when several exist), so the canonical
+// refs.bundle is a bundle of the clone whose HEAD is the shipped candidate.
+// It falls back to the top-level workspace when no such clone is present — the
+// ordinary in-place lanes whose work already lives in the top-level repo (or a
+// linked worktree sharing its object store, which `git bundle --all` already
+// covers).
+func SelectWIPRoot(ctx context.Context, workspace, sealedHead string) string {
+	sealedHead = strings.TrimSpace(sealedHead)
+	matches, _ := filepath.Glob(filepath.Join(workspace, ".capsules", "workspaces", "*"))
+	best := ""
+	var bestMod time.Time
+	for _, dir := range matches {
+		gitPath := filepath.Join(dir, ".git")
+		info, err := os.Stat(gitPath)
+		if err != nil {
+			continue // not a git repository
+		}
+		head, err := gitOutputWIP(ctx, dir, "rev-parse", "HEAD")
+		if err != nil {
+			continue // unreadable / not a valid repo
+		}
+		head = strings.TrimSpace(head)
+		if head == "" || (sealedHead != "" && head == sealedHead) {
+			continue // no committed work beyond the sealed source
+		}
+		if best == "" || info.ModTime().After(bestMod) {
+			best = dir
+			bestMod = info.ModTime()
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return workspace
 }

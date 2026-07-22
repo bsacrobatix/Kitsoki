@@ -213,7 +213,14 @@ func (m OutputMirror) MirrorWIP(ctx context.Context, record workerserver.RunReco
 		}
 		return err
 	}
-	_, err := ExportWIP(ctx, m.Store, m.prefix(), record.ExecutionID, workspace, record.SourceDigest)
+	// The whole-loop pog-bugfix story commits its fix into a managed clone
+	// under <workspace>/.capsules/workspaces/<id>/ (own .git, gitignored by
+	// the top-level checkout), not into the sealed top-level workspace, so
+	// exporting <runDir>/workspace directly finds it clean and mirrors
+	// nothing. SelectWIPRoot resolves the repository that actually carries the
+	// committed fix.
+	root := SelectWIPRoot(ctx, workspace, record.SourceDigest)
+	_, err := ExportWIP(ctx, m.Store, m.prefix(), record.ExecutionID, root, record.SourceDigest)
 	return err
 }
 
