@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -89,7 +90,13 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	if projectRoot == "" {
 		projectRoot = findProjectRoot(path)
 	}
-	out, err := orch.OneShot(ctx, orchestrator.OneShotInput{State: app.StatePath(fmt.Sprint(def.Root)), Intent: "run", World: envelopeWorld(prepared.Envelope, projectRoot)})
+	// Drive the story THROUGH its rooms to a terminal verdict (not a single
+	// operator turn): a CI/worker run has no human to advance each phase, so the
+	// bugfix loop per-room emit_intent auto-advances and gate self-arcs must
+	// settle to rest. DriveToRest is the existing multi-round drive (its
+	// WithInterceptDrive re-fires effectful self-arc on_enter); WorldAfter
+	// exposes the settled world so we can read the ci_verdict the story emitted.
+	out, err := orch.DriveToRest(ctx, "run", nil, orchestrator.DriveOptions{InitialWorld: envelopeWorld(prepared.Envelope, projectRoot), TeleportState: app.StatePath(fmt.Sprint(def.Root))})
 	if err != nil {
 		return ci.Verdict{}, err
 	}
@@ -100,7 +107,14 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	}
 	raw, ok := out.WorldAfter["ci_verdict"]
 	if !ok || raw == nil {
-		return ci.Verdict{}, fmt.Errorf("capsule ci: story %s did not emit ci_verdict after run (state %s; host calls: %s)", filepath.ToSlash(l.StoryPath), out.NextState, hostCallDiagnostics(out.HostCalls))
+		// The story settled without ever emitting a ci_verdict — it stalled at a
+		// (usually non-terminal) room instead of driving to a terminal @exit.
+		// DriveToRest folds a broken emit chain into outcome=resolved and leaves
+		// the real cause on Last.HarnessError, so without surfacing it here the
+		// worker fails with a bare, undebuggable `verdict schema ""`. Name the
+		// stuck room AND why nothing advanced it so the bucket-mirrored error is
+		// self-diagnosing (no SSH-to-worker required).
+		return ci.Verdict{}, stalledVerdictError(l.StoryPath, out)
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
@@ -131,6 +145,71 @@ func applyHostEffectPolicy(reg *host.Registry, policy executor.Policy) {
 			return original(ctx, args)
 		})
 	}
+}
+
+// stalledVerdictError builds the self-diagnosing error returned when a drive
+// settles without ci_verdict. It names the stuck room (out.FinalState) and the
+// drive outcome, then appends stallDiagnostics — so the failure that the worker
+// mirrors to the bucket explains the stall instead of the bare, causeless
+// `capsule ci: verdict schema ""`.
+func stalledVerdictError(storyPath string, out orchestrator.DriveOutcome) error {
+	return fmt.Errorf("capsule ci: story %s stalled without emitting ci_verdict — final state %s (outcome %s); %s",
+		filepath.ToSlash(storyPath), out.FinalState, out.Outcome, stallDiagnostics(out))
+}
+
+// stallDiagnostics explains WHY a drive settled without emitting ci_verdict.
+// It surfaces the swallowed settle error (the emit_intent / transition failure
+// the machine recorded but DriveToRest reports as outcome=resolved) plus the
+// last agent verdict the story bound, so the stall is debuggable from the
+// mirrored error alone.
+func stallDiagnostics(out orchestrator.DriveOutcome) string {
+	parts := []string{fmt.Sprintf("%d round(s)", out.Rounds)}
+	// The settle error is the real "why": e.g. `emit_intent "accept" at
+	// "verdict_not_reproducible": no transition arm matched`. It is otherwise
+	// lost because DriveToRest classifies the turn as resolved.
+	if out.Last != nil && strings.TrimSpace(out.Last.HarnessError) != "" {
+		parts = append(parts, "settle error: "+strings.TrimSpace(out.Last.HarnessError))
+	}
+	if v := lastAgentVerdict(out.WorldAfter); v != "" {
+		parts = append(parts, "last agent verdict: "+v)
+	} else {
+		parts = append(parts, "no agent verdict bound")
+	}
+	return strings.Join(parts, "; ")
+}
+
+// lastAgentVerdict summarises the judge/triage verdicts the story bound (world
+// keys ending in "verdict", excluding ci_verdict) — e.g.
+// "bf__llm_verdict(verdict=accept intent=accept confidence=0.95)" — so a stall
+// can report "a verdict was accepted but no advance intent fired".
+func lastAgentVerdict(world map[string]any) string {
+	keys := make([]string, 0, len(world))
+	for k := range world {
+		if k == "ci_verdict" {
+			continue
+		}
+		if strings.HasSuffix(k, "verdict") {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		m, ok := world[k].(map[string]any)
+		if !ok {
+			continue
+		}
+		fields := make([]string, 0, 3)
+		for _, f := range []string{"verdict", "intent", "confidence"} {
+			if val, present := m[f]; present {
+				fields = append(fields, fmt.Sprintf("%s=%v", f, val))
+			}
+		}
+		if len(fields) > 0 {
+			parts = append(parts, k+"("+strings.Join(fields, " ")+")")
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func hostCallDiagnostics(calls []orchestrator.HostCallSummary) string {

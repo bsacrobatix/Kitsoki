@@ -1,0 +1,107 @@
+# bugfix_repro_green_llm_verdict_collision — the exact story-level flake seen on
+# worker exec vmpool-62ceb14e84ad (fbtest-ee161-landfix-8).
+#
+# Setup that triggers it: a ticket whose repro RED-gate passes GREEN
+# (gate_command exits 0 ⇒ "cannot reproduce") AND judge_mode: llm. In the
+# `reproducing` room's on_enter this queues TWO sibling emit_intents in one
+# settle batch:
+#   step 0b  → `not_reproducible`  (repro_checked && !regression_red_pre_fix)
+#              routes to the terminal @exit:not-reproducible.
+#   step 3   → `accept`            (the judge still runs because its guard
+#              admits gate_command != '' / empty test_cmd, and returns a
+#              high-confidence accept).
+#
+# Before the dispatchEmittedIntents fix, `not_reproducible` fired first into the
+# terminal @exit and then the queued `accept` was dispatched AT that terminal
+# state, erroring `emit_intent "accept" at "...": no transition arm matched`,
+# which stranded the drive at bf.reproducing with no ci_verdict (the worker then
+# died `capsule ci: verdict schema ""`). With the fix the terminal @exit ends
+# the batch and the drive rests cleanly at @exit:not-reproducible.
+#
+# Sibling of bugfix_repro_green_not_reproducible.yaml — same GREEN trap, but with
+# the LLM judge in play so both emits collide (that flow uses judge_mode: human,
+# so the judge/accept emit never fires and no collision occurs).
+
+test_kind: flow
+app: ../app.yaml
+initial_state: idle
+initial_world:
+  ticket_id:                  "TKT-RP-COLLIDE"
+  ticket_title:               "Cannot login (intermittent — already fixed upstream?)"
+  thread:                     "TKT-RP-COLLIDE"
+  workspace_id:               "rp-collide"
+  workdir:                    ".worktrees/rp-collide"
+  feature_branch:             "rp-collide"
+  base_branch:                "main"
+  bugfix_mode:                "full"
+  judge_mode:                 "llm"
+  judge_confidence_threshold: 0.8
+  bf_autostart_attempted:     true
+  bugfix_exit:                "open-PR"
+  # Degenerate always-GREEN gate (mirrors the failing exec's gate_command="true").
+  gate_command:               "true"
+
+host_handlers:
+  host.append_to_file: { data: { ok: true } }
+  host.inbox.add:      { data: { ok: true } }
+  host.capsule_workspace:   { data: { ok: true, log: "", path: ".worktrees/rp-collide" } }
+  host.git:            { data: { ok: true, sha: "abc", diff: "" } }
+  host.local:          { data: { ok: true, log: "PASS", passed: 1, failed: 0 } }
+  # The reproducer artifact agent (step 1) still runs before the GREEN branch is
+  # taken; give it a schema-valid artifact so the judge has something to read.
+  host.agent.task:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Login repro"
+        summary_markdown: "Attempted to reproduce the login failure."
+        bug_verified:     false
+        involved_components: [{ name: "auth", reason: "login path" }]
+        status:           "passed"
+        outcome:          "pass"
+        applied:          true
+        files_changed:    []
+  host.agent.ask:
+    data: { ok: true, submitted: { summary_title: "p", summary_markdown: "p", fix_description: "x", root_cause: "y", affected_files: [] } }
+  # The judge returns a HIGH-confidence accept — the second half of the collision.
+  host.agent.decide:
+    data:
+      ok: true
+      submitted:
+        summary_title:    "Login repro"
+        summary_markdown: "Attempted to reproduce the login failure."
+        outcome:          "pass"
+        status:           "passed"
+        verdict:          "accept"
+        intent:           "accept"
+        confidence:       0.95
+        reason:           "Artifact looks strong; auto-accept."
+  host.run:
+    by_call:
+      # The repro RED-gate: ZERO exit on the unchanged worktree — the command
+      # PASSES (GREEN). The bug does not currently reproduce.
+      repro_gate_exec:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            red:     false
+            checked: true
+            log:     "ok  (PASSED on the unchanged worktree — cannot reproduce)"
+
+turns:
+  # start → reproducing.on_enter queues BOTH not_reproducible (GREEN gate) and
+  # accept (judge). The fix drops the stale `accept` once not_reproducible has
+  # reached the terminal @exit, so the drive settles at @exit:not-reproducible
+  # instead of erroring/stranding at bf.reproducing.
+  - intent: { name: start, slots: {} }
+    expect_state: __exit__not-reproducible
+    expect_world:
+      regression_red_pre_fix:  false
+      repro_checked:           true
+      status:                  not-reproducible
+    expect_world_final:
+      status: not-reproducible
+
+expect_terminal: true
+expect_no_errors: true

@@ -1223,6 +1223,27 @@ func (m *machineImpl) dispatchEmittedIntents(ctx context.Context, curState strin
 	}
 
 	for _, emit := range emits {
+		// A prior sibling emit in THIS same on_enter batch may have already
+		// transitioned the machine into a terminal @exit state (e.g. the
+		// reproducing room's deterministic GREEN-gate firing `not_reproducible`
+		// while the LLM judge's deferred `accept` is still queued behind it in
+		// this slice). A terminal exit ENDS the story: the room whose on_enter
+		// queued these siblings has been left, so any remaining queued emits are
+		// stale. A terminal state hosts no forward `on:` arm, so dispatching one
+		// there ALWAYS fails findTransition ("no transition arm matched") — which
+		// bubbles up as a settle error and strands a synchronous DriveToRest at a
+		// NON-terminal room with no terminal verdict (surfaced downstream as
+		// `capsule ci: verdict schema ""`). Log+drop the remaining siblings
+		// (matching the parallel-dropped-emit philosophy) and stop the batch.
+		if m.isTerminalState(state) {
+			m.logger.DebugContext(ctx, trace.EvIntentEmitted,
+				slog.String("intent", emit.Name),
+				slog.String("state", state),
+				slog.Int("depth", depth+1),
+				slog.String("kind", "dropped_after_terminal_exit"),
+			)
+			break
+		}
 		// Build the dispatch env so guards / templates in the
 		// destination's effects see the synthetic call's slots and
 		// the up-to-date world. Run carries over from the parent.
