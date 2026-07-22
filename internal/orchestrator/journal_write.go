@@ -119,6 +119,26 @@ func (o *Orchestrator) journalTurnError(
 			"error":   cause.Error(),
 		}, turnNum),
 	}
+
+	// Append the durable, unclearable error_log entry for this machine-fatal
+	// failure (Leak 5 — .context/troubleshooting-agent-and-error-integrity.md
+	// Part 1). Unlike a host-dispatch failure, machine.Turn aborted before any
+	// world mutation was committed: `w` is still the pre-turn world. Cloning
+	// before Set (rather than mutating the caller's map in place — see
+	// world.World's package doc) and emitting an EffectApplied event is what
+	// lets the entry survive into the next turn: BuildJourney replays events,
+	// not journalTurnError's side effects, so without this event the entry
+	// would vanish the moment this function returns.
+	postWorld := w.Clone()
+	logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(postWorld), ErrorLogClassMachine, state, "", "", cause.Error(), nil, nil, false)
+	newLog := appendErrorLog(postWorld, logEntry)
+	postWorld.Set(app.ErrorLogWorldKey, newLog)
+	postWorld.Set(app.ErrorOriginWorldKey, string(state))
+	errEvents = append(errEvents,
+		newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(postWorld, "set", map[string]any{app.ErrorLogWorldKey: newLog}), turnNum),
+		newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(postWorld, "set", map[string]any{app.ErrorOriginWorldKey: string(state)}), turnNum),
+	)
+
 	for i := range errEvents {
 		errEvents[i].Turn = turnNum
 	}
@@ -126,7 +146,7 @@ func (o *Orchestrator) journalTurnError(
 	stampStatePath(errEvents, state, o.InitialState())
 
 	jEntries := journalEntriesForEvents(sid, turnNum, time.Now(), errEvents,
-		w, w, "", state, call.Intent)
+		w, postWorld, "", state, call.Intent)
 	if appendErr := o.appendEventsAndJournal(sid, errEvents, jEntries); appendErr != nil {
 		o.logger.WarnContext(ctx, "orchestrator: failed to journal turn error",
 			slog.String("session_id", string(sid)),

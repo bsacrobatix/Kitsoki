@@ -220,6 +220,20 @@ const (
 	// doesn't need to dig into the (separate) store-event journal.
 	EvHostOnErrorRedirect = "host.on_error.redirect"
 
+	// host.error.unhandled fires when a host call fails (infra or domain)
+	// with NO `on_error:` declared. The dispatch loop still continues (this
+	// does not change control flow — see EvHostOnErrorRedirect for the
+	// redirect case), but the failure is never allowed to be silent: this
+	// WARN-level event plus the never-silent banner seam
+	// (applyErrorBannerSeam) and a world.error_log append are the three
+	// things that fire together so the failure is visible in the trace, the
+	// rendered view, and the durable world history even though the session
+	// stays on the same on_enter chain. Logs `phase` (infra|domain), `from`
+	// (the dispatching state path), `namespace`, and `exit_code` (domain
+	// failures only — infra failures never reach a host process).
+	// See .context/troubleshooting-agent-and-error-integrity.md Part 1, Leak 1.
+	EvHostErrorUnhandled = "host.error.unhandled"
+
 	// Background-job lifecycle (orchestrator-side view; the scheduler has its
 	// own job-table events but the user-visible mode transitions go here).
 	EvJobSubmitted             = "job.submitted"

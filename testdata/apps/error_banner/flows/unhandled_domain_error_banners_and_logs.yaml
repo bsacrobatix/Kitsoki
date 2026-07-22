@@ -1,0 +1,44 @@
+# Task A/B proof (.context/troubleshooting-agent-and-error-integrity.md
+# Part 1, items 1 and 2): a host DOMAIN failure (Result.Error) with NO
+# on_error: arc declared must still (a) surface the never-silent banner in
+# the rendered view — this is Task A's extension of applyErrorBannerSeam to
+# the no-on_error path — and (b) append a world.error_log entry with
+# class: host_domain, carrying exit_code/stderr from the stub's Data.
+#
+# working_unhandled has no `on:` handlers, so the session simply stays there
+# after the failed call — dispatch is NOT aborted (no behavior change to the
+# no-on_error continue-the-chain contract), it just never had a next call to
+# continue to here.
+#
+# To run:
+#   go run ./cmd/kitsoki test flows testdata/apps/error_banner/app.yaml
+
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+
+host_handlers:
+  host.run:
+    error: "simulated unhandled domain failure"
+    data: { exit_code: 17, ok: false, stderr: "boom on stderr" }
+
+turns:
+  - intent: { name: do_thing_unhandled, slots: {} }
+    expect_state: working_unhandled
+    expect_view_matches: "Action failed: simulated unhandled domain failure"
+    expect_world:
+      last_error: "simulated unhandled domain failure"
+      error_origin: "working_unhandled"
+      error_log:
+        - seq: 1
+          state: "working_unhandled"
+          namespace: "host.run"
+          effect: "write"
+          message: "simulated unhandled domain failure"
+          exit_code: 17
+          stderr: "boom on stderr"
+          class: "host_domain"
+          handled: false
+          ts: "1970-01-01T00:00:00Z"
+
+expect_terminal: false

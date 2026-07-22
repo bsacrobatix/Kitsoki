@@ -206,7 +206,7 @@ func roomTransitionEdges(fromRoom string, st *app.State, roomSet map[string]bool
 }
 
 func resolveGraphTarget(from, target string) string {
-	if target == "" || target == "." || strings.HasPrefix(target, "@") || strings.HasPrefix(target, "__exit__") {
+	if target == "" || target == "." || strings.HasPrefix(target, "@") || app.IsSynthesizedState(target) {
 		return ""
 	}
 	if !strings.HasPrefix(target, "..") {

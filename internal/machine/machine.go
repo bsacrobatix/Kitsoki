@@ -2436,14 +2436,31 @@ func (m *machineImpl) applyEffectsTracedWithOptions(ctx context.Context, effects
 			}
 			for _, k := range keys {
 				before := newWorld.Vars[k]
-				newWorld.Set(k, m.coerceSetValue(k, resolvedSet[k]))
+				// Coerce once and use the SAME coerced value for both the live
+				// world write and the journaled EffectApplied payload. Using the
+				// pre-coercion resolvedSet[k] for the event (as this used to do)
+				// let the two diverge: the in-memory world held the correctly
+				// typed value (e.g. int64(3) for a `type: int` key fed a bare
+				// world_in literal, which arrives here as the string "3" —
+				// see coerceSetValue), but the persisted event carried the raw
+				// string. Live sessions never noticed (both branches read the
+				// same in-memory World), but any reload/replay path
+				// (store.BuildJourney → coerceWorldVar) reconstructs world state
+				// purely from event JSON, which only re-coerces float64 → int64,
+				// not string → int64 — so a replayed world silently regressed
+				// the value back to a string on every subsequent read. Found via
+				// the new host_dispatch.go never-silent gate surfacing a
+				// previously-swallowed host.starlark.run schema failure
+				// (stories/dev-story's fix-tests max_cycles world_in projection).
+				coerced := m.coerceSetValue(k, resolvedSet[k])
+				newWorld.Set(k, coerced)
 				m.logger.DebugContext(ctx, trace.EvMachineEffectApplied,
 					slog.String("type", "set"),
 					slog.String("key", k),
 					slog.Any("before", before),
-					slog.Any("after", resolvedSet[k]),
+					slog.Any("after", coerced),
 				)
-				effectEvents = append(effectEvents, newEvent(store.EffectApplied, m.worldUpdatePayload(newWorld, "set", map[string]any{k: resolvedSet[k]})))
+				effectEvents = append(effectEvents, newEvent(store.EffectApplied, m.worldUpdatePayload(newWorld, "set", map[string]any{k: coerced})))
 			}
 			env.World = newWorld.Vars // expose this block's commits to the next entry
 

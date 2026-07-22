@@ -299,6 +299,34 @@ type AppDef struct {
 	// at startup via agents.BuildRegistry(def.AgentSpecs()) + host.SetAgentRegistry.
 	Agents map[string]*AgentDecl `yaml:"agents,omitempty"`
 
+	// OnErrorDefault names a story-level fallback error-transition target
+	// for any `invoke:` effect that declares no per-invoke `on_error:`. It
+	// is resolved ENTIRELY at load time (see resolveOnErrorDefaults in
+	// on_error_default.go): the loader walks every reachable on_enter /
+	// transition-effect chain and, for each Invoke effect whose OnError is
+	// still empty, sets OnError = OnErrorDefault. A per-invoke `on_error:`
+	// always wins — this only fills gaps. After load the runtime sees an
+	// ordinary populated Effect.OnError exactly as if the author had typed
+	// it on every call site; there is no new runtime concept and no
+	// orchestrator change.
+	//
+	// Value is a plain state path (dotted or slash form), validated to
+	// resolve to a declared state the same way a transition target is
+	// validated — an unresolvable default is a load error.
+	//
+	// Import-boundary rule (NOT merged across imports, mirroring Routing
+	// above): this field is resolved once per AppDef, using ONLY that
+	// AppDef's own OnErrorDefault, and applied ONLY to invokes owned by
+	// that same AppDef. A child fragment is fully resolved (with its own
+	// on_error_default, or none) before it is folded into an importer, so
+	// an importer's on_error_default never reaches into a folded child's
+	// still-empty on_error: sites, and a child's on_error_default never
+	// leaks out to the importer's own invokes. See resolveOnErrorDefaults'
+	// doc comment for the mechanics (it stops descending at any State with
+	// ImportAlias set — the same folded-child marker expandWorkbenches
+	// uses to know it has crossed an import boundary).
+	OnErrorDefault string `yaml:"on_error_default,omitempty"`
+
 	// Imports declares aliased composition with private worlds
 	// (see docs/stories/imports.md). Each import binds a child app
 	// under a string alias; child states/world keys are namespaced
@@ -1035,6 +1063,23 @@ type State struct {
 	// never see. See expandOneWorkbench's worldPrefix parameter.
 	ImportAlias string `yaml:"-"`
 
+	// OriginFile is the absolute path to the app.yaml that actually
+	// authored this state, independent of how many importing roots go on
+	// to fold it in under an alias prefix. Never authored in YAML —
+	// stamped once per state by stampOriginFile (on_error_default.go) at
+	// the same two timings resolveOnErrorDefaults runs at: on a child's
+	// own (still pre-fold) state tree inside loadImportedChild, and on a
+	// root's own directly-authored states inside the root load pipeline.
+	// Both stamps skip descending into any already-stamped (i.e. already
+	// folded-in-child) subtree, so a state's OriginFile always names the
+	// file that literally declared it, never an importer. This gives
+	// UnhandledInvokes a stable source identity for a finding: the same
+	// shared fragment folded into N different importing roots reports the
+	// same OriginFile (+ origin-relative state path) every time, letting
+	// callers de-duplicate findings that are the same underlying gap
+	// counted once per importer rather than N distinct gaps.
+	OriginFile string `yaml:"-"`
+
 	// ContextualRouting opts this room into the contextual-routing final tier:
 	// a router that fires AFTER deterministic and LLM tiers miss, classifying
 	// free-text input into one of four classes (intent, help, room_request,
@@ -1371,6 +1416,12 @@ type ProposalExecute struct {
 	// OnSuccess declares the transition after successful execution.
 	// Valid values: "stay", "back", or a named state.
 	OnSuccess string `yaml:"on_success,omitempty"`
+	// OnError declares the transition after a failed execution (either an
+	// infra error or a host-domain error — see proposal.ExecuteResult).
+	// Valid values: "stay", "back", or a named state. Empty means the
+	// error is unhandled; see UnhandledInvokes and AppDef.OnErrorDefault,
+	// both of which now cover this field.
+	OnError string `yaml:"on_error,omitempty"`
 	// Background, when true, runs the execute as a background job (see
 	// docs/stories/background-jobs).
 	Background bool `yaml:"background,omitempty"`

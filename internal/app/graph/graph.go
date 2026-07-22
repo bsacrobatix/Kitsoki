@@ -219,9 +219,10 @@ func roomOf(target string) string {
 	if target == "" || target == "." {
 		return ""
 	}
-	// Authored synthetic exit targets (@exit:done) and the loader-materialised
-	// pseudo-states they expand to (__exit__done) are graph sinks, not rooms.
-	if strings.HasPrefix(target, "@") || strings.HasPrefix(target, "__exit__") {
+	// Authored synthetic exit targets (@exit:done), the loader-materialised
+	// pseudo-states they expand to (__exit__done), and the builtin __error__
+	// fallback room (app.IsSynthesizedState) are graph sinks, not rooms.
+	if strings.HasPrefix(target, "@") || app.IsSynthesizedState(target) {
 		return ""
 	}
 	return string(app.StatePath(target).TopLevel())

@@ -24,6 +24,15 @@ type ExecuteResult struct {
 	HostResult host.Result
 	// Err is non-nil on infra failure (distinct from expected domain errors).
 	Err error
+	// OnError is the kind's execute.on_error route ("stay", "back", or a
+	// named state), copied through unchanged on BOTH failure shapes — the
+	// infra branch (Err set) and the domain branch (HostResult.Error set,
+	// Err nil). It is empty on success and empty when the kind declared no
+	// on_error:. Whoever wires the proposal lifecycle into the
+	// orchestrator is responsible for actually routing on this value; this
+	// package only carries it through so the route can't be silently
+	// dropped between here and there.
+	OnError string
 }
 
 // Execute runs a proposal's host invocation synchronously, recording the
@@ -62,7 +71,7 @@ func Execute(ctx context.Context, p *Proposal, kind *app.ProposalKind, registry 
 			FinishedAt: finishedAt,
 		})
 		p.Transition(StatusFailed)
-		return ExecuteResult{Proposal: p, Err: err}
+		return ExecuteResult{Proposal: p, Err: err, OnError: kind.Execute.OnError}
 	}
 
 	if hostResult.Error != "" {
@@ -75,7 +84,7 @@ func Execute(ctx context.Context, p *Proposal, kind *app.ProposalKind, registry 
 			FinishedAt: finishedAt,
 		})
 		p.Transition(StatusFailed)
-		return ExecuteResult{Proposal: p, HostResult: hostResult}
+		return ExecuteResult{Proposal: p, HostResult: hostResult, OnError: kind.Execute.OnError}
 	}
 
 	// Success.

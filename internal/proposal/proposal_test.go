@@ -165,6 +165,63 @@ func TestExecute_DomainError(t *testing.T) {
 	}
 }
 
+// TestExecute_InfraErrorSurfacesOnErrorRoute asserts that an infra failure
+// (registry.Invoke itself errors — here, an unregistered handler) carries
+// the kind's execute.on_error route through on ExecuteResult, the same as
+// the domain-error branch, without collapsing the infra-vs-domain
+// distinction ExecuteResult's doc comment draws (Err is still set here;
+// see TestExecute_DomainError for the Err-nil sibling case).
+func TestExecute_InfraErrorSurfacesOnErrorRoute(t *testing.T) {
+	reg := host.NewRegistry() // "host.missing" is never registered.
+
+	kind := &app.ProposalKind{
+		Execute: &app.ProposalExecute{
+			Invoke:  "host.missing",
+			OnError: "recover",
+		},
+	}
+	p := proposal.New("id", "shell_command", "sess")
+
+	result := proposal.Execute(context.Background(), p, kind, reg)
+	if result.Err == nil {
+		t.Fatal("expected infra error for unregistered handler")
+	}
+	if result.OnError != "recover" {
+		t.Fatalf("expected OnError=recover to be carried through on the infra branch, got %q", result.OnError)
+	}
+	if p.Status != proposal.StatusFailed {
+		t.Fatalf("expected failed, got %s", p.Status)
+	}
+}
+
+// TestExecute_DomainErrorSurfacesOnErrorRoute mirrors the infra-branch test
+// above for the domain-error branch (Err nil, HostResult.Error set).
+func TestExecute_DomainErrorSurfacesOnErrorRoute(t *testing.T) {
+	reg := host.NewRegistry()
+	reg.Register("host.fail", func(ctx context.Context, args map[string]any) (host.Result, error) {
+		return host.Result{Error: "resource not found"}, nil
+	})
+
+	kind := &app.ProposalKind{
+		Execute: &app.ProposalExecute{
+			Invoke:  "host.fail",
+			OnError: "recover",
+		},
+	}
+	p := proposal.New("id", "fail_cmd", "sess")
+
+	result := proposal.Execute(context.Background(), p, kind, reg)
+	if result.Err != nil {
+		t.Fatalf("unexpected infra error: %v", result.Err)
+	}
+	if result.OnError != "recover" {
+		t.Fatalf("expected OnError=recover to be carried through on the domain branch, got %q", result.OnError)
+	}
+	if p.Status != proposal.StatusFailed {
+		t.Fatalf("expected failed, got %s", p.Status)
+	}
+}
+
 func TestValidateAgainstSchema(t *testing.T) {
 	kind := &app.ProposalKind{
 		Schema: map[string]string{"cmd": "string", "cwd": "string"},

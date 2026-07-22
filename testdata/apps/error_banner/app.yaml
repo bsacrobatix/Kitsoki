@@ -16,6 +16,13 @@ app:
 hosts:
   - host.run
 
+# working_unhandled deliberately declares no on_error: on its invoke: — it
+# is the leak-1 / no-on_error: fixture the G-FLOW unhandled-error gate tests
+# (gflow_unhandled_gate_test.go) assert stays genuinely unhandled. Opt out
+# of the builtin error room explicitly so it keeps that shape regardless of
+# builtinErrorRoomDefaultOn (internal/app/builtin_error_room.go).
+on_error_default: none
+
 world:
   last_error: { type: string, default: "" }
 
@@ -28,6 +35,14 @@ intents:
     title: "Do the thing (wipes last_error on arrival)"
     description: "Run a host command that will fail, landing in a room that clears world.last_error before rendering."
     examples: ["do it quietly", "go quiet", "run silent"]
+  do_thing_unhandled:
+    title: "Do the thing (no on_error: declared)"
+    description: "Run a host command that will fail with NO on_error: arc — the leak-1 / error_log flow-test surface (.context/troubleshooting-agent-and-error-integrity.md Part 1)."
+    examples: ["do it unhandled", "go unhandled", "run unhandled"]
+  do_thing_silently_logged:
+    title: "Do the thing (wipes last_error, but the room renders from error_log)"
+    description: "Like do_thing_silently, but the destination room sources its own banner text from world.error_log instead of world.last_error — proving the durable log outlives the single-slot clear."
+    examples: ["do it quietly but log it"]
 
 root: lobby
 
@@ -41,6 +56,10 @@ states:
         - target: working
       do_thing_silently:
         - target: working_silent
+      do_thing_unhandled:
+        - target: working_unhandled
+      do_thing_silently_logged:
+        - target: working_silent_logged
 
   working:
     description: "Running the command…"
@@ -86,4 +105,46 @@ states:
       - set:
           last_error: ""
     view: |
+      Back at the lobby. Try again when ready.
+
+  # working_unhandled: NO on_error: on the invoke:, and deliberately no `on:`
+  # handlers either — a failed call here has nowhere to redirect to and no
+  # further intent to advance on, so the session simply stays put after the
+  # call fails (see unhandled_domain_error_banners_and_logs.yaml /
+  # unhandled_infra_error_banners_and_logs.yaml: leak-1 proof that the
+  # never-silent banner + world.error_log still fire on the no-on_error
+  # continue-the-chain path).
+  working_unhandled:
+    description: "Running the command (no on_error: declared)…"
+    view: |
+      Running…
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "false"
+
+  working_silent_logged:
+    description: "Running the command (silent variant, logged)…"
+    view: |
+      Running…
+    on_enter:
+      - invoke: host.run
+        with:
+          cmd: "false"
+        on_error: bounced_silent_logged
+
+  # bounced_silent_logged: like bounced_silent, clears world.last_error on
+  # arrival — but sources its OWN banner text from world.error_log (the
+  # durable append-only log, not the single-slot last_error view) so it
+  # passes rather than fails the G-FLOW gate. Proves the log survives a
+  # legitimate `set: {last_error: ""}` view reset
+  # (error_log_survives_last_error_clear.yaml).
+  bounced_silent_logged:
+    terminal: true
+    description: "Back at the lobby (silently, but logged)."
+    on_enter:
+      - set:
+          last_error: ""
+    view: |
+      ⚠ Action failed: {{ world.error_log.0.message }}
       Back at the lobby. Try again when ready.

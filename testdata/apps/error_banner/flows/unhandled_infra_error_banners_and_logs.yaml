@@ -1,0 +1,35 @@
+# Task A/B proof, infra-failure sibling of unhandled_domain_error_banners_and_logs.yaml:
+# a host INFRA failure (err != nil — "the call could not run at all") with NO
+# on_error: arc declared must still banner the view and append a
+# world.error_log entry with class: host_infra (no exit_code/stderr — an
+# infra failure never reaches a host process to produce them).
+#
+# To run:
+#   go run ./cmd/kitsoki test flows testdata/apps/error_banner/app.yaml
+
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+
+host_handlers:
+  host.run:
+    infra_error: "simulated unhandled infra failure"
+
+turns:
+  - intent: { name: do_thing_unhandled, slots: {} }
+    expect_state: working_unhandled
+    expect_view_matches: "Action failed: simulated unhandled infra failure"
+    expect_world:
+      last_error: "simulated unhandled infra failure"
+      error_origin: "working_unhandled"
+      error_log:
+        - seq: 1
+          state: "working_unhandled"
+          namespace: "host.run"
+          effect: "write"
+          message: "simulated unhandled infra failure"
+          class: "host_infra"
+          handled: false
+          ts: "1970-01-01T00:00:00Z"
+
+expect_terminal: false

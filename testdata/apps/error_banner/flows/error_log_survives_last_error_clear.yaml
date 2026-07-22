@@ -1,0 +1,48 @@
+# Task B proof: world.error_log is unclearable from story YAML. The
+# do_thing_silently_logged → bounced_silent_logged arc clears
+# world.last_error on entry (set: {last_error: ""}) — that's the "most
+# recent view" convenience clear stories do 200+ times across stories/, and
+# it is explicitly allowed. But world.error_log must survive it: the durable
+# entry appended when host.run failed is still there after the room's
+# on_enter runs, even though last_error reads "" again — proven here by the
+# destination room's OWN view successfully rendering the banner text pulled
+# from world.error_log.0.message instead of world.last_error.
+#
+# (Uses the _logged sibling rooms rather than plain working_silent /
+# bounced_silent: those intentionally still fail the G-FLOW never-silent
+# gate — see redirect_silent_bounce_fails_gate.yaml, which proves the gate
+# has teeth — so they are not a valid vehicle for a fixture that must PASS.)
+#
+# (checkEngineReservedSet, internal/app/loader.go, is what makes a story
+# actually attempting `set: {error_log: ...}` a LOAD error — see
+# internal/app/error_log_reserved_test.go for that half of the proof.)
+#
+# To run:
+#   go run ./cmd/kitsoki test flows testdata/apps/error_banner/app.yaml
+
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+
+host_handlers:
+  host.run:
+    error: "simulated silent host failure"
+
+turns:
+  - intent: { name: do_thing_silently_logged, slots: {} }
+    expect_state: bounced_silent_logged
+    expect_view_matches: "Action failed: simulated silent host failure"
+    expect_world:
+      last_error: ""
+      error_origin: "working_silent_logged"
+      error_log:
+        - seq: 1
+          state: "working_silent_logged"
+          namespace: "host.run"
+          effect: "write"
+          message: "simulated silent host failure"
+          class: "host_domain"
+          handled: false
+          ts: "1970-01-01T00:00:00Z"
+
+expect_terminal: true

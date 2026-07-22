@@ -1,0 +1,35 @@
+# Task B proof: a host failure WITH an on_error: arc declared also appends a
+# world.error_log entry (Task B is not redirect-path-specific — every host
+# failure logs, whether or not it redirects). Reuses the do_thing → working
+# → on_error: bounced arc already proven banner-safe by
+# redirect_surfaces_error.yaml; this fixture adds the error_log assertion.
+#
+# To run:
+#   go run ./cmd/kitsoki test flows testdata/apps/error_banner/app.yaml
+
+test_kind: flow
+app: ../app.yaml
+initial_state: lobby
+
+host_handlers:
+  host.run:
+    error: "simulated host failure"
+
+turns:
+  - intent: { name: do_thing, slots: {} }
+    expect_state: bounced
+    expect_view_matches: "Action failed: simulated host failure"
+    expect_world:
+      last_error: "simulated host failure"
+      error_origin: "working"
+      error_log:
+        - seq: 1
+          state: "working"
+          namespace: "host.run"
+          effect: "write"
+          message: "simulated host failure"
+          class: "host_domain"
+          handled: false
+          ts: "1970-01-01T00:00:00Z"
+
+expect_terminal: true

@@ -1,0 +1,48 @@
+# Tiny app used by TestOrchestrator_OneShotDetailed_UnhandledHostErrorAppendsErrorLog.
+# The `probe` state's on_enter invokes host.fail (which always returns
+# Result.Error != "") with NO on_error: arc, so dispatch must continue to
+# `probe` itself (Leak 1 shape: no redirect) rather than silently advancing
+# with no trace of the failure.
+#
+# on_error_default: none opts this fixture OUT of the builtin __error__ room
+# (builtinErrorRoomDefaultOn in internal/app/builtin_error_room.go defaults
+# every OTHER app's unhandled invoke: to on_error: __error__ at load time) —
+# this fixture exists specifically to exercise the true Leak-1 "no on_error:
+# at all, dispatch continues" shape on the dispatchHostCallsDetailed /
+# OneShot path, not the (now much more common) builtin-room redirect shape.
+app:
+  id: hosterror_unhandled
+  version: 0.1.0
+  title: "host unhandled-error test app (dispatchHostCallsDetailed / OneShot)"
+
+on_error_default: none
+
+hosts:
+  - host.fail
+
+world:
+  marker: { type: string, default: "" }
+
+root: idle
+
+intents:
+  ask:
+    title: "Ask"
+    description: "Trigger the probe."
+    examples: ["ask"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle. Marker: {{ world.marker }}"
+    on:
+      ask:
+        - target: probe
+
+  probe:
+    description: "Probe state — the on_enter invoke deliberately has NO on_error:."
+    view: "Probe. Marker: {{ world.marker }}"
+    on_enter:
+      - invoke: host.fail
+        with: {}

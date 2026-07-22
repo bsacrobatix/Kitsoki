@@ -262,6 +262,14 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	var events []store.Event
 	applied := false
 	var redirect app.StatePath
+	// unhandledFailure is set when a host call (infra or domain) fails with
+	// NO on_error: arc declared. It never changes control flow — the chain
+	// still continues to the next call in this on_enter block — but it tells
+	// the post-loop render (when no redirect fired) to run the view through
+	// applyErrorBannerSeam, the same never-silent seam the redirect path
+	// already converges on. See Leak 1,
+	// .context/troubleshooting-agent-and-error-integrity.md Part 1.
+	unhandledFailure := false
 
 	// dispatchBinds accumulates the world keys bound by host results as the
 	// loop progresses, so a later invoke's `with:` re-render sees an earlier
@@ -403,6 +411,16 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			}
 			w.Set("host_error", herr)
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
+			// Append the durable, unclearable error_log entry alongside the
+			// single-slot last_error/host_error views (see error_log.go). This
+			// runs regardless of whether an on_error: arc is declared below —
+			// error_log records every failure, not just the ones that redirect.
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostInfra, state, hc.Namespace, callEffect, err.Error(), nil, nil, false)
+			newLog := appendErrorLog(w, logEntry)
+			w.Set(app.ErrorLogWorldKey, newLog)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
+			w.Set(app.ErrorOriginWorldKey, string(state))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorOriginWorldKey: string(state)}), 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
 				"namespace":     hc.Namespace,
 				"error":         err.Error(),
@@ -433,6 +451,21 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 				redirect = app.StatePath(hc.OnError)
 				break
 			}
+			// No on_error: declared. The chain still continues (this is NOT a
+			// new abort-the-chain behavior — see
+			// .context/troubleshooting-agent-and-error-integrity.md Part 1, Leak
+			// 1), but the failure must never be silent: mark it so the
+			// post-loop render applies the never-silent banner, and log the
+			// same WARN-worthy signal EvHostOnErrorRedirect gives the redirect
+			// path.
+			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+				slog.String("session_id", string(sid)),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("error", err.Error()),
+				slog.String("phase", "infra"),
+			)
+			unhandledFailure = true
 			continue
 		}
 		if res.Error != "" {
@@ -457,6 +490,29 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			}
 			w.Set("host_error", herr)
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
+			// Append the durable, unclearable error_log entry alongside the
+			// single-slot last_error/host_error views (see error_log.go).
+			// Runs regardless of whether an on_error: arc is declared — see
+			// the mirroring note on the infra-failure branch above.
+			var exitCode, stderr any
+			if res.Data != nil {
+				if v, ok := res.Data["exit_code"]; ok {
+					exitCode = v
+				}
+				if v, ok := res.Data["stderr"]; ok {
+					stderr = v
+				}
+			}
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostDomain, state, hc.Namespace, callEffect, res.Error, exitCode, stderr, false)
+			newLog := appendErrorLog(w, logEntry)
+			w.Set(app.ErrorLogWorldKey, newLog)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
+			w.Set(app.ErrorOriginWorldKey, string(state))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorOriginWorldKey: string(state)}), 0))
+			// error_log/error_origin change world state even when this call
+			// declares no binds, so the post-loop render must not be skipped
+			// (see the `applied` gate at the bottom of this function).
+			applied = true
 		}
 
 		// Emit one EffectApplied event per binding so replay reconstructs
@@ -555,6 +611,25 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			)
 			redirect = app.StatePath(hc.OnError)
 			break
+		} else if res.Error != "" {
+			// No on_error: declared. The chain still continues to the next
+			// call in this on_enter block (Leak 1 — see the mirroring note
+			// on the infra-failure branch above); the never-silent
+			// obligation is met via the post-loop banner (unhandledFailure)
+			// plus the error_log entry already appended above.
+			exitCode := ""
+			if res.Data != nil {
+				exitCode = fmt.Sprintf("%v", res.Data["exit_code"])
+			}
+			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+				slog.String("session_id", string(sid)),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("error", res.Error),
+				slog.String("exit_code", exitCode),
+				slog.String("phase", "domain"),
+			)
+			unhandledFailure = true
 		}
 	}
 
@@ -620,6 +695,13 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			slog.String("state", string(state)),
 			slog.Int("world_keys", len(w.Vars)),
 		)
+	}
+	if unhandledFailure {
+		// No on_error: arc fired (no redirect above converged on the seam),
+		// but a call in this batch failed anyway — run the never-silent
+		// banner seam here so the failure still surfaces in the rendered
+		// view instead of the session advancing as though nothing happened.
+		view = applyErrorBannerSeam(view, w)
 	}
 	return events, w, view, "", nil
 }
@@ -879,6 +961,19 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	var events []store.Event
 	applied := false
 	var redirect app.StatePath
+	// unhandledFailure mirrors dispatchHostCalls' flag of the same name: set
+	// when a host call (infra or domain) fails with NO on_error: arc
+	// declared, so the post-loop render (when no redirect fired) is run
+	// through applyErrorBannerSeam instead of silently returning a "clean"
+	// view. See .context/troubleshooting-agent-and-error-integrity.md Part 1,
+	// Leak 1 — this closes the same leak on the OneShot RPC path.
+	unhandledFailure := false
+	// sessionIDForLog is best-effort: OneShot's dispatch path carries no sid
+	// parameter (unlike dispatchHostCalls), but a caller that set up
+	// AgentCallCtx before invoking OneShot (there currently is none in
+	// production; tests may) leaves it resolvable from ctx. Empty is fine —
+	// slog just omits nothing (empty string field), same shape either way.
+	sessionIDForLog := string(host.AgentCallCtxFrom(ctx).SessionID)
 
 	// dispatchBinds accumulates the world keys bound by host results as the
 	// loop progresses, so a later invoke's `with:` re-render sees an earlier
@@ -921,6 +1016,27 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			summaries = append(summaries, summary)
 			w.Set("last_error", err.Error())
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": err.Error()}), 0))
+			// Structured global host_error, matching dispatchHostCalls (see
+			// the "host_error recommendation" note in the top-of-function
+			// doc comment): parity of what a redirect target / an outside
+			// observer reading WorldAfter can render, not just last_error's
+			// bare string.
+			herr := map[string]any{
+				"namespace": hc.Namespace,
+				"message":   err.Error(),
+			}
+			w.Set("host_error", herr)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
+			// Append the durable, unclearable error_log entry — reusing the
+			// same helpers dispatchHostCalls uses (error_log.go) rather than
+			// duplicating the entry shape here. Runs regardless of whether
+			// on_error: is declared below.
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostInfra, state, hc.Namespace, callEffect, err.Error(), nil, nil, false)
+			newLog := appendErrorLog(w, logEntry)
+			w.Set(app.ErrorLogWorldKey, newLog)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
+			w.Set(app.ErrorOriginWorldKey, string(state))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorOriginWorldKey: string(state)}), 0))
 			events = append(events, newOrchestratorEvent(store.HostReturned, map[string]any{
 				"namespace":     hc.Namespace,
 				"error":         err.Error(),
@@ -939,12 +1055,63 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 				redirect = app.StatePath(hc.OnError)
 				break
 			}
+			// No on_error: declared — the chain still continues (mirrors
+			// dispatchHostCalls' Leak 1 handling), but the failure must
+			// never be silent: log the same WARN-worthy signal and mark it
+			// so the post-loop render applies the never-silent banner.
+			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+				slog.String("session_id", sessionIDForLog),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("error", err.Error()),
+				slog.String("phase", "infra"),
+			)
+			unhandledFailure = true
 			continue
 		}
 		if res.Error != "" {
 			w.Set("last_error", res.Error)
 			summary.Error = res.Error
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"last_error": res.Error}), 0))
+			// Structured global host_error mirrors last_error but carries the
+			// namespace and (when the host result returned a Data payload)
+			// the raw data plus stderr/exit_code — see the infra branch's
+			// matching note above.
+			herr := map[string]any{
+				"namespace": hc.Namespace,
+				"message":   res.Error,
+			}
+			if res.Data != nil {
+				herr["data"] = res.Data
+				if v, ok := res.Data["stderr"]; ok {
+					herr["stderr"] = v
+				}
+				if v, ok := res.Data["exit_code"]; ok {
+					herr["exit_code"] = v
+				}
+			}
+			w.Set("host_error", herr)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
+			// Append the durable, unclearable error_log entry (see the infra
+			// branch's matching note above).
+			var exitCode, stderr any
+			if res.Data != nil {
+				if v, ok := res.Data["exit_code"]; ok {
+					exitCode = v
+				}
+				if v, ok := res.Data["stderr"]; ok {
+					stderr = v
+				}
+			}
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostDomain, state, hc.Namespace, callEffect, res.Error, exitCode, stderr, false)
+			newLog := appendErrorLog(w, logEntry)
+			w.Set(app.ErrorLogWorldKey, newLog)
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
+			w.Set(app.ErrorOriginWorldKey, string(state))
+			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorOriginWorldKey: string(state)}), 0))
+			// error_log/error_origin change world state even when this call
+			// declares no binds, so the post-loop render must not be skipped.
+			applied = true
 		}
 		if res.Data != nil {
 			summary.Data = res.Data
@@ -987,6 +1154,20 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			)
 			redirect = app.StatePath(hc.OnError)
 			break
+		} else if res.Error != "" {
+			// No on_error: declared. The chain still continues to the next
+			// call in this batch (mirrors dispatchHostCalls' Leak 1
+			// handling); the never-silent obligation is met via the
+			// post-loop banner (unhandledFailure) plus the error_log entry
+			// already appended above.
+			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+				slog.String("session_id", sessionIDForLog),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("error", res.Error),
+				slog.String("phase", "domain"),
+			)
+			unhandledFailure = true
 		}
 	}
 
@@ -1022,6 +1203,13 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	view, err := o.machine.RenderState(state, w)
 	if err != nil {
 		return summaries, events, w, "", "", fmt.Errorf("re-render after host dispatch: %w", err)
+	}
+	if unhandledFailure {
+		// No on_error: arc fired, but a call in this batch failed anyway —
+		// run the never-silent banner seam here too, mirroring
+		// dispatchHostCalls' post-loop application, so a OneShot caller
+		// reading View doesn't see a "clean" room as though nothing failed.
+		view = applyErrorBannerSeam(view, w)
 	}
 	return summaries, events, w, view, "", nil
 }

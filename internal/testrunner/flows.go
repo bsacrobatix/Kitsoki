@@ -1577,6 +1577,9 @@ func runOneFlowLegacy(ctx context.Context, def *app.AppDef, m machine.Machine, f
 		if errs := assertNoSilentOnErrorBounce(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
 			tr.Failures = append(tr.Failures, errs...)
 		}
+		if errs := assertNoSilentUnhandledHostError(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
+			tr.Failures = append(tr.Failures, errs...)
+		}
 
 		// expect_slots — assert on accepted slots (we don't have a clean path here
 		// unless we compare the call slots; do that).
@@ -1995,6 +1998,9 @@ func runOneFlowOrchestrator(ctx context.Context, def *app.AppDef, m machine.Mach
 		// check, not opt-in — a fixture cannot silently pass an on_error:
 		// arc the way it can skip expect_view_matches.
 		if errs := assertNoSilentOnErrorBounce(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
+			tr.Failures = append(tr.Failures, errs...)
+		}
+		if errs := assertNoSilentUnhandledHostError(filePath, i, tr.Events, tr.View, lastErrorString(currentWorld)); len(errs) > 0 {
 			tr.Failures = append(tr.Failures, errs...)
 		}
 		// expect_slots.
@@ -3123,6 +3129,63 @@ func assertNoSilentOnErrorBounce(filePath string, turnIdx int, events []store.Ev
 			failures = append(failures, fmt.Sprintf(
 				"G-FLOW: %s turn %d drove an on_error: arc to %q but the rendered view does not contain the never-silent error banner marker %q (nor the raw failure message) — the on_error: target must surface the failure (e.g. render {{ world.last_error }}) or rely on the runtime's appendErrorBanner seam, not bounce silently",
 				filePath, turnIdx+1, to, orchestrator.ErrorBannerMarker))
+		}
+	}
+	return failures
+}
+
+// assertNoSilentUnhandledHostError is assertNoSilentOnErrorBounce's sibling
+// for Leak 1 (.context/troubleshooting-agent-and-error-integrity.md Part 1):
+// a host call that fails with NO `on_error:` declared does not redirect —
+// dispatch continues to the next call in the same on_enter block — so it
+// never emits the intent="on_error" TransitionApplied the other gate looks
+// for. The never-silent obligation still applies: internal/orchestrator's
+// dispatchHostCalls now runs the post-loop view through the same
+// applyErrorBannerSeam whenever a call in the batch failed unhandled (see
+// the `unhandledFailure` flag in host_dispatch.go).
+//
+// The gate scans the turn's events for a TransitionApplied whose intent is
+// "on_error" first — if one fired, assertNoSilentOnErrorBounce already
+// covers this turn and this gate is a no-op, avoiding a double report for
+// the same underlying failure surfaced via two different event shapes.
+// Absent that, any HostReturned event carrying a non-empty "error" must be
+// surfaced in the rendered view (banner marker or the raw message), exactly
+// like the redirect gate's surfaced check.
+func assertNoSilentUnhandledHostError(filePath string, turnIdx int, events []store.Event, view string, lastError string) []string {
+	for _, ev := range events {
+		if string(ev.Kind) != string(store.TransitionApplied) || ev.Payload == nil {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		if intentName, _ := payload["intent"].(string); intentName == "on_error" {
+			// Covered by assertNoSilentOnErrorBounce.
+			return nil
+		}
+	}
+
+	var failures []string
+	for _, ev := range events {
+		if string(ev.Kind) != string(store.HostReturned) || ev.Payload == nil {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(ev.Payload, &payload); err != nil {
+			continue
+		}
+		errMsg, _ := payload["error"].(string)
+		if errMsg == "" {
+			continue
+		}
+		surfaced := strings.Contains(view, orchestrator.ErrorBannerMarker) ||
+			(lastError != "" && strings.Contains(view, lastError))
+		if !surfaced {
+			namespace, _ := payload["namespace"].(string)
+			failures = append(failures, fmt.Sprintf(
+				"G-FLOW: %s turn %d host call %q failed with no on_error: arc declared, but the rendered view does not contain the never-silent error banner marker %q (nor the raw failure message) — an unhandled host failure must still surface the failure via the banner seam or a view that renders {{ world.last_error }}, not advance silently",
+				filePath, turnIdx+1, namespace, orchestrator.ErrorBannerMarker))
 		}
 	}
 	return failures

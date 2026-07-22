@@ -74,6 +74,20 @@ var importAliasRE = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 //   - operation_run: map — the active/completed session-level operation handle.
 //     Engine-owned: a story must not `set:` it.
 //   - operation_drafts: map — explicit handles created by persist_draft.
+//   - error_log: []map — the append-only error history. Every host_infra /
+//     host_domain host failure and every machine-fatal Turn error appends one
+//     entry: { seq, state, namespace?, effect?, message, exit_code?, stderr?,
+//     ts, class: host_infra|host_domain|machine, handled }. Unlike last_error /
+//     host_error (single-slot "most recent" views, unchanged by this), the log
+//     never loses history within a session. Engine-owned: a story must not
+//     `set:`/`increment:`/`bind:` it — checkEngineReservedSet
+//     (internal/app/loader.go) rejects any effect that targets it, so the 200+
+//     `last_error: ""` view-reset sites in stories/ keep working unaffected
+//     while the log itself stays unclearable from story YAML. See
+//     .context/troubleshooting-agent-and-error-integrity.md Part 1.
+//   - error_origin: string — the state path where the most recent error_log
+//     entry's failure occurred (mirrors the `from` field EvHostOnErrorRedirect
+//     already logs). Engine-owned: a story must not `set:` it.
 var ReservedWorldKeys = map[string]struct{}{
 	"last_error":           {},
 	"host_error":           {},
@@ -81,7 +95,19 @@ var ReservedWorldKeys = map[string]struct{}{
 	"session_id":           {},
 	OperationRunWorldKey:   {},
 	"operation_drafts":     {},
+	ErrorLogWorldKey:       {},
+	ErrorOriginWorldKey:    {},
 }
+
+// ErrorLogWorldKey and ErrorOriginWorldKey name the engine-reserved world
+// globals appended by internal/orchestrator (host_dispatch.go and
+// journal_write.go) on every host and machine-fatal failure. See
+// ReservedWorldKeys and checkEngineReservedSet (internal/app/loader.go) for
+// the unclearable-from-story-YAML enforcement.
+const (
+	ErrorLogWorldKey    = "error_log"
+	ErrorOriginWorldKey = "error_origin"
+)
 
 // ImportResolver is an injected hook that resolves an `@kitsoki/<name>`
 // import source to an absolute manifest path. It is the seam through which the
@@ -396,6 +422,32 @@ func loadImportedChild(path string, parents []string, resolver ImportResolver) (
 	if expandErrs := expandPhases(def, path); len(expandErrs) > 0 {
 		return nil, expandErrs
 	}
+	// Inject the child's OWN builtin error room when its OWN
+	// on_error_default: asks for it ("builtin", or bare/unset once
+	// builtinErrorRoomDefaultOn flips — see that const). Mirrors the root
+	// pipeline's injectBuiltinErrorRoom → resolveOnErrorDefaults ordering
+	// (loader.go), scoped to the child's own still-pre-fold tree: a shared
+	// fragment imported by several stories gets its OWN private __error__
+	// room per import, not a reference to any importer's — the importer
+	// isn't known yet (imports resolve bottom-up, and one fragment may be
+	// imported by many importers), so there is no single "the importer's
+	// room" to resolve against even in principle. Without this call,
+	// resolveOnErrorDefaults below sees the literal, un-rewritten
+	// "builtin" sentinel and fails to resolve it as a state.
+	if roomErrs := injectBuiltinErrorRoom(def, path); len(roomErrs) > 0 {
+		return nil, roomErrs
+	}
+	// Resolve the child's OWN on_error_default against its OWN (still
+	// pre-fold, un-prefixed) state tree before it is folded into the
+	// importer. See resolveOnErrorDefaults' doc comment for why this must
+	// happen here rather than after fold.
+	if errs := resolveOnErrorDefaults(def, path); len(errs) > 0 {
+		return nil, errs
+	}
+	// Stamp the child's own (still pre-fold) states with their true
+	// authoring file, before fold moves them under the importer's alias
+	// wrapper — see State.OriginFile and stampOriginFile.
+	stampOriginFile(def, path)
 	return def, nil
 }
 

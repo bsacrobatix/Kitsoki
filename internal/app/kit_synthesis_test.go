@@ -185,7 +185,24 @@ func normalizeKitDef(def *AppDef) {
 	def.ImportWrappers = nil
 	def.App = AppMeta{}
 	normalizeStoryAuthoringPaths(def)
+	clearOriginFile(def.States)
 	sort.Strings(def.Hosts)
+}
+
+// clearOriginFile strips State.OriginFile recursively — another
+// load-provenance field (see State.OriginFile) that legitimately differs
+// between a synthesized def (never stamped) and a file-loaded one (stamped
+// with its temp-dir path by Load), the same way BaseDir/LoadedManifests/
+// ImportWrappers above are provenance the synthesize/load paths never agree
+// on.
+func clearOriginFile(states map[string]*State) {
+	for _, s := range states {
+		if s == nil {
+			continue
+		}
+		s.OriginFile = ""
+		clearOriginFile(s.States)
+	}
 }
 
 func normalizeStoryAuthoringPaths(def *AppDef) {

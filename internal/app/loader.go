@@ -223,6 +223,36 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 		return nil, errors.Join(exitErrs...)
 	}
 
+	// Inject the builtin error room (__error__) that on_error_default falls
+	// back to when a story declares none of its own — "there's always some
+	// basic on_error, then people can customize from there". Runs after
+	// every other state-synthesizing pass above (so a hand-authored
+	// `needs_human` room, wherever it came from, is visible to the
+	// escalate-target check) and BEFORE resolveOnErrorDefaults, which is
+	// the pass that actually wires the fallback target in. See
+	// builtin_error_room.go.
+	if roomErrs := injectBuiltinErrorRoom(merged, path); len(roomErrs) > 0 {
+		return nil, errors.Join(roomErrs...)
+	}
+
+	// Resolve the root's own on_error_default: fill every still-empty
+	// on_error: on a reachable invoke: effect. Runs after every
+	// state-synthesizing pass above (imports already folded each child
+	// against ITS OWN default before this point — see loadImportedChild —
+	// so this walk skips descending into any folded-child subtree; see
+	// resolveOnErrorDefaults' doc comment) and before validateDef so a bad
+	// on_error_default target is reported through the same aggregated error
+	// path as every other load-time validator.
+	if defaultErrs := resolveOnErrorDefaults(merged, path); len(defaultErrs) > 0 {
+		return nil, errors.Join(defaultErrs...)
+	}
+
+	// Stamp the root's own directly-authored states with their true
+	// authoring file (every folded-in child's states were already
+	// stamped with the CHILD's own file inside loadImportedChild, before
+	// fold — this walk skips those). See State.OriginFile.
+	stampOriginFile(merged, path)
+
 	// Resolve agent plugin declarations from agent_plugins: block. This
 	// validates plugin names, performs ${VAR} substitution in env/headers, and
 	// injects the default agent.claude entry when absent.
@@ -973,6 +1003,24 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	// meta_modes here before validation. Same rationale as the Load() path.
 	injectBuiltinMetaModes(&def)
 
+	// Inject the builtin error room, same rationale and ordering as
+	// runLoadPipeline's call (see there) — must run before
+	// resolveOnErrorDefaults below.
+	if roomErrs := injectBuiltinErrorRoom(&def, file); len(roomErrs) > 0 {
+		return nil, roomErrs
+	}
+
+	// Resolve the story's own on_error_default: same rationale and ordering
+	// as runLoadPipeline's call (see there) — LoadBytes has no imports to
+	// fold, so this is simply "resolve against the whole (only) state tree".
+	if defaultErrs := resolveOnErrorDefaults(&def, file); len(defaultErrs) > 0 {
+		return nil, defaultErrs
+	}
+
+	// LoadBytes has no imports to fold, so this is simply "stamp the
+	// whole (only) state tree with its own file". See State.OriginFile.
+	stampOriginFile(&def, file)
+
 	// Resolve agent plugin declarations from agent_plugins: block.
 	if pluginErrs := resolveAgentPlugins(&def, file); len(pluginErrs) > 0 {
 		return nil, pluginErrs
@@ -1220,6 +1268,8 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 		if ex.Background && ex.Invoke == "" {
 			addErr(fmt.Sprintf("%s: background: true requires invoke: to be set", loc))
 		}
+		validateProposalExecuteTarget(loc, "on_error", ex.OnError, allStatePaths, addErr)
+		validateProposalExecuteTarget(loc, "on_success", ex.OnSuccess, allStatePaths, addErr)
 		for i, child := range ex.OnComplete {
 			childLoc := fmt.Sprintf("%s on_complete[%d]", loc, i)
 			if child.Background {
@@ -1240,6 +1290,23 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	}
 
 	return def, errs
+}
+
+// validateProposalExecuteTarget checks a ProposalExecute.OnError or
+// ProposalExecute.OnSuccess value against the shared accepted-value set:
+// "stay", "back", or a target that resolves to a declared state path.
+// Empty is always fine (OnError's empty means "unhandled", tracked
+// separately by UnhandledInvokes; OnSuccess's empty is likewise left to
+// whatever runtime default applies). Templated values ({{ }}) are skipped —
+// they can't be resolved at load time.
+func validateProposalExecuteTarget(loc, field, target string, allStatePaths map[string]struct{}, addErr func(string)) {
+	if target == "" || target == "stay" || target == "back" || strings.Contains(target, "{{") {
+		return
+	}
+	resolved := resolveTarget("", target)
+	if _, ok := allStatePaths[resolved]; !ok {
+		addErr(fmt.Sprintf("%s: %s %q (resolved: %q) does not exist", loc, field, target, resolved))
+	}
 }
 
 // collectStatePaths walks the state tree and records every path in the form
@@ -2255,21 +2322,53 @@ func validateInterceptDrive(file string, def *AppDef, errs *[]error) {
 // checkEngineReservedSet rejects effects that `set:` engine-owned world keys.
 // location prefixes the error.
 func checkEngineReservedSet(file, location string, eff Effect, errs *[]error) {
-	if eff.Set == nil {
-		return
+	if eff.Set != nil {
+		if _, ok := eff.Set[WriteModeScopeWorldKey]; ok {
+			*errs = append(*errs, &ValidationError{
+				File: file,
+				Message: fmt.Sprintf("%s: set: %q is engine-reserved — a story may not self-grant write mode by writing the scope key; "+
+					"it is set only by the write-mode gate on an operator grant", location, WriteModeScopeWorldKey),
+			})
+		}
+		if _, ok := eff.Set[OperationRunWorldKey]; ok {
+			*errs = append(*errs, &ValidationError{
+				File: file,
+				Message: fmt.Sprintf("%s: set: %q is engine-reserved — start or update operation runs with transition operation policies instead",
+					location, OperationRunWorldKey),
+			})
+		}
+		// error_log is append-only and engine-owned (see ReservedWorldKeys): a
+		// story may reset the "most recent" view (last_error: "" — 200+ sites in
+		// stories/ do exactly this) but must never be able to erase the durable
+		// history behind it. Checked across set:, increment:, and bind: below —
+		// any of the three would let a story clobber or fabricate log entries.
+		if _, ok := eff.Set[ErrorLogWorldKey]; ok {
+			*errs = append(*errs, &ValidationError{
+				File: file,
+				Message: fmt.Sprintf("%s: set: %q is engine-reserved and append-only — it is written only by the runtime on a host or machine-fatal failure; "+
+					"clear the \"most recent\" view instead (e.g. last_error: \"\")", location, ErrorLogWorldKey),
+			})
+		}
+		if _, ok := eff.Set[ErrorOriginWorldKey]; ok {
+			*errs = append(*errs, &ValidationError{
+				File: file,
+				Message: fmt.Sprintf("%s: set: %q is engine-reserved — it is written only by the runtime on a host or machine-fatal failure",
+					location, ErrorOriginWorldKey),
+			})
+		}
 	}
-	if _, ok := eff.Set[WriteModeScopeWorldKey]; ok {
+	if _, ok := eff.Increment[ErrorLogWorldKey]; ok {
 		*errs = append(*errs, &ValidationError{
 			File: file,
-			Message: fmt.Sprintf("%s: set: %q is engine-reserved — a story may not self-grant write mode by writing the scope key; "+
-				"it is set only by the write-mode gate on an operator grant", location, WriteModeScopeWorldKey),
+			Message: fmt.Sprintf("%s: increment: %q is engine-reserved and append-only — it is written only by the runtime on a host or machine-fatal failure",
+				location, ErrorLogWorldKey),
 		})
 	}
-	if _, ok := eff.Set[OperationRunWorldKey]; ok {
+	if _, ok := eff.Bind[ErrorLogWorldKey]; ok {
 		*errs = append(*errs, &ValidationError{
 			File: file,
-			Message: fmt.Sprintf("%s: set: %q is engine-reserved — start or update operation runs with transition operation policies instead",
-				location, OperationRunWorldKey),
+			Message: fmt.Sprintf("%s: bind: targets %q, which is engine-reserved and append-only — it is written only by the runtime on a host or machine-fatal failure",
+				location, ErrorLogWorldKey),
 		})
 	}
 }

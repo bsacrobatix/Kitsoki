@@ -54,10 +54,27 @@ func normalize(def *app.AppDef) {
 	def.ImportWrappers = nil
 	def.App = app.AppMeta{}
 	normalizeStoryAuthoringPaths(def)
+	clearOriginFile(def.States)
 	// Hosts is the allow-list — semantically a set. The import fold unions
 	// handler names via map iteration, so its slice order is nondeterministic;
 	// sort before comparing so the round-trip asserts set-equality, not order.
 	sort.Strings(def.Hosts)
+}
+
+// clearOriginFile strips State.OriginFile recursively — another
+// load-provenance field (see app.State.OriginFile) that legitimately
+// differs between a synthesized def (never stamped) and a file-loaded one
+// (stamped with its temp-dir path by Load), the same way
+// BaseDir/LoadedManifests/ImportWrappers above are provenance the
+// synthesize/load paths never agree on.
+func clearOriginFile(states map[string]*app.State) {
+	for _, s := range states {
+		if s == nil {
+			continue
+		}
+		s.OriginFile = ""
+		clearOriginFile(s.States)
+	}
 }
 
 func normalizeStoryAuthoringPaths(def *app.AppDef) {
