@@ -283,10 +283,10 @@ func runValidateOnce(in io.Reader, stdout, stderr io.Writer, schemaJSON []byte, 
 	}
 	compiler := jsonschema.NewCompiler()
 	compiler.AssertFormat()
-	if err := compiler.AddResource("validator-schema.json", schemaProbe); err != nil {
+	if err := compiler.AddResource("kitsoki://schemas/validator", schemaProbe); err != nil {
 		return fmt.Errorf("register schema %s: %w", sourceLabel, err)
 	}
-	compiled, err := compiler.Compile("validator-schema.json")
+	compiled, err := compiler.Compile("kitsoki://schemas/validator")
 	if err != nil {
 		return fmt.Errorf("compile schema %s: %w", sourceLabel, err)
 	}

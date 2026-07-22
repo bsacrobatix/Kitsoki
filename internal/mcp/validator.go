@@ -748,10 +748,10 @@ func CompileSchema(schemaJSON []byte) (*jsonschema.Schema, error) {
 	compiler := jsonschema.NewCompiler()
 	compiler.RegisterFormat(&jsonschema.Format{Name: "jql", Validate: validateJQL})
 	compiler.AssertFormat()
-	if err := compiler.AddResource("validator-schema.json", probe); err != nil {
+	if err := compiler.AddResource("kitsoki://schemas/validator", probe); err != nil {
 		return nil, fmt.Errorf("mcp.CompileSchema: register schema: %w", err)
 	}
-	compiled, err := compiler.Compile("validator-schema.json")
+	compiled, err := compiler.Compile("kitsoki://schemas/validator")
 	if err != nil {
 		return nil, fmt.Errorf("mcp.CompileSchema: compile schema: %w", err)
 	}

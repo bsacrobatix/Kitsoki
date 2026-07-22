@@ -185,12 +185,16 @@ and config as the service, then share the printed one-time link out of band:
 
 ```sh
 ssh root@206.189.84.218 \
-  'runuser -u pog -- \
+  'cd /var/lib/kitsoki-pog && runuser -u pog -- \
    /opt/kitsoki-hosted-pog/current/kitsoki daemon invite "Person name" \
      --db /var/lib/kitsoki-pog/sessions.db \
      --config /etc/kitsoki/hosted-pog.yaml \
      --base-url https://kitsoki-test.slothattax.me'
 ```
+
+The `cd` is required, not cosmetic: `runuser` keeps root's `/root` working
+directory, which `pog` cannot stat, and the binary's embedded-schema
+initialization aborts with `stat .: permission denied` before the command runs.
 
 The invite binds the first GitHub account that redeems it. Returning users can
 then sign in directly. List invite state with the same command plus `--list` in

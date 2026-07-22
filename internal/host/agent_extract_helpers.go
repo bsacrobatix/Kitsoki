@@ -58,6 +58,12 @@ func stringSliceArg(args map[string]any, key string) []string {
 	return nil
 }
 
+// extractSchemaURL is the compiler-internal id for an extract step's inline
+// schema. It must stay absolute: a relative id is resolved against the
+// process working directory, which fails outright when that directory is
+// unreadable (see internal/judges.schemaURL).
+const extractSchemaURL = "kitsoki://schemas/extract"
+
 // jsonSchemaValidate validates payloadJSON against the JSON Schema in schemaRaw.
 // Returns true when valid, false when not, and true (permissive) when the
 // schema cannot be compiled (authoring errors are caught at load time; at
@@ -78,12 +84,12 @@ func jsonSchemaValidate(ctx context.Context, schemaRaw []byte, payloadJSON []byt
 	}
 
 	compiler := jsonschema.NewCompiler()
-	if err := compiler.AddResource("schema.json", schemaDoc); err != nil {
+	if err := compiler.AddResource(extractSchemaURL, schemaDoc); err != nil {
 		slog.WarnContext(ctx, "extract.schema_validate",
 			slog.String("err", "add resource: "+err.Error()))
 		return true
 	}
-	schema, err := compiler.Compile("schema.json")
+	schema, err := compiler.Compile(extractSchemaURL)
 	if err != nil {
 		slog.WarnContext(ctx, "extract.schema_validate",
 			slog.String("err", "compile schema: "+err.Error()))

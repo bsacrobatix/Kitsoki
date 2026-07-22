@@ -59,11 +59,11 @@ func compileChoiceSchema() (*jsonschema.Schema, error) {
 			return
 		}
 		c := jsonschema.NewCompiler()
-		if err := c.AddResource("choice.schema.json", doc); err != nil {
+		if err := c.AddResource("kitsoki://schemas/choice", doc); err != nil {
 			choiceSchemaErr = fmt.Errorf("compile choice schema: add resource: %w", err)
 			return
 		}
-		s, err := c.Compile("choice.schema.json")
+		s, err := c.Compile("kitsoki://schemas/choice")
 		if err != nil {
 			choiceSchemaErr = fmt.Errorf("compile choice schema: compile: %w", err)
 			return

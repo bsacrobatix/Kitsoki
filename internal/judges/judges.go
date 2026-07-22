@@ -93,16 +93,25 @@ const schemaJSON = `{
 // rather than carry a "validator unavailable" error path.
 var compiledSchema = mustCompileSchema()
 
+// schemaURL is the compiler-internal identity of the embedded schema —
+// never dereferenced, matching internal/kit's "kitsoki://kit/v1". The
+// explicit scheme is load-bearing: a bare "judge_verdict.json" is a relative
+// reference the compiler resolves against the process working directory, so
+// this package's init would touch the filesystem and panic every kitsoki
+// command when that directory is unreadable (`runuser -u pog` inheriting
+// root's /root).
+const schemaURL = "kitsoki://schemas/judge_verdict"
+
 func mustCompileSchema() *jsonschema.Schema {
 	var probe any
 	if err := json.Unmarshal([]byte(schemaJSON), &probe); err != nil {
 		panic(fmt.Sprintf("judges: embedded schema is malformed JSON: %v", err))
 	}
 	c := jsonschema.NewCompiler()
-	if err := c.AddResource("judge_verdict.json", probe); err != nil {
+	if err := c.AddResource(schemaURL, probe); err != nil {
 		panic(fmt.Sprintf("judges: register embedded schema: %v", err))
 	}
-	s, err := c.Compile("judge_verdict.json")
+	s, err := c.Compile(schemaURL)
 	if err != nil {
 		panic(fmt.Sprintf("judges: compile embedded schema: %v", err))
 	}
