@@ -43,6 +43,7 @@ world:
   workspace_branch:    { type: string, default: "" }    # maker branch name
   gate_command:        { type: string, default: "" }    # deterministic gate (re-run on merged commit)
   base_branch:         { type: string, default: "main" }
+  base_commit:         { type: string, default: "" }   # base COMMIT sha (reliable anchor in clone workspaces; see integrate.yaml)
   main_worktree_path:  { type: string, default: "." }   # where integrate/verify/cleanup run
   build_check_disabled: { type: bool,  default: false }
   workspace_id:        { type: string, default: "" }    # .worktrees/<id>

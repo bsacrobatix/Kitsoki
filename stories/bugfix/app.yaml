@@ -956,6 +956,7 @@ imports:
       workspace_branch:   "{{ world.feature_branch }}"
       worktree_path:      "{{ world.worktree_path }}"
       base_branch:        "{{ world.base_branch }}"
+      base_commit:        "{{ world.base_commit }}"
       main_worktree_path: "{{ world.worktree_path }}"
       brief:              "{{ world.ticket_id }} — {{ world.ticket_title }}"
     exits:

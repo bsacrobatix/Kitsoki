@@ -82,6 +82,14 @@ states:
               # (#9a). The trap exits 0 so host.run sees success → binds fire.
               trap 'rc=$?; if [ "$EMITTED" != "1" ]; then jq -n --arg rc "$rc" "{outcome:\"error\",integrated_sha:\"\",last_op_ok:false,last_error:(\"integrate aborted before completing (exit \"+\$rc+\")\")}"; fi; exit 0' EXIT
               INTEGRATION="{{ world.base_branch }}"
+              # The base COMMIT sha the maker branch was cut from. This is the
+              # ONLY anchor guaranteed to resolve in a clone-based worker
+              # workspace: the maker `git clone --origin source` may carry the
+              # integration branch neither as local `main` NOR as `source/main`
+              # (that depends on whether the OUTER workspace it was cloned from
+              # had a local main — it usually does not), but the base commit
+              # object is always present because the branch descends from it.
+              BASE_COMMIT="{{ world.base_commit }}"
               BRANCH="{{ world.workspace_branch }}"
               MAIN_WT="{{ world.main_worktree_path }}"
               # The maker worktree that HOLDS the branch. The rebase must run
@@ -110,11 +118,16 @@ states:
               # the `source/` fallback resolves the remote-tracking ref that the
               # clone actually has. In the git-worktree self-host loop the first
               # form resolves, so the fallback is a no-op there.
-              BASE_SHA=$(git -C "$MAIN_WT" rev-parse --verify --quiet "$INTEGRATION^{commit}" 2>/dev/null \
+              # Prefer the explicit base COMMIT sha (always resolvable in the
+              # clone's object store); fall back to the branch name / source/name
+              # for the self-host worktree loop where base_commit may be empty.
+              BASE_SHA=$(git -C "$MAIN_WT" rev-parse --verify --quiet "$BASE_COMMIT^{commit}" 2>/dev/null \
+                || git -C "$WORKTREE" rev-parse --verify --quiet "$BASE_COMMIT^{commit}" 2>/dev/null \
+                || git -C "$MAIN_WT" rev-parse --verify --quiet "$INTEGRATION^{commit}" 2>/dev/null \
                 || git -C "$MAIN_WT" rev-parse --verify --quiet "source/$INTEGRATION^{commit}" 2>/dev/null \
                 || echo "")
               if [ -z "$BASE_SHA" ]; then
-                emit --arg int "$INTEGRATION" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration branch "+$int+" not found (tried "+$int+" and source/"+$int+")")}'
+                emit --arg int "$INTEGRATION" --arg bc "$BASE_COMMIT" '{outcome:"error",integrated_sha:"",last_op_ok:false,last_error:("integration base not found (tried base_commit "+$bc+", "+$int+", source/"+$int+")")}'
               fi
               # CLEAN-MAIN GUARD (#clean-main): refuse to integrate into a DIRTY
               # integration tree. The `git merge --no-ff` below, and the build-fail
