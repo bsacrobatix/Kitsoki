@@ -104,10 +104,21 @@ states:
               INTEGRATION="$1"
               BRANCH="$2"
               WT="$3"
+              BASE_COMMIT="$4"
               [ -z "$WT" ] && WT="."
-              BASE_SHA=$(git -C "$WT" rev-parse "$INTEGRATION" 2>/dev/null || echo "")
-              [ -z "$BASE_SHA" ] && emit --arg int "$INTEGRATION" '{resolve_outcome:"error",resolve_output:("integration branch "+$int+" not found")}'
-              MB=$(git -C "$WT" merge-base "$BRANCH" "$INTEGRATION" 2>/dev/null || echo "")
+              # Resolve the integration base to a real SHA. Same rationale as
+              # integrate.yaml: in a clone-based maker worktree the integration
+              # branch resolves neither as local `main` NOR `source/main`, and a
+              # bare `rev-parse main` leniently echoes "main". The base COMMIT sha
+              # (the branch descends from it) is the only guaranteed anchor, so
+              # prefer it; fall back to the branch name / source-tracking ref for
+              # the self-host worktree loop where base_commit may be empty.
+              BASE_SHA=$(git -C "$WT" rev-parse --verify --quiet "$BASE_COMMIT^{commit}" 2>/dev/null \
+                || git -C "$WT" rev-parse --verify --quiet "$INTEGRATION^{commit}" 2>/dev/null \
+                || git -C "$WT" rev-parse --verify --quiet "source/$INTEGRATION^{commit}" 2>/dev/null \
+                || echo "")
+              [ -z "$BASE_SHA" ] && emit --arg int "$INTEGRATION" --arg bc "$BASE_COMMIT" '{resolve_outcome:"error",resolve_output:("integration base not found (tried base_commit "+$bc+", "+$int+", source/"+$int+")")}'
+              MB=$(git -C "$WT" merge-base "$BRANCH" "$BASE_SHA" 2>/dev/null || echo "")
               rebase_in_progress() {
                 [ -d "$(git -C "$WT" rev-parse --git-path rebase-merge 2>/dev/null)" ] || \
                 [ -d "$(git -C "$WT" rev-parse --git-path rebase-apply 2>/dev/null)" ]
@@ -146,6 +157,7 @@ states:
             - "{{ world.base_branch }}"
             - "{{ world.workspace_branch }}"
             - "{{ world.worktree_path }}"
+            - "{{ world.base_commit }}"
         bind:
           resolve_outcome: "stdout_json.resolve_outcome"
           resolve_output:  "stdout_json.resolve_output"
