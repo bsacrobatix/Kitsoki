@@ -14,7 +14,14 @@ evolves: when a design question comes back, the answer often involves
 "we already chose A over B because…".
 
 The framing is what kitsoki *steals* from each tradition and what it
-*rejects*.
+*rejects*. A third question matters as much and is easy to skip: which
+differences are **architectural** — a consequence of a commitment the
+other side would have to abandon to match — versus which are
+**inventory**, meaning effort, surface area, or connector count that
+either side can simply go and build. Only the first kind belongs in a
+moat argument. A feature another platform ships and kitsoki could add
+next quarter is a `Steal` entry, not a differentiator on their side;
+§7.7 applies that test explicitly.
 
 ---
 
@@ -639,6 +646,14 @@ be a strategic error. What kitsoki contributes is the layer none of
 them have: **the process itself as a reviewable, testable, importable
 artifact with the LLM's blast radius enforced rather than configured.**
 
+This is also why their advantages read as inventory rather than moat
+(§7.7). The binding is one-directional: kitsoki can absorb a connector
+catalog, a grid, or a task inbox by naming it in `host_bindings:`,
+while nothing in an n8n canvas or an Airtable base can import a
+loader-checked capability surface — that would require the process to
+stop living on a canvas or in a hosted schema. Anything on the far
+side of the host boundary is borrowable; the boundary itself is not.
+
 ### Steal
 
 1. **n8n's per-node execution inspector and pinned data.** Seeing the
@@ -959,8 +974,8 @@ feedback in under a second.
 Fast state-graph tests are one consequence of a property that runs
 deeper than any single row of the §7.7 table: **every source of
 nondeterminism in kitsoki has a named, recorded, replayable seam**,
-and no automated gate is permitted to cross one live. Four seams, four
-mechanisms:
+and no automated gate is permitted to cross one live. The state graph
+is the seam the fixtures above cover; there are four more:
 
 | Seam | Mechanism |
 |---|---|
@@ -1070,9 +1085,13 @@ something you can hand to a coding agent, bisect, or fork.
 
 The summary across all three: **they win on time-to-first-working and
 on operator surface; kitsoki wins on the second edit and every edit
-after it.** If a workflow is going to be written once and watched by a
-human forever, these platforms are the right answer and kitsoki is
-overhead. If it is going to be changed repeatedly, reviewed, forked
+after it.** Note which half of that is architectural. The head start
+is inventory — connectors already written, a UI already built, and it
+is a real advantage measured in quarters of work. The second half is
+not: it falls out of where each system decided the process lives, and
+no amount of shipping closes it from their side. If a workflow is
+going to be written once and watched by a human forever, these
+platforms are the right answer and kitsoki is overhead. If it is going to be changed repeatedly, reviewed, forked
 per team, run in CI, and given progressively more LLM autonomy, then
 "the process is a diffable artifact whose LLM blast radius is
 loader-checked and whose full state graph tests in milliseconds" is
@@ -1107,15 +1126,54 @@ worth more than the head start.
 | **No automated gate can reach a real model** | convention | n/a | convention | convention | n/a | convention | ✓ policy + fake executor |
 | **Agent-written code: capability allowlist, not container** | n/a | n/a | sandbox opt-in | vm-sandboxed `Code` node (author-written) | n/a | RPA / tools | ✓ Starlark, loader-checked |
 | **One interpreter for author glue, agent code, frozen artifact** | none | none | none | none | none | none | ✓ promotion ratchet |
-| *Prebuilt integration catalog* | few | few | tool libs | ✓ 400+ | ✓ + sync | ✓ enterprise | ✗ host handlers |
-| *Non-technical operator UI (grid / form / inbox)* | none | ✓ | none | partial | ✓✓ | ✓✓ | ✗ |
-| *Human-task SLA timers + escalation* | none | none | none | partial | none | ✓✓ | ✗ |
+Inventory rows — real gaps today, none of them architectural, all of
+them either buildable or bindable (§5 Steal):
 
-The pattern: the columns to the left match kitsoki on the
-*conversational* core, and the three platform columns match or beat it
-on operator surface and integration breadth — the *italic* rows are
-where kitsoki simply loses, and where §5's "bind them as hosts"
-conclusion comes from. The rows in **bold** are where kitsoki is
+| Inventory gap | CALM | DF CX | LangGraph | n8n | Airtable | Appian | Kitsoki |
+|---|---|---|---|---|---|---|---|
+| *Prebuilt integration catalog* | few | few | tool libs | ✓ 400+ | ✓ + sync | ✓ enterprise | ✗ — or bind n8n |
+| *Non-technical operator UI (grid / form / inbox)* | none | ✓ | none | partial | ✓✓ | ✓✓ | ✗ — or bind Airtable |
+| *Human-task SLA timers + escalation* | none | none | none | partial | none | ✓✓ | ✗ — BPMN timer events, §2 |
+| *Process mining over instances* | none | partial | none | none | none | ✓✓ | ✗ — event log has the data |
+
+#### Which of these are actually differentiators
+
+A capability another platform ships is only a differentiator *for them*
+if kitsoki would have to change its architecture to get it. Most of the
+time it wouldn't — so the useful test is:
+
+> Can the other side add this without abandoning their central bet?
+
+Appian's SLA timers and escalation are the clearest case. They are a
+better answer than kitsoki's wait-forever `_awaiting_reply`, and
+they are also just timer events on a state — BPMN vocabulary §2
+already draws from, expressible in the existing effect alphabet, no
+redesign required. Same for the connector catalog and the operator
+grid: those are inventory and surface area, bought with effort or
+borrowed across the host boundary. They belong in `Steal`, not in a
+moat calculation on the other side of the table.
+
+Run the test the other direction and it stops being symmetric. For n8n
+to give you a diffable text artifact, it has to stop being a canvas.
+For Airtable to run against a local fixture, it has to stop being a
+hosted base. For Appian to make a judge's read-only-ness a
+loader-checked property rather than a prompt-plus-attached-tools
+configuration, it has to introduce a typed verb taxonomy underneath
+Agent Studio and re-authorise every existing agent against it. Those
+are not backlog items; they are the thing each product *is*.
+
+That asymmetry has a concrete form in kitsoki's design, which is why
+§5 lands where it does: **capabilities flow one way across the host
+boundary.** Kitsoki can consume n8n's 400 connectors through a single
+webhook binding, Airtable's grid as a `ticket` binding, and Appian's
+task inbox as an `inbox` binding — and lose nothing, because the
+process semantics stay on this side. There is no corresponding
+binding that lets an n8n canvas import a loader-checked blast radius
+or a millisecond state-graph suite. The bold rows above are the ones
+that survive that test in both directions.
+
+The rest of the pattern: the columns to the left match kitsoki on the
+*conversational* core. The rows in **bold** are where kitsoki is
 either uniquely declarative, uniquely composable, or uniquely fast
 to author against. They are not separate features; they are
 consequences of the same architectural commitment per
