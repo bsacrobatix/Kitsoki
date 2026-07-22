@@ -17,6 +17,7 @@ root:            <string> | <State>              # required — initial state na
 states:          { <name>: <State>, ... }        # optional
 off_path:        <OffPathDef>                    # optional
 hosts:           [ <string>, ... ]               # optional allow-list of host handler names
+on_error_default: <string>                        # optional — fallback on_error: target for invoke: effects that declare none
 operations:      { <name>: <OperationPolicy> }   # optional session-level operation run policies
 proposals:       { <name>: <ProposalKind> }      # optional
 include:         [ <glob>, ... ]                 # optional — merge other YAMLs relative to this file
@@ -36,6 +37,19 @@ host_interfaces: { <name>: <HostInterfaceDef> }  # optional — named capability
   projected world_in/world_out, named exits, intent re-export, and
   rebindable host_interfaces. Full reference and worked examples in
   [`docs/stories/imports.md`](../stories/imports.md).
+- `on_error_default:` names a story-level fallback error-transition target,
+  resolved entirely at load time: any `invoke:` effect reachable from this
+  app's own `on_enter:` / transition-effect chains whose `on_error:` is
+  empty gets `on_error: <on_error_default>` filled in before validation
+  runs. A per-invoke `on_error:` always wins. The value must resolve to a
+  declared state, same as a transition `target:` — an unresolvable default
+  is a load error. **Not merged across imports**: it applies only to this
+  app's own invokes, never to a folded-in imported child's (and a child's
+  own `on_error_default:` never reaches its importer) — mirroring how
+  `routing:` is not merged across imports either. Use
+  `kitsoki validate <app.yaml> --report-unhandled-errors` to list every
+  `invoke:` site still left with no effective `on_error:` after resolution
+  (a report, not a load-time gate).
 
 ## `operations:` — session operation policies
 
@@ -1059,6 +1073,7 @@ proposals:
       with:        { cmd: "git commit -m {{ draft.message }}" }
       repeatable:  false
       on_success:  stay                 # "stay" | "back" | <state-name>
+      on_error:    stay                 # "stay" | "back" | <state-name>
       background:  false
       on_complete: [ <Effect>, ... ]
     views:
@@ -1083,8 +1098,9 @@ proposals:
 | `with`        | Templated args (see Effect.with)                       |
 | `repeatable`  | Allow rerun/modify_and_rerun after success             |
 | `on_success`  | `stay` / `back` / named state                          |
+| `on_error`    | `stay` / `back` / named state; route on infra or host-domain failure (see `proposal.ExecuteResult`) |
 | `background`  | Run as background job (`internal/jobs`)                |
-| `on_complete` | Effects fired when background job finishes             |
+| `on_complete` | Effects fired when background job finishes              |
 
 `ProposalPolicy`:
 

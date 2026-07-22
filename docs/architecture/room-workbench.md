@@ -7,13 +7,26 @@ four already-shipped primitives, bound to the named agent's WS
 `toolbox:`/`effect:` declaration. It is a macro over existing mechanisms —
 not a new execution engine, not a new permission system.
 
-`stories/dev-story/rooms/landing.yaml` is the reference consumer: the whole
-free-form "Claude-Code-like" floor described in
-[`state-machine.md` §11](../stories/state-machine.md#the-agent-off-ramp--the-automatic-no-match-door)
-and in
-[dev-story's own README](../../stories/dev-story/README.md#the-free-form-workbench-landing)
-is one `workbench:` block. Read those two first if you want the
-worked example before the abstract shape below.
+This page covers `workbench:` in both of its uses, which are the same
+primitive at different points in [progressive determinism](concept.md#4-progressive-determinism):
+
+- **The on-ramp.** A brand-new story can be *one room* whose only content is
+  a `workbench:` block — the big-prompt ad hoc agent, but with a trace, an
+  acceptance schema, a write-mode gate, and a typed verdict from turn one.
+  [`../stories/start-ad-hoc.md`](../stories/start-ad-hoc.md) walks scaffolding
+  one, running it, reading its trace, and promoting the judgment it keeps
+  re-making into a deterministic room.
+- **The in-story free-form floor.** Inside an already-large story, one room
+  can stay a governed free-form floor while its neighbours are fully
+  deterministic pipelines. `stories/dev-story/rooms/landing.yaml` is the
+  reference consumer: the whole free-form "Claude-Code-like" floor described
+  in [`state-machine.md` §11](../stories/state-machine.md#the-agent-off-ramp--the-automatic-no-match-door)
+  and in
+  [dev-story's own README](../../stories/dev-story/README.md#the-free-form-workbench-landing)
+  is one `workbench:` block.
+
+Read whichever of those two matches where you're starting before the
+abstract shape below.
 
 ## Why this exists
 
@@ -350,3 +363,12 @@ special-cased for the synthesized root — that is the point.
   true` only checks the schema contract; those rooms stay hand-authored.
 - Not a bypass of the deterministic-seam rule above, under any
   circumstance.
+
+## See also
+
+- [`concept.md` §4, Progressive determinism](concept.md#4-progressive-determinism)
+  — why `workbench:` is stage one of the lifecycle, not a separate
+  "exploratory" tier.
+- [`../stories/start-ad-hoc.md`](../stories/start-ad-hoc.md) — the walkthrough:
+  scaffold a one-room `workbench:` story, run it, read its trace, promote one
+  judgment into a deterministic room.

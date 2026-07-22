@@ -1,6 +1,9 @@
 # The ad-hoc structured plan — propose → accept/refine → apply → verify
 
-Inside the dev-story [`landing`](../../stories/dev-story/README.md#the-free-form-workbench-landing)
+The next rung up from a bare [`workbench:`](../architecture/room-workbench.md)
+close-out note — see [`start-ad-hoc.md`](start-ad-hoc.md) if you haven't
+scaffolded a workbench room yet. Inside the dev-story
+[`landing`](../../stories/dev-story/README.md#the-free-form-workbench-landing)
 workbench, when the operator describes a concrete piece of work, the planner
 emits a **validated, executable `plan` artifact** instead of prose. The operator
 **Accepts** it (or **refines** it through the free-text work sink with prior-plan

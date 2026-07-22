@@ -14,6 +14,10 @@ way, see [`../architecture/concept.md`](../architecture/concept.md).)
 
 ## The model
 
+- **[`start-ad-hoc.md`](start-ad-hoc.md)** — start here if you'd otherwise
+  reach for a bare ad hoc agent: scaffold a one-room `workbench:` story, run
+  it, read its trace, and promote the judgment it keeps re-making into a
+  deterministic room. Same task, three stages.
 - **[`architecture.md`](architecture.md)** — the front door: a single
   end-to-end walk through rooms, phases, intents, turns, room hooks,
   views, and how the agent plugs into intent routing and the agent

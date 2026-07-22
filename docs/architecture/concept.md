@@ -203,19 +203,36 @@ The point of all this is not to write deterministic flows from
 scratch. Most useful workflows don't *start* as deterministic flows —
 they start as an idea, a description, a "wouldn't it be nice if".
 Kitsoki is built around the lifecycle that takes an idea and grows
-it into something predictable.
+it into something predictable, and each stage of that lifecycle names
+a concrete mechanism, not an abstract intention:
 
 ```mermaid
 flowchart TD
     idea["Idea / description"]
-    prove["Prove the workflow end-to-end<br/>LLM does most of the work<br/>trace records every decision"]
-    inspect["Identify recurring decision points<br/>read the trace for repeated model judgment"]
-    convert["Convert prompt to flow<br/>replace prompt prose with rooms, intents,<br/>transitions, and effects"]
-    deterministic["More deterministic workflow"]
+    prove["Prove the workflow end-to-end<br/>a one-room story: a `workbench:` block<br/>(write_mode, acceptance schema, typed verdict)"]
+    inspect["Identify recurring decision points<br/>kitsoki trace --turns — read the session's<br/>EventSink JSONL trace for repeated model judgment"]
+    convert["Convert prompt to flow<br/>the judgment becomes a room / intent / guarded<br/>transition / effect; the rest stays the workbench"]
+    deterministic["More deterministic workflow<br/>gates + typed verdicts replace free-form next-steps"]
 
     idea --> prove --> inspect --> convert --> deterministic
     deterministic -. "loop back" .-> inspect
 ```
+
+**There is no "too exploratory for a story" tier.** A `workbench:` block
+([`room-workbench.md`](room-workbench.md)) desugars one room into
+`write_mode: read_only`, an `on_enter host.agent.task` dispatch with an
+`acceptance_schema`, and a free-text capture intent — a big-prompt ad hoc
+agent, except from turn one it also has a trace, a write-mode gate, and a
+typed close-out note instead of loose prose. That covers both cases usually
+conceded to a bare agent: a novel one-shot diagnosis (the workbench *is*
+the diagnosis session) and raw frontier speed (the only overhead versus a
+bare prompt is the fixed cost of one room, one prompt file, and one JSON
+schema — every turn after that is the same single agent dispatch a bare
+prompt would make). See
+[`../stories/start-ad-hoc.md`](../stories/start-ad-hoc.md) for the walkthrough:
+scaffold the one-room story, run it, read its trace, and promote the
+judgment the trace shows repeating into a deterministic room — same task,
+three stages.
 
 At each iteration:
 
@@ -238,6 +255,14 @@ At each iteration:
   regression guard once the fix lands. This applies even when the
   judging form would have produced a well-typed object — a re-runnable
   artifact is always a stronger gate than a one-shot verdict.
+- **What was the workbench agent deciding what to do next becomes a
+  guarded transition reading its own close-out note.** The agent still
+  classifies (that's still an LLM's job); the room stops trusting the
+  agent to *act* on the classification and instead reads the typed field
+  it already emits (`world.<note>.category`, `world.<note>.route`, …) in
+  a post-bind guarded `emit_intent` and routes on it deterministically —
+  the same discipline `verifying`'s `verify_ok` routing already uses in
+  [`stories/dev-story/rooms/verifying.yaml`](../../stories/dev-story/rooms/verifying.yaml).
 
 Each conversion is **local and reviewable**: a diff against the YAML
 tree, a measurable change in trace shape, a measurable reduction in
