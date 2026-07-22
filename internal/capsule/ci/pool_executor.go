@@ -177,6 +177,13 @@ func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 			Image:         p.cfg.Image,
 			VPCUUID:       p.cfg.VPCUUID,
 			SSHKeyIDs:     append([]string(nil), p.cfg.SSHKeyIDs...),
+			// POG fix: these were unset (zero), so timeoutReason() treated every
+			// freshly-created worker as instantly "provisioning timed out" and the
+			// reconcile destroyed it mid-boot. Budgets exceed the 3h pog-bugfix
+			// command_timeout so a running agent loop is never lifecycle-killed.
+			ProvisionTimeout: 8 * time.Minute,
+			ActivityTimeout:  4 * time.Hour,
+			MaxLifetime:      5 * time.Hour,
 		},
 		PreserveFailed: true,
 	}, nil
@@ -196,6 +203,11 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	}
 
 	leaseSpec := vmpool.LeaseSpec{JobID: jobID, User: p.cfg.User, Env: map[string]string{}}
+	// POG fix: the CI pool executor left ReadyTimeout=0 (Config.ProvisionTimeout
+	// unset), so waitReady gave the freshly-booted worker exactly one readiness
+	// poll with no retry — an intermittent "worker did not become ready" race on
+	// ~60s boots. Give it a real budget so readiness is polled across the boot.
+	leaseSpec.ReadyTimeout = 6 * time.Minute
 	if len(p.cfg.PassEnv) > 0 {
 		// Names only: the worker resolves each value from its own process
 		// environment (see cmd/kitsoki capsuleWorkerChildEnv); no credential
@@ -204,6 +216,22 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	}
 	if p.cfg.AgentBackend != "" {
 		leaseSpec.Env["KITSOKI_WORKER_AGENT_BACKEND"] = p.cfg.AgentBackend
+	}
+	// POG fix: the leased worker runs the story (and the agent CLI it spawns)
+	// as root; Claude Code refuses --dangerously-skip-permissions/bypassPermissions
+	// as root unless IS_SANDBOX=1 marks the environment as an isolated sandbox,
+	// which an ephemeral single-job pool droplet is. Without it every agent
+	// acceptance attempt produces empty output and the bugfix loop never ships.
+	leaseSpec.Env["IS_SANDBOX"] = "1"
+	// A per-lease VALUE (not a pass_env name) injected into the worker boot env
+	// so the pinned engine URL is available for boot-time engine install over
+	// the base image binary. Resolved from the controller's own environment at
+	// dispatch.
+	if engineURL := strings.TrimSpace(os.Getenv("KITSOKI_WORKER_ENGINE_URL")); engineURL != "" {
+		leaseSpec.Env["KITSOKI_WORKER_ENGINE_URL"] = engineURL
+	}
+	if tok := strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")); tok != "" {
+		leaseSpec.Env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
 	}
 	if p.cfg.SourceBucket != nil {
 		store, err := newPoolObjectStore(p.name, *p.cfg.SourceBucket)

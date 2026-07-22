@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/inbox"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/store"
 	"kitsoki/internal/trace"
@@ -66,6 +67,12 @@ type DriveOptions struct {
 	// prompt's repo); tests use it to disable the build gate. Empty ⇒ the app's
 	// schema defaults stand.
 	InitialWorld map[string]any
+	// TeleportState, when set, places the session at this state with
+	// InitialWorld as slots in a single Teleport (the OneShot seeding path) —
+	// used by story-run callers so a nested initial world (e.g. world.job) is
+	// present before the driven intent enters an imported substory. Empty keeps
+	// the intercept routed-hub boot + seedInterceptWorld.
+	TeleportState app.StatePath
 }
 
 // DriveOutcome reports how a synchronous intercept drive settled. It is the
@@ -96,6 +103,10 @@ type DriveOutcome struct {
 	View string
 	// Last is the final TurnOutcome (the resolved settle, or the abort settle).
 	Last *TurnOutcome
+	// WorldAfter is the session world at the settle point (before any
+	// safe-abort), so a story driver (e.g. capsule ci storylauncher) can read a
+	// terminal effect like ci_verdict the drive-through produced.
+	WorldAfter map[string]any
 }
 
 // HasInterceptDriveRoom reports whether the loaded app declares ANY room flagged
@@ -151,20 +162,27 @@ func (o *Orchestrator) DriveToRest(ctx context.Context, intent string, slots map
 	out.SessionID = sid
 	out.Intent = intent
 
-	// Boot the session into its routed hub (idle on_enter) before the command —
-	// the matched command (e.g. rebase) is an arc on a hub, not on idle.
-	if bootErr := o.RunInitialOnEnter(ctx, sid); bootErr != nil {
-		// A boot failure can't have started a rebase, so there is nothing to
-		// abort; surface it as an infra error so the gate fails open.
-		return DriveOutcome{}, fmt.Errorf("orchestrator: DriveToRest: boot session: %w", bootErr)
-	}
-
-	// Seed the binding's runtime world AFTER boot, BEFORE the command — the
-	// off-path side-channel appender (fresh turn = journey.Turn+1) so the next
-	// SubmitDirect recomputes its turn from a clean load and never PK-collides.
-	if len(opts.InitialWorld) > 0 {
-		if seedErr := o.seedInterceptWorld(sid, opts.InitialWorld); seedErr != nil {
-			return DriveOutcome{}, fmt.Errorf("orchestrator: DriveToRest: seed world: %w", seedErr)
+	if opts.TeleportState != "" {
+		// Story-run seeding: place the session at the story root with the full
+		// initial world (incl. nested keys like world.job) in ONE step, exactly
+		// as OneShot does. seedInterceptWorld only sets flat vars post-boot and
+		// does not populate a nested initial world the story's world_in reads.
+		if _, tErr := o.Teleport(ctx, sid, inbox.TeleportTarget{State: opts.TeleportState, Slots: opts.InitialWorld}); tErr != nil {
+			return DriveOutcome{}, fmt.Errorf("orchestrator: DriveToRest: teleport: %w", tErr)
+		}
+	} else {
+		// Boot the session into its routed hub (idle on_enter) before the command —
+		// the matched command (e.g. rebase) is an arc on a hub, not on idle.
+		if bootErr := o.RunInitialOnEnter(ctx, sid); bootErr != nil {
+			return DriveOutcome{}, fmt.Errorf("orchestrator: DriveToRest: boot session: %w", bootErr)
+		}
+		// Seed the binding's runtime world AFTER boot, BEFORE the command — the
+		// off-path side-channel appender (fresh turn = journey.Turn+1) so the next
+		// SubmitDirect recomputes its turn from a clean load and never PK-collides.
+		if len(opts.InitialWorld) > 0 {
+			if seedErr := o.seedInterceptWorld(sid, opts.InitialWorld); seedErr != nil {
+				return DriveOutcome{}, fmt.Errorf("orchestrator: DriveToRest: seed world: %w", seedErr)
+			}
 		}
 	}
 
@@ -235,6 +253,11 @@ func (o *Orchestrator) DriveToRest(ctx context.Context, intent string, slots map
 		out.FinalState = last.NewState
 		out.View = last.View
 		out.Last = last
+	}
+	// Expose the settled world (verdict-terminal effects like ci_verdict) BEFORE
+	// any safe-abort so a story-run caller can read the drive-through result.
+	if j, jerr := o.loadJourney(sid); jerr == nil {
+		out.WorldAfter = copyWorldVars(j.World)
 	}
 
 	if out.Resolved {

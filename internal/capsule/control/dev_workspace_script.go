@@ -151,7 +151,16 @@ func (p DevWorkspaceScriptProvider) Create(ctx context.Context, def Definition, 
 	}
 	branch := branchPrefix + in.ID
 	if _, err := runGit(ctx, root, "rev-parse", "--verify", base+"^{commit}"); err != nil {
-		return MaterializedWorkspace{}, fmt.Errorf("dev workspace script: configured base %q is unavailable in this checkout; run from the protected project checkout or refresh its local branch: %w", base, err)
+		// POG fix: on a leased pool worker the materialized source is a git
+		// bundle clone checked out at a detached HEAD (the sealed source
+		// commit) with no local branch refs, so the configured base (e.g.
+		// "main") does not resolve. The detached HEAD IS the base to branch
+		// from there, so fall back to it rather than failing the whole story.
+		if _, headErr := runGit(ctx, root, "rev-parse", "--verify", "HEAD^{commit}"); headErr == nil {
+			base = "HEAD"
+		} else {
+			return MaterializedWorkspace{}, fmt.Errorf("dev workspace script: configured base %q is unavailable in this checkout; run from the protected project checkout or refresh its local branch: %w", base, err)
+		}
 	}
 	args := []string{"create", "--repo", root, "--root", filepath.Dir(in.Path), "--id", in.ID, "--branch", branch, "--base", base, "--target", development.Target}
 	if development.Bootstrap {

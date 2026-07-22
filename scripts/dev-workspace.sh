@@ -6,6 +6,7 @@
 # capsule-compatible sentinel/manifest so launch policy, cleanup, and forensics
 # can identify the workspace as Kitsoki-managed.
 set -euo pipefail
+echo "DWARGS $(date +%s%N) cwd=$(pwd) args=$*" >> /tmp/dwargs.log 2>/dev/null || true
 
 CAPSULE_SENTINEL=".kitsoki-capsule"
 CAPSULE_MANIFEST="capsule-manifest.json"
@@ -1117,7 +1118,7 @@ cmd_create() {
   # The source is always a local repo path. Use local clone mode so existing
   # objects are hardlinked instead of copied while refs/worktree state stay
   # isolated inside the managed capsule clone.
-  git -C "$repo" clone --local --origin source "$repo" "$path"
+  git -C "$repo" clone --local --no-hardlinks --origin source "$repo" "$path"
   write_git_excludes "$path"
   local base_ref="$base"
   if [ -n "$base" ] && ! git -C "$path" rev-parse --verify --quiet "$base^{commit}" >/dev/null; then

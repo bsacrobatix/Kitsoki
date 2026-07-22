@@ -367,11 +367,26 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv []string) workerser
 		}
 		process := exec.CommandContext(ctx, executable, args...)
 		process.Dir = workspace
-		process.Env = append(capsuleWorkerChildEnv(passEnv), "KITSOKI_RUN_ARTIFACTS_DIR="+artifactsDir)
+		process.Env = append(capsuleWorkerChildEnv(passEnv), "KITSOKI_RUN_ARTIFACTS_DIR="+artifactsDir,
+			// POG fix: the pog-bugfix story's host.capsule_workspace.create runs
+			// the in-source scripts/dev-workspace.sh helper, resolved via
+			// KITSOKI_SOURCE_DIR; the worker child env otherwise omits it, so the
+			// nested workspace creation fails 127 and the loop exits before any
+			// fix. The materialized workspace IS the project source root.
+			"KITSOKI_SOURCE_DIR=/opt/kitsoki-src",
+			"IS_SANDBOX=1")
 		var stdout, stderr bytes.Buffer
 		process.Stdout = &stdout
 		process.Stderr = &stderr
 		processErr := process.Run()
+		// Observability (no worker SSH): mirror the child's full story trace and
+		// stdio into the bucket-mirrored artifacts dir so a failed/missing run is
+		// debuggable from runs/<exec>/artifacts/** after the worker is reaped.
+		_ = os.WriteFile(filepath.Join(artifactsDir, "worker-stderr.log"), stderr.Bytes(), 0o600)
+		_ = os.WriteFile(filepath.Join(artifactsDir, "worker-stdout.log"), stdout.Bytes(), 0o600)
+		if td, terr := os.ReadFile(tracePath); terr == nil {
+			_ = os.WriteFile(filepath.Join(artifactsDir, "story-trace.jsonl"), td, 0o600)
+		}
 		resultRaw, readErr := os.ReadFile(resultPath)
 		if readErr != nil {
 			if processErr != nil {
@@ -400,7 +415,7 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv []string) workerser
 }
 
 func capsuleWorkerChildEnv(pass []string) []string {
-	allowed := map[string]bool{"HOME": true, "PATH": true, "TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LC_ALL": true, "USER": true, "LOGNAME": true, "SHELL": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true}
+	allowed := map[string]bool{"HOME": true, "PATH": true, "TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LC_ALL": true, "USER": true, "LOGNAME": true, "SHELL": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true, "CLAUDE_CODE_OAUTH_TOKEN": true}
 	for _, name := range pass {
 		name = strings.TrimSpace(name)
 		if name != "" && !strings.Contains(name, "=") {
