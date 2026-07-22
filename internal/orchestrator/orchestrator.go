@@ -1692,11 +1692,24 @@ func (o *Orchestrator) Turn(ctx context.Context, sid app.SessionID, input string
 // emit_intent, emit lands on state whose on_enter has another host
 // call that binds the same key" would loop until the turn timed out.
 //
-// 4 is a tight budget that still permits legitimate composition: the
-// machine cap of 8 multiplied by 4 outer iterations gives a total of
-// 32 emits per turn before we bail out — far above the deepest known
-// real story (the bugfix room's 2-step LLM-judge chain uses 1).
-const OrchestratorPostBindMaxDepth = 4
+// This counts FORWARD host-bind WAVES, not just cycles: a long linear
+// pipeline where each distinct room does (host call → bind → deferred
+// emit → next room) consumes one recursion level PER ROOM, exactly like
+// a cycle would. The autonomous bugfix drive is precisely that shape —
+// idle→triaging→reproducing→proposing→implementing→testing→tail.integrate
+// →tail.verify→tail.cleanup→tail.report→@exit:shipped — a run of ~10+
+// host-gated hops in a SINGLE synchronous DriveToRest settle. The old
+// budget of 4 bailed at tail.cleanup (observed depth 5 > 4 on execs
+// vmpool-dab6325d6205 / vmpool-bf8147525933), stranding the drive one
+// hop short of report → @exit:shipped with outcome 'missing'.
+//
+// 64 gives generous headroom for the full delivery tail PLUS bounded
+// refine cycles (reproducing/proposing re-entries) while remaining a
+// real backstop: a genuine host-bind CYCLE still fails loud (the inner
+// machine EmitIntentMaxDepth already catches tight per-chain cycles;
+// this outer cap catches the reset-the-inner-counter cross-turn cycle).
+// It bounds a runaway to 64 waves, not an infinite loop.
+const OrchestratorPostBindMaxDepth = 64
 
 // settlePostBindEmits re-evaluates emit_intent: effects on the
 // just-entered state's on_enter chain against the post-bind world,
