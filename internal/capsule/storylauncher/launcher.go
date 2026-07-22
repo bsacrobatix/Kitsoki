@@ -96,7 +96,11 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	// settle to rest. DriveToRest is the existing multi-round drive (its
 	// WithInterceptDrive re-fires effectful self-arc on_enter); WorldAfter
 	// exposes the settled world so we can read the ci_verdict the story emitted.
-	out, err := orch.DriveToRest(ctx, "run", nil, orchestrator.DriveOptions{InitialWorld: envelopeWorld(prepared.Envelope, projectRoot), TeleportState: app.StatePath(fmt.Sprint(def.Root))})
+	initialWorld, err := envelopeWorld(prepared.Envelope, projectRoot)
+	if err != nil {
+		return ci.Verdict{}, err
+	}
+	out, err := orch.DriveToRest(ctx, "run", nil, orchestrator.DriveOptions{InitialWorld: initialWorld, TeleportState: app.StatePath(fmt.Sprint(def.Root))})
 	if err != nil {
 		return ci.Verdict{}, err
 	}
@@ -226,14 +230,46 @@ func hostCallDiagnostics(calls []orchestrator.HostCallSummary) string {
 	}
 	return strings.Join(parts, ", ")
 }
-func envelopeWorld(e executor.Envelope, projectRoot string) map[string]any {
+func envelopeWorld(e executor.Envelope, projectRoot string) (map[string]any, error) {
 	trigger := make(map[string]any, len(e.Trigger)+2)
 	for key, value := range e.Trigger {
 		trigger[key] = value
 	}
 	trigger["envelope_digest"] = e.Digest
 	trigger["story_digest"] = e.StoryDigest
-	return map[string]any{"ci_job_id": e.JobID, "ci_pipeline": trigger["requested_pipeline"], "ci_trigger": trigger, "ci_source": map[string]any{"digest": e.SourceDigest}, "ci_workspace": map[string]any{"id": e.Instance.ID, "generation": e.Instance.Generation, "path": projectRoot}, "ci_environment": map[string]any{"id": e.Environment.ID, "digest": e.Environment.Digest}, "ci_policy": map[string]any{"network": e.Policy.Network, "external_write": e.Policy.ExternalWrite, "command_timeout": e.Policy.CommandTimeout, "agents": map[string]any{"policy": e.Policy.Agents.Policy, "profiles": e.Policy.Agents.Profiles, "max_cost_usd": e.Policy.Agents.MaxCostUSD, "on_unavailable": e.Policy.Agents.OnUnavailable}}}
+	world := map[string]any{"ci_job_id": e.JobID, "ci_pipeline": trigger["requested_pipeline"], "ci_trigger": trigger, "ci_source": map[string]any{"digest": e.SourceDigest}, "ci_workspace": map[string]any{"id": e.Instance.ID, "generation": e.Instance.Generation, "path": projectRoot}, "ci_environment": map[string]any{"id": e.Environment.ID, "digest": e.Environment.Digest}, "ci_policy": map[string]any{"network": e.Policy.Network, "external_write": e.Policy.ExternalWrite, "command_timeout": e.Policy.CommandTimeout, "agents": map[string]any{"policy": e.Policy.Agents.Policy, "profiles": e.Policy.Agents.Profiles, "max_cost_usd": e.Policy.Agents.MaxCostUSD, "on_unavailable": e.Policy.Agents.OnUnavailable}}}
+	job, err := jobInputs(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	if job != nil {
+		world["job"] = job
+	}
+	return world, nil
+}
+
+// jobInputs reads the optional, source-sealed business inputs for a story
+// dispatched as a job. The committed file rides the frozen SourceDigest and
+// becomes ordinary initial world before imports evaluate their world_in maps.
+// Absent is the common case; malformed input fails closed instead of silently
+// starting a job without its required business context.
+func jobInputs(projectRoot string) (map[string]any, error) {
+	if projectRoot == "" {
+		return nil, nil
+	}
+	path := filepath.Join(projectRoot, ".kitsoki", "job-inputs.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("capsule ci: read job inputs %s: %w", filepath.ToSlash(path), err)
+	}
+	var inputs map[string]any
+	if err := json.Unmarshal(raw, &inputs); err != nil {
+		return nil, fmt.Errorf("capsule ci: parse job inputs %s: %w", filepath.ToSlash(path), err)
+	}
+	return inputs, nil
 }
 
 func findProjectRoot(storyPath string) string {

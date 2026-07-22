@@ -436,3 +436,111 @@ func (s fixedJobStore) Archive(ctx context.Context, id artifactjob.JobID) (artif
 func (s fixedJobStore) SweepInterrupted(ctx context.Context, reason string) (int64, error) {
 	return s.inner.SweepInterrupted(ctx, reason)
 }
+
+func writeJobInputs(t *testing.T, root, body string) {
+	t.Helper()
+	kdir := filepath.Join(root, ".kitsoki")
+	if err := os.MkdirAll(kdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kdir, "job-inputs.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnvelopeWorldSeedsJobInputs(t *testing.T) {
+	root := t.TempDir()
+	writeJobInputs(t, root, `{"ticket_body":"boom","gate_command":"make repro"}`)
+	w, err := envelopeWorld(executor.Envelope{JobID: "job", Trigger: map[string]any{"requested_pipeline": "change"}}, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := w["job"].(map[string]any)
+	if !ok {
+		t.Fatalf("world.job not seeded: %#v", w["job"])
+	}
+	if job["ticket_body"] != "boom" || job["gate_command"] != "make repro" {
+		t.Fatalf("job inputs %#v", job)
+	}
+}
+
+func TestEnvelopeWorldNoJobInputsFileLeavesJobAbsent(t *testing.T) {
+	w, err := envelopeWorld(executor.Envelope{JobID: "job", Trigger: map[string]any{}}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := w["job"]; ok {
+		t.Fatalf("world.job should be absent without a job-inputs file: %#v", w["job"])
+	}
+}
+
+func TestEnvelopeWorldMalformedJobInputsFails(t *testing.T) {
+	root := t.TempDir()
+	writeJobInputs(t, root, `{not valid json`)
+	if _, err := envelopeWorld(executor.Envelope{JobID: "job"}, root); err == nil {
+		t.Fatal("expected malformed job-inputs.json to fail the run, got nil error")
+	}
+}
+
+// This exercises the production boundary: source-sealed world.job data must
+// be visible to story templates on the first driven turn.
+func TestLauncherTemplatesJobInputs(t *testing.T) {
+	root := t.TempDir()
+	writeJobInputs(t, root, `{"marker":"seen-in-story"}`)
+	story := filepath.Join(root, "app.yaml")
+	raw := `app:
+  id: engine-ci-job
+  version: 0.1.0
+  title: Engine CI Job
+  author: Test
+  license: CC0
+world:
+  ci_source: { type: object, default: {} }
+  ci_environment: { type: object, default: {} }
+  ci_trigger: { type: object, default: {} }
+  ci_verdict: { type: object, default: {} }
+  job: { type: object, default: {} }
+intents:
+  run: { description: run, examples: [run], priority: 1 }
+root: idle
+states:
+  idle:
+    view: [{ prose: "idle" }]
+    on:
+      run:
+        - target: done
+          effects:
+            - set:
+                ci_verdict:
+                  schema: capsule-ci-verdict/v1
+                  pipeline: "{{ world.job.marker }}"
+                  outcome: passed
+                  checks: []
+                  promotion_eligible: true
+                  source_digest: "{{ world.ci_source.digest }}"
+                  story_digest: sha256:story
+                  environment_digest: "{{ world.ci_environment.digest }}"
+                  envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+  done:
+    terminal: true
+    view: [{ prose: "done" }]
+`
+	if err := os.WriteFile(story, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "app.yaml", StoryDigest: "sha256:story", Environment: lock, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Launcher{StoryPath: story, ProjectRoot: root}.Launch(context.Background(), executor.Prepared{Envelope: envelope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Pipeline != "seen-in-story" {
+		t.Fatalf("story did not template world.job.marker; verdict %#v", got)
+	}
+}
