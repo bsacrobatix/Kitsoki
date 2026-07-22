@@ -586,6 +586,156 @@ func TestMirrorWIPExportsFromManagedCloneUnderWorkspace(t *testing.T) {
 	}
 }
 
+// TestMirrorWIPExportsCloneWhoseHeadIsParkedAtSealedBase reproduces the
+// shipped-but-no-bundle regression observed on exec vmpool-968154eb9c19: the
+// managed clone's committed fix lands on a BRANCH (the shipped candidate), but
+// the clone's checked-out HEAD is left parked at the sealed base
+// (== record.SourceDigest). SelectWIPRoot must still select the clone off its
+// branch work; comparing only `git rev-parse HEAD` skips it, falls back to the
+// clean top-level workspace, and ExportWIP silently mirrors NOTHING — so the
+// proven ship never reaches runs/<id>/wip/refs.bundle and is discarded.
+//
+// Contrast with the working exec vmpool-d4e791c04ab9, whose wip.json recorded
+// head != sealed_head (the clone's HEAD had advanced onto the candidate). The
+// only difference between shipping-with-bundle and shipping-without is exactly
+// where the clone's checked-out HEAD ended up.
+func TestMirrorWIPExportsCloneWhoseHeadIsParkedAtSealedBase(t *testing.T) {
+	top, _ := initWIPRepo(t)
+	write(t, filepath.Join(top, ".gitignore"), ".capsules/\n")
+	wipGit(t, top, "add", ".gitignore")
+	wipGit(t, top, "commit", "-q", "-m", "ignore capsules")
+	sealedHead := strings.TrimSpace(wipGit(t, top, "rev-parse", "HEAD"))
+
+	clone := filepath.Join(top, ".capsules", "workspaces", "bf-parked")
+	if err := os.MkdirAll(filepath.Dir(clone), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "clone", "-q", "--origin", "source", top, clone).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	wipGit(t, clone, "config", "user.name", "Capsule WIP Test")
+	wipGit(t, clone, "config", "user.email", "wip@example.invalid")
+	// The fix lands on a branch...
+	wipGit(t, clone, "checkout", "-q", "-b", "agent/bf-parked")
+	write(t, filepath.Join(clone, "fix.txt"), "fix\n")
+	wipGit(t, clone, "add", "fix.txt")
+	wipGit(t, clone, "commit", "-q", "-m", "the fix")
+	shipped := strings.TrimSpace(wipGit(t, clone, "rev-parse", "HEAD"))
+	// ...but the clone's checked-out HEAD is parked back at the sealed base,
+	// so rev-parse HEAD == sealedHead even though branch work carries the fix.
+	wipGit(t, clone, "checkout", "-q", sealedHead)
+	if got := strings.TrimSpace(wipGit(t, clone, "rev-parse", "HEAD")); got != sealedHead {
+		t.Fatalf("precondition: clone HEAD = %s, want parked at sealed base %s", got, sealedHead)
+	}
+
+	runDir := t.TempDir()
+	workspace := filepath.Join(runDir, "workspace")
+	if err := os.Rename(top, workspace); err != nil {
+		t.Fatal(err)
+	}
+
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	record := workerserver.RunRecord{ExecutionID: "exec-wip-parked-1", SourceDigest: sealedHead}
+	if err := mirror.MirrorWIP(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorWIP: %v", err)
+	}
+
+	wantKey := "runs/exec-wip-parked-1/wip/refs.bundle"
+	if _, err := store.Head(context.Background(), wantKey); err != nil {
+		t.Fatalf("expected bundle stored at %s (branch work must be exported even when clone HEAD is parked at the sealed base): %v", wantKey, err)
+	}
+	// The shipped fix (living on the branch, not on HEAD) must be recoverable
+	// from the bundle.
+	rc, _, err := store.Get(context.Background(), wantKey)
+	if err != nil {
+		t.Fatalf("get bundle: %v", err)
+	}
+	defer rc.Close()
+	bundleDir := t.TempDir()
+	bundlePath := filepath.Join(bundleDir, "refs.bundle")
+	out, err := os.Create(bundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := out.ReadFrom(rc); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	listed, err := exec.Command("git", "bundle", "list-heads", bundlePath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git bundle list-heads: %v: %s", err, listed)
+	}
+	if !strings.Contains(string(listed), shipped) {
+		t.Fatalf("bundle does not carry the shipped branch commit %s; heads:\n%s", shipped, listed)
+	}
+}
+
+// TestMirrorWIPCleanCloneWithNoWorkBeyondSealedProducesNoBundle guards the fix
+// against over-selection: a managed clone that is a pristine checkout of the
+// sealed head (HEAD at base, no branch work, clean worktree) carries nothing to
+// preserve, so MirrorWIP must fall back to the clean top-level and export
+// nothing — mirroring ExportWIP's clean early-return.
+func TestMirrorWIPCleanCloneWithNoWorkBeyondSealedProducesNoBundle(t *testing.T) {
+	top, _ := initWIPRepo(t)
+	write(t, filepath.Join(top, ".gitignore"), ".capsules/\n")
+	wipGit(t, top, "add", ".gitignore")
+	wipGit(t, top, "commit", "-q", "-m", "ignore capsules")
+	sealedHead := strings.TrimSpace(wipGit(t, top, "rev-parse", "HEAD"))
+
+	clone := filepath.Join(top, ".capsules", "workspaces", "bf-clean")
+	if err := os.MkdirAll(filepath.Dir(clone), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "clone", "-q", "--origin", "source", top, clone).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	// Fresh clone: HEAD at the sealed head, no commits or branches beyond it.
+
+	runDir := t.TempDir()
+	workspace := filepath.Join(runDir, "workspace")
+	if err := os.Rename(top, workspace); err != nil {
+		t.Fatal(err)
+	}
+	store := objectstore.NewFake()
+	mirror := bucketsource.OutputMirror{Store: store}
+	record := workerserver.RunRecord{ExecutionID: "exec-wip-clean-clone", SourceDigest: sealedHead}
+	if err := mirror.MirrorWIP(context.Background(), record, runDir); err != nil {
+		t.Fatalf("MirrorWIP: %v", err)
+	}
+	if _, err := store.Head(context.Background(), "runs/exec-wip-clean-clone/wip/refs.bundle"); err == nil {
+		t.Fatalf("expected no bundle for a clean clone with no work beyond the sealed head")
+	}
+}
+
+// TestSelectWIPRootUnresolvableSealedHeadSelectsCloneWithWork covers the
+// defensive path when record.SourceDigest is NOT a commit resolvable in the
+// clone (e.g. an unrelated/content-addressed digest): `rev-list --not
+// <sealedHead>` errors, and rather than silently dropping possibly-shipped
+// work SelectWIPRoot must still select a clone that carries commits.
+func TestSelectWIPRootUnresolvableSealedHeadSelectsCloneWithWork(t *testing.T) {
+	top, _ := initWIPRepo(t)
+	write(t, filepath.Join(top, ".gitignore"), ".capsules/\n")
+	wipGit(t, top, "add", ".gitignore")
+	wipGit(t, top, "commit", "-q", "-m", "ignore capsules")
+
+	clone := filepath.Join(top, ".capsules", "workspaces", "bf-unresolvable")
+	if err := os.MkdirAll(filepath.Dir(clone), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "clone", "-q", "--origin", "source", top, clone).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+
+	// A sealedHead that is a syntactically valid sha but does not exist in the
+	// clone — rev-list against it errors.
+	unresolvable := strings.Repeat("0", 40)
+	root := bucketsource.SelectWIPRoot(context.Background(), top, unresolvable)
+	if root != clone {
+		t.Fatalf("SelectWIPRoot with unresolvable sealedHead = %q, want clone %q", root, clone)
+	}
+}
+
 func assertObject(t *testing.T, store objectstore.Store, key, want string) {
 	t.Helper()
 	rc, _, err := store.Get(context.Background(), key)

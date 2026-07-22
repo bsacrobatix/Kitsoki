@@ -163,7 +163,16 @@ func gitOutputWIP(ctx context.Context, root string, args ...string) (string, err
 //
 // This returns the managed clone that carries committed work beyond
 // sealedHead (most-recently-modified wins when several exist), so the canonical
-// refs.bundle is a bundle of the clone whose HEAD is the shipped candidate.
+// refs.bundle is a bundle of the clone whose refs carry the shipped candidate.
+// "Beyond" is measured against every ref (and the detached HEAD), NOT just the
+// checked-out HEAD: the delivery tail may leave the clone's HEAD parked at the
+// sealed base while the fix rides a branch (agent/<id>, main, an INTEGRATION
+// branch, …). Comparing only `git rev-parse HEAD` skipped such a clone and
+// silently exported nothing even though it had shipped — the regression this
+// selection repairs (exec vmpool-968154eb9c19). ExportWIP bundles `--all`, so
+// once the right clone is selected the branch work is captured regardless of
+// where HEAD points.
+//
 // It falls back to the top-level workspace when no such clone is present — the
 // ordinary in-place lanes whose work already lives in the top-level repo (or a
 // linked worktree sharing its object store, which `git bundle --all` already
@@ -179,12 +188,7 @@ func SelectWIPRoot(ctx context.Context, workspace, sealedHead string) string {
 		if err != nil {
 			continue // not a git repository
 		}
-		head, err := gitOutputWIP(ctx, dir, "rev-parse", "HEAD")
-		if err != nil {
-			continue // unreadable / not a valid repo
-		}
-		head = strings.TrimSpace(head)
-		if head == "" || (sealedHead != "" && head == sealedHead) {
+		if !cloneHasWorkBeyond(ctx, dir, sealedHead) {
 			continue // no committed work beyond the sealed source
 		}
 		if best == "" || info.ModTime().After(bestMod) {
@@ -196,4 +200,38 @@ func SelectWIPRoot(ctx context.Context, workspace, sealedHead string) string {
 		return best
 	}
 	return workspace
+}
+
+// cloneHasWorkBeyond reports whether the git repo at dir carries any commit the
+// sealed source does not already contain — on ANY ref or a detached HEAD, not
+// merely the checked-out HEAD. It mirrors ExportWIP's own "beyond" test
+// (`rev-list --all HEAD --not <sealedHead>`) so selection and export agree on
+// what counts as work worth preserving.
+//
+// record.SourceDigest is a git commit sha (e.g. 1837c87af19f…), which for a
+// dev-workspace clone is its base commit and is resolvable there. If it is NOT
+// resolvable (an unrelated history, or a content-addressed digest), rev-list
+// against it errors; rather than silently drop possibly-shipped work we treat
+// the clone as carrying work and select it (ExportWIP then re-applies its own
+// clean check on the selected root).
+func cloneHasWorkBeyond(ctx context.Context, dir, sealedHead string) bool {
+	head, err := gitOutputWIP(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return false // unreadable / not a valid repo
+	}
+	if strings.TrimSpace(head) == "" {
+		return false
+	}
+	if sealedHead == "" {
+		// No sealed baseline to diff against: any repo with commits carries
+		// work we must preserve.
+		return true
+	}
+	beyond, err := gitOutputWIP(ctx, dir, "rev-list", "--all", "HEAD", "--not", sealedHead)
+	if err != nil {
+		// sealedHead is not a resolvable commit in this clone; do not silently
+		// discard its work.
+		return true
+	}
+	return strings.TrimSpace(beyond) != ""
 }
