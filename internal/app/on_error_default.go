@@ -67,14 +67,20 @@ func resolveOnErrorDefaults(def *AppDef, file string) []error {
 	}
 
 	applyDefault := func(eff *Effect) {
-		if eff.Invoke != "" && eff.OnError == "" {
+		// AckError is an explicit per-call acknowledgement ("log it and
+		// keep going, on purpose") — it outranks a story-level default.
+		// Filling OnError here would silently convert a deliberate,
+		// documented degrade into a hard redirect, which is exactly the
+		// regression that blocked defaulting the builtin error room on
+		// (see .context/troubleshooting-agent-and-error-integrity.md).
+		if eff.Invoke != "" && eff.OnError == "" && eff.AckError == "" {
 			eff.OnError = def.OnErrorDefault
 		}
 		// on_complete: entries can themselves invoke (async job → chained
 		// follow-up call); apply the same default to those.
 		for i := range eff.OnComplete {
 			c := &eff.OnComplete[i]
-			if c.Invoke != "" && c.OnError == "" {
+			if c.Invoke != "" && c.OnError == "" && c.AckError == "" {
 				c.OnError = def.OnErrorDefault
 			}
 		}
@@ -279,7 +285,10 @@ func UnhandledInvokes(def *AppDef, file string) []UnhandledInvoke {
 	walkEffects = func(statePath, sourceStatePath, sourceFile, prefix string, effs []Effect) {
 		for i, eff := range effs {
 			loc := fmt.Sprintf("%s[%d]", prefix, i)
-			if eff.Invoke != "" && eff.OnError == "" {
+			// AckError is an explicit, machine-readable acknowledgement
+			// that this invoke's failure is handled (record + continue) —
+			// it is not an oversight the lint should flag.
+			if eff.Invoke != "" && eff.OnError == "" && eff.AckError == "" {
 				out = append(out, UnhandledInvoke{
 					StatePath:       statePath,
 					SourceFile:      sourceFile,

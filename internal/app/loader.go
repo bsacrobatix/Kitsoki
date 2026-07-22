@@ -1135,6 +1135,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	validateWriteMode(file, def, &errs)
 	validateOperations(file, def, &errs)
 	validateOperationPolicies(file, def, &errs)
+	validateAckError(file, def, &errs)
 
 	// intercept_drive: multi-turn drive flag (conflict-capable intercept). The
 	// only valid value is "rest"; only meaningful on a top-level room.
@@ -2120,6 +2121,57 @@ func validateOperations(file string, def *AppDef, errs *[]error) {
 		}
 	}
 	walkStates("", def.States, false)
+}
+
+// validateAckError rejects any Invoke effect that declares both on_error:
+// and ack_error: — they are contradictory instructions ("redirect the whole
+// state on failure" vs. "record it and keep going") — across every effect
+// chain reachable from the state tree (on_enter:, transition effects:, and
+// their nested on_complete:/effects: children, mirroring validateOperations'
+// walk). Runs before resolveOnErrorDefaults has a chance to fill OnError
+// from a story-level default, so an author's ack_error: is checked against
+// only what they themselves wrote.
+func validateAckError(file string, def *AppDef, errs *[]error) {
+	var walkEffects func(location string, effects []Effect)
+	walkEffects = func(location string, effects []Effect) {
+		for i, eff := range effects {
+			loc := fmt.Sprintf("%s[%d]", location, i)
+			if eff.OnError != "" && eff.AckError != "" {
+				*errs = append(*errs, &ValidationError{
+					File: file,
+					Message: fmt.Sprintf(
+						"%s: on_error %q and ack_error %q are mutually exclusive on the same invoke; on_error redirects the state, ack_error records the failure and continues — pick one",
+						loc, eff.OnError, eff.AckError,
+					),
+				})
+			}
+			if len(eff.OnComplete) > 0 {
+				walkEffects(loc+" on_complete", eff.OnComplete)
+			}
+			if len(eff.Effects) > 0 {
+				walkEffects(loc+" effects", eff.Effects)
+			}
+		}
+	}
+	var walkStates func(prefix string, states map[string]*State)
+	walkStates = func(prefix string, states map[string]*State) {
+		for name, s := range states {
+			if s == nil {
+				continue
+			}
+			statePath := joinPath(prefix, name)
+			walkEffects(fmt.Sprintf("state %q on_enter", statePath), s.OnEnter)
+			for intentName, transitions := range s.On {
+				for ti, tr := range transitions {
+					walkEffects(fmt.Sprintf("state %q intent %q transitions[%d] effects", statePath, intentName, ti), tr.Effects)
+				}
+			}
+			if len(s.States) > 0 {
+				walkStates(statePath, s.States)
+			}
+		}
+	}
+	walkStates("", def.States)
 }
 
 func validateOperationPolicies(file string, def *AppDef, errs *[]error) {

@@ -1,0 +1,54 @@
+# Tiny app used by the ack_error: runtime tests (see
+# ackerror_dispatch_test.go). `probe`'s on_enter invokes host.fail (which
+# always returns Result.Error != "") with `ack_error:` instead of
+# `on_error:` — dispatch must record the failure (world.error_log,
+# handled: true, handled_reason) and continue to the SECOND invoke in the
+# same on_enter block, landing on `probe` with both binds applied and no
+# "⚠ Action failed:" banner.
+#
+# on_error_default: none opts this fixture out of the builtin __error__
+# room, mirroring hosterror_unhandled/app.yaml, so the only thing
+# suppressing the banner is ack_error: itself.
+app:
+  id: hosterror_acked
+  version: 0.1.0
+  title: "host acked-error test app (ack_error: runtime semantics)"
+
+on_error_default: none
+
+hosts:
+  - host.fail
+  - host.ok
+
+world:
+  marker:  { type: string, default: "" }
+  reached: { type: string, default: "" }
+
+root: idle
+
+intents:
+  ask:
+    title: "Ask"
+    description: "Trigger the probe."
+    examples: ["ask"]
+    priority: 10
+
+states:
+  idle:
+    description: "Idle"
+    view: "Idle. Marker: {{ world.marker }}"
+    on:
+      ask:
+        - target: probe
+
+  probe:
+    description: "Probe state — the first invoke is acked; the chain must still reach the second."
+    view: "Probe. Marker: {{ world.marker }} Reached: {{ world.reached }}"
+    on_enter:
+      - invoke: host.fail
+        with: {}
+        ack_error: "non-critical backstop — safe to ignore in this fixture"
+      - invoke: host.ok
+        with: {}
+        bind:
+          reached: value

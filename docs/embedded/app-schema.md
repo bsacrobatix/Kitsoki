@@ -41,15 +41,18 @@ host_interfaces: { <name>: <HostInterfaceDef> }  # optional — named capability
   resolved entirely at load time: any `invoke:` effect reachable from this
   app's own `on_enter:` / transition-effect chains whose `on_error:` is
   empty gets `on_error: <on_error_default>` filled in before validation
-  runs. A per-invoke `on_error:` always wins. The value must resolve to a
-  declared state, same as a transition `target:` — an unresolvable default
-  is a load error. **Not merged across imports**: it applies only to this
+  runs. A per-invoke `on_error:` always wins, and so does a per-invoke
+  `ack_error:` — a call that declares `ack_error:` is left alone even
+  though its `on_error:` is empty, because an explicit acknowledgement
+  outranks a story-level default. The value must resolve to a declared
+  state, same as a transition `target:` — an unresolvable default is a
+  load error. **Not merged across imports**: it applies only to this
   app's own invokes, never to a folded-in imported child's (and a child's
   own `on_error_default:` never reaches its importer) — mirroring how
   `routing:` is not merged across imports either. Use
   `kitsoki validate <app.yaml> --report-unhandled-errors` to list every
-  `invoke:` site still left with no effective `on_error:` after resolution
-  (a report, not a load-time gate).
+  `invoke:` site still left with no effective `on_error:`/`ack_error:`
+  after resolution (a report, not a load-time gate).
 
 ## `operations:` — session operation policies
 
@@ -606,6 +609,10 @@ effects:
     with:       { cmd: "git status", cwd: "{{ world.workspace_root }}" }
     bind:       { last_output: stdout, last_code: exit_code }
     on_error:   error_room
+  - invoke:     host.run
+    with:       { cmd: "git status --porcelain", cwd: "{{ world.workspace_root }}" }
+    bind:       { dirty_check: stdout }
+    ack_error:  "non-critical backstop; degrade to assume-clean rather than bounce the room"
   - commit_operation:
       world: { last_output: "{{ world.last_output }}" }
   - persist_draft:
@@ -628,6 +635,7 @@ Fields (any subset):
 | `with`        | Arguments for `invoke`                                               |
 | `bind`        | `{ world_key: result_key }` — copy host result into world            |
 | `on_error`    | Transition target if host invoke errors; sets `$host_error`          |
+| `ack_error`   | Non-empty reason string → an *acknowledged* failure: record it in `world.error_log` with `handled: true` and `handled_reason: <this string>`, suppress the "⚠ Action failed:" banner, and continue the chain — the deliberate "log it and move on" alternative to `on_error:`. Mutually exclusive with `on_error:` on the same invoke (a load error to declare both); overrides a story-level `on_error_default:` (an explicit ack outranks the default). The failure is still durably recorded either way — `ack_error:` changes visibility, not durability. |
 | `once`        | `true` → skip the `invoke` on re-entry when every `bind:` target is already set (non-empty); makes on_enter host calls idempotent across `/reload`, self-transitions, and `on_error:`. Requires a non-empty `bind:`. Clear the bind target to re-run. |
 | `emit`        | Broadcast named event to parallel regions                            |
 | `background`  | `true` → dispatch `invoke` as a background job (see §Background jobs) |

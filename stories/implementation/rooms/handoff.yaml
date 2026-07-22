@@ -68,13 +68,14 @@ states:
         bind:
           worktree_dirty:       "stdout_json.dirty"
           worktree_dirty_files: "stdout_json.files"
-        # NO on_error: this check is a non-critical backstop whose only output
-        # is binding worktree_dirty for the open/proceed guards below. If
-        # git/host.run can't run, worktree_dirty stays at its default (false)
-        # and the handoff proceeds — degrade to "assume clean" rather than
-        # bounce the whole room to idle. The PRIMARY lost-work fix is the
-        # write_code/test stage_all commits; this guard only hardens the
-        # pr-refinement handoff when git IS readable.
+        # This check is a non-critical backstop whose only output is binding
+        # worktree_dirty for the open/proceed guards below. The PRIMARY
+        # lost-work fix is the write_code/test stage_all commits; this guard
+        # only hardens the pr-refinement handoff when git IS readable.
+        ack_error: >-
+          non-critical backstop — if git/host.run can't run, worktree_dirty
+          stays at its default (false) and the handoff proceeds; degrade to
+          "assume clean" rather than bounce the whole room to idle
     on:
       # Dispatch into the `pr` import compound. The compound's entry
       # state is pr.open_pr (per imports.pr.entry: open_pr). open_pr's

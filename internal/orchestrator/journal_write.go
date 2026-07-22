@@ -130,7 +130,7 @@ func (o *Orchestrator) journalTurnError(
 	// not journalTurnError's side effects, so without this event the entry
 	// would vanish the moment this function returns.
 	postWorld := w.Clone()
-	logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(postWorld), ErrorLogClassMachine, state, "", "", cause.Error(), nil, nil, false)
+	logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(postWorld), ErrorLogClassMachine, state, "", "", cause.Error(), nil, nil, false, "")
 	newLog := appendErrorLog(postWorld, logEntry)
 	postWorld.Set(app.ErrorLogWorldKey, newLog)
 	postWorld.Set(app.ErrorOriginWorldKey, string(state))

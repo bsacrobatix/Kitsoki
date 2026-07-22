@@ -48,17 +48,24 @@ func nextErrorLogSeq(w world.World) int {
 // newErrorLogEntry builds one world.error_log entry:
 //
 //	{ seq, state, namespace?, effect?, message, exit_code?, stderr?, ts,
-//	  class, handled }
+//	  class, handled, handled_reason? }
 //
 // namespace/effect are omitted when empty; exitCode/stderr are omitted when
 // nil. ts is read from clk — the orchestrator's injected clock.Clock (real
 // in production, a clock.Fake pinned by the flow-test harness) — rather than
 // time.Now(), so the field stays reproducible under flow/cassette replay.
-// handled is always false at append time: an entry becomes handled only via
-// an explicit acknowledging effect, which is out of scope for this change
-// (see the design doc's Part 1 fix #1/#2 — the @error intent and its
-// handling are owned elsewhere).
-func newErrorLogEntry(clk clock.Clock, seq int, class string, state app.StatePath, namespace, effect, message string, exitCode, stderr any, handled bool) map[string]any {
+//
+// handled is true for exactly one reason today: the failing invoke: declared
+// `ack_error: "<reason>"` (see app.Effect.AckError) — an explicit, authored
+// acknowledgement that this failure is expected and tolerable. handledReason
+// carries that string verbatim as handled_reason (omitted when handled is
+// false / handledReason is empty). Every other failure — including one that
+// fires an `on_error:` redirect — is appended with handled: false: a
+// redirect changes control flow, not whether the failure was acknowledged.
+// A future dispatchable `@error` intent (Part 1 fix #3 in
+// .context/troubleshooting-agent-and-error-integrity.md) may add further
+// ways to mark an entry handled; ack_error: is the first.
+func newErrorLogEntry(clk clock.Clock, seq int, class string, state app.StatePath, namespace, effect, message string, exitCode, stderr any, handled bool, handledReason string) map[string]any {
 	entry := map[string]any{
 		"seq":     seq,
 		"state":   string(state),
@@ -78,6 +85,9 @@ func newErrorLogEntry(clk clock.Clock, seq int, class string, state app.StatePat
 	}
 	if stderr != nil {
 		entry["stderr"] = stderr
+	}
+	if handled && handledReason != "" {
+		entry["handled_reason"] = handledReason
 	}
 	return entry
 }

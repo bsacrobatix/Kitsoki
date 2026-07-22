@@ -557,3 +557,118 @@ root: fragment
 	deduped := DedupeUnhandledInvokes(combined)
 	require.Len(t, deduped, 1, "de-duplication must collapse the one real gap discovered via two importing roots into a single finding")
 }
+
+// TestAckError_WithOnErrorIsLoadError asserts that declaring both on_error:
+// and ack_error: on the same invoke: effect is a load-time ValidationError
+// naming both fields — they are contradictory instructions ("redirect the
+// whole state" vs. "record it and continue").
+func TestAckError_WithOnErrorIsLoadError(t *testing.T) {
+	yaml := []byte(`app:
+  id: ack-error-conflict
+  version: 0.1.0
+hosts: [host.run]
+root: start
+states:
+  start:
+    on_enter:
+      - invoke: host.run
+        on_error: recover
+        ack_error: "non-critical backstop"
+  recover:
+    terminal: true
+`)
+	_, err := LoadBytes(yaml)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "on_error")
+	require.Contains(t, err.Error(), "ack_error")
+	require.Contains(t, err.Error(), "mutually exclusive")
+}
+
+// TestAckError_ConflictDetectedInsideTransitionEffectsAndOnComplete asserts
+// validateAckError's walk reaches transition effects and nested on_complete:
+// chains, not just on_enter:.
+func TestAckError_ConflictDetectedInsideTransitionEffectsAndOnComplete(t *testing.T) {
+	yaml := []byte(`app:
+  id: ack-error-conflict-nested
+  version: 0.1.0
+hosts: [host.run]
+intents:
+  go: {}
+root: start
+states:
+  start:
+    on:
+      go:
+        - target: done
+          effects:
+            - invoke: host.run
+              on_error: recover
+              ack_error: "non-critical backstop"
+  done:
+    terminal: true
+  recover:
+    terminal: true
+`)
+	_, err := LoadBytes(yaml)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "on_error")
+	require.Contains(t, err.Error(), "ack_error")
+}
+
+// TestOnErrorDefault_DoesNotOverwriteAckError asserts that a story-level
+// on_error_default: leaves an invoke's ack_error: alone and does NOT fill
+// its (still-empty) on_error: — an explicit per-call acknowledgement
+// outranks the story-level default (see resolveOnErrorDefaults).
+func TestOnErrorDefault_DoesNotOverwriteAckError(t *testing.T) {
+	yaml := []byte(`app:
+  id: on-error-default-ack-error
+  version: 0.1.0
+hosts: [host.run]
+on_error_default: recover
+root: start
+states:
+  start:
+    on_enter:
+      - invoke: host.run
+        ack_error: "non-critical backstop"
+  recover:
+    terminal: true
+`)
+	def, err := LoadBytes(yaml)
+	require.NoError(t, err)
+	require.Empty(t, def.States["start"].OnEnter[0].OnError, "ack_error: must block the story-level default from filling on_error:")
+	require.Equal(t, "non-critical backstop", def.States["start"].OnEnter[0].AckError)
+}
+
+// TestUnhandledInvokes_SkipsAckedInvoke asserts the unhandled-invoke lint
+// does not flag an invoke: that declares ack_error: — it is handled,
+// explicitly, even though on_error: is empty.
+func TestUnhandledInvokes_SkipsAckedInvoke(t *testing.T) {
+	yaml := []byte(`app:
+  id: unhandled-invoke-lint-ack-error
+  version: 0.1.0
+hosts: [host.run, host.other]
+on_error_default: none
+intents:
+  go: {}
+root: start
+states:
+  start:
+    on_enter:
+      - invoke: host.run
+        ack_error: "non-critical backstop"
+    on:
+      go:
+        - target: done
+          effects:
+            - invoke: host.other
+  done:
+    terminal: true
+`)
+	def, err := LoadBytes(yaml)
+	require.NoError(t, err)
+
+	unhandled := UnhandledInvokes(def, "test.yaml")
+	require.Len(t, unhandled, 1, "the acked invoke must not be reported; the bare host.other one still must")
+	require.Equal(t, "host.other", unhandled[0].Invoke)
+}

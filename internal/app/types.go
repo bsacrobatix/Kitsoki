@@ -1260,6 +1260,25 @@ type Effect struct {
 	// Both are exempt from import folding — they stay bare at every nesting
 	// depth. See app.ReservedWorldKeys.
 	OnError string `yaml:"on_error,omitempty"`
+	// AckError is the "record it, keep going" sibling of OnError: a
+	// non-empty string means a failure of this invoke is expected and
+	// tolerable — the engine still appends a world.error_log entry (see
+	// orchestrator.newErrorLogEntry) and still logs the WARN trace event,
+	// but marks the entry handled: true with handled_reason: AckError and
+	// suppresses the "⚠ Action failed:" banner (applyErrorBannerSeam), and
+	// the on_enter/transition chain continues exactly as it does today with
+	// no on_error: declared at all. It is a string, not a bool, so the
+	// reason a failure is safe to swallow is machine-readable provenance,
+	// not just an author's YAML comment.
+	//
+	// Mutually exclusive with OnError: they are contradictory instructions
+	// ("redirect the whole state" vs. "log it and continue") — declaring
+	// both is a load-time ValidationError (see validateAckError). Also
+	// mutually exclusive with a story-level on_error_default: filling
+	// OnError — resolveOnErrorDefaults skips any Invoke effect whose
+	// AckError is already set, since an explicit per-call acknowledgement
+	// outranks a story-level default.
+	AckError string `yaml:"ack_error,omitempty"`
 	// Emit sends a named event to parallel regions.
 	Emit string `yaml:"emit,omitempty"`
 	// Background, when true, dispatches Invoke as a job and binds job_id

@@ -140,13 +140,15 @@ states:
         bind:
           worktree_dirty:       "stdout_json.dirty"
           worktree_dirty_files: "stdout_json.files"
-        # NO on_error: this check is a non-critical backstop whose only output
-        # is binding worktree_dirty for the accept guard below. If git/host.run
-        # can't run, worktree_dirty stays at its default (false) and the close-
-        # out proceeds — degrade to "assume clean" rather than bounce the whole
-        # room to idle (which would strand the done artifact). The PRIMARY
-        # lost-work fix is the testing room's stage_all commit; this guard only
-        # hardens the open-PR handoff when git IS readable.
+        # This check is a non-critical backstop whose only output is binding
+        # worktree_dirty for the accept guard below. The PRIMARY lost-work fix
+        # is the testing room's stage_all commit; this guard only hardens the
+        # open-PR handoff when git IS readable.
+        ack_error: >-
+          non-critical backstop — if git/host.run can't run, worktree_dirty
+          stays at its default (false) and the close-out proceeds; degrade to
+          "assume clean" rather than bounce the whole room to idle (which
+          would strand the done artifact)
 
       # Capture the committed tip that the issue is about to be closed against.
       # This is the direct-main equivalent of a PR merge link: the close-out arc

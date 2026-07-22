@@ -92,3 +92,28 @@ func TestGFlowUnhandledGate_FailureShapeIsHostReturnedNotRedirect(t *testing.T) 
 	require.True(t, sawHostReturnedError, "fixture must actually produce a HostReturned error event")
 	require.False(t, sawOnErrorRedirect, "this fixture must NOT redirect — it is the no-on_error: leak-1 shape")
 }
+
+// TestGFlowUnhandledGate_AckedErrorPassesWithoutBanner is ack_error:'s flow
+// proof: unlike working_unhandled (no on_error:, no ack_error: — banners),
+// working_acked declares ack_error: and must (a) still pass the durability
+// gate (assertNoSilentUnhandledHostError doesn't care whether the entry is
+// handled, only that it exists) and (b) NOT carry the never-silent banner
+// in its rendered view — acked_error_no_banner_still_logged.yaml's
+// expect_view_matches is anchored to the bannerless view, so a regression
+// that started bannering an acked call would fail this fixture's assertion,
+// not just the gate.
+func TestGFlowUnhandledGate_AckedErrorPassesWithoutBanner(t *testing.T) {
+	const appPath = "../../testdata/apps/error_banner/app.yaml"
+	const glob = "../../testdata/apps/error_banner/flows/acked_error_no_banner_still_logged.yaml"
+
+	report, err := testrunner.RunFlows(t.Context(), appPath, glob, testrunner.FlowOptions{})
+	require.NoError(t, err, "RunFlows should not return a fatal error")
+	require.Equal(t, 1, report.Passed, "acked-error fixture should pass: durable log + no banner")
+	require.Equal(t, 0, report.Failed)
+
+	for _, r := range report.Results {
+		for _, tr := range r.Turns {
+			require.True(t, tr.Passed, "turn %d failures: %v", tr.TurnIndex+1, tr.Failures)
+		}
+	}
+}

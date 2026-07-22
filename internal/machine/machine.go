@@ -95,7 +95,15 @@ type HostInvocation struct {
 	// reserved global world vars last_error (string) and host_error
 	// ({namespace, message, data?, stderr?, exit_code?}); both are exempt from
 	// import folding and readable by the target room without declaration.
-	OnError   string `json:"on_error,omitempty"`
+	OnError string `json:"on_error,omitempty"`
+	// AckError is the "record it, keep going" sibling of OnError — a
+	// non-empty string means a failure of this call is expected and
+	// tolerable: the orchestrator still appends a world.error_log entry
+	// and logs the WARN trace event, but marks the entry handled: true
+	// with handled_reason: AckError and suppresses the error banner
+	// instead of redirecting. Mutually exclusive with OnError; enforced
+	// at load time by app.validateAckError. See app.Effect.AckError.
+	AckError  string `json:"ack_error,omitempty"`
 	EmitEvent string `json:"emit_event,omitempty"`
 	// Background, when true, signals that the orchestrator should submit
 	// this invocation to the scheduler instead of dispatching synchronously.
@@ -2668,6 +2676,7 @@ func (m *machineImpl) applyEffectsTracedWithOptions(ctx context.Context, effects
 				WorldSnapshot: worldSnapshot,
 				Bind:          eff.Bind,
 				OnError:       eff.OnError,
+				AckError:      eff.AckError,
 				EmitEvent:     eff.Emit,
 				Background:    eff.Background,
 				OnComplete:    eff.OnComplete,

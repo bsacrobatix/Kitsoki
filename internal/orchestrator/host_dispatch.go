@@ -413,9 +413,12 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{"host_error": herr}), 0))
 			// Append the durable, unclearable error_log entry alongside the
 			// single-slot last_error/host_error views (see error_log.go). This
-			// runs regardless of whether an on_error: arc is declared below —
-			// error_log records every failure, not just the ones that redirect.
-			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostInfra, state, hc.Namespace, callEffect, err.Error(), nil, nil, false)
+			// runs regardless of whether an on_error:/ack_error: is declared
+			// below — error_log records every failure, not just the ones that
+			// redirect or are acknowledged. handled/handled_reason come from
+			// ack_error: (empty/false unless the author declared one; see
+			// app.Effect.AckError).
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostInfra, state, hc.Namespace, callEffect, err.Error(), nil, nil, hc.AckError != "", hc.AckError)
 			newLog := appendErrorLog(w, logEntry)
 			w.Set(app.ErrorLogWorldKey, newLog)
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
@@ -451,8 +454,28 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 				redirect = app.StatePath(hc.OnError)
 				break
 			}
-			// No on_error: declared. The chain still continues (this is NOT a
-			// new abort-the-chain behavior — see
+			if hc.AckError != "" {
+				// ack_error: an explicit, authored acknowledgement that this
+				// failure is expected and tolerable — the error_log entry
+				// above already carries handled: true + handled_reason.
+				// Durability is not waived (still logged, still recorded);
+				// only the never-silent BANNER is suppressed, because a
+				// deliberate documented degrade should not read to the user
+				// as "⚠ Action failed:". The chain still continues to the
+				// next call in this on_enter block, same as the unhandled
+				// path below.
+				o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+					slog.String("session_id", string(sid)),
+					slog.String("namespace", hc.Namespace),
+					slog.String("from", string(state)),
+					slog.String("error", err.Error()),
+					slog.String("phase", "infra"),
+					slog.String("ack_reason", hc.AckError),
+				)
+				continue
+			}
+			// No on_error:/ack_error: declared. The chain still continues
+			// (this is NOT a new abort-the-chain behavior — see
 			// .context/troubleshooting-agent-and-error-integrity.md Part 1, Leak
 			// 1), but the failure must never be silent: mark it so the
 			// post-loop render applies the never-silent banner, and log the
@@ -503,7 +526,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 					stderr = v
 				}
 			}
-			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostDomain, state, hc.Namespace, callEffect, res.Error, exitCode, stderr, false)
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostDomain, state, hc.Namespace, callEffect, res.Error, exitCode, stderr, hc.AckError != "", hc.AckError)
 			newLog := appendErrorLog(w, logEntry)
 			w.Set(app.ErrorLogWorldKey, newLog)
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
@@ -611,12 +634,32 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			)
 			redirect = app.StatePath(hc.OnError)
 			break
+		} else if res.Error != "" && hc.AckError != "" {
+			// ack_error: an explicit, authored acknowledgement — see the
+			// mirroring note on the infra-failure branch above. Durability
+			// is not waived: the error_log entry above already carries
+			// handled: true + handled_reason and this WARN still logs; only
+			// the never-silent banner is suppressed.
+			exitCode := ""
+			if res.Data != nil {
+				exitCode = fmt.Sprintf("%v", res.Data["exit_code"])
+			}
+			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+				slog.String("session_id", string(sid)),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("error", res.Error),
+				slog.String("exit_code", exitCode),
+				slog.String("phase", "domain"),
+				slog.String("ack_reason", hc.AckError),
+			)
 		} else if res.Error != "" {
-			// No on_error: declared. The chain still continues to the next
-			// call in this on_enter block (Leak 1 — see the mirroring note
-			// on the infra-failure branch above); the never-silent
-			// obligation is met via the post-loop banner (unhandledFailure)
-			// plus the error_log entry already appended above.
+			// No on_error:/ack_error: declared. The chain still continues to
+			// the next call in this on_enter block (Leak 1 — see the
+			// mirroring note on the infra-failure branch above); the
+			// never-silent obligation is met via the post-loop banner
+			// (unhandledFailure) plus the error_log entry already appended
+			// above.
 			exitCode := ""
 			if res.Data != nil {
 				exitCode = fmt.Sprintf("%v", res.Data["exit_code"])
@@ -1030,8 +1073,9 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			// Append the durable, unclearable error_log entry — reusing the
 			// same helpers dispatchHostCalls uses (error_log.go) rather than
 			// duplicating the entry shape here. Runs regardless of whether
-			// on_error: is declared below.
-			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostInfra, state, hc.Namespace, callEffect, err.Error(), nil, nil, false)
+			// on_error:/ack_error: is declared below. handled/handled_reason
+			// come from ack_error: (see app.Effect.AckError).
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostInfra, state, hc.Namespace, callEffect, err.Error(), nil, nil, hc.AckError != "", hc.AckError)
 			newLog := appendErrorLog(w, logEntry)
 			w.Set(app.ErrorLogWorldKey, newLog)
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
@@ -1055,10 +1099,27 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 				redirect = app.StatePath(hc.OnError)
 				break
 			}
-			// No on_error: declared — the chain still continues (mirrors
-			// dispatchHostCalls' Leak 1 handling), but the failure must
-			// never be silent: log the same WARN-worthy signal and mark it
-			// so the post-loop render applies the never-silent banner.
+			if hc.AckError != "" {
+				// ack_error: an explicit, authored acknowledgement — see the
+				// mirroring note in dispatchHostCalls. Durability is not
+				// waived: the error_log entry above already carries
+				// handled: true + handled_reason and this WARN still logs;
+				// only the never-silent banner is suppressed.
+				o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+					slog.String("session_id", sessionIDForLog),
+					slog.String("namespace", hc.Namespace),
+					slog.String("from", string(state)),
+					slog.String("error", err.Error()),
+					slog.String("phase", "infra"),
+					slog.String("ack_reason", hc.AckError),
+				)
+				continue
+			}
+			// No on_error:/ack_error: declared — the chain still continues
+			// (mirrors dispatchHostCalls' Leak 1 handling), but the failure
+			// must never be silent: log the same WARN-worthy signal and
+			// mark it so the post-loop render applies the never-silent
+			// banner.
 			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
 				slog.String("session_id", sessionIDForLog),
 				slog.String("namespace", hc.Namespace),
@@ -1103,7 +1164,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 					stderr = v
 				}
 			}
-			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostDomain, state, hc.Namespace, callEffect, res.Error, exitCode, stderr, false)
+			logEntry := newErrorLogEntry(o.clk, nextErrorLogSeq(w), ErrorLogClassHostDomain, state, hc.Namespace, callEffect, res.Error, exitCode, stderr, hc.AckError != "", hc.AckError)
 			newLog := appendErrorLog(w, logEntry)
 			w.Set(app.ErrorLogWorldKey, newLog)
 			events = append(events, newOrchestratorEvent(store.EffectApplied, operationWorldUpdatePayload(w, "set", map[string]any{app.ErrorLogWorldKey: newLog}), 0))
@@ -1154,9 +1215,23 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			)
 			redirect = app.StatePath(hc.OnError)
 			break
+		} else if res.Error != "" && hc.AckError != "" {
+			// ack_error: an explicit, authored acknowledgement — see the
+			// mirroring note in dispatchHostCalls. Durability is not
+			// waived: the error_log entry above already carries
+			// handled: true + handled_reason and this WARN still logs;
+			// only the never-silent banner is suppressed.
+			o.logger.WarnContext(ctx, trace.EvHostErrorUnhandled,
+				slog.String("session_id", sessionIDForLog),
+				slog.String("namespace", hc.Namespace),
+				slog.String("from", string(state)),
+				slog.String("error", res.Error),
+				slog.String("phase", "domain"),
+				slog.String("ack_reason", hc.AckError),
+			)
 		} else if res.Error != "" {
-			// No on_error: declared. The chain still continues to the next
-			// call in this batch (mirrors dispatchHostCalls' Leak 1
+			// No on_error:/ack_error: declared. The chain still continues to
+			// the next call in this batch (mirrors dispatchHostCalls' Leak 1
 			// handling); the never-silent obligation is met via the
 			// post-loop banner (unhandledFailure) plus the error_log entry
 			// already appended above.
