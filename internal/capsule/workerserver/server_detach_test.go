@@ -179,16 +179,34 @@ func TestHTTPRemoteWorkerStartDetachedPublishesSourceAndReturnsRegistered(t *tes
 		t.Fatal(err)
 	}
 
+	// The worker root must be created BEFORE the release/drain cleanup is
+	// registered. t.Cleanup runs LIFO, so registering the drain afterwards is
+	// what guarantees it runs BEFORE the TempDir RemoveAll. With the reverse
+	// order the detached run is still extracting the source bundle into
+	// <root>/runs/remote-detach/workspace/.git while RemoveAll walks it, and
+	// cleanup fails with "directory not empty".
+	root := t.TempDir()
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	finished := make(chan struct{})
 	runner := func(ctx context.Context, _ string, _ executor.Prepared, _ string) (executor.Result, error) {
+		defer close(finished)
 		select {
 		case <-release:
 		case <-ctx.Done():
 		}
 		return executor.Result{ExitCode: 0}, nil
 	}
-	worker, err := workerserver.New(workerserver.Config{Root: t.TempDir(), Token: "test-token", RequireAuth: true, Capabilities: isolatedTestCapabilities(), Runner: runner, Environment: environment.Verifier{}})
+	t.Cleanup(func() {
+		close(release)
+		// Wait for the detached run to actually return, not just to be
+		// signalled — RemoveAll races the run's own writes, not the channel.
+		select {
+		case <-finished:
+		case <-time.After(30 * time.Second):
+			t.Error("detached runner did not finish before cleanup")
+		}
+	})
+	worker, err := workerserver.New(workerserver.Config{Root: root, Token: "test-token", RequireAuth: true, Capabilities: isolatedTestCapabilities(), Runner: runner, Environment: environment.Verifier{}})
 	if err != nil {
 		t.Fatal(err)
 	}
