@@ -43,6 +43,19 @@ states:
               WT="{{ world.worktree_path }}"
               [ -z "$WT" ] && WT=".worktrees/{{ world.workspace_id }}"
               BR="{{ world.workspace_branch }}"
+              # Disposable clone-based worker: dev-workspace.sh provisions the
+              # maker workspace as a standalone `git clone` (NOT a linked
+              # worktree), and main_worktree_path == worktree_path, so
+              # `git worktree remove` cannot apply (it errors "is not a working
+              # tree" / refuses to remove the current tree) and the whole leased
+              # worker is destroyed after the run anyway. Cleanup is therefore a
+              # no-op here: report cleaned so the tail advances to @exit:shipped
+              # instead of stalling. The self-host worktree loop has
+              # MAIN_WT != WT and takes the real worktree-remove path below.
+              if [ "$WT" = "$MAIN_WT" ]; then
+                jq -n '{outcome:"cleaned",last_op_ok:true,last_error:""}'
+                exit 0
+              fi
               RM_EXIT=0
               RM_OUT=$(git -C "$MAIN_WT" worktree remove --force "$WT" 2>&1) || RM_EXIT=$?
               if [ "$RM_EXIT" -ne 0 ]; then
