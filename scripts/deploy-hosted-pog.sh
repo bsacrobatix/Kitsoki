@@ -146,6 +146,8 @@ for unit in pog-portal.service pog-worker-finalizer.service; do
 done
 test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq "ExecStart=$hosted_engine queue worker" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+test -f /opt/pog/members/gears-rust/pog/catalog.yaml
 queue_pid="$(systemctl show --property MainPID --value kitsoki-queue-worker.service)"
 if [ "$queue_pid" -gt 0 ]; then
   test "$(readlink -f "/proc/$queue_pid/exe")" = "$(readlink -f "$hosted_engine")"
