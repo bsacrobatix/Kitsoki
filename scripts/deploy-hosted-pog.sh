@@ -141,9 +141,11 @@ test -x "$hosted_engine"
 # invocation without changing that seal/control binary, which remains pinned
 # independently to the worker image's story closure.
 ! grep -q '^[[:space:]]*POG_KITSOKI_BIN=' /etc/kitsoki/queue-worker.env
-for unit in pog-portal.service pog-worker-finalizer.service; do
+for unit in kitsoki-pog.service pog-portal.service pog-worker-finalizer.service; do
   systemctl show --property Environment --value "$unit" | grep -Fq "POG_KITSOKI_BIN=$hosted_engine"
 done
+test -f /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
+grep -Fq "Environment=POG_KITSOKI_BIN=$hosted_engine" /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq "ExecStart=$hosted_engine queue worker" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 grep -Fq 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf

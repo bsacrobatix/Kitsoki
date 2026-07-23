@@ -586,6 +586,20 @@ if [ -f /etc/kitsoki/queue-worker.env ]; then
 	sed -i '/^[[:space:]]*POG_KITSOKI_BIN=/d' /etc/kitsoki/queue-worker.env
 fi
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
+# The hosted daemon owns worker dispatch, so it must use the same versioned
+# engine as the portal, finalizer, and queue worker. Historical operator
+# drop-ins selected cache-local binaries under /opt/pog/current/.artifacts;
+# those paths disappear during legitimate cache hygiene and silently override
+# the base unit after a release flip. Remove only that obsolete selector from
+# existing drop-ins, then install a lexically-last managed selector. Other
+# settings in those drop-ins remain intact.
+install -d -m 0755 /etc/systemd/system/kitsoki-pog.service.d
+for dropin in /etc/systemd/system/kitsoki-pog.service.d/*.conf; do
+	[ -f "$dropin" ] || continue
+	sed -i '/^[[:space:]]*Environment=POG_KITSOKI_BIN=/d' "$dropin"
+done
+printf '[Service]\nEnvironment=POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki\n' \
+	>/etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
 install -m 0644 "$stage/pog-worker-finalizer.service" /etc/systemd/system/pog-worker-finalizer.service
 install -m 0644 "$stage/pog-worker-finalizer.timer" /etc/systemd/system/pog-worker-finalizer.timer
@@ -605,6 +619,12 @@ systemctl daemon-reload
 systemctl enable pog-capsule-state.service kitsoki-pog.service pog-portal.service >/dev/null
 systemctl restart pog-capsule-state.service
 systemctl restart kitsoki-pog.service
+
+hosted_engine=/opt/kitsoki-hosted-pog/current/kitsoki
+test -x "$hosted_engine" || die "hosted Kitsoki engine is not executable: $hosted_engine"
+systemctl show --property Environment --value kitsoki-pog.service \
+	| grep -Fq "POG_KITSOKI_BIN=$hosted_engine" \
+	|| die "kitsoki-pog did not activate with the versioned hosted engine"
 
 for _ in $(seq 1 60); do
 	status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/me 2>/dev/null || true)"
