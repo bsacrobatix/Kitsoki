@@ -19,6 +19,8 @@ for required in \
   "$assets/node-runtime.env" \
   "$assets/pog-portal.service" \
 	"$assets/pog-capsule-state.service" \
+	"$assets/pog-worker-finalizer.service" \
+	"$assets/pog-worker-finalizer.timer" \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
 	"$capsule_state_linker" \
@@ -110,6 +112,21 @@ grep -q 'path is not empty; refusing implicit migration' "$capsule_state_linker"
 grep -q 'busy; refusing forced unmount' "$capsule_state_linker"
 grep -q 'colony_was_active' "$assets/install.sh"
 grep -q 'queue_worker_was_active' "$assets/install.sh"
+grep -q 'pog-worker-finalizer.service' "$deploy"
+grep -q 'pog-worker-finalizer.timer' "$deploy"
+grep -q 'Requires=pog-capsule-state.service' "$assets/pog-worker-finalizer.service"
+grep -q 'After=.*pog-capsule-state.service' "$assets/pog-worker-finalizer.service"
+grep -q '^User=pog$' "$assets/pog-worker-finalizer.service"
+grep -q 'WorkingDirectory=/opt/pog/current' "$assets/pog-worker-finalizer.service"
+grep -q 'POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki' "$assets/pog-worker-finalizer.service"
+grep -q 'EnvironmentFile=/etc/kitsoki/queue-worker.env' "$assets/pog-worker-finalizer.service"
+grep -q 'feedback-worker-finalizer.sh --project /opt/pog/current' "$assets/pog-worker-finalizer.service"
+! grep -q 'pog-portal.service' "$assets/pog-worker-finalizer.service"
+grep -q '^OnBootSec=' "$assets/pog-worker-finalizer.timer"
+grep -q '^OnUnitActiveSec=' "$assets/pog-worker-finalizer.timer"
+grep -q '^Persistent=true$' "$assets/pog-worker-finalizer.timer"
+grep -q 'systemctl start pog-worker-finalizer.service' "$assets/install.sh"
+grep -q 'enable --now pog-worker-finalizer.timer' "$assets/install.sh"
 grep -q 'test -L /opt/pog/current/.capsules' "$deploy"
 grep -q 'package-hosted-pog-state.sh' "$deploy"
 grep -q -- '--sync-local-state' "$deploy"

@@ -57,7 +57,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -380,8 +380,12 @@ previous_caddy="$stage/Caddyfile.previous"
 cp /etc/caddy/Caddyfile "$previous_caddy"
 previous_kitsoki_service="$stage/kitsoki-pog.service.previous"
 previous_portal_service="$stage/pog-portal.service.previous"
+previous_finalizer_service="$stage/pog-worker-finalizer.service.previous"
+previous_finalizer_timer="$stage/pog-worker-finalizer.timer.previous"
 had_previous_kitsoki_service=0
 had_previous_portal_service=0
+had_previous_finalizer_service=0
+had_previous_finalizer_timer=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
 	cp /etc/systemd/system/kitsoki-pog.service "$previous_kitsoki_service"
 	had_previous_kitsoki_service=1
@@ -389,6 +393,14 @@ fi
 if [ -f /etc/systemd/system/pog-portal.service ]; then
 	cp /etc/systemd/system/pog-portal.service "$previous_portal_service"
 	had_previous_portal_service=1
+fi
+if [ -f /etc/systemd/system/pog-worker-finalizer.service ]; then
+	cp /etc/systemd/system/pog-worker-finalizer.service "$previous_finalizer_service"
+	had_previous_finalizer_service=1
+fi
+if [ -f /etc/systemd/system/pog-worker-finalizer.timer ]; then
+	cp /etc/systemd/system/pog-worker-finalizer.timer "$previous_finalizer_timer"
+	had_previous_finalizer_timer=1
 fi
 caddy_changed=0
 services_changed=0
@@ -400,6 +412,8 @@ portfolio_link_changed=0
 release_artifacts_changed=0
 colony_was_active=0
 queue_worker_was_active=0
+finalizer_timer_was_active=0
+finalizer_timer_was_enabled=0
 
 rollback() {
 	status=$?
@@ -449,6 +463,16 @@ rollback() {
 			else
 				rm -f /etc/systemd/system/pog-portal.service
 			fi
+			if [ "$had_previous_finalizer_service" -eq 1 ]; then
+				install -m 0644 "$previous_finalizer_service" /etc/systemd/system/pog-worker-finalizer.service
+			else
+				rm -f /etc/systemd/system/pog-worker-finalizer.service
+			fi
+			if [ "$had_previous_finalizer_timer" -eq 1 ]; then
+				install -m 0644 "$previous_finalizer_timer" /etc/systemd/system/pog-worker-finalizer.timer
+			else
+				rm -f /etc/systemd/system/pog-worker-finalizer.timer
+			fi
 			systemctl daemon-reload >/dev/null 2>&1 || true
 		fi
 		if [ "$caddy_changed" -eq 1 ]; then
@@ -463,6 +487,16 @@ rollback() {
 		fi
 		[ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service >/dev/null 2>&1 || true
 		[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service >/dev/null 2>&1 || true
+		if [ "$finalizer_timer_was_enabled" -eq 1 ]; then
+			systemctl enable pog-worker-finalizer.timer >/dev/null 2>&1 || true
+		else
+			systemctl disable pog-worker-finalizer.timer >/dev/null 2>&1 || true
+		fi
+		if [ "$finalizer_timer_was_active" -eq 1 ]; then
+			systemctl start pog-worker-finalizer.timer >/dev/null 2>&1 || true
+		else
+			systemctl stop pog-worker-finalizer.timer >/dev/null 2>&1 || true
+		fi
 	fi
 	exit "$status"
 }
@@ -470,6 +504,9 @@ trap rollback EXIT
 
 systemctl is-active --quiet pog-colony-runner.service && colony_was_active=1 || true
 systemctl is-active --quiet kitsoki-queue-worker.service && queue_worker_was_active=1 || true
+systemctl is-active --quiet pog-worker-finalizer.timer && finalizer_timer_was_active=1 || true
+systemctl is-enabled --quiet pog-worker-finalizer.timer && finalizer_timer_was_enabled=1 || true
+systemctl stop pog-worker-finalizer.timer pog-worker-finalizer.service >/dev/null 2>&1 || true
 systemctl stop pog-portal.service pog-colony-runner.service kitsoki-queue-worker.service >/dev/null 2>&1 || true
 
 # Releases predating the versioned runtime wrote immutable worker ship records
@@ -530,6 +567,8 @@ install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
+install -m 0644 "$stage/pog-worker-finalizer.service" /etc/systemd/system/pog-worker-finalizer.service
+install -m 0644 "$stage/pog-worker-finalizer.timer" /etc/systemd/system/pog-worker-finalizer.timer
 if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 	printf '[Unit]\nRequires=pog-capsule-state.service\nAfter=pog-capsule-state.service\n' \
@@ -560,6 +599,16 @@ token_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Beare
 [ "$token_status" = "200" ] || die "colony service token did not authenticate against /auth/check (got ${token_status:-none})"
 bare_status="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/check 2>/dev/null || true)"
 [ "$bare_status" = "401" ] || die "unauthenticated /auth/check unexpectedly returned ${bare_status:-none}"
+
+# Reconcile once against the newly active release before the portal starts,
+# then keep doing so independently at boot and on cadence. This is deliberately
+# not a child or dependency of pog-portal.service: it is the recovery path when
+# that controller dies. systemd reads the root-only EnvironmentFile and passes
+# only the resulting environment to the unprivileged pog process.
+systemctl start pog-worker-finalizer.service
+[ "$(systemctl show --property Result --value pog-worker-finalizer.service)" = "success" ] \
+	|| die "durable worker finalizer did not complete successfully after activation"
+systemctl enable --now pog-worker-finalizer.timer >/dev/null
 
 # Mirror the token to the POG colony runner (if this host runs one) as
 # POG_RUNNER_TOKEN — the env var POG's runner-auth.mjs sends as a bearer.
@@ -641,6 +690,12 @@ esac
 	|| die "POG release does not link to stable Capsule control-plane state"
 [ "$(readlink -f /opt/pog/current/.capsules)" = "$(readlink -f "$capsule_state_root")" ] \
 	|| die "POG Capsule control-plane link does not resolve to $capsule_state_root"
+systemctl is-enabled --quiet pog-worker-finalizer.timer \
+	|| die "durable worker finalizer timer is not enabled"
+systemctl is-active --quiet pog-worker-finalizer.timer \
+	|| die "durable worker finalizer timer is not active"
+[ "$(systemctl show --property Result --value pog-worker-finalizer.service)" = "success" ] \
+	|| die "durable worker finalizer service has not completed successfully"
 if [ "$state_mode" = "sync" ]; then
 	[ "$(tr -d '[:space:]' <"$runtime_current/.hosted-pog-local-state.sha256")" = "$state_content_digest" ] \
 		|| die "active POG runtime does not match the uploaded local-state snapshot"

@@ -127,7 +127,9 @@ set -euo pipefail
 public_host="$1"
 expected_products="$2"
 node_bin=/opt/kitsoki-hosted-pog/node/current/bin/node
-systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal
+systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal pog-worker-finalizer.timer
+systemctl is-enabled --quiet pog-worker-finalizer.timer
+test "$(systemctl show --property Result --value pog-worker-finalizer.service)" = success
 test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:7778/auth/me)" = 401
 test -L /var/lib/pog/runtime
 test -L /opt/pog/current/.artifacts
@@ -299,7 +301,7 @@ for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
 	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
 done
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-portal.service,state-content-digest.mjs} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,state-content-digest.mjs} "$local_stage/"
 # The client secret travels inside the 0700 stage directories (local mktemp,
 # remote install -d) instead of the ssh argv, which would be visible in ps.
 printf '%s\n' "$GH_CLIENT_SECRET" >"$local_stage/gh-client-secret"

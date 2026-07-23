@@ -1,0 +1,13 @@
+[Unit]
+Description=Reconcile durable POG worker finalizations at boot and on cadence
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+AccuracySec=30s
+Persistent=true
+Unit=pog-worker-finalizer.service
+
+[Install]
+WantedBy=timers.target
+
