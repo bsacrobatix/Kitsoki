@@ -1,0 +1,120 @@
+app:
+  id: closure-wrapper
+  version: 0.1.0
+  title: "Closure Wrapper (test fixture)"
+  author: Test
+  license: CC0
+
+# Mimics /Users/brad/code/POG/.kitsoki/stories/pog-bugfix/app.yaml's shape: a
+# THIN world.job -> @kitsoki/bugfix adapter, except this fixture imports the
+# UNMODIFIED upstream story directly (`@kitsoki/bugfix`, not a vendored
+# in-project copy) to prove storydigest.Compute can seal a cross-repo
+# `@kitsoki/<name>` closure. See internal/capsule/storydigest's package doc
+# and TestComputeSealsCrossRepoBugfixImport.
+#
+# world_in intentionally omits POG's two delivery-push fields
+# (delivery_push_remote_url/delivery_push_ref) — those are POG-side
+# divergences from upstream bugfix's actual world schema (not yet
+# upstreamed), so mapping them here against the real embedded story would
+# fail load-time validation. Every other field mirrors POG's wrapper.
+
+world:
+  job:             { type: object, default: {} }
+  out_shipped_sha: { type: string, default: "" }
+  out_last_error:  { type: string, default: "" }
+  out_exit:        { type: string, default: "" }
+
+intents:
+  run:
+    description: "Drive the imported bugfix loop off world.job."
+    examples: [run, start]
+    priority: 90
+
+root: idle
+
+states:
+  idle:
+    view:
+      - prose: "closure wrapper ready"
+    on:
+      run:
+        - target: bf
+  done:
+    terminal: true
+    view:
+      - prose: "closure wrapper: {{ world.out_exit }}"
+
+imports:
+  bf:
+    source: "@kitsoki/bugfix"
+    entry: idle
+
+    host_bindings:
+      ticket:    host.local_files.ticket
+      vcs:       host.git
+      ci:        host.local
+      workspace: host.capsule_workspace
+      transport: host.append_to_file
+
+    world_in:
+      ticket_id:            "{{ world.job.ticket_id }}"
+      ticket_title:         "{{ world.job.ticket_title }}"
+      ticket_body:          "{{ world.job.ticket_body }}"
+      ticket_source_mode:   "freeform"
+
+      base_branch:          "{{ world.job.base_branch }}"
+      base_commit:          "{{ world.job.base_commit }}"
+
+      gate_command:         "{{ world.job.gate_command }}"
+      test_cmd:             "{{ world.job.test_cmd }}"
+      build_cmd:            "{{ world.job.build_cmd }}"
+      default_landing_gate: "{{ world.job.default_landing_gate }}"
+
+      acceptance_contract:  "{{ world.job.acceptance_contract }}"
+
+      audit_actor:          "{{ world.job.audit_actor }}"
+      audit_mode:           "{{ world.job.audit_mode }}"
+
+      bugfix_exit:          "{{ world.job.bugfix_exit }}"
+
+      auto_triage:          "{{ world.job.auto_triage }}"
+      escalate_low_value:   "{{ world.job.escalate_low_value }}"
+
+      judge_mode:           "{{ world.job.judge_mode }}"
+
+    exits:
+      shipped:
+        to: done
+        set:
+          out_shipped_sha: "{{ world.bf__shipped_sha }}"
+          out_exit: "shipped"
+      needs-human:
+        to: done
+        set:
+          out_last_error: "{{ world.bf__last_error }}"
+          out_exit: "needs-human"
+      not-reproducible:
+        to: done
+        set:
+          out_last_error: "{{ world.bf__last_error }}"
+          out_exit: "not-reproducible"
+      abandoned:
+        to: done
+        set:
+          out_exit: "abandoned"
+      pick_ticket:
+        to: done
+        set:
+          out_exit: "pick_ticket"
+      done:
+        to: done
+        set:
+          out_exit: "done"
+      merged:
+        to: done
+        set:
+          out_exit: "merged"
+      triaged:
+        to: done
+        set:
+          out_exit: "triaged"

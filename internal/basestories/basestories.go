@@ -43,10 +43,17 @@
 //     grew a fetching one.
 //   - No fs.FS plumbing through the loader/runtime: deliberately rejected in
 //     favour of the cache (above).
-//   - This package does NOT decide WHEN to fall back to the embedded library;
-//     it only delivers the on-disk root. The override order (--kitsoki-repo ›
-//     on-disk kitsoki root › embedded) lives in the loader's import resolver
-//     (internal/app, cmd/kitsoki).
+//   - This package does NOT decide WHEN an on-disk kitsoki checkout should be
+//     preferred over the embedded library; [Materialize] only delivers the
+//     on-disk embedded root. The full override order (--kitsoki-repo ›
+//     on-disk kitsoki root › embedded) is threaded by the loader's import
+//     resolver (internal/app), which calls this package for the embedded
+//     tier specifically. [DefaultResolver] (resolver.go) DOES own the
+//     $KITSOKI_REPO-override-vs-embedded decision for the two callers that
+//     need a resolver with no CLI context to thread it from
+//     (internal/capsule/storydigest, internal/capsule/storylauncher):
+//     cmd/kitsoki's own resolver adds its CLI-only kit-dev/staged tiers on
+//     top of this one rather than duplicating it.
 package basestories
 
 import "errors"

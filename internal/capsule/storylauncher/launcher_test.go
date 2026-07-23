@@ -81,6 +81,122 @@ states:
 	}
 }
 
+// TestLauncherResolvesCrossRepoKitsokiImport proves the other half of the
+// VENDORED bugfix closure fix (see internal/capsule/storydigest's package
+// doc): a story that imports `@kitsoki/<name>` — content resolved by
+// basestories.DefaultResolver rather than requiring an in-project vendored
+// copy — not only SEALS (storydigest_test.go) but also LAUNCHES and drives
+// through the imported child to a terminal ci_verdict, the same way
+// storydigest.Compute and storylauncher.Launch are wired to agree on what
+// `@kitsoki/<name>` resolves to. This uses the resolver's $KITSOKI_REPO
+// override tier with a small synthetic child story (a deterministic stand-in
+// for `@kitsoki/bugfix` — launching the real bugfix story requires a live
+// coding agent, out of scope for this unit test) rather than the real
+// embedded library, so the test is fast and needs no agent/model.
+func TestLauncherResolvesCrossRepoKitsokiImport(t *testing.T) {
+	writeFile := func(path, contents string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	repo := t.TempDir()
+	writeFile(filepath.Join(repo, "stories", "childkit", "app.yaml"), `app:
+  id: childkit
+  version: 0.1.0
+  title: Child Kit
+  author: Test
+  license: CC0
+world:
+  greeting: { type: string, default: "" }
+intents:
+  run: { description: run, examples: [run], priority: 1 }
+root: idle
+exits:
+  finished:
+    description: "child done"
+states:
+  idle:
+    view: [{ prose: "{{ world.greeting }}" }]
+    on_enter:
+      - emit_intent: run
+    on:
+      run:
+        - target: "@exit:finished"
+`)
+	t.Setenv("KITSOKI_REPO", repo)
+
+	dir := t.TempDir()
+	story := filepath.Join(dir, "app.yaml")
+	writeFile(story, `app:
+  id: cross-repo-wrapper
+  version: 0.1.0
+  title: Cross Repo Wrapper
+  author: Test
+  license: CC0
+world:
+  ci_job_id: { type: string, default: "" }
+  ci_pipeline: { type: string, default: "" }
+  ci_trigger: { type: object, default: {} }
+  ci_source: { type: object, default: {} }
+  ci_workspace: { type: object, default: {} }
+  ci_environment: { type: object, default: {} }
+  ci_policy: { type: object, default: {} }
+  ci_verdict: { type: object, default: {} }
+intents:
+  run: { description: run, examples: [run], priority: 1 }
+root: idle
+states:
+  idle:
+    view: [{ prose: idle }]
+    on:
+      run:
+        - target: child
+  done:
+    terminal: true
+    view: [{ prose: done }]
+imports:
+  child:
+    source: "@kitsoki/childkit"
+    entry: idle
+    world_in:
+      greeting: "hello"
+    exits:
+      finished:
+        to: done
+        set:
+          ci_verdict:
+            schema: capsule-ci-verdict/v1
+            pipeline: change
+            outcome: passed
+            checks: []
+            promotion_eligible: true
+            source_digest: "{{ world.ci_source.digest }}"
+            story_digest: sha256:story
+            environment_digest: "{{ world.ci_environment.digest }}"
+            envelope_digest: "{{ world.ci_trigger.envelope_digest }}"
+`)
+	lock, err := environment.SealLock(environment.Lock{Schema: environment.LockSchema, ID: "ci", DefinitionDigest: "sha256:env-def", Network: "none", Sandbox: "supervised"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "p", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "app.yaml", StoryDigest: "sha256:story", Environment: lock, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Launcher{StoryPath: story}.Launch(context.Background(), executor.Prepared{Envelope: envelope})
+	if err != nil {
+		t.Fatalf("launch cross-repo @kitsoki/childkit import: %v", err)
+	}
+	if got.Outcome != "passed" || got.EnvelopeDigest != envelope.Digest {
+		t.Fatalf("verdict %#v", got)
+	}
+}
+
 func TestApplyAgentPolicyFailsClosedAndSealsProfiles(t *testing.T) {
 	tests := []struct {
 		name       string

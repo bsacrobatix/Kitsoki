@@ -11,6 +11,7 @@ import (
 
 	mcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"kitsoki/internal/app"
+	"kitsoki/internal/basestories"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/effect"
@@ -63,7 +64,13 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	if err != nil {
 		return ci.Verdict{}, err
 	}
-	def, err := app.Load(path)
+	// The default resolver (basestories.DefaultResolver: $KITSOKI_REPO
+	// override, else the engine's embedded story library) lets a sealed
+	// story that imports `@kitsoki/<name>` — e.g. a cross-repo wrapper
+	// importing `@kitsoki/bugfix` — launch here the same way it sealed in
+	// storydigest.Compute. See that package's doc for the digest-pinning
+	// rationale this launch path shares.
+	def, err := app.LoadWithResolver(path, nil, basestories.DefaultResolver())
 	if err != nil {
 		return ci.Verdict{}, fmt.Errorf("capsule ci: load story: %w", err)
 	}

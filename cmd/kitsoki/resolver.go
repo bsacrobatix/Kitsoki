@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,8 +44,18 @@ import (
 //     copy); return ("",nil) when neither override is set.
 //   - override=false → materialize the embedded library and return
 //     <root>/<name>/app.yaml, erroring if the embedded library lacks the story.
+//
+// The $KITSOKI_REPO-override-vs-embedded-library decision itself (the last
+// two paragraphs above) is basestories.DefaultResolver — the process-global
+// subset of this resolver with no CLI-only state. This function layers the
+// kit-dev override and the staged-candidate wrapper on top of it rather than
+// duplicating that logic, so the two callers with no CLI context to build a
+// resolver from (internal/capsule/storydigest, internal/capsule/storylauncher)
+// share the exact same $KITSOKI_REPO/embedded behaviour this CLI resolver
+// falls back to.
 func buildImportResolver() app.ImportResolver {
-	base := func(name, _ string, override bool) (string, error) {
+	fallback := basestories.DefaultResolver()
+	base := func(name, importerDir string, override bool) (string, error) {
 		if override {
 			if devPath := kitdev.Resolve(name); devPath != "" {
 				candidate := filepath.Join(devPath, "app.yaml")
@@ -56,29 +65,8 @@ func buildImportResolver() app.ImportResolver {
 				}
 				return candidate, nil
 			}
-			repo := os.Getenv(kitrepo.EnvVar)
-			if repo == "" {
-				return "", nil // no override configured; fall through
-			}
-			candidate := filepath.Join(repo, "stories", name, "app.yaml")
-			if _, err := os.Stat(candidate); err != nil {
-				return "", fmt.Errorf("%s=%s: story %q not found (looked for %s): %w",
-					kitrepo.EnvVar, repo, name, candidate, err)
-			}
-			return candidate, nil
 		}
-
-		// Embedded-library fallback.
-		root, err := basestories.Materialize(context.Background())
-		if err != nil {
-			return "", fmt.Errorf("resolve @kitsoki/%s from embedded library: %w", name, err)
-		}
-		candidate := filepath.Join(root, name, "app.yaml")
-		if _, statErr := os.Stat(candidate); statErr != nil {
-			return "", fmt.Errorf("@kitsoki/%s: not in the embedded story library (looked for %s): %w",
-				name, candidate, statErr)
-		}
-		return candidate, nil
+		return fallback(name, importerDir, override)
 	}
 	// The selector reads $KITSOKI_KIT_STAGED at resolve time — same
 	// env-not-captured-flag reasoning as $KITSOKI_REPO above.
