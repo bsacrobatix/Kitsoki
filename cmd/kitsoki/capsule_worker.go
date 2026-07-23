@@ -95,7 +95,13 @@ func capsuleWorkerRunCmd() *cobra.Command {
 			if workspace != "" {
 				launchPolicy = host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{workspace}}
 			}
-			launcher := storylauncher.Launcher{StoryPath: storyPath, ProjectRoot: workspace, AgentBackend: agentBackend, AgentLaunchPolicy: launchPolicy}
+			launcher := storylauncher.Launcher{
+				StoryPath:         storyPath,
+				ProjectRoot:       workspace,
+				AgentBackend:      agentBackend,
+				AgentModel:        capsuleWorkerAgentModel(agentBackend),
+				AgentLaunchPolicy: launchPolicy,
+			}
 			// Only hand over a non-nil sink. Assigning a nil *store.JSONLSink to
 			// the interface-typed EventSink field yields a typed-nil interface
 			// that still satisfies `!= nil`, so the launcher would enable
@@ -143,6 +149,17 @@ func capsuleWorkerRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", "", "allowed coding-agent backend for story agent calls (default claude)")
 	cmd.Flags().StringVar(&observedImage, "observed-image", "", "immutable image identity observed by the enclosing container executor")
 	return cmd
+}
+
+func capsuleWorkerAgentModel(agentBackend string) string {
+	if model := strings.TrimSpace(os.Getenv("KITSOKI_WORKER_AGENT_MODEL")); model != "" {
+		return model
+	}
+	backend := strings.TrimSpace(agentBackend)
+	if backend == "" || backend == "claude" {
+		return strings.TrimSpace(os.Getenv("KITSOKI_CLAUDE_MODEL"))
+	}
+	return ""
 }
 
 func capsuleWorkerServeCmd() *cobra.Command {

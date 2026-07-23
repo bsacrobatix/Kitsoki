@@ -32,6 +32,10 @@ type Launcher struct {
 	// AgentBackend is the only coding-agent backend the worker dispatches. Empty
 	// preserves the existing Claude default.
 	AgentBackend string
+	// AgentModel is the worker/session-selected model. When set, it is installed
+	// as the active harness profile so it supersedes story-local model defaults
+	// that may be invalid for the selected provider endpoint.
+	AgentModel string
 	// AgentLaunchPolicy confines any story-declared agent call to the
 	// materialized Capsule source. The zero value keeps no launch policy.
 	AgentLaunchPolicy host.AgentLaunchPolicy
@@ -81,6 +85,16 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	}
 	if l.AgentBackend != "" {
 		opts = append(opts, orchestrator.WithAgentBackendName(l.AgentBackend))
+	}
+	if model := strings.TrimSpace(l.AgentModel); model != "" {
+		backend := strings.TrimSpace(l.AgentBackend)
+		if backend == "" {
+			backend = "claude"
+		}
+		const profile = "capsule-worker-selected"
+		opts = append(opts, orchestrator.WithHarnessProfiles(map[string]orchestrator.HarnessProfile{
+			profile: {Name: profile, Backend: backend, Model: model},
+		}, profile))
 	}
 	if l.AgentLaunchPolicy.Enabled {
 		opts = append(opts, orchestrator.WithAgentLaunchPolicy(l.AgentLaunchPolicy))

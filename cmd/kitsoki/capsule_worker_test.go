@@ -114,3 +114,22 @@ func TestWorkerPassEnvCapabilitiesAndLogsExposeNamesNotValues(t *testing.T) {
 		t.Fatalf("redacted log %q", redacted)
 	}
 }
+
+func TestCapsuleWorkerAgentModelPrefersGenericOverride(t *testing.T) {
+	t.Setenv("KITSOKI_WORKER_AGENT_MODEL", "gpt-5.6-terra")
+	t.Setenv("KITSOKI_CLAUDE_MODEL", "hf:zai-org/GLM-5.2")
+	if got := capsuleWorkerAgentModel("codex"); got != "gpt-5.6-terra" {
+		t.Fatalf("generic worker model = %q, want gpt-5.6-terra", got)
+	}
+}
+
+func TestCapsuleWorkerAgentModelUsesLegacyClaudeOverrideOnlyForClaude(t *testing.T) {
+	t.Setenv("KITSOKI_WORKER_AGENT_MODEL", "")
+	t.Setenv("KITSOKI_CLAUDE_MODEL", "hf:zai-org/GLM-5.2")
+	if got := capsuleWorkerAgentModel("claude"); got != "hf:zai-org/GLM-5.2" {
+		t.Fatalf("claude worker model = %q, want hf:zai-org/GLM-5.2", got)
+	}
+	if got := capsuleWorkerAgentModel("codex"); got != "" {
+		t.Fatalf("codex inherited Claude-only model %q", got)
+	}
+}
