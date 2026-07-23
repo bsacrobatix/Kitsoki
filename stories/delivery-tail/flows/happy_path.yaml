@@ -44,6 +44,18 @@ host_handlers:
             outcome:    cleaned
             last_op_ok: true
             last_error: ""
+      # report room's fix-diff artifact emission. Mocked here — the real bash
+      # mechanism is guarded separately; this proves the room ROUTES the bind
+      # through.
+      fix_diff_artifact:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok:       true
+            written:  true
+            bytes:    108
+            reason:   ""
 
 turns:
   # begin transitions bootstrap → integrate, firing on_enter → the autonomous
@@ -57,6 +69,8 @@ turns:
       verify_ok:         true
       integrate_outcome: integrated
       cleanup_outcome:   cleaned
+      fix_diff_written:  true
+      fix_diff_bytes:    108
 
 expect_terminal: true
 expect_no_errors: true

@@ -1,0 +1,108 @@
+# worker_path_skips_cleanup — the disposable-worker delivery path.
+#
+# Same headline sequence as e2e_mocked_maker/happy_path, but the maker
+# workspace is seeded as a disposable-worker CLONE (worktree_path ==
+# main_worktree_path — dev-workspace.sh's provider on a leased pool worker,
+# never a linked `git worktree`), instead of the self-host worktree layout
+# every OTHER flow in this story models (worktree_path = ".worktrees/<id>",
+# distinct from main_worktree_path = ".").
+#
+# Proves the routing in rooms/verify.yaml's `verify_green` arc: on this path
+# a green re-verify goes STRAIGHT to `report`, never entering `cleanup` at
+# all (not even to no-op) — a leased worker is either destroyed after the run
+# (nothing to clean) or deliberately kept alive to debug (must not tear
+# down), so cleanup never makes sense there. `cleanup_exec` is deliberately
+# left OUT of host_handlers below (nothing should ever call it) and
+# `expect_host_calls` pins `times: 0` for it as the hard proof; the
+# fix-diff-artifact and delivery-push report steps still fire untouched
+# (`cleanup_outcome` is set to "skipped" on the routing arc itself — the
+# room's own on_enter, which would normally mint "cleaned", never runs).
+
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  brief:                     "Fix the rate-limit burst off-by-one"
+  gate_command:               "go test ./internal/ratelimit/"
+  base_branch:                main
+  base_commit:                "d0c1a2b"
+  # Disposable clone-based worker: main_worktree_path == worktree_path (both
+  # the same standalone `git clone`, not a linked worktree) — this is the
+  # MAIN_WT==WT condition rooms/cleanup.yaml's no-op guard checks, decided
+  # here instead at rooms/verify.yaml's `verify_green` arc.
+  main_worktree_path:         "/srv/kitsoki-worker/clone"
+  worktree_path:               "/srv/kitsoki-worker/clone"
+  workspace_id:                burst-fix
+  workspace_branch:            burst-fix
+  # Delivery push configured (bundle+spaces transport), so the report room's
+  # delivery-push step takes its "pushed" arm (not the dormant no-op) —
+  # proving the push step still fires, and fires correctly, on the
+  # skip-cleanup path.
+  delivery_push_bucket_prefix: "delivery"
+  delivery_push_ref:           "integration/burst-fix"
+
+host_handlers:
+  host.run:
+    by_call:
+      integrate_exec:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            outcome:        integrated
+            integrated_sha: "c9a0d1e"
+            last_op_ok:     true
+            last_error:     ""
+      # re-verify: the IDENTICAL gate_command, GREEN on the merged commit.
+      verify-rerun: { data: { ok: true, exit_code: 0, stdout: "ok  internal/ratelimit  0.012s" } }
+      # NOTE: cleanup_exec is intentionally NOT stubbed here. On this path
+      # nothing may ever dispatch it — see the times:0 pin below.
+      fix_diff_artifact:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            ok:       true
+            written:  true
+            bytes:    221
+            reason:   ""
+      delivery_push_exec:
+        data:
+          ok: true
+          exit_code: 0
+          stdout_json:
+            outcome:    pushed
+            push_error: ""
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: __exit__shipped
+    expect_world:
+      status:            shipped
+      shipped_sha:       "c9a0d1e"
+      integrated_sha:    "c9a0d1e"
+      verify_ok:         true
+      integrate_outcome: integrated
+      # "skipped", never "cleaned" — the cleanup room's own on_enter (which
+      # mints "cleaned") never runs on this path.
+      cleanup_outcome:   skipped
+      fix_diff_written:  true
+      fix_diff_bytes:    221
+      push_outcome:      pushed
+    # Pin the deterministic host-call sequence: integrate → re-verify →
+    # fix-diff → delivery-push, with cleanup categorically absent.
+    expect_host_calls:
+      - handler: host.run
+        args: { call: integrate_exec }
+      - handler: host.run
+        args: { call: verify-rerun }
+      - handler: host.run
+        args: { call: fix_diff_artifact }
+      - handler: host.run
+        args: { call: delivery_push_exec }
+      - handler: host.run
+        args: { call: cleanup_exec }
+        times: 0
+
+expect_terminal: true
+expect_no_errors: true

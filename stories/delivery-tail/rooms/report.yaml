@@ -17,6 +17,14 @@ states:
             Merged:   '{{ world.shipped_sha }}  (on main, gate green on the merged sha)'
             Worktree: 'removed ({{ world.workspace_branch }}, branch -D)'
             Status:   'shipped'
+      - kv:
+          pairs:
+            Delivery: 'bundled {{ world.shipped_sha }} as ref {{ world.delivery_push_ref }} → artifacts/{{ world.delivery_push_bucket_prefix }}/integration.bundle'
+        when: "world.push_outcome == 'pushed'"
+      - kv:
+          pairs:
+            Delivery: 'FAILED — {{ world.push_error }}'
+        when: "world.push_outcome == 'failed'"
       - choice:
           mode: single
           prompt: "Actions"
@@ -24,6 +32,163 @@ states:
             - label: "look"
               intent: look
     on_enter:
+      # Before the shipped read-out, best-effort emit the fix diff
+      # (base_commit..shipped_sha) into the worker's mirrored artifacts dir so
+      # it lands durably at runs/<execution-id>/artifacts/fix.patch in Spaces
+      # alongside the trace/stderr the worker already mirrors:
+      # $KITSOKI_RUN_ARTIFACTS_DIR is set on every leased-worker story run
+      # (cmd/kitsoki/capsule_worker.go) and everything under it is mirrored
+      # verbatim at terminal (internal/capsule/bucketsource mirrorArtifacts).
+      # Absent that env (e.g. the self-hosting git-worktree loop, which never
+      # leases a pool worker) this is a documented no-op — never fatal, never
+      # blocks shipping. The mirror is keyed by execution id alone, so the
+      # dispatcher can locate the artifact deterministically without any new
+      # verdict evidence or host binding.
+      - invoke: host.run
+        id: fix_diff_artifact
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set -e
+              export NO_COLOR=1 GIT_PAGER=cat
+              EMITTED=0
+              emit() { jq -n "$@"; EMITTED=1; exit 0; }
+              # Same defense-in-depth as integrate.yaml's EXIT trap: guarantee
+              # stdout always carries JSON, even on an unexpected `set -e`
+              # abort, so this can never stall the shipped read-out.
+              trap 'rc=$?; if [ "$EMITTED" != "1" ]; then jq -n --arg rc "$rc" "{ok:false,written:false,bytes:0,reason:(\"fix-diff-artifact aborted (exit \"+\$rc+\")\")}"; fi; exit 0' EXIT
+              ART_DIR="${KITSOKI_RUN_ARTIFACTS_DIR:-}"
+              if [ -z "$ART_DIR" ]; then
+                emit '{ok:true,written:false,bytes:0,reason:"KITSOKI_RUN_ARTIFACTS_DIR not set (not a mirrored worker run)"}'
+              fi
+              BASE="$1"
+              SHIPPED="$2"
+              MAIN_WT="$3"
+              [ -z "$MAIN_WT" ] && MAIN_WT="."
+              if [ -z "$BASE" ] || [ -z "$SHIPPED" ]; then
+                emit '{ok:true,written:false,bytes:0,reason:"base_commit or shipped_sha not set"}'
+              fi
+              mkdir -p "$ART_DIR"
+              OUT="$ART_DIR/fix.patch"
+              ERR_TMP="$ART_DIR/.fix.patch.stderr.tmp"
+              DIFF_EXIT=0
+              git -C "$MAIN_WT" diff --binary "$BASE" "$SHIPPED" >"$OUT" 2>"$ERR_TMP" || DIFF_EXIT=$?
+              if [ "$DIFF_EXIT" -ne 0 ]; then
+                DIFF_ERR="$(cat "$ERR_TMP" 2>/dev/null | tr '\n' ' ')"
+                rm -f "$OUT" "$ERR_TMP"
+                emit --arg err "$DIFF_ERR" '{ok:false,written:false,bytes:0,reason:$err}'
+              fi
+              rm -f "$ERR_TMP"
+              BYTES=$(wc -c <"$OUT" | tr -d ' ')
+              emit --arg bytes "$BYTES" '{ok:true,written:true,bytes:($bytes|tonumber),reason:""}'
+            # $0 (script name) then $1/$2/$3 = base/shipped/main_worktree_path,
+            # passed as verbatim argv elements (same discipline as
+            # integrate.yaml's gate-string handling — never interpolated into
+            # the script's parsed text).
+            - "kitsoki-fix-diff-artifact"
+            - "{{ world.base_commit }}"
+            - "{{ world.shipped_sha }}"
+            - "{{ world.main_worktree_path }}"
+          cwd: "{{ world.main_worktree_path }}"
+          fail_on_error: false
+        bind:
+          fix_diff_written: "stdout_json.written"
+          fix_diff_bytes:   "stdout_json.bytes"
+          fix_diff_reason:  "stdout_json.reason"
+      # Delivery push: every direct-ship merges only inside the leased
+      # worker's throwaway clone, destroyed after the run — shipped_sha then
+      # names a commit in a repo that no longer exists. When
+      # delivery_push_bucket_prefix is configured, this step, BEFORE the
+      # shipped read-out:
+      #   1. points a real local ref, refs/heads/<delivery_push_ref>, at the
+      #      shipped commit in this same worktree (so the bundle below
+      #      carries it by name, not just as a bare commit object);
+      #   2. `git bundle create`s that ref into
+      #      $KITSOKI_RUN_ARTIFACTS_DIR/<delivery_push_bucket_prefix>/
+      #      integration.bundle — the SAME "write into the worker's
+      #      artifacts dir" mechanism the fix-diff-artifact step above
+      #      already uses. The worker's existing output-mirror machinery
+      #      (internal/capsule/bucketsource OutputMirror.mirrorArtifacts)
+      #      uploads every file under that dir verbatim to
+      #      runs/<execution-id>/artifacts/** at terminal, so this step
+      #      needs ZERO bucket credentials of its own — the worker process
+      #      already holds them for exactly this path. The resulting
+      #      deterministic bucket key is
+      #      runs/<execution-id>/artifacts/<delivery_push_bucket_prefix>/
+      #      integration.bundle.
+      # Config-gated OFF by default (empty delivery_push_bucket_prefix is a
+      # pure no-op, byte-identical to pre-existing behavior) until an
+      # operator sets the one activation env var. A push FAILURE never
+      # demotes the shipped verdict (the green re-verify above already
+      # proved the fix); it is recorded as push_outcome=failed with the real
+      # error so the orchestrator/portal can surface an undelivered ship.
+      - invoke: host.run
+        id: delivery_push_exec
+        with:
+          cmd: bash
+          args:
+            - "-c"
+            - |
+              set -e
+              export NO_COLOR=1 GIT_PAGER=cat
+              EMITTED=0
+              emit() { jq -n "$@"; EMITTED=1; exit 0; }
+              # Same defense-in-depth as integrate.yaml's EXIT trap / the
+              # fix-diff-artifact step above: guarantee stdout always carries
+              # JSON, even on an unexpected `set -e` abort, so a push never
+              # stalls the shipped read-out -- it degrades to a recorded
+              # failure instead.
+              trap 'rc=$?; if [ "$EMITTED" != "1" ]; then jq -n --arg rc "$rc" "{outcome:\"failed\",push_error:(\"delivery push aborted before completing (exit \"+\$rc+\")\")}"; fi; exit 0' EXIT
+              # Positional (never interpolated into this script's parsed
+              # text -- same discipline as integrate.yaml's gate-string-
+              # collision fix): a prefix/ref with shell metacharacters
+              # survives verbatim.
+              PREFIX="$1"
+              REF="$2"
+              SHA="$3"
+              MAIN_WT="$4"
+              [ -z "$MAIN_WT" ] && MAIN_WT="."
+
+              if [ -z "$PREFIX" ]; then
+                emit '{outcome:"dormant",push_error:""}'
+              fi
+              if [ -z "$REF" ] || [ -z "$SHA" ]; then
+                emit --arg e "delivery_push_bucket_prefix is set but delivery_push_ref or the shipped sha is empty" '{outcome:"failed",push_error:$e}'
+              fi
+              ART_DIR="${KITSOKI_RUN_ARTIFACTS_DIR:-}"
+              if [ -z "$ART_DIR" ]; then
+                emit --arg e "KITSOKI_RUN_ARTIFACTS_DIR not set (not a mirrored worker run); the bundle transport has no upload path here" '{outcome:"failed",push_error:$e}'
+              fi
+
+              REF_ERR=""
+              if ! REF_ERR=$(git -C "$MAIN_WT" update-ref "refs/heads/$REF" "$SHA" 2>&1); then
+                emit --arg out "$REF_ERR" '{outcome:"failed",push_error:$out}'
+              fi
+
+              BUNDLE_DIR="$ART_DIR/$PREFIX"
+              mkdir -p "$BUNDLE_DIR"
+              BUNDLE_OUT="$BUNDLE_DIR/integration.bundle"
+              BUNDLE_ERR=""
+              if ! BUNDLE_ERR=$(git -C "$MAIN_WT" bundle create "$BUNDLE_OUT" "refs/heads/$REF" 2>&1); then
+                rm -f "$BUNDLE_OUT"
+                emit --arg out "$BUNDLE_ERR" '{outcome:"failed",push_error:$out}'
+              fi
+              emit '{outcome:"pushed",push_error:""}'
+            # $0 (script name) then $1..$4 = bucket-prefix/ref/shipped-sha/
+            # main_worktree_path, passed as verbatim argv elements (same
+            # discipline as integrate.yaml's gate-string handling).
+            - "kitsoki-delivery-push-bundle"
+            - "{{ world.delivery_push_bucket_prefix }}"
+            - "{{ world.delivery_push_ref }}"
+            - "{{ world.shipped_sha }}"
+            - "{{ world.main_worktree_path }}"
+          cwd: "{{ world.main_worktree_path }}"
+          fail_on_error: false
+        bind:
+          push_outcome: "stdout_json.outcome"
+          push_error:   "stdout_json.push_error"
       - emit_intent: ship_done
     on:
       ship_done:

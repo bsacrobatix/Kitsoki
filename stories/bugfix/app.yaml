@@ -699,6 +699,16 @@ world:
   shipped_sha:      { type: string, default: "" }   # the merged commit, set after a green re-verify
   last_error:       { type: string, default: "" }   # the real failure on any needs-human arc
 
+  # Delivery-push config, projected straight through to the ship-it tail's
+  # world_in below. Empty bucket_prefix = dormant, byte-identical to
+  # pre-existing behavior. push_outcome/push_error are carried back from the
+  # tail's @exit:shipped (world.tail__push_*) so a caller can surface
+  # delivery status alongside shipped_sha.
+  delivery_push_bucket_prefix: { type: string, default: "" }
+  delivery_push_ref:           { type: string, default: "" }
+  push_outcome:                 { type: string, default: "" }   # dormant | pushed | failed
+  push_error:                   { type: string, default: "" }
+
   # ── Story-level "done" sink for standalone runs ──────────────────────
   status:           { type: string, default: "open" }
 
@@ -959,13 +969,21 @@ imports:
       base_commit:        "{{ world.base_commit }}"
       main_worktree_path: "{{ world.worktree_path }}"
       brief:              "{{ world.ticket_id }} — {{ world.ticket_title }}"
+      # Delivery-push config pass-through (see world's own
+      # delivery_push_bucket_prefix/ref field comments above).
+      delivery_push_bucket_prefix: "{{ world.delivery_push_bucket_prefix }}"
+      delivery_push_ref:           "{{ world.delivery_push_ref }}"
     exits:
       # ship-it's @exit:shipped → bugfix @exit:shipped, carrying the merged sha up.
       shipped:
         to: "@exit:shipped"
         set:
-          shipped_sha: "{{ world.tail__shipped_sha }}"
-          status:      "shipped"
+          shipped_sha:  "{{ world.tail__shipped_sha }}"
+          status:       "shipped"
+          # Carry the tail's delivery-push outcome up so a caller can report
+          # it alongside shipped_sha.
+          push_outcome: "{{ world.tail__push_outcome }}"
+          push_error:   "{{ world.tail__push_error }}"
       # ship-it's @exit:needs-human → bugfix @exit:needs-human, carrying the error.
       needs-human:
         to: "@exit:needs-human"

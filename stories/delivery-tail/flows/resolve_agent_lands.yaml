@@ -37,6 +37,11 @@ host_handlers:
       verify-rerun: { data: { ok: true, exit_code: 0, stdout: "ok  internal/ratelimit  0.012s" } }
       cleanup_exec:
         data: { ok: true, exit_code: 0, stdout_json: { outcome: cleaned, last_op_ok: true, last_error: "" } }
+      # report room's fix-diff artifact emission. Mocked here — the real bash
+      # mechanism is guarded separately; this proves the room ROUTES the bind
+      # through.
+      fix_diff_artifact:
+        data: { ok: true, exit_code: 0, stdout_json: { ok: true, written: true, bytes: 108, reason: "" } }
   host.agent.task:
     data:
       submitted:
@@ -52,6 +57,7 @@ turns:
       status:             shipped
       shipped_sha:        "e4f5a6b"
       checkpoint_outcome: saved
+      fix_diff_written:   true
 
 expect_terminal: true
 expect_no_errors: true

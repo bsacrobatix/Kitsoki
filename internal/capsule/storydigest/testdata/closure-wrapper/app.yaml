@@ -12,17 +12,21 @@ app:
 # `@kitsoki/<name>` closure. See internal/capsule/storydigest's package doc
 # and TestComputeSealsCrossRepoBugfixImport.
 #
-# world_in intentionally omits POG's two delivery-push fields
-# (delivery_push_remote_url/delivery_push_ref) — those are POG-side
-# divergences from upstream bugfix's actual world schema (not yet
-# upstreamed), so mapping them here against the real embedded story would
-# fail load-time validation. Every other field mirrors POG's wrapper.
+# Mirrors the full POG wrapper contract, including the delivery-push fields
+# (delivery_push_bucket_prefix/delivery_push_ref, and the push_outcome/
+# push_error carried back on @exit:shipped) now that upstream bugfix/
+# delivery-tail declare them as ordinary optional world_in/world_out keys.
 
 world:
-  job:             { type: object, default: {} }
-  out_shipped_sha: { type: string, default: "" }
-  out_last_error:  { type: string, default: "" }
-  out_exit:        { type: string, default: "" }
+  job:              { type: object, default: {} }
+  out_shipped_sha:  { type: string, default: "" }
+  out_last_error:   { type: string, default: "" }
+  out_exit:         { type: string, default: "" }
+  # Delivery-push outcome carried through from bf's own @exit:shipped
+  # (world.bf__push_outcome/push_error). dormant (world.job.
+  # delivery_push_bucket_prefix unset) | pushed | failed.
+  out_push_outcome: { type: string, default: "" }
+  out_push_error:   { type: string, default: "" }
 
 intents:
   run:
@@ -82,12 +86,20 @@ imports:
 
       judge_mode:           "{{ world.job.judge_mode }}"
 
+      # Optional delivery-push config, resolved once at seal time alongside
+      # every other world.job field. Empty bucket_prefix (the default) leaves
+      # bf's ship-it tail's delivery-push step a pure no-op.
+      delivery_push_bucket_prefix: "{{ world.job.delivery_push_bucket_prefix }}"
+      delivery_push_ref:           "{{ world.job.delivery_push_ref }}"
+
     exits:
       shipped:
         to: done
         set:
           out_shipped_sha: "{{ world.bf__shipped_sha }}"
           out_exit: "shipped"
+          out_push_outcome: "{{ world.bf__push_outcome }}"
+          out_push_error:   "{{ world.bf__push_error }}"
       needs-human:
         to: done
         set:

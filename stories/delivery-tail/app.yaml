@@ -12,8 +12,12 @@
 #
 # Pipeline:
 #   integrate ─▶ verify ─▶ cleanup ─▶ report ─▶ @exit:shipped
-#      │             │         │
-#      └─────────────┴─────────┴──────────────▶ @exit:needs-human (last_error)
+#      │             │  │      │
+#      │             │  └──────┴──────────────▶ report  (disposable-worker path,
+#      │             │                           MAIN_WT == WT — skips the no-op
+#      │             │                           cleanup room; see verify.yaml's
+#      │             │                           verify_green arc)
+#      └─────────────┴─────────────────────────▶ @exit:needs-human (last_error)
 #
 # World-in contract (parent must seed these):
 #   worktree_path      — the maker's worktree path (branch is checked out here)
@@ -24,6 +28,17 @@
 #   workspace_id       — worktree identity (.worktrees/<id>)
 #   build_check_disabled — skip build check (default: false)
 #   brief              — displayed in the shipped read-out
+#   delivery_push_bucket_prefix — optional subpath, under this run's mirrored
+#                        artifacts dir, to bundle the shipped commit into
+#                        (bundle+spaces transport: no git remote, no new
+#                        secret). Empty = dormant, byte-identical to prior
+#                        behavior — report's delivery-push step becomes a
+#                        pure no-op.
+#   delivery_push_ref   — the ref name (e.g. integration/<dispatch-id>) the
+#                        bundled commit is published under. Required when
+#                        delivery_push_bucket_prefix is set. A push FAILURE
+#                        is recorded (push_outcome/push_error) but never
+#                        demotes the shipped verdict — see rooms/report.yaml.
 
 app:
   id: delivery-tail
@@ -48,6 +63,8 @@ world:
   build_check_disabled: { type: bool,  default: false }
   workspace_id:        { type: string, default: "" }    # .worktrees/<id>
   brief:               { type: string, default: "" }    # displayed in report read-out
+  delivery_push_bucket_prefix: { type: string, default: "" }
+  delivery_push_ref:           { type: string, default: "" }
 
   # ── Internal state (minted by the tail rooms) ─────────────────────────────
   integrate_outcome:  { type: string, default: "" }   # integrated | conflict | build_fail | error
@@ -56,9 +73,25 @@ world:
   verify_ok:          { type: string, default: "" }   # tri-state: "" until re-verify binds
   verify_output:      { type: string, default: "" }   # the re-run gate's stdout/stderr tail
   shipped_sha:        { type: string, default: "" }   # merged commit, set after green re-verify
-  cleanup_outcome:    { type: string, default: "" }   # cleaned | refused
+  # Delivery-push outcome, minted by report's delivery-push step (report.yaml,
+  # alongside fix-diff-artifact emission below). dormant (not configured) |
+  # pushed | failed — a failure never demotes the shipped verdict; it is
+  # recorded so the orchestrator/portal can surface an undelivered ship.
+  push_outcome:       { type: string, default: "" }
+  push_error:         { type: string, default: "" }
+  # "skipped" = disposable-worker path (MAIN_WT == WT) — verify routed
+  # straight to report on the green re-verify; the cleanup room was never
+  # entered (see rooms/verify.yaml's verify_green arc).
+  cleanup_outcome:    { type: string, default: "" }   # cleaned | refused | skipped
   last_error:         { type: string, default: "" }   # the real failure on any needs-human arc
   status:             { type: string, default: "" }   # shipped | needs-human
+  # Best-effort outcome of writing base_commit..shipped_sha to
+  # $KITSOKI_RUN_ARTIFACTS_DIR/fix.patch (report room) — never blocks
+  # shipping; written=false with a non-empty reason is the honest "no
+  # mirrored artifacts dir on this run" / "diff failed" case.
+  fix_diff_written:   { type: bool,   default: false }
+  fix_diff_bytes:     { type: int,    default: 0 }
+  fix_diff_reason:    { type: string, default: "" }
   # Raw host.run result of integrate_exec — always present, even when the script
   # aborts before emitting JSON. Bound so the room can synthesize a non-blank
   # last_error on a no-JSON abort (bug #9b) instead of stalling at `integrate`.
@@ -123,7 +156,11 @@ intents:
     examples: []
     priority: 1
   verify_green:
-    description: "(internal) re-verify green on merged commit → cleanup."
+    description: >-
+      (internal) re-verify green on merged commit → cleanup (self-host
+      worktree path, MAIN_WT != WT) or straight to report (disposable-worker
+      path, MAIN_WT == WT — skips the no-op cleanup room; see rooms/
+      verify.yaml's verify_green arc).
     examples: []
     priority: 1
   verify_red:

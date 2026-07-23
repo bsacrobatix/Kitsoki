@@ -11,7 +11,9 @@
 # verdict auto-fires in STAGED mode (the verifying.yaml precedent) instead of
 # stalling for a human.
 #
-#   green → cleanup        (shipped_sha = the merged sha)
+#   green → cleanup   (self-host worktree path, MAIN_WT != WT; shipped_sha = the merged sha)
+#   green → report    (disposable-worker path, MAIN_WT == WT — skips the no-op
+#                       cleanup room entirely; see the `verify_green` arc below)
 #   red   → @exit:needs-human (last_error = the gate's stdout/stderr tail)
 
 states:
@@ -57,8 +59,26 @@ states:
       - when: "world.verify_ok == false"
         emit_intent: verify_red
     on:
+      # Decide the worker-vs-self-host routing ONCE, right here on the arc,
+      # using the SAME MAIN_WT==WT condition the cleanup room's own no-op
+      # guard uses (rooms/cleanup.yaml) — rather than entering that room just
+      # to no-op. A leased pool worker is either destroyed after the run
+      # (nothing to clean) or deliberately kept alive to debug (must NOT tear
+      # down), so cleanup never makes sense there; the self-host worktree loop
+      # (MAIN_WT != WT) still takes the real teardown path, unchanged.
+      # worktree_path/main_worktree_path default-resolution mirrors the
+      # room's bash defaulting (worktree_path "" -> .worktrees/<workspace_id>;
+      # main_worktree_path "" -> ".") so the two conditions stay in lockstep
+      # even though one is expr-lang and the other is bash.
       verify_green:
-        - target: cleanup
+        - when: "(world.worktree_path != '' ? world.worktree_path : ('.worktrees/' + world.workspace_id)) == (world.main_worktree_path != '' ? world.main_worktree_path : '.')"
+          target: report
+          effects:
+            - set:
+                shipped_sha:     "{{ world.integrated_sha }}"
+                cleanup_outcome: "skipped"
+        - default: true
+          target: cleanup
           effects:
             - set:
                 shipped_sha: "{{ world.integrated_sha }}"

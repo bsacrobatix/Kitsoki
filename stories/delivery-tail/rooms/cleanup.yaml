@@ -8,6 +8,14 @@
 #
 #   cleaned → report
 #   refused → @exit:needs-human (last_error)
+#
+# This room is entered ONLY on the self-host worktree path now — rooms/
+# verify.yaml's `verify_green` arc decides MAIN_WT==WT once, at routing time,
+# and skips straight to `report` on the disposable-worker path instead of
+# entering here. The MAIN_WT==WT no-op branch in cleanup_exec below is
+# therefore unreachable via normal routing; it is left in place as
+# defense-in-depth (harmless if some future caller ever lands here on a
+# worker path) rather than removed.
 
 states:
 

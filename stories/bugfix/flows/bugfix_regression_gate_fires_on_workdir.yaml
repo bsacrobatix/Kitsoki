@@ -73,7 +73,12 @@ host_handlers:
             last_error:     ""
       # the tail's verify: GREEN on the merged commit
       verify-rerun: { data: { ok: true, exit_code: 0, stdout: "ok  internal/ratelimit  0.012s" } }
-      # the tail's cleanup
+      # bugfix always seeds the tail's main_worktree_path == worktree_path
+      # (app.yaml world_in), so the tail ALWAYS takes the disposable-worker
+      # path (MAIN_WT==WT) and routes verify -> report directly, never
+      # entering cleanup at all (see delivery-tail/rooms/verify.yaml's
+      # verify_green arc). This stub is therefore unreachable here — left in
+      # place as defense-in-depth.
       cleanup_exec:
         data:
           ok: true
@@ -106,7 +111,10 @@ turns:
       shipped_sha:             "e4f5a6b"
       tail__integrate_outcome: integrated
       tail__verify_ok:         true
-      tail__cleanup_outcome:   cleaned
+      # "skipped", not "cleaned" — the disposable-worker path (MAIN_WT==WT,
+      # always true for bugfix's own tail import) routes straight to report;
+      # the cleanup room is never entered.
+      tail__cleanup_outcome:   skipped
 
 expect_terminal: true
 expect_no_errors: true

@@ -57,6 +57,11 @@ host_handlers:
         data: { ok: true, exit_code: 0, stdout_json: { outcome: integrated, integrated_sha: "abc1234", last_op_ok: true, last_error: "" } }
       # the tail's verify re-runs the DEFAULT landing gate (build + suite) — GREEN.
       verify-rerun: { data: { ok: true, exit_code: 0, stdout: "ok  ./...  1.2s" } }
+      # bugfix always seeds the tail's main_worktree_path == worktree_path, so
+      # the tail ALWAYS takes the disposable-worker path and routes verify ->
+      # report directly, never entering cleanup (delivery-tail/rooms/
+      # verify.yaml's verify_green arc). This stub is therefore unreachable —
+      # left in place as defense-in-depth.
       cleanup_exec:
         data: { ok: true, exit_code: 0, stdout_json: { outcome: cleaned, last_op_ok: true, last_error: "" } }
 
@@ -83,7 +88,10 @@ turns:
       shipped_sha:             "abc1234"
       tail__integrate_outcome: integrated
       tail__verify_ok:         true
-      tail__cleanup_outcome:   cleaned
+      # "skipped", not "cleaned" — the disposable-worker path (MAIN_WT==WT,
+      # always true for bugfix's own tail import) routes straight to report;
+      # the cleanup room is never entered.
+      tail__cleanup_outcome:   skipped
 
 expect_terminal: true
 expect_no_errors: true
