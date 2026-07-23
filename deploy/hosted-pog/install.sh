@@ -29,6 +29,7 @@ node_current="$node_release_root/current"
 state_release_root="/opt/kitsoki-hosted-pog/state-releases"
 runtime_release_root="/var/lib/pog/runtime-releases"
 runtime_current="/var/lib/pog/runtime"
+capsule_state_root=/var/lib/pog/capsules
 tmp_release=""
 tmp_kitsoki_release=""
 tmp_node_release=""
@@ -56,7 +57,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret import-legacy-worker-ships.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret bind-capsule-state.sh import-legacy-worker-ships.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -90,6 +91,10 @@ fi
 install -d -m 0755 /etc/kitsoki "$release_root" "$kitsoki_release_root" "$node_release_root" "$state_release_root"
 install -d -o pog -g pog -m 0750 /var/lib/pog /var/cache/pog /var/lib/kitsoki-pog /var/cache/kitsoki-pog
 install -d -o pog -g pog -m 0750 "$runtime_release_root"
+install -d -o pog -g pog -m 0750 "$capsule_state_root"
+install -d -m 0755 /usr/local/libexec
+install -m 0755 "$stage/bind-capsule-state.sh" /usr/local/libexec/kitsoki-hosted-pog-bind-capsule-state
+install -m 0644 "$stage/pog-capsule-state.service" /etc/systemd/system/pog-capsule-state.service
 
 # Portfolio members federated onto the hosted site, beyond POG's own home
 # catalog and the embedded Constructor Studio product. The set is authoritative
@@ -391,6 +396,8 @@ node_current_changed=0
 runtime_current_changed=0
 portfolio_link_changed=0
 release_artifacts_changed=0
+colony_was_active=0
+queue_worker_was_active=0
 
 rollback() {
 	status=$?
@@ -447,16 +454,21 @@ rollback() {
 			systemctl reload caddy >/dev/null 2>&1 || true
 		fi
 		if [ -n "$previous_current" ] && [ -n "$previous_kitsoki_current" ] && [ -n "$previous_node_current" ]; then
+			systemctl restart pog-capsule-state.service >/dev/null 2>&1 || true
 			systemctl restart kitsoki-pog.service pog-portal.service >/dev/null 2>&1 || true
 		else
 			systemctl stop pog-portal.service kitsoki-pog.service >/dev/null 2>&1 || true
 		fi
+		[ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service >/dev/null 2>&1 || true
+		[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service >/dev/null 2>&1 || true
 	fi
 	exit "$status"
 }
 trap rollback EXIT
 
-systemctl stop pog-portal.service >/dev/null 2>&1 || true
+systemctl is-active --quiet pog-colony-runner.service && colony_was_active=1 || true
+systemctl is-active --quiet kitsoki-queue-worker.service && queue_worker_was_active=1 || true
+systemctl stop pog-portal.service pog-colony-runner.service kitsoki-queue-worker.service >/dev/null 2>&1 || true
 
 # Releases predating the versioned runtime wrote immutable worker ship records
 # into their own .artifacts tree. Import those exact scoreboard inputs after
@@ -516,9 +528,20 @@ install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
+if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
+	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
+	printf '[Unit]\nRequires=pog-capsule-state.service\nAfter=pog-capsule-state.service\n' \
+		>/etc/systemd/system/pog-colony-runner.service.d/capsule-state.conf
+fi
+if systemctl cat kitsoki-queue-worker.service >/dev/null 2>&1; then
+	install -d -m 0755 /etc/systemd/system/kitsoki-queue-worker.service.d
+	printf '[Unit]\nRequires=pog-capsule-state.service\nAfter=pog-capsule-state.service\n' \
+		>/etc/systemd/system/kitsoki-queue-worker.service.d/capsule-state.conf
+fi
 services_changed=1
 systemctl daemon-reload
-systemctl enable kitsoki-pog.service pog-portal.service >/dev/null
+systemctl enable pog-capsule-state.service kitsoki-pog.service pog-portal.service >/dev/null
+systemctl restart pog-capsule-state.service
 systemctl restart kitsoki-pog.service
 
 for _ in $(seq 1 60); do
@@ -546,8 +569,10 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf
 	systemctl daemon-reload
-	systemctl restart pog-colony-runner.service
+	[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service
 fi
+
+[ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service
 
 systemctl restart pog-portal.service
 for _ in $(seq 1 60); do
@@ -610,6 +635,10 @@ esac
 [ -z "$(ss -ltnH 'sport = :5183')" ] || die "legacy Vite port 5183 is still listening"
 [ -L "$release/.artifacts" ] && [ "$(readlink -f "$release/.artifacts")" = "$(readlink -f "$runtime_current")" ] \
 	|| die "POG release is not bound to the versioned runtime"
+mountpoint -q /opt/pog/current/.capsules \
+	|| die "POG release is not bound to stable Capsule control-plane state"
+[ "$(stat -c '%d:%i' /opt/pog/current/.capsules)" = "$(stat -c '%d:%i' "$capsule_state_root")" ] \
+	|| die "POG Capsule control-plane mount does not resolve to $capsule_state_root"
 if [ "$state_mode" = "sync" ]; then
 	[ "$(tr -d '[:space:]' <"$runtime_current/.hosted-pog-local-state.sha256")" = "$state_content_digest" ] \
 		|| die "active POG runtime does not match the uploaded local-state snapshot"

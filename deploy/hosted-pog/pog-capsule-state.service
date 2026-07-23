@@ -1,0 +1,12 @@
+[Unit]
+Description=Bind stable POG Capsule control-plane state into the active release
+After=local-fs.target
+Before=pog-portal.service pog-colony-runner.service kitsoki-queue-worker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/kitsoki-hosted-pog-bind-capsule-state
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

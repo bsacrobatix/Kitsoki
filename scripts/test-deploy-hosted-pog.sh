@@ -7,8 +7,9 @@ packager="$root/scripts/package-hosted-pog-state.sh"
 assets="$root/deploy/hosted-pog"
 digest_tool="$assets/state-content-digest.mjs"
 legacy_ship_importer="$assets/import-legacy-worker-ships.sh"
+capsule_state_binder="$assets/bind-capsule-state.sh"
 
-bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer"
+bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_binder"
 node --check "$digest_tool"
 
 for required in \
@@ -17,8 +18,10 @@ for required in \
   "$assets/kitsoki-pog.service" \
   "$assets/node-runtime.env" \
   "$assets/pog-portal.service" \
+	"$assets/pog-capsule-state.service" \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
+	"$capsule_state_binder" \
   "$packager"; do
   [ -f "$required" ] || { echo "missing hosted POG deployment asset: $required" >&2; exit 1; }
 done
@@ -93,6 +96,20 @@ grep -q 'import-legacy-worker-ships.sh' "$assets/install.sh"
 grep -q 'import-legacy-worker-ships.sh' "$deploy"
 grep -q 'api/feedback-autonomy/scoreboard' "$assets/install.sh"
 grep -q 'autonomy scoreboard regressed from' "$assets/install.sh"
+grep -q 'bind-capsule-state.sh' "$assets/install.sh"
+grep -q 'pog-capsule-state.service' "$assets/install.sh"
+grep -q 'capsule-state.conf' "$assets/install.sh"
+grep -q 'capsule_state_root=/var/lib/pog/capsules' "$assets/install.sh"
+grep -q 'mountpoint -q /opt/pog/current/.capsules' "$assets/install.sh"
+grep -q 'Requires=.*pog-capsule-state.service' "$assets/pog-portal.service"
+grep -q 'After=.*pog-capsule-state.service' "$assets/pog-portal.service"
+grep -q 'Before=.*pog-colony-runner.service.*kitsoki-queue-worker.service' "$assets/pog-capsule-state.service"
+grep -q 'ExecStart=/usr/local/libexec/kitsoki-hosted-pog-bind-capsule-state' "$assets/pog-capsule-state.service"
+grep -q 'mount --bind' "$capsule_state_binder"
+grep -q 'path is not empty; refusing implicit migration' "$capsule_state_binder"
+grep -q 'colony_was_active' "$assets/install.sh"
+grep -q 'queue_worker_was_active' "$assets/install.sh"
+grep -q 'mountpoint -q /opt/pog/current/.capsules' "$deploy"
 grep -q 'package-hosted-pog-state.sh' "$deploy"
 grep -q -- '--sync-local-state' "$deploy"
 grep -q 'previous_node_current' "$assets/install.sh"

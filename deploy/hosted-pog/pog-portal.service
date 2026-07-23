@@ -1,7 +1,7 @@
 [Unit]
 Description=POG production portal on port 7777
-Requires=kitsoki-pog.service
-After=kitsoki-pog.service
+Requires=kitsoki-pog.service pog-capsule-state.service
+After=kitsoki-pog.service pog-capsule-state.service
 StartLimitIntervalSec=60
 StartLimitBurst=10
 
