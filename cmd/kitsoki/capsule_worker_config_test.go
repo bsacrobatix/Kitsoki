@@ -7,6 +7,7 @@ import (
 
 	"kitsoki/internal/capsule/bucketsource"
 	"kitsoki/internal/capsule/vmpool"
+	"kitsoki/internal/capsule/workerserver"
 )
 
 func TestLoadWorkerEnvConfigParsesAndExports(t *testing.T) {
@@ -63,6 +64,49 @@ func TestApplyWorkerEnvConfigRespectsExplicitFlags(t *testing.T) {
 	}
 	if opts.root != "/var/lib/kitsoki-worker" || opts.certFile != "/etc/kitsoki-worker/server.crt" || opts.keyFile != "/etc/kitsoki-worker/server.key" {
 		t.Fatalf("VM defaults not applied: %+v", opts)
+	}
+}
+
+func TestApplyWorkerEnvConfigParsesPreflightKeys(t *testing.T) {
+	values := map[string]string{
+		workerserver.WorkerEnvPreflightSkip:           "true",
+		workerserver.WorkerEnvPreflightDiskFloorBytes: "5368709120",
+		workerserver.WorkerEnvPreflightLiveAuthProbe:  "1",
+	}
+	opts := workerServeOptions{}
+	applyWorkerEnvConfig(values, func(string) bool { return false }, &opts)
+	if !opts.preflightSkip || opts.preflightDiskFloorBytes != 5<<30 || !opts.preflightLiveAuthProbe {
+		t.Fatalf("opts = %+v", opts)
+	}
+}
+
+func TestApplyWorkerEnvConfigPreflightUnparsableValuesAreIgnored(t *testing.T) {
+	values := map[string]string{
+		workerserver.WorkerEnvPreflightSkip:           "not-a-bool",
+		workerserver.WorkerEnvPreflightDiskFloorBytes: "not-a-number",
+	}
+	opts := workerServeOptions{preflightSkip: false, preflightDiskFloorBytes: 42}
+	applyWorkerEnvConfig(values, func(string) bool { return false }, &opts)
+	if opts.preflightSkip || opts.preflightDiskFloorBytes != 42 {
+		t.Fatalf("an unparsable config value must leave the prior value in place, got %+v", opts)
+	}
+}
+
+// TestApplyWorkerEnvConfigPreflightCLIFlagsOverrideEnv pins CLI-over-env
+// precedence: when the operator explicitly set a --preflight-* flag on this
+// invocation, the env file's value for the same knob must never override
+// it, matching every other worker-serve option's existing contract.
+func TestApplyWorkerEnvConfigPreflightCLIFlagsOverrideEnv(t *testing.T) {
+	values := map[string]string{
+		workerserver.WorkerEnvPreflightSkip:           "true",
+		workerserver.WorkerEnvPreflightDiskFloorBytes: "5368709120",
+		workerserver.WorkerEnvPreflightLiveAuthProbe:  "true",
+	}
+	opts := workerServeOptions{preflightSkip: false, preflightDiskFloorBytes: 999, preflightLiveAuthProbe: false}
+	changed := map[string]bool{"preflight-skip": true, "preflight-disk-floor-bytes": true, "preflight-live-auth-probe": true}
+	applyWorkerEnvConfig(values, func(name string) bool { return changed[name] }, &opts)
+	if opts.preflightSkip || opts.preflightDiskFloorBytes != 999 || opts.preflightLiveAuthProbe {
+		t.Fatalf("explicit CLI flags must be preserved over env-file values, got %+v", opts)
 	}
 }
 

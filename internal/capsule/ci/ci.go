@@ -141,6 +141,24 @@ type PoolExecutor struct {
 	// vmpool.Pool.Reconcile (`vmpool reap`/`capsule ci` reconcile). Zero uses
 	// the vmpool default. Ignored unless PreserveOnFailure is set.
 	PreserveFailedTTL time.Duration `yaml:"preserve_failed_ttl,omitempty" json:"preserve_failed_ttl,omitempty"`
+	// PreflightSkip, PreflightDiskFloorBytes, and PreflightLiveAuthProbe
+	// configure the leased worker's job-start preflight (see
+	// internal/capsule/workerserver.PreflightConfig) end to end: leaseWorker
+	// writes them into vmpool.LeaseSpec.Env under the
+	// workerserver.WorkerEnvPreflight* keys, which reach the leased
+	// droplet's generated boot env file exactly like AgentBackend's
+	// KITSOKI_WORKER_AGENT_BACKEND already does, and `capsule worker serve`
+	// applies them to every job it dispatches unless a CLI flag on this
+	// specific invocation overrides them.
+	PreflightSkip bool `yaml:"preflight_skip,omitempty" json:"preflight_skip,omitempty"`
+	// PreflightDiskFloorBytes overrides workerserver.DefaultPreflightDiskFloorBytes
+	// for every job this executor leases a worker for. Zero/unset leaves the
+	// worker's own default in effect.
+	PreflightDiskFloorBytes int64 `yaml:"preflight_disk_floor_bytes,omitempty" json:"preflight_disk_floor_bytes,omitempty"`
+	// PreflightLiveAuthProbe opts every job this executor leases a worker
+	// for into the paid one-token live credential probe. Off by default,
+	// like the worker-local flag it configures.
+	PreflightLiveAuthProbe bool `yaml:"preflight_live_auth_probe,omitempty" json:"preflight_live_auth_probe,omitempty"`
 }
 
 // SourceBucket opts a configured remote into bucket-mediated source transport

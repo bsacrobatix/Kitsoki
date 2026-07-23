@@ -230,10 +230,14 @@ func capsuleWorkerServeCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				opts := workerServeOptions{listen: listen, root: root, certFile: certFile, keyFile: keyFile, tokenEnv: tokenEnv, isolation: isolation, agentBackend: agentBackend, networks: networks, passEnv: passEnv}
+				opts := workerServeOptions{
+					listen: listen, root: root, certFile: certFile, keyFile: keyFile, tokenEnv: tokenEnv, isolation: isolation, agentBackend: agentBackend, networks: networks, passEnv: passEnv,
+					preflightSkip: preflightSkip, preflightDiskFloorBytes: preflightDiskFloorBytes, preflightLiveAuthProbe: preflightLiveAuthProbe,
+				}
 				applyWorkerEnvConfig(values, cmd.Flags().Changed, &opts)
 				listen, root, certFile, keyFile, tokenEnv, isolation, agentBackend = opts.listen, opts.root, opts.certFile, opts.keyFile, opts.tokenEnv, opts.isolation, opts.agentBackend
 				networks, passEnv = opts.networks, opts.passEnv
+				preflightSkip, preflightDiskFloorBytes, preflightLiveAuthProbe = opts.preflightSkip, opts.preflightDiskFloorBytes, opts.preflightLiveAuthProbe
 				outputs, err = workerOutputsFromEnv(values)
 				if err != nil {
 					return err

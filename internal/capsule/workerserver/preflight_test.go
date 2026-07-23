@@ -141,6 +141,21 @@ func TestPreflightCodexAuth(t *testing.T) {
 		{name: "auth.json present and parses", files: map[string][]byte{"/home/worker/.codex/auth.json": []byte(`{"tokens":{}}`)}, wantOK: true},
 		{name: "auth.json missing fails", wantOK: false},
 		{name: "auth.json unparsable fails", files: map[string][]byte{"/home/worker/.codex/auth.json": []byte("{not json")}, wantOK: false},
+		{
+			name:   "auth.json with future nested expiry passes",
+			files:  map[string][]byte{"/home/worker/.codex/auth.json": []byte(`{"tokens":{"expires_at":"2026-08-01T00:00:00Z"}}`)},
+			wantOK: true,
+		},
+		{
+			name:   "auth.json expired with a refresh token passes",
+			files:  map[string][]byte{"/home/worker/.codex/auth.json": []byte(`{"tokens":{"expires_at":"2020-01-01T00:00:00Z","refresh_token":"r"}}`)},
+			wantOK: true,
+		},
+		{
+			name:   "auth.json expired with no refresh token fails",
+			files:  map[string][]byte{"/home/worker/.codex/auth.json": []byte(`{"tokens":{"expires_at":"2020-01-01T00:00:00Z"}}`)},
+			wantOK: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -276,10 +291,16 @@ func TestPreflightModelEndpointCoherence(t *testing.T) {
 }
 
 func TestPreflightLiveAuthProbe(t *testing.T) {
-	t.Run("disabled backend passes unconditionally", func(t *testing.T) {
+	t.Run("unmodeled backend passes unconditionally", func(t *testing.T) {
+		env := fakePreflightEnv(t, nil, nil)
+		if out := preflightLiveAuthProbe(context.Background(), env, "copilot"); !out.OK {
+			t.Fatalf("an unmodeled backend must pass (out of scope): %+v", out)
+		}
+	})
+	t.Run("codex with no OPENAI_API_KEY passes (nothing to probe)", func(t *testing.T) {
 		env := fakePreflightEnv(t, nil, nil)
 		if out := preflightLiveAuthProbe(context.Background(), env, "codex"); !out.OK {
-			t.Fatalf("codex must pass (out of scope): %+v", out)
+			t.Fatalf("codex out=%+v, want pass", out)
 		}
 	})
 	t.Run("no credential to probe passes", func(t *testing.T) {
@@ -323,6 +344,84 @@ func TestPreflightLiveAuthProbe(t *testing.T) {
 			t.Fatalf("a transient network failure must not fail preflight: %+v", out)
 		}
 	})
+}
+
+func TestPreflightCodexLiveAuthProbe(t *testing.T) {
+	t.Run("200 passes and hits the models endpoint", func(t *testing.T) {
+		env := fakePreflightEnv(t, map[string]string{"OPENAI_API_KEY": "sk-test"}, nil)
+		var gotURL, gotAuth string
+		env.Do = func(req *http.Request) (*http.Response, error) {
+			gotURL = req.URL.String()
+			gotAuth = req.Header.Get("Authorization")
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
+		}
+		if out := preflightLiveAuthProbe(context.Background(), env, "codex"); !out.OK {
+			t.Fatalf("200 must pass: %+v", out)
+		}
+		if gotURL != "https://api.openai.com/v1/models" {
+			t.Fatalf("probe URL = %q", gotURL)
+		}
+		if gotAuth != "Bearer sk-test" {
+			t.Fatalf("Authorization header = %q", gotAuth)
+		}
+	})
+	t.Run("429 rate limited still confirms a valid credential and passes", func(t *testing.T) {
+		env := fakePreflightEnv(t, map[string]string{"OPENAI_API_KEY": "sk-test"}, nil)
+		env.Do = func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusTooManyRequests, Body: http.NoBody}, nil
+		}
+		if out := preflightLiveAuthProbe(context.Background(), env, "codex"); !out.OK {
+			t.Fatalf("429 must pass: %+v", out)
+		}
+	})
+	t.Run("401 fails", func(t *testing.T) {
+		env := fakePreflightEnv(t, map[string]string{"OPENAI_API_KEY": "sk-test"}, nil)
+		env.Do = func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusUnauthorized, Body: http.NoBody}, nil
+		}
+		out := preflightLiveAuthProbe(context.Background(), env, "codex")
+		if out.OK || out.Class != executor.FailureClassPreflightAuth {
+			t.Fatalf("401 must fail preflight_auth: %+v", out)
+		}
+	})
+	t.Run("synthetic api key is not probed live", func(t *testing.T) {
+		env := fakePreflightEnv(t, map[string]string{"SYNTHETIC_API_KEY": "k"}, nil)
+		env.Do = func(*http.Request) (*http.Response, error) {
+			t.Fatal("Do must not be called for SYNTHETIC_API_KEY: only OPENAI_API_KEY is probed live")
+			return nil, nil
+		}
+		if out := preflightLiveAuthProbe(context.Background(), env, "codex"); !out.OK {
+			t.Fatalf("out = %+v, want pass", out)
+		}
+	})
+}
+
+func TestCodexCredentialsExpiry(t *testing.T) {
+	cases := []struct {
+		name        string
+		doc         map[string]any
+		wantExpiry  bool
+		wantRefresh bool
+	}{
+		{name: "no recognized fields", doc: map[string]any{"tokens": map[string]any{}}},
+		{name: "bare expires_at", doc: map[string]any{"expires_at": "2025-01-01T00:00:00Z"}, wantExpiry: true},
+		{name: "bare expiresAt ms", doc: map[string]any{"expiresAt": float64(1735689600000)}, wantExpiry: true},
+		{name: "nested tokens.expires_at", doc: map[string]any{"tokens": map[string]any{"expires_at": "2025-01-01T00:00:00Z"}}, wantExpiry: true},
+		{name: "nested tokens.expiresAt ms", doc: map[string]any{"tokens": map[string]any{"expiresAt": float64(1735689600000)}}, wantExpiry: true},
+		{name: "bare refresh_token", doc: map[string]any{"refresh_token": "r"}, wantRefresh: true},
+		{name: "nested tokens.refresh_token", doc: map[string]any{"tokens": map[string]any{"refresh_token": "r"}}, wantRefresh: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, hasExpiry, hasRefresh := codexCredentialsExpiry(tc.doc)
+			if hasExpiry != tc.wantExpiry {
+				t.Fatalf("hasExpiry = %v, want %v", hasExpiry, tc.wantExpiry)
+			}
+			if hasRefresh != tc.wantRefresh {
+				t.Fatalf("hasRefresh = %v, want %v", hasRefresh, tc.wantRefresh)
+			}
+		})
+	}
 }
 
 func TestRunPreflightDisabledLiveAuthProbeNeverCallsDo(t *testing.T) {

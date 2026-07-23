@@ -49,6 +49,29 @@ pool:
 	}
 }
 
+func TestPoolExecutorConfigParsesPreflightKeys(t *testing.T) {
+	raw := []byte(`
+pool:
+  token_env: DO_POOL_TEST_TOKEN
+  image: "237561892"
+  size: m-2vcpu-16gb
+  region: sgp1
+  preflight_skip: true
+  preflight_disk_floor_bytes: 5368709120
+  preflight_live_auth_probe: true
+`)
+	var remote Remote
+	if err := yaml.Unmarshal(raw, &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Pool == nil {
+		t.Fatal("expected pool block to parse into a non-nil block")
+	}
+	if !remote.Pool.PreflightSkip || remote.Pool.PreflightDiskFloorBytes != 5<<30 || !remote.Pool.PreflightLiveAuthProbe {
+		t.Fatalf("pool = %#v", remote.Pool)
+	}
+}
+
 func TestValidateRejectsPoolCombinedWithEndpointOrSourceBucket(t *testing.T) {
 	base := PoolExecutor{TokenEnv: "DO_TOKEN", Size: "s-1vcpu-1gb", Region: "sgp1"}
 	cases := []Remote{
@@ -609,6 +632,76 @@ func TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData(t *test
 		if !strings.Contains(userData, want) {
 			t.Fatalf("user data missing %q\nfull user data:\n%s", want, userData)
 		}
+	}
+}
+
+// TestPoolProviderRunWiresPreflightConfigIntoLeaseUserData covers Run's
+// threading of cfg.Preflight{Skip,DiskFloorBytes,LiveAuthProbe} into the
+// leased worker's boot env file (via workerserver.WorkerEnvPreflight* ->
+// vmpool.LeaseSpec.Env -> generated user data), the same contract
+// AgentBackend already uses above. Zero-value knobs (the common case) must
+// not appear in the generated user data at all.
+func TestPoolProviderRunWiresPreflightConfigIntoLeaseUserData(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubRun(t, executor.Result{ExitCode: 0}, nil)
+	cfg := PoolExecutor{
+		TokenEnv:                "DO_TOKEN",
+		Image:                   "img",
+		Size:                    "s-1vcpu-1gb",
+		Region:                  "sgp1",
+		PreflightSkip:           true,
+		PreflightDiskFloorBytes: 5 << 30,
+		PreflightLiveAuthProbe:  true,
+	}
+	provider, err := newPoolProvider("vm-pool", cfg, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.Run(context.Background(), poolTestPrepared(t, "job-run-preflight", "exec-run-preflight"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	created := fixture.fake.Created()
+	if len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	userData := created[0].UserData
+	for _, want := range []string{
+		"KITSOKI_WORKER_PREFLIGHT_SKIP=1",
+		"KITSOKI_WORKER_PREFLIGHT_DISK_FLOOR_BYTES=5368709120",
+		"KITSOKI_WORKER_PREFLIGHT_LIVE_AUTH_PROBE=1",
+	} {
+		if !strings.Contains(userData, want) {
+			t.Fatalf("user data missing %q\nfull user data:\n%s", want, userData)
+		}
+	}
+}
+
+// TestPoolProviderRunOmitsZeroValuePreflightConfigFromLeaseUserData is the
+// negative case: an executor with no preflight overrides configured must
+// not write any KITSOKI_WORKER_PREFLIGHT_* key at all, so the leased
+// worker's own `capsule worker serve` defaults (and any of its own
+// boot-env-file overrides) apply unshadowed.
+func TestPoolProviderRunOmitsZeroValuePreflightConfigFromLeaseUserData(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubRun(t, executor.Result{ExitCode: 0}, nil)
+	cfg := PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1"}
+	provider, err := newPoolProvider("vm-pool", cfg, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Run(context.Background(), poolTestPrepared(t, "job-run-no-preflight", "exec-run-no-preflight"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	created := fixture.fake.Created()
+	if len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	if strings.Contains(created[0].UserData, "KITSOKI_WORKER_PREFLIGHT_") {
+		t.Fatalf("zero-value preflight config must not appear in user data:\n%s", created[0].UserData)
 	}
 }
 

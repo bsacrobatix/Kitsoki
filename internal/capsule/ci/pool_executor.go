@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -233,6 +234,19 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	}
 	if p.cfg.AgentBackend != "" {
 		leaseSpec.Env["KITSOKI_WORKER_AGENT_BACKEND"] = p.cfg.AgentBackend
+	}
+	// Job-start preflight config (internal/capsule/workerserver.PreflightConfig):
+	// written into the leased worker's boot env file so `capsule worker
+	// serve` applies it to every job dispatched on this droplet, the same
+	// contract AgentBackend above already uses.
+	if p.cfg.PreflightSkip {
+		leaseSpec.Env[workerserver.WorkerEnvPreflightSkip] = "1"
+	}
+	if p.cfg.PreflightDiskFloorBytes > 0 {
+		leaseSpec.Env[workerserver.WorkerEnvPreflightDiskFloorBytes] = strconv.FormatInt(p.cfg.PreflightDiskFloorBytes, 10)
+	}
+	if p.cfg.PreflightLiveAuthProbe {
+		leaseSpec.Env[workerserver.WorkerEnvPreflightLiveAuthProbe] = "1"
 	}
 	// POG fix: the leased worker runs the story (and the agent CLI it spawns)
 	// as root; Claude Code refuses --dangerously-skip-permissions/bypassPermissions

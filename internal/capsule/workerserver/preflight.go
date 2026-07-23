@@ -23,6 +23,22 @@ import (
 // trips it.
 const DefaultPreflightDiskFloorBytes int64 = 2 << 30
 
+// Worker boot env-file keys for PreflightConfig, the single source of truth
+// both cmd/kitsoki (capsule_worker_config.go's applyWorkerEnvConfig, parsing
+// the VM boot env file into serve options) and internal/capsule/ci
+// (pool_executor.go's leaseWorker, writing them into vmpool.LeaseSpec.Env so
+// they reach the generated cloud-init user-data / boot env file in the
+// first place) import rather than re-declaring the literal strings —
+// mirrors vmpool.WorkerEnvOutputsURL's existing precedent for the same
+// reason. CLI flags on `capsule worker serve`/`capsule worker run` always
+// take precedence over these when both are present (see
+// applyWorkerEnvConfig / capsuleWorkerPreflightArgs).
+const (
+	WorkerEnvPreflightSkip           = "KITSOKI_WORKER_PREFLIGHT_SKIP"
+	WorkerEnvPreflightDiskFloorBytes = "KITSOKI_WORKER_PREFLIGHT_DISK_FLOOR_BYTES"
+	WorkerEnvPreflightLiveAuthProbe  = "KITSOKI_WORKER_PREFLIGHT_LIVE_AUTH_PROBE"
+)
+
 // PreflightConfig controls the job-start readiness checks RunPreflight
 // performs once the source workspace is materialized and before the story
 // (and therefore any coding-agent subprocess) launches. Every check is
@@ -42,8 +58,10 @@ type PreflightConfig struct {
 	// the selected backend's API to confirm the credential is actually
 	// accepted, not just present/well-formed. Off by default — preflight
 	// must never spend money unless an operator explicitly opts in.
-	// Currently implemented for the claude backend only; other backends
-	// pass this check unconditionally (see preflightLiveAuthProbe).
+	// Implemented for claude (one max_tokens:1 Messages call) and codex's
+	// OPENAI_API_KEY channel (one free GET /v1/models call); codex's OAuth
+	// ~/.codex/auth.json channel and any other backend pass this check
+	// unconditionally (see preflightLiveAuthProbe).
 	LiveAuthProbe bool
 }
 
@@ -248,8 +266,8 @@ func rfc3339Field(doc map[string]any, key string) (time.Time, bool) {
 }
 
 // preflightCodexAuth requires either an OPENAI_API_KEY/SYNTHETIC_API_KEY or
-// a parseable ~/.codex/auth.json, matching the same two channels
-// cmd/kitsoki/vmpool.go's baked-image verifier already checks for.
+// a parseable, not-known-expired ~/.codex/auth.json, matching the same two
+// channels cmd/kitsoki/vmpool.go's baked-image verifier already checks for.
 func preflightCodexAuth(env preflightEnv) PreflightOutcome {
 	if strings.TrimSpace(env.Getenv("OPENAI_API_KEY")) != "" || strings.TrimSpace(env.Getenv("SYNTHETIC_API_KEY")) != "" {
 		return preflightPass()
@@ -269,7 +287,50 @@ func preflightCodexAuth(env preflightEnv) PreflightOutcome {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return preflightFail(executor.FailureClassPreflightAuth, "codex backend selected: credentials %s did not parse as JSON: %v", path, err)
 	}
+	expiresAt, hasExpiry, hasRefresh := codexCredentialsExpiry(doc)
+	if hasExpiry && !expiresAt.IsZero() && env.Now().After(expiresAt) && !hasRefresh {
+		return preflightFail(executor.FailureClassPreflightAuth,
+			"codex backend selected: credentials %s expired at %s with no refresh token recorded", path, expiresAt.UTC().Format(time.RFC3339))
+	}
 	return preflightPass()
+}
+
+// codexCredentialsExpiry mirrors claudeCredentialsExpiry's tolerant,
+// best-effort approach for a ~/.codex/auth.json document. The exact shape
+// the OpenAI Codex CLI writes is not pinned anywhere in this codebase (no
+// existing Kitsoki code parses it), so this tolerates several plausible
+// layouts rather than committing to one: a bare top-level "expires_at"
+// (RFC3339) / "expiresAt" (unix ms), or the same two fields nested one
+// level under a "tokens" object (a common OAuth-client-credential-cache
+// shape). hasRefresh reports whether a non-empty "refresh_token" is present
+// (bare or nested under "tokens") — an expired access token with a refresh
+// token on hand is not treated as a hard preflight failure, since the codex
+// CLI may self-refresh at runtime; this package does not attempt to
+// validate or exercise the refresh token itself (no refresh endpoint is
+// pinned anywhere in this codebase to call with confidence). A document
+// that parses but names none of the recognized expiry fields reports
+// hasExpiry=false, which is not a failure: not every credential shape
+// records one.
+func codexCredentialsExpiry(doc map[string]any) (expiresAt time.Time, hasExpiry bool, hasRefresh bool) {
+	nested, _ := doc["tokens"].(map[string]any)
+	if t, ok := rfc3339Field(doc, "expires_at"); ok {
+		expiresAt, hasExpiry = t, true
+	} else if t, ok := millisEpochField(doc, "expiresAt"); ok {
+		expiresAt, hasExpiry = t, true
+	} else if nested != nil {
+		if t, ok := rfc3339Field(nested, "expires_at"); ok {
+			expiresAt, hasExpiry = t, true
+		} else if t, ok := millisEpochField(nested, "expiresAt"); ok {
+			expiresAt, hasExpiry = t, true
+		}
+	}
+	hasRefresh = nonEmptyStringField(doc, "refresh_token") || (nested != nil && nonEmptyStringField(nested, "refresh_token"))
+	return expiresAt, hasExpiry, hasRefresh
+}
+
+func nonEmptyStringField(doc map[string]any, key string) bool {
+	v, _ := doc[key].(string)
+	return strings.TrimSpace(v) != ""
 }
 
 // preflightDiskHeadroom checks (b): free space on the workspace's
@@ -367,21 +428,29 @@ func isAnthropicBaseURL(raw string) bool {
 	return hostname == "api.anthropic.com" || strings.HasSuffix(hostname, ".anthropic.com")
 }
 
-// preflightLiveAuthProbe spends one minimal (max_tokens: 1) real request
-// against the Anthropic Messages API to confirm the resolved credential is
-// actually accepted, not merely present/well-formed. Scoped to the claude
-// backend only (codex's OAuth-based ~/.codex/auth.json has no equivalent
-// well-known minimal-cost probe modeled here yet) — other backends pass
-// unconditionally. A 429 (rate limited) still confirms the credential is
-// valid, so it passes; only an authentication-shaped rejection (401/403)
-// fails preflight. Any other transport/status outcome (network error, 5xx)
-// passes rather than false-failing preflight on a transient provider issue
-// unrelated to the credential itself — LiveAuthProbe never blocks a job
-// dispatch because the provider had a bad moment.
+// preflightLiveAuthProbe spends one minimal real request against the
+// selected backend's API to confirm the resolved credential is actually
+// accepted, not merely present/well-formed. Every backend/channel this
+// dispatches to shares the same fail-open semantics (see
+// preflightProbeRequest): a 429 (rate limited) still confirms the
+// credential is valid, so it passes; only an authentication-shaped
+// rejection (401/403) fails preflight; any other transport/status outcome
+// (network error, 5xx) passes rather than false-failing preflight on a
+// transient provider issue unrelated to the credential itself.
 func preflightLiveAuthProbe(ctx context.Context, env preflightEnv, backend string) PreflightOutcome {
-	if normalizeBackend(backend) != "claude" {
+	switch normalizeBackend(backend) {
+	case "claude":
+		return preflightClaudeLiveAuthProbe(ctx, env)
+	case "codex":
+		return preflightCodexLiveAuthProbe(ctx, env)
+	default:
 		return preflightPass()
 	}
+}
+
+// preflightClaudeLiveAuthProbe sends one max_tokens:1 Anthropic Messages API
+// call.
+func preflightClaudeLiveAuthProbe(ctx context.Context, env preflightEnv) PreflightOutcome {
 	token := strings.TrimSpace(env.Getenv("CLAUDE_CODE_OAUTH_TOKEN"))
 	authHeader, authValue := "Authorization", "Bearer "+token
 	if token == "" {
@@ -415,6 +484,34 @@ func preflightLiveAuthProbe(ctx context.Context, env preflightEnv, backend strin
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set(authHeader, authValue)
+	return preflightProbeRequest(env, req, base)
+}
+
+// preflightCodexLiveAuthProbe probes only the OPENAI_API_KEY channel: a GET
+// /v1/models call is a free (zero token cost), read-only OpenAI endpoint
+// that still requires a valid key. The OAuth ~/.codex/auth.json channel is
+// deliberately not probed live here: no refresh endpoint is pinned
+// anywhere in this codebase to call with confidence (see
+// codexCredentialsExpiry's doc comment), so preflightCodexAuth's expiry
+// check is the entire static contract for that channel, live probe or not.
+func preflightCodexLiveAuthProbe(ctx context.Context, env preflightEnv) PreflightOutcome {
+	token := strings.TrimSpace(env.Getenv("OPENAI_API_KEY"))
+	if token == "" {
+		return preflightPass()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.openai.com/v1/models", nil)
+	if err != nil {
+		return preflightPass()
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	return preflightProbeRequest(env, req, "https://api.openai.com")
+}
+
+// preflightProbeRequest sends req and interprets the response with the live
+// auth probe's shared fail-open semantics (see preflightLiveAuthProbe's doc
+// comment): only 401/403 fails preflight; everything else, including a
+// network error or any other status, passes.
+func preflightProbeRequest(env preflightEnv, req *http.Request, base string) PreflightOutcome {
 	resp, err := env.Do(req)
 	if err != nil {
 		// Network failure probing the provider is not itself proof the

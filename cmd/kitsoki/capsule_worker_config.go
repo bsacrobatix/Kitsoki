@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"kitsoki/internal/capsule/bucketsource"
@@ -100,6 +101,8 @@ func workerOutputsFromEnv(values map[string]string) (workerserver.OutputSink, er
 type workerServeOptions struct {
 	listen, root, certFile, keyFile, tokenEnv, isolation, agentBackend string
 	networks, passEnv                                                  []string
+	preflightSkip, preflightLiveAuthProbe                              bool
+	preflightDiskFloorBytes                                            int64
 }
 
 func applyWorkerEnvConfig(values map[string]string, set func(name string) bool, opts *workerServeOptions) {
@@ -123,6 +126,13 @@ func applyWorkerEnvConfig(values map[string]string, set func(name string) bool, 
 	if value, ok := values[workerEnvPassEnv]; ok && !set("pass-env") && strings.TrimSpace(value) != "" {
 		opts.passEnv = splitTrimmed(value)
 	}
+	assignBool("preflight-skip", workerserver.WorkerEnvPreflightSkip, values, set, &opts.preflightSkip)
+	assignBool("preflight-live-auth-probe", workerserver.WorkerEnvPreflightLiveAuthProbe, values, set, &opts.preflightLiveAuthProbe)
+	if value, ok := values[workerserver.WorkerEnvPreflightDiskFloorBytes]; ok && !set("preflight-disk-floor-bytes") && strings.TrimSpace(value) != "" {
+		if n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
+			opts.preflightDiskFloorBytes = n
+		}
+	}
 	// Config-driven defaults for a VM worker boot: durable root and TLS
 	// material live at the paths cloud-init writes.
 	if opts.root == "" && len(values) > 0 {
@@ -133,6 +143,22 @@ func applyWorkerEnvConfig(values map[string]string, set func(name string) bool, 
 	}
 	if opts.keyFile == "" && len(values) > 0 {
 		opts.keyFile = "/etc/kitsoki-worker/server.key"
+	}
+}
+
+// assignBool mirrors applyWorkerEnvConfig's string assign helper for a
+// boolean worker-env key: applied only when the env file sets it, the
+// operator did not already set the equivalent CLI flag, and the value
+// parses as a bool ("1"/"true"/"0"/"false", case-insensitive, per
+// strconv.ParseBool). An unparsable value is ignored rather than failing
+// the whole boot over one malformed config line.
+func assignBool(flag, key string, values map[string]string, set func(string) bool, target *bool) {
+	value, ok := values[key]
+	if !ok || set(flag) {
+		return
+	}
+	if b, err := strconv.ParseBool(strings.TrimSpace(value)); err == nil {
+		*target = b
 	}
 }
 
