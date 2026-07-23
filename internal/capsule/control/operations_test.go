@@ -49,6 +49,49 @@ func TestOperationsRequireFreshHandleAndDeclaredCommand(t *testing.T) {
 	}
 }
 
+func TestWorkspacePathAcceptsPersistedReleaseAliasToStableCapsuleRoot(t *testing.T) {
+	root := t.TempDir()
+	stable := filepath.Join(root, "stable-capsules")
+	workspace := filepath.Join(stable, "workspaces", "release-alias")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldRelease := filepath.Join(root, "releases", "old")
+	newRelease := filepath.Join(root, "releases", "new")
+	for _, release := range []string{oldRelease, newRelease} {
+		if err := os.MkdirAll(release, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(stable, filepath.Join(release, ".capsules")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := NewMemoryInstanceStore()
+	in, err := store.Create(context.Background(), Instance{
+		ID: "release-alias", DefinitionID: "d", Provider: "synthetic",
+		Path: filepath.Join(oldRelease, ".capsules", "workspaces", "release-alias"),
+		State: StateReady, Lease: Lease{Owner: "agent"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{
+		Definitions: defs{"d": {ID: "d"}}, Instances: store,
+		Grant: ScopeGrant{ProjectRoot: newRelease, WorkspaceRoots: []string{filepath.Join(newRelease, ".capsules", "workspaces")}},
+	}
+	got, err := manager.WorkspacePath(context.Background(), Handle{ID: in.ID, Generation: in.Generation})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("workspace path=%q, want stable path %q", got, want)
+	}
+}
+
 func TestRunCommandBoundsCapturedOutput(t *testing.T) {
 	root := t.TempDir()
 	provider := &provider{name: "synthetic"}

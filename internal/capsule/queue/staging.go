@@ -472,13 +472,29 @@ func (s StagingIntegration) Land(ctx context.Context, spec Speculation) error {
 		return fmt.Errorf("queue: staging integration requires a managed speculative workspace")
 	}
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
-	if filepath.Clean(spec.WorkspacePath) != filepath.Join(workspaceRoot, spec.WorkspaceID) {
+	if !sameResolvedPath(spec.WorkspacePath, filepath.Join(workspaceRoot, spec.WorkspaceID)) {
 		return fmt.Errorf("queue: speculative workspace escapes managed workspace root")
 	}
 	if err := s.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "merge", "--repo", root, "--root", workspaceRoot, spec.WorkspaceID, "--gate", s.GateCommand, "--teardown"); err != nil {
 		return err
 	}
 	return nil
+}
+
+// sameResolvedPath accepts release aliases only when both names resolve to
+// the exact same existing path. Hosted release directories point their
+// .capsules roots at one stable store, so persisted speculative paths from an
+// older release remain valid without weakening workspace-ID confinement.
+func sameResolvedPath(actual, expected string) bool {
+	actualResolved, err := filepath.EvalSymlinks(actual)
+	if err != nil {
+		return false
+	}
+	expectedResolved, err := filepath.EvalSymlinks(expected)
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(actualResolved) == filepath.Clean(expectedResolved)
 }
 
 // ShellGate runs the declared deterministic command only in the managed

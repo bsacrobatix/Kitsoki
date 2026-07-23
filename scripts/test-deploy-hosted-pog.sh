@@ -7,9 +7,9 @@ packager="$root/scripts/package-hosted-pog-state.sh"
 assets="$root/deploy/hosted-pog"
 digest_tool="$assets/state-content-digest.mjs"
 legacy_ship_importer="$assets/import-legacy-worker-ships.sh"
-capsule_state_binder="$assets/bind-capsule-state.sh"
+capsule_state_linker="$assets/link-capsule-state.sh"
 
-bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_binder"
+bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_linker"
 node --check "$digest_tool"
 
 for required in \
@@ -21,7 +21,7 @@ for required in \
 	"$assets/pog-capsule-state.service" \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
-	"$capsule_state_binder" \
+	"$capsule_state_linker" \
   "$packager"; do
   [ -f "$required" ] || { echo "missing hosted POG deployment asset: $required" >&2; exit 1; }
 done
@@ -96,20 +96,21 @@ grep -q 'import-legacy-worker-ships.sh' "$assets/install.sh"
 grep -q 'import-legacy-worker-ships.sh' "$deploy"
 grep -q 'api/feedback-autonomy/scoreboard' "$assets/install.sh"
 grep -q 'autonomy scoreboard regressed from' "$assets/install.sh"
-grep -q 'bind-capsule-state.sh' "$assets/install.sh"
+grep -q 'link-capsule-state.sh' "$assets/install.sh"
 grep -q 'pog-capsule-state.service' "$assets/install.sh"
 grep -q 'capsule-state.conf' "$assets/install.sh"
 grep -q 'capsule_state_root=/var/lib/pog/capsules' "$assets/install.sh"
-grep -q 'mountpoint -q /opt/pog/current/.capsules' "$assets/install.sh"
+grep -q '\[ -L /opt/pog/current/.capsules \]' "$assets/install.sh"
 grep -q 'Requires=.*pog-capsule-state.service' "$assets/pog-portal.service"
 grep -q 'After=.*pog-capsule-state.service' "$assets/pog-portal.service"
 grep -q 'Before=.*pog-colony-runner.service.*kitsoki-queue-worker.service' "$assets/pog-capsule-state.service"
-grep -q 'ExecStart=/usr/local/libexec/kitsoki-hosted-pog-bind-capsule-state' "$assets/pog-capsule-state.service"
-grep -q 'mount --bind' "$capsule_state_binder"
-grep -q 'path is not empty; refusing implicit migration' "$capsule_state_binder"
+grep -q 'ExecStart=/usr/local/libexec/kitsoki-hosted-pog-link-capsule-state' "$assets/pog-capsule-state.service"
+grep -q 'ln -s "$state_root" "$target"' "$capsule_state_linker"
+grep -q 'path is not empty; refusing implicit migration' "$capsule_state_linker"
+grep -q 'busy; refusing forced unmount' "$capsule_state_linker"
 grep -q 'colony_was_active' "$assets/install.sh"
 grep -q 'queue_worker_was_active' "$assets/install.sh"
-grep -q 'mountpoint -q /opt/pog/current/.capsules' "$deploy"
+grep -q 'test -L /opt/pog/current/.capsules' "$deploy"
 grep -q 'package-hosted-pog-state.sh' "$deploy"
 grep -q -- '--sync-local-state' "$deploy"
 grep -q 'previous_node_current' "$assets/install.sh"
@@ -120,6 +121,8 @@ grep -q 'POG_PORTFOLIO_MEMBERS="$portfolio_members"' "$assets/install.sh"
 ! grep -q 'hosted catalog does not contain exactly POG and Constructor Studio' "$assets/install.sh"
 grep -Fq 'POG_RUNNER_URL= \' "$assets/install.sh"
 grep -q 'runuser -u pog -- git -C.*rev-parse HEAD' "$assets/install.sh"
+grep -q 'runuser -u pog -- git -C.*update-ref refs/heads/main' "$assets/install.sh"
+grep -q 'runuser -u pog -- git -C.*rev-parse main' "$assets/install.sh"
 grep -q 'runuser -u pog -- git -C.*status --porcelain' "$assets/install.sh"
 grep -q 'caddy validate' "$assets/install.sh"
 grep -q 'expect_public_status 401 /decks/access-probe' "$deploy"

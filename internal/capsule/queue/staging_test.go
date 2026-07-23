@@ -41,6 +41,54 @@ func TestStagingIntegrationProcessesReceiptBoundCandidateThroughProtectedStaging
 	}
 }
 
+func TestStagingIntegrationLandAcceptsPersistedReleaseAlias(t *testing.T) {
+	root := t.TempDir()
+	stable := filepath.Join(root, "stable-capsules")
+	oldRelease := filepath.Join(root, "releases", "old")
+	newRelease := filepath.Join(root, "releases", "new")
+	workspaceID := "queue-release-alias"
+	if err := os.MkdirAll(filepath.Join(stable, "workspaces", workspaceID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, release := range []string{oldRelease, newRelease} {
+		if err := os.MkdirAll(filepath.Join(release, "scripts"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(stable, filepath.Join(release, ".capsules")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(newRelease, "scripts", "dev-workspace.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	integration := StagingIntegration{
+		ProjectRoot: newRelease,
+		GateCommand: "git diff --check",
+		Runner: CommandRunnerFunc(func(_ context.Context, dir, program string, args ...string) ([]byte, error) {
+			called = true
+			if dir != newRelease || program != filepath.Join(newRelease, "scripts", "dev-workspace.sh") {
+				t.Fatalf("unexpected lifecycle call dir=%q program=%q args=%v", dir, program, args)
+			}
+			return nil, nil
+		}),
+	}
+	spec := Speculation{WorkspaceID: workspaceID, WorkspacePath: filepath.Join(oldRelease, ".capsules", "workspaces", workspaceID)}
+	if err := integration.Land(context.Background(), spec); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("managed lifecycle was not called")
+	}
+	outside := filepath.Join(root, "outside", workspaceID)
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := integration.Land(context.Background(), Speculation{WorkspaceID: workspaceID, WorkspacePath: outside}); err == nil || !strings.Contains(err.Error(), "escapes") {
+		t.Fatalf("outside workspace err=%v", err)
+	}
+}
+
 func TestProtectedIntegrationRetainsExactCandidateWorkspaceForSourcePromotion(t *testing.T) {
 	root := protectedQueueRepo(t)
 	base := git(t, root, "rev-parse", "HEAD")

@@ -57,7 +57,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret bind-capsule-state.sh import-legacy-worker-ships.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -93,7 +93,7 @@ install -d -o pog -g pog -m 0750 /var/lib/pog /var/cache/pog /var/lib/kitsoki-po
 install -d -o pog -g pog -m 0750 "$runtime_release_root"
 install -d -o pog -g pog -m 0750 "$capsule_state_root"
 install -d -m 0755 /usr/local/libexec
-install -m 0755 "$stage/bind-capsule-state.sh" /usr/local/libexec/kitsoki-hosted-pog-bind-capsule-state
+install -m 0755 "$stage/link-capsule-state.sh" /usr/local/libexec/kitsoki-hosted-pog-link-capsule-state
 install -m 0644 "$stage/pog-capsule-state.service" /etc/systemd/system/pog-capsule-state.service
 
 # Portfolio members federated onto the hosted site, beyond POG's own home
@@ -191,6 +191,8 @@ if [ ! -d "$release/.git" ]; then
 	tmp_release=""
 fi
 [ "$(runuser -u pog -- git -C "$release" rev-parse HEAD)" = "$pog_sha" ] || die "release checkout does not match requested SHA"
+runuser -u pog -- git -C "$release" update-ref refs/heads/main "$pog_sha"
+[ "$(runuser -u pog -- git -C "$release" rev-parse main)" = "$pog_sha" ] || die "release main ref does not match requested SHA"
 [ -z "$(runuser -u pog -- git -C "$release" status --porcelain --untracked-files=no)" ] || die "release checkout has tracked changes: $release"
 [ -f "$release/portal/dist/index.html" ] || die "release build output is missing"
 [ -f "$release/portal/server/server.mjs" ] || die "release production server is missing"
@@ -635,10 +637,10 @@ esac
 [ -z "$(ss -ltnH 'sport = :5183')" ] || die "legacy Vite port 5183 is still listening"
 [ -L "$release/.artifacts" ] && [ "$(readlink -f "$release/.artifacts")" = "$(readlink -f "$runtime_current")" ] \
 	|| die "POG release is not bound to the versioned runtime"
-mountpoint -q /opt/pog/current/.capsules \
-	|| die "POG release is not bound to stable Capsule control-plane state"
-[ "$(stat -c '%d:%i' /opt/pog/current/.capsules)" = "$(stat -c '%d:%i' "$capsule_state_root")" ] \
-	|| die "POG Capsule control-plane mount does not resolve to $capsule_state_root"
+[ -L /opt/pog/current/.capsules ] \
+	|| die "POG release does not link to stable Capsule control-plane state"
+[ "$(readlink -f /opt/pog/current/.capsules)" = "$(readlink -f "$capsule_state_root")" ] \
+	|| die "POG Capsule control-plane link does not resolve to $capsule_state_root"
 if [ "$state_mode" = "sync" ]; then
 	[ "$(tr -d '[:space:]' <"$runtime_current/.hosted-pog-local-state.sha256")" = "$state_content_digest" ] \
 		|| die "active POG runtime does not match the uploaded local-state snapshot"
