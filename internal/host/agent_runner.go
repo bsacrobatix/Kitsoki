@@ -56,6 +56,19 @@ type ClaudeRun struct {
 	Usage map[string]any
 	// CostUSD is the result event's total_cost_usd (0 when absent).
 	CostUSD float64
+	// FailureClass is a best-effort classification of why the subprocess
+	// failed, computed at agent-exit handling time (the point this outcome
+	// is actually known) via ClassifyAgentFailureText against the captured
+	// stderr/Infra text: "agent_auth", "agent_quota", "infra", or "" when
+	// the run succeeded or matched no known signature. Populated whenever
+	// ExitCode != 0 or Infra != nil; empty on a clean run. Capsule worker
+	// dispatch (cmd/kitsoki) reuses ClassifyAgentFailureText directly
+	// against the fuller text it has available (the launcher/story error),
+	// rather than this field, since a ClaudeRun rarely survives that many
+	// process boundaries intact — this field's purpose is to make the
+	// classification available to any caller that DOES hold the ClaudeRun
+	// (tests, future direct callers) without re-deriving it.
+	FailureClass string
 }
 
 // ClaudeRunner runs the claude binary one-shot and returns its
@@ -257,10 +270,11 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 		if ctx.Err() != nil {
 			return ClaudeRun{}, ctx.Err()
 		}
+		stderr := se.String()
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			return ClaudeRun{Stdout: out, Stderr: se.String(), ExitCode: exitErr.ExitCode()}, nil
+			return ClaudeRun{Stdout: out, Stderr: stderr, ExitCode: exitErr.ExitCode(), FailureClass: ClassifyAgentFailureText(stderr)}, nil
 		}
-		return ClaudeRun{Stdout: out, Stderr: se.String(), Infra: runErr}, nil
+		return ClaudeRun{Stdout: out, Stderr: stderr, Infra: runErr, FailureClass: ClassifyAgentFailureText(stderr + " " + runErr.Error())}, nil
 	}
 	return ClaudeRun{Stdout: out, Stderr: se.String()}, nil
 }
@@ -369,14 +383,14 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 
 	stdoutPipe, pipeErr := cmd.StdoutPipe()
 	if pipeErr != nil {
-		return ClaudeRun{Infra: pipeErr}, "", nil
+		return ClaudeRun{Infra: pipeErr, FailureClass: ClassifyAgentFailureText(pipeErr.Error())}, "", nil
 	}
 	var se strings.Builder
 	cmd.Stderr = &se
 
 	if startErr := cmd.Start(); startErr != nil {
 		finish(nil, startErr.Error())
-		return ClaudeRun{Infra: startErr}, "", nil
+		return ClaudeRun{Infra: startErr, FailureClass: ClassifyAgentFailureText(startErr.Error())}, "", nil
 	}
 	processStart := time.Now()
 	appendAgentProcessNotice(ctx, processStart, storeAgentNotice{
@@ -527,6 +541,13 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	}
 	if scanErr != nil && cr.Infra == nil {
 		cr.Infra = fmt.Errorf("read stream-json stdout: %w", scanErr)
+	}
+	if cr.ExitCode != 0 || cr.Infra != nil {
+		text := cr.Stderr
+		if cr.Infra != nil {
+			text += " " + cr.Infra.Error()
+		}
+		cr.FailureClass = ClassifyAgentFailureText(text)
 	}
 	finishNotice := storeAgentNotice{
 		Subtype:       "finish",
@@ -699,6 +720,79 @@ func envBool(env []string, key string) bool {
 		if strings.HasPrefix(kv, prefix) {
 			v := strings.TrimSpace(strings.TrimPrefix(kv, prefix))
 			return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+		}
+	}
+	return false
+}
+
+// ClassifyAgentFailureText inspects agent-subprocess failure text (captured
+// stderr, a wrapped Infra error, or — for a caller further from the actual
+// subprocess, like the Capsule worker's story/launcher error — whatever
+// text survived that many process boundaries) for a known failure
+// signature. Returns "agent_auth", "agent_quota", "infra", or "" when no
+// known signature matches (the caller should treat that as an
+// unclassified/story-level failure, not retry it as infra).
+//
+// Order matters: an auth-shaped message is checked before a quota-shaped
+// one (an expired/invalid credential message never also looks like a rate
+// limit in practice, but auth is the more actionable/specific signal when
+// both could theoretically match), and looksRateLimited /
+// looksInfraError — the exact classifiers quota_control.go's provider-quota
+// bookkeeping and ladder.go's FailureInfra rotation already apply, reused
+// here rather than re-implemented — are consulted after the agent_auth
+// check this package does not otherwise need.
+//
+// This is a best-effort text heuristic, not a structured provider error
+// code: the coding-agent CLIs (claude, codex, ...) do not expose one
+// uniformly. Exported so cmd/kitsoki's capsule worker dispatch can classify
+// a Capsule RunRecord's typed failure_class using the identical signatures,
+// instead of re-implementing (and inevitably drifting from) its own
+// keyword list.
+func ClassifyAgentFailureText(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	if looksAgentAuthError(text) {
+		return "agent_auth"
+	}
+	if looksRateLimited(text) || looksAgentQuotaError(text) {
+		return "agent_quota"
+	}
+	if looksInfraError(text) {
+		return "infra"
+	}
+	return ""
+}
+
+// looksAgentAuthError matches the coding-agent CLIs' own authentication/
+// authorization failure text. Deliberately does not include a bare
+// "permission denied" — that phrase collides with ordinary filesystem
+// permission errors, which are infra/story failures, not auth ones.
+func looksAgentAuthError(s string) bool {
+	ls := strings.ToLower(s)
+	for _, sig := range []string{
+		"invalid x-api-key", "invalid api key", "authentication_error",
+		"authentication failed", "not authenticated", "unauthorized",
+		"invalid bearer token", "invalid access token", "please run /login",
+		"please run `claude login`", "oauth token is invalid", "oauth token expired",
+		"please log in", " 401",
+	} {
+		if strings.Contains(ls, sig) {
+			return true
+		}
+	}
+	return false
+}
+
+// looksAgentQuotaError extends looksRateLimited with the billing-shaped
+// signatures Anthropic/OpenAI-compatible providers use for a usage/budget
+// failure that is not literally rate-limit text (e.g. Anthropic's "credit
+// balance is too low").
+func looksAgentQuotaError(s string) bool {
+	ls := strings.ToLower(s)
+	for _, sig := range []string{"credit balance", "usage limit", "insufficient_quota", "spending limit"} {
+		if strings.Contains(ls, sig) {
+			return true
 		}
 	}
 	return false

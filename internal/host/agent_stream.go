@@ -295,14 +295,16 @@ func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (Claud
 	spec := s.Sandbox.launchSpec(ctx, s.Bin, inv.Args, inv.Stdin, inv.WorkingDir, s.SessionID)
 	running, policy, err := agentRuntimeRegistryFrom(ctx).Launch(ctx, spec)
 	if err != nil {
-		return ClaudeRun{Infra: fmt.Errorf("agent runtime launch: %w", err)}, "", nil
+		launchErr := fmt.Errorf("agent runtime launch: %w", err)
+		return ClaudeRun{Infra: launchErr, FailureClass: ClassifyAgentFailureText(launchErr.Error())}, "", nil
 	}
 	callID := CallIDFrom(ctx)
 	appendAgentRuntimeStartEvent(ctx, callID, policy)
 	res, waitErr := running.Wait(ctx)
 	appendAgentRuntimeEndEvent(ctx, callID, policy, res, waitErr)
 	if waitErr != nil {
-		return ClaudeRun{Infra: fmt.Errorf("agent runtime wait: %w", waitErr)}, "", nil
+		runtimeErr := fmt.Errorf("agent runtime wait: %w", waitErr)
+		return ClaudeRun{Infra: runtimeErr, FailureClass: ClassifyAgentFailureText(runtimeErr.Error())}, "", nil
 	}
 	reply, parsedSID, rawEvs, usage, cost := parseStreamJSONOutput(ctx, res.Stdout)
 	if strings.TrimSpace(reply) == "" {
@@ -315,6 +317,9 @@ func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (Claud
 		RawEvents: rawEvs,
 		Usage:     usage,
 		CostUSD:   cost,
+	}
+	if cr.ExitCode != 0 {
+		cr.FailureClass = ClassifyAgentFailureText(cr.Stderr)
 	}
 	recordAgentUsage(ctx, usage, cost)
 	return cr, parsedSID, nil

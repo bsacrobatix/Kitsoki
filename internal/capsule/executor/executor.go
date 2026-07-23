@@ -95,20 +95,24 @@ type Result struct {
 // executor after submission. A cancellation request is intentionally
 // non-terminal until the worker reports cancelled.
 type ExecutionStatus struct {
-	Schema         string                    `json:"schema"`
-	ExecutionID    string                    `json:"execution_id"`
-	EnvelopeDigest string                    `json:"envelope_digest,omitempty"`
-	RequestID      string                    `json:"request_id,omitempty"`
-	Status         string                    `json:"status"`
-	Stage          string                    `json:"stage,omitempty"`
-	StartedAt      time.Time                 `json:"started_at,omitempty"`
-	UpdatedAt      time.Time                 `json:"updated_at,omitempty"`
-	TerminalAt     time.Time                 `json:"terminal_at,omitempty"`
-	Error          string                    `json:"error,omitempty"`
-	Events         []Event                   `json:"events,omitempty"`
-	Result         Result                    `json:"result,omitempty"`
-	Agent          *AgentDiagnostics         `json:"agent,omitempty"`
-	Cleanup        *WorkerCleanupDiagnostics `json:"cleanup,omitempty"`
+	Schema         string    `json:"schema"`
+	ExecutionID    string    `json:"execution_id"`
+	EnvelopeDigest string    `json:"envelope_digest,omitempty"`
+	RequestID      string    `json:"request_id,omitempty"`
+	Status         string    `json:"status"`
+	Stage          string    `json:"stage,omitempty"`
+	StartedAt      time.Time `json:"started_at,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
+	TerminalAt     time.Time `json:"terminal_at,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	// FailureClass is the machine-readable reason a terminal failed run
+	// failed (see FailureClass's doc comment). Optional/additive: empty on
+	// success, on a cancelled run, and on any record predating this field.
+	FailureClass FailureClass              `json:"failure_class,omitempty"`
+	Events       []Event                   `json:"events,omitempty"`
+	Result       Result                    `json:"result,omitempty"`
+	Agent        *AgentDiagnostics         `json:"agent,omitempty"`
+	Cleanup      *WorkerCleanupDiagnostics `json:"cleanup,omitempty"`
 }
 
 func (s ExecutionStatus) Terminal() bool {

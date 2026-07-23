@@ -129,7 +129,10 @@ func TestPoolProviderStatusReadsDurableBucketRunRecord(t *testing.T) {
 		StartedAt:      time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC),
 		UpdatedAt:      time.Date(2026, 7, 20, 1, 5, 0, 0, time.UTC),
 		TerminalAt:     time.Date(2026, 7, 20, 1, 5, 0, 0, time.UTC),
-		Result:         executor.Result{ExecutionID: "exec-status", ExitCode: 0, VerdictJSON: []byte(`{"schema":"capsule-ci-verdict/v1"}`)},
+		// A "completed" record has no failure class; the failed-record case
+		// (FailureClass round-tripping through Status) is covered by
+		// TestPoolProviderStatusSurfacesFailureClass below.
+		Result: executor.Result{ExecutionID: "exec-status", ExitCode: 0, VerdictJSON: []byte(`{"schema":"capsule-ci-verdict/v1"}`)},
 	}
 	raw, err := json.Marshal(record)
 	if err != nil {
@@ -160,6 +163,47 @@ func TestPoolProviderStatusReadsDurableBucketRunRecord(t *testing.T) {
 	}
 	if _, err := controller.RequestCancel(context.Background(), "exec-status"); err == nil {
 		t.Fatal("detached cancel must refuse with a typed error")
+	}
+}
+
+// TestPoolProviderStatusSurfacesFailureClass pins Status's additive
+// RunRecord.FailureClass -> ExecutionStatus.FailureClass mapping for a
+// failed durable run record.
+func TestPoolProviderStatusSurfacesFailureClass(t *testing.T) {
+	store := poolTestStubObjectStore(t)
+	record := workerserver.RunRecord{
+		Schema:         workerserver.RunRecordSchema,
+		ExecutionID:    "exec-status-failed",
+		EnvelopeDigest: "sha256:envelope",
+		SourceDigest:   "sha256:source",
+		StoryDigest:    "sha256:story",
+		Status:         "failed",
+		Stage:          "running_story",
+		StartedAt:      time.Date(2026, 7, 20, 1, 0, 0, 0, time.UTC),
+		UpdatedAt:      time.Date(2026, 7, 20, 1, 5, 0, 0, time.UTC),
+		TerminalAt:     time.Date(2026, 7, 20, 1, 5, 0, 0, time.UTC),
+		Error:          "capsule worker: runner reported non-zero exit code 1",
+		FailureClass:   executor.FailureClassAgentQuota,
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Put(context.Background(), "runs/exec-status-failed/run.json", bytes.NewReader(raw), int64(len(raw)), objectstore.PutOptions{ContentType: "application/json"}); err != nil {
+		t.Fatal(err)
+	}
+
+	provider, err := newPoolProvider("vm-pool", detachTestPoolConfig(), nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := provider.(executor.ExecutionController)
+	status, err := controller.Status(context.Background(), "exec-status-failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "failed" || status.FailureClass != executor.FailureClassAgentQuota {
+		t.Fatalf("status = %+v, want failure_class agent_quota", status)
 	}
 }
 

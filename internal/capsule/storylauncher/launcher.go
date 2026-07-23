@@ -35,6 +35,20 @@ type Launcher struct {
 	// AgentModel is the worker/session-selected model. When set, it is installed
 	// as the active harness profile so it supersedes story-local model defaults
 	// that may be invalid for the selected provider endpoint.
+	//
+	// AgentModel and the endpoint (ambient ANTHROPIC_BASE_URL) are two
+	// independent channels that can disagree: an operator can route
+	// ANTHROPIC_BASE_URL at a non-Anthropic gateway while leaving AgentModel
+	// empty (the caller's KITSOKI_WORKER_AGENT_MODEL / KITSOKI_CLAUDE_MODEL
+	// were both unset), and the launch below would then dispatch with no
+	// explicit model against a gateway that does not understand the
+	// story's default one — surfacing as an opaque HTTP 400 deep inside the
+	// agent call. Launch does not itself re-validate that coherence; the
+	// Capsule worker's job-start preflight
+	// (internal/capsule/workerserver.RunPreflight, called from
+	// cmd/kitsoki's `capsule worker run` before Launch) rejects that exact
+	// combination up front with a named cause instead, so this comment is
+	// the audit trail for why no check was added here too.
 	AgentModel string
 	// AgentLaunchPolicy confines any story-declared agent call to the
 	// materialized Capsule source. The zero value keeps no launch policy.

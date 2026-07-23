@@ -382,6 +382,7 @@ func (p *poolProvider) Status(ctx context.Context, id string) (executor.Executio
 		UpdatedAt:      record.UpdatedAt,
 		TerminalAt:     record.TerminalAt,
 		Error:          record.Error,
+		FailureClass:   record.FailureClass,
 		Events:         record.Events,
 		Result:         record.Result,
 		Agent:          record.Agent,

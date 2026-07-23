@@ -50,6 +50,14 @@ func TestAuthenticatedWorkerMaterializesAndVerifiesPortableSource(t *testing.T) 
 		if prepared.ID == "remote-nonzero" {
 			return executor.Result{ExitCode: 7, VerdictArtifact: "verdict:failed"}, nil
 		}
+		if prepared.ID == "remote-classified" {
+			// Simulates cmd/kitsoki's capsuleWorkerProcessRunner having
+			// already classified the failure (a preflight rejection or a
+			// classified agent-subprocess exit) into
+			// Result.Provider["failure_class"]: the worker must trust and
+			// surface that class rather than defaulting it to "story".
+			return executor.Result{ExitCode: 1, Provider: map[string]string{"failure_class": "agent_quota"}}, nil
+		}
 		verdict, err := (storylauncher.Launcher{StoryPath: filepath.Join(workspace, prepared.Envelope.StoryPath)}).Launch(ctx, prepared)
 		if err != nil {
 			return executor.Result{}, err
@@ -145,6 +153,24 @@ func TestAuthenticatedWorkerMaterializesAndVerifiesPortableSource(t *testing.T) 
 	if nonzeroResponse.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(nonzeroRaw, []byte("non-zero exit code 7")) || !bytes.Contains(nonzeroRaw, []byte(`"status":"failed"`)) {
 		t.Fatalf("nonzero run = %d: %s", nonzeroResponse.StatusCode, nonzeroRaw)
 	}
+	if !bytes.Contains(nonzeroRaw, []byte(`"failure_class":"story"`)) {
+		t.Fatalf("an unclassified nonzero exit must default to failure_class story: %s", nonzeroRaw)
+	}
+
+	classified := prepared
+	classified.ID = "remote-classified"
+	classifiedBody, _ := json.Marshal(map[string]any{"prepared": classified})
+	classifiedRequest, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/capsules/run", bytes.NewReader(classifiedBody))
+	classifiedRequest.Header.Set("Authorization", "Bearer test-token")
+	classifiedRequest.Header.Set("Content-Type", "application/json")
+	classifiedResponse, err := client.Do(classifiedRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	classifiedRaw := readAndClose(t, classifiedResponse)
+	if classifiedResponse.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(classifiedRaw, []byte(`"failure_class":"agent_quota"`)) {
+		t.Fatalf("a runner-classified failure must surface its class: %d: %s", classifiedResponse.StatusCode, classifiedRaw)
+	}
 
 	statusRequest, _ := http.NewRequest(http.MethodGet, server.URL+"/v1/capsules/executions/"+prepared.ID, nil)
 	statusRequest.Header.Set("Authorization", "Bearer test-token")
@@ -199,6 +225,9 @@ func TestWorkerRejectsStoryClosureMismatchBeforeRunner(t *testing.T) {
 	raw := readAndClose(t, run)
 	if run.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(raw, []byte("story closure digest mismatch")) {
 		t.Fatalf("run = %d: %s", run.StatusCode, raw)
+	}
+	if !bytes.Contains(raw, []byte(`"failure_class":"verify_story"`)) {
+		t.Fatalf("run must classify a story-digest mismatch as verify_story: %s", raw)
 	}
 	if called {
 		t.Fatal("runner was called before story digest verification")
@@ -259,6 +288,9 @@ func TestWorkerRejectsEnvironmentLockFromDifferentSourceState(t *testing.T) {
 	raw := readAndClose(t, run)
 	if run.StatusCode != http.StatusUnprocessableEntity || !bytes.Contains(raw, []byte("worker lock mismatch")) || !bytes.Contains(raw, []byte(`"stage":"verify_environment"`)) {
 		t.Fatalf("run = %d: %s", run.StatusCode, raw)
+	}
+	if !bytes.Contains(raw, []byte(`"failure_class":"preflight_env"`)) {
+		t.Fatalf("run must classify an environment-lock mismatch as preflight_env: %s", raw)
 	}
 	if called {
 		t.Fatal("runner was called before environment verification")

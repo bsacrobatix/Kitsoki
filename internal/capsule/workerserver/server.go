@@ -107,10 +107,16 @@ type RunRecord struct {
 	UpdatedAt      time.Time                          `json:"updated_at"`
 	TerminalAt     time.Time                          `json:"terminal_at,omitempty"`
 	Error          string                             `json:"error,omitempty"`
-	Events         []executor.Event                   `json:"events,omitempty"`
-	Result         executor.Result                    `json:"result,omitempty"`
-	Agent          *executor.AgentDiagnostics         `json:"agent,omitempty"`
-	Cleanup        *executor.WorkerCleanupDiagnostics `json:"cleanup,omitempty"`
+	// FailureClass is the machine-readable reason a terminal "failed" run
+	// failed, assigned only at the stage that knows the cause (preflight,
+	// story-digest verification, or agent-subprocess exit handling) — see
+	// executor.FailureClass. Optional/additive: empty on success, on a
+	// cancelled run, and on any record predating this field.
+	FailureClass executor.FailureClass              `json:"failure_class,omitempty"`
+	Events       []executor.Event                   `json:"events,omitempty"`
+	Result       executor.Result                    `json:"result,omitempty"`
+	Agent        *executor.AgentDiagnostics         `json:"agent,omitempty"`
+	Cleanup      *executor.WorkerCleanupDiagnostics `json:"cleanup,omitempty"`
 }
 
 func New(cfg Config) (*Server, error) {
@@ -447,56 +453,66 @@ func (s *Server) executeRegistered(ctx context.Context, record RunRecord, prepar
 	runDir := s.runDir(prepared.ID)
 	workspace := filepath.Join(runDir, "workspace")
 	if err := os.MkdirAll(runDir, 0o700); err != nil {
-		return s.fail(ctx, record, prepared, "materialize", err)
+		return s.fail(ctx, record, prepared, "materialize", executor.FailureClassInfra, err)
 	}
 	record.Stage = "materializing_source"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.source.materializing", "running", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(ctx, record, prepared, "materialize", fmt.Errorf("capsule worker: persist materializing-source checkpoint: %w", err))
+		return s.fail(ctx, record, prepared, "materialize", executor.FailureClassInfra, fmt.Errorf("capsule worker: persist materializing-source checkpoint: %w", err))
 	}
 	if err := cloneBundle(ctx, s.sourceBundlePath(prepared.Envelope.SourceDigest), workspace, prepared.Envelope.SourceDigest); err != nil {
-		return s.fail(ctx, record, prepared, "materialize", err)
+		return s.fail(ctx, record, prepared, "materialize", executor.FailureClassInfra, err)
 	}
 	storyPath, err := confinedStoryPath(workspace, prepared.Envelope.StoryPath)
 	if err != nil {
-		return s.fail(ctx, record, prepared, "verify_story", err)
+		return s.fail(ctx, record, prepared, "verify_story", executor.FailureClassVerifyStory, err)
 	}
 	digest, err := storydigest.Compute(workspace, storyPath)
 	if err != nil {
-		return s.fail(ctx, record, prepared, "verify_story", err)
+		return s.fail(ctx, record, prepared, "verify_story", executor.FailureClassVerifyStory, err)
 	}
 	if digest.Digest != prepared.Envelope.StoryDigest {
-		return s.fail(ctx, record, prepared, "verify_story", fmt.Errorf("capsule worker: story closure digest mismatch: got %s, want %s", digest.Digest, prepared.Envelope.StoryDigest))
+		return s.fail(ctx, record, prepared, "verify_story", executor.FailureClassVerifyStory, fmt.Errorf("capsule worker: story closure digest mismatch: got %s, want %s", digest.Digest, prepared.Envelope.StoryDigest))
 	}
 	record.Stage = "verifying_environment"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.environment.verifying", "running", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(ctx, record, prepared, "verify_environment", err)
+		return s.fail(ctx, record, prepared, "verify_environment", executor.FailureClassInfra, err)
 	}
+	// A failed environment-lock verification (missing tool, engine/seal
+	// digest drift, sandbox mismatch) is a readiness problem the job-start
+	// preflight below aims to catch earlier and more cheaply; when it slips
+	// through to here anyway it is still an environment-readiness failure,
+	// not a story or agent-transport one.
 	if err := s.cfg.Environment.Verify(ctx, workspace, prepared.Envelope.Environment); err != nil {
-		return s.fail(ctx, record, prepared, "verify_environment", err)
+		return s.fail(ctx, record, prepared, "verify_environment", executor.FailureClassPreflightEnv, err)
 	}
 	record.Stage = "environment_verified"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.environment.verified", "passed", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(ctx, record, prepared, "verify_environment", err)
+		return s.fail(ctx, record, prepared, "verify_environment", executor.FailureClassInfra, err)
 	}
 	record.Stage = "running_story"
 	record.UpdatedAt = s.cfg.Now()
 	s.appendEvent(&record, prepared, "capsule.worker.story.started", "running", "")
 	if err := s.writeRun(record); err != nil {
-		return s.fail(ctx, record, prepared, "running_story", fmt.Errorf("capsule worker: persist running-story checkpoint: %w", err))
+		return s.fail(ctx, record, prepared, "running_story", executor.FailureClassInfra, fmt.Errorf("capsule worker: persist running-story checkpoint: %w", err))
 	}
 	tracePath := filepath.Join(runDir, "story-trace.jsonl")
 	result, err := s.cfg.Runner(ctx, workspace, prepared, tracePath)
 	if err != nil {
-		return s.fail(ctx, record, prepared, "running_story", err)
+		// The runner process itself failed to produce a result (could not
+		// start, was killed, never wrote its result file): a transport/infra
+		// failure, not a story or agent-auth/quota one — those arrive as a
+		// normal (non-nil-error) Result with a non-zero ExitCode below,
+		// carrying their own classification.
+		return s.fail(ctx, record, prepared, "running_story", executor.FailureClassInfra, err)
 	}
 	if result.ExitCode != 0 {
-		return s.fail(ctx, record, prepared, "running_story", fmt.Errorf("capsule worker: runner reported non-zero exit code %d", result.ExitCode))
+		return s.fail(ctx, record, prepared, "running_story", classifyRunnerFailure(result), fmt.Errorf("capsule worker: runner reported non-zero exit code %d", result.ExitCode))
 	}
 	result.ExecutionID = prepared.ID
 	if result.Provider == nil {
@@ -512,12 +528,33 @@ func (s *Server) executeRegistered(ctx context.Context, record RunRecord, prepar
 	s.appendEvent(&record, prepared, "capsule.worker.completed", "passed", "")
 	s.mirrorOutputs(ctx, &record, prepared)
 	if err := s.writeRun(record); err != nil {
-		return s.fail(ctx, record, prepared, "persist_terminal", fmt.Errorf("capsule worker: persist completed checkpoint: %w", err))
+		return s.fail(ctx, record, prepared, "persist_terminal", executor.FailureClassInfra, fmt.Errorf("capsule worker: persist completed checkpoint: %w", err))
 	}
 	return record, result, nil
 }
 
-func (s *Server) fail(ctx context.Context, record RunRecord, prepared executor.Prepared, stage string, err error) (RunRecord, executor.Result, error) {
+// classifyRunnerFailure resolves the typed failure class for a non-zero-exit
+// Runner result. The runner (capsuleWorkerProcessRunner in cmd/kitsoki) is
+// the seam that actually knows whether the failure was a job-start
+// preflight rejection, a classified agent-subprocess exit (auth/quota), or a
+// genuine story/verdict failure — it records that classification into
+// Result.Provider["failure_class"] at the point the cause is known, and this
+// function trusts that value when it is one of the recognized classes
+// (never trusting an unrecognized/forged string). A Runner that predates or
+// omits this classification (e.g. a test's fake Runner) falls back to
+// FailureClassStory: the story ran (ExitCode != 0 with no Go error means the
+// runner completed and reported a failure), so "story" is the correct
+// default absent a more specific known cause.
+func classifyRunnerFailure(result executor.Result) executor.FailureClass {
+	if result.Provider != nil {
+		if class := executor.FailureClass(result.Provider["failure_class"]); class.Valid() {
+			return class
+		}
+	}
+	return executor.FailureClassStory
+}
+
+func (s *Server) fail(ctx context.Context, record RunRecord, prepared executor.Prepared, stage string, class executor.FailureClass, err error) (RunRecord, executor.Result, error) {
 	if current, readErr := s.readRun(record.ExecutionID); readErr == nil && current.EnvelopeDigest == record.EnvelopeDigest && len(current.Events) > len(record.Events) {
 		record.Events = current.Events
 	}
@@ -527,8 +564,11 @@ func (s *Server) fail(ctx context.Context, record RunRecord, prepared executor.P
 		record.Status = "cancelled"
 		record.Stage = "terminal"
 		eventKind = "capsule.worker.cancelled"
+		// A cancellation is not a fault to classify; leave FailureClass
+		// unset regardless of what the caller passed.
 	} else {
 		record.Stage = stage
+		record.FailureClass = class
 	}
 	record.Error = boundedError(err)
 	record.TerminalAt = s.cfg.Now()

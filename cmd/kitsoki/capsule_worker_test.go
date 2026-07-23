@@ -82,7 +82,11 @@ states:
 	if err := os.WriteFile(envelopePath, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := execRoot(t, "capsule", "worker", "run", "--envelope", envelopePath, "--result", resultPath, "--workspace", root)
+	// --preflight-skip: this test exercises the executor-result-writing
+	// contract for a no-agent-calls story, not job-start preflight (which
+	// has its own dedicated test below) — the test environment has no real
+	// backend credentials to satisfy the auth-material check.
+	out, err := execRoot(t, "capsule", "worker", "run", "--envelope", envelopePath, "--result", resultPath, "--workspace", root, "--preflight-skip")
 	if err != nil {
 		t.Fatalf("worker run: %v\n%s", err, out)
 	}
@@ -131,5 +135,129 @@ func TestCapsuleWorkerAgentModelUsesLegacyClaudeOverrideOnlyForClaude(t *testing
 	}
 	if got := capsuleWorkerAgentModel("codex"); got != "" {
 		t.Fatalf("codex inherited Claude-only model %q", got)
+	}
+}
+
+// TestCapsuleWorkerChildEnvAuthPrecedence pins the single source of truth
+// for CLAUDE_CODE_OAUTH_TOKEN vs ANTHROPIC_AUTH_TOKEN precedence: when a
+// controller-supplied per-job token is present, the image-baked default is
+// deliberately withheld from the dispatched subprocess's environment rather
+// than forwarding both and leaving the claude CLI's own undocumented
+// internal precedence to decide.
+func TestCapsuleWorkerChildEnvAuthPrecedence(t *testing.T) {
+	t.Run("controller oauth token suppresses the baked anthropic auth token", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "controller-token")
+		t.Setenv("ANTHROPIC_AUTH_TOKEN", "baked-token")
+		env := capsuleWorkerChildEnv([]string{"ANTHROPIC_AUTH_TOKEN"})
+		if !containsEnvKV(env, "CLAUDE_CODE_OAUTH_TOKEN=controller-token") {
+			t.Fatalf("child env must carry the controller token: %v", env)
+		}
+		if containsEnvPrefix(env, "ANTHROPIC_AUTH_TOKEN=") {
+			t.Fatalf("child env must withhold the baked token when the controller token is present: %v", env)
+		}
+	})
+	t.Run("baked anthropic auth token flows through absent a controller token", func(t *testing.T) {
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+		t.Setenv("ANTHROPIC_AUTH_TOKEN", "baked-token")
+		env := capsuleWorkerChildEnv([]string{"ANTHROPIC_AUTH_TOKEN"})
+		if !containsEnvKV(env, "ANTHROPIC_AUTH_TOKEN=baked-token") {
+			t.Fatalf("child env must carry the baked token absent a controller token: %v", env)
+		}
+	})
+}
+
+func containsEnvKV(env []string, kv string) bool {
+	for _, e := range env {
+		if e == kv {
+			return true
+		}
+	}
+	return false
+}
+
+func containsEnvPrefix(env []string, prefix string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCapsuleWorkerPreflightArgsRendersOnlyExplicitlySetKnobs(t *testing.T) {
+	if got := capsuleWorkerPreflightArgs(false, 0, false); len(got) != 0 {
+		t.Fatalf("all-default config must render no flags, got %v", got)
+	}
+	got := capsuleWorkerPreflightArgs(true, 5<<30, true)
+	want := []string{"--preflight-skip", "--preflight-disk-floor-bytes", "5368709120", "--preflight-live-auth-probe"}
+	if len(got) != len(want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("args = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestCapsuleWorkerRunPreflightRejectsBeforeStoryLaunches proves the
+// job-start preflight seam end-to-end: with every claude auth channel
+// neutralized, `capsule worker run` must fail at preflight — before ever
+// calling storylauncher.Launcher.Launch — with a typed terminal result
+// naming preflight_auth, not a bare/opaque story failure.
+func TestCapsuleWorkerRunPreflightRejectsBeforeStoryLaunches(t *testing.T) {
+	root := t.TempDir()
+	environmentPath := filepath.Join(root, ".kitsoki", "environments", "ci.yaml")
+	if err := os.MkdirAll(filepath.Dir(environmentPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(environmentPath, []byte("schema: capsule-environment/v1\nid: ci\nnetwork: none\nsandbox: supervised\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := (environment.Resolver{ProjectRoot: root}).Resolve(t.Context(), "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A story path that does not exist on disk: proves the story is never
+	// even loaded (app.Load, which would fail differently and much later
+	// than preflight) when preflight rejects first.
+	envelope, err := executor.Seal(executor.Envelope{JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def", Instance: control.Handle{ID: "w", Generation: 1}, SourceDigest: "sha256:source", StoryPath: "does-not-exist.yaml", StoryDigest: "sha256:story", Environment: lock, Trigger: map[string]any{"requested_pipeline": "change"}, Policy: executor.Policy{Network: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelopePath := filepath.Join(root, "envelope.json")
+	resultPath := filepath.Join(root, "result.json")
+	encoded, _ := json.Marshal(envelope)
+	if err := os.WriteFile(envelopePath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Neutralize every claude auth channel so preflight reliably rejects
+	// regardless of what the machine actually running this test has
+	// configured.
+	for _, name := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"} {
+		t.Setenv(name, "")
+	}
+	t.Setenv("HOME", t.TempDir()) // no ~/.claude/.credentials.json here
+
+	out, err := execRoot(t, "capsule", "worker", "run", "--envelope", envelopePath, "--result", resultPath, "--workspace", root)
+	if err == nil {
+		t.Fatalf("expected the preflight rejection to fail the command, out=%s", out)
+	}
+	rawResult, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var result struct {
+		Result          executor.Result          `json:"result"`
+		CompletionState executor.CompletionState `json:"completion_state"`
+	}
+	if err := json.Unmarshal(rawResult, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.CompletionState.Outcome != "failed" || !strings.Contains(result.CompletionState.Reason, "preflight") {
+		t.Fatalf("result %#v", result)
+	}
+	if result.Result.Provider["failure_class"] != "preflight_auth" {
+		t.Fatalf("failure_class = %q, want preflight_auth", result.Result.Provider["failure_class"])
 	}
 }

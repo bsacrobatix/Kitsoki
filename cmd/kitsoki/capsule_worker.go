@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,8 @@ func capsuleWorkerCmd() *cobra.Command {
 
 func capsuleWorkerRunCmd() *cobra.Command {
 	var envelopePath, resultPath, workspace, tracePath, agentBackend, observedImage string
+	var preflightSkip, preflightLiveAuthProbe bool
+	var preflightDiskFloorBytes int64
 	cmd := &cobra.Command{
 		Use:          "run",
 		Short:        "Run a sealed Capsule execution envelope and write executor result JSON",
@@ -95,11 +98,12 @@ func capsuleWorkerRunCmd() *cobra.Command {
 			if workspace != "" {
 				launchPolicy = host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{workspace}}
 			}
+			resolvedModel := capsuleWorkerAgentModel(agentBackend)
 			launcher := storylauncher.Launcher{
 				StoryPath:         storyPath,
 				ProjectRoot:       workspace,
 				AgentBackend:      agentBackend,
-				AgentModel:        capsuleWorkerAgentModel(agentBackend),
+				AgentModel:        resolvedModel,
 				AgentLaunchPolicy: launchPolicy,
 			}
 			// Only hand over a non-nil sink. Assigning a nil *store.JSONLSink to
@@ -110,20 +114,61 @@ func capsuleWorkerRunCmd() *cobra.Command {
 			if sink != nil {
 				launcher.EventSink = sink
 			}
-			verdict, err := launcher.Launch(cmd.Context(), prepared)
+			// Job-start preflight: after source materialization (workspace is
+			// on disk and environment-verified above) and before the story —
+			// and therefore any coding-agent subprocess — ever launches. A
+			// preflight failure short-circuits straight to the same
+			// typed-terminal-result tail every other failure uses below, so no
+			// story turn is ever burned on a job that could not have
+			// succeeded. Only runs when a workspace was materialized; a bare
+			// `capsule worker run` invocation with no --workspace (some
+			// existing tests, and the offline validate-only path) has nothing
+			// for disk/PATH checks to run against.
+			var launchErr error
+			var preflightClass executor.FailureClass
+			var verdict ci.Verdict
+			if workspace != "" {
+				preflightCfg := workerserver.PreflightConfig{Skip: preflightSkip, DiskFloorBytes: preflightDiskFloorBytes, LiveAuthProbe: preflightLiveAuthProbe}
+				if outcome := workerserver.RunPreflight(cmd.Context(), preflightCfg, agentBackend, resolvedModel, workspace); !outcome.OK {
+					launchErr = fmt.Errorf("capsule worker: preflight: %s", outcome.Message)
+					preflightClass = outcome.Class
+				}
+			}
+			if launchErr == nil {
+				verdict, launchErr = launcher.Launch(cmd.Context(), prepared)
+			}
 			verdict = ci.NormalizeVerdict(verdict)
 			state := executor.CompletionState{Schema: executor.CompletionStateSchema, Outcome: "passed"}
-			if err == nil {
-				err = ci.ValidateVerdict(verdict, sealed, ci.ResultContract{})
+			if launchErr == nil {
+				launchErr = ci.ValidateVerdict(verdict, sealed, ci.ResultContract{})
 			}
-			if err != nil {
+			if launchErr != nil {
 				state.Outcome = "failed"
-				state.Reason = err.Error()
+				state.Reason = launchErr.Error()
 			}
 			verdictRaw, _ := json.Marshal(verdict)
 			result := executor.Result{ExitCode: 0, VerdictArtifact: "verdict:worker", VerdictJSON: verdictRaw}
 			if state.Outcome != "passed" {
 				result.ExitCode = 1
+				// Typed failure classification (see
+				// internal/capsule/workerserver's classifyRunnerFailure,
+				// which reads this back): a preflight rejection already knows
+				// its exact class; otherwise fall back to inspecting the
+				// agent-subprocess exit/story-failure text for a known
+				// auth/quota/infra signature (host.ClassifyAgentFailureText,
+				// the same logic agent_runner.go applies at agent exit
+				// handling), defaulting to FailureClassStory when neither
+				// applies — the runner completed and reported a failure, so
+				// "story" is the correct default absent a more specific cause.
+				class := preflightClass
+				if class == "" {
+					if hint := host.ClassifyAgentFailureText(state.Reason); hint != "" {
+						class = executor.FailureClass(hint)
+					} else {
+						class = executor.FailureClassStory
+					}
+				}
+				result.Provider = map[string]string{"failure_class": string(class)}
 			}
 			out := struct {
 				Result          executor.Result          `json:"result"`
@@ -148,6 +193,9 @@ func capsuleWorkerRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tracePath, "trace", "", "durable story/agent JSONL trace path")
 	cmd.Flags().StringVar(&agentBackend, "agent-backend", "", "allowed coding-agent backend for story agent calls (default claude)")
 	cmd.Flags().StringVar(&observedImage, "observed-image", "", "immutable image identity observed by the enclosing container executor")
+	cmd.Flags().BoolVar(&preflightSkip, "preflight-skip", false, "skip the job-start readiness preflight (auth material, disk headroom, required tools, model/endpoint coherence) for exotic setups")
+	cmd.Flags().Int64Var(&preflightDiskFloorBytes, "preflight-disk-floor-bytes", workerserver.DefaultPreflightDiskFloorBytes, "minimum free disk bytes the job-start preflight requires on the workspace filesystem")
+	cmd.Flags().BoolVar(&preflightLiveAuthProbe, "preflight-live-auth-probe", false, "spend one minimal real request confirming the resolved credential is accepted (off by default; never spends unless explicitly enabled)")
 	return cmd
 }
 
@@ -168,6 +216,8 @@ func capsuleWorkerServeCmd() *cobra.Command {
 	var maxBundleBytes int64
 	var requestTimeout, cleanupInterval, minTerminalAge, minSourceAge time.Duration
 	var retainTerminalRuns, maxRunDeletes, maxSourceDeletes int
+	var preflightSkip, preflightLiveAuthProbe bool
+	var preflightDiskFloorBytes int64
 	cmd := &cobra.Command{
 		Use:          "serve",
 		Short:        "Serve authenticated HTTPS Capsule executions with durable worker records",
@@ -218,7 +268,7 @@ func capsuleWorkerServeCmd() *cobra.Command {
 					EnvironmentRefs: capsuleWorkerPresentEnvRefs(passEnv),
 					Cancellable:     true,
 				},
-				Runner:      capsuleWorkerProcessRunner(agentBackend, passEnv),
+				Runner:      capsuleWorkerProcessRunner(agentBackend, passEnv, capsuleWorkerPreflightArgs(preflightSkip, preflightDiskFloorBytes, preflightLiveAuthProbe)),
 				Environment: environment.Verifier{Probe: environment.HostProbe()},
 				Outputs:     outputs,
 			})
@@ -287,6 +337,9 @@ func capsuleWorkerServeCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&minSourceAge, "min-source-age", defaults.MinSourceAge, "minimum unreferenced source age before removal")
 	cmd.Flags().IntVar(&maxRunDeletes, "cleanup-max-run-deletes", defaults.MaxRunDeletes, "maximum run directories removed per cleanup pass")
 	cmd.Flags().IntVar(&maxSourceDeletes, "cleanup-max-source-deletes", defaults.MaxSourceDeletes, "maximum source bundles removed per cleanup pass")
+	cmd.Flags().BoolVar(&preflightSkip, "preflight-skip", false, "skip each job's job-start readiness preflight for exotic setups")
+	cmd.Flags().Int64Var(&preflightDiskFloorBytes, "preflight-disk-floor-bytes", workerserver.DefaultPreflightDiskFloorBytes, "minimum free disk bytes each job's preflight requires on its workspace filesystem")
+	cmd.Flags().BoolVar(&preflightLiveAuthProbe, "preflight-live-auth-probe", false, "have each job's preflight spend one minimal real request confirming the resolved credential is accepted (off by default; never spends unless explicitly enabled)")
 	return cmd
 }
 
@@ -364,7 +417,27 @@ func runCapsuleWorkerCleanupLoop(ctx context.Context, log io.Writer, worker *wor
 	}
 }
 
-func capsuleWorkerProcessRunner(agentBackend string, passEnv []string) workerserver.Runner {
+// capsuleWorkerPreflightArgs renders serve-level preflight configuration as
+// the --preflight-* flags capsuleWorkerProcessRunner appends to every
+// dispatched `capsule worker run` subprocess, so a worker's boot-time
+// preflight configuration (skip / disk floor / live auth probe, set once at
+// `capsule worker serve` startup) applies uniformly to every job it runs,
+// not just that subprocess's own unconfigured defaults.
+func capsuleWorkerPreflightArgs(skip bool, diskFloorBytes int64, liveAuthProbe bool) []string {
+	var args []string
+	if skip {
+		args = append(args, "--preflight-skip")
+	}
+	if diskFloorBytes > 0 {
+		args = append(args, "--preflight-disk-floor-bytes", strconv.FormatInt(diskFloorBytes, 10))
+	}
+	if liveAuthProbe {
+		args = append(args, "--preflight-live-auth-probe")
+	}
+	return args
+}
+
+func capsuleWorkerProcessRunner(agentBackend string, passEnv, preflightArgs []string) workerserver.Runner {
 	return func(ctx context.Context, workspace string, prepared executor.Prepared, tracePath string) (executor.Result, error) {
 		runDir := filepath.Dir(tracePath)
 		envelopePath := filepath.Join(runDir, "envelope.json")
@@ -384,6 +457,7 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv []string) workerser
 		if agentBackend != "" {
 			args = append(args, "--agent-backend", agentBackend)
 		}
+		args = append(args, preflightArgs...)
 		// The artifacts dir is the worker's mirror source (everything under it
 		// lands at runs/<execution-id>/artifacts/** at terminal); exporting it
 		// makes artifact placement a contract instead of run-layout inference.
@@ -440,13 +514,34 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv []string) workerser
 	}
 }
 
+// capsuleWorkerAuthPrecedenceEnv, when set, is the second auth channel a
+// worker may see alongside the image-baked ANTHROPIC_AUTH_TOKEN: a
+// controller-supplied, per-job OAuth token dispatched fresh for this
+// execution (see internal/capsule/ci/pool_executor.go's leaseWorker, which
+// forwards the controller's own CLAUDE_CODE_OAUTH_TOKEN into the leased
+// worker's boot env).
+const capsuleWorkerAuthPrecedenceEnv = "CLAUDE_CODE_OAUTH_TOKEN"
+
 func capsuleWorkerChildEnv(pass []string) []string {
-	allowed := map[string]bool{"HOME": true, "PATH": true, "TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LC_ALL": true, "USER": true, "LOGNAME": true, "SHELL": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true, "CLAUDE_CODE_OAUTH_TOKEN": true}
+	allowed := map[string]bool{"HOME": true, "PATH": true, "TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LC_ALL": true, "USER": true, "LOGNAME": true, "SHELL": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true, capsuleWorkerAuthPrecedenceEnv: true}
 	for _, name := range pass {
 		name = strings.TrimSpace(name)
 		if name != "" && !strings.Contains(name, "=") {
 			allowed[name] = true
 		}
+	}
+	// Auth precedence (single source of truth — see
+	// TestCapsuleWorkerChildEnvAuthPrecedence): CLAUDE_CODE_OAUTH_TOKEN is a
+	// controller-supplied, per-job credential dispatched fresh for this
+	// execution; ANTHROPIC_AUTH_TOKEN is baked into the worker image as a
+	// static, long-lived default. When both reach this process's
+	// environment, the explicit per-job token wins and the baked default is
+	// deliberately withheld from the child env entirely: forwarding both
+	// would leave the claude CLI's own undocumented internal precedence to
+	// decide, which is exactly the silent-landmine this function exists to
+	// prevent.
+	if strings.TrimSpace(os.Getenv(capsuleWorkerAuthPrecedenceEnv)) != "" {
+		delete(allowed, "ANTHROPIC_AUTH_TOKEN")
 	}
 	out := make([]string, 0, len(allowed))
 	for name := range allowed {
