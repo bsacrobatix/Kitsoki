@@ -549,13 +549,15 @@ catalog_json="$(curl -fsS http://127.0.0.1:7777/api/catalog)"
 printf '%s' "$catalog_json" | "$node_release/bin/node" -e '
 const fs = require("node:fs");
 const graph = JSON.parse(fs.readFileSync(0, "utf8"));
-const products = (graph.comparison_catalogs ?? []).map((entry) => entry.id);
-const repos = [...new Set((graph.nodes ?? []).map((node) => node.attrs?.repo).filter(Boolean))].sort();
-if (products.join(",") !== "pog,constructor-studio" || repos.join(",") !== "constructor-studio,pog") {
-  console.error(JSON.stringify({ products, repos }));
+const expected = process.argv[1].split(",").sort().join(",");
+const products = [...new Set((graph.comparison_catalogs ?? []).map((entry) => entry.id))].sort().join(",");
+const repos = [...new Set((graph.nodes ?? []).map((node) => node.attrs?.repo).filter(Boolean))].sort().join(",");
+const unavailable = (graph.federation?.unavailable ?? []).map((entry) => entry.repo);
+if (products !== expected || repos !== expected || unavailable.length) {
+  console.error(JSON.stringify({ expected, products, repos, unavailable }));
   process.exit(1);
 }
-' || die "hosted catalog does not contain exactly POG and Constructor Studio"
+' "$portfolio_members" || die "hosted catalog does not contain every configured portfolio member"
 curl -fsS http://127.0.0.1:7777/api/feedback-reports | "$node_release/bin/node" -e '
 const fs = require("node:fs");
 const body = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -618,4 +620,4 @@ grep -q '/auth/github/start' <<<"$login_page"
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
 
 trap - EXIT
-echo "hosted-pog install: active production POG $pog_sha on 127.0.0.1:7777 at $public_base_url (products=pog,constructor-studio; state=$state_mode; no Vite runtime; all content requires an invited session)"
+echo "hosted-pog install: active production POG $pog_sha on 127.0.0.1:7777 at $public_base_url (products=$portfolio_members; state=$state_mode; no Vite runtime; all content requires an invited session)"
