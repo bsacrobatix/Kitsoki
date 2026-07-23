@@ -56,7 +56,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-portal.service hosted-pog.yaml Caddyfile gh-client-secret import-legacy-worker-ships.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -327,6 +327,19 @@ if [ -L "$current" ]; then
 elif [ -e "$current" ]; then
 	die "$current exists and is not a symlink"
 fi
+previous_fixed_autonomously=""
+if [ -n "$previous_current" ]; then
+	previous_scoreboard="$(curl -fsS http://127.0.0.1:7777/api/feedback-autonomy/scoreboard 2>/dev/null || true)"
+	if [ -n "$previous_scoreboard" ]; then
+		previous_fixed_autonomously="$(printf '%s' "$previous_scoreboard" | "$node_release/bin/node" -e '
+const fs = require("node:fs");
+try {
+  const count = JSON.parse(fs.readFileSync(0, "utf8"))?.counts?.fixed_autonomously;
+  if (Number.isSafeInteger(count) && count >= 0) process.stdout.write(String(count));
+} catch {}
+')"
+	fi
+fi
 previous_kitsoki_current=""
 if [ -L "$kitsoki_current" ]; then
 	previous_kitsoki_current="$(readlink -f "$kitsoki_current")"
@@ -445,6 +458,16 @@ trap rollback EXIT
 
 systemctl stop pog-portal.service >/dev/null 2>&1 || true
 
+# Releases predating the versioned runtime wrote immutable worker ship records
+# into their own .artifacts tree. Import those exact scoreboard inputs after
+# stopping the portal (which also stops its dispatch children) and before the
+# current-release switch. The importer is idempotent and fails closed if an
+# existing durable record differs.
+if [ -n "$previous_current" ] && [ -d "$previous_current/.artifacts" ] && [ ! -L "$previous_current/.artifacts" ]; then
+	bash "$stage/import-legacy-worker-ships.sh" "$previous_current/.artifacts" "$prepared_runtime"
+	chown -R pog:pog "$prepared_runtime/feedback/dispatch"
+fi
+
 # Remove the historical sibling link before starting the candidate. This is
 # what makes the two-product contract independent of future files under
 # /opt/kitsoki.
@@ -535,6 +558,17 @@ for _ in $(seq 1 60); do
 	sleep 1
 done
 [ "${portal_ready:-0}" = "1" ] || die "POG production portal did not become ready on port 7777"
+
+if [ -n "$previous_fixed_autonomously" ]; then
+	current_fixed_autonomously="$(curl -fsS http://127.0.0.1:7777/api/feedback-autonomy/scoreboard | "$node_release/bin/node" -e '
+const fs = require("node:fs");
+const count = JSON.parse(fs.readFileSync(0, "utf8"))?.counts?.fixed_autonomously;
+if (!Number.isSafeInteger(count) || count < 0) process.exit(1);
+process.stdout.write(String(count));
+')" || die "POG autonomy scoreboard is unreadable after activation"
+	[ "$current_fixed_autonomously" -ge "$previous_fixed_autonomously" ] \
+		|| die "POG autonomy scoreboard regressed from $previous_fixed_autonomously to $current_fixed_autonomously"
+fi
 
 health_json="$(curl -fsS http://127.0.0.1:7777/api/portal-health)"
 printf '%s' "$health_json" | "$node_release/bin/node" -e '

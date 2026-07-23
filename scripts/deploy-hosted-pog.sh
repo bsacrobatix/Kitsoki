@@ -297,7 +297,7 @@ for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
 	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
 done
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service,state-content-digest.mjs} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-portal.service,state-content-digest.mjs} "$local_stage/"
 # The client secret travels inside the 0700 stage directories (local mktemp,
 # remote install -d) instead of the ssh argv, which would be visible in ps.
 printf '%s\n' "$GH_CLIENT_SECRET" >"$local_stage/gh-client-secret"

@@ -6,8 +6,9 @@ deploy="$root/scripts/deploy-hosted-pog.sh"
 packager="$root/scripts/package-hosted-pog-state.sh"
 assets="$root/deploy/hosted-pog"
 digest_tool="$assets/state-content-digest.mjs"
+legacy_ship_importer="$assets/import-legacy-worker-ships.sh"
 
-bash -n "$deploy" "$packager" "$assets/install.sh"
+bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer"
 node --check "$digest_tool"
 
 for required in \
@@ -17,6 +18,7 @@ for required in \
   "$assets/node-runtime.env" \
   "$assets/pog-portal.service" \
 	"$digest_tool" \
+	"$legacy_ship_importer" \
   "$packager"; do
   [ -f "$required" ] || { echo "missing hosted POG deployment asset: $required" >&2; exit 1; }
 done
@@ -87,6 +89,10 @@ grep -q 'active_state_pristine' "$assets/install.sh"
 grep -q 'state-content-digest.mjs' "$deploy"
 grep -q 'runtime_current_changed' "$assets/install.sh"
 grep -q 'ln -s.*runtime_current.*release/.artifacts' "$assets/install.sh"
+grep -q 'import-legacy-worker-ships.sh' "$assets/install.sh"
+grep -q 'import-legacy-worker-ships.sh' "$deploy"
+grep -q 'api/feedback-autonomy/scoreboard' "$assets/install.sh"
+grep -q 'autonomy scoreboard regressed from' "$assets/install.sh"
 grep -q 'package-hosted-pog-state.sh' "$deploy"
 grep -q -- '--sync-local-state' "$deploy"
 grep -q 'previous_node_current' "$assets/install.sh"
@@ -130,6 +136,40 @@ cleanup() {
   rm -rf -- "$fixture"
 }
 trap cleanup EXIT
+
+# A deployment from the pre-runtime layout must retain immutable worker ship
+# evidence before replacing the release-local .artifacts directory with the
+# durable runtime symlink. The importer copies only the two scoreboard record
+# shapes, is idempotent, and refuses a divergent destination instead of
+# silently rewriting already-persisted evidence.
+legacy="$fixture/legacy-artifacts"
+durable="$fixture/durable-runtime"
+mkdir -p \
+  "$legacy/feedback/dispatch/worker-a" \
+  "$legacy/feedback/dispatch/worker-b" \
+  "$legacy/feedback/dispatch/unrelated" \
+  "$durable/feedback/dispatch/worker-a"
+printf '%s\n' '{"schema":"pog/feedback-autonomy/pog-bugfix-dispatch-result/v1","report_ref":"fb-a","shipped_sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' \
+  >"$legacy/feedback/dispatch/worker-a/pog-bugfix-result.json"
+printf '%s\n' '{"schema":"pog/feedback-autonomy/pog-bugfix-landing/v1","report_ref":"fb-b","landing_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","shipped_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}' \
+  >"$legacy/feedback/dispatch/worker-b/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.pog-bugfix-landing.json"
+printf '%s\n' 'large mutable log must stay release-local' \
+  >"$legacy/feedback/dispatch/unrelated/worker.log"
+cp "$legacy/feedback/dispatch/worker-a/pog-bugfix-result.json" \
+  "$durable/feedback/dispatch/worker-a/pog-bugfix-result.json"
+"$legacy_ship_importer" "$legacy" "$durable" >/dev/null
+cmp "$legacy/feedback/dispatch/worker-a/pog-bugfix-result.json" \
+  "$durable/feedback/dispatch/worker-a/pog-bugfix-result.json"
+cmp "$legacy/feedback/dispatch/worker-b/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.pog-bugfix-landing.json" \
+  "$durable/feedback/dispatch/worker-b/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.pog-bugfix-landing.json"
+[ ! -e "$durable/feedback/dispatch/unrelated/worker.log" ]
+printf '%s\n' '{"divergent":true}' \
+  >"$durable/feedback/dispatch/worker-a/pog-bugfix-result.json"
+if "$legacy_ship_importer" "$legacy" "$durable" >/dev/null 2>&1; then
+  echo "legacy worker ship importer overwrote divergent durable evidence" >&2
+  exit 1
+fi
+
 mkdir -p \
   "$fixture/pog/.git" \
   "$fixture/pog/.artifacts/feedback/evidence" \
