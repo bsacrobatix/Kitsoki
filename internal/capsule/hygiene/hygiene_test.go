@@ -72,6 +72,80 @@ func TestApplyRemovesOnlyPlannedProjectRunFiles(t *testing.T) {
 	}
 }
 
+func TestBuildPlanAndApplySupportStableSymlinkedCapsuleState(t *testing.T) {
+	root := t.TempDir()
+	stableState := t.TempDir()
+	if err := os.Symlink(stableState, filepath.Join(root, ".capsules")); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 23, 6, 0, 0, 0, time.UTC)
+	writeManagedWorkspace(t, root, "integrated", control.StateIntegrated, now.Add(-time.Hour), false)
+	opts := Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		Now:             func() time.Time { return now },
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	}
+	plan, err := BuildPlan(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := assertWorkspaceCandidate(t, plan, "integrated", true, "clean terminal")
+	if candidate.Path != ".capsules/workspaces/integrated" {
+		t.Fatalf("candidate path=%q, want stable Capsule alias path", candidate.Path)
+	}
+	closed := false
+	canonicalRoot, err := canonicalPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.CloseWorkspace = func(_ context.Context, gotRoot string, got Candidate) error {
+		if gotRoot != canonicalRoot || got.Path != candidate.Path {
+			t.Fatalf("close root=%q candidate=%#v", gotRoot, got)
+		}
+		closed = true
+		return nil
+	}
+	result, err := Apply(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !closed || len(result.Removed) != 1 || result.Removed[0].Path != candidate.Path {
+		t.Fatalf("closed=%t result=%#v", closed, result)
+	}
+	if _, err := projectRelativePath(root, filepath.Join(t.TempDir(), "outside")); err == nil {
+		t.Fatal("unrelated external path was accepted as project-owned")
+	}
+}
+
+func TestApplyRemovesRunFilesThroughStableSymlinkedCapsuleState(t *testing.T) {
+	root := t.TempDir()
+	stableState := t.TempDir()
+	if err := os.Symlink(stableState, filepath.Join(root, ".capsules")); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, ".capsules", "ci")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRunBundle(t, dir, "old", time.Unix(10, 0))
+	writeRunBundle(t, dir, "new", time.Unix(20, 0))
+	result, err := Apply(context.Background(), Options{ProjectRoot: root, KeepRuns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Removed) != 3 {
+		t.Fatalf("removed %#v", result.Removed)
+	}
+	if _, err := os.Stat(filepath.Join(stableState, "ci", "old.run.json")); !os.IsNotExist(err) {
+		t.Fatalf("stable old run still exists or stat failed: %v", err)
+	}
+}
+
 func TestProjectCacheAndGoCacheRequireExplicitInclusion(t *testing.T) {
 	root := t.TempDir()
 	cache := filepath.Join(root, ".capsules", "cache", "runstatus")

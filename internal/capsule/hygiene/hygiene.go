@@ -1550,16 +1550,8 @@ func removeProjectPath(root, candidatePath string) error {
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(root, filepath.FromSlash(candidatePath))
 	}
-	realRoot := root
-	if real, err := filepath.EvalSymlinks(root); err == nil {
-		realRoot = real
-	}
-	realPath := path
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		realPath = real
-	}
-	rel, err := filepath.Rel(realRoot, realPath)
-	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	relative, err := projectRelativePath(root, path)
+	if err != nil || relative != filepath.ToSlash(candidatePath) {
 		return fmt.Errorf("capsule hygiene: refusing to remove path outside project: %s", candidatePath)
 	}
 	return os.RemoveAll(path)
@@ -1733,18 +1725,38 @@ func canonicalPath(path string) (string, error) {
 }
 
 func projectRelativePath(root, path string) (string, error) {
-	abs, err := filepath.Abs(path)
+	projectRoot, err := canonicalPath(root)
 	if err != nil {
 		return "", err
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = real
+	canonical, err := canonicalPath(path)
+	if err != nil {
+		return "", err
 	}
-	relative, err := filepath.Rel(root, abs)
+	if relative, ok := relativeContainedPath(projectRoot, canonical); ok {
+		return filepath.ToSlash(relative), nil
+	}
+
+	// Hosted controllers may keep Capsule state outside immutable release
+	// checkouts by making <project>/.capsules a symlink to stable state. The
+	// manager records canonical workspace paths, so accept only that resolved
+	// Capsule root as an owned alias and retain a .capsules-relative candidate.
+	capsulesRoot, err := canonicalPath(filepath.Join(projectRoot, ".capsules"))
+	if err != nil {
+		return "", err
+	}
+	if relative, ok := relativeContainedPath(capsulesRoot, canonical); ok {
+		return filepath.ToSlash(filepath.Join(".capsules", relative)), nil
+	}
+	return "", fmt.Errorf("capsule hygiene: path is outside project: %s", path)
+}
+
+func relativeContainedPath(root, path string) (string, bool) {
+	relative, err := filepath.Rel(root, path)
 	if err != nil || relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("capsule hygiene: path is outside project: %s", path)
+		return "", false
 	}
-	return filepath.ToSlash(relative), nil
+	return relative, true
 }
 
 func lexicalProjectRelativePath(root, path string) (string, error) {
