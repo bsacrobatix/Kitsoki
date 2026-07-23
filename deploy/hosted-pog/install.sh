@@ -382,10 +382,12 @@ previous_kitsoki_service="$stage/kitsoki-pog.service.previous"
 previous_portal_service="$stage/pog-portal.service.previous"
 previous_finalizer_service="$stage/pog-worker-finalizer.service.previous"
 previous_finalizer_timer="$stage/pog-worker-finalizer.timer.previous"
+previous_queue_worker_engine="$stage/kitsoki-queue-worker.hosted-engine.conf.previous"
 had_previous_kitsoki_service=0
 had_previous_portal_service=0
 had_previous_finalizer_service=0
 had_previous_finalizer_timer=0
+had_previous_queue_worker_engine=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
 	cp /etc/systemd/system/kitsoki-pog.service "$previous_kitsoki_service"
 	had_previous_kitsoki_service=1
@@ -401,6 +403,10 @@ fi
 if [ -f /etc/systemd/system/pog-worker-finalizer.timer ]; then
 	cp /etc/systemd/system/pog-worker-finalizer.timer "$previous_finalizer_timer"
 	had_previous_finalizer_timer=1
+fi
+if [ -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf ]; then
+	cp /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf "$previous_queue_worker_engine"
+	had_previous_queue_worker_engine=1
 fi
 caddy_changed=0
 services_changed=0
@@ -472,6 +478,12 @@ rollback() {
 				install -m 0644 "$previous_finalizer_timer" /etc/systemd/system/pog-worker-finalizer.timer
 			else
 				rm -f /etc/systemd/system/pog-worker-finalizer.timer
+			fi
+			if [ "$had_previous_queue_worker_engine" -eq 1 ]; then
+				install -d -m 0755 /etc/systemd/system/kitsoki-queue-worker.service.d
+				install -m 0644 "$previous_queue_worker_engine" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+			else
+				rm -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 			fi
 			systemctl daemon-reload >/dev/null 2>&1 || true
 		fi
@@ -565,6 +577,14 @@ install -m 0644 "$rendered_config" /etc/kitsoki/hosted-pog.yaml
 	printf 'KITSOKI_COLONY_TOKEN=%s\n' "$colony_token"
 } >"$stage/hosted-pog.env"
 install -m 0600 "$stage/hosted-pog.env" /etc/kitsoki/hosted-pog.env
+# `queue-worker.env` is intentionally shared with the portal and finalizer
+# for worker credentials.  It must not also choose their engine: a stale
+# selector there used to override the versioned service contract during a
+# deploy.  The queue worker selects the hosted engine through its dedicated
+# systemd drop-in, leaving the historical seal/control binary untouched.
+if [ -f /etc/kitsoki/queue-worker.env ]; then
+	sed -i '/^[[:space:]]*POG_KITSOKI_BIN=/d' /etc/kitsoki/queue-worker.env
+fi
 install -m 0644 "$stage/kitsoki-pog.service" /etc/systemd/system/kitsoki-pog.service
 install -m 0644 "$rendered_portal_service" /etc/systemd/system/pog-portal.service
 install -m 0644 "$stage/pog-worker-finalizer.service" /etc/systemd/system/pog-worker-finalizer.service
@@ -578,6 +598,7 @@ if systemctl cat kitsoki-queue-worker.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/kitsoki-queue-worker.service.d
 	printf '[Unit]\nRequires=pog-capsule-state.service\nAfter=pog-capsule-state.service\n' \
 		>/etc/systemd/system/kitsoki-queue-worker.service.d/capsule-state.conf
+	install -m 0644 "$stage/kitsoki-queue-worker-hosted-engine.conf" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 fi
 services_changed=1
 systemctl daemon-reload

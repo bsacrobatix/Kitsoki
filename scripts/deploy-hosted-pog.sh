@@ -135,6 +135,21 @@ test -L /var/lib/pog/runtime
 test -L /opt/pog/current/.artifacts
 test -L /opt/pog/current/.capsules
 test "$(readlink -f /opt/pog/current/.capsules)" = "$(readlink -f /var/lib/pog/capsules)"
+hosted_engine=/opt/kitsoki-hosted-pog/current/kitsoki
+test -x "$hosted_engine"
+# The hosted queue-worker drop-in replaces the old `/usr/local/bin/kitsoki`
+# invocation without changing that seal/control binary, which remains pinned
+# independently to the worker image's story closure.
+! grep -q '^[[:space:]]*POG_KITSOKI_BIN=' /etc/kitsoki/queue-worker.env
+for unit in pog-portal.service pog-worker-finalizer.service; do
+  systemctl show --property Environment --value "$unit" | grep -Fq "POG_KITSOKI_BIN=$hosted_engine"
+done
+test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+grep -Fq "ExecStart=$hosted_engine queue worker" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+queue_pid="$(systemctl show --property MainPID --value kitsoki-queue-worker.service)"
+if [ "$queue_pid" -gt 0 ]; then
+  test "$(readlink -f "/proc/$queue_pid/exe")" = "$(readlink -f "$hosted_engine")"
+fi
 health="$(curl -fsS http://127.0.0.1:7777/api/portal-health)"
 active_pog_sha="$(basename "$(readlink -f /opt/pog/current)")"
 printf '%s' "$health" | "$node_bin" -e '
@@ -301,7 +316,7 @@ for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
 	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
 done
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,state-content-digest.mjs} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-worker-hosted-engine.conf,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,state-content-digest.mjs} "$local_stage/"
 # The client secret travels inside the 0700 stage directories (local mktemp,
 # remote install -d) instead of the ssh argv, which would be visible in ps.
 printf '%s\n' "$GH_CLIENT_SECRET" >"$local_stage/gh-client-secret"

@@ -21,6 +21,7 @@ for required in \
 	"$assets/pog-capsule-state.service" \
 	"$assets/pog-worker-finalizer.service" \
 	"$assets/pog-worker-finalizer.timer" \
+	"$assets/kitsoki-queue-worker-hosted-engine.conf" \
 	"$digest_tool" \
 	"$legacy_ship_importer" \
 	"$capsule_state_linker" \
@@ -127,6 +128,13 @@ grep -q '^OnUnitActiveSec=' "$assets/pog-worker-finalizer.timer"
 grep -q '^Persistent=true$' "$assets/pog-worker-finalizer.timer"
 grep -q 'systemctl start pog-worker-finalizer.service' "$assets/install.sh"
 grep -q 'enable --now pog-worker-finalizer.timer' "$assets/install.sh"
+grep -q "sed -i '/\^\[\[:space:\]\]\*POG_KITSOKI_BIN=/d' /etc/kitsoki/queue-worker.env" "$assets/install.sh"
+grep -q 'POG_KITSOKI_BIN=\$hosted_engine' "$deploy"
+grep -q 'kitsoki-queue-worker-hosted-engine.conf' "$assets/install.sh"
+grep -q 'ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue worker' "$assets/kitsoki-queue-worker-hosted-engine.conf"
+grep -q 'zz-hosted-engine.conf' "$deploy"
+grep -q 'queue_pid=' "$deploy"
+grep -q 'readlink -f "/proc/\$queue_pid/exe"' "$deploy"
 grep -q 'test -L /opt/pog/current/.capsules' "$deploy"
 grep -q 'package-hosted-pog-state.sh' "$deploy"
 grep -q -- '--sync-local-state' "$deploy"
