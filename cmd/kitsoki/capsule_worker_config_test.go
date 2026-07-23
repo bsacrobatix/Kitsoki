@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"kitsoki/internal/capsule/bucketsource"
+	"kitsoki/internal/capsule/vmpool"
 )
 
 func TestLoadWorkerEnvConfigParsesAndExports(t *testing.T) {
@@ -69,16 +70,16 @@ func TestWorkerOutputsFromEnv(t *testing.T) {
 	if sink, err := workerOutputsFromEnv(map[string]string{}); err != nil || sink != nil {
 		t.Fatalf("no bucket configured: sink=%v err=%v", sink, err)
 	}
-	if _, err := workerOutputsFromEnv(map[string]string{workerEnvOutputsURL: "https://kitsoki-test.sgp1.digitaloceanspaces.com"}); err == nil {
+	if _, err := workerOutputsFromEnv(map[string]string{vmpool.WorkerEnvOutputsURL: "https://kitsoki-test.sgp1.digitaloceanspaces.com"}); err == nil {
 		t.Fatal("expected error when key/secret env names missing")
 	}
 	t.Setenv("TEST_OUT_KEY", "key-id")
 	t.Setenv("TEST_OUT_SECRET", "secret")
 	sink, err := workerOutputsFromEnv(map[string]string{
-		workerEnvOutputsURL: "https://kitsoki-test.sgp1.digitaloceanspaces.com",
-		workerEnvOutputsKey: "TEST_OUT_KEY",
-		workerEnvOutputsSec: "TEST_OUT_SECRET",
-		workerEnvOutputsPfx: "runs",
+		vmpool.WorkerEnvOutputsURL:    "https://kitsoki-test.sgp1.digitaloceanspaces.com",
+		vmpool.WorkerEnvOutputsKeyEnv: "TEST_OUT_KEY",
+		vmpool.WorkerEnvOutputsSecEnv: "TEST_OUT_SECRET",
+		workerEnvOutputsPfx:           "runs",
 	})
 	if err != nil {
 		t.Fatal(err)

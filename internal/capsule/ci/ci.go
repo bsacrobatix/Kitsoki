@@ -128,6 +128,19 @@ type PoolExecutor struct {
 	// KITSOKI_WORKER_AGENT_BACKEND, the same contract `capsule worker serve
 	// --agent-backend` reads).
 	AgentBackend string `yaml:"agent_backend,omitempty" json:"agent_backend,omitempty"`
+	// PreserveOnFailure, when true, keeps a pre-ready lease failure's
+	// droplet running for post-mortem instead of destroying it immediately
+	// (vmpool.Pool.PreserveFailed). Defaults to false: autonomous/unattended
+	// CI dispatch must not silently accumulate billed droplets behind a
+	// human's back. Set it explicitly for interactive debugging of a
+	// flaky/broken image; PreserveFailedTTL still bounds how long the
+	// preserved droplet survives before reconcile/reap reclaims it.
+	PreserveOnFailure bool `yaml:"preserve_on_failure,omitempty" json:"preserve_on_failure,omitempty"`
+	// PreserveFailedTTL overrides vmpool.DefaultPreserveFailedTTL: how long a
+	// PreserveOnFailure droplet survives before it becomes reapable via
+	// vmpool.Pool.Reconcile (`vmpool reap`/`capsule ci` reconcile). Zero uses
+	// the vmpool default. Ignored unless PreserveOnFailure is set.
+	PreserveFailedTTL time.Duration `yaml:"preserve_failed_ttl,omitempty" json:"preserve_failed_ttl,omitempty"`
 }
 
 // SourceBucket opts a configured remote into bucket-mediated source transport
@@ -1096,6 +1109,9 @@ func validatePoolExecutor(name string, pool PoolExecutor) error {
 	}
 	if backend := pool.AgentBackend; backend != strings.TrimSpace(backend) || strings.ContainsAny(backend, " \t\n,") {
 		return fmt.Errorf("capsule ci remote %q: pool agent_backend %q must be a single token", name, backend)
+	}
+	if pool.PreserveFailedTTL < 0 {
+		return fmt.Errorf("capsule ci remote %q: pool preserve_failed_ttl must not be negative", name)
 	}
 	return nil
 }

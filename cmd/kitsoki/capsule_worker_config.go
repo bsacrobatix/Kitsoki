@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"kitsoki/internal/capsule/bucketsource"
+	"kitsoki/internal/capsule/vmpool"
 	"kitsoki/internal/capsule/workerserver"
 	"kitsoki/internal/objectstore"
 )
@@ -14,7 +15,11 @@ import (
 // Worker env-file keys. A VM worker's cloud-init writes one KEY=VALUE file
 // (/etc/kitsoki-worker/env) and starts `kitsoki capsule worker serve --config
 // <file>`; the file is the single boot contract between the pool's user-data
-// generator and this process.
+// generator and this process. The output-bucket-mirror keys
+// (workerEnvOutputs*) are NOT declared here: they are owned by
+// internal/capsule/vmpool (vmpool.WorkerEnvOutputsURL etc, dispatch.go),
+// which writes them into the boot env file in the first place; this file
+// imports them instead of re-declaring the literal strings a second time.
 const (
 	workerEnvToken       = "KITSOKI_WORKER_TOKEN"
 	workerEnvListen      = "KITSOKI_WORKER_LISTEN"
@@ -25,9 +30,6 @@ const (
 	workerEnvNetworks    = "KITSOKI_WORKER_NETWORKS"
 	workerEnvBackend     = "KITSOKI_WORKER_AGENT_BACKEND"
 	workerEnvPassEnv     = "KITSOKI_WORKER_PASS_ENV"
-	workerEnvOutputsURL  = "KITSOKI_WORKER_OUTPUTS_URL"
-	workerEnvOutputsKey  = "KITSOKI_WORKER_OUTPUTS_KEY_ENV"
-	workerEnvOutputsSec  = "KITSOKI_WORKER_OUTPUTS_SECRET_ENV"
 	workerEnvOutputsPfx  = "KITSOKI_WORKER_OUTPUTS_PREFIX"
 	workerConfigDefaults = "listen=127.0.0.1:7443 root=/var/lib/kitsoki-worker tls=/etc/kitsoki-worker/server.{crt,key} isolation=vm"
 )
@@ -73,13 +75,13 @@ func loadWorkerEnvConfig(path string) (map[string]string, error) {
 // workerOutputsFromEnv builds the optional bucket output mirror from resolved
 // worker config values. Returns nil when no output bucket is configured.
 func workerOutputsFromEnv(values map[string]string) (workerserver.OutputSink, error) {
-	bucketURL := values[workerEnvOutputsURL]
+	bucketURL := values[vmpool.WorkerEnvOutputsURL]
 	if strings.TrimSpace(bucketURL) == "" {
 		return nil, nil
 	}
-	keyEnv, secretEnv := values[workerEnvOutputsKey], values[workerEnvOutputsSec]
+	keyEnv, secretEnv := values[vmpool.WorkerEnvOutputsKeyEnv], values[vmpool.WorkerEnvOutputsSecEnv]
 	if keyEnv == "" || secretEnv == "" {
-		return nil, fmt.Errorf("capsule worker: %s requires %s and %s", workerEnvOutputsURL, workerEnvOutputsKey, workerEnvOutputsSec)
+		return nil, fmt.Errorf("capsule worker: %s requires %s and %s", vmpool.WorkerEnvOutputsURL, vmpool.WorkerEnvOutputsKeyEnv, vmpool.WorkerEnvOutputsSecEnv)
 	}
 	cfg, err := objectstore.ParseBucketURL(bucketURL)
 	if err != nil {

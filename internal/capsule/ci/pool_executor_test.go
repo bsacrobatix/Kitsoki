@@ -343,6 +343,143 @@ func TestPoolProviderCancelIsNotSupported(t *testing.T) {
 	}
 }
 
+// -- preserve-on-failure / preserve TTL / timeout plumbing ------------------
+
+// TestBuildPoolPlumbsPreserveOnFailureAndTTL covers defect 1's config
+// threading in isolation from any lease/dispatch machinery: PoolExecutor's
+// PreserveOnFailure/PreserveFailedTTL flow straight onto the constructed
+// vmpool.Pool/vmpool.Config, and are off/zero (vmpool default) when unset.
+func TestBuildPoolPlumbsPreserveOnFailureAndTTL(t *testing.T) {
+	origProvisioner := ciVMPoolNewProvisioner
+	ciVMPoolNewProvisioner = func(string) (vmpool.Provisioner, error) { return vmpool.NewFake(), nil }
+	t.Cleanup(func() { ciVMPoolNewProvisioner = origProvisioner })
+
+	def, err := newPoolProvider("vm-pool", PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1"}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := def.(*poolProvider).buildPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pool.PreserveFailed {
+		t.Fatalf("PreserveFailed should default to false")
+	}
+	if pool.Config.PreserveFailedTTL != 0 {
+		t.Fatalf("PreserveFailedTTL = %v, want zero (vmpool applies its own default)", pool.Config.PreserveFailedTTL)
+	}
+
+	set, err := newPoolProvider("vm-pool", PoolExecutor{
+		TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1",
+		PreserveOnFailure: true, PreserveFailedTTL: 90 * time.Minute,
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err = set.(*poolProvider).buildPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pool.PreserveFailed {
+		t.Fatalf("PreserveFailed should be true when PreserveOnFailure is set")
+	}
+	if pool.Config.PreserveFailedTTL != 90*time.Minute {
+		t.Fatalf("PreserveFailedTTL = %v, want 90m", pool.Config.PreserveFailedTTL)
+	}
+}
+
+// TestBuildPoolDerivesReadyTimeoutFromProvisionTimeout pins defect 2's fix at
+// the config-construction level: leaseWorker no longer sets an independent,
+// shorter LeaseSpec.ReadyTimeout, so vmpool.LeaseSpec{}.withDefaults derives
+// it from Config.ProvisionTimeout and the two can never drift apart again.
+func TestBuildPoolDerivesReadyTimeoutFromProvisionTimeout(t *testing.T) {
+	origProvisioner := ciVMPoolNewProvisioner
+	ciVMPoolNewProvisioner = func(string) (vmpool.Provisioner, error) { return vmpool.NewFake(), nil }
+	t.Cleanup(func() { ciVMPoolNewProvisioner = origProvisioner })
+
+	provider, err := newPoolProvider("vm-pool", PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1"}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := provider.(*poolProvider).buildPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pool.Config.ProvisionTimeout != ciPoolProvisionTimeout {
+		t.Fatalf("ProvisionTimeout = %v, want %v", pool.Config.ProvisionTimeout, ciPoolProvisionTimeout)
+	}
+}
+
+// TestPoolProviderRunReadyTimeoutCoversFullProvisionBudget is the end-to-end
+// regression for defect 2: a worker that becomes ready at 7 minutes — inside
+// the old, wrong hardcoded 6m ReadyTimeout's dead zone, but well inside the
+// 8m ProvisionTimeout budget — must still complete the lease instead of
+// being abandoned by waitReady.
+func TestPoolProviderRunReadyTimeoutCoversFullProvisionBudget(t *testing.T) {
+	fake := vmpool.NewFake()
+	origProvisioner := ciVMPoolNewProvisioner
+	ciVMPoolNewProvisioner = func(string) (vmpool.Provisioner, error) { return fake, nil }
+	t.Cleanup(func() { ciVMPoolNewProvisioner = origProvisioner })
+
+	origHook := ciVMPoolDispatcherHook
+	ciVMPoolDispatcherHook = func(d *vmpool.Dispatcher) {
+		var elapsed time.Duration
+		d.Sleep = func(ctx context.Context, dur time.Duration) error {
+			elapsed += dur
+			if elapsed >= 7*time.Minute {
+				for _, inst := range mustList(t, fake, d.Pool.Config.WithDefaults().Tag) {
+					fake.Activate(inst.ID, "203.0.113.60", "10.0.0.60")
+				}
+			}
+			return ctx.Err()
+		}
+		d.HealthProbe = func(_ context.Context, w vmpool.Worker, _ *http.Client, _ string, _ int) error {
+			if w.PublicIP == "" {
+				return errors.New("not ready yet")
+			}
+			return nil
+		}
+	}
+	t.Cleanup(func() { ciVMPoolDispatcherHook = origHook })
+
+	poolTestStubRun(t, executor.Result{ExitCode: 0}, nil)
+	provider, err := newPoolProvider("vm-pool", PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1"}, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := provider.Run(context.Background(), poolTestPrepared(t, "job-slow-boot", "exec-slow-boot"), nil, nil)
+	if err != nil {
+		t.Fatalf("expected the worker to be given the full ProvisionTimeout budget to become ready, got: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+// TestPoolProviderRunDoesNotInjectEngineURLEnv pins defect 3's removal: the
+// retired KITSOKI_WORKER_ENGINE_URL boot hack must never reach the leased
+// worker's user data, even when the controller process happens to have the
+// (now-dead) variable set in its own environment.
+func TestPoolProviderRunDoesNotInjectEngineURLEnv(t *testing.T) {
+	t.Setenv("KITSOKI_WORKER_ENGINE_URL", "https://example.invalid/engine")
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubRun(t, executor.Result{ExitCode: 0}, nil)
+	provider, err := newPoolProvider("vm-pool", PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1"}, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Run(context.Background(), poolTestPrepared(t, "job-no-engine-url", "exec-no-engine-url"), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	created := fixture.fake.Created()
+	if len(created) != 1 {
+		t.Fatalf("created %d instances, want exactly 1", len(created))
+	}
+	if strings.Contains(created[0].UserData, "KITSOKI_WORKER_ENGINE_URL") {
+		t.Fatalf("user data still injects the retired KITSOKI_WORKER_ENGINE_URL:\n%s", created[0].UserData)
+	}
+}
+
 // -- Run: lease / run / release orchestration -------------------------------
 
 // poolTestFixture wires ciVMPoolNewProvisioner to a vmpool.Fake and
@@ -492,10 +629,38 @@ func TestPoolProviderRunReleasesOnRunFailure(t *testing.T) {
 	}
 }
 
-func TestPoolProviderRunPreservesNeverReadyWorker(t *testing.T) {
+// TestPoolProviderRunDestroysNeverReadyWorkerByDefault pins defect 1's fix:
+// PreserveOnFailure defaults to false (the zero value), so autonomous CI
+// dispatch destroys a pre-ready lease failure instead of silently billing a
+// preserved droplet forever. Preservation is opt-in — see
+// TestPoolProviderRunPreservesNeverReadyWorkerWhenPreserveOnFailureSet.
+func TestPoolProviderRunDestroysNeverReadyWorkerByDefault(t *testing.T) {
 	fixture := newPoolTestFixture(t, false)
 	calls := poolTestStubRun(t, executor.Result{}, nil)
 	provider, err := newPoolProvider("vm-pool", PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1"}, nil, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Run(context.Background(), poolTestPrepared(t, "job-never-ready-default", "exec-never-ready-default"), nil, nil)
+	if err == nil || *calls != 0 {
+		t.Fatalf("expected pre-ready failure without a remote run, err=%v calls=%d", err, *calls)
+	}
+	if !errors.Is(err, vmpool.ErrWorkerNotReady) {
+		t.Fatalf("err=%v, want ErrWorkerNotReady in chain", err)
+	}
+	if destroyed := len(fixture.fake.Destroyed()); destroyed != 1 {
+		t.Fatalf("destroyed=%d, want the never-ready instance destroyed (preserve_on_failure defaults off)", destroyed)
+	}
+}
+
+// TestPoolProviderRunPreservesNeverReadyWorkerWhenPreserveOnFailureSet covers
+// the explicit opt-in: PreserveOnFailure: true keeps the never-ready
+// instance running for post-mortem, exactly as the old hardcoded-true
+// behavior did.
+func TestPoolProviderRunPreservesNeverReadyWorkerWhenPreserveOnFailureSet(t *testing.T) {
+	fixture := newPoolTestFixture(t, false)
+	calls := poolTestStubRun(t, executor.Result{}, nil)
+	provider, err := newPoolProvider("vm-pool", PoolExecutor{TokenEnv: "DO_TOKEN", Image: "img", Size: "s-1vcpu-1gb", Region: "sgp1", PreserveOnFailure: true}, nil, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +671,7 @@ func TestPoolProviderRunPreservesNeverReadyWorker(t *testing.T) {
 	if !errors.Is(err, vmpool.ErrWorkerNotReady) {
 		t.Fatalf("err=%v, want ErrWorkerNotReady in chain", err)
 	}
-	// PreserveFailed: the never-ready instance is kept for post-mortem.
+	// PreserveOnFailure: the never-ready instance is kept for post-mortem.
 	if destroyed := len(fixture.fake.Destroyed()); destroyed != 0 {
 		t.Fatalf("destroyed=%d, want preserved instance", destroyed)
 	}

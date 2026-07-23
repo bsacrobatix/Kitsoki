@@ -17,26 +17,29 @@ import (
 	"kitsoki/internal/objectstore"
 )
 
-// Worker env-file keys for the optional output-bucket mirror. These must
-// match cmd/kitsoki/capsule_worker_config.go's workerEnvOutputs* constants
-// byte-for-byte: that file is the worker-side consumer of
-// /etc/kitsoki-worker/env and is the authoritative definition of this
-// contract. They are duplicated here (rather than imported) because that file
-// lives in package main and dispatch.go must not import a command package.
+// Worker env-file keys for the optional output-bucket mirror. This is the
+// single authoritative definition of the contract: cmd/kitsoki's worker-side
+// consumer of /etc/kitsoki-worker/env (capsule_worker_config.go,
+// workerOutputsFromEnv) imports these exported constants instead of
+// re-declaring the literal strings — they used to be hand-duplicated
+// byte-for-byte across both files, which is exactly the kind of drift this
+// package var/const seam is meant to prevent. vmpool has no import-cycle
+// constraint against cmd/kitsoki (cmd already imports vmpool; vmpool must
+// never import a command package), so vmpool is the correct canonical home.
 const (
-	workerEnvOutputsURL    = "KITSOKI_WORKER_OUTPUTS_URL"
-	workerEnvOutputsKeyEnv = "KITSOKI_WORKER_OUTPUTS_KEY_ENV"
-	workerEnvOutputsSecEnv = "KITSOKI_WORKER_OUTPUTS_SECRET_ENV"
+	WorkerEnvOutputsURL    = "KITSOKI_WORKER_OUTPUTS_URL"
+	WorkerEnvOutputsKeyEnv = "KITSOKI_WORKER_OUTPUTS_KEY_ENV"
+	WorkerEnvOutputsSecEnv = "KITSOKI_WORKER_OUTPUTS_SECRET_ENV"
 
-	// workerEnvOutputsAccessKey and workerEnvOutputsSecretKey are the fixed
+	// WorkerEnvOutputsAccessKey and WorkerEnvOutputsSecretKey are the fixed
 	// env-file keys this dispatcher mints the resolved output-bucket
 	// credential values under. They are single-job secrets: like the TLS key
 	// and worker token, they are embedded in user data and destroyed with the
-	// droplet. workerEnvOutputsKeyEnv/workerEnvOutputsSecEnv simply name them
+	// droplet. WorkerEnvOutputsKeyEnv/WorkerEnvOutputsSecEnv simply name them
 	// so the worker's os.Getenv(keyEnv)/os.Getenv(secretEnv) lookup (see
 	// workerOutputsFromEnv) resolves to the values written here.
-	workerEnvOutputsAccessKey = "KITSOKI_WORKER_OUTPUTS_ACCESS_KEY"
-	workerEnvOutputsSecretKey = "KITSOKI_WORKER_OUTPUTS_SECRET_KEY"
+	WorkerEnvOutputsAccessKey = "KITSOKI_WORKER_OUTPUTS_ACCESS_KEY"
+	WorkerEnvOutputsSecretKey = "KITSOKI_WORKER_OUTPUTS_SECRET_KEY"
 )
 
 // Defaults for LeaseSpec.
@@ -437,10 +440,10 @@ func buildOutputsEnv(spec LeaseSpec) (map[string]string, error) {
 	if secretKey == "" {
 		return nil, fmt.Errorf("%s is not set", spec.OutputsSecretEnv)
 	}
-	env[workerEnvOutputsURL] = spec.BucketURL
-	env[workerEnvOutputsKeyEnv] = workerEnvOutputsAccessKey
-	env[workerEnvOutputsSecEnv] = workerEnvOutputsSecretKey
-	env[workerEnvOutputsAccessKey] = accessKey
-	env[workerEnvOutputsSecretKey] = secretKey
+	env[WorkerEnvOutputsURL] = spec.BucketURL
+	env[WorkerEnvOutputsKeyEnv] = WorkerEnvOutputsAccessKey
+	env[WorkerEnvOutputsSecEnv] = WorkerEnvOutputsSecretKey
+	env[WorkerEnvOutputsAccessKey] = accessKey
+	env[WorkerEnvOutputsSecretKey] = secretKey
 	return env, nil
 }

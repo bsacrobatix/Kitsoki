@@ -109,17 +109,26 @@ type Config struct {
 	ProvisionTimeout time.Duration `yaml:"provision_timeout" json:"provision_timeout"`
 	ActivityTimeout  time.Duration `yaml:"activity_timeout" json:"activity_timeout"`
 	MaxLifetime      time.Duration `yaml:"max_lifetime" json:"max_lifetime"`
+	// PreserveFailedTTL bounds how long a PreserveFailed worker's instance
+	// survives before Reconcile treats it as reapable instead of protected.
+	// Without this bound a preserved instance is terminal (Poll never
+	// revisits it) and Reconcile's orphan sweep otherwise treats "known,
+	// preserved" as permanent, so it would bill until a human ran `vmpool
+	// release` by hand. Only meaningful when the pool's PreserveFailed is
+	// set; ignored otherwise.
+	PreserveFailedTTL time.Duration `yaml:"preserve_failed_ttl" json:"preserve_failed_ttl"`
 }
 
 const (
-	DefaultTag              = "kitsoki-worker"
-	DefaultNamePrefix       = "kitsoki-worker-"
-	DefaultMaxConcurrent    = 5
-	DefaultRegion           = "sgp1"
-	DefaultSize             = "s-4vcpu-16gb"
-	DefaultProvisionTimeout = 15 * time.Minute
-	DefaultActivityTimeout  = 10 * time.Minute
-	DefaultMaxLifetime      = 2 * time.Hour
+	DefaultTag               = "kitsoki-worker"
+	DefaultNamePrefix        = "kitsoki-worker-"
+	DefaultMaxConcurrent     = 5
+	DefaultRegion            = "sgp1"
+	DefaultSize              = "s-4vcpu-16gb"
+	DefaultProvisionTimeout  = 15 * time.Minute
+	DefaultActivityTimeout   = 10 * time.Minute
+	DefaultMaxLifetime       = 2 * time.Hour
+	DefaultPreserveFailedTTL = 4 * time.Hour
 )
 
 // WithDefaults fills zero fields with the deployment defaults above.
@@ -147,6 +156,9 @@ func (c Config) WithDefaults() Config {
 	}
 	if c.MaxLifetime <= 0 {
 		c.MaxLifetime = DefaultMaxLifetime
+	}
+	if c.PreserveFailedTTL <= 0 {
+		c.PreserveFailedTTL = DefaultPreserveFailedTTL
 	}
 	return c
 }

@@ -155,9 +155,21 @@ func (p *poolProvider) AcceptPrepared(_ context.Context, prepared executor.Prepa
 // non-nil ci.Service.Run error as environmental/retryable regardless of its
 // concrete type (see executor_gate.go's runErr handling), so no further
 // remote-call-error wrapping is needed for that classification to work.
+// ciPoolProvisionTimeout is the single source of truth for how long a
+// leased worker gets to boot, both for the Pool's own provisioning-timeout
+// lifecycle guard (buildPool's Config.ProvisionTimeout) and, via
+// vmpool.LeaseSpec.withDefaults, for how long the Dispatcher's waitReady
+// loop waits before giving up (leaseWorker used to hardcode a shorter,
+// independent ReadyTimeout here — see leaseWorker's doc comment).
+const ciPoolProvisionTimeout = 8 * time.Minute
+
 // buildPool constructs the vmpool.Pool for this executor's configuration.
 // PreserveFailed keeps a pre-ready lease failure's instance for post-mortem
-// instead of destroying it blind.
+// instead of destroying it blind; it defaults to off (see
+// PoolExecutor.PreserveOnFailure's doc comment) so autonomous dispatch never
+// silently accumulates billed droplets, and PreserveFailedTTL bounds how
+// long a preserved instance survives before Reconcile reclaims it either
+// way.
 func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 	provisioner, err := ciVMPoolNewProvisioner(p.cfg.TokenEnv)
 	if err != nil {
@@ -181,11 +193,12 @@ func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 			// freshly-created worker as instantly "provisioning timed out" and the
 			// reconcile destroyed it mid-boot. Budgets exceed the 3h pog-bugfix
 			// command_timeout so a running agent loop is never lifecycle-killed.
-			ProvisionTimeout: 8 * time.Minute,
-			ActivityTimeout:  4 * time.Hour,
-			MaxLifetime:      5 * time.Hour,
+			ProvisionTimeout:  ciPoolProvisionTimeout,
+			ActivityTimeout:   4 * time.Hour,
+			MaxLifetime:       5 * time.Hour,
+			PreserveFailedTTL: p.cfg.PreserveFailedTTL,
 		},
-		PreserveFailed: true,
+		PreserveFailed: p.cfg.PreserveOnFailure,
 	}, nil
 }
 
@@ -202,12 +215,16 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 		ciVMPoolDispatcherHook(dispatcher)
 	}
 
+	// ReadyTimeout is deliberately left zero here: vmpool.LeaseSpec.withDefaults
+	// derives it from the Dispatcher's Pool.Config.ProvisionTimeout
+	// (ciPoolProvisionTimeout, set in buildPool) when unset. This used to be
+	// hardcoded shorter (6m) than ProvisionTimeout (8m), so a worker that
+	// became ready between 6-8m into its boot was abandoned by waitReady with
+	// the whole boot budget already spent — and, before PreserveOnFailure
+	// defaulted off, silently preserved (billed) on top of that. Deriving
+	// instead of duplicating keeps the two timeouts structurally impossible
+	// to drift apart again.
 	leaseSpec := vmpool.LeaseSpec{JobID: jobID, User: p.cfg.User, Env: map[string]string{}}
-	// POG fix: the CI pool executor left ReadyTimeout=0 (Config.ProvisionTimeout
-	// unset), so waitReady gave the freshly-booted worker exactly one readiness
-	// poll with no retry — an intermittent "worker did not become ready" race on
-	// ~60s boots. Give it a real budget so readiness is polled across the boot.
-	leaseSpec.ReadyTimeout = 6 * time.Minute
 	if len(p.cfg.PassEnv) > 0 {
 		// Names only: the worker resolves each value from its own process
 		// environment (see cmd/kitsoki capsuleWorkerChildEnv); no credential
@@ -223,13 +240,6 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	// which an ephemeral single-job pool droplet is. Without it every agent
 	// acceptance attempt produces empty output and the bugfix loop never ships.
 	leaseSpec.Env["IS_SANDBOX"] = "1"
-	// A per-lease VALUE (not a pass_env name) injected into the worker boot env
-	// so the pinned engine URL is available for boot-time engine install over
-	// the base image binary. Resolved from the controller's own environment at
-	// dispatch.
-	if engineURL := strings.TrimSpace(os.Getenv("KITSOKI_WORKER_ENGINE_URL")); engineURL != "" {
-		leaseSpec.Env["KITSOKI_WORKER_ENGINE_URL"] = engineURL
-	}
 	if tok := strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")); tok != "" {
 		leaseSpec.Env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
 	}
