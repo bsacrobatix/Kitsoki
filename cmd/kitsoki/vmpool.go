@@ -263,6 +263,21 @@ func vmpoolPrintStatus(w io.Writer, out vmpoolStatusOutput) error {
 		len(out.Reconcile.Active), len(out.Reconcile.Orphans), len(out.Reconcile.Lost)); err != nil {
 		return err
 	}
+	if _, err := fmt.Fprintf(w, "  preserved: protected=%d expired_reclaimable=%d\n",
+		len(out.Reconcile.PreservedProtected), len(out.Reconcile.ExpiredPreserved)); err != nil {
+		return err
+	}
+	for _, pw := range out.Reconcile.PreservedProtected {
+		if _, err := fmt.Fprintf(w, "  preserved (protected) worker %s instance=%s ttl_remaining=%s\n",
+			pw.WorkerID, ifEmpty(pw.InstanceID, "-"), pw.TTLRemaining.Round(time.Second)); err != nil {
+			return err
+		}
+	}
+	for _, id := range out.Reconcile.ExpiredPreserved {
+		if _, err := fmt.Fprintf(w, "  preserved (expired, reclaimable) worker %s\n", id); err != nil {
+			return err
+		}
+	}
 	for _, id := range out.Reconcile.Orphans {
 		if _, err := fmt.Fprintf(w, "  orphan instance %s\n", id); err != nil {
 			return err
@@ -277,10 +292,13 @@ func vmpoolPrintStatus(w io.Writer, out vmpoolStatusOutput) error {
 }
 
 // vmpoolReconcile runs the live tag-based reconcile. With repair=false it
-// computes the same orphan/lost classification Pool.Reconcile does, but
-// without destroying orphans or marking lost workers failed — a read-only
-// plan safe to run at any time. With repair=true it delegates to
-// Pool.Reconcile, which applies those actions.
+// computes the same classification Pool.Reconcile does (via
+// vmpool.Classify/ReportFromPlan) without destroying orphans, marking lost
+// workers failed, or reclaiming expired-preserved workers — a read-only plan
+// safe to run at any time. With repair=true it delegates to Pool.Reconcile,
+// which applies those actions. Both paths share the exact same
+// classification logic (see vmpoolPlanReconcile), so what an operator is
+// shown before --repair can never drift from what --repair actually does.
 func vmpoolReconcile(ctx context.Context, pool *vmpool.Pool, repair bool) (vmpool.ReconcileReport, error) {
 	if repair {
 		return pool.Reconcile(ctx)
@@ -288,6 +306,14 @@ func vmpoolReconcile(ctx context.Context, pool *vmpool.Pool, repair bool) (vmpoo
 	return vmpoolPlanReconcile(ctx, pool)
 }
 
+// vmpoolPlanReconcile is the read-only half of vmpoolReconcile: it fetches
+// the same durable state and live tagged instances Pool.Reconcile would, and
+// classifies them with the identical vmpool.Classify function Pool.Reconcile
+// itself calls internally, but takes no action. It must never hand-duplicate
+// that classification — doing so previously caused every preserved worker to
+// be misreported as an orphan and gave the plan no way to distinguish a
+// still-protected preserved worker from one whose PreserveFailedTTL had
+// already expired and was reclaimable.
 func vmpoolPlanReconcile(ctx context.Context, pool *vmpool.Pool) (vmpool.ReconcileReport, error) {
 	cfg := pool.Config.WithDefaults()
 	state, err := pool.Store.Load()
@@ -298,35 +324,8 @@ func vmpoolPlanReconcile(ctx context.Context, pool *vmpool.Pool) (vmpool.Reconci
 	if err != nil {
 		return vmpool.ReconcileReport{}, fmt.Errorf("vmpool: list instances by tag %s: %w", cfg.Tag, err)
 	}
-
-	knownInstance := make(map[string]bool, len(state.Workers))
-	for _, w := range state.Workers {
-		if !w.Status.Terminal() && w.InstanceID != "" {
-			knownInstance[w.InstanceID] = true
-		}
-	}
-
-	instanceExists := make(map[string]bool, len(instances))
-	var report vmpool.ReconcileReport
-	for _, inst := range instances {
-		instanceExists[inst.ID] = true
-		if knownInstance[inst.ID] {
-			report.Active = append(report.Active, inst.ID)
-			continue
-		}
-		report.Orphans = append(report.Orphans, inst.ID)
-	}
-
-	for _, w := range state.Workers {
-		if w.Status.Terminal() || w.InstanceID == "" {
-			continue
-		}
-		if instanceExists[w.InstanceID] {
-			continue
-		}
-		report.Lost = append(report.Lost, w.ID)
-	}
-	return report, nil
+	plan := vmpool.Classify(state, instances, cfg, pool.EffectiveNow())
+	return vmpool.ReportFromPlan(plan), nil
 }
 
 func vmpoolReleaseCmd() *cobra.Command {

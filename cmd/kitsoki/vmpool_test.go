@@ -159,6 +159,101 @@ func TestVmpReapRepairDestroysOrphansAndMarksLost(t *testing.T) {
 	require.Equal(t, vmpool.StatusFailed, w.Status)
 }
 
+// TestVmpReapPlanOnlyClassifiesPreservedWorkersInsteadOfOrphans is the
+// regression test for the fast-follow this change fixes: the plan-only path
+// (`vmpool reap`/`vmpool status` without --repair) must classify a
+// PreserveFailed worker's instance as preserved-protected or
+// preserved-expired-reclaimable via the same vmpool.Classify Pool.Reconcile
+// uses, never as a plain orphan, and must take no action either way.
+func TestVmpReapPlanOnlyClassifiesPreservedWorkersInsteadOfOrphans(t *testing.T) {
+	dir := t.TempDir()
+	fake := vmpool.NewFake()
+	vmpWithFakeProvisioner(t, fake)
+
+	protected, err := fake.Create(context.Background(), vmpool.CreateParams{Name: "protected", Tags: []string{vmpool.DefaultTag}})
+	require.NoError(t, err)
+	expired, err := fake.Create(context.Background(), vmpool.CreateParams{Name: "expired", Tags: []string{vmpool.DefaultTag}})
+	require.NoError(t, err)
+
+	// Default PreserveFailedTTL is 4h (vmpool.DefaultPreserveFailedTTL):
+	// well within it counts as protected, well past it counts as expired.
+	vmpSeedWorker(t, dir, vmpool.Worker{
+		ID: "vm-protected", JobID: "job-protected", InstanceID: protected.ID,
+		Status: vmpool.StatusFailed, Preserved: true, TerminalAt: time.Now().UTC().Add(-1 * time.Hour),
+	})
+	vmpSeedWorker(t, dir, vmpool.Worker{
+		ID: "vm-expired", JobID: "job-expired", InstanceID: expired.ID,
+		Status: vmpool.StatusFailed, Preserved: true, TerminalAt: time.Now().UTC().Add(-5 * time.Hour),
+	})
+
+	out, err := runVmp(t, "reap", "--project", dir)
+	require.NoError(t, err)
+
+	var report vmpool.ReconcileReport
+	require.NoError(t, json.Unmarshal([]byte(out), &report))
+
+	require.Empty(t, report.Orphans, "preserved workers must never be reported as orphans")
+	require.Len(t, report.PreservedProtected, 1)
+	require.Equal(t, "vm-protected", report.PreservedProtected[0].WorkerID)
+	require.Positive(t, report.PreservedProtected[0].TTLRemaining, "protected worker should report TTL remaining")
+	require.Contains(t, report.ExpiredPreserved, "vm-expired")
+	require.Empty(t, fake.Destroyed(), "plan-only reap must not destroy anything")
+
+	state, err := (vmpool.Store{ProjectRoot: dir}).Load()
+	require.NoError(t, err)
+	protectedWorker, ok := state.WorkerByID("vm-protected")
+	require.True(t, ok)
+	require.True(t, protectedWorker.Preserved, "plan-only reap must not mutate durable state")
+	expiredWorker, ok := state.WorkerByID("vm-expired")
+	require.True(t, ok)
+	require.True(t, expiredWorker.Preserved, "plan-only reap must not mutate durable state")
+}
+
+// TestVmpReapRepairReclaimsExpiredPreservedButProtectsWithinTTL is the
+// --repair counterpart: it must destroy and reclaim only the
+// preserve_failed_ttl-expired worker's instance, leaving the still-protected
+// one running and untouched.
+func TestVmpReapRepairReclaimsExpiredPreservedButProtectsWithinTTL(t *testing.T) {
+	dir := t.TempDir()
+	fake := vmpool.NewFake()
+	vmpWithFakeProvisioner(t, fake)
+
+	protected, err := fake.Create(context.Background(), vmpool.CreateParams{Name: "protected", Tags: []string{vmpool.DefaultTag}})
+	require.NoError(t, err)
+	expired, err := fake.Create(context.Background(), vmpool.CreateParams{Name: "expired", Tags: []string{vmpool.DefaultTag}})
+	require.NoError(t, err)
+
+	vmpSeedWorker(t, dir, vmpool.Worker{
+		ID: "vm-protected", JobID: "job-protected", InstanceID: protected.ID,
+		Status: vmpool.StatusFailed, Preserved: true, TerminalAt: time.Now().UTC().Add(-1 * time.Hour),
+	})
+	vmpSeedWorker(t, dir, vmpool.Worker{
+		ID: "vm-expired", JobID: "job-expired", InstanceID: expired.ID,
+		Status: vmpool.StatusFailed, Preserved: true, TerminalAt: time.Now().UTC().Add(-5 * time.Hour),
+	})
+
+	out, err := runVmp(t, "reap", "--project", dir, "--repair")
+	require.NoError(t, err)
+
+	var report vmpool.ReconcileReport
+	require.NoError(t, json.Unmarshal([]byte(out), &report))
+	require.Contains(t, report.ExpiredPreserved, "vm-expired")
+	require.Len(t, report.PreservedProtected, 1)
+	require.Equal(t, "vm-protected", report.PreservedProtected[0].WorkerID)
+
+	require.Contains(t, fake.Destroyed(), expired.ID)
+	require.NotContains(t, fake.Destroyed(), protected.ID)
+
+	state, err := (vmpool.Store{ProjectRoot: dir}).Load()
+	require.NoError(t, err)
+	expiredWorker, ok := state.WorkerByID("vm-expired")
+	require.True(t, ok)
+	require.False(t, expiredWorker.Preserved, "expired preservation must be cleared on repair")
+	protectedWorker, ok := state.WorkerByID("vm-protected")
+	require.True(t, ok)
+	require.True(t, protectedWorker.Preserved, "still-protected worker must not be reclaimed early")
+}
+
 func TestVmpImageBuildCreatesBuilderWithExpectedUserData(t *testing.T) {
 	dir := t.TempDir()
 	fake := vmpool.NewFake()

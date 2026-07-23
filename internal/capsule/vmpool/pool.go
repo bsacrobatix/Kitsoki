@@ -16,22 +16,29 @@ var ErrPoolFull = errors.New("vmpool: pool is full")
 // non-terminal worker.
 var ErrJobActive = errors.New("vmpool: job already has an active worker")
 
-// ReconcileReport summarizes the result of a Reconcile pass.
+// ReconcileReport summarizes the result of a Reconcile pass. It is derived
+// from a ReconcilePlan (see Classify/ReportFromPlan) -- the same
+// classification a plan-only caller sees before choosing to --repair.
 type ReconcileReport struct {
 	// Orphans are cloud instance IDs, tagged for this pool, that matched no
-	// non-terminal durable worker record and were destroyed.
+	// durable worker record at all and were destroyed.
 	Orphans []string
 	// Lost are durable worker IDs whose cloud instance no longer exists;
 	// they were marked StatusFailed.
 	Lost []string
-	// Active are cloud instance IDs that matched a non-terminal worker
-	// record and required no action.
+	// Active are cloud instance IDs that matched a known, non-terminal,
+	// non-preserved worker record and required no action. A preserved
+	// worker's instance is reported separately, under PreservedProtected or
+	// ExpiredPreserved.
 	Active []string
+	// PreservedProtected are PreserveFailed workers still within
+	// Config.PreserveFailedTTL: their instance is deliberately kept running
+	// and was left untouched.
+	PreservedProtected []PreservedWorker `json:"preserved_protected,omitempty"`
 	// ExpiredPreserved are durable worker IDs that were PreserveFailed but
 	// whose Config.PreserveFailedTTL has elapsed since they terminalized;
-	// their instance was destroyed (if the tag sweep above did not already
-	// catch it) and Preserved was cleared, so they no longer bill and no
-	// longer show up as protected on a later Reconcile.
+	// their instance was destroyed and Preserved was cleared, so they no
+	// longer bill and no longer show up as protected on a later Reconcile.
 	ExpiredPreserved []string
 }
 
@@ -82,6 +89,16 @@ func (p *Pool) now() time.Time {
 		return p.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// EffectiveNow reports the pool's current time, honoring the Now override
+// tests use for a deterministic clock. Exported so a plan-only caller
+// outside this package (the CLI's `vmpool status`/`vmpool reap` without
+// --repair path) can call Classify against the exact clock Reconcile would
+// use, so PreserveFailedTTL boundary behavior can never drift between the
+// two paths.
+func (p *Pool) EffectiveNow() time.Time {
+	return p.now()
 }
 
 func (p *Pool) config() Config {
@@ -342,16 +359,6 @@ func (p *Pool) destroyAndFail(ctx context.Context, w Worker, reason string) (Wor
 		})
 }
 
-// preserveExpired reports whether w's PreserveFailed grace period
-// (cfg.PreserveFailedTTL) has elapsed since it terminalized. A worker that
-// was never preserved, or has no recorded TerminalAt yet, is never expired.
-func preserveExpired(w Worker, cfg Config, now time.Time) bool {
-	if !w.Preserved || w.TerminalAt.IsZero() {
-		return false
-	}
-	return now.Sub(w.TerminalAt) > cfg.PreserveFailedTTL
-}
-
 // applyIf mutates the current durable worker record for id under the store
 // lock, but only if precondition still holds against the freshly loaded
 // record — guarding against a concurrent change made between an unlocked
@@ -450,61 +457,47 @@ func (p *Pool) Release(ctx context.Context, workerID string) error {
 }
 
 // Reconcile is the tag-based orphan sweep: cloud instances tagged
-// Config.Tag that match no non-terminal durable worker are destroyed as
-// orphans, non-terminal durable workers whose instance no longer exists are
-// marked StatusFailed as lost, and any PreserveFailed worker whose
+// Config.Tag that match no known durable worker are destroyed as orphans,
+// non-terminal durable workers whose instance no longer exists are marked
+// StatusFailed as lost, and any PreserveFailed worker whose
 // Config.PreserveFailedTTL has elapsed is reclaimed (see ExpiredPreserved).
+// Classification is delegated to Classify (see ReconcilePlan); Reconcile's
+// job is only to act on that plan and report it via ReportFromPlan, so a
+// plan-only caller inspecting the same Classify output before --repair sees
+// exactly what Reconcile is about to do.
 func (p *Pool) Reconcile(ctx context.Context) (ReconcileReport, error) {
 	cfg := p.config()
 	state, err := p.Store.Load()
 	if err != nil {
 		return ReconcileReport{}, err
 	}
-	now := p.now()
 	instances, err := p.Provisioner.ListByTag(ctx, cfg.Tag)
 	if err != nil {
 		return ReconcileReport{}, fmt.Errorf("vmpool: list instances by tag %s: %w", cfg.Tag, err)
 	}
+	now := p.now()
+	plan := Classify(state, instances, cfg, now)
 
-	knownInstance := make(map[string]bool, len(state.Workers))
-	for _, w := range state.Workers {
-		// A preserved failure's instance is intentionally kept for
-		// post-mortem: it is known, not an orphan, until explicitly
-		// released or until its preserve_failed_ttl elapses — once expired
-		// it is excluded here so the orphan sweep below reclaims it exactly
-		// like an untracked instance.
-		if (!w.Status.Terminal() || (w.Preserved && !preserveExpired(w, cfg, now))) && w.InstanceID != "" {
-			knownInstance[w.InstanceID] = true
+	for _, id := range plan.Orphans {
+		if err := p.Provisioner.Destroy(ctx, id); err != nil {
+			return ReconcileReport{}, fmt.Errorf("vmpool: destroy orphan instance %s: %w", id, err)
+		}
+	}
+	// An expired-preserved worker's instance is reclaimable, not an orphan
+	// (Classify keeps the two buckets disjoint), so it needs its own destroy
+	// pass here rather than riding along with the orphan sweep above.
+	for _, pw := range plan.PreservedExpired {
+		if pw.InstanceID == "" {
+			continue
+		}
+		if err := p.Provisioner.Destroy(ctx, pw.InstanceID); err != nil {
+			return ReconcileReport{}, fmt.Errorf("vmpool: destroy expired-preserved instance %s: %w", pw.InstanceID, err)
 		}
 	}
 
-	instanceExists := make(map[string]bool, len(instances))
-	var report ReconcileReport
-	for _, inst := range instances {
-		instanceExists[inst.ID] = true
-		if knownInstance[inst.ID] {
-			report.Active = append(report.Active, inst.ID)
-			continue
-		}
-		if err := p.Provisioner.Destroy(ctx, inst.ID); err != nil {
-			return ReconcileReport{}, fmt.Errorf("vmpool: destroy orphan instance %s: %w", inst.ID, err)
-		}
-		report.Orphans = append(report.Orphans, inst.ID)
-	}
-
-	var lost []string
-	for _, w := range state.Workers {
-		if w.Status.Terminal() || w.InstanceID == "" {
-			continue
-		}
-		if instanceExists[w.InstanceID] {
-			continue
-		}
-		lost = append(lost, w.ID)
-	}
-	if len(lost) > 0 {
-		lostSet := make(map[string]bool, len(lost))
-		for _, id := range lost {
+	if len(plan.Lost) > 0 {
+		lostSet := make(map[string]bool, len(plan.Lost))
+		for _, id := range plan.Lost {
 			lostSet[id] = true
 		}
 		if err := p.Store.Update(func(state *State) error {
@@ -522,24 +515,16 @@ func (p *Pool) Reconcile(ctx context.Context) (ReconcileReport, error) {
 			return ReconcileReport{}, err
 		}
 	}
-	report.Lost = lost
 
-	// Clear Preserved on every worker whose preserve_failed_ttl elapsed. Its
-	// instance, if the tag sweep above still found it live, was already
-	// destroyed as an orphan; this pass updates the durable record either
-	// way (including the edge case where the instance had already vanished
-	// or was never tagged) so a later Reconcile never re-reports it as
-	// protected.
-	var expiredPreserved []string
-	for _, w := range state.Workers {
-		if w.Preserved && preserveExpired(w, cfg, now) {
-			expiredPreserved = append(expiredPreserved, w.ID)
-		}
-	}
-	if len(expiredPreserved) > 0 {
-		expiredSet := make(map[string]bool, len(expiredPreserved))
-		for _, id := range expiredPreserved {
-			expiredSet[id] = true
+	// Clear Preserved on every worker whose preserve_failed_ttl elapsed
+	// (its instance, if still live, was just destroyed above); this pass
+	// updates the durable record either way (including the edge case where
+	// the instance had already vanished or was never tagged) so a later
+	// Reconcile never re-reports it as protected or expired.
+	if len(plan.PreservedExpired) > 0 {
+		expiredSet := make(map[string]bool, len(plan.PreservedExpired))
+		for _, pw := range plan.PreservedExpired {
+			expiredSet[pw.WorkerID] = true
 		}
 		if err := p.Store.Update(func(state *State) error {
 			for i := range state.Workers {
@@ -555,8 +540,8 @@ func (p *Pool) Reconcile(ctx context.Context) (ReconcileReport, error) {
 			return ReconcileReport{}, err
 		}
 	}
-	report.ExpiredPreserved = expiredPreserved
-	return report, nil
+
+	return ReportFromPlan(plan), nil
 }
 
 // List returns every durable worker record.
