@@ -390,7 +390,7 @@ func capsuleWorkspaceView(ctx context.Context, manager *control.Manager, handle 
 }
 
 func projectRelativeWorkspacePath(projectRoot, workspacePath string) (string, error) {
-	root, err := filepath.Abs(projectRoot)
+	project, err := filepath.Abs(projectRoot)
 	if err != nil {
 		return "", err
 	}
@@ -398,17 +398,39 @@ func projectRelativeWorkspacePath(projectRoot, workspacePath string) (string, er
 	if err != nil {
 		return "", err
 	}
+	root := project
 	if real, err := filepath.EvalSymlinks(root); err == nil {
 		root = real
 	}
 	if real, err := filepath.EvalSymlinks(path); err == nil {
 		path = real
 	}
+	if relative, ok := confinedRelativePath(root, path); ok {
+		return filepath.ToSlash(relative), nil
+	}
+
+	// Hosted releases deliberately point <release>/.capsules at one stable
+	// control-plane root outside the immutable release tree. WorkspacePath
+	// returns the canonical target so persisted paths survive a release flip;
+	// map that canonical path back through the managed project alias for the
+	// user-facing, machine-path-redacted view. Only the exact .capsules alias is
+	// admitted, and the descendant check remains fail-closed.
+	capsuleAlias := filepath.Join(project, ".capsules")
+	capsuleRoot, err := filepath.EvalSymlinks(capsuleAlias)
+	if err == nil {
+		if relative, ok := confinedRelativePath(capsuleRoot, path); ok {
+			return filepath.ToSlash(filepath.Join(".capsules", relative)), nil
+		}
+	}
+	return "", fmt.Errorf("capsule workspace: path is outside project scope")
+}
+
+func confinedRelativePath(root, path string) (string, bool) {
 	relative, err := filepath.Rel(root, path)
 	if err != nil || relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("capsule workspace: path is outside project scope")
+		return "", false
 	}
-	return filepath.ToSlash(relative), nil
+	return relative, true
 }
 
 func capsuleWorkspaceIntegrate(ctx context.Context, manager *control.Manager, in control.Instance, gate string, teardown bool, owner string) (capsuleWorkspaceIntegrationResult, error) {

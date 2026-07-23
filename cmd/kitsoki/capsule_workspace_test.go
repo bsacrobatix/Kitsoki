@@ -66,6 +66,34 @@ func TestProjectRelativeWorkspacePathConfinesAndRedactsMachinePath(t *testing.T)
 	}
 }
 
+func TestProjectRelativeWorkspacePathUsesStableCapsuleSymlinkAlias(t *testing.T) {
+	root := t.TempDir()
+	stable := t.TempDir()
+	workspace := filepath.Join(stable, "workspaces", "release-alias")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(stable, filepath.Join(root, ".capsules")); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := projectRelativeWorkspacePath(root, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != ".capsules/workspaces/release-alias" {
+		t.Fatalf("path=%q, want managed project alias", got)
+	}
+
+	outside := filepath.Join(t.TempDir(), "release-alias")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projectRelativeWorkspacePath(root, outside); err == nil {
+		t.Fatal("unrelated external path was accepted through capsule alias")
+	}
+}
+
 func TestCapsuleWorkspaceExecuteRequiresOwnedFreshHandleAndDeclaredCommand(t *testing.T) {
 	root := t.TempDir()
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
