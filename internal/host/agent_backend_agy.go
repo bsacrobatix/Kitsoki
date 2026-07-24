@@ -168,6 +168,12 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 			copyFile(filepath.Join(realGemini, "installation_id"), filepath.Join(geminiDir, "installation_id"))
 			copyFile(filepath.Join(realGemini, "projects.json"), filepath.Join(geminiDir, "projects.json"))
 			copyFile(filepath.Join(realGemini, "settings.json"), filepath.Join(geminiDir, "settings.json"))
+			copyFile(filepath.Join(realGemini, "config", "config.json"), filepath.Join(configDir, "config.json"))
+			// Current worker images authenticate agy with these files. Older
+			// installations may instead have the root-level OAuth files above,
+			// so retain both layouts during a rolling image upgrade.
+			copyFile(filepath.Join(realCli, "antigravity-oauth-token"), filepath.Join(cliDir, "antigravity-oauth-token"))
+			copyFile(filepath.Join(realCli, "installation_id"), filepath.Join(cliDir, "installation_id"))
 			copyFile(filepath.Join(realCli, "settings.json"), filepath.Join(cliDir, "settings.json"))
 
 			if mcpConfig == "" {
