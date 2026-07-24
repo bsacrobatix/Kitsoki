@@ -301,7 +301,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki
+(cd "$ROOT" && GOOS=linux GOARCH=amd64 GOCACHE="$GOCACHE" go build -o "$local_stage/kitsoki" ./cmd/kitsoki)
 git -C "$POG_ROOT" bundle create "$local_stage/pog.bundle" main
 # Bundle each federated portfolio member from its declared source and ref, and
 # record it in members.manifest for install.sh. A declared ref that lacks
