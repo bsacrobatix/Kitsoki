@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 	"kitsoki/internal/orchestrator"
 )
 
@@ -81,4 +82,29 @@ func TestStallDiagnosticsWithoutSettleErrorOrVerdict(t *testing.T) {
 	err := stalledVerdictError("stories/dev-story/app.yaml", out)
 	require.Contains(t, err.Error(), "bf.testing")
 	require.NotContains(t, err.Error(), `verdict schema ""`)
+}
+
+// TestStalledVerdictErrorPreservesHandledProviderFailure covers the worker
+// boundary seen in production: host.agent.task returns a typed quota failure,
+// the story handles on_error by returning to idle, and the drive therefore
+// settles without a ci_verdict or Last.HarnessError. The settled world's
+// structured host_error is the only durable cause left.
+func TestStalledVerdictErrorPreservesHandledProviderFailure(t *testing.T) {
+	out := orchestrator.DriveOutcome{
+		FinalState: app.StatePath("bf.idle"),
+		Outcome:    "resolved",
+		Rounds:     3,
+		WorldAfter: map[string]any{
+			"host_error": map[string]any{
+				"namespace": "host.agent.task",
+				"message":   "host.agent.task: claude exec failed: agent_quota: coding-agent provider unavailable: HTTP 429",
+			},
+		},
+	}
+
+	err := stalledVerdictError("stories/bugfix/app.yaml", out)
+	require.Contains(t, err.Error(), "host error:")
+	require.Contains(t, err.Error(), "agent_quota")
+	require.Equal(t, "agent_quota", host.ClassifyAgentFailureText(err.Error()),
+		"the outer Capsule worker must recover the typed provider class")
 }

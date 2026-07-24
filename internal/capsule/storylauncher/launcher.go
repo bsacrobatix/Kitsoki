@@ -209,12 +209,37 @@ func stallDiagnostics(out orchestrator.DriveOutcome) string {
 	if out.Last != nil && strings.TrimSpace(out.Last.HarnessError) != "" {
 		parts = append(parts, "settle error: "+strings.TrimSpace(out.Last.HarnessError))
 	}
+	// A host failure can be handled by the story's on_error transition and
+	// therefore disappear from Last.HarnessError before DriveToRest settles.
+	// The orchestrator deliberately preserves the structured host_error in the
+	// settled world. Surface it here so a Capsule worker does not collapse a
+	// typed provider failure (agent_quota/agent_auth) into a generic missing
+	// verdict: capsuleWorkerRunCmd classifies this returned error and the
+	// outer worker record then carries the same typed failure_class.
+	if msg := settledHostError(out.WorldAfter); msg != "" {
+		parts = append(parts, "host error: "+msg)
+	}
 	if v := lastAgentVerdict(out.WorldAfter); v != "" {
 		parts = append(parts, "last agent verdict: "+v)
 	} else {
 		parts = append(parts, "no agent verdict bound")
 	}
 	return strings.Join(parts, "; ")
+}
+
+func settledHostError(world map[string]any) string {
+	raw, ok := world["host_error"]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch value := raw.(type) {
+	case map[string]any:
+		return strings.TrimSpace(fmt.Sprint(value["message"]))
+	case string:
+		return strings.TrimSpace(value)
+	default:
+		return ""
+	}
 }
 
 // lastAgentVerdict summarises the judge/triage verdicts the story bound (world
