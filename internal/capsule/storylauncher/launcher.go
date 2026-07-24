@@ -144,6 +144,14 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 			return ci.Verdict{}, fmt.Errorf("capsule ci: agent cost %.6f exceeded sealed budget %.6f", observed, limit)
 		}
 	}
+	verdict, err := storyVerdictFromOutcome(l.StoryPath, out)
+	if err != nil {
+		return ci.Verdict{}, err
+	}
+	return verdict, nil
+}
+
+func storyVerdictFromOutcome(storyPath string, out orchestrator.DriveOutcome) (ci.Verdict, error) {
 	raw, ok := out.WorldAfter["ci_verdict"]
 	if !ok || raw == nil {
 		// The story settled without ever emitting a ci_verdict — it stalled at a
@@ -153,7 +161,7 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 		// worker fails with a bare, undebuggable `verdict schema ""`. Name the
 		// stuck room AND why nothing advanced it so the bucket-mirrored error is
 		// self-diagnosing (no SSH-to-worker required).
-		return ci.Verdict{}, stalledVerdictError(l.StoryPath, out)
+		return ci.Verdict{}, stalledVerdictError(storyPath, out)
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
@@ -162,6 +170,16 @@ func (l Launcher) Launch(ctx context.Context, prepared executor.Prepared) (ci.Ve
 	var verdict ci.Verdict
 	if err := json.Unmarshal(encoded, &verdict); err != nil {
 		return ci.Verdict{}, fmt.Errorf("capsule ci: parse story verdict: %w", err)
+	}
+	// Story world schemas can predeclare ci_verdict with its zero value. That
+	// makes the key present even when a handled host error returned the story
+	// to an idle room before any verdict was emitted. Treat this exact
+	// combination as the same stalled execution as an absent verdict, so the
+	// structured host_error survives into the worker's typed failure_class.
+	// An empty verdict without a host error remains an ordinary malformed
+	// verdict and is rejected by ValidateVerdict at the caller.
+	if strings.TrimSpace(verdict.Schema) == "" && settledHostError(out.WorldAfter) != "" {
+		return ci.Verdict{}, stalledVerdictError(storyPath, out)
 	}
 	return verdict, nil
 }

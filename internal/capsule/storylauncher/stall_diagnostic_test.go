@@ -108,3 +108,30 @@ func TestStalledVerdictErrorPreservesHandledProviderFailure(t *testing.T) {
 	require.Equal(t, "agent_quota", host.ClassifyAgentFailureText(err.Error()),
 		"the outer Capsule worker must recover the typed provider class")
 }
+
+// TestStoryVerdictFromOutcomeTreatsDefaultVerdictAsStalled pins the production
+// shape: ci_verdict exists because the story schema predeclares it, but all
+// fields are empty because the agent failed before any terminal room emitted a
+// verdict. Presence alone must not hide the settled provider failure.
+func TestStoryVerdictFromOutcomeTreatsDefaultVerdictAsStalled(t *testing.T) {
+	out := orchestrator.DriveOutcome{
+		FinalState: app.StatePath("bf.idle"),
+		Outcome:    "resolved",
+		Rounds:     3,
+		WorldAfter: map[string]any{
+			"ci_verdict": map[string]any{
+				"schema":  "",
+				"outcome": "",
+			},
+			"host_error": map[string]any{
+				"namespace": "host.agent.task",
+				"message":   "host.agent.task: agent_quota: coding-agent provider unavailable: HTTP 429",
+			},
+		},
+	}
+
+	_, err := storyVerdictFromOutcome("stories/bugfix/app.yaml", out)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "stalled without emitting ci_verdict")
+	require.Equal(t, "agent_quota", host.ClassifyAgentFailureText(err.Error()))
+}
