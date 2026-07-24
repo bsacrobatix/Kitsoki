@@ -714,6 +714,8 @@ func (codexBackend) Classify(ev map[string]any) classifiedEvent {
 
 func (codexBackend) TranscriptFormat() string { return "codex-jsonl" }
 
+func (codexBackend) StreamsIncrementally() bool { return true }
+
 // ValidatorToolName returns codex's tool name for the `submit` tool of an MCP
 // server registered via the `-c mcp_servers.<name>.*` overrides. This is a
 // best-guess placeholder ("<server>__submit") modeled on claude's

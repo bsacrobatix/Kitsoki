@@ -159,6 +159,7 @@ func (s AgentStreamer) checkCLIArgs(ctx context.Context) {
 
 func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	s.checkCLIArgs(ctx)
+	backend := AgentBackendFromContext(ctx)
 	// Every transport return passes through normalizeAgentProviderFailure below;
 	// keep that invariant when adding another runtime path so auth/quota never
 	// falls through into a verb-specific semantic retry loop.
@@ -169,25 +170,37 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	// KITSOKI_SESSION_ID.
 	args := appendClaudeMCPPermissionSettings(ctx, s.CLIArgs)
 	args = append(args, "--output-format", "stream-json", "--verbose")
-	if s.Sandbox != nil {
-		if s.Sandbox.InheritHome {
+	sandbox := s.Sandbox
+	if sandbox != nil && !backend.StreamsIncrementally() && sandbox.Resources.ActivityTimeout > 0 {
+		// A buffered CLI can be healthy for the entire call while producing no
+		// bytes at all. Applying a stream-inactivity deadline to it guarantees
+		// false cancellation. Preserve the absolute timeout, which still bounds
+		// the call, and let the CLI's own provider timeout report a typed error.
+		copy := *sandbox
+		copy.Resources.ActivityTimeout = 0
+		sandbox = &copy
+	}
+	if sandbox != nil {
+		if sandbox.InheritHome {
 			// Claude's OAuth login is tied to the operator environment. Keep the
 			// real stream transport in this explicit mode so the watchdog sees
 			// JSONL activity and the provider sees its login.
-			if s.Sandbox.Resources.Timeout > 0 {
+			if sandbox.Resources.Timeout > 0 {
 				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, s.Sandbox.Resources.Timeout)
+				ctx, cancel = context.WithTimeout(ctx, sandbox.Resources.Timeout)
 				defer cancel()
 			}
-			ctx, stop := withAgentActivityTimeout(ctx, s.Sandbox.Resources.ActivityTimeout)
+			ctx, stop := withAgentActivityTimeout(ctx, sandbox.Resources.ActivityTimeout)
 			defer stop()
 			cr, sessionID, err := runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
 			return normalizeAgentProviderFailure(cr), sessionID, err
 		}
-		cr, sessionID, err := s.runWithRuntime(ctx, args)
+		runtimeStreamer := s
+		runtimeStreamer.Sandbox = sandbox
+		cr, sessionID, err := runtimeStreamer.runWithRuntime(ctx, args)
 		return normalizeAgentProviderFailure(cr), sessionID, err
 	}
-	if activityTimeout := agentDirectActivityTimeout(); activityTimeout > 0 {
+	if activityTimeout := agentDirectActivityTimeout(); backend.StreamsIncrementally() && activityTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithCancel(ctx)
 		defer cancel()

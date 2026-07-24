@@ -81,6 +81,8 @@ func (claudeBackend) Classify(ev map[string]any) classifiedEvent {
 
 func (claudeBackend) TranscriptFormat() string { return claudeTranscriptFormat }
 
+func (claudeBackend) StreamsIncrementally() bool { return true }
+
 func (claudeBackend) ValidatorToolName(server string) string {
 	return "mcp__" + server + "__submit"
 }

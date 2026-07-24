@@ -131,6 +131,12 @@ type agentBackend interface {
 	// sidecar ("claude-stream-json" | "copilot-jsonl").
 	TranscriptFormat() string
 
+	// StreamsIncrementally reports whether the backend emits observable stdout
+	// while a request is still running. An inactivity watchdog is meaningful
+	// only for incremental transports; buffered CLIs must rely on the absolute
+	// process timeout or a provider-native timeout instead.
+	StreamsIncrementally() bool
+
 	// ValidatorToolName returns the MCP tool name the model must call to submit
 	// a schema-validated payload, given the advertised MCP server name.
 	ValidatorToolName(server string) string

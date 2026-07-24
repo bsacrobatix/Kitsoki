@@ -222,6 +222,8 @@ func (copilotBackend) Classify(ev map[string]any) classifiedEvent {
 
 func (copilotBackend) TranscriptFormat() string { return "copilot-jsonl" }
 
+func (copilotBackend) StreamsIncrementally() bool { return true }
+
 // ValidatorToolName returns copilot's tool name for the `submit` tool of an MCP
 // server registered via --additional-mcp-config. Copilot namespaces MCP tools
 // as "<server>-<tool>" (verified live: a server named "kitsoki-validator"

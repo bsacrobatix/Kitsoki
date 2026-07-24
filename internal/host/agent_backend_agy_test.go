@@ -1,9 +1,13 @@
 package host
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"kitsoki/internal/host/agentruntime"
 )
 
 func TestAgyTranslationCopiesCurrentWorkerCredentialAndMCPLayouts(t *testing.T) {
@@ -57,4 +61,42 @@ func TestAgyTranslationCopiesCurrentWorkerCredentialAndMCPLayouts(t *testing.T) 
 	assertFile(".gemini/config/config.json", `{"configured":true}`)
 	assertFile(".gemini/config/mcp_config.json", `{"mcpServers":{"validator":{}}}`)
 	assertFile(".gemini/antigravity-cli/mcp_config.json", `{"mcpServers":{"validator":{}}}`)
+}
+
+func TestAgyBufferedTransportReliesOnAbsoluteTimeoutNotStreamInactivity(t *testing.T) {
+	t.Setenv("KITSOKI_AGENT_ACTIVITY_TIMEOUT", "20ms")
+
+	runner := func(ctx context.Context, _ []string, _ string, _ string) (ClaudeRun, error) {
+		select {
+		case <-time.After(75 * time.Millisecond):
+			return ClaudeRun{Stdout: "done"}, nil
+		case <-ctx.Done():
+			return ClaudeRun{Infra: ctx.Err()}, nil
+		}
+	}
+	ctx := WithAgentBackend(context.Background(), agyBackend{})
+	ctx = WithAgyRunner(ctx, runner)
+
+	run, _, err := (AgentStreamer{
+		Bin:        "stub://agy",
+		CLIArgs:    []string{"-p"},
+		Stdin:      "prompt",
+		WorkingDir: t.TempDir(),
+		Sandbox: &AgentSandboxSpec{
+			InheritHome: true,
+			Resources: agentruntime.ResourcePolicy{
+				Timeout:         time.Second,
+				ActivityTimeout: 20 * time.Millisecond,
+			},
+		},
+	}).Run(ctx)
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if run.Infra != nil {
+		t.Fatalf("buffered agy call was canceled by stream inactivity: %v", run.Infra)
+	}
+	if run.Stdout != "done" {
+		t.Fatalf("stdout = %q, want done", run.Stdout)
+	}
 }

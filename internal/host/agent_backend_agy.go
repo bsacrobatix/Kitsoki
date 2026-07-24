@@ -226,6 +226,8 @@ func (agyBackend) Classify(ev map[string]any) classifiedEvent {
 
 func (agyBackend) TranscriptFormat() string { return "agy-jsonl" }
 
+func (agyBackend) StreamsIncrementally() bool { return false }
+
 func (agyBackend) ValidatorToolName(server string) string {
 	return "mcp__" + server + "__submit"
 }
