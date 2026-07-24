@@ -787,15 +787,24 @@ func write(path string, state State) error {
 func lock(path string, wait time.Duration) (func(), error) {
 	deadline := time.Now().Add(wait)
 	for {
-		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			return func() { _ = f.Close(); _ = os.Remove(path) }, nil
-		}
-		if !os.IsExist(err) {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
 			return nil, fmt.Errorf("queue: acquire serializer: %w", err)
 		}
+		acquired, err := tryExclusiveFileLock(f)
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("queue: acquire serializer: %w", err)
+		}
+		if acquired {
+			return func() {
+				_ = releaseExclusiveFileLock(f)
+				_ = f.Close()
+			}, nil
+		}
+		_ = f.Close()
 		if wait <= 0 || time.Now().After(deadline) {
-			return nil, fmt.Errorf("queue: acquire serializer: %w: %w", ErrBusy, err)
+			return nil, fmt.Errorf("queue: acquire serializer: %w", ErrBusy)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}

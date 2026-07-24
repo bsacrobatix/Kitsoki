@@ -70,6 +70,12 @@ audited evidence line (actor, timestamp, reason). Worker results never clobber
 an operator decision: an in-flight result landing on a parked or rejected
 candidate is discarded and the discard is evidenced.
 
+The `state.lock` path is a stable inode guarded by an OS-owned exclusive file
+lock. Its presence is not ownership: the kernel releases ownership when the
+holder exits or is killed, so a crash or service restart cannot strand the
+queue behind an orphaned lock file. A concurrent live holder still produces
+the typed `queue.ErrBusy` result within the configured lock wait.
+
 | Verb        | From                                   | Effect |
 | ----------- | -------------------------------------- | ------ |
 | `kick`      | `retry_wait`                           | clears `retry_at`; attempts untouched |

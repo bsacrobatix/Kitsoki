@@ -1,11 +1,13 @@
 package queue
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -83,11 +85,21 @@ func TestSubmitReturnsTypedBusyWithinBoundOnLockContention(t *testing.T) {
 		t.Fatal(err)
 	}
 	lockFile := filepath.Join(dir, "state.lock")
-	f, err := os.OpenFile(lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = f.Close(); _ = os.Remove(lockFile) }()
+	acquired, err := tryExclusiveFileLock(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !acquired {
+		t.Fatal("test failed to acquire serializer lock")
+	}
+	defer func() {
+		_ = releaseExclusiveFileLock(f)
+		_ = f.Close()
+	}()
 
 	sha := strings.Repeat("a", 40)
 	in := Submit{Branch: "agent/a", SHA: sha, Receipt: testReceipt(t, sha)}
@@ -105,6 +117,90 @@ func TestSubmitReturnsTypedBusyWithinBoundOnLockContention(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Submit did not return within bound while the lock was held")
 	}
+}
+
+func TestSubmitReclaimsPersistentLockFileWithoutLiveOwner(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".capsules", "queue")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(dir, "state.lock")
+	if err := os.WriteFile(lockFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sha := strings.Repeat("b", 40)
+	store := Store{ProjectRoot: root}
+	if _, err := store.Submit(Submit{
+		Branch:  "agent/restart",
+		SHA:     sha,
+		Receipt: testReceipt(t, sha),
+	}); err != nil {
+		t.Fatalf("persistent lock file without a live owner blocked submit: %v", err)
+	}
+	if _, err := os.Stat(lockFile); err != nil {
+		t.Fatalf("serializer lock file should remain as a stable inode: %v", err)
+	}
+}
+
+func TestSubmitRecoversSerializerAfterHolderProcessDies(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".capsules", "queue")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockFile := filepath.Join(dir, "state.lock")
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestQueueLockHolderProcess")
+	cmd.Env = append(os.Environ(), "KITSOKI_QUEUE_LOCK_HOLDER="+lockFile)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	scanner := bufio.NewScanner(stdout)
+	if !scanner.Scan() || scanner.Text() != "locked" {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatalf("lock holder did not become ready: %q (%v)", scanner.Text(), scanner.Err())
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+
+	sha := strings.Repeat("c", 40)
+	store := Store{ProjectRoot: root, LockWait: time.Second}
+	if _, err := store.Submit(Submit{
+		Branch:  "agent/crash-restart",
+		SHA:     sha,
+		Receipt: testReceipt(t, sha),
+	}); err != nil {
+		t.Fatalf("dead holder's serializer lock was not released by the OS: %v", err)
+	}
+}
+
+func TestQueueLockHolderProcess(t *testing.T) {
+	path := os.Getenv("KITSOKI_QUEUE_LOCK_HOLDER")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := tryExclusiveFileLock(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !acquired {
+		t.Fatal("helper could not acquire serializer lock")
+	}
+	fmt.Println("locked")
+	select {}
 }
 
 func TestProcessParksSpeculativeConflictAndKeepsEvidence(t *testing.T) {
