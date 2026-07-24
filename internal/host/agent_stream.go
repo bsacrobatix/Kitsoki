@@ -159,6 +159,9 @@ func (s AgentStreamer) checkCLIArgs(ctx context.Context) {
 
 func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 	s.checkCLIArgs(ctx)
+	// Every transport return passes through normalizeAgentProviderFailure below;
+	// keep that invariant when adding another runtime path so auth/quota never
+	// falls through into a verb-specific semantic retry loop.
 	// stream-json + --verbose (claude requires --verbose alongside
 	// --output-format stream-json in -p mode). emitStreamEvent tees to a sink
 	// only when one is installed, so the no-sink case still streams to slog and
