@@ -9,7 +9,7 @@ digest_tool="$assets/state-content-digest.mjs"
 legacy_ship_importer="$assets/import-legacy-worker-ships.sh"
 capsule_state_linker="$assets/link-capsule-state.sh"
 
-bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_linker"
+bash -n "$deploy" "$packager" "$assets/install.sh" "$legacy_ship_importer" "$capsule_state_linker" "$assets/prune-releases.sh"
 node --check "$digest_tool"
 
 for required in \
@@ -18,6 +18,7 @@ for required in \
   "$assets/kitsoki-pog.service" \
   "$assets/node-runtime.env" \
   "$assets/pog-portal.service" \
+  "$assets/prune-releases.sh" \
 	"$assets/pog-capsule-state.service" \
 	"$assets/pog-worker-finalizer.service" \
 	"$assets/pog-worker-finalizer.timer" \
@@ -139,6 +140,9 @@ grep -q 'kitsoki-pog.service.d/zz-hosted-engine.conf' "$assets/install.sh"
 grep -q 'kitsoki-pog did not activate with the versioned hosted engine' "$assets/install.sh"
 grep -q 'POG_KITSOKI_BIN=\$hosted_engine' "$deploy"
 grep -q 'for unit in kitsoki-pog.service pog-portal.service pog-worker-finalizer.service' "$deploy"
+grep -q 'prune-releases.sh' "$deploy"
+grep -q '"$stage/prune-releases.sh" "$release_root" "$current" 2' "$assets/install.sh"
+grep -q '"$stage/prune-releases.sh" "$kitsoki_release_root" "$kitsoki_current" 2' "$assets/install.sh"
 grep -q 'kitsoki-pog.service.d/zz-hosted-engine.conf' "$deploy"
 grep -q 'kitsoki-queue-worker-hosted-engine.conf' "$assets/install.sh"
 grep -q 'ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue worker' "$assets/kitsoki-queue-worker-hosted-engine.conf"
@@ -193,6 +197,28 @@ cleanup() {
   rm -rf -- "$fixture"
 }
 trap cleanup EXIT
+
+# Release retention is bounded and conservative: current plus two inactive
+# rollback releases survive, older canonical releases are removed, and
+# non-release directories are never treated as deletion candidates.
+retention_root="$fixture/releases"
+mkdir -p \
+  "$retention_root/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+  "$retention_root/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
+  "$retention_root/cccccccccccccccccccccccccccccccccccccccc" \
+  "$retention_root/dddddddddddddddddddddddddddddddddddddddd" \
+  "$retention_root/manual-preserve"
+touch -t 202601010101 "$retention_root/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+touch -t 202602010101 "$retention_root/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+touch -t 202603010101 "$retention_root/cccccccccccccccccccccccccccccccccccccccc"
+touch -t 202604010101 "$retention_root/dddddddddddddddddddddddddddddddddddddddd"
+ln -s "$retention_root/dddddddddddddddddddddddddddddddddddddddd" "$fixture/current"
+"$assets/prune-releases.sh" "$retention_root" "$fixture/current" 2 >/dev/null
+[ ! -e "$retention_root/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]
+[ -d "$retention_root/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]
+[ -d "$retention_root/cccccccccccccccccccccccccccccccccccccccc" ]
+[ -d "$retention_root/dddddddddddddddddddddddddddddddddddddddd" ]
+[ -d "$retention_root/manual-preserve" ]
 
 # A deployment from the pre-runtime layout must retain immutable worker ship
 # evidence before replacing the release-local .artifacts directory with the

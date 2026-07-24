@@ -57,7 +57,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -783,6 +783,13 @@ expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application
 login_page="$(curl -fsS "$public_base_url/auth/login")"
 grep -q '/auth/github/start' <<<"$login_page"
 curl -fsS http://127.0.0.1:8787/healthz >/dev/null
+
+# Immutable releases are rollback material, not durable state: .artifacts and
+# .capsules point at stable roots outside them. Keep two inactive rollbacks for
+# each product after every fully verified activation, and preserve any older
+# release still serving as a live process's working directory.
+"$stage/prune-releases.sh" "$release_root" "$current" 2
+"$stage/prune-releases.sh" "$kitsoki_release_root" "$kitsoki_current" 2
 
 trap - EXIT
 echo "hosted-pog install: active production POG $pog_sha on 127.0.0.1:7777 at $public_base_url (products=$portfolio_members; state=$state_mode; no Vite runtime; all content requires an invited session)"
