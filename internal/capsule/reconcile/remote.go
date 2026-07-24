@@ -57,7 +57,7 @@ func (f LocalBareRemoteFetcher) Fetch(ctx context.Context, workspace, branch str
 	if out, err := git(ctx, workspace, "rev-parse", "--verify", target); err == nil {
 		old = strings.TrimSpace(out)
 	}
-	if _, err := git(ctx, workspace, "fetch", remotePath, "refs/heads/"+branch+":"+target); err != nil {
+	if _, err := git(ctx, workspace, "fetch", "--no-write-fetch-head", remotePath, "refs/heads/"+branch+":"+target); err != nil {
 		return FetchResult{}, err
 	}
 	newOID, err := git(ctx, workspace, "rev-parse", "--verify", target)

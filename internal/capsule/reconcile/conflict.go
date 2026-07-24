@@ -78,7 +78,7 @@ func (r Reconciler) MaterializeConflictArtifact(ctx context.Context, p Plan, pro
 	// nothing here has fetched the freshly landed tip into it yet. Without
 	// this the merge-base below fails "not a valid object" whenever another
 	// candidate landed since this workspace last saw root's target ref.
-	if _, err := git(ctx, p.Workspace, "fetch", "--no-tags", root, p.Expected.Target); err != nil {
+	if _, err := git(ctx, p.Workspace, "fetch", "--no-tags", "--no-write-fetch-head", root, p.Expected.Target); err != nil {
 		return ConflictArtifact{}, "", fmt.Errorf("capsule reconcile: fetch target %s into workspace: %w", p.Expected.Target, err)
 	}
 	mergeBase, err := git(ctx, p.Workspace, "merge-base", p.Candidate, p.Expected.Target)
@@ -160,7 +160,7 @@ func (r Reconciler) MaterializeIntegrationInstance(ctx context.Context, p Plan, 
 	// fetch it directly from root so the merge-base/merge below never sees a
 	// missing-object error for a target that landed after this instance's
 	// source workspace last observed it.
-	if _, err := git(ctx, instancePath, "fetch", "--no-tags", root, p.Expected.Target); err != nil {
+	if _, err := git(ctx, instancePath, "fetch", "--no-tags", "--no-write-fetch-head", root, p.Expected.Target); err != nil {
 		return IntegrationInstance{}, "", fmt.Errorf("capsule reconcile: fetch target %s into integration instance: %w", p.Expected.Target, err)
 	}
 	if _, err := git(ctx, instancePath, "checkout", "-B", "capsule-sync-resolution", p.Candidate); err != nil {
@@ -251,11 +251,11 @@ func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApply
 	}
 	resolved = strings.TrimSpace(resolved)
 	ancestryDir := r.ancestryDir(p.Workspace, p.Protected.Root)
-	if _, err := git(ctx, p.Workspace, "fetch", instancePath, resolved); err != nil {
+	if _, err := git(ctx, p.Workspace, "fetch", "--no-write-fetch-head", instancePath, resolved); err != nil {
 		return ApplyResult{}, err
 	}
 	if p.Protected.Root != "" {
-		if _, err := git(ctx, p.Protected.Root, "fetch", "--no-tags", instancePath, resolved); err != nil {
+		if _, err := git(ctx, p.Protected.Root, "fetch", "--no-tags", "--no-write-fetch-head", instancePath, resolved); err != nil {
 			return ApplyResult{}, err
 		}
 	}

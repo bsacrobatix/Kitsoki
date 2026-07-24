@@ -210,7 +210,7 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	// admission of a candidate whose commit isn't resolvable here, and a
 	// worker preparing this candidate later fetches from the project root,
 	// not from this workspace directly.
-	if _, err := gitTrim(ctx, root, "fetch", "--no-tags", workspacePath, candidateSHA); err != nil {
+	if _, err := gitTrim(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", workspacePath, candidateSHA); err != nil {
 		return capsulePromoteResult{}, fmt.Errorf("capsule promote: publish candidate %s into %s: %w", candidateSHA, root, err)
 	}
 	branch, err := gitTrim(ctx, workspacePath, "branch", "--show-current")

@@ -70,7 +70,7 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	// today.
 	createBase, stackedOn := c.SHA, ""
 	if stackTree, predID, predWorkspace := stackBaseFor(ahead); stackTree != "" {
-		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", predWorkspace, stackTree); err == nil {
+		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", predWorkspace, stackTree); err == nil {
 			createBase, stackedOn = stackTree, predID
 		}
 	}
@@ -79,7 +79,7 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	}
 	var stackEvidence []string
 	if stackedOn != "" {
-		if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", root, c.SHA); err != nil {
+		if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", "--no-write-fetch-head", root, c.SHA); err != nil {
 			return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 		}
 		if err := p.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
@@ -414,7 +414,7 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 	// just choosing what to base the workspace on before it.
 	createBase, stackedOn := "staging/local", ""
 	if stackTree, predID, predWorkspace := stackBaseFor(ahead); stackTree != "" {
-		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", predWorkspace, stackTree); err == nil {
+		if _, err := gitOutput(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", predWorkspace, stackTree); err == nil {
 			createBase, stackedOn = stackTree, predID
 		}
 	}

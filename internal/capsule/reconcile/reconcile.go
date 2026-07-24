@@ -398,7 +398,7 @@ func (Git) ObserveProtected(ctx context.Context, workspace, protectedRoot, targe
 	if err != nil {
 		return ObservedRefs{}, err
 	}
-	if _, err := git(ctx, protectedRoot, "fetch", "--no-tags", workspace, strings.TrimSpace(head)); err != nil {
+	if _, err := git(ctx, protectedRoot, "fetch", "--no-tags", "--no-write-fetch-head", workspace, strings.TrimSpace(head)); err != nil {
 		return ObservedRefs{}, err
 	}
 	targetOID, err := git(ctx, protectedRoot, "rev-parse", target)
@@ -428,7 +428,7 @@ func (Git) UpdateRef(ctx context.Context, dir, ref, next, old string) error {
 }
 func (Git) UpdateProtectedRef(ctx context.Context, workspace, protectedRoot, ref, next, old string) error {
 	if _, err := git(ctx, protectedRoot, "cat-file", "-e", next+"^{commit}"); err != nil {
-		if _, fetchErr := git(ctx, protectedRoot, "fetch", "--no-tags", workspace, "HEAD"); fetchErr != nil {
+		if _, fetchErr := git(ctx, protectedRoot, "fetch", "--no-tags", "--no-write-fetch-head", workspace, "HEAD"); fetchErr != nil {
 			return fetchErr
 		}
 		if _, checkErr := git(ctx, protectedRoot, "cat-file", "-e", next+"^{commit}"); checkErr != nil {

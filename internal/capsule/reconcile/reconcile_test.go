@@ -267,6 +267,17 @@ func TestProtectedPromotionMovesSourceMainNotWorkspaceMain(t *testing.T) {
 	runGit(t, workspace, "add", "protected.txt")
 	runGit(t, workspace, "commit", "-m", "candidate")
 	candidate := strings.TrimSpace(runGitOutput(t, workspace, "rev-parse", "HEAD"))
+	// Protected/candidate reconciliation never consumes FETCH_HEAD. Make that
+	// path deliberately unwritable as a file so any fetch that forgets
+	// --no-write-fetch-head fails deterministically instead of leaving
+	// process-owned scratch state in the shared protected checkout.
+	fetchHead := filepath.Join(source, ".git", "FETCH_HEAD")
+	if err := os.Remove(fetchHead); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(fetchHead, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	r := Reconciler{VCS: Git{}, Gates: GateVerifierFunc(func(_ context.Context, receipt string, p Plan) error {
 		if receipt != "ok" || p.Protected.Root != source {
@@ -293,6 +304,9 @@ func TestProtectedPromotionMovesSourceMainNotWorkspaceMain(t *testing.T) {
 	}
 	if got := strings.TrimSpace(runGitOutput(t, workspace, "rev-parse", "main")); got != base {
 		t.Fatalf("workspace-local main moved to %s, want %s", got, base)
+	}
+	if info, err := os.Stat(fetchHead); err != nil || !info.IsDir() {
+		t.Fatalf("FETCH_HEAD scratch path was mutated: info=%v err=%v", info, err)
 	}
 }
 
