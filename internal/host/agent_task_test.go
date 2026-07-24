@@ -155,6 +155,77 @@ func TestAgentTask_CodexMissingSubmitRetriesFreshExec(t *testing.T) {
 	}
 }
 
+// Provider availability failures are not validator rejections. In
+// particular, Claude-compatible APIs can emit their 401/429 only in the
+// stream-json result on stdout. The shared streamer must recognize that
+// output and stop before host.agent.task resumes the same unavailable
+// provider through the rest of its semantic acceptance budget.
+func TestAgentTask_ProviderFailureAbortsAcceptanceRetries(t *testing.T) {
+	tests := []struct {
+		name       string
+		output     string
+		wantClass  string
+		wantDetail string
+	}{
+		{
+			name:       "quota from stdout",
+			output:     `API Error: Request rejected (429) - You've exceeded your subscription rate limits`,
+			wantClass:  "agent_quota",
+			wantDetail: "429",
+		},
+		{
+			name:       "auth from stdout",
+			output:     `API Error: authentication_error - Invalid API Key provided`,
+			wantClass:  "agent_auth",
+			wantDetail: "Invalid API Key",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			schemaPath := filepath.Join(dir, "ok.schema.json")
+			if err := os.WriteFile(schemaPath, []byte(`{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`), 0o644); err != nil {
+				t.Fatalf("write schema: %v", err)
+			}
+
+			calls := 0
+			runner := func(_ context.Context, _ []string, _, _ string) (host.ClaudeRun, error) {
+				calls++
+				return host.ClaudeRun{Stdout: tc.output, ExitCode: 1}, nil
+			}
+			ctx := host.WithClaudeRunner(
+				host.WithAgents(context.Background(), map[string]host.Agent{
+					"worker": {SystemPrompt: "do work", Model: "model", Tools: []string{"Read", "Write"}},
+				}),
+				runner,
+			)
+
+			res, err := host.AgentTaskHandler(ctx, map[string]any{
+				"agent":       "worker",
+				"working_dir": dir,
+				"context":     map[string]any{"prompt": "make the change"},
+				"acceptance":  map[string]any{"schema": schemaPath, "max_retries": 5},
+			})
+			if err != nil {
+				t.Fatalf("unexpected Go error: %v", err)
+			}
+			if calls != 1 {
+				t.Fatalf("runner calls = %d, want 1; provider failure must bypass semantic retries", calls)
+			}
+			if res.FailureKind != host.FailureInfra {
+				t.Fatalf("FailureKind = %q, want %q", res.FailureKind, host.FailureInfra)
+			}
+			if !strings.Contains(res.Error, tc.wantClass) || !strings.Contains(res.Error, tc.wantDetail) {
+				t.Fatalf("Result.Error = %q, want class %q and detail %q", res.Error, tc.wantClass, tc.wantDetail)
+			}
+			if strings.Contains(res.Error, "acceptance failed after") {
+				t.Fatalf("provider failure was misreported as semantic exhaustion: %s", res.Error)
+			}
+		})
+	}
+}
+
 func TestAgentTask_SlideyMCPOnlyContract(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

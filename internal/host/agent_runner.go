@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -58,8 +59,9 @@ type ClaudeRun struct {
 	CostUSD float64
 	// FailureClass is a best-effort classification of why the subprocess
 	// failed, computed at agent-exit handling time (the point this outcome
-	// is actually known) via ClassifyAgentFailureText against the captured
-	// stderr/Infra text: "agent_auth", "agent_quota", "infra", or "" when
+	// is actually known) via ClassifyAgentFailureText against all captured
+	// failure output (stdout/stream events, stderr, and Infra):
+	// "agent_auth", "agent_quota", "infra", or "" when
 	// the run succeeded or matched no known signature. Populated whenever
 	// ExitCode != 0 or Infra != nil; empty on a clean run. Capsule worker
 	// dispatch (cmd/kitsoki) reuses ClassifyAgentFailureText directly
@@ -132,7 +134,7 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 	if AgentBackendFromContext(ctx).Name() != "claude" {
 		cr, _, err := runClaudeStreamJSON(ctx, bin, cliArgs, stdin, workingDir, sid)
 		cr.Stdout = strings.TrimRight(cr.Stdout, "\n")
-		return cr, err
+		return normalizeAgentProviderFailure(cr), err
 	}
 
 	// Explicit --output-format json: preserve the buffered envelope contract.
@@ -153,7 +155,7 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 			cr.CostUSD = cost
 			recordAgentUsage(ctx, usage, cost)
 		}
-		return cr, err
+		return normalizeAgentProviderFailure(cr), err
 	}
 
 	// Everything else (text / stream-json / unset) runs as stream-json so the
@@ -162,7 +164,7 @@ func runClaudeOneShot(ctx context.Context, bin string, cliArgs []string, stdin, 
 	// again here (idempotent) to keep the contract obvious at the dispatcher.
 	cr, _, err := runClaudeStreamJSON(ctx, bin, forceStreamJSONArgs(cliArgs), stdin, workingDir, sid)
 	cr.Stdout = strings.TrimRight(cr.Stdout, "\n")
-	return cr, err
+	return normalizeAgentProviderFailure(cr), err
 }
 
 // requestedOutputFormat returns the value of the --output-format flag in
@@ -272,9 +274,9 @@ func runClaudeOneShotReal(ctx context.Context, bin string, cliArgs []string, std
 		}
 		stderr := se.String()
 		if exitErr, ok := runErr.(*exec.ExitError); ok {
-			return ClaudeRun{Stdout: out, Stderr: stderr, ExitCode: exitErr.ExitCode(), FailureClass: ClassifyAgentFailureText(stderr)}, nil
+			return ClaudeRun{Stdout: out, Stderr: stderr, ExitCode: exitErr.ExitCode(), FailureClass: ClassifyAgentFailureText(stderr + " " + out)}, nil
 		}
-		return ClaudeRun{Stdout: out, Stderr: stderr, Infra: runErr, FailureClass: ClassifyAgentFailureText(stderr + " " + runErr.Error())}, nil
+		return ClaudeRun{Stdout: out, Stderr: stderr, Infra: runErr, FailureClass: ClassifyAgentFailureText(stderr + " " + out + " " + runErr.Error())}, nil
 	}
 	return ClaudeRun{Stdout: out, Stderr: se.String()}, nil
 }
@@ -764,6 +766,85 @@ func ClassifyAgentFailureText(text string) string {
 	return ""
 }
 
+// agentProviderFailure is an infrastructure-shaped error for a coding-agent
+// provider that cannot serve the request. It deliberately retains the typed
+// class in its text because the Capsule worker is a later process boundary:
+// it classifies the story/launcher error after the in-host ClaudeRun is gone.
+// Keeping the original provider detail alongside the class lets that outer
+// boundary assign agent_auth/agent_quota without guessing from a generic
+// "acceptance retries exhausted" message.
+type agentProviderFailure struct {
+	class  string
+	detail string
+	cause  error
+}
+
+func (e agentProviderFailure) Error() string {
+	if e.detail == "" {
+		return fmt.Sprintf("%s: coding-agent provider unavailable", e.class)
+	}
+	return fmt.Sprintf("%s: coding-agent provider unavailable: %s", e.class, e.detail)
+}
+
+func (e agentProviderFailure) Unwrap() error { return e.cause }
+
+// normalizeAgentProviderFailure is the single boundary between a coding-agent
+// process result and host.agent.* retry semantics. Provider quota/auth errors
+// are availability failures, not rejected semantic answers: promote them to
+// Infra so every caller's existing infra path aborts immediately instead of
+// resuming the same unavailable provider through its acceptance loop.
+//
+// Provider CLIs do not agree on where errors are written. Claude-compatible
+// endpoints commonly put an HTTP 429 in a stream-json assistant/result event,
+// while other CLIs use stderr. Inspect all captured channels, including raw
+// events for runtimes whose reply synthesizer did not retain the error.
+func normalizeAgentProviderFailure(cr ClaudeRun) ClaudeRun {
+	if cr.ExitCode == 0 && cr.Infra == nil {
+		return cr
+	}
+	// Cancellation is control flow, not provider health. Never let an earlier
+	// partial provider message relabel an operator cancellation or deadline.
+	if errors.Is(cr.Infra, context.Canceled) || errors.Is(cr.Infra, context.DeadlineExceeded) {
+		return cr
+	}
+
+	var text strings.Builder
+	appendText := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return
+		}
+		if text.Len() > 0 {
+			text.WriteByte('\n')
+		}
+		text.WriteString(s)
+	}
+	appendText(cr.Stderr)
+	appendText(cr.Stdout)
+	for _, raw := range cr.RawEvents {
+		appendText(string(raw))
+	}
+	if cr.Infra != nil {
+		appendText(cr.Infra.Error())
+	}
+
+	failureText := text.String()
+	if class := ClassifyAgentFailureText(failureText); class != "" {
+		cr.FailureClass = class
+	}
+	if cr.FailureClass != "agent_auth" && cr.FailureClass != "agent_quota" {
+		return cr
+	}
+
+	detail := strings.TrimSpace(onelinePreview(failureText, 600))
+	cr.Infra = agentProviderFailure{
+		class:  cr.FailureClass,
+		detail: detail,
+		cause:  cr.Infra,
+	}
+	return cr
+}
+
 // looksAgentAuthError matches the coding-agent CLIs' own authentication/
 // authorization failure text. Deliberately does not include a bare
 // "permission denied" — that phrase collides with ordinary filesystem
@@ -771,6 +852,7 @@ func ClassifyAgentFailureText(text string) string {
 func looksAgentAuthError(s string) bool {
 	ls := strings.ToLower(s)
 	for _, sig := range []string{
+		"agent_auth",
 		"invalid x-api-key", "invalid api key", "authentication_error",
 		"authentication failed", "not authenticated", "unauthorized",
 		"invalid bearer token", "invalid access token", "please run /login",
@@ -790,7 +872,7 @@ func looksAgentAuthError(s string) bool {
 // balance is too low").
 func looksAgentQuotaError(s string) bool {
 	ls := strings.ToLower(s)
-	for _, sig := range []string{"credit balance", "usage limit", "insufficient_quota", "spending limit"} {
+	for _, sig := range []string{"agent_quota", "credit balance", "usage limit", "insufficient_quota", "spending limit"} {
 		if strings.Contains(ls, sig) {
 			return true
 		}

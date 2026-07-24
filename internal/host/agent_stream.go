@@ -178,9 +178,11 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 			}
 			ctx, stop := withAgentActivityTimeout(ctx, s.Sandbox.Resources.ActivityTimeout)
 			defer stop()
-			return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+			cr, sessionID, err := runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+			return normalizeAgentProviderFailure(cr), sessionID, err
 		}
-		return s.runWithRuntime(ctx, args)
+		cr, sessionID, err := s.runWithRuntime(ctx, args)
+		return normalizeAgentProviderFailure(cr), sessionID, err
 	}
 	if activityTimeout := agentDirectActivityTimeout(); activityTimeout > 0 {
 		var cancel context.CancelFunc
@@ -188,9 +190,11 @@ func (s AgentStreamer) Run(ctx context.Context) (ClaudeRun, string, error) {
 		defer cancel()
 		ctx, stop := withAgentActivityTimeout(ctx, activityTimeout)
 		defer stop()
-		return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+		cr, sessionID, err := runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+		return normalizeAgentProviderFailure(cr), sessionID, err
 	}
-	return runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+	cr, sessionID, err := runClaudeStreamJSON(ctx, s.Bin, args, s.Stdin, s.WorkingDir, s.SessionID)
+	return normalizeAgentProviderFailure(cr), sessionID, err
 }
 
 func agentDirectActivityTimeout() time.Duration {
@@ -319,7 +323,7 @@ func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (Claud
 		CostUSD:   cost,
 	}
 	if cr.ExitCode != 0 {
-		cr.FailureClass = ClassifyAgentFailureText(cr.Stderr)
+		cr.FailureClass = ClassifyAgentFailureText(cr.Stderr + " " + cr.Stdout)
 	}
 	recordAgentUsage(ctx, usage, cost)
 	return cr, parsedSID, nil

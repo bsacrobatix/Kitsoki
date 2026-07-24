@@ -1,6 +1,10 @@
 package host
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+)
 
 func TestClassifyAgentFailureText(t *testing.T) {
 	cases := []struct {
@@ -17,6 +21,8 @@ func TestClassifyAgentFailureText(t *testing.T) {
 		{name: "rate limit text is agent_quota", text: "Error: rate_limit_error: you have hit the rate limit", want: "agent_quota"},
 		{name: "429 is agent_quota", text: "HTTP 429 Too Many Requests", want: "agent_quota"},
 		{name: "credit balance is agent_quota", text: "Your credit balance is too low to access the Anthropic API", want: "agent_quota"},
+		{name: "typed quota survives process boundary", text: "agent_quota: coding-agent provider unavailable", want: "agent_quota"},
+		{name: "typed auth survives process boundary", text: "agent_auth: coding-agent provider unavailable", want: "agent_auth"},
 		{name: "timeout is infra", text: "context deadline exceeded", want: "infra"},
 		{name: "connection refused is infra", text: "dial tcp: connection refused", want: "infra"},
 		{name: "binary not found is infra", text: "exec: \"claude\": binary not found", want: "infra"},
@@ -37,5 +43,18 @@ func TestClassifyAgentFailureTextNeverMatchesPlainFilesystemPermissionErrors(t *
 	// failure) must not be misclassified as agent_auth.
 	if got := ClassifyAgentFailureText("open /workspace/.git/HEAD: permission denied"); got != "" {
 		t.Fatalf("plain filesystem permission denied classified as %q, want unclassified", got)
+	}
+}
+
+func TestNormalizeAgentProviderFailurePreservesCancellation(t *testing.T) {
+	got := normalizeAgentProviderFailure(ClaudeRun{
+		Stdout: "partial output mentioned HTTP 429 before cancellation",
+		Infra:  context.Canceled,
+	})
+	if !errors.Is(got.Infra, context.Canceled) {
+		t.Fatalf("Infra = %v, want context.Canceled", got.Infra)
+	}
+	if got.FailureClass != "" {
+		t.Fatalf("FailureClass = %q, want empty for cancellation", got.FailureClass)
 	}
 }
