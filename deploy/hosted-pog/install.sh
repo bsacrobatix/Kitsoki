@@ -656,7 +656,10 @@ systemctl enable --now pog-worker-finalizer.timer >/dev/null
 # The drop-in references a root-only env file so the secret never sits in a
 # world-readable unit file.
 if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
-	printf 'POG_RUNNER_TOKEN=%s\n' "$colony_token" >"$stage/pog-colony-runner.env"
+	{
+		printf 'POG_RUNNER_TOKEN=%s\n' "$colony_token"
+		printf 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust\n'
+	} >"$stage/pog-colony-runner.env"
 	install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-runner.env
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf

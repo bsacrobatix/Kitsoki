@@ -29,6 +29,10 @@ Environment=POG_PROJECT_ROOT=/opt/pog/current
 Environment=POG_PORTFOLIO_ROOT=/opt/pog/current
 Environment=POG_MEMBER_ROOTS=__POG_MEMBER_ROOTS__
 Environment=POG_PORTFOLIO_MEMBERS=__POG_PORTFOLIO_MEMBERS__
+# The portal launches on-demand delivery children. POG's deterministic gate
+# validates the federated gears catalog, so those children need the same
+# explicit hosted checkout that the durable queue worker receives.
+Environment=POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust
 Environment=POG_KITSOKI_URL=http://127.0.0.1:7778
 Environment=POG_KITSOKI_BROWSER_URL=
 Environment=POG_RUNNER_URL=http://127.0.0.1:7778
