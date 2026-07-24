@@ -47,6 +47,83 @@ func TestSubmitPersistsReceiptBoundCandidateAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestAtomicStateRewritePreservesDurableStoreIdentity(t *testing.T) {
+	root := t.TempDir()
+	queueDir := filepath.Join(root, ".capsules", "queue")
+	if err := os.MkdirAll(queueDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(queueDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid, primaryGID, ok := fileOwner(info)
+	if !ok {
+		t.Skip("platform does not expose Unix file ownership")
+	}
+	alternateGID := -1
+	groups, err := os.Getgroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gid := range groups {
+		if gid != primaryGID {
+			alternateGID = gid
+			break
+		}
+	}
+	if alternateGID < 0 && os.Geteuid() == 0 {
+		alternateGID = primaryGID + 1
+	}
+	if alternateGID < 0 {
+		t.Skip("no alternate writable group available")
+	}
+	if err := os.Chown(queueDir, uid, alternateGID); err != nil {
+		t.Skipf("cannot assign alternate queue group: %v", err)
+	}
+
+	path := filepath.Join(queueDir, "state.json")
+	if err := write(path, State{Schema: Schema}); err != nil {
+		t.Fatal(err)
+	}
+	assertIdentity := func(stage string) {
+		t.Helper()
+		stateInfo, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotUID, gotGID, ok := fileOwner(stateInfo)
+		if !ok {
+			t.Fatal("state ownership unavailable")
+		}
+		if gotUID != uid || gotGID != alternateGID {
+			t.Fatalf("%s owner=%d:%d, want %d:%d", stage, gotUID, gotGID, uid, alternateGID)
+		}
+		if got := stateInfo.Mode().Perm(); got != 0o600 {
+			t.Fatalf("%s mode=%#o, want 0600", stage, got)
+		}
+	}
+	assertIdentity("first write")
+
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := write(path, State{Schema: Schema, Candidates: []Candidate{{ID: "second-write"}}}); err != nil {
+		t.Fatal(err)
+	}
+	stateInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotUID, gotGID, _ := fileOwner(stateInfo)
+	if gotUID != uid || gotGID != alternateGID {
+		t.Fatalf("rewrite owner=%d:%d, want %d:%d", gotUID, gotGID, uid, alternateGID)
+	}
+	if got := stateInfo.Mode().Perm(); got != 0o640 {
+		t.Fatalf("rewrite mode=%#o, want preserved 0640", got)
+	}
+}
+
 func TestConcurrentSubmitSerializesOneCandidate(t *testing.T) {
 	sha := strings.Repeat("a", 40)
 	store := Store{ProjectRoot: t.TempDir(), LockWait: time.Second}

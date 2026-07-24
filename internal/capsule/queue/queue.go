@@ -764,6 +764,18 @@ func write(path string, state State) error {
 	if err != nil {
 		return err
 	}
+	identity, statErr := os.Stat(path)
+	mode := os.FileMode(0o600)
+	if statErr == nil {
+		mode = identity.Mode().Perm()
+	} else if !os.IsNotExist(statErr) {
+		return statErr
+	} else {
+		identity, err = os.Stat(filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*")
 	if err != nil {
 		return err
@@ -771,7 +783,10 @@ func write(path string, state State) error {
 	name := tmp.Name()
 	defer os.Remove(name)
 	if _, err = tmp.Write(append(raw, '\n')); err == nil {
-		err = tmp.Chmod(0o600)
+		err = preserveFileOwner(tmp, identity)
+	}
+	if err == nil {
+		err = tmp.Chmod(mode)
 	}
 	if err == nil {
 		err = tmp.Sync()
