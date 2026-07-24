@@ -108,6 +108,12 @@ func TestAtomicStateRewritePreservesDurableStoreIdentity(t *testing.T) {
 	if err := os.Chmod(path, 0o640); err != nil {
 		t.Fatal(err)
 	}
+	// Simulate the historical failure: a privileged writer left state.json
+	// with the writer's primary group instead of the durable directory group.
+	// The next atomic rewrite must self-heal ownership from the directory.
+	if err := os.Chown(path, uid, primaryGID); err != nil {
+		t.Fatal(err)
+	}
 	if err := write(path, State{Schema: Schema, Candidates: []Candidate{{ID: "second-write"}}}); err != nil {
 		t.Fatal(err)
 	}

@@ -764,17 +764,19 @@ func write(path string, state State) error {
 	if err != nil {
 		return err
 	}
-	identity, statErr := os.Stat(path)
+	// The durable store directory owns queue state. Atomic renames must inherit
+	// that identity even when a privileged CLI repairs a file previously
+	// written by another service user. Preserve the existing file's mode only.
+	identity, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
 	mode := os.FileMode(0o600)
+	existing, statErr := os.Stat(path)
 	if statErr == nil {
-		mode = identity.Mode().Perm()
+		mode = existing.Mode().Perm()
 	} else if !os.IsNotExist(statErr) {
 		return statErr
-	} else {
-		identity, err = os.Stat(filepath.Dir(path))
-		if err != nil {
-			return err
-		}
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*")
 	if err != nil {
