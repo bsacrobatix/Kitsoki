@@ -44,7 +44,9 @@ Environment=POG_FEEDBACK_HOSTED_DIR=/var/lib/pog/runtime/feedback/hosted
 Environment=POG_FEEDBACK_AUTO_REPRODUCTION_LEDGER=/var/lib/pog/runtime/feedback/auto-reproduction-bindings.json
 Environment=POG_FEEDBACK_DECISIONS_LEDGER=/var/lib/pog/runtime/feedback/decisions.jsonl
 Environment=POG_FEEDBACK_COMPLETIONS_DIR=/var/lib/pog/runtime/feedback/completions
-Environment=POG_AGENT_RUNNER_DB=/var/lib/pog/runtime/agent-runner/sessions.db
+# The daemon owns the authoritative session ledger. Status/reconciliation must
+# read that exact stable database, not a release-runtime shadow.
+Environment=POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db
 Environment=POG_STREAMS_DIR=/var/lib/pog/runtime/streams
 ExecStart=/opt/kitsoki-hosted-pog/node/current/bin/node --enable-source-maps /opt/pog/current/portal/server/server.mjs --addr 127.0.0.1:7777 --static /opt/pog/current/portal/dist
 Restart=always
