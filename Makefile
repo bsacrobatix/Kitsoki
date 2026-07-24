@@ -412,7 +412,7 @@ web-dev-logs:
 # session-mining no-LLM invariants. It deliberately forbids Playwright/Chrome and
 # caps local parallelism so everyday agent work does not contend with browser
 # stacks or broad CI-style fan-out.
-test: embed-skills
+test: embed-stories embed-skills
 	$(call runstatus_pnpm_install,--silent)
 	@KITSOKI_REQUIRE_VITEST=1 \
 	 KITSOKI_FORBID_BROWSER_TESTS=1 \
@@ -423,7 +423,7 @@ test: embed-skills
 
 # test-full preserves the exhaustive non-browser lane for CI/release gates and
 # local validation of integration/property tests skipped by -short.
-test-full: embed-skills
+test-full: embed-stories embed-skills
 	$(call runstatus_pnpm_install,--silent)
 	@KITSOKI_REQUIRE_VITEST=1 ./scripts/run-tests.sh
 
