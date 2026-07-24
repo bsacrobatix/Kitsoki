@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
+
+	"kitsoki/internal/atomicfile"
 )
 
 type MemoryStore struct {
@@ -145,19 +146,9 @@ func (s *FileStore) load() (map[string]Record, error) {
 	return records, nil
 }
 func (s *FileStore) save(records map[string]Record) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return err
-	}
 	raw, err := json.MarshalIndent(records, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		return err
-	}
-	return nil
+	return atomicfile.WriteFile(s.path, raw, 0o600, 0o755)
 }

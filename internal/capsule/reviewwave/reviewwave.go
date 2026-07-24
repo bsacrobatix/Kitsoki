@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"kitsoki/internal/atomicfile"
 	"kitsoki/internal/capsule/queue"
 )
 
@@ -149,18 +150,11 @@ func (s *Store) write(d document) error {
 	if err != nil {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Dir(p), 0755); err != nil {
-		return err
-	}
 	raw, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err = os.WriteFile(tmp, raw, 0644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
+	return atomicfile.WriteFile(p, raw, 0o644, 0o755)
 }
 func (s *Store) lock() (func(), error) {
 	p, err := s.path()

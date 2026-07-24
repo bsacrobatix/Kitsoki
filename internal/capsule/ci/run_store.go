@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/atomicfile"
 	"kitsoki/internal/capsule/executor"
 	capsuletrace "kitsoki/internal/capsule/trace"
 )
@@ -127,7 +128,7 @@ func (s FileRunStore) Write(record RunRecord) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(filepath.Join(dir, record.JobID+".run.json"), append(raw, '\n'), 0o600)
+	return atomicfile.WriteFile(filepath.Join(dir, record.JobID+".run.json"), append(raw, '\n'), 0o600, 0o755)
 }
 func (s FileRunStore) Get(id string) (RunRecord, error) {
 	if err := validateRunID(id); err != nil {
@@ -506,34 +507,6 @@ func diagnosticNextCommands(run RunProjection, diagnosis RunDiagnosis) []string 
 		out = append(out, "ls -la .capsules/ci")
 	}
 	return out
-}
-
-func writeAtomic(path string, raw []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
 }
 
 func firstNonEmpty(values ...string) string {

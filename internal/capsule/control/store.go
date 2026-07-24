@@ -16,6 +16,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"kitsoki/internal/atomicfile"
 	legacy "kitsoki/internal/capsule"
 )
 
@@ -351,18 +352,11 @@ func (s FileInstanceStore) write(in Instance) error {
 	if !instanceIDPattern.MatchString(in.ID) {
 		return fmt.Errorf("capsule control: invalid instance id %q", in.ID)
 	}
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
-		return err
-	}
 	raw, err := json.MarshalIndent(diskInstance{Instance: in, Path: in.Path}, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp := s.path(in.ID) + ".tmp"
-	if err := os.WriteFile(tmp, append(raw, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.path(in.ID))
+	return atomicfile.WriteFile(s.path(in.ID), append(raw, '\n'), 0o600, 0o755)
 }
 
 // diskInstance carries the machine-local path in the manager-owned index. The

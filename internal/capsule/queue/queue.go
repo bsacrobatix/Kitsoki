@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"kitsoki/internal/atomicfile"
 	"kitsoki/internal/capsule/receipt"
 )
 
@@ -764,42 +765,7 @@ func write(path string, state State) error {
 	if err != nil {
 		return err
 	}
-	// The durable store directory owns queue state. Atomic renames must inherit
-	// that identity even when a privileged CLI repairs a file previously
-	// written by another service user. Preserve the existing file's mode only.
-	identity, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	mode := os.FileMode(0o600)
-	existing, statErr := os.Stat(path)
-	if statErr == nil {
-		mode = existing.Mode().Perm()
-	} else if !os.IsNotExist(statErr) {
-		return statErr
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err = tmp.Write(append(raw, '\n')); err == nil {
-		err = preserveFileOwner(tmp, identity)
-	}
-	if err == nil {
-		err = tmp.Chmod(mode)
-	}
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(name, path)
+	return atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o755)
 }
 func lock(path string, wait time.Duration) (func(), error) {
 	deadline := time.Now().Add(wait)

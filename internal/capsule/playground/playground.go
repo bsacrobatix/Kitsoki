@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"kitsoki/internal/atomicfile"
 )
 
 const DefaultIdleTimeout = 12 * time.Minute
@@ -220,11 +222,7 @@ func write(project string, r Record) error {
 	if e != nil {
 		return e
 	}
-	tmp := path(project, r.ID) + ".tmp"
-	if e = os.WriteFile(tmp, b, 0644); e != nil {
-		return e
-	}
-	return os.Rename(tmp, path(project, r.ID))
+	return atomicfile.WriteFile(path(project, r.ID), b, 0o644, 0o755)
 }
 func alive(pid int) bool {
 	if pid <= 0 {

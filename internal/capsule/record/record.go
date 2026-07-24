@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"kitsoki/internal/atomicfile"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/receipt"
@@ -88,7 +89,7 @@ func PersistWithOptions(project string, result ci.RunResult, opts PersistOptions
 	if err != nil {
 		return Stored{}, err
 	}
-	if err := writeAtomic(receiptPath, append(encoded, '\n'), 0o600); err != nil {
+	if err := atomicfile.WriteFile(receiptPath, append(encoded, '\n'), 0o600, 0o755); err != nil {
 		return Stored{}, err
 	}
 	return Stored{Receipt: built, Verification: verification, TracePath: tracePath, ReceiptPath: receiptPath}, nil
@@ -108,7 +109,7 @@ func writeTrace(project string, result ci.RunResult) (string, []byte, error) {
 		return "", nil, err
 	}
 	tracePath := filepath.Join(dir, string(result.Job.ID)+".trace.json")
-	if err := writeAtomic(tracePath, append(raw, '\n'), 0o600); err != nil {
+	if err := atomicfile.WriteFile(tracePath, append(raw, '\n'), 0o600, 0o755); err != nil {
 		return "", nil, err
 	}
 	return tracePath, raw, nil
@@ -240,34 +241,6 @@ func providerSafeExecutorError(event executor.Event) string {
 		return "executor cancelled; see local run diagnostic"
 	}
 	return "executor failed; see local run diagnostic"
-}
-
-func writeAtomic(path string, raw []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(raw); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
 }
 
 func signByPolicy(project string, r receipt.Receipt, signer receipt.Signer) (receipt.Receipt, error) {

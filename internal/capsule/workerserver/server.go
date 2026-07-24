@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"kitsoki/internal/atomicfile"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/storydigest"
@@ -95,18 +96,18 @@ type SourceMeta struct {
 }
 
 type RunRecord struct {
-	Schema         string                             `json:"schema"`
-	ExecutionID    string                             `json:"execution_id"`
-	EnvelopeDigest string                             `json:"envelope_digest"`
-	SourceDigest   string                             `json:"source_digest"`
-	StoryDigest    string                             `json:"story_digest"`
-	RequestID      string                             `json:"request_id,omitempty"`
-	Status         string                             `json:"status"`
-	Stage          string                             `json:"stage"`
-	StartedAt      time.Time                          `json:"started_at"`
-	UpdatedAt      time.Time                          `json:"updated_at"`
-	TerminalAt     time.Time                          `json:"terminal_at,omitempty"`
-	Error          string                             `json:"error,omitempty"`
+	Schema         string    `json:"schema"`
+	ExecutionID    string    `json:"execution_id"`
+	EnvelopeDigest string    `json:"envelope_digest"`
+	SourceDigest   string    `json:"source_digest"`
+	StoryDigest    string    `json:"story_digest"`
+	RequestID      string    `json:"request_id,omitempty"`
+	Status         string    `json:"status"`
+	Stage          string    `json:"stage"`
+	StartedAt      time.Time `json:"started_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	TerminalAt     time.Time `json:"terminal_at,omitempty"`
+	Error          string    `json:"error,omitempty"`
 	// FailureClass is the machine-readable reason a terminal "failed" run
 	// failed, assigned only at the stage that knows the cause (preflight,
 	// story-digest verification, or agent-subprocess exit handling) — see
@@ -834,35 +835,11 @@ func cleanID(value string) (string, error) {
 }
 
 func writeJSONFile(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
 	raw, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(raw, '\n')); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
+	return atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o700)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

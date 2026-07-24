@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"kitsoki/internal/atomicfile"
 )
 
 // GateMemo caches passing deterministic-gate results by exact tree + gate
@@ -68,30 +70,12 @@ func (m FileGateMemo) Store(treeSHA, gateVersion string, result GateResult) erro
 	if !ok {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	entry := gateMemoEntry{Passed: true, Evidence: result.Evidence, Log: result.Log, GateVersion: first(result.GateVersion, gateVersion), CachedAt: time.Now().UTC()}
 	raw, err := json.MarshalIndent(entry, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".gate-memo-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err := tmp.Write(append(raw, '\n')); err == nil {
-		err = tmp.Chmod(0o600)
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(name, path)
+	return atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o755)
 }
 
 func (m FileGateMemo) path(treeSHA, gateVersion string) (string, bool) {

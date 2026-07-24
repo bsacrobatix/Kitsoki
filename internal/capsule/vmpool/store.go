@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"kitsoki/internal/atomicfile"
 )
 
 // StateSchema identifies the durable vmpool state format.
@@ -112,25 +114,7 @@ func write(path string, state State) error {
 	if err != nil {
 		return fmt.Errorf("vmpool: marshal state: %w", err)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".state-*")
-	if err != nil {
-		return fmt.Errorf("vmpool: create temp state file: %w", err)
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if _, err = tmp.Write(append(raw, '\n')); err == nil {
-		err = tmp.Chmod(0o600)
-	}
-	if err == nil {
-		err = tmp.Sync()
-	}
-	if closeErr := tmp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return fmt.Errorf("vmpool: write state: %w", err)
-	}
-	if err := os.Rename(name, path); err != nil {
+	if err := atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o755); err != nil {
 		return fmt.Errorf("vmpool: commit state: %w", err)
 	}
 	return nil
