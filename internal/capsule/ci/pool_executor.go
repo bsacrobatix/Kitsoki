@@ -204,8 +204,9 @@ func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 }
 
 // leaseWorker acquires one fresh ephemeral worker for jobID with this
-// executor's full boot configuration (pass_env/agent_backend/user surface and
-// optional bucket transport).
+// executor's full boot configuration
+// (pass_env/agent_backend/agent_model/user surface and optional bucket
+// transport).
 func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.WorkerLease, error) {
 	pool, err := p.buildPool()
 	if err != nil {
@@ -234,6 +235,9 @@ func (p *poolProvider) leaseWorker(ctx context.Context, jobID string) (*vmpool.W
 	}
 	if p.cfg.AgentBackend != "" {
 		leaseSpec.Env["KITSOKI_WORKER_AGENT_BACKEND"] = p.cfg.AgentBackend
+	}
+	if p.cfg.AgentModel != "" {
+		leaseSpec.Env["KITSOKI_WORKER_AGENT_MODEL"] = p.cfg.AgentModel
 	}
 	// Job-start preflight config (internal/capsule/workerserver.PreflightConfig):
 	// written into the leased worker's boot env file so `capsule worker

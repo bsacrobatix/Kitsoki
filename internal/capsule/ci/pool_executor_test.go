@@ -181,11 +181,11 @@ func TestValidatePoolExecutorNeverReadsCredentialsFromEnvironment(t *testing.T) 
 	}
 }
 
-// TestValidatePoolExecutorRejectsBadPassEnvUserAgentBackend covers the
-// PassEnv/User/AgentBackend validation added alongside vmpool's service-user
-// and pass-env support: each field is checked independently, and a valid
-// combination of all three is accepted.
-func TestValidatePoolExecutorRejectsBadPassEnvUserAgentBackend(t *testing.T) {
+// TestValidatePoolExecutorRejectsBadPassEnvUserAgentSelection covers the
+// PassEnv/User/AgentBackend/AgentModel validation added alongside vmpool's
+// service-user and pass-env support: each field is checked independently, and
+// a valid combination is accepted.
+func TestValidatePoolExecutorRejectsBadPassEnvUserAgentSelection(t *testing.T) {
 	valid := PoolExecutor{TokenEnv: "DO_TOKEN", Size: "s-1vcpu-1gb", Region: "sgp1"}
 
 	badPassEnv := valid
@@ -208,12 +208,21 @@ func TestValidatePoolExecutorRejectsBadPassEnvUserAgentBackend(t *testing.T) {
 		}
 	}
 
+	for _, bad := range []string{" model", "model ", "model\ninjected", "model\rinjected"} {
+		badModel := valid
+		badModel.AgentModel = bad
+		if err := validatePoolExecutor("vm-pool", badModel); err == nil || !strings.Contains(err.Error(), "agent_model") {
+			t.Fatalf("expected agent_model rejection for %q, got %v", bad, err)
+		}
+	}
+
 	validCombo := valid
 	validCombo.PassEnv = []string{"SYNTHETIC_API_KEY"}
 	validCombo.User = "kitsoki"
-	validCombo.AgentBackend = "claude"
+	validCombo.AgentBackend = "agy"
+	validCombo.AgentModel = "Gemini 3.1 Pro (High)"
 	if err := validatePoolExecutor("vm-pool", validCombo); err != nil {
-		t.Fatalf("valid pass_env/user/agent_backend combination rejected: %v", err)
+		t.Fatalf("valid pass_env/user/agent_backend/agent_model combination rejected: %v", err)
 	}
 }
 
@@ -589,13 +598,13 @@ func TestPoolProviderRunLeasesRunsAndReleases(t *testing.T) {
 	}
 }
 
-// TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData covers
-// Run's threading of cfg.User/PassEnv/AgentBackend into the lease it takes:
+// TestPoolProviderRunWiresUserPassEnvAndAgentSelectionIntoLeaseUserData covers
+// Run's threading of cfg.User/PassEnv/AgentBackend/AgentModel into the lease:
 // PassEnv is joined into KITSOKI_WORKER_PASS_ENV, AgentBackend into
-// KITSOKI_WORKER_AGENT_BACKEND, and User onto the boot user data's
-// systemd User= line — all observable on the fake provisioner's created
-// instance.
-func TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData(t *testing.T) {
+// KITSOKI_WORKER_AGENT_BACKEND, AgentModel into KITSOKI_WORKER_AGENT_MODEL, and
+// User onto the boot user data's systemd User= line — all observable on the
+// fake provisioner's created instance.
+func TestPoolProviderRunWiresUserPassEnvAndAgentSelectionIntoLeaseUserData(t *testing.T) {
 	fixture := newPoolTestFixture(t, true)
 	poolTestStubRun(t, executor.Result{ExitCode: 0}, nil)
 	cfg := PoolExecutor{
@@ -605,7 +614,8 @@ func TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData(t *test
 		Region:       "sgp1",
 		User:         "kitsoki",
 		PassEnv:      []string{"SYNTHETIC_API_KEY", "OTHER_KEY"},
-		AgentBackend: "claude",
+		AgentBackend: "agy",
+		AgentModel:   "Gemini 3.1 Pro (High)",
 	}
 	provider, err := newPoolProvider("vm-pool", cfg, nil, t.TempDir())
 	if err != nil {
@@ -627,7 +637,8 @@ func TestPoolProviderRunWiresUserPassEnvAndAgentBackendIntoLeaseUserData(t *test
 	for _, want := range []string{
 		"User=kitsoki",
 		"KITSOKI_WORKER_PASS_ENV=SYNTHETIC_API_KEY,OTHER_KEY",
-		"KITSOKI_WORKER_AGENT_BACKEND=claude",
+		"KITSOKI_WORKER_AGENT_BACKEND=agy",
+		"KITSOKI_WORKER_AGENT_MODEL=Gemini 3.1 Pro (High)",
 	} {
 		if !strings.Contains(userData, want) {
 			t.Fatalf("user data missing %q\nfull user data:\n%s", want, userData)

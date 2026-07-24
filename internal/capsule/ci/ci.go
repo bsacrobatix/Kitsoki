@@ -128,6 +128,13 @@ type PoolExecutor struct {
 	// KITSOKI_WORKER_AGENT_BACKEND, the same contract `capsule worker serve
 	// --agent-backend` reads).
 	AgentBackend string `yaml:"agent_backend,omitempty" json:"agent_backend,omitempty"`
+	// AgentModel, when set, pins the worker-selected model independently of
+	// story-local agent defaults (written to the boot env file as
+	// KITSOKI_WORKER_AGENT_MODEL). Keeping this beside AgentBackend lets two
+	// pool remotes use the same immutable image while selecting different
+	// backend/model pairs without image-specific wrapper scripts or ambient
+	// controller environment.
+	AgentModel string `yaml:"agent_model,omitempty" json:"agent_model,omitempty"`
 	// PreserveOnFailure, when true, keeps a pre-ready lease failure's
 	// droplet running for post-mortem instead of destroying it immediately
 	// (vmpool.Pool.PreserveFailed). Defaults to false: autonomous/unattended
@@ -1127,6 +1134,9 @@ func validatePoolExecutor(name string, pool PoolExecutor) error {
 	}
 	if backend := pool.AgentBackend; backend != strings.TrimSpace(backend) || strings.ContainsAny(backend, " \t\n,") {
 		return fmt.Errorf("capsule ci remote %q: pool agent_backend %q must be a single token", name, backend)
+	}
+	if model := pool.AgentModel; model != strings.TrimSpace(model) || strings.ContainsAny(model, "\r\n") {
+		return fmt.Errorf("capsule ci remote %q: pool agent_model %q must be a trimmed single-line value", name, model)
 	}
 	if pool.PreserveFailedTTL < 0 {
 		return fmt.Errorf("capsule ci remote %q: pool preserve_failed_ttl must not be negative", name)
