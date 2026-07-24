@@ -376,6 +376,7 @@ func runClaudeStreamJSON(ctx context.Context, bin string, cliArgs []string, stdi
 	cmd.Stdin = strings.NewReader(inv.Stdin)
 	cmd.Dir = inv.WorkingDir
 	cmd.Env = envWithProvider(envWithSessionID(envWithShimPassThrough(envWithKitsokiBinOnPath(os.Environ())), sid), AgentProviderEnvFromCtx(ctx))
+	cmd.Env = envWithProvider(cmd.Env, inv.EnvOverrides)
 	// IDE auto-connect scrub (shared decision #1) — outermost wrap, gated on a
 	// connected link in ctx; no-op otherwise so the env is byte-identical to
 	// today on every headless/flow path.

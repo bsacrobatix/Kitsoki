@@ -38,10 +38,13 @@ func (agyBackend) ResolveBin(ctx context.Context) (string, error) {
 
 // TranslateInvocation rewrites a claude-shaped invocation into agy's CLI.
 // We translate the prompt into --print. Since agy does not support a separate
-// system prompt flag, we prepend the system prompt to the user text. We also
-// isolate the execution by creating a temporary --app_data_dir and copying
-// user credentials (google_accounts.json, oauth_creds.json, state.json,
-// settings.json) into it, alongside mapping the --mcp-config if provided.
+// system prompt flag, we prepend the system prompt to the user text.
+//
+// agy's public CLI deliberately has a small flag surface. In particular,
+// current releases do not accept Claude's --strict-mcp-config /
+// --output-format flags or the old internal --app_data_dir flag. Keep the
+// emitted argv allowlisted and isolate credentials/MCP configuration through a
+// subprocess-local HOME instead.
 func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir string) Invocation {
 	var (
 		out          []string
@@ -96,12 +99,8 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 		case "--mcp-config":
 			mcpConfig = val
 		default:
-			// Passthrough unknown flags.
-			out = append(out, a)
-			if claudeValueFlags[flag] && consumed {
-				out = append(out, val)
-			}
-			continue
+			// The input vocabulary is Claude-shaped. Unknown flags must not
+			// leak into agy: its parser rejects them before any model call.
 		}
 		if consumed {
 			i++
@@ -123,7 +122,6 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 
 	args := []string{
 		"--print", prompt,
-		"--output-format", "json",
 		"--dangerously-skip-permissions",
 	}
 
@@ -135,15 +133,23 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 		args = append(args, "--conversation", strings.TrimSpace(convID))
 	}
 
-	var cleanup func()
-	tmpDir, err := os.MkdirTemp("", "kitsoki-agy-*")
+	var (
+		cleanup      func()
+		envOverrides map[string]string
+		inheritHome  bool
+	)
+	tmpHome, err := os.MkdirTemp("", "kitsoki-agy-home-*")
 	if err == nil {
 		cleanup = func() {
-			os.RemoveAll(tmpDir)
+			os.RemoveAll(tmpHome)
 		}
+		envOverrides = map[string]string{"HOME": tmpHome}
+		inheritHome = true
 
-		geminiDir := filepath.Join(tmpDir, ".gemini")
+		geminiDir := filepath.Join(tmpHome, ".gemini")
+		configDir := filepath.Join(geminiDir, "config")
 		cliDir := filepath.Join(geminiDir, "antigravity-cli")
+		os.MkdirAll(configDir, 0700)
 		os.MkdirAll(cliDir, 0700)
 
 		if home, hErr := os.UserHomeDir(); hErr == nil {
@@ -159,29 +165,36 @@ func (agyBackend) TranslateInvocation(claudeArgs []string, stdin, workingDir str
 			copyFile(filepath.Join(realGemini, "google_accounts.json"), filepath.Join(geminiDir, "google_accounts.json"))
 			copyFile(filepath.Join(realGemini, "oauth_creds.json"), filepath.Join(geminiDir, "oauth_creds.json"))
 			copyFile(filepath.Join(realGemini, "state.json"), filepath.Join(geminiDir, "state.json"))
+			copyFile(filepath.Join(realGemini, "installation_id"), filepath.Join(geminiDir, "installation_id"))
+			copyFile(filepath.Join(realGemini, "projects.json"), filepath.Join(geminiDir, "projects.json"))
+			copyFile(filepath.Join(realGemini, "settings.json"), filepath.Join(geminiDir, "settings.json"))
 			copyFile(filepath.Join(realCli, "settings.json"), filepath.Join(cliDir, "settings.json"))
 
 			if mcpConfig == "" {
-				copyFile(filepath.Join(realCli, "mcp_config.json"), filepath.Join(cliDir, "mcp_config.json"))
+				copyFile(filepath.Join(realGemini, "config", "mcp_config.json"), filepath.Join(configDir, "mcp_config.json"))
 			}
 		}
 
 		if mcpConfig != "" {
 			if data, rErr := os.ReadFile(mcpConfig); rErr == nil {
+				// agy >=1.0.14 reads global MCP configuration here.
+				os.WriteFile(filepath.Join(configDir, "mcp_config.json"), data, 0600)
+				// Retain the pre-1.0.14 path while worker images roll across
+				// versions; it is data, not an unsupported CLI flag.
 				os.WriteFile(filepath.Join(cliDir, "mcp_config.json"), data, 0600)
 			}
 		}
-
-		args = append(args, "--app_data_dir", tmpDir)
 	}
 
 	args = append(args, out...)
 
 	return Invocation{
-		Args:       args,
-		Stdin:      "",
-		WorkingDir: workingDir,
-		Cleanup:    cleanup,
+		Args:         args,
+		Stdin:        "",
+		WorkingDir:   workingDir,
+		EnvOverrides: envOverrides,
+		InheritHome:  inheritHome,
+		Cleanup:      cleanup,
 	}
 }
 

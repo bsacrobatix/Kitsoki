@@ -44,6 +44,14 @@ type Invocation struct {
 	// when it differs from Stdin. Codex carries base instructions through a
 	// model_instructions_file config override, so Stdin alone would undercount.
 	PromptForBudget string
+	// EnvOverrides are subprocess-local environment values required by the
+	// concrete backend. They are applied after the normal provider/session
+	// environment without mutating the parent process.
+	EnvOverrides map[string]string
+	// InheritHome tells the supervised runtime to retain the HOME supplied in
+	// EnvOverrides. Backends use this only when they have prepared an isolated
+	// credential/configuration home for the invocation.
+	InheritHome bool
 	// Cleanup removes any temporary files created during translation. Callers
 	// that execute an Invocation must defer it after translation.
 	Cleanup func()

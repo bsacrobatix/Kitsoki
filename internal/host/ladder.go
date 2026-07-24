@@ -1017,6 +1017,8 @@ func looksInfraError(s string) bool {
 		" 500", " 502", " 503", " 504",
 		"claude exec failed", // agent_task.go's cr.Infra wrapper message
 		"binary not found", "cli not found", "command not found",
+		"flag provided but not defined", "flags provided but not defined",
+		"unknown flag",
 	} {
 		if strings.Contains(ls, sig) {
 			return true

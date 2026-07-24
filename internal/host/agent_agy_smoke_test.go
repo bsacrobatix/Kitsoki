@@ -17,7 +17,7 @@ import (
 //  1. the MCP tool-name scheme — a server named "kitsoki-validator" must expose
 //     the tool agyBackend.ValidatorToolName returns; and
 //  2. the side-channel capture contract — agy can be driven to call that
-//     tool through the validator server registered in its app_data_dir, and
+//     tool through the validator server registered in its isolated HOME, and
 //     the kitsoki mcp-validator server writes the schema-validated payload.
 //
 // It is GATED: skipped unless KITSOKI_AGENT_LIVE=1, because it incurs a real
@@ -59,11 +59,15 @@ func TestAgyLiveSmoke(t *testing.T) {
 		},
 	}
 
-	// Create simulated app data dir with credentials copied from home
+	// Create an isolated HOME with credentials copied from the real home.
 	geminiDir := filepath.Join(dir, ".gemini")
+	configDir := filepath.Join(geminiDir, "config")
 	cliDir := filepath.Join(geminiDir, "antigravity-cli")
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
 	if err := os.MkdirAll(cliDir, 0700); err != nil {
-		t.Fatalf("mkdir app_data_dir: %v", err)
+		t.Fatalf("mkdir cli dir: %v", err)
 	}
 
 	home, herr := os.UserHomeDir()
@@ -83,9 +87,10 @@ func TestAgyLiveSmoke(t *testing.T) {
 		copyFile(filepath.Join(realCli, "settings.json"), filepath.Join(cliDir, "settings.json"))
 	}
 
-	cfgPath := filepath.Join(cliDir, "mcp_config.json")
+	cfgPath := filepath.Join(configDir, "mcp_config.json")
 	cfgBytes, _ := json.Marshal(mcpCfg)
 	mustWrite(t, cfgPath, string(cfgBytes))
+	mustWrite(t, filepath.Join(cliDir, "mcp_config.json"), string(cfgBytes))
 
 	toolName := agyBackend{}.ValidatorToolName(serverName)
 
@@ -94,10 +99,9 @@ func TestAgyLiveSmoke(t *testing.T) {
 
 	cmd := exec.CommandContext(ctx, agyBin,
 		"--print", "Call the `"+toolName+"` tool exactly once with {\"answer\":\"hello\"}. Do nothing else.",
-		"--app_data_dir", dir,
-		"--output-format", "json",
 		"--dangerously-skip-permissions",
 	)
+	cmd.Env = envWithProvider(os.Environ(), map[string]string{"HOME": dir})
 	out, runErr := cmd.CombinedOutput()
 	if runErr != nil {
 		t.Fatalf("agy run failed: %v\n%s", runErr, out)
@@ -113,7 +117,7 @@ func TestAgyLiveSmoke(t *testing.T) {
 	}
 
 	// (2) The response must be success.
-	if !strings.Contains(string(out), `"SUCCESS"`) {
+	if !strings.Contains(strings.ToUpper(string(out)), "SUCCESS") {
 		t.Errorf("agy response was not success; output:\n%s", out)
 	}
 }

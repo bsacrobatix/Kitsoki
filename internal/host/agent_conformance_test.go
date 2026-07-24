@@ -555,7 +555,15 @@ command = "/bin/codex-app"
 	})
 
 	t.Run("agy/rewrite", func(t *testing.T) {
-		inv := agyBackend{}.TranslateInvocation(claudeArgs, stdin, wd)
+		productionArgs := append([]string{}, claudeArgs...)
+		productionArgs = append(productionArgs,
+			"--strict-mcp-config",
+			"--unknown-future-claude-flag",
+		)
+		inv := agyBackend{}.TranslateInvocation(productionArgs, stdin, wd)
+		if inv.Cleanup != nil {
+			defer inv.Cleanup()
+		}
 		got := strings.Join(inv.Args, " ")
 
 		if inv.Stdin != "" {
@@ -565,9 +573,11 @@ command = "/bin/codex-app"
 			t.Errorf("agy --print arg missing prepended system prompt; args=%v", inv.Args)
 		}
 		mustContain(t, got, "--dangerously-skip-permissions")
-		mustContain(t, got, "--output-format json")
 		if !hasFlagValue(inv.Args, "--model", "some-model") {
 			t.Errorf("agy missing --model some-model; args=%v", inv.Args)
+		}
+		if inv.EnvOverrides["HOME"] == "" || !inv.InheritHome {
+			t.Errorf("agy invocation must carry an isolated HOME; env=%v inherit=%v", inv.EnvOverrides, inv.InheritHome)
 		}
 		// A claude model id must be dropped.
 		cb := agyBackend{}
@@ -582,9 +592,18 @@ command = "/bin/codex-app"
 		}
 
 		// Claude-only flags must be gone.
-		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "stream-json"} {
+		for _, dropped := range []string{"--permission-mode", "--setting-sources", "--disable-slash-commands", "--effort", "--verbose", "--append-system-prompt", "--mcp-config", "--strict-mcp-config", "--output-format", "--app_data_dir", "stream-json"} {
 			if strings.Contains(got, dropped) {
 				t.Errorf("agy args still contain dropped flag %q: %v", dropped, inv.Args)
+			}
+		}
+		for _, arg := range inv.Args {
+			if strings.HasPrefix(arg, "-") {
+				switch arg {
+				case "--print", "--dangerously-skip-permissions", "--model", "--conversation", "--add-dir":
+				default:
+					t.Errorf("agy emitted unsupported flag %q; args=%v", arg, inv.Args)
+				}
 			}
 		}
 

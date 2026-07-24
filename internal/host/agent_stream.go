@@ -300,6 +300,10 @@ func (s AgentStreamer) runWithRuntime(ctx context.Context, args []string) (Claud
 		defer inv.Cleanup()
 	}
 	spec := s.Sandbox.launchSpec(ctx, s.Bin, inv.Args, inv.Stdin, inv.WorkingDir, s.SessionID)
+	spec.Env = envWithProvider(spec.Env, inv.EnvOverrides)
+	if inv.InheritHome {
+		spec.InheritHome = true
+	}
 	running, policy, err := agentRuntimeRegistryFrom(ctx).Launch(ctx, spec)
 	if err != nil {
 		launchErr := fmt.Errorf("agent runtime launch: %w", err)

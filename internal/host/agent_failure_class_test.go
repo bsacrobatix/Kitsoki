@@ -46,6 +46,18 @@ func TestClassifyAgentFailureTextNeverMatchesPlainFilesystemPermissionErrors(t *
 	}
 }
 
+func TestClassifyAgentFailureTextTreatsCLIContractErrorsAsInfra(t *testing.T) {
+	for _, message := range []string{
+		"flags provided but not defined: -strict-mcp-config",
+		"flag provided but not defined: -output-format",
+		"unknown flag: --app_data_dir",
+	} {
+		if got := ClassifyAgentFailureText(message); got != "infra" {
+			t.Errorf("ClassifyAgentFailureText(%q) = %q, want infra", message, got)
+		}
+	}
+}
+
 func TestNormalizeAgentProviderFailurePreservesCancellation(t *testing.T) {
 	got := normalizeAgentProviderFailure(ClaudeRun{
 		Stdout: "partial output mentioned HTTP 429 before cancellation",
