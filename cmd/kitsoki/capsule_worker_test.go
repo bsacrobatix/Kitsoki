@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -136,6 +138,67 @@ func TestCapsuleWorkerAgentModelUsesLegacyClaudeOverrideOnlyForClaude(t *testing
 	if got := capsuleWorkerAgentModel("codex"); got != "" {
 		t.Fatalf("codex inherited Claude-only model %q", got)
 	}
+}
+
+func TestCapsuleWorkerProcessRunnerPassesSelectedModelAtProcessBoundary(t *testing.T) {
+	t.Setenv(capsuleWorkerAgentModelEnv, "gpt-5.6-terra")
+	t.Setenv("KITSOKI_UNRELATED_SECRET", "must-not-cross-worker-boundary")
+
+	root := t.TempDir()
+	runDir := filepath.Join(root, "run")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	commandContext := func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		helperArgs := append([]string{"-test.run=^TestCapsuleWorkerProcessBoundaryHelper$", "--"}, args...)
+		return exec.CommandContext(ctx, os.Args[0], helperArgs...)
+	}
+	runner := capsuleWorkerProcessRunnerWithCommand("codex", nil, nil, commandContext)
+	result, err := runner(t.Context(), root, executor.Prepared{
+		ID:       "process-boundary",
+		Envelope: executor.Envelope{JobID: "job-process-boundary"},
+	}, filepath.Join(runDir, "trace.jsonl"))
+	if err != nil {
+		t.Fatalf("worker process runner: %v", err)
+	}
+	if got := result.Provider["completion_state"]; got != "passed" {
+		t.Fatalf("completion state = %q, want passed", got)
+	}
+}
+
+func TestCapsuleWorkerProcessBoundaryHelper(t *testing.T) {
+	resultPath := workerHelperFlagValue(os.Args, "--result")
+	if resultPath == "" {
+		t.Skip("subprocess helper")
+	}
+	if got := os.Getenv(capsuleWorkerAgentModelEnv); got != "gpt-5.6-terra" {
+		t.Fatalf("worker subprocess model = %q, want gpt-5.6-terra", got)
+	}
+	if _, ok := os.LookupEnv("KITSOKI_UNRELATED_SECRET"); ok {
+		t.Fatal("worker subprocess received unrelated environment value")
+	}
+	raw, err := json.Marshal(struct {
+		Result          executor.Result          `json:"result"`
+		CompletionState executor.CompletionState `json:"completion_state"`
+	}{
+		Result:          executor.Result{ExecutionID: "process-boundary", ExitCode: 0},
+		CompletionState: executor.CompletionState{Schema: executor.CompletionStateSchema, Outcome: "passed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(resultPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func workerHelperFlagValue(args []string, name string) string {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == name {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 // TestCapsuleWorkerChildEnvAuthPrecedence pins the single source of truth

@@ -200,7 +200,7 @@ func capsuleWorkerRunCmd() *cobra.Command {
 }
 
 func capsuleWorkerAgentModel(agentBackend string) string {
-	if model := strings.TrimSpace(os.Getenv("KITSOKI_WORKER_AGENT_MODEL")); model != "" {
+	if model := strings.TrimSpace(os.Getenv(capsuleWorkerAgentModelEnv)); model != "" {
 		return model
 	}
 	backend := strings.TrimSpace(agentBackend)
@@ -442,6 +442,12 @@ func capsuleWorkerPreflightArgs(skip bool, diskFloorBytes int64, liveAuthProbe b
 }
 
 func capsuleWorkerProcessRunner(agentBackend string, passEnv, preflightArgs []string) workerserver.Runner {
+	return capsuleWorkerProcessRunnerWithCommand(agentBackend, passEnv, preflightArgs, exec.CommandContext)
+}
+
+type capsuleWorkerCommandContext func(context.Context, string, ...string) *exec.Cmd
+
+func capsuleWorkerProcessRunnerWithCommand(agentBackend string, passEnv, preflightArgs []string, commandContext capsuleWorkerCommandContext) workerserver.Runner {
 	return func(ctx context.Context, workspace string, prepared executor.Prepared, tracePath string) (executor.Result, error) {
 		runDir := filepath.Dir(tracePath)
 		envelopePath := filepath.Join(runDir, "envelope.json")
@@ -469,7 +475,7 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv, preflightArgs []st
 		if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
 			return executor.Result{}, err
 		}
-		process := exec.CommandContext(ctx, executable, args...)
+		process := commandContext(ctx, executable, args...)
 		process.Dir = workspace
 		process.Env = append(capsuleWorkerChildEnv(passEnv), "KITSOKI_RUN_ARTIFACTS_DIR="+artifactsDir,
 			// POG fix: the pog-bugfix story's host.capsule_workspace.create runs
@@ -525,9 +531,10 @@ func capsuleWorkerProcessRunner(agentBackend string, passEnv, preflightArgs []st
 // forwards the controller's own CLAUDE_CODE_OAUTH_TOKEN into the leased
 // worker's boot env).
 const capsuleWorkerAuthPrecedenceEnv = "CLAUDE_CODE_OAUTH_TOKEN"
+const capsuleWorkerAgentModelEnv = "KITSOKI_WORKER_AGENT_MODEL"
 
 func capsuleWorkerChildEnv(pass []string) []string {
-	allowed := map[string]bool{"HOME": true, "PATH": true, "TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LC_ALL": true, "USER": true, "LOGNAME": true, "SHELL": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true, capsuleWorkerAuthPrecedenceEnv: true}
+	allowed := map[string]bool{"HOME": true, "PATH": true, "TMPDIR": true, "TMP": true, "TEMP": true, "LANG": true, "LC_ALL": true, "USER": true, "LOGNAME": true, "SHELL": true, "SSL_CERT_FILE": true, "SSL_CERT_DIR": true, "NODE_EXTRA_CA_CERTS": true, capsuleWorkerAuthPrecedenceEnv: true, capsuleWorkerAgentModelEnv: true}
 	for _, name := range pass {
 		name = strings.TrimSpace(name)
 		if name != "" && !strings.Contains(name, "=") {
