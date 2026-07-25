@@ -61,6 +61,7 @@ func TestCapsuleCleanupScopePinsAndHidesOtherOwners(t *testing.T) {
 
 func TestCapsuleConfiguredExecutorsBundlesExactWorkspaceSource(t *testing.T) {
 	workspace := t.TempDir()
+	outerProject := t.TempDir()
 	runCapsuleSecurityGit(t, workspace, "init")
 	runCapsuleSecurityGit(t, workspace, "config", "user.name", "Capsule Test")
 	runCapsuleSecurityGit(t, workspace, "config", "user.email", "capsule@example.test")
@@ -71,7 +72,10 @@ func TestCapsuleConfiguredExecutorsBundlesExactWorkspaceSource(t *testing.T) {
 	runCapsuleSecurityGit(t, workspace, "commit", "-m", "source")
 	head := runCapsuleSecurityGit(t, workspace, "rev-parse", "HEAD")
 
-	configured := capsuleConfiguredExecutors(ci.Config{}, workspace)
+	configured := capsuleConfiguredExecutors(ci.Config{}, workspace, outerProject)
+	if configured.ProjectRoot != workspace || configured.PoolStateRoot != outerProject {
+		t.Fatalf("configured roots: workspace=%q pool=%q", configured.ProjectRoot, configured.PoolStateRoot)
+	}
 	if configured.Source == nil {
 		t.Fatal("MCP configured executors are missing the source bundler")
 	}

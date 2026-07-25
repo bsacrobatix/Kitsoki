@@ -230,8 +230,9 @@ func TestValidatePoolExecutorRejectsBadPassEnvUserAgentSelection(t *testing.T) {
 
 func TestConfiguredExecutorsSelectPoolReturnsPoolProvider(t *testing.T) {
 	executors := ConfiguredExecutors{
-		Builtins:    NewBuiltinExecutors(),
-		ProjectRoot: "/project",
+		Builtins:      NewBuiltinExecutors(),
+		ProjectRoot:   "/project",
+		PoolStateRoot: "/outer-project",
 		Remotes: map[string]Remote{
 			"vm-pool": {Pool: &PoolExecutor{TokenEnv: "DO_TOKEN", Image: "237561892", Size: "s-1vcpu-1gb", Region: "sgp1"}},
 		},
@@ -244,7 +245,7 @@ func TestConfiguredExecutorsSelectPoolReturnsPoolProvider(t *testing.T) {
 	if !ok {
 		t.Fatalf("provider type %T", provider)
 	}
-	if pool.name != "vm-pool" || pool.projectRoot != "/project" || pool.cfg.Image != "237561892" {
+	if pool.name != "vm-pool" || pool.projectRoot != "/project" || pool.poolStateRoot != "/outer-project" || pool.cfg.Image != "237561892" {
 		t.Fatalf("pool provider = %#v", pool)
 	}
 }

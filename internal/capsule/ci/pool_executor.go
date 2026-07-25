@@ -83,10 +83,11 @@ func poolCapabilities() executor.Capabilities {
 // leases a fresh ephemeral worker, drives the execution on it, and always
 // releases (destroys) it before returning — success or failure alike.
 type poolProvider struct {
-	name        string
-	cfg         PoolExecutor
-	projectRoot string
-	source      executor.SourceBundler
+	name          string
+	cfg           PoolExecutor
+	projectRoot   string
+	poolStateRoot string
+	source        executor.SourceBundler
 
 	mu       sync.Mutex
 	prepared map[string]executor.Prepared
@@ -101,10 +102,14 @@ type poolProvider struct {
 // still-to-be-published snapshot reference is a valid checked-in state), so
 // this is the first point at which an unresolved Image actually blocks use.
 func newPoolProvider(name string, cfg PoolExecutor, source executor.SourceBundler, projectRoot string) (executor.Provider, error) {
+	return newPoolProviderWithPoolStateRoot(name, cfg, source, projectRoot, "")
+}
+
+func newPoolProviderWithPoolStateRoot(name string, cfg PoolExecutor, source executor.SourceBundler, projectRoot, poolStateRoot string) (executor.Provider, error) {
 	if strings.TrimSpace(cfg.Image) == "" {
 		return nil, fmt.Errorf("capsule ci: pool executor %q: image is required", name)
 	}
-	return &poolProvider{name: name, cfg: cfg, projectRoot: projectRoot, source: source, prepared: map[string]executor.Prepared{}}, nil
+	return &poolProvider{name: name, cfg: cfg, projectRoot: projectRoot, poolStateRoot: poolStateRoot, source: source, prepared: map[string]executor.Prepared{}}, nil
 }
 
 func (p *poolProvider) Describe(context.Context) (executor.Capabilities, error) {
@@ -176,7 +181,10 @@ func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("capsule ci: pool executor %q: %w", p.name, err)
 	}
-	root := p.projectRoot
+	root := p.poolStateRoot
+	if root == "" {
+		root = p.projectRoot
+	}
 	if root == "" {
 		root = "."
 	}

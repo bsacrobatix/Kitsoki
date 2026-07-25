@@ -116,6 +116,40 @@ func TestVmpReleaseMarksDestroyed(t *testing.T) {
 	require.Contains(t, fake.Destroyed(), inst.ID)
 }
 
+func TestVmpMigrateJoinsLegacyFragmentsWithLiveInventory(t *testing.T) {
+	destination := t.TempDir()
+	legacy := t.TempDir()
+	fake := vmpool.NewFake()
+	vmpWithFakeProvisioner(t, fake)
+
+	instance, err := fake.Create(context.Background(), vmpool.CreateParams{Name: "shared-worker", Tags: []string{vmpool.DefaultTag}})
+	require.NoError(t, err)
+	fake.Activate(instance.ID, "203.0.113.80", "10.0.0.80")
+	vmpSeedWorker(t, legacy, vmpool.Worker{
+		ID: "worker-shared", JobID: "job-shared", InstanceID: instance.ID,
+		InstanceName: "shared-worker", Status: vmpool.StatusRunning, CreatedAt: time.Now().UTC(),
+	})
+
+	out, err := runVmp(t, "migrate", "--project", destination, "--legacy-project", legacy)
+	require.NoError(t, err)
+	var report vmpool.MigrationReport
+	require.NoError(t, json.Unmarshal([]byte(out), &report))
+	require.Equal(t, 1, report.WorkerCount)
+	require.Equal(t, 1, report.ActiveCount)
+	require.Equal(t, 1, report.LiveInstances)
+	require.False(t, report.AlreadyApplied)
+
+	state, err := (vmpool.Store{ProjectRoot: destination}).Load()
+	require.NoError(t, err)
+	require.Equal(t, 1, state.ActiveCount())
+	require.Len(t, state.Workers, 1)
+
+	out, err = runVmp(t, "migrate", "--project", destination, "--legacy-project", legacy)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &report))
+	require.True(t, report.AlreadyApplied)
+}
+
 func TestVmpReapPlanOnlyDoesNotDestroyOrphans(t *testing.T) {
 	dir := t.TempDir()
 	fake := vmpool.NewFake()

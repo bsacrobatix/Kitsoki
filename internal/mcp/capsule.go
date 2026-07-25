@@ -576,7 +576,7 @@ func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a 
 	if err != nil {
 		return capsuleErr(err), nil, nil
 	}
-	executors := capsuleConfiguredExecutors(cfg, workspacePath)
+	executors := capsuleConfiguredExecutors(cfg, workspacePath, project)
 	service := ci.Service{ProjectRoot: workspacePath, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: scopedCIExecutors{Allowed: s.ciExecutor, Delegate: executors}, Launcher: s.ciLauncher(filepath.Join(workspacePath, pipeline.Story)), Hygiene: capsuleCIHygienePlanner(project), Observer: record.FileRunObserver{ProjectRoot: project}}
 	result, err := service.Run(ctx, ci.RunRequest{Pipeline: s.pipeline, Workspace: a.Workspace, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, Trigger: ci.Trigger{Kind: "local", RequestedPipeline: s.pipeline}})
 	if err != nil {
@@ -592,9 +592,10 @@ func (s *CapsuleServer) ciRun(ctx context.Context, _ *mcpsdk.CallToolRequest, a 
 	return nil, map[string]any{"ok": result.Verdict.Outcome == "passed", "result": result}, nil
 }
 
-func capsuleConfiguredExecutors(cfg ci.Config, workspacePath string) ci.ConfiguredExecutors {
+func capsuleConfiguredExecutors(cfg ci.Config, workspacePath, poolStateRoot string) ci.ConfiguredExecutors {
 	executors := ci.NewConfiguredExecutors(cfg)
 	executors.ProjectRoot = workspacePath
+	executors.PoolStateRoot = poolStateRoot
 	executors.Source = executor.SourceBundlerFunc(func(ctx context.Context, envelope executor.Envelope) (executor.SourceBundle, error) {
 		return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 	})
@@ -713,18 +714,16 @@ func (s *CapsuleServer) ciExecutionController(ctx context.Context, run ci.RunRec
 	if !ok || canonicalCIExecutor(pipeline.Executor) != s.ciExecutor {
 		return nil, fmt.Errorf("%w: pipeline executor changed outside the startup grant", control.ErrDenied)
 	}
-	providers := capsuleConfiguredExecutors(cfg, workspacePath)
+	providers := capsuleConfiguredExecutors(cfg, workspacePath, s.manager.Grant.ProjectRoot)
 	provider, err := (scopedCIExecutors{Allowed: s.ciExecutor, Delegate: providers}).Select(ctx, pipeline.Executor)
 	if err != nil {
 		return nil, err
 	}
-	capabilities, err := provider.Describe(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !capabilities.Cancellable {
-		return nil, fmt.Errorf("capsule ci: executor %q does not support cancellation/status control", pipeline.Executor)
-	}
+	// The provider's ExecutionController is the authority for each control
+	// operation. Pool executors intentionally advertise Cancellable=false
+	// while still exposing durable Status and ReleaseDetached; rejecting them
+	// here would strand status refreshes from a second workspace even though
+	// both reopen the same project-authoritative pool store.
 	controller, ok := provider.(executor.ExecutionController)
 	if !ok {
 		return nil, fmt.Errorf("capsule ci: executor %q does not expose durable status/cancellation", pipeline.Executor)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/hygiene"
 )
 
 // capsuleWorkspaceCmd is the operator/automation CLI counterpart to the
@@ -18,7 +21,51 @@ import (
 // letting any onboarded project use the native manager directly.
 func capsuleWorkspaceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "workspace", Short: "Create and manage native Capsule workspaces"}
-	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceCreateScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd())
+	cmd.AddCommand(capsuleWorkspaceCreateCmd(), capsuleWorkspaceCreateScriptCmd(), capsuleWorkspaceListCmd(), capsuleWorkspaceStatusCmd(), capsuleWorkspaceExecCmd(), capsuleWorkspaceCommitCmd(), capsuleWorkspaceIntegrateCmd(), capsuleWorkspaceCloseCmd(), capsuleWorkspacePurgeCmd())
+	return cmd
+}
+
+func capsuleWorkspacePurgeCmd() *cobra.Command {
+	var project, receiptPath string
+	var jsonOut bool
+	cmd := &cobra.Command{
+		Use:          "purge",
+		Short:        "Purge one old closed quarantine bound to a durable retention receipt",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			info, err := os.Lstat(receiptPath)
+			if err != nil {
+				return fmt.Errorf("capsule workspace purge: inspect receipt: %w", err)
+			}
+			if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 64<<10 {
+				return fmt.Errorf("capsule workspace purge: receipt must be a regular non-symlink file no larger than 64 KiB")
+			}
+			file, err := os.Open(receiptPath)
+			if err != nil {
+				return fmt.Errorf("capsule workspace purge: open receipt: %w", err)
+			}
+			defer file.Close()
+			var receipt hygiene.RetentionReceipt
+			decoder := json.NewDecoder(io.LimitReader(file, (64<<10)+1))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&receipt); err != nil {
+				return fmt.Errorf("capsule workspace purge: parse receipt: %w", err)
+			}
+			result, err := hygiene.PurgeClosedWorkspace(cmd.Context(), hygiene.PurgeOptions{
+				ProjectRoot: project,
+				Receipt:     receipt,
+			})
+			if err != nil {
+				return err
+			}
+			return capsuleWorkspaceWrite(cmd, result, jsonOut)
+		},
+	}
+	cmd.Flags().StringVar(&project, "project", ".", "trusted project root")
+	cmd.Flags().StringVar(&receiptPath, "receipt", "", "capsule-workspace-retention/v1 JSON receipt")
+	cmd.Flags().BoolVar(&jsonOut, "json", true, "print JSON")
+	_ = cmd.MarkFlagRequired("receipt")
 	return cmd
 }
 

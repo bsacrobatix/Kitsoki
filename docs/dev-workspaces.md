@@ -448,6 +448,28 @@ teardown fails after a successful merge, the merge result remains successful
 and carries an explicit cleanup warning so automation does not retry the
 already-landed change as though landing failed.
 
+Autonomous retention uses the narrower receipt-bound lifecycle verb:
+
+```sh
+kitsoki capsule workspace purge \
+  --project /absolute/project/root \
+  --receipt /absolute/path/to/workspace-retention.json
+```
+
+The `capsule-workspace-retention/v1` receipt binds the trusted project, exact
+ordinary `closed-*` identity/path, HEAD, recovery ref, 24-hour eligibility
+boundary, and two distinct safe close-time process/activity probes. Purge
+independently rechecks current/pinned/dirty/tip/containment/activity/age state,
+preserves the newest five quarantines, caps one invocation at 8 GiB, and writes
+only a bounded 64 KiB monotonic purge intent before atomically renaming the
+quarantine to a visible `closed-purging-*` path. It never creates ignored-tree,
+review-artifact, or Git archives for an already-closed verified quarantine.
+An interrupted invocation resumes from the exact intent and isolated path.
+Unsafe candidates return a typed `skipped` result with the candidate and reason
+instead of disappearing from inventory. A repeated receipt returns
+`already_absent` only when its exact intent proves the prior removal; it cannot
+select a different workspace.
+
 ### `recover`
 
 ```sh

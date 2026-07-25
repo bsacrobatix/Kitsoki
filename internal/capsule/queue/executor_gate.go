@@ -103,6 +103,7 @@ func (g ExecutorGate) Run(ctx context.Context, spec Speculation) (GateResult, er
 	if selector == nil {
 		configured := ci.NewConfiguredExecutors(cfg)
 		configured.ProjectRoot = root
+		configured.PoolStateRoot = root
 		configured.Source = executor.SourceBundlerFunc(func(ctx context.Context, envelope executor.Envelope) (executor.SourceBundle, error) {
 			return executor.GitBundle(ctx, spec.WorkspacePath, envelope.SourceDigest, 0)
 		})

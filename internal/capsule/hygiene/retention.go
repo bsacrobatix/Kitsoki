@@ -1,0 +1,560 @@
+package hygiene
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"kitsoki/internal/atomicfile"
+)
+
+const (
+	RetentionReceiptSchema = "capsule-workspace-retention/v1"
+	PurgeReceiptSchema     = "capsule-workspace-purge/v1"
+	purgeIntentSchema      = "capsule-workspace-purge-intent/v1"
+	defaultPurgeMaxBytes   = int64(8 << 30)
+	defaultPurgeMinFree    = int64(16 << 20)
+	purgeFreeSlack         = int64(1 << 20)
+)
+
+// RetentionProbe records an independent, durable close-time liveness fact.
+// Purge still repeats live activity checks; these fields prove that closure
+// itself was not authorized from an unknown process snapshot.
+type RetentionProbe struct {
+	Kind       string    `json:"kind"`
+	CapturedAt time.Time `json:"captured_at"`
+	Safe       bool      `json:"safe"`
+}
+
+// RetentionReceipt is produced by the dispatch finalizer/reaper before close.
+// It binds purge to one exact closed quarantine and recovery ref.
+type RetentionReceipt struct {
+	Schema          string         `json:"schema"`
+	Project         string         `json:"project"`
+	WorkspaceID     string         `json:"workspace_id"`
+	WorkspacePath   string         `json:"workspace_path"`
+	Head            string         `json:"head"`
+	RecoveryRef     string         `json:"recovery_ref"`
+	IssuedAt        time.Time      `json:"issued_at"`
+	EligibleAfter   time.Time      `json:"eligible_after"`
+	ProcessSnapshot RetentionProbe `json:"process_snapshot"`
+	ActivityProbe   RetentionProbe `json:"activity_probe"`
+}
+
+type PurgeOptions struct {
+	ProjectRoot           string
+	Receipt               RetentionReceipt
+	MinAge                time.Duration
+	KeepWorkspaces        int
+	MaxBytes              int64
+	CurrentPath           string
+	PinnedWorkspaceIDs    []string
+	ReadWorkspaceActivity func(context.Context, []string) (WorkspaceActivity, error)
+	ReadDiskUsage         func(string) (DiskUsage, error)
+	CloseWorkspace        func(context.Context, string, Candidate) error
+	MinOperationFreeBytes int64
+	Now                   func() time.Time
+}
+
+type PurgeResult struct {
+	Schema        string     `json:"schema"`
+	OK            bool       `json:"ok"`
+	Status        string     `json:"status"`
+	ReasonCode    string     `json:"reason_code,omitempty"`
+	Reason        string     `json:"reason,omitempty"`
+	WorkspaceID   string     `json:"workspace_id"`
+	WorkspacePath string     `json:"workspace_path"`
+	Head          string     `json:"head"`
+	RecoveryRef   string     `json:"recovery_ref"`
+	IntentPath    string     `json:"intent_path,omitempty"`
+	PurgedAt      time.Time  `json:"purged_at"`
+	Bytes         int64      `json:"bytes,omitempty"`
+	AlreadyAbsent bool       `json:"already_absent,omitempty"`
+	Candidate     *Candidate `json:"candidate,omitempty"`
+	DiskBefore    int64      `json:"disk_before_bytes,omitempty"`
+	DiskAfter     int64      `json:"disk_after_bytes,omitempty"`
+}
+
+type purgeIntent struct {
+	Schema          string    `json:"schema"`
+	ReceiptDigest   string    `json:"receipt_digest"`
+	WorkspaceID     string    `json:"workspace_id"`
+	OriginalPath    string    `json:"original_path"`
+	PurgingPath     string    `json:"purging_path"`
+	Head            string    `json:"head"`
+	Branch          string    `json:"branch"`
+	Target          string    `json:"target"`
+	RecoveryRef     string    `json:"recovery_ref"`
+	Bytes           int64     `json:"bytes"`
+	Status          string    `json:"status"`
+	StartedAt       time.Time `json:"started_at"`
+	CompletedAt     time.Time `json:"completed_at,omitempty"`
+	DiskBeforeBytes int64     `json:"disk_before_bytes,omitempty"`
+	DiskAfterBytes  int64     `json:"disk_after_bytes,omitempty"`
+}
+
+// PurgeClosedWorkspace removes exactly one receipt-bound closed quarantine
+// without creating another archive. It records a bounded monotonic intent,
+// atomically isolates the exact path, repeats the live safety proofs, and can
+// resume an interrupted closed-purging state from that intent.
+func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, error) {
+	root, err := canonicalRoot(opts.ProjectRoot)
+	if err != nil {
+		return PurgeResult{}, err
+	}
+	now := time.Now().UTC()
+	if opts.Now != nil {
+		now = opts.Now().UTC()
+	}
+	minAge := opts.MinAge
+	if minAge == 0 {
+		minAge = defaultWorkspaceAge
+	}
+	keep := opts.KeepWorkspaces
+	if keep == 0 {
+		keep = defaultKeepWorkspaces
+	}
+	maxBytes := opts.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = defaultPurgeMaxBytes
+	}
+	minFree := opts.MinOperationFreeBytes
+	if minFree == 0 {
+		minFree = defaultPurgeMinFree
+	}
+	receipt := opts.Receipt
+	if err := validateRetentionReceipt(root, receipt, now, minAge); err != nil {
+		return PurgeResult{}, err
+	}
+	result := PurgeResult{
+		Schema:        PurgeReceiptSchema,
+		Status:        "planned",
+		WorkspaceID:   receipt.WorkspaceID,
+		WorkspacePath: receipt.WorkspacePath,
+		Head:          receipt.Head,
+		RecoveryRef:   receipt.RecoveryRef,
+		PurgedAt:      now,
+	}
+
+	digest, err := retentionReceiptDigest(receipt)
+	if err != nil {
+		return PurgeResult{}, err
+	}
+	intentRel := filepath.ToSlash(filepath.Join(".capsules", "retention", "purges", digest+".json"))
+	intentPath := filepath.Join(root, filepath.FromSlash(intentRel))
+	result.IntentPath = intentRel
+	intent, hasIntent, err := readPurgeIntent(intentPath, digest, receipt)
+	if err != nil {
+		return PurgeResult{}, err
+	}
+
+	originalRel := receipt.WorkspacePath
+	purgingRel := filepath.ToSlash(filepath.Join(filepath.Dir(receipt.WorkspacePath), "closed-purging-"+strings.TrimPrefix(receipt.WorkspaceID, "closed-")))
+	if strings.HasPrefix(receipt.WorkspaceID, "closed-purging-") {
+		purgingRel = receipt.WorkspacePath
+	}
+	if hasIntent {
+		originalRel = intent.OriginalPath
+		purgingRel = intent.PurgingPath
+	}
+	originalPath := filepath.Join(root, filepath.FromSlash(originalRel))
+	purgingPath := filepath.Join(root, filepath.FromSlash(purgingRel))
+	originalExists, err := regularDirectoryState(originalPath)
+	if err != nil {
+		return PurgeResult{}, err
+	}
+	purgingExists := originalExists
+	if purgingPath != originalPath {
+		purgingExists, err = regularDirectoryState(purgingPath)
+		if err != nil {
+			return PurgeResult{}, err
+		}
+	}
+	if originalPath != purgingPath && originalExists && purgingExists {
+		return skipPurge(result, "path_conflict", "both the closed and closed-purging paths exist", nil), nil
+	}
+	if !originalExists && !purgingExists {
+		if !hasIntent {
+			return skipPurge(result, "missing_without_intent", "workspace is absent without a matching monotonic purge intent", nil), nil
+		}
+		intent.Status = "purged"
+		if intent.CompletedAt.IsZero() {
+			intent.CompletedAt = now
+			if err := writePurgeIntent(intentPath, intent); err != nil {
+				return PurgeResult{}, err
+			}
+		}
+		result.OK = true
+		result.Status = "purged"
+		result.AlreadyAbsent = true
+		result.Bytes = intent.Bytes
+		result.DiskBefore = intent.DiskBeforeBytes
+		result.DiskAfter = intent.DiskAfterBytes
+		return result, nil
+	}
+
+	hygieneOpts := Options{
+		ProjectRoot:                  root,
+		KeepRuns:                     -1,
+		KeepWorkspaces:               keep,
+		MinWorkspaceAge:              minAge,
+		MeasureWorkspaceBytes:        true,
+		PinnedWorkspaceIDs:           append([]string(nil), opts.PinnedWorkspaceIDs...),
+		CurrentPath:                  opts.CurrentPath,
+		ReadWorkspaceActivity:        opts.ReadWorkspaceActivity,
+		CloseWorkspace:               opts.CloseWorkspace,
+		Now:                          opts.Now,
+		AllowReceiptBoundClosedPurge: true,
+	}
+	var candidate Candidate
+	if purgingExists && hasIntent && originalPath != purgingPath {
+		candidate, err = recheckPurgingIntent(ctx, root, purgingPath, intent, opts)
+		if err != nil {
+			return skipPurge(result, "interrupted_purge_unsafe", err.Error(), nil), nil
+		}
+	} else {
+		plan, buildErr := BuildPlan(ctx, hygieneOpts)
+		if buildErr != nil {
+			return PurgeResult{}, buildErr
+		}
+		found := false
+		for _, item := range plan.Candidates {
+			if item.Kind == "workspace" && item.WorkspaceID == receipt.WorkspaceID && item.Path == receipt.WorkspacePath {
+				candidate = item
+				found = true
+				break
+			}
+		}
+		if !found {
+			return skipPurge(result, "not_in_inventory", "receipt workspace is not present in the managed hygiene inventory", nil), nil
+		}
+		if !candidate.Safe {
+			return skipPurge(result, "unsafe_candidate", candidate.Reason, &candidate), nil
+		}
+		if !candidate.Legacy || !strings.HasPrefix(filepath.Base(candidate.Path), "closed-") ||
+			strings.HasPrefix(filepath.Base(candidate.Path), "closed-recovered-") {
+			return skipPurge(result, "unsupported_quarantine", "archive-free purge accepts only an ordinary closed managed quarantine", &candidate), nil
+		}
+		if candidate.Head != receipt.Head {
+			return skipPurge(result, "changed_head", fmt.Sprintf("workspace head changed: got %s want %s", candidate.Head, receipt.Head), &candidate), nil
+		}
+		if maxBytes > 0 && candidate.Bytes > maxBytes {
+			return skipPurge(result, "byte_limit", fmt.Sprintf("workspace size %d exceeds per-command limit %d", candidate.Bytes, maxBytes), &candidate), nil
+		}
+		if err := validateReceiptRecoveryRef(ctx, root, filepath.Join(root, filepath.FromSlash(candidate.Path)), receipt); err != nil {
+			return skipPurge(result, "recovery_ref", err.Error(), &candidate), nil
+		}
+		fresh, safe, recheckErr := recheckWorkspace(ctx, root, hygieneOpts, candidate)
+		if recheckErr != nil {
+			return skipPurge(result, "recheck_failed", recheckErr.Error(), &candidate), nil
+		}
+		if !safe {
+			return skipPurge(result, "became_unsafe", fresh.Reason, &fresh), nil
+		}
+		candidate = fresh
+		if candidate.Head != receipt.Head {
+			return skipPurge(result, "changed_head", "workspace head changed during recheck", &candidate), nil
+		}
+	}
+	result.Candidate = &candidate
+
+	diskReader := opts.ReadDiskUsage
+	if diskReader == nil {
+		diskReader = readDiskUsage
+	}
+	before, err := diskReader(root)
+	if err != nil || !before.Known {
+		reason := "disk usage is unavailable"
+		if err != nil {
+			reason = err.Error()
+		}
+		return skipPurge(result, "disk_unknown", reason, &candidate), nil
+	}
+	result.DiskBefore = before.FreeBytes
+	if minFree > 0 && before.FreeBytes < minFree {
+		return skipPurge(result, "disk_operation_floor", fmt.Sprintf("free space %d is below the bounded purge operation floor %d", before.FreeBytes, minFree), &candidate), nil
+	}
+
+	if !hasIntent {
+		intent = purgeIntent{
+			Schema:          purgeIntentSchema,
+			ReceiptDigest:   digest,
+			WorkspaceID:     receipt.WorkspaceID,
+			OriginalPath:    receipt.WorkspacePath,
+			PurgingPath:     purgingRel,
+			Head:            receipt.Head,
+			Branch:          candidate.Branch,
+			Target:          candidate.Target,
+			RecoveryRef:     receipt.RecoveryRef,
+			Bytes:           candidate.Bytes,
+			Status:          "isolating",
+			StartedAt:       now,
+			DiskBeforeBytes: before.FreeBytes,
+		}
+		if err := writePurgeIntent(intentPath, intent); err != nil {
+			return PurgeResult{}, err
+		}
+	}
+	afterIntent, err := diskReader(root)
+	if err != nil || !afterIntent.Known || afterIntent.FreeBytes+purgeFreeSlack < before.FreeBytes {
+		return skipPurge(result, "intent_not_monotonic", "bounded purge intent write materially reduced available space", &candidate), nil
+	}
+
+	if originalPath != purgingPath && originalExists {
+		if err := os.Rename(originalPath, purgingPath); err != nil {
+			return PurgeResult{}, fmt.Errorf("capsule retention: atomically isolate quarantine: %w", err)
+		}
+		intent.Status = "isolated"
+		if err := writePurgeIntent(intentPath, intent); err != nil {
+			return PurgeResult{}, err
+		}
+		candidate.Path = purgingRel
+	}
+	if _, err := recheckPurgingIntent(ctx, root, purgingPath, intent, opts); err != nil {
+		return skipPurge(result, "isolated_became_unsafe", err.Error(), &candidate), nil
+	}
+	if opts.CloseWorkspace != nil {
+		if err := opts.CloseWorkspace(ctx, root, candidate); err != nil {
+			return PurgeResult{}, fmt.Errorf("capsule retention: archive-free remover: %w", err)
+		}
+	} else if err := os.RemoveAll(purgingPath); err != nil {
+		return PurgeResult{}, fmt.Errorf("capsule retention: archive-free remove: %w", err)
+	}
+	if _, err := os.Lstat(purgingPath); !os.IsNotExist(err) {
+		return PurgeResult{}, fmt.Errorf("capsule retention: archive-free remover returned success but quarantine remains")
+	}
+	after, err := diskReader(root)
+	if err != nil || !after.Known {
+		return PurgeResult{}, fmt.Errorf("capsule retention: post-purge disk usage unavailable")
+	}
+	intent.Status = "purged"
+	intent.CompletedAt = now
+	intent.DiskAfterBytes = after.FreeBytes
+	if err := writePurgeIntent(intentPath, intent); err != nil {
+		return PurgeResult{}, err
+	}
+	result.DiskAfter = after.FreeBytes
+	if after.FreeBytes+purgeFreeSlack < before.FreeBytes {
+		result.OK = false
+		result.Status = "purged"
+		result.ReasonCode = "post_purge_space_regressed"
+		result.Reason = fmt.Sprintf("available space regressed from %d to %d", before.FreeBytes, after.FreeBytes)
+		result.Bytes = candidate.Bytes
+		return result, nil
+	}
+	result.OK = true
+	result.Status = "purged"
+	result.Bytes = candidate.Bytes
+	return result, nil
+}
+
+func skipPurge(result PurgeResult, code, reason string, candidate *Candidate) PurgeResult {
+	result.OK = false
+	result.Status = "skipped"
+	result.ReasonCode = code
+	result.Reason = reason
+	result.Candidate = candidate
+	return result
+}
+
+func retentionReceiptDigest(receipt RetentionReceipt) (string, error) {
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return "", fmt.Errorf("capsule retention: encode receipt digest: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func regularDirectoryState(path string) (bool, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("capsule retention: inspect %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, fmt.Errorf("capsule retention: managed quarantine path is not a regular directory: %s", path)
+	}
+	return true, nil
+}
+
+func readPurgeIntent(path, digest string, receipt RetentionReceipt) (purgeIntent, bool, error) {
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return purgeIntent{}, false, nil
+	}
+	if err != nil {
+		return purgeIntent{}, false, fmt.Errorf("capsule retention: read purge intent: %w", err)
+	}
+	if len(raw) > 64<<10 {
+		return purgeIntent{}, false, fmt.Errorf("capsule retention: purge intent exceeds 64 KiB")
+	}
+	var intent purgeIntent
+	if err := json.Unmarshal(raw, &intent); err != nil {
+		return purgeIntent{}, false, fmt.Errorf("capsule retention: parse purge intent: %w", err)
+	}
+	if intent.Schema != purgeIntentSchema || intent.ReceiptDigest != digest ||
+		intent.WorkspaceID != receipt.WorkspaceID || intent.Head != receipt.Head ||
+		intent.RecoveryRef != receipt.RecoveryRef ||
+		(intent.Status != "isolating" && intent.Status != "isolated" && intent.Status != "purged") {
+		return purgeIntent{}, false, fmt.Errorf("capsule retention: purge intent does not match the exact receipt")
+	}
+	return intent, true, nil
+}
+
+func writePurgeIntent(path string, intent purgeIntent) error {
+	raw, err := json.MarshalIndent(intent, "", "  ")
+	if err != nil {
+		return fmt.Errorf("capsule retention: encode purge intent: %w", err)
+	}
+	if len(raw) > 64<<10 {
+		return fmt.Errorf("capsule retention: purge intent exceeds 64 KiB")
+	}
+	if err := atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o700); err != nil {
+		return fmt.Errorf("capsule retention: write purge intent: %w", err)
+	}
+	return nil
+}
+
+func recheckPurgingIntent(ctx context.Context, root, path string, intent purgeIntent, opts PurgeOptions) (Candidate, error) {
+	exists, err := regularDirectoryState(path)
+	if err != nil || !exists {
+		if err != nil {
+			return Candidate{}, err
+		}
+		return Candidate{}, fmt.Errorf("isolated quarantine is absent")
+	}
+	if pathContains(path, opts.CurrentPath) {
+		return Candidate{}, fmt.Errorf("isolated quarantine contains the current process directory")
+	}
+	for _, pinned := range opts.PinnedWorkspaceIDs {
+		if pinned == intent.WorkspaceID || pinned == filepath.Base(path) {
+			return Candidate{}, fmt.Errorf("isolated quarantine is pinned")
+		}
+	}
+	status, err := gitStatus(ctx, path)
+	if err != nil || strings.TrimSpace(status) != "" {
+		return Candidate{}, fmt.Errorf("isolated quarantine is dirty or Git status is unknown")
+	}
+	head, err := gitText(ctx, path, "rev-parse", "--verify", "HEAD")
+	if err != nil || head != intent.Head {
+		return Candidate{}, fmt.Errorf("isolated quarantine head changed")
+	}
+	branch, err := gitText(ctx, path, "branch", "--show-current")
+	if err != nil || branch != intent.Branch {
+		return Candidate{}, fmt.Errorf("isolated quarantine branch changed")
+	}
+	contained, err := gitAncestor(ctx, root, intent.Head, "refs/heads/"+intent.Target)
+	if err != nil || !contained {
+		return Candidate{}, fmt.Errorf("isolated quarantine head is not contained in %s", intent.Target)
+	}
+	recovery, err := gitText(ctx, root, "rev-parse", "--verify", intent.RecoveryRef+"^{commit}")
+	if err != nil || recovery != intent.Head {
+		return Candidate{}, fmt.Errorf("isolated quarantine recovery ref is missing or changed")
+	}
+	reader := opts.ReadWorkspaceActivity
+	if reader == nil {
+		reader = readWorkspaceActivity
+	}
+	activity, err := reader(ctx, []string{path})
+	if err != nil || !activity.Known {
+		return Candidate{}, fmt.Errorf("isolated quarantine activity is unknown")
+	}
+	if pids := workspaceActivityPIDs(activity, path); len(pids) > 0 {
+		return Candidate{}, fmt.Errorf("isolated quarantine is active in process(es): %v", pids)
+	}
+	return Candidate{
+		ID:            "workspace:" + intent.WorkspaceID,
+		Kind:          "workspace",
+		Path:          filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator))),
+		WorkspaceID:   intent.WorkspaceID,
+		Status:        "clean",
+		Safe:          true,
+		Managed:       true,
+		Legacy:        true,
+		Merged:        true,
+		Branch:        intent.Branch,
+		Target:        intent.Target,
+		Head:          intent.Head,
+		Bytes:         intent.Bytes,
+		BytesKnown:    true,
+		ActivityKnown: true,
+		Reason:        "receipt-bound isolated quarantine is safe to resume archive-free purge",
+	}, nil
+}
+
+func validateRetentionReceipt(root string, receipt RetentionReceipt, now time.Time, minAge time.Duration) error {
+	if receipt.Schema != RetentionReceiptSchema {
+		return fmt.Errorf("capsule retention: receipt schema %q, want %q", receipt.Schema, RetentionReceiptSchema)
+	}
+	project, err := canonicalRoot(receipt.Project)
+	if err != nil || project != root {
+		return fmt.Errorf("capsule retention: receipt project does not match the trusted project root")
+	}
+	if receipt.WorkspaceID == "" || filepath.Base(receipt.WorkspaceID) != receipt.WorkspaceID || !strings.HasPrefix(receipt.WorkspaceID, "closed-") {
+		return fmt.Errorf("capsule retention: receipt workspace id is not a closed quarantine identity")
+	}
+	wantPath := filepath.ToSlash(filepath.Join(".capsules", "workspaces", receipt.WorkspaceID))
+	if receipt.WorkspacePath != wantPath {
+		return fmt.Errorf("capsule retention: receipt workspace path %q, want %q", receipt.WorkspacePath, wantPath)
+	}
+	if !isObjectID(receipt.Head) {
+		return fmt.Errorf("capsule retention: receipt head is not an object id")
+	}
+	if receipt.IssuedAt.IsZero() || receipt.EligibleAfter.IsZero() ||
+		receipt.ProcessSnapshot.CapturedAt.IsZero() || receipt.ActivityProbe.CapturedAt.IsZero() {
+		return fmt.Errorf("capsule retention: receipt timestamps are incomplete")
+	}
+	if receipt.EligibleAfter.Before(receipt.IssuedAt.Add(minAge)) {
+		return fmt.Errorf("capsule retention: receipt eligibility is shorter than minimum age %s", minAge)
+	}
+	if now.Before(receipt.EligibleAfter) {
+		return fmt.Errorf("capsule retention: receipt is too young until %s", receipt.EligibleAfter.UTC().Format(time.RFC3339))
+	}
+	if receipt.ProcessSnapshot.Kind == "" || receipt.ActivityProbe.Kind == "" ||
+		receipt.ProcessSnapshot.Kind == receipt.ActivityProbe.Kind ||
+		!receipt.ProcessSnapshot.Safe || !receipt.ActivityProbe.Safe {
+		return fmt.Errorf("capsule retention: two distinct safe close-time probes are required")
+	}
+	if receipt.ProcessSnapshot.CapturedAt.After(receipt.IssuedAt) || receipt.ActivityProbe.CapturedAt.After(receipt.IssuedAt) {
+		return fmt.Errorf("capsule retention: probe timestamps cannot postdate receipt issuance")
+	}
+	if receipt.IssuedAt.Sub(receipt.ProcessSnapshot.CapturedAt) > 5*time.Minute ||
+		receipt.IssuedAt.Sub(receipt.ActivityProbe.CapturedAt) > 5*time.Minute {
+		return fmt.Errorf("capsule retention: close-time probes are stale")
+	}
+	if strings.TrimSpace(receipt.RecoveryRef) == "" {
+		return fmt.Errorf("capsule retention: recovery ref is required")
+	}
+	return nil
+}
+
+func validateReceiptRecoveryRef(ctx context.Context, root, path string, receipt RetentionReceipt) error {
+	if strings.HasPrefix(filepath.Base(path), "closed-recovered-") {
+		var marker recoveredQuarantineManifest
+		if err := readJSON(filepath.Join(path, ".kitsoki-recovered-quarantine.json"), &marker); err != nil {
+			return fmt.Errorf("capsule retention: recovered quarantine manifest: %w", err)
+		}
+		if marker.RecoveryRef != receipt.RecoveryRef {
+			return fmt.Errorf("capsule retention: recovered quarantine ref does not match receipt")
+		}
+		return nil
+	}
+	want := "refs/kitsoki/workspace-teardown-recovery/" + receipt.Head
+	if receipt.RecoveryRef != want {
+		return fmt.Errorf("capsule retention: recovery ref %q, want %q", receipt.RecoveryRef, want)
+	}
+	head, err := gitText(ctx, root, "rev-parse", "--verify", receipt.RecoveryRef+"^{commit}")
+	if err != nil || head != receipt.Head {
+		return fmt.Errorf("capsule retention: recovery ref is missing or changed")
+	}
+	return nil
+}

@@ -61,6 +61,12 @@ type Options struct {
 	// intentionally used by the no-argument operator clear command, not by the
 	// broader retention-based hygiene pass.
 	ClearInactiveMerged bool
+	// AllowReceiptBoundClosedPurge is set only by PurgeClosedWorkspace after
+	// validating a capsule-workspace-retention/v1 receipt. Generic cleanup
+	// plan/apply/clear must leave already-closed quarantines visible and skip
+	// them; their legacy provider path archives entire trees and can amplify
+	// disk pressure during recovery.
+	AllowReceiptBoundClosedPurge bool
 }
 
 // Progress identifies the inventory phase currently being inspected. Callers
@@ -737,7 +743,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 		go func() {
 			for path := range jobs {
 				in, ok := byPath[path]
-				candidate, inspectErr := inspectWorkspace(ctx, root, path, maybeInstance(in, ok), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged)
+				candidate, inspectErr := inspectWorkspace(ctx, root, path, maybeInstance(in, ok), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
 				results <- inspection{candidate: candidate, err: inspectErr}
 			}
 		}()
@@ -757,7 +763,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 	return out, nil
 }
 
-func inspectWorkspace(ctx context.Context, root, path string, in *control.Instance, current string, pinned map[string]bool, now time.Time, minAge time.Duration, activity WorkspaceActivity, measureBytes, clearInactiveMerged bool) (Candidate, error) {
+func inspectWorkspace(ctx context.Context, root, path string, in *control.Instance, current string, pinned map[string]bool, now time.Time, minAge time.Duration, activity WorkspaceActivity, measureBytes, clearInactiveMerged, allowReceiptBoundClosedPurge bool) (Candidate, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Candidate{}, err
@@ -848,6 +854,8 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 		candidate.Reason = "workspace has uncommitted changes"
 	case candidate.Legacy && !candidate.Merged:
 		candidate.Reason = "legacy workspace HEAD is not contained in declared target " + candidate.Target
+	case candidate.Legacy && strings.HasPrefix(id, "closed-") && !allowReceiptBoundClosedPurge:
+		candidate.Reason = "closed quarantine requires receipt-bound archive-free purge"
 	case clearInactiveMerged && !candidate.Legacy && in.State != control.StateIntegrated:
 		candidate.Reason = "workspace is not integrated into a branch"
 	case !candidate.Legacy && in.State == control.StateCommitted:
@@ -1295,7 +1303,7 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 		if opts.Now != nil {
 			now = opts.Now().UTC()
 		}
-		fresh, inspectErr := inspectWorkspace(ctx, root, path, nil, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged)
+		fresh, inspectErr := inspectWorkspace(ctx, root, path, nil, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
 		if inspectErr != nil {
 			return planned, false, inspectErr
 		}
@@ -1329,7 +1337,7 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 	if activityErr != nil {
 		activity = WorkspaceActivity{Reason: activityErr.Error()}
 	}
-	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged)
+	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
 	if err != nil {
 		return planned, false, err
 	}

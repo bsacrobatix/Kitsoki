@@ -283,6 +283,7 @@ func capsulePromoteDoctorCheck(ctx context.Context, root, pipeline string, insta
 	}
 	executors := ci.NewConfiguredExecutors(cfg)
 	executors.ProjectRoot = workspacePath
+	executors.PoolStateRoot = root
 	doctor := ci.Doctor{ProjectRoot: workspacePath, Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Hygiene: capsuleCIHygienePlanner(root), Workspace: ci.GitWorkspaceProbe{}}
 	return doctor.Check(ctx, ci.DoctorRequest{Pipeline: pipeline, Workspace: instance, WorkspacePath: workspacePath})
 }
@@ -308,6 +309,7 @@ func runPromoteCI(ctx context.Context, project string, instance control.Instance
 	var launcher ci.Launcher = storylauncher.Launcher{StoryPath: filepath.Join(instance.Path, p.Story), ProjectRoot: instance.Path, AgentLaunchPolicy: host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{instance.Path}}}
 	executors := ci.NewConfiguredExecutors(cfg)
 	executors.ProjectRoot = instance.Path
+	executors.PoolStateRoot = project
 	executors.Source = executor.SourceBundlerFunc(func(ctx context.Context, envelope executor.Envelope) (executor.SourceBundle, error) {
 		return executor.GitBundle(ctx, instance.Path, envelope.SourceDigest, 0)
 	})

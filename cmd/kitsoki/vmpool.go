@@ -59,7 +59,46 @@ func vmpoolCmd() *cobra.Command {
 		Long: "Operate the DigitalOcean-backed ephemeral-worker pool (internal/capsule/vmpool): inspect and reconcile\n" +
 			"durable pool state, and author the base image every worker boots from.\n\n" + vmpoolSecurityNote,
 	}
-	cmd.AddCommand(vmpoolStatusCmd(), vmpoolReleaseCmd(), vmpoolReapCmd(), vmpoolImageCmd(), vmpoolSmokeCmd(), vmpoolRoundtripCmd())
+	cmd.AddCommand(vmpoolStatusCmd(), vmpoolReleaseCmd(), vmpoolReapCmd(), vmpoolMigrateCmd(), vmpoolImageCmd(), vmpoolSmokeCmd(), vmpoolRoundtripCmd())
+	return cmd
+}
+
+func vmpoolMigrateCmd() *cobra.Command {
+	var common vmpoolCommonFlags
+	var cfgFlags vmpoolConfigFlags
+	var legacyProjects []string
+	cmd := &cobra.Command{
+		Use:          "migrate",
+		Short:        "Fail-closed migration of workspace-local pool fragments into one project authority",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if len(legacyProjects) == 0 {
+				return fmt.Errorf("vmpool migrate: at least one --legacy-project is required")
+			}
+			pool, err := vmpoolBuildPool(common, cfgFlags)
+			if err != nil {
+				return err
+			}
+			cfg := pool.Config.WithDefaults()
+			live, err := pool.Provisioner.ListByTag(cmd.Context(), cfg.Tag)
+			if err != nil {
+				return fmt.Errorf("vmpool migrate: list live instances by tag %q: %w", cfg.Tag, err)
+			}
+			fragments := make([]vmpool.Store, 0, len(legacyProjects))
+			for _, root := range legacyProjects {
+				fragments = append(fragments, vmpool.Store{ProjectRoot: root})
+			}
+			report, err := vmpool.MigrateProjectState(cmd.Context(), *pool.Store, fragments, live)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+		},
+	}
+	addVMPoolCommonFlags(cmd, &common)
+	addVMPoolConfigFlags(cmd, &cfgFlags)
+	cmd.Flags().StringSliceVar(&legacyProjects, "legacy-project", nil, "legacy workspace project root containing .capsules/vmpool (repeatable)")
 	return cmd
 }
 

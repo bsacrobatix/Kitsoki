@@ -4,7 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +18,7 @@ import (
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
+	"kitsoki/internal/capsule/vmpool"
 	"kitsoki/internal/capsule/workerserver"
 	"kitsoki/internal/objectstore"
 )
@@ -238,6 +245,199 @@ func TestPoolProviderReleaseDetachedDestroysLeasedWorkerIdempotently(t *testing.
 		t.Fatalf("second release destroyed again: %v", destroyed)
 	}
 }
+
+func TestConfiguredPoolStateRootCapsConcurrencyAcrossWorkspaces(t *testing.T) {
+	fake := vmpool.NewFake()
+	origProvisioner := ciVMPoolNewProvisioner
+	ciVMPoolNewProvisioner = func(string) (vmpool.Provisioner, error) { return fake, nil }
+	t.Cleanup(func() { ciVMPoolNewProvisioner = origProvisioner })
+
+	origHook := ciVMPoolDispatcherHook
+	ciVMPoolDispatcherHook = func(d *vmpool.Dispatcher) {
+		d.Sleep = func(ctx context.Context, _ time.Duration) error {
+			instances, err := fake.ListByTag(ctx, d.Pool.Config.WithDefaults().Tag)
+			if err != nil {
+				return err
+			}
+			for _, instance := range instances {
+				fake.Activate(instance.ID, "203.0.113.70", "10.0.0.70")
+			}
+			return ctx.Err()
+		}
+		d.HealthProbe = func(context.Context, vmpool.Worker, *http.Client, string, int) error { return nil }
+	}
+	t.Cleanup(func() { ciVMPoolDispatcherHook = origHook })
+
+	poolTestStubObjectStore(t)
+	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
+	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
+	origStart := poolRemoteStartDetached
+	poolRemoteStartDetached = func(_ context.Context, _ executor.HTTPRemoteWorker, prepared executor.Prepared, _ executor.EventSink) (executor.ExecutionStatus, error) {
+		return executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, ExecutionID: prepared.ID, Status: "running", Stage: "registered"}, nil
+	}
+	t.Cleanup(func() { poolRemoteStartDetached = origStart })
+
+	outer := t.TempDir()
+	cfg := detachTestPoolConfig()
+	cfg.MaxConcurrent = 3
+	providers := make([]executor.Provider, 4)
+	workspaces := make([]string, 4)
+	for i := range providers {
+		workspaces[i] = t.TempDir()
+		configured := ConfiguredExecutors{
+			Builtins:      NewBuiltinExecutors(),
+			ProjectRoot:   workspaces[i],
+			PoolStateRoot: outer,
+			Remotes:       map[string]Remote{"vm-pool": {Pool: &cfg}},
+		}
+		var err error
+		providers[i], err = configured.Select(context.Background(), "vm-pool")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	errs := make([]error, len(providers))
+	var wg sync.WaitGroup
+	for i := range providers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = providers[i].(executor.DetachedStarter).StartDetached(
+				context.Background(),
+				poolTestPrepared(t, fmt.Sprintf("job-shared-%d", i), fmt.Sprintf("exec-shared-%d", i)),
+				nil,
+			)
+		}(i)
+	}
+	wg.Wait()
+
+	var full, admitted int
+	var admittedJob string
+	for i, err := range errs {
+		switch {
+		case err == nil:
+			admitted++
+			admittedJob = fmt.Sprintf("job-shared-%d", i)
+		case errors.Is(err, vmpool.ErrPoolFull):
+			full++
+		default:
+			t.Fatalf("workspace %d: unexpected acquire error: %v", i, err)
+		}
+	}
+	if admitted != 3 || full != 1 {
+		t.Fatalf("admitted=%d pool_full=%d errors=%v, want exactly 3/1", admitted, full, errs)
+	}
+	if created := len(fake.Created()); created != 3 {
+		t.Fatalf("provision calls=%d, want exactly shared capacity 3", created)
+	}
+	state, err := (vmpool.Store{ProjectRoot: outer}).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.ActiveCount(); got != 3 {
+		t.Fatalf("outer active count=%d, want 3", got)
+	}
+	for _, workspace := range workspaces {
+		if _, err := os.Stat(filepath.Join(workspace, ".capsules", "vmpool", "state.json")); !os.IsNotExist(err) {
+			t.Fatalf("workspace-local pool state exists under %s: %v", workspace, err)
+		}
+	}
+
+	if err := providers[0].(executor.DetachedReleaser).ReleaseDetached(context.Background(), admittedJob); err != nil {
+		t.Fatal(err)
+	}
+	var blocked int
+	for i, err := range errs {
+		if errors.Is(err, vmpool.ErrPoolFull) {
+			blocked = i
+			break
+		}
+	}
+	if _, err := providers[blocked].(executor.DetachedStarter).StartDetached(
+		context.Background(),
+		poolTestPrepared(t, "job-retry-after-release", "exec-retry-after-release"),
+		nil,
+	); err != nil {
+		t.Fatalf("fourth workspace did not acquire released shared slot: %v", err)
+	}
+	if created := len(fake.Created()); created != 4 {
+		t.Fatalf("provision calls after released slot=%d, want 4", created)
+	}
+}
+
+func TestConfiguredPoolStateRootReopensDetachedLeaseFromAnotherWorkspace(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubObjectStore(t)
+	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
+	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
+	poolTestStubStartDetached(t, executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, Status: "running", Stage: "registered"}, nil)
+
+	outer := t.TempDir()
+	firstWorkspace := t.TempDir()
+	secondWorkspace := t.TempDir()
+	cfg := Config{Remotes: map[string]Remote{"vm-pool": {Pool: ptrPoolExecutor(detachTestPoolConfig())}}}
+	first := NewConfiguredExecutors(cfg)
+	first.ProjectRoot = firstWorkspace
+	first.PoolStateRoot = outer
+	firstProvider, err := first.Select(context.Background(), "vm-pool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := firstProvider.(executor.DetachedStarter).StartDetached(
+		context.Background(),
+		poolTestPrepared(t, "job-cross-workspace-release", "exec-cross-workspace-release"),
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	second := NewConfiguredExecutors(cfg)
+	second.ProjectRoot = secondWorkspace
+	second.PoolStateRoot = outer
+	secondProvider, err := second.Select(context.Background(), "vm-pool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := secondProvider.(executor.DetachedReleaser).ReleaseDetached(context.Background(), "job-cross-workspace-release"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(fixture.fake.Destroyed()); got != 1 {
+		t.Fatalf("destroyed=%d, want exact shared worker released once", got)
+	}
+}
+
+func TestConfiguredPoolWithoutPoolStateRootPreservesWorkspaceLocalStore(t *testing.T) {
+	fixture := newPoolTestFixture(t, true)
+	poolTestStubObjectStore(t)
+	t.Setenv("POOL_TEST_BUCKET_KEY", "key")
+	t.Setenv("POOL_TEST_BUCKET_SECRET", "secret")
+	poolTestStubStartDetached(t, executor.ExecutionStatus{Schema: executor.ExecutionStatusSchema, Status: "running", Stage: "registered"}, nil)
+
+	workspace := t.TempDir()
+	cfg := Config{Remotes: map[string]Remote{"vm-pool": {Pool: ptrPoolExecutor(detachTestPoolConfig())}}}
+	configured := NewConfiguredExecutors(cfg)
+	configured.ProjectRoot = workspace
+	provider, err := configured.Select(context.Background(), "vm-pool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.(executor.DetachedStarter).StartDetached(
+		context.Background(),
+		poolTestPrepared(t, "job-compat-local-store", "exec-compat-local-store"),
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, ".capsules", "vmpool", "state.json")); err != nil {
+		t.Fatalf("standalone workspace-local pool state missing: %v", err)
+	}
+	if len(fixture.fake.Created()) != 1 {
+		t.Fatalf("created=%d, want 1", len(fixture.fake.Created()))
+	}
+}
+
+func ptrPoolExecutor(value PoolExecutor) *PoolExecutor { return &value }
 
 // detachableFakeProvider wraps the executor fake with a DetachedStarter
 // implementation so Service.Run's detach path is testable hermetically.

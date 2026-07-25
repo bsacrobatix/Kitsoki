@@ -185,6 +185,7 @@ func capsuleCIRunCmd() *cobra.Command {
 		}
 		executors := ci.NewConfiguredExecutors(cfg)
 		executors.ProjectRoot = workspacePath
+		executors.PoolStateRoot = project
 		executors.Source = executor.SourceBundlerFunc(func(ctx context.Context, envelope executor.Envelope) (executor.SourceBundle, error) {
 			return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 		})
@@ -357,6 +358,7 @@ func capsuleCIDoctorCmd() *cobra.Command {
 		}
 		executors := ci.NewConfiguredExecutors(cfg)
 		executors.ProjectRoot = workspacePath
+		executors.PoolStateRoot = root
 		doctor := ci.Doctor{ProjectRoot: workspacePath, Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Hygiene: capsuleCIHygienePlanner(root), Workspace: ci.GitWorkspaceProbe{}}
 		report, err := doctor.Check(cmd.Context(), ci.DoctorRequest{Pipeline: args[0], Workspace: instance, WorkspacePath: workspacePath})
 		if err != nil {
@@ -639,6 +641,7 @@ func capsuleCIExecutionController(ctx context.Context, project string, run ci.Ru
 	}
 	configured := ci.NewConfiguredExecutors(cfg)
 	configured.ProjectRoot = workspaceRoot
+	configured.PoolStateRoot = root
 	provider, err := configured.Select(ctx, executorName)
 	if err != nil {
 		return nil, ci.Pipeline{}, err

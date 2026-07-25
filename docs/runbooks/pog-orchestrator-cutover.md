@@ -95,6 +95,29 @@ ssh "$ORCH_HOST" kitsoki vmpool status --project "$ORCH_PROJECT_ROOT" --json | j
 Expect empty orphan/lost lists. If not, `kitsoki vmpool reap --repair
 --project "$ORCH_PROJECT_ROOT"` before proceeding.
 
+1.6. If earlier dispatches wrote workspace-local pool fragments, migrate them
+only while admission is held. Snapshot each legacy
+`.capsules/vmpool/state.json` first, then pass every owning workspace root
+explicitly:
+
+```
+kitsoki vmpool migrate \
+  --project "$ORCH_PROJECT_ROOT" \
+  --legacy-project "$ORCH_PROJECT_ROOT/.capsules/workspaces/<first>" \
+  --legacy-project "$ORCH_PROJECT_ROOT/.capsules/workspaces/<second>"
+```
+
+The command lists the live provider inventory by the configured pool tag and
+requires an exact join before atomically creating the outer-project state. It
+aborts on a malformed fragment, conflicting worker/job/instance identity,
+untracked live instance, or a non-empty divergent destination. A tracked
+non-terminal worker whose provider instance is absent is safely reconciled to
+a typed terminal `failed/lost` record in the atomic destination; this lets an
+authoritative zero-instance provider inventory converge projected active
+counts to zero without pretending the old lease is still live. It never
+deletes or rewrites legacy fragments; retain them read-only for the audit
+window. Do not run `vmpool reap --repair` against a fragmented store.
+
 ## 2. Drain in-flight laptop dispatches
 
 2.1. Stop new admission mentally (don't submit new candidates during the

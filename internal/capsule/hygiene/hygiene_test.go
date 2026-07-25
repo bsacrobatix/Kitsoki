@@ -1134,7 +1134,7 @@ func TestApplyUsesLegacyProviderTeardownAfterRecheck(t *testing.T) {
 	}
 }
 
-func TestApplyPurgesClosedWorkspaceQuarantineThroughProvider(t *testing.T) {
+func TestApplyLeavesClosedWorkspaceVisibleForReceiptBoundArchiveFreePurge(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
 	created := time.Now().UTC()
@@ -1156,15 +1156,19 @@ func TestApplyPurgesClosedWorkspaceQuarantineThroughProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Removed) != 1 || !result.Removed[0].Legacy || len(result.Skipped) != 0 {
+	if len(result.Removed) != 0 || len(result.Skipped) != 0 {
 		t.Fatalf("result=%#v", result)
 	}
-	if _, err := os.Stat(workspace); !os.IsNotExist(err) {
-		t.Fatalf("closed workspace quarantine still exists or unexpected stat error: %v", err)
+	candidate := assertWorkspaceCandidate(t, result.Plan, filepath.Base(workspace), false, "receipt-bound archive-free purge")
+	if !candidate.Legacy {
+		t.Fatalf("candidate=%#v", candidate)
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("closed workspace quarantine was not preserved: %v", err)
 	}
 }
 
-func TestCloseThenCleanupPreservesTrackedAndIgnoredReviewRoots(t *testing.T) {
+func TestClosePreservesReviewRootsAndGenericCleanupDefersArchiveFreePurge(t *testing.T) {
 	root := t.TempDir()
 	runHygieneGit(t, root, "init")
 	runHygieneGit(t, root, "config", "user.name", "Close Hygiene Test")
@@ -1251,11 +1255,12 @@ func TestCloseThenCleanupPreservesTrackedAndIgnoredReviewRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Removed) != 1 || len(result.Skipped) != 0 {
+	if len(result.Removed) != 0 || len(result.Skipped) != 0 {
 		t.Fatalf("result=%#v", result)
 	}
-	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
-		t.Fatalf("closed quarantine still exists or unexpected stat error: %v", err)
+	assertWorkspaceCandidate(t, result.Plan, filepath.Base(quarantine), false, "receipt-bound archive-free purge")
+	if _, err := os.Stat(quarantine); err != nil {
+		t.Fatalf("generic cleanup removed closed quarantine: %v", err)
 	}
 }
 
@@ -1324,10 +1329,11 @@ func TestRecoveredQuarantineIsEligibleOnlyThroughDurableRefs(t *testing.T) {
 		"tree":          tree,
 	})
 	plan, err := BuildPlan(context.Background(), Options{
-		ProjectRoot:     root,
-		KeepWorkspaces:  -1,
-		MinWorkspaceAge: -1,
-		CurrentPath:     root,
+		ProjectRoot:                  root,
+		KeepWorkspaces:               -1,
+		MinWorkspaceAge:              -1,
+		CurrentPath:                  root,
+		AllowReceiptBoundClosedPurge: true,
 		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
 			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
 		},

@@ -62,11 +62,19 @@ var _ ExecutorSelector = BuiltinExecutors{}
 // names only; credential values are read at request time and stay out of
 // envelopes, traces, and receipts.
 type ConfiguredExecutors struct {
-	Builtins    BuiltinExecutors
-	Remotes     map[string]Remote
-	Client      *http.Client
-	Source      executor.SourceBundler
+	Builtins BuiltinExecutors
+	Remotes  map[string]Remote
+	Client   *http.Client
+	Source   executor.SourceBundler
+	// ProjectRoot is the exact candidate/workspace root used for source,
+	// certificates, and other tree-scoped inputs.
 	ProjectRoot string
+	// PoolStateRoot is the trusted outer project root that owns the one
+	// durable vmpool serializer shared by all of its managed workspaces.
+	// It is runtime-only: candidate configuration can never select it.
+	// Empty preserves the standalone embedding contract and falls back to
+	// ProjectRoot.
+	PoolStateRoot string
 }
 
 func NewConfiguredExecutors(cfg Config) ConfiguredExecutors {
@@ -82,7 +90,7 @@ func (e ConfiguredExecutors) Select(ctx context.Context, name string) (executor.
 		return nil, fmt.Errorf("capsule ci: executor %q is not configured", name)
 	}
 	if remote.Pool != nil {
-		return newPoolProvider(name, *remote.Pool, e.Source, e.ProjectRoot)
+		return newPoolProviderWithPoolStateRoot(name, *remote.Pool, e.Source, e.ProjectRoot, e.PoolStateRoot)
 	}
 	client := e.Client
 	if remote.CAFile != "" {
