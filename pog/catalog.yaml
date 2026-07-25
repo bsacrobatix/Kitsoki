@@ -3176,3 +3176,26 @@ nodes:
     status: proposed
     title: 'Add requirement: session-lifecycle RPC for runstatus daemon (from POG feedback 01KXSW9MDWBWJWR4SWB2S25FF9)'
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-25T12:55:56Z"
+    id: cs-4b2cf9e15f71a53ec83ecd20c33791df
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-dev-story-bugfix
+          id: req-bugfix-bounded-workspace-and-provider-failure-classification
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-operator-report
+          status: proposed
+          summary: The bugfix story must derive every Capsule workspace id within the control plane's 128-character instance-id limit regardless of ticket/reference length while preserving per-session uniqueness. Provider failure classification must distinguish explicit authentication responses (for example HTTP/status 401) from explicit quota/rate-limit responses (for example HTTP/status 429), and must never match bare numeric substrings embedded inside UUIDs, digests, ticket ids, paths, or other arbitrary text. A host-domain failure before any host.agent call, including invalid instance id, must remain a story/host/infra failure and must not open an agent_auth or agent_quota provider circuit. Regression proof must include the observed identifier fragment a3a0429046 (which contains 429), an over-128-character recursive report reference, explicit 401, and explicit 429 cases.
+          title: Bugfix workspace identity and provider failure classification are fail-closed
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Bound bugfix workspace IDs and classify provider failures structurally
+    visibility: internal
