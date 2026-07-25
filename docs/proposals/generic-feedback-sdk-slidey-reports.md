@@ -1,6 +1,6 @@
 # Epic: Generic feedback SDK and Slidey reports
 
-**Status:** Draft v1. No slices implemented yet.
+**Status:** Draft v2. No slices implemented yet.
 **Kind:**   epic
 **Slices:** 6 (0/6 shipped)
 
@@ -88,6 +88,12 @@ fork the evidence model.
 - The existing chromeless `/point` handoff gives the right UI shape: a
   token-scoped page with one interaction and no surrounding app chrome
   (`docs/tui/spatial-handoff.md`).
+- Semantic sidecars and `AnnotationAnchor.semantic_element` already carry a
+  producer-owned ref, kind, label, description, structured context, and optional
+  geometry through the annotation/trace path. Story applications should emit
+  this contract directly rather than teach the SDK an application-specific
+  locator (`internal/host/semantic_sidecar.go`,
+  `internal/host/annotation_anchor.go`).
 
 ## Market and research context
 
@@ -253,7 +259,8 @@ interface FeedbackReportBundle {
   privacyManifest: PrivacyManifest;
   evidence: {
     rrweb?: { events: unknown[]; durationMs: number };
-    spatial?: SpatialAnchor[];
+    anchors?: AnnotationAnchor[];
+    spatial?: SpatialAnchor[]; // accepted legacy input; normalized to anchors
     console?: ConsoleEntry[];
     network?: NetworkSummary[];
     screenshots?: EvidenceImage[];
@@ -294,6 +301,9 @@ First-party plugins:
 - `rrwebRecorder`: bounded rolling DOM replay with configurable
   text/input/media/canvas policy.
 - `spatialPicker`: point/box/element anchor capture over live DOM or replay.
+- `semanticContext`: resolves a story/application semantic ref to its declared
+  name, description, role, graph relationships, source provenance, current
+  frame state, and privacy-approved report context.
 - `consoleCapture`: bounded console ring with scrub rules.
 - `networkCapture`: fetch/XHR metadata capture; body capture only through
   allowlisted host policy.
@@ -303,6 +313,29 @@ First-party plugins:
 - `i18nContext`: locale, message key, source string hash, rendered string, and
   translation provider metadata when available.
 - `deckNarrative`: converts the reviewed bundle into a Slidey report deck.
+
+### Story application semantic context
+
+The SDK does not define a second UI ontology. The application platform proposal
+([`story-application-platform.md`](story-application-platform.md)) owns semantic
+refs, names, descriptions, roles, relationships, provenance, and runtime state.
+This SDK accepts their existing `semantic_element` projection as an
+`AnnotationAnchor`.
+
+When a semantic target is available, it is primary and DOM selectors, roles,
+text, coordinates, screenshots, terminal cells, VS Code contribution ids, and
+transport call ids become optional supporting evidence. The same ref can
+therefore target a web card, its reused VS Code webview, a TUI projection, or the
+handler receipt behind a CLI/MCP/JSON-RPC call. A report stays attached after
+copy or layout changes.
+
+`semanticContext` resolves only declared report-safe fields. Arbitrary
+component props, world state, field values, local paths, credentials, and input
+payloads are not copied into a report. Every contributed semantic-context field
+still carries the privacy metadata and review state required by this proposal.
+Unknown refs remain reportable with their surface evidence, but the bundle marks
+resolution as failed so conformance and maintainers can distinguish missing
+semantics from an ordinary product bug.
 
 ## Slidey report deck
 
@@ -314,8 +347,8 @@ The deck is the report artifact, not just an attachment. Minimum scenes:
    and relevant plugin context.
 3. Replay: rrweb playback segment covering the lead-up, with a marker at the
    report moment.
-4. Spatial anchor: clicked/boxed region, selector/role/text/bbox, and user
-   complaint.
+4. Semantic/spatial anchor: stable ref, name, description, owner/relationships,
+   current state, optional selector/role/text/bbox, and user complaint.
 5. Evidence: console/network/errors as compact redacted tables.
 6. Privacy review: what was removed, masked, swapped, retained, or blocked.
 7. LLM review: coherent narrative, suspected category, likely owner/component,
@@ -373,8 +406,8 @@ translation" that call `reporter.open({ kind, context })`.
 | 1 | Capture core extraction | tracing | Extract rrweb, console/error, network summary, screenshot, and bundle assembly from runstatus into a framework-neutral browser core. | - | Draft | Child proposal deferred |
 | 2 | Privacy policy engine | runtime | Add privacy manifest types, plugin preflight, redaction/swap/alias transforms, retention metadata, and review blockers. | 1 | Draft | Child proposal deferred |
 | 3 | Chromeless reporter UI | tui | Build the default floating trigger/reporter and custom trigger/custom panel integration points without Kitsoki app chrome. | 1, 2 | Draft | Child proposal deferred |
-| 4 | Spatial feedback plugin | tracing | Promote live DOM / rrweb replay point-box-element resolution into an SDK plugin. | 1, 2 | Draft | Child proposal deferred |
-| 5 | Slidey report generator | tracing | Generate a reviewed Slidey deck with replay, precursor state, spatial anchor, evidence, privacy review, and stubbed LLM narrative. | 1, 2, 4 | Draft | Child proposal deferred |
+| 4 | Semantic and spatial feedback plugin | tracing | Accept application `semantic_element` anchors and promote live DOM / rrweb replay point-box-element resolution into one SDK plugin. | 1, 2 | Draft | Child proposal deferred |
+| 5 | Slidey report generator | tracing | Generate a reviewed Slidey deck with replay, precursor state, semantic/spatial anchors, evidence, privacy review, and stubbed LLM narrative. | 1, 2, 4 | Draft | Child proposal deferred |
 | 6 | Product-site and sink integration | runtime | Wire Kitsoki product-site context plugins and the generic sink adapter for the parallel GitHub agent. | 1-5 | Draft | Child proposal deferred |
 
 ## Sequencing
@@ -387,17 +420,18 @@ translation" that call `reporter.open({ kind, context })`.
 ```
 
 Privacy lands before any public product-site deployment. The Slidey generator
-can start once reviewed bundles and spatial anchors are stable. The GitHub-agent
-adapter should stay thin until the parallel backend API is ready.
+can start once reviewed bundles and semantic/spatial anchors are stable. The
+GitHub-agent adapter should stay thin until the parallel backend API is ready.
 
 ## Shared decisions
 
 1. **Reviewed bundle is the boundary.** Remote LLM review and sink submission
    receive only the post-policy bundle. Raw drafts stay browser-local by
    default.
-2. **Structural evidence before content.** Route ids, feature ids, message
-   keys, selectors, roles, and bounding boxes are preferred over screenshots,
-   rendered text, console objects, or network bodies.
+2. **Semantic identity before surface evidence.** Story/application refs, names,
+   descriptions, relationships, route/feature/message ids, and provenance are
+   preferred over selectors, coordinates, screenshots, rendered text, console
+   objects, or network bodies.
 3. **Plugin output is fail-closed.** Undeclared privacy policy or `unknown`
    sensitivity blocks submit until the user or host reviews it.
 4. **Pseudonymised is still personal unless proven otherwise.** Stable hashes
@@ -435,7 +469,8 @@ adapter should stay thin until the parallel backend API is ready.
 - [ ] 3. Implement privacy preflight, field policies, redaction/swap/alias
       transforms, retention metadata, and review blockers.
 - [ ] 4. Build the chromeless reporter UI and framework wrapper examples.
-- [ ] 5. Promote spatial picker/element resolver into the SDK plugin layer.
+- [ ] 5. Add application semantic-context resolution and promote the spatial
+      picker/element resolver into the same SDK plugin layer.
 - [ ] 6. Add Slidey report generation with stubbed LLM review fixtures.
 - [ ] 7. Define the mock sink and thin GitHub-agent adapter once that API is
       stable.

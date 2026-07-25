@@ -328,12 +328,23 @@ canonical content/action unit, then project the same program outward:
 
 - a presentation-free application frame describes navigation, regions,
   cards, components, actions, current state, and declared capabilities;
+- every addressable UI node has a stable story-owned semantic ref, meaningful
+  name and description, finite role, relationships, state, and provenance;
 - optional Vue or native presentation modules consume that frame through
   dependency-injected services and may dispatch only declared actions;
 - one typed handler/event registry maps actions and external calls back
   onto intents, Starlark, and host-interface operations; and
 - every frame node and handler edge joins the program graph in 7.3, so a
   custom UI cannot become invisible control flow.
+
+That semantic structure is also the debugging and feedback address space.
+Web/VS Code DOM locations, TUI coordinates, visible text, and protocol call ids
+are transient evidence projected around the same semantic ref. Bug and feedback
+reports therefore identify the named story node and its owning graph edges
+first, then attach screenshots, replay, trace receipts, or spatial coordinates
+as optional evidence. Descriptions and privacy-approved context are available
+to operator surfaces and agents without exposing arbitrary component props or
+world state.
 
 The design is tracked in
 [`story-application-platform`](../proposals/story-application-platform.md).

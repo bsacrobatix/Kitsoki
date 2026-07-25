@@ -1301,6 +1301,16 @@ actions; they do not acquire hidden state or a second controller. POG is the
 first external acceptance target for proving a product can be wholly
 story-owned while retaining deterministic TUI/headless fallbacks.
 
+Application nodes also need first-class semantic identity. Every reportable or
+interactive page, region, card, component, field, action, status, and artifact
+should declare a stable ref, meaningful name and description, finite role,
+relationships, and provenance. Those nodes project through web, VS Code, TUI,
+CLI, MCP, JSON-RPC, traces, and replay; surface selectors or coordinates are
+optional evidence around the same identity. The existing
+`AnnotationAnchor.semantic_element` and reviewed feedback bundle carry that
+identity into bug/feedback reports, with story-declared privacy-safe context
+rather than arbitrary props or world values.
+
 ---
 
 *These are additive. The through-line: keep the pure-core / typed-world /
