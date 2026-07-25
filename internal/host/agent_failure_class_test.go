@@ -18,8 +18,12 @@ func TestClassifyAgentFailureText(t *testing.T) {
 		{name: "please run claude login is agent_auth", text: "Please run \x60claude login\x60 to authenticate.", want: "agent_auth"},
 		{name: "oauth token expired is agent_auth", text: "the OAuth token expired, please re-authenticate", want: "agent_auth"},
 		{name: "bare 401 is agent_auth", text: "request failed with status 401", want: "agent_auth"},
+		{name: "HTTP 1.1 401 is agent_auth", text: "HTTP/1.1 401 Unauthorized", want: "agent_auth"},
+		{name: "JSON status code 401 is agent_auth", text: `{"status_code":401,"error":"invalid token"}`, want: "agent_auth"},
 		{name: "rate limit text is agent_quota", text: "Error: rate_limit_error: you have hit the rate limit", want: "agent_quota"},
 		{name: "429 is agent_quota", text: "HTTP 429 Too Many Requests", want: "agent_quota"},
+		{name: "status code 429 is agent_quota", text: "request failed with status code: 429", want: "agent_quota"},
+		{name: "JSON status 429 is agent_quota", text: `{"status":429,"error":"request rejected"}`, want: "agent_quota"},
 		{name: "credit balance is agent_quota", text: "Your credit balance is too low to access the Anthropic API", want: "agent_quota"},
 		{name: "typed quota survives process boundary", text: "agent_quota: coding-agent provider unavailable", want: "agent_quota"},
 		{name: "typed auth survives process boundary", text: "agent_auth: coding-agent provider unavailable", want: "agent_auth"},
@@ -35,6 +39,35 @@ func TestClassifyAgentFailureText(t *testing.T) {
 				t.Fatalf("ClassifyAgentFailureText(%q) = %q, want %q", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestClassifyAgentFailureTextRejectsNumericIdentifierCollisions(t *testing.T) {
+	for _, text := range []string{
+		"a3a0429046",
+		"dispatch-orphaned-report-dispatch-orphaned-report-a3a0429046",
+		"workspace creation failed for /reports/a3a0429046/result.json",
+		"ticket ABR-429271 could not create a workspace",
+		"artifact /status/429/receipt.json is missing",
+		"digest f401429deadbeef",
+		"status 429271 from an internal sequence counter",
+		"HTTP 4019 is not a three-digit response",
+	} {
+		if got := ClassifyAgentFailureText(text); got != "" {
+			t.Errorf("ClassifyAgentFailureText(%q) = %q, want unclassified", text, got)
+		}
+	}
+}
+
+func TestLooksRateLimitedRejectsNumericIdentifierCollisions(t *testing.T) {
+	for _, text := range []string{
+		"a3a0429046",
+		"ticket ABR-429271",
+		"artifact /status/429/receipt.json",
+	} {
+		if looksRateLimited(text) {
+			t.Errorf("looksRateLimited(%q) = true, want false", text)
+		}
 	}
 }
 

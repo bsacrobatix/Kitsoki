@@ -858,13 +858,13 @@ func looksAgentAuthError(s string) bool {
 		"authentication failed", "not authenticated", "unauthorized",
 		"invalid bearer token", "invalid access token", "please run /login",
 		"please run `claude login`", "oauth token is invalid", "oauth token expired",
-		"please log in", " 401",
+		"please log in",
 	} {
 		if strings.Contains(ls, sig) {
 			return true
 		}
 	}
-	return false
+	return hasExplicitHTTPStatusCode(s, "401")
 }
 
 // looksAgentQuotaError extends looksRateLimited with the billing-shaped

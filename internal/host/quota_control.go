@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -491,11 +492,30 @@ func usageInt64(usage map[string]any, key string) int64 {
 	}
 }
 
+var httpStatusCodePattern = regexp.MustCompile(
+	`(?i)(?:\bhttp(?:/[0-9](?:\.[0-9])?)?\b|\bstatus(?:[ _]code)?\b)[ \t"'=:(),]*([0-9]{3})(?:\b|$)`,
+)
+
+// hasExplicitHTTPStatusCode recognizes a status only when it is attached to
+// an HTTP/status marker. Provider output is often unstructured text, but a
+// bare numeric substring is not evidence of a provider response: report
+// digests, UUIDs, ticket IDs, and paths routinely contain 401 or 429 by
+// coincidence. Requiring the marker also prevents those identifiers from
+// opening a project-wide auth/quota circuit.
+func hasExplicitHTTPStatusCode(s, code string) bool {
+	for _, match := range httpStatusCodePattern.FindAllStringSubmatch(s, -1) {
+		if len(match) == 2 && match[1] == code {
+			return true
+		}
+	}
+	return false
+}
+
 func looksRateLimited(s string) bool {
-	s = strings.ToLower(s)
-	return strings.Contains(s, "rate limit") ||
-		strings.Contains(s, "rate_limit") ||
-		strings.Contains(s, "quota") ||
-		strings.Contains(s, "too many requests") ||
-		strings.Contains(s, "429")
+	ls := strings.ToLower(s)
+	return strings.Contains(ls, "rate limit") ||
+		strings.Contains(ls, "rate_limit") ||
+		strings.Contains(ls, "quota") ||
+		strings.Contains(ls, "too many requests") ||
+		hasExplicitHTTPStatusCode(s, "429")
 }
