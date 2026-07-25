@@ -1,0 +1,64 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  resume_phase: staging
+  job:
+    schema: kitsoki/integration-train-job/v1
+    train_id: train-target-moved
+    manifest:
+      schema: kitsoki/integration-train-manifest/v1
+      manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      stable_order: candidate_id-asc
+      max_items: 1
+      candidates:
+        - candidate_id: c01
+          report_ref: reports/c01.md
+          report_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          execution_id: worker-01
+          shipped_sha: "1111111111111111111111111111111111111111"
+          base_sha: "0000000000000000000000000000000000000000"
+          bundle_digest: "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+  gated_sha: "3333333333333333333333333333333333333333"
+  checkpoint:
+    schema: kitsoki/integration-train-checkpoint/v1
+    train_id: train-target-moved
+    manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    phase: gate
+    sequence: 3
+    previous_digest: "sha256:3222222222222222222222222222222222222222222222222222222222222222"
+    checkpoint_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    evidence: { gate: green }
+
+host_handlers:
+  host.integration_train.reconcile:
+    by_call:
+      train_staging_authority:
+        data:
+          evidence:
+            schema: kitsoki/integration-train-authority/v1
+            phase: staging
+            train_id: train-target-moved
+            manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            status: target_moved
+            error: "staging moved from aaaaaaaa to bbbbbbbb; rebuild the exact-SHA candidate"
+            checkpoint:
+              schema: kitsoki/integration-train-checkpoint/v1
+              train_id: train-target-moved
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              phase: staging
+              sequence: 4
+              previous_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+              checkpoint_digest: "sha256:3444444444444444444444444444444444444444444444444444444444444444"
+              evidence: { observed_target: bbbbbbbb }
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: __exit__needs-input
+    expect_world:
+      status: needs-input
+      resume_phase: staging
+      last_error: "staging moved from aaaaaaaa to bbbbbbbb; rebuild the exact-SHA candidate"
+
+expect_terminal: true
+expect_no_errors: true

@@ -1,0 +1,114 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  resume_phase: main
+  job:
+    schema: kitsoki/integration-train-job/v1
+    train_id: train-restart
+    manifest:
+      schema: kitsoki/integration-train-manifest/v1
+      manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      stable_order: candidate_id-asc
+      max_items: 1
+      candidates:
+        - candidate_id: c01
+          report_ref: reports/c01.md
+          report_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          execution_id: worker-01
+          shipped_sha: "1111111111111111111111111111111111111111"
+          base_sha: "0000000000000000000000000000000000000000"
+          bundle_digest: "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+  integrated_sha: "3333333333333333333333333333333333333333"
+  gated_sha: "3333333333333333333333333333333333333333"
+  staging_sha: "4444444444444444444444444444444444444444"
+  staging_receipt:
+    schema: kitsoki/queue-landing/v1
+    target: staging
+    status: landed
+    candidate_id: staging-train-restart
+    candidate_sha: "3333333333333333333333333333333333333333"
+    landed_sha: "4444444444444444444444444444444444444444"
+    target_base_sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    receipt_digest: "sha256:5444444444444444444444444444444444444444444444444444444444444444"
+  checkpoint:
+    schema: kitsoki/integration-train-checkpoint/v1
+    train_id: train-restart
+    manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    phase: staging
+    sequence: 4
+    previous_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    checkpoint_digest: "sha256:3444444444444444444444444444444444444444444444444444444444444444"
+    evidence: { queue: staging }
+
+host_handlers:
+  host.integration_train.reconcile:
+    by_call:
+      # No validate/integrate/gate/staging handlers exist. A restart must begin
+      # by reconciling the accepted staging checkpoint, not repeat old effects.
+      train_main_authority:
+        data:
+          evidence:
+            schema: kitsoki/integration-train-authority/v1
+            phase: main
+            train_id: train-restart
+            manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            status: landed
+            queue_receipt:
+              schema: kitsoki/queue-landing/v1
+              target: main
+              status: landed
+              candidate_id: main-train-restart
+              candidate_sha: "4444444444444444444444444444444444444444"
+              landed_sha: "5555555555555555555555555555555555555555"
+              target_base_sha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              receipt_digest: "sha256:6555555555555555555555555555555555555555555555555555555555555555"
+            checkpoint:
+              schema: kitsoki/integration-train-checkpoint/v1
+              train_id: train-restart
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              phase: main
+              sequence: 5
+              previous_digest: "sha256:3444444444444444444444444444444444444444444444444444444444444444"
+              checkpoint_digest: "sha256:3555555555555555555555555555555555555555555555555555555555555555"
+              evidence: { reconciled_existing_staging: true }
+      train_deploy_authority:
+        data:
+          evidence:
+            schema: kitsoki/integration-train-authority/v1
+            phase: deploy
+            train_id: train-restart
+            manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            status: attested
+            deployment_attestation:
+              schema: kitsoki/integration-train-deployment-attestation/v1
+              main_sha: "5555555555555555555555555555555555555555"
+              main_tree: "6666666666666666666666666666666666666666"
+              release_digest: "sha256:7666666666666666666666666666666666666666666666666666666666666666"
+              image_digest: "sha256:8666666666666666666666666666666666666666666666666666666666666666"
+              environment: production
+              health: healthy
+              verifier: release-controller
+              verified_at: "2026-07-26T00:00:00Z"
+            checkpoint:
+              schema: kitsoki/integration-train-checkpoint/v1
+              train_id: train-restart
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              phase: deploy
+              sequence: 6
+              previous_digest: "sha256:3555555555555555555555555555555555555555555555555555555555555555"
+              checkpoint_digest: "sha256:3666666666666666666666666666666666666666666666666666666666666666"
+              evidence: { deployment: healthy }
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: __exit__released
+    expect_world:
+      status: released
+      main_sha: "5555555555555555555555555555555555555555"
+      resume_phase: ""
+
+expect_terminal: true
+expect_no_errors: true

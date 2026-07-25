@@ -1,0 +1,64 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  resume_phase: deploy
+  job:
+    schema: kitsoki/integration-train-job/v1
+    train_id: train-deploy-mismatch
+    manifest:
+      schema: kitsoki/integration-train-manifest/v1
+      manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      stable_order: candidate_id-asc
+      max_items: 1
+      candidates:
+        - candidate_id: c01
+          report_ref: reports/c01.md
+          report_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          execution_id: worker-01
+          shipped_sha: "1111111111111111111111111111111111111111"
+          base_sha: "0000000000000000000000000000000000000000"
+          bundle_digest: "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+  main_sha: "5555555555555555555555555555555555555555"
+  checkpoint:
+    schema: kitsoki/integration-train-checkpoint/v1
+    train_id: train-deploy-mismatch
+    manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    phase: main
+    sequence: 5
+    previous_digest: "sha256:3444444444444444444444444444444444444444444444444444444444444444"
+    checkpoint_digest: "sha256:3555555555555555555555555555555555555555555555555555555555555555"
+    evidence: { queue: main }
+
+host_handlers:
+  host.integration_train.reconcile:
+    by_call:
+      train_deploy_authority:
+        data:
+          evidence:
+            schema: kitsoki/integration-train-authority/v1
+            phase: deploy
+            train_id: train-deploy-mismatch
+            manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            status: mismatch
+            error: "production image attests main 44444444, expected 55555555"
+            checkpoint:
+              schema: kitsoki/integration-train-checkpoint/v1
+              train_id: train-deploy-mismatch
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              phase: deploy
+              sequence: 6
+              previous_digest: "sha256:3555555555555555555555555555555555555555555555555555555555555555"
+              checkpoint_digest: "sha256:3666666666666666666666666666666666666666666666666666666666666666"
+              evidence: { observed_main: "4444444444444444444444444444444444444444" }
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: __exit__needs-input
+    expect_world:
+      status: needs-input
+      resume_phase: deploy
+      last_error: "production image attests main 44444444, expected 55555555"
+
+expect_terminal: true
+expect_no_errors: true

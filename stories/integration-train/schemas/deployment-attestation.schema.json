@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kitsoki/integration-train-deployment-attestation/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "main_sha",
+    "main_tree",
+    "release_digest",
+    "image_digest",
+    "environment",
+    "health",
+    "verifier",
+    "verified_at"
+  ],
+  "properties": {
+    "schema": { "const": "kitsoki/integration-train-deployment-attestation/v1" },
+    "main_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "main_tree": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "release_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "environment": { "type": "string", "minLength": 1 },
+    "health": { "const": "healthy" },
+    "verifier": { "type": "string", "minLength": 1 },
+    "verified_at": { "type": "string", "format": "date-time" }
+  }
+}

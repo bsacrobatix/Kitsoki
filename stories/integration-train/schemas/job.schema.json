@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kitsoki/integration-train-job/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "train_id", "manifest"],
+  "properties": {
+    "schema": { "const": "kitsoki/integration-train-job/v1" },
+    "train_id": { "type": "string", "minLength": 1 },
+    "deploy_required": { "type": "boolean", "default": true },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "manifest_digest", "stable_order", "max_items", "candidates"],
+      "properties": {
+        "schema": { "const": "kitsoki/integration-train-manifest/v1" },
+        "manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "stable_order": { "const": "candidate_id-asc" },
+        "max_items": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "candidate_id",
+              "report_ref",
+              "report_digest",
+              "execution_id",
+              "shipped_sha",
+              "base_sha",
+              "bundle_digest"
+            ],
+            "properties": {
+              "candidate_id": { "type": "string", "minLength": 1 },
+              "report_ref": { "type": "string", "minLength": 1 },
+              "report_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+              "execution_id": { "type": "string", "minLength": 1 },
+              "shipped_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+              "base_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+              "bundle_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,105 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  resume_phase: gate
+  job:
+    schema: kitsoki/integration-train-job/v1
+    train_id: train-bisect
+    manifest:
+      schema: kitsoki/integration-train-manifest/v1
+      manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      stable_order: candidate_id-asc
+      max_items: 2
+      candidates:
+        - candidate_id: c01
+          report_ref: reports/c01.md
+          report_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          execution_id: worker-01
+          shipped_sha: "1111111111111111111111111111111111111111"
+          base_sha: "0000000000000000000000000000000000000000"
+          bundle_digest: "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+        - candidate_id: c02
+          report_ref: reports/c02.md
+          report_digest: "sha256:1222222222222222222222222222222222222222222222222222222222222222"
+          execution_id: worker-02
+          shipped_sha: "2222222222222222222222222222222222222222"
+          base_sha: "0000000000000000000000000000000000000000"
+          bundle_digest: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  integrated_sha: "3333333333333333333333333333333333333333"
+  checkpoint:
+    schema: kitsoki/integration-train-checkpoint/v1
+    train_id: train-bisect
+    manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    phase: integrate
+    sequence: 2
+    previous_digest: "sha256:3111111111111111111111111111111111111111111111111111111111111111"
+    checkpoint_digest: "sha256:3222222222222222222222222222222222222222222222222222222222222222"
+    evidence: { accepted: 2 }
+
+host_handlers:
+  host.integration_train.reconcile:
+    by_call:
+      train_gate_authority:
+        data:
+          evidence:
+            schema: kitsoki/integration-train-authority/v1
+            phase: gate
+            train_id: train-bisect
+            manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            status: partial
+            gated_sha: "7777777777777777777777777777777777777777"
+            item_dispositions:
+              - { candidate_id: c01, status: accepted }
+              - { candidate_id: c02, status: invalid, reason: "bisect isolated aggregate gate regression" }
+            gate_receipt:
+              schema: kitsoki/integration-train-gate-receipt/v1
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              validated_sha: "7777777777777777777777777777777777777777"
+              aggregate_status: red
+              bisect_status: complete
+              isolated_candidate_ids: [c02]
+              receipt_digest: "sha256:4333333333333333333333333333333333333333333333333333333333333333"
+            checkpoint:
+              schema: kitsoki/integration-train-checkpoint/v1
+              train_id: train-bisect
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              phase: gate
+              sequence: 3
+              previous_digest: "sha256:3222222222222222222222222222222222222222222222222222222222222222"
+              checkpoint_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+              evidence: { aggregate: red, isolated: [c02] }
+      train_staging_authority:
+        data:
+          evidence:
+            schema: kitsoki/integration-train-authority/v1
+            phase: staging
+            train_id: train-bisect
+            manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            status: target_moved
+            error: "fixture stop after proving completed-bisect routing"
+            checkpoint:
+              schema: kitsoki/integration-train-checkpoint/v1
+              train_id: train-bisect
+              manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              phase: staging
+              sequence: 4
+              previous_digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+              checkpoint_digest: "sha256:3444444444444444444444444444444444444444444444444444444444444444"
+              evidence: { fixture_stop: true }
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: __exit__needs-input
+    expect_world:
+      status: needs-input
+      partial: true
+      gated_sha: "7777777777777777777777777777777777777777"
+      resume_phase: staging
+      last_error: "fixture stop after proving completed-bisect routing"
+      item_dispositions:
+        - { candidate_id: c01, status: accepted }
+        - { candidate_id: c02, status: invalid, reason: "bisect isolated aggregate gate regression" }
+
+expect_terminal: true
+expect_no_errors: true

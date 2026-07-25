@@ -1,0 +1,405 @@
+# integration-train — sealed, restartable, authority-reconciled bulk delivery.
+#
+# The story owns ordering, evidence validation, checkpoints, and routing. The
+# rebound train.reconcile authority owns effects. No authority means no claim.
+
+app:
+  id: integration-train
+  version: 0.1.0
+  title: "Integration train — sealed worker fixes to attested deployment"
+  author: "Kitsoki"
+  license: "CC0"
+
+hosts:
+  - host.integration_train
+  - host.starlark.run
+
+host_interfaces:
+  train:
+    description: "Perform or reconcile one durable integration-train phase and return authority evidence."
+    operations:
+      reconcile:
+        input:  { request: object }
+        output: { evidence: object }
+    default: host.integration_train
+
+world:
+  job:                    { type: object, default: {} }
+  checkpoint:             { type: object, default: {} }
+  authority_evidence:     { type: object, default: {} }
+  ordered_candidate_ids:  { type: list,   default: [] }
+  item_dispositions:      { type: list,   default: [] }
+  integrated_sha:         { type: string, default: "" }
+  gated_sha:              { type: string, default: "" }
+  staging_sha:            { type: string, default: "" }
+  main_sha:               { type: string, default: "" }
+  staging_receipt:        { type: object, default: {} }
+  main_receipt:           { type: object, default: {} }
+  deployment_attestation: { type: object, default: {} }
+  partial:                { type: bool,   default: false }
+  route:                  { type: string, default: "" }
+  resume_phase:           { type: string, default: "validate" }
+  status:                 { type: string, default: "" }
+  last_error:             { type: string, default: "" }
+
+intents:
+  begin:
+    description: "Start or resume the sealed integration train."
+    examples: [begin, start, resume]
+    priority: 90
+  look:
+    description: "Re-render current train status."
+    examples: [look, status]
+    priority: 5
+  phase_next:       { description: "(internal) advance to the next proven phase.", priority: 1 }
+  train_needs_input: { description: "(internal) stop with observable authority evidence.", priority: 1 }
+  train_released:   { description: "(internal) report a fully released train.", priority: 1 }
+  train_partial:    { description: "(internal) report a released train with explicit exclusions.", priority: 1 }
+
+exits:
+  released:
+    description: "All sealed candidates released with matching deployment attestation."
+    requires: [main_sha, deployment_attestation]
+  partial:
+    description: "Accepted subset released; exclusions remain explicit in item_dispositions."
+    requires: [main_sha, deployment_attestation, item_dispositions]
+  needs-input:
+    description: "Train stopped fail-closed with a durable checkpoint and observable reason."
+    requires: [last_error, resume_phase]
+
+root: bootstrap
+
+states:
+  bootstrap:
+    description: "Review the sealed train and selected authority path."
+    relevant_world: [job, checkpoint, resume_phase]
+    view:
+      - heading: "Integration train · sealed intake"
+      - prose: "Train: {{ world.job.train_id|default:'(missing)' }}"
+      - prose: "Manifest: {{ world.job.manifest.manifest_digest|default:'(missing)' }}"
+      - prose: "Candidates: {{ world.job.manifest.candidates|default:[]|length }} · stable order: {{ world.job.manifest.stable_order|default:'(missing)' }}"
+      - prose: "Mode: authority-reconciled. Effects are accepted only with exact provenance, checkpoint, queue, gate, and deployment evidence."
+      - prose: "Next: reconcile {{ world.resume_phase|default:'validate' }} from the last durable checkpoint."
+      - choice:
+          mode: single
+          prompt: "Actions"
+          items:
+            - { label: "begin", intent: begin, hint: "start or resume without discarding checkpoint state" }
+            - { label: "look", intent: look }
+    on:
+      begin:
+        - when: "world.resume_phase == 'integrate'"
+          target: integrate
+        - when: "world.resume_phase == 'gate'"
+          target: gate
+        - when: "world.resume_phase == 'staging'"
+          target: staging
+        - when: "world.resume_phase == 'main'"
+          target: main
+        - when: "world.resume_phase == 'deploy'"
+          target: deploy
+        - target: validate
+      look: [{ target: . }]
+
+  validate:
+    description: "Validate the sealed manifest and stable order."
+    view:
+      - heading: "Integration train · validate"
+      - prose: "Reconciling the immutable manifest with the configured authority."
+      - prose: "No bundle is materialized until every provenance tuple and the candidate order are accepted."
+    on_enter:
+      - set:
+          last_error: "Integration-train authority unavailable while validating the sealed manifest."
+          resume_phase: "validate"
+          authority_evidence: {}
+          route: ""
+      - invoke: iface.train.reconcile
+        id: train_validate_authority
+        once: true
+        with:
+          request:
+            phase: validate
+            job: "{{ world.job }}"
+            checkpoint: "{{ world.checkpoint }}"
+        bind: { authority_evidence: evidence }
+        on_error: needs_input
+      - invoke: host.starlark.run
+        id: train_validate_evidence
+        once: true
+        with:
+          script: scripts/validate_authority.star
+          inputs:
+            phase: validate
+            job: "{{ world.job }}"
+            prior_checkpoint: "{{ world.checkpoint }}"
+            evidence: "{{ world.authority_evidence }}"
+            item_dispositions: "{{ world.item_dispositions }}"
+            integrated_sha: "{{ world.integrated_sha }}"
+            gated_sha: "{{ world.gated_sha }}"
+            staging_sha: "{{ world.staging_sha }}"
+            main_sha: "{{ world.main_sha }}"
+            staging_receipt: "{{ world.staging_receipt }}"
+            main_receipt: "{{ world.main_receipt }}"
+            deployment_attestation: "{{ world.deployment_attestation }}"
+            partial: "{{ world.partial }}"
+        bind: &train_bind
+          route: route
+          checkpoint: checkpoint
+          ordered_candidate_ids: ordered_candidate_ids
+          item_dispositions: item_dispositions
+          integrated_sha: integrated_sha
+          gated_sha: gated_sha
+          staging_sha: staging_sha
+          main_sha: main_sha
+          staging_receipt: staging_receipt
+          main_receipt: main_receipt
+          deployment_attestation: deployment_attestation
+          partial: partial
+          last_error: last_error
+          resume_phase: resume_phase
+          status: status
+        on_error: needs_input
+      - when: "world.route == 'next'"
+        emit_intent: phase_next
+      - when: "world.route == 'needs_input'"
+        emit_intent: train_needs_input
+    on:
+      phase_next: [{ target: integrate }]
+      train_needs_input: [{ target: needs_input }]
+      look: [{ target: . }]
+
+  integrate:
+    description: "Materialize accepted bundles in stable order and isolate item conflicts."
+    view:
+      - heading: "Integration train · integrate"
+      - prose: "Authority is reconciling {{ world.ordered_candidate_ids|default:[]|length }} candidate(s) in sealed order."
+      - prose: "Each item must end accepted, conflict, invalid, or needs_input; exclusions remain visible."
+    on_enter:
+      - set:
+          last_error: "Integration-train authority unavailable while reconciling bundle integration."
+          resume_phase: "integrate"
+          authority_evidence: {}
+          route: ""
+      - invoke: iface.train.reconcile
+        id: train_integrate_authority
+        once: true
+        with:
+          request: { phase: integrate, job: "{{ world.job }}", checkpoint: "{{ world.checkpoint }}" }
+        bind: { authority_evidence: evidence }
+        on_error: needs_input
+      - invoke: host.starlark.run
+        id: train_integrate_evidence
+        once: true
+        with:
+          script: scripts/validate_authority.star
+          inputs: &train_inputs
+            phase: integrate
+            job: "{{ world.job }}"
+            prior_checkpoint: "{{ world.checkpoint }}"
+            evidence: "{{ world.authority_evidence }}"
+            item_dispositions: "{{ world.item_dispositions }}"
+            integrated_sha: "{{ world.integrated_sha }}"
+            gated_sha: "{{ world.gated_sha }}"
+            staging_sha: "{{ world.staging_sha }}"
+            main_sha: "{{ world.main_sha }}"
+            staging_receipt: "{{ world.staging_receipt }}"
+            main_receipt: "{{ world.main_receipt }}"
+            deployment_attestation: "{{ world.deployment_attestation }}"
+            partial: "{{ world.partial }}"
+        bind: *train_bind
+        on_error: needs_input
+      - when: "world.route == 'next'"
+        emit_intent: phase_next
+      - when: "world.route == 'needs_input'"
+        emit_intent: train_needs_input
+    on:
+      phase_next: [{ target: gate }]
+      train_needs_input: [{ target: needs_input }]
+      look: [{ target: . }]
+
+  gate:
+    description: "Run the aggregate gate and require a completed bisect for isolated failures."
+    view:
+      - heading: "Integration train · aggregate gate"
+      - prose: "Integrated SHA: {{ world.integrated_sha|default:'(pending)' }}"
+      - prose: "A red aggregate may proceed only when the authority returns a completed bisect and a newly validated SHA."
+    on_enter:
+      - set:
+          last_error: "Integration-train authority unavailable while reconciling the aggregate gate."
+          resume_phase: "gate"
+          authority_evidence: {}
+          route: ""
+      - invoke: iface.train.reconcile
+        id: train_gate_authority
+        once: true
+        with:
+          request: { phase: gate, job: "{{ world.job }}", checkpoint: "{{ world.checkpoint }}" }
+        bind: { authority_evidence: evidence }
+        on_error: needs_input
+      - invoke: host.starlark.run
+        id: train_gate_evidence
+        once: true
+        with:
+          script: scripts/validate_authority.star
+          inputs:
+            <<: *train_inputs
+            phase: gate
+        bind: *train_bind
+        on_error: needs_input
+      - when: "world.route == 'next'"
+        emit_intent: phase_next
+      - when: "world.route == 'needs_input'"
+        emit_intent: train_needs_input
+    on:
+      phase_next: [{ target: staging }]
+      train_needs_input: [{ target: needs_input }]
+      look: [{ target: . }]
+
+  staging:
+    description: "Require an exact-SHA landed receipt from the staging queue."
+    view:
+      - heading: "Integration train · staging"
+      - prose: "Gated SHA: {{ world.gated_sha|default:'(pending)' }}"
+      - prose: "Queued or running is not landed. Target movement stops the train for a rebuilt candidate."
+    on_enter:
+      - set:
+          last_error: "Integration-train authority unavailable while reconciling staging."
+          resume_phase: "staging"
+          authority_evidence: {}
+          route: ""
+      - invoke: iface.train.reconcile
+        id: train_staging_authority
+        once: true
+        with:
+          request: { phase: staging, job: "{{ world.job }}", checkpoint: "{{ world.checkpoint }}" }
+        bind: { authority_evidence: evidence }
+        on_error: needs_input
+      - invoke: host.starlark.run
+        id: train_staging_evidence
+        once: true
+        with:
+          script: scripts/validate_authority.star
+          inputs:
+            <<: *train_inputs
+            phase: staging
+        bind: *train_bind
+        on_error: needs_input
+      - when: "world.route == 'next'"
+        emit_intent: phase_next
+      - when: "world.route == 'needs_input'"
+        emit_intent: train_needs_input
+    on:
+      phase_next: [{ target: main }]
+      train_needs_input: [{ target: needs_input }]
+      look: [{ target: . }]
+
+  main:
+    description: "Require a distinct exact-SHA landed receipt from the protected-main queue."
+    view:
+      - heading: "Integration train · protected main"
+      - prose: "Staging SHA: {{ world.staging_sha|default:'(pending)' }}"
+      - prose: "Restart is safe: the authority receives the accepted staging checkpoint and must reconcile before submitting anything."
+    on_enter:
+      - set:
+          last_error: "Integration-train authority unavailable while reconciling protected main."
+          resume_phase: "main"
+          authority_evidence: {}
+          route: ""
+      - invoke: iface.train.reconcile
+        id: train_main_authority
+        once: true
+        with:
+          request: { phase: main, job: "{{ world.job }}", checkpoint: "{{ world.checkpoint }}" }
+        bind: { authority_evidence: evidence }
+        on_error: needs_input
+      - invoke: host.starlark.run
+        id: train_main_evidence
+        once: true
+        with:
+          script: scripts/validate_authority.star
+          inputs:
+            <<: *train_inputs
+            phase: main
+        bind: *train_bind
+        on_error: needs_input
+      - when: "world.route == 'next'"
+        emit_intent: phase_next
+      - when: "world.route == 'needs_input'"
+        emit_intent: train_needs_input
+    on:
+      phase_next: [{ target: deploy }]
+      train_needs_input: [{ target: needs_input }]
+      look: [{ target: . }]
+
+  deploy:
+    description: "Require deployment identity and health attestation."
+    view:
+      - heading: "Integration train · deployment attestation"
+      - prose: "Main SHA: {{ world.main_sha|default:'(pending)' }}"
+      - prose: "Release is claimed only when main tree, release/image digests, environment, health, verifier, and time match."
+    on_enter:
+      - set:
+          last_error: "Integration-train authority unavailable while reconciling deployment."
+          resume_phase: "deploy"
+          authority_evidence: {}
+          route: ""
+      - invoke: iface.train.reconcile
+        id: train_deploy_authority
+        once: true
+        with:
+          request: { phase: deploy, job: "{{ world.job }}", checkpoint: "{{ world.checkpoint }}" }
+        bind: { authority_evidence: evidence }
+        on_error: needs_input
+      - invoke: host.starlark.run
+        id: train_deploy_evidence
+        once: true
+        with:
+          script: scripts/validate_authority.star
+          inputs:
+            <<: *train_inputs
+            phase: deploy
+        bind: *train_bind
+        on_error: needs_input
+      - when: "world.route == 'released'"
+        emit_intent: train_released
+      - when: "world.route == 'partial'"
+        emit_intent: train_partial
+      - when: "world.route == 'needs_input'"
+        emit_intent: train_needs_input
+    on:
+      train_released: [{ target: released }]
+      train_partial: [{ target: partial }]
+      train_needs_input: [{ target: needs_input }]
+      look: [{ target: . }]
+
+  released:
+    description: "All candidates released with an attested deployment."
+    view:
+      - heading: "Integration train · released"
+      - prose: "Main {{ world.main_sha }} is deployed and healthy."
+    on_enter:
+      - set: { status: released }
+      - emit_intent: train_released
+    on: { train_released: [{ target: "@exit:released" }] }
+
+  partial:
+    description: "Accepted subset released; exclusions remain explicit."
+    view:
+      - heading: "Integration train · partial release"
+      - prose: "Main {{ world.main_sha }} is deployed; excluded items remain in the disposition ledger."
+      - code: "{{ world.item_dispositions }}"
+    on_enter:
+      - set: { status: partial }
+      - emit_intent: train_partial
+    on: { train_partial: [{ target: "@exit:partial" }] }
+
+  needs_input:
+    description: "Train stopped fail-closed with durable evidence."
+    view:
+      - heading: "Integration train · needs input"
+      - prose: "{{ world.last_error }}"
+      - prose: "Resume phase: {{ world.resume_phase }} · checkpoint: {{ world.checkpoint.checkpoint_digest|default:'(none)' }}"
+    on_enter:
+      - set: { status: needs-input }
+      - emit_intent: train_needs_input
+    on: { train_needs_input: [{ target: "@exit:needs-input" }] }

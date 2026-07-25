@@ -1,0 +1,31 @@
+inputs:
+  phase:                  { type: string, required: true }
+  job:                    { type: object, required: true }
+  prior_checkpoint:       { type: object, required: false }
+  evidence:               { type: object, required: true }
+  item_dispositions:      { type: list,   required: false }
+  integrated_sha:         { type: string, required: false }
+  gated_sha:              { type: string, required: false }
+  staging_sha:            { type: string, required: false }
+  main_sha:               { type: string, required: false }
+  staging_receipt:        { type: object, required: false }
+  main_receipt:           { type: object, required: false }
+  deployment_attestation: { type: object, required: false }
+  partial:                { type: bool,   required: false }
+
+outputs:
+  route:                  { type: string }
+  checkpoint:             { type: object }
+  ordered_candidate_ids:  { type: list }
+  item_dispositions:      { type: list }
+  integrated_sha:         { type: string }
+  gated_sha:              { type: string }
+  staging_sha:            { type: string }
+  main_sha:               { type: string }
+  staging_receipt:        { type: object }
+  main_receipt:           { type: object }
+  deployment_attestation: { type: object }
+  partial:                { type: bool }
+  last_error:             { type: string }
+  resume_phase:           { type: string }
+  status:                 { type: string }

@@ -1,0 +1,37 @@
+test_kind: flow
+app: ../app.yaml
+initial_state: bootstrap
+initial_world:
+  job:
+    schema: kitsoki/integration-train-job/v1
+    train_id: train-no-authority
+    manifest:
+      schema: kitsoki/integration-train-manifest/v1
+      manifest_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      stable_order: candidate_id-asc
+      max_items: 1
+      candidates:
+        - candidate_id: c01
+          report_ref: reports/c01.md
+          report_digest: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+          execution_id: worker-01
+          shipped_sha: "1111111111111111111111111111111111111111"
+          base_sha: "0000000000000000000000000000000000000000"
+          bundle_digest: "sha256:2111111111111111111111111111111111111111111111111111111111111111"
+
+host_handlers:
+  host.integration_train.reconcile:
+    by_call:
+      train_validate_authority:
+        error: "no effectful integration-train authority is configured"
+
+turns:
+  - intent: { name: begin, slots: {} }
+    expect_state: __exit__needs-input
+    expect_world:
+      status: needs-input
+      resume_phase: validate
+      last_error: "no effectful integration-train authority is configured"
+
+expect_terminal: true
+expect_no_errors: true

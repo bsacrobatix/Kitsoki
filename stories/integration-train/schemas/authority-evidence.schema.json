@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kitsoki/integration-train-authority/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema",
+    "phase",
+    "train_id",
+    "manifest_digest",
+    "status",
+    "checkpoint"
+  ],
+  "properties": {
+    "schema": { "const": "kitsoki/integration-train-authority/v1" },
+    "phase": {
+      "enum": ["validate", "integrate", "gate", "staging", "main", "deploy"]
+    },
+    "train_id": { "type": "string", "minLength": 1 },
+    "manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "status": {
+      "enum": [
+        "ready",
+        "complete",
+        "partial",
+        "green",
+        "landed",
+        "attested",
+        "needs_input",
+        "target_moved",
+        "mismatch",
+        "red"
+      ]
+    },
+    "checkpoint": { "$ref": "checkpoint.schema.json" },
+    "ordered_candidate_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "item_dispositions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["candidate_id", "status"],
+        "properties": {
+          "candidate_id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["accepted", "conflict", "invalid", "needs_input"] },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "integrated_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "gated_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "gate_receipt": { "type": "object" },
+    "queue_receipt": { "type": "object" },
+    "deployment_attestation": { "$ref": "deployment-attestation.schema.json" },
+    "error": { "type": "string" }
+  }
+}

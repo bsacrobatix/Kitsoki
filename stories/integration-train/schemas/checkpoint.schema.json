@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kitsoki/integration-train-checkpoint/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "train_id",
+    "manifest_digest",
+    "phase",
+    "sequence",
+    "checkpoint_digest",
+    "evidence"
+  ],
+  "properties": {
+    "schema": { "const": "kitsoki/integration-train-checkpoint/v1" },
+    "train_id": { "type": "string", "minLength": 1 },
+    "manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "phase": {
+      "enum": ["validate", "integrate", "gate", "staging", "main", "deploy"]
+    },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "previous_digest": {
+      "type": "string",
+      "pattern": "^(|sha256:[0-9a-f]{64})$"
+    },
+    "checkpoint_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "evidence": { "type": "object" }
+  }
+}
