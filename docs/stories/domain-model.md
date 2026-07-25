@@ -15,8 +15,9 @@ the authoritative deep-dives rather than restating them:
 [choice widget](choice-widget.md) · [authoring](authoring.md) ·
 [semantic routing](../architecture/semantic-routing.md) ·
 [Starlark host](../architecture/starlark.md) · [hosts](../architecture/hosts.md) ·
-[prior art](../architecture/prior-art.md). A companion class diagram sits beside
-this file: [`domain-model.mmd`](domain-model.mmd).
+[story programming paradigm](../architecture/story-programming-paradigm.md) ·
+[prior art](../architecture/prior-art.md). A companion class diagram sits
+beside this file: [`domain-model.mmd`](domain-model.mmd).
 
 ---
 
@@ -44,7 +45,8 @@ Story (app.yaml)                         root of one story
 │     │        terminal, initial, menu[]→Intent, default_intent→Intent
 │     ├── states { <name>: Room }         nested children (compound)
 │     ├── view: [ViewBlock]               presentation
-│     │     └── ViewBlock: banner | prose | kv | heading | template | choice
+│     │     └── ViewBlock: banner | prose | heading | code | template |
+│     │                    list | kv | media | choice
 │     │           └── choice: mode, prompt
 │     │                 └── items: [ChoiceItem]
 │     │                       └── ChoiceItem: label, hint, intent→Intent,
@@ -104,7 +106,7 @@ Story (app.yaml)                         root of one story
 | Slot | `intents.<name>.slots.<name>` | type, required, default, values, validator | — |
 | Room | `states.<name>` | type, mode, terminal, initial, menu, default_intent | menu/default_intent → Intent |
 | View | `states.<name>.view` | list of ViewBlock | — |
-| ViewBlock | view list item | banner/prose/kv/heading/template/choice | — |
+| ViewBlock | view list item | banner/prose/heading/code/template/list/kv/media/choice | — |
 | Choice | view `choice:` | mode, prompt | — |
 | ChoiceItem | `choice.items[]` | label, hint, intent, slots, param | intent → Intent |
 | Transition | `states.<name>.on.<intent>[]` | when, target, default, emit | target → Room; emit → Intent |
@@ -957,6 +959,17 @@ Serverless Workflow, by design, has no presentation concept at all: it
 orchestrates backends. Modeling a story in SW strands this entire layer — the
 thing a user actually sees and touches — outside the spec.
 
+**Boundary, stated honestly:** the shipped `view:` model is a typed,
+state-bound presentation, not yet a complete application shell. It does not
+declare application-wide navigation, reusable pages/cards, custom presentation
+components, native VS Code contributions, or one inbound handler exposed
+consistently through CLI/MCP/JSON-RPC. The proposed
+[`story-application-platform`](../proposals/story-application-platform.md)
+preserves the room view as the canonical content/action unit and adds a
+presentation-free application frame plus optional surface presentations around
+it. This is an extension of the view/intent binding above, not a second UI
+controller.
+
 **4. LLM agents are governed, capability-classified actors — not function
 calls.** A SW `call` is a call; the spec has no reason to care whether the callee
 is deterministic. A Kitsoki `agent` is a persona with a system prompt, a tool
@@ -1123,7 +1136,10 @@ behavior. Each item is stated honestly against what exists today, and each is
 chosen because it extends the **same spine** — a pure machine, typed world,
 composable statechart, capability-gated effects, and the deterministic↔fluent
 spectrum of §4 — rather than bolting on a foreign concept. Nothing here changes
-the core; they fill in its edges.
+the core; they fill in its edges. The application-platform proposal contains a
+[gap-closure matrix](../proposals/story-application-platform.md#paradigm-alignment-and-gap-closure)
+that names which of these capabilities it implements, integrates, or consumes;
+the full POG conformance gate may not silently waive a required row.
 
 ### 6.1 Event binding *(planned)*
 
@@ -1165,20 +1181,32 @@ library," because the fold installs the child as a compound state and needs stat
 to enter. `include:` *does* merge fine-grained pieces — agents, providers,
 toolboxes, intents, meta-modes, states — but only as **local file-splitting within
 one story**: a flat, un-namespaced merge (name collisions are errors), from local
-globs, with no packaging or versioning. Kits share whole stories plus `schemas`,
-`interfaces`, and `ui` — but **not** agents, toolboxes, intents, or providers.
+globs, with no packaging or versioning. The planned [`kits`](../proposals/kits.md)
+model would share whole stories plus `schemas`, `interfaces`, and `ui` — but
+does not yet cover à-la-carte agents, toolboxes, intents, or providers.
 
-So there is no first-class **reusable component library**: a shareable, versioned,
-*namespaced* package of agents / toolboxes / intents / providers / host-interfaces
-/ schemas that a story imports à la carte, *without* dragging in a room graph.
-Reusing a well-tuned judge persona, a standard intent vocabulary, or a provider
-profile across ten stories today means copy-paste, a same-repo `include:`, or
-importing an entire story you don't want. Planned: a **component-package** form —
-resolvable like a story (`./path`, `@kitsoki/<name>`, `git+…`) — that `imports:`
-can pull *selectively* and namespace, so `agents`, `toolboxes`, `intents`,
-`providers`, and `host_interfaces` become first-class shared, versioned building
-blocks, not just rooms. This pairs directly with 6.4: once components are
-shareable, they need semver.
+So there is no first-class **reusable component library**: a shareable,
+versioned, *namespaced* package of agents / toolboxes / intents / providers /
+host-interfaces / schemas / UI components that a story imports à la carte,
+*without* dragging in a room graph. Reusing a well-tuned judge persona, a
+standard intent vocabulary, a card renderer, or a provider profile across ten
+stories today means copy-paste, a same-repo `include:`, or importing an entire
+story you don't want.
+
+Planned: a **component-package** form — resolvable like a story (`./path`,
+`@kitsoki/<name>`, `git+…`) — that `imports:` can pull selectively and
+namespace. It also carries the reuse contracts identified by the
+[story-programming paradigm §7.2](../architecture/story-programming-paradigm.md#72-the-oop-inheritancepolymorphism-gap):
+
+- **room interfaces** — intent/slot/world contracts that any room may implement,
+  loader-verified and targetable without naming one concrete room; and
+- **parameterized room templates** — declared parameters for world slices, host
+  bindings, and exit edges, expanded into visible concrete graph nodes.
+
+This keeps composition as the default while making `agents`, `toolboxes`,
+`intents`, `providers`, `host_interfaces`, room templates/contracts, schemas,
+and application components first-class shared building blocks. It pairs
+directly with 6.4: once components are shareable, they need semver.
 
 ### 6.4 Composition versioning *(planned)*
 
@@ -1232,13 +1260,46 @@ pay a model twice for the same sentence."
 
 ### 6.9 Deeper statechart static analysis *(planned)*
 
-Model-checking beyond target resolution. Load-time already proves every `target:`
-resolves, every `invoke:` is allow-listed, and every guard compiles (§3.0); a
-fuller pass would prove **reachability** (no orphan rooms or intents), **exit
-satisfiability** (every `@exit`'s `requires` set is achievable), **guard
-exhaustiveness** (a `default:` or total cover on every decision gate), and
-**deadlock-freedom**. For an artifact that aims to be deterministic and auditable,
-provable well-formedness is the natural completion of the load-time contract.
+Model-checking beyond target resolution. Load-time already proves every
+`target:` resolves, every `invoke:` is allow-listed, and every guard compiles
+(§3.0); a fuller pass would prove:
+
+- **reachability** — no orphan rooms, intents, handlers, actions, or UI nodes;
+- **exit satisfiability** — every `@exit`'s `requires` set is achievable;
+- **outcome totality** — every declared host/handler result variant has a named
+  edge or an explicit collapse;
+- **typed binds and guards** — every result-to-world bind and expression agrees
+  with the world schema;
+- **guard exhaustiveness** — a `default:`/`else:` or total cover on every
+  decision gate;
+- **room-interface conformance** and parameterized-room validity;
+- **deadlock-freedom**; and
+- **field-level impact** — one load-time read/write/call index answers which
+  rooms, effects, handlers, and views depend on a world field.
+
+The same index extends naturally into the application program graph:
+page/card/component → action → handler/intent → transition/effect → world
+read/write. For an artifact that aims to be deterministic and auditable,
+provable well-formedness and queryable impact are the natural completion of the
+load-time contract.
+
+### 6.10 Application shell and surface projections *(planned)*
+
+Today a story is a UI at the **room** level (§5.3): typed view blocks are bound
+directly to intents and slots, and the same semantic view reaches TUI and web.
+It is not yet a reusable application definition. Application-wide navigation,
+page/card composition, custom Vue components, native VS Code projections,
+Kitsoki-owned Vite/HMR, and one typed inbound handler exposed through
+JSON-RPC/MCP/CLI still require surface-specific code.
+
+[`story-application-platform`](../proposals/story-application-platform.md)
+closes that boundary with a presentation-free application frame, optional
+story-owned presentations, a common handler/event registry, versioned component
+packages, and a program-graph conformance gate. The frame must stay a projection
+of the same room/intent/world/effect graph: components dispatch declared
+actions; they do not acquire hidden state or a second controller. POG is the
+first external acceptance target for proving a product can be wholly
+story-owned while retaining deterministic TUI/headless fallbacks.
 
 ---
 
@@ -1246,4 +1307,6 @@ provable well-formedness is the natural completion of the load-time contract.
 statechart / capability-gated spine fixed, and extend it toward reacting to events
 (6.1), controlling the determinism dial explicitly (6.2, 6.5, 6.8), making
 composition fine-grained, versioned, and concurrent (6.3, 6.4, 6.6), making
-irreversible actions safe (6.7), and proving the whole thing well-formed (6.9).*
+irreversible actions safe (6.7), proving the whole thing well-formed (6.9), and
+projecting that same governed program as a reusable cross-surface application
+(6.10).*

@@ -114,10 +114,12 @@ thought.
 - [`story-application-platform.md`](story-application-platform.md) — **epic.**
   Generalize stories into reusable applications: a presentation-free canonical
   frame, optional Vue/card/wizard presentations, story-owned custom components,
-  one typed operation registry for JSON-RPC/MCP/CLI and interactive surfaces,
-  Kitsoki-owned Vite development/HMR, composition across story imports, and POG
-  as the first full external conformance target. Nothing implemented yet; six
-  slices are sketched pending review of the shared contracts.
+  finite story contracts plus a queryable program graph, one typed handler/event
+  registry for JSON-RPC/MCP/CLI and interactive surfaces, Kitsoki-owned Vite
+  development/HMR, versioned component packages, composition across story
+  imports, and POG as the first full external conformance target. Nothing
+  implemented yet; eight slices are sketched pending review of the shared
+  contracts.
 - [`contextual-room-routing.md`](contextual-room-routing.md) — **runtime.** make the final LLM routing tier classify unmatched room input as exactly one of: explicit intent with slots, read-only help, in-room free-form request, or room-scoped meta edit. Adds persistent room chat lanes, route receipts, and one-decision rewind so operators can correct a bad routing choice. Builds on the in-progress ad-hoc structured-plan workbench and existing meta modes. Runtime slices shipped; web receipt/rewind plumbing and intent-class rewind exist. Remaining work is switch-route ergonomics, TUI parity for receipt/rewind controls, and optional extra flow fixtures.
 - `operation-scoped-world.md` — **shipped and retired.** The operation overlay, explicit commit/draft/discard effects, tracing events, and first GitOps `sync_main` adoption live in [`../stories/state-machine.md`](../stories/state-machine.md#operation-scoped-world), [`../embedded/app-schema.md`](../embedded/app-schema.md#operation--abandonable-task-local-world), and [`../tracing/trace-format.md`](../tracing/trace-format.md#operation-events).
 - [`multi-hop-contextual-routing.md`](multi-hop-contextual-routing.md) — **runtime.** extend the contextual routing tier with an opt-in `route_plan` verdict for bounded cross-room commands: leave the current room, execute a validated intent in another room, optionally return, and surface one plan receipt/rewind target so bad-route correction can restore the conversation to the pre-plan state and choose a different interpretation. Multi-hop `route_plan` itself is not implemented; base contextual-routing substrate has advanced since this draft.

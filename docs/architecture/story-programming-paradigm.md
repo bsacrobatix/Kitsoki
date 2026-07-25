@@ -5,6 +5,10 @@ what it takes from functional programming, what it takes from object
 orientation, what only a graph can provide, and why the combination is
 specifically suited to a world where AI both writes and runs the code.*
 
+The concrete authored YAML and current runtime behavior are mapped in
+[`docs/stories/domain-model.md`](../stories/domain-model.md); this document
+states the governing laws and keeps aspirational gaps explicit.
+
 ---
 
 ## 1. The problem being solved
@@ -203,10 +207,10 @@ Working candidates, in rough order of preference:
 ## 7. Caveats — and how to resolve them without leaving the paradigm
 
 The mapping from paradigm to the existing story runtime is honest but
-not perfect. Two claims above are aspirational in degree, and both can
+not perfect. Four claims above are aspirational in degree, and all can
 be closed with the paradigm's own tools — declared structure plus
 load-time verification — rather than by importing someone else's type
-system.
+system or a second application controller.
 
 ### 7.1 Monadic totality is enforced by convention, not by types
 
@@ -230,6 +234,11 @@ same: make the implicit thing declared, then lint the declaration.
   exhaustiveness, but as a load-time graph lint rather than a compiler:
   the same mechanism that already refuses an undeclared verb refuses an
   unrouted outcome.
+- **The same variants on exported application handlers.** A handler
+  exposed through JSON-RPC, MCP, CLI, web, VS Code, or TUI is another
+  finite border crossing, not a generic `{ok,error}` escape hatch. It
+  reuses the effect contract's declared variants so every transport
+  reports the same typed outcome and every UI action accounts for it.
 - **Typed binds against the world schema.** The world already has a
   schema; the missing check is that every `bind:` target and every
   guard expression type-checks against it at load time, so "the effect
@@ -280,6 +289,11 @@ inheritance buried:
   the paradigm's answer stays `imports:` + projection + rebinding: reuse
   by *wiring*, which the graph can display, rather than by *ancestry*,
   which it cannot.
+- **Presentation implements the same contracts.** An application page
+  may target a room interface and a custom component may implement a
+  props/action contract, but neither inherits behavior. The loader
+  verifies substitutability and the rendered graph still shows the
+  concrete room/component selected.
 
 ### 7.3 Structural queries are partial
 
@@ -292,8 +306,40 @@ edge-level impact analysis are not yet uniform, first-class queries.
 answer — guards and binds name the world fields they touch. Extracting
 a field-level read/write index at load time turns data-flow impact into
 the same kind of query as reachability, and closes the loop with 7.1's
-typed binds: one schema, one index, every structural question answered
-from declarations rather than execution.
+typed binds. The index extends through application declarations:
+page/card/component → action → handler/intent → transition/effect →
+world read/write. One program graph then answers control-flow,
+data-flow, presentation ownership, transport exposure, and impact
+questions from declarations rather than execution.
+
+### 7.4 A room view is not yet a complete application projection
+
+**The gap.** The paradigm correctly treats `view:` as part of the
+program: deterministic typed blocks are bound to the room's finite
+intent/slot grammar. But today's runtime only supplies the per-state
+presentation. A story cannot yet declare application-wide navigation,
+reusable pages/cards, custom presentation components, native VS Code
+contributions, or one inbound handler shared by JSON-RPC, MCP, CLI, web,
+and TUI. Calling the current room view a complete application UI
+overstates what has shipped.
+
+**Resolution inside the paradigm.** Preserve the room view as the
+canonical content/action unit, then project the same program outward:
+
+- a presentation-free application frame describes navigation, regions,
+  cards, components, actions, current state, and declared capabilities;
+- optional Vue or native presentation modules consume that frame through
+  dependency-injected services and may dispatch only declared actions;
+- one typed handler/event registry maps actions and external calls back
+  onto intents, Starlark, and host-interface operations; and
+- every frame node and handler edge joins the program graph in 7.3, so a
+  custom UI cannot become invisible control flow.
+
+The design is tracked in
+[`story-application-platform`](../proposals/story-application-platform.md).
+Its POG acceptance gate is the falsifiable test: every product UI/API
+surface must have story provenance, deterministic fallbacks, and the
+same cross-transport outcome receipts.
 
 The common thread: each caveat is a place where a property currently
 holds *by authoring discipline*, and the fix in every case is the
