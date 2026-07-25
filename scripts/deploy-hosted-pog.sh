@@ -154,11 +154,14 @@ for unit in kitsoki-pog.service pog-portal.service pog-worker-finalizer.service;
 done
 test -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
 colony_environment="$(systemctl show --property Environment --value pog-colony-runner.service)"
+colony_pid="$(systemctl show --property MainPID --value pog-colony-runner.service)"
+test "$colony_pid" -gt 0
+colony_process_environment="$(tr '\0' '\n' <"/proc/$colony_pid/environ")"
 grep -Fq 'POG_PORTFOLIO_ROOT=/opt/pog/current' <<<"$colony_environment"
 grep -Fq "POG_MEMBER_ROOTS=$expected_member_roots" <<<"$colony_environment"
 grep -Fq "POG_PORTFOLIO_MEMBERS=$expected_portfolio_members" <<<"$colony_environment"
 grep -Fq "POG_KITSOKI_BIN=$hosted_engine" <<<"$colony_environment"
-grep -Fq "KITSOKI_SOURCE_DIR=$hosted_source" <<<"$colony_environment"
+grep -Fxq "KITSOKI_SOURCE_DIR=$hosted_source" <<<"$colony_process_environment"
 test -f /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 grep -Fq "Environment=POG_KITSOKI_BIN=$hosted_engine" /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf

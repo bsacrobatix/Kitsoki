@@ -396,12 +396,14 @@ previous_finalizer_service="$stage/pog-worker-finalizer.service.previous"
 previous_finalizer_timer="$stage/pog-worker-finalizer.timer.previous"
 previous_queue_worker_engine="$stage/kitsoki-queue-worker.hosted-engine.conf.previous"
 previous_colony_portfolio="$stage/pog-colony-runner.portfolio-authority.conf.previous"
+previous_colony_env="$stage/pog-colony-runner.env.previous"
 had_previous_kitsoki_service=0
 had_previous_portal_service=0
 had_previous_finalizer_service=0
 had_previous_finalizer_timer=0
 had_previous_queue_worker_engine=0
 had_previous_colony_portfolio=0
+had_previous_colony_env=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
 	cp /etc/systemd/system/kitsoki-pog.service "$previous_kitsoki_service"
 	had_previous_kitsoki_service=1
@@ -425,6 +427,10 @@ fi
 if [ -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf ]; then
 	cp /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf "$previous_colony_portfolio"
 	had_previous_colony_portfolio=1
+fi
+if [ -f /etc/kitsoki/pog-colony-runner.env ]; then
+	cp /etc/kitsoki/pog-colony-runner.env "$previous_colony_env"
+	had_previous_colony_env=1
 fi
 caddy_changed=0
 services_changed=0
@@ -508,6 +514,11 @@ rollback() {
 				install -m 0644 "$previous_colony_portfolio" /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
 			else
 				rm -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
+			fi
+			if [ "$had_previous_colony_env" -eq 1 ]; then
+				install -m 0600 "$previous_colony_env" /etc/kitsoki/pog-colony-runner.env
+			else
+				rm -f /etc/kitsoki/pog-colony-runner.env
 			fi
 			systemctl daemon-reload >/dev/null 2>&1 || true
 		fi
@@ -703,6 +714,9 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	systemctl daemon-reload
 	[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service
 	colony_environment="$(systemctl show --property Environment --value pog-colony-runner.service)"
+	colony_pid="$(systemctl show --property MainPID --value pog-colony-runner.service)"
+	[ "$colony_pid" -gt 0 ] || die "colony runner has no live process after restart"
+	colony_process_environment="$(tr '\0' '\n' <"/proc/$colony_pid/environ")"
 	grep -Fq 'POG_PORTFOLIO_ROOT=/opt/pog/current' <<<"$colony_environment" \
 		|| die "colony runner lacks the hosted portfolio root authority"
 	grep -Fq "POG_MEMBER_ROOTS=$member_roots" <<<"$colony_environment" \
@@ -711,7 +725,7 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 		|| die "colony runner lacks the rendered portfolio-member authority"
 	grep -Fq "POG_KITSOKI_BIN=$hosted_engine" <<<"$colony_environment" \
 		|| die "colony runner lacks the activated hosted Kitsoki engine"
-	grep -Fq 'KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' <<<"$colony_environment" \
+	grep -Fxq 'KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' <<<"$colony_process_environment" \
 		|| die "colony runner still depends on a mutable Kitsoki source checkout"
 fi
 
