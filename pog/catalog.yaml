@@ -3199,3 +3199,26 @@ nodes:
     status: proposed
     title: Bound bugfix workspace IDs and classify provider failures structurally
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-25T13:36:05Z"
+    id: cs-5c7f30d16c5caef8e00f1bb7653365a5
+    operations:
+      - after:
+          edges:
+            motivated_by: []
+            part_of:
+              - product-kitsoki
+            required_by: []
+          fields:
+            summary: Capsule CI must keep the candidate workspace as the source/config root while deriving one trusted outer-project pool-state root for every managed workspace, executor tier, detached status controller, queue gate, promotion path, and MCP path. One project-scoped serializer and state file must enforce the declared global max_concurrent ceiling; workspace-local pool fragments must be migrated only after an exact state-to-live-instance join, with contradictions failing closed. Terminal shipped workspaces must then close from durable finalization, head-matching bundle, and diff evidence, and may be purged only through a typed guarded lifecycle verb with recovery-ref, liveness, cleanliness, age, count, and byte limits. Disk below the launch floor must stop new leases rather than allow unbounded workspace growth or blind deletion.
+          id: req-project-authoritative-worker-pool-and-retention
+          schema: kitsoki/requirement/v0
+          sources: []
+          status: proposed
+          title: Worker-pool capacity and retention use trusted project authority
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Make worker-pool capacity and workspace retention project-authoritative
+    visibility: internal
