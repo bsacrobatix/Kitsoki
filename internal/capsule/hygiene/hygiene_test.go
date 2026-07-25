@@ -1386,9 +1386,155 @@ func TestParseWorkspaceActivityMapsOpenFilesToWorkspace(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := parseWorkspaceActivity("p22\nn"+filepath.Join(one, "file")+"\np11\nn"+two+"\np22\nn"+filepath.Join(one, "other")+"\n", []string{one, two})
+	got, err := parseWorkspaceActivity("p22\nf1\nn"+filepath.Join(one, "file")+"\np11\nfcwd\nn"+two+"\np22\nf2\nn"+filepath.Join(one, "other")+"\n", []string{one, two})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if fmt.Sprint(got[one]) != "[22]" || fmt.Sprint(got[two]) != "[11]" {
 		t.Fatalf("activity=%#v", got)
+	}
+}
+
+func TestReadWorkspaceActivityAllowsIrrelevantTraceFSWarning(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "open.txt"), []byte("open\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := t.TempDir()
+	fakeLSOF := filepath.Join(fakeBin, "lsof")
+	script := `#!/bin/sh
+printf 'p4242\nf1\nn%s/open.txt\n' "$KITSOKI_TEST_WORKSPACE"
+printf '%s\n' \
+  "lsof: WARNING: can't stat() tracefs file system /sys/kernel/tracing" \
+  "      Output information may be incomplete." >&2
+exit 1
+`
+	if err := os.WriteFile(fakeLSOF, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_TEST_WORKSPACE", workspace)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	activity, err := readWorkspaceActivity(context.Background(), []string{workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activity.Known || fmt.Sprint(activity.PIDsByPath[workspace]) != "[4242]" {
+		t.Fatalf("activity=%#v", activity)
+	}
+	if len(activity.Diagnostics) != 1 ||
+		activity.Diagnostics[0].Code != "lsof_irrelevant_tracefs_unavailable" ||
+		activity.Diagnostics[0].Subject != "/sys/kernel/tracing" {
+		t.Fatalf("diagnostics=%#v", activity.Diagnostics)
+	}
+}
+
+func TestReadWorkspaceActivityRejectsInconclusiveWarningsFailuresAndOutput(t *testing.T) {
+	workspace := t.TempDir()
+	tests := []struct {
+		name   string
+		script string
+		want   string
+	}{
+		{
+			name: "unrecognized incomplete warning",
+			script: `#!/bin/sh
+printf 'p4242\nf1\nn%s/open.txt\n' "$KITSOKI_TEST_WORKSPACE"
+printf 'lsof: incomplete recursive scan\n' >&2
+exit 1
+`,
+			want: "workspace activity probe was incomplete",
+		},
+		{
+			name: "genuine command failure",
+			script: `#!/bin/sh
+printf 'p4242\nf1\nn%s/open.txt\n' "$KITSOKI_TEST_WORKSPACE"
+exit 2
+`,
+			want: "workspace activity probe:",
+		},
+		{
+			name: "truncated machine output",
+			script: `#!/bin/sh
+printf 'p4242\nf1\nn%s/open.txt' "$KITSOKI_TEST_WORKSPACE"
+exit 0
+`,
+			want: "machine output ended without a record terminator",
+		},
+		{
+			name: "truncated process record",
+			script: `#!/bin/sh
+printf 'p4242\n'
+exit 0
+`,
+			want: "process record 4242 has no name field",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeBin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(fakeBin, "lsof"), []byte(tt.script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("KITSOKI_TEST_WORKSPACE", workspace)
+			t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			activity, err := readWorkspaceActivity(context.Background(), []string{workspace})
+			if err == nil || activity.Known || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("activity=%#v err=%v, want error containing %q", activity, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestClassifyWorkspaceActivityWarningsRejectsWorkspaceRelevantTraceFS(t *testing.T) {
+	workspace := t.TempDir()
+	stderr := fmt.Sprintf(
+		"lsof: WARNING: can't stat() tracefs file system %s\n      Output information may be incomplete.\n",
+		workspace,
+	)
+	diagnostics, err := classifyWorkspaceActivityWarnings(stderr, []string{workspace})
+	if err == nil || diagnostics != nil || !strings.Contains(err.Error(), "overlaps workspace") {
+		t.Fatalf("diagnostics=%#v err=%v", diagnostics, err)
+	}
+}
+
+func TestBuildPlanSurfacesActivityDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	writeManagedWorkspace(t, root, "inactive", control.StateIntegrated, now.Add(-48*time.Hour), false)
+	diagnostic := ActivityDiagnostic{
+		Code:     "lsof_irrelevant_tracefs_unavailable",
+		Severity: "warning",
+		Source:   "lsof",
+		Subject:  "/sys/kernel/tracing",
+		Message:  "lsof could not stat an unrelated tracefs mount; workspace process inventory remained conclusive",
+	}
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		Now:             func() time.Time { return now },
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{
+				Known:       true,
+				PIDsByPath:  map[string][]int{},
+				Diagnostics: []ActivityDiagnostic{diagnostic, diagnostic},
+			}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Diagnostics) != 1 || plan.Diagnostics[0] != diagnostic {
+		t.Fatalf("diagnostics=%#v", plan.Diagnostics)
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"code":"lsof_irrelevant_tracefs_unavailable"`) {
+		t.Fatalf("plan JSON omitted activity diagnostic: %s", raw)
 	}
 }
 

@@ -109,15 +109,29 @@ type Candidate struct {
 	CapsuleProjectKind      string        `json:"capsule_project_kind,omitempty"`
 	CapsuleProjectManagedBy string        `json:"capsule_project_managed_by,omitempty"`
 	ProvenanceDigest        string        `json:"provenance_digest,omitempty"`
+	activityDiagnostics     []ActivityDiagnostic
+}
+
+// ActivityDiagnostic records a non-fatal, typed process-inventory warning.
+// Diagnostics never relax the probe on their own: readWorkspaceActivity only
+// attaches them after proving that the warning is understood, disjoint from
+// every requested workspace, and accompanied by conclusive machine output.
+type ActivityDiagnostic struct {
+	Code     string `json:"code"`
+	Severity string `json:"severity"`
+	Source   string `json:"source"`
+	Subject  string `json:"subject,omitempty"`
+	Message  string `json:"message"`
 }
 
 // WorkspaceActivity is a point-in-time inventory of processes with an open
 // file or working directory inside candidate workspaces. Unknown activity is
 // never sufficient proof for pruning a legacy workspace.
 type WorkspaceActivity struct {
-	Known      bool
-	PIDsByPath map[string][]int
-	Reason     string
+	Known       bool
+	PIDsByPath  map[string][]int
+	Reason      string
+	Diagnostics []ActivityDiagnostic
 }
 
 type DiskUsage struct {
@@ -130,19 +144,20 @@ type DiskUsage struct {
 }
 
 type Plan struct {
-	Schema                 string      `json:"schema"`
-	Project                string      `json:"project"`
-	KeepRuns               int         `json:"keep_runs"`
-	KeepWorkspaces         int         `json:"keep_workspaces"`
-	MinWorkspaceAge        string      `json:"min_workspace_age"`
-	BytesBasis             string      `json:"bytes_basis"`
-	Candidates             []Candidate `json:"candidates"`
-	TotalBytes             int64       `json:"total_bytes"`
-	InventoryBytes         int64       `json:"inventory_bytes"`
-	Unmeasured             int         `json:"unmeasured_candidates,omitempty"`
-	WorkspaceBytesMeasured bool        `json:"workspace_bytes_measured"`
-	Disk                   DiskUsage   `json:"disk"`
-	DiskError              string      `json:"disk_error,omitempty"`
+	Schema                 string               `json:"schema"`
+	Project                string               `json:"project"`
+	KeepRuns               int                  `json:"keep_runs"`
+	KeepWorkspaces         int                  `json:"keep_workspaces"`
+	MinWorkspaceAge        string               `json:"min_workspace_age"`
+	BytesBasis             string               `json:"bytes_basis"`
+	Candidates             []Candidate          `json:"candidates"`
+	TotalBytes             int64                `json:"total_bytes"`
+	InventoryBytes         int64                `json:"inventory_bytes"`
+	Unmeasured             int                  `json:"unmeasured_candidates,omitempty"`
+	WorkspaceBytesMeasured bool                 `json:"workspace_bytes_measured"`
+	Disk                   DiskUsage            `json:"disk"`
+	DiskError              string               `json:"disk_error,omitempty"`
+	Diagnostics            []ActivityDiagnostic `json:"diagnostics,omitempty"`
 }
 
 type ApplyResult struct {
@@ -267,6 +282,7 @@ func finishPlan(root string, opts Options, plan Plan) (Plan, error) {
 		return plan.Candidates[i].Path < plan.Candidates[j].Path
 	})
 	for _, c := range plan.Candidates {
+		plan.Diagnostics = appendUniqueActivityDiagnostics(plan.Diagnostics, c.activityDiagnostics...)
 		if c.BytesKnown {
 			plan.InventoryBytes += c.Bytes
 		} else {
@@ -290,6 +306,26 @@ func finishPlan(root string, opts Options, plan Plan) (Plan, error) {
 		plan.Disk = disk
 	}
 	return plan, nil
+}
+
+func appendUniqueActivityDiagnostics(existing []ActivityDiagnostic, additions ...ActivityDiagnostic) []ActivityDiagnostic {
+	for _, addition := range additions {
+		duplicate := false
+		for _, current := range existing {
+			if current.Code == addition.Code &&
+				current.Severity == addition.Severity &&
+				current.Source == addition.Source &&
+				current.Subject == addition.Subject &&
+				current.Message == addition.Message {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			existing = append(existing, addition)
+		}
+	}
+	return existing
 }
 
 func Apply(ctx context.Context, opts Options) (ApplyResult, error) {
@@ -521,6 +557,7 @@ func inspectNestedCapsuleProject(ctx context.Context, parentRoot string, project
 		CapsuleProjectKind:      projectRoot.Kind,
 		CapsuleProjectManagedBy: projectRoot.ManagedBy,
 		ProvenanceDigest:        projectRoot.Provenance,
+		activityDiagnostics:     append([]ActivityDiagnostic(nil), activity.Diagnostics...),
 	}
 	workspaceCount, activeRecords, initializing, lastActivity, inventoryErr := nestedCapsuleProjectWorkspaceState(ctx, projectRoot.Root)
 	if lastActivity.After(updated) {
@@ -781,7 +818,18 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 	}
 	id := filepath.Base(path)
 	updated := info.ModTime().UTC()
-	candidate := Candidate{ID: "workspace:" + id, Kind: "workspace", Path: relative, Bytes: bytes, BytesKnown: measureBytes, WorkspaceID: id, Status: "unknown", UpdatedAt: updated, ActivityKnown: activity.Known}
+	candidate := Candidate{
+		ID:                  "workspace:" + id,
+		Kind:                "workspace",
+		Path:                relative,
+		Bytes:               bytes,
+		BytesKnown:          measureBytes,
+		WorkspaceID:         id,
+		Status:              "unknown",
+		UpdatedAt:           updated,
+		ActivityKnown:       activity.Known,
+		activityDiagnostics: append([]ActivityDiagnostic(nil), activity.Diagnostics...),
+	}
 	candidate.ActivePIDs = workspaceActivityPIDs(activity, path)
 	if in != nil {
 		candidate.WorkspaceID = in.ID
@@ -1205,8 +1253,9 @@ func readWorkspaceActivity(ctx context.Context, paths []string) (WorkspaceActivi
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
-	if warning := strings.TrimSpace(stderr.String()); warning != "" {
-		return WorkspaceActivity{}, fmt.Errorf("workspace activity probe was incomplete: %s", warning)
+	diagnostics, warningErr := classifyWorkspaceActivityWarnings(stderr.String(), paths)
+	if warningErr != nil {
+		return WorkspaceActivity{}, warningErr
 	}
 	if runErr != nil {
 		var exitErr *exec.ExitError
@@ -1214,12 +1263,69 @@ func readWorkspaceActivity(ctx context.Context, paths []string) (WorkspaceActivi
 			return WorkspaceActivity{}, fmt.Errorf("workspace activity probe: %w", runErr)
 		}
 	}
+	pidsByPath, parseErr := parseWorkspaceActivity(stdout.String(), paths)
+	if parseErr != nil {
+		return WorkspaceActivity{}, fmt.Errorf("workspace activity probe output is inconclusive: %w", parseErr)
+	}
 	activity.Known = true
-	activity.PIDsByPath = parseWorkspaceActivity(stdout.String(), paths)
+	activity.PIDsByPath = pidsByPath
+	activity.Diagnostics = diagnostics
 	return activity, nil
 }
 
-func parseWorkspaceActivity(output string, paths []string) map[string][]int {
+func classifyWorkspaceActivityWarnings(stderr string, paths []string) ([]ActivityDiagnostic, error) {
+	const (
+		traceFSPrefix     = "lsof: WARNING: can't stat() tracefs file system "
+		incompleteWarning = "Output information may be incomplete."
+	)
+	rawWarning := strings.TrimSpace(stderr)
+	if rawWarning == "" {
+		return nil, nil
+	}
+	rawLines := strings.Split(rawWarning, "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	diagnostics := []ActivityDiagnostic{}
+	for index := 0; index < len(lines); {
+		line := lines[index]
+		if !strings.HasPrefix(line, traceFSPrefix) || index+1 >= len(lines) || lines[index+1] != incompleteWarning {
+			return nil, fmt.Errorf("workspace activity probe was incomplete: %s", rawWarning)
+		}
+		mountPath := strings.TrimSpace(strings.TrimPrefix(line, traceFSPrefix))
+		if !filepath.IsAbs(mountPath) {
+			return nil, fmt.Errorf("workspace activity probe was incomplete: invalid tracefs mount warning %q", line)
+		}
+		for _, workspacePath := range paths {
+			if pathsOverlap(mountPath, workspacePath) {
+				return nil, fmt.Errorf("workspace activity probe was incomplete: tracefs warning path %q overlaps workspace %q", mountPath, workspacePath)
+			}
+		}
+		diagnostics = appendUniqueActivityDiagnostics(diagnostics, ActivityDiagnostic{
+			Code:     "lsof_irrelevant_tracefs_unavailable",
+			Severity: "warning",
+			Source:   "lsof",
+			Subject:  filepath.Clean(mountPath),
+			Message:  "lsof could not stat an unrelated tracefs mount; workspace process inventory remained conclusive",
+		})
+		index += 2
+	}
+	return diagnostics, nil
+}
+
+func pathsOverlap(one, two string) bool {
+	canonicalOne, oneErr := canonicalPath(one)
+	canonicalTwo, twoErr := canonicalPath(two)
+	if oneErr != nil || twoErr != nil {
+		return true
+	}
+	return pathWithin(canonicalOne, canonicalTwo) || pathWithin(canonicalTwo, canonicalOne)
+}
+
+func parseWorkspaceActivity(output string, paths []string) (map[string][]int, error) {
 	sets := map[string]map[int]bool{}
 	canonicalWorkspaces := map[string]string{}
 	for _, path := range paths {
@@ -1228,17 +1334,46 @@ func parseWorkspaceActivity(output string, paths []string) map[string][]int {
 			canonicalWorkspaces[path] = canonical
 		}
 	}
+	if output != "" && !strings.HasSuffix(output, "\n") {
+		return nil, fmt.Errorf("machine output ended without a record terminator")
+	}
 	pid := 0
-	for _, line := range strings.Split(output, "\n") {
-		if len(line) < 2 {
+	pidHasName := false
+	for lineNumber, line := range strings.Split(output, "\n") {
+		if line == "" {
 			continue
+		}
+		if len(line) < 1 {
+			return nil, fmt.Errorf("malformed field on line %d", lineNumber+1)
 		}
 		switch line[0] {
 		case 'p':
-			pid, _ = strconv.Atoi(line[1:])
+			if pid > 0 && !pidHasName {
+				return nil, fmt.Errorf("process record %d has no name field", pid)
+			}
+			parsedPID, err := strconv.Atoi(line[1:])
+			if err != nil || parsedPID <= 0 {
+				return nil, fmt.Errorf("invalid process field on line %d", lineNumber+1)
+			}
+			pid = parsedPID
+			pidHasName = false
+		case 'f':
+			if pid <= 0 {
+				return nil, fmt.Errorf("file field precedes a process field on line %d", lineNumber+1)
+			}
+			if len(line) < 2 {
+				return nil, fmt.Errorf("empty file field on line %d", lineNumber+1)
+			}
 		case 'n':
+			if pid <= 0 {
+				return nil, fmt.Errorf("name field precedes a process field on line %d", lineNumber+1)
+			}
+			pidHasName = true
+			if len(line) < 2 {
+				continue
+			}
 			openPath := strings.TrimSuffix(line[1:], " (deleted)")
-			if pid <= 0 || !filepath.IsAbs(openPath) {
+			if !filepath.IsAbs(openPath) {
 				continue
 			}
 			canonicalOpen, err := canonicalPath(openPath)
@@ -1250,7 +1385,12 @@ func parseWorkspaceActivity(output string, paths []string) map[string][]int {
 					sets[workspace][pid] = true
 				}
 			}
+		default:
+			return nil, fmt.Errorf("unexpected field %q on line %d", string(line[0]), lineNumber+1)
 		}
+	}
+	if pid > 0 && !pidHasName {
+		return nil, fmt.Errorf("process record %d has no name field", pid)
 	}
 	out := map[string][]int{}
 	for path, pids := range sets {
@@ -1259,7 +1399,7 @@ func parseWorkspaceActivity(output string, paths []string) map[string][]int {
 		}
 		sort.Ints(out[path])
 	}
-	return out
+	return out, nil
 }
 
 func pathWithin(root, path string) bool {

@@ -119,6 +119,9 @@ func capsuleCleanupWrite(cmd *cobra.Command, value any, jsonOut bool) error {
 	switch v := value.(type) {
 	case hygiene.Plan:
 		fmt.Fprintf(cmd.OutOrStdout(), "cleanup inventory: %d entries (%d measured bytes, %d unmeasured), reclaimable measured bytes: %d\n", len(v.Candidates), v.InventoryBytes, v.Unmeasured, v.TotalBytes)
+		for _, diagnostic := range v.Diagnostics {
+			fmt.Fprintf(cmd.OutOrStdout(), "cleanup diagnostic [%s/%s] %s: %s\n", diagnostic.Severity, diagnostic.Code, diagnostic.Source, diagnostic.Message)
+		}
 		if v.Disk.Known {
 			fmt.Fprintf(cmd.OutOrStdout(), "disk free: %d bytes, projected after cleanup: %d bytes, floor: %d bytes, pressure: %t\n", v.Disk.FreeBytes, v.Disk.ProjectedFreeBytes, v.Disk.MinFreeBytes, v.Disk.BelowMinimum)
 		} else if v.DiskError != "" {
