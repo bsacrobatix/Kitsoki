@@ -155,15 +155,22 @@ fi
 if [ ! -d "$kitsoki_release" ]; then
 	tmp_kitsoki_release="$kitsoki_release.installing.$$"
 	[ ! -e "$tmp_kitsoki_release" ] || die "temporary Kitsoki release path already exists: $tmp_kitsoki_release"
-	install -d -m 0755 "$tmp_kitsoki_release"
+	install -d -m 0755 "$tmp_kitsoki_release" "$tmp_kitsoki_release/scripts"
 	install -m 0755 "$stage/kitsoki" "$tmp_kitsoki_release/kitsoki"
+	install -m 0755 "$stage/kitsoki-dev-workspace.sh" "$tmp_kitsoki_release/scripts/dev-workspace.sh"
 	mv "$tmp_kitsoki_release" "$kitsoki_release"
 	tmp_kitsoki_release=""
 fi
 [ -x "$kitsoki_release/kitsoki" ] || die "Kitsoki release is incomplete: $kitsoki_release"
+[ -x "$kitsoki_release/scripts/dev-workspace.sh" ] \
+	|| die "Kitsoki release lacks its immutable lifecycle helper: $kitsoki_release/scripts/dev-workspace.sh"
 staged_kitsoki_sha="$(sha256sum "$stage/kitsoki" | awk '{print $1}')"
 installed_kitsoki_sha="$(sha256sum "$kitsoki_release/kitsoki" | awk '{print $1}')"
 [ "$staged_kitsoki_sha" = "$installed_kitsoki_sha" ] || die "Kitsoki release checksum does not match commit $kitsoki_sha"
+staged_lifecycle_sha="$(sha256sum "$stage/kitsoki-dev-workspace.sh" | awk '{print $1}')"
+installed_lifecycle_sha="$(sha256sum "$kitsoki_release/scripts/dev-workspace.sh" | awk '{print $1}')"
+[ "$staged_lifecycle_sha" = "$installed_lifecycle_sha" ] \
+	|| die "Kitsoki lifecycle helper checksum does not match commit $kitsoki_sha"
 
 if [ ! -d "$release/.git" ]; then
 	[ ! -e "$release" ] || die "release path exists but is incomplete: $release"
@@ -678,11 +685,12 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 		printf 'POG_RUNNER_TOKEN=%s\n' "$colony_token"
 		printf 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust\n'
 		printf 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db\n'
-		# POG's dev-workspace bridge delegates lifecycle operations to this
-		# immutable deployed Kitsoki source tree. Without the explicit source
-		# path, hosted release layout makes its sibling fallback resolve to
-		# /scripts/dev-workspace.sh and terminal workspace closes fail.
-		printf 'KITSOKI_SOURCE_DIR=/opt/kitsoki-src\n'
+		# POG's compatibility bridge delegates lifecycle operations to the
+		# helper shipped beside the exact-revision hosted binary. Pointing at
+		# the activated immutable release removes the former dependency on the
+		# mutable /opt/kitsoki-src checkout and its recursively growing
+		# .capsules tree.
+		printf 'KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current\n'
 		# The reaper resolves the lifecycle CLI lazily only when a terminal
 		# workspace is eligible. Pin it to the same activated hosted engine as
 		# the portal instead of falling back to a developer checkout that does
@@ -703,6 +711,8 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 		|| die "colony runner lacks the rendered portfolio-member authority"
 	grep -Fq "POG_KITSOKI_BIN=$hosted_engine" <<<"$colony_environment" \
 		|| die "colony runner lacks the activated hosted Kitsoki engine"
+	grep -Fq 'KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' <<<"$colony_environment" \
+		|| die "colony runner still depends on a mutable Kitsoki source checkout"
 fi
 
 [ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service

@@ -64,7 +64,10 @@ grep -q 'install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-
 grep -q 'pog-colony-runner.service.d/runner-token.conf' "$assets/install.sh"
 grep -q 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' "$assets/install.sh"
 grep -q 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db' "$assets/install.sh"
-grep -q 'KITSOKI_SOURCE_DIR=/opt/kitsoki-src' "$assets/install.sh"
+grep -q 'KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' "$assets/install.sh"
+! grep -q 'KITSOKI_SOURCE_DIR=/opt/kitsoki-src' "$assets/install.sh"
+grep -q 'kitsoki-dev-workspace.sh' "$deploy"
+grep -q 'kitsoki-dev-workspace.sh' "$assets/install.sh"
 grep -q "printf 'POG_KITSOKI_BIN=%s.*hosted_engine" "$assets/install.sh"
 # The colony dispatches federation proposals itself. Its non-secret authority
 # is a distinct drop-in rendered from the same roots/member set as the portal;
@@ -170,6 +173,8 @@ grep -q '"$stage/prune-releases.sh" "$kitsoki_release_root" "$kitsoki_current" 2
 grep -q 'kitsoki-pog.service.d/zz-hosted-engine.conf' "$deploy"
 grep -q 'kitsoki-queue-worker-hosted-engine.conf' "$assets/install.sh"
 grep -q 'ExecStart=/opt/kitsoki-hosted-pog/current/kitsoki queue worker' "$assets/kitsoki-queue-worker-hosted-engine.conf"
+grep -q 'Environment=KITSOKI_SOURCE_DIR=/opt/kitsoki-hosted-pog/current' "$assets/kitsoki-queue-worker-hosted-engine.conf"
+! grep -q 'Environment=KITSOKI_SOURCE_DIR=/opt/kitsoki-src' "$assets/kitsoki-queue-worker-hosted-engine.conf"
 grep -q 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' "$assets/kitsoki-queue-worker-hosted-engine.conf"
 grep -q 'zz-hosted-engine.conf' "$deploy"
 grep -q '/opt/pog/members/gears-rust/pog/catalog.yaml' "$deploy"
