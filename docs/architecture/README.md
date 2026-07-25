@@ -28,6 +28,9 @@ contributor commands.
   multi-surface sessions, persistence, replay, and trust model.
 - [`prior-art.md`](prior-art.md) — what Kitsoki borrows from and rejects from
   interactive fiction, statecharts, workflow engines, and dialogue managers.
+- [`story-programming-paradigm.md`](story-programming-paradigm.md) — the story
+  concept framed as an AI-native programming paradigm: what it inherits from
+  FP and OO, and what only a graph provides.
 
 ## Runtime Boundaries
 
