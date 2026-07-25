@@ -49,7 +49,7 @@ func TestOperationsRequireFreshHandleAndDeclaredCommand(t *testing.T) {
 	}
 }
 
-func TestWorkspacePathAcceptsPersistedReleaseAliasToStableCapsuleRoot(t *testing.T) {
+func TestWorkspacePathRecoversPersistedReleaseAliasAfterOldReleaseRemoval(t *testing.T) {
 	root := t.TempDir()
 	stable := filepath.Join(root, "stable-capsules")
 	workspace := filepath.Join(stable, "workspaces", "release-alias")
@@ -69,15 +69,20 @@ func TestWorkspacePathAcceptsPersistedReleaseAliasToStableCapsuleRoot(t *testing
 	store := NewMemoryInstanceStore()
 	in, err := store.Create(context.Background(), Instance{
 		ID: "release-alias", DefinitionID: "d", Provider: "synthetic",
-		Path: filepath.Join(oldRelease, ".capsules", "workspaces", "release-alias"),
+		Path:  filepath.Join(oldRelease, ".capsules", "workspaces", "release-alias"),
 		State: StateReady, Lease: Lease{Owner: "agent"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Remove(filepath.Join(oldRelease, ".capsules")); err != nil {
+		t.Fatal(err)
+	}
+	provider := &provider{name: "synthetic"}
 	manager := &Manager{
 		Definitions: defs{"d": {ID: "d"}}, Instances: store,
-		Grant: ScopeGrant{ProjectRoot: newRelease, WorkspaceRoots: []string{filepath.Join(newRelease, ".capsules", "workspaces")}},
+		Providers: map[string]WorkspaceProvider{"synthetic": provider},
+		Grant:     ScopeGrant{ProjectRoot: newRelease, WorkspaceRoots: []string{filepath.Join(newRelease, ".capsules", "workspaces")}},
 	}
 	got, err := manager.WorkspacePath(context.Background(), Handle{ID: in.ID, Generation: in.Generation})
 	if err != nil {
@@ -89,6 +94,12 @@ func TestWorkspacePathAcceptsPersistedReleaseAliasToStableCapsuleRoot(t *testing
 	}
 	if got != want {
 		t.Fatalf("workspace path=%q, want stable path %q", got, want)
+	}
+	if err := manager.Close(context.Background(), Handle{ID: in.ID, Generation: in.Generation}, "agent"); err != nil {
+		t.Fatal(err)
+	}
+	if provider.closedPath != want {
+		t.Fatalf("provider close path=%q, want stable path %q", provider.closedPath, want)
 	}
 }
 

@@ -63,6 +63,8 @@ grep -q 'install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-
 grep -q 'pog-colony-runner.service.d/runner-token.conf' "$assets/install.sh"
 grep -q 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' "$assets/install.sh"
 grep -q 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db' "$assets/install.sh"
+grep -q 'KITSOKI_SOURCE_DIR=/opt/kitsoki-src' "$assets/install.sh"
+grep -q "printf 'POG_KITSOKI_BIN=%s.*hosted_engine" "$assets/install.sh"
 grep -q 'POG_KITSOKI_BROWSER_URL=' "$assets/pog-portal.service"
 grep -q 'Environment=POG_MEMBER_ROOTS=__POG_MEMBER_ROOTS__' "$assets/pog-portal.service"
 grep -q 'Environment=POG_PORTFOLIO_MEMBERS=__POG_PORTFOLIO_MEMBERS__' "$assets/pog-portal.service"

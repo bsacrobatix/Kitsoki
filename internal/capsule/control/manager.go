@@ -239,6 +239,15 @@ func (m *Manager) Close(ctx context.Context, h Handle, owner string) error {
 		if provider == nil {
 			return fmt.Errorf("capsule control: provider %q is not configured", in.Provider)
 		}
+		path, err := m.resolveWorkspacePath(ctx, in)
+		if err != nil {
+			return err
+		}
+		// Persisted instance paths can name a release-local alias whose
+		// symlink disappeared after activation moved to a newer release. Give
+		// providers the currently authorized real workspace path so lifecycle
+		// cleanup never follows stale deployment layout.
+		in.Path = path
 		if err := provider.Close(ctx, in); err != nil {
 			return err
 		}
@@ -303,19 +312,38 @@ func (m *Manager) WorkspacePath(ctx context.Context, h Handle) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path := in.Path
-	if real, err := filepath.EvalSymlinks(path); err == nil {
-		path = real
+	return m.resolveWorkspacePath(ctx, in)
+}
+
+func (m *Manager) resolveWorkspacePath(ctx context.Context, in Instance) (string, error) {
+	candidates := []string{in.Path}
+	if def, err := m.Definitions.Get(ctx, in.DefinitionID); err == nil {
+		if root, rootErr := m.workspaceRoot(def); rootErr == nil {
+			candidates = append(candidates, filepath.Join(root, in.ID))
+		}
 	}
-	for _, root := range m.Grant.WorkspaceRoots {
+	for _, candidate := range candidates {
+		path, err := filepath.EvalSymlinks(candidate)
+		if err != nil {
+			continue
+		}
+		if workspacePathWithinRoots(path, m.Grant.WorkspaceRoots) {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("%w: instance path is outside grant or unavailable", ErrDenied)
+}
+
+func workspacePathWithinRoots(path string, roots []string) bool {
+	for _, root := range roots {
 		if real, err := filepath.EvalSymlinks(root); err == nil {
 			root = real
 		}
 		if rel, e := filepath.Rel(root, path); e == nil && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
-			return path, nil
+			return true
 		}
 	}
-	return "", fmt.Errorf("%w: instance path is outside grant", ErrDenied)
+	return false
 }
 
 // VerifierOverlayPaths resolves verifier-only overlay refs to absolute paths

@@ -660,6 +660,16 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 		printf 'POG_RUNNER_TOKEN=%s\n' "$colony_token"
 		printf 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust\n'
 		printf 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db\n'
+		# POG's dev-workspace bridge delegates lifecycle operations to this
+		# immutable deployed Kitsoki source tree. Without the explicit source
+		# path, hosted release layout makes its sibling fallback resolve to
+		# /scripts/dev-workspace.sh and terminal workspace closes fail.
+		printf 'KITSOKI_SOURCE_DIR=/opt/kitsoki-src\n'
+		# The reaper resolves the lifecycle CLI lazily only when a terminal
+		# workspace is eligible. Pin it to the same activated hosted engine as
+		# the portal instead of falling back to a developer checkout that does
+		# not exist on the orchestrator.
+		printf 'POG_KITSOKI_BIN=%s\n' "$hosted_engine"
 	} >"$stage/pog-colony-runner.env"
 	install -m 0600 "$stage/pog-colony-runner.env" /etc/kitsoki/pog-colony-runner.env
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d

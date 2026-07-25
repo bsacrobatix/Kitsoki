@@ -21,8 +21,9 @@ func (d defs) Get(_ context.Context, id string) (Definition, error) {
 func (d defs) List(context.Context) ([]Definition, error) { return nil, nil }
 
 type provider struct {
-	name  string
-	calls int
+	name       string
+	calls      int
+	closedPath string
 }
 
 func (p *provider) Name() string { return p.name }
@@ -33,7 +34,10 @@ func (p *provider) Create(_ context.Context, _ Definition, in Instance) (Materia
 	}
 	return MaterializedWorkspace{Path: in.Path, Head: "abc"}, nil
 }
-func (p *provider) Close(context.Context, Instance) error { return nil }
+func (p *provider) Close(_ context.Context, in Instance) error {
+	p.closedPath = in.Path
+	return nil
+}
 
 func TestManagerLeaseIdempotencyAndStaleHandle(t *testing.T) {
 	root := t.TempDir()
