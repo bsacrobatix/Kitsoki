@@ -1,0 +1,240 @@
+classDiagram
+    direction TB
+
+    %% ===================================================================
+    %% Kitsoki story YAML (app.yaml) — authored domain model.
+    %% Composition (*--) = nested YAML block. Dependency (..>) = ref by name.
+    %% Anchored to stories/bugfix/*.yaml and internal/app/types.go.
+    %% ===================================================================
+
+    class Story {
+        <<app.yaml root>>
+        include : []path
+        root : start state name
+        hosts : []string
+    }
+
+    class App {
+        <<app: block>>
+        id
+        version
+        title
+        author
+        license
+        context / context_path
+    }
+
+    class WorldVar {
+        <<world.&lt;name&gt;: entry>>
+        type : string|int|bool|list|...
+        default
+        values : enum
+    }
+
+    class Intent {
+        <<intents.&lt;name&gt;: entry>>
+        title
+        description
+        examples : []string
+        priority
+        hidden : bool
+        synonyms : []string
+    }
+
+    class Slot {
+        <<intent slot>>
+        type
+        required : bool
+        default
+        values : enum
+        validator : expr
+    }
+
+    class Room {
+        <<states.&lt;name&gt;: entry (top-level = room)>>
+        type : atomic|compound|parallel
+        mode : conversational|...
+        description
+        terminal : bool
+        initial : child name
+        menu : []intent
+        default_intent
+    }
+
+    class View {
+        <<view: block>>
+        list of ViewBlock
+    }
+
+    class ViewBlock {
+        <<one view element>>
+        banner | prose | kv | heading
+        template | choice
+    }
+
+    class Choice {
+        <<view choice block>>
+        mode : single|multi
+        prompt
+    }
+
+    class ChoiceItem {
+        <<choice item>>
+        label
+        hint
+        intent : emitted intent
+        slots : preset values
+        param : inline slot capture
+    }
+
+    class OnEnter {
+        <<on_enter: effect list>>
+        runs on entering the room
+    }
+
+    class Transition {
+        <<on.&lt;intent&gt;: arc>>
+        when : guard expr
+        target : dest state | @exit:name | .
+        default : bool
+        emit : []intent
+    }
+
+    class Effect {
+        <<effect step>>
+        when : guard
+        set : map
+        increment : map
+        say : text
+        invoke : host.* | iface.*
+        with : args
+        bind : world key
+        emit_intent : name (+ slots)
+        on_error / background
+        commit_operation / discard_operation
+    }
+
+    class AgentDecl {
+        <<agents.&lt;name&gt;: entry>>
+        system_prompt / system_prompt_path
+        model
+        provider
+        tools / toolbox
+        bash_profile
+        effect : pure|read|write|external
+    }
+
+    class ProviderDecl {
+        <<providers.&lt;name&gt;: entry>>
+        backend
+        model
+        effort
+    }
+
+    class AgentPluginDecl {
+        <<agent_plugins.&lt;name&gt;: entry>>
+        plugin
+        command / endpoint
+        model
+    }
+
+    class ToolboxDecl {
+        <<toolboxes.&lt;name&gt;: entry>>
+        tools
+        effect
+    }
+
+    class HostInterface {
+        <<host_interfaces.&lt;name&gt;: entry>>
+        ops : []op
+        default : binding
+    }
+
+    class ImportDef {
+        <<imports.&lt;alias&gt;: entry>>
+        source : ./path | @kitsoki/name | git+
+        entry : child start state
+        world_in : parent to child projection
+        intents / overrides
+    }
+
+    class ImportExit {
+        <<import exits.&lt;name&gt;>>
+        to : parent state
+        set : projection
+    }
+
+    class HostBinding {
+        <<import host_bindings.&lt;iface&gt;>>
+        handler
+        script : scripts/*.star
+    }
+
+    class ExitDef {
+        <<exits.&lt;name&gt;: entry>>
+        requires : world guard
+    }
+
+    class Exports {
+        <<exports: block>>
+        intents : surfaced to parent
+    }
+
+    class OperationPolicy {
+        <<operations.&lt;name&gt;: entry>>
+        mode / execution_mode
+        run_in_background
+        stop_on
+        terminal_artifact
+    }
+
+    class Routing {
+        <<routing: block>>
+        semantic routing tier config
+    }
+
+    %% ---------- composition (nested YAML) ----------
+    Story *-- "1" App
+    Story *-- "*" WorldVar : world
+    Story *-- "*" Intent : intents (global library)
+    Story *-- "*" Room : states
+    Story *-- "*" AgentDecl : agents
+    Story *-- "*" ProviderDecl : providers
+    Story *-- "*" AgentPluginDecl : agent_plugins
+    Story *-- "*" ToolboxDecl : toolboxes
+    Story *-- "*" HostInterface : host_interfaces
+    Story *-- "*" ImportDef : imports
+    Story *-- "*" ExitDef : exits
+    Story *-- "0..1" Exports : exports
+    Story *-- "*" OperationPolicy : operations
+    Story *-- "0..1" Routing : routing
+
+    Intent *-- "*" Slot : slots
+
+    Room *-- "*" Room : nested children (compound)
+    Room *-- "0..1" View : view
+    Room *-- "1" OnEnter : on_enter
+    Room *-- "*" Transition : on[intent]
+    Room *-- "*" Intent : state-local intents
+
+    View *-- "*" ViewBlock
+    ViewBlock *-- "0..1" Choice : choice
+    Choice *-- "*" ChoiceItem : items
+
+    OnEnter *-- "*" Effect
+    Transition *-- "*" Effect : effects
+
+    ImportDef *-- "*" ImportExit : exits
+    ImportDef *-- "*" HostBinding : host_bindings
+
+    %% ---------- references (by name) ----------
+    Story ..> Room : root (start state)
+    Transition ..> Room : target
+    ChoiceItem ..> Intent : intent
+    Effect ..> Intent : emit_intent
+    Effect ..> HostInterface : invoke iface.*
+    Room ..> Intent : default_intent / menu
+    AgentDecl ..> ProviderDecl : provider
+    AgentDecl ..> ToolboxDecl : toolbox
+    ImportExit ..> Room : to (parent state)
+    HostBinding ..> HostInterface : binds
