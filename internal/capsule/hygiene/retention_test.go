@@ -30,6 +30,7 @@ func TestPurgeClosedWorkspaceRequiresReceiptAndProviderGuard(t *testing.T) {
 		CurrentPath:           root,
 		Now:                   func() time.Time { return now },
 		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
 		CloseWorkspace: func(_ context.Context, project string, candidate Candidate) error {
 			providerCalls++
 			if project != resultProjectRoot(t, root) || candidate.Path != purgingRel || candidate.Head != head || !candidate.Legacy {
@@ -49,10 +50,11 @@ func TestPurgeClosedWorkspaceRequiresReceiptAndProviderGuard(t *testing.T) {
 	}
 
 	result, err = PurgeClosedWorkspace(context.Background(), PurgeOptions{
-		ProjectRoot: root,
-		Receipt:     receipt,
-		MinAge:      24 * time.Hour,
-		Now:         func() time.Time { return now },
+		ProjectRoot:   root,
+		Receipt:       receipt,
+		MinAge:        24 * time.Hour,
+		Now:           func() time.Time { return now },
+		ReadDiskUsage: stableRetentionDiskUsage,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +136,7 @@ func TestPurgeClosedWorkspaceFailsClosedOnRetentionGuards(t *testing.T) {
 				PinnedWorkspaceIDs:    pinned,
 				Now:                   func() time.Time { return now },
 				ReadWorkspaceActivity: activity,
+				ReadDiskUsage:         stableRetentionDiskUsage,
 				CloseWorkspace: func(context.Context, string, Candidate) error {
 					providerCalled = true
 					return nil
@@ -177,6 +180,7 @@ func TestPurgeClosedWorkspaceIsArchiveFreeAndResumesInterruptedIsolation(t *test
 		CurrentPath:           root,
 		Now:                   func() time.Time { return now },
 		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
 		CloseWorkspace: func(context.Context, string, Candidate) error {
 			return context.Canceled
 		},
@@ -200,6 +204,7 @@ func TestPurgeClosedWorkspaceIsArchiveFreeAndResumesInterruptedIsolation(t *test
 		CurrentPath:           root,
 		Now:                   func() time.Time { return now.Add(time.Minute) },
 		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
 	})
 	if err != nil || !result.OK || result.Status != "purged" {
 		t.Fatalf("resumed result=%+v err=%v", result, err)
@@ -316,6 +321,10 @@ func validRetentionReceipt(root, id, head, recoveryRef string, now time.Time) Re
 			Safe:       true,
 		},
 	}
+}
+
+func stableRetentionDiskUsage(string) (DiskUsage, error) {
+	return DiskUsage{Known: true, FreeBytes: 1 << 40}, nil
 }
 
 func inactiveRetentionActivity(context.Context, []string) (WorkspaceActivity, error) {
