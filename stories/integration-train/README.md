@@ -28,6 +28,10 @@ receives the complete sealed job plus the last accepted checkpoint. A phase may
 reconcile an already-completed effect, but its response must return the same
 train ID, manifest digest, phase, and a monotonic checkpoint.
 
+Repeated calls are reconciliation requests, not permission to repeat an effect:
+the authority must return the already-observed receipt when the checkpoint
+proves that phase completed.
+
 ## Authority operation
 
 Bind `host_interfaces.train` to a host implementing:
