@@ -125,6 +125,10 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.slidey.render":         {class: Write, deterministic: true},
 	"host.contact_sheet":         {class: Write, deterministic: true},
 	"host.video.frame":           {class: Write, deterministic: true},
+	// This carrier may materialize bundles, submit queue candidates, and run a
+	// deploy verifier. Its configured commands are operator-owned but external
+	// and time-dependent, so classify conservatively.
+	"host.integration_train": {class: External, deterministic: false},
 
 	// host.git — 7 ops, per-op tiers: local mutations (branch/commit) are
 	// Write; anything that reaches GitHub (push/open_pr/pr_comment) is

@@ -82,5 +82,34 @@ go run ./cmd/kitsoki test flows stories/integration-train/app.yaml
 The fixtures use no LLM calls. The authority host is stubbed, while the
 Starlark evidence validator runs for real.
 
-The missing generic effectful host is tracked in
-`issues/bugs/2026-07-25T172340Z-integration-train-lacks-an-effectful-authority-host.md`.
+## Native authority carrier
+
+Kitsoki now registers `host.integration_train`. It is deliberately inert until
+an operator configures `KITSOKI_INTEGRATION_TRAIN_AUTHORITY_CONFIG` to an
+absolute, local JSON file:
+
+```json
+{
+  "schema": "kitsoki/integration-train-authority-config/v1",
+  "state_root": "/var/lib/kitsoki/integration-trains",
+  "phases": {
+    "integrate": {"command": ["/opt/pog/bin/integration-authority"], "timeout": "20m"},
+    "gate": {"command": ["/opt/pog/bin/integration-authority"], "timeout": "45m"}
+  }
+}
+```
+
+Each configured phase receives the sealed request JSON on stdin and must emit
+one matching `kitsoki/integration-train-authority/v1` evidence document. The
+carrier persists the exact request/evidence pair below `state_root` and returns
+it on a retry once recorded. Missing configuration, an omitted phase, a command failure, malformed
+output, or evidence for another train/manifest all return visible
+`needs_input` evidence. Commands must themselves make the content-addressed
+request idempotent across a crash between their external effect and receipt
+write; the carrier never treats a missing receipt as success.
+
+The concrete POG materializer/receipt-and-queue adapter is still required
+before the shipped-fix backlog can be executed. In particular, it needs the
+queue primitive that admits an exact staging-landed SHA to the main target with
+a new receipt; this carrier intentionally does not paper over that missing
+authority.

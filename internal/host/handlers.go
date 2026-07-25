@@ -607,6 +607,11 @@ func RegisterBuiltins(r *Registry) {
 	// host.queue.<op> call here with <op> injected into args["op"].
 	r.Register("host.queue", QueueHandler)
 
+	// Integration train's explicit, restart-safe authority carrier. Without a
+	// configured operator-owned authority plan it returns structured
+	// needs_input evidence rather than treating an unbound host as a ship.
+	r.Register("host.integration_train", IntegrationTrainHandler)
+
 	// Use-case loop A2 — host.demo.* (mockup/demo packet pipeline: create,
 	// record, doctor; see demo_handlers.go). Registered bare so the
 	// registry's longest-prefix fallback resolves every host.demo.<op>
