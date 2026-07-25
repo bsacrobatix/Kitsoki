@@ -263,6 +263,20 @@ type WorkspaceProvider interface {
 	Close(context.Context, Instance) error
 }
 
+// ClosedWorkspace identifies the exact quarantine created by a provider close.
+// Providers that can retain this authority implement WorkspaceCloseReporter;
+// Manager.CloseWithResult keeps older providers compatible while allowing
+// native lifecycle callers to issue a purge receipt for the actual rename.
+type ClosedWorkspace struct {
+	Path        string
+	Head        string
+	RecoveryRef string
+}
+
+type WorkspaceCloseReporter interface {
+	CloseWithResult(context.Context, Instance) (ClosedWorkspace, error)
+}
+
 // WorkspaceIntegrator is implemented only by providers that own a complete
 // protected integration lifecycle. Generic local ref reconciliation continues
 // through reconcile.Plan/Apply; this seam preserves the historical script's

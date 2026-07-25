@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"kitsoki/internal/capsule/control"
+	"kitsoki/internal/capsule/hygiene"
 )
 
 type capsuleWorkspaceTestDefinitions map[string]control.Definition
@@ -30,6 +32,32 @@ type capsuleWorkspaceTestProvider struct {
 	closeErr       error
 	closeCalls     int
 	integrateCalls int
+}
+
+type capsuleWorkspaceCloseReporter struct {
+	quarantine string
+	head       string
+}
+
+func (p *capsuleWorkspaceCloseReporter) Name() string {
+	return string(control.SourceDevWorkspaceScript)
+}
+func (p *capsuleWorkspaceCloseReporter) Create(_ context.Context, _ control.Definition, in control.Instance) (control.MaterializedWorkspace, error) {
+	return control.MaterializedWorkspace{Path: in.Path}, nil
+}
+func (p *capsuleWorkspaceCloseReporter) Close(ctx context.Context, in control.Instance) error {
+	_, err := p.CloseWithResult(ctx, in)
+	return err
+}
+func (p *capsuleWorkspaceCloseReporter) CloseWithResult(_ context.Context, in control.Instance) (control.ClosedWorkspace, error) {
+	if err := os.Rename(in.Path, p.quarantine); err != nil {
+		return control.ClosedWorkspace{}, err
+	}
+	return control.ClosedWorkspace{
+		Path:        p.quarantine,
+		Head:        p.head,
+		RecoveryRef: "refs/kitsoki/workspace-teardown-recovery/" + p.head,
+	}, nil
 }
 
 func (p *capsuleWorkspaceTestProvider) Name() string { return "test" }
@@ -289,5 +317,92 @@ func TestCapsuleWorkspaceCloseRequiresExpectedGenerationAndReturnsReceipt(t *tes
 	}
 	if provider.closeCalls != 1 {
 		t.Fatalf("provider close calls=%d", provider.closeCalls)
+	}
+}
+
+func TestCapsuleWorkspaceClosePersistsExactQuarantineRetentionAuthority(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	workspace := filepath.Join(workspaceRoot, "terminal")
+	quarantine := filepath.Join(workspaceRoot, "closed-terminal-20260725T180622Z-42-0")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	store := control.NewMemoryInstanceStore()
+	in, err := store.Create(context.Background(), control.Instance{
+		ID:           "terminal",
+		DefinitionID: "development",
+		Provider:     string(control.SourceDevWorkspaceScript),
+		Path:         workspace,
+		State:        control.StateCommitted,
+		Lease:        control.Lease{Owner: "reaper"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("a", 40)
+	provider := &capsuleWorkspaceCloseReporter{quarantine: quarantine, head: head}
+	manager := &control.Manager{
+		Definitions: capsuleWorkspaceTestDefinitions{"development": {ID: "development"}},
+		Instances:   store,
+		Providers: map[string]control.WorkspaceProvider{
+			string(control.SourceDevWorkspaceScript): provider,
+		},
+		Grant: control.ScopeGrant{
+			ProjectRoot:    root,
+			WorkspaceRoots: []string{workspaceRoot},
+			Effects:        []string{"workspace_manage"},
+		},
+	}
+	originalProbe := capsuleWorkspaceActivityProbe
+	originalProcessProbe := capsuleWorkspaceProcessProbe
+	originalNow := capsuleWorkspaceCloseNow
+	t.Cleanup(func() {
+		capsuleWorkspaceActivityProbe = originalProbe
+		capsuleWorkspaceProcessProbe = originalProcessProbe
+		capsuleWorkspaceCloseNow = originalNow
+	})
+	inactiveProbe := func(_ context.Context, paths []string) (hygiene.WorkspaceActivity, error) {
+		return hygiene.WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{paths[0]: {}}}, nil
+	}
+	capsuleWorkspaceActivityProbe = inactiveProbe
+	capsuleWorkspaceProcessProbe = inactiveProbe
+	probeTimes := []time.Time{
+		time.Date(2026, 7, 25, 18, 6, 21, 0, time.UTC),
+		time.Date(2026, 7, 25, 18, 6, 22, 0, time.UTC),
+	}
+	capsuleWorkspaceCloseNow = func() time.Time {
+		next := probeTimes[0]
+		probeTimes = probeTimes[1:]
+		return next
+	}
+
+	result, err := capsuleWorkspaceClose(context.Background(), manager, in, in.Generation, "reaper")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantReceipt := ".capsules/retention/receipts/" + filepath.Base(quarantine) + ".json"
+	if !result.OK || result.Quarantine != ".capsules/workspaces/"+filepath.Base(quarantine) ||
+		result.RetentionReceipt != wantReceipt || result.RetentionError != "" {
+		t.Fatalf("result=%#v", result)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(wantReceipt)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt hygiene.RetentionReceipt
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		t.Fatal(err)
+	}
+	stateRoot, err := filepath.EvalSymlinks(filepath.Join(root, ".capsules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.WorkspaceID != filepath.Base(quarantine) || receipt.WorkspacePath != result.Quarantine ||
+		receipt.ProjectStateRoot != stateRoot || receipt.Head != head ||
+		receipt.ProcessSnapshot.Kind == receipt.ActivityProbe.Kind ||
+		!receipt.ProcessSnapshot.Safe || !receipt.ActivityProbe.Safe ||
+		receipt.EligibleAfter.Sub(receipt.IssuedAt) != hygiene.DefaultWorkspaceRetentionAge {
+		t.Fatalf("receipt=%#v", receipt)
 	}
 }

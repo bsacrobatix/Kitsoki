@@ -448,6 +448,17 @@ teardown fails after a successful merge, the merge result remains successful
 and carries an explicit cleanup warning so automation does not retry the
 already-landed change as though landing failed.
 
+The native `kitsoki capsule workspace close` path wraps that rename with two
+fail-closed activity probes and writes an immutable receipt under
+`.capsules/retention/receipts/<closed-id>.json`. Its JSON result names both the
+exact quarantine and receipt. If the post-close probe or receipt write is
+inconclusive, the workspace still remains visibly closed and the result carries
+`retention_error`; no quarantine is silently treated as purgeable. The receipt
+also binds the canonical `.capsules` state root. That stable project identity
+keeps a valid receipt usable when an immutable hosted release checkout is
+retired, while exact workspace metadata, HEAD, recovery ref, and current
+trusted state-root checks remain mandatory.
+
 Autonomous retention uses the narrower receipt-bound lifecycle verb:
 
 ```sh
@@ -456,9 +467,10 @@ kitsoki capsule workspace purge \
   --receipt /absolute/path/to/workspace-retention.json
 ```
 
-The `capsule-workspace-retention/v1` receipt binds the trusted project, exact
-ordinary `closed-*` identity/path, HEAD, recovery ref, 24-hour eligibility
-boundary, and two distinct safe close-time process/activity probes. Purge
+The `capsule-workspace-retention/v1` receipt binds the trusted project and
+project state root, exact ordinary `closed-*` identity/path, HEAD, recovery
+ref, 24-hour eligibility boundary, and two distinct safe close-time
+process/activity probes. Purge
 independently rechecks current/pinned/dirty/tip/containment/activity/age state,
 preserves the newest five quarantines, caps one invocation at 8 GiB, and writes
 only a bounded 64 KiB monotonic purge intent before atomically renaming the

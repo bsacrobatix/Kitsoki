@@ -219,44 +219,58 @@ func (m *Manager) Definition(ctx context.Context, id string) (Definition, error)
 }
 
 func (m *Manager) Close(ctx context.Context, h Handle, owner string) error {
+	_, err := m.CloseWithResult(ctx, h, owner)
+	return err
+}
+
+func (m *Manager) CloseWithResult(ctx context.Context, h Handle, owner string) (ClosedWorkspace, error) {
 	in, err := m.Status(ctx, h)
 	if err != nil {
-		return err
+		return ClosedWorkspace{}, err
 	}
 	if in.Lease.Owner != owner {
-		return fmt.Errorf("%w: instance %q", ErrLeaseConflict, h.ID)
+		return ClosedWorkspace{}, fmt.Errorf("%w: instance %q", ErrLeaseConflict, h.ID)
 	}
 	if m.Grant.Owner != "" && !m.Grant.Allows("effect", "workspace_manage") {
-		return fmt.Errorf("%w: workspace_manage", ErrDenied)
+		return ClosedWorkspace{}, fmt.Errorf("%w: workspace_manage", ErrDenied)
 	}
+	closedWorkspace := ClosedWorkspace{}
 	switch in.State {
 	case StateMaterializing, StateFailed:
 		if err := m.removeIncompleteWorkspace(in); err != nil {
-			return err
+			return ClosedWorkspace{}, err
 		}
 	default:
 		provider := m.Providers[in.Provider]
 		if provider == nil {
-			return fmt.Errorf("capsule control: provider %q is not configured", in.Provider)
+			return ClosedWorkspace{}, fmt.Errorf("capsule control: provider %q is not configured", in.Provider)
 		}
 		path, err := m.resolveWorkspacePath(ctx, in)
 		if err != nil {
-			return err
+			return ClosedWorkspace{}, err
 		}
 		// Persisted instance paths can name a release-local alias whose
 		// symlink disappeared after activation moved to a newer release. Give
 		// providers the currently authorized real workspace path so lifecycle
 		// cleanup never follows stale deployment layout.
 		in.Path = path
-		if err := provider.Close(ctx, in); err != nil {
-			return err
+		if reporter, ok := provider.(WorkspaceCloseReporter); ok {
+			closedWorkspace, err = reporter.CloseWithResult(ctx, in)
+		} else {
+			err = provider.Close(ctx, in)
+		}
+		if err != nil {
+			return ClosedWorkspace{}, err
 		}
 	}
 	in, err = m.Instances.CompareAndSwap(ctx, h.ID, h.Generation, func(cur *Instance) error { cur.State = StateClosed; return nil })
 	if err != nil {
-		return err
+		return ClosedWorkspace{}, err
 	}
-	return m.emit(ctx, "capsule.workspace.closed", in)
+	if err := m.emit(ctx, "capsule.workspace.closed", in); err != nil {
+		return ClosedWorkspace{}, err
+	}
+	return closedWorkspace, nil
 }
 
 func (m *Manager) removeIncompleteWorkspace(in Instance) error {

@@ -19,6 +19,8 @@ func TestPurgeClosedWorkspaceRequiresReceiptAndProviderGuard(t *testing.T) {
 	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
 	runHygieneGit(t, root, "update-ref", recoveryRef, head)
 	receipt := validRetentionReceipt(root, filepath.Base(workspace), head, recoveryRef, now)
+	receipt.Project = filepath.Join(root, "releases", "retired")
+	receipt.ProjectStateRoot = filepath.Join(root, ".capsules")
 
 	var providerCalls int
 	purgingRel := filepath.ToSlash(filepath.Join(".capsules", "workspaces", "closed-purging-shipped-20260725"))

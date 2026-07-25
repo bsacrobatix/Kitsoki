@@ -43,7 +43,20 @@ func TestDevWorkspaceScriptProviderMapsProtectedLifecycle(t *testing.T) {
 			}
 			return nil, os.WriteFile(filepath.Join(path, instanceSentinel), []byte("managed\n"), 0o644)
 		case "teardown":
-			return nil, os.RemoveAll(filepath.Join(args[argValue(t, args, "--root")+1], args[len(args)-1]))
+			workspace := filepath.Join(args[argValue(t, args, "--root")+1], args[len(args)-1])
+			quarantine := filepath.Join(filepath.Dir(workspace), "closed-"+filepath.Base(workspace)+"-20260725T180622Z-42-0")
+			headCommand := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
+			headCommand.Dir = workspace
+			headOutput, err := headCommand.CombinedOutput()
+			if err != nil {
+				return headOutput, err
+			}
+			head := strings.TrimSpace(string(headOutput))
+			runControlGit(t, project, "update-ref", "refs/kitsoki/workspace-teardown-recovery/"+head, head)
+			if err := os.Rename(workspace, quarantine); err != nil {
+				return nil, err
+			}
+			return []byte("removed from managed workspaces: " + workspace + "\nquarantined: " + quarantine + "\n"), nil
 		default:
 			return nil, nil
 		}
@@ -67,8 +80,17 @@ func TestDevWorkspaceScriptProviderMapsProtectedLifecycle(t *testing.T) {
 	if !containsArgs(calls[1], "--gate", "go test ./internal/capsule") {
 		t.Fatalf("integrate args %q", calls[1])
 	}
-	if err := provider.Close(context.Background(), Instance{ID: "one", Path: path}); err != nil {
+	closed, err := provider.CloseWithResult(context.Background(), Instance{ID: "one", Path: path})
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantClosed, err := filepath.EvalSymlinks(filepath.Join(project, ".capsules", "workspaces", "closed-one-20260725T180622Z-42-0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Path != wantClosed ||
+		closed.Head == "" || closed.RecoveryRef != "refs/kitsoki/workspace-teardown-recovery/"+closed.Head {
+		t.Fatalf("closed=%#v", closed)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("workspace remains after close: %v", err)

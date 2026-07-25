@@ -220,6 +220,52 @@ func (p DevWorkspaceScriptProvider) Close(ctx context.Context, in Instance) erro
 	return nil
 }
 
+func (p DevWorkspaceScriptProvider) CloseWithResult(ctx context.Context, in Instance) (ClosedWorkspace, error) {
+	root, err := projectRoot(p.ProjectRoot)
+	if err != nil {
+		return ClosedWorkspace{}, err
+	}
+	output, err := p.runner().Run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "teardown", "--repo", root, "--root", filepath.Dir(in.Path), in.ID)
+	if err != nil {
+		return ClosedWorkspace{}, scriptError("close", err, output)
+	}
+	const prefix = "quarantined: "
+	quarantine := ""
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			if quarantine != "" {
+				return ClosedWorkspace{}, fmt.Errorf("dev workspace script: close returned more than one quarantine path")
+			}
+			quarantine = strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	if quarantine == "" {
+		return ClosedWorkspace{}, fmt.Errorf("dev workspace script: close did not return a quarantine path")
+	}
+	realRoot, err := filepath.EvalSymlinks(filepath.Dir(in.Path))
+	if err != nil {
+		return ClosedWorkspace{}, fmt.Errorf("dev workspace script: resolve workspace root: %w", err)
+	}
+	realQuarantine, err := filepath.EvalSymlinks(quarantine)
+	if err != nil {
+		return ClosedWorkspace{}, fmt.Errorf("dev workspace script: resolve quarantine: %w", err)
+	}
+	if err := pathWithin(realRoot, realQuarantine); err != nil || filepath.Dir(realQuarantine) != realRoot || !strings.HasPrefix(filepath.Base(realQuarantine), "closed-") {
+		return ClosedWorkspace{}, fmt.Errorf("dev workspace script: close returned an unconfined quarantine path")
+	}
+	head, err := runGit(ctx, realQuarantine, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return ClosedWorkspace{}, fmt.Errorf("dev workspace script: read quarantine head: %w", err)
+	}
+	head = strings.TrimSpace(head)
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	recovery, err := runGit(ctx, root, "rev-parse", "--verify", recoveryRef+"^{commit}")
+	if err != nil || strings.TrimSpace(recovery) != head {
+		return ClosedWorkspace{}, fmt.Errorf("dev workspace script: quarantine recovery ref is missing or changed")
+	}
+	return ClosedWorkspace{Path: realQuarantine, Head: head, RecoveryRef: recoveryRef}, nil
+}
+
 func scriptError(operation string, err error, output []byte) error {
 	message := strings.TrimSpace(string(output))
 	if message == "" {
@@ -236,4 +282,5 @@ func (p DevWorkspaceScriptProvider) runner() ScriptRunner {
 }
 
 var _ WorkspaceProvider = DevWorkspaceScriptProvider{}
+var _ WorkspaceCloseReporter = DevWorkspaceScriptProvider{}
 var _ WorkspaceIntegrator = DevWorkspaceScriptProvider{}

@@ -22,12 +22,15 @@ import (
 	"kitsoki/internal/capsule/project"
 )
 
-const Schema = "capsule-hygiene-plan/v1"
+const (
+	Schema                       = "capsule-hygiene-plan/v1"
+	DefaultWorkspaceRetentionAge = 24 * time.Hour
+)
 
 const (
 	defaultKeepRuns       = 20
 	defaultKeepWorkspaces = 5
-	defaultWorkspaceAge   = 24 * time.Hour
+	defaultWorkspaceAge   = DefaultWorkspaceRetentionAge
 	workspaceSentinel     = ".kitsoki-capsule"
 	workspacePinSentinel  = ".kitsoki-capsule-pin"
 	projectSentinel       = ".kitsoki-capsule-project"
@@ -1022,9 +1025,10 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 		return invalid("manifest contains an invalid path")
 	}
 	id := filepath.Base(path)
+	sourceMatchesProject := canonicalCloneSource == canonicalProject && canonicalCapsuleSource == canonicalProject
 	if clone.ManagedBy != "scripts/dev-workspace.sh" || dev.ManagedBy != clone.ManagedBy ||
 		clone.ID != id || dev.ID != id || capsule.Environment.ID != id ||
-		canonicalCloneSource != canonicalProject || canonicalCapsuleSource != canonicalProject ||
+		dev.Source != clone.Source || capsule.Source.Repo != clone.Source ||
 		canonicalCloneRoot != canonicalWorkspaceRoot || canonicalCapsuleRoot != canonicalWorkspaceRoot ||
 		canonicalDevWorkspace != canonicalWorkspace || canonicalCapsuleWorkspace != canonicalWorkspace ||
 		clone.Branch == "" || dev.Branch != clone.Branch ||
@@ -1042,6 +1046,14 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 	head, err := gitText(ctx, path, "rev-parse", "HEAD")
 	if err != nil {
 		return invalid("read HEAD: %v", err)
+	}
+	if !sourceMatchesProject {
+		if !strings.HasPrefix(id, "closed-") || strings.HasPrefix(id, "closed-recovered-") {
+			return invalid("clone, development, and capsule ownership metadata do not agree")
+		}
+		if err := validateClosedWorkspaceProjectAuthority(ctx, root, path, id, head); err != nil {
+			return invalid("closed quarantine project authority: %v", err)
+		}
 	}
 	merged := false
 	if strings.HasPrefix(id, "closed-recovered-") {
@@ -1061,6 +1073,36 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 	}
 	updated := workspaceUpdatedAt(ctx, path, clone.Branch, clone.CreatedAt)
 	return legacyWorkspace{Branch: clone.Branch, Target: clone.Target, Head: head, Merged: merged, UpdatedAt: updated}, true, nil
+}
+
+func validateClosedWorkspaceProjectAuthority(ctx context.Context, root, path, id, head string) error {
+	receiptPath := filepath.Join(root, ".capsules", "retention", "receipts", id+".json")
+	info, err := os.Lstat(receiptPath)
+	if err != nil {
+		return fmt.Errorf("retention receipt: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 64<<10 {
+		return errors.New("retention receipt is not a bounded regular file")
+	}
+	var receipt RetentionReceipt
+	if err := readJSON(receiptPath, &receipt); err != nil {
+		return fmt.Errorf("retention receipt: %w", err)
+	}
+	canonicalProject, err := canonicalRoot(root)
+	if err != nil {
+		return err
+	}
+	if err := validateRetentionReceiptBinding(canonicalProject, receipt); err != nil {
+		return err
+	}
+	relative, err := projectRelativePath(root, path)
+	if err != nil {
+		return err
+	}
+	if receipt.WorkspaceID != id || receipt.WorkspacePath != relative || receipt.Head != head {
+		return errors.New("retention receipt does not bind the exact closed workspace")
+	}
+	return validateReceiptRecoveryRef(ctx, canonicalProject, path, receipt)
 }
 
 // gitMergedIntoAnyBranch proves that a legacy capsule can be reconstructed

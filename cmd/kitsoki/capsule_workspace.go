@@ -16,6 +16,12 @@ import (
 	"kitsoki/internal/capsule/hygiene"
 )
 
+var (
+	capsuleWorkspaceActivityProbe = hygiene.ProbeWorkspaceActivity
+	capsuleWorkspaceProcessProbe  = hygiene.ProbeWorkspaceProcessCommands
+	capsuleWorkspaceCloseNow      = func() time.Time { return time.Now().UTC() }
+)
+
 // capsuleWorkspaceCmd is the operator/automation CLI counterpart to the
 // handle-scoped MCP lifecycle. It retains current script compatibility while
 // letting any onboarded project use the native manager directly.
@@ -303,6 +309,9 @@ func capsuleWorkspaceCloseCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if result.RetentionError != "" {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: workspace %s closed, but purge authority needs attention: %s\n", id, result.RetentionError)
+		}
 		return capsuleWorkspaceWrite(cmd, result, jsonOut)
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
@@ -357,15 +366,18 @@ type capsuleWorkspaceExecutionResult struct {
 }
 
 type capsuleWorkspaceCloseResult struct {
-	Schema       string        `json:"schema"`
-	OK           bool          `json:"ok"`
-	Project      string        `json:"project"`
-	ID           string        `json:"id"`
-	DefinitionID string        `json:"definition_id"`
-	Provider     string        `json:"provider"`
-	Generation   uint64        `json:"generation"`
-	Owner        string        `json:"owner"`
-	State        control.State `json:"state"`
+	Schema           string        `json:"schema"`
+	OK               bool          `json:"ok"`
+	Project          string        `json:"project"`
+	ID               string        `json:"id"`
+	DefinitionID     string        `json:"definition_id"`
+	Provider         string        `json:"provider"`
+	Generation       uint64        `json:"generation"`
+	Owner            string        `json:"owner"`
+	State            control.State `json:"state"`
+	Quarantine       string        `json:"quarantine,omitempty"`
+	RetentionReceipt string        `json:"retention_receipt,omitempty"`
+	RetentionError   string        `json:"retention_error,omitempty"`
 }
 
 func capsuleWorkspaceExecute(ctx context.Context, manager *control.Manager, handle control.Handle, owner, commandID string, timeout time.Duration) (control.CommandResult, error) {
@@ -386,7 +398,27 @@ func capsuleWorkspaceClose(ctx context.Context, manager *control.Manager, in con
 	if effectiveOwner == "" {
 		effectiveOwner = in.Lease.Owner
 	}
-	if err := manager.Close(ctx, control.Handle{ID: in.ID, Generation: in.Generation}, effectiveOwner); err != nil {
+	handle := control.Handle{ID: in.ID, Generation: in.Generation}
+	var firstProbe hygiene.RetentionProbe
+	if in.Provider == string(control.SourceDevWorkspaceScript) {
+		path, err := manager.WorkspacePath(ctx, handle)
+		if err != nil {
+			return capsuleWorkspaceCloseResult{}, err
+		}
+		activity, err := capsuleWorkspaceProcessProbe(ctx, []string{path})
+		if err != nil || !activity.Known {
+			if err == nil {
+				err = fmt.Errorf("%s", activity.Reason)
+			}
+			return capsuleWorkspaceCloseResult{}, fmt.Errorf("workspace close liveness probe is inconclusive: %w", err)
+		}
+		if pids := activity.PIDsByPath[path]; len(pids) > 0 {
+			return capsuleWorkspaceCloseResult{}, fmt.Errorf("workspace close refused active process(es): %v", pids)
+		}
+		firstProbe = hygiene.RetentionProbe{Kind: "process-command-snapshot", CapturedAt: capsuleWorkspaceCloseNow(), Safe: true}
+	}
+	quarantine, err := manager.CloseWithResult(ctx, handle, effectiveOwner)
+	if err != nil {
 		return capsuleWorkspaceCloseResult{}, err
 	}
 	closed, err := manager.Instances.Get(ctx, in.ID)
@@ -396,7 +428,7 @@ func capsuleWorkspaceClose(ctx context.Context, manager *control.Manager, in con
 	if closed.State != control.StateClosed {
 		return capsuleWorkspaceCloseResult{}, fmt.Errorf("workspace close returned state %q", closed.State)
 	}
-	return capsuleWorkspaceCloseResult{
+	result := capsuleWorkspaceCloseResult{
 		Schema:       "capsule-workspace-close/v1",
 		OK:           true,
 		Project:      manager.Grant.ProjectRoot,
@@ -406,7 +438,58 @@ func capsuleWorkspaceClose(ctx context.Context, manager *control.Manager, in con
 		Generation:   closed.Generation,
 		Owner:        effectiveOwner,
 		State:        closed.State,
-	}, nil
+	}
+	if quarantine.Path == "" {
+		return result, nil
+	}
+	relative, err := projectRelativeWorkspacePath(manager.Grant.ProjectRoot, quarantine.Path)
+	if err != nil {
+		result.RetentionError = "closed quarantine path is outside project authority: " + err.Error()
+		return result, nil
+	}
+	result.Quarantine = relative
+	activity, probeErr := capsuleWorkspaceActivityProbe(ctx, []string{quarantine.Path})
+	if probeErr != nil || !activity.Known {
+		if probeErr == nil {
+			probeErr = fmt.Errorf("%s", activity.Reason)
+		}
+		result.RetentionError = "closed quarantine liveness probe is inconclusive: " + probeErr.Error()
+		return result, nil
+	}
+	if pids := activity.PIDsByPath[quarantine.Path]; len(pids) > 0 {
+		result.RetentionError = fmt.Sprintf("closed quarantine remains active in process(es): %v", pids)
+		return result, nil
+	}
+	issuedAt := capsuleWorkspaceCloseNow()
+	stateRoot, stateErr := filepath.EvalSymlinks(filepath.Join(manager.Grant.ProjectRoot, ".capsules"))
+	if stateErr != nil {
+		result.RetentionError = "project state root is unavailable: " + stateErr.Error()
+		return result, nil
+	}
+	receipt := hygiene.RetentionReceipt{
+		Schema:           hygiene.RetentionReceiptSchema,
+		Project:          manager.Grant.ProjectRoot,
+		ProjectStateRoot: stateRoot,
+		WorkspaceID:      filepath.Base(quarantine.Path),
+		WorkspacePath:    relative,
+		Head:             quarantine.Head,
+		RecoveryRef:      quarantine.RecoveryRef,
+		IssuedAt:         issuedAt,
+		EligibleAfter:    issuedAt.Add(hygiene.DefaultWorkspaceRetentionAge),
+		ProcessSnapshot:  firstProbe,
+		ActivityProbe: hygiene.RetentionProbe{
+			Kind:       "closed-quarantine-activity",
+			CapturedAt: issuedAt,
+			Safe:       true,
+		},
+	}
+	receiptPath, receiptErr := hygiene.WriteRetentionReceipt(manager.Grant.ProjectRoot, receipt)
+	if receiptErr != nil {
+		result.RetentionError = receiptErr.Error()
+		return result, nil
+	}
+	result.RetentionReceipt = receiptPath
+	return result, nil
 }
 
 func capsuleWorkspaceView(ctx context.Context, manager *control.Manager, handle control.Handle) (capsuleWorkspaceViewResult, error) {

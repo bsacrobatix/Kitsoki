@@ -1238,6 +1238,30 @@ func TestClosePreservesReviewRootsAndGenericCleanupDefersArchiveFreePurge(t *tes
 	if status := runHygieneCommand(t, quarantine, "git", "status", "--porcelain", "--untracked-files=all"); strings.TrimSpace(status) != "" {
 		t.Fatalf("closed quarantine is tracked-dirty: %s", status)
 	}
+	oldRelease := filepath.Join(root, "releases", "retired-source")
+	rewriteLegacyWorkspaceSource(t, quarantine, oldRelease)
+	invalidPlan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkspaceCandidate(t, invalidPlan, filepath.Base(quarantine), false, "project authority")
+	head := strings.TrimSpace(runHygieneCommand(t, quarantine, "git", "rev-parse", "HEAD"))
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	now := time.Now().UTC()
+	receipt := validRetentionReceipt(root, filepath.Base(quarantine), head, recoveryRef, now)
+	receipt.Project = oldRelease
+	receipt.ProjectStateRoot = filepath.Join(root, ".capsules")
+	if _, err := WriteRetentionReceipt(root, receipt); err != nil {
+		t.Fatal(err)
+	}
 	preserved, err := filepath.Glob(filepath.Join(root, ".artifacts", "workspace-close", "tracked-review-*", ".artifacts", "issues", "future", ".provider-payload"))
 	if err != nil || len(preserved) != 1 {
 		t.Fatalf("future provider evidence was not copied: %v err=%v", preserved, err)
@@ -1261,6 +1285,27 @@ func TestClosePreservesReviewRootsAndGenericCleanupDefersArchiveFreePurge(t *tes
 	assertWorkspaceCandidate(t, result.Plan, filepath.Base(quarantine), false, "receipt-bound archive-free purge")
 	if _, err := os.Stat(quarantine); err != nil {
 		t.Fatalf("generic cleanup removed closed quarantine: %v", err)
+	}
+}
+
+func rewriteLegacyWorkspaceSource(t *testing.T, workspace, source string) {
+	t.Helper()
+	for _, name := range []string{".kitsoki-clone", ".kitsoki-dev-workspace.json", "capsule-manifest.json"} {
+		path := filepath.Join(workspace, name)
+		var manifest map[string]any
+		if err := readJSON(path, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		if name == "capsule-manifest.json" {
+			sourceManifest, ok := manifest["source"].(map[string]any)
+			if !ok {
+				t.Fatalf("%s source is not an object", name)
+			}
+			sourceManifest["repo"] = source
+		} else {
+			manifest["source"] = source
+		}
+		writeTestJSON(t, path, manifest)
 	}
 }
 

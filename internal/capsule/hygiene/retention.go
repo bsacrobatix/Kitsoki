@@ -1,13 +1,16 @@
 package hygiene
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,16 +38,94 @@ type RetentionProbe struct {
 // RetentionReceipt is produced by the dispatch finalizer/reaper before close.
 // It binds purge to one exact closed quarantine and recovery ref.
 type RetentionReceipt struct {
-	Schema          string         `json:"schema"`
-	Project         string         `json:"project"`
-	WorkspaceID     string         `json:"workspace_id"`
-	WorkspacePath   string         `json:"workspace_path"`
-	Head            string         `json:"head"`
-	RecoveryRef     string         `json:"recovery_ref"`
-	IssuedAt        time.Time      `json:"issued_at"`
-	EligibleAfter   time.Time      `json:"eligible_after"`
-	ProcessSnapshot RetentionProbe `json:"process_snapshot"`
-	ActivityProbe   RetentionProbe `json:"activity_probe"`
+	Schema           string         `json:"schema"`
+	Project          string         `json:"project"`
+	ProjectStateRoot string         `json:"project_state_root,omitempty"`
+	WorkspaceID      string         `json:"workspace_id"`
+	WorkspacePath    string         `json:"workspace_path"`
+	Head             string         `json:"head"`
+	RecoveryRef      string         `json:"recovery_ref"`
+	IssuedAt         time.Time      `json:"issued_at"`
+	EligibleAfter    time.Time      `json:"eligible_after"`
+	ProcessSnapshot  RetentionProbe `json:"process_snapshot"`
+	ActivityProbe    RetentionProbe `json:"activity_probe"`
+}
+
+// ProbeWorkspaceActivity exposes the same fail-closed lsof inventory used by
+// cleanup so native close can retain two point-in-time liveness proofs around
+// the atomic quarantine rename.
+func ProbeWorkspaceActivity(ctx context.Context, paths []string) (WorkspaceActivity, error) {
+	return readWorkspaceActivity(ctx, paths)
+}
+
+// ProbeWorkspaceProcessCommands is independent of the open-file inventory: it
+// takes one complete process-command snapshot and reports exact workspace paths
+// still named by a running command. The post-rename lsof probe remains
+// authoritative for cwd and descriptor ownership that command lines omit.
+func ProbeWorkspaceProcessCommands(ctx context.Context, paths []string) (WorkspaceActivity, error) {
+	activity := WorkspaceActivity{PIDsByPath: map[string][]int{}}
+	ps, err := exec.LookPath("ps")
+	if err != nil {
+		activity.Reason = "ps is unavailable"
+		return activity, nil
+	}
+	output, err := exec.CommandContext(ctx, ps, "-axww", "-o", "pid=,command=").Output()
+	if err != nil {
+		return WorkspaceActivity{}, fmt.Errorf("workspace process snapshot: %w", err)
+	}
+	for lineNumber, raw := range strings.Split(strings.TrimSuffix(string(output), "\n"), "\n") {
+		fields := strings.Fields(raw)
+		if len(fields) < 2 {
+			if strings.TrimSpace(raw) == "" {
+				continue
+			}
+			return WorkspaceActivity{}, fmt.Errorf("workspace process snapshot line %d is malformed", lineNumber+1)
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 {
+			return WorkspaceActivity{}, fmt.Errorf("workspace process snapshot line %d has an invalid pid", lineNumber+1)
+		}
+		command := strings.TrimSpace(strings.TrimPrefix(raw, fields[0]))
+		for _, path := range paths {
+			if strings.Contains(command, path) {
+				activity.PIDsByPath[path] = append(activity.PIDsByPath[path], pid)
+			}
+		}
+	}
+	activity.Known = true
+	return activity, nil
+}
+
+// WriteRetentionReceipt persists one immutable project-scoped close receipt.
+// Repeating the exact receipt is idempotent; a same-identity byte conflict is
+// never overwritten.
+func WriteRetentionReceipt(projectRoot string, receipt RetentionReceipt) (string, error) {
+	root, err := canonicalRoot(projectRoot)
+	if err != nil {
+		return "", err
+	}
+	if err := validateRetentionReceiptBinding(root, receipt); err != nil {
+		return "", err
+	}
+	raw, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("capsule retention: encode receipt: %w", err)
+	}
+	raw = append(raw, '\n')
+	relative := filepath.ToSlash(filepath.Join(".capsules", "retention", "receipts", receipt.WorkspaceID+".json"))
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	if existing, readErr := os.ReadFile(path); readErr == nil {
+		if !bytes.Equal(existing, raw) {
+			return "", fmt.Errorf("capsule retention: immutable receipt conflict at %s", relative)
+		}
+		return relative, nil
+	} else if !os.IsNotExist(readErr) {
+		return "", fmt.Errorf("capsule retention: inspect receipt: %w", readErr)
+	}
+	if err := atomicfile.WriteFile(path, raw, 0o600, 0o700); err != nil {
+		return "", fmt.Errorf("capsule retention: write receipt: %w", err)
+	}
+	return relative, nil
 }
 
 type PurgeOptions struct {
@@ -492,22 +573,8 @@ func recheckPurgingIntent(ctx context.Context, root, path string, intent purgeIn
 }
 
 func validateRetentionReceipt(root string, receipt RetentionReceipt, now time.Time, minAge time.Duration) error {
-	if receipt.Schema != RetentionReceiptSchema {
-		return fmt.Errorf("capsule retention: receipt schema %q, want %q", receipt.Schema, RetentionReceiptSchema)
-	}
-	project, err := canonicalRoot(receipt.Project)
-	if err != nil || project != root {
-		return fmt.Errorf("capsule retention: receipt project does not match the trusted project root")
-	}
-	if receipt.WorkspaceID == "" || filepath.Base(receipt.WorkspaceID) != receipt.WorkspaceID || !strings.HasPrefix(receipt.WorkspaceID, "closed-") {
-		return fmt.Errorf("capsule retention: receipt workspace id is not a closed quarantine identity")
-	}
-	wantPath := filepath.ToSlash(filepath.Join(".capsules", "workspaces", receipt.WorkspaceID))
-	if receipt.WorkspacePath != wantPath {
-		return fmt.Errorf("capsule retention: receipt workspace path %q, want %q", receipt.WorkspacePath, wantPath)
-	}
-	if !isObjectID(receipt.Head) {
-		return fmt.Errorf("capsule retention: receipt head is not an object id")
+	if err := validateRetentionReceiptBinding(root, receipt); err != nil {
+		return err
 	}
 	if receipt.IssuedAt.IsZero() || receipt.EligibleAfter.IsZero() ||
 		receipt.ProcessSnapshot.CapturedAt.IsZero() || receipt.ActivityProbe.CapturedAt.IsZero() {
@@ -530,6 +597,34 @@ func validateRetentionReceipt(root string, receipt RetentionReceipt, now time.Ti
 	if receipt.IssuedAt.Sub(receipt.ProcessSnapshot.CapturedAt) > 5*time.Minute ||
 		receipt.IssuedAt.Sub(receipt.ActivityProbe.CapturedAt) > 5*time.Minute {
 		return fmt.Errorf("capsule retention: close-time probes are stale")
+	}
+	return nil
+}
+
+func validateRetentionReceiptBinding(root string, receipt RetentionReceipt) error {
+	if receipt.Schema != RetentionReceiptSchema {
+		return fmt.Errorf("capsule retention: receipt schema %q, want %q", receipt.Schema, RetentionReceiptSchema)
+	}
+	project, err := canonicalRoot(receipt.Project)
+	projectMatches := err == nil && project == root
+	if strings.TrimSpace(receipt.ProjectStateRoot) != "" {
+		stateRoot, stateErr := canonicalPath(receipt.ProjectStateRoot)
+		trustedStateRoot, trustedErr := canonicalPath(filepath.Join(root, ".capsules"))
+		if stateErr != nil || trustedErr != nil || stateRoot != trustedStateRoot {
+			return fmt.Errorf("capsule retention: receipt project state root does not match the trusted project")
+		}
+	} else if !projectMatches {
+		return fmt.Errorf("capsule retention: receipt project does not match the trusted project root")
+	}
+	if receipt.WorkspaceID == "" || filepath.Base(receipt.WorkspaceID) != receipt.WorkspaceID || !strings.HasPrefix(receipt.WorkspaceID, "closed-") {
+		return fmt.Errorf("capsule retention: receipt workspace id is not a closed quarantine identity")
+	}
+	wantPath := filepath.ToSlash(filepath.Join(".capsules", "workspaces", receipt.WorkspaceID))
+	if receipt.WorkspacePath != wantPath {
+		return fmt.Errorf("capsule retention: receipt workspace path %q, want %q", receipt.WorkspacePath, wantPath)
+	}
+	if !isObjectID(receipt.Head) {
+		return fmt.Errorf("capsule retention: receipt head is not an object id")
 	}
 	if strings.TrimSpace(receipt.RecoveryRef) == "" {
 		return fmt.Errorf("capsule retention: recovery ref is required")
