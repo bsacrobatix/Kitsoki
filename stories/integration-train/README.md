@@ -77,3 +77,6 @@ go run ./cmd/kitsoki test flows stories/integration-train/app.yaml
 
 The fixtures use no LLM calls. The authority host is stubbed, while the
 Starlark evidence validator runs for real.
+
+The missing generic effectful host is tracked in
+`issues/bugs/2026-07-25T172340Z-integration-train-lacks-an-effectful-authority-host.md`.
