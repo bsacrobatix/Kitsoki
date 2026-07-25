@@ -26,9 +26,13 @@ HOSTED_MEMBERS=(
 	"slidey:slidey:${KITSOKI_HOSTED_POG_MEMBER_SLIDEY_ROOT:-$HOME/code/slidey}:${KITSOKI_HOSTED_POG_MEMBER_SLIDEY_REF:-main}"
 )
 HOSTED_MEMBER_IDS=""
+HOSTED_MEMBER_ROOTS=""
 for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	HOSTED_MEMBER_IDS="${HOSTED_MEMBER_IDS:+$HOSTED_MEMBER_IDS,}${member_entry%%:*}"
+	IFS=: read -r _member_id member_dir _member_root _member_ref <<<"$member_entry"
+	HOSTED_MEMBER_ROOTS="${HOSTED_MEMBER_ROOTS:+$HOSTED_MEMBER_ROOTS,}$member_dir=/opt/pog/members/$member_dir"
 done
+HOSTED_PORTFOLIO_MEMBERS="pog,constructor-studio${HOSTED_MEMBER_IDS:+,$HOSTED_MEMBER_IDS}"
 # Full hosted product set (POG home + embedded Constructor Studio + federated
 # members), sorted, for the post-deploy verification assertion below.
 HOSTED_PRODUCTS_SORTED="$(printf 'pog\nconstructor-studio\n%b\n' "${HOSTED_MEMBER_IDS//,/\\n}" | sort -u | paste -sd, -)"
@@ -122,10 +126,12 @@ verify() {
 	expect_public_status 401 /gh-agent/webhook -X POST -H 'Content-Type: application/json' --data '{}'
 	login_page="$(curl -fsS "${PUBLIC_BASE_URL%/}/auth/login")"
 	grep -q '/auth/github/start' <<<"$login_page"
-	ssh "$REMOTE" bash -s -- "$PUBLIC_HOST" "$HOSTED_PRODUCTS_SORTED" <<'REMOTE_VERIFY'
+	ssh "$REMOTE" bash -s -- "$PUBLIC_HOST" "$HOSTED_PRODUCTS_SORTED" "$HOSTED_MEMBER_ROOTS" "$HOSTED_PORTFOLIO_MEMBERS" <<'REMOTE_VERIFY'
 set -euo pipefail
 public_host="$1"
 expected_products="$2"
+expected_member_roots="$3"
+expected_portfolio_members="$4"
 node_bin=/opt/kitsoki-hosted-pog/node/current/bin/node
 systemctl is-active --quiet kitsoki-gh-agent caddy kitsoki-pog pog-portal pog-worker-finalizer.timer
 systemctl is-enabled --quiet pog-worker-finalizer.timer
@@ -144,6 +150,12 @@ test -x "$hosted_engine"
 for unit in kitsoki-pog.service pog-portal.service pog-worker-finalizer.service; do
   systemctl show --property Environment --value "$unit" | grep -Fq "POG_KITSOKI_BIN=$hosted_engine"
 done
+test -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
+colony_environment="$(systemctl show --property Environment --value pog-colony-runner.service)"
+grep -Fq 'POG_PORTFOLIO_ROOT=/opt/pog/current' <<<"$colony_environment"
+grep -Fq "POG_MEMBER_ROOTS=$expected_member_roots" <<<"$colony_environment"
+grep -Fq "POG_PORTFOLIO_MEMBERS=$expected_portfolio_members" <<<"$colony_environment"
+grep -Fq "POG_KITSOKI_BIN=$hosted_engine" <<<"$colony_environment"
 test -f /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 grep -Fq "Environment=POG_KITSOKI_BIN=$hosted_engine" /etc/systemd/system/kitsoki-pog.service.d/zz-hosted-engine.conf
 test -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
@@ -320,7 +332,7 @@ for member_entry in "${HOSTED_MEMBERS[@]}"; do
 	printf '%s %s %s\n' "$member_dir" "$member_sha" "$member_id" >>"$local_stage/members.manifest"
 	echo "  federated member $member_id <- $member_root@$member_ref ($member_sha)"
 done
-cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-worker-hosted-engine.conf,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,prune-releases.sh,state-content-digest.mjs} "$local_stage/"
+cp "$ROOT"/deploy/hosted-pog/{Caddyfile,kitsoki-queue-worker-hosted-engine.conf,link-capsule-state.sh,hosted-pog.yaml,import-legacy-worker-ships.sh,install.sh,kitsoki-pog.service,node-runtime.env,pog-capsule-state.service,pog-colony-runner-portfolio.conf,pog-portal.service,pog-worker-finalizer.service,pog-worker-finalizer.timer,prune-releases.sh,state-content-digest.mjs} "$local_stage/"
 # The client secret travels inside the 0700 stage directories (local mktemp,
 # remote install -d) instead of the ssh argv, which would be visible in ps.
 printf '%s\n' "$GH_CLIENT_SECRET" >"$local_stage/gh-client-secret"

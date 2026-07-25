@@ -57,7 +57,7 @@ trap cleanup_incomplete_release EXIT
 [ "$state_mode" = "preserve" ] || [ "$state_mode" = "sync" ] || die "state mode must be preserve or sync"
 public_host="${public_base_url#https://}"
 
-for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
+for file in pog.bundle kitsoki kitsoki-pog.service node-runtime.env pog-capsule-state.service pog-colony-runner-portfolio.conf pog-portal.service pog-worker-finalizer.service pog-worker-finalizer.timer hosted-pog.yaml Caddyfile gh-client-secret link-capsule-state.sh import-legacy-worker-ships.sh prune-releases.sh; do
 	[ -f "$stage/$file" ] || die "staged file is missing: $file"
 done
 github_client_secret="$(tr -d '[:space:]' <"$stage/gh-client-secret")"
@@ -319,6 +319,7 @@ fi
 rendered_config="$stage/hosted-pog.rendered.yaml"
 rendered_caddy="$stage/Caddyfile.rendered"
 rendered_portal_service="$stage/pog-portal.service.rendered"
+rendered_colony_portfolio="$stage/pog-colony-runner-portfolio.conf.rendered"
 sed -e "s|__PUBLIC_BASE_URL__|$public_base_url|g" -e "s|__GITHUB_ADMIN__|$admin|g" -e "s|__GITHUB_CLIENT_ID__|$github_client_id|g" "$stage/hosted-pog.yaml" >"$rendered_config"
 sed -e "s|__PUBLIC_HOST__|$public_host|g" "$stage/Caddyfile" >"$rendered_caddy"
 sed \
@@ -326,6 +327,10 @@ sed \
 	-e "s|__POG_MEMBER_ROOTS__|$member_roots|g" \
 	-e "s|__POG_PORTFOLIO_MEMBERS__|$portfolio_members|g" \
 	"$stage/pog-portal.service" >"$rendered_portal_service"
+sed \
+	-e "s|__POG_MEMBER_ROOTS__|$member_roots|g" \
+	-e "s|__POG_PORTFOLIO_MEMBERS__|$portfolio_members|g" \
+	"$stage/pog-colony-runner-portfolio.conf" >"$rendered_colony_portfolio"
 caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 
 previous_current=""
@@ -383,11 +388,13 @@ previous_portal_service="$stage/pog-portal.service.previous"
 previous_finalizer_service="$stage/pog-worker-finalizer.service.previous"
 previous_finalizer_timer="$stage/pog-worker-finalizer.timer.previous"
 previous_queue_worker_engine="$stage/kitsoki-queue-worker.hosted-engine.conf.previous"
+previous_colony_portfolio="$stage/pog-colony-runner.portfolio-authority.conf.previous"
 had_previous_kitsoki_service=0
 had_previous_portal_service=0
 had_previous_finalizer_service=0
 had_previous_finalizer_timer=0
 had_previous_queue_worker_engine=0
+had_previous_colony_portfolio=0
 if [ -f /etc/systemd/system/kitsoki-pog.service ]; then
 	cp /etc/systemd/system/kitsoki-pog.service "$previous_kitsoki_service"
 	had_previous_kitsoki_service=1
@@ -407,6 +414,10 @@ fi
 if [ -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf ]; then
 	cp /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf "$previous_queue_worker_engine"
 	had_previous_queue_worker_engine=1
+fi
+if [ -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf ]; then
+	cp /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf "$previous_colony_portfolio"
+	had_previous_colony_portfolio=1
 fi
 caddy_changed=0
 services_changed=0
@@ -484,6 +495,12 @@ rollback() {
 				install -m 0644 "$previous_queue_worker_engine" /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
 			else
 				rm -f /etc/systemd/system/kitsoki-queue-worker.service.d/zz-hosted-engine.conf
+			fi
+			if [ "$had_previous_colony_portfolio" -eq 1 ]; then
+				install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
+				install -m 0644 "$previous_colony_portfolio" /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
+			else
+				rm -f /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
 			fi
 			systemctl daemon-reload >/dev/null 2>&1 || true
 		fi
@@ -607,6 +624,7 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 	printf '[Unit]\nRequires=pog-capsule-state.service\nAfter=pog-capsule-state.service\n' \
 		>/etc/systemd/system/pog-colony-runner.service.d/capsule-state.conf
+	install -m 0644 "$rendered_colony_portfolio" /etc/systemd/system/pog-colony-runner.service.d/portfolio-authority.conf
 fi
 if systemctl cat kitsoki-queue-worker.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/kitsoki-queue-worker.service.d
@@ -676,6 +694,15 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf
 	systemctl daemon-reload
 	[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service
+	colony_environment="$(systemctl show --property Environment --value pog-colony-runner.service)"
+	grep -Fq 'POG_PORTFOLIO_ROOT=/opt/pog/current' <<<"$colony_environment" \
+		|| die "colony runner lacks the hosted portfolio root authority"
+	grep -Fq "POG_MEMBER_ROOTS=$member_roots" <<<"$colony_environment" \
+		|| die "colony runner lacks the rendered member-root authority"
+	grep -Fq "POG_PORTFOLIO_MEMBERS=$portfolio_members" <<<"$colony_environment" \
+		|| die "colony runner lacks the rendered portfolio-member authority"
+	grep -Fq "POG_KITSOKI_BIN=$hosted_engine" <<<"$colony_environment" \
+		|| die "colony runner lacks the activated hosted Kitsoki engine"
 fi
 
 [ "$queue_worker_was_active" -eq 0 ] || systemctl restart kitsoki-queue-worker.service

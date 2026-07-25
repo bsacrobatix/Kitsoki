@@ -8,11 +8,14 @@ human-readable upstream is reached. Vite is a build dependency only and must
 never run on the VM. The domain is private as a whole, not merely the new POG
 routes.
 
-The hosted product selector is intentionally limited to two products:
-`pog` and `constructor-studio`. POG's other repository tracks remain visible
-as program/dependency objects in the POG graph, but their sibling catalogs are
-not mounted as additional hosted products. The installer verifies this exact
-product set from the live `/api/catalog` response before activation succeeds.
+The hosted product selector mounts POG, Constructor Studio, and the explicit
+federated member set declared by `scripts/deploy-hosted-pog.sh`. The installer
+renders a single member-root/member-id authority into both the portal service
+and a distinct, non-secret `pog-colony-runner.service` drop-in. That prevents
+colony dispatch from falling back to release-layout sibling guesses while
+leaving its provider, token, Capsule-state, ledger, and POG-root environment
+owned by their existing units and drop-ins. The activated hosted Kitsoki
+engine is also explicit for both services.
 
 Use the versioned assets under [`deploy/hosted-pog/`](../../../deploy/hosted-pog/)
 and the idempotent [`scripts/deploy-hosted-pog.sh`](../../../scripts/deploy-hosted-pog.sh).
@@ -142,16 +145,17 @@ Node archive, and invokes the versioned remote installer. The installer then:
    and `/opt/kitsoki-hosted-pog/releases/<sha>` without replacing the existing
    GitHub agent's `/usr/local/bin/kitsoki`;
 3. runs `npm ci`, the POG typecheck/client build, and the self-contained
-   production-server build before activation; the server artifact receives
-   the explicit `pog,constructor-studio` allowlist, while browser links are
-   built same-origin and only the systemd runtime receives loopback upstreams;
+   production-server build before activation; browser links are built
+   same-origin and only the systemd runtime receives loopback upstreams;
 4. preserves `/var/lib/pog/runtime`, or, with `--sync-local-state`, verifies the
    uploaded snapshot checksum and manifest, builds a conflict-free versioned
    runtime, and atomically moves the runtime symlink;
 5. binds the release's ignored `.artifacts` path to that versioned runtime so
    every portal state reader uses the same durable data;
-6. removes historical sibling discovery, enforces the explicit hosted member
-   allowlist, and verifies the live products are exactly POG and Constructor Studio;
+6. installs the explicit hosted member set under `/opt/pog/members`, renders
+   the same roots and product ids into the portal and colony runner, pins the
+   colony to `/opt/kitsoki-hosted-pog/current/kitsoki`, and verifies the full
+   live product set;
 7. atomically moves the POG, Kitsoki, and Node `current` symlinks to their
    verified releases;
 8. installs and restarts Kitsoki auth/RPC on 7778 and the built POG production

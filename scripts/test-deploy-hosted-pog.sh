@@ -20,6 +20,7 @@ for required in \
   "$assets/pog-portal.service" \
   "$assets/prune-releases.sh" \
 	"$assets/pog-capsule-state.service" \
+	"$assets/pog-colony-runner-portfolio.conf" \
 	"$assets/pog-worker-finalizer.service" \
 	"$assets/pog-worker-finalizer.timer" \
 	"$assets/kitsoki-queue-worker-hosted-engine.conf" \
@@ -65,6 +66,27 @@ grep -q 'POG_GEARS_RUST_SRC=/opt/pog/members/gears-rust' "$assets/install.sh"
 grep -q 'POG_AGENT_RUNNER_DB=/var/lib/kitsoki-pog/sessions.db' "$assets/install.sh"
 grep -q 'KITSOKI_SOURCE_DIR=/opt/kitsoki-src' "$assets/install.sh"
 grep -q "printf 'POG_KITSOKI_BIN=%s.*hosted_engine" "$assets/install.sh"
+# The colony dispatches federation proposals itself. Its non-secret authority
+# is a distinct drop-in rendered from the same roots/member set as the portal;
+# existing secret/provider/state drop-ins remain separately owned.
+grep -q 'Environment=POG_PORTFOLIO_ROOT=/opt/pog/current' "$assets/pog-colony-runner-portfolio.conf"
+grep -q 'Environment=POG_MEMBER_ROOTS=__POG_MEMBER_ROOTS__' "$assets/pog-colony-runner-portfolio.conf"
+grep -q 'Environment=POG_PORTFOLIO_MEMBERS=__POG_PORTFOLIO_MEMBERS__' "$assets/pog-colony-runner-portfolio.conf"
+grep -q 'Environment=POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki' "$assets/pog-colony-runner-portfolio.conf"
+! grep -Eq 'TOKEN|SECRET|EnvironmentFile|UnsetEnvironment' "$assets/pog-colony-runner-portfolio.conf"
+grep -q 'pog-colony-runner-portfolio.conf.rendered' "$assets/install.sh"
+grep -q 'pog-colony-runner.service.d/portfolio-authority.conf' "$assets/install.sh"
+grep -q 'previous_colony_portfolio' "$assets/install.sh"
+grep -q 'colony runner lacks the hosted portfolio root authority' "$assets/install.sh"
+grep -q 'colony runner lacks the rendered member-root authority' "$assets/install.sh"
+grep -q 'colony runner lacks the rendered portfolio-member authority' "$assets/install.sh"
+grep -q 'colony runner lacks the activated hosted Kitsoki engine' "$assets/install.sh"
+grep -q 'pog-colony-runner-portfolio.conf' "$deploy"
+grep -q 'HOSTED_MEMBER_ROOTS=' "$deploy"
+grep -q 'HOSTED_PORTFOLIO_MEMBERS=' "$deploy"
+grep -q 'pog-colony-runner.service.d/portfolio-authority.conf' "$deploy"
+grep -q 'POG_MEMBER_ROOTS=\$expected_member_roots' "$deploy"
+grep -q 'POG_PORTFOLIO_MEMBERS=\$expected_portfolio_members' "$deploy"
 grep -q 'POG_KITSOKI_BROWSER_URL=' "$assets/pog-portal.service"
 grep -q 'Environment=POG_MEMBER_ROOTS=__POG_MEMBER_ROOTS__' "$assets/pog-portal.service"
 grep -q 'Environment=POG_PORTFOLIO_MEMBERS=__POG_PORTFOLIO_MEMBERS__' "$assets/pog-portal.service"
@@ -199,6 +221,19 @@ cleanup() {
   rm -rf -- "$fixture"
 }
 trap cleanup EXIT
+
+# Rendering is deterministic and leaves no unresolved authority placeholder.
+expected_member_roots='Kitsoki=/opt/pog/members/Kitsoki,gears-rust=/opt/pog/members/gears-rust,studio-sassfully=/opt/pog/members/studio-sassfully,slidey=/opt/pog/members/slidey'
+expected_portfolio_members='pog,constructor-studio,kitsoki,gears-rust,sassfully,slidey'
+rendered_colony_portfolio="$fixture/pog-colony-runner-portfolio.conf"
+sed \
+  -e "s|__POG_MEMBER_ROOTS__|$expected_member_roots|g" \
+  -e "s|__POG_PORTFOLIO_MEMBERS__|$expected_portfolio_members|g" \
+  "$assets/pog-colony-runner-portfolio.conf" >"$rendered_colony_portfolio"
+grep -Fq "Environment=POG_MEMBER_ROOTS=$expected_member_roots" "$rendered_colony_portfolio"
+grep -Fq "Environment=POG_PORTFOLIO_MEMBERS=$expected_portfolio_members" "$rendered_colony_portfolio"
+grep -Fq 'Environment=POG_KITSOKI_BIN=/opt/kitsoki-hosted-pog/current/kitsoki' "$rendered_colony_portfolio"
+! grep -q '__POG_' "$rendered_colony_portfolio"
 
 # Release retention is bounded and conservative: current plus two inactive
 # rollback releases survive, older canonical releases are removed, and
