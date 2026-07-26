@@ -183,8 +183,16 @@ func NewWithWatcher(config Config, load Loader, runner Runner, clock Clock, watc
 	if config.TempRoot == "" {
 		config.TempRoot = filepath.Join(repoRoot, ".temp", "application")
 	}
+	config.TempRoot, err = filepath.Abs(config.TempRoot)
+	if err != nil {
+		return nil, fmt.Errorf("application build: resolve temporary root: %w", err)
+	}
 	if config.ArtifactRoot == "" {
 		config.ArtifactRoot = filepath.Join(repoRoot, ".artifacts", "application-builds")
+	}
+	config.ArtifactRoot, err = filepath.Abs(config.ArtifactRoot)
+	if err != nil {
+		return nil, fmt.Errorf("application build: resolve artifact root: %w", err)
 	}
 	if config.BackendURL == "" {
 		config.BackendURL = "http://127.0.0.1:7777"

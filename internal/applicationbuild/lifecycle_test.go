@@ -118,6 +118,51 @@ func TestBuildCreatesContentAddressedManifestAndGeneratedComponentEntry(t *testi
 	}
 }
 
+func TestRelativeLifecycleRootsBecomeAbsoluteBeforeToolWorkingDirectoryChanges(t *testing.T) {
+	projectRoot := t.TempDir()
+	t.Chdir(projectRoot)
+	toolRoot := t.TempDir()
+	storyDir := filepath.Join(projectRoot, "stories", "demo")
+	if err := os.MkdirAll(storyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	storyPath := filepath.Join(storyDir, "app.yaml")
+	if err := os.WriteFile(storyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	manager, err := New(Config{
+		RepoRoot: toolRoot, TempRoot: ".temp/custom", ArtifactRoot: ".artifacts/custom",
+	}, func(string) (*app.AppDef, error) {
+		def := applicationDefinition("")
+		delete(def.Application.Components, "demo.list")
+		return def, nil
+	}, runner, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(manager.config.TempRoot) || !filepath.IsAbs(manager.config.ArtifactRoot) {
+		t.Fatalf("lifecycle roots are not absolute: temp=%q artifact=%q", manager.config.TempRoot, manager.config.ArtifactRoot)
+	}
+	if manager.config.TempRoot != filepath.Join(projectRoot, ".temp", "custom") ||
+		manager.config.ArtifactRoot != filepath.Join(projectRoot, ".artifacts", "custom") {
+		t.Fatalf("relative roots resolved outside caller project: temp=%q artifact=%q", manager.config.TempRoot, manager.config.ArtifactRoot)
+	}
+
+	manifest, err := manager.Build(context.Background(), storyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planPath := runnerPlanPath(t, runner.commands[0])
+	if !filepath.IsAbs(planPath) || !strings.HasPrefix(planPath, manager.config.TempRoot+string(filepath.Separator)) {
+		t.Fatalf("plan path is not rooted in absolute temp root: %q", planPath)
+	}
+	if !filepath.IsAbs(manifest.ArtifactDir) ||
+		!strings.HasPrefix(manifest.ArtifactDir, manager.config.ArtifactRoot+string(filepath.Separator)) {
+		t.Fatalf("artifact path is not rooted in absolute artifact root: %q", manifest.ArtifactDir)
+	}
+}
+
 func TestPrepareLoadsAndDeterministicallyMergesApplicationThemeTokens(t *testing.T) {
 	root := t.TempDir()
 	storyDir := filepath.Join(root, "story")
