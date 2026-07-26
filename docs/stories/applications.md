@@ -342,6 +342,17 @@ external handlers additionally declare `compensation` or
 `compensation_impossible`. Durable replay returns the stored result with a new
 transport-aware receipt and does not repeat the side effect.
 
+When a current frame offers a write/external handler as an application action,
+the service derives a stable action-opportunity key from the application,
+session, actor, action, handler, frame revision, and normalized input. Web,
+VS Code, and TUI renderers therefore do not invent product-specific request
+IDs, and retrying the same offered action through another surface returns a
+replay receipt instead of repeating the effect. An explicit envelope
+`idempotency_key` still takes precedence for headless callers. A handler input
+schema should not require its configured idempotency field solely for an
+interactive action; direct calls can supply either that field or the envelope
+key.
+
 ## Events
 
 Events dispatch the same handler or intent contracts without fabricating a

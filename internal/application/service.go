@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 )
@@ -104,6 +105,17 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 	if s.Registry == nil {
 		return OutcomeEnvelope{}, fmt.Errorf("application: registry is required for handler action %q", action.ID)
 	}
+	handler, ok := s.Registry.Handler(action.Handler)
+	if !ok {
+		return OutcomeEnvelope{}, fmt.Errorf("%w: %q", ErrHandlerNotFound, action.Handler)
+	}
+	if envelope.IdempotencyKey == "" &&
+		(handler.Effect == EffectWrite || handler.Effect == EffectExternal) {
+		envelope.IdempotencyKey, err = actionOpportunityKey(frame, action, envelope)
+		if err != nil {
+			return OutcomeEnvelope{}, err
+		}
+	}
 	routingMode := envelope.RoutingMode
 	if routingMode == "" {
 		routingMode = action.RoutingMode
@@ -126,6 +138,37 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 	}
 	annotateBudgetFrame(&outcome)
 	return outcome, err
+}
+
+func actionOpportunityKey(frame Frame, action Action, envelope ActionEnvelope) (string, error) {
+	inputDigest, err := DigestJSON(envelope.Input)
+	if err != nil {
+		return "", fmt.Errorf("application: action %q idempotency input: %w", action.ID, err)
+	}
+	raw, err := json.Marshal(struct {
+		Schema        string `json:"schema"`
+		ApplicationID string `json:"application_id"`
+		SessionID     string `json:"session_id"`
+		Actor         string `json:"actor"`
+		Action        string `json:"action"`
+		Handler       string `json:"handler"`
+		FrameRevision uint64 `json:"frame_revision"`
+		InputDigest   string `json:"input_digest"`
+	}{
+		Schema:        "application-action-opportunity/v1",
+		ApplicationID: frame.ApplicationID,
+		SessionID:     envelope.SessionID,
+		Actor:         envelope.Actor,
+		Action:        action.ID,
+		Handler:       action.Handler,
+		FrameRevision: envelope.FrameRevision,
+		InputDigest:   inputDigest,
+	})
+	if err != nil {
+		return "", fmt.Errorf("application: encode action opportunity: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("aop_%x", sum[:16]), nil
 }
 
 func CurrentFrameForPage(

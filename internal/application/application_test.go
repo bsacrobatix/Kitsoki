@@ -1324,6 +1324,92 @@ func TestServiceDispatchActionIsMechanicalAndRejectsStaleFrame(t *testing.T) {
 	}
 }
 
+func TestServiceDispatchActionSynthesizesStableCrossSurfaceIdempotency(t *testing.T) {
+	registry := NewRegistry(Dependencies{
+		Schemas: &JSONSchemaValidator{},
+		Replay:  NewMemoryReplayStore(),
+	})
+	def := readDefinition(
+		"test.open",
+		TransportWeb,
+		TransportVSCode,
+		TransportTUI,
+	)
+	def.Effect = EffectWrite
+	def.Idempotency = IdempotencyRequired
+	def.IdempotencyScope = "session"
+	calls := 0
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		calls++
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{"saved":true}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	frames := &staticFrames{frame: testFrame()}
+	service := Service{Registry: registry, Frames: frames}
+	envelope := ActionEnvelope{
+		Action: "test.open", Input: json.RawMessage(`{"id":1}`),
+		SessionID: "session-1", Actor: "operator-1", FrameRevision: 7,
+	}
+
+	first, err := service.DispatchAction(context.Background(), TransportWeb, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := service.DispatchAction(context.Background(), TransportVSCode, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want one action opportunity", calls)
+	}
+	if first.Receipt.IdempotencyKey == "" ||
+		first.Receipt.IdempotencyKey != replay.Receipt.IdempotencyKey {
+		t.Fatalf("idempotency keys = %q, %q", first.Receipt.IdempotencyKey, replay.Receipt.IdempotencyKey)
+	}
+	if replay.Receipt.Transport != TransportVSCode || !replay.Receipt.Replayed ||
+		replay.Receipt.ReplayOf != first.Receipt.ID {
+		t.Fatalf("cross-surface replay receipt = %#v, first = %#v", replay.Receipt, first.Receipt)
+	}
+
+	envelope.Actor = "operator-2"
+	secondActor, err := service.DispatchAction(context.Background(), TransportTUI, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || secondActor.Receipt.IdempotencyKey == first.Receipt.IdempotencyKey {
+		t.Fatalf("actor-scoped opportunity calls=%d receipt=%#v", calls, secondActor.Receipt)
+	}
+}
+
+func TestServiceDispatchActionPreservesExplicitIdempotencyKey(t *testing.T) {
+	registry := NewRegistry(Dependencies{
+		Schemas: &JSONSchemaValidator{},
+		Replay:  NewMemoryReplayStore(),
+	})
+	def := readDefinition("test.open", TransportWeb)
+	def.Effect = EffectExternal
+	def.Idempotency = IdempotencyRequired
+	def.IdempotencyScope = "session"
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Registry: registry, Frames: &staticFrames{frame: testFrame()}}
+	outcome, err := service.DispatchAction(context.Background(), TransportWeb, ActionEnvelope{
+		Action: "test.open", Input: json.RawMessage(`{}`),
+		SessionID: "session-1", Actor: "operator-1", FrameRevision: 7,
+		IdempotencyKey: "caller-owned-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Receipt.IdempotencyKey != "caller-owned-key" {
+		t.Fatalf("idempotency key = %q", outcome.Receipt.IdempotencyKey)
+	}
+}
+
 func TestServiceDispatchActionUsesDeclarativeTargetPageForOutcomeFrame(t *testing.T) {
 	registry := NewRegistry(Dependencies{Schemas: &fakeSchemaValidator{}})
 	if err := registry.RegisterHandler(readDefinition("test.open", TransportWeb), HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {

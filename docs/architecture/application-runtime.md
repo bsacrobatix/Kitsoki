@@ -86,6 +86,10 @@ Handlers enforce `session: none|required|create`. Write and external handlers
 apply declared idempotency scope; replays return the stored outcome with a new
 transport-aware receipt and never reinvoke behavior. Retryable external
 handlers must declare compensation or an explicit impossibility reason.
+Handler-backed application actions acquire a deterministic, actor-scoped
+action-opportunity key from the current frame revision and normalized input
+when the envelope does not already carry a key. This keeps renderer retries
+mechanical and idempotency authority out of product components.
 
 Events enter the same registry through `DispatchEvent`. A target may be an
 exported handler or a story intent. Background events are submitted to the
