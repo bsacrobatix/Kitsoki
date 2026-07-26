@@ -435,6 +435,12 @@ provisioning fields (`token_env`, `image`, `size`, `region`, optional
 `vpc_uuid`/`ssh_key_ids`/`max_concurrent`) and the shared `source_bucket`
 transport, the block declares the worker's agent surface:
 
+- Hosted deployments may replace static `image` with an absolute
+  `image_pointer` plus `image_pointer_environment`. The root-owned pointer is
+  resolved independently for every new lease and fails closed without a
+  static fallback. See
+  [External worker-image pointer](../../architecture/external-worker-image-pointer.md).
+
 - `user:` runs the worker service as that pre-existing image user (systemd
   `User=`) so credentials the image bakes for it — agent CLI auth state,
   HOME-relative config — are usable by story steps. The generated unit also

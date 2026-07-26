@@ -85,6 +85,41 @@ func TestVmpStatusRendersWorkersFromSeededStore(t *testing.T) {
 	require.Empty(t, got.Reconcile.Lost)
 }
 
+func TestVmpStatusExposesExternalImagePointerConfig(t *testing.T) {
+	dir := t.TempDir()
+	fake := vmpool.NewFake()
+	vmpWithFakeProvisioner(t, fake)
+
+	out, err := runVmp(t,
+		"status", "--project", dir, "--json",
+		"--image-pointer", "/etc/kitsoki/worker-image.json",
+		"--image-pointer-environment", "production",
+	)
+	require.NoError(t, err)
+	var got vmpoolStatusOutput
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Empty(t, got.Config.Image)
+	require.Equal(t, "/etc/kitsoki/worker-image.json", got.Config.ImagePointerPath)
+	require.Equal(t, "production", got.Config.ImagePointerEnvironment)
+}
+
+func TestVmpCommandsRejectAmbiguousOrIncompleteImagePointerFlags(t *testing.T) {
+	fake := vmpool.NewFake()
+	vmpWithFakeProvisioner(t, fake)
+	project := t.TempDir()
+	cases := [][]string{
+		{"status", "--project", project, "--image", "100", "--image-pointer", "/etc/kitsoki/worker-image.json", "--image-pointer-environment", "production"},
+		{"status", "--project", project, "--image-pointer", "relative.json", "--image-pointer-environment", "production"},
+		{"status", "--project", project, "--image-pointer", "/etc/kitsoki/worker-image.json"},
+		{"status", "--project", project, "--image-pointer-environment", "production"},
+	}
+	for _, args := range cases {
+		if _, err := runVmp(t, args...); err == nil {
+			t.Fatalf("args %v unexpectedly accepted", args)
+		}
+	}
+}
+
 func TestVmpStatusHumanOutputListsWorkerLine(t *testing.T) {
 	dir := t.TempDir()
 	fake := vmpool.NewFake()

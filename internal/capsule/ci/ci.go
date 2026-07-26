@@ -225,13 +225,19 @@ type Remote struct {
 // valid checked-in state) and instead fails fast at executor-selection/Run
 // time with a clear error, before any lease is attempted.
 type PoolExecutor struct {
-	TokenEnv      string   `yaml:"token_env" json:"token_env"`
-	Image         string   `yaml:"image,omitempty" json:"image,omitempty"`
-	Size          string   `yaml:"size" json:"size"`
-	Region        string   `yaml:"region" json:"region"`
-	VPCUUID       string   `yaml:"vpc_uuid,omitempty" json:"vpc_uuid,omitempty"`
-	SSHKeyIDs     []string `yaml:"ssh_key_ids,omitempty" json:"ssh_key_ids,omitempty"`
-	MaxConcurrent int      `yaml:"max_concurrent,omitempty" json:"max_concurrent,omitempty"`
+	TokenEnv string `yaml:"token_env" json:"token_env"`
+	Image    string `yaml:"image,omitempty" json:"image,omitempty"`
+	// ImagePointer is the absolute root-owned image selection file consumed
+	// at every lease. PointerEnvironment is required with it and prevents
+	// cross-environment image activation. Image and ImagePointer are
+	// mutually exclusive.
+	ImagePointer            string   `yaml:"image_pointer,omitempty" json:"image_pointer,omitempty"`
+	ImagePointerEnvironment string   `yaml:"image_pointer_environment,omitempty" json:"image_pointer_environment,omitempty"`
+	Size                    string   `yaml:"size" json:"size"`
+	Region                  string   `yaml:"region" json:"region"`
+	VPCUUID                 string   `yaml:"vpc_uuid,omitempty" json:"vpc_uuid,omitempty"`
+	SSHKeyIDs               []string `yaml:"ssh_key_ids,omitempty" json:"ssh_key_ids,omitempty"`
+	MaxConcurrent           int      `yaml:"max_concurrent,omitempty" json:"max_concurrent,omitempty"`
 	// SourceBucket, when set, mediates source transport to the leased worker
 	// through shared object storage the same way Remote.SourceBucket does
 	// for a fixed endpoint, and also configures the worker's output mirror
@@ -1263,6 +1269,19 @@ func validatePoolExecutor(name string, pool PoolExecutor) error {
 	if strings.TrimSpace(pool.Region) == "" {
 		return fmt.Errorf("capsule ci remote %q: pool region is required", name)
 	}
+	if pool.Image != "" && pool.ImagePointer != "" {
+		return fmt.Errorf("capsule ci remote %q: pool image and image_pointer are mutually exclusive", name)
+	}
+	if pool.ImagePointer != "" {
+		if !filepath.IsAbs(pool.ImagePointer) {
+			return fmt.Errorf("capsule ci remote %q: pool image_pointer must be an absolute path", name)
+		}
+		if !environmentPatternForConfig(pool.ImagePointerEnvironment) {
+			return fmt.Errorf("capsule ci remote %q: pool image_pointer_environment is required and must be a lowercase environment name", name)
+		}
+	} else if pool.ImagePointerEnvironment != "" {
+		return fmt.Errorf("capsule ci remote %q: pool image_pointer_environment requires image_pointer", name)
+	}
 	if pool.MaxConcurrent < 0 {
 		return fmt.Errorf("capsule ci remote %q: pool max_concurrent must be >= 0", name)
 	}
@@ -1297,6 +1316,19 @@ func validatePoolExecutor(name string, pool PoolExecutor) error {
 		return fmt.Errorf("capsule ci remote %q: pool preserve_failed_ttl must not be negative", name)
 	}
 	return nil
+}
+
+func environmentPatternForConfig(value string) bool {
+	if value == "" || len(value) > 63 || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for _, r := range value[1:] {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validEnvName(name string) bool {

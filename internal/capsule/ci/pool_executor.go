@@ -106,8 +106,11 @@ func newPoolProvider(name string, cfg PoolExecutor, source executor.SourceBundle
 }
 
 func newPoolProviderWithPoolStateRoot(name string, cfg PoolExecutor, source executor.SourceBundler, projectRoot, poolStateRoot string) (executor.Provider, error) {
-	if strings.TrimSpace(cfg.Image) == "" {
-		return nil, fmt.Errorf("capsule ci: pool executor %q: image is required", name)
+	if strings.TrimSpace(cfg.Image) == "" && strings.TrimSpace(cfg.ImagePointer) == "" {
+		return nil, fmt.Errorf("capsule ci: pool executor %q: image or image_pointer is required", name)
+	}
+	if cfg.Image != "" && cfg.ImagePointer != "" {
+		return nil, fmt.Errorf("capsule ci: pool executor %q: image and image_pointer are mutually exclusive", name)
 	}
 	return &poolProvider{name: name, cfg: cfg, projectRoot: projectRoot, poolStateRoot: poolStateRoot, source: source, prepared: map[string]executor.Prepared{}}, nil
 }
@@ -192,12 +195,14 @@ func (p *poolProvider) buildPool() (*vmpool.Pool, error) {
 		Store:       &vmpool.Store{ProjectRoot: root, LockWait: ciVMPoolStoreLockWait},
 		Provisioner: provisioner,
 		Config: vmpool.Config{
-			MaxConcurrent: p.cfg.MaxConcurrent,
-			Region:        p.cfg.Region,
-			Size:          p.cfg.Size,
-			Image:         p.cfg.Image,
-			VPCUUID:       p.cfg.VPCUUID,
-			SSHKeyIDs:     append([]string(nil), p.cfg.SSHKeyIDs...),
+			MaxConcurrent:           p.cfg.MaxConcurrent,
+			Region:                  p.cfg.Region,
+			Size:                    p.cfg.Size,
+			Image:                   p.cfg.Image,
+			ImagePointerPath:        p.cfg.ImagePointer,
+			ImagePointerEnvironment: p.cfg.ImagePointerEnvironment,
+			VPCUUID:                 p.cfg.VPCUUID,
+			SSHKeyIDs:               append([]string(nil), p.cfg.SSHKeyIDs...),
 			// POG fix: these were unset (zero), so timeoutReason() treated every
 			// freshly-created worker as instantly "provisioning timed out" and the
 			// reconcile destroyed it mid-boot. Budgets exceed the 3h pog-bugfix

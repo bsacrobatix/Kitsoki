@@ -34,19 +34,27 @@ func (s Status) Terminal() bool { return s == StatusDestroyed || s == StatusFail
 
 // Worker is the durable pool record for one ephemeral VM.
 type Worker struct {
-	ID             string    `json:"id"`
-	JobID          string    `json:"job_id"`
-	InstanceID     string    `json:"instance_id,omitempty"`
-	InstanceName   string    `json:"instance_name"`
-	Status         Status    `json:"status"`
-	PublicIP       string    `json:"public_ip,omitempty"`
-	PrivateIP      string    `json:"private_ip,omitempty"`
-	Image          string    `json:"image"`
-	CreatedAt      time.Time `json:"created_at"`
-	ReadyAt        time.Time `json:"ready_at,omitzero"`
-	LastActivityAt time.Time `json:"last_activity_at,omitzero"`
-	TerminalAt     time.Time `json:"terminal_at,omitzero"`
-	Error          string    `json:"error,omitempty"`
+	ID           string `json:"id"`
+	JobID        string `json:"job_id"`
+	InstanceID   string `json:"instance_id,omitempty"`
+	InstanceName string `json:"instance_name"`
+	Status       Status `json:"status"`
+	PublicIP     string `json:"public_ip,omitempty"`
+	PrivateIP    string `json:"private_ip,omitempty"`
+	Image        string `json:"image"`
+	// ImageGeneration and the accompanying identity fields bind this worker
+	// to the exact external image-pointer snapshot resolved before its
+	// durable record was created. They remain zero for legacy static-image
+	// configuration.
+	ImageGeneration  uint64    `json:"image_generation,omitempty"`
+	ImageDigest      string    `json:"image_digest,omitempty"`
+	ImageSourceSHA   string    `json:"image_source_sha,omitempty"`
+	ImageEnvironment string    `json:"image_environment,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	ReadyAt          time.Time `json:"ready_at,omitzero"`
+	LastActivityAt   time.Time `json:"last_activity_at,omitzero"`
+	TerminalAt       time.Time `json:"terminal_at,omitzero"`
+	Error            string    `json:"error,omitempty"`
 	// Preserved marks a failed worker whose instance was deliberately kept
 	// running for post-mortem; Reconcile treats it as known, not orphaned,
 	// until an explicit Release.
@@ -98,17 +106,24 @@ type Provisioner interface {
 // region sgp1 (co-located with the kitsoki-test Spaces bucket) and 16 GB
 // workers to start.
 type Config struct {
-	Tag              string        `yaml:"tag" json:"tag"`
-	NamePrefix       string        `yaml:"name_prefix" json:"name_prefix"`
-	MaxConcurrent    int           `yaml:"max_concurrent" json:"max_concurrent"`
-	Region           string        `yaml:"region" json:"region"`
-	Size             string        `yaml:"size" json:"size"`
-	Image            string        `yaml:"image" json:"image"`
-	VPCUUID          string        `yaml:"vpc_uuid,omitempty" json:"vpc_uuid,omitempty"`
-	SSHKeyIDs        []string      `yaml:"ssh_key_ids,omitempty" json:"ssh_key_ids,omitempty"`
-	ProvisionTimeout time.Duration `yaml:"provision_timeout" json:"provision_timeout"`
-	ActivityTimeout  time.Duration `yaml:"activity_timeout" json:"activity_timeout"`
-	MaxLifetime      time.Duration `yaml:"max_lifetime" json:"max_lifetime"`
+	Tag           string `yaml:"tag" json:"tag"`
+	NamePrefix    string `yaml:"name_prefix" json:"name_prefix"`
+	MaxConcurrent int    `yaml:"max_concurrent" json:"max_concurrent"`
+	Region        string `yaml:"region" json:"region"`
+	Size          string `yaml:"size" json:"size"`
+	Image         string `yaml:"image" json:"image"`
+	// ImagePointerPath selects a root-owned external image pointer at every
+	// Acquire. It is mutually exclusive with Image and fails closed: there
+	// is no static-image fallback when the pointer cannot be loaded.
+	ImagePointerPath string `yaml:"image_pointer,omitempty" json:"image_pointer,omitempty"`
+	// ImagePointerEnvironment prevents an environment from consuming a
+	// valid pointer intended for another deployment target.
+	ImagePointerEnvironment string        `yaml:"image_pointer_environment,omitempty" json:"image_pointer_environment,omitempty"`
+	VPCUUID                 string        `yaml:"vpc_uuid,omitempty" json:"vpc_uuid,omitempty"`
+	SSHKeyIDs               []string      `yaml:"ssh_key_ids,omitempty" json:"ssh_key_ids,omitempty"`
+	ProvisionTimeout        time.Duration `yaml:"provision_timeout" json:"provision_timeout"`
+	ActivityTimeout         time.Duration `yaml:"activity_timeout" json:"activity_timeout"`
+	MaxLifetime             time.Duration `yaml:"max_lifetime" json:"max_lifetime"`
 	// PreserveFailedTTL bounds how long a PreserveFailed worker's instance
 	// survives before Reconcile treats it as reapable instead of protected.
 	// Without this bound a preserved instance is terminal (Poll never

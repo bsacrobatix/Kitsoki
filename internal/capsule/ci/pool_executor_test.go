@@ -49,6 +49,30 @@ pool:
 	}
 }
 
+func TestPoolExecutorConfigParsesExternalImagePointer(t *testing.T) {
+	raw := []byte(`
+pool:
+  token_env: DO_POOL_TEST_TOKEN
+  image_pointer: /etc/kitsoki/worker-image.json
+  image_pointer_environment: production
+  size: m-2vcpu-16gb
+  region: sgp1
+`)
+	var remote Remote
+	if err := yaml.Unmarshal(raw, &remote); err != nil {
+		t.Fatal(err)
+	}
+	if remote.Pool == nil {
+		t.Fatal("expected pool block")
+	}
+	if err := validatePoolExecutor("vm-pool", *remote.Pool); err != nil {
+		t.Fatalf("valid pointer pool rejected: %v", err)
+	}
+	if remote.Pool.ImagePointer != "/etc/kitsoki/worker-image.json" || remote.Pool.ImagePointerEnvironment != "production" {
+		t.Fatalf("pool=%#v", remote.Pool)
+	}
+}
+
 func TestPoolExecutorConfigParsesPreflightKeys(t *testing.T) {
 	raw := []byte(`
 pool:
@@ -138,6 +162,41 @@ func TestValidatePoolExecutorAllowsEmptyImage(t *testing.T) {
 	pool := PoolExecutor{TokenEnv: "DO_TOKEN", Size: "s-1vcpu-1gb", Region: "sgp1"}
 	if err := validatePoolExecutor("vm-pool", pool); err != nil {
 		t.Fatalf("empty image should validate cleanly, got %v", err)
+	}
+}
+
+func TestValidatePoolExecutorRejectsAmbiguousOrIncompletePointer(t *testing.T) {
+	base := PoolExecutor{TokenEnv: "DO_TOKEN", Size: "s-1vcpu-1gb", Region: "sgp1"}
+	cases := []struct {
+		name string
+		edit func(*PoolExecutor)
+		want string
+	}{
+		{name: "both", edit: func(p *PoolExecutor) {
+			p.Image = "123"
+			p.ImagePointer = "/etc/kitsoki/worker-image.json"
+			p.ImagePointerEnvironment = "production"
+		}, want: "mutually exclusive"},
+		{name: "relative", edit: func(p *PoolExecutor) {
+			p.ImagePointer = "worker-image.json"
+			p.ImagePointerEnvironment = "production"
+		}, want: "absolute"},
+		{name: "missing environment", edit: func(p *PoolExecutor) {
+			p.ImagePointer = "/etc/kitsoki/worker-image.json"
+		}, want: "image_pointer_environment"},
+		{name: "environment without pointer", edit: func(p *PoolExecutor) {
+			p.ImagePointerEnvironment = "production"
+		}, want: "requires image_pointer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.edit(&cfg)
+			err := validatePoolExecutor("vm-pool", cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error=%v, want substring %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -258,8 +317,35 @@ func TestConfiguredExecutorsSelectPoolRequiresImage(t *testing.T) {
 		},
 	}
 	_, err := executors.Select(context.Background(), "vm-pool")
-	if err == nil || !strings.Contains(err.Error(), "image is required") {
+	if err == nil || !strings.Contains(err.Error(), "image or image_pointer is required") {
 		t.Fatalf("expected image-required rejection, got %v", err)
+	}
+}
+
+func TestConfiguredExecutorsSelectPoolAcceptsExternalImagePointer(t *testing.T) {
+	executors := ConfiguredExecutors{
+		Builtins: NewBuiltinExecutors(),
+		Remotes: map[string]Remote{
+			"vm-pool": {Pool: &PoolExecutor{
+				TokenEnv: "DO_TOKEN", ImagePointer: "/etc/kitsoki/worker-image.json",
+				ImagePointerEnvironment: "production", Size: "s-1vcpu-1gb", Region: "sgp1",
+			}},
+		},
+	}
+	provider, err := executors.Select(context.Background(), "vm-pool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := provider.(*poolProvider)
+	orig := ciVMPoolNewProvisioner
+	ciVMPoolNewProvisioner = func(string) (vmpool.Provisioner, error) { return vmpool.NewFake(), nil }
+	t.Cleanup(func() { ciVMPoolNewProvisioner = orig })
+	built, err := pool.buildPool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if built.Config.Image != "" || built.Config.ImagePointerPath != "/etc/kitsoki/worker-image.json" || built.Config.ImagePointerEnvironment != "production" {
+		t.Fatalf("pool config=%#v", built.Config)
 	}
 }
 

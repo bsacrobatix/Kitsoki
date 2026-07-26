@@ -124,6 +124,8 @@ type vmpoolConfigFlags struct {
 	region           string
 	size             string
 	image            string
+	imagePointer     string
+	imageEnvironment string
 	vpcUUID          string
 	sshKeyIDs        []string
 	provisionTimeout time.Duration
@@ -138,6 +140,8 @@ func addVMPoolConfigFlags(cmd *cobra.Command, f *vmpoolConfigFlags) {
 	cmd.Flags().StringVar(&f.region, "region", "", "DO region slug (default "+vmpool.DefaultRegion+")")
 	cmd.Flags().StringVar(&f.size, "size", "", "DO droplet size slug (default "+vmpool.DefaultSize+")")
 	cmd.Flags().StringVar(&f.image, "image", "", "worker base image: snapshot name/ID or distribution slug")
+	cmd.Flags().StringVar(&f.imagePointer, "image-pointer", "", "absolute root-owned external worker image pointer (mutually exclusive with --image)")
+	cmd.Flags().StringVar(&f.imageEnvironment, "image-pointer-environment", "", "required environment identity when --image-pointer is set")
 	cmd.Flags().StringVar(&f.vpcUUID, "vpc-uuid", "", "DO VPC UUID")
 	cmd.Flags().StringSliceVar(&f.sshKeyIDs, "ssh-key-id", nil, "DO SSH key id installed on new worker instances (repeatable)")
 	cmd.Flags().DurationVar(&f.provisionTimeout, "provision-timeout", 0, fmt.Sprintf("provisioning timeout (default %s)", vmpool.DefaultProvisionTimeout))
@@ -147,17 +151,19 @@ func addVMPoolConfigFlags(cmd *cobra.Command, f *vmpoolConfigFlags) {
 
 func (f vmpoolConfigFlags) config() vmpool.Config {
 	return vmpool.Config{
-		Tag:              f.tag,
-		NamePrefix:       f.namePrefix,
-		MaxConcurrent:    f.maxConcurrent,
-		Region:           f.region,
-		Size:             f.size,
-		Image:            f.image,
-		VPCUUID:          f.vpcUUID,
-		SSHKeyIDs:        f.sshKeyIDs,
-		ProvisionTimeout: f.provisionTimeout,
-		ActivityTimeout:  f.activityTimeout,
-		MaxLifetime:      f.maxLifetime,
+		Tag:                     f.tag,
+		NamePrefix:              f.namePrefix,
+		MaxConcurrent:           f.maxConcurrent,
+		Region:                  f.region,
+		Size:                    f.size,
+		Image:                   f.image,
+		ImagePointerPath:        f.imagePointer,
+		ImagePointerEnvironment: f.imageEnvironment,
+		VPCUUID:                 f.vpcUUID,
+		SSHKeyIDs:               f.sshKeyIDs,
+		ProvisionTimeout:        f.provisionTimeout,
+		ActivityTimeout:         f.activityTimeout,
+		MaxLifetime:             f.maxLifetime,
 	}.WithDefaults()
 }
 
@@ -226,6 +232,20 @@ func vmpoolSmokeCmd() *cobra.Command {
 // vmpoolBuildPool resolves the Provisioner and assembles a Pool over the
 // durable store at common.project.
 func vmpoolBuildPool(common vmpoolCommonFlags, cfg vmpoolConfigFlags) (*vmpool.Pool, error) {
+	effective := cfg.config()
+	if effective.Image != "" && effective.ImagePointerPath != "" {
+		return nil, fmt.Errorf("vmpool: --image and --image-pointer are mutually exclusive")
+	}
+	if effective.ImagePointerPath != "" {
+		if !filepath.IsAbs(effective.ImagePointerPath) {
+			return nil, fmt.Errorf("vmpool: --image-pointer must be an absolute path")
+		}
+		if effective.ImagePointerEnvironment == "" {
+			return nil, fmt.Errorf("vmpool: --image-pointer-environment is required with --image-pointer")
+		}
+	} else if effective.ImagePointerEnvironment != "" {
+		return nil, fmt.Errorf("vmpool: --image-pointer-environment requires --image-pointer")
+	}
 	prov, err := vmpoolNewProvisioner(common.tokenEnv)
 	if err != nil {
 		return nil, err
@@ -233,7 +253,7 @@ func vmpoolBuildPool(common vmpoolCommonFlags, cfg vmpoolConfigFlags) (*vmpool.P
 	return &vmpool.Pool{
 		Store:       &vmpool.Store{ProjectRoot: common.project},
 		Provisioner: prov,
-		Config:      cfg.config(),
+		Config:      effective,
 	}, nil
 }
 

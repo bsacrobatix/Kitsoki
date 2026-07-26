@@ -53,6 +53,10 @@ type Pool struct {
 	Provisioner Provisioner
 	Config      Config
 
+	// ImagePointerLoader overrides strict root-owned pointer loading in
+	// deterministic tests. Nil uses LoadWorkerImagePointer.
+	ImagePointerLoader func(string) (ImagePointer, error)
+
 	// Now, when set, overrides time.Now for deterministic tests.
 	Now func() time.Time
 
@@ -122,16 +126,45 @@ func (p *Pool) Acquire(ctx context.Context, jobID string) (Worker, error) {
 		return Worker{}, fmt.Errorf("vmpool: job id is required")
 	}
 	cfg := p.config()
+	image := cfg.Image
+	var imagePointer ImagePointer
+	if cfg.ImagePointerPath != "" {
+		if strings.TrimSpace(cfg.Image) != "" {
+			return Worker{}, fmt.Errorf("vmpool: image and image_pointer are mutually exclusive")
+		}
+		if cfg.ImagePointerEnvironment == "" {
+			return Worker{}, fmt.Errorf("vmpool: image_pointer_environment is required with image_pointer")
+		}
+		loader := p.ImagePointerLoader
+		if loader == nil {
+			loader = LoadWorkerImagePointer
+		}
+		var err error
+		imagePointer, err = loader(cfg.ImagePointerPath)
+		if err != nil {
+			return Worker{}, fmt.Errorf("vmpool: resolve worker image: %w", err)
+		}
+		if imagePointer.Environment != cfg.ImagePointerEnvironment {
+			return Worker{}, fmt.Errorf("vmpool: worker image pointer environment %q, want %q", imagePointer.Environment, cfg.ImagePointerEnvironment)
+		}
+		image = imagePointer.ImageID
+	} else if cfg.ImagePointerEnvironment != "" {
+		return Worker{}, fmt.Errorf("vmpool: image_pointer_environment requires image_pointer")
+	}
 	id := workerID(jobID)
 	created := p.now()
 
 	worker := Worker{
-		ID:           id,
-		JobID:        jobID,
-		InstanceName: cfg.NamePrefix + jobID,
-		Status:       StatusCreating,
-		Image:        cfg.Image,
-		CreatedAt:    created,
+		ID:               id,
+		JobID:            jobID,
+		InstanceName:     cfg.NamePrefix + jobID,
+		Status:           StatusCreating,
+		Image:            image,
+		ImageGeneration:  imagePointer.Generation,
+		ImageDigest:      imagePointer.ImageDigest,
+		ImageSourceSHA:   imagePointer.SourceSHA,
+		ImageEnvironment: imagePointer.Environment,
+		CreatedAt:        created,
 	}
 
 	if err := p.Store.Update(func(state *State) error {
@@ -164,7 +197,7 @@ func (p *Pool) Acquire(ctx context.Context, jobID string) (Worker, error) {
 		Name:      worker.InstanceName,
 		Region:    cfg.Region,
 		Size:      cfg.Size,
-		Image:     cfg.Image,
+		Image:     image,
 		VPCUUID:   cfg.VPCUUID,
 		UserData:  userData,
 		SSHKeyIDs: cfg.SSHKeyIDs,
