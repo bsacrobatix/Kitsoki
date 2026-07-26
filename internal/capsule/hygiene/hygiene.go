@@ -809,6 +809,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 		now = opts.Now().UTC()
 	}
 	activity := deferredWorkspaceActivity()
+	legacyRefs := &legacyMergeRefIndex{}
 	type inspection struct {
 		candidate Candidate
 		err       error
@@ -832,7 +833,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 						return
 					}
 					in, found := byPath[path]
-					candidate, inspectErr := inspectWorkspace(inspectCtx, root, path, maybeInstance(in, found), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
+					candidate, inspectErr := inspectWorkspace(inspectCtx, root, path, maybeInstance(in, found), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge, legacyRefs)
 					select {
 					case results <- inspection{candidate: candidate, err: inspectErr}:
 					case <-inspectCtx.Done():
@@ -879,7 +880,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 	return out, nil
 }
 
-func inspectWorkspace(ctx context.Context, root, path string, in *control.Instance, current string, pinned map[string]bool, now time.Time, minAge time.Duration, activity WorkspaceActivity, measureBytes, clearInactiveMerged, allowReceiptBoundClosedPurge bool) (Candidate, error) {
+func inspectWorkspace(ctx context.Context, root, path string, in *control.Instance, current string, pinned map[string]bool, now time.Time, minAge time.Duration, activity WorkspaceActivity, measureBytes, clearInactiveMerged, allowReceiptBoundClosedPurge bool, legacyRefs *legacyMergeRefIndex) (Candidate, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Candidate{}, err
@@ -922,7 +923,7 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 	}
 	_, sentinelErr := os.Stat(filepath.Join(path, workspaceSentinel))
 	candidate.Managed = in != nil && sentinelErr == nil
-	legacy, legacyRecognized, legacyErr := readLegacyWorkspace(ctx, root, path)
+	legacy, legacyRecognized, legacyErr := readLegacyWorkspaceWithMergeRefs(ctx, root, path, legacyRefs)
 	if in == nil && legacyRecognized {
 		candidate.Legacy = true
 		candidate.Managed = legacyErr == nil
@@ -1064,6 +1065,10 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 	return readLegacyWorkspaceWithAuthority(ctx, root, path, false)
 }
 
+func readLegacyWorkspaceWithMergeRefs(ctx context.Context, root, path string, refs *legacyMergeRefIndex) (legacyWorkspace, bool, error) {
+	return readLegacyWorkspaceWithAuthorityAndMergeRefs(ctx, root, path, false, refs)
+}
+
 // readLegacyWorkspaceWithReceiptlessClosedAuthority is intentionally private
 // to the retention migrator. It accepts an old closed quarantine whose source
 // checkout has gone away only after the migrator proves its exact recovery ref
@@ -1073,6 +1078,10 @@ func readLegacyWorkspaceWithReceiptlessClosedAuthority(ctx context.Context, root
 }
 
 func readLegacyWorkspaceWithAuthority(ctx context.Context, root, path string, allowReceiptlessClosedAuthority bool) (legacyWorkspace, bool, error) {
+	return readLegacyWorkspaceWithAuthorityAndMergeRefs(ctx, root, path, allowReceiptlessClosedAuthority, nil)
+}
+
+func readLegacyWorkspaceWithAuthorityAndMergeRefs(ctx context.Context, root, path string, allowReceiptlessClosedAuthority bool, refs *legacyMergeRefIndex) (legacyWorkspace, bool, error) {
 	if !legacyWorkspaceMarker(path) {
 		return legacyWorkspace{}, false, nil
 	}
@@ -1159,7 +1168,7 @@ func readLegacyWorkspaceWithAuthority(ctx context.Context, root, path string, al
 		merged = true
 	} else {
 		var mergedTarget string
-		merged, mergedTarget, err = gitMergedIntoAnyBranch(ctx, root, head, clone.Target)
+		merged, mergedTarget, err = gitMergedIntoAnyBranch(ctx, root, head, clone.Target, refs)
 		if err != nil {
 			return invalid("verify branch containment: %v", err)
 		}
@@ -1216,35 +1225,74 @@ func validateClosedWorkspaceProjectAuthority(ctx context.Context, root, path, id
 	return validateReceiptRecoveryRef(ctx, canonicalProject, path, receipt)
 }
 
-// gitMergedIntoAnyBranch proves that a legacy capsule can be reconstructed
-// from a branch already known to the source repository. Prefer its declared
-// target for stable reporting, then accept any local or remote branch that
-// contains the exact capsule HEAD.
-func gitMergedIntoAnyBranch(ctx context.Context, repo, head, declaredTarget string) (bool, string, error) {
-	refs := []string{}
-	if strings.TrimSpace(declaredTarget) != "" {
-		refs = append(refs, "refs/heads/"+declaredTarget)
+// legacyMergeRefIndex shares the repository-wide fallback ref inventory among
+// concurrent legacy workspace inspections. An index is deliberately scoped to
+// one BuildPlan root: it only avoids repeated discovery, never an ancestry
+// proof. Failed or cancelled discovery is not cached so a later inspection can
+// still report its real Git error.
+type legacyMergeRefIndex struct {
+	mu     sync.Mutex
+	refs   []string
+	loaded bool
+}
+
+func (index *legacyMergeRefIndex) fallbackRefs(ctx context.Context, repo string) ([]string, error) {
+	if index == nil {
+		return listLegacyMergeFallbackRefs(ctx, repo)
 	}
+	index.mu.Lock()
+	defer index.mu.Unlock()
+	if index.loaded {
+		return index.refs, nil
+	}
+	refs, err := listLegacyMergeFallbackRefs(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	index.refs = refs
+	index.loaded = true
+	return index.refs, nil
+}
+
+func listLegacyMergeFallbackRefs(ctx context.Context, repo string) ([]string, error) {
 	all, err := gitText(ctx, repo, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
 	if err != nil {
-		return false, "", err
+		return nil, err
 	}
+	refs := make([]string, 0, len(strings.Fields(all)))
 	for _, ref := range strings.Fields(all) {
-		if ref == "refs/remotes/origin/HEAD" {
-			continue
-		}
-		seen := false
-		for _, candidate := range refs {
-			if candidate == ref {
-				seen = true
-				break
-			}
-		}
-		if !seen {
+		if ref != "refs/remotes/origin/HEAD" {
 			refs = append(refs, ref)
 		}
 	}
+	return refs, nil
+}
+
+// gitMergedIntoAnyBranch proves that a legacy capsule can be reconstructed
+// from a branch already known to the source repository. It checks the declared
+// target before discovering fallback refs; that preserves the prior preferred
+// order while avoiding a repository-wide ref scan for the common case. The
+// fallback still checks every local and remote ref against the exact HEAD.
+func gitMergedIntoAnyBranch(ctx context.Context, repo, head, declaredTarget string, index *legacyMergeRefIndex) (bool, string, error) {
+	declaredRef := ""
+	if strings.TrimSpace(declaredTarget) != "" {
+		declaredRef = "refs/heads/" + declaredTarget
+		merged, err := gitAncestor(ctx, repo, head, declaredRef)
+		if err != nil {
+			return false, "", err
+		}
+		if merged {
+			return true, declaredTarget, nil
+		}
+	}
+	refs, err := index.fallbackRefs(ctx, repo)
+	if err != nil {
+		return false, "", err
+	}
 	for _, ref := range refs {
+		if ref == declaredRef {
+			continue
+		}
 		merged, ancestorErr := gitAncestor(ctx, repo, head, ref)
 		if ancestorErr != nil {
 			return false, "", ancestorErr
@@ -1849,7 +1897,7 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 		if opts.Now != nil {
 			now = opts.Now().UTC()
 		}
-		fresh, inspectErr := inspectWorkspace(ctx, root, path, nil, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
+		fresh, inspectErr := inspectWorkspace(ctx, root, path, nil, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge, nil)
 		if inspectErr != nil {
 			return planned, false, inspectErr
 		}
@@ -1883,7 +1931,7 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 	if activityErr != nil {
 		return planned, false, activityErr
 	}
-	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
+	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge, nil)
 	if err != nil {
 		return planned, false, err
 	}

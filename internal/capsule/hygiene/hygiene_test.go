@@ -1193,6 +1193,109 @@ func TestBuildPlanAdoptsOnlyInactiveCleanMergedLegacyWorkspace(t *testing.T) {
 	assertWorkspaceCandidate(t, plan, "legacy-invalid", false, "metadata is invalid")
 }
 
+func TestBuildPlanLegacyDeclaredTargetAvoidsFallbackRefInventory(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Now().UTC()
+	for index := 0; index < workspaceInspectors*2; index++ {
+		writeLegacyWorkspace(t, root, fmt.Sprintf("legacy-declared-%02d", index), now, false, false)
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	countPath := filepath.Join(t.TempDir(), "fallback-ref-count")
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "git")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nif [ \"$1\" = for-each-ref ]; then printf x >> \"$KITSOKI_HYGIENE_FALLBACK_REF_COUNT\"; fi\nexec \"$KITSOKI_HYGIENE_REAL_GIT\" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_HYGIENE_FALLBACK_REF_COUNT", countPath)
+	t.Setenv("KITSOKI_HYGIENE_REAL_GIT", realGit)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, readErr := os.ReadFile(countPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if scans := len(raw); scans != 0 {
+		t.Fatalf("fallback ref scans=%d, want 0 when every declared target contains its workspace HEAD", scans)
+	}
+	for index := 0; index < workspaceInspectors*2; index++ {
+		assertWorkspaceCandidate(t, plan, fmt.Sprintf("legacy-declared-%02d", index), true, "clean merged inactive")
+	}
+}
+
+func TestBuildPlanLegacyFallbackRefInventoryIsSharedAndCompletesProgress(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Now().UTC()
+	for index := 0; index < workspaceInspectors*2; index++ {
+		writeLegacyWorkspace(t, root, fmt.Sprintf("legacy-fallback-%02d", index), now, false, true)
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	countPath := filepath.Join(t.TempDir(), "fallback-ref-count")
+	scriptDir := t.TempDir()
+	script := filepath.Join(scriptDir, "git")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nif [ \"$1\" = for-each-ref ]; then printf x >> \"$KITSOKI_HYGIENE_FALLBACK_REF_COUNT\"; fi\nexec \"$KITSOKI_HYGIENE_REAL_GIT\" \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_HYGIENE_FALLBACK_REF_COUNT", countPath)
+	t.Setenv("KITSOKI_HYGIENE_REAL_GIT", realGit)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var progress []Progress
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  -1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		ReportProgress: func(p Progress) {
+			progress = append(progress, p)
+		},
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, readErr := os.ReadFile(countPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if scans := len(raw); scans != 1 {
+		t.Fatalf("fallback ref scans=%d, want 1 shared inventory", scans)
+	}
+	hasWorkspaceStart := false
+	hasWorkspaceComplete := false
+	for _, event := range progress {
+		hasWorkspaceStart = hasWorkspaceStart || event == (Progress{Phase: "workspace-inventory", Completed: 0, Total: 1})
+		hasWorkspaceComplete = hasWorkspaceComplete || event == (Progress{Phase: "workspace-inventory", Completed: 1, Total: 1})
+	}
+	if !hasWorkspaceStart || !hasWorkspaceComplete || len(progress) == 0 || progress[len(progress)-1] != (Progress{Phase: "complete", Completed: 1, Total: 1}) {
+		t.Fatalf("progress=%#v", progress)
+	}
+	for index := 0; index < workspaceInspectors*2; index++ {
+		assertWorkspaceCandidate(t, plan, fmt.Sprintf("legacy-fallback-%02d", index), false, "not contained in declared target")
+	}
+}
+
 func TestClearInactiveMergedPlansOnlyCooledOffIntegratedOrBranchMergedWorkspaces(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)

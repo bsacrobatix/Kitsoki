@@ -768,6 +768,7 @@ func discoverLegacyShellIsolation(
 		false,
 		true,
 		true,
+		nil,
 	)
 	if inspectErr != nil {
 		return Candidate{}, false, inspectErr
