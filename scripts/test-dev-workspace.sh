@@ -647,15 +647,18 @@ git -C "$park_quarantine" reset --quiet --hard "$park_quarantine_sealed_head"
 cp "$park_quarantine_marker_backup" "$park_quarantine_marker"
 git -C "$source_repo" update-ref -d "$late_quarantine_tip_ref"
 
-# Purge preserves every ignored file, not only known review roots. It also
-# repeats the process-activity proof after atomic isolation and restores the
-# quarantine on activity or deletion failure.
+# Purge is archive-free even when the quarantine contains large ignored,
+# review, and repository-only payloads. It repeats the process-activity proof
+# after atomic isolation and restores the quarantine on activity or deletion
+# failure.
 printf '/arbitrary-ignored.dat\n' >>"$park_quarantine/.git/info/exclude"
 printf 'arbitrary ignored state\n' >"$park_quarantine/arbitrary-ignored.dat"
+printf '/large-ignored.bin\n' >>"$park_quarantine/.git/info/exclude"
+dd if=/dev/zero of="$park_quarantine/large-ignored.bin" bs=1048576 count=8 2>/dev/null
 
-# Clean status does not imply that the repository database has no unique work.
-# Preserve a stash, a secondary ref, a reflog-only commit, and an unreachable
-# blob through the Git recovery archive.
+# Clean status does not imply that the repository database has no large or
+# unique work. Seed a stash, secondary ref, reflog-only commit, and unreachable
+# blob to prove archive-free purge does not copy repository-only payloads.
 printf 'stash-only state\n' >"$park_quarantine/stash-secret.txt"
 git -C "$park_quarantine" stash push --quiet --include-untracked -m 'stash recovery proof'
 stash_oid="$(git -C "$park_quarantine" rev-parse refs/stash)"
@@ -711,32 +714,6 @@ grep -Fq "active process IDs after isolation (4242)" "$tmp/active-recovery-purge
 [ "$(cat "$park_quarantine/arbitrary-ignored.dat")" = "arbitrary ignored state" ] ||
   fail "activity refusal lost arbitrary ignored state"
 
-real_mv="$(command -v mv)"
-cat >"$purge_fakebin/mv" <<SH
-#!/usr/bin/env bash
-case "\${KITSOKI_TEST_FAIL_ARTIFACT_PUBLICATION:-}:\$*" in
-  ignored:*workspace-close/*-ignored/ignored-root.tar) exit 1 ;;
-  git:*workspace-close/*-git/git-metadata.tar) exit 1 ;;
-esac
-exec "$real_mv" "\$@"
-SH
-chmod +x "$purge_fakebin/mv"
-if PATH="$purge_fakebin:$PATH" KITSOKI_TEST_FAIL_ARTIFACT_PUBLICATION=ignored \
-  "$dev_workspace" close --repo "$source_repo" --root "$(dirname "$park_quarantine")" --purge-quarantine "$park_quarantine" >"$tmp/failed-ignored-publication.log" 2>&1; then
-  fail "provider purge succeeded after ignored-archive publication failed"
-fi
-grep -Fq "could not publish the complete ignored-tree archive" "$tmp/failed-ignored-publication.log" ||
-  fail "provider purge did not report ignored-archive publication failure"
-[ -d "$park_quarantine/.git" ] || fail "ignored-archive publication failure did not restore the quarantine"
-if PATH="$purge_fakebin:$PATH" KITSOKI_TEST_FAIL_ARTIFACT_PUBLICATION=git \
-  "$dev_workspace" close --repo "$source_repo" --root "$(dirname "$park_quarantine")" --purge-quarantine "$park_quarantine" >"$tmp/failed-git-publication.log" 2>&1; then
-  fail "provider purge succeeded after Git-archive publication failed"
-fi
-grep -Fq "could not publish Git repository recovery metadata" "$tmp/failed-git-publication.log" ||
-  fail "provider purge did not report Git-archive publication failure"
-[ -d "$park_quarantine/.git" ] || fail "Git-archive publication failure did not restore the quarantine"
-rm "$purge_fakebin/mv"
-
 real_rm="$(command -v rm)"
 cat >"$purge_fakebin/rm" <<SH
 #!/usr/bin/env bash
@@ -759,62 +736,22 @@ rm "$purge_fakebin/rm"
 
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$park_workspace" >/dev/null
 "$dev_workspace" close --repo "$source_repo" --root "$root" "$park_recovery" >/dev/null
+workspace_close_files_before="$(find "$source_repo/.artifacts/workspace-close" -type f 2>/dev/null | wc -l | tr -d ' ')"
 purge_probe_count="$tmp/purge-probe-count"
 : >"$purge_probe_count"
 PATH="$purge_fakebin:$PATH" KITSOKI_TEST_LSOF_COUNT_FILE="$purge_probe_count" \
   "$dev_workspace" close --repo "$source_repo" --root "$(dirname "$park_quarantine")" --purge-quarantine "$park_quarantine" >/dev/null
 [ "$(wc -l <"$purge_probe_count" | tr -d ' ')" = "2" ] ||
-  fail "successful provider purge did not prove inactivity before and after preservation"
+  fail "successful provider purge did not prove inactivity at both archive-free deletion boundaries"
 [ ! -e "$park_quarantine" ] || fail "provider purge left the recovered park quarantine"
+[ "$(find "$source_repo/.artifacts/workspace-close" -type f 2>/dev/null | wc -l | tr -d ' ')" = "$workspace_close_files_before" ] ||
+  fail "archive-free provider purge created workspace-close artifacts"
 [ "$(git -C "$source_repo" rev-parse "$park_quarantine_tip_ref")" = "$park_quarantine_sealed_head" ] ||
   fail "provider purge removed the durable exact quarantine-tip ref"
 git -C "$source_repo" rev-parse --verify "$park_snapshot_ref" >/dev/null ||
   fail "provider purge removed the canonical dirty snapshot ref"
 git -C "$source_repo" rev-parse --verify "$park_recovery_ref" >/dev/null ||
   fail "provider purge removed the signed recovery ref"
-ignored_archive=""
-while IFS= read -r candidate; do
-  if tar -tf "$candidate" | grep -Fxq 'arbitrary-ignored.dat'; then
-    ignored_archive="$candidate"
-    break
-  fi
-done < <(find "$source_repo/.artifacts/workspace-close" -name ignored-root.tar -type f -print)
-[ -n "$ignored_archive" ] || fail "provider purge did not retain a complete ignored-tree archive"
-[ "$(tar -xOf "$ignored_archive" arbitrary-ignored.dat)" = "arbitrary ignored state" ] ||
-  fail "complete ignored-tree archive changed arbitrary ignored bytes"
-git_recovery_archive=""
-while IFS= read -r candidate; do
-  if grep -Fq "refs/stash" "$candidate/refs.tsv" 2>/dev/null &&
-    grep -Fq "refs/heads/secondary-local" "$candidate/refs.tsv" 2>/dev/null; then
-    git_recovery_archive="$candidate"
-    break
-  fi
-done < <(find "$source_repo/.artifacts/workspace-close" -name git-metadata.tar -type f -exec dirname {} \;)
-[ -n "$git_recovery_archive" ] || fail "provider purge did not retain complete Git repository metadata"
-[ -s "$git_recovery_archive/unique-object-ids.txt" ] || fail "Git recovery archive omitted unique object inventory"
-git -C "$source_repo" cat-file -e "$stash_oid^{commit}" >/dev/null 2>&1 &&
-  fail "stash recovery fixture unexpectedly existed in the primary object database"
-git -C "$source_repo" reflog expire --expire=now --expire-unreachable=now --all
-git -C "$source_repo" gc --prune=now
-[ "$(git -C "$source_repo" rev-parse "$park_quarantine_tip_ref")" = "$park_quarantine_sealed_head" ] ||
-  fail "primary pruning removed the durable exact quarantine tip"
-git_restore="$tmp/git-state-restore"
-mkdir -p "$git_restore"
-tar -C "$git_restore" -xf "$git_recovery_archive/git-metadata.tar"
-mkdir -p "$git_restore/.git/objects/pack"
-printf '%s\n' "$source_repo/.git/objects" >"$git_restore/.git/objects/info/alternates"
-cp "$git_recovery_archive"/pack-*.pack "$git_restore/.git/objects/pack/"
-cp "$git_recovery_archive"/pack-*.idx "$git_restore/.git/objects/pack/"
-[ "$(git -C "$git_restore" show refs/stash^3:stash-secret.txt)" = "stash-only state" ] ||
-  fail "Git recovery archive did not restore stash-only bytes"
-[ "$(git -C "$git_restore" rev-parse refs/heads/secondary-local)" = "$secondary_oid" ] ||
-  fail "Git recovery archive did not restore the secondary local ref"
-git -C "$git_restore" cat-file -e "$reflog_only_oid^{commit}" ||
-  fail "Git recovery archive did not restore the reflog-only commit"
-[ "$(git -C "$git_restore" cat-file blob "$unreachable_blob_oid")" = "unreachable object recovery proof" ] ||
-  fail "Git recovery archive did not restore the unreachable blob"
-git -C "$git_restore" fsck --full --no-dangling >/dev/null ||
-  fail "Git recovery archive did not reconstruct a connected repository"
 
 # A Studio MCP server can itself run inside an agent capsule. That clone tracks
 # staging/local as source/staging/local and intentionally has no local

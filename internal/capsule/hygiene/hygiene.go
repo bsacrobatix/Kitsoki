@@ -70,6 +70,11 @@ type Options struct {
 	// them; their legacy provider path archives entire trees and can amplify
 	// disk pressure during recovery.
 	AllowReceiptBoundClosedPurge bool
+	// ArchiveFreeWorkspaceRemovalOnly makes operator cleanup plan/apply leave
+	// every ordinary workspace visible for its lifecycle owner to close and
+	// receipt. Cleanup may still reclaim CI sidecars and explicitly selected
+	// caches, but it cannot invoke a provider that copies workspace payloads.
+	ArchiveFreeWorkspaceRemovalOnly bool
 }
 
 // Progress identifies the inventory phase currently being inspected. Callers
@@ -227,6 +232,14 @@ func BuildPlan(ctx context.Context, opts Options) (Plan, error) {
 	workspaceCandidates, err := workspaceCandidates(ctx, root, nestedProjects, opts, keepWorkspaces, minAge)
 	if err != nil {
 		return Plan{}, err
+	}
+	if opts.ArchiveFreeWorkspaceRemovalOnly {
+		for i := range workspaceCandidates {
+			if workspaceCandidates[i].Safe {
+				workspaceCandidates[i].Safe = false
+				workspaceCandidates[i].Reason = "workspace requires lifecycle close and receipt-bound archive-free purge"
+			}
+		}
 	}
 	reportProgress("workspace-inventory", len(nestedProjects)+1, len(nestedProjects)+1)
 	plan.Candidates = append(plan.Candidates, workspaceCandidates...)
@@ -1601,11 +1614,11 @@ func closeLegacyWorkspace(ctx context.Context, root string, candidate Candidate)
 	if err != nil || relative != candidate.Path {
 		return fmt.Errorf("capsule hygiene: legacy workspace path failed confinement")
 	}
+	if strings.HasPrefix(filepath.Base(path), "closed-") {
+		return fmt.Errorf("capsule hygiene: closed quarantine requires receipt-bound archive-free purge")
+	}
 	script := filepath.Join(root, "scripts", "dev-workspace.sh")
 	args := []string{"teardown", "--repo", root, "--root", filepath.Dir(path)}
-	if strings.HasPrefix(filepath.Base(path), "closed-") {
-		args = append(args, "--purge-quarantine")
-	}
 	args = append(args, path)
 	cmd := exec.CommandContext(ctx, script, args...)
 	out, err := cmd.CombinedOutput()

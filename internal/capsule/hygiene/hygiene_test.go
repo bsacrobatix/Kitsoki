@@ -1134,6 +1134,30 @@ func TestApplyUsesLegacyProviderTeardownAfterRecheck(t *testing.T) {
 	}
 }
 
+func TestOperatorCleanupPlanNeverAdmitsMaterializingWorkspaceClose(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	created := time.Now().UTC()
+	workspace := writeLegacyWorkspace(t, root, "legacy-operator-cleanup", created, false, false)
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:                     root,
+		KeepWorkspaces:                  -1,
+		MinWorkspaceAge:                 -1,
+		CurrentPath:                     root,
+		ArchiveFreeWorkspaceRemovalOnly: true,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := assertWorkspaceCandidate(t, plan, filepath.Base(workspace), false, "receipt-bound archive-free purge")
+	if plan.TotalBytes != 0 || candidate.Safe {
+		t.Fatalf("operator cleanup projected a materializing workspace close: plan=%#v candidate=%#v", plan, candidate)
+	}
+}
+
 func TestApplyLeavesClosedWorkspaceVisibleForReceiptBoundArchiveFreePurge(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
@@ -1165,6 +1189,42 @@ func TestApplyLeavesClosedWorkspaceVisibleForReceiptBoundArchiveFreePurge(t *tes
 	}
 	if _, err := os.Stat(workspace); err != nil {
 		t.Fatalf("closed workspace quarantine was not preserved: %v", err)
+	}
+}
+
+func TestApplyCannotRouteClosedWorkspaceThroughLegacyArchiveProvider(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	created := time.Now().UTC()
+	workspace := writeLegacyWorkspace(t, root, "closed-provider-denied", created, false, false)
+	script := filepath.Join(root, "scripts", "dev-workspace.sh")
+	called := filepath.Join(root, "legacy-provider-called")
+	stub := "#!/bin/sh\nprintf called >\"" + called + "\"\nexit 0\n"
+	if err := os.WriteFile(script, []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Apply(context.Background(), Options{
+		ProjectRoot:                  root,
+		KeepWorkspaces:               -1,
+		MinWorkspaceAge:              -1,
+		CurrentPath:                  root,
+		AllowReceiptBoundClosedPurge: true,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Removed) != 0 || len(result.Skipped) != 1 ||
+		!strings.Contains(result.Skipped[0].Reason, "receipt-bound archive-free purge") {
+		t.Fatalf("result=%#v", result)
+	}
+	if _, err := os.Stat(called); !os.IsNotExist(err) {
+		t.Fatalf("legacy archive provider was invoked: %v", err)
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("closed workspace was removed: %v", err)
 	}
 }
 

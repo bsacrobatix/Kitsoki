@@ -1915,16 +1915,20 @@ cmd_close() {
       return 1
     fi
   fi
-  if ! import_workspace_issues "$path" "$repo"; then
-    echo "error: close: workspace tickets were not safely preserved; keeping workspace: $path" >&2
-    return 1
+  if [ "$purge_quarantine" != "1" ]; then
+    if ! import_workspace_issues "$path" "$repo"; then
+      echo "error: close: workspace tickets were not safely preserved; keeping workspace: $path" >&2
+      return 1
+    fi
   fi
   if [ "$force" != "1" ] && workspace_dirty "$path"; then
     die "close: workspace has uncommitted changes: $path"
   fi
   local workspace_close_id
   workspace_close_id="$(workspace_id_from_path "$path")"
-  preserve_workspace_review_artifacts "$path" "$repo" "$workspace_close_id" || return 1
+  if [ "$purge_quarantine" != "1" ]; then
+    preserve_workspace_review_artifacts "$path" "$repo" "$workspace_close_id" || return 1
+  fi
   if [ "$purge_quarantine" = "1" ]; then
     case "$(basename "$path")" in
       closed-*) ;;
@@ -2000,9 +2004,10 @@ cmd_close() {
       return 1
     fi
     # A process that retained a cwd or descriptor through the rename must be
-    # rejected before preservation starts. The randomized old-path removal
-    # prevents a new path-based writer from entering after this proof; the
-    # second probe below closes the archive-to-delete boundary.
+    # rejected before deletion starts. Purge is intentionally archive-free:
+    # the recovery refs are already durable, and copying ignored, review, or
+    # Git payloads would amplify disk pressure at the exact moment cleanup is
+    # supposed to reclaim it.
     set +e
     activity_pids="$(quarantine_activity "$purge_path")"
     activity_status=$?
@@ -2017,27 +2022,12 @@ cmd_close() {
       fi
       return 1
     fi
-    preserve_workspace_review_artifacts "$purge_path" "$repo" "$workspace_close_id" || {
-      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
-      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
-      return 1
-    }
-    preserve_all_ignored_artifacts "$purge_path" "$repo" "$workspace_close_id" || {
-      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
-      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
-      return 1
-    }
-    preserve_git_repository_state "$purge_path" "$repo" "$workspace_close_id" || {
-      rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
-      [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
-      return 1
-    }
     if ! purge_status="$(git -C "$purge_path" status --porcelain --untracked-files=all 2>/dev/null)" ||
       [ "$(git -C "$purge_path" rev-parse --verify HEAD 2>/dev/null || true)" != "$expected_tip" ] ||
       [ -n "$purge_status" ]; then
       rewrite_workspace_identity "$purge_path" "$original_quarantine_id" "$root" >/dev/null 2>&1 || true
       [ ! -e "$path" ] && mv "$purge_path" "$path" >/dev/null 2>&1 || true
-      echo "error: close: quarantine changed while final evidence was copied; restored when possible" >&2
+      echo "error: close: quarantine changed at the archive-free deletion boundary; restored when possible" >&2
       return 1
     fi
     set +e

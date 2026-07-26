@@ -304,16 +304,15 @@ ignored/untracked review files; tracked files under those roots stay in the Git
 checkout. The branch, manifests, complete source issue tree, and original
 evidence stay intact in quarantine.
 The normal Capsule cleanup plan discovers that quarantine as a legacy managed
-workspace and applies the same clean, merged, inactive, and age guards. Only
-cleanup apply invokes the provider's `--purge-quarantine` path. The provider
-atomically moves the path to a visible managed purge state, repeats exact
-branch/HEAD/status checks, re-preserves review artifacts and the complete
-ignored tree, archives complete Git metadata plus a verified pack of every
-object not reachable from a primary repository ref, proves inactivity both
-before and after preservation,
-and only then removes it and its teardown recovery ref. Stashes, secondary
-refs, reflog-only commits, and unreachable objects therefore remain
-reconstructible even though they do not make `git status` dirty.
+workspace but leaves it visible for receipt-bound archive-free purge. Generic
+hygiene apply and clear never send a `closed-*` path through the legacy
+provider. The compatibility provider's direct `--purge-quarantine` entrypoint
+is also archive-free: it atomically moves the path to a visible managed purge
+state, repeats exact branch/HEAD/status and inactivity checks, and unlinks the
+isolated path without copying issues, review artifacts, ignored files, or Git
+metadata. Durable recovery refs must exist before purge; ignored and
+repository-only payloads are intentionally reclaimed rather than duplicated
+under `.artifacts/workspace-close/`.
 
 ### Hygiene
 
@@ -382,11 +381,11 @@ directory anywhere under the workspace. The default activity proof uses
 `lsof`; if that probe is unavailable or inconclusive, activity is `unknown`
 and the candidate remains unsafe. Apply repeats every proof and uses
 the compatibility provider's `teardown` command, including its issue-preserving
-guard, instead of deleting the directory directly. The provider atomically
-moves a quarantine to a visible managed `closed-purging-*` state, archives its
-complete ignored tree and Git repository recovery state, and repeats the
-process-activity proof both before preservation and immediately before
-deletion. The activity probe must
+guard, for an ordinary open legacy workspace instead of deleting the directory
+directly. It categorically refuses to route a `closed-*` path through that
+provider. The provider's compatibility purge entrypoint atomically moves a
+quarantine to a visible managed `closed-purging-*` state and repeats the
+process-activity proof at both archive-free deletion boundaries. The activity probe must
 produce no process IDs, no diagnostic output, and only a recognized no-match
 status. An interrupted purge therefore remains discoverable by the next plan,
 and an unavailable or inconclusive activity probe fails closed. A
@@ -396,13 +395,13 @@ signed seal manifest must prove exact content-addressed primary `dirty-snapshot`
 Missing or changed proof makes the candidate unsafe.
 
 For routine reclamation of completed agent capsules, use the parameterless
-command below. It removes only clean workspaces with a lossless branch proof:
-legacy workspaces must have their exact HEAD contained in a local or fetched
-remote branch, while native workspaces must be recorded as integrated. It keeps
-no count-based retention, never removes CI evidence or caches, and requires a
-full five-minute cooloff since the latest workspace activity before both
-planning and provider-owned teardown. Current, pinned, initializing, dirty, or
-process-active capsules remain untouched.
+command below. It considers only immutable retention receipts and delegates
+every deletion to the internal archive-free purge. It never invokes a workspace
+provider, walks or copies the payload, removes CI evidence or caches, or creates
+`.artifacts/workspace-close/`. The receipt, exact path, HEAD, recovery ref,
+merge containment, clean status, two liveness probes, and five-minute cooloff
+must agree. Current, pinned, dirty, unmerged, malformed, ambiguous, or
+process-active capsules remain visible with a typed skip reason.
 
 ```sh
 kitsoki capsule cleanup clear
@@ -477,6 +476,11 @@ only a bounded 64 KiB monotonic purge intent before atomically renaming the
 quarantine to a visible `closed-purging-*` path. It never creates ignored-tree,
 review-artifact, or Git archives for an already-closed verified quarantine.
 An interrupted invocation resumes from the exact intent and isolated path.
+`capsule cleanup clear` uses the same protocol with no payload walk or size
+ceiling. It can migrate the one historical shell-interruption shape
+`closed-purging-<receipt-id>-<numeric-pid>` only when exactly one matching path
+still satisfies the receipt, HEAD, recovery-ref, containment, clean-status,
+age, and inactivity proofs; path or receipt ambiguity fails closed.
 Unsafe candidates return a typed `skipped` result with the candidate and reason
 instead of disappearing from inventory. A repeated receipt returns
 `already_absent` only when its exact intent proves the prior removal; it cannot

@@ -20,6 +20,7 @@ import (
 const (
 	RetentionReceiptSchema = "capsule-workspace-retention/v1"
 	PurgeReceiptSchema     = "capsule-workspace-purge/v1"
+	RetentionClearSchema   = "capsule-workspace-retention-clear/v1"
 	purgeIntentSchema      = "capsule-workspace-purge-intent/v1"
 	defaultPurgeMaxBytes   = int64(8 << 30)
 	defaultPurgeMinFree    = int64(16 << 20)
@@ -162,6 +163,15 @@ type PurgeResult struct {
 	DiskAfter     int64      `json:"disk_after_bytes,omitempty"`
 }
 
+// RetentionClearResult is the bounded, archive-free result emitted by the
+// operator cleanup command. A malformed or ineligible receipt is visible as a
+// typed skip; it never prevents independent valid receipts from being purged.
+type RetentionClearResult struct {
+	Schema  string        `json:"schema"`
+	Purged  []PurgeResult `json:"purged"`
+	Skipped []PurgeResult `json:"skipped"`
+}
+
 type purgeIntent struct {
 	Schema          string    `json:"schema"`
 	ReceiptDigest   string    `json:"receipt_digest"`
@@ -260,6 +270,19 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 	if originalPath != purgingPath && originalExists && purgingExists {
 		return skipPurge(result, "path_conflict", "both the closed and closed-purging paths exist", nil), nil
 	}
+	var legacyShellIsolation *Candidate
+	if !hasIntent && !originalExists && !purgingExists {
+		candidate, found, discoverErr := discoverLegacyShellIsolation(ctx, root, receipt, opts, now, minAge)
+		if discoverErr != nil {
+			return skipPurge(result, "legacy_isolation_conflict", discoverErr.Error(), nil), nil
+		}
+		if found {
+			legacyShellIsolation = &candidate
+			purgingRel = candidate.Path
+			purgingPath = filepath.Join(root, filepath.FromSlash(purgingRel))
+			purgingExists = true
+		}
+	}
 	if !originalExists && !purgingExists {
 		if !hasIntent {
 			return skipPurge(result, "missing_without_intent", "workspace is absent without a matching monotonic purge intent", nil), nil
@@ -285,7 +308,7 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 		KeepRuns:                     -1,
 		KeepWorkspaces:               keep,
 		MinWorkspaceAge:              minAge,
-		MeasureWorkspaceBytes:        true,
+		MeasureWorkspaceBytes:        maxBytes > 0,
 		PinnedWorkspaceIDs:           append([]string(nil), opts.PinnedWorkspaceIDs...),
 		CurrentPath:                  opts.CurrentPath,
 		ReadWorkspaceActivity:        opts.ReadWorkspaceActivity,
@@ -294,7 +317,9 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 		AllowReceiptBoundClosedPurge: true,
 	}
 	var candidate Candidate
-	if purgingExists && hasIntent && originalPath != purgingPath {
+	if legacyShellIsolation != nil {
+		candidate = *legacyShellIsolation
+	} else if purgingExists && hasIntent && originalPath != purgingPath {
 		candidate, err = recheckPurgingIntent(ctx, root, purgingPath, intent, opts)
 		if err != nil {
 			return skipPurge(result, "interrupted_purge_unsafe", err.Error(), nil), nil
@@ -325,7 +350,7 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 		if candidate.Head != receipt.Head {
 			return skipPurge(result, "changed_head", fmt.Sprintf("workspace head changed: got %s want %s", candidate.Head, receipt.Head), &candidate), nil
 		}
-		if maxBytes > 0 && candidate.Bytes > maxBytes {
+		if maxBytes > 0 && candidate.BytesKnown && candidate.Bytes > maxBytes {
 			return skipPurge(result, "byte_limit", fmt.Sprintf("workspace size %d exceeds per-command limit %d", candidate.Bytes, maxBytes), &candidate), nil
 		}
 		if err := validateReceiptRecoveryRef(ctx, root, filepath.Join(root, filepath.FromSlash(candidate.Path)), receipt); err != nil {
@@ -363,6 +388,10 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 	}
 
 	if !hasIntent {
+		status := "isolating"
+		if legacyShellIsolation != nil {
+			status = "isolated"
+		}
 		intent = purgeIntent{
 			Schema:          purgeIntentSchema,
 			ReceiptDigest:   digest,
@@ -374,7 +403,7 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 			Target:          candidate.Target,
 			RecoveryRef:     receipt.RecoveryRef,
 			Bytes:           candidate.Bytes,
-			Status:          "isolating",
+			Status:          status,
 			StartedAt:       now,
 			DiskBeforeBytes: before.FreeBytes,
 		}
@@ -433,6 +462,174 @@ func PurgeClosedWorkspace(ctx context.Context, opts PurgeOptions) (PurgeResult, 
 	result.Status = "purged"
 	result.Bytes = candidate.Bytes
 	return result, nil
+}
+
+// ClearRetainedWorkspaces is the only cleanup-clear deletion path. It reads
+// bounded immutable close receipts and delegates every deletion to
+// PurgeClosedWorkspace; it never invokes a workspace provider or shell
+// teardown, so ignored/review/Git payloads cannot be copied before removal.
+func ClearRetainedWorkspaces(ctx context.Context, opts PurgeOptions) (RetentionClearResult, error) {
+	root, err := canonicalRoot(opts.ProjectRoot)
+	if err != nil {
+		return RetentionClearResult{}, err
+	}
+	result := RetentionClearResult{
+		Schema:  RetentionClearSchema,
+		Purged:  []PurgeResult{},
+		Skipped: []PurgeResult{},
+	}
+	dir := filepath.Join(root, ".capsules", "retention", "receipts")
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return result, nil
+	}
+	if err != nil {
+		return RetentionClearResult{}, fmt.Errorf("capsule retention: list receipts: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		receipt, readErr := readBoundedRetentionReceipt(path)
+		if readErr != nil {
+			result.Skipped = append(result.Skipped, PurgeResult{
+				Schema:      PurgeReceiptSchema,
+				Status:      "skipped",
+				ReasonCode:  "invalid_receipt",
+				Reason:      readErr.Error(),
+				WorkspaceID: strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())),
+			})
+			continue
+		}
+		if entry.Name() != receipt.WorkspaceID+".json" {
+			result.Skipped = append(result.Skipped, PurgeResult{
+				Schema:      PurgeReceiptSchema,
+				Status:      "skipped",
+				ReasonCode:  "receipt_identity_mismatch",
+				Reason:      "receipt filename does not match its immutable workspace identity",
+				WorkspaceID: receipt.WorkspaceID,
+			})
+			continue
+		}
+		purgeOpts := opts
+		purgeOpts.ProjectRoot = root
+		purgeOpts.Receipt = receipt
+		purged, purgeErr := PurgeClosedWorkspace(ctx, purgeOpts)
+		if purgeErr != nil {
+			result.Skipped = append(result.Skipped, PurgeResult{
+				Schema:        PurgeReceiptSchema,
+				Status:        "skipped",
+				ReasonCode:    "invalid_or_ineligible_receipt",
+				Reason:        purgeErr.Error(),
+				WorkspaceID:   receipt.WorkspaceID,
+				WorkspacePath: receipt.WorkspacePath,
+				Head:          receipt.Head,
+				RecoveryRef:   receipt.RecoveryRef,
+			})
+			continue
+		}
+		if purged.Status == "purged" {
+			result.Purged = append(result.Purged, purged)
+		} else {
+			result.Skipped = append(result.Skipped, purged)
+		}
+	}
+	return result, nil
+}
+
+func readBoundedRetentionReceipt(path string) (RetentionReceipt, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return RetentionReceipt{}, fmt.Errorf("inspect receipt: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 64<<10 {
+		return RetentionReceipt{}, fmt.Errorf("receipt is not a bounded regular file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return RetentionReceipt{}, fmt.Errorf("read receipt: %w", err)
+	}
+	var receipt RetentionReceipt
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		return RetentionReceipt{}, fmt.Errorf("parse receipt: %w", err)
+	}
+	return receipt, nil
+}
+
+// discoverLegacyShellIsolation migrates only the exact interrupted shape
+// created by the historical dev-workspace --purge-quarantine implementation:
+// closed-purging-<receipt workspace id>-<numeric pid>. The immutable receipt,
+// recovery ref, clean Git head, merge containment, age, and inactivity must
+// all still agree. More than one matching path is ambiguous and fails closed.
+func discoverLegacyShellIsolation(
+	ctx context.Context,
+	root string,
+	receipt RetentionReceipt,
+	opts PurgeOptions,
+	now time.Time,
+	minAge time.Duration,
+) (Candidate, bool, error) {
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	entries, err := os.ReadDir(workspaceRoot)
+	if err != nil {
+		return Candidate{}, false, fmt.Errorf("list workspace root: %w", err)
+	}
+	prefix := "closed-purging-" + receipt.WorkspaceID + "-"
+	var path string
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), prefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(entry.Name(), prefix)
+		if suffix == "" || strings.Trim(suffix, "0123456789") != "" {
+			continue
+		}
+		if path != "" {
+			return Candidate{}, false, fmt.Errorf("more than one legacy shell isolation matches receipt %s", receipt.WorkspaceID)
+		}
+		path = filepath.Join(workspaceRoot, entry.Name())
+	}
+	if path == "" {
+		return Candidate{}, false, nil
+	}
+	activity, activityErr := workspaceActivity(ctx, Options{
+		ReadWorkspaceActivity: opts.ReadWorkspaceActivity,
+	}, []string{path})
+	if activityErr != nil {
+		activity = WorkspaceActivity{Reason: activityErr.Error()}
+	}
+	current := opts.CurrentPath
+	if current == "" {
+		current, _ = os.Getwd()
+	}
+	candidate, inspectErr := inspectWorkspace(
+		ctx,
+		root,
+		path,
+		nil,
+		current,
+		stringSet(opts.PinnedWorkspaceIDs),
+		now,
+		normalizeAge(minAge),
+		activity,
+		false,
+		true,
+		true,
+	)
+	if inspectErr != nil {
+		return Candidate{}, false, inspectErr
+	}
+	if !candidate.Safe {
+		return Candidate{}, false, fmt.Errorf("legacy shell isolation is unsafe: %s", candidate.Reason)
+	}
+	if candidate.Head != receipt.Head {
+		return Candidate{}, false, fmt.Errorf("legacy shell isolation head does not match receipt")
+	}
+	if err := validateReceiptRecoveryRef(ctx, root, path, receipt); err != nil {
+		return Candidate{}, false, err
+	}
+	return candidate, true, nil
 }
 
 func skipPurge(result PurgeResult, code, reason string, candidate *Candidate) PurgeResult {

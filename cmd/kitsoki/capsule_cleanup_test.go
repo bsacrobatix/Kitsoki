@@ -9,16 +9,23 @@ import (
 	"kitsoki/internal/capsule/hygiene"
 )
 
-func TestCapsuleCleanupClearUsesFixedInactiveMergedPolicy(t *testing.T) {
-	opts := capsuleClearInactiveOptions("fixture")
-	if opts.ProjectRoot != "fixture" || !opts.ClearInactiveMerged {
+func TestCapsuleCleanupClearUsesFixedArchiveFreeRetentionPolicy(t *testing.T) {
+	opts := capsuleClearRetentionOptions("fixture")
+	if opts.ProjectRoot != "fixture" {
 		t.Fatalf("options=%#v", opts)
 	}
-	if opts.KeepRuns != -1 || opts.KeepWorkspaces != -1 || opts.MinWorkspaceAge != 5*time.Minute {
+	if opts.KeepWorkspaces != -1 || opts.MinAge != 5*time.Minute {
 		t.Fatalf("clear retention/cooloff policy=%#v", opts)
 	}
-	if opts.IncludeCapsuleCache || opts.IncludeGoBuildCache || opts.MeasureWorkspaceBytes {
-		t.Fatalf("clear must not touch caches or walk workspace bytes: %#v", opts)
+	if opts.MaxBytes != -1 || opts.CloseWorkspace != nil {
+		t.Fatalf("clear must use the internal archive-free remover without a payload walk or provider: %#v", opts)
+	}
+}
+
+func TestCapsuleCleanupPlanApplyNeverInvokeWorkspaceArchiveProviders(t *testing.T) {
+	opts := (capsuleCleanupFlags{project: "fixture"}).options()
+	if !opts.ArchiveFreeWorkspaceRemovalOnly {
+		t.Fatalf("operator cleanup options can invoke materializing workspace providers: %#v", opts)
 	}
 }
 

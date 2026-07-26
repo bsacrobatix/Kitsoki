@@ -17,16 +17,16 @@ func capsuleCleanupCmd() *cobra.Command {
 
 const capsuleClearInactiveCooloff = 5 * time.Minute
 
-// capsuleCleanupClearCmd is deliberately parameterless: it is the safe
-// high-water-mark cleanup for merged, clean, inactive development capsules.
+// capsuleCleanupClearCmd is deliberately parameterless: it is the safe,
+// archive-free high-water-mark cleanup for receipt-bound closed Capsules.
 func capsuleCleanupClearCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:          "clear",
-		Short:        "Remove all clean merged capsules inactive for at least five minutes",
+		Short:        "Archive-free purge of receipt-bound closed Capsules inactive for at least five minutes",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			result, err := hygiene.Apply(cmd.Context(), capsuleClearInactiveOptions("."))
+			result, err := hygiene.ClearRetainedWorkspaces(cmd.Context(), capsuleClearRetentionOptions("."))
 			if err != nil {
 				return err
 			}
@@ -35,14 +35,15 @@ func capsuleCleanupClearCmd() *cobra.Command {
 	}
 }
 
-func capsuleClearInactiveOptions(project string) hygiene.Options {
-	return hygiene.Options{
-		ProjectRoot:           project,
-		KeepRuns:              -1,
-		KeepWorkspaces:        -1,
-		MinWorkspaceAge:       capsuleClearInactiveCooloff,
-		ClearInactiveMerged:   true,
-		MeasureWorkspaceBytes: false,
+func capsuleClearRetentionOptions(project string) hygiene.PurgeOptions {
+	return hygiene.PurgeOptions{
+		ProjectRoot:    project,
+		KeepWorkspaces: -1,
+		MinAge:         capsuleClearInactiveCooloff,
+		// Archive-free deletion does not need a payload walk or size ceiling.
+		// The operation writes only bounded receipts/intents, then unlinks the
+		// exact isolated target.
+		MaxBytes: -1,
 	}
 }
 
@@ -74,15 +75,16 @@ func (f *capsuleCleanupFlags) bind(cmd *cobra.Command) {
 
 func (f capsuleCleanupFlags) options() hygiene.Options {
 	return hygiene.Options{
-		ProjectRoot:           f.project,
-		KeepRuns:              f.keepRuns,
-		KeepWorkspaces:        f.keepWorkspaces,
-		MinWorkspaceAge:       f.workspaceMinAge,
-		MinFreeBytes:          f.minFreeBytes,
-		MeasureWorkspaceBytes: f.measureWorkspaceBytes,
-		PinnedWorkspaceIDs:    append([]string(nil), f.pinnedWorkspaces...),
-		IncludeCapsuleCache:   f.includeCapsuleCache,
-		IncludeGoBuildCache:   f.includeGoBuildCache,
+		ProjectRoot:                     f.project,
+		KeepRuns:                        f.keepRuns,
+		KeepWorkspaces:                  f.keepWorkspaces,
+		MinWorkspaceAge:                 f.workspaceMinAge,
+		MinFreeBytes:                    f.minFreeBytes,
+		MeasureWorkspaceBytes:           f.measureWorkspaceBytes,
+		PinnedWorkspaceIDs:              append([]string(nil), f.pinnedWorkspaces...),
+		IncludeCapsuleCache:             f.includeCapsuleCache,
+		IncludeGoBuildCache:             f.includeGoBuildCache,
+		ArchiveFreeWorkspaceRemovalOnly: true,
 	}
 }
 
@@ -129,6 +131,11 @@ func capsuleCleanupWrite(cmd *cobra.Command, value any, jsonOut bool) error {
 		}
 	case hygiene.ApplyResult:
 		fmt.Fprintf(cmd.OutOrStdout(), "cleanup removed: %d (%d bytes), skipped after recheck: %d, concurrent cleanup tolerated: %d\n", len(v.Removed), v.TotalBytes, len(v.Skipped), len(v.Tolerated))
+	case hygiene.RetentionClearResult:
+		fmt.Fprintf(cmd.OutOrStdout(), "cleanup archive-free purged: %d, skipped: %d\n", len(v.Purged), len(v.Skipped))
+		for _, skipped := range v.Skipped {
+			fmt.Fprintf(cmd.OutOrStdout(), "cleanup skip [%s] %s: %s\n", skipped.ReasonCode, skipped.WorkspaceID, skipped.Reason)
+		}
 	default:
 		fmt.Fprintln(cmd.OutOrStdout(), value)
 	}

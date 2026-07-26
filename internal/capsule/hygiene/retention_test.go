@@ -1,7 +1,9 @@
 package hygiene
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,6 +300,208 @@ func TestPurgeClosedWorkspaceRejectsMalformedOrSingleProbeReceipt(t *testing.T) 
 		Now:         func() time.Time { return now },
 	}); err == nil || !strings.Contains(err.Error(), "two distinct safe") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestClearRetainedWorkspacesPurgesLargePayloadWithoutArchiveAmplification(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	workspace := writeLegacyWorkspace(t, root, "closed-large-payload", now.Add(-48*time.Hour), false, false)
+	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	runHygieneGit(t, root, "update-ref", recoveryRef, head)
+	receipt := validRetentionReceipt(root, filepath.Base(workspace), head, recoveryRef, now)
+	if _, err := WriteRetentionReceipt(root, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	payload := bytes.Repeat([]byte("archive-free-payload\n"), 256*1024)
+	for _, relative := range []string{
+		".artifacts/review/large.bin",
+		".context/review/large.bin",
+		"large-ignored.bin",
+	} {
+		path := filepath.Join(workspace, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exclude := filepath.Join(workspace, ".git", "info", "exclude")
+	f, err := os.OpenFile(exclude, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(".artifacts/\n.context/\nlarge-ignored.bin\n"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runHygieneGit(t, workspace, "hash-object", "-w", filepath.Join(workspace, "large-ignored.bin"))
+	if status := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "status", "--porcelain", "--untracked-files=all")); status != "" {
+		t.Fatalf("large ignored fixture is not clean: %s", status)
+	}
+
+	var removerCalls int
+	result, err := ClearRetainedWorkspaces(context.Background(), PurgeOptions{
+		ProjectRoot:           root,
+		KeepWorkspaces:        -1,
+		MinAge:                24 * time.Hour,
+		MaxBytes:              -1,
+		CurrentPath:           root,
+		Now:                   func() time.Time { return now },
+		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
+		CloseWorkspace: func(_ context.Context, project string, candidate Candidate) error {
+			removerCalls++
+			if _, err := os.Stat(filepath.Join(project, ".artifacts", "workspace-close")); !os.IsNotExist(err) {
+				t.Fatalf("archive path exists before deletion: %v", err)
+			}
+			if candidate.BytesKnown || candidate.Bytes != 0 {
+				t.Fatalf("archive-free clear walked the large payload: %+v", candidate)
+			}
+			return os.RemoveAll(filepath.Join(project, filepath.FromSlash(candidate.Path)))
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removerCalls != 1 || len(result.Purged) != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("result=%+v remover_calls=%d", result, removerCalls)
+	}
+	if _, err := os.Stat(workspace); !os.IsNotExist(err) {
+		t.Fatalf("large workspace remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".artifacts", "workspace-close")); !os.IsNotExist(err) {
+		t.Fatalf("clear created workspace-close archive: %v", err)
+	}
+	intentPath := filepath.Join(root, filepath.FromSlash(result.Purged[0].IntentPath))
+	if info, err := os.Stat(intentPath); err != nil || info.Size() > 64<<10 {
+		t.Fatalf("intent is not bounded: info=%v err=%v", info, err)
+	}
+}
+
+func TestClearRetainedWorkspacesMigratesInterruptedLegacyShellIsolation(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	originalID := "closed-legacy-shell"
+	workspace := writeLegacyWorkspace(t, root, originalID, now.Add(-48*time.Hour), false, false)
+	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	runHygieneGit(t, root, "update-ref", recoveryRef, head)
+	receipt := validRetentionReceipt(root, originalID, head, recoveryRef, now)
+	if _, err := WriteRetentionReceipt(root, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	purgingID := "closed-purging-" + originalID + "-4242"
+	purgingPath := filepath.Join(root, ".capsules", "workspaces", purgingID)
+	if err := os.Rename(workspace, purgingPath); err != nil {
+		t.Fatal(err)
+	}
+	rewriteLegacyWorkspaceIdentity(t, purgingPath, purgingID)
+
+	result, err := ClearRetainedWorkspaces(context.Background(), PurgeOptions{
+		ProjectRoot:           root,
+		KeepWorkspaces:        -1,
+		MinAge:                24 * time.Hour,
+		MaxBytes:              -1,
+		CurrentPath:           root,
+		Now:                   func() time.Time { return now },
+		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
+	})
+	if err != nil || len(result.Purged) != 1 || len(result.Skipped) != 0 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := os.Stat(purgingPath); !os.IsNotExist(err) {
+		t.Fatalf("legacy isolated path remains: %v", err)
+	}
+	if !strings.Contains(result.Purged[0].IntentPath, ".capsules/retention/purges/") {
+		t.Fatalf("migration did not write bounded internal intent: %+v", result.Purged[0])
+	}
+
+	repeated, err := ClearRetainedWorkspaces(context.Background(), PurgeOptions{
+		ProjectRoot:   root,
+		MinAge:        24 * time.Hour,
+		MaxBytes:      -1,
+		Now:           func() time.Time { return now.Add(time.Minute) },
+		ReadDiskUsage: stableRetentionDiskUsage,
+	})
+	if err != nil || len(repeated.Purged) != 1 || !repeated.Purged[0].AlreadyAbsent {
+		t.Fatalf("idempotent repeat=%+v err=%v", repeated, err)
+	}
+}
+
+func TestClearRetainedWorkspacesFailsClosedOnReceiptPathMismatch(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	workspace := writeLegacyWorkspace(t, root, "closed-mismatch", now.Add(-48*time.Hour), false, false)
+	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	runHygieneGit(t, root, "update-ref", recoveryRef, head)
+	receipt := validRetentionReceipt(root, filepath.Base(workspace), head, recoveryRef, now)
+	receipt.WorkspacePath = ".capsules/workspaces/closed-someone-else"
+	receiptDir := filepath.Join(root, ".capsules", "retention", "receipts")
+	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestJSON(t, filepath.Join(receiptDir, receipt.WorkspaceID+".json"), receipt)
+
+	result, err := ClearRetainedWorkspaces(context.Background(), PurgeOptions{
+		ProjectRoot: root,
+		MinAge:      24 * time.Hour,
+		MaxBytes:    -1,
+		Now:         func() time.Time { return now },
+	})
+	if err != nil || len(result.Purged) != 0 || len(result.Skipped) != 1 ||
+		result.Skipped[0].ReasonCode != "invalid_or_ineligible_receipt" ||
+		!strings.Contains(result.Skipped[0].Reason, "workspace path") {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("mismatched receipt removed workspace: %v", err)
+	}
+}
+
+func rewriteLegacyWorkspaceIdentity(t *testing.T, workspace, id string) {
+	t.Helper()
+	root := filepath.Dir(workspace)
+	for _, name := range []string{".kitsoki-clone", ".kitsoki-dev-workspace.json", "capsule-manifest.json"} {
+		path := filepath.Join(workspace, name)
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var manifest map[string]any
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		switch name {
+		case ".kitsoki-clone":
+			manifest["id"] = id
+			manifest["root"] = root
+		case ".kitsoki-dev-workspace.json":
+			manifest["id"] = id
+			manifest["root"] = root
+			manifest["workspace"] = workspace
+		case "capsule-manifest.json":
+			manifest["workspace"] = workspace
+			environment, ok := manifest["environment"].(map[string]any)
+			if !ok {
+				t.Fatalf("capsule environment is not an object")
+			}
+			environment["id"] = id
+			environment["root"] = root
+		}
+		writeTestJSON(t, path, manifest)
 	}
 }
 
