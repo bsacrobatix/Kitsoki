@@ -53,6 +53,7 @@ import (
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
@@ -192,14 +193,15 @@ type SessionRegistry struct {
 	// daemonStore owns the connection used by daemonJobs. It is separate from
 	// each live session runtime but points at the same SQLite file, so durable
 	// job identity survives registry and process teardown.
-	daemonStore       store.Store
-	daemonJobs        artifactjob.Store
-	campaignStore     campaign.Store
-	campaignSource    campaign.Source
-	campaignScheduler jobs.Scheduler
-	campaignServices  map[string]*campaign.Service
-	studies           study.Store
-	federation        *daemonfederation.Pool
+	daemonStore        store.Store
+	daemonJobs         artifactjob.Store
+	campaignStore      campaign.Store
+	campaignSource     campaign.Source
+	campaignScheduler  jobs.Scheduler
+	campaignServices   map[string]*campaign.Service
+	studies            study.Store
+	federation         *daemonfederation.Pool
+	feedbackDispatches reviewedfeedback.DispatchStore
 
 	// feedbackBackends are explicit daemon-construction bindings keyed by
 	// application ID. Session construction derives the remaining scope from
@@ -294,6 +296,22 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	}
 	r.daemonStore = st
 	r.daemonJobs = artifactJobs
+	if len(r.cfg.ReviewedFeedback) > 0 {
+		feedbackDispatches, feedbackErr := reviewedfeedback.NewSQLiteDispatchStore(
+			st.DB(), clock.Real(),
+		)
+		if feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon reviewed feedback dispatches: %w", feedbackErr)
+		}
+		if _, feedbackErr := feedbackDispatches.InterruptPending(
+			context.Background(), "daemon_restarted",
+		); feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon reviewed feedback dispatches: %w", feedbackErr)
+		}
+		r.feedbackDispatches = feedbackDispatches
+	}
 	if r.cfg.Campaigns != nil {
 		campaignStore, campaignErr := campaign.NewSQLiteStore(st.DB())
 		if campaignErr != nil {
@@ -1575,7 +1593,9 @@ func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
 	var restored int
 	var restoreErrs []error
 	for _, job := range jobs {
-		if (job.Origin.Kind != "daemon" && job.Origin.Kind != "campaign") || job.Story == "" {
+		if (job.Origin.Kind != "daemon" &&
+			job.Origin.Kind != "campaign" &&
+			job.Origin.Kind != "feedback") || job.Story == "" {
 			continue
 		}
 		id, attachErr := r.AttachExternal(ctx, job.Story, "daemon:"+string(job.ID))
@@ -1585,6 +1605,12 @@ func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
 		}
 		if id != string(job.ID) {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore job %s returned unstable route %s", job.ID, id))
+			continue
+		}
+		if job.Origin.Kind == "feedback" {
+			// Reattach the durable session, but keep the artifact job
+			// interrupted until the operator explicitly retries the dispatch.
+			restored++
 			continue
 		}
 		r.syncDaemonJob(id)

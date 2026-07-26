@@ -28,6 +28,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -129,6 +130,11 @@ type WebConfig struct {
 	// Load via resolveFeedbackRouting.
 	FeedbackRouting map[string]FeedbackRoute `yaml:"feedback_routing,omitempty"`
 
+	// ReviewedFeedback binds source applications to the daemon-owned reviewed
+	// feedback adopter. Story arguments cannot choose a target story, handler,
+	// action, ledger path, or provider; all authority is fixed here.
+	ReviewedFeedback map[string]ReviewedFeedbackBinding `yaml:"reviewed_feedback,omitempty"`
+
 	// DaemonFederation is machine-local worker discovery for kitsoki daemon.
 	// Workers are independent loopback-only daemons; secrets remain in the local override.
 	DaemonFederation daemonfederation.Config `yaml:"daemon_federation,omitempty"`
@@ -212,6 +218,56 @@ type FeedbackRoute struct {
 	// (first carries the summary text; "report"/"report_id" carry the
 	// receipt ref) — mirrors a catalog's own feedback_routing.fields.
 	Fields []string `yaml:"fields,omitempty"`
+}
+
+// ReviewedFeedbackBinding is one application-scoped daemon adopter. The
+// conventional reviewed application-feedback ledger and managed roots are
+// resolved by the server and are intentionally not configurable here.
+type ReviewedFeedbackBinding struct {
+	TargetApplication string `yaml:"target_application"`
+	TargetHandler     string `yaml:"target_handler"`
+	TargetAction      string `yaml:"target_action"`
+}
+
+func (cfg *WebConfig) resolveReviewedFeedback() error {
+	sources := make([]string, 0, len(cfg.ReviewedFeedback))
+	for source := range cfg.ReviewedFeedback {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	for _, source := range sources {
+		binding := cfg.ReviewedFeedback[source]
+		if !validReviewedFeedbackID(source) {
+			return fmt.Errorf("reviewed_feedback: source application id is required and must be opaque")
+		}
+		switch {
+		case !validReviewedFeedbackID(binding.TargetApplication):
+			return fmt.Errorf("reviewed_feedback.%s.target_application is required and must be opaque", source)
+		case !validReviewedFeedbackID(binding.TargetHandler):
+			return fmt.Errorf("reviewed_feedback.%s.target_handler is required and must be opaque", source)
+		case !validReviewedFeedbackID(binding.TargetAction):
+			return fmt.Errorf("reviewed_feedback.%s.target_action is required and must be opaque", source)
+		}
+	}
+	return nil
+}
+
+func validReviewedFeedbackID(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 180 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-', r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // resolveFeedbackRouting validates the `feedback_routing:` block fail-fast
@@ -575,6 +631,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveFeedbackRouting(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveReviewedFeedback(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveCampaigns(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -798,6 +857,16 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.FeedbackRouting = merged
+	}
+	if len(local.ReviewedFeedback) > 0 {
+		merged := make(map[string]ReviewedFeedbackBinding, len(base.ReviewedFeedback)+len(local.ReviewedFeedback))
+		for k, v := range base.ReviewedFeedback {
+			merged[k] = v
+		}
+		for k, v := range local.ReviewedFeedback {
+			merged[k] = v
+		}
+		out.ReviewedFeedback = merged
 	}
 	// Field-merged (like Root), NOT block-replaced: the intended split is a
 	// checked-in base block (mode, admins, public_url, client_id) with only

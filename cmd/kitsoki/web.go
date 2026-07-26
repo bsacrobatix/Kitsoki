@@ -382,6 +382,11 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("discover stories: %w", err)
 			}
+			if daemonMode {
+				if err := registry.ConfigureFeedbackBackends(captureRoot); err != nil {
+					return err
+				}
+			}
 
 			// ── Serve (session-routing) ──────────────────────────────────────
 			// Web-filed bugs (runstatus.bug.report) land under the same repo the

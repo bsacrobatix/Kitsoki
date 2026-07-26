@@ -378,7 +378,7 @@ func registerGraphBuiltins(r *Registry) {
 			"report_ref", "string", "dispatch_id", "string", "resume_mode", "string",
 			"resume_workspace", "string", "retry_brief", "string",
 		),
-		Output: fields("job_id", "string"),
+		Output: fields("job_id", "string", "receipts", "list"),
 	})
 	r.Register("host.compliance", "run", Op{
 		Input:  fields("catalog_path", "string", "node_id", "string"),
