@@ -12,14 +12,13 @@ import (
 )
 
 const (
-	maxCatalogPathBytes = 4096
-	maxNodeIDBytes      = 512
-	maxAudienceBytes    = 32
-	maxClosureNodes     = 256
-	maxTasks            = 64
-	maxArtifacts        = 64
-	maxPayloadBytes     = 256 * 1024
-	maxArtifactBytes    = 64 * 1024 * 1024
+	maxNodeIDBytes   = 512
+	maxAudienceBytes = 32
+	maxClosureNodes  = 256
+	maxTasks         = 64
+	maxArtifacts     = 64
+	maxPayloadBytes  = 256 * 1024
+	maxArtifactBytes = 64 * 1024 * 1024
 )
 
 // Scope is the immutable application authority checked before an operation.
@@ -42,14 +41,11 @@ type Resolver interface {
 	ProjectMockup(context.Context, string, string, string, string) (MockupProjection, error)
 }
 
-// Materializer evaluates a server-resolved artifact materialization task.
-type Materializer interface {
-	Run(context.Context, string, Task) (TaskResult, error)
-}
-
-// MockupCreator creates a mockup from a server-owned projected scenario.
-type MockupCreator interface {
-	Create(context.Context, string, MockupManifest) (ToolResult, error)
+// ApplicationArtifactExecutor invokes deployment-bound registered Story
+// Applications. The caller cannot select applications, phases, sessions,
+// actors, transports, paths, or execution providers.
+type ApplicationArtifactExecutor interface {
+	ExecuteApplicationArtifact(context.Context, ApplicationArtifactRequest) (ApplicationArtifactResult, error)
 }
 
 // Capture records a server-resolved demo manifest.
@@ -71,16 +67,55 @@ type EvidenceStore interface {
 
 // Dependencies are injected when a Story Application runtime is constructed.
 type Dependencies struct {
-	AppID        string
-	Root         string
-	Authorizer   Authorizer
-	Resolver     Resolver
-	Materializer Materializer
-	Creator      MockupCreator
-	Capture      Capture
-	Doctor       Doctor
-	Evidence     EvidenceStore
-	Clock        clock.Clock
+	AppID               string
+	Root                string
+	CatalogPath         string
+	CatalogRef          string
+	MockupApplicationID string
+	Authorizer          Authorizer
+	Resolver            Resolver
+	Artifacts           ApplicationArtifactExecutor
+	Capture             Capture
+	Doctor              Doctor
+	Evidence            EvidenceStore
+	Clock               clock.Clock
+}
+
+// DeploymentBinding is server-owned catalog authority for one caller.
+type DeploymentBinding struct {
+	CatalogPath         string
+	CatalogRef          string
+	MockupApplicationID string
+}
+
+// ApplicationArtifactRequest is private, exact typed input to the injected
+// daemon executor.
+type ApplicationArtifactRequest struct {
+	CallerApplicationID string
+	Operation           string
+	Input               ApplicationArtifactInput
+}
+
+// ApplicationArtifactInput is deliberately finite and path-free.
+type ApplicationArtifactInput struct {
+	Schema         string   `json:"schema"`
+	CatalogRef     string   `json:"catalog_ref,omitempty"`
+	NodeID         string   `json:"node_id,omitempty"`
+	ContextDigest  string   `json:"context_digest,omitempty"`
+	ScenarioRef    string   `json:"scenario_ref,omitempty"`
+	ScenarioDigest string   `json:"scenario_digest,omitempty"`
+	ActionIDs      []string `json:"action_ids,omitempty"`
+}
+
+// ApplicationArtifactResult carries only durable private identity, canonical
+// receipts, and opaque handles.
+type ApplicationArtifactResult struct {
+	JobID      string
+	SessionID  string
+	ReceiptIDs []string
+	Artifacts  []string
+	Primary    string
+	Bundle     string
 }
 
 // BrokerCapture waits for an attached Story Application surface to execute a
@@ -115,13 +150,6 @@ type Task struct {
 	Artifacts []Artifact
 }
 
-// TaskResult is the bounded, sanitized result of one materialization task.
-type TaskResult struct {
-	ID         string `json:"id"`
-	OK         bool   `json:"ok"`
-	OutputHash string `json:"output_hash,omitempty"`
-}
-
 // Artifact names a server-owned file eligible for an opaque artifact handle.
 type Artifact struct {
 	Kind string
@@ -152,11 +180,10 @@ type MockupProjection struct {
 
 // MockupManifest contains private server-side inputs for the creator.
 type MockupManifest struct {
-	Scenario    json.RawMessage
-	ScenarioRef string
-	ActionIDs   []string
-	WorkDir     string
-	OutPath     string
+	ApplicationID string
+	Scenario      json.RawMessage
+	ScenarioRef   string
+	ActionIDs     []string
 }
 
 // ToolResult contains server-owned files emitted by a tool adapter.
@@ -185,15 +212,16 @@ type artifactRecord struct {
 }
 
 type operationReceipt struct {
-	Schema      string       `json:"schema"`
-	AppID       string       `json:"app_id"`
-	Operation   string       `json:"operation"`
-	InputDigest string       `json:"input_digest"`
-	OK          bool         `json:"ok"`
-	Evidence    any          `json:"evidence,omitempty"`
-	Artifacts   []string     `json:"artifacts,omitempty"`
-	Tasks       []TaskResult `json:"tasks,omitempty"`
-	RecordedAt  string       `json:"recorded_at"`
+	Schema      string   `json:"schema"`
+	AppID       string   `json:"app_id"`
+	Operation   string   `json:"operation"`
+	InputDigest string   `json:"input_digest"`
+	OK          bool     `json:"ok"`
+	Evidence    any      `json:"evidence,omitempty"`
+	Artifacts   []string `json:"artifacts,omitempty"`
+	Receipts    []string `json:"application_receipts,omitempty"`
+	Bundle      string   `json:"bundle,omitempty"`
+	RecordedAt  string   `json:"recorded_at"`
 }
 
 func result(data map[string]any) host.Result {

@@ -144,6 +144,10 @@ type WebConfig struct {
 	// absent or the process is not `kitsoki daemon`.
 	Campaigns *CampaignConfig `yaml:"campaigns,omitempty"`
 
+	// StoryApplicationArtifacts binds callers to exact registered artifact
+	// producers. It is executable only when daemon construction enables it.
+	StoryApplicationArtifacts map[string]StoryApplicationArtifactConfig `yaml:"story_application_artifacts,omitempty"`
+
 	// Auth configures invitation-only GitHub sign-in for the web/daemon HTTP
 	// surface (internal/webauth). Nil ⇒ mode "auto": auth is required exactly
 	// when the server binds a non-loopback address. The client secret is
@@ -634,6 +638,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveReviewedFeedback(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveStoryApplicationArtifacts(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveCampaigns(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -812,6 +819,19 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if local.Campaigns != nil {
 		out.Campaigns = local.Campaigns
+	}
+	if len(local.StoryApplicationArtifacts) > 0 {
+		merged := make(
+			map[string]StoryApplicationArtifactConfig,
+			len(base.StoryApplicationArtifacts)+len(local.StoryApplicationArtifacts),
+		)
+		for k, v := range base.StoryApplicationArtifacts {
+			merged[k] = v
+		}
+		for k, v := range local.StoryApplicationArtifacts {
+			merged[k] = v
+		}
+		out.StoryApplicationArtifacts = merged
 	}
 	if len(local.Workers) > 0 {
 		out.Workers = local.Workers

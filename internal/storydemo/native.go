@@ -17,32 +17,6 @@ const legacyManifestSchema = "kitsoki/legacy-demo-manifest/v1"
 // text.
 type NativePlatform struct{}
 
-func (NativePlatform) Run(_ context.Context, root string, task Task) (TaskResult, error) {
-	records := make([]artifactRecord, 0, len(task.Artifacts))
-	for _, artifact := range task.Artifacts {
-		record, err := artifactMetadata(root, artifact)
-		if err != nil {
-			return TaskResult{}, err
-		}
-		records = append(records, record)
-	}
-	raw, err := json.Marshal(struct {
-		ID        string           `json:"id"`
-		Phase     string           `json:"phase"`
-		Artifacts []artifactRecord `json:"artifacts"`
-	}{ID: task.ID, Phase: task.Phase, Artifacts: records})
-	if err != nil {
-		return TaskResult{}, err
-	}
-	return TaskResult{ID: task.ID, OK: true, OutputHash: semanticDigest("materialized-artifacts", raw)}, nil
-}
-
-func (NativePlatform) Create(_ context.Context, _ string, _ MockupManifest) (ToolResult, error) {
-	return ToolResult{}, fmt.Errorf(
-		"Story Application mockup creation is unavailable until a typed artifact executor is configured",
-	)
-}
-
 func (NativePlatform) Check(_ context.Context, root string, manifest Manifest) (DoctorResult, error) {
 	document, raw, err := readNativeManifest(root, manifest.Path)
 	if err != nil {

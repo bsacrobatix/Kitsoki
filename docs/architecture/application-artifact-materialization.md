@@ -70,3 +70,10 @@ receipt IDs. Resolved catalog, story, and artifact paths remain server-private.
 Failure to persist phase evidence or the terminal materialization record fails
 the job; an in-memory application outcome is never reported as completed durable
 materialization.
+
+The same generic executor backs configured `host.demo.materialize` and
+`host.demo.create_mockup` operations. Their caller-to-producer bindings live in
+daemon-owned `story_application_artifacts` configuration, not story input.
+Mockup creation additionally requires a verified immutable bundle previously
+published by `applicationbuild`; the runtime executor never starts Vite or
+generates frontend files.

@@ -57,6 +57,7 @@ import (
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
+	"kitsoki/internal/storydemo"
 	"kitsoki/internal/study"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
@@ -211,6 +212,9 @@ type SessionRegistry struct {
 	// flowEvidenceProviders are explicit daemon-construction bindings. The
 	// registered catalog path and dependencies are never selected by callers.
 	flowEvidenceProviders map[string]host.FlowEvidenceProvider
+
+	applicationArtifactMu sync.Mutex
+	applicationBundleRoot string
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -219,6 +223,18 @@ type SessionRegistry struct {
 // session-invariant construction posture every new session inherits. The
 // initial catalogue is empty until the caller runs Rescan.
 func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *SessionRegistry {
+	base.StoryDemoBindings = make(map[string]storydemo.DeploymentBinding, len(cfg.StoryApplicationArtifacts))
+	for caller, binding := range cfg.StoryApplicationArtifacts {
+		mockupApplicationID := ""
+		if binding.CreateMockup != nil {
+			mockupApplicationID = binding.CreateMockup.ApplicationID
+		}
+		base.StoryDemoBindings[caller] = storydemo.DeploymentBinding{
+			CatalogPath:         binding.Catalog,
+			CatalogRef:          binding.CatalogRef,
+			MockupApplicationID: mockupApplicationID,
+		}
+	}
 	return &SessionRegistry{
 		cfg:                   cfg,
 		base:                  base,
@@ -311,6 +327,10 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 			return fmt.Errorf("restore daemon reviewed feedback dispatches: %w", feedbackErr)
 		}
 		r.feedbackDispatches = feedbackDispatches
+	}
+	r.base.StoryDemoExecutor = r
+	if root, rootErr := os.Getwd(); rootErr == nil {
+		r.applicationBundleRoot = filepath.Join(root, ".artifacts", "application-builds")
 	}
 	if r.cfg.Campaigns != nil {
 		campaignStore, campaignErr := campaign.NewSQLiteStore(st.DB())
@@ -1531,21 +1551,31 @@ func (r *SessionRegistry) ListArtifactJobs(ctx context.Context) ([]server.Artifa
 		}
 		out = make([]server.ArtifactJobSummary, 0, len(jobs))
 		for _, job := range jobs {
+			story := job.Story
+			sessionID := string(job.SessionID)
+			runURL := job.RunURL
+			openURL := job.RunURL
+			if job.Origin.Kind == "application-artifact" {
+				story = "application:" + job.AppID
+				sessionID = ""
+				runURL = ""
+				openURL = ""
+			}
 			out = append(out, server.ArtifactJobSummary{
 				JobID:             string(job.ID),
-				SessionID:         string(job.SessionID),
+				SessionID:         sessionID,
 				AppID:             job.AppID,
-				Story:             job.Story,
+				Story:             story,
 				Status:            string(job.Status),
 				Phase:             job.Phase,
 				Summary:           job.Summary,
-				RunURL:            job.RunURL,
+				RunURL:            runURL,
 				UpdatedAt:         job.UpdatedAt,
 				InterruptedReason: job.InterruptedReason,
 				WorkerID:          "local",
 				WorkerLabel:       "Local",
 				Placement:         "local",
-				OpenURL:           job.RunURL,
+				OpenURL:           openURL,
 			})
 		}
 	}
@@ -1613,7 +1643,9 @@ func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
 	for _, job := range jobs {
 		if (job.Origin.Kind != "daemon" &&
 			job.Origin.Kind != "campaign" &&
-			job.Origin.Kind != "feedback") || job.Story == "" {
+			job.Origin.Kind != "feedback" &&
+			job.Origin.Kind != "application-artifact") ||
+			job.Story == "" {
 			continue
 		}
 		id, attachErr := r.AttachExternal(ctx, job.Story, "daemon:"+string(job.ID))

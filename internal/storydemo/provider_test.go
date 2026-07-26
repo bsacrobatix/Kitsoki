@@ -36,47 +36,55 @@ func (f *fakeResolver) ProjectMockup(context.Context, string, string, string, st
 	return f.projection, nil
 }
 
-type fakeMaterializer struct {
-	mu    sync.Mutex
-	calls int
+type fakeArtifacts struct {
+	mu      sync.Mutex
+	calls   int
+	results map[string]ApplicationArtifactResult
 }
 
-func (f *fakeMaterializer) Run(_ context.Context, _ string, task Task) (TaskResult, error) {
+func (f *fakeArtifacts) ExecuteApplicationArtifact(
+	_ context.Context,
+	request ApplicationArtifactRequest,
+) (ApplicationArtifactResult, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	raw, _ := json.Marshal(request)
+	key := string(raw)
+	if result, ok := f.results[key]; ok {
+		return result, nil
+	}
 	f.calls++
-	f.mu.Unlock()
-	return TaskResult{ID: task.ID, OK: true, OutputHash: "bounded"}, nil
+	result := ApplicationArtifactResult{
+		JobID: "job-opaque", SessionID: "session-opaque",
+		ReceiptIDs: []string{"ar_0123456789abcdef0123456789abcdef"},
+	}
+	switch request.Operation {
+	case "create_mockup":
+		result.Primary = "demo-artifact:mockup"
+		result.Bundle = "application-bundle:0123456789abcdef"
+		result.Artifacts = []string{result.Primary}
+	default:
+		result.Primary = "demo-artifact:materialized"
+		result.Artifacts = []string{result.Primary}
+	}
+	f.results[key] = result
+	return result, nil
 }
 
 type fakeTools struct {
 	mu          sync.Mutex
-	createCalls int
+	root        string
 	recordCalls int
 	doctorCalls int
-}
-
-func (f *fakeTools) Create(_ context.Context, _ string, manifest MockupManifest) (ToolResult, error) {
-	f.mu.Lock()
-	f.createCalls++
-	f.mu.Unlock()
-	if err := os.MkdirAll(manifest.WorkDir, 0o700); err != nil {
-		return ToolResult{}, err
-	}
-	if err := os.WriteFile(manifest.OutPath, []byte("<html>mockup</html>"), 0o600); err != nil {
-		return ToolResult{}, err
-	}
-	demo := filepath.Join(manifest.WorkDir, "fixture.demo.json")
-	if err := os.WriteFile(demo, []byte(`{"version":1}`), 0o600); err != nil {
-		return ToolResult{}, err
-	}
-	return ToolResult{Primary: Artifact{Kind: "mockup", Path: manifest.OutPath}}, nil
+	lastRecord  Manifest
 }
 
 func (f *fakeTools) Record(_ context.Context, _ string, manifest Manifest) (ToolResult, error) {
 	f.mu.Lock()
 	f.recordCalls++
+	f.lastRecord = manifest
 	f.mu.Unlock()
-	path := filepath.Join(filepath.Dir(manifest.Path), "capture.json")
+	path := filepath.Join(f.root, "capture.json")
 	if err := os.WriteFile(path, []byte(`{"events":[]}`), 0o600); err != nil {
 		return ToolResult{}, err
 	}
@@ -90,7 +98,7 @@ func (f *fakeTools) Check(context.Context, string, Manifest) (DoctorResult, erro
 	return DoctorResult{Report: map[string]any{"ok": true, "checks": []any{}}, OK: true}, nil
 }
 
-func testDependencies(t *testing.T) (Dependencies, *fakeResolver, *fakeMaterializer, *fakeTools) {
+func testDependencies(t *testing.T) (Dependencies, *fakeResolver, *fakeArtifacts, *fakeTools) {
 	t.Helper()
 	root := t.TempDir()
 	manifest := filepath.Join(root, "demo.json")
@@ -102,7 +110,6 @@ func testDependencies(t *testing.T) (Dependencies, *fakeResolver, *fakeMateriali
 		t.Fatal(err)
 	}
 	scenario := json.RawMessage(`{"version":1,"title":"typed"}`)
-	workDir := filepath.Join(root, ".artifacts", "mockup")
 	resolver := &fakeResolver{
 		plan: Plan{
 			CatalogDigest: "catalog", NodeID: "subject",
@@ -117,25 +124,25 @@ func testDependencies(t *testing.T) (Dependencies, *fakeResolver, *fakeMateriali
 		},
 		projection: MockupProjection{
 			CatalogDigest: "catalog", NodeID: "subject", Audience: "internal", Scenario: scenario,
-			Manifest: MockupManifest{Scenario: scenario, WorkDir: workDir, OutPath: filepath.Join(workDir, "mockup.html")},
+			Manifest: MockupManifest{Scenario: scenario},
 		},
 	}
-	materializer := &fakeMaterializer{}
-	tools := &fakeTools{}
+	artifacts := &fakeArtifacts{results: map[string]ApplicationArtifactResult{}}
+	tools := &fakeTools{root: root}
 	deps := Dependencies{
-		AppID: "typed-app", Root: root,
-		Authorizer:   BoundAuthorizer{AppID: "typed-app", Root: root},
-		Resolver:     resolver,
-		Materializer: materializer,
-		Creator:      tools,
-		Capture:      tools,
-		Doctor:       tools,
+		AppID: "typed-app", Root: root, CatalogPath: "catalog.yaml", CatalogRef: "product",
+		MockupApplicationID: "artifact-producer",
+		Authorizer:          BoundAuthorizer{AppID: "typed-app", Root: root},
+		Resolver:            resolver,
+		Artifacts:           artifacts,
+		Capture:             tools,
+		Doctor:              tools,
 		Evidence: FileEvidenceStore{
 			Dir: filepath.Join(root, ".artifacts", "refs"), Scope: ScopeID("typed-app", root),
 		},
 		Clock: clock.NewFake(time.Date(2026, 7, 26, 0, 0, 0, 0, time.UTC)),
 	}
-	return deps, resolver, materializer, tools
+	return deps, resolver, artifacts, tools
 }
 
 func actorContext() context.Context {
@@ -146,7 +153,7 @@ func TestTypedHandlerRejectsActorlessAndExecutableInputs(t *testing.T) {
 	deps, resolver, _, _ := testDependencies(t)
 	handler := NewHandler(deps)
 	_, err := handler(context.Background(), map[string]any{
-		"op": "plan", "catalog_path": "catalog.yaml", "node_id": "subject",
+		"op": "plan", "node_id": "subject",
 	})
 	if err == nil || !strings.Contains(err.Error(), "authenticated actor") {
 		t.Fatalf("actorless error = %v", err)
@@ -158,19 +165,19 @@ func TestTypedHandlerRejectsActorlessAndExecutableInputs(t *testing.T) {
 	for _, key := range []string{"cmd", "command", "script", "path", "repo_path", "url", "args", "credentials"} {
 		t.Run(key, func(t *testing.T) {
 			_, err := handler(actorContext(), map[string]any{
-				"op": "plan", "catalog_path": "catalog.yaml", "node_id": "subject", key: "unsafe",
+				"op": "plan", "node_id": "subject", key: "unsafe",
 			})
 			if err == nil || !strings.Contains(err.Error(), `unknown argument "`+key+`"`) {
 				t.Fatalf("error = %v", err)
 			}
 		})
 	}
-	for _, catalogPath := range []string{"/tmp/catalog.yaml", "../catalog.yaml", "https://example.test/catalog"} {
+	for _, key := range []string{"catalog_path", "actor", "session_id", "transport", "provider"} {
 		_, err := handler(actorContext(), map[string]any{
-			"op": "plan", "catalog_path": catalogPath, "node_id": "subject",
+			"op": "materialize", "node_id": "subject", "phase": "subject", key: "unsafe",
 		})
-		if err == nil || (!strings.Contains(err.Error(), "application-relative") && !strings.Contains(err.Error(), "escapes")) {
-			t.Fatalf("catalog path %q error = %v", catalogPath, err)
+		if err == nil || !strings.Contains(err.Error(), `unknown argument "`+key+`"`) {
+			t.Fatalf("authority field %q error = %v", key, err)
 		}
 	}
 }
@@ -180,7 +187,7 @@ func TestTypedOperationsUseOpaqueRefsAndSurviveRestart(t *testing.T) {
 	handler := NewHandler(deps)
 	ctx := actorContext()
 
-	planned, err := handler(ctx, map[string]any{"op": "plan", "catalog_path": "catalog.yaml", "node_id": "subject"})
+	planned, err := handler(ctx, map[string]any{"op": "plan", "node_id": "subject"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,15 +196,30 @@ func TestTypedOperationsUseOpaqueRefsAndSurviveRestart(t *testing.T) {
 		t.Fatalf("unsafe manifest ref %q", manifestRef)
 	}
 
-	_, err = handler(ctx, map[string]any{
-		"op": "materialize", "catalog_path": "catalog.yaml", "node_id": "subject", "phase": "subject",
+	materialized, err := handler(ctx, map[string]any{
+		"op": "materialize", "node_id": "subject", "phase": "subject",
 	})
-	if err == nil || !strings.Contains(err.Error(), "typed phase-action executor") {
-		t.Fatalf("materialize error = %v", err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if materialized.Data["evidence_ref"] == "" {
+		t.Fatalf("materialize = %#v", materialized.Data)
+	}
+	materializedReceipt, err := deps.Evidence.Resolve(
+		ctx,
+		materialized.Data["evidence_ref"].(string),
+		"materialize",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(materializedReceipt), "job-opaque") ||
+		strings.Contains(string(materializedReceipt), "session-opaque") {
+		t.Fatalf("materialize receipt leaks runtime identity: %s", materializedReceipt)
 	}
 
 	projected, err := handler(ctx, map[string]any{
-		"op": "project_mockup", "catalog_path": "catalog.yaml", "node_id": "subject", "audience": "internal",
+		"op": "project_mockup", "node_id": "subject", "audience": "internal",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,16 +229,19 @@ func TestTypedOperationsUseOpaqueRefsAndSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(created.Data["mockup_ref"].(string), "kitsoki://story-demo/") {
+	if !strings.HasPrefix(created.Data["mockup_ref"].(string), "demo-artifact:") {
 		t.Fatalf("mockup ref = %q", created.Data["mockup_ref"])
+	}
+	if !strings.HasPrefix(created.Data["bundle_ref"].(string), "application-bundle:") {
+		t.Fatalf("bundle ref = %q", created.Data["bundle_ref"])
 	}
 
 	restarted := NewHandler(deps)
 	if _, err := restarted(ctx, map[string]any{"op": "create_mockup", "manifest_ref": projectedManifest}); err != nil {
 		t.Fatal(err)
 	}
-	if tools.createCalls != 1 {
-		t.Fatalf("create calls after restart = %d, want 1", tools.createCalls)
+	if deps.Artifacts.(*fakeArtifacts).calls != 2 {
+		t.Fatalf("artifact calls after restart = %d, want 2 operations", deps.Artifacts.(*fakeArtifacts).calls)
 	}
 	recorded, err := restarted(ctx, map[string]any{"op": "record", "manifest_ref": projectedManifest})
 	if err != nil {
@@ -230,6 +255,11 @@ func TestTypedOperationsUseOpaqueRefsAndSurviveRestart(t *testing.T) {
 	}
 	if tools.recordCalls != 1 {
 		t.Fatalf("record calls after restart = %d, want 1", tools.recordCalls)
+	}
+	if tools.lastRecord.Path != "" || tools.lastRecord.Capture == nil ||
+		tools.lastRecord.Capture.ApplicationID != "artifact-producer" ||
+		tools.lastRecord.Capture.ScenarioRef == "" {
+		t.Fatalf("projected capture manifest = %#v", tools.lastRecord)
 	}
 	otherActor := host.WithActor(context.Background(), "other@example.test")
 	if _, err := NewHandler(deps)(otherActor, map[string]any{
@@ -256,7 +286,7 @@ func TestTypedOperationsUseOpaqueRefsAndSurviveRestart(t *testing.T) {
 }
 
 func TestConcurrentMaterializeExecutesOnce(t *testing.T) {
-	deps, _, materializer, _ := testDependencies(t)
+	deps, _, artifacts, _ := testDependencies(t)
 	handler := NewHandler(deps)
 	ctx := actorContext()
 	const goroutines = 12
@@ -267,7 +297,7 @@ func TestConcurrentMaterializeExecutesOnce(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_, err := handler(ctx, map[string]any{
-				"op": "materialize", "catalog_path": "catalog.yaml", "node_id": "subject", "phase": "subject",
+				"op": "materialize", "node_id": "subject", "phase": "subject",
 			})
 			errs <- err
 		}()
@@ -275,12 +305,12 @@ func TestConcurrentMaterializeExecutesOnce(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		if err == nil || !strings.Contains(err.Error(), "typed phase-action executor") {
+		if err != nil {
 			t.Fatalf("materialize error = %v", err)
 		}
 	}
-	if materializer.calls != 0 {
-		t.Fatalf("materializer calls = %d, want 0", materializer.calls)
+	if artifacts.calls != 1 {
+		t.Fatalf("artifact calls = %d, want 1", artifacts.calls)
 	}
 }
 
@@ -288,7 +318,7 @@ func TestReferencesAreApplicationScoped(t *testing.T) {
 	deps, _, _, _ := testDependencies(t)
 	handler := NewHandler(deps)
 	planned, err := handler(actorContext(), map[string]any{
-		"op": "plan", "catalog_path": "catalog.yaml", "node_id": "subject",
+		"op": "plan", "node_id": "subject",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -311,13 +341,13 @@ func TestPhaseAndBoundsFailInsteadOfTruncating(t *testing.T) {
 	deps, resolver, _, _ := testDependencies(t)
 	handler := NewHandler(deps)
 	_, err := handler(actorContext(), map[string]any{
-		"op": "materialize", "catalog_path": "catalog.yaml", "node_id": "subject", "phase": "all",
+		"op": "materialize", "node_id": "subject", "phase": "all",
 	})
 	if err == nil || !strings.Contains(err.Error(), "phase must be") {
 		t.Fatalf("phase error = %v", err)
 	}
 	resolver.plan.ClosureOrder = make([]string, maxClosureNodes+1)
-	_, err = handler(actorContext(), map[string]any{"op": "plan", "catalog_path": "catalog.yaml", "node_id": "subject"})
+	_, err = handler(actorContext(), map[string]any{"op": "plan", "node_id": "subject"})
 	if err == nil || !strings.Contains(err.Error(), "refusing to truncate") {
 		t.Fatalf("bounds error = %v", err)
 	}
@@ -325,9 +355,9 @@ func TestPhaseAndBoundsFailInsteadOfTruncating(t *testing.T) {
 
 func TestTypedContractRegistrationAndEffects(t *testing.T) {
 	wantOps := map[string][]string{
-		"plan":           {"catalog_path", "node_id"},
-		"materialize":    {"catalog_path", "node_id", "phase"},
-		"project_mockup": {"catalog_path", "node_id", "audience"},
+		"plan":           {"node_id"},
+		"materialize":    {"node_id", "phase"},
+		"project_mockup": {"node_id", "audience"},
 		"create_mockup":  {"manifest_ref"},
 		"record":         {"manifest_ref"},
 		"doctor":         {"manifest_ref"},

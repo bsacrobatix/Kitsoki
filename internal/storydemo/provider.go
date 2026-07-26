@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"kitsoki/internal/host"
 )
@@ -84,10 +85,6 @@ func validateDependencies(deps Dependencies) error {
 		return fmt.Errorf("host.demo: authorizer is unavailable")
 	case deps.Resolver == nil:
 		return fmt.Errorf("host.demo: resolver is unavailable")
-	case deps.Materializer == nil:
-		return fmt.Errorf("host.demo: materializer is unavailable")
-	case deps.Creator == nil:
-		return fmt.Errorf("host.demo: mockup creator is unavailable")
 	case deps.Capture == nil:
 		return fmt.Errorf("host.demo: capture adapter is unavailable")
 	case deps.Doctor == nil:
@@ -102,11 +99,17 @@ func validateDependencies(deps Dependencies) error {
 }
 
 func planOp(ctx context.Context, deps Dependencies, args map[string]any) (host.Result, error) {
-	catalogPath, nodeID, err := graphArgs("plan", args, nil)
+	if err := rejectUnknown("plan", args, map[string]bool{"op": true, "node_id": true}); err != nil {
+		return host.Result{}, err
+	}
+	nodeID, err := requiredString("plan", args, "node_id", maxNodeIDBytes)
 	if err != nil {
 		return host.Result{}, err
 	}
-	plan, err := deps.Resolver.Plan(ctx, deps.Root, catalogPath, nodeID)
+	if strings.TrimSpace(deps.CatalogPath) == "" {
+		return host.Result{}, fmt.Errorf("host.demo.plan: daemon artifact binding is not configured")
+	}
+	plan, err := deps.Resolver.Plan(ctx, deps.Root, deps.CatalogPath, nodeID)
 	if err != nil {
 		return host.Result{}, fmt.Errorf("host.demo.plan: resolve: %w", err)
 	}
@@ -127,6 +130,9 @@ func planOp(ctx context.Context, deps Dependencies, args map[string]any) (host.R
 }
 
 func materializeOp(ctx context.Context, deps Dependencies, args map[string]any) (host.Result, error) {
+	if deps.Artifacts == nil {
+		return host.Result{}, fmt.Errorf("host.demo.materialize: application artifact executor is unavailable outside daemon mode")
+	}
 	phase, err := requiredString("materialize", args, "phase", 32)
 	if err != nil {
 		return host.Result{}, err
@@ -134,14 +140,63 @@ func materializeOp(ctx context.Context, deps Dependencies, args map[string]any) 
 	if phase != "dependencies" && phase != "subject" && phase != "verify" {
 		return host.Result{}, fmt.Errorf("host.demo.materialize: phase must be dependencies, subject, or verify")
 	}
-	_, _, err = graphArgs("materialize", args, map[string]bool{"phase": true})
+	if err := rejectUnknown("materialize", args, map[string]bool{
+		"op": true, "node_id": true, "phase": true,
+	}); err != nil {
+		return host.Result{}, err
+	}
+	nodeID, err := requiredString("materialize", args, "node_id", maxNodeIDBytes)
 	if err != nil {
 		return host.Result{}, err
 	}
-	return host.Result{}, fmt.Errorf(
-		"host.demo.materialize: phase %q is unavailable until a typed phase-action executor is configured",
+	if strings.TrimSpace(deps.CatalogPath) == "" || strings.TrimSpace(deps.CatalogRef) == "" {
+		return host.Result{}, fmt.Errorf("host.demo.materialize: daemon artifact binding is not configured")
+	}
+	materialization, err := deps.Resolver.Materialization(
+		ctx,
+		deps.Root,
+		deps.CatalogPath,
+		nodeID,
 		phase,
 	)
+	if err != nil {
+		return host.Result{}, fmt.Errorf("host.demo.materialize: resolve: %w", err)
+	}
+	contextDigest, err := materializationDigest(deps.Root, materialization)
+	if err != nil {
+		return host.Result{}, fmt.Errorf("host.demo.materialize: context: %w", err)
+	}
+	executed, err := deps.Artifacts.ExecuteApplicationArtifact(ctx, ApplicationArtifactRequest{
+		CallerApplicationID: deps.AppID,
+		Operation:           "materialize." + phase,
+		Input: ApplicationArtifactInput{
+			Schema:     "kitsoki/story-application-materialize-input/v1",
+			CatalogRef: deps.CatalogRef, NodeID: nodeID, ContextDigest: contextDigest,
+		},
+	})
+	if err != nil {
+		return host.Result{}, fmt.Errorf("host.demo.materialize: execute: %w", err)
+	}
+	if len(executed.Artifacts) == 0 {
+		return host.Result{}, fmt.Errorf("host.demo.materialize: producer returned no artifact handles")
+	}
+	key := semanticDigest("materialize-receipt", []byte(strings.Join([]string{
+		deps.CatalogRef, nodeID, phase, contextDigest,
+	}, "\x00")))
+	ref, err := putApplicationReceipt(
+		ctx,
+		deps,
+		"materialize",
+		key,
+		"materialize."+phase,
+		executed,
+	)
+	if err != nil {
+		return host.Result{}, err
+	}
+	return result(map[string]any{
+		"evidence_ref": ref, "artifact_handles": append([]string(nil), executed.Artifacts...),
+	}), nil
 }
 
 func projectMockupOp(ctx context.Context, deps Dependencies, args map[string]any) (host.Result, error) {
@@ -152,11 +207,19 @@ func projectMockupOp(ctx context.Context, deps Dependencies, args map[string]any
 	if audience != "internal" && audience != "public" {
 		return host.Result{}, fmt.Errorf("host.demo.project_mockup: audience must be internal or public")
 	}
-	catalogPath, nodeID, err := graphArgs("project_mockup", args, map[string]bool{"audience": true})
+	if err := rejectUnknown("project_mockup", args, map[string]bool{
+		"op": true, "node_id": true, "audience": true,
+	}); err != nil {
+		return host.Result{}, err
+	}
+	nodeID, err := requiredString("project_mockup", args, "node_id", maxNodeIDBytes)
 	if err != nil {
 		return host.Result{}, err
 	}
-	projection, err := deps.Resolver.ProjectMockup(ctx, deps.Root, catalogPath, nodeID, audience)
+	if strings.TrimSpace(deps.CatalogPath) == "" {
+		return host.Result{}, fmt.Errorf("host.demo.project_mockup: daemon artifact binding is not configured")
+	}
+	projection, err := deps.Resolver.ProjectMockup(ctx, deps.Root, deps.CatalogPath, nodeID, audience)
 	if err != nil {
 		return host.Result{}, fmt.Errorf("host.demo.project_mockup: resolve: %w", err)
 	}
@@ -164,6 +227,10 @@ func projectMockupOp(ctx context.Context, deps Dependencies, args map[string]any
 	if err != nil {
 		return host.Result{}, err
 	}
+	if deps.MockupApplicationID == "" {
+		return host.Result{}, fmt.Errorf("host.demo.project_mockup: no producer application is configured")
+	}
+	projection.Manifest.ApplicationID = deps.MockupApplicationID
 	projection.Manifest.ScenarioRef = scenarioRef
 	manifestRef, err := putJSON(ctx, deps, "manifest", manifestRecord{Mockup: &projection.Manifest})
 	if err != nil {
@@ -173,6 +240,9 @@ func projectMockupOp(ctx context.Context, deps Dependencies, args map[string]any
 }
 
 func createMockupOp(ctx context.Context, deps Dependencies, args map[string]any) (host.Result, error) {
+	if deps.Artifacts == nil {
+		return host.Result{}, fmt.Errorf("host.demo.create_mockup: application artifact executor is unavailable outside daemon mode")
+	}
 	manifestRef, err := refArgs("create_mockup", args)
 	if err != nil {
 		return host.Result{}, err
@@ -184,38 +254,33 @@ func createMockupOp(ctx context.Context, deps Dependencies, args map[string]any)
 	if record.Mockup == nil {
 		return host.Result{}, fmt.Errorf("host.demo.create_mockup: manifest ref is not a projected mockup")
 	}
+	scenarioDigest := semanticDigest("scenario", record.Mockup.Scenario)
+	created, err := deps.Artifacts.ExecuteApplicationArtifact(ctx, ApplicationArtifactRequest{
+		CallerApplicationID: deps.AppID,
+		Operation:           "create_mockup",
+		Input: ApplicationArtifactInput{
+			Schema:         "kitsoki/story-application-mockup-input/v1",
+			ScenarioRef:    record.Mockup.ScenarioRef,
+			ScenarioDigest: scenarioDigest,
+			ActionIDs:      append([]string(nil), record.Mockup.ActionIDs...),
+		},
+	})
+	if err != nil {
+		return host.Result{}, fmt.Errorf("host.demo.create_mockup: execute: %w", err)
+	}
+	if created.Primary == "" || created.Bundle == "" || len(created.Artifacts) == 0 {
+		return host.Result{}, fmt.Errorf("host.demo.create_mockup: producer returned incomplete mockup and bundle handles")
+	}
 	key := semanticDigest("create-receipt", []byte(manifestRef))
-	if _, prior, ok, err := deps.Evidence.Find(ctx, "create", key); err != nil {
-		return host.Result{}, err
-	} else if ok {
-		var receipt operationReceipt
-		if err := json.Unmarshal(prior, &receipt); err != nil {
-			return host.Result{}, err
-		}
-		mockupRef := ""
-		if len(receipt.Artifacts) > 0 {
-			mockupRef = receipt.Artifacts[0]
-		}
-		return result(map[string]any{"mockup_ref": mockupRef, "artifact_handles": receipt.Artifacts}), nil
-	}
-	created, err := deps.Creator.Create(ctx, deps.Root, *record.Mockup)
-	if err != nil {
-		return host.Result{}, fmt.Errorf("host.demo.create_mockup: create: %w", err)
-	}
-	artifacts := append([]Artifact{created.Primary}, created.Artifacts...)
-	handles, err := putArtifacts(ctx, deps, artifacts)
+	_, err = putApplicationReceipt(ctx, deps, "create", key, "create_mockup", created)
 	if err != nil {
 		return host.Result{}, err
 	}
-	if len(handles) == 0 {
-		return host.Result{}, fmt.Errorf("host.demo.create_mockup: creator returned no mockup")
-	}
-	receiptRef, err := putReceipt(ctx, deps, "create", key, "create_mockup", true, created.Summary, handles)
-	if err != nil {
-		return host.Result{}, err
-	}
-	_ = receiptRef
-	return result(map[string]any{"mockup_ref": handles[0], "artifact_handles": handles}), nil
+	return result(map[string]any{
+		"mockup_ref":       created.Primary,
+		"bundle_ref":       created.Bundle,
+		"artifact_handles": append([]string(nil), created.Artifacts...),
+	}), nil
 }
 
 func recordOp(ctx context.Context, deps Dependencies, args map[string]any) (host.Result, error) {
@@ -265,7 +330,7 @@ func doctorOp(ctx context.Context, deps Dependencies, args map[string]any) (host
 	if err != nil {
 		return host.Result{}, fmt.Errorf("host.demo.doctor: %w", err)
 	}
-	fingerprint, err := fileFingerprint(deps.Root, manifest.Path)
+	fingerprint, err := manifestFingerprint(deps.Root, manifest)
 	if err != nil {
 		return host.Result{}, err
 	}
@@ -296,32 +361,6 @@ func doctorOp(ctx context.Context, deps Dependencies, args map[string]any) (host
 		return host.Result{}, err
 	}
 	return result(map[string]any{"report": checked.Report, "ok": checked.OK, "evidence_ref": ref}), nil
-}
-
-func graphArgs(op string, args map[string]any, extra map[string]bool) (string, string, error) {
-	allowed := map[string]bool{"op": true, "catalog_path": true, "node_id": true}
-	for key := range extra {
-		allowed[key] = true
-	}
-	if err := rejectUnknown(op, args, allowed); err != nil {
-		return "", "", err
-	}
-	catalogPath, err := requiredString(op, args, "catalog_path", maxCatalogPathBytes)
-	if err != nil {
-		return "", "", err
-	}
-	if filepath.IsAbs(catalogPath) || strings.Contains(catalogPath, "://") {
-		return "", "", fmt.Errorf("host.demo.%s: catalog_path must be application-relative", op)
-	}
-	clean := filepath.Clean(catalogPath)
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", "", fmt.Errorf("host.demo.%s: catalog_path escapes the application scope", op)
-	}
-	nodeID, err := requiredString(op, args, "node_id", maxNodeIDBytes)
-	if err != nil {
-		return "", "", err
-	}
-	return catalogPath, nodeID, nil
 }
 
 func refArgs(op string, args map[string]any) (string, error) {
@@ -358,6 +397,74 @@ func putJSON(ctx context.Context, deps Dependencies, kind string, value any) (st
 	}
 	digest := semanticDigest(kind, payload)
 	return deps.Evidence.Put(ctx, kind, digest, payload, deps.Clock.Now())
+}
+
+func putApplicationReceipt(
+	ctx context.Context,
+	deps Dependencies,
+	kind string,
+	key string,
+	operation string,
+	executed ApplicationArtifactResult,
+) (string, error) {
+	receipt := operationReceipt{
+		Schema: receiptSchema, AppID: deps.AppID, Operation: operation,
+		InputDigest: key, OK: true,
+		Artifacts:  append([]string(nil), executed.Artifacts...),
+		Receipts:   append([]string(nil), executed.ReceiptIDs...),
+		Bundle:     executed.Bundle,
+		RecordedAt: deps.Clock.Now().UTC().Format(time.RFC3339Nano),
+	}
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return "", err
+	}
+	return deps.Evidence.Put(ctx, kind, key, raw, deps.Clock.Now())
+}
+
+func materializationDigest(root string, materialization Materialization) (string, error) {
+	type boundedArtifact struct {
+		Kind   string `json:"kind"`
+		Size   int64  `json:"size"`
+		Digest string `json:"digest"`
+	}
+	type boundedTask struct {
+		ID        string            `json:"id"`
+		Phase     string            `json:"phase"`
+		Artifacts []boundedArtifact `json:"artifacts"`
+	}
+	if len(materialization.Tasks) > maxTasks {
+		return "", fmt.Errorf("task count exceeds %d", maxTasks)
+	}
+	tasks := make([]boundedTask, 0, len(materialization.Tasks))
+	for _, task := range materialization.Tasks {
+		bounded := boundedTask{ID: task.ID, Phase: task.Phase}
+		for _, artifact := range task.Artifacts {
+			metadata, err := artifactMetadata(root, artifact)
+			if err != nil {
+				return "", err
+			}
+			bounded.Artifacts = append(bounded.Artifacts, boundedArtifact{
+				Kind: metadata.Kind, Size: metadata.Size, Digest: metadata.Digest,
+			})
+		}
+		tasks = append(tasks, bounded)
+	}
+	raw, err := json.Marshal(struct {
+		CatalogDigest string        `json:"catalog_digest"`
+		NodeID        string        `json:"node_id"`
+		Phase         string        `json:"phase"`
+		Tasks         []boundedTask `json:"tasks"`
+	}{
+		CatalogDigest: materialization.CatalogDigest,
+		NodeID:        materialization.NodeID,
+		Phase:         materialization.Phase,
+		Tasks:         tasks,
+	})
+	if err != nil {
+		return "", err
+	}
+	return "sha256:" + semanticDigest("materialization-context", raw), nil
 }
 
 func putArtifacts(ctx context.Context, deps Dependencies, artifacts []Artifact) ([]string, error) {
@@ -402,18 +509,20 @@ func (m manifestRecord) resolve(root string) (Manifest, error) {
 	if m.Mockup == nil {
 		return Manifest{}, fmt.Errorf("manifest reference has no server-owned target")
 	}
-	entries, err := filepath.Glob(filepath.Join(m.Mockup.WorkDir, "*.demo.json"))
-	if err != nil {
-		return Manifest{}, err
+	if strings.TrimSpace(m.Mockup.ApplicationID) == "" {
+		return Manifest{}, fmt.Errorf("projected mockup has no producer application")
 	}
-	if len(entries) != 1 {
-		return Manifest{}, fmt.Errorf("projected mockup has %d demo manifests; expected exactly one", len(entries))
+	if strings.TrimSpace(m.Mockup.ScenarioRef) == "" {
+		return Manifest{}, fmt.Errorf("projected mockup has no scenario reference")
 	}
-	path, err := containedExistingPath(root, entries[0])
-	if err != nil {
-		return Manifest{}, err
+	if len(m.Mockup.ActionIDs) > maxTasks {
+		return Manifest{}, fmt.Errorf("projected mockup has %d actions, exceeds %d", len(m.Mockup.ActionIDs), maxTasks)
 	}
-	return manifestFromPath(root, path)
+	return Manifest{Capture: &CapturePlan{
+		ApplicationID: m.Mockup.ApplicationID,
+		ScenarioRef:   m.Mockup.ScenarioRef,
+		ActionIDs:     append([]string(nil), m.Mockup.ActionIDs...),
+	}}, nil
 }
 
 func manifestFromPath(root, path string) (Manifest, error) {
@@ -438,6 +547,20 @@ func fileFingerprint(root, path string) (string, error) {
 		return "", err
 	}
 	return metadata.Digest, nil
+}
+
+func manifestFingerprint(root string, manifest Manifest) (string, error) {
+	if manifest.Path != "" {
+		return fileFingerprint(root, manifest.Path)
+	}
+	if manifest.Capture == nil {
+		return "", fmt.Errorf("manifest has neither a native path nor a capture plan")
+	}
+	raw, err := json.Marshal(manifest.Capture)
+	if err != nil {
+		return "", err
+	}
+	return "sha256:" + semanticDigest("capture-plan", raw), nil
 }
 
 func putReceipt(ctx context.Context, deps Dependencies, kind, key, op string, ok bool, evidence any, artifacts []string) (string, error) {

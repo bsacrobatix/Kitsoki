@@ -137,13 +137,10 @@ func (GraphResolver) ProjectMockup(_ context.Context, root, catalogPath, nodeID,
 	if len(raw) > maxPayloadBytes {
 		return MockupProjection{}, fmt.Errorf("projected scenario is %d bytes, exceeds %d; refusing to truncate", len(raw), maxPayloadBytes)
 	}
-	key := semanticDigest("mockup-work", append([]byte(cat.ContentDigest+"\x00"+nodeID+"\x00"+audience), raw...))
-	workDir := filepath.Join(root, ".artifacts", "story-demo", "mockups", key[:16])
 	return MockupProjection{
 		CatalogDigest: cat.ContentDigest, NodeID: nodeID, Audience: audience, Scenario: raw,
 		Manifest: MockupManifest{
 			Scenario: raw, ActionIDs: actionIDs,
-			WorkDir: workDir, OutPath: filepath.Join(workDir, "mockup.html"),
 		},
 	}, nil
 }

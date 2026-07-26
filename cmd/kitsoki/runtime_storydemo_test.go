@@ -29,7 +29,7 @@ func TestWireStoryDemoHostReplacesLegacyHandlerWithAppScopedProvider(t *testing.
 	})
 
 	_, err := registry.Invoke(context.Background(), "host.demo.plan", map[string]any{
-		"catalog_path": "catalog.yaml", "node_id": "demo-1",
+		"node_id": "demo-1",
 	})
 	if err == nil || !strings.Contains(err.Error(), "authenticated actor") {
 		t.Fatalf("actorless error = %v", err)

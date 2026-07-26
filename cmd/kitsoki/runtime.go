@@ -198,6 +198,8 @@ type runtimeConfig struct {
 	// ApplicationCaptures is the process-owned browser capture broker shared
 	// by runstatus and every per-session typed host.demo registry.
 	ApplicationCaptures applicationcapture.Broker
+	StoryDemoExecutor   storydemo.ApplicationArtifactExecutor
+	StoryDemoBinding    storydemo.DeploymentBinding
 }
 
 // runtimeBase carries the session-INVARIANT construction posture that
@@ -274,6 +276,8 @@ type runtimeBase struct {
 	// embedding VS Code extension). The TUI run path leaves it false.
 	ConnectIDEFromEnv   bool
 	ApplicationCaptures applicationcapture.Broker
+	StoryDemoExecutor   storydemo.ApplicationArtifactExecutor
+	StoryDemoBindings   map[string]storydemo.DeploymentBinding
 }
 
 // config materialises a per-session runtimeConfig for the story at storyPath
@@ -282,6 +286,7 @@ type runtimeBase struct {
 // produced sessionRuntime is nil-harness, cassette/stub-backed when the base
 // carries a fixture — the same construction web.go performs today.
 func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
+	demoBinding := b.StoryDemoBindings[def.App.ID]
 	return runtimeConfig{
 		AppPath:             storyPath,
 		Def:                 def,
@@ -303,6 +308,8 @@ func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 		MiningRepoPath:      filepath.Dir(storyPath),
 		ConnectIDEFromEnv:   b.ConnectIDEFromEnv,
 		ApplicationCaptures: b.ApplicationCaptures,
+		StoryDemoExecutor:   b.StoryDemoExecutor,
+		StoryDemoBinding:    demoBinding,
 	}
 }
 
@@ -326,12 +333,14 @@ func wireStoryDemoHost(registry *host.Registry, cfg runtimeConfig) {
 	scope := storydemo.ScopeID(cfg.Def.App.ID, root)
 	platform := storydemo.NativePlatform{}
 	registry.Replace("host.demo", storydemo.NewHandler(storydemo.Dependencies{
-		AppID:        cfg.Def.App.ID,
-		Root:         root,
-		Authorizer:   storydemo.BoundAuthorizer{AppID: cfg.Def.App.ID, Root: root},
-		Resolver:     storydemo.GraphResolver{},
-		Materializer: platform,
-		Creator:      platform,
+		AppID:               cfg.Def.App.ID,
+		Root:                root,
+		CatalogPath:         cfg.StoryDemoBinding.CatalogPath,
+		CatalogRef:          cfg.StoryDemoBinding.CatalogRef,
+		MockupApplicationID: cfg.StoryDemoBinding.MockupApplicationID,
+		Authorizer:          storydemo.BoundAuthorizer{AppID: cfg.Def.App.ID, Root: root},
+		Resolver:            storydemo.GraphResolver{},
+		Artifacts:           cfg.StoryDemoExecutor,
 		Capture: storydemo.BrokerCapture{
 			Broker: cfg.ApplicationCaptures,
 		},

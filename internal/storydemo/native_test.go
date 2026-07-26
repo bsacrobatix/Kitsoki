@@ -9,22 +9,6 @@ import (
 	"testing"
 )
 
-func TestNativePlatformCreateFailsClosedWithoutTypedArtifactExecutor(t *testing.T) {
-	root := t.TempDir()
-	workDir := filepath.Join(root, ".artifacts", "mockup")
-	scenario := json.RawMessage(`{"title":"Native mockup","tagline":"No subprocesses","states":{"start":{},"done":{}}}`)
-	platform := NativePlatform{}
-	_, err := platform.Create(context.Background(), root, MockupManifest{
-		Scenario: scenario, WorkDir: workDir, OutPath: filepath.Join(workDir, "mockup.html"),
-	})
-	if err == nil || !strings.Contains(err.Error(), "typed artifact executor") {
-		t.Fatalf("create error = %v", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(workDir, "mockup.html")); !os.IsNotExist(statErr) {
-		t.Fatalf("standalone mockup was emitted: %v", statErr)
-	}
-}
-
 func TestNativePlatformRejectsEscapingAndInvalidRRWebArtifacts(t *testing.T) {
 	root := t.TempDir()
 	workDir := filepath.Join(root, "demo")

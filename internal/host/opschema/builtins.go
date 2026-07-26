@@ -400,20 +400,20 @@ func registerGraphBuiltins(r *Registry) {
 		Output: fields("evidence_ref", "string", "passed", "bool", "run_count", "int"),
 	})
 	r.Register("host.demo", "plan", Op{
-		Input:  fields("catalog_path", "string", "node_id", "string"),
+		Input:  fields("node_id", "string"),
 		Output: fields("closure_order", "list", "manifest_ref", "string", "artifact_handles", "list"),
 	})
 	r.Register("host.demo", "materialize", Op{
-		Input:  fields("catalog_path", "string", "node_id", "string", "phase", "string"),
+		Input:  fields("node_id", "string", "phase", "string"),
 		Output: fields("evidence_ref", "string", "artifact_handles", "list"),
 	})
 	r.Register("host.demo", "project_mockup", Op{
-		Input:  fields("catalog_path", "string", "node_id", "string", "audience", "string"),
+		Input:  fields("node_id", "string", "audience", "string"),
 		Output: fields("scenario_ref", "string", "manifest_ref", "string"),
 	})
 	r.Register("host.demo", "create_mockup", Op{
 		Input:  fields("manifest_ref", "string"),
-		Output: fields("mockup_ref", "string", "artifact_handles", "list"),
+		Output: fields("mockup_ref", "string", "bundle_ref", "string", "artifact_handles", "list"),
 	})
 	r.Register("host.demo", "record", Op{
 		Input:  fields("manifest_ref", "string"),
