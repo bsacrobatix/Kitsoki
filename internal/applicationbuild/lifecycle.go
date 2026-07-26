@@ -101,9 +101,10 @@ type Config struct {
 }
 
 type ComponentModule struct {
-	ID     string `json:"id"`
-	Module string `json:"module"`
-	Export string `json:"export"`
+	ID             string `json:"id"`
+	Module         string `json:"module"`
+	Export         string `json:"export"`
+	ResolvedModule string `json:"-"`
 }
 
 type NativeSurface struct {
@@ -149,7 +150,7 @@ type Manifest struct {
 	Theme         map[string]string        `json:"theme,omitempty"`
 	Native        map[string]NativeSurface `json:"native,omitempty"`
 	Compatibility Compatibility            `json:"compatibility"`
-	ArtifactDir   string                   `json:"artifact_dir"`
+	ArtifactDir   string                   `json:"-"`
 }
 
 type Manager struct {
@@ -450,7 +451,7 @@ func generatedEntry(plan Plan, repoRoot string) string {
 	out.WriteString("import { installApplicationComponents } from " + quoteTS(filepath.Join(repoRoot, "tools", "runstatus", "src", "application", "component-loader.ts")) + ";\n")
 	out.WriteString("import { installApplicationTheme } from " + quoteTS(filepath.Join(repoRoot, "tools", "runstatus", "src", "application", "theme.ts")) + ";\n")
 	for index, component := range plan.Components {
-		fmt.Fprintf(&out, "import * as component%d from %s;\n", index, quoteTS(component.Module))
+		fmt.Fprintf(&out, "import * as component%d from %s;\n", index, quoteTS(component.ResolvedModule))
 	}
 	out.WriteString("installApplicationComponents({\n")
 	for index, component := range plan.Components {

@@ -126,11 +126,13 @@ states:
 	if _, importedRoomGraph := def.States["ready"]; importedRoomGraph {
 		t.Fatal("component package selection imported a room graph")
 	}
-	if !filepath.IsAbs(def.Application.Components[owner+".panel"].Web.Module) {
-		t.Fatalf("component module path was not rebased: %q", def.Application.Components[owner+".panel"].Web.Module)
-	}
 	component := def.Application.Components[owner+".panel"]
-	if !filepath.IsAbs(component.Events["select"]) ||
+	if component.Web.Module != "ui/panel.js" ||
+		!filepath.IsAbs(component.Web.ResolvedModule) ||
+		component.Events["select"] != "schemas/panel-select.json" ||
+		!filepath.IsAbs(component.ResolvedEvents["select"]) ||
+		component.PropsSchema != "schemas/panel.json" ||
+		!filepath.IsAbs(component.ResolvedPropsSchema) ||
 		component.Origin.Story != owner ||
 		component.Origin.Member != "component-package.components.panel" {
 		t.Fatalf("component event/origin = %#v", component)

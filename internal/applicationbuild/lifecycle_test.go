@@ -94,6 +94,15 @@ func TestBuildCreatesContentAddressedManifestAndGeneratedComponentEntry(t *testi
 	if _, err := os.Stat(filepath.Join(manifest.ArtifactDir, "application-manifest.json")); err != nil {
 		t.Fatal(err)
 	}
+	rawManifest, err := os.ReadFile(filepath.Join(manifest.ArtifactDir, "application-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawManifest), root) ||
+		strings.Contains(string(rawManifest), filepath.ToSlash(root)) ||
+		strings.Contains(string(rawManifest), "artifact_dir") {
+		t.Fatalf("bundle manifest leaked local build paths: %s", rawManifest)
+	}
 	entry, err := os.ReadFile(filepath.Join(filepath.Dir(runnerPlanPath(t, runner.commands[0])), "entry.ts"))
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +321,9 @@ func TestPrepareAllowsComponentUnderVerifiedExternalPackageRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Components) != 1 || plan.Components[0].Module != canonicalModule {
+	if len(plan.Components) != 1 ||
+		plan.Components[0].Module != "ui/Panel.vue" ||
+		plan.Components[0].ResolvedModule != canonicalModule {
 		t.Fatalf("components = %#v", plan.Components)
 	}
 }

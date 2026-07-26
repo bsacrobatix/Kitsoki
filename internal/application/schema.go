@@ -15,21 +15,48 @@ import (
 )
 
 // JSONSchemaValidator validates application inputs and outputs against real
-// Draft 2020-12 JSON Schemas. Compiled schemas are cached by canonical digest.
-// Root, when set, permits file references strictly within one story/package.
-// Network references and paths that escape Root are always denied.
+// Draft 2020-12 JSON Schemas. Compiled schemas are cached by canonical digest
+// and resource provenance. Roots permit file references strictly within
+// verified story/package boundaries. Network and escaping paths are denied.
 type JSONSchemaValidator struct {
 	Root  string
+	Roots []string
 	cache sync.Map
 }
 
-func (v *JSONSchemaValidator) Validate(_ context.Context, schemaRaw, valueRaw json.RawMessage) error {
+func (v *JSONSchemaValidator) Validate(ctx context.Context, schemaRaw, valueRaw json.RawMessage) error {
+	return v.validate(ctx, SchemaReference{}, schemaRaw, valueRaw)
+}
+
+// ValidateReference validates with a trusted, wire-excluded schema location.
+// Relative $id and $ref values resolve from the schema file while every file
+// load remains inside that schema's owning story or package root.
+func (v *JSONSchemaValidator) ValidateReference(
+	ctx context.Context,
+	reference SchemaReference,
+	schemaRaw json.RawMessage,
+	valueRaw json.RawMessage,
+) error {
+	return v.validate(ctx, reference, schemaRaw, valueRaw)
+}
+
+func (v *JSONSchemaValidator) validate(
+	_ context.Context,
+	reference SchemaReference,
+	schemaRaw json.RawMessage,
+	valueRaw json.RawMessage,
+) error {
 	digest, err := DigestJSON(schemaRaw)
 	if err != nil {
 		return fmt.Errorf("invalid schema document: %w", err)
 	}
+	roots, resourceURI, err := v.compileScope(reference, digest)
+	if err != nil {
+		return err
+	}
+	cacheKey := digest + "\x00" + resourceURI + "\x00" + strings.Join(roots, "\x00")
 	var compiled *jsonschema.Schema
-	if cached, ok := v.cache.Load(digest); ok {
+	if cached, ok := v.cache.Load(cacheKey); ok {
 		compiled = cached.(*jsonschema.Schema)
 	} else {
 		var document any
@@ -37,16 +64,15 @@ func (v *JSONSchemaValidator) Validate(_ context.Context, schemaRaw, valueRaw js
 			return fmt.Errorf("parse schema: %w", err)
 		}
 		compiler := jsonschema.NewCompiler()
-		compiler.UseLoader(rootedSchemaLoader{root: v.Root})
-		uri := "application://schema/" + strings.TrimPrefix(digest, "sha256:")
-		if err := compiler.AddResource(uri, document); err != nil {
+		compiler.UseLoader(rootedSchemaLoader{roots: roots})
+		if err := compiler.AddResource(resourceURI, document); err != nil {
 			return fmt.Errorf("register schema: %w", err)
 		}
-		compiled, err = compiler.Compile(uri)
+		compiled, err = compiler.Compile(resourceURI)
 		if err != nil {
 			return fmt.Errorf("compile schema: %w", err)
 		}
-		actual, _ := v.cache.LoadOrStore(digest, compiled)
+		actual, _ := v.cache.LoadOrStore(cacheKey, compiled)
 		compiled = actual.(*jsonschema.Schema)
 	}
 	var value any
@@ -59,8 +85,48 @@ func (v *JSONSchemaValidator) Validate(_ context.Context, schemaRaw, valueRaw js
 	return nil
 }
 
+func (v *JSONSchemaValidator) compileScope(
+	reference SchemaReference,
+	digest string,
+) ([]string, string, error) {
+	configured, err := canonicalSchemaRoots(append([]string{v.Root}, v.Roots...))
+	if err != nil {
+		return nil, "", err
+	}
+	if reference.Path == "" && reference.Root == "" {
+		return configured, "application://schema/" + strings.TrimPrefix(digest, "sha256:"), nil
+	}
+	if reference.Path == "" || reference.Root == "" {
+		return nil, "", fmt.Errorf("application schema reference provenance is incomplete")
+	}
+	owner, err := filepath.EvalSymlinks(filepath.Clean(reference.Root))
+	if err != nil {
+		return nil, "", fmt.Errorf("application schema owning root: %w", err)
+	}
+	target, err := filepath.EvalSymlinks(filepath.Clean(reference.Path))
+	if err != nil {
+		return nil, "", fmt.Errorf("application schema resource: %w", err)
+	}
+	if !pathWithinSchemaRoot(owner, target) {
+		return nil, "", fmt.Errorf("application schema resource escapes its owning story root")
+	}
+	if len(configured) > 0 {
+		authorized := false
+		for _, root := range configured {
+			if pathWithinSchemaRoot(root, owner) {
+				authorized = true
+				break
+			}
+		}
+		if !authorized {
+			return nil, "", fmt.Errorf("application schema owning root is not registered")
+		}
+	}
+	return []string{owner}, (&url.URL{Scheme: "file", Path: target}).String(), nil
+}
+
 type rootedSchemaLoader struct {
-	root string
+	roots []string
 }
 
 func (l rootedSchemaLoader) Load(rawURL string) (any, error) {
@@ -74,24 +140,19 @@ func (l rootedSchemaLoader) Load(rawURL string) (any, error) {
 	if reference.Host != "" && reference.Host != "localhost" {
 		return nil, fmt.Errorf("application schema reference %q: remote file hosts are denied", rawURL)
 	}
-	if l.root == "" {
+	if len(l.roots) == 0 {
 		return nil, fmt.Errorf("application schema reference %q: no story root is configured", rawURL)
 	}
 	path, err := url.PathUnescape(reference.Path)
 	if err != nil {
 		return nil, fmt.Errorf("application schema reference %q: %w", rawURL, err)
 	}
-	root, err := filepath.EvalSymlinks(filepath.Clean(l.root))
-	if err != nil {
-		return nil, fmt.Errorf("application schema root: %w", err)
-	}
 	target, err := filepath.EvalSymlinks(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("application schema reference %q: %w", rawURL, err)
 	}
-	relative, err := filepath.Rel(root, target)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return nil, fmt.Errorf("application schema reference %q escapes story root %q", rawURL, root)
+	if !pathWithinAnySchemaRoot(l.roots, target) {
+		return nil, fmt.Errorf("application schema reference %q escapes story root", rawURL)
 	}
 	raw, err := os.ReadFile(target)
 	if err != nil {
@@ -102,6 +163,35 @@ func (l rootedSchemaLoader) Load(rawURL string) (any, error) {
 		return nil, fmt.Errorf("application schema reference %q: parse: %w", rawURL, err)
 	}
 	return document, nil
+}
+
+func canonicalSchemaRoots(candidates []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(candidates))
+	roots := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		root, err := filepath.EvalSymlinks(filepath.Clean(candidate))
+		if err != nil {
+			return nil, fmt.Errorf("application schema root: %w", err)
+		}
+		if _, exists := seen[root]; exists {
+			continue
+		}
+		seen[root] = struct{}{}
+		roots = append(roots, root)
+	}
+	return roots, nil
+}
+
+func pathWithinAnySchemaRoot(roots []string, target string) bool {
+	for _, root := range roots {
+		if pathWithinSchemaRoot(root, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatSchemaValidationError(err error) error {

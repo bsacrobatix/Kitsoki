@@ -42,7 +42,11 @@ func componentModules(def *app.AppDef, storyRoot string) ([]ComponentModule, err
 		if component == nil || component.Web == nil {
 			continue
 		}
-		module, err := resolveOwnedPathInRoots(ownedRoots, component.Web.Module)
+		moduleRef := component.Web.ResolvedModule
+		if moduleRef == "" {
+			moduleRef = component.Web.Module
+		}
+		module, err := resolveOwnedPathInRoots(ownedRoots, moduleRef)
 		if err != nil {
 			return nil, fmt.Errorf("application build: component %q: %w", id, err)
 		}
@@ -50,9 +54,42 @@ func componentModules(def *app.AppDef, storyRoot string) ([]ComponentModule, err
 		if exportName == "" {
 			exportName = "default"
 		}
-		components = append(components, ComponentModule{ID: id, Module: module, Export: exportName})
+		manifestModule := component.Web.Module
+		if filepath.IsAbs(manifestModule) {
+			manifestModule, err = portableOwnedPath(ownedRoots, module)
+			if err != nil {
+				return nil, fmt.Errorf("application build: component %q: %w", id, err)
+			}
+		}
+		components = append(components, ComponentModule{
+			ID: id, Module: filepath.ToSlash(manifestModule), Export: exportName, ResolvedModule: module,
+		})
 	}
 	return components, nil
+}
+
+func portableOwnedPath(roots []string, target string) (string, error) {
+	bestRoot := ""
+	bestRelative := ""
+	for _, root := range roots {
+		canonicalRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		relative, err := filepath.Rel(canonicalRoot, target)
+		if err != nil || relative == ".." || filepath.IsAbs(relative) ||
+			len(relative) >= 3 && relative[:3] == ".."+string(filepath.Separator) {
+			continue
+		}
+		if len(canonicalRoot) > len(bestRoot) {
+			bestRoot = canonicalRoot
+			bestRelative = relative
+		}
+	}
+	if bestRoot == "" {
+		return "", fmt.Errorf("path %q escapes story root and verified package roots", target)
+	}
+	return bestRelative, nil
 }
 
 func compatibilityForDefinition(def *app.AppDef, storyRoot string, components []ComponentModule, theme map[string]string) (Compatibility, error) {
@@ -89,7 +126,7 @@ func compatibilityForDefinition(def *app.AppDef, storyRoot string, components []
 	}
 	presentationSources := make(map[string]string, len(components))
 	for _, component := range components {
-		presentationSources[component.Module] = fileDigest(component.Module)
+		presentationSources[component.Module] = fileDigest(component.ResolvedModule)
 	}
 	presentationDigest, err := digestValue(struct {
 		Application *app.ApplicationContract

@@ -430,6 +430,246 @@ func TestApplicationRPCFrameDiscoverInspectAndAction(t *testing.T) {
 	}
 }
 
+func TestApplicationRPCValidatesImportedSchemaReferencesWithoutPathLeaks(t *testing.T) {
+	root := t.TempDir()
+	childDir := filepath.Join(root, "child")
+	parentDir := filepath.Join(root, "parent")
+	for _, dir := range []string{
+		filepath.Join(childDir, "schemas", "defs"),
+		parentDir,
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "schemas", "empty-command.json"), []byte(`{
+		"$id":"empty-command.json",
+		"$ref":"defs/command.json"
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "schemas", "defs", "command.json"), []byte(`{
+		"type":"object",
+		"required":["command"],
+		"properties":{"command":{"type":"string","minLength":1}},
+		"additionalProperties":false
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "schemas", "result.json"), []byte(
+		`{"type":"object"}`,
+	), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childDir, "app.yaml"), []byte(`
+app: {id: child, version: 1.0.0}
+root: idle
+intents:
+  execute:
+    title: Execute
+    description: Execute the command.
+    slots:
+      command: {type: string, required: true}
+states:
+  idle:
+    description: Await a command.
+    on:
+      execute: [{target: idle}]
+exports:
+  intents: [execute]
+  application:
+    pages: [home]
+    components: [prose]
+    actions: [child.execute]
+    schemas: [empty-command]
+  handlers:
+    child.execute:
+      name: Execute
+      description: Execute one imported command.
+      semantic_ref: child.handler.execute
+      input_schema: schemas/empty-command.json
+      output_schema: schemas/result.json
+      session: required
+      effect: read
+      routing_mode: exact
+      outcomes: [ok]
+      dispatch: {intent: execute, state: idle, slots_from: input}
+      expose: [jsonrpc]
+application:
+  schema: application/v1
+  name: Child
+  description: Imported command application.
+  semantic_ref: child.application
+  schemas:
+    empty-command: schemas/empty-command.json
+  components:
+    prose:
+      name: Command summary
+      description: Render the imported command.
+      semantic_ref: child.component.command
+      fallback: {element: prose}
+  pages:
+    home:
+      name: Commands
+      description: Execute imported commands.
+      semantic_ref: child.page.home
+      regions:
+        main:
+          name: Main
+          description: Show command actions.
+          semantic_ref: child.region.main
+          items:
+            - card:
+                id: command
+                name: Command
+                description: Execute one command.
+                semantic_ref: child.card.command
+                component: prose
+                actions: [child.execute]
+  actions:
+    child.execute:
+      name: Execute
+      description: Execute one imported command.
+      semantic_ref: child.action.execute
+      handler: child.execute
+      input_schema: schemas/empty-command.json
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parentYAML := fmt.Sprintf(`
+app: {id: parent, version: 1.0.0}
+root: start
+imports:
+  module:
+    source: ../child
+    entry: idle
+states:
+  start: {description: Parent entry.}
+application:
+  schema: application/v1
+  name: Parent
+  description: Compose the imported command application.
+  semantic_ref: parent.application
+  shell: {entry: module__home}
+events:
+  command-received:
+    source: parent.command.received
+    input_schema: ../child/schemas/empty-command.json
+    session: required
+    mode: interrupt
+    dispatch: {handler: parent.module.execute}
+`)
+	parentPath := filepath.Join(parentDir, "app.yaml")
+	if err := os.WriteFile(parentPath, []byte(parentYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := app.Load(parentPath)
+	if err != nil {
+		t.Fatalf("load composed application: %v", err)
+	}
+	driver := &captureDriver{}
+	source := applicationTestSource{
+		def: def,
+		header: runstatus.SessionHeader{
+			SessionID: "session-imported", AppID: "parent",
+			CurrentState: "module.idle", Turn: 4,
+		},
+	}
+	provider := &applicationTestProvider{
+		def: def,
+		entries: map[string]Entry{
+			"session-imported": {Source: source, Driver: driver},
+		},
+	}
+	live := NewMulti(provider)
+	server := httptest.NewServer(live.Handler())
+	t.Cleanup(server.Close)
+
+	var frame appplatform.Frame
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.frame", map[string]any{
+		"session_id": "session-imported", "page": "module__home",
+	}, &frame); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	action := frame.Regions[0].Cards[0].Actions[0]
+	if action.ID != "parent.module.execute" ||
+		action.InputSchemaRef != "schemas/empty-command.json" {
+		t.Fatalf("imported action = %#v", action)
+	}
+	assertApplicationWireOmitsPath(t, root, frame)
+
+	var discovered []appplatform.HandlerDefinition
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.discover", map[string]any{
+		"session_id": "session-imported",
+	}, &discovered); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	if len(discovered) != 1 || discovered[0].ID != "parent.module.execute" {
+		t.Fatalf("discovered handlers = %#v", discovered)
+	}
+	assertApplicationWireOmitsPath(t, root, discovered)
+
+	input := map[string]any{"command": "status"}
+	var actionOutcome appplatform.OutcomeEnvelope
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.action", map[string]any{
+		"session_id": "session-imported", "page": "module__home",
+		"action": action.ID, "frame_revision": frame.Revision,
+		"input": input,
+	}, &actionOutcome); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	assertApplicationWireOmitsPath(t, root, actionOutcome)
+
+	var callOutcome appplatform.OutcomeEnvelope
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.call", map[string]any{
+		"session_id": "session-imported", "handler": "parent.module.execute",
+		"input": input,
+	}, &callOutcome); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	assertApplicationWireOmitsPath(t, root, callOutcome)
+
+	var eventOutcome appplatform.OutcomeEnvelope
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.event", map[string]any{
+		"session_id": "session-imported", "event": "command-received",
+		"input": input,
+	}, &eventOutcome); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	assertApplicationWireOmitsPath(t, root, eventOutcome)
+	if driver.submits != 3 || driver.lastSlots["command"] != "status" {
+		t.Fatalf("imported dispatch submits=%d slots=%#v", driver.submits, driver.lastSlots)
+	}
+
+	invalid := map[string]any{"command": 7}
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.call", map[string]any{
+		"session_id": "session-imported", "handler": "parent.module.execute",
+		"input": invalid,
+	}, nil); rpcErr == nil || !strings.Contains(rpcErr.Message, "schema validation failed") {
+		t.Fatalf("invalid imported input error = %#v", rpcErr)
+	}
+	if driver.submits != 3 {
+		t.Fatalf("invalid input reached driver: submits=%d", driver.submits)
+	}
+}
+
+func assertApplicationWireOmitsPath(t *testing.T, root string, value any) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalRoot, _ := filepath.EvalSymlinks(root)
+	for _, forbidden := range []string{root, filepath.ToSlash(root), canonicalRoot, filepath.ToSlash(canonicalRoot), "file://"} {
+		if forbidden == "" {
+			continue
+		}
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("application wire value leaked %q: %s", forbidden, raw)
+		}
+	}
+}
+
 func TestApplicationFrameDirectRouteSynchronizesStateAndResolvesParams(t *testing.T) {
 	def := &app.AppDef{
 		App:   app.AppMeta{ID: "demo"},

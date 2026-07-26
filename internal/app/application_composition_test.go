@@ -111,8 +111,9 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 		action.TargetPage != "module__home" {
 		t.Fatalf("composed action = %#v", action)
 	}
-	if !strings.HasSuffix(action.InputSchema, filepath.Join("fixtures", "child", "schemas", "open.json")) {
-		t.Fatalf("action input schema = %q", action.InputSchema)
+	if action.InputSchema != "schemas/open.json" ||
+		!strings.HasSuffix(action.ResolvedInputSchema, filepath.Join("fixtures", "child", "schemas", "open.json")) {
+		t.Fatalf("action schema authored=%q resolved=%q", action.InputSchema, action.ResolvedInputSchema)
 	}
 	if _, ok := parent.ImportedApplicationOwners["child"]; !ok {
 		t.Fatal("child semantic owner was not retained")
@@ -243,10 +244,12 @@ application:
 		t.Fatalf("composed action = %#v", action)
 	}
 	wantSchema := filepath.Join(childDir, "schemas", "go-command.json")
-	if action.InputSchema != wantSchema ||
-		def.Application.Schemas["parent.module.go-command"] != wantSchema {
-		t.Fatalf("composed schema paths action=%q schema=%q want=%q",
-			action.InputSchema, def.Application.Schemas["parent.module.go-command"], wantSchema)
+	if action.InputSchema != "schemas/go-command.json" ||
+		action.ResolvedInputSchema != wantSchema ||
+		def.Application.Schemas["parent.module.go-command"] != "schemas/go-command.json" ||
+		def.Application.ResolvedSchemas["parent.module.go-command"] != wantSchema {
+		t.Fatalf("composed schema paths action=%#v schemas=%#v resolved=%#v want=%q",
+			action, def.Application.Schemas, def.Application.ResolvedSchemas, wantSchema)
 	}
 	if page := def.Application.Pages["module__home"]; page.Origin.Story != "child" ||
 		page.Origin.Member != "application.pages.home" ||
@@ -397,8 +400,10 @@ func TestApplicationOverridePathsRemainParentOwned(t *testing.T) {
 	}, "parent", parentRoot, func(message string) { errs = append(errs, message) })
 	got := child.Application.Components["child.card"]
 	if len(errs) != 0 ||
-		got.Web.Module != filepath.Join(parentRoot, "ui", "parent-card.js") ||
-		got.PropsSchema != filepath.Join(parentRoot, "schemas", "card.json") ||
+		got.Web.Module != "ui/parent-card.js" ||
+		got.Web.ResolvedModule != filepath.Join(parentRoot, "ui", "parent-card.js") ||
+		got.PropsSchema != "schemas/card.json" ||
+		got.ResolvedPropsSchema != filepath.Join(parentRoot, "schemas", "card.json") ||
 		got.Origin.Story != "parent" ||
 		got.Origin.Member != "overrides.application.components.child.card" {
 		t.Fatalf("override=%#v errors=%v", got, errs)

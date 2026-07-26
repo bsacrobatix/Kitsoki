@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -182,8 +180,12 @@ func CompileFrameWithContext(
 		})
 		descriptor := &frame.Components[len(frame.Components)-1]
 		for _, event := range sortedMapKeys(decl.Events) {
-			schema, err := resolveApplicationSchema(
-				def, fmt.Sprintf("component %q event %q", id, event), decl.Events[event],
+			reference := decl.ResolvedEvents[event]
+			if reference == "" {
+				reference = decl.Events[event]
+			}
+			schema, err := ResolveApplicationSchema(
+				def, fmt.Sprintf("component %q event %q", id, event), reference,
 			)
 			if err != nil {
 				return Frame{}, err
@@ -191,7 +193,7 @@ func CompileFrameWithContext(
 			if descriptor.Events == nil {
 				descriptor.Events = map[string]json.RawMessage{}
 			}
-			descriptor.Events[event] = schema
+			descriptor.Events[event] = schema.Schema
 		}
 		if decl.Web != nil {
 			frame.Capabilities.Presentation = appendUnique(frame.Capabilities.Presentation, "custom-components")
@@ -457,13 +459,20 @@ func compileComponentProps(
 		return nil, fmt.Errorf("encode resolved props: %w", err)
 	}
 	if card.Bindings != nil && component != nil && component.PropsSchema != "" {
-		schema, err := resolveApplicationSchema(
-			def, fmt.Sprintf("component %q props", card.Component), component.PropsSchema,
+		reference := component.ResolvedPropsSchema
+		if reference == "" {
+			reference = component.PropsSchema
+		}
+		schema, err := ResolveApplicationSchema(
+			def, fmt.Sprintf("component %q props", card.Component), reference,
 		)
 		if err != nil {
 			return nil, err
 		}
-		if err := (&JSONSchemaValidator{}).Validate(stdcontext.Background(), schema, raw); err != nil {
+		validator := &JSONSchemaValidator{Roots: ApplicationSchemaRoots(def)}
+		if err := validator.ValidateReference(
+			stdcontext.Background(), schema.Reference, schema.Schema, raw,
+		); err != nil {
 			return nil, fmt.Errorf("props_schema rejected resolved props: %w", err)
 		}
 	}
@@ -594,11 +603,16 @@ func compileAction(def *app.AppDef, id string, decl *app.ApplicationAction) (Act
 			def.App.ID, "application.actions."+id, decl.Origin,
 		),
 	}
-	schema, err := resolveActionInputSchema(def, id, decl.InputSchema)
+	reference := decl.ResolvedInputSchema
+	if reference == "" {
+		reference = decl.InputSchema
+	}
+	schema, err := ResolveApplicationSchema(def, fmt.Sprintf("action %q input", id), reference)
 	if err != nil {
 		return Action{}, err
 	}
-	action.InputSchema = schema
+	action.InputSchema = schema.Schema
+	action.SchemaReference = schema.Reference
 	if decl.Handler != "" && def.Exports != nil {
 		if handler := def.Exports.Handlers[decl.Handler]; handler != nil {
 			action.Semantic.Relationships = append(action.Semantic.Relationships, Relationship{
@@ -607,60 +621,6 @@ func compileAction(def *app.AppDef, id string, decl *app.ApplicationAction) (Act
 		}
 	}
 	return action, nil
-}
-
-func resolveActionInputSchema(def *app.AppDef, actionID, reference string) (json.RawMessage, error) {
-	return resolveApplicationSchema(def, fmt.Sprintf("action %q input", actionID), reference)
-}
-
-func resolveApplicationSchema(def *app.AppDef, label, reference string) (json.RawMessage, error) {
-	reference = strings.TrimSpace(reference)
-	if reference == "" {
-		return nil, nil
-	}
-	if def == nil || def.BaseDir == "" {
-		return nil, fmt.Errorf("application: %s schema %q has no story root", label, reference)
-	}
-	if strings.Contains(reference, "{{") {
-		return nil, fmt.Errorf("application: %s schema path may not be templated", label)
-	}
-	target := reference
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(def.BaseDir, target)
-	}
-	target, err := filepath.EvalSymlinks(filepath.Clean(target))
-	if err != nil {
-		return nil, fmt.Errorf("application: %s schema %q: %w", label, reference, err)
-	}
-	allowedRoots := []string{def.BaseDir}
-	for _, manifest := range def.LoadedManifests {
-		allowedRoots = append(allowedRoots, filepath.Dir(manifest))
-	}
-	allowedRoots = append(allowedRoots, def.ApplicationPackageRoots...)
-	allowed := false
-	for _, root := range allowedRoots {
-		root, rootErr := filepath.EvalSymlinks(filepath.Clean(root))
-		if rootErr != nil {
-			continue
-		}
-		relative, relErr := filepath.Rel(root, target)
-		if relErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
-		return nil, fmt.Errorf("application: %s schema %q escapes story and package roots", label, reference)
-	}
-	raw, err := os.ReadFile(target)
-	if err != nil {
-		return nil, fmt.Errorf("application: %s schema %q: %w", label, reference, err)
-	}
-	normalized, err := NormalizeJSON(raw)
-	if err != nil {
-		return nil, fmt.Errorf("application: %s schema %q: %w", label, reference, err)
-	}
-	return normalized, nil
 }
 
 func semanticFromContract(ref string, kind SemanticKind, name, description, story, member string) SemanticNode {

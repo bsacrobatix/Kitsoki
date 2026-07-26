@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -377,10 +375,14 @@ func NewSessionApplicationServiceWithRequest(
 			if action == nil || action.Intent == "" {
 				continue
 			}
-			var inputSchema json.RawMessage
+			var inputSchema appplatform.ResolvedSchema
 			if strings.TrimSpace(action.InputSchema) != "" {
 				var err error
-				inputSchema, err = loadApplicationSchema(def, action.InputSchema)
+				reference := action.ResolvedInputSchema
+				if reference == "" {
+					reference = action.InputSchema
+				}
+				inputSchema, err = loadApplicationSchema(def, "action "+id+" input", reference)
 				if err != nil {
 					return appplatform.Service{}, fmt.Errorf("application: action %q input schema: %w", id, err)
 				}
@@ -389,8 +391,9 @@ func NewSessionApplicationServiceWithRequest(
 			actionDecl := action
 			if err := intentRegistry.RegisterHandler(appplatform.HandlerDefinition{
 				ID: actionID, Name: actionDecl.Name, Description: actionDecl.Description,
-				SemanticRef: actionDecl.SemanticRef, InputSchema: inputSchema,
-				Session: appplatform.SessionRequired, Effect: appplatform.EffectWrite,
+				SemanticRef: actionDecl.SemanticRef, InputSchema: inputSchema.Schema,
+				InputSchemaReference: inputSchema.Reference,
+				Session:              appplatform.SessionRequired, Effect: appplatform.EffectWrite,
 				RoutingMode: applicationRoutingMode(actionDecl.RoutingMode), Outcomes: []string{"ok"},
 				Expose: []appplatform.Transport{
 					appplatform.TransportJSONRPC, appplatform.TransportMCP, appplatform.TransportCLI,
@@ -471,22 +474,27 @@ func NewSessionApplicationServiceWithRequest(
 		if event == nil || event.Dispatch == nil {
 			continue
 		}
+		eventReference := event.ResolvedInputSchema
+		if eventReference == "" {
+			eventReference = event.InputSchema
+		}
+		inputSchema, err := loadApplicationSchema(def, "event "+id+" input", eventReference)
+		if err != nil {
+			return appplatform.Service{}, fmt.Errorf("application: event %q input schema: %w", id, err)
+		}
 		target := event.Dispatch.Handler
 		if event.Dispatch.Intent != "" {
 			if event.Session == string(appplatform.SessionNone) {
 				return appplatform.Service{}, fmt.Errorf("application: stateful event %q cannot use session:none", id)
 			}
 			target = "event-intent:" + id
-			inputSchema, err := loadApplicationSchema(def, event.InputSchema)
-			if err != nil {
-				return appplatform.Service{}, fmt.Errorf("application: event %q input schema: %w", id, err)
-			}
 			eventID := id
 			eventDecl := event
 			if err := registry.RegisterHandler(appplatform.HandlerDefinition{
 				ID: target, Name: id, Description: "Dispatch the " + id + " event intent.",
-				SemanticRef: event.Source, InputSchema: inputSchema,
-				Session: appplatform.SessionPolicy(event.Session), Effect: appplatform.EffectWrite,
+				SemanticRef: event.Source, InputSchema: inputSchema.Schema,
+				InputSchemaReference: inputSchema.Reference,
+				Session:              appplatform.SessionPolicy(event.Session), Effect: appplatform.EffectWrite,
 				RoutingMode: applicationRoutingMode(event.RoutingMode), Outcomes: []string{"ok"},
 				Idempotency: appplatform.IdempotencyOptional,
 			}, appplatform.HandlerFunc(func(ctx context.Context, invocation appplatform.Invocation) (appplatform.HandlerResult, error) {
@@ -503,13 +511,10 @@ func NewSessionApplicationServiceWithRequest(
 				return appplatform.Service{}, err
 			}
 		}
-		inputSchema, err := loadApplicationSchema(def, event.InputSchema)
-		if err != nil {
-			return appplatform.Service{}, fmt.Errorf("application: event %q input schema: %w", id, err)
-		}
 		if err := registry.RegisterEvent(appplatform.EventDefinition{
-			ID: id, Source: event.Source, InputSchema: inputSchema,
-			Session: appplatform.SessionPolicy(event.Session), Mode: appplatform.EventMode(event.Mode),
+			ID: id, Source: event.Source, InputSchema: inputSchema.Schema,
+			InputSchemaReference: inputSchema.Reference,
+			Session:              appplatform.SessionPolicy(event.Session), Mode: appplatform.EventMode(event.Mode),
 			RoutingMode: applicationRoutingMode(event.RoutingMode), Handler: target,
 		}); err != nil {
 			return appplatform.Service{}, err
@@ -533,7 +538,9 @@ func NewSessionApplicationServiceWithRequest(
 func applicationDependencies(entry Entry, def *app.AppDef, runtime ApplicationRuntime) (appplatform.Dependencies, error) {
 	deps := runtime.Dependencies
 	if deps.Schemas == nil {
-		deps.Schemas = &appplatform.JSONSchemaValidator{Root: def.BaseDir}
+		deps.Schemas = &appplatform.JSONSchemaValidator{
+			Root: def.BaseDir, Roots: appplatform.ApplicationSchemaRoots(def),
+		}
 	}
 	if deps.Auth == nil {
 		deps.Auth = applicationAuthorizer{}
@@ -722,11 +729,19 @@ func applicationHandlerDefinition(def *app.AppDef, id string, handler *app.Appli
 	for _, transport := range handler.Expose {
 		expose = append(expose, appplatform.Transport(transport))
 	}
-	inputSchema, err := loadApplicationSchema(def, handler.InputSchema)
+	inputReference := handler.ResolvedInputSchema
+	if inputReference == "" {
+		inputReference = handler.InputSchema
+	}
+	inputSchema, err := loadApplicationSchema(def, "handler "+id+" input", inputReference)
 	if err != nil {
 		return appplatform.HandlerDefinition{}, fmt.Errorf("application: handler %q input schema: %w", id, err)
 	}
-	outputSchema, err := loadApplicationSchema(def, handler.OutputSchema)
+	outputReference := handler.ResolvedOutputSchema
+	if outputReference == "" {
+		outputReference = handler.OutputSchema
+	}
+	outputSchema, err := loadApplicationSchema(def, "handler "+id+" output", outputReference)
 	if err != nil {
 		return appplatform.HandlerDefinition{}, fmt.Errorf("application: handler %q output schema: %w", id, err)
 	}
@@ -745,7 +760,9 @@ func applicationHandlerDefinition(def *app.AppDef, id string, handler *app.Appli
 	}
 	runtimeDef := appplatform.HandlerDefinition{
 		ID: id, Name: handler.Name, Description: handler.Description,
-		SemanticRef: handler.SemanticRef, InputSchema: inputSchema, OutputSchema: outputSchema,
+		SemanticRef: handler.SemanticRef,
+		InputSchema: inputSchema.Schema, OutputSchema: outputSchema.Schema,
+		InputSchemaReference: inputSchema.Reference, OutputSchemaReference: outputSchema.Reference,
 		Session: appplatform.SessionPolicy(handler.Session), Effect: appplatform.EffectClass(handler.Effect),
 		RoutingMode: applicationRoutingMode(handler.RoutingMode),
 		Outcomes:    append([]string(nil), handler.Outcomes...), Expose: expose,
@@ -917,76 +934,12 @@ func applicationExactOutcome(outcomes []string, output json.RawMessage) (string,
 	return "", fmt.Errorf("result did not identify one of the declared outcomes %v", outcomes)
 }
 
-func loadApplicationSchema(def *app.AppDef, reference string) (json.RawMessage, error) {
-	path, err := resolveApplicationPath(def, reference)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", reference, err)
-	}
-	var schema any
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		return nil, fmt.Errorf("parse %q: %w", reference, err)
-	}
-	if object, ok := schema.(map[string]any); ok {
-		schemaID, err := applicationSchemaID(def.BaseDir, path, object["$id"])
-		if err != nil {
-			return nil, fmt.Errorf("schema %q $id: %w", reference, err)
-		}
-		object["$id"] = schemaID
-	}
-	normalized, err := json.Marshal(schema)
-	if err != nil {
-		return nil, fmt.Errorf("normalize %q: %w", reference, err)
-	}
-	return normalized, nil
-}
-
-func applicationSchemaID(root, path string, declared any) (string, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	base := (&url.URL{Scheme: "file", Path: absolute}).String()
-	if declared == nil || declared == "" {
-		return base, nil
-	}
-	id, ok := declared.(string)
-	if !ok {
-		return "", fmt.Errorf("must be a string")
-	}
-	reference, err := url.Parse(id)
-	if err != nil {
-		return "", err
-	}
-	if reference.IsAbs() {
-		if reference.Scheme != "file" {
-			return "", fmt.Errorf("network and non-file identifiers are denied")
-		}
-		return applicationRootedFileURL(root, reference)
-	}
-	resolved, err := url.Parse(base)
-	if err != nil {
-		return "", err
-	}
-	return applicationRootedFileURL(root, resolved.ResolveReference(reference))
-}
-
-func applicationRootedFileURL(root string, reference *url.URL) (string, error) {
-	if reference.Host != "" && reference.Host != "localhost" {
-		return "", fmt.Errorf("remote file hosts are denied")
-	}
-	path, err := url.PathUnescape(reference.Path)
-	if err != nil {
-		return "", err
-	}
-	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("file identifier escapes story root")
-	}
-	return reference.String(), nil
+func loadApplicationSchema(
+	def *app.AppDef,
+	label string,
+	reference string,
+) (appplatform.ResolvedSchema, error) {
+	return appplatform.ResolveApplicationSchema(def, label, reference)
 }
 
 func resolveApplicationPath(def *app.AppDef, reference string) (string, error) {

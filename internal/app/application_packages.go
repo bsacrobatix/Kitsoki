@@ -187,21 +187,24 @@ func applyApplicationPackageSelection(def *AppDef, selection *componentpackage.S
 		component := &ApplicationComponent{
 			Name: source.Name, Description: source.Description,
 			SemanticRef: source.SemanticRef, SemanticAliases: append([]string(nil), source.SemanticAliases...),
-			PropsSchema: rebaseApplicationPath(source.PropsSchema, packageDir),
-			Events:      map[string]string{},
+			PropsSchema: source.PropsSchema, ResolvedPropsSchema: rebaseApplicationPath(source.PropsSchema, packageDir),
+			Events: map[string]string{}, ResolvedEvents: map[string]string{},
 			Origin: ApplicationMemberOrigin{
 				Story: owner, Member: "component-package.components." + strings.TrimPrefix(id, owner+"."),
 			},
 		}
 		for event, schema := range source.Events {
-			component.Events[event] = rebaseApplicationPath(schema, packageDir)
+			component.Events[event] = schema
+			component.ResolvedEvents[event] = rebaseApplicationPath(schema, packageDir)
 		}
 		if len(component.Events) == 0 {
 			component.Events = nil
+			component.ResolvedEvents = nil
 		}
 		if source.Web != nil {
 			component.Web = &ApplicationWebComponent{
-				Module: rebaseApplicationPath(source.Web.Module, packageDir), Export: source.Web.Export,
+				Module: source.Web.Module, Export: source.Web.Export,
+				ResolvedModule: rebaseApplicationPath(source.Web.Module, packageDir),
 			}
 		}
 		if source.Fallback != nil {
@@ -214,12 +217,16 @@ func applyApplicationPackageSelection(def *AppDef, selection *componentpackage.S
 	if def.Application.Schemas == nil {
 		def.Application.Schemas = map[string]string{}
 	}
+	if def.Application.ResolvedSchemas == nil {
+		def.Application.ResolvedSchemas = map[string]string{}
+	}
 	for _, id := range sortedKeys(selection.Schemas) {
 		if _, exists := def.Application.Schemas[id]; exists {
 			add(fmt.Sprintf("schema %q collides with an existing declaration", id))
 			continue
 		}
-		def.Application.Schemas[id] = rebaseApplicationPath(selection.Schemas[id], packageDir)
+		def.Application.Schemas[id] = selection.Schemas[id]
+		def.Application.ResolvedSchemas[id] = rebaseApplicationPath(selection.Schemas[id], packageDir)
 	}
 	if def.Application.Tokens == nil {
 		def.Application.Tokens = map[string]string{}

@@ -84,7 +84,13 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 		if s.Registry == nil || s.Registry.deps.Schemas == nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: schema validator is required for action %q", action.ID)
 		}
-		if validateErr := s.Registry.deps.Schemas.Validate(ctx, action.InputSchema, input); validateErr != nil {
+		if validateErr := validateSchema(
+			ctx,
+			s.Registry.deps.Schemas,
+			action.SchemaReference,
+			action.InputSchema,
+			input,
+		); validateErr != nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate action %q input: %w", action.ID, validateErr)
 		}
 		envelope.Input = input

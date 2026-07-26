@@ -22,22 +22,23 @@ type ApplicationMemberOrigin struct {
 // renderer-neutral: paths and component names are declarations, never live
 // Vue/DOM/TUI objects.
 type ApplicationContract struct {
-	Schema      string                           `yaml:"schema" json:"schema"`
-	Name        string                           `yaml:"name" json:"name"`
-	Description string                           `yaml:"description" json:"description"`
-	SemanticRef string                           `yaml:"semantic_ref" json:"semantic_ref"`
-	Data        map[string]*ApplicationData      `yaml:"data,omitempty" json:"data,omitempty"`
-	Feedback    *ApplicationFeedbackPolicy       `yaml:"feedback,omitempty" json:"feedback,omitempty"`
-	Shell       ApplicationShell                 `yaml:"shell,omitempty" json:"shell,omitempty"`
-	Navigation  []ApplicationNavigation          `yaml:"navigation,omitempty" json:"navigation,omitempty"`
-	Pages       map[string]*ApplicationPage      `yaml:"pages,omitempty" json:"pages,omitempty"`
-	Components  map[string]*ApplicationComponent `yaml:"components,omitempty" json:"components,omitempty"`
-	Actions     map[string]*ApplicationAction    `yaml:"actions,omitempty" json:"actions,omitempty"`
-	Surfaces    map[string]*ApplicationSurface   `yaml:"surfaces,omitempty" json:"surfaces,omitempty"`
-	Packages    []ApplicationPackageUse          `yaml:"packages,omitempty" json:"packages,omitempty"`
-	Schemas     map[string]string                `yaml:"schemas,omitempty" json:"schemas,omitempty"`
-	Tokens      map[string]string                `yaml:"tokens,omitempty" json:"tokens,omitempty"`
-	Generated   bool                             `yaml:"-" json:"generated,omitempty"`
+	Schema          string                           `yaml:"schema" json:"schema"`
+	Name            string                           `yaml:"name" json:"name"`
+	Description     string                           `yaml:"description" json:"description"`
+	SemanticRef     string                           `yaml:"semantic_ref" json:"semantic_ref"`
+	Data            map[string]*ApplicationData      `yaml:"data,omitempty" json:"data,omitempty"`
+	Feedback        *ApplicationFeedbackPolicy       `yaml:"feedback,omitempty" json:"feedback,omitempty"`
+	Shell           ApplicationShell                 `yaml:"shell,omitempty" json:"shell,omitempty"`
+	Navigation      []ApplicationNavigation          `yaml:"navigation,omitempty" json:"navigation,omitempty"`
+	Pages           map[string]*ApplicationPage      `yaml:"pages,omitempty" json:"pages,omitempty"`
+	Components      map[string]*ApplicationComponent `yaml:"components,omitempty" json:"components,omitempty"`
+	Actions         map[string]*ApplicationAction    `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Surfaces        map[string]*ApplicationSurface   `yaml:"surfaces,omitempty" json:"surfaces,omitempty"`
+	Packages        []ApplicationPackageUse          `yaml:"packages,omitempty" json:"packages,omitempty"`
+	Schemas         map[string]string                `yaml:"schemas,omitempty" json:"schemas,omitempty"`
+	ResolvedSchemas map[string]string                `yaml:"-" json:"-"`
+	Tokens          map[string]string                `yaml:"tokens,omitempty" json:"tokens,omitempty"`
+	Generated       bool                             `yaml:"-" json:"generated,omitempty"`
 }
 
 // ApplicationData declares one finite world value that may cross the
@@ -127,15 +128,17 @@ type ApplicationCard struct {
 }
 
 type ApplicationComponent struct {
-	Name            string                        `yaml:"name" json:"name"`
-	Description     string                        `yaml:"description" json:"description"`
-	SemanticRef     string                        `yaml:"semantic_ref" json:"semantic_ref"`
-	SemanticAliases []string                      `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
-	Web             *ApplicationWebComponent      `yaml:"web,omitempty" json:"web,omitempty"`
-	PropsSchema     string                        `yaml:"props_schema,omitempty" json:"props_schema,omitempty"`
-	Events          map[string]string             `yaml:"events,omitempty" json:"events,omitempty"`
-	Fallback        *ApplicationComponentFallback `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	Origin          ApplicationMemberOrigin       `yaml:"-" json:"-"`
+	Name                string                        `yaml:"name" json:"name"`
+	Description         string                        `yaml:"description" json:"description"`
+	SemanticRef         string                        `yaml:"semantic_ref" json:"semantic_ref"`
+	SemanticAliases     []string                      `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
+	Web                 *ApplicationWebComponent      `yaml:"web,omitempty" json:"web,omitempty"`
+	PropsSchema         string                        `yaml:"props_schema,omitempty" json:"props_schema,omitempty"`
+	Events              map[string]string             `yaml:"events,omitempty" json:"events,omitempty"`
+	ResolvedPropsSchema string                        `yaml:"-" json:"-"`
+	ResolvedEvents      map[string]string             `yaml:"-" json:"-"`
+	Fallback            *ApplicationComponentFallback `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Origin              ApplicationMemberOrigin       `yaml:"-" json:"-"`
 }
 
 // ApplicationComponentBindings is the finite data/event boundary between a
@@ -174,8 +177,9 @@ func (b *ApplicationValueBinding) UnmarshalYAML(data []byte) error {
 }
 
 type ApplicationWebComponent struct {
-	Module string `yaml:"module" json:"module"`
-	Export string `yaml:"export,omitempty" json:"export,omitempty"`
+	Module         string `yaml:"module" json:"module"`
+	Export         string `yaml:"export,omitempty" json:"export,omitempty"`
+	ResolvedModule string `yaml:"-" json:"-"`
 }
 
 type ApplicationComponentFallback struct {
@@ -184,19 +188,20 @@ type ApplicationComponentFallback struct {
 }
 
 type ApplicationAction struct {
-	Name            string                  `yaml:"name" json:"name"`
-	Description     string                  `yaml:"description" json:"description"`
-	SemanticRef     string                  `yaml:"semantic_ref" json:"semantic_ref"`
-	SemanticAliases []string                `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
-	Handler         string                  `yaml:"handler,omitempty" json:"handler,omitempty"`
-	Intent          string                  `yaml:"intent,omitempty" json:"intent,omitempty"`
-	State           string                  `yaml:"state,omitempty" json:"state,omitempty"`
-	TargetPage      string                  `yaml:"target_page,omitempty" json:"target_page,omitempty"`
-	RoomInterface   string                  `yaml:"room_interface,omitempty" json:"room_interface,omitempty"`
-	InputSchema     string                  `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
-	RoutingMode     string                  `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
-	Generated       bool                    `yaml:"-" json:"generated,omitempty"`
-	Origin          ApplicationMemberOrigin `yaml:"-" json:"-"`
+	Name                string                  `yaml:"name" json:"name"`
+	Description         string                  `yaml:"description" json:"description"`
+	SemanticRef         string                  `yaml:"semantic_ref" json:"semantic_ref"`
+	SemanticAliases     []string                `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
+	Handler             string                  `yaml:"handler,omitempty" json:"handler,omitempty"`
+	Intent              string                  `yaml:"intent,omitempty" json:"intent,omitempty"`
+	State               string                  `yaml:"state,omitempty" json:"state,omitempty"`
+	TargetPage          string                  `yaml:"target_page,omitempty" json:"target_page,omitempty"`
+	RoomInterface       string                  `yaml:"room_interface,omitempty" json:"room_interface,omitempty"`
+	InputSchema         string                  `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
+	ResolvedInputSchema string                  `yaml:"-" json:"-"`
+	RoutingMode         string                  `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
+	Generated           bool                    `yaml:"-" json:"generated,omitempty"`
+	Origin              ApplicationMemberOrigin `yaml:"-" json:"-"`
 }
 
 type ApplicationSurface struct {
@@ -218,6 +223,8 @@ type ApplicationHandler struct {
 	SemanticAliases        []string                    `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
 	InputSchema            string                      `yaml:"input_schema" json:"input_schema"`
 	OutputSchema           string                      `yaml:"output_schema" json:"output_schema"`
+	ResolvedInputSchema    string                      `yaml:"-" json:"-"`
+	ResolvedOutputSchema   string                      `yaml:"-" json:"-"`
 	Session                string                      `yaml:"session" json:"session"`
 	Effect                 effect.Effect               `yaml:"effect" json:"effect"`
 	RoutingMode            string                      `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
@@ -264,12 +271,13 @@ type HandlerRetryPolicy struct {
 }
 
 type ApplicationEvent struct {
-	Source      string                      `yaml:"source" json:"source"`
-	InputSchema string                      `yaml:"input_schema" json:"input_schema"`
-	Session     string                      `yaml:"session" json:"session"`
-	Mode        string                      `yaml:"mode" json:"mode"`
-	RoutingMode string                      `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
-	Dispatch    *ApplicationHandlerDispatch `yaml:"dispatch" json:"dispatch"`
+	Source              string                      `yaml:"source" json:"source"`
+	InputSchema         string                      `yaml:"input_schema" json:"input_schema"`
+	ResolvedInputSchema string                      `yaml:"-" json:"-"`
+	Session             string                      `yaml:"session" json:"session"`
+	Mode                string                      `yaml:"mode" json:"mode"`
+	RoutingMode         string                      `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
+	Dispatch            *ApplicationHandlerDispatch `yaml:"dispatch" json:"dispatch"`
 }
 
 func semanticContractError(path, message string) error {
