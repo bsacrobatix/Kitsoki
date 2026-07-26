@@ -163,6 +163,16 @@ func TestSatelliteStoresFollowBackendDialect(t *testing.T) {
 				t.Errorf("newMaterializationStatusStore.Save: %v", err)
 			}
 		}
+		if ds, err := newReviewedFeedbackDispatchStore(s, nil); err != nil {
+			t.Errorf("newReviewedFeedbackDispatchStore: %v", err)
+		} else if ds == nil {
+			t.Error("newReviewedFeedbackDispatchStore: nil store")
+		}
+		if rs, err := newReviewedFeedbackReconcileStore(s, nil); err != nil {
+			t.Errorf("newReviewedFeedbackReconcileStore: %v", err)
+		} else if rs == nil {
+			t.Error("newReviewedFeedbackReconcileStore: nil store")
+		}
 	}
 
 	t.Run("sqlite", func(t *testing.T) {

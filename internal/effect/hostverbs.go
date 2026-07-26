@@ -303,8 +303,11 @@ var builtinVerbTable = map[string]verbEffect{
 			"dispatch":      {class: External, deterministic: false},
 		},
 	},
-	"host.feedback.list_reviewed": {class: Read, deterministic: true},
-	"host.feedback.dispatch":      {class: External, deterministic: false},
+	"host.feedback.list_reviewed":               {class: Read, deterministic: true},
+	"host.feedback.dispatch":                    {class: External, deterministic: false},
+	"host.reviewed_feedback_campaign.reconcile": {class: External, deterministic: false},
+	"host.feedback_intake.reconcile":            {class: Write, deterministic: false},
+	"host.feedback_federation.reconcile":        {class: External, deterministic: false},
 
 	// host.compliance evaluates server-resolved Starlark materialize checks and
 	// writes immutable local evidence. It has no command, LLM, or network lane.

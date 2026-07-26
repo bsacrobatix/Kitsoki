@@ -14,6 +14,7 @@ import (
 	appplatform "kitsoki/internal/application"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/effect"
+	"kitsoki/internal/host"
 	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
@@ -23,21 +24,46 @@ import (
 // ConfigureFeedbackBackends resolves reviewed_feedback bindings against the
 // discovered application catalogue. Call it only after Rescan and EnableDaemon.
 func (r *SessionRegistry) ConfigureFeedbackBackends(root string) error {
-	if len(r.cfg.ReviewedFeedback) == 0 {
+	if len(r.cfg.ReviewedFeedback) == 0 && len(r.cfg.FeedbackIntake) == 0 &&
+		len(r.cfg.FeedbackFederation) == 0 {
 		return nil
-	}
-	if r.daemonJobs == nil || r.feedbackDispatches == nil {
-		return fmt.Errorf("configure reviewed feedback: daemon persistence is unavailable")
 	}
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("configure reviewed feedback: resolve server root: %w", err)
+		return fmt.Errorf("configure feedback services: resolve server root: %w", err)
 	}
 	home, _ := os.UserHomeDir()
+	ledger := reviewedfeedback.JSONLLedger{
+		Path: filepath.Join(root, ".artifacts", "feedback", "feedback.jsonl"),
+		Home: home,
+	}
+	r.mu.Lock()
+	r.feedbackLedger = ledger
+	if r.feedbackCaptureSources == nil {
+		r.feedbackCaptureSources = make(map[string]reviewedfeedback.CaptureSource)
+	}
+	if _, exists := r.feedbackCaptureSources[reviewedfeedback.ApplicationFeedbackSourceID]; !exists {
+		r.feedbackCaptureSources[reviewedfeedback.ApplicationFeedbackSourceID] =
+			reviewedfeedback.LedgerCaptureSource{Ledger: ledger}
+	}
+	r.mu.Unlock()
 
 	r.mu.Lock()
 	stories := append([]webconfig.StoryMeta(nil), r.stories...)
 	r.mu.Unlock()
+	intakeIDs := make([]string, 0, len(r.cfg.FeedbackIntake))
+	for appID := range r.cfg.FeedbackIntake {
+		intakeIDs = append(intakeIDs, appID)
+	}
+	sort.Strings(intakeIDs)
+	for _, appID := range intakeIDs {
+		if _, err := uniqueFeedbackApplication(stories, appID, "intake"); err != nil {
+			return err
+		}
+	}
+	if len(intakeIDs) > 0 && r.feedbackReconciles == nil {
+		return fmt.Errorf("configure feedback intake: daemon persistence is unavailable")
+	}
 
 	sourceIDs := make([]string, 0, len(r.cfg.ReviewedFeedback))
 	for sourceID := range r.cfg.ReviewedFeedback {
@@ -46,44 +72,91 @@ func (r *SessionRegistry) ConfigureFeedbackBackends(root string) error {
 	sort.Strings(sourceIDs)
 	for _, sourceID := range sourceIDs {
 		configured := r.cfg.ReviewedFeedback[sourceID]
-		if _, err := uniqueFeedbackApplication(stories, sourceID, "source"); err != nil {
-			return err
-		}
-		target, err := uniqueFeedbackApplication(
-			stories, configured.TargetApplication, "target",
+		backend, err := r.buildFeedbackBackend(
+			root, home, stories, sourceID, configured,
 		)
 		if err != nil {
 			return err
 		}
-		if err := validateFeedbackTarget(target.Def, configured); err != nil {
-			return fmt.Errorf("configure reviewed feedback %q: %w", sourceID, err)
-		}
-		binding := reviewedfeedback.Binding{
-			SourceApplication: sourceID,
-			TargetApplication: configured.TargetApplication,
-			TargetHandler:     configured.TargetHandler,
-			TargetAction:      configured.TargetAction,
-		}
-		backend := &reviewedfeedback.Backend{
-			Binding: binding,
-			Ledger: reviewedfeedback.JSONLLedger{
-				Path: filepath.Join(root, ".artifacts", "feedback", "feedback.jsonl"),
-				Home: home,
-			},
-			Locators: reviewedfeedback.ManagedLocatorResolver{
-				WorkspaceRoot: filepath.Join(root, ".capsules", "workspaces"),
-				ArtifactRoot:  filepath.Join(root, ".artifacts"),
-			},
-			Store: r.feedbackDispatches,
-			Dispatcher: feedbackRegistryDispatcher{
-				registry: r, target: target, binding: binding,
-			},
+		if r.feedbackReconciles == nil || r.daemonJobs == nil || r.feedbackDispatches == nil {
+			return fmt.Errorf("configure reviewed feedback: daemon dispatch persistence is unavailable")
 		}
 		if err := r.RegisterFeedbackBackend(sourceID, backend); err != nil {
 			return fmt.Errorf("configure reviewed feedback %q: %w", sourceID, err)
 		}
 	}
+
+	federationIDs := make([]string, 0, len(r.cfg.FeedbackFederation))
+	for sourceID := range r.cfg.FeedbackFederation {
+		federationIDs = append(federationIDs, sourceID)
+	}
+	sort.Strings(federationIDs)
+	for _, sourceID := range federationIDs {
+		configured := r.cfg.FeedbackFederation[sourceID]
+		backend, err := r.buildFeedbackBackend(
+			root, home, stories, sourceID, webconfig.ReviewedFeedbackBinding{
+				TargetApplication: configured.TargetApplication,
+				TargetHandler:     configured.TargetHandler,
+				TargetAction:      configured.TargetAction,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("configure feedback federation %q: %w", sourceID, err)
+		}
+		if r.feedbackReconciles == nil || r.daemonJobs == nil || r.feedbackDispatches == nil {
+			return fmt.Errorf("configure feedback federation: daemon dispatch persistence is unavailable")
+		}
+		r.mu.Lock()
+		if r.feedbackFederationBackends == nil {
+			r.feedbackFederationBackends = make(map[string]host.FeedbackBackend)
+		}
+		if _, exists := r.feedbackFederationBackends[sourceID]; exists {
+			r.mu.Unlock()
+			return fmt.Errorf("configure feedback federation %q: already registered", sourceID)
+		}
+		r.feedbackFederationBackends[sourceID] = backend
+		r.mu.Unlock()
+	}
 	return nil
+}
+
+func (r *SessionRegistry) buildFeedbackBackend(
+	root, home string,
+	stories []webconfig.StoryMeta,
+	sourceID string,
+	configured webconfig.ReviewedFeedbackBinding,
+) (*reviewedfeedback.Backend, error) {
+	if _, err := uniqueFeedbackApplication(stories, sourceID, "source"); err != nil {
+		return nil, err
+	}
+	target, err := uniqueFeedbackApplication(stories, configured.TargetApplication, "target")
+	if err != nil {
+		return nil, err
+	}
+	if err := validateFeedbackTarget(target.Def, configured); err != nil {
+		return nil, fmt.Errorf("configure reviewed feedback %q: %w", sourceID, err)
+	}
+	binding := reviewedfeedback.Binding{
+		SourceApplication: sourceID,
+		TargetApplication: configured.TargetApplication,
+		TargetHandler:     configured.TargetHandler,
+		TargetAction:      configured.TargetAction,
+	}
+	return &reviewedfeedback.Backend{
+		Binding: binding,
+		Ledger: reviewedfeedback.JSONLLedger{
+			Path: filepath.Join(root, ".artifacts", "feedback", "feedback.jsonl"),
+			Home: home,
+		},
+		Locators: reviewedfeedback.ManagedLocatorResolver{
+			WorkspaceRoot: filepath.Join(root, ".capsules", "workspaces"),
+			ArtifactRoot:  filepath.Join(root, ".artifacts"),
+		},
+		Store: r.feedbackDispatches,
+		Dispatcher: feedbackRegistryDispatcher{
+			registry: r, target: target, binding: binding,
+		},
+	}, nil
 }
 
 func uniqueFeedbackApplication(

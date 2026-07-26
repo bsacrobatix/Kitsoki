@@ -392,6 +392,30 @@ func registerGraphBuiltins(r *Registry) {
 		),
 		Output: fields("job_id", "string", "receipts", "list"),
 	})
+	r.Register("host.reviewed_feedback_campaign", "reconcile", Op{
+		Input: fields(),
+		Output: fields(
+			"schema", "string", "operation", "string", "status", "string",
+			"application_id", "string", "report_ref", "string", "job_id", "string",
+			"receipts", "list", "replayed", "bool",
+		),
+	})
+	r.Register("host.feedback_intake", "reconcile", Op{
+		Input: fields(),
+		Output: fields(
+			"schema", "string", "operation", "string", "status", "string",
+			"application_id", "string", "report_ref", "string",
+			"intake_receipt", "object", "replayed", "bool",
+		),
+	})
+	r.Register("host.feedback_federation", "reconcile", Op{
+		Input: fields(),
+		Output: fields(
+			"schema", "string", "operation", "string", "status", "string",
+			"application_id", "string", "report_ref", "string", "job_id", "string",
+			"receipts", "list", "replayed", "bool",
+		),
+	})
 	r.Register("host.compliance", "run", Op{
 		Input:  fields("catalog_path", "string", "node_id", "string"),
 		Output: fields("passed", "bool", "evidence_ref", "string", "summary", "string"),

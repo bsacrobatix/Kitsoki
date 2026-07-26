@@ -38,6 +38,7 @@ import (
 	"kitsoki/internal/campaign"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
+	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/workerregistry"
 )
 
@@ -134,6 +135,14 @@ type WebConfig struct {
 	// feedback adopter. Story arguments cannot choose a target story, handler,
 	// action, ledger path, or provider; all authority is fixed here.
 	ReviewedFeedback map[string]ReviewedFeedbackBinding `yaml:"reviewed_feedback,omitempty"`
+
+	// FeedbackIntake binds an application to one daemon-registered typed
+	// capture source. Source names are semantic IDs, never paths or transports.
+	FeedbackIntake map[string]FeedbackIntakeBinding `yaml:"feedback_intake,omitempty"`
+
+	// FeedbackFederation binds reviewed records to an exact target application
+	// service. It carries no repository, URL, provider, credential, or command.
+	FeedbackFederation map[string]FeedbackFederationBinding `yaml:"feedback_federation,omitempty"`
 
 	// DaemonFederation is machine-local worker discovery for kitsoki daemon.
 	// Workers are independent loopback-only daemons; secrets remain in the local override.
@@ -278,6 +287,18 @@ type ReviewedFeedbackBinding struct {
 	TargetAction      string `yaml:"target_action"`
 }
 
+type FeedbackIntakeBinding struct {
+	Source     string `yaml:"source"`
+	MaxRecords int    `yaml:"max_records,omitempty"`
+}
+
+type FeedbackFederationBinding struct {
+	TargetApplication string `yaml:"target_application"`
+	TargetHandler     string `yaml:"target_handler"`
+	TargetAction      string `yaml:"target_action"`
+	MaxRecords        int    `yaml:"max_records,omitempty"`
+}
+
 func (cfg *WebConfig) resolveReviewedFeedback() error {
 	sources := make([]string, 0, len(cfg.ReviewedFeedback))
 	for source := range cfg.ReviewedFeedback {
@@ -296,6 +317,48 @@ func (cfg *WebConfig) resolveReviewedFeedback() error {
 			return fmt.Errorf("reviewed_feedback.%s.target_handler is required and must be opaque", source)
 		case !validReviewedFeedbackID(binding.TargetAction):
 			return fmt.Errorf("reviewed_feedback.%s.target_action is required and must be opaque", source)
+		}
+	}
+	intakeApps := make([]string, 0, len(cfg.FeedbackIntake))
+	for appID := range cfg.FeedbackIntake {
+		intakeApps = append(intakeApps, appID)
+	}
+	sort.Strings(intakeApps)
+	for _, appID := range intakeApps {
+		binding := cfg.FeedbackIntake[appID]
+		switch {
+		case !validReviewedFeedbackID(appID):
+			return fmt.Errorf("feedback_intake: application id is required and must be opaque")
+		case !validReviewedFeedbackID(binding.Source):
+			return fmt.Errorf("feedback_intake.%s.source is required and must be opaque", appID)
+		case binding.MaxRecords < 0 || binding.MaxRecords > reviewedfeedback.MaxDrainLimit:
+			return fmt.Errorf(
+				"feedback_intake.%s.max_records must be between 1 and %d when set",
+				appID, reviewedfeedback.MaxDrainLimit,
+			)
+		}
+	}
+	federationApps := make([]string, 0, len(cfg.FeedbackFederation))
+	for appID := range cfg.FeedbackFederation {
+		federationApps = append(federationApps, appID)
+	}
+	sort.Strings(federationApps)
+	for _, appID := range federationApps {
+		binding := cfg.FeedbackFederation[appID]
+		switch {
+		case !validReviewedFeedbackID(appID):
+			return fmt.Errorf("feedback_federation: application id is required and must be opaque")
+		case !validReviewedFeedbackID(binding.TargetApplication):
+			return fmt.Errorf("feedback_federation.%s.target_application is required and must be opaque", appID)
+		case !validReviewedFeedbackID(binding.TargetHandler):
+			return fmt.Errorf("feedback_federation.%s.target_handler is required and must be opaque", appID)
+		case !validReviewedFeedbackID(binding.TargetAction):
+			return fmt.Errorf("feedback_federation.%s.target_action is required and must be opaque", appID)
+		case binding.MaxRecords < 0 || binding.MaxRecords > reviewedfeedback.MaxDrainLimit:
+			return fmt.Errorf(
+				"feedback_federation.%s.max_records must be between 1 and %d when set",
+				appID, reviewedfeedback.MaxDrainLimit,
+			)
 		}
 	}
 	return nil
@@ -945,6 +1008,26 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.ReviewedFeedback = merged
+	}
+	if len(local.FeedbackIntake) > 0 {
+		merged := make(map[string]FeedbackIntakeBinding, len(base.FeedbackIntake)+len(local.FeedbackIntake))
+		for k, v := range base.FeedbackIntake {
+			merged[k] = v
+		}
+		for k, v := range local.FeedbackIntake {
+			merged[k] = v
+		}
+		out.FeedbackIntake = merged
+	}
+	if len(local.FeedbackFederation) > 0 {
+		merged := make(map[string]FeedbackFederationBinding, len(base.FeedbackFederation)+len(local.FeedbackFederation))
+		for k, v := range base.FeedbackFederation {
+			merged[k] = v
+		}
+		for k, v := range local.FeedbackFederation {
+			merged[k] = v
+		}
+		out.FeedbackFederation = merged
 	}
 	// Field-merged (like Root), NOT block-replaced: the intended split is a
 	// checked-in base block (mode, admins, public_url, client_id) with only

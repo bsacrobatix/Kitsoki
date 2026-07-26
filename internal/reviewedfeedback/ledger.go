@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strconv"
@@ -47,6 +48,113 @@ type ledgerRecord struct {
 		FrameRevision uint64 `json:"frame_revision"`
 	} `json:"application"`
 	ReceivedAt string `json:"receivedAt"`
+}
+
+// NormalizeCaptured verifies and privacy-scrubs one typed application feedback
+// report before it enters the canonical reviewed ledger.
+func (l JSONLLedger) NormalizeCaptured(
+	scope host.FeedbackScope,
+	report applicationfeedback.Report,
+) (applicationfeedback.Report, error) {
+	report.Schema = applicationfeedback.ReportSchema
+	report.Reviewed = true
+	report.App = strings.TrimSpace(report.App)
+	report.Producer = strings.TrimSpace(report.Producer)
+	report.Kind = strings.TrimSpace(report.Kind)
+	report.IdempotencyKey = strings.TrimSpace(report.IdempotencyKey)
+	report.UserText = harscrub.ScrubString(strings.TrimSpace(report.UserText), harscrub.ScrubOptions{
+		Home: l.Home, SecretPatterns: harscrub.DefaultSecretPatterns(),
+	})
+	if report.App != scope.ApplicationID ||
+		report.Attachment.Schema != applicationfeedback.AttachmentSchema ||
+		report.Attachment.ApplicationID != scope.ApplicationID {
+		return applicationfeedback.Report{}, fmt.Errorf("captured report is outside the resolved application scope")
+	}
+	if !safeReference(report.IdempotencyKey, 180) ||
+		!safeToken(report.Kind, 64) || !safeToken(report.Producer, 128) {
+		return applicationfeedback.Report{}, fmt.Errorf("captured report identity is not privacy-safe")
+	}
+	if report.Attachment.FrameRevision == 0 || report.UserText == "" ||
+		len(report.UserText) > maxSummaryBytes || !safeText(report.UserText) {
+		return applicationfeedback.Report{}, fmt.Errorf("captured report content is outside its privacy boundary")
+	}
+	if !reflect.DeepEqual(report.Attachment.Anchor, report.Anchor) {
+		return applicationfeedback.Report{}, fmt.Errorf("captured report semantic anchor is inconsistent")
+	}
+	anchorJSON, err := json.Marshal(report.Anchor)
+	if err != nil || len(anchorJSON) > maxSummaryBytes {
+		return applicationfeedback.Report{}, fmt.Errorf("captured report semantic anchor is outside its privacy boundary")
+	}
+	scrubbedAnchor := harscrub.ScrubString(string(anchorJSON), harscrub.ScrubOptions{
+		Home: l.Home, SecretPatterns: harscrub.DefaultSecretPatterns(),
+	})
+	if scrubbedAnchor != string(anchorJSON) {
+		return applicationfeedback.Report{}, fmt.Errorf("captured report semantic anchor contains sensitive data")
+	}
+	return report, nil
+}
+
+// AppendReviewed persists one normalized report to the conventional reviewed
+// application-feedback ledger. ReconcileStore owns cross-process claim and
+// dedupe; this method additionally detects exact replay after a crash.
+func (l JSONLLedger) AppendReviewed(
+	ctx context.Context,
+	scope host.FeedbackScope,
+	report applicationfeedback.Report,
+	reviewedAt time.Time,
+) (string, bool, error) {
+	select {
+	case <-ctx.Done():
+		return "", false, ctx.Err()
+	default:
+	}
+	report, err := l.NormalizeCaptured(scope, report)
+	if err != nil {
+		return "", false, err
+	}
+	existing, err := l.listCaptured(ctx, scope.ApplicationID, maxLedgerRecords)
+	if err != nil {
+		return "", false, err
+	}
+	for _, candidate := range existing {
+		if candidate.Report.IdempotencyKey != report.IdempotencyKey {
+			continue
+		}
+		if !reflect.DeepEqual(candidate.Report, report) {
+			return "", false, fmt.Errorf("reviewed feedback ledger contains a conflicting duplicate report")
+		}
+		return report.IdempotencyKey, true, nil
+	}
+
+	record := map[string]any{}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return "", false, fmt.Errorf("encode reviewed feedback report: %w", err)
+	}
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return "", false, fmt.Errorf("normalize reviewed feedback report: %w", err)
+	}
+	record["receivedAt"] = reviewedAt.UTC().Format(time.RFC3339)
+	line, err := json.Marshal(record)
+	if err != nil {
+		return "", false, fmt.Errorf("encode reviewed feedback ledger record: %w", err)
+	}
+	if len(line) > maxLedgerLine {
+		return "", false, fmt.Errorf("reviewed feedback ledger record exceeds its byte bound")
+	}
+	if err := os.MkdirAll(filepath.Dir(l.Path), 0o755); err != nil {
+		return "", false, fmt.Errorf("create reviewed feedback ledger directory: %w", err)
+	}
+	file, err := os.OpenFile(l.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return "", false, fmt.Errorf("open reviewed feedback ledger: %w", err)
+	}
+	defer file.Close()
+	line = append(line, '\n')
+	if _, err := file.Write(line); err != nil {
+		return "", false, fmt.Errorf("append reviewed feedback ledger: %w", err)
+	}
+	return report.IdempotencyKey, false, nil
 }
 
 func (l JSONLLedger) ListReviewed(

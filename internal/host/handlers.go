@@ -610,6 +610,9 @@ func RegisterBuiltins(r *Registry) {
 	// unavailable sentinel; daemon construction may register an application-
 	// scoped backend which session construction injects.
 	r.Register("host.feedback", FeedbackHandler)
+	r.Register(ReviewedFeedbackCampaignReconcileVerb, ReviewedFeedbackCampaignReconcileHandler)
+	r.Register(FeedbackIntakeReconcileVerb, FeedbackIntakeReconcileHandler)
+	r.Register(FeedbackFederationReconcileVerb, FeedbackFederationReconcileHandler)
 
 	// Typed deterministic compliance checks. Session construction replaces the
 	// sentinel with an app-scoped graph/materialize provider.

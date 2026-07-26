@@ -10,12 +10,14 @@ import (
 
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/clock"
 	"kitsoki/internal/dbruntime"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/mining"
+	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/store"
 	"kitsoki/internal/study"
 )
@@ -164,6 +166,26 @@ func newArtifactJobStore(s store.Store) (artifactjob.Store, error) {
 		return artifactjob.NewPostgresStore(s.DB())
 	}
 	return artifactjob.NewSQLiteStore(s.DB())
+}
+
+func newReviewedFeedbackDispatchStore(
+	s store.Store,
+	clk clock.Clock,
+) (reviewedfeedback.DispatchStore, error) {
+	if store.IsPostgres(s) {
+		return reviewedfeedback.NewPostgresDispatchStore(s.DB(), clk)
+	}
+	return reviewedfeedback.NewSQLiteDispatchStore(s.DB(), clk)
+}
+
+func newReviewedFeedbackReconcileStore(
+	s store.Store,
+	clk clock.Clock,
+) (reviewedfeedback.ReconcileStore, error) {
+	if store.IsPostgres(s) {
+		return reviewedfeedback.NewPostgresReconcileStore(s.DB(), clk)
+	}
+	return reviewedfeedback.NewSQLiteReconcileStore(s.DB(), clk)
 }
 
 // newMiningWatermarkStore constructs the miner's per-slug watermark ledger.

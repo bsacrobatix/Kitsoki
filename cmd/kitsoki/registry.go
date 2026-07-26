@@ -208,11 +208,15 @@ type SessionRegistry struct {
 	federation         *daemonfederation.Pool
 	materializations   materializationstatus.Store
 	feedbackDispatches reviewedfeedback.DispatchStore
+	feedbackReconciles reviewedfeedback.ReconcileStore
+	feedbackLedger     reviewedfeedback.JSONLLedger
 
 	// feedbackBackends are explicit daemon-construction bindings keyed by
 	// application ID. Session construction derives the remaining scope from
 	// the loaded application metadata.
-	feedbackBackends map[string]host.FeedbackBackend
+	feedbackBackends           map[string]host.FeedbackBackend
+	feedbackFederationBackends map[string]host.FeedbackBackend
+	feedbackCaptureSources     map[string]reviewedfeedback.CaptureSource
 
 	// flowEvidenceProviders are explicit daemon-construction bindings. The
 	// registered catalog path and dependencies are never selected by callers.
@@ -241,14 +245,63 @@ func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *Sess
 		}
 	}
 	return &SessionRegistry{
-		cfg:                   cfg,
-		base:                  base,
-		dirs:                  dirs,
-		sessions:              map[string]*entry{},
-		feedbackBackends:      map[string]host.FeedbackBackend{},
-		flowEvidenceProviders: map[string]host.FlowEvidenceProvider{},
-		maxSessions:           maxSessionsFromEnv(),
+		cfg:                        cfg,
+		base:                       base,
+		dirs:                       dirs,
+		sessions:                   map[string]*entry{},
+		feedbackBackends:           map[string]host.FeedbackBackend{},
+		feedbackFederationBackends: map[string]host.FeedbackBackend{},
+		feedbackCaptureSources:     map[string]reviewedfeedback.CaptureSource{},
+		flowEvidenceProviders:      map[string]host.FlowEvidenceProvider{},
+		maxSessions:                maxSessionsFromEnv(),
 	}
+}
+
+// RegisterFeedbackCaptureSource binds an opaque semantic source ID to an
+// existing platform-owned typed feedback source. Configuration and host calls
+// cannot supply a path, URL, transport, credential, or provider.
+func (r *SessionRegistry) RegisterFeedbackCaptureSource(
+	sourceID string,
+	source reviewedfeedback.CaptureSource,
+) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if !validFeedbackServiceID(sourceID) {
+		return errors.New("register feedback capture source: opaque source id is required")
+	}
+	if sourceID == reviewedfeedback.ApplicationFeedbackSourceID {
+		return fmt.Errorf(
+			"register feedback capture source %q: source id is reserved by the platform",
+			sourceID,
+		)
+	}
+	if source == nil {
+		return fmt.Errorf("register feedback capture source %q: source is required", sourceID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.feedbackCaptureSources == nil {
+		r.feedbackCaptureSources = make(map[string]reviewedfeedback.CaptureSource)
+	}
+	if _, exists := r.feedbackCaptureSources[sourceID]; exists {
+		return fmt.Errorf("register feedback capture source %q: already registered", sourceID)
+	}
+	r.feedbackCaptureSources[sourceID] = source
+	return nil
+}
+
+func validFeedbackServiceID(value string) bool {
+	if value == "" || len(value) > 180 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '.', r == '_', r == '-', r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // RegisterFeedbackBackend binds one application ID to a governed feedback
@@ -317,9 +370,9 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	}
 	r.daemonStore = st
 	r.daemonJobs = artifactJobs
-	if len(r.cfg.ReviewedFeedback) > 0 {
-		feedbackDispatches, feedbackErr := reviewedfeedback.NewSQLiteDispatchStore(
-			st.DB(), clock.Real(),
+	if len(r.cfg.ReviewedFeedback) > 0 || len(r.cfg.FeedbackFederation) > 0 {
+		feedbackDispatches, feedbackErr := newReviewedFeedbackDispatchStore(
+			st, clock.Real(),
 		)
 		if feedbackErr != nil {
 			_ = st.Close()
@@ -332,6 +385,23 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 			return fmt.Errorf("restore daemon reviewed feedback dispatches: %w", feedbackErr)
 		}
 		r.feedbackDispatches = feedbackDispatches
+	}
+	if len(r.cfg.ReviewedFeedback) > 0 || len(r.cfg.FeedbackIntake) > 0 ||
+		len(r.cfg.FeedbackFederation) > 0 {
+		feedbackReconciles, feedbackErr := newReviewedFeedbackReconcileStore(
+			st, clock.Real(),
+		)
+		if feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon feedback reconciliations: %w", feedbackErr)
+		}
+		if _, feedbackErr := feedbackReconciles.InterruptPending(
+			context.Background(), "daemon_restarted",
+		); feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon feedback reconciliations: %w", feedbackErr)
+		}
+		r.feedbackReconciles = feedbackReconciles
 	}
 	r.base.StoryDemoExecutor = r
 	if root, rootErr := os.Getwd(); rootErr == nil {
@@ -902,6 +972,7 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
@@ -1154,6 +1225,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
@@ -1630,6 +1702,88 @@ func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revisio
 			Revision:      revision,
 		}),
 	)
+}
+
+func (r *SessionRegistry) wireFeedbackReconciliation(
+	rt *sessionRuntime,
+	appID, owner, revision string,
+) {
+	if rt == nil || rt.HostRegistry == nil || appID == "" {
+		return
+	}
+	scope := host.FeedbackScope{ApplicationID: appID, Owner: owner, Revision: revision}
+	r.mu.Lock()
+	campaignBackend := r.feedbackBackends[appID]
+	federationBackend := r.feedbackFederationBackends[appID]
+	intakeBinding, intakeConfigured := r.cfg.FeedbackIntake[appID]
+	intakeSource := r.feedbackCaptureSources[intakeBinding.Source]
+	campaignBinding, campaignConfigured := r.cfg.ReviewedFeedback[appID]
+	federationBinding, federationConfigured := r.cfg.FeedbackFederation[appID]
+	store := r.feedbackReconciles
+	ledger := r.feedbackLedger
+	r.mu.Unlock()
+
+	if campaignConfigured {
+		service := reviewedfeedback.DispatchReconciler{
+			Operation: reviewedfeedback.OperationCampaign,
+			ConfigurationID: reviewedfeedback.BindingConfigurationID(
+				campaignBinding.TargetApplication,
+				campaignBinding.TargetHandler,
+				campaignBinding.TargetAction,
+			),
+			Backend: campaignBackend, Store: store, Scope: scope,
+			Limit: reviewedfeedback.DefaultDrainLimit,
+		}
+		rt.HostRegistry.Replace(
+			host.ReviewedFeedbackCampaignReconcileVerb,
+			host.NewFeedbackReconcileHandler(
+				host.ReviewedFeedbackCampaignReconcileVerb,
+				func(ctx context.Context) (host.Result, error) {
+					result, err := service.Reconcile(ctx)
+					return result.HostResult(), err
+				},
+			),
+		)
+	}
+	if intakeConfigured {
+		service := reviewedfeedback.IntakeReconciler{
+			SourceID: intakeBinding.Source, Source: intakeSource,
+			Ledger: ledger, Store: store, Scope: scope,
+			Clock: clock.Real(), Limit: intakeBinding.MaxRecords,
+		}
+		rt.HostRegistry.Replace(
+			host.FeedbackIntakeReconcileVerb,
+			host.NewFeedbackReconcileHandler(
+				host.FeedbackIntakeReconcileVerb,
+				func(ctx context.Context) (host.Result, error) {
+					result, err := service.Reconcile(ctx)
+					return result.HostResult(), err
+				},
+			),
+		)
+	}
+	if federationConfigured {
+		service := reviewedfeedback.DispatchReconciler{
+			Operation: reviewedfeedback.OperationFederation,
+			ConfigurationID: reviewedfeedback.BindingConfigurationID(
+				federationBinding.TargetApplication,
+				federationBinding.TargetHandler,
+				federationBinding.TargetAction,
+			),
+			Backend: federationBackend, Store: store, Scope: scope,
+			Limit: federationBinding.MaxRecords,
+		}
+		rt.HostRegistry.Replace(
+			host.FeedbackFederationReconcileVerb,
+			host.NewFeedbackReconcileHandler(
+				host.FeedbackFederationReconcileVerb,
+				func(ctx context.Context) (host.Result, error) {
+					result, err := service.Reconcile(ctx)
+					return result.HostResult(), err
+				},
+			),
+		)
+	}
 }
 
 func (r *SessionRegistry) wireCampaign(rt *sessionRuntime, appID string) {

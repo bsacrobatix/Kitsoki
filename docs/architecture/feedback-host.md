@@ -93,3 +93,91 @@ The backend may create a job that performs governed review or implementation
 work, but this host contract does not expose graph apply/authorize operations,
 git merge/push operations, queue promotion, or any other source-landing
 authority.
+
+## Command-free reconciliation
+
+Daemon applications may also receive three exact, zero-argument operations:
+
+```text
+host.reviewed_feedback_campaign.reconcile
+host.feedback_intake.reconcile
+host.feedback_federation.reconcile
+```
+
+They reject every caller argument. In particular, a story cannot select a
+source or target application, handler, action, path, URL, command, provider,
+credential, repository, actor, session, or transport. Application scope comes
+from the loaded application and all remaining authority comes from server
+configuration and injected services.
+
+`reviewed_feedback_campaign.reconcile` is enabled by the existing
+`reviewed_feedback.<application>` adopter binding. It lists a bounded set of
+eligible reviewed records, transactionally claims at most one, and invokes the
+configured adopter with a stable identity derived from operation, source
+application, and report reference.
+
+`feedback_federation.reconcile` has an independent exact target binding:
+
+```yaml
+feedback_federation:
+  review.application:
+    target_application: portfolio.application
+    target_handler: portfolio.application.feedback.apply
+    target_action: portfolio.application.feedback.apply.action
+    max_records: 50
+```
+
+Federation uses the same `application.Service` path and canonical receipt
+validation as the adopter. It never edits a sibling filesystem or calls raw
+MCP or HTTP. The three target values are opaque semantic identifiers; no
+executable, path, endpoint, or secret-bearing fields exist.
+
+`feedback_intake.reconcile` binds an application to a typed capture source:
+
+```yaml
+feedback_intake:
+  review.application:
+    source: application-feedback
+    max_records: 50
+```
+
+The fixed `application-feedback` source is the existing platform-owned
+canonical ledger written by `/api/feedback/local`; the daemon injects its
+already-resolved `reviewedfeedback.JSONLLedger`. This adds no file format,
+directory, or ingress route. Other sources must be injected through
+`RegisterFeedbackCaptureSource` under an opaque ID. An unregistered configured
+source reports `configured source is unavailable`; a registered source with no
+eligible records returns `status: empty`.
+
+Intake accepts only typed `applicationfeedback.Report` values. It verifies the
+canonical report and attachment schemas, application identity, frame revision,
+opaque classifications and references, and matching semantic anchors. It
+deterministically scrubs reviewed user text and rejects anchors whose encoded
+form contains home paths or recognized secrets. It persists through the
+existing reviewed ledger. When the source is that same ledger, an exact record
+is acknowledged without appending a duplicate line; a conflicting duplicate
+fails closed.
+
+## Reconciliation state
+
+The daemon database owns restart and concurrency truth for all three
+operations. SQLite remains the default; PostgreSQL uses the same contract in a
+dedicated `reviewedfeedback` schema. Durable identity is
+`(operation, application, item)` plus a normalized content digest.
+A dispatch digest includes the exact target binding; an intake digest includes
+the configured source ID and opaque source reference. Configuration drift
+therefore fails closed instead of replaying a receipt from a different target
+or source.
+A partial unique index permits only one pending item for each operation and
+application. Reusing an item identity with different content fails, completed
+results replay without calling the source or target again, and an external
+failure leaves an interrupted claim with only a bounded privacy-safe reason.
+
+Daemon startup marks pending claims `interrupted` with
+`daemon_restarted`. Only an explicit later reconcile may claim the item again;
+the attempt count advances and the stable dispatch/application idempotency
+identity is reused. Campaign and federation successes store the target's
+finalized `application-receipt/v1`. Intake stores a finalized
+`kitsoki/feedback-intake-receipt/v1` and returns it to the typed source as its
+acknowledgement. Results are bounded by the configured record limit, one
+selected item, one application receipt, and fixed-size receipt metadata.
