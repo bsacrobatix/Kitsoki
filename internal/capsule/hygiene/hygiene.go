@@ -38,6 +38,11 @@ const (
 	projectSentinelSchema = "capsule-project/v1"
 	byteMeasurement       = "logical file bytes; workspace .git/objects excluded as shared clone data"
 	workspaceInspectors   = 4
+	// workspaceActivityInspectors bounds concurrent lsof +D probes. A global
+	// lsof walk is unbounded with respect to unrelated process file tables and
+	// can starve the doctor before it reaches its first workspace. Each scoped
+	// probe remains complete for its one workspace tree.
+	workspaceActivityInspectors = 4
 )
 
 type Options struct {
@@ -1371,28 +1376,107 @@ func readWorkspaceActivity(ctx context.Context, paths []string) (WorkspaceActivi
 		activity.Reason = "lsof is unavailable"
 		return activity, nil
 	}
-	cmd := exec.CommandContext(ctx, lsof, "-n", "-P", "-F", "pn")
+	if len(paths) == 0 {
+		activity.Known = true
+		return activity, nil
+	}
+
+	// +D is lsof's complete recursive file selection for one directory. Run it
+	// once per managed root, with a fixed fan-out, instead of asking lsof to
+	// inventory every open file on the machine and filtering that output here.
+	// A failed or incomplete per-root probe fails the entire liveness proof; it
+	// never turns a workspace into a safe cleanup candidate.
+	ordered := append([]string(nil), paths...)
+	sort.Strings(ordered)
+	type result struct {
+		activity WorkspaceActivity
+		err      error
+	}
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	workers := minInt(workspaceActivityInspectors, len(ordered))
+	jobs := make(chan string)
+	results := make(chan result, workers)
+	var group sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for {
+				select {
+				case <-probeCtx.Done():
+					return
+				case path, ok := <-jobs:
+					if !ok {
+						return
+					}
+					probed, probeErr := readWorkspaceActivityPath(probeCtx, lsof, path)
+					select {
+					case results <- result{activity: probed, err: probeErr}:
+					case <-probeCtx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+	defer func() {
+		cancel()
+		close(jobs)
+		group.Wait()
+	}()
+	for next, inFlight := 0, 0; next < len(ordered) || inFlight > 0; {
+		if err := probeCtx.Err(); err != nil {
+			return WorkspaceActivity{}, err
+		}
+		var submit chan<- string
+		var path string
+		if next < len(ordered) && inFlight < workers {
+			submit = jobs
+			path = ordered[next]
+		}
+		select {
+		case <-probeCtx.Done():
+			return WorkspaceActivity{}, probeCtx.Err()
+		case submit <- path:
+			next++
+			inFlight++
+		case outcome := <-results:
+			inFlight--
+			if outcome.err != nil {
+				return WorkspaceActivity{}, outcome.err
+			}
+			for path, pids := range outcome.activity.PIDsByPath {
+				activity.PIDsByPath[path] = append(activity.PIDsByPath[path], pids...)
+				sort.Ints(activity.PIDsByPath[path])
+			}
+			activity.Diagnostics = appendUniqueActivityDiagnostics(activity.Diagnostics, outcome.activity.Diagnostics...)
+		}
+	}
+	activity.Known = true
+	return activity, nil
+}
+
+func readWorkspaceActivityPath(ctx context.Context, lsof, path string) (WorkspaceActivity, error) {
+	cmd := exec.CommandContext(ctx, lsof, "-n", "-P", "-F", "pn", "+D", path)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	runErr := cmd.Run()
-	diagnostics, warningErr := classifyWorkspaceActivityWarnings(stderr.String(), paths)
+	diagnostics, warningErr := classifyWorkspaceActivityWarnings(stderr.String(), []string{path})
 	if warningErr != nil {
 		return WorkspaceActivity{}, warningErr
 	}
 	if runErr != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 1 {
-			return WorkspaceActivity{}, fmt.Errorf("workspace activity probe: %w", runErr)
+			return WorkspaceActivity{}, fmt.Errorf("workspace activity probe: %s: %w", path, runErr)
 		}
 	}
-	pidsByPath, parseErr := parseWorkspaceActivity(stdout.String(), paths)
+	pidsByPath, parseErr := parseWorkspaceActivity(stdout.String(), []string{path})
 	if parseErr != nil {
 		return WorkspaceActivity{}, fmt.Errorf("workspace activity probe output is inconclusive: %w", parseErr)
 	}
-	activity.Known = true
-	activity.PIDsByPath = pidsByPath
-	activity.Diagnostics = diagnostics
-	return activity, nil
+	return WorkspaceActivity{Known: true, PIDsByPath: pidsByPath, Diagnostics: diagnostics}, nil
 }
 
 func classifyWorkspaceActivityWarnings(stderr string, paths []string) ([]ActivityDiagnostic, error) {

@@ -1573,6 +1573,77 @@ exit 1
 	}
 }
 
+func TestReadWorkspaceActivityScopesLsofToEachWorkspace(t *testing.T) {
+	root := t.TempDir()
+	one := filepath.Join(root, "one")
+	two := filepath.Join(root, "two")
+	for _, workspace := range []string{one, two} {
+		if err := os.MkdirAll(workspace, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(workspace, "open.txt"), []byte("open\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fakeBin := t.TempDir()
+	script := `#!/bin/sh
+[ "$1" = "-n" ] && [ "$2" = "-P" ] && [ "$3" = "-F" ] && [ "$4" = "pn" ] && [ "$5" = "+D" ] || exit 42
+case "$6" in
+  "$KITSOKI_TEST_WORKSPACE_ONE") printf 'p101\nf1\nn%s/open.txt\n' "$6" ;;
+  "$KITSOKI_TEST_WORKSPACE_TWO") printf 'p202\nf1\nn%s/open.txt\n' "$6" ;;
+  *) exit 43 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "lsof"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_TEST_WORKSPACE_ONE", one)
+	t.Setenv("KITSOKI_TEST_WORKSPACE_TWO", two)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	activity, err := readWorkspaceActivity(context.Background(), []string{two, one})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !activity.Known || fmt.Sprint(activity.PIDsByPath[one]) != "[101]" || fmt.Sprint(activity.PIDsByPath[two]) != "[202]" {
+		t.Fatalf("activity=%#v", activity)
+	}
+}
+
+func TestReadWorkspaceActivityStopsScopedProbesAtDeadline(t *testing.T) {
+	root := t.TempDir()
+	paths := make([]string, 0, workspaceActivityInspectors+3)
+	for index := 0; index < cap(paths); index++ {
+		workspace := filepath.Join(root, fmt.Sprintf("workspace-%d", index))
+		if err := os.MkdirAll(workspace, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, workspace)
+	}
+	fakeBin := t.TempDir()
+	countPath := filepath.Join(t.TempDir(), "probe-count")
+	script := "#!/bin/sh\nprintf x >> \"$KITSOKI_HYGIENE_PROBE_COUNT\"\n/bin/sleep 1\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "lsof"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_HYGIENE_PROBE_COUNT", countPath)
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	_, err := readWorkspaceActivity(ctx, paths)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("readWorkspaceActivity error = %v, want deadline exceeded", err)
+	}
+	raw, readErr := os.ReadFile(countPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if probes := len(raw); probes > workspaceActivityInspectors {
+		t.Fatalf("scoped lsof probes = %d, want <= %d after deadline", probes, workspaceActivityInspectors)
+	}
+}
+
 func TestReadWorkspaceActivityRejectsInconclusiveWarningsFailuresAndOutput(t *testing.T) {
 	workspace := t.TempDir()
 	tests := []struct {
