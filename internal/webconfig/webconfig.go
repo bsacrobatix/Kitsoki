@@ -188,6 +188,10 @@ type WebConfig struct {
 	// read-only Story Application projections. Map keys are application IDs;
 	// neither story inputs nor transport requests can choose another binding.
 	ApplicationReadModels map[string]ApplicationReadModelConfig `yaml:"application_read_models,omitempty"`
+
+	// ApplicationGraphs binds exact Story Application IDs to server-owned
+	// repository graph paths, bounds, and write policy.
+	ApplicationGraphs map[string]ApplicationGraphConfig `yaml:"application_graphs,omitempty"`
 }
 
 type ApplicationReadModelConfig struct {
@@ -770,6 +774,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveApplicationReadModels(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveApplicationGraphs(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveAuth(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -997,6 +1004,16 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[key] = value
 		}
 		out.ApplicationReadModels = merged
+	}
+	if len(local.ApplicationGraphs) > 0 {
+		merged := make(map[string]ApplicationGraphConfig, len(base.ApplicationGraphs)+len(local.ApplicationGraphs))
+		for key, value := range base.ApplicationGraphs {
+			merged[key] = value
+		}
+		for key, value := range local.ApplicationGraphs {
+			merged[key] = value
+		}
+		out.ApplicationGraphs = merged
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)

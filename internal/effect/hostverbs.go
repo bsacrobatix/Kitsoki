@@ -255,6 +255,7 @@ var builtinVerbTable = map[string]verbEffect{
 			"propose":      {class: Write, deterministic: true},
 			"authorize":    {class: Write, deterministic: true},
 			"withdraw":     {class: Write, deterministic: true},
+			"rebase":       {class: Write, deterministic: true},
 		},
 	},
 

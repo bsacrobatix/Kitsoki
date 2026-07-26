@@ -251,27 +251,67 @@ schemas deliberately reject network references and unsupported keywords.
 Native surfaces retain the same component and action semantic refs and project
 the fallback's selected resolved prop instead of dumping the full prop object.
 
-Use provider-to-world-to-frame composition for graph-backed applications:
+Use provider-to-world-to-frame composition for graph-backed applications. The
+deployment binds graph authority to the exact calling application:
+
+```yaml
+application_graphs:
+  pog:
+    project_root: .
+    catalog: pog/catalog.yaml
+    overlay: pog/catalog.overlay.yaml # optional, read operations only
+    max_nodes: 2000
+    max_bytes: 1048576
+    write_policy: propose
+```
+
+`project_root` is resolved beneath the discovered project root. `catalog` and
+`overlay` are resolved beneath that configured root. Absolute paths, traversal,
+symlink escapes, missing paths, and non-regular catalog files fail session
+construction. `max_bytes` bounds the configured catalog entry files and every
+application request/result. `max_nodes` is injected into `snapshot`.
+`write_policy` is `read`, `propose`, or `steward`.
+
+The story declares operation data only:
 
 ```yaml
 host_interfaces:
   catalog:
     operations:
       snapshot:
-        input: {catalog_path: string, audience: string, fields: list, max_nodes: int}
+        input: {audience: string, fields: list}
         output: {snapshot: object}
     default: host.graph
 
 # In a room effect:
 - invoke: iface.catalog.snapshot
   with:
-    catalog_path: "{{ world.catalog_path }}"
     audience: public
     fields: [title, status, visibility]
-    max_nodes: 1000
   bind:
     public_snapshot: snapshot
 ```
+
+For configured Story Applications the public input shapes are:
+
+| Operation | Public input |
+|---|---|
+| `snapshot` | `audience`, `fields` |
+| `get` | `ids`, `fields` |
+| `changeset` | `action`, `changeset_id`, `node_id` |
+| `project` | `graph_id` |
+| `propose` | `title`, `operations`, `visibility`, `validate_only` |
+| `authorize` | `changeset_id` |
+| `withdraw` | `changeset_id` |
+| `rebase` | `changeset_id` |
+| `apply` | `changeset_id`, `dry_run` |
+
+`read` permits the four read operations. `propose` additionally permits
+`propose`, `withdraw`, `rebase`, and dry-run `apply`. `steward` permits the
+complete table, including `authorize` and live `apply`. Graph writes are
+stamped with the server-owned `kitsoki.application:<application-id>` actor.
+Caller-supplied catalog/overlay paths, URLs, commands, providers, profiles,
+actors, sessions, or transports are rejected recursively.
 
 Keep `public_snapshot` world-only, derive a finite public page projection with
 capability-free Starlark, and expose only that derived key through

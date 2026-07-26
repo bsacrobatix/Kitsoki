@@ -41,6 +41,24 @@ in `application.data`; raw provider snapshots remain world-only. Public models
 must originate from a provider call made with `audience: public`, not from
 client-side filtering of an internal snapshot.
 
+Graph-backed Story Applications receive an application-scoped replacement for
+the generic `host.graph` handler when their exact application ID appears under
+`.kitsoki.yaml` `application_graphs`. Session construction resolves the
+configured project root, catalog, and optional overlay to server-owned real
+paths and rejects absolute paths, traversal, symlink escapes, and non-regular
+files. Unconfigured sessions retain the generic handler used by the bare graph
+CLI and MCP surfaces.
+
+The replacement accepts only operation data for `snapshot`, `get`,
+`changeset`, `project`, `propose`, `authorize`, `withdraw`, `rebase`, and
+`apply`. It recursively rejects path, URL, command, provider/profile,
+actor/session, and transport authority, injects the resolved paths and
+configured snapshot node bound, enforces request/result byte bounds and the
+`read|propose|steward` write policy, stamps writes with a server-owned
+application actor, then delegates to the existing graph handler. The graph
+loader, linting, changeset guards, provenance rules, and transactional write
+invariants therefore remain shared with the generic surface.
+
 `internal/application.Service` coordinates three injected dependencies:
 
 | Dependency | Responsibility |

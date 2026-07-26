@@ -1014,6 +1014,10 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
+	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
+		rt.Close()
+		return "", err
+	}
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireApplicationJob(rt, def.App.ID)
 	if err := r.wireApplicationConversation(rt, def.App.ID); err != nil {
@@ -1271,6 +1275,10 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
+	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
+		rt.Close()
+		return "", err
+	}
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireApplicationJob(rt, def.App.ID)
 	if err := r.wireApplicationConversation(rt, def.App.ID); err != nil {
