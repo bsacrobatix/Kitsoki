@@ -433,6 +433,17 @@ func goModModuleIsKitsoki(raw []byte) bool {
 }
 
 func relCapsulePath(root, path string) string {
+	// FileDefinitionStore canonicalizes project roots and definition paths so
+	// symlinks cannot escape the project. Keep the display-side root in that
+	// same coordinate system. On macOS, os.Getwd may report /var/... while
+	// EvalSymlinks reports /private/var/...; relativizing one against the
+	// other otherwise emits a bogus ../../private/... path.
+	if real, err := filepath.EvalSymlinks(root); err == nil {
+		root = real
+	}
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return path

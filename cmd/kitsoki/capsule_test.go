@@ -91,6 +91,26 @@ func TestCapsuleListCoreJSONUsesManagedDefinitions(t *testing.T) {
 	t.Fatalf("missing clean-repo in %+v", payload.Capsules)
 }
 
+func TestRelCapsulePathCanonicalizesProjectAndDefinitionAliases(t *testing.T) {
+	parent := t.TempDir()
+	realRoot := filepath.Join(parent, "real-project")
+	if err := os.MkdirAll(filepath.Join(realRoot, "capsules", "clean-repo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(parent, "project-alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+	definition := filepath.Join(realRoot, "capsules", "clean-repo", "capsule.yaml")
+	if err := os.WriteFile(definition, []byte("name: clean-repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := relCapsulePath(aliasRoot, definition), "capsules/clean-repo/capsule.yaml"; got != want {
+		t.Fatalf("relative capsule path = %q, want %q", got, want)
+	}
+}
+
 func TestCapsuleListRepoHistoryMarkdown(t *testing.T) {
 	jsonOut, err := execRoot(t, "capsule", "list", "--kind", "repo-history", "--json")
 	if err != nil {
