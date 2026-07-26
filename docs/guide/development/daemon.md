@@ -24,6 +24,69 @@ can read the same records through JSON-RPC:
 Bind only to trusted localhost or an authenticated internal proxy. The daemon
 does not add HTTP authentication.
 
+## Run graph-declared campaigns
+
+Daemon mode can watch generic campaign nodes from the project graph and dispatch
+their actions through the story runtime. Enable the provider in
+`.kitsoki.yaml`:
+
+```yaml
+campaigns:
+  catalog: graph/catalog.yaml
+  type: campaign
+  max_definitions: 200
+  max_bytes: 262144
+```
+
+The catalog path is fixed by daemon configuration. A campaign node uses the
+following contract:
+
+```yaml
+schema: project/campaign/v1
+id: recurring-review
+type: campaign
+title: Recurring review
+status: active
+application_id: review-runner
+enabled: true
+paused: false
+cadence_seconds: 300
+budget:
+  max_ticks_per_day: 48
+  max_concurrency: 1
+action:
+  kind: story-intent
+  story: stories/review/app.yaml
+  intent: review
+  input:
+    scope: current
+```
+
+Only `status: active` nodes whose `application_id` exactly matches the calling
+application are visible. `host.campaign.watch` reconciles those definitions and
+starts one process watcher for that application:
+
+```yaml
+host:
+  call: host.campaign.watch
+  with:
+    poll_seconds: 30
+```
+
+The result contains `watch_job_ref`, its compatibility alias `job_id`,
+`job_refs`, `campaign_count`, and `restored`. The watcher reference identifies
+process-bound polling. Entries in `job_refs` identify durable artifact jobs
+created for actions that were due during that call. Every dispatched action
+also receives its campaign idempotency key as `request_id`.
+
+`host.campaign.snapshot` returns bounded deterministic status for the same
+application. Its required `max_campaigns` and `max_bytes` inputs must remain
+within the platform ceilings and cannot request an unbounded response. The provider
+rejects malformed definitions and unsupported action kinds instead of
+truncating or invoking external command authority. Durable claims enforce
+enabled and paused state, cadence, daily tick budget, concurrency, and
+idempotency before exact story-intent dispatch.
+
 ## Federate VM and workstation workers
 
 Each worker is an ordinary self-contained daemon: it owns its SQLite database,
@@ -138,6 +201,12 @@ rows failed with `process_died_mid_job`; blindly repeating a shell command,
 agent call, or external write could duplicate side effects. A story that needs
 automatic work replay must provide an idempotent, checkpointed executor and an
 explicit resume action.
+
+Campaign schedules and their next due times survive the same restart. Any
+campaign dispatch recorded as running is marked `interrupted` with reason
+`daemon_restarted`; neither it nor the process watcher is claimed to have
+resumed. Restored artifact-job sessions keep their stable references, and the
+application starts a new watcher by invoking `host.campaign.watch`.
 
 ## Install a systemd user service
 

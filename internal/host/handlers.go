@@ -615,6 +615,11 @@ func RegisterBuiltins(r *Registry) {
 	// sentinel with an app-scoped graph/materialize provider.
 	r.Register("host.compliance", ComplianceHandler)
 
+	// Generic graph-declared standing campaigns. The builtin is an unavailable
+	// sentinel; daemon-backed session construction replaces it with an
+	// app-scoped controller over a configured project graph and durable store.
+	r.Register("host.campaign", CampaignHandler)
+
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
 	// bare so the registry's longest-prefix fallback resolves every

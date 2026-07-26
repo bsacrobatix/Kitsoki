@@ -34,6 +34,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/campaign"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
 	"kitsoki/internal/workerregistry"
@@ -132,6 +133,11 @@ type WebConfig struct {
 	// Workers are independent loopback-only daemons; secrets remain in the local override.
 	DaemonFederation daemonfederation.Config `yaml:"daemon_federation,omitempty"`
 
+	// Campaigns binds the daemon's generic standing-campaign runtime to one
+	// project object graph. The handler remains unavailable when this block is
+	// absent or the process is not `kitsoki daemon`.
+	Campaigns *CampaignConfig `yaml:"campaigns,omitempty"`
+
 	// Auth configures invitation-only GitHub sign-in for the web/daemon HTTP
 	// surface (internal/webauth). Nil ⇒ mode "auto": auth is required exactly
 	// when the server binds a non-loopback address. The client secret is
@@ -149,6 +155,43 @@ type WebConfig struct {
 	// never the checked-in .kitsoki.yaml, since Endpoint/Tunnel/CredentialEnv
 	// are machine-local or secret-bearing.
 	Workers []workerregistry.Entry `yaml:"workers,omitempty"`
+}
+
+// CampaignConfig fixes the graph source and bounded discovery limits for the
+// daemon. Individual stories cannot override these values through host args.
+type CampaignConfig struct {
+	Catalog        string `yaml:"catalog"`
+	TypeID         string `yaml:"type,omitempty"`
+	MaxDefinitions int    `yaml:"max_definitions,omitempty"`
+	MaxBytes       int    `yaml:"max_bytes,omitempty"`
+}
+
+func (cfg *WebConfig) resolveCampaigns() error {
+	if cfg.Campaigns == nil {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Campaigns.Catalog) == "" {
+		return fmt.Errorf("campaigns.catalog is required")
+	}
+	if cfg.Campaigns.TypeID == "" {
+		cfg.Campaigns.TypeID = campaign.DefaultTypeID
+	}
+	if cfg.Campaigns.MaxDefinitions == 0 {
+		cfg.Campaigns.MaxDefinitions = campaign.DefaultMaxDefinitions
+	}
+	if cfg.Campaigns.MaxDefinitions < 1 || cfg.Campaigns.MaxDefinitions > campaign.DefaultMaxDefinitions {
+		return fmt.Errorf(
+			"campaigns.max_definitions must be between 1 and %d",
+			campaign.DefaultMaxDefinitions,
+		)
+	}
+	if cfg.Campaigns.MaxBytes == 0 {
+		cfg.Campaigns.MaxBytes = campaign.DefaultMaxBytes
+	}
+	if cfg.Campaigns.MaxBytes < 1 || cfg.Campaigns.MaxBytes > campaign.DefaultMaxBytes {
+		return fmt.Errorf("campaigns.max_bytes must be between 1 and %d", campaign.DefaultMaxBytes)
+	}
+	return nil
 }
 
 // FeedbackRoute is one producer's `feedback_routing:` rule. The node type
@@ -532,6 +575,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveFeedbackRouting(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveCampaigns(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveAuth(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -704,6 +750,9 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if len(local.DaemonFederation.Workers) > 0 {
 		out.DaemonFederation = local.DaemonFederation
+	}
+	if local.Campaigns != nil {
+		out.Campaigns = local.Campaigns
 	}
 	if len(local.Workers) > 0 {
 		out.Workers = local.Workers

@@ -45,7 +45,9 @@ import (
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/campaign"
 	"kitsoki/internal/chats"
+	"kitsoki/internal/clock"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
@@ -190,10 +192,14 @@ type SessionRegistry struct {
 	// daemonStore owns the connection used by daemonJobs. It is separate from
 	// each live session runtime but points at the same SQLite file, so durable
 	// job identity survives registry and process teardown.
-	daemonStore store.Store
-	daemonJobs  artifactjob.Store
-	studies     study.Store
-	federation  *daemonfederation.Pool
+	daemonStore       store.Store
+	daemonJobs        artifactjob.Store
+	campaignStore     campaign.Store
+	campaignSource    campaign.Source
+	campaignScheduler jobs.Scheduler
+	campaignServices  map[string]*campaign.Service
+	studies           study.Store
+	federation        *daemonfederation.Pool
 
 	// feedbackBackends are explicit daemon-construction bindings keyed by
 	// application ID. Session construction derives the remaining scope from
@@ -249,13 +255,45 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("open daemon store: %w", err)
 	}
-	jobs, err := artifactjob.NewSQLiteStore(st.DB())
+	artifactJobs, err := artifactjob.NewSQLiteStore(st.DB())
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("open daemon artifact jobs: %w", err)
 	}
 	r.daemonStore = st
-	r.daemonJobs = jobs
+	r.daemonJobs = artifactJobs
+	if r.cfg.Campaigns != nil {
+		campaignStore, campaignErr := campaign.NewSQLiteStore(st.DB())
+		if campaignErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon campaigns: %w", campaignErr)
+		}
+		catalogPath, campaignErr := filepath.Abs(r.cfg.Campaigns.Catalog)
+		if campaignErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("resolve daemon campaign catalog: %w", campaignErr)
+		}
+		campaignJobs, campaignErr := jobs.NewJobStore(st.DB())
+		if campaignErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon campaign scheduler: %w", campaignErr)
+		}
+		r.campaignStore = campaignStore
+		r.campaignSource = campaign.CatalogSource{
+			Path:           catalogPath,
+			TypeID:         r.cfg.Campaigns.TypeID,
+			MaxDefinitions: r.cfg.Campaigns.MaxDefinitions,
+			MaxBytes:       r.cfg.Campaigns.MaxBytes,
+		}
+		r.campaignScheduler = jobs.NewScheduler(campaignJobs)
+		r.campaignServices = make(map[string]*campaign.Service)
+		if _, campaignErr := campaignStore.InterruptRunning(
+			context.Background(), "daemon_restarted", time.Now().UTC(),
+		); campaignErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon campaigns: %w", campaignErr)
+		}
+	}
 	studies, err := study.NewSQLiteStore(st.DB())
 	if err != nil {
 		_ = st.Close()
@@ -672,6 +710,18 @@ func (r *SessionRegistry) SetNotifier(n server.Notifier) {
 // `kitsoki web` entrypoint defers this on shutdown.
 func (r *SessionRegistry) Close() {
 	r.mu.Lock()
+	services := make([]*campaign.Service, 0, len(r.campaignServices))
+	for _, service := range r.campaignServices {
+		services = append(services, service)
+	}
+	r.mu.Unlock()
+	closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, service := range services {
+		_ = service.Close(closeCtx)
+	}
+
+	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.sessions {
 		if e.sink != nil {
@@ -706,6 +756,15 @@ func (r *SessionRegistry) NewSessionSeeded(ctx context.Context, storyPath string
 }
 
 func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error) {
+	return r.newSessionWithOrigin(ctx, storyPath, initialWorld, artifactjob.Origin{})
+}
+
+func (r *SessionRegistry) newSessionWithOrigin(
+	ctx context.Context,
+	storyPath string,
+	initialWorld map[string]any,
+	origin artifactjob.Origin,
+) (string, error) {
 	loaded, err := r.loadStory(storyPath)
 	if err != nil {
 		return "", err
@@ -733,6 +792,7 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireCampaign(rt, def.App.ID)
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -806,12 +866,15 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 
 	daemonRegistered := false
 	if r.daemonJobs != nil {
+		if origin.Kind == "" {
+			origin = artifactjob.Origin{Kind: "daemon", Ref: "daemon:" + id}
+		}
 		_, err = r.daemonJobs.Register(ctx, artifactjob.RegisterRequest{
 			ID:         artifactjob.JobID(id),
 			SessionID:  sid,
 			AppID:      def.App.ID,
 			Story:      abs,
-			Origin:     artifactjob.Origin{Kind: "daemon", Ref: "daemon:" + id},
+			Origin:     origin,
 			Status:     artifactjob.StatusRunning,
 			RunURL:     "/s/" + id,
 			TracePath:  tracePath,
@@ -979,6 +1042,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireCampaign(rt, def.App.ID)
 	ok := false
 	defer func() {
 		if !ok {
@@ -1204,6 +1268,102 @@ func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revisio
 	)
 }
 
+func (r *SessionRegistry) wireCampaign(rt *sessionRuntime, appID string) {
+	if r.campaignStore == nil || r.campaignSource == nil || r.campaignScheduler == nil ||
+		rt == nil || rt.HostRegistry == nil || appID == "" {
+		return
+	}
+	r.mu.Lock()
+	service := r.campaignServices[appID]
+	if service == nil {
+		service = &campaign.Service{
+			Store:      r.campaignStore,
+			Source:     r.campaignSource,
+			Scheduler:  campaignSchedulerAdapter{scheduler: r.campaignScheduler},
+			Clock:      clock.Real(),
+			Dispatcher: campaignRegistryDispatcher{registry: r},
+		}
+		r.campaignServices[appID] = service
+	}
+	r.mu.Unlock()
+	rt.HostRegistry.Replace("host.campaign", host.NewCampaignHandler(service, appID))
+}
+
+type campaignSchedulerAdapter struct {
+	scheduler jobs.Scheduler
+}
+
+func (a campaignSchedulerAdapter) Submit(
+	ctx context.Context,
+	kind string,
+	run func(context.Context) error,
+) (string, error) {
+	if a.scheduler == nil {
+		return "", fmt.Errorf("campaign scheduler is unavailable")
+	}
+	return a.scheduler.Submit(ctx, jobs.JobSpec{
+		Kind: kind,
+		Handler: func(handlerCtx context.Context, _ map[string]any) (host.Result, error) {
+			return host.Result{}, run(handlerCtx)
+		},
+	})
+}
+
+func (a campaignSchedulerAdapter) Cancel(ctx context.Context, ref string) error {
+	if a.scheduler == nil {
+		return nil
+	}
+	err := a.scheduler.Cancel(ctx, ref)
+	if errors.Is(err, jobs.ErrJobNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (a campaignSchedulerAdapter) WaitIdle(ctx context.Context) error {
+	if a.scheduler == nil {
+		return nil
+	}
+	return a.scheduler.WaitIdle(ctx)
+}
+
+type campaignRegistryDispatcher struct {
+	registry *SessionRegistry
+}
+
+func (d campaignRegistryDispatcher) Dispatch(ctx context.Context, claim campaign.Claim) (string, error) {
+	if d.registry == nil {
+		return "", fmt.Errorf("campaign dispatcher is unavailable")
+	}
+	jobRef, err := d.registry.newSessionWithOrigin(
+		ctx,
+		claim.Action.Story,
+		nil,
+		artifactjob.Origin{
+			Kind: "campaign",
+			Ref:  "campaign:" + claim.AppID + "/" + claim.ID + "/" + claim.IdempotencyKey,
+		},
+	)
+	if err != nil {
+		return "", err
+	}
+	d.registry.mu.Lock()
+	entry := d.registry.sessions[jobRef]
+	d.registry.mu.Unlock()
+	if entry == nil || entry.driver == nil {
+		return jobRef, fmt.Errorf("campaign dispatch %q has no live session driver", jobRef)
+	}
+	input := make(map[string]any, len(claim.Action.Input)+1)
+	for key, value := range claim.Action.Input {
+		input[key] = value
+	}
+	input["request_id"] = claim.IdempotencyKey
+	if _, err := entry.driver.SubmitDirect(ctx, claim.Action.Intent, input); err != nil {
+		return jobRef, err
+	}
+	return jobRef, nil
+}
+
 // CurrentSession implements [server.CurrentSessionProvider]: it returns the id of
 // the most recently created (NewSession) or attached (AttachExternal) session.
 // Trace-only and graph-only surfaces, which have no chat to start a session, read
@@ -1337,7 +1497,7 @@ func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
 	var restored int
 	var restoreErrs []error
 	for _, job := range jobs {
-		if job.Origin.Kind != "daemon" || job.Story == "" {
+		if (job.Origin.Kind != "daemon" && job.Origin.Kind != "campaign") || job.Story == "" {
 			continue
 		}
 		id, attachErr := r.AttachExternal(ctx, job.Story, "daemon:"+string(job.ID))

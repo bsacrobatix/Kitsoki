@@ -94,6 +94,20 @@ cancel the active session turn before dispatch and fail closed when the host
 cannot provide cancellation. Event receipts retain the source event, mode,
 session, routing pin, and handler semantic ref.
 
+The daemon-only `host.campaign` provider applies the same boundary to recurring
+work declared in a generic project graph. Its daemon configuration fixes the
+catalog and node type; the calling application fixes `application_id`, so story
+input cannot widen discovery. Campaign definitions may dispatch only an exact
+story and intent. Their durable schedule records enforce enabled and paused
+state, cadence, UTC-day budget, concurrency, and idempotency before a dispatcher
+creates an artifact-job-backed session.
+
+Campaign watcher references are process-bound scheduler jobs. Dispatched
+artifact-job references, definitions, next due times, claims, and outcomes are
+durable. At daemon restart, running claims are recorded as interrupted and
+watchers are recreated only by a later `host.campaign.watch` call; the runtime
+does not claim that arbitrary in-flight behavior resumed.
+
 ## Story compilation
 
 `internal/app` treats `application:`, exported handlers, events, typed views,

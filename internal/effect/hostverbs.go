@@ -294,6 +294,19 @@ var builtinVerbTable = map[string]verbEffect{
 	},
 	"host.compliance.run": {class: Write, deterministic: true},
 
+	// host.campaign reads an app-scoped graph and starts exact story intents
+	// through the daemon. The target intent may be external, so watch fails
+	// closed to the highest tier. Snapshot reads only durable control state.
+	"host.campaign": {
+		class: External, deterministic: false,
+		ops: map[string]opEffect{
+			"watch":    {class: External, deterministic: false},
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.campaign.watch":    {class: External, deterministic: false},
+	"host.campaign.snapshot": {class: Read, deterministic: true},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under

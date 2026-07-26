@@ -384,6 +384,17 @@ func registerGraphBuiltins(r *Registry) {
 		Input:  fields("catalog_path", "string", "node_id", "string"),
 		Output: fields("passed", "bool", "evidence_ref", "string", "summary", "string"),
 	})
+	r.Register("host.campaign", "watch", Op{
+		Input: fields("poll_seconds", "int"),
+		Output: fields(
+			"watch_job_ref", "string", "job_id", "string",
+			"job_refs", "list", "campaign_count", "int", "restored", "bool",
+		),
+	})
+	r.Register("host.campaign", "snapshot", Op{
+		Input:  fields("max_campaigns", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
 	r.Register("host.graph", "presentation", Op{
 		Input:  fields(),
 		Output: fields("layers", "list"),
