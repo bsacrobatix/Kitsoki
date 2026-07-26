@@ -601,6 +601,11 @@ func RegisterBuiltins(r *Registry) {
 	// injected into args["op"].
 	r.Register("host.graph", GraphHandler)
 
+	// Durable application run status. The builtin is an unavailable sentinel;
+	// daemon-backed session construction replaces it with an app-scoped,
+	// read-only artifact-job projection.
+	r.Register("host.runstatus", RunstatusSnapshotHandler)
+
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
 	// bare so the registry's longest-prefix fallback resolves every

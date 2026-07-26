@@ -258,6 +258,19 @@ var builtinVerbTable = map[string]verbEffect{
 		},
 	},
 
+	// host.runstatus snapshots an injected durable store. It performs no
+	// process probing or writes, and its projection is deterministic for the
+	// captured store state.
+	"host.runstatus": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	// Machine effects classify the fully-qualified invoke before registry
+	// prefix fallback injects args["op"], so keep the leaf classified too.
+	"host.runstatus.snapshot": {class: Read, deterministic: true},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under

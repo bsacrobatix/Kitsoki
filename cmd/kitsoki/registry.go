@@ -701,6 +701,7 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 	if err != nil {
 		return "", err
 	}
+	r.wireRunstatusSnapshot(rt, def.App.ID)
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -945,6 +946,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	if err != nil {
 		return "", err
 	}
+	r.wireRunstatusSnapshot(rt, def.App.ID)
 	ok := false
 	defer func() {
 		if !ok {
@@ -1138,6 +1140,16 @@ func (r *SessionRegistry) ApplicationHostRegistry(sessionID string) (*host.Regis
 		return nil, false
 	}
 	return e.rt.HostRegistry, true
+}
+
+func (r *SessionRegistry) wireRunstatusSnapshot(rt *sessionRuntime, appID string) {
+	if r.daemonJobs == nil || rt == nil || rt.HostRegistry == nil {
+		return
+	}
+	rt.HostRegistry.Replace(
+		"host.runstatus",
+		host.NewRunstatusSnapshotHandler(r.daemonJobs, appID),
+	)
 }
 
 // CurrentSession implements [server.CurrentSessionProvider]: it returns the id of
