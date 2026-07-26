@@ -27,6 +27,9 @@ func queueCmd() *cobra.Command {
 		queueApproveCmd(),
 		queueOpCmd("unapprove", "Withdraw a steward approval and return the candidate to the approval hold", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Unapprove(op) }),
 		queueOpCmd("reject", "Remove a candidate from the queue; branches and evidence are retained", func(s queue.Store, op queue.Op) (queue.Candidate, error) { return s.Reject(op) }),
+		queueOpCmd("reconcile-landing", "Strictly reconcile a managed staging helper's actual landed commit", func(s queue.Store, op queue.Op) (queue.Candidate, error) {
+			return s.ReconcileLanding(op)
+		}),
 	)
 	return cmd
 }
@@ -378,16 +381,12 @@ func queueProcessDeps(project, gate, target, resolver, repair, workerID string) 
 		TargetRef:   target,
 		GateMemo:    queue.FileGateMemo{ProjectRoot: project},
 	}
-	if target == "staging/local" {
-		deps.Integration = queue.StagingIntegration{ProjectRoot: project, GateCommand: gate}
-	} else {
-		deps.Integration = queue.ProtectedIntegration{
-			ProjectRoot:     project,
-			TargetRef:       target,
-			ResolverCommand: resolver,
-		}
-		deps.Finalizer = queue.ProtectedFinalizer{ProjectRoot: project, TargetRef: target}
+	deps.Integration = queue.ProtectedIntegration{
+		ProjectRoot:     project,
+		TargetRef:       target,
+		ResolverCommand: resolver,
 	}
+	deps.Finalizer = queue.ProtectedFinalizer{ProjectRoot: project, TargetRef: target}
 	if strings.TrimSpace(repair) != "" {
 		deps.Repairer = queue.ShellRepairer{Command: repair}
 	}

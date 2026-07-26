@@ -18,14 +18,16 @@ import (
 	"kitsoki/internal/capsule/receipt"
 )
 
-func TestQueueProcessDepsDefaultsToStagingIntegration(t *testing.T) {
+func TestQueueProcessDepsDefaultsToExactProtectedStagingCAS(t *testing.T) {
 	deps := queueProcessDeps("/project", "make test", "", "", "", "worker-1")
 
-	integration, ok := deps.Integration.(queue.StagingIntegration)
+	integration, ok := deps.Integration.(queue.ProtectedIntegration)
 	require.True(t, ok)
 	require.Equal(t, "/project", integration.ProjectRoot)
-	require.Equal(t, "make test", integration.GateCommand)
-	require.Nil(t, deps.Finalizer)
+	require.Equal(t, "staging/local", integration.TargetRef)
+	finalizer, ok := deps.Finalizer.(queue.ProtectedFinalizer)
+	require.True(t, ok)
+	require.Equal(t, "staging/local", finalizer.TargetRef)
 	require.Nil(t, deps.Repairer)
 	require.Equal(t, "worker-1", deps.WorkerID)
 	require.Equal(t, "staging/local", deps.TargetRef)

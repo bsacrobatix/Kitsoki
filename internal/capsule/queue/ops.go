@@ -1,9 +1,13 @@
 package queue
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
+
+	"kitsoki/internal/capsule/reconcile"
+	"kitsoki/internal/capsule/record"
 )
 
 // Operator verbs. These are the durable human-override surface of the merge
@@ -240,6 +244,94 @@ func (s Store) Get(id string) (Candidate, error) {
 		}
 	}
 	return Candidate{}, fmt.Errorf("queue: unknown candidate %q", id)
+}
+
+// ReconcileLanding repairs the recorded result of a historical staging
+// finalization that used the managed workspace helper before the helper's
+// actual protected commit was returned to Worker. It is deliberately narrower
+// than a generic state-edit command: the current target must be the newest
+// reflog transition, that transition must name this exact queue candidate,
+// its prior value must be the candidate's prepared base, and the protected,
+// speculative, validated, and previously recorded results must all resolve to
+// one identical tree.
+func (s Store) ReconcileLanding(op Op) (Candidate, error) {
+	if strings.TrimSpace(op.ID) == "" {
+		return Candidate{}, fmt.Errorf("queue: reconcile-landing requires a candidate id")
+	}
+	ctx := context.Background()
+	return s.mutate(func(state *State) (Candidate, error) {
+		for i := range state.Candidates {
+			c := &state.Candidates[i]
+			if c.ID != op.ID {
+				continue
+			}
+			if c.phase() != Landed {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing requires landed; candidate %s is %s", c.ID, c.phase())
+			}
+			if c.TargetRef != "staging/local" {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing only supports managed staging helper results, not %q", c.TargetRef)
+			}
+			if c.ReceiptID == "" || c.BaseSHA == "" || c.TreeSHA == "" || c.ValidatedSHA != c.TreeSHA || c.ResultMainSHA == "" {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing requires a complete receipt-bearing landed tuple")
+			}
+			root := s.ProjectRoot
+			if err := (record.PromotionGate{ProjectRoot: root}).Verify(ctx, c.ReceiptID, reconcile.Plan{Candidate: c.SHA}); err != nil {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing verify source receipt %s: %w", c.ReceiptID, err)
+			}
+			current, err := gitOutput(ctx, root, "rev-parse", "--verify", "refs/heads/"+c.TargetRef)
+			if err != nil {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing read target: %w", err)
+			}
+			if current == c.ResultMainSHA {
+				return *c, nil
+			}
+			reflog, err := gitOutput(ctx, root, "reflog", "show", "--max-count=2", "--format=%H%x1f%gs", "refs/heads/"+c.TargetRef)
+			if err != nil {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing read target reflog: %w", err)
+			}
+			lines := strings.Split(reflog, "\n")
+			if len(lines) != 2 {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing requires exactly one unambiguous latest target transition")
+			}
+			top := strings.SplitN(lines[0], "\x1f", 2)
+			previous := strings.SplitN(lines[1], "\x1f", 2)
+			if len(top) != 2 || len(previous) != 2 || top[0] != current {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing target reflog does not identify the current protected head")
+			}
+			expectedMessage := "dev-workspace merge queue/speculative/" + c.ID + " into " + c.TargetRef
+			if top[1] != expectedMessage {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing latest target transition %q does not name candidate %s", top[1], c.ID)
+			}
+			if previous[0] != c.BaseSHA {
+				return Candidate{}, fmt.Errorf("queue: reconcile-landing prior target %s does not match prepared base %s", previous[0], c.BaseSHA)
+			}
+			var commonTree string
+			for label, sha := range map[string]string{
+				"protected": current, "speculative": c.TreeSHA,
+				"validated": c.ValidatedSHA, "recorded": c.ResultMainSHA,
+			} {
+				tree, err := gitOutput(ctx, root, "rev-parse", sha+"^{tree}")
+				if err != nil {
+					return Candidate{}, fmt.Errorf("queue: reconcile-landing read %s tree: %w", label, err)
+				}
+				if commonTree == "" {
+					commonTree = tree
+				} else if tree != commonTree {
+					return Candidate{}, fmt.Errorf("queue: reconcile-landing %s tree %s does not match expected tree %s", label, tree, commonTree)
+				}
+			}
+			oldResult := c.ResultMainSHA
+			c.ResultMainSHA = current
+			line := fmt.Sprintf(
+				"queue:reconcile-landing by %s at %s reason=%s old_result=%s actual_target=%s base=%s tree=%s reflog=%q",
+				op.actor(), op.at().Format(time.RFC3339), first(op.Reason, "repair staging helper result identity"),
+				oldResult, current, c.BaseSHA, commonTree, top[1],
+			)
+			c.Evidence = append(c.Evidence, line)
+			return *c, nil
+		}
+		return Candidate{}, fmt.Errorf("queue: unknown candidate %q", op.ID)
+	})
 }
 
 func (s Store) operate(op Op, verb string, fn func(*State, *Candidate) error) (Candidate, error) {
