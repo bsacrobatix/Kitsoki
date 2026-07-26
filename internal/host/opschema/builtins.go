@@ -435,6 +435,27 @@ func registerGraphBuiltins(r *Registry) {
 		Input:  fields("catalog_path", "string", "node_id", "string"),
 		Output: fields("evidence_ref", "string", "passed", "bool", "run_count", "int"),
 	})
+	r.Register("host.application_job", "submit", Op{
+		Input: fields("template", "string", "input", "object"),
+		Output: fields(
+			"job_ref", "string", "status", "string", "artifact_handles", "list",
+			"primary", "string", "reason", "string", "receipt", "object",
+		),
+	})
+	r.Register("host.application_job", "status", Op{
+		Input: fields("job_ref", "string"),
+		Output: fields(
+			"job_ref", "string", "status", "string", "artifact_handles", "list",
+			"primary", "string", "reason", "string", "receipt", "object",
+		),
+	})
+	r.Register("host.application_job", "cancel", Op{
+		Input: fields("job_ref", "string"),
+		Output: fields(
+			"job_ref", "string", "status", "string", "artifact_handles", "list",
+			"primary", "string", "reason", "string", "receipt", "object",
+		),
+	})
 	r.Register("host.demo", "plan", Op{
 		Input:  fields("node_id", "string"),
 		Output: fields("closure_order", "list", "manifest_ref", "string", "artifact_handles", "list"),

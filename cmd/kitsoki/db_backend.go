@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
@@ -186,6 +187,13 @@ func newReviewedFeedbackReconcileStore(
 		return reviewedfeedback.NewPostgresReconcileStore(s.DB(), clk)
 	}
 	return reviewedfeedback.NewSQLiteReconcileStore(s.DB(), clk)
+}
+
+func newApplicationJobStore(s store.Store) (applicationjob.Store, error) {
+	if store.IsPostgres(s) {
+		return applicationjob.NewPostgresStore(s.DB())
+	}
+	return applicationjob.NewSQLiteStore(s.DB())
 }
 
 // newMiningWatermarkStore constructs the miner's per-slug watermark ledger.

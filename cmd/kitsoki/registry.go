@@ -44,6 +44,7 @@ import (
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/campaign"
 	"kitsoki/internal/capsule/queue"
@@ -224,6 +225,7 @@ type SessionRegistry struct {
 
 	applicationArtifactMu sync.Mutex
 	applicationBundleRoot string
+	applicationJobs       *applicationjob.Service
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -370,6 +372,20 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	}
 	r.daemonStore = st
 	r.daemonJobs = artifactJobs
+	if len(r.cfg.StoryApplicationJobs) > 0 {
+		applicationJobRecords, applicationJobErr := newApplicationJobStore(st)
+		if applicationJobErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon application jobs: %w", applicationJobErr)
+		}
+		r.applicationJobs = &applicationjob.Service{
+			Records:   applicationJobRecords,
+			Jobs:      artifactJobs,
+			Backend:   applicationJobRegistryBackend{registry: r},
+			Templates: r.cfg.StoryApplicationJobs,
+			Now:       time.Now,
+		}
+	}
 	if len(r.cfg.ReviewedFeedback) > 0 || len(r.cfg.FeedbackFederation) > 0 {
 		feedbackDispatches, feedbackErr := newReviewedFeedbackDispatchStore(
 			st, clock.Real(),
@@ -976,6 +992,7 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireApplicationJob(rt, def.App.ID)
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -1229,6 +1246,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireApplicationJob(rt, def.App.ID)
 	ok := false
 	defer func() {
 		if !ok {
@@ -1960,7 +1978,7 @@ func (r *SessionRegistry) ListArtifactJobs(ctx context.Context) ([]server.Artifa
 			sessionID := string(job.SessionID)
 			runURL := job.RunURL
 			openURL := job.RunURL
-			if job.Origin.Kind == "application-artifact" {
+			if job.Origin.Kind == "application-artifact" || job.Origin.Kind == "application-job" {
 				story = "application:" + job.AppID
 				sessionID = ""
 				runURL = ""

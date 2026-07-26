@@ -35,6 +35,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/campaign"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
@@ -156,6 +157,10 @@ type WebConfig struct {
 	// StoryApplicationArtifacts binds callers to exact registered artifact
 	// producers. It is executable only when daemon construction enables it.
 	StoryApplicationArtifacts map[string]StoryApplicationArtifactConfig `yaml:"story_application_artifacts,omitempty"`
+
+	// StoryApplicationJobs binds caller-owned public template names to exact
+	// registered background Application Events and bounded artifact projections.
+	StoryApplicationJobs map[string]map[string]applicationjob.Template `yaml:"story_application_jobs,omitempty"`
 
 	// Auth configures invitation-only GitHub sign-in for the web/daemon HTTP
 	// surface (internal/webauth). Nil ⇒ mode "auto": auth is required exactly
@@ -749,6 +754,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveStoryApplicationArtifacts(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveStoryApplicationJobs(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveCampaigns(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -943,6 +951,19 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.StoryApplicationArtifacts = merged
+	}
+	if len(local.StoryApplicationJobs) > 0 {
+		merged := make(
+			map[string]map[string]applicationjob.Template,
+			len(base.StoryApplicationJobs)+len(local.StoryApplicationJobs),
+		)
+		for k, v := range base.StoryApplicationJobs {
+			merged[k] = v
+		}
+		for k, v := range local.StoryApplicationJobs {
+			merged[k] = v
+		}
+		out.StoryApplicationJobs = merged
 	}
 	if len(local.Workers) > 0 {
 		out.Workers = local.Workers

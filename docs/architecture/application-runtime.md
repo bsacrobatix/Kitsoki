@@ -98,6 +98,13 @@ cancel the active session turn before dispatch and fail closed when the host
 cannot provide cancellation. Event receipts retain the source event, mode,
 session, routing pin, and handler semantic ref.
 
+The daemon-only [`host.application_job`](application-jobs.md) provider lets a
+registered caller submit one deployment-configured background event. The
+public boundary accepts only a template and JSON input, then exposes a stable
+artifact-job reference and configured opaque output handles. Target
+application, event, route, session, and scheduler child identities remain in a
+private durable mapping.
+
 The daemon-only `host.campaign` provider applies the same boundary to recurring
 work declared in a generic project graph. Its daemon configuration fixes the
 catalog and node type; the calling application fixes `application_id`, so story

@@ -75,6 +75,9 @@ contributor commands.
   backends (SQLite default, opt-in Postgres/embedded-Postgres), lease locks,
   the durable event-stream cursor contract, trace export, mining offsets,
   and durable receipts.
+- [`application-jobs.md`](application-jobs.md) — deployment-owned background
+  Application Event templates, durable job references, and privacy-safe
+  artifact projections.
 - [`graph-storage.md`](graph-storage.md) — the graph `CatalogStore` seam,
   YAML as first-class interchange, and the Postgres catalog backend with
   `pg:` references and audit history.
