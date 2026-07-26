@@ -134,10 +134,25 @@ func (r Reconciler) MaterializeIntegrationInstance(ctx context.Context, p Plan, 
 	if err := os.MkdirAll(syncDir, 0o755); err != nil {
 		return IntegrationInstance{}, "", err
 	}
+	if info, err := os.Lstat(syncDir); err != nil {
+		return IntegrationInstance{}, "", err
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return IntegrationInstance{}, "", fmt.Errorf("capsule reconcile: sync scope must be a real directory")
+	}
 	artifactPath := filepath.Join(syncDir, p.Continuation.Token+".integration.json")
-	if raw, err := os.ReadFile(artifactPath); err == nil {
+	if artifactInfo, err := os.Lstat(artifactPath); err == nil {
+		if artifactInfo.Mode()&os.ModeSymlink != 0 || !artifactInfo.Mode().IsRegular() {
+			return IntegrationInstance{}, "", fmt.Errorf("capsule reconcile: integration artifact must be a regular file")
+		}
+		raw, err := os.ReadFile(artifactPath)
+		if err != nil {
+			return IntegrationInstance{}, "", err
+		}
 		var existing IntegrationInstance
 		if err := json.Unmarshal(raw, &existing); err != nil {
+			return IntegrationInstance{}, "", err
+		}
+		if _, err := validateMaterializedIntegrationInstance(ctx, p, root, existing); err != nil {
 			return IntegrationInstance{}, "", err
 		}
 		return existing, artifactPath, nil
@@ -202,6 +217,9 @@ func (r Reconciler) MaterializeIntegrationInstance(ctx context.Context, p Plan, 
 		ConflictPaths:     conflictPaths,
 		StatusPorcelain:   strings.TrimSpace(status),
 	}
+	if _, err := validateMaterializedIntegrationInstance(ctx, p, root, instance); err != nil {
+		return IntegrationInstance{}, "", err
+	}
 	raw, err := json.MarshalIndent(instance, "", "  ")
 	if err != nil {
 		return IntegrationInstance{}, "", err
@@ -210,6 +228,61 @@ func (r Reconciler) MaterializeIntegrationInstance(ctx context.Context, p Plan, 
 		return IntegrationInstance{}, "", err
 	}
 	return instance, artifactPath, nil
+}
+
+func validateMaterializedIntegrationInstance(ctx context.Context, p Plan, root string, instance IntegrationInstance) (string, error) {
+	if instance.Schema != IntegrationInstanceSchema {
+		return "", fmt.Errorf("capsule reconcile: invalid integration instance schema %q", instance.Schema)
+	}
+	if instance.PlanDigest != p.Digest ||
+		instance.ContinuationToken != p.Continuation.Token ||
+		instance.Operation != p.Operation ||
+		instance.TargetRef != p.TargetRef ||
+		instance.Candidate != p.Candidate ||
+		instance.Target != p.Expected.Target ||
+		instance.Branch != "capsule-sync-resolution" {
+		return "", fmt.Errorf("capsule reconcile: existing integration instance does not match current plan authority")
+	}
+	expectedRelative := filepath.ToSlash(filepath.Join(".capsules", "sync", p.Continuation.Token+".integration"))
+	if filepath.ToSlash(filepath.Clean(filepath.FromSlash(instance.InstancePath))) != expectedRelative {
+		return "", fmt.Errorf("capsule reconcile: integration instance path does not match continuation token")
+	}
+	instancePath, err := resolveSyncPath(root, instance.InstancePath)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(instancePath)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", fmt.Errorf("capsule reconcile: integration instance must be a real directory")
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(filepath.Join(root, ".capsules", "sync"))
+	if err != nil {
+		return "", err
+	}
+	resolvedInstance, err := filepath.EvalSymlinks(instancePath)
+	if err != nil {
+		return "", err
+	}
+	expectedResolved := filepath.Join(resolvedRoot, p.Continuation.Token+".integration")
+	if filepath.Clean(resolvedInstance) != filepath.Clean(expectedResolved) {
+		return "", fmt.Errorf("capsule reconcile: integration instance real path does not match continuation token")
+	}
+	isWorkTree, err := git(ctx, instancePath, "rev-parse", "--is-inside-work-tree")
+	if err != nil || strings.TrimSpace(isWorkTree) != "true" {
+		return "", fmt.Errorf("capsule reconcile: integration instance is not a git worktree")
+	}
+	topLevel, err := git(ctx, instancePath, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("capsule reconcile: integration instance is not a git worktree")
+	}
+	resolvedTopLevel, err := filepath.EvalSymlinks(strings.TrimSpace(topLevel))
+	if err != nil || filepath.Clean(resolvedTopLevel) != filepath.Clean(resolvedInstance) {
+		return "", fmt.Errorf("capsule reconcile: integration instance is not the git worktree root")
+	}
+	return instancePath, nil
 }
 
 func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApplyRequest) (ApplyResult, error) {
@@ -231,10 +304,7 @@ func (r Reconciler) ApplyContinuation(ctx context.Context, req ContinuationApply
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	if instance.PlanDigest != p.Digest || instance.ContinuationToken != p.Continuation.Token {
-		return ApplyResult{}, fmt.Errorf("capsule reconcile: integration instance does not match plan")
-	}
-	instancePath, err := resolveSyncPath(root, instance.InstancePath)
+	instancePath, err := validateMaterializedIntegrationInstance(ctx, p, root, instance)
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -428,6 +498,13 @@ func validateConflictPlan(p Plan) error {
 
 func readIntegrationInstance(root, token string) (IntegrationInstance, error) {
 	path := filepath.Join(root, ".capsules", "sync", token+".integration.json")
+	info, err := os.Lstat(path)
+	if err != nil {
+		return IntegrationInstance{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return IntegrationInstance{}, fmt.Errorf("capsule reconcile: integration artifact must be a regular file")
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return IntegrationInstance{}, err

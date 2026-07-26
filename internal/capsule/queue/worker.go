@@ -71,6 +71,7 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 		}
 		if pick != nil {
 			clearApproval(pick)
+			clearPreparedIdentity(pick)
 			w.lease(pick, Preparing, n)
 			pick.Attempt++
 			pick.Started = n
@@ -96,6 +97,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			return
 		}
 		cur.SpeculativeSHA, cur.TreeSHA, cur.BaseSHA = spec.SHA, spec.SHA, spec.BaseSHA
+		cur.RuntimeConfigDigest = spec.RuntimeConfigDigest
 		cur.IntegrationRef, cur.WorkspaceID, cur.WorkspacePath = spec.IntegrationRef, spec.WorkspaceID, spec.WorkspacePath
 		cur.Evidence = append(cur.Evidence, spec.Evidence...)
 		if specErr != nil {
@@ -117,7 +119,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 		// protected CAS still applies; only the deterministic gate is waived,
 		// and the waiver is recorded durably.
 		result = GateResult{Passed: true, GateVersion: "operator-override/v1", Evidence: []string{fmt.Sprintf("queue:gate-overridden-by=%s reason=%s", first(c.OverrideBy, "operator"), first(c.OverrideReason, "unspecified"))}}
-	} else if memo, ok := w.gateMemoLookup(spec.SHA); ok {
+	} else if memo, ok := w.gateMemoLookup(spec.SHA, spec.RuntimeConfigDigest); ok {
 		// This exact tree already passed this exact gate identity — a
 		// reprepare onto an unchanged tree (a stale-base Reprepare whose
 		// fresh classification still lands here, or a retry after an
@@ -149,7 +151,7 @@ func (w Worker) prepare(ctx context.Context, c Candidate) error {
 			}
 		}
 		if gateErr == nil && result.Passed {
-			w.gateMemoStore(spec.SHA, result)
+			w.gateMemoStore(spec.SHA, spec.RuntimeConfigDigest, result)
 		}
 	}
 	return w.update(c.ID, func(state *State, cur *Candidate) {
@@ -419,17 +421,17 @@ func (w Worker) renewLease(id string) error {
 		}
 	})
 }
-func (w Worker) gateMemoLookup(treeSHA string) (GateResult, bool) {
+func (w Worker) gateMemoLookup(treeSHA, runtimeConfigDigest string) (GateResult, bool) {
 	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
 		return GateResult{}, false
 	}
-	return w.Deps.GateMemo.Lookup(treeSHA, w.Deps.GateVersion)
+	return w.Deps.GateMemo.Lookup(treeSHA, w.Deps.GateVersion, runtimeConfigDigest)
 }
-func (w Worker) gateMemoStore(treeSHA string, result GateResult) {
+func (w Worker) gateMemoStore(treeSHA, runtimeConfigDigest string, result GateResult) {
 	if w.Deps.GateMemo == nil || strings.TrimSpace(w.Deps.GateVersion) == "" {
 		return
 	}
-	_ = w.Deps.GateMemo.Store(treeSHA, w.Deps.GateVersion, result)
+	_ = w.Deps.GateMemo.Store(treeSHA, w.Deps.GateVersion, runtimeConfigDigest, result)
 }
 func (w Worker) failPreparation(state *State, c *Candidate, err error) {
 	c.WorkerID, c.LeaseExpiresAt, c.Failure = "", time.Time{}, err.Error()
@@ -560,7 +562,7 @@ func fingerprint(values ...string) string {
 }
 
 func preparedFingerprint(c Candidate) string {
-	return fingerprint(c.ReceiptDigest, c.TargetRef, c.TargetBaseSHAAtAdmission, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion)
+	return fingerprint(c.ReceiptDigest, c.TargetRef, c.TargetBaseSHAAtAdmission, c.SHA, c.BaseSHA, c.TreeSHA, c.GateVersion, c.RuntimeConfigDigest)
 }
 
 func approvalFingerprint(c Candidate) string {
@@ -594,6 +596,21 @@ func clearApproval(c *Candidate) {
 		c.Evidence = append(c.Evidence, "queue:approval invalidated by repreparation")
 	}
 	c.Approval = nil
+}
+
+// clearPreparedIdentity prevents a failed or interrupted repreparation from
+// leaving the prior tree, gate, or runtime-policy proof looking current.
+func clearPreparedIdentity(c *Candidate) {
+	c.BaseSHA = ""
+	c.TreeSHA = ""
+	c.SpeculativeSHA = ""
+	c.ValidatedSHA = ""
+	c.GateVersion = ""
+	c.DependencyFingerprint = ""
+	c.RuntimeConfigDigest = ""
+	c.IntegrationRef = ""
+	c.WorkspaceID = ""
+	c.WorkspacePath = ""
 }
 
 func validatePreparedTuple(c Candidate) error {

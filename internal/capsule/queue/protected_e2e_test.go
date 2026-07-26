@@ -69,7 +69,7 @@ func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	}
 	state, err := store.Process(context.Background(), ProcessDeps{
 		Integration: ProtectedIntegration{ProjectRoot: root, TargetRef: "main"},
-		Gate:        ShellGate{Command: "git diff --check"},
+		Gate:        ShellGate{Command: "grep -qx 'default_profile: queue-test' .kitsoki.local.yaml && git diff --check"},
 		Finalizer:   ProtectedFinalizer{ProjectRoot: root, TargetRef: "main"},
 	})
 	if err != nil {
@@ -82,7 +82,7 @@ func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	if !hasEvidence(c, "queue:disjoint-histories-merged-automatically") {
 		t.Fatalf("auto-merge not evidenced: %v", c.Evidence)
 	}
-	if !hasEvidence(c, "queue:local-config-propagated=.kitsoki.local.yaml") {
+	if !hasEvidence(c, "queue:local-config-propagated-to-continuation") {
 		t.Fatalf("local config propagation not evidenced: %v", c.Evidence)
 	}
 	if got, err := os.ReadFile(filepath.Join(c.WorkspacePath, ".kitsoki.local.yaml")); err != nil || string(got) != string(localConfig) {
@@ -100,6 +100,65 @@ func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	}
 	if got := strings.TrimSpace(git(t, root, "show", "main:mainline.txt")); got != "mainline" {
 		t.Fatalf("mainline content=%q", got)
+	}
+}
+
+func TestProtectedIntegrationRefreshesReusedWorkspaceRuntimeConfig(t *testing.T) {
+	root := protectedQueueRepo(t)
+	commit(t, root, ".gitignore", ".kitsoki.local.yaml\n", "ignore machine-local config")
+	git(t, root, "checkout", "-b", "agent/config-reuse")
+	commit(t, root, "candidate.txt", "candidate\n", "candidate work")
+	candidateSHA := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "checkout", "main")
+
+	source := filepath.Join(root, ".kitsoki.local.yaml")
+	if err := os.WriteFile(source, []byte("runtime: A\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	integration := ProtectedIntegration{ProjectRoot: root, TargetRef: "main"}
+	candidate := Candidate{ID: "config-reuse", SHA: candidateSHA, TargetRef: "main"}
+	first, err := integration.Speculate(context.Background(), candidate, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RuntimeConfigDigest == "" {
+		t.Fatal("first preparation omitted runtime config identity")
+	}
+
+	if err := os.WriteFile(source, []byte("runtime: B\n"), 0o440); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(source, 0o440); err != nil {
+		t.Fatal(err)
+	}
+	second, err := integration.Speculate(context.Background(), candidate, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.WorkspacePath != first.WorkspacePath {
+		t.Fatalf("workspace was not reused: first=%s second=%s", first.WorkspacePath, second.WorkspacePath)
+	}
+	if second.RuntimeConfigDigest == first.RuntimeConfigDigest {
+		t.Fatal("runtime config identity did not change after protected policy update")
+	}
+	got, err := os.ReadFile(filepath.Join(second.WorkspacePath, ".kitsoki.local.yaml"))
+	if err != nil || string(got) != "runtime: B\n" {
+		t.Fatalf("reused workspace config=%q err=%v, want refreshed B", got, err)
+	}
+	info, err := os.Stat(filepath.Join(second.WorkspacePath, ".kitsoki.local.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o440 {
+		t.Fatalf("reused workspace mode=%#o, want %#o", info.Mode().Perm(), os.FileMode(0o440))
+	}
+
+	memo := FileGateMemo{ProjectRoot: root}
+	if err := memo.Store(first.SHA, "test/v1", first.RuntimeConfigDigest, GateResult{Passed: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := memo.Lookup(second.SHA, "test/v1", second.RuntimeConfigDigest); ok {
+		t.Fatal("runtime config B incorrectly reused config A gate memo")
 	}
 }
 

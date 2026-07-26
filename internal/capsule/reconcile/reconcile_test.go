@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,6 +119,158 @@ func TestMaterializeIntegrationInstanceForDivergedPlan(t *testing.T) {
 	}
 	if againPath != path || again.InstancePath != instance.InstancePath {
 		t.Fatalf("non-idempotent rematerialize: %#v %s", again, againPath)
+	}
+}
+
+func TestMaterializeIntegrationInstanceRejectsTamperedRetainedAuthority(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, artifactPath, instancePath string, instance IntegrationInstance)
+	}{
+		{
+			name: "artifact branch",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.Branch = "attacker-controlled"
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact schema",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.Schema = "attacker/v1"
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact plan digest",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.PlanDigest = "sha256:attacker"
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact continuation token",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.ContinuationToken = "cont-attacker"
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact operation",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.Operation = Promote
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact target ref",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.TargetRef = "attacker/main"
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact candidate",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.Candidate = strings.Repeat("a", 40)
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact target",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.Target = strings.Repeat("b", 40)
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "artifact instance path",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				instance.InstancePath = ".capsules/sync/other.integration"
+				writeIntegrationArtifact(t, artifactPath, instance)
+			},
+		},
+		{
+			name: "missing instance directory",
+			mutate: func(t *testing.T, _ string, instancePath string, _ IntegrationInstance) {
+				if err := os.RemoveAll(instancePath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "missing artifact with retained directory",
+			mutate: func(t *testing.T, artifactPath, _ string, _ IntegrationInstance) {
+				if err := os.Remove(artifactPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "symlink instance directory",
+			mutate: func(t *testing.T, _ string, instancePath string, _ IntegrationInstance) {
+				if err := os.RemoveAll(instancePath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), instancePath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "non git instance directory",
+			mutate: func(t *testing.T, _ string, instancePath string, _ IntegrationInstance) {
+				if err := os.RemoveAll(filepath.Join(instancePath, ".git")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "artifact symlink",
+			mutate: func(t *testing.T, artifactPath, _ string, instance IntegrationInstance) {
+				outside := filepath.Join(t.TempDir(), "artifact.json")
+				writeIntegrationArtifact(t, outside, instance)
+				if err := os.Remove(artifactPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, artifactPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := capsuletest.Open(t, "rebase-conflict-ready")
+			if err := os.WriteFile(filepath.Join(dir, ".git", "info", "exclude"), []byte(".kitsoki-capsule\ncapsule-manifest.json\n.capsules/\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			r := Reconciler{VCS: Git{}}
+			p, err := r.Plan(context.Background(), PlanRequest{Workspace: dir, TargetRef: "main", Operation: Refresh, Generation: 9})
+			if err != nil {
+				t.Fatal(err)
+			}
+			instance, artifactPath, err := r.MaterializeIntegrationInstance(context.Background(), p, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			instancePath := filepath.Join(dir, filepath.FromSlash(instance.InstancePath))
+			tt.mutate(t, artifactPath, instancePath, instance)
+			if _, _, err := r.MaterializeIntegrationInstance(context.Background(), p, dir); err == nil {
+				t.Fatal("tampered retained integration authority was accepted")
+			}
+		})
+	}
+}
+
+func writeIntegrationArtifact(t *testing.T, path string, instance IntegrationInstance) {
+	t.Helper()
+	raw, err := json.MarshalIndent(instance, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

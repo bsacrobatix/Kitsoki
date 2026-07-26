@@ -53,6 +53,43 @@ func TestCopyProtectedLocalConfigLeavesAbsentConfigAbsent(t *testing.T) {
 	}
 }
 
+func TestCopyProtectedLocalConfigAbsentRemovesStaleRegularDestination(t *testing.T) {
+	root := t.TempDir()
+	destination := localConfigDestination(t, root)
+	target := filepath.Join(destination, ".kitsoki.local.yaml")
+	if err := os.WriteFile(target, []byte("stale: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := copyProtectedLocalConfig(root, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("stale destination removal was not reported")
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("stale destination survived: %v", err)
+	}
+}
+
+func TestCopyProtectedLocalConfigAbsentRejectsStaleDestinationSymlink(t *testing.T) {
+	root := t.TempDir()
+	destination := localConfigDestination(t, root)
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	if err := os.WriteFile(outside, []byte("outside: unchanged\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(destination, ".kitsoki.local.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := copyProtectedLocalConfig(root, destination); err == nil || changed {
+		t.Fatalf("changed=%v err=%v, want absent-source symlink refusal", changed, err)
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != "outside: unchanged\n" {
+		t.Fatalf("outside target changed: content=%q err=%v", got, err)
+	}
+}
+
 func TestCopyProtectedLocalConfigRejectsSymlinkSource(t *testing.T) {
 	root := t.TempDir()
 	destination := localConfigDestination(t, root)
@@ -68,6 +105,17 @@ func TestCopyProtectedLocalConfigRejectsSymlinkSource(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(destination, ".kitsoki.local.yaml")); !os.IsNotExist(err) {
 		t.Fatalf("destination config err=%v, want absent after refusal", err)
+	}
+}
+
+func TestCopyProtectedLocalConfigRejectsSpecialSource(t *testing.T) {
+	root := t.TempDir()
+	destination := localConfigDestination(t, root)
+	if err := os.Mkdir(filepath.Join(root, ".kitsoki.local.yaml"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if copied, err := copyProtectedLocalConfig(root, destination); err == nil || copied {
+		t.Fatalf("copied=%v err=%v, want fail-closed special-file refusal", copied, err)
 	}
 }
 

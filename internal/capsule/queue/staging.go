@@ -79,6 +79,10 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	if err := p.run(ctx, root, filepath.Join(root, "scripts", "dev-workspace.sh"), "create", "--repo", root, "--root", workspaceRoot, "--id", id, "--branch", branch, "--base", createBase, "--target", target); err != nil {
 		return Speculation{}, Environmental(err)
 	}
+	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
+	if err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(fmt.Errorf("queue: refresh preparation local config: %w", err))
+	}
 	var stackEvidence []string
 	if stackedOn != "" {
 		if _, err := gitOutput(ctx, workspace, "fetch", "--no-tags", "--no-write-fetch-head", root, c.SHA); err != nil {
@@ -115,7 +119,12 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	if err != nil {
 		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(err)
 	}
-	spec := Speculation{SHA: plan.Candidate, BaseSHA: plan.Expected.Target, WorkspaceID: id, WorkspacePath: workspace, Evidence: append([]string{"queue:reconcile-plan=" + plan.Digest}, stackEvidence...)}
+	spec := Speculation{
+		SHA: plan.Candidate, BaseSHA: plan.Expected.Target,
+		RuntimeConfigDigest: runtimeConfig.Digest,
+		WorkspaceID:         id, WorkspacePath: workspace,
+		Evidence: append([]string{"queue:reconcile-plan=" + plan.Digest, runtimeConfig.evidence()}, stackEvidence...),
+	}
 	if plan.Continuation == nil {
 		if plan.Class != reconcile.LocalAhead && plan.Class != reconcile.UpToDate {
 			return spec, fmt.Errorf("queue: protected integration is %s", plan.Class)
@@ -131,11 +140,10 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 		return spec, Environmental(err)
 	}
 	instancePath := filepath.Join(root, filepath.FromSlash(instance.InstancePath))
-	if copied, err := copyProtectedLocalConfig(root, instancePath); err != nil {
-		return spec, Environmental(fmt.Errorf("queue: propagate protected local config to continuation: %w", err))
-	} else if copied {
-		spec.Evidence = append(spec.Evidence, "queue:local-config-propagated=.kitsoki.local.yaml")
+	if _, err := installLocalConfigSnapshot(root, instancePath, runtimeConfig); err != nil {
+		return spec, Environmental(fmt.Errorf("queue: propagate preparation local config to continuation: %w", err))
 	}
+	spec.Evidence = append(spec.Evidence, "queue:local-config-propagated-to-continuation digest="+runtimeConfig.Digest)
 	spec.WorkspaceID = artifact.ContinuationToken
 	spec.WorkspacePath = instancePath
 	spec.Evidence = append(spec.Evidence,
@@ -174,17 +182,98 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	return spec, nil
 }
 
-// copyProtectedLocalConfig preserves the same machine-local runtime policy in
-// a reconcile-created integration instance that dev-workspace.sh already
-// installs in ordinary managed workspaces. Without it, a divergent candidate
-// is gated under a different harness/provider configuration than both its
-// source workspace and the protected checkout.
-func copyProtectedLocalConfig(root, destination string) (bool, error) {
-	return copyProtectedLocalConfigWithHook(root, destination, nil)
+// localConfigSnapshot is the exact machine-local runtime policy used by one
+// preparation. It is installed into the ordinary managed workspace first and
+// then carried to any reconcile continuation; the live protected checkout is
+// never re-read midway through a preparation.
+type localConfigSnapshot struct {
+	Present bool
+	Data    []byte
+	Mode    os.FileMode
+	Digest  string
 }
 
-func copyProtectedLocalConfigWithHook(root, destination string, afterOpen func()) (bool, error) {
-	resolvedRoot, err := filepath.EvalSymlinks(root)
+func (s localConfigSnapshot) evidence() string {
+	return fmt.Sprintf("queue:runtime-config present=%t digest=%s", s.Present, s.Digest)
+}
+
+func refreshPreparationLocalConfig(root, workspace string) (localConfigSnapshot, error) {
+	snapshot, err := readLocalConfigSnapshotWithHook(root, nil)
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	if _, err := installLocalConfigSnapshot(root, workspace, snapshot); err != nil {
+		return localConfigSnapshot{}, err
+	}
+	installed, err := readLocalConfigSnapshotWithHook(workspace, nil)
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	if installed.Digest != snapshot.Digest {
+		return localConfigSnapshot{}, fmt.Errorf("preparation local config does not match captured runtime policy")
+	}
+	return installed, nil
+}
+
+func readLocalConfigSnapshotWithHook(sourceRoot string, afterOpen func()) (localConfigSnapshot, error) {
+	source := filepath.Join(sourceRoot, ".kitsoki.local.yaml")
+	linkInfo, err := os.Lstat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return localConfigSnapshot{Digest: fingerprint("local-config/absent/v1")}, nil
+		}
+		return localConfigSnapshot{}, err
+	}
+	if !linkInfo.Mode().IsRegular() {
+		return localConfigSnapshot{}, fmt.Errorf("local config must be a regular file, got mode %s", linkInfo.Mode())
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	defer input.Close()
+	info, err := input.Stat()
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(linkInfo, info) {
+		return localConfigSnapshot{}, fmt.Errorf("local config changed identity while opening")
+	}
+	if afterOpen != nil {
+		afterOpen()
+	}
+	data, err := io.ReadAll(input)
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	after, err := input.Stat()
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	if info.Size() != after.Size() || info.Mode() != after.Mode() || !info.ModTime().Equal(after.ModTime()) {
+		return localConfigSnapshot{}, fmt.Errorf("local config changed while snapshotting")
+	}
+	if _, err := input.Seek(0, io.SeekStart); err != nil {
+		return localConfigSnapshot{}, err
+	}
+	confirmation, err := io.ReadAll(input)
+	if err != nil {
+		return localConfigSnapshot{}, err
+	}
+	if !bytes.Equal(data, confirmation) {
+		return localConfigSnapshot{}, fmt.Errorf("local config changed while snapshotting")
+	}
+	mode := info.Mode().Perm()
+	return localConfigSnapshot{
+		Present: true,
+		Data:    append([]byte(nil), data...),
+		Mode:    mode,
+		Digest:  fingerprint("local-config/present/v1", fmt.Sprintf("%#o", mode), string(data)),
+	}, nil
+}
+
+func installLocalConfigSnapshot(projectRoot, destination string, snapshot localConfigSnapshot) (bool, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(projectRoot)
 	if err != nil {
 		return false, err
 	}
@@ -194,60 +283,30 @@ func copyProtectedLocalConfigWithHook(root, destination string, afterOpen func()
 	}
 	relativeDestination, err := filepath.Rel(resolvedRoot, resolvedDestination)
 	if err != nil || relativeDestination == "." || relativeDestination == ".." || strings.HasPrefix(relativeDestination, ".."+string(os.PathSeparator)) {
-		return false, fmt.Errorf("integration destination escapes protected project root")
-	}
-	source := filepath.Join(root, ".kitsoki.local.yaml")
-	linkInfo, err := os.Lstat(source)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	if !linkInfo.Mode().IsRegular() {
-		return false, fmt.Errorf("protected local config must be a regular file, got mode %s", linkInfo.Mode())
-	}
-	input, err := os.Open(source)
-	if err != nil {
-		return false, err
-	}
-	defer input.Close()
-	info, err := input.Stat()
-	if err != nil {
-		return false, err
-	}
-	if !info.Mode().IsRegular() || !os.SameFile(linkInfo, info) {
-		return false, fmt.Errorf("protected local config changed identity while opening")
-	}
-	if afterOpen != nil {
-		afterOpen()
-	}
-	data, err := io.ReadAll(input)
-	if err != nil {
-		return false, err
-	}
-	after, err := input.Stat()
-	if err != nil {
-		return false, err
-	}
-	if info.Size() != after.Size() || info.Mode() != after.Mode() || !info.ModTime().Equal(after.ModTime()) {
-		return false, fmt.Errorf("protected local config changed while snapshotting")
-	}
-	if _, err := input.Seek(0, io.SeekStart); err != nil {
-		return false, err
-	}
-	confirmation, err := io.ReadAll(input)
-	if err != nil {
-		return false, err
-	}
-	if !bytes.Equal(data, confirmation) {
-		return false, fmt.Errorf("protected local config changed while snapshotting")
+		return false, fmt.Errorf("local config destination escapes protected project root")
 	}
 	target := filepath.Join(destination, ".kitsoki.local.yaml")
-	if targetInfo, err := os.Lstat(target); err == nil && targetInfo.Mode()&os.ModeSymlink != 0 {
-		return false, fmt.Errorf("integration local config target must not be a symlink")
-	} else if err != nil && !os.IsNotExist(err) {
-		return false, err
+	targetInfo, targetErr := os.Lstat(target)
+	if targetErr != nil && !os.IsNotExist(targetErr) {
+		return false, targetErr
+	}
+	if targetErr == nil && !targetInfo.Mode().IsRegular() {
+		return false, fmt.Errorf("local config target must be a regular file or absent, got mode %s", targetInfo.Mode())
+	}
+	if !snapshot.Present {
+		if os.IsNotExist(targetErr) {
+			return false, nil
+		}
+		if err := os.Remove(target); err != nil {
+			return false, err
+		}
+		if err := syncDirectory(destination); err != nil {
+			return false, err
+		}
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			return false, fmt.Errorf("stale local config remained after removal")
+		}
+		return true, nil
 	}
 	temp, err := os.CreateTemp(destination, ".kitsoki.local.yaml.tmp-")
 	if err != nil {
@@ -255,7 +314,11 @@ func copyProtectedLocalConfigWithHook(root, destination string, afterOpen func()
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
-	if _, err := temp.Write(data); err != nil {
+	if _, err := temp.Write(snapshot.Data); err != nil {
+		_ = temp.Close()
+		return false, err
+	}
+	if err := temp.Chmod(snapshot.Mode.Perm()); err != nil {
 		_ = temp.Close()
 		return false, err
 	}
@@ -266,13 +329,44 @@ func copyProtectedLocalConfigWithHook(root, destination string, afterOpen func()
 	if err := temp.Close(); err != nil {
 		return false, err
 	}
-	if err := os.Chmod(tempPath, info.Mode().Perm()); err != nil {
-		return false, err
-	}
 	if err := os.Rename(tempPath, target); err != nil {
 		return false, err
 	}
+	if err := syncDirectory(destination); err != nil {
+		return false, err
+	}
+	installed, err := readLocalConfigSnapshotWithHook(destination, nil)
+	if err != nil {
+		return false, err
+	}
+	if installed.Digest != snapshot.Digest || installed.Mode.Perm() != snapshot.Mode.Perm() || !bytes.Equal(installed.Data, snapshot.Data) {
+		return false, fmt.Errorf("installed local config failed exact verification")
+	}
 	return true, nil
+}
+
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+// copyProtectedLocalConfigWithHook remains a narrow test seam for exercising
+// the snapshot race. Production prepares once through
+// refreshPreparationLocalConfig and carries that returned snapshot forward.
+func copyProtectedLocalConfig(root, destination string) (bool, error) {
+	return copyProtectedLocalConfigWithHook(root, destination, nil)
+}
+
+func copyProtectedLocalConfigWithHook(root, destination string, afterOpen func()) (bool, error) {
+	snapshot, err := readLocalConfigSnapshotWithHook(root, afterOpen)
+	if err != nil {
+		return false, err
+	}
+	return installLocalConfigSnapshot(root, destination, snapshot)
 }
 
 func (p ProtectedIntegration) Land(context.Context, Speculation) error { return nil }
@@ -532,6 +626,10 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 		// the lenient env-retry budget, matching ProtectedIntegration.
 		return Speculation{}, Environmental(err)
 	}
+	runtimeConfig, err := refreshPreparationLocalConfig(root, workspace)
+	if err != nil {
+		return Speculation{WorkspaceID: id, WorkspacePath: workspace}, Environmental(fmt.Errorf("queue: refresh preparation local config: %w", err))
+	}
 	var stackEvidence []string
 	if err := s.run(ctx, workspace, "git", "merge", "--no-ff", "--no-edit", c.SHA); err != nil {
 		if stackedOn == "" {
@@ -563,8 +661,11 @@ func (s StagingIntegration) Speculate(ctx context.Context, c Candidate, ahead []
 	if err != nil {
 		return Speculation{}, err
 	}
-	evidence := append([]string{"queue:speculative-workspace=" + filepath.ToSlash(filepath.Join(".capsules", "workspaces", id))}, stackEvidence...)
-	return Speculation{SHA: sha, BaseSHA: base, WorkspaceID: id, WorkspacePath: workspace, Evidence: evidence}, nil
+	evidence := append([]string{
+		"queue:speculative-workspace=" + filepath.ToSlash(filepath.Join(".capsules", "workspaces", id)),
+		runtimeConfig.evidence(),
+	}, stackEvidence...)
+	return Speculation{SHA: sha, BaseSHA: base, RuntimeConfigDigest: runtimeConfig.Digest, WorkspaceID: id, WorkspacePath: workspace, Evidence: evidence}, nil
 }
 
 // Land delegates staging/local mutation to the established protected

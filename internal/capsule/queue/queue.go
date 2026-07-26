@@ -114,6 +114,7 @@ type Candidate struct {
 	TreeSHA                  string             `json:"tree_sha,omitempty"`
 	GateVersion              string             `json:"gate_version,omitempty"`
 	DependencyFingerprint    string             `json:"dependency_fingerprint,omitempty"`
+	RuntimeConfigDigest      string             `json:"runtime_config_digest,omitempty"`
 	IntegrationRef           string             `json:"integration_ref,omitempty"`
 	WorkspaceID              string             `json:"workspace_id,omitempty"`
 	WorkspacePath            string             `json:"workspace_path,omitempty"`
@@ -185,12 +186,13 @@ type Integration interface {
 	Land(context.Context, Speculation) error
 }
 type Speculation struct {
-	SHA            string   `json:"sha"`
-	BaseSHA        string   `json:"base_sha,omitempty"`
-	IntegrationRef string   `json:"integration_ref,omitempty"`
-	Evidence       []string `json:"evidence,omitempty"`
-	WorkspaceID    string   `json:"workspace_id,omitempty"`
-	WorkspacePath  string   `json:"workspace_path,omitempty"`
+	SHA                 string   `json:"sha"`
+	BaseSHA             string   `json:"base_sha,omitempty"`
+	RuntimeConfigDigest string   `json:"runtime_config_digest,omitempty"`
+	IntegrationRef      string   `json:"integration_ref,omitempty"`
+	Evidence            []string `json:"evidence,omitempty"`
+	WorkspaceID         string   `json:"workspace_id,omitempty"`
+	WorkspacePath       string   `json:"workspace_path,omitempty"`
 }
 type Gate interface {
 	Run(context.Context, Speculation) (GateResult, error)
@@ -215,8 +217,9 @@ type ProcessDeps struct {
 	// TargetRef selects the only candidate partition this worker may mutate.
 	// Empty retains supervisor compatibility for legacy in-process callers.
 	TargetRef string
-	// GateMemo, when set, skips a gate run whose exact (tree, GateVersion)
-	// pair already passed — see GateMemo's doc. Nil disables memoization.
+	// GateMemo, when set, skips a gate run whose exact (tree, GateVersion,
+	// runtime-config digest) tuple already passed — see GateMemo's doc. Nil
+	// disables memoization.
 	GateMemo GateMemo
 
 	// Retry policy. A red gate or failed speculation moves the candidate to

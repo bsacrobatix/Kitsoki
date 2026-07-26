@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,30 +12,48 @@ import (
 func TestFileGateMemoStoresOnlyPassingResultsAndRoundTrips(t *testing.T) {
 	memo := FileGateMemo{ProjectRoot: t.TempDir()}
 	tree := strings.Repeat("a", 40)
+	config := fingerprint("absent")
 
-	if _, ok := memo.Lookup(tree, "v1"); ok {
+	if _, ok := memo.Lookup(tree, "v1", config); ok {
 		t.Fatal("empty memo should not have a hit")
 	}
-	if err := memo.Store(tree, "v1", GateResult{Passed: false, Evidence: []string{"gate:red"}}); err != nil {
+	if err := memo.Store(tree, "v1", config, GateResult{Passed: false, Evidence: []string{"gate:red"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := memo.Lookup(tree, "v1"); ok {
+	if _, ok := memo.Lookup(tree, "v1", config); ok {
 		t.Fatal("a failing result must never be cached: a cache hit must never be able to mask a fix")
 	}
-	if err := memo.Store(tree, "v1", GateResult{Passed: true, Evidence: []string{"gate:green"}, Log: "ok"}); err != nil {
+	if err := memo.Store(tree, "v1", config, GateResult{Passed: true, Evidence: []string{"gate:green"}, Log: "ok"}); err != nil {
 		t.Fatal(err)
 	}
-	got, ok := memo.Lookup(tree, "v1")
+	got, ok := memo.Lookup(tree, "v1", config)
 	if !ok || !got.Passed || got.Log != "ok" {
 		t.Fatalf("expected a cache hit for the passing result, got %#v ok=%v", got, ok)
 	}
 	// Different gate identity, same tree: must not hit.
-	if _, ok := memo.Lookup(tree, "v2"); ok {
+	if _, ok := memo.Lookup(tree, "v2", config); ok {
 		t.Fatal("a different gate identity must not reuse another gate identity's result")
 	}
 	// Different tree, same identity: must not hit.
-	if _, ok := memo.Lookup(strings.Repeat("b", 40), "v1"); ok {
+	if _, ok := memo.Lookup(strings.Repeat("b", 40), "v1", config); ok {
 		t.Fatal("a different tree must not reuse another tree's result")
+	}
+	// Different machine-local runtime policy, same tree and gate: must not hit.
+	if _, ok := memo.Lookup(tree, "v1", fingerprint("present", "different")); ok {
+		t.Fatal("a different runtime config must not reuse another config's result")
+	}
+	// A memo written by the historical two-field implementation must miss
+	// even if its JSON otherwise looks passing.
+	legacyKey := strings.TrimPrefix(fingerprint(tree, "legacy/v1"), "sha256:")
+	legacyPath := filepath.Join(memo.ProjectRoot, ".capsules", "queue", "gate-memo", legacyKey+".json")
+	if err := os.MkdirAll(filepath.Dir(legacyPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, []byte(`{"passed":true,"gate_version":"legacy/v1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := memo.Lookup(tree, "legacy/v1", config); ok {
+		t.Fatal("legacy two-field memo entry must miss without runtime config identity")
 	}
 }
 
@@ -59,7 +79,7 @@ func TestGateMemoSkipsARepeatGateRunOnTheIdenticalTree(t *testing.T) {
 		Integration: &fakeIntegration{speculate: func(_ context.Context, c Candidate, _ []Candidate) (Speculation, error) {
 			// The identical tree every time: this is the case a stale-base
 			// Reprepare with an unchanged classification produces.
-			return Speculation{SHA: "tree-" + c.SHA}, nil
+			return Speculation{SHA: "tree-" + c.SHA, RuntimeConfigDigest: fingerprint("absent")}, nil
 		}},
 		Gate: gate, GateVersion: "test/v1", GateMemo: memo,
 	}
