@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,6 +131,11 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 		return spec, Environmental(err)
 	}
 	instancePath := filepath.Join(root, filepath.FromSlash(instance.InstancePath))
+	if copied, err := copyProtectedLocalConfig(root, instancePath); err != nil {
+		return spec, Environmental(fmt.Errorf("queue: propagate protected local config to continuation: %w", err))
+	} else if copied {
+		spec.Evidence = append(spec.Evidence, "queue:local-config-propagated=.kitsoki.local.yaml")
+	}
 	spec.WorkspaceID = artifact.ContinuationToken
 	spec.WorkspacePath = instancePath
 	spec.Evidence = append(spec.Evidence,
@@ -165,6 +172,107 @@ func (p ProtectedIntegration) Speculate(ctx context.Context, c Candidate, ahead 
 	}
 	spec.SHA = sha
 	return spec, nil
+}
+
+// copyProtectedLocalConfig preserves the same machine-local runtime policy in
+// a reconcile-created integration instance that dev-workspace.sh already
+// installs in ordinary managed workspaces. Without it, a divergent candidate
+// is gated under a different harness/provider configuration than both its
+// source workspace and the protected checkout.
+func copyProtectedLocalConfig(root, destination string) (bool, error) {
+	return copyProtectedLocalConfigWithHook(root, destination, nil)
+}
+
+func copyProtectedLocalConfigWithHook(root, destination string, afterOpen func()) (bool, error) {
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false, err
+	}
+	resolvedDestination, err := filepath.EvalSymlinks(destination)
+	if err != nil {
+		return false, err
+	}
+	relativeDestination, err := filepath.Rel(resolvedRoot, resolvedDestination)
+	if err != nil || relativeDestination == "." || relativeDestination == ".." || strings.HasPrefix(relativeDestination, ".."+string(os.PathSeparator)) {
+		return false, fmt.Errorf("integration destination escapes protected project root")
+	}
+	source := filepath.Join(root, ".kitsoki.local.yaml")
+	linkInfo, err := os.Lstat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !linkInfo.Mode().IsRegular() {
+		return false, fmt.Errorf("protected local config must be a regular file, got mode %s", linkInfo.Mode())
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		return false, err
+	}
+	defer input.Close()
+	info, err := input.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() || !os.SameFile(linkInfo, info) {
+		return false, fmt.Errorf("protected local config changed identity while opening")
+	}
+	if afterOpen != nil {
+		afterOpen()
+	}
+	data, err := io.ReadAll(input)
+	if err != nil {
+		return false, err
+	}
+	after, err := input.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() != after.Size() || info.Mode() != after.Mode() || !info.ModTime().Equal(after.ModTime()) {
+		return false, fmt.Errorf("protected local config changed while snapshotting")
+	}
+	if _, err := input.Seek(0, io.SeekStart); err != nil {
+		return false, err
+	}
+	confirmation, err := io.ReadAll(input)
+	if err != nil {
+		return false, err
+	}
+	if !bytes.Equal(data, confirmation) {
+		return false, fmt.Errorf("protected local config changed while snapshotting")
+	}
+	target := filepath.Join(destination, ".kitsoki.local.yaml")
+	if targetInfo, err := os.Lstat(target); err == nil && targetInfo.Mode()&os.ModeSymlink != 0 {
+		return false, fmt.Errorf("integration local config target must not be a symlink")
+	} else if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	temp, err := os.CreateTemp(destination, ".kitsoki.local.yaml.tmp-")
+	if err != nil {
+		return false, err
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return false, err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return false, err
+	}
+	if err := temp.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Chmod(tempPath, info.Mode().Perm()); err != nil {
+		return false, err
+	}
+	if err := os.Rename(tempPath, target); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (p ProtectedIntegration) Land(context.Context, Speculation) error { return nil }

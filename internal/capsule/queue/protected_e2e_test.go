@@ -49,6 +49,11 @@ func persistedReceipt(t *testing.T, root, sha string) receipt.Receipt {
 
 func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	root := protectedQueueRepo(t)
+	commit(t, root, ".gitignore", ".kitsoki.local.yaml\n", "ignore machine-local config")
+	localConfig := []byte("default_profile: queue-test\n")
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki.local.yaml"), localConfig, 0o440); err != nil {
+		t.Fatal(err)
+	}
 	// Candidate edits candidate.txt off the original base…
 	git(t, root, "checkout", "-b", "agent/disjoint")
 	commit(t, root, "candidate.txt", "candidate\n", "candidate work")
@@ -76,6 +81,12 @@ func TestDisjointDivergentCandidateLandsAutomatically(t *testing.T) {
 	}
 	if !hasEvidence(c, "queue:disjoint-histories-merged-automatically") {
 		t.Fatalf("auto-merge not evidenced: %v", c.Evidence)
+	}
+	if !hasEvidence(c, "queue:local-config-propagated=.kitsoki.local.yaml") {
+		t.Fatalf("local config propagation not evidenced: %v", c.Evidence)
+	}
+	if got, err := os.ReadFile(filepath.Join(c.WorkspacePath, ".kitsoki.local.yaml")); err != nil || string(got) != string(localConfig) {
+		t.Fatalf("continuation local config=%q err=%v, want exact protected config", got, err)
 	}
 	main := git(t, root, "rev-parse", "main")
 	if main == mainBefore {
