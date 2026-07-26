@@ -61,6 +61,7 @@ type Notification struct {
 // nil *JobStore must not be called.
 type JobStore struct {
 	db            *sql.DB
+	dialect       Dialect
 	journalWriter journal.Writer
 }
 
@@ -81,8 +82,22 @@ func WithJobJournalWriter(jw journal.Writer) JobStoreOption {
 	}
 }
 
-// NewJobStore creates a JobStore and applies the jobs/notifications schema migration.
+// NewJobStore creates a JobStore and applies the jobs/notifications schema
+// migration for the configured dialect (SQLite unless WithDialect says
+// otherwise).
 func NewJobStore(db *sql.DB, opts ...JobStoreOption) (*JobStore, error) {
+	js := &JobStore{db: db}
+	for _, o := range opts {
+		o(js)
+	}
+	if js.dialect == DialectPostgres {
+		// owner_pid and the clarification columns ship in the Postgres DDL
+		// from day one, so no compatibility ALTER is needed on this dialect.
+		if _, err := db.Exec(jobsSchemaPGDDL); err != nil {
+			return nil, fmt.Errorf("jobs.NewJobStore: schema migration: %w", err)
+		}
+		return js, nil
+	}
 	if _, err := db.Exec(jobsSchemaDDL); err != nil {
 		return nil, fmt.Errorf("jobs.NewJobStore: schema migration: %w", err)
 	}
@@ -91,10 +106,6 @@ func NewJobStore(db *sql.DB, opts ...JobStoreOption) (*JobStore, error) {
 	// legitimately owned by a live sibling scheduler on the same database.
 	if _, err := db.Exec(`ALTER TABLE jobs ADD COLUMN owner_pid INTEGER`); err != nil && !isSQLiteDuplicateColumn(err) {
 		return nil, fmt.Errorf("jobs.NewJobStore: compatibility migration: %w", err)
-	}
-	js := &JobStore{db: db}
-	for _, o := range opts {
-		o(js)
 	}
 	return js, nil
 }
@@ -131,12 +142,34 @@ func (js *JobStore) UpsertJob(ctx context.Context, j *Job) error {
 		finishedAtMs = &ms
 	}
 
-	_, err = js.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO jobs
+	// Portable upsert (SQLite and Postgres share the ON CONFLICT ... EXCLUDED
+	// syntax). The explicit clarification resets reproduce the row-replacement
+	// semantics of the historical INSERT OR REPLACE: columns absent from the
+	// insert list revert to NULL on conflict.
+	_, err = js.db.ExecContext(ctx, js.q(`
+		INSERT INTO jobs
 		  (id, session_id, kind, status, origin_state, origin_proposal_id,
 		   payload, progress, result, error, retry_count,
 		   created_at, updated_at, started_at, finished_at, owner_pid)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		ON CONFLICT(id) DO UPDATE SET
+		  session_id=excluded.session_id,
+		  kind=excluded.kind,
+		  status=excluded.status,
+		  origin_state=excluded.origin_state,
+		  origin_proposal_id=excluded.origin_proposal_id,
+		  payload=excluded.payload,
+		  progress=excluded.progress,
+		  result=excluded.result,
+		  error=excluded.error,
+		  retry_count=excluded.retry_count,
+		  created_at=excluded.created_at,
+		  updated_at=excluded.updated_at,
+		  started_at=excluded.started_at,
+		  finished_at=excluded.finished_at,
+		  owner_pid=excluded.owner_pid,
+		  clarification_schema=NULL,
+		  clarification_answer=NULL`),
 		j.ID, string(j.SessionID), j.Kind, string(j.Status),
 		string(j.OriginState), j.OriginProposalID,
 		string(payloadJSON),
@@ -194,9 +227,23 @@ var sweepProcessAlive = processAlive
 // sessions' freshly submitted jobs the moment a new session started —
 // exactly the concurrent-dispatch stall observed on the hosted POG
 // orchestrator. Returns the number of rows swept.
+//
+// On the Postgres dialect the sweep is conservatively skipped. owner_pid is
+// an OS PID recorded by whichever host's scheduler owned the row, and a
+// Postgres database is shared across hosts — probing the LOCAL process table
+// against a foreign PID is meaningless: a live remote owner whose PID happens
+// to be unused (or recycled) on this host would have its jobs falsely failed.
+// Until job rows carry a host-independent lease/heartbeat (expires_at renewed
+// by the owner, the shape the store package's session_locks already uses),
+// leaving a stale row in running/awaiting_input is the safer failure mode
+// than killing live cross-host work. SQLite (single-host by construction)
+// keeps the PID-liveness sweep unchanged.
 func (js *JobStore) SweepStaleJobs(ctx context.Context) (int64, error) {
-	rows, err := js.db.QueryContext(ctx, `
-		SELECT id, owner_pid FROM jobs WHERE status IN (?, ?)`,
+	if js.dialect == DialectPostgres {
+		return 0, nil
+	}
+	rows, err := js.db.QueryContext(ctx, js.q(`
+		SELECT id, owner_pid FROM jobs WHERE status IN (?, ?)`),
 		string(JobRunning), string(JobAwaitingInput))
 	if err != nil {
 		return 0, fmt.Errorf("jobs.SweepStaleJobs: %w", err)
@@ -224,10 +271,10 @@ func (js *JobStore) SweepStaleJobs(ctx context.Context) (int64, error) {
 	}
 	now := time.Now().UnixMilli()
 	args := append([]any{string(JobFailed), ErrProcessDied, now, now}, orphans...)
-	res, err := js.db.ExecContext(ctx, `
+	res, err := js.db.ExecContext(ctx, js.q(`
 		UPDATE jobs
 		SET status = ?, error = ?, finished_at = ?, updated_at = ?
-		WHERE id IN (?`+strings.Repeat(",?", len(orphans)-1)+`)`,
+		WHERE id IN (?`+strings.Repeat(",?", len(orphans)-1)+`)`),
 		args...)
 	if err != nil {
 		return 0, fmt.Errorf("jobs.SweepStaleJobs: %w", err)
@@ -255,8 +302,8 @@ func (js *JobStore) UpdateJobStatus(ctx context.Context, id JobID, status JobSta
 		finishedAtMs = &ms
 	}
 	now := time.Now().UnixMilli()
-	_, err := js.db.ExecContext(ctx, `
-		UPDATE jobs SET status=?, error=?, result=?, finished_at=?, updated_at=? WHERE id=?`,
+	_, err := js.db.ExecContext(ctx, js.q(`
+		UPDATE jobs SET status=?, error=?, result=?, finished_at=?, updated_at=? WHERE id=?`),
 		string(status), errMsg, nullableBytes(resultJSON), finishedAtMs, now, id)
 	if err != nil {
 		return err
@@ -267,7 +314,7 @@ func (js *JobStore) UpdateJobStatus(ctx context.Context, id JobID, status JobSta
 	// See docs/tracing for how these entries feed checkpoints and replay.
 	if js.journalWriter != nil {
 		// Fetch the job's session_id so the journal entry can be attributed.
-		sid := jobSessionID(ctx, js.db, id)
+		sid := js.jobSessionID(ctx, id)
 		ops := []map[string]any{
 			{"op": "replace", "path": "/status", "value": string(status)},
 		}
@@ -295,10 +342,10 @@ func (js *JobStore) UpdateJobStatus(ctx context.Context, id JobID, status JobSta
 
 // GetJob returns the job with the given ID, or ErrJobNotFound if it does not exist.
 func (js *JobStore) GetJob(ctx context.Context, id JobID) (*Job, error) {
-	rows, err := js.db.QueryContext(ctx, `
+	rows, err := js.db.QueryContext(ctx, js.q(`
 		SELECT id, kind, status, origin_state, origin_proposal_id,
 		       payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
-		FROM jobs WHERE id=?`, id)
+		FROM jobs WHERE id=?`), id)
 	if err != nil {
 		return nil, err
 	}
@@ -315,10 +362,10 @@ func (js *JobStore) GetJob(ctx context.Context, id JobID) (*Job, error) {
 
 // ListJobsByStatus returns jobs for a session matching a status.
 func (js *JobStore) ListJobsByStatus(ctx context.Context, sessionID app.SessionID, status JobStatus) ([]Job, error) {
-	rows, err := js.db.QueryContext(ctx, `
+	rows, err := js.db.QueryContext(ctx, js.q(`
 		SELECT id, kind, status, origin_state, origin_proposal_id,
 		       payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
-		FROM jobs WHERE session_id=? AND status=? ORDER BY created_at DESC`,
+		FROM jobs WHERE session_id=? AND status=? ORDER BY created_at DESC`),
 		string(sessionID), string(status))
 	if err != nil {
 		return nil, err
@@ -333,10 +380,10 @@ func (js *JobStore) ListJobsByStatus(ctx context.Context, sessionID app.SessionI
 // Order is creation-time so callers can index by "the N-th job to be dispatched
 // this turn" reliably.
 func (js *JobStore) ListBySession(ctx context.Context, sessionID app.SessionID) ([]Job, error) {
-	rows, err := js.db.QueryContext(ctx, `
+	rows, err := js.db.QueryContext(ctx, js.q(`
 		SELECT id, kind, status, origin_state, origin_proposal_id,
 		       payload, error, clarification_schema, retry_count, created_at, updated_at, started_at, finished_at
-		FROM jobs WHERE session_id=? ORDER BY created_at ASC`,
+		FROM jobs WHERE session_id=? ORDER BY created_at ASC`),
 		string(sessionID))
 	if err != nil {
 		return nil, err
@@ -361,7 +408,7 @@ func (js *JobStore) ListByStatus(ctx context.Context, statuses []JobStatus) ([]J
 	for _, st := range statuses {
 		args = append(args, string(st))
 	}
-	rows, err := js.db.QueryContext(ctx, q, args...)
+	rows, err := js.db.QueryContext(ctx, js.q(q), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +494,7 @@ func scanJobRows(rows *sql.Rows, includeSession bool) ([]Job, error) {
 // world.patch that follows. The notifications table persists independently and
 // is the canonical source of truth for the notification row itself.
 func (js *JobStore) InsertNotification(ctx context.Context, n *Notification) error {
-	return insertNotification(ctx, js.db, n)
+	return js.insertNotification(ctx, js.db, n)
 }
 
 // InsertExternalNotificationOnce inserts an external notification unless the
@@ -476,11 +523,11 @@ func (js *JobStore) InsertExternalNotificationOnce(ctx context.Context, n *Notif
 	defer tx.Rollback()
 
 	var existingID string
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, js.q(`
 		SELECT id FROM notifications
 		WHERE session_id=? AND origin_kind=? AND origin_ref=?
 		ORDER BY created_at DESC
-		LIMIT 1`,
+		LIMIT 1`),
 		string(n.SessionID), n.OriginKind, n.OriginRef,
 	).Scan(&existingID)
 	if err == nil {
@@ -490,7 +537,7 @@ func (js *JobStore) InsertExternalNotificationOnce(ctx context.Context, n *Notif
 	if !errors.Is(err, sql.ErrNoRows) {
 		return false, err
 	}
-	if err := insertNotification(ctx, tx, n); err != nil {
+	if err := js.insertNotification(ctx, tx, n); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -499,7 +546,7 @@ func (js *JobStore) InsertExternalNotificationOnce(ctx context.Context, n *Notif
 	return true, nil
 }
 
-func insertNotification(ctx context.Context, exec notificationExecer, n *Notification) error {
+func (js *JobStore) insertNotification(ctx context.Context, exec notificationExecer, n *Notification) error {
 	if n.ID == "" {
 		n.ID = ulid.New()
 	}
@@ -521,12 +568,12 @@ func insertNotification(ctx context.Context, exec notificationExecer, n *Notific
 		teleportSlotsJSON = b
 	}
 
-	_, err := exec.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, js.q(`
 		INSERT INTO notifications
 		  (id, session_id, created_at, severity, title, body,
 		   teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
 		   origin_kind, origin_ref, origin_url)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		n.ID, string(n.SessionID), n.CreatedAt.UnixMilli(),
 		string(n.Severity), n.Title, n.Body,
 		n.TeleportState, nullableBytes(teleportSlotsJSON),
@@ -539,7 +586,7 @@ func insertNotification(ctx context.Context, exec notificationExecer, n *Notific
 // MarkNotificationRead sets read_at on a notification.
 func (js *JobStore) MarkNotificationRead(ctx context.Context, id string) error {
 	_, err := js.db.ExecContext(ctx,
-		`UPDATE notifications SET read_at=? WHERE id=?`,
+		js.q(`UPDATE notifications SET read_at=? WHERE id=?`),
 		time.Now().UnixMilli(), id)
 	return err
 }
@@ -549,7 +596,7 @@ func (js *JobStore) MarkNotificationRead(ctx context.Context, id string) error {
 // dismiss is a terminal "I'm done with this" action distinct from "read".
 func (js *JobStore) DismissNotification(ctx context.Context, id string) error {
 	_, err := js.db.ExecContext(ctx,
-		`UPDATE notifications SET dismissed_at=? WHERE id=?`,
+		js.q(`UPDATE notifications SET dismissed_at=? WHERE id=?`),
 		time.Now().UnixMilli(), id)
 	return err
 }
@@ -558,11 +605,11 @@ func (js *JobStore) DismissNotification(ctx context.Context, id string) error {
 // for a session, grouped by severity.
 func (js *JobStore) UnreadCount(ctx context.Context, sessionID app.SessionID) (map[NotificationSeverity]int, error) {
 	now := time.Now().UnixMilli()
-	rows, err := js.db.QueryContext(ctx, `
+	rows, err := js.db.QueryContext(ctx, js.q(`
 		SELECT severity, COUNT(*) FROM notifications
 		WHERE session_id=? AND read_at IS NULL AND dismissed_at IS NULL
 		  AND (snoozed_until IS NULL OR snoozed_until < ?)
-		GROUP BY severity`,
+		GROUP BY severity`),
 		string(sessionID), now)
 	if err != nil {
 		return nil, err
@@ -596,7 +643,7 @@ func (js *JobStore) ListNotifications(ctx context.Context, sessionID app.Session
 		args = append(args, limit)
 	}
 
-	rows, err := js.db.QueryContext(ctx, q, args...)
+	rows, err := js.db.QueryContext(ctx, js.q(q), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -621,7 +668,7 @@ func (js *JobStore) ListNotificationsAll(ctx context.Context, limit int) ([]Noti
 		args = append(args, limit)
 	}
 
-	rows, err := js.db.QueryContext(ctx, q, args...)
+	rows, err := js.db.QueryContext(ctx, js.q(q), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -683,12 +730,12 @@ func placeholders(n int) string {
 // read/dismissed state (teleport resolution needs the teleport fields even for
 // an already-read item). Returns (nil, nil) when no row matches.
 func (js *JobStore) GetNotification(ctx context.Context, id string) (*Notification, error) {
-	row := js.db.QueryRowContext(ctx, `
+	row := js.db.QueryRowContext(ctx, js.q(`
 		SELECT id, session_id, created_at, read_at, severity, title, body,
 		       teleport_state, teleport_slots, teleport_proposal_id, teleport_job_id,
 		       origin_kind, origin_ref, origin_url
 		FROM notifications
-		WHERE id=?`, id)
+		WHERE id=?`), id)
 
 	var n Notification
 	var createdAtMs int64
@@ -734,9 +781,9 @@ func nullableBytes(b []byte) any {
 
 // jobSessionID fetches the kitsoki session_id for a job row.
 // Returns an empty SessionID if the row is not found (best-effort).
-func jobSessionID(ctx context.Context, db *sql.DB, id JobID) app.SessionID {
+func (js *JobStore) jobSessionID(ctx context.Context, id JobID) app.SessionID {
 	var sid string
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(session_id,'') FROM jobs WHERE id = ?`, id).Scan(&sid)
+	_ = js.db.QueryRowContext(ctx, js.q(`SELECT COALESCE(session_id,'') FROM jobs WHERE id = ?`), id).Scan(&sid)
 	return app.SessionID(sid)
 }
 

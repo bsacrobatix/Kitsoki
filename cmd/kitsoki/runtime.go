@@ -365,33 +365,33 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		}
 	}()
 
-	s, err := store.Open(cfg.DBPath)
+	s, err := openSessionStoreBackend(cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
 	rt.Store = s
 	rt.closers = append(rt.closers, func() { _ = s.Close() })
 
-	jw, err := journal.NewSQLiteWriter(s.DB())
+	jw, err := newJournalWriter(s)
 	if err != nil {
 		return nil, fmt.Errorf("open journal writer: %w", err)
 	}
 	rt.Journal = jw
 
-	jr, err := journal.NewSQLiteReader(s.DB())
+	jr, err := newJournalReader(s)
 	if err != nil {
 		return nil, fmt.Errorf("open journal reader: %w", err)
 	}
 	rt.JournalRead = jr
 
-	jobStore, err := jobs.NewJobStore(s.DB(), jobs.WithJobJournalWriter(jw))
+	jobStore, err := newJobStore(s, jobs.WithJobJournalWriter(jw))
 	if err != nil {
 		return nil, fmt.Errorf("open job store: %w", err)
 	}
 	rt.JobStore = jobStore
 	rt.Scheduler = jobs.NewScheduler(jobStore)
 
-	rawChatStore, err := chats.NewStore(s.DB(), chats.WithJournalWriter(jw))
+	rawChatStore, err := newChatStore(s, chats.WithJournalWriter(jw))
 	if err != nil {
 		return nil, fmt.Errorf("open chat store: %w", err)
 	}

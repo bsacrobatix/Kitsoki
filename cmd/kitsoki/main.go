@@ -152,6 +152,13 @@ See docs/ in the repo for the narrative documentation.`,
 	// semroute, turn-cache, default_intent, and free-form fallback.
 	root.PersistentFlags().BoolVar(&semanticRoutingFlag, "semantic-routing", false,
 		"enable the deterministic semantic-routing stack (semroute, turn-cache, default_intent sink, free-form fallback); default off (env: KITSOKI_SEMANTIC_ROUTING)")
+
+	// Opt-in session-store backend selection (see db_backend.go). Default is
+	// sqlite — the historical path, byte-for-byte.
+	root.PersistentFlags().StringVar(&dbBackendFlag, "db-backend", "",
+		"session store backend: sqlite (default) | postgres | embedded-postgres (env: KITSOKI_DB_BACKEND)")
+	root.PersistentFlags().StringVar(&pgDSNFlag, "pg-dsn", "",
+		"Postgres DSN for --db-backend postgres (env: KITSOKI_PG_DSN)")
 	root.Flags().AddFlagSet(defaultRunCmd.Flags())
 
 	root.AddCommand(versionCmd())
@@ -232,7 +239,11 @@ See docs/ in the repo for the narrative documentation.`,
 }
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	err := newRootCmd().Execute()
+	// Stop the process-shared embedded Postgres (if the embedded-postgres
+	// backend started one) before any os.Exit below skips deferred cleanup.
+	closeEmbeddedPG()
+	if err != nil {
 		// Sentinel error: translate to EX_TEMPFAIL=75 (chat-busy / session-busy)
 		// so wrappers like loop.py can back off and retry.  The user-facing
 		// reason was already written to stderr by the subcommand.
@@ -1595,7 +1606,7 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 				// Default: in-memory (ephemeral session for this serve invocation).
 				s, err = store.OpenMemory()
 			} else {
-				s, err = store.Open(dbPath)
+				s, err = openSessionStoreBackend(dbPath)
 			}
 			if err != nil {
 				return fmt.Errorf("open store: %w", err)

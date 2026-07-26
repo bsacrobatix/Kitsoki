@@ -48,12 +48,25 @@ var migratableFromVersions = map[int]bool{
 // ErrChatNotFound is returned when a requested chat does not exist.
 var ErrChatNotFound = errors.New("chats: chat not found")
 
-// Store provides SQLite-backed persistence for chats and their transcripts.
+// Store provides SQL-backed persistence for chats and their transcripts.
 // It operates on an existing *sql.DB (opened by the parent store package).
+// The default flavor is SQLite (NewStore); NewPostgresStore selects the
+// Postgres dialect explicitly.
 type Store struct {
 	db            *sql.DB
 	clock         clock.Clock
 	journalWriter journal.Writer
+	// dialect selects placeholder style plus the few statements that differ
+	// between engines. Zero value is SQLite, keeping NewStore unchanged.
+	dialect dialect
+	// leaseHolder is the opaque token identifying this Store in the Postgres
+	// lease-based chat_locks table. Unused on the SQLite path, which keys
+	// locks on (owner_pid, owner_host) instead.
+	leaseHolder string
+	// leaseHeartbeatEvery is how often WithLock renews a held Postgres lease
+	// while fn runs (see lock.go). Unused on the SQLite path; tests shrink it
+	// to exercise renewal without waiting on wall-clock ticks.
+	leaseHeartbeatEvery time.Duration
 }
 
 // Option is a functional option for constructing a Store.
@@ -207,11 +220,11 @@ func (s *Store) Create(ctx context.Context, appID, room, scopeKey, title string)
 	}
 	now := s.clock.Now().UnixMicro()
 	id := ulid.New()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO chats
 		  (id, app_id, room, scope_key, title, status, claude_session_id, parent_chat_id, session_id,
 		   created_at, updated_at, last_active_at)
-		VALUES (?, ?, ?, ?, ?, ?, '', NULL, NULL, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, '', NULL, NULL, ?, ?, ?)`),
 		id, appID, room, scopeKey, title, string(ChatActive),
 		now, now, now,
 	)
@@ -237,13 +250,23 @@ func (s *Store) GetOrEnsure(ctx context.Context, chatID string) (*Chat, error) {
 		return nil, fmt.Errorf("chats.GetOrEnsure: %w", err)
 	}
 	// Row not found — insert a placeholder, ignoring conflicts so a concurrent
-	// GetOrEnsure on the same chatID is safe.
+	// GetOrEnsure on the same chatID is safe. SQLite spells conflict-tolerant
+	// insert as INSERT OR IGNORE; Postgres as ON CONFLICT DO NOTHING.
 	now := s.clock.Now().UnixMicro()
-	if _, execErr := s.db.ExecContext(ctx, `
+	insert := `
 		INSERT OR IGNORE INTO chats
 		  (id, app_id, room, scope_key, title, status, claude_session_id,
 		   parent_chat_id, session_id, created_at, updated_at, last_active_at)
-		VALUES (?, '', '', '', 'untitled chat', 'active', '', NULL, NULL, ?, ?, ?)`,
+		VALUES (?, '', '', '', 'untitled chat', 'active', '', NULL, NULL, ?, ?, ?)`
+	if s.dialect == dialectPostgres {
+		insert = `
+		INSERT INTO chats
+		  (id, app_id, room, scope_key, title, status, claude_session_id,
+		   parent_chat_id, session_id, created_at, updated_at, last_active_at)
+		VALUES (?, '', '', '', 'untitled chat', 'active', '', NULL, NULL, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`
+	}
+	if _, execErr := s.db.ExecContext(ctx, s.q(insert),
 		chatID, now, now, now,
 	); execErr != nil {
 		return nil, fmt.Errorf("chats.GetOrEnsure: insert placeholder: %w", execErr)
@@ -253,13 +276,13 @@ func (s *Store) GetOrEnsure(ctx context.Context, chatID string) (*Chat, error) {
 
 // Get returns the chat with the given ID, or ErrChatNotFound if it does not exist.
 func (s *Store) Get(ctx context.Context, chatID string) (*Chat, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, s.q(`
 		SELECT id, app_id, room, scope_key, title, status,
 		       COALESCE(claude_session_id, ''),
 		       COALESCE(parent_chat_id, ''),
 		       COALESCE(session_id, ''),
 		       created_at, updated_at, last_active_at
-		FROM chats WHERE id = ?`, chatID)
+		FROM chats WHERE id = ?`), chatID)
 	c, err := scanChat(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrChatNotFound
@@ -294,7 +317,7 @@ func (s *Store) List(ctx context.Context, appID, room, scopeKey string) ([]Chat,
 	}
 	q += " ORDER BY last_active_at DESC"
 
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.db.QueryContext(ctx, s.q(q), args...)
 	if err != nil {
 		return nil, fmt.Errorf("chats.List: %w", err)
 	}
@@ -336,13 +359,13 @@ func (s *Store) Resolve(ctx context.Context, appID, room, scopeKey, title string
 	// Archived rows are soft-deleted — Resolve treats them as not present
 	// so a fresh row gets created. /meta new in the TUI relies on this.
 	var id string
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, s.q(`
 		SELECT id FROM chats
 		WHERE app_id = ? AND room = ? AND scope_key = ?
 		  AND parent_chat_id IS NULL
 		  AND status != 'archived'
 		ORDER BY last_active_at DESC
-		LIMIT 1`,
+		LIMIT 1`),
 		appID, room, scopeKey,
 	).Scan(&id)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -351,13 +374,13 @@ func (s *Store) Resolve(ctx context.Context, appID, room, scopeKey, title string
 
 	if err == nil {
 		// Found existing — read it inside the same tx and return it.
-		c, scanErr := scanChat(tx.QueryRowContext(ctx, `
+		c, scanErr := scanChat(tx.QueryRowContext(ctx, s.q(`
 			SELECT id, app_id, room, scope_key, title, status,
 			       COALESCE(claude_session_id, ''),
 			       COALESCE(parent_chat_id, ''),
 			       COALESCE(session_id, ''),
 			       created_at, updated_at, last_active_at
-			FROM chats WHERE id = ?`, id))
+			FROM chats WHERE id = ?`), id))
 		if scanErr != nil {
 			return nil, false, fmt.Errorf("chats.Resolve: read existing: %w", scanErr)
 		}
@@ -370,23 +393,23 @@ func (s *Store) Resolve(ctx context.Context, appID, room, scopeKey, title string
 	// None found — create a new one in the same tx.
 	now := s.clock.Now().UnixMicro()
 	newID := ulid.New()
-	if _, execErr := tx.ExecContext(ctx, `
+	if _, execErr := tx.ExecContext(ctx, s.q(`
 		INSERT INTO chats
 		  (id, app_id, room, scope_key, title, status, claude_session_id, parent_chat_id, session_id,
 		   created_at, updated_at, last_active_at)
-		VALUES (?, ?, ?, ?, ?, ?, '', NULL, NULL, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, '', NULL, NULL, ?, ?, ?)`),
 		newID, appID, room, scopeKey, title, string(ChatActive),
 		now, now, now,
 	); execErr != nil {
 		return nil, false, fmt.Errorf("chats.Resolve: insert: %w", execErr)
 	}
-	c, scanErr := scanChat(tx.QueryRowContext(ctx, `
+	c, scanErr := scanChat(tx.QueryRowContext(ctx, s.q(`
 		SELECT id, app_id, room, scope_key, title, status,
 		       COALESCE(claude_session_id, ''),
 		       COALESCE(parent_chat_id, ''),
 		       COALESCE(session_id, ''),
 		       created_at, updated_at, last_active_at
-		FROM chats WHERE id = ?`, newID))
+		FROM chats WHERE id = ?`), newID))
 	if scanErr != nil {
 		return nil, false, fmt.Errorf("chats.Resolve: read new: %w", scanErr)
 	}
@@ -400,7 +423,7 @@ func (s *Store) Resolve(ctx context.Context, appID, room, scopeKey, title string
 func (s *Store) SetClaudeSessionID(ctx context.Context, chatID, claudeSessionID string) error {
 	now := s.clock.Now().UnixMicro()
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE chats SET claude_session_id = ?, updated_at = ? WHERE id = ?`,
+		s.q(`UPDATE chats SET claude_session_id = ?, updated_at = ? WHERE id = ?`),
 		claudeSessionID, now, chatID)
 	if err != nil {
 		return fmt.Errorf("chats.SetClaudeSessionID: %w", err)
@@ -411,7 +434,7 @@ func (s *Store) SetClaudeSessionID(ctx context.Context, chatID, claudeSessionID 
 	}
 	// Site 22: emit chats.append for the claude_session_id update.
 	if s.journalWriter != nil {
-		sid := chatSessionID(ctx, s.db, chatID)
+		sid := s.chatSessionID(ctx, chatID)
 		body := mustJSON([]map[string]any{
 			{"op": "replace", "path": "/meta/claude_session_id", "value": claudeSessionID},
 		})
@@ -437,7 +460,7 @@ func (s *Store) Rename(ctx context.Context, chatID, title string) error {
 	}
 	now := s.clock.Now().UnixMicro()
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE chats SET title = ?, updated_at = ? WHERE id = ?`,
+		s.q(`UPDATE chats SET title = ?, updated_at = ? WHERE id = ?`),
 		title, now, chatID)
 	if err != nil {
 		return fmt.Errorf("chats.Rename: %w", err)
@@ -448,7 +471,7 @@ func (s *Store) Rename(ctx context.Context, chatID, title string) error {
 	}
 	// Site 21: emit chats.append for the title rename.
 	if s.journalWriter != nil {
-		sid := chatSessionID(ctx, s.db, chatID)
+		sid := s.chatSessionID(ctx, chatID)
 		body := mustJSON([]map[string]any{
 			{"op": "replace", "path": "/meta/title", "value": title},
 		})
@@ -467,7 +490,7 @@ func (s *Store) Rename(ctx context.Context, chatID, title string) error {
 func (s *Store) Archive(ctx context.Context, chatID string) error {
 	now := s.clock.Now().UnixMicro()
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE chats SET status = ?, updated_at = ? WHERE id = ?`,
+		s.q(`UPDATE chats SET status = ?, updated_at = ? WHERE id = ?`),
 		string(ChatArchived), now, chatID)
 	if err != nil {
 		return fmt.Errorf("chats.Archive: %w", err)
@@ -478,7 +501,7 @@ func (s *Store) Archive(ctx context.Context, chatID string) error {
 	}
 	// Site 20: emit chats.append for the archive status change.
 	if s.journalWriter != nil {
-		sid := chatSessionID(ctx, s.db, chatID)
+		sid := s.chatSessionID(ctx, chatID)
 		body := mustJSON([]map[string]any{
 			{"op": "replace", "path": "/meta/status", "value": string(ChatArchived)},
 		})
@@ -516,7 +539,7 @@ func (s *Store) AppendMessage(ctx context.Context, chatID, role, content string,
 	// Determine next seq atomically within the transaction.
 	var maxSeq sql.NullInt64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT MAX(seq) FROM chat_messages WHERE chat_id = ?`, chatID,
+		s.q(`SELECT MAX(seq) FROM chat_messages WHERE chat_id = ?`), chatID,
 	).Scan(&maxSeq); err != nil {
 		return Message{}, fmt.Errorf("chats.AppendMessage: get max seq: %w", err)
 	}
@@ -526,7 +549,7 @@ func (s *Store) AppendMessage(ctx context.Context, chatID, role, content string,
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO chat_messages (chat_id, seq, role, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		s.q(`INSERT INTO chat_messages (chat_id, seq, role, content, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?)`),
 		chatID, seq, role, content, nullableBytes(metaJSON), now,
 	); err != nil {
 		return Message{}, fmt.Errorf("chats.AppendMessage: insert: %w", err)
@@ -534,7 +557,7 @@ func (s *Store) AppendMessage(ctx context.Context, chatID, role, content string,
 
 	// Update last_active_at and updated_at on the chat.
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE chats SET last_active_at = ?, updated_at = ? WHERE id = ?`,
+		s.q(`UPDATE chats SET last_active_at = ?, updated_at = ? WHERE id = ?`),
 		now, now, chatID,
 	); err != nil {
 		return Message{}, fmt.Errorf("chats.AppendMessage: update chat: %w", err)
@@ -559,7 +582,7 @@ func (s *Store) AppendMessage(ctx context.Context, chatID, role, content string,
 	// Emit chats.append for the new message. Post-commit write — acceptable
 	// because chat appends serialise behind the per-chat lock.
 	if s.journalWriter != nil {
-		sid := chatSessionID(ctx, s.db, chatID)
+		sid := s.chatSessionID(ctx, chatID)
 		msgValue := map[string]any{
 			"seq":        seq,
 			"role":       role,
@@ -586,11 +609,11 @@ func (s *Store) AppendMessage(ctx context.Context, chatID, role, content string,
 // Transcript returns messages for a chat ordered by seq ASC, optionally
 // starting from a minimum seq (sinceSeq). Pass sinceSeq=0 for all messages.
 func (s *Store) Transcript(ctx context.Context, chatID string, sinceSeq int) ([]Message, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, s.q(`
 		SELECT chat_id, seq, role, content, COALESCE(metadata, ''), created_at
 		FROM chat_messages
 		WHERE chat_id = ? AND seq >= ?
-		ORDER BY seq ASC`,
+		ORDER BY seq ASC`),
 		chatID, sinceSeq,
 	)
 	if err != nil {
@@ -621,7 +644,7 @@ func (s *Store) Transcript(ctx context.Context, chatID string, sinceSeq int) ([]
 func (s *Store) LatestSeq(ctx context.Context, chatID string) (int, error) {
 	var maxSeq sql.NullInt64
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT MAX(seq) FROM chat_messages WHERE chat_id = ?`, chatID,
+		s.q(`SELECT MAX(seq) FROM chat_messages WHERE chat_id = ?`), chatID,
 	).Scan(&maxSeq); err != nil {
 		return -1, fmt.Errorf("chats.LatestSeq: %w", err)
 	}
@@ -644,13 +667,13 @@ func (s *Store) Fork(ctx context.Context, parentChatID, newTitle string) (*Chat,
 	// Read parent.
 	var parent Chat
 	var createdAt, updatedAt, lastActiveAt int64
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, s.q(`
 		SELECT id, app_id, room, scope_key, title, status,
 		       COALESCE(claude_session_id, ''),
 		       COALESCE(parent_chat_id, ''),
 		       COALESCE(session_id, ''),
 		       created_at, updated_at, last_active_at
-		FROM chats WHERE id = ?`, parentChatID,
+		FROM chats WHERE id = ?`), parentChatID,
 	).Scan(
 		&parent.ID, &parent.AppID, &parent.Room, &parent.ScopeKey,
 		&parent.Title, &parent.Status, &parent.ClaudeSessionID,
@@ -671,11 +694,11 @@ func (s *Store) Fork(ctx context.Context, parentChatID, newTitle string) (*Chat,
 	now := s.clock.Now().UnixMicro()
 	newID := ulid.New()
 
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, s.q(`
 		INSERT INTO chats
 		  (id, app_id, room, scope_key, title, status, claude_session_id, parent_chat_id, session_id,
 		   created_at, updated_at, last_active_at)
-		VALUES (?, ?, ?, ?, ?, ?, '', ?, NULL, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, '', ?, NULL, ?, ?, ?)`),
 		newID, parent.AppID, parent.Room, parent.ScopeKey, newTitle,
 		string(ChatActive), parentChatID, now, now, now,
 	); err != nil {
@@ -683,10 +706,10 @@ func (s *Store) Fork(ctx context.Context, parentChatID, newTitle string) (*Chat,
 	}
 
 	// Copy messages atomically.
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(ctx, s.q(`
 		INSERT INTO chat_messages (chat_id, seq, role, content, metadata, created_at)
 		SELECT ?, seq, role, content, metadata, created_at
-		FROM chat_messages WHERE chat_id = ? ORDER BY seq`,
+		FROM chat_messages WHERE chat_id = ? ORDER BY seq`),
 		newID, parentChatID,
 	); err != nil {
 		return nil, fmt.Errorf("chats.Fork: copy messages: %w", err)
@@ -722,7 +745,7 @@ func (s *Store) Fork(ctx context.Context, parentChatID, newTitle string) (*Chat,
 			{"op": "add", "path": "/messages", "value": msgsVal},
 		})
 		// Use parent's session_id for both entries (fork shares the session).
-		parentSID := chatSessionID(ctx, s.db, parentChatID)
+		parentSID := s.chatSessionID(ctx, parentChatID)
 		appendJournalEntry(s.journalWriter, journal.Entry{
 			Ts:      s.clock.Now(),
 			Session: parentSID,
@@ -801,9 +824,9 @@ func nullableBytes(b []byte) any {
 // chatSessionID fetches the kitsoki session_id stored on the chat row.
 // Returns an empty string if the row has no session_id (pre-continue builds).
 // This is a best-effort lookup — a miss never blocks the main operation.
-func chatSessionID(ctx context.Context, db *sql.DB, chatID string) app.SessionID {
+func (s *Store) chatSessionID(ctx context.Context, chatID string) app.SessionID {
 	var sid string
-	_ = db.QueryRowContext(ctx, `SELECT COALESCE(session_id,'') FROM chats WHERE id = ?`, chatID).Scan(&sid)
+	_ = s.db.QueryRowContext(ctx, s.q(`SELECT COALESCE(session_id,'') FROM chats WHERE id = ?`), chatID).Scan(&sid)
 	return app.SessionID(sid)
 }
 

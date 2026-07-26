@@ -20,7 +20,7 @@
 // # Media artifact sidecar export
 //
 // After writing the HTML or JSON output, both modes scan the session's journal
-// (the SQLite store at [defaultDBPath]) for [journal.KindArtifactEmitted]
+// (the session store at [defaultDBPath]) for [journal.KindArtifactEmitted]
 // entries and copy each artifact file into an `artifacts/` subdirectory next
 // to the output file, matching the `./artifacts/<handle>` relative URL that
 // [tools/runstatus/src/data/snapshot-source.ts] uses to serve media elements
@@ -49,7 +49,6 @@ import (
 	"kitsoki/internal/journal"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/web"
-	"kitsoki/internal/store"
 )
 
 func exportStatusCmd() *cobra.Command {
@@ -325,16 +324,17 @@ func copyMediaArtifacts(sessionID, outDir string) {
 		return
 	}
 
-	// Open the session store to get the journal reader.
+	// Open the session store (honoring --db-backend / KITSOKI_DB_BACKEND) to
+	// get the journal reader in the matching dialect.
 	dbPath := defaultDBPath()
-	s, err := store.Open(dbPath)
+	s, err := openSessionStoreBackend(dbPath)
 	if err != nil {
 		// DB absent or inaccessible — silently skip (common for fixture traces).
 		return
 	}
 	defer func() { _ = s.Close() }()
 
-	jr, err := journal.NewSQLiteReader(s.DB())
+	jr, err := newJournalReader(s)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "export-status: open journal reader: %v\n", err)
 		return

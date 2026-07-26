@@ -80,12 +80,13 @@
 //
 // # Lifecycle
 //
-// A session's writer ([NewSQLiteWriter], or [NewMemWriter] for tests) appends
-// entries as turns produce them, periodically emitting checkpoints per a
-// [Policy] ([DefaultPolicy]). A reader ([NewSQLiteReader] / [NewMemReader])
-// replays them on resume or for trace export. Writer and reader share one
-// backing store; the SQLite pair persists to sessions.db, the in-memory pair
-// lives only for a test's lifetime.
+// A session's writer ([NewSQLiteWriter], [NewPostgresWriter] on the Postgres
+// backend, or [NewMemWriter] for tests) appends entries as turns produce them,
+// periodically emitting checkpoints per a [Policy] ([DefaultPolicy]). A reader
+// ([NewSQLiteReader] / [NewPostgresReader] / [NewMemReader]) replays them on
+// resume or for trace export. Writer and reader share one backing store; the
+// SQLite pair persists to sessions.db, the Postgres pair to the shared server
+// database, and the in-memory pair lives only for a test's lifetime.
 //
 // # Non-goals
 //

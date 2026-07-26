@@ -271,7 +271,7 @@ Exit codes:
 			}
 			defer func() { _ = s.Close() }()
 
-			rawStore, err := chats.NewStore(s.DB())
+			rawStore, err := newChatStore(s)
 			if err != nil {
 				return fmt.Errorf("open chat store: %w", err)
 			}
@@ -469,7 +469,7 @@ func openChatStore(dbPath string) (*chats.Store, func(), error) {
 	if err != nil {
 		return nil, func() {}, err
 	}
-	cs, err := chats.NewStore(s.DB())
+	cs, err := newChatStore(s)
 	if err != nil {
 		_ = s.Close()
 		return nil, func() {}, fmt.Errorf("open chat store: %w", err)

@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,14 +11,16 @@ import (
 	"kitsoki/internal/app"
 )
 
-// ---- SQLite Writer ----------------------------------------------------------
+// ---- SQL Writer (SQLite default, Postgres via dialect) ----------------------
 
-// sqliteWriter implements Writer backed by a *sql.DB (modernc.org/sqlite).
-// It shares the same *sql.DB as the session store so journal writes can be
-// included in the caller's transaction via AppendJournalTx, so a journal write
-// and the matching events row commit (or roll back) together.
-type sqliteWriter struct {
+// sqlWriter implements Writer backed by a *sql.DB (modernc.org/sqlite, or a
+// pgx-stdlib handle under dialectPostgres — see postgres.go for the pg
+// constructors). It shares the same *sql.DB as the session store so journal
+// writes can be included in the caller's transaction via AppendJournalTx, so a
+// journal write and the matching events row commit (or roll back) together.
+type sqlWriter struct {
 	db *sql.DB
+	d  dialect
 }
 
 // NewSQLiteWriter returns a Writer backed by db.
@@ -26,7 +29,7 @@ func NewSQLiteWriter(db *sql.DB) (Writer, error) {
 	if db == nil {
 		return nil, fmt.Errorf("journal.NewSQLiteWriter: db must not be nil")
 	}
-	return &sqliteWriter{db: db}, nil
+	return &sqlWriter{db: db, d: dialectSQLite}, nil
 }
 
 // Append writes a single entry to the journal inside its own transaction.
@@ -34,14 +37,14 @@ func NewSQLiteWriter(db *sql.DB) (Writer, error) {
 // current MAX from the table and incrementing; this is consistent as long as
 // callers serialise writes through the session writer lock — concurrent
 // unserialised Appends to the same (sid, doc) can race on the MAX read.
-func (w *sqliteWriter) Append(e Entry) error {
+func (w *sqlWriter) Append(e Entry) error {
 	tx, err := w.db.Begin()
 	if err != nil {
-		return fmt.Errorf("journal.sqliteWriter.Append: begin tx: %w", err)
+		return fmt.Errorf("journal.sqlWriter.Append: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := AppendJournalTx(tx, e.Session, []Entry{e}); err != nil {
+	if err := appendJournalTx(context.Background(), tx, w.d, e.Session, []Entry{e}); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -49,23 +52,23 @@ func (w *sqliteWriter) Append(e Entry) error {
 
 // AppendCheckpoint writes a full-document checkpoint entry in its own
 // transaction. The DocVersion is assigned as MAX(doc_version)+1 for (sid, doc).
-func (w *sqliteWriter) AppendCheckpoint(sid app.SessionID, turn app.TurnNumber, seq int, doc DocID, full json.RawMessage) error {
+func (w *sqlWriter) AppendCheckpoint(sid app.SessionID, turn app.TurnNumber, seq int, doc DocID, full json.RawMessage) error {
 	tx, err := w.db.Begin()
 	if err != nil {
-		return fmt.Errorf("journal.sqliteWriter.AppendCheckpoint: begin tx: %w", err)
+		return fmt.Errorf("journal.sqlWriter.AppendCheckpoint: begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	ver, err := nextVersionTx(tx, sid, doc)
+	ver, err := nextVersionTx(context.Background(), tx, w.d, sid, doc)
 	if err != nil {
-		return fmt.Errorf("journal.sqliteWriter.AppendCheckpoint: next version: %w", err)
+		return fmt.Errorf("journal.sqlWriter.AppendCheckpoint: next version: %w", err)
 	}
 
 	body, err := json.Marshal(struct {
 		Full json.RawMessage `json:"full"`
 	}{Full: full})
 	if err != nil {
-		return fmt.Errorf("journal.sqliteWriter.AppendCheckpoint: marshal body: %w", err)
+		return fmt.Errorf("journal.sqlWriter.AppendCheckpoint: marshal body: %w", err)
 	}
 
 	e := Entry{
@@ -78,7 +81,7 @@ func (w *sqliteWriter) AppendCheckpoint(sid app.SessionID, turn app.TurnNumber, 
 		DocVersion: ver,
 		Body:       body,
 	}
-	if err := insertEntryTx(tx, e); err != nil {
+	if err := insertEntryTx(context.Background(), tx, w.d, e); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -86,7 +89,12 @@ func (w *sqliteWriter) AppendCheckpoint(sid app.SessionID, turn app.TurnNumber, 
 
 // Flush runs a WAL checkpoint to ensure journal writes are in the main DB
 // file. This is a best-effort operation; errors are returned but not fatal.
-func (w *sqliteWriter) Flush() error {
+// Postgres has no WAL-checkpoint pragma and commits are already durable at
+// transaction commit, so Flush is a no-op on that dialect.
+func (w *sqlWriter) Flush() error {
+	if w.d == dialectPostgres {
+		return nil
+	}
 	_, err := w.db.Exec("PRAGMA wal_checkpoint(PASSIVE)")
 	return err
 }
@@ -102,13 +110,21 @@ func (w *sqliteWriter) Flush() error {
 // DocVersion is left as 0 / NULL.
 //
 // The function is exported so the store layer can call it from within its
-// own AppendEvents transaction (next-wave wiring).
+// own AppendEvents transaction (next-wave wiring). It speaks SQLite; the
+// Postgres store layer uses [AppendJournalPgTx] (postgres.go), which shares
+// this implementation via the dialect parameter.
 func AppendJournalTx(tx *sql.Tx, sid app.SessionID, entries []Entry) error {
+	return appendJournalTx(context.Background(), tx, dialectSQLite, sid, entries)
+}
+
+// appendJournalTx is the dialect-parameterized implementation behind
+// AppendJournalTx and AppendJournalPgTx.
+func appendJournalTx(ctx context.Context, tx *sql.Tx, d dialect, sid app.SessionID, entries []Entry) error {
 	for i := range entries {
 		e := entries[i]
 		// Assign version for doc-targeting entries (patches and checkpoints).
 		if e.Doc != "" && (IsPatchKind(e.Kind) || IsCheckpointKind(e.Kind)) {
-			ver, err := nextVersionTx(tx, sid, e.Doc)
+			ver, err := nextVersionTx(ctx, tx, d, sid, e.Doc)
 			if err != nil {
 				return fmt.Errorf("journal.AppendJournalTx: next version for %q: %w", e.Doc, err)
 			}
@@ -126,13 +142,13 @@ func AppendJournalTx(tx *sql.Tx, sid app.SessionID, entries []Entry) error {
 		// paired events row) and use Turn>=1, so this branch leaves them
 		// untouched.
 		if e.Turn == 0 && e.Seq == 0 {
-			nextSeq, err := nextSeqTx(tx, sid, e.Turn)
+			nextSeq, err := nextSeqTx(ctx, tx, d, sid, e.Turn)
 			if err != nil {
 				return fmt.Errorf("journal.AppendJournalTx: next seq for out-of-turn entry: %w", err)
 			}
 			e.Seq = nextSeq
 		}
-		if err := insertEntryTx(tx, e); err != nil {
+		if err := insertEntryTx(ctx, tx, d, e); err != nil {
 			return err
 		}
 	}
@@ -144,10 +160,10 @@ func AppendJournalTx(tx *sql.Tx, sid app.SessionID, entries []Entry) error {
 // the first row in its turn). Used to safely assign seqs for out-of-turn
 // entries (chat appends, drive lifecycle, etc.) without colliding with
 // other post-commit writes.
-func nextSeqTx(tx *sql.Tx, sid app.SessionID, turn app.TurnNumber) (int, error) {
+func nextSeqTx(ctx context.Context, tx *sql.Tx, d dialect, sid app.SessionID, turn app.TurnNumber) (int, error) {
 	var maxSeq sql.NullInt64
-	err := tx.QueryRow(
-		`SELECT MAX(seq) FROM journal WHERE session_id = ? AND turn = ?`,
+	err := tx.QueryRowContext(ctx,
+		d.rebind(`SELECT MAX(seq) FROM journal WHERE session_id = ? AND turn = ?`),
 		string(sid), int64(turn),
 	).Scan(&maxSeq)
 	if err != nil {
@@ -161,10 +177,10 @@ func nextSeqTx(tx *sql.Tx, sid app.SessionID, turn app.TurnNumber) (int, error) 
 
 // nextVersionTx returns MAX(doc_version)+1 for (sid, doc) within tx.
 // If no rows exist yet it returns 1.
-func nextVersionTx(tx *sql.Tx, sid app.SessionID, doc DocID) (Version, error) {
+func nextVersionTx(ctx context.Context, tx *sql.Tx, d dialect, sid app.SessionID, doc DocID) (Version, error) {
 	var maxVer sql.NullInt64
-	err := tx.QueryRow(
-		`SELECT MAX(doc_version) FROM journal WHERE session_id = ? AND doc = ?`,
+	err := tx.QueryRowContext(ctx,
+		d.rebind(`SELECT MAX(doc_version) FROM journal WHERE session_id = ? AND doc = ?`),
 		string(sid), string(doc),
 	).Scan(&maxVer)
 	if err != nil {
@@ -177,7 +193,7 @@ func nextVersionTx(tx *sql.Tx, sid app.SessionID, doc DocID) (Version, error) {
 }
 
 // insertEntryTx writes a single Entry row inside tx.
-func insertEntryTx(tx *sql.Tx, e Entry) error {
+func insertEntryTx(ctx context.Context, tx *sql.Tx, d dialect, e Entry) error {
 	tsMicro := e.Ts.UnixMicro()
 	if tsMicro == 0 {
 		tsMicro = time.Now().UnixMicro()
@@ -198,9 +214,9 @@ func insertEntryTx(tx *sql.Tx, e Entry) error {
 		docVer = sql.NullInt64{Int64: int64(e.DocVersion), Valid: true}
 	}
 
-	_, err := tx.Exec(
-		`INSERT INTO journal (session_id, turn, seq, ts, kind, doc, doc_version, body_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err := tx.ExecContext(ctx,
+		d.rebind(`INSERT INTO journal (session_id, turn, seq, ts, kind, doc, doc_version, body_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
 		string(e.Session),
 		int64(e.Turn),
 		e.Seq,
@@ -217,11 +233,12 @@ func insertEntryTx(tx *sql.Tx, e Entry) error {
 	return nil
 }
 
-// ---- SQLite Reader ----------------------------------------------------------
+// ---- SQL Reader (SQLite default, Postgres via dialect) ----------------------
 
-// sqliteReader implements Reader backed by a *sql.DB.
-type sqliteReader struct {
+// sqlReader implements Reader backed by a *sql.DB.
+type sqlReader struct {
 	db *sql.DB
+	d  dialect
 }
 
 // NewSQLiteReader returns a Reader backed by db.
@@ -229,13 +246,13 @@ func NewSQLiteReader(db *sql.DB) (Reader, error) {
 	if db == nil {
 		return nil, fmt.Errorf("journal.NewSQLiteReader: db must not be nil")
 	}
-	return &sqliteReader{db: db}, nil
+	return &sqlReader{db: db, d: dialectSQLite}, nil
 }
 
 // LoadDocument finds the latest checkpoint for (sid, doc), then returns its
 // body.full as current and its doc_version as version. If no checkpoint
 // exists both current and version are zero values with nil error.
-func (r *sqliteReader) LoadDocument(sid app.SessionID, doc DocID) (json.RawMessage, Version, error) {
+func (r *sqlReader) LoadDocument(sid app.SessionID, doc DocID) (json.RawMessage, Version, error) {
 	// Find latest checkpoint for this doc.
 	var (
 		cpKind string
@@ -243,12 +260,12 @@ func (r *sqliteReader) LoadDocument(sid app.SessionID, doc DocID) (json.RawMessa
 		cpBody string
 	)
 	err := r.db.QueryRow(
-		`SELECT kind, doc_version, body_json
+		r.d.rebind(`SELECT kind, doc_version, body_json
 		 FROM journal
 		 WHERE session_id = ? AND doc = ?
 		   AND kind LIKE '%.checkpoint'
 		 ORDER BY doc_version DESC
-		 LIMIT 1`,
+		 LIMIT 1`),
 		string(sid), string(doc),
 	).Scan(&cpKind, &cpVer, &cpBody)
 
@@ -273,11 +290,11 @@ func (r *sqliteReader) LoadDocument(sid app.SessionID, doc DocID) (json.RawMessa
 	// Find the highest patch version after the checkpoint.
 	var maxPatchVer sql.NullInt64
 	err = r.db.QueryRow(
-		`SELECT MAX(doc_version)
+		r.d.rebind(`SELECT MAX(doc_version)
 		 FROM journal
 		 WHERE session_id = ? AND doc = ?
 		   AND doc_version > ?
-		   AND kind NOT LIKE '%.checkpoint'`,
+		   AND kind NOT LIKE '%.checkpoint'`),
 		string(sid), string(doc), int64(checkpointVer),
 	).Scan(&maxPatchVer)
 	if err != nil && err != sql.ErrNoRows {
@@ -294,15 +311,15 @@ func (r *sqliteReader) LoadDocument(sid app.SessionID, doc DocID) (json.RawMessa
 
 // ReplayFrom returns an iterator over patch entries for (sid, doc) where
 // DocVersion >= from, ordered by (turn, seq). The query streams rows lazily.
-func (r *sqliteReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) (iter.Seq[Entry], func() error) {
+func (r *sqlReader) ReplayFrom(sid app.SessionID, doc DocID, from Version) (iter.Seq[Entry], func() error) {
 	var capturedErr error
 	seq := func(yield func(Entry) bool) {
 		rows, err := r.db.Query(
-			`SELECT turn, seq, ts, kind, doc, doc_version, body_json
+			r.d.rebind(`SELECT turn, seq, ts, kind, doc, doc_version, body_json
 			 FROM journal
 			 WHERE session_id = ? AND doc = ? AND doc_version >= ?
 			   AND kind NOT LIKE '%.checkpoint'
-			 ORDER BY turn ASC, seq ASC`,
+			 ORDER BY turn ASC, seq ASC`),
 			string(sid), string(doc), int64(from),
 		)
 		if err != nil {
@@ -367,10 +384,10 @@ ORDER BY turn ASC, seq ASC`
 
 // ReplayTyped returns an iterator over all typed (non-patch, non-checkpoint)
 // entries for sid, ordered by (turn, seq). Rows are streamed lazily.
-func (r *sqliteReader) ReplayTyped(sid app.SessionID) (iter.Seq[Entry], func() error) {
+func (r *sqlReader) ReplayTyped(sid app.SessionID) (iter.Seq[Entry], func() error) {
 	var capturedErr error
 	seq := func(yield func(Entry) bool) {
-		rows, err := r.db.Query(replayTypedSQL, string(sid))
+		rows, err := r.db.Query(r.d.rebind(replayTypedSQL), string(sid))
 		if err != nil {
 			capturedErr = fmt.Errorf("journal.ReplayTyped: query: %w", err)
 			return
@@ -419,7 +436,7 @@ func (r *sqliteReader) ReplayTyped(sid app.SessionID) (iter.Seq[Entry], func() e
 // LatestCheckpoint returns the most recent checkpoint entry for (sid, doc).
 // Returns (Entry{}, false, nil) if no checkpoint exists, and a non-nil error
 // (kept distinct from "not found") on a query/scan failure.
-func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bool, error) {
+func (r *sqlReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bool, error) {
 	var (
 		turnN   int64
 		seq     int
@@ -429,12 +446,12 @@ func (r *sqliteReader) LatestCheckpoint(sid app.SessionID, doc DocID) (Entry, bo
 		body    string
 	)
 	err := r.db.QueryRow(
-		`SELECT turn, seq, ts, kind, doc_version, body_json
+		r.d.rebind(`SELECT turn, seq, ts, kind, doc_version, body_json
 		 FROM journal
 		 WHERE session_id = ? AND doc = ?
 		   AND kind LIKE '%.checkpoint'
 		 ORDER BY doc_version DESC
-		 LIMIT 1`,
+		 LIMIT 1`),
 		string(sid), string(doc),
 	).Scan(&turnN, &seq, &tsMicro, &kind, &docVer, &body)
 	if err == sql.ErrNoRows {
@@ -534,11 +551,11 @@ func LoadAgentCalls(db *sql.DB, sid app.SessionID) (map[string]json.RawMessage, 
 }
 
 // ListLiveDocs returns the distinct DocIDs that have at least one entry for sid.
-func (r *sqliteReader) ListLiveDocs(sid app.SessionID) []DocID {
+func (r *sqlReader) ListLiveDocs(sid app.SessionID) []DocID {
 	rows, err := r.db.Query(
-		`SELECT DISTINCT doc FROM journal
+		r.d.rebind(`SELECT DISTINCT doc FROM journal
 		 WHERE session_id = ? AND doc IS NOT NULL
-		 ORDER BY doc ASC`,
+		 ORDER BY doc ASC`),
 		string(sid),
 	)
 	if err != nil {

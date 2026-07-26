@@ -88,18 +88,18 @@ func (s *Store) AttachPTY(ctx context.Context, opts AttachPTYOptions) (*PtySessi
 	// short-circuits before we touch any rows.
 	var existingHost string
 	err = tx.QueryRowContext(ctx,
-		`SELECT tmux_host FROM chat_pty_sessions WHERE chat_id = ?`,
+		s.q(`SELECT tmux_host FROM chat_pty_sessions WHERE chat_id = ?`),
 		opts.ChatID,
 	).Scan(&existingHost)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// Fresh row.
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, s.q(`
 			INSERT INTO chat_pty_sessions
 			  (chat_id, tmux_session, tmux_host, mode,
 			   permission_mode, workspace_path,
 			   created_at, updated_at, last_idle_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`),
 			opts.ChatID, opts.TmuxSession, host, string(PtyModeAttached),
 			opts.PermissionMode, opts.WorkspacePath,
 			now, now,
@@ -113,12 +113,12 @@ func (s *Store) AttachPTY(ctx context.Context, opts AttachPTYOptions) (*PtySessi
 		if existingHost != host {
 			return nil, ErrPTYCrossHost
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := tx.ExecContext(ctx, s.q(`
 			UPDATE chat_pty_sessions
 			SET tmux_session = ?, mode = ?,
 			    permission_mode = ?, workspace_path = ?,
 			    updated_at = ?
-			WHERE chat_id = ?`,
+			WHERE chat_id = ?`),
 			opts.TmuxSession, string(PtyModeAttached),
 			opts.PermissionMode, opts.WorkspacePath,
 			now, opts.ChatID,
@@ -155,7 +155,7 @@ func (s *Store) DetachPTY(ctx context.Context, chatID string) (*PtySession, erro
 
 	var existingHost string
 	err = tx.QueryRowContext(ctx,
-		`SELECT tmux_host FROM chat_pty_sessions WHERE chat_id = ?`,
+		s.q(`SELECT tmux_host FROM chat_pty_sessions WHERE chat_id = ?`),
 		chatID,
 	).Scan(&existingHost)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -169,7 +169,7 @@ func (s *Store) DetachPTY(ctx context.Context, chatID string) (*PtySession, erro
 	}
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE chat_pty_sessions SET mode = ?, updated_at = ? WHERE chat_id = ?`,
+		s.q(`UPDATE chat_pty_sessions SET mode = ?, updated_at = ? WHERE chat_id = ?`),
 		string(PtyModeBackground), now, chatID,
 	); err != nil {
 		return nil, fmt.Errorf("chats.DetachPTY: update: %w", err)
@@ -194,7 +194,7 @@ func (s *Store) RemovePTY(ctx context.Context, chatID string) error {
 	}
 	host, _ := os.Hostname()
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM chat_pty_sessions WHERE chat_id = ? AND tmux_host = ?`,
+		s.q(`DELETE FROM chat_pty_sessions WHERE chat_id = ? AND tmux_host = ?`),
 		chatID, host,
 	)
 	if err != nil {
@@ -206,7 +206,7 @@ func (s *Store) RemovePTY(ctx context.Context, chatID string) error {
 		// tell GC paths apart from genuinely missing state.
 		var existingHost string
 		err := s.db.QueryRowContext(ctx,
-			`SELECT tmux_host FROM chat_pty_sessions WHERE chat_id = ?`,
+			s.q(`SELECT tmux_host FROM chat_pty_sessions WHERE chat_id = ?`),
 			chatID,
 		).Scan(&existingHost)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -224,11 +224,11 @@ func (s *Store) RemovePTY(ctx context.Context, chatID string) error {
 // if no row exists. Cross-host rows are returned (so the caller can
 // produce the "this chat is attached on another host" message).
 func (s *Store) GetPTY(ctx context.Context, chatID string) (*PtySession, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, s.q(`
 		SELECT chat_id, tmux_session, tmux_host, mode,
 		       permission_mode, workspace_path,
 		       created_at, updated_at, last_idle_at
-		FROM chat_pty_sessions WHERE chat_id = ?`, chatID)
+		FROM chat_pty_sessions WHERE chat_id = ?`), chatID)
 	p, err := scanPTYSession(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoPTYSession
@@ -245,13 +245,13 @@ func (s *Store) GetPTY(ctx context.Context, chatID string) (*PtySession, error) 
 // updated_at DESC.
 func (s *Store) ListPTYForHost(ctx context.Context) ([]PtySession, error) {
 	host, _ := os.Hostname()
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, s.q(`
 		SELECT chat_id, tmux_session, tmux_host, mode,
 		       permission_mode, workspace_path,
 		       created_at, updated_at, last_idle_at
 		FROM chat_pty_sessions
 		WHERE tmux_host = ?
-		ORDER BY updated_at DESC`, host)
+		ORDER BY updated_at DESC`), host)
 	if err != nil {
 		return nil, fmt.Errorf("chats.ListPTYForHost: %w", err)
 	}
@@ -278,7 +278,7 @@ func (s *Store) MarkPTYIdle(ctx context.Context, chatID string) error {
 	}
 	now := s.clock.Now().UnixMicro()
 	res, err := s.db.ExecContext(ctx,
-		`UPDATE chat_pty_sessions SET last_idle_at = ?, updated_at = ? WHERE chat_id = ?`,
+		s.q(`UPDATE chat_pty_sessions SET last_idle_at = ?, updated_at = ? WHERE chat_id = ?`),
 		now, now, chatID,
 	)
 	if err != nil {
@@ -336,10 +336,10 @@ func scanPTYSessionRow(rows *sql.Rows) (*PtySession, error) {
 
 func scanPTYSessionCommon(scan func(...any) error) (*PtySession, error) {
 	var (
-		p                     PtySession
-		modeStr               string
-		createdAt, updatedAt  int64
-		lastIdleAt            sql.NullInt64
+		p                    PtySession
+		modeStr              string
+		createdAt, updatedAt int64
+		lastIdleAt           sql.NullInt64
 	)
 	if err := scan(
 		&p.ChatID, &p.TmuxSession, &p.TmuxHost, &modeStr,

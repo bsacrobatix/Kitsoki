@@ -285,11 +285,11 @@ func (r *SessionRegistry) RegisterFlowEvidenceProvider(
 // It is explicit rather than an environment toggle so ordinary `kitsoki web`
 // keeps its existing process-local behavior.
 func (r *SessionRegistry) EnableDaemon(dbPath string) error {
-	st, err := store.Open(dbPath)
+	st, err := openSessionStoreBackend(dbPath)
 	if err != nil {
 		return fmt.Errorf("open daemon store: %w", err)
 	}
-	artifactJobs, err := artifactjob.NewSQLiteStore(st.DB())
+	artifactJobs, err := newArtifactJobStore(st)
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("open daemon artifact jobs: %w", err)
@@ -344,7 +344,7 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 			return fmt.Errorf("restore daemon campaigns: %w", campaignErr)
 		}
 	}
-	studies, err := study.NewSQLiteStore(st.DB())
+	studies, err := newStudyStore(st)
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("open daemon studies: %w", err)
@@ -1999,11 +1999,11 @@ func (r *SessionRegistry) ensureSelfMetaLocked() error {
 	if r.metaSelfCtrl != nil {
 		return nil
 	}
-	s, err := store.Open(r.base.DBPath)
+	s, err := openSessionStoreBackend(r.base.DBPath)
 	if err != nil {
 		return fmt.Errorf("meta self: open store: %w", err)
 	}
-	cs, err := chats.NewStore(s.DB())
+	cs, err := newChatStore(s)
 	if err != nil {
 		_ = s.Close()
 		return fmt.Errorf("meta self: open chat store: %w", err)

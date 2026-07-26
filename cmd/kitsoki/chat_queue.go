@@ -195,7 +195,7 @@ failed. If another process holds the chat lock the command exits 75
 			}
 			defer func() { _ = s.Close() }()
 
-			rawStore, err := chats.NewStore(s.DB())
+			rawStore, err := newChatStore(s)
 			if err != nil {
 				return fmt.Errorf("open chat store: %w", err)
 			}

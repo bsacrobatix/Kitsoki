@@ -8,7 +8,6 @@ import (
 
 	"kitsoki/internal/host"
 	inboxmodel "kitsoki/internal/inbox"
-	"kitsoki/internal/jobs"
 )
 
 func inboxCmd() *cobra.Command {
@@ -66,7 +65,7 @@ skipped.`,
 			if err != nil {
 				return err
 			}
-			js, err := jobs.NewJobStore(s.DB())
+			js, err := newJobStore(s)
 			if err != nil {
 				return err
 			}

@@ -27,10 +27,8 @@ import (
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
-	"kitsoki/internal/chats"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
-	"kitsoki/internal/journal"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
@@ -871,7 +869,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			}
 			defer func() { _ = transportReg.Close() }()
 
-			rawChatStore, chatStoreErr := chats.NewStore(s.DB())
+			rawChatStore, chatStoreErr := newChatStore(s)
 			var chatStoreOpt orchestrator.Option
 			if chatStoreErr == nil {
 				chatStoreOpt = orchestrator.WithChatStore(chathost.NewAdapter(rawChatStore))
@@ -883,12 +881,12 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			// jobs.WithJobJournalWriter (mirrors cmd/kitsoki/main.go § run).
 			var journalWriterOpt orchestrator.Option
 			var journalReaderOpt orchestrator.Option
-			jw, jwErr := journal.NewSQLiteWriter(s.DB())
+			jw, jwErr := newJournalWriter(s)
 			if jwErr == nil {
 				journalWriterOpt = orchestrator.WithJournalWriter(jw)
 			}
 			// Build the journal reader (symmetric to the writer; §4.5 resume path).
-			if jr, jrErr := journal.NewSQLiteReader(s.DB()); jrErr == nil {
+			if jr, jrErr := newJournalReader(s); jrErr == nil {
 				journalReaderOpt = orchestrator.WithJournalReader(jr)
 			}
 
@@ -907,7 +905,7 @@ another process holds it, this command exits 75 (EX_TEMPFAIL).`,
 			var schedulerOpt, jobStoreOpt orchestrator.Option
 			if jwErr == nil {
 				var jsErr error
-				jobStore, jsErr = jobs.NewJobStore(s.DB(), jobs.WithJobJournalWriter(jw))
+				jobStore, jsErr = newJobStore(s, jobs.WithJobJournalWriter(jw))
 				if jsErr == nil {
 					jobScheduler = jobs.NewScheduler(jobStore)
 					schedulerOpt = orchestrator.WithScheduler(jobScheduler)
@@ -1552,7 +1550,7 @@ func openSessionStore(dbPath string) (store.Store, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
-	s, err := store.Open(dbPath)
+	s, err := openSessionStoreBackend(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}

@@ -39,7 +39,6 @@ import (
 	"kitsoki/internal/agent"
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
-	"kitsoki/internal/chats"
 	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/orchestrator"
@@ -221,7 +220,7 @@ func runInterceptEngine(ctx context.Context, in interceptEngineInput) (intercept
 		return interceptResult{}, infraError("validate hosts: %v", err)
 	}
 
-	chatStore, err := chats.NewStore(s.DB())
+	chatStore, err := newChatStore(s)
 	if err != nil {
 		return interceptResult{}, infraError("init chats store: %v", err)
 	}
