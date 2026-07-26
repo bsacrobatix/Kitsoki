@@ -14,7 +14,7 @@ import (
 func TestPurgeClosedWorkspaceRequiresReceiptAndProviderGuard(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	workspace := writeLegacyWorkspace(t, root, "closed-shipped-20260725", now.Add(-48*time.Hour), false, false)
 	writePurgeProviderStub(t, root)
 	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
@@ -69,7 +69,7 @@ func TestPurgeClosedWorkspaceRequiresReceiptAndProviderGuard(t *testing.T) {
 }
 
 func TestPurgeClosedWorkspaceFailsClosedOnRetentionGuards(t *testing.T) {
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	tests := []struct {
 		name       string
 		dirty      bool
@@ -168,7 +168,7 @@ func TestPurgeClosedWorkspaceFailsClosedOnRetentionGuards(t *testing.T) {
 func TestPurgeClosedWorkspaceIsArchiveFreeAndResumesInterruptedIsolation(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	workspace := writeLegacyWorkspace(t, root, "closed-interrupted", now.Add(-48*time.Hour), false, false)
 	writePurgeProviderStub(t, root)
 	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
@@ -247,7 +247,7 @@ func TestPurgeClosedWorkspaceEnforcesMonotonicDiskReceipts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			initLegacyProject(t, root)
-			now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+			now := retentionFixtureNow()
 			workspace := writeLegacyWorkspace(t, root, "closed-monotonic", now.Add(-48*time.Hour), false, false)
 			writePurgeProviderStub(t, root)
 			head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
@@ -291,7 +291,7 @@ func TestPurgeClosedWorkspaceEnforcesMonotonicDiskReceipts(t *testing.T) {
 
 func TestPurgeClosedWorkspaceRejectsMalformedOrSingleProbeReceipt(t *testing.T) {
 	root := t.TempDir()
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	receipt := validRetentionReceipt(root, "closed-safe", strings.Repeat("a", 40), "refs/kitsoki/workspace-teardown-recovery/"+strings.Repeat("a", 40), now)
 	receipt.ActivityProbe.Kind = receipt.ProcessSnapshot.Kind
 	if _, err := PurgeClosedWorkspace(context.Background(), PurgeOptions{
@@ -306,7 +306,7 @@ func TestPurgeClosedWorkspaceRejectsMalformedOrSingleProbeReceipt(t *testing.T) 
 func TestClearRetainedWorkspacesPurgesLargePayloadWithoutArchiveAmplification(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	workspace := writeLegacyWorkspace(t, root, "closed-large-payload", now.Add(-48*time.Hour), false, false)
 	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
 	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
@@ -389,7 +389,7 @@ func TestClearRetainedWorkspacesPurgesLargePayloadWithoutArchiveAmplification(t 
 func TestClearRetainedWorkspacesMigratesInterruptedLegacyShellIsolation(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	originalID := "closed-legacy-shell"
 	workspace := writeLegacyWorkspace(t, root, originalID, now.Add(-48*time.Hour), false, false)
 	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
@@ -442,7 +442,7 @@ func TestClearRetainedWorkspacesMigratesInterruptedLegacyShellIsolation(t *testi
 func TestClearRetainedWorkspacesFailsClosedOnReceiptPathMismatch(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
-	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	now := retentionFixtureNow()
 	workspace := writeLegacyWorkspace(t, root, "closed-mismatch", now.Add(-48*time.Hour), false, false)
 	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
 	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
@@ -527,6 +527,15 @@ func validRetentionReceipt(root, id, head, recoveryRef string, now time.Time) Re
 			Safe:       true,
 		},
 	}
+}
+
+// retentionFixtureNow keeps the injected policy clock well ahead of the real
+// filesystem and Git timestamps created by writeLegacyWorkspace. A fixed
+// 2026 clock made the intended 48-hour-old fixtures become younger than the
+// 24-hour guard as wall time crossed that date, so unrelated provider and
+// byte-limit assertions failed before reaching their guard under test.
+func retentionFixtureNow() time.Time {
+	return time.Now().UTC().Add(72 * time.Hour)
 }
 
 func stableRetentionDiskUsage(string) (DiskUsage, error) {
