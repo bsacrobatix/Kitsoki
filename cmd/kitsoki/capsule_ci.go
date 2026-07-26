@@ -51,7 +51,7 @@ func capsuleCIProjectRoot(project string) (string, error) {
 	return filepath.Abs(project)
 }
 
-func ciInputs(ctx context.Context, project, workspace, pipeline string, trigger ci.Trigger) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, string, error) {
+func ciInputs(ctx context.Context, project, workspace, pipeline string, trigger ci.Trigger, jobInputs map[string]any) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, string, error) {
 	root, err := capsuleCIProjectRoot(project)
 	if err != nil {
 		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
@@ -89,8 +89,66 @@ func ciInputs(ctx context.Context, project, workspace, pipeline string, trigger 
 		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
 	}
 	service := ci.Service{ProjectRoot: workspacePath, Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}}
-	_, envelope, err := service.Plan(ctx, ci.RunRequest{Pipeline: pipeline, Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: story.Digest, Trigger: trigger})
+	_, envelope, err := service.Plan(ctx, ci.RunRequest{Pipeline: pipeline, Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: story.Digest, JobInputs: jobInputs, Trigger: trigger})
 	return m, in, p, envelope, workspacePath, err
+}
+
+func ciSourceInputs(ctx context.Context, project, sourceRoot, sourceSHA, instanceID, definitionID, pipeline string, trigger ci.Trigger, jobInputs map[string]any) (*control.Manager, control.Instance, ci.Pipeline, executor.Envelope, string, error) {
+	root, err := filepath.Abs(sourceRoot)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
+	head, err := gitTrim(ctx, root, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: inspect immutable source head: %w", err)
+	}
+	if sourceSHA == "" {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: --source-sha is required with --source-root")
+	}
+	if head != sourceSHA {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: immutable source head %q does not match --source-sha %q", head, sourceSHA)
+	}
+	dirty, err := gitTrim(ctx, root, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: inspect immutable source status: %w", err)
+	}
+	if dirty != "" {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: immutable source has tracked changes")
+	}
+	if strings.TrimSpace(instanceID) == "" {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: --instance is required with --source-root")
+	}
+	if strings.TrimSpace(definitionID) == "" {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: --definition is required with --source-root")
+	}
+	projectRoot, err := capsuleCIProjectRoot(project)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
+	m, err := capsuleWorkspaceManager(projectRoot)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
+	def, err := m.Definition(ctx, definitionID)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
+	cfg, err := ci.Load(root)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
+	p, ok := cfg.Pipelines[pipeline]
+	if !ok {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", fmt.Errorf("capsule ci: pipeline %q not found", pipeline)
+	}
+	story, err := storydigest.Compute(root, p.Story)
+	if err != nil {
+		return nil, control.Instance{}, ci.Pipeline{}, executor.Envelope{}, "", err
+	}
+	in := control.Instance{ID: instanceID, DefinitionID: def.ID, DefinitionDigest: def.Digest, Head: sourceSHA, Generation: 1, State: control.StateReady}
+	service := ci.Service{ProjectRoot: root, Env: environment.Resolver{ProjectRoot: root, Probe: environment.HostProbe()}}
+	_, envelope, err := service.Plan(ctx, ci.RunRequest{Pipeline: pipeline, Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: story.Digest, JobInputs: jobInputs, Trigger: trigger})
+	return m, in, p, envelope, root, err
 }
 
 func capsuleCIReadTrigger(cmd *cobra.Command, triggerPath, pipeline string) (ci.Trigger, error) {
@@ -117,6 +175,24 @@ func capsuleCIReadTrigger(cmd *cobra.Command, triggerPath, pipeline string) (ci.
 	return trigger, nil
 }
 
+func capsuleCIReadJobInputs(cmd *cobra.Command, inputPath string) (map[string]any, error) {
+	if inputPath == "" {
+		return nil, nil
+	}
+	raw, err := readPayloadFile(cmd, inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("capsule ci: read job inputs: %w", err)
+	}
+	var inputs map[string]any
+	if err := json.Unmarshal(raw, &inputs); err != nil {
+		return nil, fmt.Errorf("capsule ci: parse job inputs: %w", err)
+	}
+	if inputs == nil {
+		return nil, fmt.Errorf("capsule ci: job inputs must be a JSON object")
+	}
+	return inputs, nil
+}
+
 func capsuleCIPlanCmd() *cobra.Command {
 	var project, workspace, triggerPath string
 	var jsonOut bool
@@ -130,7 +206,7 @@ func capsuleCIPlanCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		_, _, _, env, _, err := ciInputs(cmd.Context(), project, workspace, args[0], trigger)
+		_, _, _, env, _, err := ciInputs(cmd.Context(), project, workspace, args[0], trigger, nil)
 		if err != nil {
 			return err
 		}
@@ -144,7 +220,7 @@ func capsuleCIPlanCmd() *cobra.Command {
 	return cmd
 }
 func capsuleCIRunCmd() *cobra.Command {
-	var project, workspace, verdictPath, fakeReceiptSigner, triggerPath, workerID, lane string
+	var project, workspace, sourceRoot, sourceSHA, instanceID, definitionID, jobInputsPath, verdictPath, fakeReceiptSigner, triggerPath, workerID, lane string
 	var jsonOut, detach bool
 	cmd := &cobra.Command{Use: "run <pipeline>", Args: cobra.ExactArgs(1), Short: "Run declared Capsule CI with a story-produced typed verdict", RunE: func(cmd *cobra.Command, args []string) error {
 		var err error
@@ -156,7 +232,26 @@ func capsuleCIRunCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		m, in, p, planned, workspacePath, err := ciInputs(cmd.Context(), project, workspace, args[0], trigger)
+		jobInputs, err := capsuleCIReadJobInputs(cmd, jobInputsPath)
+		if err != nil {
+			return err
+		}
+		if workspace != "" && sourceRoot != "" {
+			return fmt.Errorf("capsule ci: --workspace and --source-root are mutually exclusive")
+		}
+		if workspace == "" && sourceRoot == "" {
+			return fmt.Errorf("capsule ci: either --workspace or --source-root is required")
+		}
+		var m *control.Manager
+		var in control.Instance
+		var p ci.Pipeline
+		var planned executor.Envelope
+		var workspacePath string
+		if sourceRoot != "" {
+			m, in, p, planned, workspacePath, err = ciSourceInputs(cmd.Context(), project, sourceRoot, sourceSHA, instanceID, definitionID, args[0], trigger, jobInputs)
+		} else {
+			m, in, p, planned, workspacePath, err = ciInputs(cmd.Context(), project, workspace, args[0], trigger, jobInputs)
+		}
 		if err != nil {
 			return err
 		}
@@ -190,7 +285,7 @@ func capsuleCIRunCmd() *cobra.Command {
 			return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 		})
 		service := ci.Service{ProjectRoot: workspacePath, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project), Observer: record.FileRunObserver{ProjectRoot: project}}
-		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, Trigger: trigger, ExecutorOverride: workerID, Detach: detach})
+		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, JobInputs: jobInputs, Trigger: trigger, ExecutorOverride: workerID, Detach: detach})
 		if err != nil {
 			return persistCapsuleCIRunFailure(project, result, err)
 		}
@@ -222,6 +317,11 @@ func capsuleCIRunCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&project, "project", ".", "project root")
 	cmd.Flags().StringVar(&workspace, "workspace", "", "managed workspace id")
+	cmd.Flags().StringVar(&sourceRoot, "source-root", "", "exact immutable Git source checkout (workspace-free mode)")
+	cmd.Flags().StringVar(&sourceSHA, "source-sha", "", "exact commit at --source-root (workspace-free mode)")
+	cmd.Flags().StringVar(&instanceID, "instance", "", "logical execution instance id (workspace-free mode)")
+	cmd.Flags().StringVar(&definitionID, "definition", "development", "Capsule definition identity (workspace-free mode)")
+	cmd.Flags().StringVar(&jobInputsPath, "job-inputs", "", "sealed job-input JSON object path, or - for stdin")
 	cmd.Flags().StringVar(&triggerPath, "trigger", "", "normalized capsule CI trigger JSON path, or - for stdin (default: local trigger)")
 	cmd.Flags().StringVar(&verdictPath, "verdict", "", "optional externally produced capsule-ci-verdict/v1 JSON; omit to drive the declared story engine")
 	cmd.Flags().StringVar(&fakeReceiptSigner, "fake-receipt-signer", "", "deterministic local/test receipt signer id for projects requiring signed receipts")
@@ -229,7 +329,6 @@ func capsuleCIRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&workerID, "worker", "", "pin this dispatch to a registered worker id, overriding the pipeline's declared executor (still policy-checked: see agent_launch_policy.placement)")
 	cmd.Flags().StringVar(&lane, "lane", "", "placement policy lane for this dispatch when --worker is set (default: the pipeline name)")
 	cmd.Flags().BoolVar(&detach, "detach", false, "dispatch the sealed envelope asynchronously and return the run result (job id + execution id) immediately; reconcile terminal state with 'capsule ci status --job <id> --refresh' (pool executors with source_bucket only)")
-	_ = cmd.MarkFlagRequired("workspace")
 	return cmd
 }
 

@@ -110,6 +110,23 @@ func TestSealRejectsMutationOfExistingDigest(t *testing.T) {
 	}
 }
 
+func TestSealBindsJobInputsIntoEnvelopeDigest(t *testing.T) {
+	envelope, err := Seal(Envelope{
+		JobID: "job", ProjectID: "project", DefinitionDigest: "sha256:def",
+		Instance: control.Handle{ID: "workspace", Generation: 1}, SourceDigest: "sha256:source",
+		StoryPath: "stories/ci/app.yaml", StoryDigest: "sha256:story",
+		JobInputs:   map[string]any{"report_id": "fb-1", "attempt": float64(2)},
+		Environment: testEnvironmentLock(t), Policy: Policy{Network: "none"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope.JobInputs["report_id"] = "fb-2"
+	if _, err := Seal(envelope); err == nil || !strings.Contains(err.Error(), "envelope digest mismatch") {
+		t.Fatalf("expected sealed job-input mutation rejection, got %v", err)
+	}
+}
+
 func TestSealRejectsNetworkDriftAndUnenforceableLiveExternalDeny(t *testing.T) {
 	lock := testEnvironmentLock(t)
 	base := Envelope{

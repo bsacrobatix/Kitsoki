@@ -47,18 +47,23 @@ type AgentPolicy struct {
 	OnUnavailable string   `json:"on_unavailable,omitempty"`
 }
 type Envelope struct {
-	Schema           string           `json:"schema"`
-	JobID            string           `json:"job_id"`
-	ProjectID        string           `json:"project_id"`
-	DefinitionDigest string           `json:"definition_digest"`
-	Instance         control.Handle   `json:"instance"`
-	SourceDigest     string           `json:"source_digest"`
-	StoryPath        string           `json:"story_path"`
-	StoryDigest      string           `json:"story_digest"`
-	Environment      environment.Lock `json:"environment"`
-	Trigger          map[string]any   `json:"trigger"`
-	Policy           Policy           `json:"policy"`
-	Digest           string           `json:"digest"`
+	Schema           string         `json:"schema"`
+	JobID            string         `json:"job_id"`
+	ProjectID        string         `json:"project_id"`
+	DefinitionDigest string         `json:"definition_digest"`
+	Instance         control.Handle `json:"instance"`
+	SourceDigest     string         `json:"source_digest"`
+	StoryPath        string         `json:"story_path"`
+	StoryDigest      string         `json:"story_digest"`
+	// JobInputs are business inputs sealed independently from source. They let
+	// a controller dispatch an immutable source commit without first creating
+	// and committing a controller-local workspace solely to add
+	// .kitsoki/job-inputs.json.
+	JobInputs   map[string]any   `json:"job_inputs,omitempty"`
+	Environment environment.Lock `json:"environment"`
+	Trigger     map[string]any   `json:"trigger"`
+	Policy      Policy           `json:"policy"`
+	Digest      string           `json:"digest"`
 }
 type Event struct {
 	Kind           string         `json:"kind"`

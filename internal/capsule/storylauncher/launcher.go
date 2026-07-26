@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -316,12 +317,17 @@ func envelopeWorld(e executor.Envelope, projectRoot string) (map[string]any, err
 	trigger["envelope_digest"] = e.Digest
 	trigger["story_digest"] = e.StoryDigest
 	world := map[string]any{"ci_job_id": e.JobID, "ci_pipeline": trigger["requested_pipeline"], "ci_trigger": trigger, "ci_source": map[string]any{"digest": e.SourceDigest}, "ci_workspace": map[string]any{"id": e.Instance.ID, "generation": e.Instance.Generation, "path": projectRoot}, "ci_environment": map[string]any{"id": e.Environment.ID, "digest": e.Environment.Digest}, "ci_policy": map[string]any{"network": e.Policy.Network, "external_write": e.Policy.ExternalWrite, "command_timeout": e.Policy.CommandTimeout, "agents": map[string]any{"policy": e.Policy.Agents.Policy, "profiles": e.Policy.Agents.Profiles, "max_cost_usd": e.Policy.Agents.MaxCostUSD, "on_unavailable": e.Policy.Agents.OnUnavailable}}}
-	job, err := jobInputs(projectRoot)
+	sourceJob, err := jobInputs(projectRoot)
 	if err != nil {
 		return nil, err
 	}
-	if job != nil {
-		world["job"] = job
+	if e.JobInputs != nil && sourceJob != nil && !reflect.DeepEqual(e.JobInputs, sourceJob) {
+		return nil, fmt.Errorf("capsule ci: sealed job inputs conflict with source job inputs")
+	}
+	if e.JobInputs != nil {
+		world["job"] = e.JobInputs
+	} else if sourceJob != nil {
+		world["job"] = sourceJob
 	}
 	return world, nil
 }

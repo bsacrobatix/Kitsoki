@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -104,6 +105,90 @@ func TestCapsuleCIProjectRootKeepsExplicitPath(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("explicit project root = %q, want %q", got, want)
+	}
+}
+
+func TestCapsuleCISourceInputsUseExactHeadWithoutWorkspace(t *testing.T) {
+	project := t.TempDir()
+	writeCapsuleCIDevelopmentDefinition(t, project)
+	files := map[string]string{
+		".kitsoki/ci.yaml": `schema: capsule-ci/v1
+default_environment: ci
+pipelines:
+  change:
+    story: .kitsoki/stories/ci/app.yaml
+    triggers: [local]
+    result:
+      schema: capsule-ci-verdict/v1
+`,
+		".kitsoki/environments/ci.yaml": "schema: capsule-environment/v1\nid: ci\nnetwork: none\nsandbox: supervised\n",
+		".kitsoki/stories/ci/app.yaml": `app:
+  id: ci
+  version: 0.1.0
+  title: CI
+  author: Test
+  license: CC0
+world: {}
+intents: {}
+root: idle
+states:
+  idle:
+    view:
+      - prose: ok
+`,
+	}
+	for name, body := range files {
+		path := filepath.Join(project, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.name", "test"},
+		{"config", "user.email", "test@example.invalid"},
+		{"add", "."},
+		{"commit", "-qm", "fixture"},
+	} {
+		command := exec.Command("git", args...)
+		command.Dir = project
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	head, err := gitTrim(context.Background(), project, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := map[string]any{"report_id": "fb-1"}
+	_, in, _, envelope, root, err := ciSourceInputs(
+		context.Background(), project, project, head, "dispatch-fb-1",
+		"development", "change", ci.Trigger{Kind: "local"}, inputs,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.ID != "dispatch-fb-1" || in.Generation != 1 || in.Path != "" || in.Head != head {
+		t.Fatalf("synthetic source instance = %#v", in)
+	}
+	if root != project || envelope.SourceDigest != head || envelope.JobInputs["report_id"] != "fb-1" {
+		t.Fatalf("source envelope = %#v, root = %q", envelope, root)
+	}
+	if _, err := os.Stat(filepath.Join(project, ".capsules", "workspaces", "dispatch-fb-1")); !os.IsNotExist(err) {
+		t.Fatalf("source mode materialized a workspace: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(project, ".kitsoki", "ci.yaml"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, _, err := ciSourceInputs(
+		context.Background(), project, project, head, "dispatch-fb-2",
+		"development", "change", ci.Trigger{Kind: "local"}, inputs,
+	); err == nil || !strings.Contains(err.Error(), "tracked changes") {
+		t.Fatalf("expected dirty immutable source rejection, got %v", err)
 	}
 }
 

@@ -552,6 +552,7 @@ type RunRequest struct {
 	DefinitionDigest string
 	SourceDigest     string
 	StoryDigest      string
+	JobInputs        map[string]any
 	Trigger          Trigger
 
 	// ExecutorOverride, when non-empty, replaces the pipeline's declared
@@ -639,7 +640,7 @@ func (s Service) Plan(ctx context.Context, req RunRequest) (Pipeline, executor.E
 	if err != nil {
 		return Pipeline{}, executor.Envelope{}, err
 	}
-	e, err := executor.Seal(executor.Envelope{JobID: "pending", ProjectID: filepath.Base(s.ProjectRoot), DefinitionDigest: req.DefinitionDigest, Instance: req.Workspace, SourceDigest: req.SourceDigest, StoryPath: p.Story, StoryDigest: req.StoryDigest, Environment: lock, Trigger: triggerMap(req.Trigger), Policy: executor.Policy{Network: defaultNetwork(p.Permissions.Network), MinimumSandbox: lock.Sandbox, ExternalWrite: defaultExternal(p.Permissions.ExternalWrite), CommandTimeout: p.CommandTimeout, Agents: executor.AgentPolicy{Policy: defaultAgentPolicy(p.Agents.Policy), Profiles: append([]string(nil), p.Agents.Profiles...), MaxCostUSD: p.Agents.MaxCostUSD, OnUnavailable: p.Agents.OnUnavailable}}})
+	e, err := executor.Seal(executor.Envelope{JobID: "pending", ProjectID: filepath.Base(s.ProjectRoot), DefinitionDigest: req.DefinitionDigest, Instance: req.Workspace, SourceDigest: req.SourceDigest, StoryPath: p.Story, StoryDigest: req.StoryDigest, JobInputs: req.JobInputs, Environment: lock, Trigger: triggerMap(req.Trigger), Policy: executor.Policy{Network: defaultNetwork(p.Permissions.Network), MinimumSandbox: lock.Sandbox, ExternalWrite: defaultExternal(p.Permissions.ExternalWrite), CommandTimeout: p.CommandTimeout, Agents: executor.AgentPolicy{Policy: defaultAgentPolicy(p.Agents.Policy), Profiles: append([]string(nil), p.Agents.Profiles...), MaxCostUSD: p.Agents.MaxCostUSD, OnUnavailable: p.Agents.OnUnavailable}}})
 	return p, e, err
 }
 func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {

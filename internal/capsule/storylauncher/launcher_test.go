@@ -580,6 +580,33 @@ func TestEnvelopeWorldSeedsJobInputs(t *testing.T) {
 	}
 }
 
+func TestEnvelopeWorldSeedsSealedJobInputsWithoutSourceFile(t *testing.T) {
+	w, err := envelopeWorld(executor.Envelope{
+		JobID:     "job",
+		Trigger:   map[string]any{"requested_pipeline": "change"},
+		JobInputs: map[string]any{"ticket_body": "sealed"},
+	}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, ok := w["job"].(map[string]any)
+	if !ok || job["ticket_body"] != "sealed" {
+		t.Fatalf("sealed job inputs not seeded: %#v", w["job"])
+	}
+}
+
+func TestEnvelopeWorldRejectsConflictingSealedAndSourceJobInputs(t *testing.T) {
+	root := t.TempDir()
+	writeJobInputs(t, root, `{"ticket_body":"source"}`)
+	_, err := envelopeWorld(executor.Envelope{
+		JobID:     "job",
+		JobInputs: map[string]any{"ticket_body": "sealed"},
+	}, root)
+	if err == nil || !strings.Contains(err.Error(), "conflict") {
+		t.Fatalf("expected conflicting job inputs to fail closed, got %v", err)
+	}
+}
+
 func TestEnvelopeWorldNoJobInputsFileLeavesJobAbsent(t *testing.T) {
 	w, err := envelopeWorld(executor.Envelope{JobID: "job", Trigger: map[string]any{}}, t.TempDir())
 	if err != nil {
