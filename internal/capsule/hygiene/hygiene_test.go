@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,7 +50,7 @@ func TestBuildPlanReturnsEmptyCandidateSlice(t *testing.T) {
 	}
 }
 
-func TestWorkspaceInventoryStopsDispatchingSlowProbesOnDeadline(t *testing.T) {
+func TestWorkspaceInventorySkipsSlowGitForUnmanagedPaths(t *testing.T) {
 	root := t.TempDir()
 	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
 	for i := 0; i < 141; i++ {
@@ -64,26 +66,194 @@ func TestWorkspaceInventoryStopsDispatchingSlowProbesOnDeadline(t *testing.T) {
 	}
 	t.Setenv("KITSOKI_HYGIENE_PROBE_COUNT", countPath)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	_, err := BuildPlan(ctx, Options{
+	_, err := BuildPlan(context.Background(), Options{
 		ProjectRoot: root,
 		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
 			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
 		},
 	})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("BuildPlan error = %v, want deadline exceeded", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// The inventory has 141 paths, but it may only dispatch its fixed worker
-	// bound before cancellation. This prevents a post-green deadline from
-	// launching a probe for every workspace after it has already expired.
+	// Authoritative manager/sentinel metadata rejects every path before a Git
+	// or activity probe. The prior eager ordering dispatched slow Git work for
+	// all 141 retained non-candidates.
 	raw, readErr := os.ReadFile(countPath)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		t.Fatal(readErr)
 	}
-	if probes := len(raw); probes > workspaceInspectors {
-		t.Fatalf("slow probe launches = %d, want <= %d after deadline", probes, workspaceInspectors)
+	if probes := len(raw); probes != 0 {
+		t.Fatalf("slow Git probes = %d, want 0 for unmanaged paths", probes)
+	}
+}
+
+func TestBuildPlanSkipsActivityProbeWhenMetadataAndRetentionLeaveNoCleanupCandidates(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 27, 6, 0, 0, 0, time.UTC)
+	old := now.Add(-72 * time.Hour)
+	writeManagedWorkspace(t, root, "active", control.StateReady, old, false)
+	writeManagedWorkspace(t, root, "dirty", control.StateIntegrated, old, true)
+	writeManagedWorkspace(t, root, "young", control.StateIntegrated, now.Add(-time.Hour), false)
+	writeManagedWorkspace(t, root, "retained", control.StateIntegrated, old, false)
+	calls := 0
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  1,
+		MinWorkspaceAge: 24 * time.Hour,
+		CurrentPath:     root,
+		Now:             func() time.Time { return now },
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			calls++
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || plan.ActivityProbeCandidates != 0 || plan.ActivityProbeUnknown != 0 {
+		t.Fatalf("activity calls=%d probe_candidates=%d unknown=%d", calls, plan.ActivityProbeCandidates, plan.ActivityProbeUnknown)
+	}
+	assertWorkspaceCandidate(t, plan, "active", false, "lifecycle is active")
+	assertWorkspaceCandidate(t, plan, "dirty", false, "uncommitted changes")
+	assertWorkspaceCandidate(t, plan, "young", false, "younger than minimum cleanup age")
+	assertWorkspaceCandidate(t, plan, "retained", false, "retained among newest 1")
+}
+
+func TestBuildPlanProbesExactlyMetadataEligibleCleanupCandidates(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 27, 6, 0, 0, 0, time.UTC)
+	expected := []string{}
+	for index, id := range []string{"oldest", "middle", "active", "retained"} {
+		path := writeManagedWorkspace(t, root, id, control.StateIntegrated, now.Add(time.Duration(index-8)*time.Hour), false)
+		if id != "retained" {
+			canonical, err := canonicalPath(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected = append(expected, canonical)
+		}
+	}
+	writeManagedWorkspace(t, root, "dirty", control.StateIntegrated, now.Add(-96*time.Hour), true)
+	var mu sync.Mutex
+	probed := []string{}
+
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:     root,
+		KeepWorkspaces:  1,
+		MinWorkspaceAge: -1,
+		CurrentPath:     root,
+		Now:             func() time.Time { return now },
+		ReadWorkspaceActivity: func(_ context.Context, paths []string) (WorkspaceActivity, error) {
+			mu.Lock()
+			probed = append(probed, paths...)
+			mu.Unlock()
+			pids := map[string][]int{}
+			if filepath.Base(paths[0]) == "active" {
+				pids[paths[0]] = []int{4242}
+			}
+			return WorkspaceActivity{Known: true, PIDsByPath: pids}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(expected)
+	sort.Strings(probed)
+	if fmt.Sprint(probed) != fmt.Sprint(expected) {
+		t.Fatalf("probed=%v want=%v", probed, expected)
+	}
+	if plan.ActivityProbeCandidates != len(expected) || plan.ActivityProbeUnknown != 0 {
+		t.Fatalf("probe_candidates=%d unknown=%d", plan.ActivityProbeCandidates, plan.ActivityProbeUnknown)
+	}
+	assertWorkspaceCandidate(t, plan, "retained", false, "retained among newest 1")
+	assertWorkspaceCandidate(t, plan, "dirty", false, "uncommitted changes")
+	assertWorkspaceCandidate(t, plan, "active", false, "in use by process")
+	assertWorkspaceCandidate(t, plan, "middle", true, "outside retention")
+	assertWorkspaceCandidate(t, plan, "oldest", true, "outside retention")
+}
+
+func TestBuildPlanActivityUnknownAndTimeoutExcludeOnlyThoseCandidates(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 27, 6, 0, 0, 0, time.UTC)
+	for _, id := range []string{"safe", "timeout", "unknown"} {
+		writeManagedWorkspace(t, root, id, control.StateIntegrated, now.Add(-72*time.Hour), false)
+	}
+	var mu sync.Mutex
+	calls := 0
+	plan, err := BuildPlan(context.Background(), Options{
+		ProjectRoot:              root,
+		KeepWorkspaces:           -1,
+		MinWorkspaceAge:          -1,
+		CurrentPath:              root,
+		Now:                      func() time.Time { return now },
+		WorkspaceActivityTimeout: 20 * time.Millisecond,
+		ReadWorkspaceActivity: func(ctx context.Context, paths []string) (WorkspaceActivity, error) {
+			mu.Lock()
+			calls++
+			mu.Unlock()
+			switch filepath.Base(paths[0]) {
+			case "timeout":
+				<-ctx.Done()
+				return WorkspaceActivity{}, ctx.Err()
+			case "unknown":
+				return WorkspaceActivity{Reason: "probe unavailable"}, nil
+			default:
+				return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 || plan.ActivityProbeCandidates != 3 || plan.ActivityProbeUnknown != 2 {
+		t.Fatalf("calls=%d probe_candidates=%d unknown=%d", calls, plan.ActivityProbeCandidates, plan.ActivityProbeUnknown)
+	}
+	assertWorkspaceCandidate(t, plan, "safe", true, "outside retention")
+	assertWorkspaceCandidate(t, plan, "unknown", false, "probe unavailable")
+	assertWorkspaceCandidate(t, plan, "timeout", false, "timed out after 20ms")
+	codes := map[string]bool{}
+	for _, diagnostic := range plan.Diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["workspace_activity_probe_unknown"] || !codes["workspace_activity_probe_timeout"] {
+		t.Fatalf("diagnostics=%#v", plan.Diagnostics)
+	}
+}
+
+func TestWorkspaceActivityCandidateProbesStopDispatchingOnCancellation(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 7, 27, 6, 0, 0, 0, time.UTC)
+	for index := 0; index < workspaceActivityInspectors+5; index++ {
+		writeManagedWorkspace(t, root, fmt.Sprintf("eligible-%02d", index), control.StateIntegrated, now.Add(-72*time.Hour), false)
+	}
+	var mu sync.Mutex
+	calls := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := BuildPlan(ctx, Options{
+		ProjectRoot:              root,
+		KeepWorkspaces:           -1,
+		MinWorkspaceAge:          -1,
+		CurrentPath:              root,
+		Now:                      func() time.Time { return now },
+		WorkspaceActivityTimeout: time.Second,
+		ReadWorkspaceActivity: func(ctx context.Context, _ []string) (WorkspaceActivity, error) {
+			mu.Lock()
+			calls++
+			if calls == 1 {
+				cancel()
+			}
+			mu.Unlock()
+			<-ctx.Done()
+			return WorkspaceActivity{}, ctx.Err()
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("BuildPlan error=%v, want cancellation", err)
+	}
+	if calls == 0 || calls > workspaceActivityInspectors {
+		t.Fatalf("activity probes=%d, want 1..%d after cancellation", calls, workspaceActivityInspectors)
 	}
 }
 
@@ -1408,7 +1578,7 @@ func rewriteLegacyWorkspaceSource(t *testing.T, workspace, source string) {
 	}
 }
 
-func TestClosedWorkspaceCannotHideUntrackedFilesWithGitConfig(t *testing.T) {
+func TestClosedWorkspaceReceiptGuardPrecedesGitAndActivity(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
 	workspace := writeLegacyWorkspace(t, root, "closed-hidden-untracked", time.Now().UTC(), false, false)
@@ -1428,9 +1598,9 @@ func TestClosedWorkspaceCannotHideUntrackedFilesWithGitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := assertWorkspaceCandidate(t, plan, "closed-hidden-untracked", false, "uncommitted changes")
-	if !candidate.Dirty {
-		t.Fatalf("candidate did not report hidden untracked work: %#v", candidate)
+	candidate := assertWorkspaceCandidate(t, plan, "closed-hidden-untracked", false, "receipt-bound archive-free purge")
+	if candidate.ActivityKnown || candidate.Safe {
+		t.Fatalf("closed quarantine advanced past receipt guard: %#v", candidate)
 	}
 }
 

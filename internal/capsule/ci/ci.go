@@ -645,18 +645,20 @@ type HygienePlanner interface {
 	PlanHygiene(context.Context, CleanupPolicy) (HygieneReport, error)
 }
 type HygieneReport struct {
-	Schema            string `json:"schema,omitempty"`
-	Candidates        int    `json:"candidates"`
-	TotalBytes        int64  `json:"total_bytes"`
-	EvidenceRef       string `json:"evidence_ref,omitempty"`
-	Phase             string `json:"phase,omitempty"`
-	ProgressCompleted int    `json:"progress_completed,omitempty"`
-	ProgressTotal     int    `json:"progress_total,omitempty"`
-	DiskKnown         bool   `json:"disk_known,omitempty"`
-	DiskCapacityBytes int64  `json:"disk_capacity_bytes,omitempty"`
-	DiskFreeBytes     int64  `json:"disk_free_bytes,omitempty"`
-	DiskMinimumBytes  int64  `json:"disk_minimum_bytes,omitempty"`
-	DiskBelowMinimum  bool   `json:"disk_below_minimum,omitempty"`
+	Schema                  string `json:"schema,omitempty"`
+	Candidates              int    `json:"candidates"`
+	TotalBytes              int64  `json:"total_bytes"`
+	EvidenceRef             string `json:"evidence_ref,omitempty"`
+	Phase                   string `json:"phase,omitempty"`
+	ProgressCompleted       int    `json:"progress_completed,omitempty"`
+	ProgressTotal           int    `json:"progress_total,omitempty"`
+	ActivityProbeCandidates int    `json:"activity_probe_candidates,omitempty"`
+	ActivityProbeUnknown    int    `json:"activity_probe_unknown,omitempty"`
+	DiskKnown               bool   `json:"disk_known,omitempty"`
+	DiskCapacityBytes       int64  `json:"disk_capacity_bytes,omitempty"`
+	DiskFreeBytes           int64  `json:"disk_free_bytes,omitempty"`
+	DiskMinimumBytes        int64  `json:"disk_minimum_bytes,omitempty"`
+	DiskBelowMinimum        bool   `json:"disk_below_minimum,omitempty"`
 }
 type HygienePlannerFunc func(context.Context, CleanupPolicy) (HygieneReport, error)
 

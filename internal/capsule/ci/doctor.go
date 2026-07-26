@@ -412,6 +412,8 @@ func hygieneReportDetails(report HygieneReport) map[string]any {
 		details["progress_completed"] = report.ProgressCompleted
 		details["progress_total"] = report.ProgressTotal
 	}
+	details["activity_probe_candidates"] = report.ActivityProbeCandidates
+	details["activity_probe_unknown"] = report.ActivityProbeUnknown
 	return details
 }
 

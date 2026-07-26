@@ -435,6 +435,8 @@ func capsuleCIHygienePlanner(project string) ci.HygienePlanner {
 		report.Schema = plan.Schema
 		report.Candidates = len(plan.Candidates)
 		report.TotalBytes = plan.TotalBytes
+		report.ActivityProbeCandidates = plan.ActivityProbeCandidates
+		report.ActivityProbeUnknown = plan.ActivityProbeUnknown
 		report.DiskKnown = plan.Disk.Known
 		report.DiskCapacityBytes = plan.Disk.CapacityBytes
 		report.DiskFreeBytes = plan.Disk.FreeBytes

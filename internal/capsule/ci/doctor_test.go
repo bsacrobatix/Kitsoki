@@ -28,7 +28,7 @@ func TestDoctorPerformsNoSpendReadinessPreflight(t *testing.T) {
 			return WorkspaceInspection{Path: filepath.Join(root, ".capsules", "workspaces", "w"), Head: "sha256:source", Branch: "agent/test"}, nil
 		}),
 		Hygiene: HygienePlannerFunc(func(context.Context, CleanupPolicy) (HygieneReport, error) {
-			return HygieneReport{Candidates: 1, TotalBytes: 1024, DiskKnown: true, DiskCapacityBytes: 100 << 30, DiskFreeBytes: 50 << 30, DiskMinimumBytes: 10 << 30}, nil
+			return HygieneReport{Candidates: 1, TotalBytes: 1024, ActivityProbeCandidates: 1, DiskKnown: true, DiskCapacityBytes: 100 << 30, DiskFreeBytes: 50 << 30, DiskMinimumBytes: 10 << 30}, nil
 		}),
 		Now: func() time.Time { return time.Date(2026, 7, 11, 1, 2, 3, 0, time.UTC) },
 	}
@@ -44,6 +44,10 @@ func TestDoctorPerformsNoSpendReadinessPreflight(t *testing.T) {
 		if check == nil || check.Outcome != "passed" {
 			t.Fatalf("check %s: %#v", id, check)
 		}
+	}
+	hygiene := doctorCheckByID(report.Checks, "hygiene-debt")
+	if hygiene.Details["activity_probe_candidates"] != 1 || hygiene.Details["activity_probe_unknown"] != 0 {
+		t.Fatalf("hygiene activity details: %#v", hygiene.Details)
 	}
 	if provider.ran {
 		t.Fatal("doctor invoked Provider.Run")

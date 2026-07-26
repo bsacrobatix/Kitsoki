@@ -38,6 +38,11 @@ const (
 	projectSentinelSchema = "capsule-project/v1"
 	byteMeasurement       = "logical file bytes; workspace .git/objects excluded as shared clone data"
 	workspaceInspectors   = 4
+	// workspaceActivityProbeTimeout bounds one cleanup-candidate proof. A
+	// timeout excludes only that candidate; it does not make inactivity known
+	// and it does not prevent authoritative metadata from classifying the rest
+	// of the retained inventory.
+	workspaceActivityProbeTimeout = 2 * time.Second
 	// workspaceActivityInspectors bounds concurrent lsof +D probes. A global
 	// lsof walk is unbounded with respect to unrelated process file tables and
 	// can starve the doctor before it reaches its first workspace. Each scoped
@@ -46,24 +51,25 @@ const (
 )
 
 type Options struct {
-	ProjectRoot           string
-	KeepRuns              int
-	KeepWorkspaces        int
-	MinWorkspaceAge       time.Duration
-	MinFreeBytes          int64
-	MeasureWorkspaceBytes bool
-	IncludeCapsuleCache   bool
-	IncludeGoBuildCache   bool
-	GoCachePath           string
-	PinnedWorkspaceIDs    []string
-	CurrentPath           string
-	CleanGoCache          func(context.Context) error
-	ReadDiskUsage         func(string) (DiskUsage, error)
-	ReadWorkspaceActivity func(context.Context, []string) (WorkspaceActivity, error)
-	CloseWorkspace        func(context.Context, string, Candidate) error
-	ReportProgress        func(Progress)
-	BeforeApply           func(Candidate)
-	Now                   func() time.Time
+	ProjectRoot              string
+	KeepRuns                 int
+	KeepWorkspaces           int
+	MinWorkspaceAge          time.Duration
+	MinFreeBytes             int64
+	MeasureWorkspaceBytes    bool
+	IncludeCapsuleCache      bool
+	IncludeGoBuildCache      bool
+	GoCachePath              string
+	PinnedWorkspaceIDs       []string
+	CurrentPath              string
+	CleanGoCache             func(context.Context) error
+	ReadDiskUsage            func(string) (DiskUsage, error)
+	ReadWorkspaceActivity    func(context.Context, []string) (WorkspaceActivity, error)
+	WorkspaceActivityTimeout time.Duration
+	CloseWorkspace           func(context.Context, string, Candidate) error
+	ReportProgress           func(Progress)
+	BeforeApply              func(Candidate)
+	Now                      func() time.Time
 	// ClearInactiveMerged limits cleanup to workspaces whose work is already
 	// integrated: native workspaces must be in the integrated lifecycle state
 	// and legacy workspaces must have their HEAD contained in a branch. It is
@@ -124,12 +130,14 @@ type Candidate struct {
 	CapsuleProjectManagedBy string        `json:"capsule_project_managed_by,omitempty"`
 	ProvenanceDigest        string        `json:"provenance_digest,omitempty"`
 	activityDiagnostics     []ActivityDiagnostic
+	needsActivityProbe      bool
+	activityProbed          bool
+	activityProbeUnknown    bool
 }
 
-// ActivityDiagnostic records a non-fatal, typed process-inventory warning.
-// Diagnostics never relax the probe on their own: readWorkspaceActivity only
-// attaches them after proving that the warning is understood, disjoint from
-// every requested workspace, and accompanied by conclusive machine output.
+// ActivityDiagnostic records typed process-inventory evidence. Warnings never
+// relax the probe on their own; error diagnostics make the named candidate's
+// activity unknown and therefore ineligible for cleanup.
 type ActivityDiagnostic struct {
 	Code     string `json:"code"`
 	Severity string `json:"severity"`
@@ -158,20 +166,22 @@ type DiskUsage struct {
 }
 
 type Plan struct {
-	Schema                 string               `json:"schema"`
-	Project                string               `json:"project"`
-	KeepRuns               int                  `json:"keep_runs"`
-	KeepWorkspaces         int                  `json:"keep_workspaces"`
-	MinWorkspaceAge        string               `json:"min_workspace_age"`
-	BytesBasis             string               `json:"bytes_basis"`
-	Candidates             []Candidate          `json:"candidates"`
-	TotalBytes             int64                `json:"total_bytes"`
-	InventoryBytes         int64                `json:"inventory_bytes"`
-	Unmeasured             int                  `json:"unmeasured_candidates,omitempty"`
-	WorkspaceBytesMeasured bool                 `json:"workspace_bytes_measured"`
-	Disk                   DiskUsage            `json:"disk"`
-	DiskError              string               `json:"disk_error,omitempty"`
-	Diagnostics            []ActivityDiagnostic `json:"diagnostics,omitempty"`
+	Schema                  string               `json:"schema"`
+	Project                 string               `json:"project"`
+	KeepRuns                int                  `json:"keep_runs"`
+	KeepWorkspaces          int                  `json:"keep_workspaces"`
+	MinWorkspaceAge         string               `json:"min_workspace_age"`
+	BytesBasis              string               `json:"bytes_basis"`
+	Candidates              []Candidate          `json:"candidates"`
+	TotalBytes              int64                `json:"total_bytes"`
+	InventoryBytes          int64                `json:"inventory_bytes"`
+	Unmeasured              int                  `json:"unmeasured_candidates,omitempty"`
+	WorkspaceBytesMeasured  bool                 `json:"workspace_bytes_measured"`
+	Disk                    DiskUsage            `json:"disk"`
+	DiskError               string               `json:"disk_error,omitempty"`
+	Diagnostics             []ActivityDiagnostic `json:"diagnostics,omitempty"`
+	ActivityProbeCandidates int                  `json:"activity_probe_candidates,omitempty"`
+	ActivityProbeUnknown    int                  `json:"activity_probe_unknown,omitempty"`
 }
 
 type ApplyResult struct {
@@ -305,6 +315,12 @@ func finishPlan(root string, opts Options, plan Plan) (Plan, error) {
 	})
 	for _, c := range plan.Candidates {
 		plan.Diagnostics = appendUniqueActivityDiagnostics(plan.Diagnostics, c.activityDiagnostics...)
+		if c.activityProbed {
+			plan.ActivityProbeCandidates++
+		}
+		if c.activityProbeUnknown {
+			plan.ActivityProbeUnknown++
+		}
 		if c.BytesKnown {
 			plan.InventoryBytes += c.Bytes
 		} else {
@@ -490,16 +506,18 @@ func nestedCapsuleProjects(ctx context.Context, root string, opts Options, minAg
 			candidates = append(candidates, candidate)
 			continue
 		}
-		activity, activityErr := workspaceActivity(ctx, opts, []string{project.Root})
-		if activityErr != nil {
-			activity = WorkspaceActivity{Reason: activityErr.Error()}
-		}
-		candidate := inspectNestedCapsuleProject(ctx, root, project, sentinelInfo, current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes)
+		candidate := inspectNestedCapsuleProject(ctx, root, project, sentinelInfo, current, pinned, now, minAge, deferredWorkspaceActivity(), opts.MeasureWorkspaceBytes)
 		projects = append(projects, project)
 		candidates = append(candidates, candidate)
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].Relative < projects[j].Relative })
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Path < candidates[j].Path })
+	if !opts.ClearInactiveMerged {
+		candidates, err = probeCandidateActivities(ctx, root, opts, candidates)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	return projects, candidates, nil
 }
 
@@ -614,10 +632,6 @@ func inspectNestedCapsuleProject(ctx context.Context, parentRoot string, project
 		candidate.Reason = "Capsule project contains the current process directory"
 	case candidate.Pinned:
 		candidate.Reason = "Capsule project is pinned for investigation or reuse"
-	case !candidate.ActivityKnown:
-		candidate.Reason = "Capsule project process activity is unknown: " + firstNonEmpty(activity.Reason, "activity probe unavailable")
-	case len(candidate.ActivePIDs) > 0:
-		candidate.Reason = fmt.Sprintf("Capsule project is in use by process(es): %v", candidate.ActivePIDs)
 	case inventoryErr != nil:
 		candidate.Reason = "Capsule project workspace inventory is invalid: " + inventoryErr.Error()
 	case candidate.Initializing:
@@ -628,6 +642,11 @@ func inspectNestedCapsuleProject(ctx context.Context, parentRoot string, project
 		candidate.Reason = fmt.Sprintf("Capsule project still has %d non-closed workspace record(s)", activeRecords)
 	case minAge > 0 && now.Sub(updated) < minAge:
 		candidate.Reason = "empty Capsule project is younger than minimum cleanup age " + minAge.String()
+	case !candidate.ActivityKnown:
+		candidate.needsActivityProbe = true
+		candidate.Reason = "Capsule project process activity is unknown: " + firstNonEmpty(activity.Reason, "activity probe unavailable")
+	case len(candidate.ActivePIDs) > 0:
+		candidate.Reason = fmt.Sprintf("Capsule project is in use by process(es): %v", candidate.ActivePIDs)
 	default:
 		candidate.Safe = true
 		candidate.Reason = "empty inactive sentinel-owned Capsule project is outside the cleanup age guard"
@@ -696,7 +715,7 @@ func workspaceCandidates(ctx context.Context, root string, nested []nestedCapsul
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	eligible := make([]int, 0, len(out))
 	for i := range out {
-		if out[i].Safe {
+		if out[i].needsActivityProbe {
 			eligible = append(eligible, i)
 		}
 	}
@@ -704,10 +723,19 @@ func workspaceCandidates(ctx context.Context, root string, nested []nestedCapsul
 		return out[eligible[i]].UpdatedAt.After(out[eligible[j]].UpdatedAt)
 	})
 	for _, index := range eligible[:minInt(keep, len(eligible))] {
-		out[index].Safe = false
+		out[index].needsActivityProbe = false
 		out[index].Reason = fmt.Sprintf("retained among newest %d clean terminal workspace(s)", keep)
 	}
-	return out, nil
+	if opts.ArchiveFreeWorkspaceRemovalOnly {
+		for i := range out {
+			if out[i].needsActivityProbe {
+				out[i].needsActivityProbe = false
+				out[i].Reason = "workspace requires lifecycle close and receipt-bound archive-free purge"
+			}
+		}
+		return out, nil
+	}
+	return probeCandidateActivities(ctx, root, opts, out)
 }
 
 func decorateNestedWorkspaceCandidate(parentRoot string, projectRoot nestedCapsuleProject, candidate Candidate) (Candidate, error) {
@@ -780,13 +808,7 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	activity := WorkspaceActivity{Reason: "workspace activity probe was not run"}
-	if len(ordered) > 0 {
-		activity, err = workspaceActivity(ctx, opts, ordered)
-		if err != nil {
-			activity = WorkspaceActivity{Reason: err.Error()}
-		}
-	}
+	activity := deferredWorkspaceActivity()
 	type inspection struct {
 		candidate Candidate
 		err       error
@@ -923,24 +945,12 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 		fileExists(filepath.Join(path, workspacePinSentinel)) ||
 		fileExists(filepath.Join(root, ".capsules", "workspace-pins", candidate.WorkspaceID)) ||
 		stagingPinned
-	status, statusErr := gitStatus(ctx, path)
-	if statusErr == nil {
-		candidate.Status = "clean"
-		candidate.Dirty = strings.TrimSpace(status) != ""
-		if candidate.Dirty {
-			candidate.Status = "dirty"
-		}
-	}
 
 	switch {
 	case candidate.Current:
 		candidate.Reason = "workspace contains the current process directory"
 	case candidate.Pinned:
 		candidate.Reason = "workspace is pinned for investigation or reuse"
-	case !candidate.ActivityKnown:
-		candidate.Reason = "workspace process activity is unknown: " + firstNonEmpty(activity.Reason, "activity probe unavailable")
-	case len(candidate.ActivePIDs) > 0:
-		candidate.Reason = fmt.Sprintf("workspace is in use by process(es): %v", candidate.ActivePIDs)
 	case in == nil && !legacyRecognized:
 		candidate.Reason = "workspace is not present in the manager inventory"
 	case candidate.Legacy && legacyErr != nil:
@@ -953,10 +963,6 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 		candidate.Reason = "workspace lease owner is unknown"
 	case !candidate.Legacy && strings.TrimSpace(in.Provider) == "":
 		candidate.Reason = "workspace provider is unknown"
-	case statusErr != nil:
-		candidate.Reason = "workspace Git status is unknown: " + statusErr.Error()
-	case candidate.Dirty:
-		candidate.Reason = "workspace has uncommitted changes"
 	case candidate.Legacy && !candidate.Merged:
 		candidate.Reason = "legacy workspace HEAD is not contained in declared target " + candidate.Target
 	case candidate.Legacy && strings.HasPrefix(id, "closed-") && !allowReceiptBoundClosedPurge:
@@ -972,11 +978,31 @@ func inspectWorkspace(ctx context.Context, root, path string, in *control.Instan
 	case minAge > 0 && now.Sub(candidate.UpdatedAt) < minAge:
 		candidate.Reason = "terminal workspace is younger than minimum cleanup age " + minAge.String()
 	default:
-		candidate.Safe = true
-		if candidate.Legacy {
-			candidate.Reason = "clean merged inactive legacy managed workspace is outside retention and age guards"
-		} else {
-			candidate.Reason = "clean terminal managed workspace is outside retention and age guards"
+		status, statusErr := gitStatus(ctx, path)
+		if statusErr != nil {
+			candidate.Reason = "workspace Git status is unknown: " + statusErr.Error()
+			return candidate, nil
+		}
+		candidate.Status = "clean"
+		candidate.Dirty = strings.TrimSpace(status) != ""
+		if candidate.Dirty {
+			candidate.Status = "dirty"
+			candidate.Reason = "workspace has uncommitted changes"
+			return candidate, nil
+		}
+		switch {
+		case !candidate.ActivityKnown:
+			candidate.needsActivityProbe = true
+			candidate.Reason = "workspace process activity is unknown: " + firstNonEmpty(activity.Reason, "activity probe unavailable")
+		case len(candidate.ActivePIDs) > 0:
+			candidate.Reason = fmt.Sprintf("workspace is in use by process(es): %v", candidate.ActivePIDs)
+		default:
+			candidate.Safe = true
+			if candidate.Legacy {
+				candidate.Reason = "clean merged inactive legacy managed workspace is outside retention and age guards"
+			} else {
+				candidate.Reason = "clean terminal managed workspace is outside retention and age guards"
+			}
 		}
 	}
 	return candidate, nil
@@ -1357,6 +1383,180 @@ func gitAncestor(ctx context.Context, repo, ancestor, descendant string) (bool, 
 	return false, fmt.Errorf("git merge-base --is-ancestor: %w: %s", err, strings.TrimSpace(string(out)))
 }
 
+func deferredWorkspaceActivity() WorkspaceActivity {
+	return WorkspaceActivity{
+		PIDsByPath: map[string][]int{},
+		Reason:     "workspace activity probe was deferred until cleanup eligibility was established",
+	}
+}
+
+func probeCandidateActivities(ctx context.Context, root string, opts Options, candidates []Candidate) ([]Candidate, error) {
+	pending := make([]int, 0, len(candidates))
+	for i := range candidates {
+		if candidates[i].needsActivityProbe {
+			pending = append(pending, i)
+		}
+	}
+	if len(pending) == 0 {
+		return candidates, nil
+	}
+	if opts.ReportProgress != nil {
+		opts.ReportProgress(Progress{Phase: "workspace-activity", Completed: 0, Total: len(pending)})
+	}
+	type result struct {
+		index    int
+		path     string
+		activity WorkspaceActivity
+		err      error
+	}
+	probeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	workers := minInt(workspaceActivityInspectors, len(pending))
+	jobs := make(chan int)
+	results := make(chan result, workers)
+	var group sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for {
+				select {
+				case <-probeCtx.Done():
+					return
+				case index, ok := <-jobs:
+					if !ok {
+						return
+					}
+					path := filepath.Join(root, filepath.FromSlash(candidates[index].Path))
+					activity, err := boundedWorkspaceActivity(probeCtx, opts, path)
+					select {
+					case results <- result{index: index, path: path, activity: activity, err: err}:
+					case <-probeCtx.Done():
+						return
+					}
+				}
+			}
+		}()
+	}
+	defer func() {
+		cancel()
+		close(jobs)
+		group.Wait()
+	}()
+	for next, inFlight, completed := 0, 0, 0; next < len(pending) || inFlight > 0; {
+		if err := probeCtx.Err(); err != nil {
+			return nil, err
+		}
+		var submit chan<- int
+		var index int
+		if next < len(pending) && inFlight < workers {
+			submit = jobs
+			index = pending[next]
+		}
+		select {
+		case <-probeCtx.Done():
+			return nil, probeCtx.Err()
+		case submit <- index:
+			next++
+			inFlight++
+		case outcome := <-results:
+			inFlight--
+			if outcome.err != nil {
+				return nil, outcome.err
+			}
+			candidates[outcome.index] = applyCandidateActivity(candidates[outcome.index], outcome.path, outcome.activity)
+			completed++
+			if opts.ReportProgress != nil {
+				opts.ReportProgress(Progress{Phase: "workspace-activity", Completed: completed, Total: len(pending)})
+			}
+		}
+	}
+	return candidates, nil
+}
+
+func boundedWorkspaceActivity(ctx context.Context, opts Options, path string) (WorkspaceActivity, error) {
+	timeout := opts.WorkspaceActivityTimeout
+	if timeout <= 0 {
+		timeout = workspaceActivityProbeTimeout
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	activity, err := workspaceActivity(probeCtx, opts, []string{path})
+	if ctx.Err() != nil {
+		return WorkspaceActivity{}, ctx.Err()
+	}
+	if err != nil {
+		reason := err.Error()
+		code := "workspace_activity_probe_failed"
+		message := "workspace activity proof failed; candidate is excluded from cleanup"
+		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) {
+			reason = "activity probe timed out after " + timeout.String()
+			code = "workspace_activity_probe_timeout"
+			message = "workspace activity proof timed out; candidate is excluded from cleanup"
+		}
+		return unknownWorkspaceActivity(path, reason, code, message, activity.Diagnostics), nil
+	}
+	if !activity.Known {
+		reason := firstNonEmpty(activity.Reason, "activity probe did not establish a conclusive result")
+		return unknownWorkspaceActivity(
+			path,
+			reason,
+			"workspace_activity_probe_unknown",
+			"workspace activity proof is unknown; candidate is excluded from cleanup",
+			activity.Diagnostics,
+		), nil
+	}
+	return activity, nil
+}
+
+func unknownWorkspaceActivity(path, reason, code, message string, diagnostics []ActivityDiagnostic) WorkspaceActivity {
+	return WorkspaceActivity{
+		PIDsByPath: map[string][]int{},
+		Reason:     reason,
+		Diagnostics: appendUniqueActivityDiagnostics(diagnostics, ActivityDiagnostic{
+			Code:     code,
+			Severity: "error",
+			Source:   "workspace-activity",
+			Subject:  filepath.Clean(path),
+			Message:  message,
+		}),
+	}
+}
+
+func applyCandidateActivity(candidate Candidate, path string, activity WorkspaceActivity) Candidate {
+	candidate.needsActivityProbe = false
+	candidate.activityProbed = true
+	candidate.ActivityKnown = activity.Known
+	candidate.ActivePIDs = workspaceActivityPIDs(activity, path)
+	candidate.activityDiagnostics = appendUniqueActivityDiagnostics(candidate.activityDiagnostics, activity.Diagnostics...)
+	switch {
+	case !candidate.ActivityKnown:
+		candidate.activityProbeUnknown = true
+		if candidate.Kind == "capsule-project" {
+			candidate.Reason = "Capsule project process activity is unknown: " + firstNonEmpty(activity.Reason, "activity probe unavailable")
+		} else {
+			candidate.Reason = "workspace process activity is unknown: " + firstNonEmpty(activity.Reason, "activity probe unavailable")
+		}
+	case len(candidate.ActivePIDs) > 0:
+		if candidate.Kind == "capsule-project" {
+			candidate.Reason = fmt.Sprintf("Capsule project is in use by process(es): %v", candidate.ActivePIDs)
+		} else {
+			candidate.Reason = fmt.Sprintf("workspace is in use by process(es): %v", candidate.ActivePIDs)
+		}
+	default:
+		candidate.Safe = true
+		switch {
+		case candidate.Kind == "capsule-project":
+			candidate.Reason = "empty inactive sentinel-owned Capsule project is outside the cleanup age guard"
+		case candidate.Legacy:
+			candidate.Reason = "clean merged inactive legacy managed workspace is outside retention and age guards"
+		default:
+			candidate.Reason = "clean terminal managed workspace is outside retention and age guards"
+		}
+	}
+	return candidate
+}
+
 func workspaceActivity(ctx context.Context, opts Options, paths []string) (WorkspaceActivity, error) {
 	reader := opts.ReadWorkspaceActivity
 	if reader == nil {
@@ -1637,9 +1837,9 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 			return planned, false, fmt.Errorf("nested Capsule projects cannot use the legacy workspace provider")
 		}
 		path := filepath.Join(root, filepath.FromSlash(planned.Path))
-		activity, err := workspaceActivity(ctx, opts, []string{path})
+		activity, err := boundedWorkspaceActivity(ctx, opts, path)
 		if err != nil {
-			activity = WorkspaceActivity{Reason: err.Error()}
+			return planned, false, err
 		}
 		current := opts.CurrentPath
 		if current == "" {
@@ -1679,9 +1879,9 @@ func recheckWorkspace(ctx context.Context, root string, opts Options, planned Ca
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	activity, activityErr := workspaceActivity(ctx, opts, []string{in.Path})
+	activity, activityErr := boundedWorkspaceActivity(ctx, opts, in.Path)
 	if activityErr != nil {
-		activity = WorkspaceActivity{Reason: activityErr.Error()}
+		return planned, false, activityErr
 	}
 	fresh, err := inspectWorkspace(ctx, projectRoot, in.Path, &in, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
 	if err != nil {
@@ -1751,9 +1951,9 @@ func recheckNestedCapsuleProject(ctx context.Context, parentRoot string, opts Op
 	if opts.Now != nil {
 		now = opts.Now().UTC()
 	}
-	activity, activityErr := workspaceActivity(ctx, opts, []string{projectRoot.Root})
+	activity, activityErr := boundedWorkspaceActivity(ctx, opts, projectRoot.Root)
 	if activityErr != nil {
-		activity = WorkspaceActivity{Reason: activityErr.Error()}
+		return planned, false, activityErr
 	}
 	fresh := inspectNestedCapsuleProject(ctx, parentRoot, projectRoot, sentinelInfo, current, stringSet(opts.PinnedWorkspaceIDs), now, normalizeAge(opts.MinWorkspaceAge), activity, opts.MeasureWorkspaceBytes)
 	return fresh, fresh.Safe, nil
