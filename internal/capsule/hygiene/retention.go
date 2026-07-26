@@ -167,9 +167,23 @@ type PurgeResult struct {
 // operator cleanup command. A malformed or ineligible receipt is visible as a
 // typed skip; it never prevents independent valid receipts from being purged.
 type RetentionClearResult struct {
-	Schema  string        `json:"schema"`
-	Purged  []PurgeResult `json:"purged"`
-	Skipped []PurgeResult `json:"skipped"`
+	Schema     string               `json:"schema"`
+	Migrations []RetentionMigration `json:"migrations"`
+	Purged     []PurgeResult        `json:"purged"`
+	Skipped    []PurgeResult        `json:"skipped"`
+}
+
+// RetentionMigration makes a receiptless historical quarantine visible. A
+// migration writes only its bounded receipt; it never archives or deletes the
+// workspace. A later clear must still pass the ordinary receipt age, liveness,
+// recovery-ref, and exact-path checks before it can purge anything.
+type RetentionMigration struct {
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspacePath string `json:"workspace_path,omitempty"`
+	ReceiptPath   string `json:"receipt_path,omitempty"`
+	Status        string `json:"status"`
+	ReasonCode    string `json:"reason_code,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 type purgeIntent struct {
@@ -474,10 +488,21 @@ func ClearRetainedWorkspaces(ctx context.Context, opts PurgeOptions) (RetentionC
 		return RetentionClearResult{}, err
 	}
 	result := RetentionClearResult{
-		Schema:  RetentionClearSchema,
-		Purged:  []PurgeResult{},
-		Skipped: []PurgeResult{},
+		Schema:     RetentionClearSchema,
+		Migrations: []RetentionMigration{},
+		Purged:     []PurgeResult{},
+		Skipped:    []PurgeResult{},
 	}
+	// Some pre-receipt legacy close operations left a correctly quarantined
+	// checkout and its recovery ref, but no close receipt. Migrate only that
+	// exact, observable shape. This deliberately happens before listing
+	// receipts so a first clear records the new receipt (and its cooling window)
+	// rather than deleting a historical payload immediately.
+	migrations, err := migrateReceiptlessClosedQuarantines(ctx, root, opts)
+	if err != nil {
+		return RetentionClearResult{}, err
+	}
+	result.Migrations = migrations
 	dir := filepath.Join(root, ".capsules", "retention", "receipts")
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -534,6 +559,133 @@ func ClearRetainedWorkspaces(ctx context.Context, opts PurgeOptions) (RetentionC
 		} else {
 			result.Skipped = append(result.Skipped, purged)
 		}
+	}
+	return result, nil
+}
+
+func migrateReceiptlessClosedQuarantines(ctx context.Context, root string, opts PurgeOptions) ([]RetentionMigration, error) {
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	entries, err := os.ReadDir(workspaceRoot)
+	if os.IsNotExist(err) {
+		return []RetentionMigration{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("capsule retention: list legacy quarantines: %w", err)
+	}
+	now := time.Now().UTC()
+	if opts.Now != nil {
+		now = opts.Now().UTC()
+	}
+	minAge := opts.MinAge
+	if minAge == 0 {
+		minAge = defaultWorkspaceAge
+	}
+	activityReader := opts.ReadWorkspaceActivity
+	if activityReader == nil {
+		activityReader = ProbeWorkspaceActivity
+	}
+	result := []RetentionMigration{}
+	for _, entry := range entries {
+		id := entry.Name()
+		if !strings.HasPrefix(id, "closed-") || strings.HasPrefix(id, "closed-purging-") || strings.HasPrefix(id, "closed-recovered-") {
+			continue
+		}
+		path := filepath.Join(workspaceRoot, id)
+		relative := filepath.ToSlash(filepath.Join(".capsules", "workspaces", id))
+		record := RetentionMigration{WorkspaceID: id, WorkspacePath: relative, Status: "skipped"}
+		info, statErr := os.Lstat(path)
+		if statErr != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			record.ReasonCode = "invalid_quarantine_path"
+			record.Reason = "legacy closed quarantine is not a regular directory"
+			result = append(result, record)
+			continue
+		}
+		receiptPath := filepath.Join(root, ".capsules", "retention", "receipts", id+".json")
+		if _, receiptErr := os.Lstat(receiptPath); receiptErr == nil {
+			continue
+		} else if !os.IsNotExist(receiptErr) {
+			record.ReasonCode = "receipt_inspect_failed"
+			record.Reason = receiptErr.Error()
+			result = append(result, record)
+			continue
+		}
+		legacy, recognized, legacyErr := readLegacyWorkspaceWithReceiptlessClosedAuthority(ctx, root, path)
+		if !recognized || legacyErr != nil {
+			record.ReasonCode = "legacy_authority_unproven"
+			if legacyErr != nil {
+				record.Reason = legacyErr.Error()
+			} else {
+				record.Reason = "legacy Capsule manifests are missing"
+			}
+			result = append(result, record)
+			continue
+		}
+		if pathContains(path, opts.CurrentPath) {
+			record.ReasonCode = "current_workspace"
+			record.Reason = "legacy closed quarantine contains the current process directory"
+			result = append(result, record)
+			continue
+		}
+		status, statusErr := gitStatus(ctx, path)
+		if statusErr != nil || strings.TrimSpace(status) != "" {
+			record.ReasonCode = "workspace_not_clean"
+			record.Reason = "legacy closed quarantine is dirty or Git status is unknown"
+			result = append(result, record)
+			continue
+		}
+		process, processErr := ProbeWorkspaceProcessCommands(ctx, []string{path})
+		activity, activityErr := activityReader(ctx, []string{path})
+		if processErr != nil || !process.Known || activityErr != nil || !activity.Known {
+			record.ReasonCode = "liveness_unproven"
+			record.Reason = "two independent liveness probes are required to migrate a legacy quarantine"
+			result = append(result, record)
+			continue
+		}
+		if len(process.PIDsByPath[path]) != 0 || len(activity.PIDsByPath[path]) != 0 {
+			record.ReasonCode = "workspace_active"
+			record.Reason = "legacy closed quarantine is still named by a running process"
+			result = append(result, record)
+			continue
+		}
+		recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + legacy.Head
+		recovery, recoveryErr := gitText(ctx, root, "rev-parse", "--verify", recoveryRef+"^{commit}")
+		if recoveryErr != nil || recovery != legacy.Head {
+			record.ReasonCode = "recovery_ref_unproven"
+			record.Reason = "legacy closed quarantine has no exact durable recovery ref"
+			result = append(result, record)
+			continue
+		}
+		stateRoot, stateErr := filepath.EvalSymlinks(filepath.Join(root, ".capsules"))
+		if stateErr != nil {
+			record.ReasonCode = "state_root_unavailable"
+			record.Reason = stateErr.Error()
+			result = append(result, record)
+			continue
+		}
+		receipt := RetentionReceipt{
+			Schema:           RetentionReceiptSchema,
+			Project:          root,
+			ProjectStateRoot: stateRoot,
+			WorkspaceID:      id,
+			WorkspacePath:    relative,
+			Head:             legacy.Head,
+			RecoveryRef:      recoveryRef,
+			IssuedAt:         now,
+			EligibleAfter:    now.Add(minAge),
+			ProcessSnapshot:  RetentionProbe{Kind: "process-command-snapshot", CapturedAt: now, Safe: true},
+			ActivityProbe:    RetentionProbe{Kind: "open-file-scan", CapturedAt: now, Safe: true},
+		}
+		written, writeErr := WriteRetentionReceipt(root, receipt)
+		if writeErr != nil {
+			record.ReasonCode = "receipt_write_failed"
+			record.Reason = writeErr.Error()
+			result = append(result, record)
+			continue
+		}
+		record.Status = "migrated"
+		record.ReceiptPath = written
+		record.Reason = "legacy closed quarantine now has a bounded receipt; it remains retained through the cooling window"
+		result = append(result, record)
 	}
 	return result, nil
 }

@@ -994,6 +994,18 @@ func legacyWorkspaceMarker(path string) bool {
 }
 
 func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspace, bool, error) {
+	return readLegacyWorkspaceWithAuthority(ctx, root, path, false)
+}
+
+// readLegacyWorkspaceWithReceiptlessClosedAuthority is intentionally private
+// to the retention migrator. It accepts an old closed quarantine whose source
+// checkout has gone away only after the migrator proves its exact recovery ref
+// and records fresh independent liveness facts in a new immutable receipt.
+func readLegacyWorkspaceWithReceiptlessClosedAuthority(ctx context.Context, root, path string) (legacyWorkspace, bool, error) {
+	return readLegacyWorkspaceWithAuthority(ctx, root, path, true)
+}
+
+func readLegacyWorkspaceWithAuthority(ctx context.Context, root, path string, allowReceiptlessClosedAuthority bool) (legacyWorkspace, bool, error) {
 	if !legacyWorkspaceMarker(path) {
 		return legacyWorkspace{}, false, nil
 	}
@@ -1064,7 +1076,11 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 		if !strings.HasPrefix(id, "closed-") || strings.HasPrefix(id, "closed-recovered-") {
 			return invalid("clone, development, and capsule ownership metadata do not agree")
 		}
-		if err := validateClosedWorkspaceProjectAuthority(ctx, root, path, id, head); err != nil {
+		if allowReceiptlessClosedAuthority {
+			if err := validateReceiptlessClosedWorkspaceAuthority(ctx, root, id, head); err != nil {
+				return invalid("closed quarantine receiptless project authority: %v", err)
+			}
+		} else if err := validateClosedWorkspaceProjectAuthority(ctx, root, path, id, head); err != nil {
 			return invalid("closed quarantine project authority: %v", err)
 		}
 	}
@@ -1086,6 +1102,21 @@ func readLegacyWorkspace(ctx context.Context, root, path string) (legacyWorkspac
 	}
 	updated := workspaceUpdatedAt(ctx, path, clone.Branch, clone.CreatedAt)
 	return legacyWorkspace{Branch: clone.Branch, Target: clone.Target, Head: head, Merged: merged, UpdatedAt: updated}, true, nil
+}
+
+func validateReceiptlessClosedWorkspaceAuthority(ctx context.Context, root, id, head string) error {
+	if !strings.HasPrefix(id, "closed-") || strings.HasPrefix(id, "closed-purging-") || strings.HasPrefix(id, "closed-recovered-") {
+		return errors.New("workspace is not an ordinary closed quarantine")
+	}
+	if !isObjectID(head) {
+		return errors.New("closed quarantine head is not an object id")
+	}
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	recovery, err := gitText(ctx, root, "rev-parse", "--verify", recoveryRef+"^{commit}")
+	if err != nil || recovery != head {
+		return errors.New("exact workspace teardown recovery ref is missing or changed")
+	}
+	return nil
 }
 
 func validateClosedWorkspaceProjectAuthority(ctx context.Context, root, path, id, head string) error {

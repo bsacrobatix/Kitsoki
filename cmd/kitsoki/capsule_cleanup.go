@@ -132,7 +132,10 @@ func capsuleCleanupWrite(cmd *cobra.Command, value any, jsonOut bool) error {
 	case hygiene.ApplyResult:
 		fmt.Fprintf(cmd.OutOrStdout(), "cleanup removed: %d (%d bytes), skipped after recheck: %d, concurrent cleanup tolerated: %d\n", len(v.Removed), v.TotalBytes, len(v.Skipped), len(v.Tolerated))
 	case hygiene.RetentionClearResult:
-		fmt.Fprintf(cmd.OutOrStdout(), "cleanup archive-free purged: %d, skipped: %d\n", len(v.Purged), len(v.Skipped))
+		fmt.Fprintf(cmd.OutOrStdout(), "cleanup archive-free migrated: %d, purged: %d, skipped: %d\n", len(v.Migrations), len(v.Purged), len(v.Skipped))
+		for _, migration := range v.Migrations {
+			fmt.Fprintf(cmd.OutOrStdout(), "cleanup migration [%s] %s: %s\n", migration.Status, migration.WorkspaceID, migration.Reason)
+		}
 		for _, skipped := range v.Skipped {
 			fmt.Fprintf(cmd.OutOrStdout(), "cleanup skip [%s] %s: %s\n", skipped.ReasonCode, skipped.WorkspaceID, skipped.Reason)
 		}

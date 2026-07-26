@@ -295,6 +295,12 @@ write_git_excludes() {
   local exclude="$path/.git/info/exclude"
   mkdir -p "$(dirname "$exclude")"
   {
+    # Control-plane state is never source content.  This is intentionally an
+    # internal exclude as well as the repository-level .gitignore: a managed
+    # parent may belong to a project that has not yet adopted that ignore rule.
+    # Without it, `commit` can stage a child .capsules/ tree and the next local
+    # clone recursively materializes every retained workspace.
+    echo "/.capsules/"
     echo "/$CAPSULE_SENTINEL"
     echo "/$CAPSULE_MANIFEST"
     echo "/$CLONE_SENTINEL"
@@ -302,6 +308,19 @@ write_git_excludes() {
     echo "/.kitsoki-owner"
     echo "/$RECOVERED_QUARANTINE_MANIFEST"
   } >>"$exclude"
+}
+
+refuses_tracked_control_state() {
+  local repo="$1" source_ref="$2" tracked
+  # A clone only copies committed files, so inspect the exact source tree
+  # before creating the target.  Do not try to remove an inherited control
+  # tree after clone: that would turn a provenance breach into silent loss.
+  tracked="$(git -C "$repo" ls-tree -r --name-only "$source_ref" -- .capsules 2>/dev/null || true)"
+  if [ -n "$tracked" ]; then
+    echo "error: create: source commit $source_ref tracks .capsules control state; refuse recursive Capsule materialization. Remove it from the source tree and retain/recover it through Capsule lifecycle records instead." >&2
+    return 1
+  fi
+  return 0
 }
 
 write_manifests() {
@@ -1115,6 +1134,12 @@ cmd_create() {
     fi
   fi
   source_commit="$(git -C "$repo" rev-parse "$source_ref")"
+  # A nested Capsule lives below the source checkout. Put the control-state
+  # boundary on both sides of creation: the child must not inherit a tracked
+  # control tree, and the source must not accidentally stage this new child on
+  # a later `git add -A` when the project has no repository .gitignore yet.
+  write_git_excludes "$repo"
+  refuses_tracked_control_state "$repo" "$source_ref" || die "create: source control-state boundary violation"
   # The source is always a local repo path. Use local clone mode so existing
   # objects are hardlinked instead of copied while refs/worktree state stay
   # isolated inside the managed capsule clone.

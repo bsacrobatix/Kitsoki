@@ -765,6 +765,9 @@ nested_root="$nested_repo/.capsules/workspaces"
 nested_json="$("$dev_workspace" create --repo "$nested_repo" --root "$nested_root" --id nested-child --branch agent/nested-child --json)"
 nested_workspace="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["path"])' <<<"$nested_json")"
 [ "$(cat "$nested_workspace/feature.txt")" = "two" ] || fail "nested create did not resolve source/staging/local"
+[ -f "$nested_repo/.git/info/exclude" ] || fail "nested source did not receive a local control-state exclude"
+git -C "$nested_repo" check-ignore -q .capsules/workspaces/nested-child/feature.txt ||
+  fail "nested source can still stage child Capsule control state"
 printf 'nested\n' >"$nested_workspace/nested.txt"
 "$dev_workspace" commit --repo "$nested_repo" --root "$nested_root" "$nested_workspace" --message 'add nested feature' >/dev/null
 "$dev_workspace" merge --repo "$nested_repo" --root "$nested_root" "$nested_workspace" --teardown >/dev/null
@@ -882,5 +885,25 @@ fi
   fail "close lost an untracked file hidden by status.showUntrackedFiles=no"
 "$dev_workspace" close --repo "$source_repo" --root "$root" --force "$dirty_workspace" >/dev/null
 [ ! -e "$dirty_workspace" ] || fail "close --force left workspace behind"
+
+# A clone must never materialize committed project control state. This is the
+# fail-closed guard for old projects that accidentally staged a nested
+# .capsules/workspaces tree before the local exclude existed.
+control_source="$tmp/tracked-control-source"
+mkdir -p "$control_source/.capsules/workspaces/old-child"
+git -C "$control_source" init --quiet --initial-branch=main
+printf 'control state fixture\n' >"$control_source/README.md"
+printf 'must not clone\n' >"$control_source/.capsules/workspaces/old-child/payload.txt"
+gitc "$control_source" add README.md
+gitc "$control_source" add -f .capsules/workspaces/old-child/payload.txt
+gitc "$control_source" commit --quiet -m 'fixture: accidentally tracked capsule control state'
+control_root="$tmp/tracked-control-workspaces"
+if "$dev_workspace" create --repo "$control_source" --root "$control_root" --id forbidden-control-state --branch agent/forbidden-control-state --base main --target main >"$tmp/tracked-control-state.log" 2>&1; then
+  fail "create accepted a source commit with tracked Capsule control state"
+fi
+grep -Fq "tracks .capsules control state" "$tmp/tracked-control-state.log" ||
+  fail "tracked control-state refusal was not observable"
+[ ! -e "$control_root/forbidden-control-state" ] ||
+  fail "tracked control-state refusal left a partial workspace"
 
 echo "dev-workspace tests passed"

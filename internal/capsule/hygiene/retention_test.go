@@ -386,6 +386,104 @@ func TestClearRetainedWorkspacesPurgesLargePayloadWithoutArchiveAmplification(t 
 	}
 }
 
+func TestClearRetainedWorkspacesMigratesReceiptlessClosedQuarantineBeforePurge(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := retentionFixtureNow()
+	workspace := writeLegacyWorkspace(t, root, "closed-receiptless", now.Add(-48*time.Hour), false, false)
+	head := strings.TrimSpace(runHygieneCommand(t, workspace, "git", "rev-parse", "HEAD"))
+	recoveryRef := "refs/kitsoki/workspace-teardown-recovery/" + head
+	runHygieneGit(t, root, "update-ref", recoveryRef, head)
+	// Historical releases can leave a close manifest pointing at a retired
+	// source checkout. The exact recovery ref, not that mutable path, is the
+	// authority used by the receipt migration.
+	rewriteLegacyWorkspaceSource(t, workspace, filepath.Join(root, "releases", "retired"))
+	payload := filepath.Join(workspace, ".artifacts", "nested-control-state.bin")
+	if err := os.MkdirAll(filepath.Dir(payload), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(payload, bytes.Repeat([]byte("no archive amplification\n"), 1024), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".git", "info", "exclude"), []byte(".kitsoki-capsule\n.kitsoki-clone\n.kitsoki-dev-workspace.json\ncapsule-manifest.json\n.artifacts/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	options := PurgeOptions{
+		ProjectRoot:           root,
+		KeepWorkspaces:        -1,
+		MinAge:                5 * time.Minute,
+		MaxBytes:              -1,
+		CurrentPath:           root,
+		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
+		CloseWorkspace: func(_ context.Context, project string, candidate Candidate) error {
+			return os.RemoveAll(filepath.Join(project, filepath.FromSlash(candidate.Path)))
+		},
+		Now: func() time.Time { return now },
+	}
+	first, err := ClearRetainedWorkspaces(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Migrations) != 1 || first.Migrations[0].Status != "migrated" || len(first.Purged) != 0 {
+		t.Fatalf("first clear = %+v", first)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".capsules", "retention", "receipts", "closed-receiptless.json")); err != nil {
+		t.Fatalf("migration did not write bounded retention receipt: %v", err)
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("migration deleted workspace before its cooling window: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".artifacts", "workspace-close")); !os.IsNotExist(err) {
+		t.Fatalf("receipt migration created archive payloads: %v", err)
+	}
+
+	options.Now = func() time.Time { return now.Add(6 * time.Minute) }
+	second, err := ClearRetainedWorkspaces(context.Background(), options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Migrations) != 0 || len(second.Purged) != 1 {
+		t.Fatalf("second clear = %+v", second)
+	}
+	if _, err := os.Stat(workspace); !os.IsNotExist(err) {
+		t.Fatalf("receipt-bound purge left legacy quarantine: %v", err)
+	}
+	if got := strings.TrimSpace(runHygieneCommand(t, root, "git", "rev-parse", recoveryRef+"^{commit}")); got != head {
+		t.Fatalf("purge changed recovery ref: got %s want %s", got, head)
+	}
+}
+
+func TestClearRetainedWorkspacesLeavesReceiptlessQuarantineWithoutRecoveryRefVisible(t *testing.T) {
+	root := t.TempDir()
+	initLegacyProject(t, root)
+	now := retentionFixtureNow()
+	workspace := writeLegacyWorkspace(t, root, "closed-no-recovery", now.Add(-48*time.Hour), false, false)
+	result, err := ClearRetainedWorkspaces(context.Background(), PurgeOptions{
+		ProjectRoot:           root,
+		KeepWorkspaces:        -1,
+		MinAge:                5 * time.Minute,
+		MaxBytes:              -1,
+		CurrentPath:           root,
+		ReadWorkspaceActivity: inactiveRetentionActivity,
+		ReadDiskUsage:         stableRetentionDiskUsage,
+		Now:                   func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Migrations) != 1 || result.Migrations[0].ReasonCode != "recovery_ref_unproven" || len(result.Purged) != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		t.Fatalf("receiptless workspace was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".capsules", "retention", "receipts", "closed-no-recovery.json")); !os.IsNotExist(err) {
+		t.Fatalf("migration wrote a receipt without recovery authority: %v", err)
+	}
+}
+
 func TestClearRetainedWorkspacesMigratesInterruptedLegacyShellIsolation(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)

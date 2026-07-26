@@ -78,12 +78,13 @@ func publishAppDirForTestrunner(appPath string) {
 // fallback is never reached.
 var appDirLoadMu sync.Mutex
 
-// loadAppForRun publishes KITSOKI_APP_DIR and loads appPath while holding
-// appDirLoadMu, so the setenv the loader depends on can never be clobbered by
-// a concurrent RunFlows/RunIntents/RunFlowCoverage call in the same process.
-// See appDirLoadMu's doc comment for the scope of what this does and doesn't
-// cover.
-func loadAppForRun(appPath string, resolver app.ImportResolver) (*app.AppDef, error) {
+// loadAppForRunWithBindings publishes KITSOKI_APP_DIR and loads appPath while
+// holding appDirLoadMu. Both the initial app load and a per-fixture
+// host_bindings reload must use this helper: the latter still expands
+// ${KITSOKI_APP_DIR} during app.LoadWithResolver, and used to bypass the lock.
+// That let concurrent real-dispatch flows load one story with another story's
+// app directory, which in turn selected the wrong workspace provider/base.
+func loadAppForRunWithBindings(appPath string, bindings map[string]string, resolver app.ImportResolver) (*app.AppDef, error) {
 	appDirLoadMu.Lock()
 	defer appDirLoadMu.Unlock()
 	publishAppDirForTestrunner(appPath)
@@ -103,7 +104,12 @@ func loadAppForRun(appPath string, resolver app.ImportResolver) (*app.AppDef, er
 		}
 		return appDef, nil
 	}
-	return app.LoadWithResolver(appPath, nil, resolver)
+	return app.LoadWithResolver(appPath, bindings, resolver)
+}
+
+// loadAppForRun is the no-override form used by the top-level runners.
+func loadAppForRun(appPath string, resolver app.ImportResolver) (*app.AppDef, error) {
+	return loadAppForRunWithBindings(appPath, nil, resolver)
 }
 
 // ─── Flow fixture YAML format ────────────────────────────────────────────────
@@ -1274,7 +1280,7 @@ func runFlowFile(ctx context.Context, def *app.AppDef, m machine.Machine, appPat
 				// silently ignore the fixture's intent.
 				return nil, fmt.Errorf("fixture in %q: host_bindings is not supported with the agent:<name> scheme (synthesized roots declare no host interfaces)", filePath)
 			}
-			overriddenDef, lerr := app.LoadWithResolver(appPath, fixture.HostBindings, opts.ImportResolver)
+			overriddenDef, lerr := loadAppForRunWithBindings(appPath, fixture.HostBindings, opts.ImportResolver)
 			if lerr != nil {
 				return nil, fmt.Errorf("fixture in %q: load with host_bindings: %w", filePath, lerr)
 			}
