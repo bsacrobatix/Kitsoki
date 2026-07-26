@@ -1238,24 +1238,28 @@ func TestBuildPlanLegacyDeclaredTargetAvoidsFallbackRefInventory(t *testing.T) {
 	}
 }
 
-func TestBuildPlanLegacyFallbackRefInventoryIsSharedAndCompletesProgress(t *testing.T) {
+func TestBuildPlanLegacyFallbackUsesOneContainmentQueryRegardlessOfRefCount(t *testing.T) {
 	root := t.TempDir()
 	initLegacyProject(t, root)
 	now := time.Now().UTC()
-	for index := 0; index < workspaceInspectors*2; index++ {
-		writeLegacyWorkspace(t, root, fmt.Sprintf("legacy-fallback-%02d", index), now, false, true)
+	workspace := writeLegacyWorkspace(t, root, "legacy-fallback", now, false, true)
+	runHygieneGit(t, root, "fetch", workspace, "agent/legacy-fallback:refs/heads/recovered")
+	for index := 0; index < 32; index++ {
+		runHygieneGit(t, root, "branch", fmt.Sprintf("unrelated-%02d", index), "staging/local")
 	}
 	realGit, err := exec.LookPath("git")
 	if err != nil {
 		t.Fatal(err)
 	}
 	countPath := filepath.Join(t.TempDir(), "fallback-ref-count")
+	commandPath := filepath.Join(t.TempDir(), "fallback-ref-command")
 	scriptDir := t.TempDir()
 	script := filepath.Join(scriptDir, "git")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nif [ \"$1\" = for-each-ref ]; then printf x >> \"$KITSOKI_HYGIENE_FALLBACK_REF_COUNT\"; fi\nexec \"$KITSOKI_HYGIENE_REAL_GIT\" \"$@\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nif [ \"$1\" = for-each-ref ]; then printf x >> \"$KITSOKI_HYGIENE_FALLBACK_REF_COUNT\"; printf '%s\\n' \"$*\" >> \"$KITSOKI_HYGIENE_FALLBACK_REF_COMMAND\"; fi\nexec \"$KITSOKI_HYGIENE_REAL_GIT\" \"$@\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("KITSOKI_HYGIENE_FALLBACK_REF_COUNT", countPath)
+	t.Setenv("KITSOKI_HYGIENE_FALLBACK_REF_COMMAND", commandPath)
 	t.Setenv("KITSOKI_HYGIENE_REAL_GIT", realGit)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	var progress []Progress
@@ -1280,7 +1284,14 @@ func TestBuildPlanLegacyFallbackRefInventoryIsSharedAndCompletesProgress(t *test
 		t.Fatal(readErr)
 	}
 	if scans := len(raw); scans != 1 {
-		t.Fatalf("fallback ref scans=%d, want 1 shared inventory", scans)
+		t.Fatalf("fallback containment queries=%d, want 1 regardless of ref count", scans)
+	}
+	command, err := os.ReadFile(commandPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(command), "--contains") {
+		t.Fatalf("fallback query=%q, want --contains", command)
 	}
 	hasWorkspaceStart := false
 	hasWorkspaceComplete := false
@@ -1291,8 +1302,9 @@ func TestBuildPlanLegacyFallbackRefInventoryIsSharedAndCompletesProgress(t *test
 	if !hasWorkspaceStart || !hasWorkspaceComplete || len(progress) == 0 || progress[len(progress)-1] != (Progress{Phase: "complete", Completed: 1, Total: 1}) {
 		t.Fatalf("progress=%#v", progress)
 	}
-	for index := 0; index < workspaceInspectors*2; index++ {
-		assertWorkspaceCandidate(t, plan, fmt.Sprintf("legacy-fallback-%02d", index), false, "not contained in declared target")
+	candidate := assertWorkspaceCandidate(t, plan, "legacy-fallback", true, "clean merged inactive")
+	if candidate.Target != "recovered" {
+		t.Fatalf("fallback target=%q candidate=%#v", candidate.Target, candidate)
 	}
 }
 
