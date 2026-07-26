@@ -613,6 +613,9 @@ func RegisterBuiltins(r *Registry) {
 	r.Register(ReviewedFeedbackCampaignReconcileVerb, ReviewedFeedbackCampaignReconcileHandler)
 	r.Register(FeedbackIntakeReconcileVerb, FeedbackIntakeReconcileHandler)
 	r.Register(FeedbackFederationReconcileVerb, FeedbackFederationReconcileHandler)
+	r.Register(SessionReconciliationVerb, SessionReconciliationHandler)
+	r.Register(WorkerFleetVerb, WorkerFleetHandler)
+	r.Register(CampaignSupervisionVerb, CampaignSupervisionHandler)
 
 	// Typed deterministic compliance checks. Session construction replaces the
 	// sentinel with an app-scoped graph/materialize provider.

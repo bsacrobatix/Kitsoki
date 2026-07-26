@@ -335,6 +335,53 @@ sink. Studio MCP returns the identical sink-compatible bundle because it does
 not own a runstatus intake instance. Idempotency is carried through the sink,
 and adapters add surface evidence without changing the canonical semantic ref.
 
+## Application-scoped maintenance
+
+Long-running Story Applications can opt into three daemon-owned maintenance
+providers. Their story-facing operations all accept exactly `{}`; application
+identity, durable stores, worker registry, health pool, bounds, and remediation
+policy come from daemon configuration:
+
+```yaml
+application_maintenance:
+  portfolio-application:
+    session_reconciliation:
+      max_sessions: 200
+      max_jobs: 1000
+    worker_fleet:
+      max_workers: 200
+      max_bytes: 262144
+    campaign_supervision:
+      max_campaigns: 200
+      max_bytes: 262144
+      remediation:
+        mode: propose
+        max_proposals: 50
+        statuses: [failed, interrupted]
+```
+
+`host.session_reconciliation.reconcile` joins the configured application to its
+durable sessions, then asks the typed jobs store to interrupt only non-terminal
+SQLite rows whose recorded local process owner is absent. Postgres ownership
+may span hosts, so those rows are reported as deferred until a host-independent
+lease exists; local PID guesses never overwrite cross-host truth. The receipt
+is `kitsoki/session-reconciliation-receipt/v1` and exposes aggregate counts
+only.
+
+`host.worker_fleet.reconcile` is observe-only. Its
+`kitsoki/worker-fleet-receipt/v1` projection contains worker semantic refs,
+placement, health, enabled state, bounded job counts, and declared capability
+classes. Its type cannot carry endpoints, tunnels, credentials, URLs, poll
+errors, or transport configuration.
+
+`host.campaign_supervision.reconcile` evaluates the configured application's
+durable campaign schedules and latest scheduler outcomes. The only supported
+remediation mode is `propose`: a bounded
+`kitsoki/campaign-supervision-receipt/v1` names typed issues and
+recommendations without executing commands, changing definitions, replaying
+ticks, or exposing stored error text. A separate existing typed service must
+own any later mutation.
+
 ## Conformance
 
 Deterministic tests compare discovery, action/call outcomes, refreshed frames,

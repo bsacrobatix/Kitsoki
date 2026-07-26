@@ -36,6 +36,7 @@ import (
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/applicationjob"
+	"kitsoki/internal/applicationmaintenance"
 	"kitsoki/internal/campaign"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
@@ -189,9 +190,42 @@ type WebConfig struct {
 	// neither story inputs nor transport requests can choose another binding.
 	ApplicationReadModels map[string]ApplicationReadModelConfig `yaml:"application_read_models,omitempty"`
 
+	// ApplicationMaintenance opts exact application IDs into daemon-owned
+	// maintenance providers. Story calls carry no arguments; durable stores,
+	// worker observations, bounds, and remediation policy are fixed here.
+	ApplicationMaintenance map[string]ApplicationMaintenanceConfig `yaml:"application_maintenance,omitempty"`
+
 	// ApplicationGraphs binds exact Story Application IDs to server-owned
 	// repository graph paths, bounds, and write policy.
 	ApplicationGraphs map[string]ApplicationGraphConfig `yaml:"application_graphs,omitempty"`
+}
+
+type ApplicationMaintenanceConfig struct {
+	SessionReconciliation *SessionReconciliationConfig `yaml:"session_reconciliation,omitempty"`
+	WorkerFleet           *WorkerFleetConfig           `yaml:"worker_fleet,omitempty"`
+	CampaignSupervision   *CampaignSupervisionConfig   `yaml:"campaign_supervision,omitempty"`
+}
+
+type SessionReconciliationConfig struct {
+	MaxSessions int `yaml:"max_sessions,omitempty"`
+	MaxJobs     int `yaml:"max_jobs,omitempty"`
+}
+
+type WorkerFleetConfig struct {
+	MaxWorkers int `yaml:"max_workers,omitempty"`
+	MaxBytes   int `yaml:"max_bytes,omitempty"`
+}
+
+type CampaignSupervisionConfig struct {
+	MaxCampaigns int                       `yaml:"max_campaigns,omitempty"`
+	MaxBytes     int                       `yaml:"max_bytes,omitempty"`
+	Remediation  CampaignRemediationConfig `yaml:"remediation,omitempty"`
+}
+
+type CampaignRemediationConfig struct {
+	Mode         string   `yaml:"mode,omitempty"`
+	MaxProposals int      `yaml:"max_proposals,omitempty"`
+	Statuses     []string `yaml:"statuses,omitempty"`
 }
 
 type ApplicationReadModelConfig struct {
@@ -219,6 +253,127 @@ func (cfg *WebConfig) resolveApplicationReadModels() error {
 	}
 	if materializationOwners > 1 {
 		return fmt.Errorf("application_read_models: materialization owner is ambiguous")
+	}
+	return nil
+}
+
+func (cfg *WebConfig) resolveApplicationMaintenance() error {
+	for appID, binding := range cfg.ApplicationMaintenance {
+		if !readModelIdentity(appID) {
+			return fmt.Errorf("application_maintenance key %q must be an opaque application id", appID)
+		}
+		if binding.SessionReconciliation != nil {
+			if binding.SessionReconciliation.MaxSessions == 0 {
+				binding.SessionReconciliation.MaxSessions = applicationmaintenance.DefaultMaxSessions
+			}
+			if binding.SessionReconciliation.MaxJobs == 0 {
+				binding.SessionReconciliation.MaxJobs = applicationmaintenance.DefaultMaxSessionJobs
+			}
+			if binding.SessionReconciliation.MaxSessions < 1 ||
+				binding.SessionReconciliation.MaxSessions > applicationmaintenance.DefaultMaxSessions {
+				return fmt.Errorf(
+					"application_maintenance.%s.session_reconciliation.max_sessions must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxSessions,
+				)
+			}
+			if binding.SessionReconciliation.MaxJobs < 1 ||
+				binding.SessionReconciliation.MaxJobs > applicationmaintenance.DefaultMaxSessionJobs {
+				return fmt.Errorf(
+					"application_maintenance.%s.session_reconciliation.max_jobs must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxSessionJobs,
+				)
+			}
+		}
+		if binding.WorkerFleet != nil {
+			if binding.WorkerFleet.MaxWorkers == 0 {
+				binding.WorkerFleet.MaxWorkers = applicationmaintenance.DefaultMaxWorkers
+			}
+			if binding.WorkerFleet.MaxWorkers < 1 ||
+				binding.WorkerFleet.MaxWorkers > applicationmaintenance.DefaultMaxWorkers {
+				return fmt.Errorf(
+					"application_maintenance.%s.worker_fleet.max_workers must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxWorkers,
+				)
+			}
+			if binding.WorkerFleet.MaxBytes == 0 {
+				binding.WorkerFleet.MaxBytes = applicationmaintenance.DefaultMaxReceiptBytes
+			}
+			if binding.WorkerFleet.MaxBytes < 1 ||
+				binding.WorkerFleet.MaxBytes > applicationmaintenance.DefaultMaxReceiptBytes {
+				return fmt.Errorf(
+					"application_maintenance.%s.worker_fleet.max_bytes must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxReceiptBytes,
+				)
+			}
+		}
+		if binding.CampaignSupervision != nil {
+			if cfg.Campaigns == nil {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision requires campaigns",
+					appID,
+				)
+			}
+			if binding.CampaignSupervision.MaxCampaigns == 0 {
+				binding.CampaignSupervision.MaxCampaigns = applicationmaintenance.DefaultMaxCampaigns
+			}
+			if binding.CampaignSupervision.MaxCampaigns < 1 ||
+				binding.CampaignSupervision.MaxCampaigns > applicationmaintenance.DefaultMaxCampaigns {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.max_campaigns must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxCampaigns,
+				)
+			}
+			if binding.CampaignSupervision.MaxBytes == 0 {
+				binding.CampaignSupervision.MaxBytes = applicationmaintenance.DefaultMaxReceiptBytes
+			}
+			if binding.CampaignSupervision.MaxBytes < 1 ||
+				binding.CampaignSupervision.MaxBytes > applicationmaintenance.DefaultMaxReceiptBytes {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.max_bytes must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxReceiptBytes,
+				)
+			}
+			policy := &binding.CampaignSupervision.Remediation
+			if policy.Mode == "" {
+				policy.Mode = "propose"
+			}
+			if policy.Mode != "propose" {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.remediation.mode must be propose",
+					appID,
+				)
+			}
+			if policy.MaxProposals == 0 {
+				policy.MaxProposals = applicationmaintenance.DefaultMaxRemediations
+			}
+			if policy.MaxProposals < 1 ||
+				policy.MaxProposals > applicationmaintenance.DefaultMaxRemediations {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.remediation.max_proposals must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxRemediations,
+				)
+			}
+			seen := map[string]bool{}
+			for _, status := range policy.Statuses {
+				if status != "failed" && status != "interrupted" {
+					return fmt.Errorf(
+						"application_maintenance.%s.campaign_supervision.remediation.statuses contains unsupported status %q",
+						appID, status,
+					)
+				}
+				if seen[status] {
+					return fmt.Errorf(
+						"application_maintenance.%s.campaign_supervision.remediation.statuses contains duplicate %q",
+						appID, status,
+					)
+				}
+				seen[status] = true
+			}
+			if len(policy.Statuses) == 0 {
+				policy.Statuses = []string{"failed", "interrupted"}
+			}
+		}
+		cfg.ApplicationMaintenance[appID] = binding
 	}
 	return nil
 }
@@ -774,6 +929,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveApplicationReadModels(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveApplicationMaintenance(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveApplicationGraphs(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -1004,6 +1162,19 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[key] = value
 		}
 		out.ApplicationReadModels = merged
+	}
+	if len(local.ApplicationMaintenance) > 0 {
+		merged := make(
+			map[string]ApplicationMaintenanceConfig,
+			len(base.ApplicationMaintenance)+len(local.ApplicationMaintenance),
+		)
+		for key, value := range base.ApplicationMaintenance {
+			merged[key] = value
+		}
+		for key, value := range local.ApplicationMaintenance {
+			merged[key] = value
+		}
+		out.ApplicationMaintenance = merged
 	}
 	if len(local.ApplicationGraphs) > 0 {
 		merged := make(map[string]ApplicationGraphConfig, len(base.ApplicationGraphs)+len(local.ApplicationGraphs))

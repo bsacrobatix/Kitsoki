@@ -46,6 +46,7 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/applicationconversation"
 	"kitsoki/internal/applicationjob"
+	"kitsoki/internal/applicationmaintenance"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/campaign"
 	"kitsoki/internal/capsule/queue"
@@ -206,6 +207,7 @@ type SessionRegistry struct {
 	campaignSource               campaign.Source
 	campaignScheduler            jobs.Scheduler
 	campaignServices             map[string]*campaign.Service
+	maintenanceJobs              *jobs.JobStore
 	studies                      study.Store
 	federation                   *daemonfederation.Pool
 	materializations             materializationstatus.Store
@@ -445,6 +447,18 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 	r.base.StoryDemoExecutor = r
 	if root, rootErr := os.Getwd(); rootErr == nil {
 		r.applicationBundleRoot = filepath.Join(root, ".artifacts", "application-builds")
+	}
+	for _, binding := range r.cfg.ApplicationMaintenance {
+		if binding.SessionReconciliation == nil {
+			continue
+		}
+		maintenanceJobs, maintenanceErr := newJobStore(st)
+		if maintenanceErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon session reconciliation jobs: %w", maintenanceErr)
+		}
+		r.maintenanceJobs = maintenanceJobs
+		break
 	}
 	if r.cfg.Campaigns != nil {
 		campaignStore, campaignErr := campaign.NewSQLiteStore(st.DB())
@@ -1014,6 +1028,7 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
+	r.wireApplicationMaintenance(rt, def.App.ID)
 	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
 		rt.Close()
 		return "", err
@@ -1275,6 +1290,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
+	r.wireApplicationMaintenance(rt, def.App.ID)
 	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
 		rt.Close()
 		return "", err
@@ -1739,6 +1755,28 @@ func (s registryFederationSource) FederationSnapshot(ctx context.Context) (host.
 	return projection, nil
 }
 
+func (s registryFederationSource) ObserveWorkers(
+	ctx context.Context,
+) ([]applicationmaintenance.WorkerObservation, error) {
+	projection, err := s.FederationSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]applicationmaintenance.WorkerObservation, 0, len(projection.Workers))
+	for _, worker := range projection.Workers {
+		out = append(out, applicationmaintenance.WorkerObservation{
+			ID: worker.ID, Placement: worker.Placement, Health: worker.Health,
+			Enabled: worker.Enabled, Jobs: worker.Jobs,
+			Capabilities: applicationmaintenance.WorkerCapabilities{
+				Placements: append([]string(nil), worker.Capabilities.Placements...),
+				Isolation:  worker.Capabilities.Isolation,
+				Networks:   append([]string(nil), worker.Capabilities.Networks...),
+			},
+		})
+	}
+	return out, nil
+}
+
 func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revision string) {
 	if rt == nil || rt.HostRegistry == nil {
 		return
@@ -1860,6 +1898,69 @@ func (r *SessionRegistry) wireCampaign(rt *sessionRuntime, appID string) {
 	}
 	r.mu.Unlock()
 	rt.HostRegistry.Replace("host.campaign", host.NewCampaignHandler(service, appID))
+}
+
+func (r *SessionRegistry) wireApplicationMaintenance(rt *sessionRuntime, appID string) {
+	if rt == nil || rt.HostRegistry == nil || appID == "" {
+		return
+	}
+	binding, ok := r.cfg.ApplicationMaintenance[appID]
+	if !ok {
+		return
+	}
+	if cfg := binding.SessionReconciliation; cfg != nil &&
+		r.daemonStore != nil && r.maintenanceJobs != nil {
+		service := applicationmaintenance.SessionService{
+			ApplicationID: appID,
+			Sessions:      r.daemonStore,
+			Jobs:          r.maintenanceJobs,
+			MaxSessions:   cfg.MaxSessions,
+			MaxJobs:       cfg.MaxJobs,
+		}
+		rt.HostRegistry.Replace(
+			host.SessionReconciliationVerb,
+			host.NewApplicationMaintenanceHandler(
+				host.SessionReconciliationVerb,
+				service.Reconcile,
+			),
+		)
+	}
+	if cfg := binding.WorkerFleet; cfg != nil {
+		entries := append([]workerregistry.Entry(nil), r.cfg.Workers...)
+		if len(entries) == 0 {
+			entries = workerregistry.FromDaemonFederation(r.cfg.DaemonFederation)
+		}
+		service := applicationmaintenance.WorkerService{
+			ApplicationID: appID,
+			Source: registryFederationSource{
+				entries: entries,
+				pool:    r.federation,
+				policy:  r.base.AgentLaunchPolicy.Placement,
+			},
+			MaxWorkers: cfg.MaxWorkers,
+			MaxBytes:   cfg.MaxBytes,
+		}
+		rt.HostRegistry.Replace(
+			host.WorkerFleetVerb,
+			host.NewApplicationMaintenanceHandler(host.WorkerFleetVerb, service.Reconcile),
+		)
+	}
+	if cfg := binding.CampaignSupervision; cfg != nil && r.campaignStore != nil {
+		service := applicationmaintenance.CampaignService{
+			ApplicationID: appID,
+			Store:         r.campaignStore,
+			MaxCampaigns:  cfg.MaxCampaigns,
+			MaxBytes:      cfg.MaxBytes,
+			Policy: applicationmaintenance.CampaignPolicy{
+				MaxProposals: cfg.Remediation.MaxProposals,
+				Statuses:     append([]string(nil), cfg.Remediation.Statuses...),
+			},
+		}
+		rt.HostRegistry.Replace(
+			host.CampaignSupervisionVerb,
+			host.NewApplicationMaintenanceHandler(host.CampaignSupervisionVerb, service.Reconcile),
+		)
+	}
 }
 
 type campaignSchedulerAdapter struct {

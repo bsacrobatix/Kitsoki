@@ -65,6 +65,16 @@ type JobStore struct {
 	journalWriter journal.Writer
 }
 
+// ProcessBoundReconcileResult is a privacy-safe aggregate of one app-scoped
+// stale-owner pass. Job, session, PID, payload, and error details never leave
+// the durable store boundary.
+type ProcessBoundReconcileResult struct {
+	Examined     int
+	Interrupted  int
+	Deferred     int
+	RestartTruth string
+}
+
 type notificationExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
@@ -284,6 +294,94 @@ func (js *JobStore) SweepStaleJobs(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("jobs.SweepStaleJobs: rows affected: %w", err)
 	}
 	return n, nil
+}
+
+// ReconcileProcessBoundJobs examines non-terminal jobs belonging only to the
+// supplied session IDs. SQLite can safely probe its single-host owner_pid and
+// interrupts dead owners. Postgres ownership can span hosts, so it records the
+// observation as deferred until the durable job contract carries a
+// host-independent lease; it never guesses from a local PID.
+func (js *JobStore) ReconcileProcessBoundJobs(
+	ctx context.Context,
+	sessionIDs []app.SessionID,
+	maxJobs int,
+) (ProcessBoundReconcileResult, error) {
+	result := ProcessBoundReconcileResult{RestartTruth: "local_process_ownership"}
+	if len(sessionIDs) == 0 {
+		return result, nil
+	}
+	if maxJobs < 1 {
+		return result, fmt.Errorf("jobs.ReconcileProcessBoundJobs: maxJobs must be positive")
+	}
+	args := make([]any, 0, 2+len(sessionIDs))
+	args = append(args, string(JobRunning), string(JobAwaitingInput))
+	for _, sessionID := range sessionIDs {
+		args = append(args, string(sessionID))
+	}
+	args = append(args, maxJobs+1)
+	rows, err := js.db.QueryContext(ctx, js.q(`
+		SELECT id, owner_pid FROM jobs
+		WHERE status IN (?, ?)
+		  AND session_id IN (`+placeholders(len(sessionIDs))+`)
+		ORDER BY updated_at, id
+		LIMIT ?`), args...)
+	if err != nil {
+		return result, fmt.Errorf("jobs.ReconcileProcessBoundJobs: query: %w", err)
+	}
+	type ownedJob struct {
+		id  string
+		pid sql.NullInt64
+	}
+	owned := make([]ownedJob, 0)
+	for rows.Next() {
+		var item ownedJob
+		if err := rows.Scan(&item.id, &item.pid); err != nil {
+			_ = rows.Close()
+			return result, fmt.Errorf("jobs.ReconcileProcessBoundJobs: scan: %w", err)
+		}
+		owned = append(owned, item)
+	}
+	if err := rows.Close(); err != nil {
+		return result, fmt.Errorf("jobs.ReconcileProcessBoundJobs: close rows: %w", err)
+	}
+	if len(owned) > maxJobs {
+		return result, fmt.Errorf(
+			"jobs.ReconcileProcessBoundJobs: selected more than %d jobs; refusing to truncate",
+			maxJobs,
+		)
+	}
+	result.Examined = len(owned)
+	if js.dialect == DialectPostgres {
+		result.Deferred = len(owned)
+		result.RestartTruth = "cross_host_lease_required"
+		return result, nil
+	}
+	orphans := make([]any, 0, len(owned))
+	for _, item := range owned {
+		if !item.pid.Valid || !sweepProcessAlive(int(item.pid.Int64)) {
+			orphans = append(orphans, item.id)
+		}
+	}
+	if len(orphans) == 0 {
+		return result, nil
+	}
+	now := time.Now().UnixMilli()
+	updateArgs := append([]any{string(JobFailed), ErrProcessDied, now, now}, orphans...)
+	res, err := js.db.ExecContext(ctx, js.q(`
+		UPDATE jobs
+		SET status = ?, error = ?, finished_at = ?, updated_at = ?
+		WHERE id IN (?`+strings.Repeat(",?", len(orphans)-1)+`)
+		  AND status IN ('running', 'awaiting_input')`),
+		updateArgs...)
+	if err != nil {
+		return result, fmt.Errorf("jobs.ReconcileProcessBoundJobs: interrupt: %w", err)
+	}
+	interrupted, err := res.RowsAffected()
+	if err != nil {
+		return result, fmt.Errorf("jobs.ReconcileProcessBoundJobs: rows affected: %w", err)
+	}
+	result.Interrupted = int(interrupted)
+	return result, nil
 }
 
 // UpdateJobStatus updates the status, error, result, and timestamps of a job.

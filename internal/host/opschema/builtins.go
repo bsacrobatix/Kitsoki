@@ -416,6 +416,18 @@ func registerGraphBuiltins(r *Registry) {
 			"receipts", "list", "replayed", "bool",
 		),
 	})
+	r.Register("host.session_reconciliation", "reconcile", Op{
+		Input:  fields(),
+		Output: fields("receipt", "object"),
+	})
+	r.Register("host.worker_fleet", "reconcile", Op{
+		Input:  fields(),
+		Output: fields("receipt", "object"),
+	})
+	r.Register("host.campaign_supervision", "reconcile", Op{
+		Input:  fields(),
+		Output: fields("receipt", "object"),
+	})
 	r.Register("host.compliance", "run", Op{
 		Input:  fields("catalog_path", "string", "node_id", "string"),
 		Output: fields("passed", "bool", "evidence_ref", "string", "summary", "string"),

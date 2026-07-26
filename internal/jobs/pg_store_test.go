@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/dbruntime/pgtest"
 	"kitsoki/internal/jobs"
 )
@@ -191,6 +192,28 @@ func TestJobStorePostgres_SweepStaleJobs(t *testing.T) {
 		if got.Status != want {
 			t.Errorf("%s: status = %q, want %q", id, got.Status, want)
 		}
+	}
+}
+
+func TestJobStorePostgres_ReconcileProcessBoundJobsDefersCrossHostOwners(t *testing.T) {
+	js, _ := openPGJobStore(t)
+	ctx := context.Background()
+	job := makeTestJob("01JPG0000000000000000005R", jobs.JobRunning)
+	job.SessionID = "app-session"
+	if err := js.UpsertJob(ctx, job); err != nil {
+		t.Fatalf("UpsertJob: %v", err)
+	}
+	result, err := js.ReconcileProcessBoundJobs(ctx, []app.SessionID{"app-session"}, 10)
+	if err != nil {
+		t.Fatalf("ReconcileProcessBoundJobs: %v", err)
+	}
+	if result.Examined != 1 || result.Interrupted != 0 || result.Deferred != 1 ||
+		result.RestartTruth != "cross_host_lease_required" {
+		t.Fatalf("result = %#v", result)
+	}
+	got, err := js.GetJob(ctx, job.ID)
+	if err != nil || got.Status != jobs.JobRunning {
+		t.Fatalf("job after deferred reconciliation = %#v, %v", got, err)
 	}
 }
 

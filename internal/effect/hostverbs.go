@@ -310,6 +310,13 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.feedback_intake.reconcile":            {class: Write, deterministic: false},
 	"host.feedback_federation.reconcile":        {class: External, deterministic: false},
 
+	// Story Application maintenance providers carry no caller authority.
+	// Session reconciliation may interrupt local process-owned stale rows;
+	// worker fleet and campaign supervision expose bounded observations only.
+	"host.session_reconciliation.reconcile": {class: Write, deterministic: false},
+	"host.worker_fleet.reconcile":           {class: External, deterministic: false},
+	"host.campaign_supervision.reconcile":   {class: Read, deterministic: true},
+
 	// host.compliance evaluates server-resolved Starlark materialize checks and
 	// writes immutable local evidence. It has no command, LLM, or network lane.
 	"host.compliance": {

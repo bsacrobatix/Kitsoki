@@ -78,6 +78,9 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.slidey.render`](#hostslideyrender) | Validate + render a JSON scene spec to MP4, PDF, or interactive HTML via the slidey pipeline. |
 | [`host.contact_sheet`](#hostcontact_sheet) | Assemble a PNG contact-sheet montage from a directory of PNG frames via ffmpeg. |
 | [`host.video.frame`](#hostvideoframe) | Grab a single still PNG from a video at a timestamp via ffmpeg; deterministic, no LLM. |
+| [`host.session_reconciliation.reconcile`](#story-application-maintenance) | Reconcile app-scoped process-owned stale jobs through durable session and job stores. |
+| [`host.worker_fleet.reconcile`](#story-application-maintenance) | Observe a bounded, privacy-safe worker fleet projection. |
+| [`host.campaign_supervision.reconcile`](#story-application-maintenance) | Evaluate durable campaign outcomes and propose bounded typed remediation. |
 
 Every handler must be present in the app's top-level `hosts:`
 allow-list to be invokable.
@@ -2572,6 +2575,29 @@ Evidence is immutable JSON under `.artifacts/compliance`, addressed externally
 as `kitsoki://compliance/sha256/<digest>`. The reference reveals no filesystem
 path. Equivalent verdicts reuse the same semantic digest after a daemon or
 session restart; a changed verdict creates a new record.
+
+## Story Application maintenance
+
+The three maintenance verbs are exact leaf handlers and accept no input fields:
+
+| Handler | Effect | Receipt |
+|---|---|---|
+| `host.session_reconciliation.reconcile` | write, non-deterministic | `kitsoki/session-reconciliation-receipt/v1` |
+| `host.worker_fleet.reconcile` | external read, non-deterministic | `kitsoki/worker-fleet-receipt/v1` |
+| `host.campaign_supervision.reconcile` | read, deterministic | `kitsoki/campaign-supervision-receipt/v1` |
+
+Each returns `{receipt: object}`. The builtin handlers fail closed; `kitsoki
+daemon` replaces them only for an exact application ID under
+`application_maintenance`. Any supplied story argument is rejected, including
+bounds or application IDs. Bounds and campaign remediation policy are
+server-owned.
+
+Session reconciliation exposes aggregate process-owner results without session
+or job IDs. Worker fleet is observe-only and cannot expose endpoints, tunnels,
+credentials, URLs, or poll error text. Campaign supervision reads durable
+schedule outcomes, omits stored error text, and supports only proposal
+receipts; it has no command, shell, replay, or direct campaign mutation
+authority.
 
 ## Adding your own host
 
