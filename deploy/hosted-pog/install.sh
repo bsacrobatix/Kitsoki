@@ -712,7 +712,10 @@ if systemctl cat pog-colony-runner.service >/dev/null 2>&1; then
 	install -d -m 0755 /etc/systemd/system/pog-colony-runner.service.d
 	printf '[Service]\nEnvironmentFile=-/etc/kitsoki/pog-colony-runner.env\n' >/etc/systemd/system/pog-colony-runner.service.d/runner-token.conf
 	systemctl daemon-reload
-	[ "$colony_was_active" -eq 0 ] || systemctl restart pog-colony-runner.service
+	# A successful hosted activation owns returning the colony to service even
+	# when an operator deliberately held it before deployment. Rollback still
+	# restores the prior active/inactive state via colony_was_active.
+	systemctl restart pog-colony-runner.service
 	colony_environment="$(systemctl show --property Environment --value pog-colony-runner.service)"
 	colony_pid="$(systemctl show --property MainPID --value pog-colony-runner.service)"
 	[ "$colony_pid" -gt 0 ] || die "colony runner has no live process after restart"
