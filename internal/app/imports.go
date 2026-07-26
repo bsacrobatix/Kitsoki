@@ -416,6 +416,9 @@ func loadImportedChild(path string, parents []string, resolver ImportResolver) (
 	if len(mergeErrs) > 0 {
 		return nil, mergeErrs
 	}
+	// Imported children bypass runLoadPipeline, so retain their authoring root
+	// for application contract path rebasing during foldChild.
+	def.BaseDir = baseDir
 	// Recursively resolve the child's own imports BEFORE folding into parent.
 	if impErrs := resolveImports(def, path, baseDir, parents, resolver); len(impErrs) > 0 {
 		return nil, impErrs

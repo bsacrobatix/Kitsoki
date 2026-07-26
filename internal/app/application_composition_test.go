@@ -161,11 +161,14 @@ exports:
   application:
     pages: [home]
     actions: [child.go]
+    schemas: [go-command]
 application:
   schema: application/v1
   name: Child
   description: Child application fragment.
   semantic_ref: child.application
+  schemas:
+    go-command: schemas/go-command.json
   pages:
     home:
       name: Child home
@@ -191,7 +194,10 @@ application:
       semantic_ref: child.action.go
       intent: go
       state: idle
+      input_schema: schemas/go-command.json
 `)
+	childSchemas := mkdirT(t, childDir, "schemas")
+	mustWrite(t, childSchemas, "go-command.json", `{"type":"object","additionalProperties":false}`)
 	parentDir := mkdirT(t, root, "parent")
 	mustWrite(t, parentDir, "app.yaml", `
 app: {id: parent, version: 1.0.0}
@@ -235,6 +241,12 @@ application:
 	action := def.Application.Actions["parent.module.go"]
 	if action.State != "module.idle" || action.Intent != "module__go" {
 		t.Fatalf("composed action = %#v", action)
+	}
+	wantSchema := filepath.Join(childDir, "schemas", "go-command.json")
+	if action.InputSchema != wantSchema ||
+		def.Application.Schemas["parent.module.go-command"] != wantSchema {
+		t.Fatalf("composed schema paths action=%q schema=%q want=%q",
+			action.InputSchema, def.Application.Schemas["parent.module.go-command"], wantSchema)
 	}
 	if page := def.Application.Pages["module__home"]; page.Origin.Story != "child" ||
 		page.Origin.Member != "application.pages.home" ||
