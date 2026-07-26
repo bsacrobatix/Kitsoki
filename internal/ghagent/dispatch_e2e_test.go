@@ -743,6 +743,7 @@ func TestConcurrentDispatch_NoAppDirCrossContamination(t *testing.T) {
 // testrunner.RunFlows -> rolling-status ack comment. Fully offline, zero LLM,
 // zero network.
 func TestDispatch_MentionToAckLoop(t *testing.T) {
+	setKitsokiRepoToTestCheckout(t)
 	ctx := context.Background()
 
 	issuesJSON := `[{"number":42,"title":"@kitsoki please fix the crash","assignees":[{"login":"alice"}],"url":"https://github.com/o/r/issues/42"}]`

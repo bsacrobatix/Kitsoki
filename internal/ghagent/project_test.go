@@ -79,6 +79,7 @@ func TestProjectRouteResolverFallsBackWithoutOnboarding(t *testing.T) {
 }
 
 func TestRunStorySessionProjectBeats(t *testing.T) {
+	setKitsokiRepoToTestCheckout(t)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	root, err := repoRoot()
 	if err != nil {

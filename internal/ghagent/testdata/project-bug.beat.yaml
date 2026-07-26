@@ -22,11 +22,27 @@ initial_world:
   repo: "o/r"
 
 host_handlers:
+  # dev-story's bugfix import resolves iface.workspace.create through the
+  # declared Capsule provider. Keep this fixture on that provider so the
+  # landing transition cannot silently take its on_error arc.
+  host.capsule_workspace: { data: { ok: true, log: "", path: ".capsules/workspaces/ws-gh-bug-poc" } }
   host.git_worktree: { data: { ok: true, log: "", path: ".worktrees/gh-bug-poc" } }
+  host.agent.codeact:
+    data:
+      ok: true
+      terminated: done
+      payload:
+        verdict: STILL-LIVE
+        confidence: 0.9
+        summary_title: "Known live project bug"
+        evidence: "internal/example.go:12 still has the reported behavior."
+        summary_markdown: "The project-local bug route entered the bounded triage path."
+        suggested_action: "drive the full bugfix pipeline"
+        involved_components: ["internal/example.go"]
 
 turns:
   - intent: { name: drive, slots: {} }
-    expect_state: bf.idle
+    expect_state: bf.triaging
     expect_world:
       ticket_type: "bug"
 
