@@ -90,7 +90,12 @@ var realDispatchPlans = map[string]realDispatchPlan{
 		HostBindings: map[string]string{
 			"vcs":       "host.git",
 			"ci":        "host.local",
-			"workspace": "host.git_worktree",
+			// The bugfix story owns workspace lifecycle through its checked-in
+			// Capsule definition.  Keep the replay plan on that same provider:
+			// happy_human.cassette.yaml records host.capsule_workspace calls,
+			// whereas host.git_worktree would fall through to a real nested
+			// workspace create and make replay depend on incidental local refs.
+			"workspace": "host.capsule_workspace",
 			"transport": "host.append_to_file",
 		},
 		// The recorded cassette's phases (idle/reproducing/proposing/

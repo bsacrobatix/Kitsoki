@@ -1421,6 +1421,14 @@ func TestRealDispatchPlanDefaultsJobWorkspaceToDevelopmentCapsuleBase(t *testing
 	if got := plan.BaseWorld["base_branch"]; got != managedDevelopmentBase {
 		t.Fatalf("real dispatch base_branch = %q, want development Capsule base %q", got, managedDevelopmentBase)
 	}
+	// The story declaration and its recorded replay cassette both use the
+	// Capsule provider.  Rebinding this to the legacy git-worktree handler
+	// makes an otherwise replay-only dispatch reach scripts/dev-workspace.sh;
+	// an exact continuation intentionally has no local branch refs, so that
+	// accidental real call fails before the story runs.
+	if got := plan.HostBindings["workspace"]; got != "host.capsule_workspace" {
+		t.Fatalf("real dispatch workspace binding = %q, want host.capsule_workspace", got)
+	}
 }
 
 func TestRunStorySession_RealDispatch_AlreadyFixedTriageSkipsMakerPipeline(t *testing.T) {
