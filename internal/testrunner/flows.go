@@ -582,6 +582,13 @@ type FlowOptions struct {
 	// during flow execution and records statement/branch hits by fixture file.
 	// It is ignored by host_cassette stubs that replace host.starlark.run.
 	StarlarkCoverage *starlarkhost.CoverageRecorder
+
+	// DeterministicOnly rejects compatibility features which may activate real
+	// host providers or cassette recording. It is used by governed evidence
+	// runners that must prove a declared flow suite without shell, network
+	// recording, or live-agent authority. Ordinary `kitsoki test flows`
+	// behavior is unchanged when false.
+	DeterministicOnly bool
 }
 
 // ─── orchRig holds all resources for an orchestrator-backed flow run ─────────
@@ -1247,6 +1254,11 @@ func runFlowFile(ctx context.Context, def *app.AppDef, m machine.Machine, appPat
 		if fixture.TestKind != "flow" {
 			continue // skip non-flow docs
 		}
+		if opts.DeterministicOnly {
+			if err := validateDeterministicFlowFixture(filePath, &fixture); err != nil {
+				return nil, err
+			}
+		}
 
 		// Per-fixture host_bindings: rebuild def + machine for this
 		// fixture only. The outer def/m stay untouched so peer fixtures
@@ -1287,6 +1299,56 @@ func runFlowFile(ctx context.Context, def *app.AppDef, m machine.Machine, appPat
 	}
 
 	return results, nil
+}
+
+func validateDeterministicFlowFixture(filePath string, fixture *FlowFixture) error {
+	if len(fixture.HostBindings) > 0 {
+		return fmt.Errorf(
+			"fixture in %q: deterministic-only flow evidence forbids host_bindings",
+			filePath,
+		)
+	}
+	if fixture.HostCassette != "" {
+		cassettePath := fixture.HostCassette
+		if !filepath.IsAbs(cassettePath) {
+			cassettePath = filepath.Join(filepath.Dir(filePath), cassettePath)
+		}
+		cassette, err := LoadCassette(cassettePath)
+		if err != nil {
+			return fmt.Errorf("fixture in %q: load deterministic host cassette: %w", filePath, err)
+		}
+		if mode := CassetteRecordMode(cassette); mode != "" && mode != "none" {
+			return fmt.Errorf(
+				"fixture in %q: deterministic-only flow evidence forbids host cassette record mode %q",
+				filePath, mode,
+			)
+		}
+	}
+	if fixture.StarlarkHTTPCassette != "" {
+		cassettePath := fixture.StarlarkHTTPCassette
+		if !filepath.IsAbs(cassettePath) {
+			cassettePath = filepath.Join(filepath.Dir(filePath), cassettePath)
+		}
+		raw, err := os.ReadFile(cassettePath)
+		if err != nil {
+			return fmt.Errorf("fixture in %q: read deterministic HTTP cassette: %w", filePath, err)
+		}
+		var cassette starlarkhost.HTTPCassette
+		if err := yaml.Unmarshal(raw, &cassette); err != nil {
+			return fmt.Errorf("fixture in %q: parse deterministic HTTP cassette: %w", filePath, err)
+		}
+		mode := cassette.RecordMode
+		if env := os.Getenv("KITSOKI_HTTP_CASSETTE_RECORD"); env != "" {
+			mode = env
+		}
+		if mode != "" && mode != starlarkhost.RecordModeNone {
+			return fmt.Errorf(
+				"fixture in %q: deterministic-only flow evidence forbids HTTP cassette record mode %q",
+				filePath, mode,
+			)
+		}
+	}
+	return nil
 }
 
 // splitYAMLDocs splits a YAML file into individual documents on "---" boundaries.

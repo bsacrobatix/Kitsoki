@@ -307,6 +307,16 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.campaign.watch":    {class: External, deterministic: false},
 	"host.campaign.snapshot": {class: Read, deterministic: true},
 
+	// host.flow_evidence runs only server-resolved deterministic Kitsoki flow
+	// suites and writes a durable, idempotent evidence receipt.
+	"host.flow_evidence": {
+		class: Write, deterministic: false,
+		ops: map[string]opEffect{
+			"record": {class: Write, deterministic: false},
+		},
+	},
+	"host.flow_evidence.record": {class: Write, deterministic: false},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under

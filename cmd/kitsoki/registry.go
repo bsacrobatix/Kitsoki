@@ -205,6 +205,10 @@ type SessionRegistry struct {
 	// application ID. Session construction derives the remaining scope from
 	// the loaded application metadata.
 	feedbackBackends map[string]host.FeedbackBackend
+
+	// flowEvidenceProviders are explicit daemon-construction bindings. The
+	// registered catalog path and dependencies are never selected by callers.
+	flowEvidenceProviders map[string]host.FlowEvidenceProvider
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -214,12 +218,13 @@ type SessionRegistry struct {
 // initial catalogue is empty until the caller runs Rescan.
 func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *SessionRegistry {
 	return &SessionRegistry{
-		cfg:              cfg,
-		base:             base,
-		dirs:             dirs,
-		sessions:         map[string]*entry{},
-		feedbackBackends: map[string]host.FeedbackBackend{},
-		maxSessions:      maxSessionsFromEnv(),
+		cfg:                   cfg,
+		base:                  base,
+		dirs:                  dirs,
+		sessions:              map[string]*entry{},
+		feedbackBackends:      map[string]host.FeedbackBackend{},
+		flowEvidenceProviders: map[string]host.FlowEvidenceProvider{},
+		maxSessions:           maxSessionsFromEnv(),
 	}
 }
 
@@ -244,6 +249,33 @@ func (r *SessionRegistry) RegisterFeedbackBackend(appID string, backend host.Fee
 		return fmt.Errorf("register feedback backend %q: already registered", appID)
 	}
 	r.feedbackBackends[appID] = backend
+	return nil
+}
+
+// RegisterFlowEvidenceProvider binds one application to an exact catalog and
+// an injected deterministic runner, resolver, durable store, and clock.
+func (r *SessionRegistry) RegisterFlowEvidenceProvider(
+	appID string,
+	provider host.FlowEvidenceProvider,
+) error {
+	appID = strings.TrimSpace(appID)
+	provider.CatalogPath = strings.TrimSpace(provider.CatalogPath)
+	if appID == "" {
+		return errors.New("register flow evidence provider: application id is required")
+	}
+	if provider.CatalogPath == "" || provider.Resolver == nil ||
+		provider.Runner == nil || provider.Store == nil || provider.Clock == nil {
+		return fmt.Errorf("register flow evidence provider %q: complete injected dependencies are required", appID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.flowEvidenceProviders == nil {
+		r.flowEvidenceProviders = make(map[string]host.FlowEvidenceProvider)
+	}
+	if _, exists := r.flowEvidenceProviders[appID]; exists {
+		return fmt.Errorf("register flow evidence provider %q: already registered", appID)
+	}
+	r.flowEvidenceProviders[appID] = provider
 	return nil
 }
 
@@ -793,6 +825,7 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -1043,6 +1076,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	ok := false
 	defer func() {
 		if !ok {
@@ -1362,6 +1396,27 @@ func (d campaignRegistryDispatcher) Dispatch(ctx context.Context, claim campaign
 		return jobRef, err
 	}
 	return jobRef, nil
+}
+
+func (r *SessionRegistry) wireFlowEvidence(rt *sessionRuntime, appID, owner, revision string) {
+	if rt == nil || rt.HostRegistry == nil {
+		return
+	}
+	r.mu.Lock()
+	provider, ok := r.flowEvidenceProviders[appID]
+	r.mu.Unlock()
+	if !ok {
+		return
+	}
+	rt.HostRegistry.Replace(
+		"host.flow_evidence",
+		host.NewFlowEvidenceHandler(provider, host.FlowEvidenceScope{
+			ApplicationID: appID,
+			Owner:         owner,
+			Revision:      revision,
+			CatalogPath:   provider.CatalogPath,
+		}),
+	)
 }
 
 // CurrentSession implements [server.CurrentSessionProvider]: it returns the id of

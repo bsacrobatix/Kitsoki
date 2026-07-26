@@ -620,6 +620,11 @@ func RegisterBuiltins(r *Registry) {
 	// app-scoped controller over a configured project graph and durable store.
 	r.Register("host.campaign", CampaignHandler)
 
+	// Deterministic catalog-node flow evidence. The builtin fails closed until
+	// daemon construction injects the app's resolver, runner, durable store,
+	// catalog binding, and clock.
+	r.Register("host.flow_evidence", FlowEvidenceHandler)
+
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
 	// bare so the registry's longest-prefix fallback resolves every
