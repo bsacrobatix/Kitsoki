@@ -121,6 +121,33 @@ Custom components read this finite map from `frame.data`; static card `props`
 remain static author input. Callers that compile a definition without a live
 world remain compatible and receive no `data` field.
 
+Use provider-to-world-to-frame composition for graph-backed applications:
+
+```yaml
+host_interfaces:
+  catalog:
+    operations:
+      snapshot:
+        input: {catalog_path: string, audience: string, fields: list, max_nodes: int}
+        output: {snapshot: object}
+    default: host.graph
+
+# In a room effect:
+- invoke: iface.catalog.snapshot
+  with:
+    catalog_path: "{{ world.catalog_path }}"
+    audience: public
+    fields: [title, status, visibility]
+    max_nodes: 1000
+  bind:
+    public_snapshot: snapshot
+```
+
+Keep `public_snapshot` world-only, derive a finite public page projection with
+capability-free Starlark, and expose only that derived key through
+page-scoped `application.data`. Never expose an internal/raw snapshot and rely
+on a renderer or component to remove private fields.
+
 ## Exported handlers
 
 Handlers live under `exports.handlers`, outside the presentation declaration.

@@ -249,6 +249,7 @@ var builtinVerbTable = map[string]verbEffect{
 			"diff":         {class: Read, deterministic: true},
 			"query":        {class: Write, deterministic: true},
 			"project":      {class: Read, deterministic: true},
+			"snapshot":     {class: Read, deterministic: true},
 			"apply":        {class: Write, deterministic: true},
 			"presentation": {class: Read, deterministic: true},
 			"propose":      {class: Write, deterministic: true},

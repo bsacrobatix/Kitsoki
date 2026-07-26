@@ -2518,6 +2518,31 @@ archive ([`issues/DEPRECATED.md`](../../issues/DEPRECATED.md)). Implementation:
 
 ---
 
+## host.graph.snapshot
+
+`host.graph.snapshot` is the bounded read boundary for story applications that
+need catalog data rather than the renderer-oriented `host.graph.project` wire
+graph. It accepts:
+
+```yaml
+catalog_path: pog/catalog.yaml
+audience: internal # public | internal
+fields: [title, status, visibility, statement]
+max_nodes: 1000
+```
+
+The result contains `snapshot.schema`, `audience`, `catalog_digest`, and
+stable-sorted `nodes`, `edges`, and minimal `types`. Node identity, type, and
+schema are structural; every other scalar must be named in `fields`. Source
+provenance, undeclared fields, materialization declarations, and non-scalar
+field values never cross this boundary.
+
+Public mode selects only public nodes and keeps an edge only when both endpoints
+are public. `max_nodes` is a hard result bound: exceeding it fails the call
+instead of truncating. This makes the operation suitable for an injected
+read-only host interface whose result is bound into world, transformed by
+capability-free Starlark, and exposed through page-scoped `application.data`.
+
 ## Adding your own host
 
 See [`developer-guide.md` §5.2](../guide/development/developer-guide.md#52-adding-a-new-built-in-host-handler).

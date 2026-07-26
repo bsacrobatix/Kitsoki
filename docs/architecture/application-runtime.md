@@ -21,6 +21,14 @@ internal values may be included; sensitive and secret values must be excluded,
 redacted, or hashed. Fixed-entry and legacy callers continue to use
 `CompileFrame` and receive no frame data.
 
+Provider data follows the same ownership boundary. A story may invoke a
+read-only host interface such as `iface.catalog.snapshot` backed by
+`host.graph.snapshot`, bind its bounded result into world, and derive finite
+page models with capability-free Starlark. Only those derived world keys belong
+in `application.data`; raw provider snapshots remain world-only. Public models
+must originate from a provider call made with `audience: public`, not from
+client-side filtering of an internal snapshot.
+
 `internal/application.Service` coordinates three injected dependencies:
 
 | Dependency | Responsibility |

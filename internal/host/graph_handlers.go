@@ -16,6 +16,7 @@
 //	apply        {catalog_path, changeset_id[, dry_run]}         -> apply result
 //	canonicalize {catalog_path[, dry_run]}                       -> explicit canonical re-marshal of the catalog's files
 //	project      {catalog_path[, overlay_path], graph_id}        -> kitsoki.graph/v1 wire graph
+//	snapshot     {catalog_path, audience, fields, max_nodes}      -> bounded privacy-filtered catalog data
 //	presentation {...; kit-injected _kit_dir}                    -> starlark-served presentation data
 //	open         {catalog_path}                                  -> catalog overview (graph-mcp-plan.md §3.3 graph.open)
 //	get          {catalog_path, ids[1..20][, fields]}             -> full node envelopes + refs_in
@@ -119,6 +120,8 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphQueryOp(args)
 	case "project":
 		return graphProjectOp(args)
+	case "snapshot":
+		return graphSnapshotOp(args)
 	case "presentation":
 		return graphPresentationOp(ctx, args)
 	case "open":
@@ -136,7 +139,7 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 	case "history":
 		return graphHistoryOp(ctx, args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, canonicalize, query, project, presentation, open, get, find, neighbors, type_census, changeset, history)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, canonicalize, query, project, snapshot, presentation, open, get, find, neighbors, type_census, changeset, history)", op)
 	}
 }
 
