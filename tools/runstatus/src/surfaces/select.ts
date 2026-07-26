@@ -16,9 +16,9 @@
  * extension host — keep it exact.
  */
 
-export type Surface = "chat" | "trace" | "graph";
+export type Surface = "chat" | "trace" | "graph" | "application";
 
-const VALID: readonly Surface[] = ["chat", "trace", "graph"];
+const VALID: readonly Surface[] = ["chat", "trace", "graph", "application"];
 
 function isSurface(value: unknown): value is Surface {
   return typeof value === "string" && (VALID as readonly string[]).includes(value);

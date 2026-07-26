@@ -373,6 +373,24 @@ flock, so two processes cannot share one live trace stream. A
 cross-process live stream (teeing store events to a shared, lock-free
 trace reader) is the remaining engine work.
 
+### 8.4 Story application adapters
+
+Stories with an `application/v1` contract expose a canonical
+`application-frame/v1` and one shared typed-handler registry. The live
+runstatus JSON-RPC adapter provides `runstatus.application.frame`, `.discover`,
+`.inspect`, `.call`, `.action`, and `.event`. The full Studio MCP session
+toolbox exposes the corresponding `application.*` tools, while
+`kitsoki app call` invokes the same JSON-RPC handler path with transport `cli`.
+The web and VS Code-webview host render the frame and dispatch revision-pinned
+actions through those methods; the TUI projection maps the same frame to typed
+view elements and action envelopes.
+
+Adapters do not own application behavior. They preserve handler exposure,
+session and routing metadata, carry receipt envelopes, and reject stale frame
+revisions before action dispatch. Live schema, authorization, budget, durable
+receipt, and idempotent replay services are not wired yet. See
+[Application runtime](application-runtime.md).
+
 ---
 
 ## 9. Pointers
@@ -384,4 +402,5 @@ trace reader) is the remaining engine work.
 - The `loop.py` external driver lives in a separate repo and is the
   reference inbound poller; for the live bug-fix flow design see
   [`../stories/bugfix/README.md`](../../stories/bugfix/README.md).
-- CLI reference: `kitsoki session --help`, `kitsoki chat --help`.
+- CLI reference: `kitsoki session --help`, `kitsoki chat --help`,
+  `kitsoki app --help`.

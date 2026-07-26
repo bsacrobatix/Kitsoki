@@ -2,6 +2,7 @@
   <ChatSurface v-if="surface === 'chat'" />
   <TraceSurface v-else-if="surface === 'trace'" />
   <GraphSurface v-else-if="surface === 'graph'" />
+  <ApplicationSurface v-else-if="surface === 'application'" />
 </template>
 
 <script setup lang="ts">
@@ -12,6 +13,7 @@ import type { Surface } from "./select.js";
 import ChatSurface from "./ChatSurface.vue";
 import TraceSurface from "./TraceSurface.vue";
 import GraphSurface from "./GraphSurface.vue";
+import ApplicationSurface from "./ApplicationSurface.vue";
 
 defineProps<{ surface: Surface }>();
 </script>

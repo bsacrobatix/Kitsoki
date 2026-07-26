@@ -211,6 +211,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(validateCmd())
 	root.AddCommand(storyboardCmd())
 	root.AddCommand(workflowCmd())
+	root.AddCommand(applicationCmd())
 	root.AddCommand(capsuleCmd())
 	root.AddCommand(workerCmd())
 	root.AddCommand(vmpoolCmd())

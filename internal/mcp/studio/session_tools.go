@@ -123,6 +123,7 @@ func (srv *Server) registerStrictSessionDriverTools() {
 // registry.
 func (srv *Server) registerSessionTools() {
 	srv.registerStrictSessionDriverTools()
+	srv.registerApplicationTools()
 
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "session.attach",

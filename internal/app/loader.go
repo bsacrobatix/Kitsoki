@@ -567,6 +567,8 @@ func mergeInto(dst, src *AppDef, srcFile string) []error {
 		dst.Toolboxes[k] = v
 	}
 
+	mergeApplicationDeclarations(dst, src, addErr)
+
 	return errs
 }
 
@@ -1195,6 +1197,11 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// routing rules. Errors here share the same shape as the
 	// surrounding validators (ValidationError via the errs slice).
 	validateRouting(file, def, &errs)
+
+	// The optional application/v1 and exported handler/event author contracts
+	// are additive. Legacy stories skip this pass; declared contracts get
+	// semantic identity, relationship, fallback, and effect-policy validation.
+	errs = append(errs, validateApplicationContract(def, file)...)
 
 	// ── 7b. (removed) off-path agent reference: superseded by step 9b
 	// validateAgentReferences which also recognises builtin agent names

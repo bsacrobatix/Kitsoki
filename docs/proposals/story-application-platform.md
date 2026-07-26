@@ -1,10 +1,16 @@
 # Epic: Stories as a reusable application platform
 
-**Status:** Draft v3. Nothing implemented yet. Reconciled with
+**Status:** In progress v4. The cross-surface application foundation is
+implemented: `application/v1` loading and validation, program-graph projection,
+`application-frame/v1`, the handler/event registry and receipt envelopes, the
+default Vue renderer, semantic inspection, TUI projection, and initial CLI,
+MCP, JSON-RPC, web, and VS Code-webview adapters. The remaining work is deeper
+story-contract analysis, functional Starlark/event execution, the managed
+Vite/package lifecycle, the wizard framework, native surface integration, and
+the external POG conformance migration. Reconciled with
 [`docs/stories/domain-model.md`](../stories/domain-model.md) and
 [`docs/architecture/story-programming-paradigm.md`](../architecture/story-programming-paradigm.md);
-focused child proposals should be cut after the shared contracts, including the
-semantic UI and feedback-anchor contract, are reviewed.
+the remaining focused child proposals should be cut from the residual slices.
 **Kind:**   epic
 **Slices:** 8 (0/8 shipped)
 
@@ -564,12 +570,12 @@ its own managed workflow.
 
 | # | Slice | Kind | Scope (one line) | Depends on | Status | File |
 |---|---|---|---|---|---|---|
-| 1 | story-contracts-and-program-graph | runtime | Outcome/bind/guard totality, room interfaces, parameterized rooms, and a queryable read/write/effect/UI graph with semantic identity and quality lints | — | not cut | — |
-| 2 | application-contract | runtime | `application/v1`, canonical frame/action/semantic-node schemas, loader validation, composition, provenance, feedback policy, and legacy typed-view projection | 1 | not cut | — |
-| 3 | handler-and-event-registry | runtime + tracing | Typed intent/Starlark handlers, event binding, routing/budget/idempotency/compensation policy, discovery, outcome envelopes, child-run collections, and receipts | 1 | not cut | — |
-| 4 | web-application-runtime | tui + runtime | Vue component registry, default frame renderer, semantic DOM projection/inspection, scoped theming, Vite dev/HMR ownership, stale-session rules, and production bundle | 2, 3 | not cut | — |
+| 1 | story-contracts-and-program-graph | runtime | Outcome/bind/guard totality, room interfaces, parameterized rooms, and a queryable read/write/effect/UI graph with semantic identity and quality lints | — | partial: application/UI/handler/event graph shipped; totality and room contracts remain | — |
+| 2 | application-contract | runtime | `application/v1`, canonical frame/action/semantic-node schemas, loader validation, composition, provenance, feedback policy, and legacy typed-view projection | 1 | partial: schemas, validation, include merging, provenance, and frame compiler shipped; full override and legacy-view projection remain | — |
+| 3 | handler-and-event-registry | runtime + tracing | Typed intent/Starlark handlers, event binding, routing/budget/idempotency/compensation policy, discovery, outcome envelopes, child-run collections, and receipts | 1 | partial: registry, policy injection seams, discovery, handler-target events, outcomes, and receipt envelopes shipped; schema/policy/sink wiring, deduplication, functional Starlark, session-event modes, and runtime governor wiring remain | — |
+| 4 | web-application-runtime | tui + runtime | Vue component registry, default frame renderer, semantic DOM projection/inspection, scoped theming, Vite dev/HMR ownership, stale-session rules, and production bundle | 2, 3 | partial: default renderer, component registry/fallbacks, semantic inspection, live runstatus host, and stale-frame rules shipped; managed dev/HMR/build lifecycle remains | — |
 | 5 | wizard-application-framework | story | Reusable headless + default card presentation with navigation, forms, validation, errors, progress, events, and extension fixtures | 2, 4 | not cut | — |
-| 6 | surface-adapters | tui + runtime | VS Code web/native, TUI, CLI, MCP, and JSON-RPC projections over shared frame/handler contracts, including semantic inspection, routing, and feedback anchors | 2, 3, 5 | not cut | — |
+| 6 | surface-adapters | tui + runtime | VS Code web/native, TUI, CLI, MCP, and JSON-RPC projections over shared frame/handler contracts, including semantic inspection, routing, and feedback anchors | 2, 3, 5 | partial: web/VS Code reuse, TUI projection, and initial CLI, MCP, and JSON-RPC adapters shipped; native VS Code/TUI host integration, non-required session modes, and cross-surface feedback fixture remain | — |
 | 7 | versioned-component-packages | runtime | À-la-carte namespaced packages for story/application components, room templates, schemas, UI, and one lockfile shared with kits | 1, 2 | not cut | — |
 | 8 | POG adoption and conformance | story | Migrate one vertical slice, generate the program-graph/semantic ownership report, prove cross-surface feedback resolution, then close every remaining non-story product surface | 4, 5, 6, 7 | external; not cut | — |
 

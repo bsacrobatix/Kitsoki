@@ -92,6 +92,7 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	appplatform "kitsoki/internal/application"
 	"kitsoki/internal/assignment"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/dynamicworkflow"
@@ -1159,6 +1160,160 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 			return nil, lifecycleErr(err)
 		}
 		return map[string]any{"session_id": sid}, nil
+
+	// ── Story application platform ─────────────────────────────────────────
+	case "runstatus.application.frame":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		sessionID, rerr := sessionIDParam(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		frame, err := service.Frames.CurrentFrame(ctx, sessionID)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return frame, nil
+
+	case "runstatus.application.inspect":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		sessionID, rerr := sessionIDParam(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		ref := stringParam(params, "ref")
+		if ref == "" {
+			return nil, invalidParams(fmt.Errorf("ref is required"))
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		inspection, ok, err := service.Inspect(ctx, sessionID, ref, 20)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		if !ok {
+			return nil, &rpcError{Code: codeNotFound, Message: "semantic application ref not found"}
+		}
+		return inspection, nil
+
+	case "runstatus.application.discover":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		transport := appplatform.Transport(stringParam(params, "transport"))
+		if transport == "" {
+			transport = appplatform.TransportJSONRPC
+		}
+		handlers, err := service.Discover(ctx, transport)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		return handlers, nil
+
+	case "runstatus.application.call":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		var request appplatform.CallRequest
+		if err := decodeParams(params, &request); err != nil {
+			return nil, invalidParams(err)
+		}
+		if actor, ok := s.resolveActor(ctx, params); ok {
+			request.Actor = actor
+		} else {
+			request.Actor = ""
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		transport := appplatform.Transport(stringParam(params, "transport"))
+		if transport == "" {
+			transport = appplatform.TransportJSONRPC
+		}
+		outcome, err := service.Call(ctx, transport, request)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return outcome, nil
+
+	case "runstatus.application.action":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		var envelope appplatform.ActionEnvelope
+		if err := decodeParams(params, &envelope); err != nil {
+			return nil, invalidParams(err)
+		}
+		if actor, ok := s.resolveActor(ctx, params); ok {
+			envelope.Actor = actor
+		} else {
+			envelope.Actor = ""
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		transport := appplatform.Transport(stringParam(params, "transport"))
+		if transport == "" {
+			transport = appplatform.TransportWeb
+		}
+		outcome, err := service.DispatchAction(ctx, transport, envelope)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return outcome, nil
+
+	case "runstatus.application.event":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if entry.Driver == nil {
+			return nil, readOnlyErr(method)
+		}
+		var envelope appplatform.EventEnvelope
+		if err := decodeParams(params, &envelope); err != nil {
+			return nil, invalidParams(err)
+		}
+		if actor, ok := s.resolveActor(ctx, params); ok {
+			envelope.Actor = actor
+		} else {
+			envelope.Actor = ""
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		outcome, err := service.DispatchEvent(ctx, envelope)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return outcome, nil
 
 	// ── Dynamic workflows (shared draft lifecycle) ──────────────────────────
 	case "runstatus.workflow.create":

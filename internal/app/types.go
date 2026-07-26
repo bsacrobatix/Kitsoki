@@ -231,7 +231,14 @@ type AppDef struct {
 	Intents map[string]Intent `yaml:"intents,omitempty"`
 	Root    any               `yaml:"root"` // string state name or inline compound/parallel root
 	States  map[string]*State `yaml:"states,omitempty"`
-	OffPath *OffPathDef       `yaml:"off_path,omitempty"`
+	// Application is the optional, presentation-independent application/v1
+	// author contract. Stories that omit it retain the legacy room-oriented
+	// rendering and transport behavior.
+	Application *ApplicationContract `yaml:"application,omitempty"`
+	// Events bind non-operator inputs to the same handler/intent registry used
+	// by application actions.
+	Events  map[string]*ApplicationEvent `yaml:"events,omitempty"`
+	OffPath *OffPathDef                  `yaml:"off_path,omitempty"`
 	// Hosts is the allow-list of host handler names this app may invoke.
 	Hosts []string `yaml:"hosts,omitempty"`
 	// AgentPlugins declares agent plugin configurations under the top-level
@@ -339,8 +346,7 @@ type AppDef struct {
 	// no runtime effect outside an import context.
 	Exits map[string]*ExitDef `yaml:"exits,omitempty"`
 
-	// Exports declares what the child app surfaces to importers.
-	// Currently only intents (see docs/stories/imports.md).
+	// Exports declares what the app surfaces to importers and transports.
 	Exports *ExportsBlock `yaml:"exports,omitempty"`
 
 	// HostInterfaces declares named capabilities the app depends on
@@ -741,7 +747,8 @@ type ExitDef struct {
 
 // ExportsBlock declares what an app surfaces to importers.
 type ExportsBlock struct {
-	Intents []string `yaml:"intents,omitempty"`
+	Intents  []string                       `yaml:"intents,omitempty" json:"intents,omitempty"`
+	Handlers map[string]*ApplicationHandler `yaml:"handlers,omitempty" json:"handlers,omitempty"`
 }
 
 // HostInterfaceDef declares one named capability surface.

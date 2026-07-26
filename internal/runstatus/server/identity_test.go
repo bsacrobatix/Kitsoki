@@ -21,13 +21,19 @@ import (
 // the server injected the resolved operator identity as slots.author. This is a
 // white-box test (package server) because the Driver interface returns the
 // unexported intentInfo type, which a black-box fake cannot satisfy.
-type captureDriver struct{ lastSlots map[string]any }
+type captureDriver struct {
+	lastSlots map[string]any
+	outcome   *orchestrator.TurnOutcome
+}
 
 func (d *captureDriver) Turn(context.Context, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
 func (d *captureDriver) SubmitDirect(_ context.Context, _ string, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	d.lastSlots = slots
+	if d.outcome != nil {
+		return d.outcome, nil
+	}
 	return &orchestrator.TurnOutcome{}, nil
 }
 func (d *captureDriver) ContinueTurn(_ context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {
