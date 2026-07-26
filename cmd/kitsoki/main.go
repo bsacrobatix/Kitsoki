@@ -225,6 +225,7 @@ See docs/ in the repo for the narrative documentation.`,
 	root.AddCommand(queueCmd())
 	root.AddCommand(waveCmd())
 	root.AddCommand(gitopsCmd())
+	root.AddCommand(repoCmd())
 	root.AddCommand(ticketProviderCmd())
 	root.AddCommand(doctorCmd())
 	root.AddCommand(graphCmd())
