@@ -379,6 +379,38 @@ func TestHandlerEffectPolicyValidation(t *testing.T) {
 		t.Fatalf("write handler error = %v", err)
 	}
 
+	tests := []struct {
+		name        string
+		idempotency string
+		want        string
+	}{
+		{
+			name:        "empty key",
+			idempotency: "{scope: session}",
+			want:        "idempotency.key: must be a non-empty input.<field> path",
+		},
+		{
+			name:        "non-input key",
+			idempotency: "{key: request_id, scope: session}",
+			want:        "idempotency.key: must be a non-empty input.<field> path",
+		},
+		{
+			name:        "empty scope",
+			idempotency: "{key: input.request_id}",
+			want:        "idempotency.scope: is required for write and external handlers",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := strings.Replace(validApplicationStory, "effect: read", "effect: write", 1)
+			input = strings.Replace(input, "      routing_mode: exact",
+				"      routing_mode: exact\n      idempotency: "+tt.idempotency, 1)
+			if _, err := LoadBytes([]byte(input)); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("handler error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+
 	retryableExternal := strings.Replace(validApplicationStory, "effect: read", "effect: external", 1)
 	retryableExternal = strings.Replace(retryableExternal,
 		"      routing_mode: exact",

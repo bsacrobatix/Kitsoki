@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
@@ -23,6 +24,8 @@ import (
 // unexported intentInfo type, which a black-box fake cannot satisfy.
 type captureDriver struct {
 	lastSlots map[string]any
+	lastActor string
+	submits   int
 	outcome   *orchestrator.TurnOutcome
 	world     map[string]any
 }
@@ -30,8 +33,10 @@ type captureDriver struct {
 func (d *captureDriver) Turn(context.Context, string) (*orchestrator.TurnOutcome, error) {
 	return &orchestrator.TurnOutcome{}, nil
 }
-func (d *captureDriver) SubmitDirect(_ context.Context, _ string, slots map[string]any) (*orchestrator.TurnOutcome, error) {
+func (d *captureDriver) SubmitDirect(ctx context.Context, _ string, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	d.lastSlots = slots
+	d.lastActor = host.ActorFromContext(ctx)
+	d.submits++
 	if d.outcome != nil {
 		return d.outcome, nil
 	}

@@ -703,11 +703,18 @@ func validateApplicationContract(def *AppDef, file string) []error {
 		if handler.Effect == effect.Write || handler.Effect == effect.External {
 			if handler.Idempotency == nil {
 				addf(path+".idempotency", "is required for write and external handlers")
+			} else {
+				if !validApplicationIdempotencyKey(handler.Idempotency.Key) {
+					addf(path+".idempotency.key", "must be a non-empty input.<field> path")
+				}
+				if strings.TrimSpace(handler.Idempotency.Scope) == "" {
+					addf(path+".idempotency.scope", "is required for write and external handlers")
+				}
 			}
 		}
 		if handler.Idempotency != nil {
 			switch handler.Idempotency.Scope {
-			case "", "request", "session", "application":
+			case "request", "session", "application":
 			default:
 				addf(path+".idempotency.scope", "%q is not one of request|session|application", handler.Idempotency.Scope)
 			}
@@ -791,6 +798,22 @@ func validateApplicationContract(def *AppDef, file string) []error {
 	}
 
 	return errs
+}
+
+func validApplicationIdempotencyKey(key string) bool {
+	if key != strings.TrimSpace(key) || !strings.HasPrefix(key, "input.") {
+		return false
+	}
+	segments := strings.Split(strings.TrimPrefix(key, "input."), ".")
+	if len(segments) == 0 {
+		return false
+	}
+	for _, segment := range segments {
+		if segment == "" || segment != strings.TrimSpace(segment) {
+			return false
+		}
+	}
+	return true
 }
 
 func validateRoutingMode(path, mode string, addf func(string, string, ...any)) {

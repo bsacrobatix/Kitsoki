@@ -12,6 +12,7 @@ import (
 
 	"kitsoki/internal/app"
 	appplatform "kitsoki/internal/application"
+	"kitsoki/internal/effect"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/orchestrator"
@@ -109,10 +110,8 @@ func (p sessionApplicationFrameProvider) CurrentFrame(ctx context.Context, sessi
 }
 
 type sessionApplicationIntentDispatcher struct {
-	entry   Entry
-	frames  appplatform.FrameProvider
-	runtime ApplicationRuntime
-	deps    appplatform.Dependencies
+	frames   appplatform.FrameProvider
+	registry *appplatform.Registry
 }
 
 func (d sessionApplicationIntentDispatcher) DispatchIntent(
@@ -121,83 +120,37 @@ func (d sessionApplicationIntentDispatcher) DispatchIntent(
 	envelope appplatform.ActionEnvelope,
 	action appplatform.Action,
 ) (appplatform.OutcomeEnvelope, error) {
-	def := appplatform.HandlerDefinition{
-		ID: action.ID, Name: action.Semantic.Name, Description: action.Semantic.Description,
-		SemanticRef: action.Semantic.Ref, Session: appplatform.SessionRequired,
-		Effect: appplatform.EffectWrite, RoutingMode: action.RoutingMode, Outcomes: []string{"ok"},
+	if d.registry == nil {
+		return appplatform.OutcomeEnvelope{}, fmt.Errorf("application: intent action registry is unavailable")
 	}
-	invocation := appplatform.Invocation{
+	outcome, err := d.registry.Invoke(ctx, appplatform.Invocation{
 		HandlerID: action.ID, Input: envelope.Input, SessionID: envelope.SessionID,
 		Actor: envelope.Actor, Transport: transport, RoutingMode: action.RoutingMode,
-		IdempotencyKey: envelope.IdempotencyKey, FrameRevision: envelope.FrameRevision,
-	}
-	if d.deps.Auth != nil {
-		if err := d.deps.Auth.Authorize(ctx, def, invocation); err != nil {
-			return appplatform.OutcomeEnvelope{}, fmt.Errorf("%w: %v", appplatform.ErrUnauthorized, err)
-		}
-	}
-	if d.deps.Effects != nil {
-		if err := d.deps.Effects.AuthorizeEffect(ctx, def, invocation); err != nil {
-			return appplatform.OutcomeEnvelope{}, fmt.Errorf("application: effect policy denied %q: %w", action.ID, err)
-		}
-	}
-	budget := appplatform.BudgetDecision{Allowed: true, Code: "not_applicable"}
-	if d.deps.Budget != nil {
-		var err error
-		budget, err = d.deps.Budget.Decide(ctx, def, invocation)
-		if err != nil {
-			return appplatform.OutcomeEnvelope{}, fmt.Errorf("application: budget policy for %q: %w", action.ID, err)
-		}
-		if !budget.Allowed {
-			return appplatform.OutcomeEnvelope{}, fmt.Errorf("%w: %s", appplatform.ErrBudgetDenied, budget.Reason)
-		}
-	}
-	entry, err := resolveApplicationEntry(d.entry, d.runtime, envelope.SessionID)
+		IdempotencyKey: applicationIntentActionKey(envelope.FrameRevision),
+		FrameRevision:  envelope.FrameRevision,
+	})
 	if err != nil {
-		return appplatform.OutcomeEnvelope{}, err
+		return outcome, err
 	}
-	result, err := runApplicationIntent(
-		ctx, entry, action.ID, action.Intent, action.TargetState, action.RoomInterface,
-		[]string{"ok"}, string(action.RoutingMode),
-		appplatform.Invocation{
-			HandlerID: action.ID, Input: envelope.Input, SessionID: envelope.SessionID,
-			Actor: envelope.Actor, Transport: transport, RoutingMode: action.RoutingMode,
-			IdempotencyKey: envelope.IdempotencyKey, FrameRevision: envelope.FrameRevision,
-		},
-	)
-	if err != nil {
-		return appplatform.OutcomeEnvelope{}, err
-	}
-	receipt, err := applicationReceipt(
-		action.ID, action.Semantic.Ref, envelope.SessionID, envelope.Actor,
-		transport, action.RoutingMode, envelope.IdempotencyKey,
-		envelope.FrameRevision, envelope.Input, result.Output, result.Outcome, budget,
-		result.SelectedImplementor,
-	)
-	if err != nil {
-		return appplatform.OutcomeEnvelope{}, err
-	}
-	outcome := appplatform.OutcomeEnvelope{
-		Schema: appplatform.OutcomeSchema, Handler: action.ID, Outcome: result.Outcome,
-		Output: result.Output, Receipt: receipt, SelectedImplementor: result.SelectedImplementor,
-	}
-	if d.frames != nil {
+	if outcome.Frame == nil && d.frames != nil {
 		frame, frameErr := d.frames.CurrentFrame(ctx, envelope.SessionID)
 		if frameErr != nil {
 			return appplatform.OutcomeEnvelope{}, frameErr
 		}
 		outcome.Frame = &frame
-		outcome.Frame.Workflow.BudgetState = budget.Code
-		if budget.Code != "not_applicable" {
-			outcome.Frame.Workflow.Degradation = budget.Reason
-		}
-	}
-	if d.deps.Receipts != nil {
-		if err := d.deps.Receipts.Record(ctx, receipt); err != nil {
-			return appplatform.OutcomeEnvelope{}, fmt.Errorf("application: record action receipt: %w", err)
+		outcome.Frame.Workflow.BudgetState = outcome.Receipt.Budget.Code
+		if outcome.Receipt.Budget.Code != "not_applicable" {
+			outcome.Frame.Workflow.Degradation = outcome.Receipt.Budget.Reason
 		}
 	}
 	return outcome, nil
+}
+
+func applicationIntentActionKey(frameRevision uint64) string {
+	// Handler ID and session are separate ReplayKey dimensions. The offered
+	// frame revision therefore identifies one action opportunity without
+	// trusting a transport-generated key or actor label.
+	return fmt.Sprintf("application-action/v1:frame:%d", frameRevision)
 }
 
 // NewSessionApplicationService adapts one runstatus entry to the shared
@@ -217,6 +170,51 @@ func NewSessionApplicationService(entry Entry, page string, runtimes ...Applicat
 		return appplatform.Service{}, err
 	}
 	registry := appplatform.NewRegistry(deps)
+	intentRegistry := appplatform.NewRegistry(deps)
+
+	contract, _ := app.EffectiveApplication(def)
+	if contract != nil {
+		for _, id := range sortedApplicationKeys(contract.Actions) {
+			action := contract.Actions[id]
+			if action == nil || action.Intent == "" {
+				continue
+			}
+			var inputSchema json.RawMessage
+			if strings.TrimSpace(action.InputSchema) != "" {
+				var err error
+				inputSchema, err = loadApplicationSchema(def, action.InputSchema)
+				if err != nil {
+					return appplatform.Service{}, fmt.Errorf("application: action %q input schema: %w", id, err)
+				}
+			}
+			actionID := id
+			actionDecl := action
+			if err := intentRegistry.RegisterHandler(appplatform.HandlerDefinition{
+				ID: actionID, Name: actionDecl.Name, Description: actionDecl.Description,
+				SemanticRef: actionDecl.SemanticRef, InputSchema: inputSchema,
+				Session: appplatform.SessionRequired, Effect: appplatform.EffectWrite,
+				RoutingMode: applicationRoutingMode(actionDecl.RoutingMode), Outcomes: []string{"ok"},
+				Expose: []appplatform.Transport{
+					appplatform.TransportJSONRPC, appplatform.TransportMCP, appplatform.TransportCLI,
+					appplatform.TransportWeb, appplatform.TransportVSCode, appplatform.TransportTUI,
+				},
+				Idempotency:      appplatform.IdempotencyRequired,
+				IdempotencyScope: "session",
+			}, appplatform.HandlerFunc(func(ctx context.Context, invocation appplatform.Invocation) (appplatform.HandlerResult, error) {
+				targetEntry, err := resolveApplicationEntry(entry, runtime, invocation.SessionID)
+				if err != nil {
+					return appplatform.HandlerResult{}, err
+				}
+				return runApplicationIntent(
+					ctx, targetEntry, actionID, actionDecl.Intent,
+					actionDecl.State, actionDecl.RoomInterface,
+					[]string{"ok"}, actionDecl.RoutingMode, invocation,
+				)
+			})); err != nil {
+				return appplatform.Service{}, err
+			}
+		}
+	}
 
 	if def.Exports != nil {
 		for _, id := range sortedApplicationKeys(def.Exports.Handlers) {
@@ -241,6 +239,7 @@ func NewSessionApplicationService(entry Entry, page string, runtimes ...Applicat
 				)
 			}
 			if err := registry.RegisterHandler(runtimeDef, appplatform.HandlerFunc(func(ctx context.Context, invocation appplatform.Invocation) (appplatform.HandlerResult, error) {
+				ctx = host.WithActor(ctx, invocation.Actor)
 				targetEntry, err := resolveApplicationEntry(entry, runtime, invocation.SessionID)
 				if err != nil {
 					return appplatform.HandlerResult{}, err
@@ -321,10 +320,15 @@ func NewSessionApplicationService(entry Entry, page string, runtimes ...Applicat
 	if err := registry.Validate(); err != nil {
 		return appplatform.Service{}, err
 	}
+	if err := intentRegistry.Validate(); err != nil {
+		return appplatform.Service{}, err
+	}
 	return appplatform.Service{
 		Registry: registry,
 		Frames:   frames,
-		Intents:  sessionApplicationIntentDispatcher{entry: entry, frames: frames, runtime: runtime, deps: deps},
+		Intents: sessionApplicationIntentDispatcher{
+			frames: frames, registry: intentRegistry,
+		},
 	}, nil
 }
 
@@ -529,6 +533,15 @@ func applicationHandlerDefinition(def *app.AppDef, id string, handler *app.Appli
 		return appplatform.HandlerDefinition{}, fmt.Errorf("application: handler %q output schema: %w", id, err)
 	}
 	idempotency := appplatform.IdempotencyPolicy("")
+	if handler.Effect == effect.Write || handler.Effect == effect.External {
+		if handler.Idempotency == nil || strings.TrimSpace(handler.Idempotency.Key) == "" ||
+			strings.TrimSpace(handler.Idempotency.Scope) == "" {
+			return appplatform.HandlerDefinition{}, fmt.Errorf(
+				"application: %s handler %q requires an explicit idempotency input key and scope",
+				handler.Effect, id,
+			)
+		}
+	}
 	if handler.Idempotency != nil {
 		idempotency = appplatform.IdempotencyRequired
 	}
@@ -581,6 +594,7 @@ func runApplicationIntent(
 		return appplatform.HandlerResult{}, err
 	}
 	slots = applicationActorSlots(slots, invocation.Actor)
+	ctx = host.WithActor(ctx, invocation.Actor)
 	out, err := entry.Driver.SubmitDirect(ctx, intent, slots)
 	if err != nil {
 		return appplatform.HandlerResult{}, err
@@ -614,6 +628,7 @@ func runApplicationStarlark(
 	if handlerDecl.Starlark == nil {
 		return appplatform.HandlerResult{}, fmt.Errorf("application: handler %q has no Starlark declaration", handlerID)
 	}
+	ctx = host.WithActor(ctx, invocation.Actor)
 	script, err := resolveApplicationPath(def, handlerDecl.Starlark.Script)
 	if err != nil {
 		return appplatform.HandlerResult{}, err
@@ -863,36 +878,6 @@ func applicationTurnOutput(out *orchestrator.TurnOutcome) (json.RawMessage, erro
 		"mode": out.Mode, "state": out.NewState, "view": out.View,
 		"allowed_intents": out.AllowedIntents, "error_code": out.ErrorCode,
 		"error_message": out.ErrorMessage, "turn": out.TurnNumber,
-	})
-}
-
-func applicationReceipt(
-	handlerID, semanticRef, sessionID, actor string,
-	transport appplatform.Transport,
-	routing appplatform.RoutingMode,
-	idempotencyKey string,
-	frameRevision uint64,
-	input, output json.RawMessage,
-	outcome string,
-	budget appplatform.BudgetDecision,
-	selectedImplementor string,
-) (appplatform.Receipt, error) {
-	inputDigest, err := appplatform.DigestJSON(input)
-	if err != nil {
-		return appplatform.Receipt{}, err
-	}
-	outputDigest, err := appplatform.DigestJSON(output)
-	if err != nil {
-		return appplatform.Receipt{}, err
-	}
-	return appplatform.FinalizeReceipt(appplatform.Receipt{
-		HandlerID: handlerID, SemanticRef: semanticRef, SessionID: sessionID,
-		Actor: actor, Effect: appplatform.EffectWrite,
-		Routing:        appplatform.RoutingReceipt{Requested: routing, Resolved: routing},
-		Budget:         budget,
-		IdempotencyKey: idempotencyKey, InputDigest: inputDigest, OutputDigest: outputDigest,
-		Transport: transport, FrameRevision: frameRevision, Outcome: outcome,
-		SelectedImplementor: selectedImplementor,
 	})
 }
 

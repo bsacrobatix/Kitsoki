@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,6 +44,18 @@ type applicationBudgetFunc func(context.Context, appplatform.HandlerDefinition, 
 
 func (f applicationBudgetFunc) Decide(ctx context.Context, def appplatform.HandlerDefinition, invocation appplatform.Invocation) (appplatform.BudgetDecision, error) {
 	return f(ctx, def, invocation)
+}
+
+type applicationReceiptCollector struct {
+	mu       sync.Mutex
+	receipts []appplatform.Receipt
+}
+
+func (c *applicationReceiptCollector) Record(_ context.Context, receipt appplatform.Receipt) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.receipts = append(c.receipts, receipt)
+	return nil
 }
 
 func (p *applicationTestProvider) Get(id string) (Entry, bool) {
@@ -138,13 +151,21 @@ application:
                 name: Item
                 description: Show one item.
                 semantic_ref: demo.card.item
-                actions: [demo.open]
+                actions: [demo.open, demo.intent]
   actions:
     demo.open:
       name: Open
       description: Open the selected item.
       semantic_ref: demo.action.open
       handler: demo.open
+    demo.intent:
+      name: Advance
+      description: Advance through the offered story intent.
+      semantic_ref: demo.action.intent
+      intent: open
+      state: ready
+      input_schema: schemas/open.json
+      routing_mode: exact
 exports:
   handlers:
     demo.open:
@@ -455,6 +476,32 @@ func TestApplicationIntentRefusesSameNameInWrongRoom(t *testing.T) {
 	}
 }
 
+func TestApplicationIntentPropagatesResolvedActorToHostContext(t *testing.T) {
+	driver := &captureDriver{}
+	entry := Entry{
+		Source: applicationTestSource{
+			def: &app.AppDef{},
+			header: runstatus.SessionHeader{
+				SessionID: "session-1", CurrentState: "ready",
+			},
+		},
+		Driver: driver,
+	}
+	_, err := runApplicationIntent(
+		context.Background(), entry, "demo.intent", "open", "ready", "",
+		[]string{"ok"}, "exact", appplatform.Invocation{
+			HandlerID: "demo.intent", SessionID: "session-1", Actor: "operator-1",
+			Transport: appplatform.TransportWeb, Input: json.RawMessage(`{"item_id":"item-1"}`),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if driver.lastActor != "operator-1" {
+		t.Fatalf("host actor = %q, want operator-1", driver.lastActor)
+	}
+}
+
 func TestApplicationStarlarkUsesSessionHostRegistry(t *testing.T) {
 	root := t.TempDir()
 	script := filepath.Join(root, "host.star")
@@ -474,8 +521,11 @@ outputs:
 	}
 	hostRegistry := host.NewRegistry()
 	called := false
-	hostRegistry.Register("host.workspace_manager.get", func(_ context.Context, args map[string]any) (host.Result, error) {
+	hostRegistry.Register("host.workspace_manager.get", func(ctx context.Context, args map[string]any) (host.Result, error) {
 		called = true
+		if actor := host.ActorFromContext(ctx); actor != "operator-1" {
+			return host.Result{}, fmt.Errorf("host actor = %q, want operator-1", actor)
+		}
 		return host.Result{Data: map[string]any{"id": args["id"]}}, nil
 	})
 	result, err := runApplicationStarlark(
@@ -489,7 +539,7 @@ outputs:
 				},
 			},
 		},
-		appplatform.Invocation{Transport: appplatform.TransportJSONRPC},
+		appplatform.Invocation{Actor: "operator-1", Transport: appplatform.TransportJSONRPC},
 		hostRegistry,
 	)
 	if err != nil {
@@ -497,6 +547,56 @@ outputs:
 	}
 	if !called || result.Outcome != "ok" || !strings.Contains(string(result.Output), `"id":"workspace-1"`) {
 		t.Fatalf("host-backed Starlark result=%#v called=%v", result, called)
+	}
+}
+
+func TestApplicationIntentActionUsesCanonicalServerReplay(t *testing.T) {
+	replay := appplatform.NewMemoryReplayStore()
+	receipts := &applicationReceiptCollector{}
+	server, driver, _ := applicationRPCFixture(t, WithApplicationDependencies(appplatform.Dependencies{
+		Replay: replay, Receipts: receipts,
+	}))
+	params := map[string]any{
+		"session_id": "session-1", "action": "demo.intent", "frame_revision": 12,
+		"input": map[string]any{"item_id": "item-1"}, "actor": "operator-1",
+		"idempotency_key": "untrusted-client-key-1",
+	}
+	var first appplatform.OutcomeEnvelope
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.web_action", params, &first); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	params["idempotency_key"] = "untrusted-client-key-2"
+	var second appplatform.OutcomeEnvelope
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.web_action", params, &second); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+
+	if driver.submits != 1 {
+		t.Fatalf("intent effects = %d, want 1", driver.submits)
+	}
+	if driver.lastActor != "operator-1" {
+		t.Fatalf("host actor = %q, want operator-1", driver.lastActor)
+	}
+	wantKey := applicationIntentActionKey(12)
+	if first.Receipt.IdempotencyKey != wantKey || second.Receipt.IdempotencyKey != wantKey {
+		t.Fatalf("receipt keys first=%q second=%q, want %q",
+			first.Receipt.IdempotencyKey, second.Receipt.IdempotencyKey, wantKey)
+	}
+	if first.Receipt.Replayed || !second.Receipt.Replayed || second.Receipt.ReplayOf != first.Receipt.ID {
+		t.Fatalf("first receipt=%#v second receipt=%#v", first.Receipt, second.Receipt)
+	}
+	params["input"] = map[string]any{"item_id": "item-2"}
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.web_action", params, nil); rpcErr == nil ||
+		!strings.Contains(rpcErr.Message, "idempotency key reused with different input") {
+		t.Fatalf("conflicting replay error = %#v", rpcErr)
+	}
+	if driver.submits != 1 {
+		t.Fatalf("intent effects after conflicting replay = %d, want 1", driver.submits)
+	}
+	receipts.mu.Lock()
+	defer receipts.mu.Unlock()
+	if len(receipts.receipts) != 2 {
+		t.Fatalf("receipts = %d, want effect receipt plus replay receipt", len(receipts.receipts))
 	}
 }
 

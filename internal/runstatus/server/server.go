@@ -519,12 +519,12 @@ func WithDriver(d Driver) Option {
 // WithDefaultActor configures the operator identity recorded on a drive turn
 // (session.submit / session.continue) when no other source supplies one. It is
 // the lowest-precedence identity source: the `X-Kitsoki-Actor` request header
-// wins over it, and an explicit `actor` RPC param wins over the header. The
-// resolved value is injected as `slots.author` before the Driver advances the
-// turn, so a story's `last_reply_author` records a known principal instead of
-// the literal `'human'` fallback. `kitsoki web --actor <name>` sets it; empty
-// means "no configured default" (turns fall back to whatever the story does
-// with an absent `slots.author`).
+// wins over both it and an explicit `actor` RPC param; the RPC param wins over
+// the configured default. The resolved value is injected as `slots.author`
+// before the Driver advances the turn, so a story's `last_reply_author` records
+// a known principal instead of the literal `'human'` fallback. `kitsoki web
+// --actor <name>` sets it; empty means "no configured default" (turns fall back
+// to whatever the story does with an absent `slots.author`).
 //
 // See the drive-vs-transport model in docs/architecture/transports.md.
 func WithDefaultActor(actor string) Option {
