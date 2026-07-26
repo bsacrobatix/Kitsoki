@@ -1204,7 +1204,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if rerr != nil {
 			return nil, rerr
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page:             stringParam(params, "page"),
+			RoutePath:        stringParam(params, "route_path"),
+			RouteParams:      routeParams,
+			SynchronizeState: stringParam(params, "page") != "" || stringParam(params, "route_path") != "",
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1227,7 +1233,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if ref == "" {
 			return nil, invalidParams(fmt.Errorf("ref is required"))
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page:        stringParam(params, "page"),
+			RouteParams: routeParams,
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1254,7 +1264,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if ref == "" || instruction == "" {
 			return nil, invalidParams(fmt.Errorf("ref and instruction are required"))
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page: stringParam(params, "page"), RouteParams: routeParams,
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1292,7 +1305,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if rerr != nil {
 			return nil, rerr
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page: stringParam(params, "page"), RouteParams: routeParams,
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1319,7 +1335,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		} else {
 			request.Actor = ""
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page: stringParam(params, "page"), RouteParams: routeParams,
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1352,7 +1371,11 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		} else {
 			envelope.Actor = ""
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page:        stringParam(params, "page"),
+			RouteParams: routeParams,
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1386,7 +1409,10 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		} else {
 			envelope.Actor = ""
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		routeParams, _ := params["route_params"].(map[string]any)
+		service, err := NewSessionApplicationServiceWithRequest(entry, ApplicationFrameRequest{
+			Page: stringParam(params, "page"), RouteParams: routeParams,
+		}, s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}

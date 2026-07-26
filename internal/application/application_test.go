@@ -324,6 +324,7 @@ func TestCompileFrameResolvesTypedPackageBindingsAndScopesDataByPage(t *testing.
 				},
 				"dashboard": {
 					Name: "Dashboard", Description: "Show internal data", SemanticRef: "demo.page.dashboard",
+					Route: "/changes/{change_id}",
 					Regions: map[string]*app.ApplicationRegion{
 						"main": {
 							Name: "Main", Description: "Show graph", SemanticRef: "demo.region.main",
@@ -422,6 +423,11 @@ func TestCompileFrameResolvesTypedPackageBindingsAndScopesDataByPage(t *testing.
 	}
 	if props["state"] != "dashboard.ready" || props["route_id"] != "chg-42" {
 		t.Fatalf("resolved props = %#v", props)
+	}
+	if dashboard.Route == nil || dashboard.Route.Template != "/changes/{change_id}" ||
+		dashboard.RoutePath != "/changes/chg-42" ||
+		dashboard.RouteParams["change_id"] != "chg-42" {
+		t.Fatalf("resolved route = %#v path=%q params=%#v", dashboard.Route, dashboard.RoutePath, dashboard.RouteParams)
 	}
 	if note, exists := props["note"]; !exists || note != nil {
 		t.Fatalf("literal null prop = %#v", props)
@@ -1120,6 +1126,18 @@ type staticFrames struct {
 	calls int
 }
 
+type pageFrames struct {
+	staticFrames
+	target string
+}
+
+func (f *pageFrames) CurrentFrameForPage(_ context.Context, _ string, page string) (Frame, error) {
+	f.target = page
+	next := f.frame
+	next.Page = page
+	return next, nil
+}
+
 func (f *staticFrames) CurrentFrame(context.Context, string) (Frame, error) {
 	f.calls++
 	return f.frame, nil
@@ -1162,6 +1180,29 @@ func TestServiceDispatchActionIsMechanicalAndRejectsStaleFrame(t *testing.T) {
 	}
 	if len(schemas.values) != 3 {
 		t.Fatalf("schema validations = %d, want action input plus handler input/output", len(schemas.values))
+	}
+}
+
+func TestServiceDispatchActionUsesDeclarativeTargetPageForOutcomeFrame(t *testing.T) {
+	registry := NewRegistry(Dependencies{Schemas: &fakeSchemaValidator{}})
+	if err := registry.RegisterHandler(readDefinition("test.open", TransportWeb), HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	frame := testFrame()
+	frame.Regions[0].Cards[0].Actions[0].TargetPage = "review"
+	frames := &pageFrames{staticFrames: staticFrames{frame: frame}}
+	service := Service{Registry: registry, Frames: frames}
+	outcome, err := service.DispatchAction(context.Background(), TransportWeb, ActionEnvelope{
+		Action: "test.open", Input: json.RawMessage(`{}`),
+		SessionID: "session-1", FrameRevision: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frames.target != "review" || outcome.Frame == nil || outcome.Frame.Page != "review" {
+		t.Fatalf("target=%q outcome frame=%#v", frames.target, outcome.Frame)
 	}
 }
 

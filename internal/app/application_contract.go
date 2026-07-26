@@ -79,6 +79,8 @@ type ApplicationNavigation struct {
 	Description string                  `yaml:"description" json:"description"`
 	SemanticRef string                  `yaml:"semantic_ref" json:"semantic_ref"`
 	Page        string                  `yaml:"page" json:"page"`
+	Route       string                  `yaml:"route,omitempty" json:"route,omitempty"`
+	State       string                  `yaml:"state,omitempty" json:"state,omitempty"`
 	Origin      ApplicationMemberOrigin `yaml:"-" json:"-"`
 }
 
@@ -87,6 +89,9 @@ type ApplicationPage struct {
 	Description     string                        `yaml:"description" json:"description"`
 	SemanticRef     string                        `yaml:"semantic_ref" json:"semantic_ref"`
 	SemanticAliases []string                      `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
+	Route           string                        `yaml:"route,omitempty" json:"route,omitempty"`
+	RouteBindings   map[string]string             `yaml:"route_bindings,omitempty" json:"route_bindings,omitempty"`
+	State           string                        `yaml:"state,omitempty" json:"state,omitempty"`
 	Regions         map[string]*ApplicationRegion `yaml:"regions,omitempty" json:"regions,omitempty"`
 	Generated       bool                          `yaml:"-" json:"generated,omitempty"`
 	Origin          ApplicationMemberOrigin       `yaml:"-" json:"-"`
@@ -186,6 +191,7 @@ type ApplicationAction struct {
 	Handler         string                  `yaml:"handler,omitempty" json:"handler,omitempty"`
 	Intent          string                  `yaml:"intent,omitempty" json:"intent,omitempty"`
 	State           string                  `yaml:"state,omitempty" json:"state,omitempty"`
+	TargetPage      string                  `yaml:"target_page,omitempty" json:"target_page,omitempty"`
 	RoomInterface   string                  `yaml:"room_interface,omitempty" json:"room_interface,omitempty"`
 	InputSchema     string                  `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
 	RoutingMode     string                  `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
@@ -377,6 +383,9 @@ func validateApplicationContract(def *AppDef, file string) []error {
 				addf(path+".page", "%q does not name an application page", nav.Page)
 			}
 		}
+		for _, issue := range validateApplicationPageBindings(def, contract) {
+			addf(issue.Path, "%s", issue.Message)
+		}
 		if def.Exports != nil && def.Exports.Application != nil {
 			exports := def.Exports.Application
 			validateExportList := func(kind string, ids []string, exists func(string) bool) {
@@ -525,6 +534,11 @@ func validateApplicationContract(def *AppDef, file string) []error {
 				}
 				if action.Intent == "" {
 					addf(path+".room_interface", "requires an intent target")
+				}
+			}
+			if action.TargetPage != "" {
+				if _, ok := contract.Pages[action.TargetPage]; !ok {
+					addf(path+".target_page", "%q does not name an application page", action.TargetPage)
 				}
 			}
 			if targets != 1 {

@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+
+	"kitsoki/internal/app"
 )
 
 type SemanticState struct {
@@ -38,6 +40,9 @@ func (f Frame) Validate() error {
 	if strings.TrimSpace(f.Page) == "" {
 		return fmt.Errorf("application: page is required")
 	}
+	if err := validateFrameRoute(f.Route, f.RoutePath, f.RouteParams); err != nil {
+		return err
+	}
 	for name, data := range f.Data {
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("application: frame data name is required")
@@ -67,11 +72,17 @@ func (f Frame) Validate() error {
 		if item.ID == "" || item.Page == "" {
 			return fmt.Errorf("application: navigation id and page are required")
 		}
+		if err := validateFrameRoute(item.Route, "", nil); err != nil {
+			return fmt.Errorf("application: navigation %q: %w", item.ID, err)
+		}
 		entries = append(entries, semanticEntry{node: item.Semantic, state: item.State})
 	}
 	for _, page := range f.Pages {
 		if page.ID == "" {
 			return fmt.Errorf("application: page descriptor id is required")
+		}
+		if err := validateFrameRoute(page.Route, "", nil); err != nil {
+			return fmt.Errorf("application: page descriptor %q: %w", page.ID, err)
 		}
 		entries = append(entries, semanticEntry{node: page.Semantic})
 	}
@@ -144,6 +155,36 @@ func (f Frame) Validate() error {
 				return fmt.Errorf("application: semantic ref %q relates to unknown ref %q", entry.node.Ref, relationship.Ref)
 			}
 		}
+	}
+	return nil
+}
+
+func validateFrameRoute(descriptor *RouteDescriptor, path string, params map[string]any) error {
+	if descriptor == nil {
+		if path != "" {
+			return fmt.Errorf("application: route_path requires a route descriptor")
+		}
+		return nil
+	}
+	route, err := app.ParseApplicationRouteTemplate(descriptor.Template)
+	if err != nil {
+		return fmt.Errorf("application: route descriptor: %w", err)
+	}
+	if !reflect.DeepEqual(route.Params, descriptor.Params) {
+		return fmt.Errorf(
+			"application: route descriptor params %v do not match template params %v",
+			descriptor.Params, route.Params,
+		)
+	}
+	if path == "" {
+		return nil
+	}
+	formatted, err := app.FormatApplicationRoute(route.Template, params)
+	if err != nil {
+		return fmt.Errorf("application: route_path: %w", err)
+	}
+	if formatted != path {
+		return fmt.Errorf("application: route_path %q is not canonical for %q", path, route.Template)
 	}
 	return nil
 }

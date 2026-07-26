@@ -26,6 +26,35 @@ type applicationTestSource struct {
 	header runstatus.SessionHeader
 }
 
+type applicationStateDriver struct {
+	*captureDriver
+	source     *applicationTestSource
+	syncCalls  []string
+	routeWorld map[string]any
+}
+
+func (d *applicationStateDriver) NavigateApplication(
+	_ context.Context,
+	state string,
+	world map[string]any,
+) (*orchestrator.TurnOutcome, error) {
+	d.syncCalls = append(d.syncCalls, state)
+	d.routeWorld = world
+	if state != "" {
+		d.source.header.CurrentState = state
+	}
+	d.source.header.Turn++
+	return &orchestrator.TurnOutcome{NewState: app.StatePath(state)}, nil
+}
+
+func (d *applicationStateDriver) View(context.Context) (*orchestrator.TurnOutcome, error) {
+	return &orchestrator.TurnOutcome{NewState: app.StatePath(d.source.header.CurrentState)}, nil
+}
+
+func (d *applicationStateDriver) CurrentWorld(context.Context) (map[string]any, error) {
+	return d.routeWorld, nil
+}
+
 func (s applicationTestSource) Snapshot() (runstatus.Snapshot, error) {
 	return runstatus.Snapshot{Session: s.header, App: s.def}, nil
 }
@@ -398,6 +427,140 @@ func TestApplicationRPCFrameDiscoverInspectAndAction(t *testing.T) {
 	}
 	if got := driver.lastSlots[authorSlot]; got != "operator-1" || outcome.Receipt.Actor != "operator-1" {
 		t.Fatalf("actor slots=%#v receipt=%#v", driver.lastSlots, outcome.Receipt)
+	}
+}
+
+func TestApplicationFrameDirectRouteSynchronizesStateAndResolvesParams(t *testing.T) {
+	def := &app.AppDef{
+		App:   app.AppMeta{ID: "demo"},
+		World: map[string]app.VarDef{"selected_review": {Type: "string"}},
+		States: map[string]*app.State{
+			"overview": {}, "review": {},
+		},
+		Application: &app.ApplicationContract{
+			Schema: app.ApplicationSchemaV1, Name: "Demo", Description: "Exercise routes",
+			SemanticRef: "demo.application", Shell: app.ApplicationShell{Entry: "overview"},
+			Data: map[string]*app.ApplicationData{
+				"selected_review": {
+					Source: "world.selected_review", Sensitivity: "internal", Policy: "include",
+				},
+			},
+			Pages: map[string]*app.ApplicationPage{
+				"overview": {
+					Name: "Overview", Description: "Show overview", SemanticRef: "demo.page.overview",
+					Route: "/overview", State: "overview",
+				},
+				"review": {
+					Name: "Review", Description: "Show review", SemanticRef: "demo.page.review",
+					Route: "/reviews/{review_id}", State: "review",
+					RouteBindings: map[string]string{"review_id": "selected_review"},
+				},
+				"help": {
+					Name: "Help", Description: "Show help", SemanticRef: "demo.page.help", Route: "/help",
+				},
+			},
+		},
+	}
+	source := &applicationTestSource{
+		def: def,
+		header: runstatus.SessionHeader{
+			SessionID: "session-1", CurrentState: "overview", Turn: 1,
+		},
+	}
+	driver := &applicationStateDriver{captureDriver: &captureDriver{}, source: source}
+	provider := sessionApplicationFrameProvider{
+		entry: Entry{Source: source, Driver: driver},
+		request: ApplicationFrameRequest{
+			RoutePath: "/reviews/rev-42", SynchronizeState: true,
+		},
+	}
+	frame, err := provider.CurrentFrame(context.Background(), "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Page != "review" || frame.Workflow.State != "review" ||
+		frame.RouteParams["review_id"] != "rev-42" ||
+		len(driver.syncCalls) != 1 || driver.syncCalls[0] != "review" ||
+		driver.routeWorld["selected_review"] != "rev-42" {
+		t.Fatalf("frame=%#v sync=%#v world=%#v", frame, driver.syncCalls, driver.routeWorld)
+	}
+	if got := string(frame.Data["selected_review"].Value); got != `"rev-42"` {
+		t.Fatalf("selected route world data = %s", got)
+	}
+	provider.request = ApplicationFrameRequest{
+		RoutePath: "/reviews/rev-43", SynchronizeState: true,
+	}
+	if _, err := provider.CurrentFrame(context.Background(), "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.syncCalls) != 2 || driver.syncCalls[1] != "review" ||
+		driver.routeWorld["selected_review"] != "rev-43" {
+		t.Fatalf("same-state route selection sync=%#v world=%#v", driver.syncCalls, driver.routeWorld)
+	}
+
+	provider.request = ApplicationFrameRequest{RoutePath: "/help", SynchronizeState: true}
+	if _, err := provider.CurrentFrame(context.Background(), "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(driver.syncCalls) != 2 {
+		t.Fatalf("unbound page mutated state: %#v", driver.syncCalls)
+	}
+	provider.request = ApplicationFrameRequest{
+		Page: "review", SynchronizeState: true,
+	}
+	if _, err := provider.CurrentFrame(context.Background(), "session-1"); err == nil ||
+		!strings.Contains(err.Error(), `route parameter "review_id" is required`) {
+		t.Fatalf("parameterless route navigation error = %v", err)
+	}
+	if len(driver.syncCalls) != 2 {
+		t.Fatalf("invalid navigation mutated state: %#v", driver.syncCalls)
+	}
+
+	provider.request = ApplicationFrameRequest{RoutePath: "/overview", SynchronizeState: true}
+	back, err := provider.CurrentFrame(context.Background(), "session-1")
+	if err != nil || back.Page != "overview" || back.Workflow.State != "overview" {
+		t.Fatalf("back frame=%#v err=%v", back, err)
+	}
+}
+
+func TestApplicationOutcomePageSelectionRequiresTargetOnlyWhenStateIsAmbiguous(t *testing.T) {
+	def := &app.AppDef{
+		App:    app.AppMeta{ID: "demo"},
+		States: map[string]*app.State{"overview": {}, "edit": {}},
+		Application: &app.ApplicationContract{
+			Schema: app.ApplicationSchemaV1, Name: "Demo", Description: "Exercise page outcomes",
+			SemanticRef: "demo.application", Shell: app.ApplicationShell{Entry: "overview"},
+			Pages: map[string]*app.ApplicationPage{
+				"overview": {
+					Name: "Overview", Description: "Show overview", SemanticRef: "demo.page.overview", State: "overview",
+				},
+				"editor": {
+					Name: "Editor", Description: "Edit item", SemanticRef: "demo.page.editor", State: "edit",
+				},
+				"preview": {
+					Name: "Preview", Description: "Preview item", SemanticRef: "demo.page.preview", State: "edit",
+				},
+			},
+		},
+	}
+	source := &applicationTestSource{
+		def: def,
+		header: runstatus.SessionHeader{
+			SessionID: "session-1", CurrentState: "edit", Turn: 2,
+		},
+	}
+	driver := &applicationStateDriver{captureDriver: &captureDriver{}, source: source}
+	provider := sessionApplicationFrameProvider{
+		entry:   Entry{Source: source, Driver: driver},
+		request: ApplicationFrameRequest{Page: "overview"},
+	}
+	if _, err := provider.CurrentFrame(context.Background(), "session-1"); err == nil ||
+		!strings.Contains(err.Error(), "target_page is required") {
+		t.Fatalf("ambiguous outcome error = %v", err)
+	}
+	targeted, err := provider.CurrentFrameForPage(context.Background(), "session-1", "preview")
+	if err != nil || targeted.Page != "preview" {
+		t.Fatalf("targeted frame=%#v err=%v", targeted, err)
 	}
 }
 

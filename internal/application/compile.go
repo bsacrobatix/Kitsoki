@@ -57,6 +57,11 @@ func CompileFrameWithContext(
 		return Frame{}, fmt.Errorf("application: session id is required")
 	}
 	if pageID == "" {
+		if statePage, ok := app.ApplicationPageForState(contract, workflow.State); ok {
+			pageID = statePage
+		}
+	}
+	if pageID == "" {
 		pageID = contract.Shell.Entry
 		if pageID == "" {
 			pages := sortedMapKeys(contract.Pages)
@@ -83,6 +88,31 @@ func CompileFrameWithContext(
 		),
 		Capabilities: Capabilities{Presentation: []string{"typed-elements"}},
 	}
+	bindings := app.ApplicationPageBindings(contract)
+	currentBinding := bindings[pageID]
+	if currentBinding.Route != "" {
+		route, err := app.ParseApplicationRouteTemplate(currentBinding.Route)
+		if err != nil {
+			return Frame{}, fmt.Errorf("application: page %q route: %w", pageID, err)
+		}
+		frame.Route = &RouteDescriptor{Template: route.Template, Params: append([]string(nil), route.Params...)}
+		frame.RouteParams, err = compileRouteParams(route, context.RouteParams)
+		if err != nil {
+			return Frame{}, fmt.Errorf("application: page %q: %w", pageID, err)
+		}
+		if len(route.Params) == 0 || len(frame.RouteParams) == len(route.Params) {
+			frame.RoutePath, err = app.FormatApplicationRoute(route.Template, frame.RouteParams)
+			if err != nil {
+				return Frame{}, fmt.Errorf("application: page %q: %w", pageID, err)
+			}
+		}
+	} else if len(context.RouteParams) > 0 {
+		routeParams, routeErr := compileUnboundRouteParams(context.RouteParams)
+		if routeErr != nil {
+			return Frame{}, fmt.Errorf("application: page %q: %w", pageID, routeErr)
+		}
+		frame.RouteParams = routeParams
+	}
 	data, err := compileFrameData(contract.Data, context.World, pageID)
 	if err != nil {
 		return Frame{}, err
@@ -97,9 +127,16 @@ func CompileFrameWithContext(
 		if target := contract.Pages[nav.Page]; target != nil {
 			node.Relationships = append(node.Relationships, Relationship{Kind: "page", Ref: target.SemanticRef})
 		}
-		frame.Navigation = append(frame.Navigation, NavigationItem{
-			ID: nav.ID, Page: nav.Page, Semantic: node,
-		})
+		item := NavigationItem{ID: nav.ID, Page: nav.Page, Semantic: node}
+		if binding := bindings[nav.Page]; binding.Route != "" {
+			route, routeErr := app.ParseApplicationRouteTemplate(binding.Route)
+			if routeErr != nil {
+				return Frame{}, fmt.Errorf("application: navigation %q route: %w", nav.ID, routeErr)
+			}
+			item.Route = &RouteDescriptor{Template: route.Template, Params: append([]string(nil), route.Params...)}
+			item.TargetState = binding.State
+		}
+		frame.Navigation = append(frame.Navigation, item)
 	}
 
 	for _, id := range sortedMapKeys(contract.Pages) {
@@ -107,13 +144,24 @@ func CompileFrameWithContext(
 		if decl == nil {
 			return Frame{}, fmt.Errorf("application: page %q has an empty definition", id)
 		}
-		frame.Pages = append(frame.Pages, PageDescriptor{
+		descriptor := PageDescriptor{
 			ID: id, Current: id == pageID,
 			Semantic: semanticFromApplicationMember(
 				decl.SemanticRef, SemanticPage, decl.Name, decl.Description,
 				def.App.ID, "application.pages."+id, decl.Origin,
 			),
-		})
+		}
+		if binding := bindings[id]; binding.Route != "" || binding.State != "" {
+			descriptor.TargetState = binding.State
+			if binding.Route != "" {
+				route, routeErr := app.ParseApplicationRouteTemplate(binding.Route)
+				if routeErr != nil {
+					return Frame{}, fmt.Errorf("application: page %q route: %w", id, routeErr)
+				}
+				descriptor.Route = &RouteDescriptor{Template: route.Template, Params: append([]string(nil), route.Params...)}
+			}
+		}
+		frame.Pages = append(frame.Pages, descriptor)
 	}
 
 	for _, id := range sortedMapKeys(contract.Components) {
@@ -281,6 +329,42 @@ func CompileFrameWithContext(
 		return Frame{}, fmt.Errorf("application: compile frame: %w", err)
 	}
 	return frame, nil
+}
+
+func compileRouteParams(route app.ApplicationRouteTemplate, supplied map[string]any) (map[string]any, error) {
+	allowed := make(map[string]struct{}, len(route.Params))
+	for _, name := range route.Params {
+		allowed[name] = struct{}{}
+	}
+	for name := range supplied {
+		if _, ok := allowed[name]; !ok {
+			return nil, fmt.Errorf("route parameter %q is not declared by %q", name, route.Template)
+		}
+	}
+	if len(supplied) == 0 {
+		return nil, nil
+	}
+	params := make(map[string]any, len(supplied))
+	for name, value := range supplied {
+		text, ok := value.(string)
+		if !ok || text == "" {
+			return nil, fmt.Errorf("route parameter %q must be a non-empty string", name)
+		}
+		params[name] = text
+	}
+	return params, nil
+}
+
+func compileUnboundRouteParams(supplied map[string]any) (map[string]any, error) {
+	params := make(map[string]any, len(supplied))
+	for name, value := range supplied {
+		text, ok := value.(string)
+		if !ok || text == "" {
+			return nil, fmt.Errorf("route parameter %q must be a non-empty string", name)
+		}
+		params[name] = text
+	}
+	return params, nil
 }
 
 func compileFrameData(
@@ -502,6 +586,7 @@ func compileAction(def *app.AppDef, id string, decl *app.ApplicationAction) (Act
 	}
 	action := Action{
 		ID: id, Handler: decl.Handler, Intent: decl.Intent, TargetState: decl.State,
+		TargetPage:    decl.TargetPage,
 		RoomInterface: decl.RoomInterface,
 		RoutingMode:   RoutingMode(decl.RoutingMode), InputSchemaRef: decl.InputSchema, Enabled: true,
 		Semantic: semanticFromApplicationMember(

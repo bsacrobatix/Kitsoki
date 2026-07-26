@@ -311,10 +311,29 @@ type WorldReader interface {
 	CurrentWorld(ctx context.Context) (map[string]any, error)
 }
 
+// ApplicationPageNavigator is the explicit story mutation boundary used by
+// declaratively state-bound pages and route-parameter world bindings.
+type ApplicationPageNavigator interface {
+	NavigateApplication(context.Context, string, map[string]any) (*orchestrator.TurnOutcome, error)
+}
+
 // CurrentWorld implements [WorldReader] by replaying the session's world
 // off the event log (Orchestrator.CurrentWorld).
 func (d OrchestratorDriver) CurrentWorld(context.Context) (map[string]any, error) {
 	return d.Orch.CurrentWorld(d.SID).Vars, nil
+}
+
+func (d OrchestratorDriver) NavigateApplication(
+	ctx context.Context,
+	state string,
+	world map[string]any,
+) (*orchestrator.TurnOutcome, error) {
+	if state == "" {
+		return nil, fmt.Errorf("application navigation state is required")
+	}
+	return d.Orch.Teleport(ctx, d.SID, inbox.TeleportTarget{
+		State: app.StatePath(state), Slots: world,
+	})
 }
 
 func (d OrchestratorDriver) ContinueTurn(ctx context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {

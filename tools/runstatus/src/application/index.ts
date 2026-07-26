@@ -1,6 +1,12 @@
 export { default as ApplicationFrameRenderer } from "./ApplicationFrameRenderer.vue";
 export { default as ApplicationWizard } from "./ApplicationWizard.vue";
 export { dispatchWebApplicationAction } from "./action.js";
+export {
+  observeApplicationRoutes,
+  readApplicationRoutePath,
+  writeApplicationRoute,
+  type ApplicationHistoryMode,
+} from "./history.js";
 export type {
   ApplicationActionClient,
   ApplicationActionOutcome,

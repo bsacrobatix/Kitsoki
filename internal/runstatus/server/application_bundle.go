@@ -49,8 +49,19 @@ func (s *Server) handleApplicationBundle(w http.ResponseWriter, r *http.Request)
 	}
 	file, err := bundle.Asset(asset)
 	if err != nil {
-		http.NotFound(w, r)
-		return
+		// Canonical application routes are presentation paths, not bundle
+		// assets. A browser document navigation receives the immutable entry
+		// shell; missing scripts, styles, and RPC-like requests remain 404s.
+		if !strings.Contains(r.Header.Get("Accept"), "text/html") {
+			http.NotFound(w, r)
+			return
+		}
+		asset = bundle.Manifest.Entry
+		file, err = bundle.Asset(asset)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	if asset == "application-manifest.json" {
 		raw, readErr := os.ReadFile(file)

@@ -257,7 +257,13 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 			add(fmt.Sprintf("exported action %q targets private intent %q", id, action.Intent))
 			continue
 		}
-		parent.Application.Actions[newID] = cloneComposedAction(action, alias, rw, handlerIDs, child.BaseDir)
+		if action.TargetPage != "" && pageIDs[action.TargetPage] == "" {
+			add(fmt.Sprintf("exported action %q targets private page %q", id, action.TargetPage))
+			continue
+		}
+		parent.Application.Actions[newID] = cloneComposedAction(
+			action, alias, rw, handlerIDs, pageIDs, child.BaseDir,
+		)
 	}
 	for _, id := range sortedKeys(schemaIDs) {
 		newID := schemaIDs[id]
@@ -392,6 +398,13 @@ func cloneComposedPage(
 	}
 	clone := *page
 	clone.SemanticAliases = append([]string(nil), page.SemanticAliases...)
+	clone.RouteBindings = make(map[string]string, len(page.RouteBindings))
+	for param, worldKey := range page.RouteBindings {
+		clone.RouteBindings[param] = rw.rewriteWorldKeyRef(worldKey)
+	}
+	if clone.State != "" {
+		clone.State = alias + "." + strings.ReplaceAll(clone.State, "/", ".")
+	}
 	clone.Regions = make(map[string]*ApplicationRegion, len(page.Regions))
 	for regionID, region := range page.Regions {
 		if region == nil {
@@ -514,7 +527,13 @@ func cloneApplicationValueBinding(binding *ApplicationValueBinding, rw *childRew
 	return &clone
 }
 
-func cloneComposedAction(action *ApplicationAction, alias string, rw *childRewriter, handlers map[string]string, baseDir string) *ApplicationAction {
+func cloneComposedAction(
+	action *ApplicationAction,
+	alias string,
+	rw *childRewriter,
+	handlers, pages map[string]string,
+	baseDir string,
+) *ApplicationAction {
 	if action == nil {
 		return nil
 	}
@@ -531,6 +550,9 @@ func cloneComposedAction(action *ApplicationAction, alias string, rw *childRewri
 	}
 	if clone.RoomInterface != "" {
 		clone.RoomInterface = alias + "__" + clone.RoomInterface
+	}
+	if clone.TargetPage != "" {
+		clone.TargetPage = pages[clone.TargetPage]
 	}
 	clone.InputSchema = rebaseApplicationPath(clone.InputSchema, baseDir)
 	return &clone

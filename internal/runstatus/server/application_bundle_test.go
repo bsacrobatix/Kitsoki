@@ -51,6 +51,20 @@ func TestApplicationBundleHostServesBuiltManifestAndAssets(t *testing.T) {
 			t.Fatalf("%s Cache-Control = %q, want %q", asset, got, wantCache)
 		}
 	}
+	deepLinkRequest, err := http.NewRequest(http.MethodGet, srv.URL+"/application/demo/changes/chg-42", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deepLinkRequest.Header.Set("Accept", "text/html")
+	deepLink, err := http.DefaultClient.Do(deepLinkRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer deepLink.Body.Close()
+	deepLinkBody, _ := io.ReadAll(deepLink.Body)
+	if deepLink.StatusCode != http.StatusOK || !strings.Contains(string(deepLinkBody), "assets/app.js") {
+		t.Fatalf("deep link status=%d body=%s", deepLink.StatusCode, deepLinkBody)
+	}
 	response, err := http.Get(srv.URL + "/application/demo/application-manifest.json")
 	if err != nil {
 		t.Fatal(err)

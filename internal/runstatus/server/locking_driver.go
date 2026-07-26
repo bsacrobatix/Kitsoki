@@ -57,6 +57,24 @@ func (d *lockingDriver) SubmitDirect(ctx context.Context, intent string, slots m
 	return out, err
 }
 
+func (d *lockingDriver) NavigateApplication(
+	ctx context.Context,
+	state string,
+	world map[string]any,
+) (*orchestrator.TurnOutcome, error) {
+	navigator, ok := d.Driver.(ApplicationPageNavigator)
+	if !ok {
+		return nil, fmt.Errorf("application page navigation unavailable")
+	}
+	var out *orchestrator.TurnOutcome
+	err := d.lock(ctx, func() error {
+		var e error
+		out, e = navigator.NavigateApplication(ctx, state, world)
+		return e
+	})
+	return out, err
+}
+
 func (d *lockingDriver) ContinueTurn(ctx context.Context, slots map[string]any) (*orchestrator.TurnOutcome, error) {
 	var out *orchestrator.TurnOutcome
 	err := d.lock(ctx, func() error {

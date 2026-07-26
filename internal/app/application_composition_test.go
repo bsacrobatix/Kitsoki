@@ -23,7 +23,9 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 	child := &AppDef{
 		App:     AppMeta{ID: "child"},
 		BaseDir: filepath.Join("fixtures", "child"),
-		World:   map[string]VarDef{"graph": {Type: "list"}},
+		World: map[string]VarDef{
+			"graph": {Type: "list"}, "selected_item": {Type: "string"},
+		},
 		RoomInterfaces: map[string]*RoomInterfaceDef{
 			"reviewer": {Intents: map[string]Intent{"go": {}}},
 		},
@@ -36,7 +38,8 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 			},
 			Pages: map[string]*ApplicationPage{
 				"home": {
-					SemanticRef: "child.page.home",
+					SemanticRef: "child.page.home", Route: "/child/{item_id}", State: "entry",
+					RouteBindings: map[string]string{"item_id": "selected_item"},
 					Regions: map[string]*ApplicationRegion{
 						"main": {Items: []ApplicationRegionItem{{Card: &ApplicationCard{
 							ID: "card", Component: "child.card", Actions: []string{"child.open"},
@@ -59,7 +62,7 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 				"child.open": {
 					SemanticRef: "child.action.open", Handler: "child.open",
 					InputSchema: "schemas/open.json", Intent: "go", State: "entry",
-					RoomInterface: "reviewer",
+					RoomInterface: "reviewer", TargetPage: "home",
 				},
 			},
 		},
@@ -80,7 +83,7 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 	}
 	rw := &childRewriter{
 		alias: "module", childIntent: map[string]struct{}{"go": {}},
-		childWorldKey: map[string]struct{}{"graph": {}},
+		childWorldKey: map[string]struct{}{"graph": {}, "selected_item": {}},
 	}
 	if errs := foldChildApplication(parent, child, "module", rw, "app.yaml"); len(errs) != 0 {
 		t.Fatalf("foldChildApplication: %v", errs)
@@ -88,6 +91,10 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 	componentID := "parent.module.card"
 	actionID := "parent.module.open"
 	page := parent.Application.Pages["module__home"]
+	if page.Route != "/child/{item_id}" || page.State != "module.entry" ||
+		page.RouteBindings["item_id"] != "module__selected_item" {
+		t.Fatalf("composed page route/state = %#v", page)
+	}
 	card := page.Regions["main"].Items[0].Card
 	if card.Component != componentID || card.Actions[0] != actionID {
 		t.Fatalf("composed card = %#v", card)
@@ -100,7 +107,8 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 	}
 	action := parent.Application.Actions[actionID]
 	if action.Handler != actionID || action.Intent != "module__go" ||
-		action.State != "module.entry" || action.RoomInterface != "module__reviewer" {
+		action.State != "module.entry" || action.RoomInterface != "module__reviewer" ||
+		action.TargetPage != "module__home" {
 		t.Fatalf("composed action = %#v", action)
 	}
 	if !strings.HasSuffix(action.InputSchema, filepath.Join("fixtures", "child", "schemas", "open.json")) {

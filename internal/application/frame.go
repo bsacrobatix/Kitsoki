@@ -77,16 +77,25 @@ type Workflow struct {
 }
 
 type NavigationItem struct {
-	ID       string       `json:"id"`
-	Page     string       `json:"page"`
-	Semantic SemanticNode `json:"semantic"`
-	State    NodeState    `json:"state,omitempty"`
+	ID          string           `json:"id"`
+	Page        string           `json:"page"`
+	Route       *RouteDescriptor `json:"route,omitempty"`
+	TargetState string           `json:"target_state,omitempty"`
+	Semantic    SemanticNode     `json:"semantic"`
+	State       NodeState        `json:"state,omitempty"`
 }
 
 type PageDescriptor struct {
-	ID       string       `json:"id"`
-	Semantic SemanticNode `json:"semantic"`
-	Current  bool         `json:"current,omitempty"`
+	ID          string           `json:"id"`
+	Route       *RouteDescriptor `json:"route,omitempty"`
+	TargetState string           `json:"target_state,omitempty"`
+	Semantic    SemanticNode     `json:"semantic"`
+	Current     bool             `json:"current,omitempty"`
+}
+
+type RouteDescriptor struct {
+	Template string   `json:"template"`
+	Params   []string `json:"params,omitempty"`
 }
 
 type ComponentDescriptor struct {
@@ -133,6 +142,7 @@ type Action struct {
 	Handler        string          `json:"handler,omitempty"`
 	Intent         string          `json:"intent,omitempty"`
 	TargetState    string          `json:"target_state,omitempty"`
+	TargetPage     string          `json:"target_page,omitempty"`
 	RoomInterface  string          `json:"room_interface,omitempty"`
 	RoutingMode    RoutingMode     `json:"routing_mode,omitempty"`
 	InputSchema    json.RawMessage `json:"input_schema,omitempty"`
@@ -181,6 +191,9 @@ type Frame struct {
 	SessionID     string                `json:"session_id"`
 	Revision      uint64                `json:"revision"`
 	Page          string                `json:"page"`
+	Route         *RouteDescriptor      `json:"route,omitempty"`
+	RoutePath     string                `json:"route_path,omitempty"`
+	RouteParams   map[string]any        `json:"route_params,omitempty"`
 	PageSemantic  SemanticNode          `json:"page_semantic"`
 	Semantic      SemanticNode          `json:"semantic"`
 	Workflow      Workflow              `json:"workflow"`

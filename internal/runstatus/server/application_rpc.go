@@ -72,8 +72,20 @@ func (s *Server) applicationRuntime() ApplicationRuntime {
 
 type sessionApplicationFrameProvider struct {
 	entry   Entry
-	page    string
+	request ApplicationFrameRequest
 	runtime ApplicationRuntime
+}
+
+func (p sessionApplicationFrameProvider) CurrentFrameForPage(
+	ctx context.Context,
+	sessionID string,
+	page string,
+) (appplatform.Frame, error) {
+	p.request.Page = page
+	p.request.RoutePath = ""
+	p.request.SynchronizeState = false
+	p.request.RequirePage = true
+	return p.CurrentFrame(ctx, sessionID)
 }
 
 func (p sessionApplicationFrameProvider) CurrentFrame(ctx context.Context, sessionID string) (appplatform.Frame, error) {
@@ -81,9 +93,70 @@ func (p sessionApplicationFrameProvider) CurrentFrame(ctx context.Context, sessi
 	if err != nil {
 		return appplatform.Frame{}, err
 	}
+	def := entry.Source.AppDef()
+	contract, _ := app.EffectiveApplication(def)
+	page := p.request.Page
+	routeParams := cloneApplicationParams(p.request.RouteParams)
+	if p.request.RoutePath != "" {
+		match, routeErr := app.ResolveApplicationRoute(contract, p.request.RoutePath)
+		if routeErr != nil {
+			// The application host root is the neutral entry URL. Contracts
+			// without a canonical "/" route resolve their entry page and let
+			// the shared adapter replace it with that page's canonical path.
+			if p.request.RoutePath != "/" {
+				return appplatform.Frame{}, routeErr
+			}
+		} else {
+			if page != "" && page != match.Page {
+				return appplatform.Frame{}, fmt.Errorf(
+					"application: route %q resolves page %q, not requested page %q",
+					p.request.RoutePath, match.Page, page,
+				)
+			}
+			page = match.Page
+			routeParams = match.Params
+		}
+	}
+	if page != "" && p.request.SynchronizeState && p.request.RoutePath == "" {
+		if binding, ok := app.ApplicationPageBindingFor(contract, page); ok && binding.Route != "" {
+			if routeErr := validateApplicationPageRouteParams(binding.Route, routeParams); routeErr != nil {
+				return appplatform.Frame{}, fmt.Errorf(
+					"application: navigate page %q: %w", page, routeErr,
+				)
+			}
+		}
+	}
 	snapshot, err := entry.Source.Snapshot()
 	if err != nil {
 		return appplatform.Frame{}, err
+	}
+	currentState := snapshot.Session.CurrentState
+	pageBinding, pageBound := app.ApplicationPageBindingFor(contract, page)
+	routeWorld := applicationRouteWorld(contract, page, routeParams)
+	nextState := ""
+	if pageBound && pageBinding.State != "" && pageBinding.State != currentState {
+		nextState = pageBinding.State
+	}
+	if len(routeWorld) > 0 && nextState == "" {
+		nextState = currentState
+	}
+	if p.request.SynchronizeState && (nextState != "" || len(routeWorld) > 0) {
+		navigator, ok := entry.Driver.(ApplicationPageNavigator)
+		if !ok {
+			return appplatform.Frame{}, fmt.Errorf(
+				"application: page %q requires story navigation but the session cannot navigate applications",
+				page,
+			)
+		}
+		if _, err := navigator.NavigateApplication(ctx, nextState, routeWorld); err != nil {
+			return appplatform.Frame{}, fmt.Errorf(
+				"application: navigate page %q: %w", page, err,
+			)
+		}
+		snapshot, err = entry.Source.Snapshot()
+		if err != nil {
+			return appplatform.Frame{}, err
+		}
 	}
 	workflow := appplatform.Workflow{State: snapshot.Session.CurrentState}
 	if entry.Driver != nil {
@@ -97,6 +170,46 @@ func (p sessionApplicationFrameProvider) CurrentFrame(ctx context.Context, sessi
 		}
 		workflow.AllowedIntents = append([]string(nil), view.AllowedIntents...)
 	}
+	if p.request.RequirePage {
+		binding := app.ApplicationPageBindings(contract)[page]
+		if binding.State != "" && binding.State != workflow.State {
+			return appplatform.Frame{}, fmt.Errorf(
+				"application: target page %q binds state %q but action reached state %q",
+				page, binding.State, workflow.State,
+			)
+		}
+	} else if !p.request.SynchronizeState {
+		statePages := app.ApplicationPagesForState(contract, workflow.State)
+		bindings := app.ApplicationPageBindings(contract)
+		requestMatchesState := page != "" && bindings[page].State == workflow.State
+		switch {
+		case requestMatchesState:
+			// A requested alias remains canonical while its bound state is current.
+		case len(statePages) == 1:
+			page = statePages[0]
+		case len(statePages) > 1 && page == "":
+			if entry := contract.Shell.Entry; bindings[entry].State == workflow.State {
+				page = entry
+			} else {
+				return appplatform.Frame{}, fmt.Errorf(
+					"application: state %q is bound to pages %s; an explicit target page is required",
+					workflow.State, strings.Join(statePages, ", "),
+				)
+			}
+		case len(statePages) > 1:
+			return appplatform.Frame{}, fmt.Errorf(
+				"application: state %q is bound to pages %s; action target_page is required",
+				workflow.State, strings.Join(statePages, ", "),
+			)
+		}
+		if binding := bindings[page]; binding.Route != "" {
+			route, routeErr := app.ParseApplicationRouteTemplate(binding.Route)
+			if routeErr != nil {
+				return appplatform.Frame{}, routeErr
+			}
+			routeParams = retainApplicationRouteParams(route.Params, routeParams)
+		}
+	}
 	var world map[string]any
 	if worldReader, ok := entry.Driver.(WorldReader); ok {
 		world, err = worldReader.CurrentWorld(ctx)
@@ -104,9 +217,80 @@ func (p sessionApplicationFrameProvider) CurrentFrame(ctx context.Context, sessi
 			return appplatform.Frame{}, fmt.Errorf("application: read frame data world: %w", err)
 		}
 	}
-	return appplatform.CompileFrameWithData(
-		entry.Source.AppDef(), sessionID, uint64(snapshot.Session.Turn), p.page, workflow, world,
+	return appplatform.CompileFrameWithContext(
+		def, sessionID, uint64(snapshot.Session.Turn), page, workflow,
+		appplatform.CompileContext{World: world, RouteParams: routeParams},
 	)
+}
+
+func validateApplicationPageRouteParams(template string, params map[string]any) error {
+	route, err := app.ParseApplicationRouteTemplate(template)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]struct{}, len(route.Params))
+	for _, name := range route.Params {
+		allowed[name] = struct{}{}
+	}
+	for name := range params {
+		if _, ok := allowed[name]; !ok {
+			return fmt.Errorf("route parameter %q is not declared by %q", name, template)
+		}
+	}
+	_, err = app.FormatApplicationRoute(template, params)
+	return err
+}
+
+func applicationRouteWorld(
+	contract *app.ApplicationContract,
+	page string,
+	params map[string]any,
+) map[string]any {
+	if contract == nil || contract.Pages[page] == nil || len(params) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for param, worldKey := range contract.Pages[page].RouteBindings {
+		if value, ok := params[param]; ok {
+			out[worldKey] = value
+		}
+	}
+	return out
+}
+
+// ApplicationFrameRequest carries presentation-neutral page addressing into
+// the shared frame compiler. RoutePath is resolved by the application contract;
+// transports that already resolved a route may supply RouteParams with Page.
+type ApplicationFrameRequest struct {
+	Page             string
+	RoutePath        string
+	RouteParams      map[string]any
+	SynchronizeState bool
+	RequirePage      bool
+}
+
+func cloneApplicationParams(params map[string]any) map[string]any {
+	if len(params) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(params))
+	for name, value := range params {
+		out[name] = value
+	}
+	return out
+}
+
+func retainApplicationRouteParams(names []string, params map[string]any) map[string]any {
+	if len(names) == 0 || len(params) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, name := range names {
+		if value, ok := params[name]; ok {
+			out[name] = value
+		}
+	}
+	return out
 }
 
 type sessionApplicationIntentDispatcher struct {
@@ -133,7 +317,9 @@ func (d sessionApplicationIntentDispatcher) DispatchIntent(
 		return outcome, err
 	}
 	if outcome.Frame == nil && d.frames != nil {
-		frame, frameErr := d.frames.CurrentFrame(ctx, envelope.SessionID)
+		frame, frameErr := appplatform.CurrentFrameForPage(
+			ctx, d.frames, envelope.SessionID, action.TargetPage,
+		)
 		if frameErr != nil {
 			return appplatform.OutcomeEnvelope{}, frameErr
 		}
@@ -156,6 +342,18 @@ func applicationIntentActionKey(frameRevision uint64) string {
 // NewSessionApplicationService adapts one runstatus entry to the shared
 // application registry. Studio MCP and JSON-RPC both use this constructor.
 func NewSessionApplicationService(entry Entry, page string, runtimes ...ApplicationRuntime) (appplatform.Service, error) {
+	return NewSessionApplicationServiceWithRequest(
+		entry, ApplicationFrameRequest{Page: page}, runtimes...,
+	)
+}
+
+// NewSessionApplicationServiceWithRequest preserves route and state-navigation
+// context for every frame refresh performed by the shared service.
+func NewSessionApplicationServiceWithRequest(
+	entry Entry,
+	request ApplicationFrameRequest,
+	runtimes ...ApplicationRuntime,
+) (appplatform.Service, error) {
 	if entry.Source == nil || entry.Source.AppDef() == nil {
 		return appplatform.Service{}, fmt.Errorf("application: session has no story definition")
 	}
@@ -164,7 +362,7 @@ func NewSessionApplicationService(entry Entry, page string, runtimes ...Applicat
 		runtime = runtimes[0]
 	}
 	def := entry.Source.AppDef()
-	frames := sessionApplicationFrameProvider{entry: entry, page: page, runtime: runtime}
+	frames := sessionApplicationFrameProvider{entry: entry, request: request, runtime: runtime}
 	deps, err := applicationDependencies(entry, def, runtime)
 	if err != nil {
 		return appplatform.Service{}, err

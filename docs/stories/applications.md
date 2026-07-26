@@ -36,11 +36,15 @@ application:
       description: Open changes waiting for review.
       semantic_ref: review.nav.inbox
       page: inbox
+      route: /reviews
+      state: review
   pages:
     inbox:
       name: Review inbox
       description: Show the changes currently waiting for an operator.
       semantic_ref: review.page.inbox
+      route: /reviews
+      state: review
       regions:
         main:
           name: Pending changes
@@ -73,6 +77,7 @@ application:
       description: Open the selected change in the review workflow.
       semantic_ref: review.action.change-open
       handler: review.change.open
+      target_page: inbox
   surfaces:
     web:
       presentation: default
@@ -90,6 +95,53 @@ name, and a purpose-oriented description. Refs are identity: changing visible
 copy or moving a card must not change its ref. The loader rejects missing or
 duplicate refs, dangling page/component/action targets, unsupported fallback
 kinds, and actions that do not resolve to an intent or exported handler.
+
+## Canonical routes and story state
+
+Pages may declare a canonical absolute `route` template. Placeholders must be
+finite whole path segments such as `{change_id}`; parameter names are lowercase
+identifiers. Navigation may repeat or supply the target page's route, but every
+alias for one page must agree. The loader rejects trailing slashes, query or
+fragment syntax, duplicate parameters, and any two templates that can match the
+same path, including static/dynamic overlaps such as `/changes/new` and
+`/changes/{change_id}`.
+
+A page may map declared parameters into declared string world keys. The server
+applies this finite mapping before it enters and renders the bound story state,
+so a direct URL reload restores story-owned selection without consulting
+browser globals:
+
+```yaml
+pages:
+  change:
+    route: /changes/{change_id}
+    route_bindings:
+      change_id: selected_change_id
+    state: review
+```
+
+Every binding key must name a placeholder in that page's route and every target
+must be a declared `world` key with `type: string`. Imported page bindings
+rebase imported world keys with the same alias rules as other world references.
+
+An optional page `state` binds presentation navigation to a story state.
+Navigation may repeat or supply that binding. Opening a bound page through a web
+or VS Code reused-web route synchronizes the live story state through the
+runtime's guarded state boundary. A page with neither `state` nor
+`route_bindings` never mutates story state; an unbound page with explicit route
+bindings keeps the current state path while atomically applying those values.
+Several informational pages may share one state. After an action transitions
+the story, the current page is retained when it is still bound to that state,
+or the unique page bound to the new state is selected. When several pages bind
+the new state, the action must declare `target_page` to make the outcome
+deterministic. Imported page states and target pages are alias-rebased with the
+rest of the application fragment.
+
+The frame exposes route descriptors, the resolved `route_path`, structured
+`route_params`, and page state targets. Web and VS Code's reused web projection
+use the browser History API for navigation and `popstate`; they do not install
+a story-specific router. TUI, CLI, JSON-RPC, and MCP keep addressing pages by
+page ID and receive the same route-parameter compile context when supplied.
 
 ## Live application data
 

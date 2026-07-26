@@ -15,26 +15,31 @@ import (
 )
 
 type ApplicationHandleArgs struct {
-	Handle string `json:"handle"`
-	Page   string `json:"page,omitempty"`
+	Handle      string         `json:"handle"`
+	Page        string         `json:"page,omitempty"`
+	RoutePath   string         `json:"route_path,omitempty"`
+	RouteParams map[string]any `json:"route_params,omitempty"`
 }
 
 type ApplicationDiscoverArgs struct {
-	Handle    string `json:"handle"`
-	Page      string `json:"page,omitempty"`
-	Transport string `json:"transport,omitempty"`
+	Handle      string         `json:"handle"`
+	Page        string         `json:"page,omitempty"`
+	Transport   string         `json:"transport,omitempty"`
+	RouteParams map[string]any `json:"route_params,omitempty"`
 }
 
 type ApplicationInspectArgs struct {
-	Handle string `json:"handle"`
-	Page   string `json:"page,omitempty"`
-	Ref    string `json:"ref"`
-	Limit  int    `json:"relationship_limit,omitempty"`
+	Handle      string         `json:"handle"`
+	Page        string         `json:"page,omitempty"`
+	RouteParams map[string]any `json:"route_params,omitempty"`
+	Ref         string         `json:"ref"`
+	Limit       int            `json:"relationship_limit,omitempty"`
 }
 
 type ApplicationCallArgs struct {
 	Handle         string         `json:"handle"`
 	Page           string         `json:"page,omitempty"`
+	RouteParams    map[string]any `json:"route_params,omitempty"`
 	Handler        string         `json:"handler"`
 	Input          map[string]any `json:"input,omitempty"`
 	RoutingMode    string         `json:"routing_mode,omitempty"`
@@ -44,6 +49,7 @@ type ApplicationCallArgs struct {
 type ApplicationActionArgs struct {
 	Handle         string         `json:"handle"`
 	Page           string         `json:"page,omitempty"`
+	RouteParams    map[string]any `json:"route_params,omitempty"`
 	Action         string         `json:"action"`
 	Input          map[string]any `json:"input,omitempty"`
 	FrameRevision  uint64         `json:"frame_revision"`
@@ -52,25 +58,28 @@ type ApplicationActionArgs struct {
 }
 
 type ApplicationEventArgs struct {
-	Handle string         `json:"handle"`
-	Page   string         `json:"page,omitempty"`
-	Event  string         `json:"event"`
-	Input  map[string]any `json:"input,omitempty"`
+	Handle      string         `json:"handle"`
+	Page        string         `json:"page,omitempty"`
+	RouteParams map[string]any `json:"route_params,omitempty"`
+	Event       string         `json:"event"`
+	Input       map[string]any `json:"input,omitempty"`
 }
 
 type ApplicationFeedbackArgs struct {
-	Handle         string `json:"handle"`
-	Page           string `json:"page,omitempty"`
-	Ref            string `json:"ref"`
-	Instruction    string `json:"instruction"`
-	Kind           string `json:"kind,omitempty"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	Handle         string         `json:"handle"`
+	Page           string         `json:"page,omitempty"`
+	RouteParams    map[string]any `json:"route_params,omitempty"`
+	Ref            string         `json:"ref"`
+	Instruction    string         `json:"instruction"`
+	Kind           string         `json:"kind,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
 }
 
 func (srv *Server) registerApplicationTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
-		Name:        "application.frame",
-		Description: "Read the canonical application-frame/v1 for a driving session. {handle, page?}. Read-only and presentation-free.",
+		Name: "application.frame",
+		Description: "Read the canonical application-frame/v1 for a driving session. " +
+			"{handle, page?, route_path?, route_params?}. Selecting a page or route synchronizes its declared story state.",
 	}, srv.handleApplicationFrame)
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "application.discover",
@@ -103,7 +112,9 @@ func (srv *Server) handleApplicationFeedback(ctx context.Context, _ *mcpsdk.Call
 	if args.Ref == "" || args.Instruction == "" {
 		return buildToolError(ErrBadRequest, "application.feedback: ref and instruction are required"), nil, nil
 	}
-	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	service, sh, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RouteParams: args.RouteParams,
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}
@@ -127,7 +138,10 @@ func (srv *Server) handleApplicationFeedback(ctx context.Context, _ *mcpsdk.Call
 	return nil, report, nil
 }
 
-func (srv *Server) applicationService(handle, page string) (appplatform.Service, *SessionHandle, *mcpsdk.CallToolResult) {
+func (srv *Server) applicationService(
+	handle string,
+	request rsserver.ApplicationFrameRequest,
+) (appplatform.Service, *SessionHandle, *mcpsdk.CallToolResult) {
 	sh, err := srv.sess.ResolveSession(handle)
 	if err != nil {
 		return appplatform.Service{}, nil, buildToolError(ErrBadRequest, fmt.Sprintf("application: %v", err))
@@ -141,7 +155,7 @@ func (srv *Server) applicationService(handle, page string) (appplatform.Service,
 	}
 	created := map[string]rsserver.Entry{}
 	createdHandles := map[string]*SessionHandle{}
-	service, err := rsserver.NewSessionApplicationService(baseEntry, page, rsserver.ApplicationRuntime{
+	service, err := rsserver.NewSessionApplicationServiceWithRequest(baseEntry, request, rsserver.ApplicationRuntime{
 		ResolveEntry: func(sessionID string) (rsserver.Entry, error) {
 			if sessionID == string(sh.SID) || sessionID == sh.Key {
 				return baseEntry, nil
@@ -200,7 +214,10 @@ func (srv *Server) applicationService(handle, page string) (appplatform.Service,
 }
 
 func (srv *Server) handleApplicationFrame(ctx context.Context, _ *mcpsdk.CallToolRequest, args ApplicationHandleArgs) (*mcpsdk.CallToolResult, any, error) {
-	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	service, sh, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RoutePath: args.RoutePath, RouteParams: args.RouteParams,
+		SynchronizeState: args.Page != "" || args.RoutePath != "",
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}
@@ -212,7 +229,9 @@ func (srv *Server) handleApplicationFrame(ctx context.Context, _ *mcpsdk.CallToo
 }
 
 func (srv *Server) handleApplicationDiscover(ctx context.Context, _ *mcpsdk.CallToolRequest, args ApplicationDiscoverArgs) (*mcpsdk.CallToolResult, any, error) {
-	service, _, failure := srv.applicationService(args.Handle, args.Page)
+	service, _, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RouteParams: args.RouteParams,
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}
@@ -231,7 +250,9 @@ func (srv *Server) handleApplicationInspect(ctx context.Context, _ *mcpsdk.CallT
 	if args.Ref == "" {
 		return buildToolError(ErrBadRequest, "application.inspect: ref is required"), nil, nil
 	}
-	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	service, sh, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RouteParams: args.RouteParams,
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}
@@ -249,7 +270,9 @@ func (srv *Server) handleApplicationCall(ctx context.Context, _ *mcpsdk.CallTool
 	if args.Handler == "" {
 		return buildToolError(ErrBadRequest, "application.call: handler is required"), nil, nil
 	}
-	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	service, sh, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RouteParams: args.RouteParams,
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}
@@ -273,7 +296,9 @@ func (srv *Server) handleApplicationAction(ctx context.Context, _ *mcpsdk.CallTo
 	if args.Action == "" {
 		return buildToolError(ErrBadRequest, "application.action: action is required"), nil, nil
 	}
-	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	service, sh, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RouteParams: args.RouteParams,
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}
@@ -297,7 +322,9 @@ func (srv *Server) handleApplicationEvent(ctx context.Context, _ *mcpsdk.CallToo
 	if args.Event == "" {
 		return buildToolError(ErrBadRequest, "application.event: event is required"), nil, nil
 	}
-	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	service, sh, failure := srv.applicationService(args.Handle, rsserver.ApplicationFrameRequest{
+		Page: args.Page, RouteParams: args.RouteParams,
+	})
 	if failure != nil {
 		return failure, nil, nil
 	}

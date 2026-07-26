@@ -57,14 +57,23 @@ export interface ApplicationWorkflow {
 export interface ApplicationNavigationItem {
   readonly id: string;
   readonly page: string;
+  readonly route?: ApplicationRouteDescriptor;
+  readonly target_state?: string;
   readonly semantic: ApplicationSemanticNode;
   readonly state?: ApplicationNodeState;
 }
 
 export interface ApplicationPageDescriptor {
   readonly id: string;
+  readonly route?: ApplicationRouteDescriptor;
+  readonly target_state?: string;
   readonly semantic: ApplicationSemanticNode;
   readonly current?: boolean;
+}
+
+export interface ApplicationRouteDescriptor {
+  readonly template: string;
+  readonly params?: readonly string[];
 }
 
 export interface ApplicationComponentDescriptor {
@@ -84,6 +93,7 @@ export interface ApplicationAction {
   readonly handler?: string;
   readonly intent?: string;
   readonly target_state?: string;
+  readonly target_page?: string;
   readonly routing_mode?: "exact" | "synonym" | "semantic" | "llm" | "off";
   readonly input_schema?: JSONValue;
   readonly input_schema_ref?: string;
@@ -166,6 +176,9 @@ export interface ApplicationFrame {
   readonly session_id: string;
   readonly revision: number;
   readonly page: string;
+  readonly route?: ApplicationRouteDescriptor;
+  readonly route_path?: string;
+  readonly route_params?: Readonly<Record<string, JSONValue>>;
   readonly page_semantic: ApplicationSemanticNode;
   readonly semantic: ApplicationSemanticNode;
   readonly workflow: ApplicationWorkflow;

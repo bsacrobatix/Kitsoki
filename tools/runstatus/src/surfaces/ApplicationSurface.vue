@@ -45,8 +45,12 @@ import {
   inspectApplicationFeedbackTarget,
   installedApplicationComponents,
   installedApplicationTheme,
+  observeApplicationRoutes,
+  readApplicationRoutePath,
   submitApplicationFeedback,
+  writeApplicationRoute,
   type ApplicationActionDispatcher,
+  type ApplicationHistoryMode,
   type ApplicationFeedbackClient,
   type ApplicationFrame,
   type ApplicationSemanticInspection,
@@ -91,15 +95,24 @@ let refreshQueued = false;
 let compatibilityTimer: ReturnType<typeof setInterval> | null = null;
 let refreshedDefinition = "";
 let compatibilityRequest: Promise<void> | null = null;
+let unsubscribeHistory: (() => void) | null = null;
 
-async function loadFrame(id: string, page = currentPage.value): Promise<void> {
+async function loadFrame(
+  id: string,
+  page = currentPage.value,
+  routePath = "",
+  historyMode: ApplicationHistoryMode = "none",
+): Promise<void> {
   try {
     const nextFrame = await rpc.post<ApplicationFrame>("runstatus.application.frame", {
       session_id: id,
       ...(page ? { page } : {}),
+      ...(routePath ? { route_path: routePath } : {}),
+      ...(!routePath && frame.value?.route_params ? { route_params: frame.value.route_params } : {}),
     });
     frame.value = nextFrame;
     currentPage.value = nextFrame.page;
+    writeApplicationRoute(nextFrame, historyMode, window.history, window.location, props.applicationId);
     feedbackTarget.value = null;
     feedbackStatus.value = "";
     error.value = "";
@@ -162,7 +175,12 @@ function followSession(id: string | null): void {
   loading.value = Boolean(id);
   if (!id) return;
 
-  void loadFrame(id);
+  void loadFrame(
+    id,
+    "",
+    readApplicationRoutePath(window.location, props.applicationId),
+    "replace",
+  );
   unsubscribeEvents = source?.subscribe(id, () => {
     eventCount.value += 1;
     if (refreshQueued) return;
@@ -178,10 +196,16 @@ function followSession(id: string | null): void {
 
 const dispatch: ApplicationActionDispatcher = async (envelope) => {
   try {
-    const outcome = await dispatchWebApplicationAction(rpc, envelope, currentPage.value);
+    const outcome = await dispatchWebApplicationAction(
+      rpc,
+      envelope,
+      currentPage.value,
+      frame.value?.route_params,
+    );
     if (outcome.frame) {
       frame.value = outcome.frame;
       currentPage.value = outcome.frame.page;
+      writeApplicationRoute(outcome.frame, "push", window.history, window.location, props.applicationId);
     }
     return { ...outcome, ok: !outcome.error };
   } catch (cause) {
@@ -193,7 +217,13 @@ function navigate(page: string): void {
   if (!sessionId.value || page === currentPage.value) return;
   currentPage.value = page;
   loading.value = true;
-  void loadFrame(sessionId.value, page);
+  void loadFrame(sessionId.value, page, "", "push");
+}
+
+function navigateHistory(routePath: string): void {
+  if (!sessionId.value) return;
+  loading.value = true;
+  void loadFrame(sessionId.value, "", routePath);
 }
 
 async function checkCompatibility(): Promise<void> {
@@ -235,6 +265,7 @@ async function applyCompatibility(next: ApplicationCompatibility): Promise<void>
 }
 
 onMounted(async () => {
+  unsubscribeHistory = observeApplicationRoutes(navigateHistory, props.applicationId);
   source = createDataSource();
   try {
     const current = await source.getCurrentSession();
@@ -253,6 +284,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  unsubscribeHistory?.();
   unsubscribeCurrent?.();
   unsubscribeEvents?.();
   if (compatibilityTimer) clearInterval(compatibilityTimer);

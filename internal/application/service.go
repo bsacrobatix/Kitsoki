@@ -10,6 +10,10 @@ type FrameProvider interface {
 	CurrentFrame(context.Context, string) (Frame, error)
 }
 
+type PageFrameProvider interface {
+	CurrentFrameForPage(context.Context, string, string) (Frame, error)
+}
+
 // IntentDispatcher is the existing story state-machine boundary injected into
 // the surface service. Intent business behavior remains owned by the runtime.
 type IntentDispatcher interface {
@@ -104,7 +108,9 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 		IdempotencyKey: envelope.IdempotencyKey, FrameRevision: envelope.FrameRevision,
 	})
 	if outcome.Frame == nil {
-		refreshed, frameErr := s.Frames.CurrentFrame(ctx, outcome.Receipt.SessionID)
+		refreshed, frameErr := CurrentFrameForPage(
+			ctx, s.Frames, outcome.Receipt.SessionID, action.TargetPage,
+		)
 		if frameErr != nil && err == nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: refresh frame: %w", frameErr)
 		}
@@ -114,6 +120,20 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 	}
 	annotateBudgetFrame(&outcome)
 	return outcome, err
+}
+
+func CurrentFrameForPage(
+	ctx context.Context,
+	frames FrameProvider,
+	sessionID string,
+	page string,
+) (Frame, error) {
+	if page != "" {
+		if provider, ok := frames.(PageFrameProvider); ok {
+			return provider.CurrentFrameForPage(ctx, sessionID, page)
+		}
+	}
+	return frames.CurrentFrame(ctx, sessionID)
 }
 
 func (s Service) DispatchEvent(ctx context.Context, envelope EventEnvelope) (OutcomeEnvelope, error) {

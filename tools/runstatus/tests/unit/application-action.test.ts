@@ -29,7 +29,7 @@ describe("application web action adapter", () => {
       input: { item_id: "item-1" },
       session_id: "session-1",
       frame_revision: 8,
-    }, "home");
+    }, "home", { change_id: "chg-42" });
 
     expect(post).toHaveBeenCalledWith("runstatus.application.web_action", {
       action: "demo.open",
@@ -37,6 +37,7 @@ describe("application web action adapter", () => {
       session_id: "session-1",
       frame_revision: 8,
       page: "home",
+      route_params: { change_id: "chg-42" },
     });
     expect(outcome).toEqual(canonical);
   });

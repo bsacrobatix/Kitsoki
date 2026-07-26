@@ -14,6 +14,18 @@ allowlisted application data, navigation,
 page/component/handler descriptors, actions, regions, errors, and declared
 capabilities. It contains only serializable values.
 
+Canonical application routes are compiled into the same frame. The runstatus
+boundary resolves an incoming absolute path to a declared page and decoded
+string parameter map before calling `CompileFrameWithContext`. The default web
+projection updates browser history and reloads frames on `popstate`; the VS
+Code reused-web surface inherits that adapter inside its hosted bundle. Neither
+surface owns a product router. Headless transports continue to use page IDs and
+may pass the same structured route parameters explicitly.
+Finite page `route_bindings` may copy declared parameters to declared string
+world keys through the injected application navigation boundary. A bound-state
+navigation applies those values in the same teleport that enters the state, so
+the story renders the selected record on first load.
+
 The runstatus frame provider reads a session world only through the optional
 `WorldReader` interface. `CompileFrameWithData` then evaluates the story's
 `application.data` declarations and copies no ambient world map. Public and
@@ -58,6 +70,13 @@ of the frame that exposed it. Dispatch follows this order:
 6. Invoke the intent, Starlark function, or host-interface implementation.
 7. Validate the declared output and outcome, then durably record its receipt.
 8. Attach the refreshed frame when the handler did not return one.
+
+Page/story-state bindings participate only at the frame boundary. Explicit
+navigation to a bound page uses the injected state synchronizer. Outcome
+refresh preserves a page that remains bound to the resulting state, selects a
+unique matching page, or uses the action's declared `target_page` when several
+pages share that state. Unbound pages without route bindings never mutate
+story state.
 
 Stale revisions fail before invocation. A surface may display that failure as a
 `STALE_FRAME` frame error while it obtains a new frame, but staleness never
