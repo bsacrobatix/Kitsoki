@@ -20,7 +20,11 @@ Import at `bootstrap` and project a `job` object matching
 - every candidate carries `candidate_id`, report reference and digest,
   execution ID, shipped SHA, base SHA, and bundle digest;
 - candidate IDs are unique and sorted ascending (`candidate_id-asc`);
-- `manifest_digest` is the authority-issued seal over the canonical manifest;
+- `manifest_digest` is `sha256:` plus the SHA-256 of compact UTF-8 JSON for the
+  manifest with `manifest_digest` omitted. Object keys are ordered
+  lexicographically at every depth, array order is preserved, and there is no
+  insignificant whitespace. The authority carrier recomputes this seal before
+  invoking any effectful phase and fails closed on a mismatch;
 - `max_items` bounds the train and cannot exceed 100.
 
 An optional `checkpoint` resumes an interrupted train. Every authority call
@@ -108,8 +112,11 @@ output, or evidence for another train/manifest all return visible
 request idempotent across a crash between their external effect and receipt
 write; the carrier never treats a missing receipt as success.
 
-The concrete POG materializer/receipt-and-queue adapter is still required
-before the shipped-fix backlog can be executed. In particular, it needs the
-queue primitive that admits an exact staging-landed SHA to the main target with
-a new receipt; this carrier intentionally does not paper over that missing
-authority.
+The concrete POG materializer and phase adapter are still required before the
+shipped-fix backlog can be executed. Kitsoki provides the previously missing
+cross-target primitive as `kitsoki capsule promote-existing` and the native
+`queue.PromoteExistingAuthority`: they verify a receipt-bearing source-target
+landing, certify that exact SHA, retain both receipts as destination provenance,
+and submit without processing the destination queue. POG's adapter must call
+that authority and return its durable evidence; the generic carrier does not
+invent project policy or deployment credentials.

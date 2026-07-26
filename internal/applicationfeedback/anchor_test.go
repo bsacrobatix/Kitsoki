@@ -136,6 +136,9 @@ func feedbackFrame() application.Frame {
 		},
 		Semantic:     semantic(application.SemanticApplication, "demo.application", "Demo"),
 		PageSemantic: semantic(application.SemanticPage, "demo.page.review", "Review page"),
+		Components: []application.ComponentDescriptor{{
+			ID: "demo.form", Semantic: semantic(application.SemanticComponent, "demo.component.form", "Demo form"),
+		}},
 		Actions:      []application.Action{action},
 		Regions: []application.Region{{
 			ID: "main", Semantic: semantic(application.SemanticRegion, "demo.region.main", "Main"),

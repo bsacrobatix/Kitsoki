@@ -14,7 +14,11 @@
       "required": ["schema", "manifest_digest", "stable_order", "max_items", "candidates"],
       "properties": {
         "schema": { "const": "kitsoki/integration-train-manifest/v1" },
-        "manifest_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "SHA-256 of compact UTF-8 JSON for this manifest with manifest_digest omitted; recursively lexicographic object keys and preserved array order."
+        },
         "stable_order": { "const": "candidate_id-asc" },
         "max_items": { "type": "integer", "minimum": 1, "maximum": 100 },
         "candidates": {

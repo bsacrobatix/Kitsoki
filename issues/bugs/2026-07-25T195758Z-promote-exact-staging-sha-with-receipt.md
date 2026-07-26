@@ -12,7 +12,7 @@ kitsoki_rev: "e663761"
 
 # --- classification ------------------------------------------
 severity: "critical"
-status: "open"
+status: "fixed"
 labels: ["integration-train", "promotion", "receipt"]
 
 # --- evidence ------------------------------------------------
@@ -60,3 +60,15 @@ Add a receipt-bound `promote-existing` primitive (CLI plus native API) that:
   candidate, not duplicated admission.
 - Verify main admission retains both the new CI receipt and the staging
   landing receipt as required provenance.
+
+## Resolution
+
+Implemented by `kitsoki capsule promote-existing` and the native
+`queue.PromoteExistingAuthority`. The authority persists the observed source
+and destination refs before exact-source CI, uses a deterministic CI job
+identity, rejects missing or changed source landing receipts and target
+movement, and only submits the destination candidate. The target-partitioned
+queue worker remains the sole protected CAS owner. Real-Git tests cover the
+staging-to-main path, arbitrary reachable commits, missing source receipt,
+mid-certification target movement, and controller restart without duplicate
+receipt or queue admission.
