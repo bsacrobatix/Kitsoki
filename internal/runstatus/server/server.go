@@ -93,6 +93,7 @@ import (
 
 	"kitsoki/internal/app"
 	appplatform "kitsoki/internal/application"
+	"kitsoki/internal/applicationcapture"
 	"kitsoki/internal/applicationfeedback"
 	"kitsoki/internal/assignment"
 	"kitsoki/internal/bugprivacy"
@@ -190,6 +191,9 @@ type Server struct {
 	// in-memory scheduler.
 	applicationEventSched jobs.Scheduler
 	applicationBundleRoot string
+	applicationCaptures   applicationcapture.Broker
+	captureSubs           *applicationCaptureSubscriptions
+	captureReceipts       *applicationCaptureReceiptLedger
 
 	// defaultActor is the lowest-precedence operator identity injected as
 	// slots.author on a drive turn (see WithDefaultActor). Empty = none.
@@ -386,6 +390,7 @@ type serverConfig struct {
 	applicationDeps           appplatform.Dependencies
 	applicationEventSched     jobs.Scheduler
 	applicationBundleRoot     string
+	applicationCaptures       applicationcapture.Broker
 }
 
 // WithAssignmentStore enables the persisted room-assignment RPC family. The
@@ -554,6 +559,12 @@ func WithApplicationEventScheduler(scheduler jobs.Scheduler) Option {
 	return func(c *serverConfig) { c.applicationEventSched = scheduler }
 }
 
+// WithApplicationCaptureBroker installs the durable request/ack broker shared
+// with typed host.demo recording.
+func WithApplicationCaptureBroker(broker applicationcapture.Broker) Option {
+	return func(c *serverConfig) { c.applicationCaptures = broker }
+}
+
 // New builds a Server that serves the run recorded in the JSONL trace at
 // tracePath, interpreted against def — the read-only `kitsoki status serve`
 // path. The lifecycle RPCs (stories.*, session.new/reload) report
@@ -602,6 +613,9 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		applicationDeps:           cfg.applicationDeps,
 		applicationEventSched:     applicationEventSched,
 		applicationBundleRoot:     cfg.applicationBundleRoot,
+		applicationCaptures:       cfg.applicationCaptures,
+		captureSubs:               newApplicationCaptureSubscriptions(),
+		captureReceipts:           newApplicationCaptureReceiptLedger(),
 		defaultActor:              cfg.defaultActor,
 		auth:                      cfg.auth,
 		subs:                      make(map[string]*subscription),
@@ -775,6 +789,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
 	mux.HandleFunc("/rpc/turn-stream", s.handleTurnStream)
 	mux.HandleFunc("/rpc/materialize-stream", s.handleMaterializeStream)
+	mux.HandleFunc("/rpc/application-captures", s.handleApplicationCaptures)
 	// Embedded help-docs site (make site-embed). Serves an actionable
 	// placeholder when not staged — never an error (see internal/helpdocs).
 	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
@@ -1220,6 +1235,81 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return frame, nil
 
+	case "runstatus.application.capture.attach":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		return map[string]any{"ok": true, "revision": surface.Revision}, nil
+
+	case "runstatus.application.capture.subscribe":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		subscriptionID, err := s.captureSubs.subscribe(surface.PublicSessionID, surface.Actor)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{
+			"subscription_id": subscriptionID,
+			"revision":        surface.Revision,
+		}, nil
+
+	case "runstatus.application.capture.unsubscribe":
+		id := stringParam(params, "subscription_id")
+		if id == "" {
+			return nil, invalidParams(fmt.Errorf("subscription_id is required"))
+		}
+		actor, ok := s.resolveActor(ctx, params)
+		if !ok || !s.captureSubs.unsubscribe(id, actor) {
+			return nil, &rpcError{Code: codeNotFound, Message: "unknown application capture subscription"}
+		}
+		return map[string]bool{"ok": true}, nil
+
+	case "runstatus.application.capture.ack":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var ack applicationcapture.Ack
+		if err := decodeParams(params, &ack); err != nil {
+			return nil, invalidParams(err)
+		}
+		request, err := s.applicationCaptures.Lookup(ctx, surface, ack.RequestID)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := s.captureReceipts.verify(surface, request, ack.Receipts, true); err != nil {
+			return nil, invalidParams(err)
+		}
+		captured, err := s.applicationCaptures.Acknowledge(ctx, surface, ack)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		return map[string]any{"artifact_ref": captured.ArtifactRef}, nil
+
+	case "runstatus.application.capture.fail":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var ack applicationcapture.FailureAck
+		if err := decodeParams(params, &ack); err != nil {
+			return nil, invalidParams(err)
+		}
+		request, err := s.applicationCaptures.Lookup(ctx, surface, ack.RequestID)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := s.captureReceipts.verify(surface, request, ack.Receipts, false); err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := s.applicationCaptures.Fail(ctx, surface, ack); err != nil {
+			return nil, invalidParams(err)
+		}
+		return map[string]bool{"ok": true}, nil
+
 	case "runstatus.application.inspect":
 		entry, rerr := s.resolve(params)
 		if rerr != nil {
@@ -1389,6 +1479,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		outcome, err := service.DispatchAction(ctx, transport, envelope)
 		if err != nil {
 			return nil, serverErr(err)
+		}
+		if transport == appplatform.TransportWeb {
+			s.captureReceipts.record(envelope.SessionID, envelope.Action, outcome.Receipt)
 		}
 		return outcome, nil
 

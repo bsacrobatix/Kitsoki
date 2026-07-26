@@ -336,19 +336,27 @@ var builtinVerbTable = map[string]verbEffect{
 		},
 	},
 
-	// host.demo — mockup/demo packet pipeline (create-mockup.mjs,
-	// record-tour.mjs, demo-doctor.mjs) exec'd via a resolved script root.
-	// create writes generated mockup assets deterministically from its
-	// manifest; record spawns a live browser capture (timing-dependent
-	// output); doctor only reads artifacts and reports.
+	// host.demo is replaced in Story Application runtimes by an app-scoped
+	// typed provider. The legacy create operation remains classified for the
+	// deprecated path-based compatibility handler.
 	"host.demo": {
 		class: Write, deterministic: false, // fallback for an unrecognised op
 		ops: map[string]opEffect{
-			"create": {class: Write, deterministic: true},
-			"record": {class: Write, deterministic: false},
-			"doctor": {class: Read, deterministic: true},
+			"plan":           {class: Read, deterministic: true},
+			"materialize":    {class: Write, deterministic: false},
+			"project_mockup": {class: Read, deterministic: true},
+			"create_mockup":  {class: Write, deterministic: true},
+			"record":         {class: Write, deterministic: false},
+			"doctor":         {class: Read, deterministic: true},
+			"create":         {class: Write, deterministic: true},
 		},
 	},
+	"host.demo.plan":           {class: Read, deterministic: true},
+	"host.demo.materialize":    {class: Write, deterministic: false},
+	"host.demo.project_mockup": {class: Read, deterministic: true},
+	"host.demo.create_mockup":  {class: Write, deterministic: true},
+	"host.demo.record":         {class: Write, deterministic: false},
+	"host.demo.doctor":         {class: Read, deterministic: true},
 }
 
 // ClassifyVerb returns the default (effect, deterministic) pair for a

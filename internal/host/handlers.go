@@ -636,10 +636,9 @@ func RegisterBuiltins(r *Registry) {
 	// needs_input evidence rather than treating an unbound host as a ship.
 	r.Register("host.integration_train", IntegrationTrainHandler)
 
-	// Use-case loop A2 — host.demo.* (mockup/demo packet pipeline: create,
-	// record, doctor; see demo_handlers.go). Registered bare so the
-	// registry's longest-prefix fallback resolves every host.demo.<op>
-	// call here with <op> injected into args["op"].
+	// Deprecated path-based demo compatibility handler. Story Application
+	// runtime construction replaces this sentinel with the typed app-scoped
+	// provider from internal/storydemo.
 	r.Register("host.demo", DemoHandler)
 }
 

@@ -14,6 +14,7 @@ import (
 	agentserver "kitsoki/internal/agent/server"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationcapture"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
@@ -29,6 +30,7 @@ import (
 	"kitsoki/internal/mining"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
+	"kitsoki/internal/storydemo"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
 )
@@ -192,6 +194,10 @@ type runtimeConfig struct {
 	// runtimeBase.HostCassette). Distinct from Flow.HostCassette, which only
 	// applies in the nil-harness flow posture.
 	HostCassette string
+
+	// ApplicationCaptures is the process-owned browser capture broker shared
+	// by runstatus and every per-session typed host.demo registry.
+	ApplicationCaptures applicationcapture.Broker
 }
 
 // runtimeBase carries the session-INVARIANT construction posture that
@@ -266,7 +272,8 @@ type runtimeBase struct {
 	// ConnectIDEFromEnv is threaded into each session's runtimeConfig so the
 	// web posture auto-connects an IDE link from CLAUDE_CODE_SSE_PORT (the
 	// embedding VS Code extension). The TUI run path leaves it false.
-	ConnectIDEFromEnv bool
+	ConnectIDEFromEnv   bool
+	ApplicationCaptures applicationcapture.Broker
 }
 
 // config materialises a per-session runtimeConfig for the story at storyPath
@@ -276,25 +283,26 @@ type runtimeBase struct {
 // carries a fixture — the same construction web.go performs today.
 func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 	return runtimeConfig{
-		AppPath:           storyPath,
-		Def:               def,
-		DBPath:            b.DBPath,
-		ExecMode:          b.ExecMode,
-		HarnessType:       b.HarnessType,
-		ClaudeModel:       b.ClaudeModel,
-		RecordingPath:     b.RecordingPath,
-		RecordPath:        b.RecordPath,
-		AgentBackend:      b.AgentBackend,
-		HarnessProfiles:   b.HarnessProfiles,
-		DefaultProfile:    b.DefaultProfile,
-		HarnessLadder:     b.HarnessLadder,
-		AgentLaunchPolicy: b.AgentLaunchPolicy,
-		Flow:              b.Flow,
-		FlowFilePath:      b.FlowFilePath,
-		HostCassette:      b.HostCassette,
-		Mining:            b.Mining,
-		MiningRepoPath:    filepath.Dir(storyPath),
-		ConnectIDEFromEnv: b.ConnectIDEFromEnv,
+		AppPath:             storyPath,
+		Def:                 def,
+		DBPath:              b.DBPath,
+		ExecMode:            b.ExecMode,
+		HarnessType:         b.HarnessType,
+		ClaudeModel:         b.ClaudeModel,
+		RecordingPath:       b.RecordingPath,
+		RecordPath:          b.RecordPath,
+		AgentBackend:        b.AgentBackend,
+		HarnessProfiles:     b.HarnessProfiles,
+		DefaultProfile:      b.DefaultProfile,
+		HarnessLadder:       b.HarnessLadder,
+		AgentLaunchPolicy:   b.AgentLaunchPolicy,
+		Flow:                b.Flow,
+		FlowFilePath:        b.FlowFilePath,
+		HostCassette:        b.HostCassette,
+		Mining:              b.Mining,
+		MiningRepoPath:      filepath.Dir(storyPath),
+		ConnectIDEFromEnv:   b.ConnectIDEFromEnv,
+		ApplicationCaptures: b.ApplicationCaptures,
 	}
 }
 
@@ -308,6 +316,28 @@ func wireComplianceHost(registry *host.Registry, cfg runtimeConfig) {
 		Runner:     compliance.MaterializeCheckRunner{},
 		Evidence: compliance.FileEvidenceStore{
 			Dir: filepath.Join(root, ".artifacts", "compliance"),
+		},
+		Clock: clock.Real(),
+	}))
+}
+
+func wireStoryDemoHost(registry *host.Registry, cfg runtimeConfig) {
+	root := storydemo.DiscoverRoot(cfg.AppPath)
+	scope := storydemo.ScopeID(cfg.Def.App.ID, root)
+	platform := storydemo.NativePlatform{}
+	registry.Replace("host.demo", storydemo.NewHandler(storydemo.Dependencies{
+		AppID:        cfg.Def.App.ID,
+		Root:         root,
+		Authorizer:   storydemo.BoundAuthorizer{AppID: cfg.Def.App.ID, Root: root},
+		Resolver:     storydemo.GraphResolver{},
+		Materializer: platform,
+		Creator:      platform,
+		Capture: storydemo.BrokerCapture{
+			Broker: cfg.ApplicationCaptures,
+		},
+		Doctor: platform,
+		Evidence: storydemo.FileEvidenceStore{
+			Dir: filepath.Join(root, ".artifacts", "story-demo", "references"), Scope: scope,
 		},
 		Clock: clock.Real(),
 	}))
@@ -389,6 +419,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
 		wireComplianceHost(hostReg, cfg)
+		wireStoryDemoHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		testrunner.RegisterHostStubs(hostReg, cfg.Flow.HostHandlers)
 
@@ -469,6 +500,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
 		wireComplianceHost(hostReg, cfg)
+		wireStoryDemoHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		// Layer a host cassette over the live-harness posture when requested
 		// (e.g. --harness replay for free-text routing + --host-cassette for the

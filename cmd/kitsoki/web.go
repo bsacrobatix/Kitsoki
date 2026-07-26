@@ -39,8 +39,10 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/spf13/cobra"
 
+	"kitsoki/internal/applicationcapture"
 	"kitsoki/internal/assignment"
 	"kitsoki/internal/capsule"
+	"kitsoki/internal/clock"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
@@ -326,27 +328,36 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "kitsoki: no --actor; using git user.name %q as operator identity\n", actor)
 				}
 			}
+			captureRoot, captureRootErr := os.Getwd()
+			if captureRootErr != nil {
+				return fmt.Errorf("resolve application capture root: %w", captureRootErr)
+			}
+			captureBroker := applicationcapture.NewFileBroker(
+				filepath.Join(captureRoot, ".artifacts", "application-captures"),
+				clock.Real(),
+			)
 
 			// ── Session-invariant construction posture every session inherits ──
 			base := runtimeBase{
-				DBPath:            dbPath,
-				ExecMode:          execMode,
-				HarnessType:       harnessType,
-				ClaudeModel:       claudeModel,
-				AgentBackend:      resolveAgentBackend(agentBackend),
-				HarnessProfiles:   harnessProfiles,
-				DefaultProfile:    defaultProfile,
-				HarnessLadder:     cfg.HarnessLadder.ToHostLadderConfig(),
-				AgentLaunchPolicy: agentLaunchPolicyFromConfig(cfg),
-				RecordingPath:     recordingPath,
-				RecordPath:        recordPath,
-				Flow:              fixture,
-				FlowFilePath:      flowFilePath,
-				SeedFixture:       seedFixture,
-				HostCassette:      liveCassette,
-				DefaultActor:      actor,
-				Mining:            cfg.Mining,
-				ConnectIDEFromEnv: true,
+				DBPath:              dbPath,
+				ExecMode:            execMode,
+				HarnessType:         harnessType,
+				ClaudeModel:         claudeModel,
+				AgentBackend:        resolveAgentBackend(agentBackend),
+				HarnessProfiles:     harnessProfiles,
+				DefaultProfile:      defaultProfile,
+				HarnessLadder:       cfg.HarnessLadder.ToHostLadderConfig(),
+				AgentLaunchPolicy:   agentLaunchPolicyFromConfig(cfg),
+				RecordingPath:       recordingPath,
+				RecordPath:          recordPath,
+				Flow:                fixture,
+				FlowFilePath:        flowFilePath,
+				SeedFixture:         seedFixture,
+				HostCassette:        liveCassette,
+				DefaultActor:        actor,
+				Mining:              cfg.Mining,
+				ConnectIDEFromEnv:   true,
+				ApplicationCaptures: captureBroker,
 			}
 
 			// ── Registry + initial story catalogue ──────────────────────────
@@ -437,6 +448,7 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				server.WithFeedbackRouting(feedbackRouting),
 				server.WithStoryDirs(dirs),
 				server.WithAuth(authMgr),
+				server.WithApplicationCaptureBroker(captureBroker),
 			)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification
