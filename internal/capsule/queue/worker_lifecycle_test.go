@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -157,6 +158,14 @@ func TestWltRunOnceWithOnlyTerminalOrParkedOrFutureRetryCandidatesIsNoop(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, path, err := store.paths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	worker := Worker{Store: store, Deps: ProcessDeps{Integration: specIntegration(), Gate: passingGate{}}}
 	progressed, err := worker.RunOnce(context.Background())
 	if err != nil || progressed {
@@ -168,6 +177,13 @@ func TestWltRunOnceWithOnlyTerminalOrParkedOrFutureRetryCandidatesIsNoop(t *test
 	}
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("no-op RunOnce mutated state: before=%#v after=%#v", before, after)
+	}
+	afterBytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(beforeBytes, afterBytes) {
+		t.Fatal("no-op RunOnce rewrote durable queue state")
 	}
 }
 

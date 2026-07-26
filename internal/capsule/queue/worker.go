@@ -38,10 +38,11 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 	var claimed Candidate
 	var ok bool
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, _, err := w.Store.read(path)
+		state, migrated, err := w.Store.read(path)
 		if err != nil {
 			return State{}, err
 		}
+		dirty := migrated
 		n := now(w.Deps)
 		for i := range state.Candidates {
 			c := &state.Candidates[i]
@@ -51,6 +52,7 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 			if (c.phase() == Preparing || c.phase() == Gating || c.phase() == Finalizing) && !c.LeaseExpiresAt.IsZero() && !n.Before(c.LeaseExpiresAt) {
 				c.Phase, c.Status, c.WorkerID, c.LeaseExpiresAt = Reprepare, Reprepare, "", time.Time{}
 				c.Failure = "worker lease expired; preserved attempt evidence requires reprepare"
+				dirty = true
 			}
 		}
 		var pick *Candidate
@@ -78,6 +80,10 @@ func (w Worker) claimPreparation() (Candidate, bool, error) {
 			pick.Failure = ""
 			pick.RetryAt = time.Time{}
 			claimed, ok = *pick, true
+			dirty = true
+		}
+		if !dirty {
+			return state, nil
 		}
 		return state, write(path, state)
 	})
@@ -224,7 +230,7 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 	var candidate Candidate
 	var ok bool
 	_, err := w.Store.withLock(func(path string) (State, error) {
-		state, _, err := w.Store.read(path)
+		state, migrated, err := w.Store.read(path)
 		if err != nil {
 			return State{}, err
 		}
@@ -252,8 +258,15 @@ func (w Worker) finalize(ctx context.Context) (bool, error) {
 		if head != nil && head.phase() == ReadyToFinalize && finalizationAuthorized(*head) {
 			w.lease(head, Finalizing, n)
 			candidate, ok = *head, true
+			return state, write(path, state)
 		}
-		return state, write(path, state)
+		if migrated {
+			return state, write(path, state)
+		}
+		// An idle worker must be a read-only observer. Rewriting the whole
+		// queue here turns a quiet, large train into a perpetual JSON
+		// marshal/fsync loop even though no durable state changed.
+		return state, nil
 	})
 	if err != nil || !ok {
 		return false, err

@@ -322,18 +322,24 @@ func runQueueWorkerLoop(ctx context.Context, store queue.Store, deps queue.Proce
 		if once {
 			return nil
 		}
+		delay := 250 * time.Millisecond
 		if !progressed {
+			// There is no filesystem watcher on the durable queue. Polling once
+			// per second bounds admission latency while keeping an idle worker
+			// from repeatedly decoding a multi-megabyte queue state four times a
+			// second.
+			delay = time.Second
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(250 * time.Millisecond):
+			case <-time.After(delay):
 			}
 			continue
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(delay):
 		}
 	}
 }
