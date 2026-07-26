@@ -56,11 +56,15 @@ const (
 	// this — only issues the write itself would add.
 	CodeCatalogLintBlocked = "CATALOG_LINT_BLOCKED"
 
-	// CodeNeedsCanonicalization: a write op was rejected because a file
-	// backing the catalog isn't in yaml.v3's canonical re-marshal form
-	// (guards.go's checkCanonical, hazard guard #4) — writing through it
-	// would silently reflow a hand-wrapped block scalar. Canonicalize the
-	// file out-of-band before retrying.
+	// CodeNeedsCanonicalization: a catalog file could not be safely
+	// re-serialized (internal/graph's canonicalize.go). This is now rare by
+	// construction — a file that merely isn't in yaml.v3's canonical
+	// re-marshal form gets canonicalized inside the write and reported as
+	// `canonicalized`, never rejected. What still fails closed is a file
+	// that can't be read or parsed, or one whose canonical form would
+	// change its meaning (a YAML round-trip defect); the message names the
+	// exact node/field that diverged. graph.canonicalize also raises this
+	// for a file it had to skip. None of these are caller-retryable.
 	CodeNeedsCanonicalization = "NEEDS_CANONICALIZATION"
 
 	// CodeNotYourChangeset: a propose-mode caller tried to withdraw a

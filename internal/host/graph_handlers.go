@@ -14,6 +14,7 @@
 //	lint         {catalog_path}                                 -> lint issues
 //	diff         {catalog_path, overlay_path}                   -> node-level diff classification
 //	apply        {catalog_path, changeset_id[, dry_run]}         -> apply result
+//	canonicalize {catalog_path[, dry_run]}                       -> explicit canonical re-marshal of the catalog's files
 //	project      {catalog_path[, overlay_path], graph_id}        -> kitsoki.graph/v1 wire graph
 //	presentation {...; kit-injected _kit_dir}                    -> starlark-served presentation data
 //	open         {catalog_path}                                  -> catalog overview (graph-mcp-plan.md §3.3 graph.open)
@@ -112,6 +113,8 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 		return graphWithdrawOp(ctx, args)
 	case "rebase":
 		return graphRebaseOp(ctx, args)
+	case "canonicalize":
+		return graphCanonicalizeOp(args)
 	case "query":
 		return graphQueryOp(args)
 	case "project":
@@ -133,7 +136,45 @@ func GraphHandler(ctx context.Context, args map[string]any) (Result, error) {
 	case "history":
 		return graphHistoryOp(ctx, args)
 	default:
-		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, query, project, presentation, open, get, find, neighbors, type_census, changeset, history)", op)
+		return Result{}, fmt.Errorf("host.graph: unknown op %q (want one of load, lint, diff, apply, propose, authorize, withdraw, rebase, canonicalize, query, project, presentation, open, get, find, neighbors, type_census, changeset, history)", op)
+	}
+}
+
+// graphApplyResultData renders an internal/graph.ApplyResult as the Data map
+// every lifecycle-writing op here returns (apply/authorize/withdraw/rebase).
+// The four used to each carry an identical copy of this marshalling; one
+// shared renderer is what let `canonicalized`/`canonicalized_files` reach all
+// of them at once.
+//
+// canonicalized reports that the operation ALSO rewrote one or more catalog
+// files into canonical re-marshal form as part of the same commit, because a
+// human had left them non-canonical. That used to be a hard rejection
+// (NEEDS_CANONICALIZATION) that froze every write path until someone ran the
+// CLI canonicalizer; it now heals in-transaction and reports itself here.
+func graphApplyResultData(res *objectgraph.ApplyResult) map[string]any {
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	lintIssues := make([]any, len(res.LintIssues))
+	for i, iss := range res.LintIssues {
+		lintIssues[i] = iss.Error()
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	canonicalizedFiles := make([]any, len(res.CanonicalizedFiles))
+	for i, f := range res.CanonicalizedFiles {
+		canonicalizedFiles[i] = f
+	}
+	return map[string]any{
+		"rejected":            res.Rejected(),
+		"reject_reasons":      rejectReasons,
+		"lint_issues":         lintIssues,
+		"changed_files":       changedFiles,
+		"canonicalized":       res.Canonicalized,
+		"canonicalized_files": canonicalizedFiles,
 	}
 }
 
@@ -267,24 +308,7 @@ func graphApplyOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return Result{Data: map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}}, nil
+	return Result{Data: graphApplyResultData(res)}, nil
 }
 
 // graphProposeOp: {catalog_path, title, operations[, visibility, provenance,
@@ -366,14 +390,51 @@ func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 		}
 		guardFills[i] = entry
 	}
+	canonicalizedFiles := make([]any, len(res.CanonicalizedFiles))
+	for i, f := range res.CanonicalizedFiles {
+		canonicalizedFiles[i] = f
+	}
 	return Result{Data: map[string]any{
-		"changeset_id":   string(res.ChangesetID),
-		"status":         res.Status,
-		"lint":           lintIssues,
-		"rejected":       len(res.RejectReasons) > 0 || len(res.Lint) > 0,
-		"guard_fills":    guardFills,
-		"validated_only": res.ValidatedOnly,
-		"reject_reasons": rejectReasons,
+		"changeset_id":        string(res.ChangesetID),
+		"status":              res.Status,
+		"lint":                lintIssues,
+		"rejected":            len(res.RejectReasons) > 0 || len(res.Lint) > 0,
+		"guard_fills":         guardFills,
+		"validated_only":      res.ValidatedOnly,
+		"reject_reasons":      rejectReasons,
+		"canonicalized":       res.Canonicalized,
+		"canonicalized_files": canonicalizedFiles,
+	}}, nil
+}
+
+// graphCanonicalizeOp: {catalog_path[, dry_run]} -> {changed_files, skipped,
+// already_canonical}. The explicit form of the heal every write op now
+// performs on its own behalf (internal/graph.Canonicalize) — worth its own
+// verb so an operator or agent can land the reflow as a standalone,
+// reviewable commit instead of having it ride along with the next propose.
+// Never required to unblock anything; nothing rejects on formatting anymore.
+func graphCanonicalizeOp(args map[string]any) (Result, error) {
+	catalogPath := graphStringArg(args, "catalog_path")
+	if catalogPath == "" {
+		return Result{}, fmt.Errorf("host.graph.canonicalize: missing required arg %q", "catalog_path")
+	}
+	res, err := objectgraph.Canonicalize(catalogPath, graphBoolArg(args, "dry_run"))
+	if err != nil {
+		return Result{}, err
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	skipped := make([]any, len(res.Skipped))
+	for i, s := range res.Skipped {
+		skipped[i] = s
+	}
+	return Result{Data: map[string]any{
+		"changed_files":     changedFiles,
+		"skipped":           skipped,
+		"already_canonical": len(res.ChangedFiles) == 0 && len(res.Skipped) == 0,
+		"dry_run":           graphBoolArg(args, "dry_run"),
 	}}, nil
 }
 
@@ -398,24 +459,7 @@ func graphAuthorizeOp(ctx context.Context, args map[string]any) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return Result{Data: map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}}, nil
+	return Result{Data: graphApplyResultData(res)}, nil
 }
 
 // graphWithdrawOp: {catalog_path, changeset_id} -> the review queue's
@@ -438,24 +482,7 @@ func graphWithdrawOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return Result{Data: map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}}, nil
+	return Result{Data: graphApplyResultData(res)}, nil
 }
 
 // graphRebaseOp: {catalog_path, changeset_id} -> the review queue's "rebase"
@@ -479,24 +506,7 @@ func graphRebaseOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return Result{Data: map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}}, nil
+	return Result{Data: graphApplyResultData(res)}, nil
 }
 
 // graphProjectOp: {catalog_path[, overlay_path], graph_id} -> the

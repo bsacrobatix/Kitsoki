@@ -7,8 +7,8 @@ import (
 )
 
 // nonCanonicalFixture mirrors internal/graph's blockScalarFixture: a
-// single-file catalog whose hand-wrapped folded block scalar makes
-// checkCanonical reject every lifecycle verb until canonicalized.
+// single-file catalog whose hand-wrapped folded block scalar used to make
+// every lifecycle verb reject until someone canonicalized it out-of-band.
 const nonCanonicalFixture = `schema: project-object-graph/seed-catalog/v0
 catalog:
   id: canon-rpc-fixture
@@ -45,51 +45,60 @@ func writeNonCanonicalFixture(t *testing.T) string {
 	return dst
 }
 
-// TestGraphRPC_RejectDetailsAndCanonicalize covers the two halves of the
-// portal's graceful NEEDS_CANONICALIZATION handling: (1) a rejected
-// graph.propose carries structured reject_details (code + file) alongside
-// the raw reject_reasons, so a browser client never regexes message text;
-// (2) graph.canonicalize repairs the catalog, after which the same propose
-// goes through.
-func TestGraphRPC_RejectDetailsAndCanonicalize(t *testing.T) {
+func proposeRPC(t *testing.T, s *Server, root, id string) map[string]any {
+	t.Helper()
+	result, rerr := s.graphProposeRPC(map[string]any{
+		"catalog_path": root,
+		"title":        "write against a non-canonical catalog",
+		"operations": []any{
+			map[string]any{
+				"kind":  "added",
+				"after": map[string]any{"schema": "graph/requirement/v0", "id": id, "title": "Lands", "status": "draft", "visibility": "internal"},
+			},
+		},
+	})
+	if rerr != nil {
+		t.Fatalf("graphProposeRPC: %+v", rerr)
+	}
+	return result.(map[string]any)
+}
+
+// TestGraphRPC_ProposeAutoHealsNonCanonicalCatalog: the portal's write path
+// must not be freezable by a hand-edited catalog either. The propose lands
+// and reports the heal; the portal no longer needs a fix-it button standing
+// between a user and their own write.
+func TestGraphRPC_ProposeAutoHealsNonCanonicalCatalog(t *testing.T) {
 	root := writeNonCanonicalFixture(t)
 	s := &Server{}
 
-	propose := func() map[string]any {
-		result, rerr := s.graphProposeRPC(map[string]any{
-			"catalog_path": root,
-			"title":        "blocked until canonicalized",
-			"operations": []any{
-				map[string]any{
-					"kind":  "added",
-					"after": map[string]any{"schema": "graph/requirement/v0", "id": "req-new", "title": "Lands after canonicalize", "status": "draft", "visibility": "internal"},
-				},
-			},
-		})
-		if rerr != nil {
-			t.Fatalf("graphProposeRPC: %+v", rerr)
-		}
-		return result.(map[string]any)
+	m := proposeRPC(t, s, root, "req-rpc-heals")
+	if rejected, _ := m["rejected"].(bool); rejected {
+		t.Fatalf("a non-canonical catalog must not block a propose: %#v", m)
+	}
+	if c, _ := m["canonicalized"].(bool); !c {
+		t.Errorf("expected canonicalized:true, got: %#v", m)
+	}
+	if files, _ := m["canonicalized_files"].([]any); len(files) != 1 {
+		t.Errorf("expected one canonicalized file, got: %#v", m["canonicalized_files"])
 	}
 
-	// (1) Rejected, with structured details.
-	m := propose()
-	if rejected, _ := m["rejected"].(bool); !rejected {
-		t.Fatalf("expected propose rejected on non-canonical catalog, got: %#v", m)
+	// Healed once; the next write has nothing to tidy.
+	m = proposeRPC(t, s, root, "req-rpc-second")
+	if rejected, _ := m["rejected"].(bool); rejected {
+		t.Fatalf("second propose rejected: %#v", m)
 	}
-	details, _ := m["reject_details"].([]any)
-	if len(details) == 0 {
-		t.Fatalf("expected reject_details alongside reject_reasons, got: %#v", m)
+	if c, _ := m["canonicalized"].(bool); c {
+		t.Errorf("second propose must not claim a reformat: %#v", m)
 	}
-	d0 := details[0].(map[string]any)
-	if code, _ := d0["code"].(string); code != "needs_canonicalization" {
-		t.Errorf("reject_details[0].code = %q, want needs_canonicalization", code)
-	}
-	if file, _ := d0["file"].(string); file != root {
-		t.Errorf("reject_details[0].file = %q, want %q", file, root)
-	}
+}
 
-	// (2) graph.canonicalize repairs it.
+// TestGraphRPC_CanonicalizeVerb keeps the explicit verb honest: it heals the
+// catalog, and a second call reports already_canonical without touching
+// bytes (the writer-format stability the portal's pinned binaries rely on).
+func TestGraphRPC_CanonicalizeVerb(t *testing.T) {
+	root := writeNonCanonicalFixture(t)
+	s := &Server{}
+
 	result, rerr := s.graphCanonicalizeRPC(map[string]any{"catalog_path": root})
 	if rerr != nil {
 		t.Fatalf("graphCanonicalizeRPC: %+v", rerr)
@@ -98,8 +107,11 @@ func TestGraphRPC_RejectDetailsAndCanonicalize(t *testing.T) {
 	if changed, _ := cm["changed_files"].([]any); len(changed) != 1 {
 		t.Fatalf("expected one changed file, got: %#v", cm)
 	}
+	healed, err := os.ReadFile(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Second canonicalize is a no-op reporting already_canonical.
 	result, rerr = s.graphCanonicalizeRPC(map[string]any{"catalog_path": root})
 	if rerr != nil {
 		t.Fatalf("second graphCanonicalizeRPC: %+v", rerr)
@@ -107,10 +119,50 @@ func TestGraphRPC_RejectDetailsAndCanonicalize(t *testing.T) {
 	if already, _ := result.(map[string]any)["already_canonical"].(bool); !already {
 		t.Errorf("second canonicalize should report already_canonical, got: %#v", result)
 	}
+	stable, err := os.ReadFile(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(healed) != string(stable) {
+		t.Error("re-canonicalizing a canonical catalog changed its bytes")
+	}
+}
 
-	// And the propose that was blocked now lands.
-	m = propose()
-	if rejected, _ := m["rejected"].(bool); rejected {
-		t.Fatalf("propose still rejected after canonicalize: %#v", m)
+// TestGraphRPC_RejectDetailsStillClassify: reject_details is the portal's
+// structured reject channel, and it must keep classifying the reasons that
+// can still occur. Canonicality no longer produces one from a merely
+// unformatted file, so this exercises the classifier directly rather than
+// pretending a formatting reject is still reachable.
+func TestGraphRPC_RejectDetailsStillClassify(t *testing.T) {
+	root := writeNonCanonicalFixture(t)
+	s := &Server{}
+
+	// A stale `before` guard is a genuine, still-reachable rejection.
+	result, rerr := s.graphProposeRPC(map[string]any{
+		"catalog_path": root,
+		"title":        "stale guard",
+		"operations": []any{
+			map[string]any{
+				"kind": "modified",
+				"node": "req-block",
+				"changes": []any{
+					map[string]any{"path": []any{"status"}, "before": "published", "after": "active"},
+				},
+			},
+		},
+	})
+	if rerr != nil {
+		t.Fatalf("graphProposeRPC: %+v", rerr)
+	}
+	m := result.(map[string]any)
+	if rejected, _ := m["rejected"].(bool); !rejected {
+		t.Fatalf("expected a stale-guard rejection, got: %#v", m)
+	}
+	details, _ := m["reject_details"].([]any)
+	if len(details) == 0 {
+		t.Fatalf("expected reject_details alongside reject_reasons, got: %#v", m)
+	}
+	if code, _ := details[0].(map[string]any)["code"].(string); code == "" {
+		t.Errorf("every reject detail must carry a code, got: %#v", details[0])
 	}
 }

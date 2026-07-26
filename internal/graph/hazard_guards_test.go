@@ -242,12 +242,14 @@ func TestLintDiffGate_NewIssueStillBlocks(t *testing.T) {
 	}
 }
 
-// ─── Hazard guard #4: canonicality pre-check ────────────────────────────────
+// ─── Hazard guard #4: canonicality auto-heal ────────────────────────────────
 
-// blockScalarFixture is a single-file catalog whose changeset type's
-// requirement node carries a hand-wrapped literal block scalar — yaml.v3
-// would reflow this on any whole-document re-marshal (the failure mode
-// checkCanonical exists to catch before a write, not after).
+// blockScalarFixture is a single-file catalog whose requirement node carries
+// a hand-wrapped folded block scalar — yaml.v3 reflows this on any
+// whole-document re-marshal. This is the exact shape of the POG incident: a
+// human wrapped a long summary field by hand and every write path locked up.
+// The canonicality machinery now heals it in-transaction instead of
+// rejecting; see canonicalize_test.go for the write-path coverage.
 const blockScalarFixture = `schema: project-object-graph/seed-catalog/v0
 catalog:
   id: canon-fixture
@@ -284,62 +286,36 @@ func writeBlockScalarFixture(t *testing.T) string {
 	return dst
 }
 
-func TestCheckCanonical_FlagsHandWrappedBlockScalarDivergence(t *testing.T) {
+func TestNonCanonicalCatalogFiles_DetectsHandWrappedBlockScalarDivergence(t *testing.T) {
 	root := writeBlockScalarFixture(t)
 	cat, err := LoadCatalog(root)
 	if err != nil {
 		t.Fatalf("LoadCatalog: %v", err)
 	}
-	reasons := checkCanonical(cat)
-	if len(reasons) == 0 {
-		t.Fatal("expected checkCanonical to flag the hand-wrapped folded block scalar as non-canonical")
+	files, problems := nonCanonicalCatalogFiles(cat)
+	if len(problems) > 0 {
+		t.Fatalf("unexpected problems assessing the fixture: %v", problems)
 	}
-	found := false
-	for _, r := range reasons {
-		if strings.Contains(r, "NEEDS_CANONICALIZATION") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected a NEEDS_CANONICALIZATION reason, got: %v", reasons)
-	}
-
-	// And Propose must refuse to write at all — not even attempt the
-	// scratch build — when the catalog needs canonicalization.
-	res, err := Propose(root, ProposeInput{
-		Title: "Should be blocked by canonicality pre-check",
-		Operations: []map[string]any{
-			{"kind": "added", "after": map[string]any{"schema": "graph/requirement/v0", "id": "req-blocked", "title": "Should not land", "status": "draft", "visibility": "internal"}},
-		},
-	}, "", clock.Real())
-	if err != nil {
-		t.Fatalf("Propose: %v", err)
-	}
-	if len(res.RejectReasons) == 0 {
-		t.Fatal("expected Propose to reject with NEEDS_CANONICALIZATION")
-	}
-	reload, err := LoadCatalog(root)
-	if err != nil {
-		t.Fatalf("reload: %v", err)
-	}
-	if _, ok := reload.Nodes["req-blocked"]; ok {
-		t.Error("req-blocked must not have been written when the catalog needed canonicalization")
+	if len(files) != 1 || files[0] != root {
+		t.Fatalf("expected exactly the fixture file flagged as non-canonical, got: %v", files)
 	}
 }
 
-// TestCheckCanonical_NoBlockScalarsNeverBlocks: a catalog with no block
-// scalars at all is exempt from the byte-compare even when it isn't
+// TestNonCanonicalCatalogFiles_NoBlockScalarsNeverFlagged: a catalog with no
+// block scalars at all is exempt from the byte-compare even when it isn't
 // byte-identical to yaml.v3's own serialization conventions (flow-mapping
-// padding, quoting) — checkCanonical only cares about the block-scalar
-// reflow hazard, not incidental cosmetic differences.
-func TestCheckCanonical_NoBlockScalarsNeverBlocks(t *testing.T) {
+// padding, quoting). The canonicality machinery only cares about the
+// block-scalar reflow hazard, not incidental cosmetic differences — so it
+// never churns a hand-authored file that has nothing to reflow.
+func TestNonCanonicalCatalogFiles_NoBlockScalarsNeverFlagged(t *testing.T) {
 	root := copySingleFileFixture(t)
 	cat, err := LoadCatalog(root)
 	if err != nil {
 		t.Fatalf("LoadCatalog: %v", err)
 	}
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		t.Errorf("expected no canonicalization block for a block-scalar-free fixture, got: %v", reasons)
+	files, problems := nonCanonicalCatalogFiles(cat)
+	if len(files) > 0 || len(problems) > 0 {
+		t.Errorf("expected a block-scalar-free fixture to be exempt, got files=%v problems=%v", files, problems)
 	}
 }
 

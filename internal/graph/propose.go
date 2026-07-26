@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"time"
 
 	"kitsoki/internal/clock"
@@ -68,6 +69,16 @@ type ProposeResult struct {
 	// was set: validation + scratch lint ran, but nothing was written, not
 	// even the changeset node.
 	ValidatedOnly bool
+	// Canonicalized reports that this propose also rewrote one or more
+	// catalog files into canonical re-marshal form, in the same commit as
+	// the changeset node, because a human had left them non-canonical
+	// (canonicalize.go). On a ValidatedOnly propose it means the same heal
+	// WOULD happen on the real write — a validate-only check never rejects
+	// on formatting, it tells you what the write will tidy.
+	Canonicalized bool
+	// CanonicalizedFiles lists exactly which files that heal rewrote (or
+	// would rewrite), relative to the catalog root.
+	CanonicalizedFiles []string
 }
 
 // autoAuthorizeFieldRoots is the D9 allowlist: a system-authored changeset
@@ -201,10 +212,6 @@ func proposeOnce(rootPath string, input ProposeInput, actor string, clk clock.Cl
 	if err != nil {
 		return nil, false, fmt.Errorf("graph propose: load %s: %w", rootPath, err)
 	}
-	// Canonicality pre-check (hazard guard #4): before any write attempt.
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		return &ProposeResult{RejectReasons: reasons}, false, nil
-	}
 
 	synthetic := &Node{
 		ID:     "__propose-candidate__",
@@ -258,36 +265,29 @@ func proposeOnce(rootPath string, input ProposeInput, actor string, clk clock.Cl
 
 	addOp := []Operation{{Kind: OpAdded, Node: id, After: nodeMap}}
 
-	if input.ValidateOnly {
-		_, issues, rejectReasons, err := commitScratchOperations(cat, addOp, true /* dryRun */)
-		if err != nil {
-			if errors.Is(err, errCASConflict) {
-				return nil, true, nil
-			}
-			return nil, false, fmt.Errorf("graph propose: %w", err)
-		}
-		if len(rejectReasons) > 0 {
-			return &ProposeResult{RejectReasons: rejectReasons}, false, nil
-		}
-		return &ProposeResult{ChangesetID: id, Status: status, Lint: issues, GuardFills: guardFills, ValidatedOnly: true}, false, nil
-	}
-
-	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, addOp, false)
+	commit, err := commitScratchOperations(cat, addOp, input.ValidateOnly)
 	if err != nil {
 		if errors.Is(err, errCASConflict) {
 			return nil, true, nil
 		}
 		return nil, false, fmt.Errorf("graph propose: %w", err)
 	}
-	if len(rejectReasons) > 0 {
-		return &ProposeResult{RejectReasons: rejectReasons}, false, nil
+	if len(commit.RejectReasons) > 0 {
+		return &ProposeResult{RejectReasons: commit.RejectReasons}, false, nil
 	}
-	if len(issues) > 0 {
-		return &ProposeResult{Lint: issues}, false, nil
+	if len(commit.LintIssues) > 0 && !input.ValidateOnly {
+		return &ProposeResult{Lint: commit.LintIssues}, false, nil
 	}
-	_ = changedFiles
 
-	return &ProposeResult{ChangesetID: id, Status: status, Lint: issues, GuardFills: guardFills}, false, nil
+	return &ProposeResult{
+		ChangesetID:        id,
+		Status:             status,
+		Lint:               commit.LintIssues,
+		GuardFills:         guardFills,
+		ValidatedOnly:      input.ValidateOnly,
+		Canonicalized:      len(commit.CanonicalizedFiles) > 0,
+		CanonicalizedFiles: commit.CanonicalizedFiles,
+	}, false, nil
 }
 
 // Authorize flips a changeset from "proposed" to "authorized" — the only
@@ -322,9 +322,6 @@ func authorizeOnce(rootPath string, changesetID NodeID, actor string, clk clock.
 	if err != nil {
 		return nil, false, fmt.Errorf("graph authorize: load %s: %w", rootPath, err)
 	}
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		return &ApplyResult{RejectReasons: reasons}, false, nil
-	}
 	node, ok := cat.Nodes[changesetID]
 	if !ok {
 		return &ApplyResult{RejectReasons: []string{
@@ -349,7 +346,7 @@ func authorizeOnce(rootPath string, changesetID NodeID, actor string, clk clock.
 	if actor != "" {
 		changes = append(changes, FieldChange{Path: []string{"fields", "authorized_by"}, After: actor})
 	}
-	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
+	commit, err := commitScratchOperations(cat, []Operation{
 		{
 			Kind:    OpModified,
 			Node:    changesetID,
@@ -362,13 +359,7 @@ func authorizeOnce(rootPath string, changesetID NodeID, actor string, clk clock.
 		}
 		return nil, false, fmt.Errorf("graph authorize: %w", err)
 	}
-	if len(rejectReasons) > 0 {
-		return &ApplyResult{RejectReasons: rejectReasons}, false, nil
-	}
-	if len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, false, nil
-	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
+	return commit.applyResult(), false, nil
 }
 
 // Withdraw flips a "proposed" or "authorized" (but not yet applied/
@@ -399,9 +390,6 @@ func withdrawOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry 
 	if err != nil {
 		return nil, false, fmt.Errorf("graph withdraw: load %s: %w", rootPath, err)
 	}
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		return &ApplyResult{RejectReasons: reasons}, false, nil
-	}
 	node, ok := cat.Nodes[changesetID]
 	if !ok {
 		return &ApplyResult{RejectReasons: []string{
@@ -419,7 +407,7 @@ func withdrawOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry 
 		}}, false, nil
 	}
 
-	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
+	commit, err := commitScratchOperations(cat, []Operation{
 		{
 			Kind: OpModified,
 			Node: changesetID,
@@ -434,13 +422,7 @@ func withdrawOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry 
 		}
 		return nil, false, fmt.Errorf("graph withdraw: %w", err)
 	}
-	if len(rejectReasons) > 0 {
-		return &ApplyResult{RejectReasons: rejectReasons}, false, nil
-	}
-	if len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, false, nil
-	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
+	return commit.applyResult(), false, nil
 }
 
 // Rebase refreshes a "proposed" changeset's stale Before guards (§3.3's
@@ -487,10 +469,6 @@ func rebaseOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry bo
 	if err != nil {
 		return nil, false, fmt.Errorf("graph rebase: load %s: %w", rootPath, err)
 	}
-	// Canonicality pre-check (hazard guard #4): before any write attempt.
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		return &ApplyResult{RejectReasons: reasons}, false, nil
-	}
 	node, ok := cat.Nodes[changesetID]
 	if !ok {
 		return &ApplyResult{RejectReasons: []string{
@@ -533,7 +511,7 @@ func rebaseOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry bo
 	}
 
 	newRawOps := rawOpsToAny(opsToRaw(cs.Operations))
-	changedFiles, issues, rejectReasons, err := commitScratchOperations(cat, []Operation{
+	commit, err := commitScratchOperations(cat, []Operation{
 		{
 			Kind: OpModified,
 			Node: changesetID,
@@ -548,65 +526,129 @@ func rebaseOnce(rootPath string, changesetID NodeID) (res *ApplyResult, retry bo
 		}
 		return nil, false, fmt.Errorf("graph rebase: %w", err)
 	}
-	if len(rejectReasons) > 0 {
-		return &ApplyResult{RejectReasons: rejectReasons}, false, nil
-	}
-	if len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, false, nil
-	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
+	return commit.applyResult(), false, nil
 }
 
-// commitScratchOperations is Apply's dry-run-first scratch-copy machinery,
-// factored out so Propose and Authorize can commit a small synthetic
-// operation set (appending a changeset node, or flipping its status) with
-// the exact same comment-preserving-rewrite-then-lint-then-copy-back
-// guarantee Apply gives ordinary changesets — a rejected candidate never
-// touches rootPath. dryRun mirrors Apply's own dry-run convention
-// (ValidateOnly Propose calls): builds and lints the scratch candidate but
-// never calls commitWithCAS.
+// scratchCommit is the outcome of one commitScratchOperations pass. It
+// exists rather than a five-value return because the canonicalization heal
+// added a fourth thing every caller has to relay, and a tuple that wide
+// stops being readable at the call site.
+type scratchCommit struct {
+	// ChangedFiles are every file the pass rewrote, relative to the catalog
+	// root: the operations' own edits plus any canonicalization heal.
+	ChangedFiles []string
+	// CanonicalizedFiles is the heal's subset of ChangedFiles.
+	CanonicalizedFiles []string
+	// LintIssues is non-empty when the candidate catalog introduced NEW
+	// error-severity lint — a rejection; nothing was committed.
+	LintIssues []LintIssue
+	// RejectReasons is non-empty when the operations could not be applied
+	// to the scratch tree at all — also a rejection, also nothing committed.
+	RejectReasons []string
+}
+
+// applyResult renders a commit as the ApplyResult shape the lifecycle flips
+// (Authorize/Withdraw/Rebase) all return, so those three don't each
+// re-implement the same reject/lint/success ladder.
+func (c *scratchCommit) applyResult() *ApplyResult {
+	if len(c.RejectReasons) > 0 {
+		return &ApplyResult{RejectReasons: c.RejectReasons}
+	}
+	if len(c.LintIssues) > 0 {
+		return &ApplyResult{LintIssues: c.LintIssues}
+	}
+	return &ApplyResult{
+		Applied:            true,
+		ChangedFiles:       c.ChangedFiles,
+		Canonicalized:      len(c.CanonicalizedFiles) > 0,
+		CanonicalizedFiles: c.CanonicalizedFiles,
+	}
+}
+
+// commitScratchOperations is the one write path behind every lifecycle verb
+// — Propose, Authorize, Withdraw, Rebase and Apply all commit through here.
+// It copies the catalog to a scratch tree, canonicalizes anything a human
+// left non-canonical, applies ops (comment-preserving, via yaml.Node
+// rewrites), re-loads and re-lints the candidate, and only then copies the
+// changed files back. A rejected candidate never touches the real catalog.
+// dryRun builds and lints the candidate but never calls commitWithCAS.
 //
-// The lint gate only blocks on error-severity issues NOT already present
-// in cat's own baseline lint (hazard guard #3: pre-existing catalog dirt
-// must never deadlock a write), and commit-time uses commitWithCAS (hazard
-// guard #2): a content-digest mismatch returns errCASConflict for the
-// caller's retry loop instead of clobbering a concurrent write.
-func commitScratchOperations(cat *Catalog, ops []Operation, dryRun bool) (changedFiles []string, lintIssues []LintIssue, rejectReasons []string, err error) {
+// Three guarantees ride on this being a single shared path:
+//
+//   - Lint (hazard guard #3) only blocks on error-severity issues NOT
+//     already in cat's baseline, so pre-existing catalog dirt can't deadlock
+//     writes.
+//   - Copy-back goes through commitWithCAS (hazard guard #2): a
+//     content-digest mismatch returns errCASConflict for the caller's retry
+//     loop rather than clobbering a concurrent write.
+//   - Canonicalization (canonicalize.go) happens HERE, inside the scratch
+//     tree, before the operations are applied — so the heal is committed by
+//     the same CAS-guarded copy-back as the edits, under the same digest
+//     captured at LoadCatalog time. There is no separate write, no second
+//     window, and no digest the heal itself could invalidate. Healing
+//     before applying also means the ops' own whole-file re-marshal writes
+//     over already-canonical bytes, making the two rewrites idempotent with
+//     respect to each other.
+func commitScratchOperations(cat *Catalog, ops []Operation, dryRun bool) (*scratchCommit, error) {
 	baseline := ErrorIssues(Lint(cat))
 
 	tmpDir, err := os.MkdirTemp("", "kitsoki-graph-commit-*")
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("mktemp: %w", err)
+		return nil, fmt.Errorf("mktemp: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
 	scratchRoot, err := copyCatalogTree(cat.RootPath, tmpDir, cat)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("copy scratch tree: %w", err)
+		return nil, fmt.Errorf("copy scratch tree: %w", err)
+	}
+
+	canonicalized, canonReasons := canonicalizeScratch(cat, scratchRoot)
+	if len(canonReasons) > 0 {
+		return &scratchCommit{RejectReasons: canonReasons}, nil
 	}
 
 	changed, err := applyOperations(cat, ops, scratchRoot)
 	if err != nil {
-		return nil, nil, []string{err.Error()}, nil
+		return &scratchCommit{RejectReasons: []string{err.Error()}}, nil
 	}
+	changed = mergeChangedFiles(changed, canonicalized)
 
 	candidate, err := LoadCatalog(scratchRoot)
 	if err != nil {
-		return nil, nil, []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}, nil
+		return &scratchCommit{RejectReasons: []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}}, nil
 	}
-	// Error-severity only, same rationale as Apply's gate (apply.go):
-	// advisory warnings must not block a propose/commit. Only NEW issues
-	// (not in baseline) block (hazard guard #3).
+	// Error-severity only: advisory warnings (lint.go's SeverityWarning)
+	// must not block a write — a work item that hasn't declared its
+	// materialize gate yet would otherwise brick the very write-back that
+	// records the failure. Only NEW issues block (hazard guard #3).
 	if issues := newErrorIssues(baseline, ErrorIssues(Lint(candidate))); len(issues) > 0 {
-		return nil, issues, nil, nil
+		return &scratchCommit{LintIssues: issues}, nil
 	}
 
-	if dryRun {
-		return changed, nil, nil, nil
+	if !dryRun {
+		if err := commitWithCAS(cat, scratchRoot, changed); err != nil {
+			return nil, err
+		}
 	}
+	return &scratchCommit{ChangedFiles: changed, CanonicalizedFiles: canonicalized}, nil
+}
 
-	if err := commitWithCAS(cat, scratchRoot, changed); err != nil {
-		return nil, nil, nil, err
+// mergeChangedFiles unions the operations' touched files with the heal's,
+// deduplicated and sorted — a file that was both canonicalized and edited
+// must be copied back exactly once.
+func mergeChangedFiles(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range lists {
+		for _, f := range list {
+			if seen[f] {
+				continue
+			}
+			seen[f] = true
+			out = append(out, f)
+		}
 	}
-	return changed, nil, nil, nil
+	sort.Strings(out)
+	return out
 }

@@ -52,6 +52,39 @@ func graphRejectDetails(reasons []string) []any {
 	return details
 }
 
+// graphApplyResultWire renders an internal/graph.ApplyResult as the wire
+// map every lifecycle-writing RPC here returns. The four verbs used to each
+// carry their own identical copy of this marshalling; folding it into one
+// place is what let `canonicalized`/`canonicalized_files` reach all of them
+// at once rather than three out of four.
+func graphApplyResultWire(res *objectgraph.ApplyResult) map[string]any {
+	rejectReasons := make([]any, len(res.RejectReasons))
+	for i, r := range res.RejectReasons {
+		rejectReasons[i] = r
+	}
+	lintIssues := make([]any, len(res.LintIssues))
+	for i, iss := range res.LintIssues {
+		lintIssues[i] = iss.Error()
+	}
+	changedFiles := make([]any, len(res.ChangedFiles))
+	for i, f := range res.ChangedFiles {
+		changedFiles[i] = f
+	}
+	canonicalizedFiles := make([]any, len(res.CanonicalizedFiles))
+	for i, f := range res.CanonicalizedFiles {
+		canonicalizedFiles[i] = f
+	}
+	return map[string]any{
+		"rejected":            res.Rejected(),
+		"reject_reasons":      rejectReasons,
+		"reject_details":      graphRejectDetails(res.RejectReasons),
+		"lint_issues":         lintIssues,
+		"changed_files":       changedFiles,
+		"canonicalized":       res.Canonicalized,
+		"canonicalized_files": canonicalizedFiles,
+	}
+}
+
 func graphStringParam(params map[string]any, key string) string {
 	s, _ := params[key].(string)
 	return s
@@ -131,13 +164,19 @@ func (s *Server) graphProposeRPC(params map[string]any) (any, *rpcError) {
 	for i, r := range res.RejectReasons {
 		rejectReasons[i] = r
 	}
+	canonicalizedFiles := make([]any, len(res.CanonicalizedFiles))
+	for i, f := range res.CanonicalizedFiles {
+		canonicalizedFiles[i] = f
+	}
 	return map[string]any{
-		"changeset_id":   string(res.ChangesetID),
-		"status":         res.Status,
-		"lint":           lint,
-		"rejected":       len(res.RejectReasons) > 0 || len(res.Lint) > 0,
-		"reject_reasons": rejectReasons,
-		"reject_details": graphRejectDetails(res.RejectReasons),
+		"changeset_id":        string(res.ChangesetID),
+		"status":              res.Status,
+		"lint":                lint,
+		"rejected":            len(res.RejectReasons) > 0 || len(res.Lint) > 0,
+		"reject_reasons":      rejectReasons,
+		"reject_details":      graphRejectDetails(res.RejectReasons),
+		"canonicalized":       res.Canonicalized,
+		"canonicalized_files": canonicalizedFiles,
 	}, nil
 }
 
@@ -162,25 +201,7 @@ func (s *Server) graphAuthorizeRPC(params map[string]any) (any, *rpcError) {
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.authorize: " + err.Error()}
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"reject_details": graphRejectDetails(res.RejectReasons),
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}, nil
+	return graphApplyResultWire(res), nil
 }
 
 // graphWithdrawRPC: {catalog_path, changeset_id} -> the bare sibling of
@@ -203,25 +224,7 @@ func (s *Server) graphWithdrawRPC(params map[string]any) (any, *rpcError) {
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.withdraw: " + err.Error()}
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"reject_details": graphRejectDetails(res.RejectReasons),
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}, nil
+	return graphApplyResultWire(res), nil
 }
 
 // graphRebaseRPC: {catalog_path, changeset_id} -> the bare sibling of
@@ -247,25 +250,7 @@ func (s *Server) graphRebaseRPC(params map[string]any) (any, *rpcError) {
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.rebase: " + err.Error()}
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"reject_details": graphRejectDetails(res.RejectReasons),
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}, nil
+	return graphApplyResultWire(res), nil
 }
 
 // graphCanonicalizeRPC: {catalog | catalog_path[, dry_run]} ->
@@ -324,23 +309,5 @@ func (s *Server) graphApplyRPC(params map[string]any) (any, *rpcError) {
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.apply: " + err.Error()}
 	}
-	rejectReasons := make([]any, len(res.RejectReasons))
-	for i, r := range res.RejectReasons {
-		rejectReasons[i] = r
-	}
-	lintIssues := make([]any, len(res.LintIssues))
-	for i, iss := range res.LintIssues {
-		lintIssues[i] = iss.Error()
-	}
-	changedFiles := make([]any, len(res.ChangedFiles))
-	for i, f := range res.ChangedFiles {
-		changedFiles[i] = f
-	}
-	return map[string]any{
-		"rejected":       res.Rejected(),
-		"reject_reasons": rejectReasons,
-		"reject_details": graphRejectDetails(res.RejectReasons),
-		"lint_issues":    lintIssues,
-		"changed_files":  changedFiles,
-	}, nil
+	return graphApplyResultWire(res), nil
 }

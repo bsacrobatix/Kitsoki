@@ -157,7 +157,7 @@ threads it via `host.WithActor` on every write call.
 
 Steward mode is the second half of the ceiling. Modes:
 
-| mode | read family | `graph.propose`/`withdraw`/`changeset` | `graph.apply` | `graph.authorize` |
+| mode | read family | `graph.propose`/`withdraw`/`changeset`/`canonicalize` | `graph.apply` | `graph.authorize` |
 |---|---|---|---|---|
 | `read` | yes | not registered | not registered | not registered |
 | `propose` (default) | yes | yes (withdraw: own changesets only) | dry-run only | registered, rejected `STEWARD_ONLY` |
@@ -251,6 +251,54 @@ The dev-workspace.sh process seam is injectable (`Config.WorkspaceRunner`) —
 tests drive the whole capsule route with a deterministic fake and never
 spawn a real clone ([`writevia_test.go`](../../internal/mcp/graphsrv/writevia_test.go)).
 
+## Canonicalization: heal, never block
+
+`yaml.v3` re-marshals a whole document on any write that touches it, so a
+catalog file whose bytes differ from that re-serialization would get
+reformatted as a side effect of an unrelated changeset. The original guard
+against that surprise was a fail-closed rejection: any write against a
+non-canonical file returned `NEEDS_CANONICALIZATION` and the operator had to
+run `kitsoki graph canonicalize` before anything could proceed.
+
+That protected reviewers by freezing the write path. One human hand-wrapping
+one long field in `pog/catalog.yaml` blocked every agent proposal, every
+portal write, and even `validate_only` checks — and the remedy needed a
+binary whose writer format matched the catalog's pin, so a pin mismatch left
+users with no way out at all.
+
+The guard now heals instead of refusing
+([`internal/graph/canonicalize.go`](../../internal/graph/canonicalize.go)).
+Every lifecycle verb commits through one shared scratch transaction
+(`commitScratchOperations`): the catalog is copied to a scratch tree, any
+non-canonical file is rewritten there, the operations are applied, and the
+whole set is copied back under the same content-digest CAS guard. Concretely:
+
+- **Nothing blocks on formatting.** `graph.propose`, `graph.apply`,
+  `graph.authorize`, `graph.withdraw` and rebase all take the write.
+  `validate_only` validates instead of refusing to look.
+- **Nothing is silently reformatted.** The result carries
+  `canonicalized: true` and `canonicalized_files`, and the healed files also
+  appear in `changed_files`, so the reflow is visible in the response and in
+  `git diff`.
+- **The heal is inside the transaction.** It lands only via the operation's
+  CAS-guarded copy-back, against the digest captured at load time. A losing
+  CAS race rolls back the heal along with the edits; there is no window in
+  which a concurrent reader sees a half-healed catalog.
+- **It still fails closed on real danger.** Before writing, the original and
+  canonical bytes are compared as parsed YAML values. If they differ — which
+  a well-formed file cannot produce, since yaml.v3's emitter falls back to a
+  quoted style for anything block style can't round-trip — the operation
+  refuses and names the exact node/field that diverged.
+- **The output format is unchanged.** Canonical bytes are whatever
+  `marshalYAMLNode` has always produced, and canonicalizing an
+  already-canonical file is a byte-for-byte no-op. Downstream repos pinning a
+  binary on writer-format compatibility are unaffected.
+
+`graph.canonicalize` (MCP), `graph.canonicalize` (RPC) and `kitsoki graph
+canonicalize` (CLI) remain, no longer as an unblocking remedy but as the
+explicit form: land the reflow as its own reviewable commit before a content
+change rides along with it. `dry_run` reports what would be rewritten.
+
 ## No-LLM, ever
 
 Every handler in this package is deterministic Go: JSON args in, a
@@ -322,9 +370,10 @@ constants in `errors.go`:
   called on a non-steward server.
 - `CATALOG_LINT_BLOCKED` — a write would add a *new* lint issue (pre-existing
   catalog dirt never blocks a write, only regressions).
-- `NEEDS_CANONICALIZATION` — the catalog file isn't in yaml.v3 canonical
-  form; writing through it would silently reflow a hand-wrapped block
-  scalar.
+- `NEEDS_CANONICALIZATION` — a catalog file could not be safely
+  re-serialized: it can't be read or parsed, or its canonical form would
+  change its *meaning*. A file that is merely non-canonical never produces
+  this — see "Canonicalization" below.
 - `NOT_YOUR_CHANGESET` — a propose-mode `graph.withdraw` call named a
   changeset authored by a different actor.
 - `OUT_OF_SCOPE` — the call named (or a write would touch) a node that

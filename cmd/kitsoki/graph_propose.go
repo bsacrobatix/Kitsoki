@@ -141,7 +141,20 @@ non-zero on rejection, printing every reject reason and lint issue.`,
 			}
 			changesetID, _ := res.Data["changeset_id"].(string)
 			status, _ := res.Data["status"].(string)
-			if validatedOnly, _ := res.Data["validated_only"].(bool); validatedOnly {
+			validatedOnly, _ := res.Data["validated_only"].(bool)
+			// The canonicalization heal is never silent: if this write also
+			// reformatted a file a human had left non-canonical, say so, so
+			// the extra hunk in `git diff` is expected rather than alarming.
+			if canonicalized, _ := res.Data["canonicalized"].(bool); canonicalized {
+				verb := "canonicalized"
+				if validatedOnly {
+					verb = "would canonicalize"
+				}
+				for _, f := range res.Data["canonicalized_files"].([]any) {
+					fmt.Fprintf(out, "graph propose: %s %v (non-canonical YAML, rewritten in the same commit)\n", verb, f)
+				}
+			}
+			if validatedOnly {
 				fmt.Fprintln(out, "graph propose: validate-only clean, nothing written")
 				return nil
 			}

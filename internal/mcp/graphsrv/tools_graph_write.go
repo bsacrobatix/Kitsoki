@@ -12,27 +12,35 @@ import (
 )
 
 // registerGraphWriteTools registers the P4 write family (plan §3.4):
-// graph.propose, graph.withdraw, graph.apply, graph.authorize.
-// graph.changeset (read-only, all modes) lives in tools_graph.go alongside
-// the other read tools. Called from RegisterGraphTools's mode switch — not
-// at all in read mode, per the plan §3.1 "an MCP client shouldn't see write
-// tools it can never call" tools/list economics rationale. graph.authorize
-// is still registered (but gated STEWARD_ONLY at runtime) in propose mode,
-// since a propose-mode caller attempting authorize is a meaningful,
-// teachable rejection, not a tool that shouldn't exist for that mode.
+// graph.propose, graph.withdraw, graph.apply, graph.authorize, plus
+// graph.canonicalize. graph.changeset (read-only, all modes) lives in
+// tools_graph.go alongside the other read tools. Called from
+// RegisterGraphTools's mode switch — not at all in read mode, per the plan
+// §3.1 "an MCP client shouldn't see write tools it can never call"
+// tools/list economics rationale. graph.authorize is still registered (but
+// gated STEWARD_ONLY at runtime) in propose mode, since a propose-mode
+// caller attempting authorize is a meaningful, teachable rejection, not a
+// tool that shouldn't exist for that mode.
 func registerGraphWriteTools(srv *mcpsdk.Server, deps *Deps) {
 	registerGraphProposeTool(srv, deps)
 	registerGraphWithdrawTool(srv, deps)
 	registerGraphApplyTool(srv, deps)
 	registerGraphAuthorizeTool(srv, deps)
+	registerGraphCanonicalizeTool(srv, deps)
 }
 
 // classifyWriteReject maps a write op's reject_reasons/lint content to an
 // mcp-graph error code. Unlike classifyHostErr (a raw Go error's message),
 // this inspects RejectReasons/Lint strings returned INSIDE a successful
-// host.graph.* Result — the hazard guards (guards.go) surface as reject
-// reasons prefixed "NEEDS_CANONICALIZATION:", never as Go errors, from the
-// write ops.
+// host.graph.* Result — the canonicality machinery (internal/graph's
+// canonicalize.go) surfaces as reject reasons prefixed
+// "NEEDS_CANONICALIZATION:", never as Go errors, from the write ops.
+//
+// That code is now rare by construction: a merely non-canonical catalog
+// heals itself inside the write and never rejects. It survives for the
+// conditions that genuinely must fail closed — an unreadable or
+// un-marshalable catalog file, or a re-serialization that would change the
+// file's meaning.
 func classifyWriteReject(rejectReasons []any, hasLintIssues bool) string {
 	for _, r := range rejectReasons {
 		if s, ok := r.(string); ok && strings.HasPrefix(s, "NEEDS_CANONICALIZATION") {
@@ -79,6 +87,24 @@ func writeCtx(ctx context.Context, deps *Deps) context.Context {
 	return ctx
 }
 
+// stringList narrows a host Result's []any field to []string, dropping
+// anything that isn't a string. Used for the canonicalized_files echo,
+// where the host layer speaks []any and the tool payload wants a typed
+// list.
+func stringList(v any) []string {
+	items, ok := v.([]any)
+	if !ok || len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // operationsToAny adapts graph.propose's []map[string]any wire operations
 // to the []any shape host.graph.propose's args["operations"] expects.
 func operationsToAny(ops []map[string]any) []any {
@@ -118,13 +144,20 @@ type graphProposeArgs struct {
 }
 
 type graphProposeOK struct {
-	OK            bool   `json:"ok"`
-	Catalog       string `json:"catalog"`
-	ChangesetID   string `json:"changeset_id"`
-	Status        string `json:"status"`
-	GuardFills    []any  `json:"guard_fills,omitempty"`
-	ValidatedOnly bool   `json:"validated_only,omitempty"`
-	Truncated     bool   `json:"truncated,omitempty"`
+	OK          bool   `json:"ok"`
+	Catalog     string `json:"catalog"`
+	ChangesetID string `json:"changeset_id"`
+	Status      string `json:"status"`
+	GuardFills  []any  `json:"guard_fills,omitempty"`
+	// Canonicalized/CanonicalizedFiles report that this write also rewrote
+	// catalog files into canonical YAML form, in the same commit — see
+	// internal/graph/canonicalize.go. On a validate_only call it describes
+	// what the real write would tidy. Emitted only when it happened, so the
+	// common case costs no response budget.
+	Canonicalized      bool     `json:"canonicalized,omitempty"`
+	CanonicalizedFiles []string `json:"canonicalized_files,omitempty"`
+	ValidatedOnly      bool     `json:"validated_only,omitempty"`
+	Truncated          bool     `json:"truncated,omitempty"`
 }
 
 func registerGraphProposeTool(srv *mcpsdk.Server, deps *Deps) {
@@ -197,7 +230,17 @@ func handleGraphPropose(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReq
 		}
 	}
 
-	out := graphProposeOK{OK: true, Catalog: alias, ChangesetID: changesetID, Status: status, GuardFills: guardFills, ValidatedOnly: validatedOnly}
+	canonicalized, _ := res.Data["canonicalized"].(bool)
+	out := graphProposeOK{
+		OK:                 true,
+		Catalog:            alias,
+		ChangesetID:        changesetID,
+		Status:             status,
+		GuardFills:         guardFills,
+		Canonicalized:      canonicalized,
+		CanonicalizedFiles: stringList(res.Data["canonicalized_files"]),
+		ValidatedOnly:      validatedOnly,
+	}
 	for !fitsBudget(out, BudgetGraphPropose) && len(out.GuardFills) > 0 {
 		out.GuardFills = out.GuardFills[:len(out.GuardFills)-1]
 		out.Truncated = true
@@ -228,7 +271,12 @@ type graphWithdrawOK struct {
 	ChangesetID  string `json:"changeset_id"`
 	Applied      bool   `json:"applied"`
 	ChangedFiles []any  `json:"changed_files,omitempty"`
-	Truncated    bool   `json:"truncated,omitempty"`
+	// Canonicalized/CanonicalizedFiles report that this write also rewrote
+	// catalog files into canonical YAML form, in the same commit — see
+	// internal/graph/canonicalize.go. Emitted only when it happened.
+	Canonicalized      bool     `json:"canonicalized,omitempty"`
+	CanonicalizedFiles []string `json:"canonicalized_files,omitempty"`
+	Truncated          bool     `json:"truncated,omitempty"`
 }
 
 func registerGraphWithdrawTool(srv *mcpsdk.Server, deps *Deps) {
@@ -315,7 +363,9 @@ func handleGraphWithdraw(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRe
 	}
 
 	changedFiles, _ := res.Data["changed_files"].([]any)
-	out := graphWithdrawOK{OK: true, Catalog: alias, ChangesetID: args.ID, Applied: true, ChangedFiles: changedFiles}
+	canonicalized, _ := res.Data["canonicalized"].(bool)
+	out := graphWithdrawOK{OK: true, Catalog: alias, ChangesetID: args.ID, Applied: true, ChangedFiles: changedFiles,
+		Canonicalized: canonicalized, CanonicalizedFiles: stringList(res.Data["canonicalized_files"])}
 	for !fitsBudget(out, BudgetGraphWithdraw) && len(out.ChangedFiles) > 0 {
 		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
 		out.Truncated = true
@@ -349,7 +399,12 @@ type graphApplyOK struct {
 	DryRun       bool   `json:"dry_run"`
 	Applied      bool   `json:"applied"`
 	ChangedFiles []any  `json:"changed_files,omitempty"`
-	Truncated    bool   `json:"truncated,omitempty"`
+	// Canonicalized/CanonicalizedFiles report that this write also rewrote
+	// catalog files into canonical YAML form, in the same commit — see
+	// internal/graph/canonicalize.go. Emitted only when it happened.
+	Canonicalized      bool     `json:"canonicalized,omitempty"`
+	CanonicalizedFiles []string `json:"canonicalized_files,omitempty"`
+	Truncated          bool     `json:"truncated,omitempty"`
 }
 
 func registerGraphApplyTool(srv *mcpsdk.Server, deps *Deps) {
@@ -409,7 +464,9 @@ func handleGraphApply(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReque
 	}
 
 	changedFiles, _ := res.Data["changed_files"].([]any)
-	out := graphApplyOK{OK: true, Catalog: alias, ChangesetID: args.ID, DryRun: args.DryRun, Applied: true, ChangedFiles: changedFiles}
+	canonicalized, _ := res.Data["canonicalized"].(bool)
+	out := graphApplyOK{OK: true, Catalog: alias, ChangesetID: args.ID, DryRun: args.DryRun, Applied: true, ChangedFiles: changedFiles,
+		Canonicalized: canonicalized, CanonicalizedFiles: stringList(res.Data["canonicalized_files"])}
 	for !fitsBudget(out, BudgetGraphApply) && len(out.ChangedFiles) > 0 {
 		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
 		out.Truncated = true
@@ -440,7 +497,12 @@ type graphAuthorizeOK struct {
 	ChangesetID  string `json:"changeset_id"`
 	Applied      bool   `json:"applied"`
 	ChangedFiles []any  `json:"changed_files,omitempty"`
-	Truncated    bool   `json:"truncated,omitempty"`
+	// Canonicalized/CanonicalizedFiles report that this write also rewrote
+	// catalog files into canonical YAML form, in the same commit — see
+	// internal/graph/canonicalize.go. Emitted only when it happened.
+	Canonicalized      bool     `json:"canonicalized,omitempty"`
+	CanonicalizedFiles []string `json:"canonicalized_files,omitempty"`
+	Truncated          bool     `json:"truncated,omitempty"`
 }
 
 func registerGraphAuthorizeTool(srv *mcpsdk.Server, deps *Deps) {
@@ -498,10 +560,116 @@ func handleGraphAuthorize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolR
 	}
 
 	changedFiles, _ := res.Data["changed_files"].([]any)
-	out := graphAuthorizeOK{OK: true, Catalog: alias, ChangesetID: args.ID, Applied: true, ChangedFiles: changedFiles}
+	canonicalized, _ := res.Data["canonicalized"].(bool)
+	out := graphAuthorizeOK{OK: true, Catalog: alias, ChangesetID: args.ID, Applied: true, ChangedFiles: changedFiles,
+		Canonicalized: canonicalized, CanonicalizedFiles: stringList(res.Data["canonicalized_files"])}
 	for !fitsBudget(out, BudgetGraphAuthorize) && len(out.ChangedFiles) > 0 {
 		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
 		out.Truncated = true
 	}
 	return journal(deps, "graph.authorize", anchor, alias, req.Params.Arguments, okResult(out), args.ID), nil
+}
+
+// ─── graph.canonicalize ───
+
+const graphCanonicalizeInputSchema = `{
+  "type": "object",
+  "properties": {
+    "catalog": {"type": "string", "description": "Bound catalog alias (omit to use the default catalog)."},
+    "dry_run": {"type": "boolean", "description": "If true, report which files WOULD be rewritten without touching disk."}
+  },
+  "additionalProperties": false
+}`
+
+type graphCanonicalizeArgs struct {
+	Catalog string `json:"catalog,omitempty"`
+	DryRun  bool   `json:"dry_run,omitempty"`
+}
+
+type graphCanonicalizeOK struct {
+	OK               bool     `json:"ok"`
+	Catalog          string   `json:"catalog"`
+	DryRun           bool     `json:"dry_run"`
+	AlreadyCanonical bool     `json:"already_canonical"`
+	ChangedFiles     []string `json:"changed_files,omitempty"`
+	// Skipped lists "<file>: <reason>" entries for files that needed
+	// canonicalizing but couldn't be — a read-only catalog, or (the
+	// fail-closed case) a re-serialization that would change the file's
+	// meaning.
+	Skipped   []string `json:"skipped,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
+func registerGraphCanonicalizeTool(srv *mcpsdk.Server, deps *Deps) {
+	srv.AddTool(&mcpsdk.Tool{
+		Name: "graph.canonicalize",
+		Description: "Rewrite the bound catalog's YAML files into canonical re-marshal form as a standalone change. " +
+			"You rarely need this: every write op (graph.propose/apply/authorize/withdraw) already canonicalizes " +
+			"non-canonical files in the same commit and reports it as `canonicalized`. Call this when you would " +
+			"rather land the reformat as its own reviewable diff, before a content change rides along with it. " +
+			"dry_run reports what would be rewritten without touching disk.",
+		InputSchema: json.RawMessage(graphCanonicalizeInputSchema),
+	}, recorded(deps, "graph.canonicalize", func(ctx context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return handleGraphCanonicalize(ctx, deps, req)
+	}))
+}
+
+func handleGraphCanonicalize(ctx context.Context, deps *Deps, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+	var args graphCanonicalizeArgs
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return errorResult(NewError(CodeValidation, "graph.canonicalize: arguments are not valid JSON: "+err.Error(), "")), nil
+		}
+	}
+
+	// A dry run mutates nothing, but it still resolves through the write
+	// path: it answers a question about the writable catalog, and routing it
+	// through resolveRead would let it report on a different tree than the
+	// one a subsequent real canonicalize would touch.
+	path, anchor, alias, errPayload := deps.resolveWrite(ctx, args.Catalog)
+	if errPayload != nil {
+		return errorResult(errPayload), nil
+	}
+
+	hostArgs := map[string]any{"catalog_path": path, "dry_run": args.DryRun}
+	res, err := deps.Registry.Invoke(writeCtx(ctx, deps), "host.graph.canonicalize", hostArgs)
+	if err != nil {
+		return journal(deps, "graph.canonicalize", anchor, alias, req.Params.Arguments, hostErrResult("graph.canonicalize", err), ""), nil
+	}
+	if res.Error != "" {
+		return journal(deps, "graph.canonicalize", anchor, alias, req.Params.Arguments, errorResult(NewError(CodeValidation, "graph.canonicalize: "+res.Error, "")), ""), nil
+	}
+
+	changedFiles := stringList(res.Data["changed_files"])
+	skipped := stringList(res.Data["skipped"])
+	alreadyCanonical, _ := res.Data["already_canonical"].(bool)
+
+	// A skip is the fail-closed half of this tool: the file needed
+	// canonicalizing and could not be canonicalized. Report it as the error
+	// it is rather than an ok-with-caveats payload the caller may not read.
+	if len(skipped) > 0 {
+		return journal(deps, "graph.canonicalize", anchor, alias, req.Params.Arguments,
+			errorResult(NewError(CodeNeedsCanonicalization,
+				"graph.canonicalize: "+strings.Join(skipped, "; "),
+				"a skipped file is either read-only or would not survive re-serialization unchanged; neither is fixable from this tool")), ""), nil
+	}
+
+	if !args.DryRun && len(changedFiles) > 0 {
+		if ep := deps.integrateWrite(ctx, anchor, "graph-mcp: graph.canonicalize", false); ep != nil {
+			return journal(deps, "graph.canonicalize", anchor, alias, req.Params.Arguments, errorResult(ep), ""), nil
+		}
+	}
+
+	out := graphCanonicalizeOK{
+		OK:               true,
+		Catalog:          alias,
+		DryRun:           args.DryRun,
+		AlreadyCanonical: alreadyCanonical,
+		ChangedFiles:     changedFiles,
+	}
+	for !fitsBudget(out, BudgetGraphCanonicalize) && len(out.ChangedFiles) > 0 {
+		out.ChangedFiles = out.ChangedFiles[:len(out.ChangedFiles)-1]
+		out.Truncated = true
+	}
+	return journal(deps, "graph.canonicalize", anchor, alias, req.Params.Arguments, okResult(out), ""), nil
 }

@@ -21,7 +21,19 @@ type ApplyResult struct {
 	Applied bool
 	// ChangedFiles are the files (relative to the catalog root) that were
 	// rewritten. Populated on a successful apply or a successful dry-run.
+	// Includes any file the operation canonicalized on the way through (see
+	// CanonicalizedFiles).
 	ChangedFiles []string
+	// Canonicalized reports that this operation also rewrote one or more
+	// catalog files into canonical re-marshal form, in the same commit as
+	// its own edits, because a human had left them non-canonical
+	// (canonicalize.go). Never a rejection, never silent: the reformat is
+	// named here and in ChangedFiles, so it's visible in the result as well
+	// as in git diff.
+	Canonicalized bool
+	// CanonicalizedFiles lists exactly which files that heal rewrote,
+	// relative to the catalog root. A subset of ChangedFiles.
+	CanonicalizedFiles []string
 	// RejectReasons is non-empty when the changeset failed a pre-apply
 	// validation check (ValidateChangeset, or changeset shape/status).
 	// The real catalog was never touched.
@@ -81,11 +93,6 @@ func applyOnce(rootPath string, changesetID NodeID, dryRun bool, clk clock.Clock
 	if err != nil {
 		return nil, false, fmt.Errorf("graph apply: load %s: %w", rootPath, err)
 	}
-	// Canonicality pre-check (hazard guard #4): refuse to write through a
-	// file yaml.v3 would reflow on next re-marshal.
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		return &ApplyResult{RejectReasons: reasons}, false, nil
-	}
 	csNode, ok := cat.Nodes[changesetID]
 	if !ok {
 		return nil, false, fmt.Errorf("graph apply: changeset %q not found in catalog", changesetID)
@@ -103,21 +110,6 @@ func applyOnce(rootPath string, changesetID NodeID, dryRun bool, clk clock.Clock
 		return &ApplyResult{RejectReasons: reasons}, false, nil
 	}
 
-	// Lint-diff gate baseline (hazard guard #3): computed on cat BEFORE any
-	// operation is applied, so pre-existing catalog dirt never blocks.
-	baseline := ErrorIssues(Lint(cat))
-
-	tmpDir, err := os.MkdirTemp("", "kitsoki-graph-apply-*")
-	if err != nil {
-		return nil, false, fmt.Errorf("graph apply: mktemp: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	scratchRoot, err := copyCatalogTree(rootPath, tmpDir, cat)
-	if err != nil {
-		return nil, false, fmt.Errorf("graph apply: copy scratch tree: %w", err)
-	}
-
 	ops := cs.Operations
 	if !dryRun {
 		// Mark the changeset itself "notified" in the same commit as its
@@ -133,38 +125,32 @@ func applyOnce(rootPath string, changesetID NodeID, dryRun bool, clk clock.Clock
 			},
 		})
 	}
-	changedFiles, err := applyOperations(cat, ops, scratchRoot)
+	// Apply commits through the exact same scratch machinery as
+	// Propose/Authorize/Withdraw/Rebase (commitScratchOperations,
+	// propose.go): copy the tree, canonicalize anything a human left
+	// non-canonical, apply the operations, re-lint the candidate against a
+	// pre-write baseline, and copy back under CAS. Sharing that one path is
+	// what makes "a non-canonical catalog never blocks a write" true on
+	// every verb rather than four-fifths of them.
+	commit, err := commitScratchOperations(cat, ops, dryRun)
 	if err != nil {
-		return &ApplyResult{RejectReasons: []string{err.Error()}}, false, nil
-	}
-
-	candidate, err := LoadCatalog(scratchRoot)
-	if err != nil {
-		return &ApplyResult{RejectReasons: []string{fmt.Sprintf("candidate catalog failed to load: %v", err)}}, false, nil
-	}
-	// Only error-severity issues reject an apply: SeverityWarning is
-	// documented as advisory (lint.go), so a warning — e.g. a work item
-	// that has not yet declared its materialize gate check — must not brick
-	// every subsequent catalog write (including materialize's own
-	// system-authored write-backs, which are exactly how such a node records
-	// that its check failed). And only NEW error issues (not present in
-	// baseline) block — pre-existing dirt no longer deadlocks writes
-	// (hazard guard #3).
-	if issues := newErrorIssues(baseline, ErrorIssues(Lint(candidate))); len(issues) > 0 {
-		return &ApplyResult{LintIssues: issues}, false, nil
-	}
-
-	if dryRun {
-		return &ApplyResult{Applied: false, ChangedFiles: changedFiles}, false, nil
-	}
-
-	if err := commitWithCAS(cat, scratchRoot, changedFiles); err != nil {
 		if errors.Is(err, errCASConflict) {
 			return nil, true, nil
 		}
 		return nil, false, fmt.Errorf("graph apply: %w", err)
 	}
-	return &ApplyResult{Applied: true, ChangedFiles: changedFiles}, false, nil
+	if len(commit.RejectReasons) > 0 {
+		return &ApplyResult{RejectReasons: commit.RejectReasons}, false, nil
+	}
+	if len(commit.LintIssues) > 0 {
+		return &ApplyResult{LintIssues: commit.LintIssues}, false, nil
+	}
+	return &ApplyResult{
+		Applied:            !dryRun,
+		ChangedFiles:       commit.ChangedFiles,
+		Canonicalized:      len(commit.CanonicalizedFiles) > 0,
+		CanonicalizedFiles: commit.CanonicalizedFiles,
+	}, false, nil
 }
 
 // commitChangedFiles copies each of changedFiles (relative to scratchRoot,
@@ -184,17 +170,72 @@ func commitChangedFiles(rootPath, scratchRoot string, changedFiles []string) err
 		if len(changedFiles) == 0 {
 			return nil
 		}
-		return copyFile(scratchRoot, rootPath)
+		return copyFileAtomic(scratchRoot, rootPath)
 	}
 	realRoot := rootDir(rootPath)
 	for _, rel := range changedFiles {
 		src := filepath.Join(scratchRoot, rel)
 		dst := filepath.Join(realRoot, rel)
-		if err := copyFile(src, dst); err != nil {
+		if err := copyFileAtomic(src, dst); err != nil {
 			return fmt.Errorf("commit %s: %w", rel, err)
 		}
 	}
 	return nil
+}
+
+// copyFileAtomic replaces dst with src's content via a same-directory temp
+// file + rename. Copy-back is where a canonicalizing write is at its most
+// exposed — a whole-file reformat plus the changeset's own edits land
+// together — so a concurrent reader must see either the entire old file or
+// the entire new one, never a truncated in-progress write. (Per-file
+// atomicity is what a POSIX rename buys; the multi-file commit of a bundle
+// catalog is still ordered rather than transactional, which is why
+// commitWithCAS's digest re-check, not this, is the concurrency guard.)
+//
+// A read-only destination is refused explicitly: rename would happily
+// replace a mode-0444 file (the directory's write bit is what governs it),
+// and silently overwriting a file someone deliberately locked would be a
+// surprise the plain-copy implementation never sprang.
+func copyFileAtomic(src, dst string) error {
+	content, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(dst); err == nil {
+		mode = info.Mode().Perm()
+		if mode&0o200 == 0 {
+			return fmt.Errorf("%s is read-only (mode %v)", dst, info.Mode())
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return replaceFileAtomic(dst, content, mode)
+}
+
+// scratchPathFor maps one of cat's real on-disk files to its staged copy
+// under scratchRoot. For a single-file catalog scratchRoot IS that one
+// file; for a bundle it's scratchRoot joined with the file's path relative
+// to the bundle root. Shared by applyOperations and canonicalizeScratch so
+// the heal and the edits provably address the same staged bytes.
+func scratchPathFor(cat *Catalog, scratchRoot, realFile string) (string, error) {
+	if info, err := os.Stat(cat.RootPath); err == nil && !info.IsDir() {
+		return scratchRoot, nil
+	}
+	rel, err := filepath.Rel(rootDir(cat.RootPath), realFile)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(scratchRoot, rel), nil
+}
+
+// scratchRelPath renders a staged file path in the "relative to the catalog
+// root" form ChangedFiles and commitChangedFiles both speak.
+func scratchRelPath(scratchRoot, scratchFile string) (string, error) {
+	if info, err := os.Stat(scratchRoot); err == nil && !info.IsDir() {
+		return filepath.Base(scratchFile), nil // single-file catalog: scratchRoot IS the file
+	}
+	return filepath.Rel(scratchRoot, scratchFile)
 }
 
 // rootDir returns the directory a relative changed-file path should be
@@ -288,15 +329,7 @@ func applyOperations(cat *Catalog, ops []Operation, scratchRoot string) ([]strin
 		return &doc, nil
 	}
 	scratchFileFor := func(realFile string) (string, error) {
-		rel, err := filepath.Rel(rootDir(cat.RootPath), realFile)
-		if err != nil {
-			return "", err
-		}
-		info, statErr := os.Stat(cat.RootPath)
-		if statErr == nil && !info.IsDir() {
-			return scratchRoot, nil // single-file catalog: scratchRoot IS the one file
-		}
-		return filepath.Join(scratchRoot, rel), nil
+		return scratchPathFor(cat, scratchRoot, realFile)
 	}
 
 	for _, op := range ops {
@@ -511,12 +544,9 @@ func applyOperations(cat *Catalog, ops []Operation, scratchRoot string) ([]strin
 		if err := os.WriteFile(scratchFile, out, 0o644); err != nil {
 			return nil, err
 		}
-		rel, err := filepath.Rel(scratchRoot, scratchFile)
+		rel, err := scratchRelPath(scratchRoot, scratchFile)
 		if err != nil {
 			return nil, err
-		}
-		if info, statErr := os.Stat(scratchRoot); statErr == nil && !info.IsDir() {
-			rel = filepath.Base(scratchFile) // single-file catalog: scratchRoot IS the file
 		}
 		changed = append(changed, rel)
 	}

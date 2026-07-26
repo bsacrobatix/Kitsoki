@@ -72,6 +72,10 @@ const (
 	BudgetGraphApply     = 8 * 1024 // graph.apply
 	BudgetGraphAuthorize = 8 * 1024 // graph.authorize
 
+	// BudgetGraphCanonicalize: a list of rewritten catalog file paths —
+	// same page-shaped-response convention as its write-family siblings.
+	BudgetGraphCanonicalize = 8 * 1024
+
 	// BudgetGraphHistory: graph.history's merged changeset+git timeline
 	// page — plan §3.5 ("≤4KB/page").
 	BudgetGraphHistory = 4 * 1024

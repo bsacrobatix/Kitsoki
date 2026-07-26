@@ -8,9 +8,10 @@ import (
 	"kitsoki/internal/clock"
 )
 
-// Canonicalize is the remedy for exactly the state blockScalarFixture
-// (hazard_guards_test.go) puts a catalog in: hand-wrapped block scalar,
-// checkCanonical rejecting every lifecycle verb.
+// Canonicalize is the explicit form of the heal every lifecycle verb now
+// performs on its own: it turns blockScalarFixture (hazard_guards_test.go)
+// — a catalog a human left with a hand-wrapped block scalar — into
+// canonical form as its own reviewable commit.
 
 func TestCanonicalize_RewritesFlaggedFileAndUnblocksLifecycle(t *testing.T) {
 	root := writeBlockScalarFixture(t)
@@ -30,8 +31,8 @@ func TestCanonicalize_RewritesFlaggedFileAndUnblocksLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCatalog after canonicalize: %v", err)
 	}
-	if reasons := checkCanonical(cat); len(reasons) > 0 {
-		t.Fatalf("checkCanonical still rejects after Canonicalize: %v", reasons)
+	if files, problems := nonCanonicalCatalogFiles(cat); len(files) > 0 || len(problems) > 0 {
+		t.Fatalf("catalog still non-canonical after Canonicalize: files=%v problems=%v", files, problems)
 	}
 	// Content survived the rewrite (only formatting changed).
 	if _, ok := cat.Nodes["req-block"]; !ok {
@@ -149,7 +150,7 @@ func TestClassifyRejectReason(t *testing.T) {
 		wantFile string
 	}{
 		{
-			reason:   "NEEDS_CANONICALIZATION: /abs/path/pog/catalog.yaml: file is not in canonical re-marshal form — yaml.v3 would reflow a hand-wrapped block scalar in this file on next write; canonicalize it out-of-band before proposing/applying a changeset that touches this file",
+			reason:   "NEEDS_CANONICALIZATION: /abs/path/pog/catalog.yaml: " + divergenceMessage("$.nodes[req-one].statement"),
 			code:     "needs_canonicalization",
 			wantFile: "/abs/path/pog/catalog.yaml",
 		},

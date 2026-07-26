@@ -218,6 +218,14 @@ Exit code 0 on a successful apply (or a clean dry-run); non-zero on rejection.`,
 			if rejected {
 				return fmt.Errorf("graph apply: changeset %q rejected, catalog untouched", changesetID)
 			}
+			// The canonicalization heal is never silent: if this apply also
+			// reformatted a file a human had left non-canonical, say so, so
+			// the extra hunk in `git diff` is expected rather than alarming.
+			if canonicalized, _ := res.Data["canonicalized"].(bool); canonicalized {
+				for _, f := range res.Data["canonicalized_files"].([]any) {
+					fmt.Fprintf(out, "graph apply: canonicalized %v (non-canonical YAML, rewritten in the same commit)\n", f)
+				}
+			}
 			verb := "applied"
 			if dryRun {
 				verb = "dry-run clean"
@@ -230,25 +238,27 @@ Exit code 0 on a successful apply (or a clean dry-run); non-zero on rejection.`,
 	return cmd
 }
 
-// graphCanonicalizeCmd — the out-of-band remedy the NEEDS_CANONICALIZATION
-// guard message has always demanded but never shipped: re-serialize every
-// block-scalar-bearing catalog file into marshalYAMLNode's canonical form
-// so the propose/authorize/apply lifecycle stops rejecting on formatting.
-// Calls internal/graph.Canonicalize directly (like lint --check-index)
-// because host.graph.* has no canonicalize op — this is repo maintenance,
-// not a graph write.
+// graphCanonicalizeCmd — the explicit form of the canonicalization that
+// every write op now performs on its own behalf. This is no longer a
+// remedy for a blocked lifecycle (nothing rejects on formatting anymore);
+// it exists so the reflow can land as its own reviewable commit instead of
+// riding along with the next changeset's diff. Calls
+// internal/graph.Canonicalize directly (like lint --check-index): repo
+// maintenance, not a graph write.
 func graphCanonicalizeCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "canonicalize <catalog-path>",
 		Short: "Re-serialize catalog files into canonical re-marshal form",
-		Long: `Rewrites every file backing the catalog at <catalog-path> that the
-NEEDS_CANONICALIZATION guard would reject — a file containing a hand-wrapped
-block scalar whose bytes differ from yaml.v3's own re-serialization — into
-that canonical form, comments preserved. Files without block scalars, or
-already canonical, are untouched. Run this once when propose/apply rejects
-with NEEDS_CANONICALIZATION; the reflow diff is deliberate and reviewable
-instead of smuggled into some later changeset's diff.
+		Long: `Rewrites every file backing the catalog at <catalog-path> whose bytes
+differ from yaml.v3's own re-serialization because it contains a hand-wrapped
+block scalar, into that canonical form, comments preserved. Files without
+block scalars, or already canonical, are untouched.
+
+You do not need to run this to unblock anything. Every write op (propose,
+authorize, apply, withdraw, rebase) canonicalizes such files in the same
+commit as its own edits and reports it as "canonicalized". Run this when you
+would rather land the reflow as a standalone, reviewable diff first.
 
 Exit code 0 whether or not files changed; non-zero only on load/write errors.`,
 		Args: cobra.ExactArgs(1),

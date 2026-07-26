@@ -1,15 +1,18 @@
 package graph
 
 // guards.go implements the P1 hazard guards (graph-mcp plan §3.4 red-team
-// amendments #2-#4) shared by Propose/Authorize/Withdraw (via
-// commitScratchOperations, propose.go) and Apply (apply.go): file-level CAS
-// around the load->scratch->copy-back window, a lint-diff gate that only
-// blocks on NEW error-severity issues (not pre-existing catalog dirt), and
-// a canonicality pre-check that refuses to write through a file yaml.v3
-// would silently reflow on its next touch-and-remarshal.
+// amendments #2-#4) shared by Propose/Authorize/Withdraw/Rebase and Apply —
+// all of which now commit through commitScratchOperations (propose.go):
+// file-level CAS around the load->scratch->copy-back window, and a
+// lint-diff gate that only blocks on NEW error-severity issues, not
+// pre-existing catalog dirt.
+//
+// The third guard that used to live here — the canonicality pre-check that
+// refused to write through a file yaml.v3 would reflow — moved to
+// canonicalize.go and became an auto-heal inside the same scratch
+// transaction instead of a refusal. See that file's header for why.
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,8 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-
-	"gopkg.in/yaml.v3"
 )
 
 // casMaxAttempts bounds the load->scratch->copy-back retry loop (hazard
@@ -157,73 +158,4 @@ type lintIssueKey struct {
 
 func lintIssueKeyOf(iss LintIssue) lintIssueKey {
 	return lintIssueKey{Node: iss.Node, Kind: iss.Kind, Message: iss.Message}
-}
-
-// checkCanonical verifies that every file backing cat is already in the
-// exact byte-for-byte form yaml.v3 would re-marshal it to (marshalYAMLNode's
-// 2-space-indent convention — the same re-serialization applyOperations
-// performs on any touched file) — but ONLY for files that actually contain
-// a block scalar (literal `|` or folded `>` style), the specific hazard
-// docs/plan.md's canonicality fixture exists to catch ("yaml.v3 re-marshal
-// reflows hand-wrapped block scalars"). A file with no block scalars is
-// exempt from the byte-compare even if it differs cosmetically from
-// yaml.v3's own serialization conventions (flow-mapping padding, quote
-// style, key ordering that Go's map iteration doesn't preserve, ...) —
-// those differences are not the hazard this guard exists to prevent, and a
-// literal whole-file byte-compare would false-block on virtually every
-// hand-authored catalog including ones with zero block scalars, defeating
-// "before any catalog write" without actually protecting anything a block
-// scalar's line-wrap width doesn't already cover.
-func checkCanonical(cat *Catalog) []string {
-	files, err := catalogFiles(cat)
-	if err != nil {
-		return []string{fmt.Sprintf("NEEDS_CANONICALIZATION: failed to enumerate catalog files: %v", err)}
-	}
-	var reasons []string
-	for _, f := range files {
-		raw, err := os.ReadFile(f)
-		if err != nil {
-			reasons = append(reasons, fmt.Sprintf("NEEDS_CANONICALIZATION: %s: %v", f, err))
-			continue
-		}
-		var doc yaml.Node
-		if err := yaml.Unmarshal(raw, &doc); err != nil {
-			// Not this guard's concern — LoadCatalog already succeeded, so
-			// a re-parse failure here would be surprising; skip rather than
-			// false-block on an unrelated parse quirk.
-			continue
-		}
-		if !hasBlockScalar(&doc) {
-			continue
-		}
-		out, err := marshalYAMLNode(&doc)
-		if err != nil {
-			reasons = append(reasons, fmt.Sprintf("NEEDS_CANONICALIZATION: %s: re-marshal failed: %v", f, err))
-			continue
-		}
-		if !bytes.Equal(raw, out) {
-			reasons = append(reasons, fmt.Sprintf("NEEDS_CANONICALIZATION: %s: file is not in canonical re-marshal form — yaml.v3 would reflow a hand-wrapped block scalar in this file on next write; canonicalize it out-of-band before proposing/applying a changeset that touches this file", f))
-		}
-	}
-	return reasons
-}
-
-// hasBlockScalar reports whether n (or any descendant) is a literal (`|`)
-// or folded (`>`) style scalar node — the class of YAML formatting whose
-// re-marshal can silently change meaning-bearing line-wrap width (the
-// hazard checkCanonical exists to catch), as opposed to purely cosmetic
-// flow-style/quoting differences elsewhere in a hand-authored file.
-func hasBlockScalar(n *yaml.Node) bool {
-	if n == nil {
-		return false
-	}
-	if n.Kind == yaml.ScalarNode && n.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
-		return true
-	}
-	for _, c := range n.Content {
-		if hasBlockScalar(c) {
-			return true
-		}
-	}
-	return false
 }
