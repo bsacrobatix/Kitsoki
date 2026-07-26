@@ -282,6 +282,9 @@ func capsuleCIRunCmd() *cobra.Command {
 		executors.ProjectRoot = workspacePath
 		executors.PoolStateRoot = project
 		executors.Source = executor.SourceBundlerFunc(func(ctx context.Context, envelope executor.Envelope) (executor.SourceBundle, error) {
+			if sourceRoot != "" {
+				return executor.GitCommitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
+			}
 			return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 		})
 		service := ci.Service{ProjectRoot: workspacePath, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project), Observer: record.FileRunObserver{ProjectRoot: project}}

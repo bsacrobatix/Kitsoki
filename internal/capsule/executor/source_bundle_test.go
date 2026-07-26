@@ -51,6 +51,35 @@ func TestGitBundleRejectsUnsealedWorkspaceBytes(t *testing.T) {
 	}
 }
 
+func TestGitCommitBundleIgnoresCheckoutLocalState(t *testing.T) {
+	root := capsuletest.Open(t, "clean-repo")
+	head := strings.TrimSpace(commandOutput(t, root, "rev-parse", "HEAD"))
+	stateRoot := t.TempDir()
+	if err := os.Symlink(stateRoot, filepath.Join(root, ".artifacts")); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := GitCommitBundle(context.Background(), root, head, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Head != head {
+		t.Fatalf("bundle head = %q, want %q", bundle.Head, head)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "source.bundle")
+	if err := os.WriteFile(path, bundle.Data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(dir, "clone")
+	cmd := exec.Command("git", "clone", "--quiet", path, clone)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone bundle: %v: %s", err, out)
+	}
+	if _, err := os.Lstat(filepath.Join(clone, ".artifacts")); !os.IsNotExist(err) {
+		t.Fatalf("checkout-local state entered sealed bundle: %v", err)
+	}
+}
+
 func TestValidateSourceBundleRejectsTampering(t *testing.T) {
 	bundle := SourceBundle{Schema: SourceBundleSchema, Format: SourceBundleFormat, Head: strings.Repeat("a", 40), Digest: "sha256:bad", Size: 1, Data: []byte("x")}
 	if err := ValidateSourceBundle(bundle, 0); err == nil || !strings.Contains(err.Error(), "digest mismatch") {

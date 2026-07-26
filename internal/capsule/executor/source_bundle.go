@@ -48,6 +48,19 @@ func (f SourceBundlerFunc) Bundle(ctx context.Context, envelope Envelope) (Sourc
 // It rejects dirty workspaces because uncommitted bytes are not represented by
 // Envelope.SourceDigest and therefore could not be verified by the worker.
 func GitBundle(ctx context.Context, workspace, expectedHead string, maxBytes int64) (SourceBundle, error) {
+	return gitBundle(ctx, workspace, expectedHead, maxBytes, true)
+}
+
+// GitCommitBundle builds a bundle from the sealed commit while deliberately
+// ignoring checkout-local state. Exact-source callers use this when the host
+// attaches runtime ledgers or other mutable state beside a read-only release:
+// those bytes are not part of Envelope.SourceDigest and must neither enter nor
+// block the remote source handoff.
+func GitCommitBundle(ctx context.Context, workspace, expectedHead string, maxBytes int64) (SourceBundle, error) {
+	return gitBundle(ctx, workspace, expectedHead, maxBytes, false)
+}
+
+func gitBundle(ctx context.Context, workspace, expectedHead string, maxBytes int64, requireClean bool) (SourceBundle, error) {
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxBundleSize
 	}
@@ -67,12 +80,14 @@ func GitBundle(ctx context.Context, workspace, expectedHead string, maxBytes int
 	if !validGitObjectID(head) || !validGitObjectID(expectedHead) || head != expectedHead {
 		return SourceBundle{}, fmt.Errorf("capsule source: workspace HEAD %q does not match sealed source %q", head, expectedHead)
 	}
-	status, err := gitOutput(ctx, root, "status", "--porcelain=v1", "--untracked-files=normal")
-	if err != nil {
-		return SourceBundle{}, fmt.Errorf("capsule source: inspect workspace: %w", err)
-	}
-	if strings.TrimSpace(status) != "" {
-		return SourceBundle{}, fmt.Errorf("capsule source: workspace has uncommitted or untracked files; commit the exact source before remote execution")
+	if requireClean {
+		status, err := gitOutput(ctx, root, "status", "--porcelain=v1", "--untracked-files=normal")
+		if err != nil {
+			return SourceBundle{}, fmt.Errorf("capsule source: inspect workspace: %w", err)
+		}
+		if strings.TrimSpace(status) != "" {
+			return SourceBundle{}, fmt.Errorf("capsule source: workspace has uncommitted or untracked files; commit the exact source before remote execution")
+		}
 	}
 	tmpDir, err := os.MkdirTemp("", "kitsoki-capsule-source-*")
 	if err != nil {
