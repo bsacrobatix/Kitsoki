@@ -196,6 +196,75 @@ func TestCompileFrameProjectsValidatedAuthorContract(t *testing.T) {
 	}
 }
 
+func TestCompileFrameWithDataProjectsOnlyAllowlistedWorldValues(t *testing.T) {
+	def := &app.AppDef{
+		App: app.AppMeta{ID: "demo", Version: "1.0.0"},
+		Application: &app.ApplicationContract{
+			Schema: app.ApplicationSchemaV1, Name: "Demo", Description: "Show live data",
+			SemanticRef: "demo.application", Shell: app.ApplicationShell{Entry: "home"},
+			Pages: map[string]*app.ApplicationPage{
+				"home": {Name: "Home", Description: "Show live data", SemanticRef: "demo.page.home"},
+			},
+			Data: map[string]*app.ApplicationData{
+				"catalog": {
+					Source: "world.catalog", Sensitivity: "internal", Policy: "include",
+				},
+				"token": {
+					Source: "world.token", Sensitivity: "secret", Policy: "redact",
+				},
+				"fingerprint": {
+					Source: "world.token", Sensitivity: "secret", Policy: "hash",
+				},
+				"omitted": {
+					Source: "world.token", Sensitivity: "secret", Policy: "exclude",
+				},
+			},
+		},
+	}
+	world := map[string]any{
+		"catalog": map[string]any{"nodes": []any{"a", "b"}},
+		"token":   "credential",
+		"ambient": "/private/path",
+	}
+	frame, err := CompileFrameWithData(
+		def, "session-1", 1, "", Workflow{State: "ready"}, world,
+	)
+	if err != nil {
+		t.Fatalf("CompileFrameWithData() error = %v", err)
+	}
+	if len(frame.Data) != 3 {
+		t.Fatalf("data = %#v, want three projected entries", frame.Data)
+	}
+	if got := string(frame.Data["catalog"].Value); got != `{"nodes":["a","b"]}` {
+		t.Fatalf("catalog = %s", got)
+	}
+	if got := string(frame.Data["token"].Value); got != `"[redacted]"` {
+		t.Fatalf("redacted token = %s", got)
+	}
+	if got := string(frame.Data["fingerprint"].Value); !strings.Contains(got, `"sha256:`) {
+		t.Fatalf("fingerprint = %s", got)
+	}
+	if _, ok := frame.Data["omitted"]; ok {
+		t.Fatal("excluded data was projected")
+	}
+	wire, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "ambient") || strings.Contains(string(wire), "/private/path") ||
+		strings.Contains(string(wire), "credential") {
+		t.Fatalf("frame leaked ambient or secret world data: %s", wire)
+	}
+
+	legacy, err := CompileFrame(def, "session-1", 2, "", Workflow{State: "ready"})
+	if err != nil {
+		t.Fatalf("CompileFrame() error = %v", err)
+	}
+	if legacy.Data != nil {
+		t.Fatalf("legacy compile data = %#v, want nil", legacy.Data)
+	}
+}
+
 func TestCompileFramePreservesComposedMemberProvenance(t *testing.T) {
 	def := &app.AppDef{
 		App: app.AppMeta{ID: "parent", Version: "1.0.0"},

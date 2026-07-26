@@ -8,6 +8,7 @@ import type {
   ApplicationAction,
   ApplicationActionEnvelope,
   ApplicationActionDispatcher,
+  ApplicationActionResult,
   ApplicationComponentRegistrySource,
   ApplicationFrame,
   ApplicationNavigationItem,
@@ -63,15 +64,18 @@ function envelope(action: string, input: JSONValue = {}) {
   };
 }
 
-async function dispatchEnvelope(value: ApplicationActionEnvelope): Promise<void> {
+async function dispatchEnvelope(value: ApplicationActionEnvelope): Promise<ApplicationActionResult | void> {
   if (isStale.value || pendingActions.value.has(value.action)) return;
   dispatchError.value = "";
   pendingActions.value = new Set(pendingActions.value).add(value.action);
   try {
     const result = await props.dispatch(value);
     if (result && !result.ok) {
-      dispatchError.value = result.error || `Action ${value.action} failed.`;
+      dispatchError.value = typeof result.error === "string"
+        ? result.error
+        : result.error?.message || `Action ${value.action} failed.`;
     }
+    return result;
   } catch (error) {
     dispatchError.value = error instanceof Error ? error.message : String(error);
   } finally {

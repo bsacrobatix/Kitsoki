@@ -29,10 +29,11 @@ func projectApplicationTUI(
 	revision uint64,
 	state app.StatePath,
 	allowed []string,
+	world map[string]any,
 ) (*applicationnative.TUIProjection, error) {
-	frame, err := appplatform.CompileFrame(def, string(sessionID), revision, "", appplatform.Workflow{
+	frame, err := appplatform.CompileFrameWithData(def, string(sessionID), revision, "", appplatform.Workflow{
 		State: string(state), AllowedIntents: append([]string(nil), allowed...),
-	})
+	}, world)
 	if err != nil {
 		return nil, err
 	}

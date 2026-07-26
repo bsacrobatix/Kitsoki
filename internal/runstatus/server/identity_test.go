@@ -24,6 +24,7 @@ import (
 type captureDriver struct {
 	lastSlots map[string]any
 	outcome   *orchestrator.TurnOutcome
+	world     map[string]any
 }
 
 func (d *captureDriver) Turn(context.Context, string) (*orchestrator.TurnOutcome, error) {
@@ -47,6 +48,9 @@ func (d *captureDriver) View(context.Context) (*orchestrator.TurnOutcome, error)
 func (d *captureDriver) IntentInfo(string, string) (intentInfo, bool)     { return intentInfo{}, false }
 func (d *captureDriver) DefaultIntent(string) string                      { return "" }
 func (d *captureDriver) PatchWorld(context.Context, map[string]any) error { return nil }
+func (d *captureDriver) CurrentWorld(context.Context) (map[string]any, error) {
+	return d.world, nil
+}
 func (d *captureDriver) ListNotifications(context.Context) ([]jobs.Notification, error) {
 	return nil, nil
 }

@@ -13,11 +13,19 @@ app:
   id: review
   version: 1.0.0
 
+world:
+  pending_changes: {type: list, default: []}
+
 application:
   schema: application/v1
   name: Review
   description: Inspect and resolve changes that need operator review.
   semantic_ref: review.application
+  data:
+    pending_changes:
+      source: world.pending_changes
+      sensitivity: internal
+      policy: include
   shell:
     presentation: default
     entry: inbox
@@ -81,6 +89,37 @@ name, and a purpose-oriented description. Refs are identity: changing visible
 copy or moving a card must not change its ref. The loader rejects missing or
 duplicate refs, dangling page/component/action targets, unsupported fallback
 kinds, and actions that do not resolve to an intent or exported handler.
+
+## Live application data
+
+`application.data` is the only story-world path into
+`application-frame/v1`. Each entry names exactly one declared `world` key and
+assigns a sensitivity and exposure policy. Names must start with a lowercase
+letter and contain only lowercase letters, digits, underscores, or hyphens.
+Sources use the finite `world.<key>` form; nested paths, environment variables,
+component props, credentials, and host paths are not valid sources.
+
+`include` preserves JSON values classified as `public` or `internal`.
+`redact` emits the literal `[redacted]`, `hash` emits a canonical SHA-256
+fingerprint, and `exclude` emits no frame entry. `sensitive` and `secret`
+values cannot use `include`. A live runstatus frame reads the current session
+world through `WorldReader` for every refresh and projects only these entries:
+
+```json
+{
+  "data": {
+    "pending_changes": {
+      "value": [{"id": "chg-42", "title": "Review navigation"}],
+      "sensitivity": "internal",
+      "policy": "include"
+    }
+  }
+}
+```
+
+Custom components read this finite map from `frame.data`; static card `props`
+remain static author input. Callers that compile a definition without a live
+world remain compatible and receive no `data` field.
 
 ## Exported handlers
 
@@ -224,6 +263,9 @@ It renders frame navigation, regions, cards, built-in body elements, and
 actions. Custom components are supplied through an injected component registry.
 Each component receives its serializable props plus `frame`, `body`, and the
 injected `dispatch` function. It does not receive story internals.
+The dispatcher resolves to the canonical application outcome, including
+`outcome`, `output`, `receipt`, and the refreshed `frame`, so a component can
+consume a typed result without calling a transport directly.
 
 When a custom component is unavailable, the renderer uses the component's
 declared finite fallback. If neither implementation nor fallback exists, it

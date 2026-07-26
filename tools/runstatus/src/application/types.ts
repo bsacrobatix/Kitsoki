@@ -140,6 +140,12 @@ export interface ApplicationCapabilities {
   readonly actions?: readonly string[];
 }
 
+export interface ApplicationFrameData {
+  readonly value: JSONValue;
+  readonly sensitivity: "public" | "internal" | "sensitive" | "secret";
+  readonly policy: "include" | "redact" | "hash";
+}
+
 /** Exact TypeScript projection of internal/application.Frame's JSON contract. */
 export interface ApplicationFrame {
   readonly schema: typeof APPLICATION_FRAME_SCHEMA;
@@ -150,6 +156,7 @@ export interface ApplicationFrame {
   readonly page_semantic: ApplicationSemanticNode;
   readonly semantic: ApplicationSemanticNode;
   readonly workflow: ApplicationWorkflow;
+  readonly data?: Readonly<Record<string, ApplicationFrameData>>;
   readonly navigation?: readonly ApplicationNavigationItem[];
   readonly pages?: readonly ApplicationPageDescriptor[];
   readonly components?: readonly ApplicationComponentDescriptor[];
@@ -172,7 +179,56 @@ export interface ApplicationActionEnvelope {
 
 export interface ApplicationActionResult {
   readonly ok: boolean;
-  readonly error?: string;
+  readonly schema?: "application-outcome/v1";
+  readonly handler?: string;
+  readonly outcome?: string;
+  readonly output?: JSONValue;
+  readonly receipt?: ApplicationReceipt;
+  readonly frame?: ApplicationFrame;
+  readonly children?: readonly ApplicationChildRun[];
+  readonly join?: ApplicationJoinState;
+  readonly error?: string | ApplicationOutcomeError;
+  readonly selected_implementor?: string;
+}
+
+export interface ApplicationChildRun {
+  readonly id: string;
+  readonly status: string;
+  readonly outcome?: string;
+}
+
+export interface ApplicationJoinState {
+  readonly status: string;
+  readonly pending?: readonly string[];
+  readonly completed?: readonly string[];
+}
+
+export interface ApplicationOutcomeError {
+  readonly code: string;
+  readonly message: string;
+}
+
+export interface ApplicationReceipt {
+  readonly schema: "application-receipt/v1";
+  readonly id: string;
+  readonly handler_id: string;
+  readonly semantic_ref: string;
+  readonly session_id?: string;
+  readonly actor?: string;
+  readonly effect: string;
+  readonly routing: JSONValue;
+  readonly budget: JSONValue;
+  readonly input_digest: string;
+  readonly output_digest: string;
+  readonly transport: string;
+  readonly event_id?: string;
+  readonly event_mode?: string;
+  readonly frame_revision?: number;
+  readonly outcome: string;
+  readonly idempotency_key?: string;
+  readonly replayed?: boolean;
+  readonly replay_of?: string;
+  readonly selected_implementor?: string;
 }
 
 export type ApplicationActionDispatcher = (

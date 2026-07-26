@@ -24,6 +24,7 @@ type ApplicationContract struct {
 	Name        string                           `yaml:"name" json:"name"`
 	Description string                           `yaml:"description" json:"description"`
 	SemanticRef string                           `yaml:"semantic_ref" json:"semantic_ref"`
+	Data        map[string]*ApplicationData      `yaml:"data,omitempty" json:"data,omitempty"`
 	Feedback    *ApplicationFeedbackPolicy       `yaml:"feedback,omitempty" json:"feedback,omitempty"`
 	Shell       ApplicationShell                 `yaml:"shell,omitempty" json:"shell,omitempty"`
 	Navigation  []ApplicationNavigation          `yaml:"navigation,omitempty" json:"navigation,omitempty"`
@@ -35,6 +36,14 @@ type ApplicationContract struct {
 	Schemas     map[string]string                `yaml:"schemas,omitempty" json:"schemas,omitempty"`
 	Tokens      map[string]string                `yaml:"tokens,omitempty" json:"tokens,omitempty"`
 	Generated   bool                             `yaml:"-" json:"generated,omitempty"`
+}
+
+// ApplicationData declares one finite world value that may cross the
+// story/runtime boundary into application-frame/v1.
+type ApplicationData struct {
+	Source      string `yaml:"source" json:"source"`
+	Sensitivity string `yaml:"sensitivity" json:"sensitivity"`
+	Policy      string `yaml:"policy" json:"policy"`
 }
 
 // ApplicationPackageUse selects named members from one package pinned in the
@@ -532,6 +541,35 @@ func validateApplicationContract(def *AppDef, file string) []error {
 				}
 			}
 		}
+		for name, data := range contract.Data {
+			path := "application.data." + name
+			if !validApplicationDataName(name) {
+				addf(path, "name %q must start with a lowercase letter and contain only lowercase letters, digits, underscores, or hyphens", name)
+			}
+			if data == nil {
+				addf(path, "empty definition")
+				continue
+			}
+			worldKey, ok := strings.CutPrefix(data.Source, "world.")
+			if !ok || worldKey == "" || strings.Contains(worldKey, ".") {
+				addf(path+".source", "%q must name one declared world key as world.<key>", data.Source)
+			} else if _, declared := def.World[worldKey]; !declared {
+				addf(path+".source", "%q names undeclared world key %q", data.Source, worldKey)
+			}
+			switch data.Sensitivity {
+			case "public", "internal", "sensitive", "secret":
+			default:
+				addf(path+".sensitivity", "%q is not one of public|internal|sensitive|secret", data.Sensitivity)
+			}
+			switch data.Policy {
+			case "include", "exclude", "redact", "hash":
+			default:
+				addf(path+".policy", "%q is not one of include|exclude|redact|hash", data.Policy)
+			}
+			if data.Policy == "include" && (data.Sensitivity == "sensitive" || data.Sensitivity == "secret") {
+				addf(path, "sensitive or secret data may not use policy include")
+			}
+		}
 	}
 
 	for _, handlerID := range sortedKeys(handlers) {
@@ -817,6 +855,19 @@ func validSemanticRef(ref string) bool {
 	return true
 }
 
+func validApplicationDataName(name string) bool {
+	if name == "" || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for _, r := range name[1:] {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func semanticOwnerAllowed(ref string, owners map[string]struct{}) bool {
 	for owner := range owners {
 		if owner != "" && (ref == owner || strings.HasPrefix(ref, owner+".")) {
@@ -924,6 +975,16 @@ func mergeApplicationContract(dst, src *ApplicationContract, addErr func(string)
 
 	dst.Navigation = append(dst.Navigation, src.Navigation...)
 	dst.Packages = append(dst.Packages, src.Packages...)
+	for name, data := range src.Data {
+		if _, exists := dst.Data[name]; exists {
+			addErr(fmt.Sprintf("include: application data %q is already declared", name))
+			continue
+		}
+		if dst.Data == nil {
+			dst.Data = map[string]*ApplicationData{}
+		}
+		dst.Data[name] = data
+	}
 	for name, page := range src.Pages {
 		if _, exists := dst.Pages[name]; exists {
 			addErr(fmt.Sprintf("include: application page %q is already declared", name))

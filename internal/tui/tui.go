@@ -924,6 +924,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	if orch.AppDef().Application != nil {
 		projected, err := projectApplicationTUI(
 			orch.AppDef(), sid, m.applicationRevision, m.currentState, nil,
+			orch.CurrentWorld(sid).Vars,
 		)
 		if err != nil {
 			slog.Warn("tui.application.project_initial", "err", err)
@@ -2970,6 +2971,7 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 		if m.orch.AppDef().Application != nil {
 			projected, err := projectApplicationTUI(
 				m.orch.AppDef(), m.sid, uint64(out.TurnNumber), out.NewState, out.AllowedIntents,
+				m.orch.CurrentWorld(m.sid).Vars,
 			)
 			if err != nil {
 				slog.Warn("tui.application.project_turn", "err", err)

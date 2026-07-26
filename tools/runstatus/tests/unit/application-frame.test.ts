@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { defineComponent, h } from "vue";
+import { defineComponent, h, ref } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import {
   ApplicationFrameRenderer,
@@ -165,33 +165,81 @@ describe("application-frame/v1 default renderer", () => {
   });
 
   it("passes the dispatcher and frame context to registered components", async () => {
-    const dispatch = vi.fn<ApplicationActionDispatcher>().mockResolvedValue({ ok: true });
+    const refreshedFrame = frame({
+      revision: 13,
+      data: {
+        catalog: { value: "refreshed-catalog", sensitivity: "internal", policy: "include" },
+      },
+    });
+    const dispatch = vi.fn<ApplicationActionDispatcher>().mockResolvedValue({
+      ok: true,
+      schema: "application-outcome/v1",
+      handler: "demo.component.refresh",
+      outcome: "refreshed",
+      output: { count: 3 },
+      receipt: {
+        schema: "application-receipt/v1",
+        id: "ar_refresh",
+        handler_id: "demo.component.refresh",
+        semantic_ref: "demo.action.component-refresh",
+        effect: "read",
+        routing: { requested: "exact", resolved: "exact" },
+        budget: { allowed: true },
+        input_digest: "sha256:input",
+        output_digest: "sha256:output",
+        transport: "web",
+        outcome: "refreshed",
+      },
+      frame: refreshedFrame,
+    });
     const ChangeList = defineComponent({
       props: {
         frame: { type: Object, required: true },
         dispatch: { type: Function, required: true },
       },
       setup(props) {
-        return () => h("button", {
-          "data-testid": "component-action",
-          onClick: () => props.dispatch({
-            action: "demo.component.refresh",
-            input: { scope: "all" },
-            session_id: (props.frame as ApplicationFrame).session_id,
-            frame_revision: (props.frame as ApplicationFrame).revision,
-          }),
-        }, "Refresh");
+        const outcome = ref("");
+        return () => h("div", [
+          h("output", { "data-testid": "component-data" },
+            String((props.frame as ApplicationFrame).data?.catalog.value)),
+          h("button", {
+            "data-testid": "component-action",
+            onClick: async () => {
+              const result = await props.dispatch({
+                action: "demo.component.refresh",
+                input: { scope: "all" },
+                session_id: (props.frame as ApplicationFrame).session_id,
+                frame_revision: (props.frame as ApplicationFrame).revision,
+              });
+              outcome.value = [
+                result?.outcome,
+                String((result?.output as { count?: number } | undefined)?.count ?? ""),
+                result?.receipt?.id,
+                String(result?.frame?.revision ?? ""),
+              ].join(":");
+            },
+          }, "Refresh"),
+          h("output", { "data-testid": "component-outcome" }, outcome.value),
+        ]);
       },
     });
     const wrapper = mount(ApplicationFrameRenderer, {
       props: {
-        frame: frame(),
+        frame: frame({
+          data: {
+            catalog: { value: "live-catalog", sensitivity: "internal", policy: "include" },
+          },
+        }),
         dispatch,
         components: { "demo.change-list": ChangeList },
       },
     });
 
     await wrapper.get("[data-testid='component-action']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='component-data']").text()).toBe("live-catalog");
+    expect(wrapper.get("[data-testid='component-outcome']").text())
+      .toBe("refreshed:3:ar_refresh:13");
     expect(dispatch).toHaveBeenCalledWith({
       action: "demo.component.refresh",
       input: { scope: "all" },

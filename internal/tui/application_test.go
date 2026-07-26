@@ -32,9 +32,17 @@ func (applicationHarness) Close() error { return nil }
 func TestProjectApplicationTUIRetainsSemanticActionRevision(t *testing.T) {
 	def := &app.AppDef{
 		App: app.AppMeta{ID: "demo"},
+		World: map[string]app.VarDef{
+			"catalog": {Type: "object", Default: map[string]any{}},
+		},
 		Application: &app.ApplicationContract{
 			Schema: app.ApplicationSchemaV1, Name: "Demo", Description: "Demo application.",
 			SemanticRef: "demo.application", Shell: app.ApplicationShell{Entry: "home"},
+			Data: map[string]*app.ApplicationData{
+				"catalog": {
+					Source: "world.catalog", Sensitivity: "internal", Policy: "include",
+				},
+			},
 			Pages: map[string]*app.ApplicationPage{
 				"home": {
 					Name: "Home", Description: "Home page.", SemanticRef: "demo.page.home",
@@ -59,7 +67,13 @@ func TestProjectApplicationTUIRetainsSemanticActionRevision(t *testing.T) {
 			Surfaces: map[string]*app.ApplicationSurface{"tui": {Projection: "cards"}},
 		},
 	}
-	projection, err := projectApplicationTUI(def, "session-1", 9, "ready", []string{"open"})
+	projection, err := projectApplicationTUI(
+		def, "session-1", 9, "ready", []string{"open"},
+		map[string]any{
+			"catalog": map[string]any{"nodes": []any{"one"}},
+			"ambient": "/private/path",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,6 +82,16 @@ func TestProjectApplicationTUIRetainsSemanticActionRevision(t *testing.T) {
 	}
 	if len(projection.Frame.Actions) != 1 {
 		t.Fatalf("actions = %#v", projection.Frame.Actions)
+	}
+	if got := string(projection.Canonical.Data["catalog"].Value); got != `{"nodes":["one"]}` {
+		t.Fatalf("TUI frame data = %s", got)
+	}
+	wire, err := json.Marshal(projection.Canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "ambient") || strings.Contains(string(wire), "/private/path") {
+		t.Fatalf("TUI frame leaked ambient world data: %s", wire)
 	}
 	action := projection.Frame.Actions[0]
 	if action.SemanticRef != "demo.action.open" ||

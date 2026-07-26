@@ -1,6 +1,7 @@
 package application
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -36,6 +37,27 @@ func (f Frame) Validate() error {
 	}
 	if strings.TrimSpace(f.Page) == "" {
 		return fmt.Errorf("application: page is required")
+	}
+	for name, data := range f.Data {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("application: frame data name is required")
+		}
+		switch data.Sensitivity {
+		case "public", "internal", "sensitive", "secret":
+		default:
+			return fmt.Errorf("application: frame data %q has invalid sensitivity %q", name, data.Sensitivity)
+		}
+		switch data.Policy {
+		case "include", "redact", "hash":
+		default:
+			return fmt.Errorf("application: frame data %q has invalid policy %q", name, data.Policy)
+		}
+		if data.Policy == "include" && (data.Sensitivity == "sensitive" || data.Sensitivity == "secret") {
+			return fmt.Errorf("application: frame data %q cannot include %s value", name, data.Sensitivity)
+		}
+		if len(data.Value) == 0 || !json.Valid(data.Value) {
+			return fmt.Errorf("application: frame data %q is not valid JSON", name)
+		}
 	}
 
 	entries := make([]semanticEntry, 0)

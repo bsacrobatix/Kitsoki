@@ -155,6 +155,13 @@ type Capabilities struct {
 	Actions      []string `json:"actions,omitempty"`
 }
 
+// FrameData is one privacy-evaluated value selected by application.data.
+type FrameData struct {
+	Value       json.RawMessage `json:"value"`
+	Sensitivity string          `json:"sensitivity"`
+	Policy      string          `json:"policy"`
+}
+
 type Frame struct {
 	Schema        string                `json:"schema"`
 	ApplicationID string                `json:"application_id"`
@@ -164,6 +171,7 @@ type Frame struct {
 	PageSemantic  SemanticNode          `json:"page_semantic"`
 	Semantic      SemanticNode          `json:"semantic"`
 	Workflow      Workflow              `json:"workflow"`
+	Data          map[string]FrameData  `json:"data,omitempty"`
 	Navigation    []NavigationItem      `json:"navigation,omitempty"`
 	Pages         []PageDescriptor      `json:"pages,omitempty"`
 	Components    []ComponentDescriptor `json:"components,omitempty"`

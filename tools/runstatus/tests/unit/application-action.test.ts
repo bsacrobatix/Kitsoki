@@ -3,8 +3,28 @@ import { dispatchWebApplicationAction } from "../../src/application/index.js";
 
 describe("application web action adapter", () => {
   it("uses the server-bound web method without a client transport", async () => {
-    const post = vi.fn().mockResolvedValue({ frame: { session_id: "session-1" } });
-    await dispatchWebApplicationAction({ post }, {
+    const canonical = {
+      schema: "application-outcome/v1" as const,
+      handler: "demo.open",
+      outcome: "selected",
+      output: { item_id: "item-1" },
+      receipt: {
+        schema: "application-receipt/v1" as const,
+        id: "ar_1",
+        handler_id: "demo.open",
+        semantic_ref: "demo.action.open",
+        effect: "read",
+        routing: { requested: "exact", resolved: "exact" },
+        budget: { allowed: true },
+        input_digest: "sha256:input",
+        output_digest: "sha256:output",
+        transport: "web",
+        outcome: "selected",
+      },
+      frame: { session_id: "session-1" },
+    };
+    const post = vi.fn().mockResolvedValue(canonical);
+    const outcome = await dispatchWebApplicationAction({ post }, {
       action: "demo.open",
       input: { item_id: "item-1" },
       session_id: "session-1",
@@ -18,5 +38,6 @@ describe("application web action adapter", () => {
       frame_revision: 8,
       page: "home",
     });
+    expect(outcome).toEqual(canonical);
   });
 });

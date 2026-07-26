@@ -9,9 +9,17 @@ surface's presentation. Its canonical boundary is
 The loader validates the author-facing `application/v1`, exported handlers, and
 event bindings in `internal/app`. `internal/application.CompileFrame` then
 projects one current page and session revision into a deterministic frame. The
-frame carries application and page semantics, workflow state, navigation,
+frame carries application and page semantics, workflow state, explicitly
+allowlisted application data, navigation,
 page/component/handler descriptors, actions, regions, errors, and declared
 capabilities. It contains only serializable values.
+
+The runstatus frame provider reads a session world only through the optional
+`WorldReader` interface. `CompileFrameWithData` then evaluates the story's
+`application.data` declarations and copies no ambient world map. Public and
+internal values may be included; sensitive and secret values must be excluded,
+redacted, or hashed. Fixed-entry and legacy callers continue to use
+`CompileFrame` and receive no frame data.
 
 `internal/application.Service` coordinates three injected dependencies:
 
@@ -104,10 +112,18 @@ dispatcher. If no component exists, the registry fallback is tried, followed by
 the frame component descriptor's finite fallback. Unknown elements without a
 fallback produce a visible error.
 
+The dispatcher returns the canonical outcome envelope to the caller while the
+surface still applies its refreshed frame and the renderer still owns local
+pending/error state. Components can therefore consume declared outcomes,
+outputs, receipts, and refreshed frames without bypassing the application
+handler boundary.
+
 The TypeScript wire types in `tools/runstatus/src/application/types.ts` mirror
 the Go JSON field names. In particular, provenance lives under
 `semantic.source`, component data remains JSON under `props`, element content
 remains JSON under `value`, and action envelopes retain `frame_revision`.
+Allowlisted world values live only under `frame.data.<name>.value` with their
+declared `sensitivity` and applied `policy`.
 
 `ApplicationWizard.vue` is the default multi-page shell. It projects progress,
 navigation, forms, field validation, frame errors, workflow/budget state, and

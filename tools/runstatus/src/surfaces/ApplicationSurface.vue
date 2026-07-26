@@ -183,7 +183,7 @@ const dispatch: ApplicationActionDispatcher = async (envelope) => {
       frame.value = outcome.frame;
       currentPage.value = outcome.frame.page;
     }
-    return { ok: true };
+    return { ...outcome, ok: !outcome.error };
   } catch (cause) {
     return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
   }

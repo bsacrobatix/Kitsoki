@@ -1,6 +1,7 @@
 package application
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,6 +16,12 @@ import (
 // presentation-free runtime frame. It is deliberately pure: schema references
 // remain references, while only inline static props are encoded as JSON.
 func CompileFrame(def *app.AppDef, sessionID string, revision uint64, pageID string, workflow Workflow) (Frame, error) {
+	return CompileFrameWithData(def, sessionID, revision, pageID, workflow, nil)
+}
+
+// CompileFrameWithData projects only world keys explicitly allowlisted by
+// application.data. The input is never copied wholesale into the frame.
+func CompileFrameWithData(def *app.AppDef, sessionID string, revision uint64, pageID string, workflow Workflow, world map[string]any) (Frame, error) {
 	if def == nil {
 		return Frame{}, fmt.Errorf("application: application contract is required")
 	}
@@ -55,6 +62,11 @@ func CompileFrame(def *app.AppDef, sessionID string, revision uint64, pageID str
 		),
 		Capabilities: Capabilities{Presentation: []string{"typed-elements"}},
 	}
+	data, err := compileFrameData(contract.Data, world)
+	if err != nil {
+		return Frame{}, err
+	}
+	frame.Data = data
 
 	for _, nav := range contract.Navigation {
 		node := semanticFromApplicationMember(
@@ -211,6 +223,55 @@ func CompileFrame(def *app.AppDef, sessionID string, revision uint64, pageID str
 		return Frame{}, fmt.Errorf("application: compile frame: %w", err)
 	}
 	return frame, nil
+}
+
+func compileFrameData(declarations map[string]*app.ApplicationData, world map[string]any) (map[string]FrameData, error) {
+	if len(declarations) == 0 || world == nil {
+		return nil, nil
+	}
+	data := make(map[string]FrameData)
+	for _, name := range sortedMapKeys(declarations) {
+		declaration := declarations[name]
+		if declaration == nil || declaration.Policy == "exclude" {
+			continue
+		}
+		key, ok := strings.CutPrefix(declaration.Source, "world.")
+		if !ok || key == "" || strings.Contains(key, ".") {
+			return nil, fmt.Errorf("application: data %q source %q must be world.<key>", name, declaration.Source)
+		}
+		if declaration.Policy == "include" &&
+			(declaration.Sensitivity == "sensitive" || declaration.Sensitivity == "secret") {
+			return nil, fmt.Errorf(
+				"application: data %q cannot include %s value",
+				name, declaration.Sensitivity,
+			)
+		}
+		value, ok := world[key]
+		if !ok {
+			continue
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("application: encode data %q from %q: %w", name, declaration.Source, err)
+		}
+		switch declaration.Policy {
+		case "include":
+		case "redact":
+			raw = json.RawMessage(`"[redacted]"`)
+		case "hash":
+			sum := sha256.Sum256(raw)
+			raw, _ = json.Marshal(fmt.Sprintf("sha256:%x", sum))
+		default:
+			return nil, fmt.Errorf("application: data %q has invalid policy %q", name, declaration.Policy)
+		}
+		data[name] = FrameData{
+			Value: raw, Sensitivity: declaration.Sensitivity, Policy: declaration.Policy,
+		}
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return data, nil
 }
 
 func compileAction(def *app.AppDef, id string, decl *app.ApplicationAction) (Action, error) {

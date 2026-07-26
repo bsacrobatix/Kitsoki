@@ -96,8 +96,15 @@ func (p sessionApplicationFrameProvider) CurrentFrame(ctx context.Context, sessi
 		}
 		workflow.AllowedIntents = append([]string(nil), view.AllowedIntents...)
 	}
-	return appplatform.CompileFrame(
-		entry.Source.AppDef(), sessionID, uint64(snapshot.Session.Turn), p.page, workflow,
+	var world map[string]any
+	if worldReader, ok := entry.Driver.(WorldReader); ok {
+		world, err = worldReader.CurrentWorld(ctx)
+		if err != nil {
+			return appplatform.Frame{}, fmt.Errorf("application: read frame data world: %w", err)
+		}
+	}
+	return appplatform.CompileFrameWithData(
+		entry.Source.AppDef(), sessionID, uint64(snapshot.Session.Turn), p.page, workflow, world,
 	)
 }
 

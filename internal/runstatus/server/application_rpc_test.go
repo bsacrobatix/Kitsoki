@@ -94,6 +94,8 @@ func applicationRPCFixture(t *testing.T, opts ...Option) (*httptest.Server, *cap
 	def, err := app.LoadBytes([]byte(`
 app: {id: demo, version: 1.0.0}
 root: ready
+world:
+  catalog: {type: object, default: {}}
 intents:
   open:
     title: Open
@@ -108,6 +110,11 @@ application:
   name: Demo
   description: Exercise the shared application RPC boundary.
   semantic_ref: demo.application
+  data:
+    catalog:
+      source: world.catalog
+      sensitivity: internal
+      policy: include
   shell: {entry: home}
   navigation:
     - id: home
@@ -258,7 +265,10 @@ outputs:
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	driver := &captureDriver{}
+	driver := &captureDriver{world: map[string]any{
+		"catalog": map[string]any{"revision": 1},
+		"ambient": "/private/path",
+	}}
 	source := applicationTestSource{
 		def: def,
 		header: runstatus.SessionHeader{
@@ -312,6 +322,23 @@ func TestApplicationRPCFrameDiscoverInspectAndAction(t *testing.T) {
 	}
 	if frame.Schema != appplatform.FrameSchema || frame.Revision != 12 || frame.Page != "home" {
 		t.Fatalf("frame = %#v", frame)
+	}
+	if got := string(frame.Data["catalog"].Value); got != `{"revision":1}` {
+		t.Fatalf("frame catalog data = %s", got)
+	}
+	driver.world["catalog"] = map[string]any{"revision": 2}
+	if rpcErr := applicationRPCCall(t, server, "runstatus.application.frame", params, &frame); rpcErr != nil {
+		t.Fatal(rpcErr)
+	}
+	if got := string(frame.Data["catalog"].Value); got != `{"revision":2}` {
+		t.Fatalf("refreshed frame catalog data = %s", got)
+	}
+	wire, err := json.Marshal(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "ambient") || strings.Contains(string(wire), "/private/path") {
+		t.Fatalf("frame leaked ambient world data: %s", wire)
 	}
 
 	var handlers []appplatform.HandlerDefinition

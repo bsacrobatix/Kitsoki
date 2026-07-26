@@ -11,6 +11,8 @@ app:
   id: pog
   version: 1.0.0
 root: ready
+world:
+  change_summary: {type: object, default: {}}
 intents:
   open_change:
     title: Open change
@@ -25,6 +27,11 @@ application:
   name: POG
   description: Shape and deliver product changes.
   semantic_ref: pog.application
+  data:
+    change_summary:
+      source: world.change_summary
+      sensitivity: public
+      policy: include
   feedback:
     context:
       workflow_state:
@@ -147,6 +154,52 @@ func TestLoadBytesApplicationContract(t *testing.T) {
 	}
 	if !strings.Contains(string(handlerWire), `"routing_mode"`) {
 		t.Errorf("handler JSON missing routing_mode: %s", handlerWire)
+	}
+}
+
+func TestApplicationDataValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		replace string
+		with    string
+		want    string
+	}{
+		{
+			name:    "name",
+			replace: "    change_summary:\n",
+			with:    "    Change.Summary:\n",
+			want:    "must start with a lowercase letter",
+		},
+		{
+			name:    "source",
+			replace: "source: world.change_summary",
+			with:    "source: world.missing",
+			want:    `names undeclared world key "missing"`,
+		},
+		{
+			name:    "ambient source",
+			replace: "source: world.change_summary",
+			with:    "source: env.HOME",
+			want:    "must name one declared world key",
+		},
+		{
+			name:    "secret include",
+			replace: "source: world.change_summary\n      sensitivity: public",
+			with:    "source: world.change_summary\n      sensitivity: secret",
+			want:    "sensitive or secret data may not use policy include",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := strings.Replace(validApplicationStory, tt.replace, tt.with, 1)
+			if input == validApplicationStory {
+				t.Fatalf("test replacement %q not found", tt.replace)
+			}
+			_, err := LoadBytes([]byte(input))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+		})
 	}
 }
 
