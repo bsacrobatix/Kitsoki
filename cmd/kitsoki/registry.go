@@ -787,6 +787,29 @@ func (r *SessionRegistry) NewSessionSeeded(ctx context.Context, storyPath string
 	return r.newSession(ctx, storyPath, initialWorld)
 }
 
+// NewRegisteredApplicationSession implements
+// [server.RegisteredApplicationProvider]. Application IDs are resolved
+// exactly and uniquely against the discovered story catalog before the
+// internal path is used to create a live session.
+func (r *SessionRegistry) NewRegisteredApplicationSession(ctx context.Context, applicationID string) (string, error) {
+	r.mu.Lock()
+	var matches []string
+	for _, story := range r.stories {
+		if story.Def != nil && story.Def.App.ID == applicationID {
+			matches = append(matches, story.Path)
+		}
+	}
+	r.mu.Unlock()
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("registered application %q not found", applicationID)
+	case 1:
+		return r.newSession(ctx, matches[0], nil)
+	default:
+		return "", fmt.Errorf("registered application %q is ambiguous (%d exact matches)", applicationID, len(matches))
+	}
+}
+
 func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error) {
 	return r.newSessionWithOrigin(ctx, storyPath, initialWorld, artifactjob.Origin{})
 }
@@ -1979,12 +2002,13 @@ func (r *SessionRegistry) ensureSelfMetaLocked() error {
 
 // Compile-time assertions that SessionRegistry satisfies the provider seams.
 var (
-	_ server.SessionProvider        = (*SessionRegistry)(nil)
-	_ server.MetaSelfProvider       = (*SessionRegistry)(nil)
-	_ server.EditorProvider         = (*SessionRegistry)(nil)
-	_ server.SeededSessionProvider  = (*SessionRegistry)(nil)
-	_ server.ExternalAttachProvider = (*SessionRegistry)(nil)
-	_ server.CurrentSessionProvider = (*SessionRegistry)(nil)
+	_ server.SessionProvider               = (*SessionRegistry)(nil)
+	_ server.MetaSelfProvider              = (*SessionRegistry)(nil)
+	_ server.EditorProvider                = (*SessionRegistry)(nil)
+	_ server.SeededSessionProvider         = (*SessionRegistry)(nil)
+	_ server.RegisteredApplicationProvider = (*SessionRegistry)(nil)
+	_ server.ExternalAttachProvider        = (*SessionRegistry)(nil)
+	_ server.CurrentSessionProvider        = (*SessionRegistry)(nil)
 )
 
 // seedFlowInitialState honors a flow fixture's initial_state / initial_world on

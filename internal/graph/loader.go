@@ -220,8 +220,17 @@ type fileMaterializeCheck struct {
 	Capabilities map[string]any `yaml:"capabilities"`
 }
 
+type fileMaterializePhase struct {
+	ID              string   `yaml:"id"`
+	Handler         string   `yaml:"handler"`
+	Action          string   `yaml:"action"`
+	ArtifactOutputs []string `yaml:"artifact_outputs"`
+}
+
 type fileMaterializeDecl struct {
 	Story                string                 `yaml:"story"`
+	ApplicationID        string                 `yaml:"application_id"`
+	Phases               []fileMaterializePhase `yaml:"phases"`
 	ContextEdges         []string               `yaml:"context_edges"`
 	IncomingContextEdges []string               `yaml:"incoming_context_edges"`
 	Params               []fileMaterializeParam `yaml:"params"`
@@ -257,8 +266,15 @@ func (ft fileTypeDef) toTypeDef() (TypeDef, string, error) {
 	}
 	if ft.Materialize != nil {
 		md := &MaterializeDecl{
-			Story: ft.Materialize.Story,
-			Gates: ft.Materialize.Gates,
+			Story:         ft.Materialize.Story,
+			ApplicationID: ft.Materialize.ApplicationID,
+			Gates:         ft.Materialize.Gates,
+		}
+		for _, phase := range ft.Materialize.Phases {
+			md.Phases = append(md.Phases, MaterializePhaseDecl{
+				ID: phase.ID, Handler: phase.Handler, Action: phase.Action,
+				ArtifactOutputs: append([]string(nil), phase.ArtifactOutputs...),
+			})
 		}
 		for _, e := range ft.Materialize.ContextEdges {
 			md.ContextEdges = append(md.ContextEdges, EdgeField(e))

@@ -15,6 +15,7 @@ package server
 //	  data: {"type":"gate","gate_id":"…","passed":true}
 //	  data: {"type":"stage","stage_id":"…","status":"in-progress"|"complete"|"failed"}
 //	  data: {"type":"artifact","kind":"…","title":"…","path":"…"}
+//	  data: {"type":"artifact","kind":"…","title":"…","handle":"…"}
 //	  data: {"type":"status","status":"in-progress"|"awaiting-input"|"complete"|"failed"|"cancelled"}
 //	  data: {"type":"error","message":"…"}
 //	  data: {"type":"done"}
@@ -37,7 +38,7 @@ package server
 // before entering the live loop. Subscribe-first means nothing falls in the
 // gap; the price is that a queued live event may re-report state older than
 // the snapshot, so emits are monotonic per stage (a stage never regresses
-// from complete back to in-progress) and artifact frames dedup by path.
+// from complete back to in-progress) and artifact frames dedup by path/handle.
 // This closes the stuck-pill gap the first cut deferred to the
 // graph.materialize.status poll fallback: a client whose EventSource
 // connected mid-run used to keep whatever pills it had missed at "waiting"
@@ -66,9 +67,11 @@ type materializeStreamFrame struct {
 	StageID string `json:"stage_id,omitempty"`
 
 	// artifact
-	Kind  string `json:"kind,omitempty"`
-	Title string `json:"title,omitempty"`
-	Path  string `json:"path,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	Title      string   `json:"title,omitempty"`
+	Path       string   `json:"path,omitempty"`
+	Handle     string   `json:"handle,omitempty"`
+	ReceiptIDs []string `json:"receipt_ids,omitempty"`
 
 	// status (also reused as the stage frame's status field)
 	Status string `json:"status,omitempty"`
@@ -158,11 +161,15 @@ func (s *Server) handleMaterializeStream(w http.ResponseWriter, r *http.Request)
 	}
 	emittedArtifacts := map[string]bool{}
 	emitArtifact := func(a materializeArtifact) {
-		if a.Path == "" || emittedArtifacts[a.Path] {
+		identity := a.Path
+		if identity == "" {
+			identity = a.Handle
+		}
+		if identity == "" || emittedArtifacts[identity] {
 			return
 		}
-		emittedArtifacts[a.Path] = true
-		emit(materializeStreamFrame{Type: "artifact", Kind: a.Kind, Title: a.Title, Path: a.Path})
+		emittedArtifacts[identity] = true
+		emit(materializeStreamFrame{Type: "artifact", Kind: a.Kind, Title: a.Title, Path: a.Path, Handle: a.Handle})
 	}
 
 	for _, gateID := range state.gatesSnapshot() {
@@ -190,7 +197,10 @@ func (s *Server) handleMaterializeStream(w http.ResponseWriter, r *http.Request)
 				emit(materializeStreamFrame{Type: "error", Message: job.Error})
 			}
 		}
-		emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(jobs.JobStatus(snapStatus))})
+		emit(materializeStreamFrame{
+			Type: "status", Status: jobStatusToWire(jobs.JobStatus(snapStatus)),
+			ReceiptIDs: state.receiptIDsSnapshot(),
+		})
 		emit(materializeStreamFrame{Type: "done"})
 		return
 	case jobs.JobAwaitingInput:
@@ -221,10 +231,15 @@ func (s *Server) handleMaterializeStream(w http.ResponseWriter, r *http.Request)
 			case jobs.JobRunning, jobs.JobAwaitingInput:
 				emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(ev.Status)})
 			case jobs.JobDone:
-				if a, ok := materializeArtifactFromResult(state, ev); ok {
+				artifacts, receipts := typedMaterializeResults(state, ev)
+				if len(artifacts) > 0 {
+					for _, artifact := range artifacts {
+						emitArtifact(artifact)
+					}
+				} else if a, ok := materializeArtifactFromResult(state, ev); ok {
 					emitArtifact(a)
 				}
-				emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(ev.Status)})
+				emit(materializeStreamFrame{Type: "status", Status: jobStatusToWire(ev.Status), ReceiptIDs: receipts})
 				emit(materializeStreamFrame{Type: "done"})
 				return
 			case jobs.JobFailed:

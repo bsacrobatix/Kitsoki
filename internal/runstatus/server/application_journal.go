@@ -78,6 +78,27 @@ func openApplicationJournal(path string) (*applicationJournal, error) {
 	return journal, nil
 }
 
+// openWritableApplicationJournal preflights the durable append surface before
+// an effectful caller is allowed to rely on it. openApplicationJournal alone
+// intentionally accepts a missing file for read/reconstruction use.
+func openWritableApplicationJournal(path string) (*applicationJournal, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("application: create journal directory: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("application: open writable journal: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("application: sync writable journal: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("application: close writable journal: %w", err)
+	}
+	return openApplicationJournal(path)
+}
+
 func (j *applicationJournal) Record(_ context.Context, receipt appplatform.Receipt) error {
 	return j.append(applicationJournalLine{Kind: "receipt", Receipt: &receipt})
 }

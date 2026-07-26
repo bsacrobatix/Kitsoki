@@ -186,6 +186,13 @@ type Server struct {
 	// applicationDeps carries deployment-owned authorization, effect, and
 	// budget policy into every generated application adapter.
 	applicationDeps appplatform.Dependencies
+	// materializeReplay is shared across the short-lived application services
+	// created for separate materialization sessions.
+	materializeReplay appplatform.ReplayStore
+	// materializeReceipts shares the same durable journal when the server owns
+	// the materialization replay store.
+	materializeReceipts  appplatform.ReceiptSink
+	materializeReplayErr error
 	// applicationEventSched owns generated background event jobs. Daemon
 	// surfaces can inject their durable scheduler; local web uses an isolated
 	// in-memory scheduler.
@@ -547,8 +554,10 @@ func WithAuth(m *webauth.Manager) Option {
 }
 
 // WithApplicationDependencies installs deployment policy and persistence
-// dependencies for generated application handlers. Nil members retain the
-// trusted-local runtime defaults; configured members are never overwritten.
+// dependencies for generated application handlers. A configured Replay store
+// is the deployment's durable replay authority for effectful typed
+// materialization; when omitted, the server opens its own journal under the
+// materialization root. Nil members otherwise retain trusted-local defaults.
 func WithApplicationDependencies(deps appplatform.Dependencies) Option {
 	return func(c *serverConfig) { c.applicationDeps = deps }
 }
@@ -606,11 +615,34 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 	if applicationEventSched == nil {
 		applicationEventSched = jobs.NewInMemoryScheduler()
 	}
+	materializeReplay := cfg.applicationDeps.Replay
+	materializeReceipts := cfg.applicationDeps.Receipts
+	var materializeReplayErr error
+	if materializeReplay == nil && strings.TrimSpace(cfg.materializeRoot) != "" {
+		journalPath := filepath.Join(
+			cfg.materializeRoot,
+			".artifacts",
+			"kitsoki",
+			"graph-materialize.application.jsonl",
+		)
+		journal, err := openWritableApplicationJournal(journalPath)
+		if err != nil {
+			materializeReplayErr = err
+		} else {
+			materializeReplay = journal
+			if materializeReceipts == nil {
+				materializeReceipts = journal
+			}
+		}
+	}
 	return &Server{
 		provider:                  provider,
 		poll:                      cfg.poll,
 		assignments:               cfg.assignments,
 		applicationDeps:           cfg.applicationDeps,
+		materializeReplay:         materializeReplay,
+		materializeReceipts:       materializeReceipts,
+		materializeReplayErr:      materializeReplayErr,
 		applicationEventSched:     applicationEventSched,
 		applicationBundleRoot:     cfg.applicationBundleRoot,
 		applicationCaptures:       cfg.applicationCaptures,

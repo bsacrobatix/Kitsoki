@@ -40,9 +40,10 @@ type materializeStageWire struct {
 // materializeArtifact is the wire shape of one produced-artifact entry, both
 // in a `.status` response's `artifacts` list and in a stream `artifact` frame.
 type materializeArtifact struct {
-	Kind  string `json:"kind"`
-	Title string `json:"title"`
-	Path  string `json:"path"`
+	Kind   string `json:"kind"`
+	Title  string `json:"title"`
+	Path   string `json:"path,omitempty"`
+	Handle string `json:"handle,omitempty"`
 }
 
 // materializeJobState is the server's own bookkeeping for one materialize
@@ -67,6 +68,7 @@ type materializeJobState struct {
 	artifactTitle string
 	status        string // running | awaiting_input | done | failed | cancelled
 	artifacts     []materializeArtifact
+	receiptIDs    []string
 }
 
 func (st *materializeJobState) snapshot() (stages []materialize.Stage, status string, artifacts []materializeArtifact) {
@@ -104,10 +106,28 @@ func (st *materializeJobState) addArtifact(a materializeArtifact) {
 	st.mu.Unlock()
 }
 
+func (st *materializeJobState) setReceiptIDs(ids []string) {
+	st.mu.Lock()
+	st.receiptIDs = append([]string(nil), ids...)
+	st.mu.Unlock()
+}
+
+func (st *materializeJobState) receiptIDsSnapshot() []string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return append([]string(nil), st.receiptIDs...)
+}
+
 func (st *materializeJobState) artifactFor(path string) materializeArtifact {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return materializeArtifact{Kind: st.artifactKind, Title: st.artifactTitle, Path: path}
+}
+
+func (st *materializeJobState) artifactForHandle(handle string) materializeArtifact {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return materializeArtifact{Kind: st.artifactKind, Title: st.artifactTitle, Handle: handle}
 }
 
 // materializeArtifactFromResult builds the wire artifact entry from a
@@ -121,6 +141,37 @@ func materializeArtifactFromResult(state *materializeJobState, ev jobs.JobEvent)
 		return materializeArtifact{}, false
 	}
 	return state.artifactFor(p), true
+}
+
+func typedMaterializeResults(state *materializeJobState, ev jobs.JobEvent) ([]materializeArtifact, []string) {
+	if ev.Result == nil {
+		return nil, nil
+	}
+	rawHandles, _ := ev.Result.Data["artifact_handles"].([]string)
+	if rawHandles == nil {
+		if values, ok := ev.Result.Data["artifact_handles"].([]any); ok {
+			for _, value := range values {
+				if handle, ok := value.(string); ok {
+					rawHandles = append(rawHandles, handle)
+				}
+			}
+		}
+	}
+	rawReceipts, _ := ev.Result.Data["receipt_ids"].([]string)
+	if rawReceipts == nil {
+		if values, ok := ev.Result.Data["receipt_ids"].([]any); ok {
+			for _, value := range values {
+				if receipt, ok := value.(string); ok {
+					rawReceipts = append(rawReceipts, receipt)
+				}
+			}
+		}
+	}
+	artifacts := make([]materializeArtifact, len(rawHandles))
+	for i, handle := range rawHandles {
+		artifacts[i] = state.artifactForHandle(handle)
+	}
+	return artifacts, rawReceipts
 }
 
 // dispatchMaterialize handles the graph.materialize.* method family. It
@@ -221,6 +272,7 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 	}
 	prep, err := materialize.Prepare(materialize.Request{
 		CatalogPath: catalogPath,
+		CatalogRef:  graphStringParam(params, "catalog"),
 		RepoRoot:    repoRoot,
 		NodeID:      graph.NodeID(nodeID),
 		Params:      paramArgs,
@@ -241,9 +293,21 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 	// fully drivable session (no seeded provider, seeding failed, no write
 	// driver, no world reader) falls back to the self-contained private rig,
 	// which remains the CLI / `status serve` path.
-	webSessionID, turnDriver := s.materializeSessionDriver(ctx, prep)
+	var (
+		webSessionID        string
+		turnDriver          materialize.TurnDriver
+		applicationExecutor materialize.ApplicationPhaseExecutor
+	)
+	if prep.Binding.ApplicationID != "" {
+		webSessionID, applicationExecutor, err = s.materializeRegisteredApplication(ctx, prep)
+		if err != nil {
+			return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
+		}
+	} else {
+		webSessionID, turnDriver = s.materializeSessionDriver(ctx, prep)
+	}
 
-	jobID, stages, err := prep.Submit(ctx, s.materializeSched, turnDriver, webSessionID)
+	jobID, stages, err := prep.Submit(ctx, s.materializeSched, turnDriver, webSessionID, applicationExecutor)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
 	}
@@ -274,8 +338,10 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		title := st.ID
 		if checkID, isCheck := strings.CutPrefix(st.ID, materialize.CheckStagePrefix); isCheck {
 			title = "Gate check: " + checkID
-		} else if roomState, ok := prep.Def.States[st.ID]; ok && roomState.Description != "" {
-			title = roomState.Description
+		} else if prep.Def != nil {
+			if roomState, ok := prep.Def.States[st.ID]; ok && roomState.Description != "" {
+				title = roomState.Description
+			}
 		}
 		stagesOut[i] = materializeStageWire{ID: st.ID, Title: title}
 	}
@@ -446,7 +512,12 @@ func (s *Server) trackMaterializeJob(jobID jobs.JobID, state *materializeJobStat
 			case jobs.JobAwaitingInput:
 				state.setStatus(string(jobs.JobAwaitingInput))
 			case jobs.JobDone:
-				if a, ok := materializeArtifactFromResult(state, ev); ok {
+				if artifacts, receipts := typedMaterializeResults(state, ev); len(artifacts) > 0 || len(receipts) > 0 {
+					for _, artifact := range artifacts {
+						state.addArtifact(artifact)
+					}
+					state.setReceiptIDs(receipts)
+				} else if a, ok := materializeArtifactFromResult(state, ev); ok {
 					state.addArtifact(a)
 				}
 				state.setStatus(string(jobs.JobDone))
@@ -478,11 +549,16 @@ func (s *Server) materializeStatus(params map[string]any) (any, *rpcError) {
 	if artifacts == nil {
 		artifacts = []materializeArtifact{}
 	}
+	receiptIDs := state.receiptIDsSnapshot()
+	if receiptIDs == nil {
+		receiptIDs = []string{}
+	}
 	return map[string]any{
-		"status":     status,
-		"stages":     stages,
-		"artifacts":  artifacts,
-		"session_id": state.sessionID,
+		"status":      status,
+		"stages":      stages,
+		"artifacts":   artifacts,
+		"receipt_ids": receiptIDs,
+		"session_id":  state.sessionID,
 	}, nil
 }
 

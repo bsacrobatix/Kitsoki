@@ -70,6 +70,8 @@ type StageEvent struct {
 type Binding struct {
 	TypeID               string
 	Story                string
+	ApplicationID        string
+	Phases               []graph.MaterializePhaseDecl
 	ContextEdges         []graph.EdgeField
 	IncomingContextEdges []graph.EdgeField
 	Params               []graph.MaterializeParamDecl
@@ -100,6 +102,9 @@ func (e *GateError) Error() string {
 type Request struct {
 	// CatalogPath is the catalog file or bundle dir (graph.LoadCatalog shape).
 	CatalogPath string
+	// CatalogRef is the allowlisted RPC catalog alias. Typed application
+	// phases receive this opaque reference, never CatalogPath.
+	CatalogRef string
 	// RepoRoot is the repository root a type's materialize.story path is
 	// relative to (NOT the catalog path — the catalog may live in a
 	// subdirectory such as pog/catalog.yaml while the story lives at
@@ -126,6 +131,8 @@ func ResolveBinding(cat *graph.Catalog, node *graph.Node) (*Binding, error) {
 	return &Binding{
 		TypeID:               eff.ID,
 		Story:                md.Story,
+		ApplicationID:        md.ApplicationID,
+		Phases:               append([]graph.MaterializePhaseDecl(nil), md.Phases...),
 		ContextEdges:         md.ContextEdges,
 		IncomingContextEdges: md.IncomingContextEdges,
 		Params:               md.Params,
@@ -447,6 +454,7 @@ func ContextDigest(cat *graph.Catalog, node *graph.Node, binding *Binding, param
 		"nodes":   nodes,
 		"binding": map[string]any{
 			"type_id": binding.TypeID, "story": binding.Story,
+			"application_id": binding.ApplicationID, "phases": binding.Phases,
 			"artifact_schema": binding.ArtifactSchema, "artifact_format": binding.ArtifactFormat, "artifact_kind": binding.ArtifactKind,
 			"context_edges": sortedEdgeNames(binding.ContextEdges), "incoming_context_edges": sortedEdgeNames(binding.IncomingContextEdges),
 			"gates": sortedStrings(binding.Gates), "params": binding.Params, "checks": binding.Checks,
@@ -559,14 +567,16 @@ func Start(ctx context.Context, sched jobs.Scheduler, req Request) (jobs.JobID, 
 	if err != nil {
 		return "", nil, err
 	}
+	if p.Binding.ApplicationID != "" {
+		return "", nil, fmt.Errorf("materialize: typed application binding requires a registered application executor")
+	}
 	return p.Submit(ctx, sched, nil, "")
 }
 
 // Prepared is a resolved, gate-checked materialize plan for one node — the
 // output of [Prepare], everything [Prepared.Submit] needs to run the job.
-// Split from Start so a caller that drives the story through its own live
-// session (the runstatus server's web-registry path) can seed that session
-// from StoryAppPath + InitialWorld between preparing and submitting.
+// Legacy bindings load Def/StoryAppPath for story driving. Typed bindings
+// leave both empty and are executed through a registered application service.
 type Prepared struct {
 	Req           Request
 	Node          *graph.Node
@@ -578,20 +588,20 @@ type Prepared struct {
 	// story-path key once absolutized).
 	Def          *app.AppDef
 	StoryAppPath string
-	// Stages is the story's room sequence (see RoomSequence) followed by
-	// one "check:<id>" stage per resolved gate check; NumRooms says where
-	// rooms end and checks begin. InitialWorld is the seed world (node_id +
-	// resolved params + the node's gate text).
+	// Stages is the legacy story's room sequence or the typed application's
+	// phase sequence, followed by any legacy check stages. Typed declarations
+	// reject checks, so their stages are phase-only.
 	Stages       []string
 	NumRooms     int
 	Checks       []ResolvedCheck
 	InitialWorld map[string]any
+	writeback    applicationDurableWriteback
 }
 
-// Prepare resolves req's node binding, validates gates, snapshots the
-// context closure, loads the bound story, and computes the room sequence and
-// seed world. Returns a *[GateError] (unwrap with errors.As) when gates are
-// unmet.
+// Prepare resolves req's node binding, validates gates, and snapshots the
+// context closure. Legacy bindings load their story and compute its room
+// sequence; typed bindings retain only phase IDs and never resolve a story
+// path. Returns a *[GateError] when gates are unmet.
 func Prepare(req Request) (*Prepared, error) {
 	cat, err := graph.LoadCatalog(req.CatalogPath)
 	if err != nil {
@@ -623,21 +633,35 @@ func Prepare(req Request) (*Prepared, error) {
 		contextIDs[i] = string(id)
 	}
 
-	storyAppPath := filepath.Join(req.RepoRoot, binding.Story, "app.yaml")
-	def, err := app.Load(storyAppPath)
-	if err != nil {
-		return nil, fmt.Errorf("materialize: load story %q: %w", binding.Story, err)
-	}
-
-	roomSeq, err := RoomSequence(def)
-	if err != nil {
-		return nil, err
-	}
-	if len(roomSeq) == 0 {
-		return nil, fmt.Errorf("materialize: story %q has no rooms", binding.Story)
-	}
 	checks := ResolveChecks(node, binding.Checks)
-	allStages := append(append([]string{}, roomSeq...), CheckStages(checks)...)
+	var (
+		def          *app.AppDef
+		storyAppPath string
+		runStages    []string
+	)
+	if binding.ApplicationID != "" {
+		if strings.TrimSpace(req.CatalogRef) == "" {
+			return nil, fmt.Errorf("materialize: typed application binding requires an opaque catalog reference")
+		}
+		runStages = make([]string, len(binding.Phases))
+		for i, phase := range binding.Phases {
+			runStages[i] = phase.ID
+		}
+	} else {
+		storyAppPath = filepath.Join(req.RepoRoot, binding.Story, "app.yaml")
+		def, err = app.Load(storyAppPath)
+		if err != nil {
+			return nil, fmt.Errorf("materialize: load story %q: %w", binding.Story, err)
+		}
+		runStages, err = RoomSequence(def)
+		if err != nil {
+			return nil, err
+		}
+		if len(runStages) == 0 {
+			return nil, fmt.Errorf("materialize: story %q has no rooms", binding.Story)
+		}
+	}
+	allStages := append(append([]string{}, runStages...), CheckStages(checks)...)
 
 	initialWorld := map[string]any{
 		"node_id": string(req.NodeID),
@@ -663,9 +687,10 @@ func Prepare(req Request) (*Prepared, error) {
 		Def:           def,
 		StoryAppPath:  storyAppPath,
 		Stages:        allStages,
-		NumRooms:      len(roomSeq),
+		NumRooms:      len(runStages),
 		Checks:        checks,
 		InitialWorld:  initialWorld,
+		writeback:     graphApplicationWriteback{},
 	}, nil
 }
 
@@ -683,20 +708,28 @@ type TurnDriver interface {
 // Submit submits the prepared materialize job to sched and returns the job
 // id plus the full all-"waiting" stage list (Start's ".start" contract).
 //
-// driver == nil drives a self-contained in-memory orchestrator rig seeded
-// from p.InitialWorld (the CLI / no-registry path). A non-nil driver drives
-// the caller's own live session — the caller must have already created and
-// seeded it (e.g. via the web registry's NewSessionSeeded on p.StoryAppPath
-// + p.InitialWorld); webSessionID then records that session's id in the job
-// payload ("web_session") for observability.
-func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver TurnDriver, webSessionID string) (jobs.JobID, []Stage, error) {
+// Legacy bindings use driver as before. Typed bindings require an
+// ApplicationPhaseExecutor and fail closed when it is absent; they never fall
+// back to the private story rig.
+func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver TurnDriver, webSessionID string, applicationExecutors ...ApplicationPhaseExecutor) (jobs.JobID, []Stage, error) {
+	var applicationExecutor ApplicationPhaseExecutor
+	if len(applicationExecutors) > 0 {
+		applicationExecutor = applicationExecutors[0]
+	}
+	if p.Binding.ApplicationID != "" && applicationExecutor == nil {
+		return "", nil, fmt.Errorf("materialize: typed application binding requires a registered application executor")
+	}
 	sessionID := app.SessionID("materialize-" + string(p.Req.NodeID) + "-" + ulid.New())
 
 	payload := map[string]any{
 		"node_id": string(p.Req.NodeID),
-		"story":   p.Binding.Story,
 		"context": p.ContextIDs,
 		"stages":  p.Stages,
+	}
+	if p.Binding.ApplicationID != "" {
+		payload["application_id"] = p.Binding.ApplicationID
+	} else {
+		payload["story"] = p.Binding.Story
 	}
 	if webSessionID != "" {
 		payload["web_session"] = webSessionID
@@ -706,7 +739,7 @@ func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver Turn
 		SessionID: sessionID,
 		Kind:      "graph.materialize",
 		Payload:   payload,
-		Handler:   driveHandler(p, sched, driver, webSessionID),
+		Handler:   driveHandler(p, sched, driver, webSessionID, applicationExecutor),
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("materialize: submit job: %w", err)
@@ -761,7 +794,10 @@ func (d rigDriver) World(context.Context) (map[string]any, error) {
 // artifact's content to disk under the repo root and appends an evidence
 // entry to the catalog (writeback.go). On the job's terminal outcome
 // (success or failure) it upserts the node's `materialization:` block.
-func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionID string) host.Handler {
+func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionID string, applicationExecutor ApplicationPhaseExecutor) host.Handler {
+	if p.Binding.ApplicationID != "" {
+		return driveApplicationHandler(p, sched, sessionID, applicationExecutor)
+	}
 	stages := p.Stages
 	wb := driveWriteback{
 		CatalogPath: p.Req.CatalogPath,

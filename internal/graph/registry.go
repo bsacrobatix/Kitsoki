@@ -113,8 +113,15 @@ func CanonicalArtifactKind(artifact *ArtifactDecl) string {
 type MaterializeDecl struct {
 	// Story is a story root path (e.g. "stories/materialize-work-item"),
 	// relative to the repo root the catalog lives in — not to the catalog
-	// file itself.
+	// file itself. Story is the legacy materializer identity and is mutually
+	// exclusive with ApplicationID/Phases.
 	Story string
+	// ApplicationID selects one exact application from the daemon's registered
+	// story catalog. It is never resolved as a filesystem path.
+	ApplicationID string
+	// Phases are typed application operations. Each phase owns its artifact
+	// outputs so handles and receipts cannot be attributed ambiguously.
+	Phases []MaterializePhaseDecl
 	// ContextEdges are edge field ids followed (recursively, through edges
 	// of the same kinds) to build the node's materialization context.
 	ContextEdges []EdgeField
@@ -137,6 +144,23 @@ type MaterializeDecl struct {
 	// whether the gate is actually satisfied.
 	Checks []MaterializeCheckDecl
 }
+
+// MaterializePhaseDecl is one typed application operation in a materializer.
+// Exactly one of Handler or Action is set. ArtifactOutputs are top-level
+// fields in the canonical application output whose values must be opaque
+// handles. Inputs are intentionally not authorable: the daemon supplies the
+// bounded catalog reference, node identity, and context digest.
+type MaterializePhaseDecl struct {
+	ID              string
+	Handler         string
+	Action          string
+	ArtifactOutputs []string
+}
+
+const (
+	maxMaterializePhases          = 32
+	maxMaterializeOutputsPerPhase = 16
+)
 
 // MaterializeCheckDecl is one entry of a materialize: declaration's checks
 // list. Exactly one of Script (type-provided, reusable across every node of
@@ -201,8 +225,116 @@ func (r *Registry) Register(def TypeDef) error {
 	if _, exists := r.defs[def.ID]; exists {
 		return fmt.Errorf("type registry: duplicate type id %q", def.ID)
 	}
+	if err := validateMaterializeDecl(def.ID, def.Materialize); err != nil {
+		return err
+	}
 	r.defs[def.ID] = def
 	return nil
+}
+
+func validateMaterializeDecl(typeID string, decl *MaterializeDecl) error {
+	if decl == nil {
+		return nil
+	}
+	legacy := strings.TrimSpace(decl.Story) != ""
+	typed := strings.TrimSpace(decl.ApplicationID) != "" || len(decl.Phases) > 0
+	if legacy == typed {
+		return fmt.Errorf(
+			"type registry: type %q materialize must declare exactly one of legacy story or typed application_id with phases",
+			typeID,
+		)
+	}
+	if legacy {
+		return nil
+	}
+	if strings.TrimSpace(decl.ApplicationID) == "" || len(decl.Phases) == 0 {
+		return fmt.Errorf(
+			"type registry: type %q typed materialize requires application_id and phases",
+			typeID,
+		)
+	}
+	if len(decl.Params) > 0 {
+		return fmt.Errorf("type registry: type %q typed materialize cannot declare legacy params", typeID)
+	}
+	if len(decl.Checks) > 0 {
+		return fmt.Errorf("type registry: type %q typed materialize cannot declare legacy script checks; use a typed phase", typeID)
+	}
+	if len(decl.Phases) > maxMaterializePhases {
+		return fmt.Errorf("type registry: type %q typed materialize exceeds %d phases", typeID, maxMaterializePhases)
+	}
+	phaseIDs := map[string]struct{}{}
+	for i, phase := range decl.Phases {
+		path := fmt.Sprintf("type registry: type %q materialize phase %d", typeID, i)
+		if !IsKebabID(phase.ID) {
+			return fmt.Errorf("%s: id %q is not kebab-case", path, phase.ID)
+		}
+		if _, exists := phaseIDs[phase.ID]; exists {
+			return fmt.Errorf("%s: duplicate id %q", path, phase.ID)
+		}
+		phaseIDs[phase.ID] = struct{}{}
+		if (strings.TrimSpace(phase.Handler) == "") == (strings.TrimSpace(phase.Action) == "") {
+			return fmt.Errorf("%s %q: exactly one of handler or action is required", path, phase.ID)
+		}
+		if !validMaterializeMemberID(firstNonEmpty(phase.Handler, phase.Action)) {
+			return fmt.Errorf("%s %q: operation id is invalid", path, phase.ID)
+		}
+		if len(phase.ArtifactOutputs) == 0 {
+			return fmt.Errorf("%s %q: artifact_outputs is required", path, phase.ID)
+		}
+		if len(phase.ArtifactOutputs) > maxMaterializeOutputsPerPhase {
+			return fmt.Errorf("%s %q: artifact_outputs exceeds %d entries", path, phase.ID, maxMaterializeOutputsPerPhase)
+		}
+		outputs := map[string]struct{}{}
+		for _, output := range phase.ArtifactOutputs {
+			if !validMaterializeOutputField(output) {
+				return fmt.Errorf("%s %q: artifact output %q is invalid", path, phase.ID, output)
+			}
+			if _, exists := outputs[output]; exists {
+				return fmt.Errorf("%s %q: duplicate artifact output %q", path, phase.ID, output)
+			}
+			outputs[output] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func validMaterializeMemberID(value string) bool {
+	if value == "" || len(value) > 256 {
+		return false
+	}
+	for i, r := range value {
+		if i == 0 && !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return false
+		}
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validMaterializeOutputField(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for i, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || i > 0 && r >= '0' && r <= '9' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // Resolve validates the whole registry (missing/cyclic parents, incompatible

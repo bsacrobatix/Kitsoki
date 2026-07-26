@@ -164,6 +164,14 @@ type SeededSessionProvider interface {
 	NewSessionSeeded(ctx context.Context, storyPath string, initialWorld map[string]any) (sessionID string, err error)
 }
 
+// RegisteredApplicationProvider creates a session by exact application ID
+// from the provider's discovered catalog. It is the only provider authority
+// accepted by typed graph materialization; path-based seeded sessions remain
+// legacy-only.
+type RegisteredApplicationProvider interface {
+	NewRegisteredApplicationSession(ctx context.Context, applicationID string) (sessionID string, err error)
+}
+
 // ExternalAttachProvider is an optional extension of [SessionProvider]: a
 // provider that can attach a live session to an EXISTING persisted session
 // addressed by an external key (`transport:thread`, e.g. `jira:PLTFRM-12345`),

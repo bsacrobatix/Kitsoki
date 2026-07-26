@@ -129,8 +129,42 @@ type materializeStreamFrame struct {
 	Kind    string `json:"kind"`
 	Title   string `json:"title"`
 	Path    string `json:"path"`
+	Handle  string `json:"handle"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
+}
+
+func TestMaterialize_TypedApplicationFailsClosedWithoutRegisteredProvider(t *testing.T) {
+	root := t.TempDir()
+	pogDir := filepath.Join(root, "pog")
+	require.NoError(t, os.MkdirAll(pogDir, 0o755))
+	const catalog = `schema: project-object-graph/seed-catalog/v0
+catalog: {id: typed}
+type_registry:
+  - {id: core-node, schema: graph-type/v0, required_fields: [id, schema, title, status, visibility]}
+  - {id: changeset, schema: graph-type/v0, extends: core-node}
+  - id: app
+    schema: graph-type/v0
+    extends: core-node
+    artifact: {schema: pog/artifact/application/v0, format: json, presentation: evidence}
+    materialize:
+      application_id: artifact-producer
+      phases:
+        - {id: record, handler: evidence.record, artifact_outputs: [evidence_ref]}
+nodes:
+  - {schema: graph/app/v0, id: app-one, title: Application, status: active, visibility: internal}
+`
+	catalogPath := filepath.Join(pogDir, "catalog.yaml")
+	require.NoError(t, os.WriteFile(catalogPath, []byte(catalog), 0o644))
+
+	ts := httptest.NewServer(server.NewMulti(newStubProvider(), server.WithMaterializeRoot(root)).Handler())
+	t.Cleanup(ts.Close)
+	_, msg := rpcCallExpectError(t, ts, "graph.materialize.start", map[string]any{
+		"catalog": "pog", "node_id": "app-one",
+	})
+	assert.Contains(t, msg, "provider does not support registered application execution")
+	assert.NotContains(t, msg, root)
+	assert.NotContains(t, msg, catalogPath)
 }
 
 func readMaterializeStreamFrames(t *testing.T, ts *httptest.Server, jobID string) []materializeStreamFrame {
