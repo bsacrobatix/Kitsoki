@@ -34,6 +34,10 @@ turns:
   - intent: { name: bf__accept, slots: {} }   # -> bf.proposing
   - intent: { name: bf__accept, slots: {} }   # -> bf.implementing
   - intent: { name: bf__accept, slots: {} }   # -> bf.testing
+    expect_host_calls:
+      - handler: host.starlark.run
+        args: { call: acceptance_contract_gate }
+        times: 1
   - intent: { name: bf__accept, slots: {} }   # -> bf.reviewing
   - intent: { name: bf__accept, slots: {} }   # -> bf.validating
   - intent: { name: bf__accept, slots: {} }   # -> bf.done

@@ -75,7 +75,7 @@ func (s *Service) Watch(ctx context.Context, appID string, pollSeconds int) (map
 	if err := s.Store.Reconcile(ctx, appID, defs, now); err != nil {
 		return nil, err
 	}
-	jobRefs, err := s.dispatchDue(ctx, appID)
+	jobRefs, err := s.dispatchDue(ctx, appID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -188,12 +188,14 @@ func (s *Service) reconcileAndDispatch(ctx context.Context, appID string) error 
 	if err := s.Store.Reconcile(ctx, appID, defs, now); err != nil {
 		return err
 	}
-	_, err = s.dispatchDue(ctx, appID)
+	_, err = s.dispatchDue(ctx, appID, now)
 	return err
 }
 
-func (s *Service) dispatchDue(ctx context.Context, appID string) ([]string, error) {
-	now := s.Clock.Now().UTC()
+// dispatchDue claims work against the same reconciliation timestamp. This
+// keeps a newly discovered campaign immediately due even if wall time steps
+// backward between the two operations.
+func (s *Service) dispatchDue(ctx context.Context, appID string, now time.Time) ([]string, error) {
 	claims, err := s.Store.ClaimDue(ctx, appID, now, DefaultMaxDefinitions)
 	if err != nil {
 		return nil, err

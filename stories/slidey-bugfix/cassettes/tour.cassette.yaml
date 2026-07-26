@@ -75,6 +75,19 @@ episodes:
     data:
       ok: true
   replay: any
+# The imported bugfix testing room runs this deterministic acceptance-shape
+# gate after the recorded test receipt. Match its call id exactly: replay must
+# remain fail-closed if another Starlark call is added to this tour.
+- id: acceptance_contract_gate
+  match:
+    handler: host.starlark.run
+    call: acceptance_contract_gate
+  response:
+    data:
+      gate:
+        ok: true
+        missing: []
+        summary: "No public acceptance-contract requirements were declared for slidey-128."
 - id: repro_det_gate
   match:
     handler: host.run

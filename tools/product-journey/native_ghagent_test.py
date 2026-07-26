@@ -172,6 +172,11 @@ def main():
             check=True,
         )
         os.environ["KITSOKI_BIN"] = str(kitsoki_bin)
+        # The binary and the replay story/cassette must come from this same
+        # checkout. Managed Capsules inherit KITSOKI_REPO from their primary
+        # checkout; leaving that ambient value in place can pair this freshly
+        # built binary with a stale story fixture from another revision.
+        os.environ["KITSOKI_REPO"] = str(run.ROOT)
 
         catalog = run.load_catalog(run.CATALOG)
         personas = run.load_personas(run.PERSONAS)

@@ -163,6 +163,26 @@ func TestServiceWatchIsSingletonAndSnapshotIsBounded(t *testing.T) {
 	}
 }
 
+func TestServiceWatchDispatchesNewCampaignWhenWallClockStepsBackward(t *testing.T) {
+	start := time.Date(2026, 7, 26, 2, 0, 0, 1, time.UTC)
+	service := &Service{
+		Store:      NewMemoryStore(),
+		Source:     staticSource{defs: []Definition{testDefinition()}},
+		Scheduler:  &captureScheduler{},
+		Clock:      &sequenceClock{nows: []time.Time{start, start.Add(-time.Millisecond)}},
+		Dispatcher: captureDispatcher{},
+	}
+
+	result, err := service.Watch(context.Background(), "runner", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobRefs, ok := result["job_refs"].([]any)
+	if !ok || len(jobRefs) != 1 || jobRefs[0] != "job-1" {
+		t.Fatalf("immediate durable job refs = %#v", result["job_refs"])
+	}
+}
+
 func TestSQLiteStoreResetsDailyBudgetAtUTCDateBoundary(t *testing.T) {
 	db, err := store.Open(filepath.Join(t.TempDir(), "sessions.db"))
 	if err != nil {
@@ -239,6 +259,30 @@ type captureDispatcher struct{}
 
 func (captureDispatcher) Dispatch(context.Context, Claim) (string, error) {
 	return "job-1", nil
+}
+
+// sequenceClock deliberately returns a later timestamp followed by an earlier
+// one, modeling a wall-clock correction between reconcile and claim.
+type sequenceClock struct {
+	nows  []time.Time
+	index int
+}
+
+func (c *sequenceClock) Now() time.Time {
+	index := c.index
+	if index < len(c.nows)-1 {
+		c.index++
+	}
+	return c.nows[index]
+}
+
+func (c *sequenceClock) Since(t time.Time) time.Duration { return c.Now().Sub(t) }
+
+func (*sequenceClock) After(time.Duration) <-chan time.Time { panic("unexpected After") }
+func (*sequenceClock) Sleep(time.Duration)                  { panic("unexpected Sleep") }
+func (*sequenceClock) NewTimer(time.Duration) clock.Timer   { panic("unexpected NewTimer") }
+func (*sequenceClock) NewTicker(time.Duration) clock.Ticker {
+	panic("unexpected NewTicker")
 }
 
 func writeCampaignCatalog(t *testing.T, kind string) string {
