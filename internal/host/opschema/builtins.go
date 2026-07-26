@@ -369,6 +369,17 @@ func registerGraphBuiltins(r *Registry) {
 		Input:  fields("max_jobs", "int", "max_bytes", "int"),
 		Output: fields("snapshot", "object"),
 	})
+	r.Register("host.feedback", "list_reviewed", Op{
+		Input:  fields("scope", "string", "limit", "int"),
+		Output: fields("reports", "list", "revision", "string"),
+	})
+	r.Register("host.feedback", "dispatch", Op{
+		Input: fields(
+			"report_ref", "string", "dispatch_id", "string", "resume_mode", "string",
+			"resume_workspace", "string", "retry_brief", "string",
+		),
+		Output: fields("job_id", "string"),
+	})
 	r.Register("host.graph", "presentation", Op{
 		Input:  fields(),
 		Output: fields("layers", "list"),

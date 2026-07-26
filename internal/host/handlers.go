@@ -606,6 +606,11 @@ func RegisterBuiltins(r *Registry) {
 	// read-only artifact-job projection.
 	r.Register("host.runstatus", RunstatusSnapshotHandler)
 
+	// Reviewed feedback listing and governed dispatch. The builtin is an
+	// unavailable sentinel; daemon construction may register an application-
+	// scoped backend which session construction injects.
+	r.Register("host.feedback", FeedbackHandler)
+
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
 	// bare so the registry's longest-prefix fallback resolves every

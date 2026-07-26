@@ -194,6 +194,11 @@ type SessionRegistry struct {
 	daemonJobs  artifactjob.Store
 	studies     study.Store
 	federation  *daemonfederation.Pool
+
+	// feedbackBackends are explicit daemon-construction bindings keyed by
+	// application ID. Session construction derives the remaining scope from
+	// the loaded application metadata.
+	feedbackBackends map[string]host.FeedbackBackend
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -203,12 +208,37 @@ type SessionRegistry struct {
 // initial catalogue is empty until the caller runs Rescan.
 func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *SessionRegistry {
 	return &SessionRegistry{
-		cfg:         cfg,
-		base:        base,
-		dirs:        dirs,
-		sessions:    map[string]*entry{},
-		maxSessions: maxSessionsFromEnv(),
+		cfg:              cfg,
+		base:             base,
+		dirs:             dirs,
+		sessions:         map[string]*entry{},
+		feedbackBackends: map[string]host.FeedbackBackend{},
+		maxSessions:      maxSessionsFromEnv(),
 	}
+}
+
+// RegisterFeedbackBackend binds one application ID to a governed feedback
+// backend. It intentionally does not infer story names, repositories, or
+// launcher paths. Register bindings during daemon construction before sessions
+// are created.
+func (r *SessionRegistry) RegisterFeedbackBackend(appID string, backend host.FeedbackBackend) error {
+	appID = strings.TrimSpace(appID)
+	if appID == "" {
+		return errors.New("register feedback backend: application id is required")
+	}
+	if backend == nil {
+		return fmt.Errorf("register feedback backend %q: backend is required", appID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.feedbackBackends == nil {
+		r.feedbackBackends = make(map[string]host.FeedbackBackend)
+	}
+	if _, exists := r.feedbackBackends[appID]; exists {
+		return fmt.Errorf("register feedback backend %q: already registered", appID)
+	}
+	r.feedbackBackends[appID] = backend
+	return nil
 }
 
 // EnableDaemon turns the registry into the persistent daemon session owner.
@@ -702,6 +732,7 @@ func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, init
 		return "", err
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
+	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -947,6 +978,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 		return "", err
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
+	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	ok := false
 	defer func() {
 		if !ok {
@@ -1149,6 +1181,26 @@ func (r *SessionRegistry) wireRunstatusSnapshot(rt *sessionRuntime, appID string
 	rt.HostRegistry.Replace(
 		"host.runstatus",
 		host.NewRunstatusSnapshotHandler(r.daemonJobs, appID),
+	)
+}
+
+func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revision string) {
+	if rt == nil || rt.HostRegistry == nil {
+		return
+	}
+	r.mu.Lock()
+	backend := r.feedbackBackends[appID]
+	r.mu.Unlock()
+	if backend == nil {
+		return
+	}
+	rt.HostRegistry.Replace(
+		"host.feedback",
+		host.NewFeedbackHandler(backend, host.FeedbackScope{
+			ApplicationID: appID,
+			Owner:         owner,
+			Revision:      revision,
+		}),
 	)
 }
 

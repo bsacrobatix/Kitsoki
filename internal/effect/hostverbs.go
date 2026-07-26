@@ -271,6 +271,19 @@ var builtinVerbTable = map[string]verbEffect{
 	// prefix fallback injects args["op"], so keep the leaf classified too.
 	"host.runstatus.snapshot": {class: Read, deterministic: true},
 
+	// host.feedback reads a captured reviewed-report view or asks an injected
+	// governed backend to create an idempotent dispatch job. Dispatch grants no
+	// source-landing authority.
+	"host.feedback": {
+		class: External, deterministic: false,
+		ops: map[string]opEffect{
+			"list_reviewed": {class: Read, deterministic: true},
+			"dispatch":      {class: External, deterministic: false},
+		},
+	},
+	"host.feedback.list_reviewed": {class: Read, deterministic: true},
+	"host.feedback.dispatch":      {class: External, deterministic: false},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under
