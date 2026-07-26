@@ -57,6 +57,7 @@ carrier handler when the op name is dispatched from `with:` args.
 | [`host.agent.codeact`](#hostagentcodeact) | Bounded agent loop that emits capability-scoped Starlark snippets, then `done(payload)`. |
 | [`host.agent.task`](#hostagenttask) | Agentic verb with full tool surface, acceptance loop, and replay artifacts (Mode A/B/C). |
 | [`host.agent.converse`](#hostagentconverse) | Free-form conversational Claude session with permission_mode control. |
+| [`host.application_conversation.ask`](application-conversation-host.md) | Daemon-bound, persistent application conversation over a fixed graph and tool-free role. |
 | [`host.transport.post`](#hosttransportpost) | Post a message to a registered transport (TUI / Jira / Bitbucket). |
 | [`host.workspace_manager.get`](#hostworkspace_managerget) | Load a structured workspace context (repos, issue, PRs). |
 | [`host.capsule_workspace`](#hostcapsule_workspace-workspace-interface) | `workspace` provider: checked-in Capsule definitions create/get/status/sync/commit/close under `.capsules/workspaces/<id>`. |

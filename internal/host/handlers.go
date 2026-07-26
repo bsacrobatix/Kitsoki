@@ -634,6 +634,10 @@ func RegisterBuiltins(r *Registry) {
 	// catalog binding, and clock.
 	r.Register("host.flow_evidence", FlowEvidenceHandler)
 
+	// Application-scoped multi-turn LLM conversations. The exact leaf avoids
+	// prefix dispatch adding an op field to its two-argument story contract.
+	r.Register("host.application_conversation.ask", ApplicationConversationHandler)
+
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
 	// bare so the registry's longest-prefix fallback resolves every

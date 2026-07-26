@@ -44,6 +44,7 @@ import (
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationconversation"
 	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/campaign"
@@ -199,18 +200,20 @@ type SessionRegistry struct {
 	// daemonStore owns the connection used by daemonJobs. It is separate from
 	// each live session runtime but points at the same SQLite file, so durable
 	// job identity survives registry and process teardown.
-	daemonStore        store.Store
-	daemonJobs         artifactjob.Store
-	campaignStore      campaign.Store
-	campaignSource     campaign.Source
-	campaignScheduler  jobs.Scheduler
-	campaignServices   map[string]*campaign.Service
-	studies            study.Store
-	federation         *daemonfederation.Pool
-	materializations   materializationstatus.Store
-	feedbackDispatches reviewedfeedback.DispatchStore
-	feedbackReconciles reviewedfeedback.ReconcileStore
-	feedbackLedger     reviewedfeedback.JSONLLedger
+	daemonStore                  store.Store
+	daemonJobs                   artifactjob.Store
+	campaignStore                campaign.Store
+	campaignSource               campaign.Source
+	campaignScheduler            jobs.Scheduler
+	campaignServices             map[string]*campaign.Service
+	studies                      study.Store
+	federation                   *daemonfederation.Pool
+	materializations             materializationstatus.Store
+	feedbackDispatches           reviewedfeedback.DispatchStore
+	feedbackReconciles           reviewedfeedback.ReconcileStore
+	feedbackLedger               reviewedfeedback.JSONLLedger
+	applicationConversationStore *applicationconversation.SQLStore
+	applicationConversationChats *chats.Store
 
 	// feedbackBackends are explicit daemon-construction bindings keyed by
 	// application ID. Session construction derives the remaining scope from
@@ -385,6 +388,26 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 			Templates: r.cfg.StoryApplicationJobs,
 			Now:       time.Now,
 		}
+	}
+	if len(r.cfg.ApplicationConversations) > 0 {
+		conversationStore, conversationErr := newApplicationConversationStore(st, clock.Real())
+		if conversationErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon application conversations: %w", conversationErr)
+		}
+		conversationChats, conversationErr := newChatStore(st)
+		if conversationErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon application conversation chats: %w", conversationErr)
+		}
+		if _, conversationErr := conversationStore.InterruptPending(
+			context.Background(), "daemon_restarted",
+		); conversationErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon application conversations: %w", conversationErr)
+		}
+		r.applicationConversationStore = conversationStore
+		r.applicationConversationChats = conversationChats
 	}
 	if len(r.cfg.ReviewedFeedback) > 0 || len(r.cfg.FeedbackFederation) > 0 {
 		feedbackDispatches, feedbackErr := newReviewedFeedbackDispatchStore(
@@ -993,6 +1016,9 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireApplicationJob(rt, def.App.ID)
+	if err := r.wireApplicationConversation(rt, def.App.ID); err != nil {
+		return "", err
+	}
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -1247,6 +1273,9 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireApplicationJob(rt, def.App.ID)
+	if err := r.wireApplicationConversation(rt, def.App.ID); err != nil {
+		return "", err
+	}
 	ok := false
 	defer func() {
 		if !ok {

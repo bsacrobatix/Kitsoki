@@ -456,6 +456,13 @@ func registerGraphBuiltins(r *Registry) {
 			"primary", "string", "reason", "string", "receipt", "object",
 		),
 	})
+	r.Register("host.application_conversation", "ask", Op{
+		Input: fields("chat_id", "string", "question", "string"),
+		Output: fields(
+			"answer", "string", "conversation_ref", "string", "turn_ref", "string",
+			"receipt", "object", "replayed", "bool",
+		),
+	})
 	r.Register("host.demo", "plan", Op{
 		Input:  fields("node_id", "string"),
 		Output: fields("closure_order", "list", "manifest_ref", "string", "artifact_handles", "list"),

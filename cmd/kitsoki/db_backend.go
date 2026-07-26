@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"kitsoki/internal/applicationconversation"
 	"kitsoki/internal/applicationjob"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
@@ -131,6 +132,16 @@ func newChatStore(s store.Store, opts ...chats.Option) (*chats.Store, error) {
 		return chats.NewPostgresStore(s.DB(), opts...)
 	}
 	return chats.NewStore(s.DB(), opts...)
+}
+
+func newApplicationConversationStore(
+	s store.Store,
+	clk clock.Clock,
+) (*applicationconversation.SQLStore, error) {
+	if store.IsPostgres(s) {
+		return applicationconversation.NewPostgresStore(s.DB(), clk)
+	}
+	return applicationconversation.NewSQLiteStore(s.DB(), clk)
 }
 
 // newJobStore constructs the jobs satellite store on s's shared handle,

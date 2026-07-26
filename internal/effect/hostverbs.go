@@ -342,6 +342,16 @@ var builtinVerbTable = map[string]verbEffect{
 	},
 	"host.flow_evidence.record": {class: Write, deterministic: false},
 
+	// host.application_conversation.ask performs an LLM call through a
+	// daemon-owned binding and persists its transcript and replay receipt.
+	"host.application_conversation": {
+		class: External, deterministic: false,
+		ops: map[string]opEffect{
+			"ask": {class: External, deterministic: false},
+		},
+	},
+	"host.application_conversation.ask": {class: External, deterministic: false},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under

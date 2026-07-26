@@ -162,6 +162,10 @@ type WebConfig struct {
 	// registered background Application Events and bounded artifact projections.
 	StoryApplicationJobs map[string]map[string]applicationjob.Template `yaml:"story_application_jobs,omitempty"`
 
+	// ApplicationConversations binds a caller application to one exact target
+	// role, graph projection, provider, machine profile, and set of bounds.
+	ApplicationConversations map[string]ApplicationConversationBinding `yaml:"application_conversations,omitempty"`
+
 	// Auth configures invitation-only GitHub sign-in for the web/daemon HTTP
 	// surface (internal/webauth). Nil ⇒ mode "auto": auth is required exactly
 	// when the server binds a non-loopback address. The client secret is
@@ -757,6 +761,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveStoryApplicationJobs(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveApplicationConversations(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveCampaigns(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -964,6 +971,19 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.StoryApplicationJobs = merged
+	}
+	if len(local.ApplicationConversations) > 0 {
+		merged := make(
+			map[string]ApplicationConversationBinding,
+			len(base.ApplicationConversations)+len(local.ApplicationConversations),
+		)
+		for k, v := range base.ApplicationConversations {
+			merged[k] = v
+		}
+		for k, v := range local.ApplicationConversations {
+			merged[k] = v
+		}
+		out.ApplicationConversations = merged
 	}
 	if len(local.Workers) > 0 {
 		out.Workers = local.Workers
