@@ -13,11 +13,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"kitsoki/internal/artifactjob"
+	"kitsoki/internal/atomicfile"
 	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/control"
 	"kitsoki/internal/capsule/environment"
 	"kitsoki/internal/capsule/executor"
 	"kitsoki/internal/capsule/queue"
+	"kitsoki/internal/capsule/receipt"
 	"kitsoki/internal/capsule/reconcile"
 	"kitsoki/internal/capsule/record"
 	"kitsoki/internal/capsule/storydigest"
@@ -120,6 +122,32 @@ type capsulePromoteOptions struct {
 	Wait            bool
 }
 
+// promoteReceiptReuse is the durable hand-off between Capsule CI and queue
+// admission. Queue contention is expected to be temporary; it must not cause
+// a second expensive CI run for an identical promotion attempt.  The record is
+// deliberately more specific than a receipt: it binds the receipt to the
+// workspace generation, branch, queue target, and deterministic queue gate
+// that the caller asked to promote.
+const promoteReceiptReuseSchema = "capsule-promote-receipt-reuse/v1"
+
+type promoteReceiptReuse struct {
+	Schema            string `json:"schema"`
+	ProjectRoot       string `json:"project_root"`
+	WorkspaceID       string `json:"workspace_id"`
+	WorkspaceGen      uint64 `json:"workspace_generation"`
+	Branch            string `json:"branch"`
+	CandidateSHA      string `json:"candidate_sha"`
+	Pipeline          string `json:"pipeline"`
+	TargetRef         string `json:"target_ref"`
+	GateCommand       string `json:"gate_command"`
+	ReceiptID         string `json:"receipt_id"`
+	ReceiptPath       string `json:"receipt_path"`
+	RunID             string `json:"run_id"`
+	EnvelopeDigest    string `json:"envelope_digest"`
+	StoryDigest       string `json:"story_digest"`
+	EnvironmentDigest string `json:"environment_digest"`
+}
+
 func resolvePromoteWorkspace(project, workspace string, current bool) (devWorkspaceManifest, error) {
 	if !current {
 		if strings.TrimSpace(workspace) == "" {
@@ -195,10 +223,16 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 			return capsulePromoteResult{}, err
 		}
 	}
+	branch, err := gitTrim(ctx, workspacePath, "branch", "--show-current")
+	if err != nil {
+		return capsulePromoteResult{}, err
+	}
 	var stored record.Stored
 	candidateSHA := instance.Head
 	if !opts.SkipTests {
-		stored, err = runPromoteCI(ctx, root, instance, opts.Pipeline)
+		stored, _, err = promoteReceiptForAttempt(ctx, root, instance, branch, opts, func(ctx context.Context) (record.Stored, error) {
+			return runPromoteCI(ctx, root, instance, opts.Pipeline)
+		})
 		if err != nil {
 			return capsulePromoteResult{}, err
 		}
@@ -212,10 +246,6 @@ func runCapsulePromote(ctx context.Context, opts capsulePromoteOptions) (capsule
 	// not from this workspace directly.
 	if _, err := gitTrim(ctx, root, "fetch", "--no-tags", "--no-write-fetch-head", workspacePath, candidateSHA); err != nil {
 		return capsulePromoteResult{}, fmt.Errorf("capsule promote: publish candidate %s into %s: %w", candidateSHA, root, err)
-	}
-	branch, err := gitTrim(ctx, workspacePath, "branch", "--show-current")
-	if err != nil {
-		return capsulePromoteResult{}, err
 	}
 	qstore := queue.Store{ProjectRoot: root}
 	var qcandidate queue.Candidate
@@ -325,6 +355,137 @@ func runPromoteCI(ctx context.Context, project string, instance control.Instance
 		return record.Stored{}, err
 	}
 	return stored, nil
+}
+
+// promoteReceiptForAttempt returns a previous Capsule-CI receipt only when its
+// durable continuation and the receipt/run pair still describe this exact
+// promotion. A stale continuation (for example after a workspace commit or a
+// different target/gate request) is not an error: it simply cannot authorize
+// reuse and a fresh CI run is required. A matching continuation with malformed
+// or substituted evidence is an error and never falls through to a blind rerun.
+func promoteReceiptForAttempt(ctx context.Context, root string, instance control.Instance, branch string, opts capsulePromoteOptions, run func(context.Context) (record.Stored, error)) (record.Stored, bool, error) {
+	stored, found, err := loadPromoteReceiptReuse(ctx, root, instance, branch, opts)
+	if err != nil {
+		return record.Stored{}, false, err
+	}
+	if found {
+		return stored, true, nil
+	}
+	stored, err = run(ctx)
+	if err != nil {
+		return record.Stored{}, false, err
+	}
+	if err := persistPromoteReceiptReuse(root, instance, branch, opts, stored); err != nil {
+		return record.Stored{}, false, err
+	}
+	return stored, false, nil
+}
+
+func loadPromoteReceiptReuse(ctx context.Context, root string, instance control.Instance, branch string, opts capsulePromoteOptions) (record.Stored, bool, error) {
+	path, err := promoteReceiptReusePath(root, instance.ID)
+	if err != nil {
+		return record.Stored{}, false, err
+	}
+	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return record.Stored{}, false, nil
+	}
+	if err != nil {
+		return record.Stored{}, false, fmt.Errorf("capsule promote: read receipt reuse record: %w", err)
+	}
+	var reuse promoteReceiptReuse
+	if err := json.Unmarshal(raw, &reuse); err != nil {
+		return record.Stored{}, false, fmt.Errorf("capsule promote: parse receipt reuse record: %w", err)
+	}
+	if !reuseMatchesAttempt(reuse, root, instance, branch, opts) {
+		return record.Stored{}, false, nil
+	}
+	stored, err := verifyPromoteReceiptReuse(ctx, root, instance, reuse)
+	if err != nil {
+		return record.Stored{}, false, err
+	}
+	return stored, true, nil
+}
+
+func reuseMatchesAttempt(reuse promoteReceiptReuse, root string, instance control.Instance, branch string, opts capsulePromoteOptions) bool {
+	return reuse.Schema == promoteReceiptReuseSchema &&
+		reuse.ProjectRoot == root &&
+		reuse.WorkspaceID == instance.ID &&
+		reuse.WorkspaceGen == instance.Generation &&
+		reuse.Branch == branch &&
+		reuse.CandidateSHA == instance.Head &&
+		reuse.Pipeline == opts.Pipeline &&
+		reuse.TargetRef == opts.TargetRef &&
+		reuse.GateCommand == opts.GateCommand
+}
+
+func verifyPromoteReceiptReuse(ctx context.Context, root string, instance control.Instance, reuse promoteReceiptReuse) (record.Stored, error) {
+	if reuse.ReceiptID == "" || reuse.RunID == "" || reuse.EnvelopeDigest == "" || reuse.StoryDigest == "" || reuse.EnvironmentDigest == "" {
+		return record.Stored{}, fmt.Errorf("capsule promote: receipt reuse record is missing receipt, run, or envelope provenance")
+	}
+	wantPath := filepath.Join(root, ".capsules", "ci", reuse.RunID+".receipt.json")
+	if reuse.ReceiptPath != wantPath {
+		return record.Stored{}, fmt.Errorf("capsule promote: receipt reuse record has an unexpected receipt path")
+	}
+	raw, err := os.ReadFile(wantPath)
+	if err != nil {
+		return record.Stored{}, fmt.Errorf("capsule promote: read reusable receipt: %w", err)
+	}
+	var r receipt.Receipt
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return record.Stored{}, fmt.Errorf("capsule promote: parse reusable receipt: %w", err)
+	}
+	// PromotionGate binds receipt content, promotion eligibility, and its
+	// persisted run projection to the exact current candidate. It also applies
+	// the project signature policy if one exists.
+	if err := (record.PromotionGate{ProjectRoot: root}).Verify(ctx, reuse.ReceiptID, reconcile.Plan{Candidate: instance.Head, ReceiptCandidate: instance.Head}); err != nil {
+		return record.Stored{}, fmt.Errorf("capsule promote: reusable receipt provenance: %w", err)
+	}
+	run, err := (ci.FileRunStore{ProjectRoot: root}).Get(reuse.RunID)
+	if err != nil {
+		return record.Stored{}, fmt.Errorf("capsule promote: read reusable CI run: %w", err)
+	}
+	if r.ReceiptID != reuse.ReceiptID || r.JobID != reuse.RunID ||
+		r.Envelope.SourceDigest != instance.Head ||
+		r.Envelope.Instance.ID != instance.ID || r.Envelope.Instance.Generation != instance.Generation ||
+		r.Envelope.Digest != reuse.EnvelopeDigest || r.Envelope.StoryDigest != reuse.StoryDigest ||
+		r.Envelope.Environment.Digest != reuse.EnvironmentDigest ||
+		r.Verdict.Pipeline != reuse.Pipeline || run.ReceiptID != reuse.ReceiptID ||
+		run.Result.Envelope.Digest != reuse.EnvelopeDigest || run.Result.Verdict.Pipeline != reuse.Pipeline {
+		return record.Stored{}, fmt.Errorf("capsule promote: reusable receipt provenance does not match this workspace, pipeline, envelope, or run")
+	}
+	return record.Stored{Receipt: r, Verification: receipt.Verify(r, nil, false), ReceiptPath: wantPath}, nil
+}
+
+func persistPromoteReceiptReuse(root string, instance control.Instance, branch string, opts capsulePromoteOptions, stored record.Stored) error {
+	if stored.Receipt.ReceiptID == "" || stored.Receipt.JobID == "" || stored.Receipt.Envelope.SourceDigest != instance.Head || stored.Receipt.Verdict.Pipeline != opts.Pipeline {
+		return fmt.Errorf("capsule promote: CI result cannot be reused because its receipt does not match the requested workspace and pipeline")
+	}
+	path, err := promoteReceiptReusePath(root, instance.ID)
+	if err != nil {
+		return err
+	}
+	reuse := promoteReceiptReuse{
+		Schema: promoteReceiptReuseSchema, ProjectRoot: root, WorkspaceID: instance.ID, WorkspaceGen: instance.Generation,
+		Branch: branch, CandidateSHA: instance.Head, Pipeline: opts.Pipeline, TargetRef: opts.TargetRef, GateCommand: opts.GateCommand,
+		ReceiptID: stored.Receipt.ReceiptID, ReceiptPath: filepath.Join(root, ".capsules", "ci", stored.Receipt.JobID+".receipt.json"), RunID: stored.Receipt.JobID,
+		EnvelopeDigest: stored.Receipt.Envelope.Digest, StoryDigest: stored.Receipt.Envelope.StoryDigest, EnvironmentDigest: stored.Receipt.Envelope.Environment.Digest,
+	}
+	raw, err := json.MarshalIndent(reuse, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := atomicfile.WriteFile(path, append(raw, '\n'), 0o600, 0o755); err != nil {
+		return fmt.Errorf("capsule promote: persist receipt reuse record: %w", err)
+	}
+	return nil
+}
+
+func promoteReceiptReusePath(root, workspaceID string) (string, error) {
+	if workspaceID == "" || filepath.Base(workspaceID) != workspaceID || workspaceID == "." || workspaceID == ".." {
+		return "", fmt.Errorf("capsule promote: invalid workspace id for receipt reuse")
+	}
+	return filepath.Join(root, ".capsules", "promotions", workspaceID+".receipt-reuse.json"), nil
 }
 
 func storydigestCompute(root, storyPath string) (string, error) {

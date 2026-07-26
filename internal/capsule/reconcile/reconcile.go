@@ -420,7 +420,11 @@ func (Git) IsAncestor(ctx context.Context, dir, a, b string) (bool, error) {
 	return false, err
 }
 func (Git) UpdateRef(ctx context.Context, dir, ref, next, old string) error {
-	if !strings.HasPrefix(ref, "refs/") && !strings.Contains(ref, "/") {
+	// Queue targets are branch names, including namespaced branches such as
+	// staging/local. update-ref does not DWIM a slash-containing branch name:
+	// without the full namespace it attempts to update the invalid loose ref
+	// "staging/local" instead of "refs/heads/staging/local".
+	if !strings.HasPrefix(ref, "refs/") {
 		ref = "refs/heads/" + ref
 	}
 	_, err := git(ctx, dir, "update-ref", ref, next, old)

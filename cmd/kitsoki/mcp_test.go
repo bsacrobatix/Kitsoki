@@ -300,6 +300,7 @@ func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
 	ctx := context.Background()
 	srv := studio.NewServer(studio.NewStudioSession(nil))
 	cs := connectStudioTestClient(ctx, t, srv)
+	tracePath := filepath.Join(t.TempDir(), "workflow-smoke.jsonl")
 
 	report, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
 		ServerCommand: "kitsoki",
@@ -311,6 +312,7 @@ func TestRunStudioMCPTestSession_SequentialCallsShareSession(t *testing.T) {
 				Args: map[string]any{
 					"story_path": "../../testdata/apps/cloak/app.yaml",
 					"key":        "workflow-smoke",
+					"trace":      tracePath,
 				},
 			},
 			{
@@ -356,6 +358,7 @@ func TestRunStudioMCPTestSession_SaveFeedsLaterCall(t *testing.T) {
 	ctx := context.Background()
 	srv := studio.NewServer(studio.NewStudioSession(nil))
 	cs := connectStudioTestClient(ctx, t, srv)
+	tracePath := filepath.Join(t.TempDir(), "saved-handle.jsonl")
 
 	report, err := runStudioMCPTestSession(ctx, cs, studioMCPTestOptions{
 		ServerCommand: "kitsoki",
@@ -367,6 +370,7 @@ func TestRunStudioMCPTestSession_SaveFeedsLaterCall(t *testing.T) {
 				Args: map[string]any{
 					"story_path": "../../testdata/apps/cloak/app.yaml",
 					"key":        "saved-handle",
+					"trace":      tracePath,
 				},
 				Save: map[string]string{
 					"handle": "structuredContent.handle",

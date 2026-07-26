@@ -7,6 +7,7 @@ package host
 // the stored evidence rather than invoking an effect again.
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -211,7 +212,40 @@ func integrationTrainRequestValid(request integrationTrainRequest) error {
 	if !integrationTrainPhaseValid(request.Phase) || request.trainID() == "" || request.manifestDigest() == "" {
 		return fmt.Errorf("authority request has invalid phase, train_id, or manifest_digest")
 	}
+	manifest, _ := request.Job["manifest"].(map[string]any)
+	computed, err := integrationTrainManifestDigest(manifest)
+	if err != nil {
+		return fmt.Errorf("authority request manifest seal: %w", err)
+	}
+	if request.manifestDigest() != computed {
+		return fmt.Errorf("authority request manifest_digest does not match canonical manifest: got %s want %s", request.manifestDigest(), computed)
+	}
 	return nil
+}
+
+// integrationTrainManifestDigest is the canonical seal shared with manifest
+// assemblers. The digest input is compact UTF-8 JSON of the manifest with
+// manifest_digest omitted, object keys recursively ordered lexicographically,
+// and array order preserved. encoding/json already orders map keys; disabling
+// HTML escaping keeps the bytes canonical UTF-8 rather than spelling <, >, and
+// & as optional escape sequences.
+func integrationTrainManifestDigest(manifest map[string]any) (string, error) {
+	if manifest == nil {
+		return "", fmt.Errorf("manifest object is required")
+	}
+	unsigned := make(map[string]any, len(manifest)-1)
+	for key, value := range manifest {
+		if key != "manifest_digest" {
+			unsigned[key] = value
+		}
+	}
+	var raw bytes.Buffer
+	encoder := json.NewEncoder(&raw)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(unsigned); err != nil {
+		return "", fmt.Errorf("encode canonical manifest: %w", err)
+	}
+	return integrationTrainDigest(bytes.TrimSuffix(raw.Bytes(), []byte{'\n'})), nil
 }
 
 func integrationTrainEvidenceMatches(request integrationTrainRequest, evidence map[string]any) error {
