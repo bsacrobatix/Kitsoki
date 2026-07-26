@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,47 @@ func TestNormalizeAgentProviderFailurePreservesCancellation(t *testing.T) {
 	}
 	if got.FailureClass != "" {
 		t.Fatalf("FailureClass = %q, want empty for cancellation", got.FailureClass)
+	}
+}
+
+func TestNormalizeAgentProviderFailureKeepsOnlyTypedSafeRemediation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		provider   string
+		wantClass  string
+		wantPhrase string
+	}{
+		{
+			name:       "401 is terminal credential remediation",
+			provider:   `HTTP/1.1 401 Unauthorized {"error":"expired","access_token":"secret-auth-token"}`,
+			wantClass:  "agent_auth",
+			wantPhrase: "refresh or replace the provider credential",
+		},
+		{
+			name:       "429 is deferred quota remediation",
+			provider:   `{"status_code":429,"message":"slow down","authorization":"Bearer secret-quota-token"}`,
+			wantClass:  "agent_quota",
+			wantPhrase: "retry is deferred by provider quota control",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeAgentProviderFailure(ClaudeRun{ExitCode: 1, Stderr: tc.provider})
+			if got.FailureClass != tc.wantClass {
+				t.Fatalf("FailureClass = %q, want %q", got.FailureClass, tc.wantClass)
+			}
+			if got.Infra == nil {
+				t.Fatal("Infra = nil, want typed provider failure")
+			}
+			message := got.Infra.Error()
+			if !strings.Contains(message, tc.wantPhrase) {
+				t.Fatalf("safe remediation %q missing from %q", tc.wantPhrase, message)
+			}
+			if strings.Contains(strings.ToLower(message), "secret-") || strings.Contains(message, "Bearer") {
+				t.Fatalf("provider secret leaked into durable error: %q", message)
+			}
+			if errors.Unwrap(got.Infra) != nil {
+				t.Fatalf("provider failure must not retain raw cause through unwrap: %v", errors.Unwrap(got.Infra))
+			}
+		})
 	}
 }

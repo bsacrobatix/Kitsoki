@@ -97,7 +97,7 @@ func TestStalledVerdictErrorPreservesHandledProviderFailure(t *testing.T) {
 		WorldAfter: map[string]any{
 			"host_error": map[string]any{
 				"namespace": "host.agent.task",
-				"message":   "host.agent.task: claude exec failed: agent_quota: coding-agent provider unavailable: HTTP 429",
+				"message":   "host.agent.task: claude exec failed: agent_quota: coding-agent provider rate limited; retry is deferred by provider quota control",
 			},
 		},
 	}
@@ -125,7 +125,7 @@ func TestStoryVerdictFromOutcomeTreatsDefaultVerdictAsStalled(t *testing.T) {
 			},
 			"host_error": map[string]any{
 				"namespace": "host.agent.task",
-				"message":   "host.agent.task: agent_quota: coding-agent provider unavailable: HTTP 429",
+				"message":   "host.agent.task: agent_quota: coding-agent provider rate limited; retry is deferred by provider quota control",
 			},
 		},
 	}

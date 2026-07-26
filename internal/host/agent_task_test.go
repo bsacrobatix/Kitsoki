@@ -162,22 +162,25 @@ func TestAgentTask_CodexMissingSubmitRetriesFreshExec(t *testing.T) {
 // provider through the rest of its semantic acceptance budget.
 func TestAgentTask_ProviderFailureAbortsAcceptanceRetries(t *testing.T) {
 	tests := []struct {
-		name       string
-		output     string
-		wantClass  string
-		wantDetail string
+		name            string
+		output          string
+		wantClass       string
+		wantRemediation string
+		mustNotLeak     string
 	}{
 		{
-			name:       "quota from stdout",
-			output:     `API Error: Request rejected (429) - You've exceeded your subscription rate limits`,
-			wantClass:  "agent_quota",
-			wantDetail: "429",
+			name:            "quota from stdout",
+			output:          `API Error: Request rejected (429) - You've exceeded your subscription rate limits`,
+			wantClass:       "agent_quota",
+			wantRemediation: "retry is deferred by provider quota control",
+			mustNotLeak:     "subscription rate limits",
 		},
 		{
-			name:       "auth from stdout",
-			output:     `API Error: authentication_error - Invalid API Key provided`,
-			wantClass:  "agent_auth",
-			wantDetail: "Invalid API Key",
+			name:            "auth from stdout",
+			output:          `API Error: authentication_error - Invalid API Key provided`,
+			wantClass:       "agent_auth",
+			wantRemediation: "refresh or replace the provider credential",
+			mustNotLeak:     "Invalid API Key",
 		},
 	}
 
@@ -216,8 +219,11 @@ func TestAgentTask_ProviderFailureAbortsAcceptanceRetries(t *testing.T) {
 			if res.FailureKind != host.FailureInfra {
 				t.Fatalf("FailureKind = %q, want %q", res.FailureKind, host.FailureInfra)
 			}
-			if !strings.Contains(res.Error, tc.wantClass) || !strings.Contains(res.Error, tc.wantDetail) {
-				t.Fatalf("Result.Error = %q, want class %q and detail %q", res.Error, tc.wantClass, tc.wantDetail)
+			if !strings.Contains(res.Error, tc.wantClass) || !strings.Contains(res.Error, tc.wantRemediation) {
+				t.Fatalf("Result.Error = %q, want class %q and remediation %q", res.Error, tc.wantClass, tc.wantRemediation)
+			}
+			if strings.Contains(res.Error, tc.mustNotLeak) {
+				t.Fatalf("Result.Error leaked raw provider detail %q: %q", tc.mustNotLeak, res.Error)
 			}
 			if strings.Contains(res.Error, "acceptance failed after") {
 				t.Fatalf("provider failure was misreported as semantic exhaustion: %s", res.Error)

@@ -86,6 +86,39 @@ func TestProviderQuotaBacksOffAfterRateLimitError(t *testing.T) {
 	}
 }
 
+func TestProviderQuotaOnlyOpensBackoffForExplicit429(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "quota.json")
+	ctx := quotaTestContext(statePath, QuotaControl{
+		Window:        "1m",
+		ReserveTokens: 1,
+	})
+
+	auth, err := reserveProviderQuota(ctx, claudeBackend{}, "auth")
+	if err != nil {
+		t.Fatalf("reserve for 401: %v", err)
+	}
+	auth.finish(nil, `{"status":401,"error":"invalid credential"}`)
+	st := readQuotaStateForTest(t, statePath)
+	profile := st.Profiles["synthetic-test|claude|hf:test|ambient"]
+	if profile == nil {
+		t.Fatalf("profile state missing after 401: %+v", st.Profiles)
+	}
+	if !profile.BackoffUntil.IsZero() || !profile.LastRateLimitedAt.IsZero() {
+		t.Fatalf("401 must not open quota backoff: %+v", profile)
+	}
+
+	quota, err := reserveProviderQuota(ctx, claudeBackend{}, "quota")
+	if err != nil {
+		t.Fatalf("reserve for 429: %v", err)
+	}
+	quota.finish(nil, `request failed with status code: 429`)
+	st = readQuotaStateForTest(t, statePath)
+	profile = st.Profiles["synthetic-test|claude|hf:test|ambient"]
+	if profile.LastRateLimitedAt.IsZero() || profile.BackoffUntil.IsZero() {
+		t.Fatalf("explicit 429 must open quota backoff: %+v", profile)
+	}
+}
+
 func TestProviderQuotaPersistsObservedUsage(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "quota.json")
 	ctx := quotaTestContext(statePath, QuotaControl{

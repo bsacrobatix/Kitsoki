@@ -771,23 +771,25 @@ func ClassifyAgentFailureText(text string) string {
 // provider that cannot serve the request. It deliberately retains the typed
 // class in its text because the Capsule worker is a later process boundary:
 // it classifies the story/launcher error after the in-host ClaudeRun is gone.
-// Keeping the original provider detail alongside the class lets that outer
-// boundary assign agent_auth/agent_quota without guessing from a generic
-// "acceptance retries exhausted" message.
+// The typed class alone is enough for that outer boundary to assign
+// agent_auth/agent_quota without guessing from a generic "acceptance retries
+// exhausted" message. Do not retain provider output here: it may include a
+// response body or credential-shaped value, while this error is persisted in
+// durable worker evidence and shown to operators.
 type agentProviderFailure struct {
-	class  string
-	detail string
-	cause  error
+	class string
 }
 
 func (e agentProviderFailure) Error() string {
-	if e.detail == "" {
+	switch e.class {
+	case "agent_auth":
+		return "agent_auth: coding-agent provider authentication failed; refresh or replace the provider credential"
+	case "agent_quota":
+		return "agent_quota: coding-agent provider rate limited; retry is deferred by provider quota control"
+	default:
 		return fmt.Sprintf("%s: coding-agent provider unavailable", e.class)
 	}
-	return fmt.Sprintf("%s: coding-agent provider unavailable: %s", e.class, e.detail)
 }
-
-func (e agentProviderFailure) Unwrap() error { return e.cause }
 
 // normalizeAgentProviderFailure is the single boundary between a coding-agent
 // process result and host.agent.* retry semantics. Provider quota/auth errors
@@ -837,11 +839,8 @@ func normalizeAgentProviderFailure(cr ClaudeRun) ClaudeRun {
 		return cr
 	}
 
-	detail := strings.TrimSpace(onelinePreview(failureText, 600))
 	cr.Infra = agentProviderFailure{
-		class:  cr.FailureClass,
-		detail: detail,
-		cause:  cr.Infra,
+		class: cr.FailureClass,
 	}
 	return cr
 }
