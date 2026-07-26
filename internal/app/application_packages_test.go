@@ -55,6 +55,21 @@ application:
                 description: Selected package panel.
                 semantic_ref: package-consumer.card.panel
                 component: kitsoki-test.synthetic.panel
+                bindings:
+                  props:
+                    title: {source: literal, value: Fixture panel}
+                    note: {source: literal, value: null}
+                  events:
+                    select:
+                      action: package-consumer.panel.select
+                      input:
+                        id: {source: event, path: [id]}
+  actions:
+    package-consumer.panel.select:
+      name: Select panel
+      description: Select one package panel.
+      semantic_ref: package-consumer.action.panel-select
+      intent: kitsoki-test.synthetic.approve
   surfaces:
     web: {presentation: custom}
     tui: {presentation: default}
@@ -113,6 +128,19 @@ states:
 	}
 	if !filepath.IsAbs(def.Application.Components[owner+".panel"].Web.Module) {
 		t.Fatalf("component module path was not rebased: %q", def.Application.Components[owner+".panel"].Web.Module)
+	}
+	component := def.Application.Components[owner+".panel"]
+	if !filepath.IsAbs(component.Events["select"]) ||
+		component.Origin.Story != owner ||
+		component.Origin.Member != "component-package.components.panel" {
+		t.Fatalf("component event/origin = %#v", component)
+	}
+	if component.Fallback == nil || component.Fallback.ValueProp != "title" {
+		t.Fatalf("component fallback = %#v", component.Fallback)
+	}
+	bindings := def.Application.Pages["home"].Regions["main"].Items[0].Card.Bindings
+	if bindings == nil || !bindings.Props["note"].ValueSet || bindings.Props["note"].Value != nil {
+		t.Fatalf("literal null binding = %#v", bindings)
 	}
 	if len(def.ApplicationPackageRoots) != 1 || def.ApplicationPackageRoots[0] != fixtureDir {
 		t.Fatalf("verified package roots = %#v", def.ApplicationPackageRoots)

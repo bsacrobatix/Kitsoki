@@ -75,9 +75,19 @@ func (f Frame) Validate() error {
 		}
 		entries = append(entries, semanticEntry{node: page.Semantic})
 	}
+	components := make(map[string]ComponentDescriptor, len(f.Components))
 	for _, component := range f.Components {
 		if component.ID == "" {
 			return fmt.Errorf("application: component descriptor id is required")
+		}
+		if _, duplicate := components[component.ID]; duplicate {
+			return fmt.Errorf("application: duplicate component descriptor %q", component.ID)
+		}
+		components[component.ID] = component
+		for event, schema := range component.Events {
+			if event == "" || len(schema) == 0 || !json.Valid(schema) {
+				return fmt.Errorf("application: component %q event %q has invalid schema", component.ID, event)
+			}
 		}
 		entries = append(entries, semanticEntry{node: component.Semantic})
 	}
@@ -105,7 +115,7 @@ func (f Frame) Validate() error {
 				return err
 			}
 			for _, element := range card.Body {
-				if err := collectElement(element, &entries, actionIDs); err != nil {
+				if err := collectElement(element, &entries, actionIDs, components); err != nil {
 					return err
 				}
 			}
@@ -138,9 +148,52 @@ func (f Frame) Validate() error {
 	return nil
 }
 
-func collectElement(element Element, entries *[]semanticEntry, actionIDs map[string]Action) error {
+func collectElement(
+	element Element,
+	entries *[]semanticEntry,
+	actionIDs map[string]Action,
+	components map[string]ComponentDescriptor,
+) error {
 	if element.Kind == "" {
 		return fmt.Errorf("application: element kind is required")
+	}
+	if len(element.Props) > 0 && !json.Valid(element.Props) {
+		return fmt.Errorf("application: element props are not valid JSON")
+	}
+	if len(element.Value) > 0 && !json.Valid(element.Value) {
+		return fmt.Errorf("application: element value is not valid JSON")
+	}
+	if element.Component != "" {
+		component, ok := components[element.Component]
+		if !ok {
+			return fmt.Errorf("application: element component %q is not declared", element.Component)
+		}
+		offered := map[string]struct{}{}
+		for _, action := range element.Actions {
+			offered[action.ID] = struct{}{}
+		}
+		for event, binding := range element.Events {
+			if _, ok := component.Events[event]; !ok {
+				return fmt.Errorf("application: component %q event %q is not declared", element.Component, event)
+			}
+			if _, ok := offered[binding.Action]; !ok {
+				return fmt.Errorf("application: component event %q action %q is not offered by the element", event, binding.Action)
+			}
+			for input, source := range binding.Input {
+				switch source.Source {
+				case "event":
+					if len(source.Value) != 0 {
+						return fmt.Errorf("application: component event %q input %q event source has a literal value", event, input)
+					}
+				case "literal":
+					if len(source.Path) != 0 || len(source.Value) == 0 || !json.Valid(source.Value) {
+						return fmt.Errorf("application: component event %q input %q has an invalid literal", event, input)
+					}
+				default:
+					return fmt.Errorf("application: component event %q input %q has unsupported source %q", event, input, source.Source)
+				}
+			}
+		}
 	}
 	if element.Semantic != nil {
 		*entries = append(*entries, semanticEntry{node: *element.Semantic, state: element.State})
@@ -149,7 +202,7 @@ func collectElement(element Element, entries *[]semanticEntry, actionIDs map[str
 		return err
 	}
 	for _, item := range element.Items {
-		if err := collectElement(item, entries, actionIDs); err != nil {
+		if err := collectElement(item, entries, actionIDs, components); err != nil {
 			return err
 		}
 	}

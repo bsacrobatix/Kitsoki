@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -188,6 +189,12 @@ func TestApplicationDataValidation(t *testing.T) {
 			with:    "source: world.change_summary\n      sensitivity: secret",
 			want:    "sensitive or secret data may not use policy include",
 		},
+		{
+			name:    "unknown page scope",
+			replace: "      policy: include\n",
+			with:    "      policy: include\n      pages: [missing]\n",
+			want:    `"missing" does not name an application page`,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -200,6 +207,48 @@ func TestApplicationDataValidation(t *testing.T) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestApplicationContractRejectsTypedBindingsOnUnverifiedLocalComponent(t *testing.T) {
+	def := &AppDef{
+		App: AppMeta{ID: "demo", Version: "1.0.0"},
+		Application: &ApplicationContract{
+			Schema: ApplicationSchemaV1, Name: "Demo", Description: "Exercise bindings",
+			SemanticRef: "demo.application", Shell: ApplicationShell{Entry: "home"},
+			Pages: map[string]*ApplicationPage{
+				"home": {
+					Name: "Home", Description: "Show the component", SemanticRef: "demo.page.home",
+					Regions: map[string]*ApplicationRegion{
+						"main": {
+							Name: "Main", Description: "Show content", SemanticRef: "demo.region.main",
+							Items: []ApplicationRegionItem{{Card: &ApplicationCard{
+								ID: "card", Name: "Card", Description: "Show local component",
+								SemanticRef: "demo.card.local", Component: "demo.local",
+								Bindings: &ApplicationComponentBindings{
+									Props: map[string]*ApplicationValueBinding{
+										"title": {
+											Source: "literal", Value: "Unsafe", ValueSet: true,
+										},
+									},
+								},
+							}}},
+						},
+					},
+				},
+			},
+			Components: map[string]*ApplicationComponent{
+				"demo.local": {
+					Name: "Local", Description: "A local component",
+					SemanticRef: "demo.component.local", PropsSchema: "props.json",
+					Web: &ApplicationWebComponent{Module: "ui/local.js"},
+				},
+			},
+		},
+	}
+	errs := validateApplicationContract(def, "app.yaml")
+	if got := fmt.Sprint(errs); !strings.Contains(got, "requires a component selected from a lock-verified application package") {
+		t.Fatalf("validation errors = %v", errs)
 	}
 }
 

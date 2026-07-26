@@ -23,16 +23,28 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 	child := &AppDef{
 		App:     AppMeta{ID: "child"},
 		BaseDir: filepath.Join("fixtures", "child"),
+		World:   map[string]VarDef{"graph": {Type: "list"}},
 		RoomInterfaces: map[string]*RoomInterfaceDef{
 			"reviewer": {Intents: map[string]Intent{"go": {}}},
 		},
 		Application: &ApplicationContract{
+			Data: map[string]*ApplicationData{
+				"graph": {
+					Source: "world.graph", Sensitivity: "internal", Policy: "include",
+					Pages: []string{"home"},
+				},
+			},
 			Pages: map[string]*ApplicationPage{
 				"home": {
 					SemanticRef: "child.page.home",
 					Regions: map[string]*ApplicationRegion{
 						"main": {Items: []ApplicationRegionItem{{Card: &ApplicationCard{
 							ID: "card", Component: "child.card", Actions: []string{"child.open"},
+							Bindings: &ApplicationComponentBindings{
+								Props: map[string]*ApplicationValueBinding{
+									"rows": {Source: "data", Key: "graph"},
+								},
+							},
 						}}}},
 					},
 				},
@@ -54,7 +66,7 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 		Exports: &ExportsBlock{
 			Intents: []string{"go"},
 			Application: &ApplicationExports{
-				Pages: []string{"home"}, Components: []string{"child.card"},
+				Pages: []string{"home"}, Data: []string{"graph"}, Components: []string{"child.card"},
 				Actions: []string{"child.open"},
 			},
 			Handlers: map[string]*ApplicationHandler{
@@ -66,7 +78,10 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 			},
 		},
 	}
-	rw := &childRewriter{alias: "module", childIntent: map[string]struct{}{"go": {}}}
+	rw := &childRewriter{
+		alias: "module", childIntent: map[string]struct{}{"go": {}},
+		childWorldKey: map[string]struct{}{"graph": {}},
+	}
 	if errs := foldChildApplication(parent, child, "module", rw, "app.yaml"); len(errs) != 0 {
 		t.Fatalf("foldChildApplication: %v", errs)
 	}
@@ -76,6 +91,12 @@ func TestFoldChildApplicationNamespacesFullContract(t *testing.T) {
 	card := page.Regions["main"].Items[0].Card
 	if card.Component != componentID || card.Actions[0] != actionID {
 		t.Fatalf("composed card = %#v", card)
+	}
+	data := parent.Application.Data["module__graph"]
+	if data == nil || data.Source != "world.module__graph" ||
+		len(data.Pages) != 1 || data.Pages[0] != "module__home" ||
+		card.Bindings.Props["rows"].Key != "module__graph" {
+		t.Fatalf("composed data/binding = %#v / %#v", data, card.Bindings)
 	}
 	action := parent.Application.Actions[actionID]
 	if action.Handler != actionID || action.Intent != "module__go" ||

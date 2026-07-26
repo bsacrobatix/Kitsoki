@@ -771,6 +771,7 @@ type ExportsBlock struct {
 type ApplicationExports struct {
 	Navigation []string `yaml:"navigation,omitempty" json:"navigation,omitempty"`
 	Pages      []string `yaml:"pages,omitempty" json:"pages,omitempty"`
+	Data       []string `yaml:"data,omitempty" json:"data,omitempty"`
 	Components []string `yaml:"components,omitempty" json:"components,omitempty"`
 	Actions    []string `yaml:"actions,omitempty" json:"actions,omitempty"`
 	Schemas    []string `yaml:"schemas,omitempty" json:"schemas,omitempty"`

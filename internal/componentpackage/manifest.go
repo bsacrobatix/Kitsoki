@@ -5,6 +5,7 @@
 package componentpackage
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	yaml "github.com/goccy/go-yaml"
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 
 	"kitsoki/internal/kitlock"
 	"kitsoki/internal/kitver"
@@ -50,6 +52,7 @@ type Component struct {
 	SemanticAliases []string           `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
 	Web             *WebComponent      `yaml:"web,omitempty" json:"web,omitempty"`
 	PropsSchema     string             `yaml:"props_schema,omitempty" json:"props_schema,omitempty"`
+	Events          map[string]string  `yaml:"events,omitempty" json:"events,omitempty"`
 	Fallback        *ComponentFallback `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 }
 
@@ -59,7 +62,8 @@ type WebComponent struct {
 }
 
 type ComponentFallback struct {
-	Element string `yaml:"element" json:"element"`
+	Element   string `yaml:"element" json:"element"`
+	ValueProp string `yaml:"value_prop,omitempty" json:"value_prop,omitempty"`
 }
 
 type Dependency struct {
@@ -128,10 +132,32 @@ func (m *Manifest) Validate(root string) error {
 		if component.Web == nil && component.Fallback == nil {
 			problems = append(problems, path+": requires a web renderer or portable fallback")
 		}
+		if component.Fallback != nil && component.Fallback.ValueProp != "" {
+			if !segmentRE.MatchString(component.Fallback.ValueProp) {
+				problems = append(problems, path+".fallback.value_prop: must be a lowercase kebab-case prop name")
+			}
+			if component.PropsSchema == "" {
+				problems = append(problems, path+".fallback.value_prop: requires props_schema")
+			} else {
+				validateSchemaProperty(
+					root, path+".fallback.value_prop", component.PropsSchema,
+					component.Fallback.ValueProp, &problems,
+				)
+			}
+		}
 		if component.Web != nil {
 			validateFile(root, path+".web.module", component.Web.Module, &problems)
 		}
 		validateFile(root, path+".props_schema", component.PropsSchema, &problems)
+		for _, event := range sortedKeys(component.Events) {
+			validateMemberID(path+".events", event, &problems)
+			if strings.TrimSpace(component.Events[event]) == "" {
+				problems = append(problems, path+".events."+event+": payload schema is required")
+				continue
+			}
+			validateFile(root, path+".events."+event, component.Events[event], &problems)
+			validatePortableEventSchema(root, path+".events."+event, component.Events[event], &problems)
+		}
 	}
 	for _, id := range sortedKeys(m.Tokens) {
 		validateMemberID("tokens", id, &problems)
@@ -375,6 +401,119 @@ func validateFile(root, field, name string, problems *[]string) {
 			*problems = append(*problems, field+": file does not exist")
 		}
 	}
+}
+
+func validatePortableEventSchema(root, field, name string, problems *[]string) {
+	if root == "" || name == "" || filepath.IsAbs(name) {
+		return
+	}
+	rootPath, rootErr := filepath.EvalSymlinks(filepath.Clean(root))
+	targetPath, targetErr := filepath.EvalSymlinks(filepath.Join(root, filepath.Clean(name)))
+	if rootErr != nil || targetErr != nil {
+		return
+	}
+	relative, relErr := filepath.Rel(rootPath, targetPath)
+	if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return
+	}
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		return
+	}
+	var schema any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		*problems = append(*problems, field+": payload schema is not valid JSON")
+		return
+	}
+	if err := validatePortableSchemaNode(schema); err != nil {
+		*problems = append(*problems, field+": "+err.Error())
+		return
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("application://component-event/schema", schema); err != nil {
+		*problems = append(*problems, field+": invalid payload schema: "+err.Error())
+		return
+	}
+	if _, err := compiler.Compile("application://component-event/schema"); err != nil {
+		*problems = append(*problems, field+": invalid payload schema: "+err.Error())
+	}
+}
+
+func validateSchemaProperty(root, field, schemaFile, property string, problems *[]string) {
+	if root == "" || schemaFile == "" || filepath.IsAbs(schemaFile) {
+		return
+	}
+	rootPath, rootErr := filepath.EvalSymlinks(filepath.Clean(root))
+	targetPath, targetErr := filepath.EvalSymlinks(filepath.Join(root, filepath.Clean(schemaFile)))
+	if rootErr != nil || targetErr != nil {
+		return
+	}
+	relative, relErr := filepath.Rel(rootPath, targetPath)
+	if relErr != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return
+	}
+	raw, err := os.ReadFile(targetPath)
+	if err != nil {
+		return
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(raw, &schema) != nil {
+		return
+	}
+	if _, ok := schema.Properties[property]; !ok {
+		*problems = append(*problems, fmt.Sprintf("%s: %q is not declared by props_schema", field, property))
+	}
+}
+
+func validatePortableSchemaNode(schema any) error {
+	if _, ok := schema.(bool); ok {
+		return nil
+	}
+	object, ok := schema.(map[string]any)
+	if !ok {
+		return fmt.Errorf("payload schema nodes must be objects or booleans")
+	}
+	for keyword, value := range object {
+		switch keyword {
+		case "$schema", "$id", "title", "description", "default", "examples",
+			"type", "enum", "const", "required",
+			"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+			"minLength", "maxLength", "pattern",
+			"minItems", "maxItems", "uniqueItems",
+			"minProperties", "maxProperties":
+		case "properties":
+			properties, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("properties must be an object")
+			}
+			for name, property := range properties {
+				if err := validatePortableSchemaNode(property); err != nil {
+					return fmt.Errorf("properties.%s: %w", name, err)
+				}
+			}
+		case "items", "contains", "not", "additionalProperties":
+			if _, boolean := value.(bool); !boolean {
+				if err := validatePortableSchemaNode(value); err != nil {
+					return fmt.Errorf("%s: %w", keyword, err)
+				}
+			}
+		case "allOf", "anyOf", "oneOf", "prefixItems":
+			members, ok := value.([]any)
+			if !ok {
+				return fmt.Errorf("%s must be an array", keyword)
+			}
+			for i, member := range members {
+				if err := validatePortableSchemaNode(member); err != nil {
+					return fmt.Errorf("%s[%d]: %w", keyword, i, err)
+				}
+			}
+		default:
+			return fmt.Errorf("unsupported portable payload-schema keyword %q", keyword)
+		}
+	}
+	return nil
 }
 
 func sortedKeys[V any](values map[string]V) []string {

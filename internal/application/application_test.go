@@ -265,6 +265,216 @@ func TestCompileFrameWithDataProjectsOnlyAllowlistedWorldValues(t *testing.T) {
 	}
 }
 
+func TestCompileFrameResolvesTypedPackageBindingsAndScopesDataByPage(t *testing.T) {
+	baseDir := t.TempDir()
+	writeApplicationTestFile(t, filepath.Join(baseDir, "props.json"), `{
+		"type": "object",
+		"required": ["rows", "state", "route_id", "note"],
+		"properties": {
+			"rows": {"type": "array", "items": {"type": "object"}},
+			"state": {"type": "string"},
+			"route_id": {"type": "string"},
+			"note": {"type": "null"}
+		},
+		"additionalProperties": false
+	}`)
+	writeApplicationTestFile(t, filepath.Join(baseDir, "select-event.json"), `{
+		"type": "object",
+		"required": ["id"],
+		"properties": {"id": {"type": "string"}},
+		"additionalProperties": false
+	}`)
+	writeApplicationTestFile(t, filepath.Join(baseDir, "select-input.json"), `{
+		"type": "object",
+		"required": ["id", "origin"],
+		"properties": {
+			"id": {"type": "string"},
+			"origin": {"type": "string"}
+		},
+		"additionalProperties": false
+	}`)
+	def := &app.AppDef{
+		App: app.AppMeta{ID: "demo", Version: "1.0.0"}, BaseDir: baseDir,
+		World: map[string]app.VarDef{
+			"graph":       {Type: "list"},
+			"public_name": {Type: "string"},
+		},
+		Intents: map[string]app.Intent{
+			"select": {Slots: map[string]app.Slot{
+				"id": {Type: "string", Required: true},
+			}},
+		},
+		ApplicationPackageRoots: []string{baseDir},
+		Application: &app.ApplicationContract{
+			Schema: app.ApplicationSchemaV1, Name: "Demo", Description: "Exercise bindings",
+			SemanticRef: "demo.application", Shell: app.ApplicationShell{Entry: "public"},
+			Data: map[string]*app.ApplicationData{
+				"graph": {
+					Source: "world.graph", Sensitivity: "internal", Policy: "include",
+					Pages: []string{"dashboard"},
+				},
+				"public_name": {
+					Source: "world.public_name", Sensitivity: "public", Policy: "include",
+					Pages: []string{"public"},
+				},
+			},
+			Pages: map[string]*app.ApplicationPage{
+				"public": {
+					Name: "Public", Description: "Show public data", SemanticRef: "demo.page.public",
+				},
+				"dashboard": {
+					Name: "Dashboard", Description: "Show internal data", SemanticRef: "demo.page.dashboard",
+					Regions: map[string]*app.ApplicationRegion{
+						"main": {
+							Name: "Main", Description: "Show graph", SemanticRef: "demo.region.main",
+							Items: []app.ApplicationRegionItem{{Card: &app.ApplicationCard{
+								ID: "graph", Name: "Graph", Description: "Present graph rows",
+								SemanticRef: "demo.card.graph", Component: "kitsoki.widgets.graph",
+								Bindings: &app.ApplicationComponentBindings{
+									Props: map[string]*app.ApplicationValueBinding{
+										"rows":     {Source: "data", Key: "graph"},
+										"state":    {Source: "frame", Path: []string{"workflow", "state"}},
+										"route_id": {Source: "route", Key: "change_id"},
+										"note":     {Source: "literal", Value: nil, ValueSet: true},
+									},
+									Events: map[string]*app.ApplicationComponentEventBinding{
+										"select": {
+											Action: "demo.graph.select",
+											Input: map[string]*app.ApplicationValueBinding{
+												"id": {
+													Source: "event", Path: []string{"id"},
+												},
+												"origin": {
+													Source: "literal", Value: "graph", ValueSet: true,
+												},
+											},
+										},
+									},
+								},
+							}}},
+						},
+					},
+				},
+			},
+			Components: map[string]*app.ApplicationComponent{
+				"kitsoki.widgets.graph": {
+					Name: "Graph", Description: "Present graph rows",
+					SemanticRef: "kitsoki.widgets.component.graph",
+					PropsSchema: filepath.Join(baseDir, "props.json"),
+					Events: map[string]string{
+						"select": filepath.Join(baseDir, "select-event.json"),
+					},
+					Fallback: &app.ApplicationComponentFallback{Element: "table", ValueProp: "rows"},
+					Origin: app.ApplicationMemberOrigin{
+						Story: "kitsoki.widgets", Member: "component-package.components.graph",
+					},
+				},
+			},
+			Actions: map[string]*app.ApplicationAction{
+				"demo.graph.select": {
+					Name: "Select graph row", Description: "Select one graph row",
+					SemanticRef: "demo.action.graph-select", Intent: "select",
+					InputSchema: "select-input.json",
+				},
+			},
+		},
+	}
+	world := map[string]any{
+		"graph":        []any{map[string]any{"id": "node-1"}},
+		"public_name":  "Public catalog",
+		"private_path": "/private/catalog",
+	}
+
+	public, err := CompileFrameWithContext(
+		def, "session-1", 1, "public", Workflow{State: "ready"},
+		CompileContext{World: world},
+	)
+	if err != nil {
+		t.Fatalf("compile public frame: %v", err)
+	}
+	if _, leaked := public.Data["graph"]; leaked {
+		t.Fatalf("internal graph leaked into public frame: %#v", public.Data)
+	}
+	if got := string(public.Data["public_name"].Value); got != `"Public catalog"` {
+		t.Fatalf("public data = %s", got)
+	}
+	publicWire, err := json.Marshal(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(publicWire), "/private/catalog") {
+		t.Fatalf("ambient private state leaked into public frame: %s", publicWire)
+	}
+
+	dashboard, err := CompileFrameWithContext(
+		def, "session-1", 2, "dashboard", Workflow{State: "dashboard.ready"},
+		CompileContext{
+			World: world, RouteParams: map[string]any{"change_id": "chg-42"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("compile dashboard frame: %v", err)
+	}
+	element := dashboard.Regions[0].Cards[0].Body[0]
+	var props map[string]any
+	if err := json.Unmarshal(element.Props, &props); err != nil {
+		t.Fatal(err)
+	}
+	if props["state"] != "dashboard.ready" || props["route_id"] != "chg-42" {
+		t.Fatalf("resolved props = %#v", props)
+	}
+	if note, exists := props["note"]; !exists || note != nil {
+		t.Fatalf("literal null prop = %#v", props)
+	}
+	if string(element.Value) != `[{"id":"node-1"}]` {
+		t.Fatalf("fallback value = %s", element.Value)
+	}
+	if element.Semantic == nil || element.Semantic.Ref != "kitsoki.widgets.component.graph" {
+		t.Fatalf("component semantic = %#v", element.Semantic)
+	}
+	if element.Events["select"].Action != "demo.graph.select" ||
+		element.Events["select"].Input["id"].Source != "event" ||
+		string(element.Events["select"].Input["origin"].Value) != `"graph"` {
+		t.Fatalf("compiled event binding = %#v", element.Events)
+	}
+	if len(element.Actions) != 1 {
+		t.Fatalf("component event actions = %#v", element.Actions)
+	}
+	validator := &JSONSchemaValidator{}
+	if err := validator.Validate(
+		context.Background(), element.Actions[0].InputSchema,
+		json.RawMessage(`{"id":"node-1","origin":"graph"}`),
+	); err != nil {
+		t.Fatalf("mapped input schema validation: %v", err)
+	}
+	if err := validator.Validate(
+		context.Background(), element.Actions[0].InputSchema,
+		json.RawMessage(`{"id":1,"origin":"graph"}`),
+	); err == nil {
+		t.Fatal("malformed mapped action input passed schema validation")
+	}
+	if _, leaked := dashboard.Data["public_name"]; leaked {
+		t.Fatalf("public-only data crossed into dashboard frame: %#v", dashboard.Data)
+	}
+
+	world["graph"] = "wrong type"
+	if _, err := CompileFrameWithContext(
+		def, "session-1", 3, "dashboard", Workflow{State: "dashboard.ready"},
+		CompileContext{
+			World: world, RouteParams: map[string]any{"change_id": "chg-42"},
+		},
+	); err == nil || !strings.Contains(err.Error(), "props_schema rejected resolved props") {
+		t.Fatalf("wrong prop type error = %v", err)
+	}
+}
+
+func writeApplicationTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompileFramePreservesComposedMemberProvenance(t *testing.T) {
 	def := &app.AppDef{
 		App: app.AppMeta{ID: "parent", Version: "1.0.0"},

@@ -52,6 +52,9 @@ const runtime = {
   isActionPending(action: string) {
     return pendingActions.value.has(action);
   },
+  reportError(error: unknown) {
+    dispatchError.value = error instanceof Error ? error.message : String(error);
+  },
 };
 provide(applicationRuntimeKey, runtime);
 

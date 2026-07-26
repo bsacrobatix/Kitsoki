@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	yaml "github.com/goccy/go-yaml"
+
 	"kitsoki/internal/effect"
 )
 
@@ -41,9 +43,10 @@ type ApplicationContract struct {
 // ApplicationData declares one finite world value that may cross the
 // story/runtime boundary into application-frame/v1.
 type ApplicationData struct {
-	Source      string `yaml:"source" json:"source"`
-	Sensitivity string `yaml:"sensitivity" json:"sensitivity"`
-	Policy      string `yaml:"policy" json:"policy"`
+	Source      string   `yaml:"source" json:"source"`
+	Sensitivity string   `yaml:"sensitivity" json:"sensitivity"`
+	Policy      string   `yaml:"policy" json:"policy"`
+	Pages       []string `yaml:"pages,omitempty" json:"pages,omitempty"`
 }
 
 // ApplicationPackageUse selects named members from one package pinned in the
@@ -105,16 +108,17 @@ type ApplicationRegionItem struct {
 }
 
 type ApplicationCard struct {
-	ID          string                  `yaml:"id" json:"id"`
-	Name        string                  `yaml:"name" json:"name"`
-	Description string                  `yaml:"description" json:"description"`
-	SemanticRef string                  `yaml:"semantic_ref" json:"semantic_ref"`
-	Component   string                  `yaml:"component,omitempty" json:"component,omitempty"`
-	Props       map[string]any          `yaml:"props,omitempty" json:"props,omitempty"`
-	Elements    []ViewElement           `yaml:"elements,omitempty" json:"elements,omitempty"`
-	Actions     []string                `yaml:"actions,omitempty" json:"actions,omitempty"`
-	Generated   bool                    `yaml:"-" json:"generated,omitempty"`
-	Origin      ApplicationMemberOrigin `yaml:"-" json:"-"`
+	ID          string                        `yaml:"id" json:"id"`
+	Name        string                        `yaml:"name" json:"name"`
+	Description string                        `yaml:"description" json:"description"`
+	SemanticRef string                        `yaml:"semantic_ref" json:"semantic_ref"`
+	Component   string                        `yaml:"component,omitempty" json:"component,omitempty"`
+	Props       map[string]any                `yaml:"props,omitempty" json:"props,omitempty"`
+	Bindings    *ApplicationComponentBindings `yaml:"bindings,omitempty" json:"bindings,omitempty"`
+	Elements    []ViewElement                 `yaml:"elements,omitempty" json:"elements,omitempty"`
+	Actions     []string                      `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Generated   bool                          `yaml:"-" json:"generated,omitempty"`
+	Origin      ApplicationMemberOrigin       `yaml:"-" json:"-"`
 }
 
 type ApplicationComponent struct {
@@ -124,8 +128,44 @@ type ApplicationComponent struct {
 	SemanticAliases []string                      `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
 	Web             *ApplicationWebComponent      `yaml:"web,omitempty" json:"web,omitempty"`
 	PropsSchema     string                        `yaml:"props_schema,omitempty" json:"props_schema,omitempty"`
+	Events          map[string]string             `yaml:"events,omitempty" json:"events,omitempty"`
 	Fallback        *ApplicationComponentFallback `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 	Origin          ApplicationMemberOrigin       `yaml:"-" json:"-"`
+}
+
+// ApplicationComponentBindings is the finite data/event boundary between a
+// lock-verified component package member and a story application.
+type ApplicationComponentBindings struct {
+	Props  map[string]*ApplicationValueBinding          `yaml:"props,omitempty" json:"props,omitempty"`
+	Events map[string]*ApplicationComponentEventBinding `yaml:"events,omitempty" json:"events,omitempty"`
+}
+
+type ApplicationValueBinding struct {
+	Source   string   `yaml:"source" json:"source"`
+	Key      string   `yaml:"key,omitempty" json:"key,omitempty"`
+	Path     []string `yaml:"path,omitempty" json:"path,omitempty"`
+	Value    any      `yaml:"value,omitempty" json:"value,omitempty"`
+	ValueSet bool     `yaml:"-" json:"-"`
+}
+
+type ApplicationComponentEventBinding struct {
+	Action string                              `yaml:"action" json:"action"`
+	Input  map[string]*ApplicationValueBinding `yaml:"input,omitempty" json:"input,omitempty"`
+}
+
+func (b *ApplicationValueBinding) UnmarshalYAML(data []byte) error {
+	type plain ApplicationValueBinding
+	var decoded plain
+	if err := yaml.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]any
+	if err := yaml.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*b = ApplicationValueBinding(decoded)
+	_, b.ValueSet = fields["value"]
+	return nil
 }
 
 type ApplicationWebComponent struct {
@@ -134,7 +174,8 @@ type ApplicationWebComponent struct {
 }
 
 type ApplicationComponentFallback struct {
-	Element string `yaml:"element" json:"element"`
+	Element   string `yaml:"element" json:"element"`
+	ValueProp string `yaml:"value_prop,omitempty" json:"value_prop,omitempty"`
 }
 
 type ApplicationAction struct {
@@ -359,6 +400,9 @@ func validateApplicationContract(def *AppDef, file string) []error {
 			validateExportList("pages", exports.Pages, func(id string) bool {
 				return contract.Pages[id] != nil
 			})
+			validateExportList("data", exports.Data, func(id string) bool {
+				return contract.Data[id] != nil
+			})
 			validateExportList("components", exports.Components, func(id string) bool {
 				return contract.Components[id] != nil
 			})
@@ -415,6 +459,7 @@ func validateApplicationContract(def *AppDef, file string) []error {
 							addf(cardPath+".component", "%q is not declared in application.components", card.Component)
 						}
 					}
+					validateApplicationComponentBindings(def, contract, cardPath, card, addf)
 					for actionIndex, actionID := range card.Actions {
 						if _, ok := contract.Actions[actionID]; !ok {
 							addf(fmt.Sprintf("%s.actions[%d]", cardPath, actionIndex), "%q is not declared in application.actions", actionID)
@@ -568,6 +613,18 @@ func validateApplicationContract(def *AppDef, file string) []error {
 			}
 			if data.Policy == "include" && (data.Sensitivity == "sensitive" || data.Sensitivity == "secret") {
 				addf(path, "sensitive or secret data may not use policy include")
+			}
+			seenPages := map[string]struct{}{}
+			for i, page := range data.Pages {
+				pagePath := fmt.Sprintf("%s.pages[%d]", path, i)
+				if _, duplicate := seenPages[page]; duplicate {
+					addf(pagePath, "%q is duplicated", page)
+					continue
+				}
+				seenPages[page] = struct{}{}
+				if contract.Pages[page] == nil {
+					addf(pagePath, "%q does not name an application page", page)
+				}
 			}
 		}
 	}
@@ -800,6 +857,180 @@ func isBuiltinApplicationComponent(name string) bool {
 	}
 }
 
+var applicationFrameBindingPaths = map[string]struct{}{
+	"application_id":           {},
+	"session_id":               {},
+	"revision":                 {},
+	"page":                     {},
+	"workflow.state":           {},
+	"workflow.allowed_intents": {},
+	"workflow.budget_state":    {},
+	"workflow.degradation":     {},
+}
+
+func validateApplicationComponentBindings(
+	def *AppDef,
+	contract *ApplicationContract,
+	cardPath string,
+	card *ApplicationCard,
+	addf func(string, string, ...any),
+) {
+	if card == nil || card.Bindings == nil {
+		return
+	}
+	path := cardPath + ".bindings"
+	if card.Component == "" {
+		addf(path, "requires component")
+		return
+	}
+	component := contract.Components[card.Component]
+	if component == nil {
+		return
+	}
+	if !strings.HasPrefix(component.Origin.Member, "component-package.components.") {
+		addf(path, "requires a component selected from a lock-verified application package")
+	}
+	if len(card.Bindings.Props) > 0 && strings.TrimSpace(component.PropsSchema) == "" {
+		addf(path+".props", "requires the selected component to declare props_schema")
+	}
+	for name, binding := range card.Bindings.Props {
+		bindingPath := path + ".props." + name
+		if !validApplicationDataName(name) {
+			addf(bindingPath, "prop name %q must start with a lowercase letter and contain only lowercase letters, digits, underscores, or hyphens", name)
+		}
+		if _, legacy := card.Props[name]; legacy {
+			addf(bindingPath, "duplicates legacy props.%s", name)
+		}
+		validateApplicationValueBinding(contract, bindingPath, binding, false, addf)
+	}
+	for event, eventBinding := range card.Bindings.Events {
+		eventPath := path + ".events." + event
+		if !validApplicationDataName(event) {
+			addf(eventPath, "event name %q must start with a lowercase letter and contain only lowercase letters, digits, underscores, or hyphens", event)
+		}
+		if _, declared := component.Events[event]; !declared {
+			addf(eventPath, "%q is not declared by component %q", event, card.Component)
+		}
+		if eventBinding == nil {
+			addf(eventPath, "empty definition")
+			continue
+		}
+		action := contract.Actions[eventBinding.Action]
+		if action == nil {
+			addf(eventPath+".action", "%q is not declared in application.actions", eventBinding.Action)
+		}
+		for input, binding := range eventBinding.Input {
+			inputPath := eventPath + ".input." + input
+			if !validApplicationDataName(input) {
+				addf(inputPath, "input name %q must start with a lowercase letter and contain only lowercase letters, digits, underscores, or hyphens", input)
+			}
+			validateApplicationValueBinding(contract, inputPath, binding, true, addf)
+			if action != nil && action.Intent != "" {
+				if intent := applicationIntent(def, action.State, action.RoomInterface, action.Intent); intent != nil {
+					if _, declared := intent.Slots[input]; !declared {
+						addf(inputPath, "%q is not a slot of intent %q", input, action.Intent)
+					}
+				}
+			}
+		}
+	}
+}
+
+func validateApplicationValueBinding(
+	contract *ApplicationContract,
+	path string,
+	binding *ApplicationValueBinding,
+	allowEvent bool,
+	addf func(string, string, ...any),
+) {
+	if binding == nil {
+		addf(path, "empty definition")
+		return
+	}
+	switch binding.Source {
+	case "literal":
+		if binding.Key != "" || len(binding.Path) != 0 {
+			addf(path, "literal binding may only declare value")
+		}
+		if !binding.ValueSet {
+			addf(path+".value", "is required for a literal binding (use value: null for JSON null)")
+		}
+	case "data":
+		if binding.Key == "" || contract.Data[binding.Key] == nil {
+			addf(path+".key", "%q is not declared in application.data", binding.Key)
+		}
+		if len(binding.Path) != 0 {
+			addf(path+".path", "data binding does not support nested paths")
+		}
+	case "frame":
+		framePath := strings.Join(binding.Path, ".")
+		if _, ok := applicationFrameBindingPaths[framePath]; !ok {
+			addf(path+".path", "%q is not a supported canonical frame path", framePath)
+		}
+		if binding.Key != "" {
+			addf(path+".key", "frame binding uses path, not key")
+		}
+	case "route":
+		if !validApplicationDataName(binding.Key) {
+			addf(path+".key", "%q is not a valid route parameter name", binding.Key)
+		}
+		if len(binding.Path) != 0 {
+			addf(path+".path", "route binding does not support nested paths")
+		}
+	case "event":
+		if !allowEvent {
+			addf(path+".source", "event is only valid in component event input mappings")
+		}
+		if binding.Key != "" {
+			addf(path+".key", "event binding uses path, not key")
+		}
+		for i, segment := range binding.Path {
+			if !validApplicationDataName(segment) {
+				addf(fmt.Sprintf("%s.path[%d]", path, i), "%q is not a valid event payload member", segment)
+			}
+		}
+	default:
+		expected := "literal|data|frame|route"
+		if allowEvent {
+			expected += "|event"
+		}
+		addf(path+".source", "%q is not one of %s", binding.Source, expected)
+	}
+	if binding.Source != "literal" && binding.ValueSet {
+		addf(path+".value", "is only valid for a literal binding")
+	}
+}
+
+func applicationIntent(def *AppDef, statePath, roomInterface, intent string) *Intent {
+	if def == nil {
+		return nil
+	}
+	if roomInterface != "" {
+		if contract := def.RoomInterfaces[roomInterface]; contract != nil {
+			if declared, ok := contract.Intents[intent]; ok {
+				copy := declared
+				return &copy
+			}
+		}
+		return nil
+	}
+	if declared, ok := def.Intents[intent]; ok {
+		copy := declared
+		return &copy
+	}
+	var found *Intent
+	walkStates(def.States, "", func(path string, state *State) {
+		if found != nil || state == nil || (statePath != "" && path != statePath) {
+			return
+		}
+		if declared, ok := state.Intents[intent]; ok {
+			copy := declared
+			found = &copy
+		}
+	})
+	return found
+}
+
 func requiresComponentFallback(surfaces map[string]*ApplicationSurface) bool {
 	for name, surface := range surfaces {
 		if name == "web" || surface == nil || surface.Presentation == "none" {
@@ -935,6 +1166,7 @@ func mergeApplicationDeclarations(dst, src *AppDef, addErr func(string)) {
 			}
 			mergeExportList("navigation", &dst.Exports.Application.Navigation, src.Exports.Application.Navigation)
 			mergeExportList("page", &dst.Exports.Application.Pages, src.Exports.Application.Pages)
+			mergeExportList("data", &dst.Exports.Application.Data, src.Exports.Application.Data)
 			mergeExportList("component", &dst.Exports.Application.Components, src.Exports.Application.Components)
 			mergeExportList("action", &dst.Exports.Application.Actions, src.Exports.Application.Actions)
 			mergeExportList("schema", &dst.Exports.Application.Schemas, src.Exports.Application.Schemas)

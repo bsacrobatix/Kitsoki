@@ -13,6 +13,7 @@ func TestLoadDirAndVerifyLock(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "ui/card.js"), "export default {}")
 	write(t, filepath.Join(dir, "schemas/card.json"), "{}")
+	write(t, filepath.Join(dir, "schemas/select.json"), `{"type":"object","properties":{"id":{"type":"string"}}}`)
 	write(t, filepath.Join(dir, "tokens/base.json"), "{}")
 	write(t, filepath.Join(dir, FileName), `
 schema: application-component-package/v1
@@ -25,6 +26,7 @@ components:
     description: Present one guided step.
     semantic_ref: kitsoki.wizard-ui.component.card
     props_schema: schemas/card.json
+    events: {select: schemas/select.json}
     web: {module: ui/card.js, export: default}
     fallback: {element: prose}
 schemas:
@@ -70,6 +72,9 @@ dependencies:
 		selected.RoomTemplates["kitsoki.wizard-ui.review"] == nil ||
 		selected.HostInterfaces["kitsoki.wizard-ui.catalog"] == nil {
 		t.Fatalf("selection = %#v", selected)
+	}
+	if got := selected.Components["kitsoki.wizard-ui.card"].Events["select"]; got != "schemas/select.json" {
+		t.Fatalf("selected event schema = %q", got)
 	}
 }
 
@@ -129,6 +134,26 @@ func TestManifestRejectsFileSymlinkOutsidePackageRoot(t *testing.T) {
 	}
 	err := manifest.Validate(root)
 	if err == nil || !strings.Contains(err.Error(), "symlink escapes package root") {
+		t.Fatalf("Validate error = %v", err)
+	}
+}
+
+func TestManifestRejectsNonPortableEventSchema(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "panel.js"), "export default {}")
+	write(t, filepath.Join(root, "event.json"), `{"$ref":"https://example.invalid/event.json"}`)
+	manifest := &Manifest{
+		Schema: SchemaV1, Namespace: "kitsoki", Name: "unsafe", Version: "1.0.0",
+		Components: map[string]*Component{
+			"panel": {
+				SemanticRef: "kitsoki.unsafe.component.panel",
+				Web:         &WebComponent{Module: "panel.js"},
+				Events:      map[string]string{"select": "event.json"},
+			},
+		},
+	}
+	err := manifest.Validate(root)
+	if err == nil || !strings.Contains(err.Error(), `unsupported portable payload-schema keyword "$ref"`) {
 		t.Fatalf("Validate error = %v", err)
 	}
 }

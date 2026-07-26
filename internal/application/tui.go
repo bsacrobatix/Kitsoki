@@ -3,7 +3,10 @@ package application
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+
+	goyaml "github.com/goccy/go-yaml"
 
 	"kitsoki/internal/app"
 )
@@ -153,6 +156,33 @@ func projectTUIElement(frame Frame, element Element) ([]app.ViewElement, error) 
 			items = append(items, app.ListItem{Label: fmt.Sprint(value)})
 		}
 		return []app.ViewElement{{Kind: "list", Items: items}}, nil
+	case "kv":
+		var values map[string]any
+		if err := json.Unmarshal(element.Value, &values); err != nil {
+			return nil, fmt.Errorf("kv value must be an object: %w", err)
+		}
+		keys := make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		pairs := make(goyaml.MapSlice, 0, len(keys))
+		for _, key := range keys {
+			pairs = append(pairs, goyaml.MapItem{Key: key, Value: values[key]})
+		}
+		return []app.ViewElement{{Kind: "kv", Pairs: pairs}}, nil
+	case "banner":
+		return []app.ViewElement{{Kind: "banner", Source: displayTUIValue(element.Value)}}, nil
+	case "choice":
+		var values []any
+		if err := json.Unmarshal(element.Value, &values); err != nil {
+			return nil, fmt.Errorf("choice fallback value must be an array: %w", err)
+		}
+		items := make([]app.ListItem, 0, len(values))
+		for _, value := range values {
+			items = append(items, app.ListItem{Label: fmt.Sprint(value)})
+		}
+		return []app.ViewElement{{Kind: "list", Items: items}}, nil
 	case "component":
 		fallback := componentFallback(frame, element.Component)
 		if fallback == "" {
@@ -184,6 +214,19 @@ func projectTUIElement(frame Frame, element Element) ([]app.ViewElement, error) 
 		}
 		return []app.ViewElement{{
 			Kind: "media", MediaHandle: artifact.Handle, MediaCaption: artifact.Name,
+		}}, nil
+	case "media":
+		var media struct {
+			Handle  string `json:"handle"`
+			Caption string `json:"caption"`
+		}
+		if err := json.Unmarshal(element.Value, &media); err != nil || media.Handle == "" {
+			if err := json.Unmarshal(element.Value, &media.Handle); err != nil || media.Handle == "" {
+				return nil, fmt.Errorf("media value must contain a handle")
+			}
+		}
+		return []app.ViewElement{{
+			Kind: "media", MediaHandle: media.Handle, MediaCaption: media.Caption,
 		}}, nil
 	case "form":
 		var typed app.ViewElement

@@ -56,6 +56,9 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 	if parent.Application.Pages == nil {
 		parent.Application.Pages = map[string]*ApplicationPage{}
 	}
+	if parent.Application.Data == nil {
+		parent.Application.Data = map[string]*ApplicationData{}
+	}
 	if parent.Application.Components == nil {
 		parent.Application.Components = map[string]*ApplicationComponent{}
 	}
@@ -76,6 +79,7 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 	}
 
 	pageIDs := map[string]string{}
+	dataIDs := map[string]string{}
 	componentIDs := map[string]string{}
 	actionIDs := map[string]string{}
 	schemaIDs := map[string]string{}
@@ -100,6 +104,12 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 		}, pageIDs)
 		for id := range pageIDs {
 			pageIDs[id] = alias + "__" + id
+		}
+		exportMembers("data", applicationExports.Data, func(id string) bool {
+			return child.Application.Data[id] != nil
+		}, dataIDs)
+		for id := range dataIDs {
+			dataIDs[id] = alias + "__" + id
 		}
 		exportMembers("components", applicationExports.Components, func(id string) bool {
 			return child.Application.Components[id] != nil
@@ -142,6 +152,25 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 					add(fmt.Sprintf("exported page %q references private component %q", id, component))
 					privateDependency = true
 				}
+				if item.Card.Bindings != nil {
+					for _, binding := range item.Card.Bindings.Props {
+						if binding != nil && binding.Source == "data" && dataIDs[binding.Key] == "" {
+							add(fmt.Sprintf("exported page %q references private application data %q", id, binding.Key))
+							privateDependency = true
+						}
+					}
+					for _, event := range item.Card.Bindings.Events {
+						if event == nil {
+							continue
+						}
+						for _, binding := range event.Input {
+							if binding != nil && binding.Source == "data" && dataIDs[binding.Key] == "" {
+								add(fmt.Sprintf("exported page %q event references private application data %q", id, binding.Key))
+								privateDependency = true
+							}
+						}
+					}
+				}
 				for _, action := range item.Card.Actions {
 					if child.Application.Actions[action] != nil && actionIDs[action] == "" {
 						add(fmt.Sprintf("exported page %q references private action %q", id, action))
@@ -157,7 +186,34 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 		if privateDependency {
 			continue
 		}
-		parent.Application.Pages[newID] = cloneComposedPage(page, alias, rw, componentIDs, actionIDs)
+		parent.Application.Pages[newID] = cloneComposedPage(page, alias, rw, componentIDs, actionIDs, dataIDs)
+	}
+	for _, id := range sortedKeys(dataIDs) {
+		newID := dataIDs[id]
+		if _, exists := parent.Application.Data[newID]; exists {
+			add(fmt.Sprintf("data %q collides", newID))
+			continue
+		}
+		source := child.Application.Data[id]
+		if source == nil {
+			continue
+		}
+		clone := *source
+		clone.Source = rw.rewriteExpr(source.Source)
+		clone.Pages = make([]string, 0, len(source.Pages))
+		privatePage := false
+		for _, page := range source.Pages {
+			if mapped := pageIDs[page]; mapped != "" {
+				clone.Pages = append(clone.Pages, mapped)
+			} else {
+				add(fmt.Sprintf("exported data %q scopes private page %q", id, page))
+				privatePage = true
+			}
+		}
+		if privatePage {
+			continue
+		}
+		parent.Application.Data[newID] = &clone
 	}
 	if child.Application != nil && applicationExports != nil {
 		exportedNavigation := make(map[string]struct{}, len(applicationExports.Navigation))
@@ -325,7 +381,12 @@ func composedApplicationID(parentID, alias, childID, id string) string {
 	return parentID + "." + alias + "." + suffix
 }
 
-func cloneComposedPage(page *ApplicationPage, alias string, rw *childRewriter, components, actions map[string]string) *ApplicationPage {
+func cloneComposedPage(
+	page *ApplicationPage,
+	alias string,
+	rw *childRewriter,
+	components, actions, data map[string]string,
+) *ApplicationPage {
 	if page == nil {
 		return nil
 	}
@@ -350,6 +411,7 @@ func cloneComposedPage(page *ApplicationPage, alias string, rw *childRewriter, c
 			for key, value := range item.Card.Props {
 				card.Props[key] = rw.rewriteAny(value)
 			}
+			card.Bindings = cloneApplicationComponentBindings(item.Card.Bindings, rw, actions, data)
 			card.Elements = cloneViewElements(card.Elements)
 			for j := range card.Elements {
 				card.Elements[j] = rw.rewriteViewElement(card.Elements[j])
@@ -376,6 +438,13 @@ func cloneComposedComponent(component *ApplicationComponent, baseDir string) *Ap
 	}
 	clone := *component
 	clone.SemanticAliases = append([]string(nil), component.SemanticAliases...)
+	clone.Events = make(map[string]string, len(component.Events))
+	for event, schema := range component.Events {
+		clone.Events[event] = rebaseApplicationPath(schema, baseDir)
+	}
+	if len(clone.Events) == 0 {
+		clone.Events = nil
+	}
 	if component.Web != nil {
 		web := *component.Web
 		web.Module = rebaseApplicationPath(web.Module, baseDir)
@@ -386,6 +455,62 @@ func cloneComposedComponent(component *ApplicationComponent, baseDir string) *Ap
 		clone.Fallback = &fallback
 	}
 	clone.PropsSchema = rebaseApplicationPath(clone.PropsSchema, baseDir)
+	return &clone
+}
+
+func cloneApplicationComponentBindings(
+	bindings *ApplicationComponentBindings,
+	rw *childRewriter,
+	actions map[string]string,
+	data map[string]string,
+) *ApplicationComponentBindings {
+	if bindings == nil {
+		return nil
+	}
+	clone := &ApplicationComponentBindings{
+		Props:  make(map[string]*ApplicationValueBinding, len(bindings.Props)),
+		Events: make(map[string]*ApplicationComponentEventBinding, len(bindings.Events)),
+	}
+	for name, binding := range bindings.Props {
+		clone.Props[name] = cloneApplicationValueBinding(binding, rw)
+		if clone.Props[name] != nil && clone.Props[name].Source == "data" {
+			if mapped := data[clone.Props[name].Key]; mapped != "" {
+				clone.Props[name].Key = mapped
+			}
+		}
+	}
+	for event, binding := range bindings.Events {
+		if binding == nil {
+			clone.Events[event] = nil
+			continue
+		}
+		eventClone := &ApplicationComponentEventBinding{
+			Action: binding.Action,
+			Input:  make(map[string]*ApplicationValueBinding, len(binding.Input)),
+		}
+		if mapped := actions[eventClone.Action]; mapped != "" {
+			eventClone.Action = mapped
+		}
+		for name, input := range binding.Input {
+			eventClone.Input[name] = cloneApplicationValueBinding(input, rw)
+			if eventClone.Input[name] != nil && eventClone.Input[name].Source == "data" {
+				if mapped := data[eventClone.Input[name].Key]; mapped != "" {
+					eventClone.Input[name].Key = mapped
+				}
+			}
+		}
+		clone.Events[event] = eventClone
+	}
+	return clone
+}
+
+func cloneApplicationValueBinding(binding *ApplicationValueBinding, rw *childRewriter) *ApplicationValueBinding {
+	if binding == nil {
+		return nil
+	}
+	clone := *binding
+	clone.Path = append([]string(nil), binding.Path...)
+	clone.Value = rw.rewriteAny(binding.Value)
 	return &clone
 }
 

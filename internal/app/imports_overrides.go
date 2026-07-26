@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 )
 
@@ -260,15 +261,24 @@ func compatibleComponentOverride(base, replacement *ApplicationComponent) error 
 	if base.PropsSchema != replacement.PropsSchema {
 		return fmt.Errorf("props_schema %q is incompatible with %q", replacement.PropsSchema, base.PropsSchema)
 	}
+	if !reflect.DeepEqual(base.Events, replacement.Events) {
+		return fmt.Errorf("component events are incompatible")
+	}
 	baseFallback, replacementFallback := "", ""
+	baseFallbackValue, replacementFallbackValue := "", ""
 	if base.Fallback != nil {
 		baseFallback = base.Fallback.Element
+		baseFallbackValue = base.Fallback.ValueProp
 	}
 	if replacement.Fallback != nil {
 		replacementFallback = replacement.Fallback.Element
+		replacementFallbackValue = replacement.Fallback.ValueProp
 	}
 	if baseFallback != replacementFallback {
 		return fmt.Errorf("fallback element %q is incompatible with %q", replacementFallback, baseFallback)
+	}
+	if baseFallbackValue != replacementFallbackValue {
+		return fmt.Errorf("fallback value_prop %q is incompatible with %q", replacementFallbackValue, baseFallbackValue)
 	}
 	return nil
 }

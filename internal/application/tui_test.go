@@ -17,7 +17,8 @@ func TestProjectTUIUsesTypedElementsFallbacksAndSemanticTargets(t *testing.T) {
 	frame.Regions[0].Cards[0].Body = []Element{{
 		Kind:      "component",
 		Component: "test.component.items",
-		Props:     json.RawMessage(`["one","two"]`),
+		Props:     json.RawMessage(`{"rows":["wrong","shape"]}`),
+		Value:     json.RawMessage(`["one","two"]`),
 	}}
 	frame.Regions[0].Cards[0].Semantic.Source.ProgramNode = "program.card.items"
 	projected, err := ProjectTUI(frame)
@@ -112,5 +113,48 @@ func TestProjectTUIRejectsCustomComponentWithoutFallback(t *testing.T) {
 	frame.Regions[0].Cards[0].Body = []Element{{Kind: "component", Component: "demo.component"}}
 	if _, err := ProjectTUI(frame); err == nil {
 		t.Fatal("expected missing fallback error")
+	}
+}
+
+func TestProjectTUIProjectsAcceptedPortableComponentFallbackKinds(t *testing.T) {
+	tests := []struct {
+		kind  string
+		value string
+		want  string
+	}{
+		{kind: "heading", value: `"Heading"`, want: "heading"},
+		{kind: "code", value: `"code"`, want: "code"},
+		{kind: "template", value: `"template"`, want: "template"},
+		{kind: "kv", value: `{"State":"ready"}`, want: "kv"},
+		{kind: "banner", value: `"Review"`, want: "banner"},
+		{kind: "choice", value: `["Open","Archive"]`, want: "list"},
+		{kind: "media", value: `{"handle":"artifact-1","caption":"Evidence"}`, want: "media"},
+	}
+	for _, test := range tests {
+		t.Run(test.kind, func(t *testing.T) {
+			frame := testFrame()
+			frame.Components = []ComponentDescriptor{{
+				ID:       "test.component",
+				Fallback: test.kind,
+				Semantic: semantic("test.component", SemanticComponent),
+			}}
+			frame.Regions[0].Cards[0].Body = []Element{{
+				Kind: "component", Component: "test.component",
+				Props: json.RawMessage(`{"rich":"props"}`), Value: json.RawMessage(test.value),
+			}}
+			projected, err := ProjectTUI(frame)
+			if err != nil {
+				t.Fatalf("ProjectTUI: %v", err)
+			}
+			found := false
+			for _, element := range projected.View.Elements {
+				if element.Kind == test.want {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("fallback %q missing from %#v", test.want, projected.View.Elements)
+			}
+		})
 	}
 }

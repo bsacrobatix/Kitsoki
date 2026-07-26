@@ -84,9 +84,10 @@ program graph records workflow nodes, reads/writes/effects, application
 semantics, handler/event edges, and provenance for impact and ownership queries.
 
 Imports fold application fragments under the existing story ownership rules.
-Child pages, navigation, components, actions, schemas, and tokens remain private
-unless named under `exports.application`; exported actions cannot target private
-intents. The root may make explicit whole-member replacements under
+Child pages, navigation, data, components, actions, schemas, and tokens remain
+private unless named under `exports.application`; exported data page scopes and
+binding keys are rebased with imported page aliases, and exported actions cannot
+target private intents. The root may make explicit whole-member replacements under
 `overrides.application`; replacements retain compatibility and semantic alias
 checks. Stories without an application contract receive a deterministic
 generated application projection from their typed views.
@@ -97,6 +98,14 @@ providers, and host interfaces without importing a room graph. Selection is
 resolved through the project kit repository and the same `.kitsoki/kits.lock`
 pin used by kits; an unpinned version, digest mismatch, collision, or missing
 portable fallback fails loading.
+
+Lock-selected component members may additionally declare a `props_schema`,
+finite emitted-event payload schemas, and a portable fallback `value_prop`.
+Story cards bind those members through structured `literal|data|frame|route`
+prop sources and named event-to-action mappings. The compiler resolves every
+non-event source from explicit inputs, validates the complete props object, and
+serializes the result into the canonical frame. It never carries an expression,
+module path, world snapshot, or ambient route object into a renderer.
 
 ## Web projection
 
@@ -113,12 +122,25 @@ as alerts; action rejection and dispatcher exceptions remain visible. Disabled
 or pending actions cannot dispatch. Stale state disables every action and
 navigation control.
 
+For typed package components, Vue listeners are synthesized only for events
+declared by the locked package member and bound by the story card. An emitted
+payload must satisfy the package's portable schema before its structured input
+paths are read. Invalid payloads fail closed on the frame error surface; valid
+mapped inputs still pass through the server-side action JSON Schema validator.
+
 Built-in frame elements render without story code. A component element resolves
 its name through `ApplicationComponentRegistry`. The registered Vue component
-receives schema-owned props, the frame, its element descriptor, and the same
-dispatcher. If no component exists, the registry fallback is tried, followed by
-the frame component descriptor's finite fallback. Unknown elements without a
-fallback produce a visible error.
+receives schema-owned props, the frame, and its element descriptor. Legacy
+components retain the direct dispatcher prop; typed package components dispatch
+only through their declared emitted-event listeners. If no component exists,
+the registry fallback is tried, followed by the frame component descriptor's
+finite fallback. Unknown elements without a fallback produce a visible error.
+
+The accepted fallback vocabulary is implemented on both web and TUI:
+`prose`, `form`, `list`, `table`, `artifact`, `status`, `heading`, `code`,
+`template`, `kv`, `banner`, `choice`, and `media`. A package may name
+`fallback.value_prop` to project one fully resolved prop as the portable value,
+which keeps rich list/table components useful outside their native web renderer.
 
 The dispatcher returns the canonical outcome envelope to the caller while the
 surface still applies its refreshed frame and the renderer still owns local

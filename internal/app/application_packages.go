@@ -188,6 +188,16 @@ func applyApplicationPackageSelection(def *AppDef, selection *componentpackage.S
 			Name: source.Name, Description: source.Description,
 			SemanticRef: source.SemanticRef, SemanticAliases: append([]string(nil), source.SemanticAliases...),
 			PropsSchema: rebaseApplicationPath(source.PropsSchema, packageDir),
+			Events:      map[string]string{},
+			Origin: ApplicationMemberOrigin{
+				Story: owner, Member: "component-package.components." + strings.TrimPrefix(id, owner+"."),
+			},
+		}
+		for event, schema := range source.Events {
+			component.Events[event] = rebaseApplicationPath(schema, packageDir)
+		}
+		if len(component.Events) == 0 {
+			component.Events = nil
 		}
 		if source.Web != nil {
 			component.Web = &ApplicationWebComponent{
@@ -195,7 +205,9 @@ func applyApplicationPackageSelection(def *AppDef, selection *componentpackage.S
 			}
 		}
 		if source.Fallback != nil {
-			component.Fallback = &ApplicationComponentFallback{Element: source.Fallback.Element}
+			component.Fallback = &ApplicationComponentFallback{
+				Element: source.Fallback.Element, ValueProp: source.Fallback.ValueProp,
+			}
 		}
 		def.Application.Components[id] = component
 	}

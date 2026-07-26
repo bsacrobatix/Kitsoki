@@ -26,6 +26,7 @@ application:
       source: world.pending_changes
       sensitivity: internal
       policy: include
+      pages: [inbox]
   shell:
     presentation: default
     entry: inbox
@@ -53,7 +54,7 @@ application:
                 semantic_ref: review.card.pending
                 component: review.change-list
                 props:
-                  source: pending_changes
+                  limit: 20
                 actions: [review.change.open]
   components:
     review.change-list:
@@ -93,10 +94,12 @@ kinds, and actions that do not resolve to an intent or exported handler.
 ## Live application data
 
 `application.data` is the only story-world path into
-`application-frame/v1`. Each entry names exactly one declared `world` key and
-assigns a sensitivity and exposure policy. Names must start with a lowercase
-letter and contain only lowercase letters, digits, underscores, or hyphens.
-Sources use the finite `world.<key>` form; nested paths, environment variables,
+`application-frame/v1`. Each entry names exactly one declared `world` key,
+assigns a sensitivity and exposure policy, and may restrict exposure to named
+pages with `pages`. An omitted `pages` list retains the compatibility behavior
+of exposing the value on every page. Names must start with a lowercase letter
+and contain only lowercase letters, digits, underscores, or hyphens. Sources
+use the finite `world.<key>` form; nested paths, environment variables,
 component props, credentials, and host paths are not valid sources.
 
 `include` preserves JSON values classified as `public` or `internal`.
@@ -117,9 +120,84 @@ world through `WorldReader` for every refresh and projects only these entries:
 }
 ```
 
-Custom components read this finite map from `frame.data`; static card `props`
-remain static author input. Callers that compile a definition without a live
-world remain compatible and receive no `data` field.
+Page filtering happens before component props compile, so an internal value
+scoped to `dashboard` is absent from a public page frame even when both pages
+belong to one application. Imported data and page scopes are alias-qualified
+together. Callers that compile a definition without a live world remain
+compatible and receive no `data` field.
+
+## Typed package component bindings
+
+New data/event bindings apply only to components selected from a versioned
+`application-component-package/v1` through the existing lock-verified
+`application.packages` mechanism. A binding cannot introduce a module path.
+Legacy local component declarations and static `props` remain compatible, but
+they do not acquire the typed binding surface.
+
+```yaml
+application:
+  packages:
+    - package: kitsoki.review-ui
+      select: [components.change-list]
+  pages:
+    inbox:
+      # ...
+      regions:
+        main:
+          # ...
+          items:
+            - card:
+                id: pending
+                name: Changes
+                description: List changes waiting for review.
+                semantic_ref: review.card.pending
+                component: kitsoki.review-ui.change-list
+                bindings:
+                  props:
+                    items: {source: data, key: pending_changes}
+                    workflow_state: {source: frame, path: [workflow, state]}
+                    change_id: {source: route, key: change_id}
+                    compact: {source: literal, value: true}
+                    empty_note: {source: literal, value: null}
+                  events:
+                    open:
+                      action: review.change.open
+                      input:
+                        change_id: {source: event, path: [change, id]}
+                        origin: {source: literal, value: inbox}
+```
+
+Prop sources are a finite union: `literal`, an exposed `data` key, one
+allowlisted canonical `frame` path, or an explicit `route` parameter. Route
+parameters are never read from browser globals; a caller must supply them via
+`CompileFrameWithContext`. Missing data or route values omit that prop.
+Resolved props are validated in full against the selected member's
+`props_schema` before the frame is emitted. Explicit `value: null` remains a
+JSON null and is distinct from an omitted literal value.
+
+The package member declares emitted event names and portable payload schemas:
+
+```yaml
+components:
+  change-list:
+    name: Change list
+    description: Present reviewable changes.
+    semantic_ref: kitsoki.review-ui.component.change-list
+    props_schema: schemas/change-list.json
+    events:
+      open: schemas/change-open-event.json
+    web: {module: ui/ChangeList.js, export: default}
+    fallback: {element: table, value_prop: items}
+```
+
+Only declared events can bind. Event inputs use structured payload paths or
+literals and target one named application action, which already resolves to a
+story intent or handler. The web renderer validates emitted payloads against
+the package schema before mapping them; the application service then validates
+the mapped input against the action schema before dispatch. Portable event
+schemas deliberately reject network references and unsupported keywords.
+Native surfaces retain the same component and action semantic refs and project
+the fallback's selected resolved prop instead of dumping the full prop object.
 
 Use provider-to-world-to-frame composition for graph-backed applications:
 
@@ -251,6 +329,7 @@ exports:
   application:
     navigation: [inbox]
     pages: [inbox]
+    data: [pending_changes]
     components: [review.change-list]
     actions: [review.change.open]
     schemas: [change-list]

@@ -1,6 +1,7 @@
 package application
 
 import (
+	stdcontext "context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -19,9 +20,29 @@ func CompileFrame(def *app.AppDef, sessionID string, revision uint64, pageID str
 	return CompileFrameWithData(def, sessionID, revision, pageID, workflow, nil)
 }
 
+type CompileContext struct {
+	World       map[string]any
+	RouteParams map[string]any
+}
+
 // CompileFrameWithData projects only world keys explicitly allowlisted by
 // application.data. The input is never copied wholesale into the frame.
 func CompileFrameWithData(def *app.AppDef, sessionID string, revision uint64, pageID string, workflow Workflow, world map[string]any) (Frame, error) {
+	return CompileFrameWithContext(
+		def, sessionID, revision, pageID, workflow, CompileContext{World: world},
+	)
+}
+
+// CompileFrameWithContext resolves component bindings only from explicit
+// compile inputs and the canonical frame under construction.
+func CompileFrameWithContext(
+	def *app.AppDef,
+	sessionID string,
+	revision uint64,
+	pageID string,
+	workflow Workflow,
+	context CompileContext,
+) (Frame, error) {
 	if def == nil {
 		return Frame{}, fmt.Errorf("application: application contract is required")
 	}
@@ -62,7 +83,7 @@ func CompileFrameWithData(def *app.AppDef, sessionID string, revision uint64, pa
 		),
 		Capabilities: Capabilities{Presentation: []string{"typed-elements"}},
 	}
-	data, err := compileFrameData(contract.Data, world)
+	data, err := compileFrameData(contract.Data, context.World, pageID)
 	if err != nil {
 		return Frame{}, err
 	}
@@ -111,6 +132,19 @@ func CompileFrameWithData(def *app.AppDef, sessionID string, revision uint64, pa
 				def.App.ID, "application.components."+id, decl.Origin,
 			),
 		})
+		descriptor := &frame.Components[len(frame.Components)-1]
+		for _, event := range sortedMapKeys(decl.Events) {
+			schema, err := resolveApplicationSchema(
+				def, fmt.Sprintf("component %q event %q", id, event), decl.Events[event],
+			)
+			if err != nil {
+				return Frame{}, err
+			}
+			if descriptor.Events == nil {
+				descriptor.Events = map[string]json.RawMessage{}
+			}
+			descriptor.Events[event] = schema
+		}
 		if decl.Web != nil {
 			frame.Capabilities.Presentation = appendUnique(frame.Capabilities.Presentation, "custom-components")
 		}
@@ -174,21 +208,45 @@ func CompileFrameWithData(def *app.AppDef, sessionID string, revision uint64, pa
 				card.Body = append(card.Body, Element{Kind: elementDecl.Kind, Props: props})
 			}
 			if cardDecl.Component != "" {
-				props, err := json.Marshal(cardDecl.Props)
+				component := contract.Components[cardDecl.Component]
+				props, err := compileComponentProps(def, frame, component, cardDecl, context)
 				if err != nil {
-					return Frame{}, fmt.Errorf("application: encode props for card %q: %w", cardDecl.ID, err)
+					return Frame{}, fmt.Errorf("application: compile component props for card %q: %w", cardDecl.ID, err)
 				}
-				if cardDecl.Props == nil {
-					props = json.RawMessage(`{}`)
-				}
-				card.Body = append(card.Body, Element{
+				element := Element{
 					Kind: "component", Component: cardDecl.Component, Props: props,
-				})
-				if component := contract.Components[cardDecl.Component]; component != nil {
+					Value: componentFallbackValue(props, component),
+				}
+				if component != nil {
+					semantic := semanticFromApplicationMember(
+						component.SemanticRef, SemanticComponent, component.Name, component.Description,
+						def.App.ID, "application.components."+cardDecl.Component, component.Origin,
+					)
+					element.Semantic = &semantic
 					card.Semantic.Relationships = append(card.Semantic.Relationships, Relationship{
 						Kind: "component", Ref: component.SemanticRef,
 					})
 				}
+				if cardDecl.Bindings != nil {
+					for _, event := range sortedMapKeys(cardDecl.Bindings.Events) {
+						declared := cardDecl.Bindings.Events[event]
+						binding, action, err := compileComponentEventBinding(
+							def, frame, context, event, declared,
+						)
+						if err != nil {
+							return Frame{}, fmt.Errorf("application: compile component event %q for card %q: %w", event, cardDecl.ID, err)
+						}
+						if element.Events == nil {
+							element.Events = map[string]ComponentEventBinding{}
+						}
+						element.Events[event] = binding
+						element.Actions = append(element.Actions, action)
+						card.Semantic.Relationships = append(card.Semantic.Relationships, Relationship{
+							Kind: "action", Ref: action.Semantic.Ref,
+						})
+					}
+				}
+				card.Body = append(card.Body, element)
 			}
 			for _, actionID := range cardDecl.Actions {
 				action, err := compileAction(def, actionID, contract.Actions[actionID])
@@ -225,14 +283,19 @@ func CompileFrameWithData(def *app.AppDef, sessionID string, revision uint64, pa
 	return frame, nil
 }
 
-func compileFrameData(declarations map[string]*app.ApplicationData, world map[string]any) (map[string]FrameData, error) {
+func compileFrameData(
+	declarations map[string]*app.ApplicationData,
+	world map[string]any,
+	pageID string,
+) (map[string]FrameData, error) {
 	if len(declarations) == 0 || world == nil {
 		return nil, nil
 	}
 	data := make(map[string]FrameData)
 	for _, name := range sortedMapKeys(declarations) {
 		declaration := declarations[name]
-		if declaration == nil || declaration.Policy == "exclude" {
+		if declaration == nil || declaration.Policy == "exclude" ||
+			(len(declaration.Pages) > 0 && !contains(declaration.Pages, pageID)) {
 			continue
 		}
 		key, ok := strings.CutPrefix(declaration.Source, "world.")
@@ -274,6 +337,165 @@ func compileFrameData(declarations map[string]*app.ApplicationData, world map[st
 	return data, nil
 }
 
+func contains(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func compileComponentProps(
+	def *app.AppDef,
+	frame Frame,
+	component *app.ApplicationComponent,
+	card *app.ApplicationCard,
+	context CompileContext,
+) (json.RawMessage, error) {
+	props := make(map[string]any, len(card.Props))
+	for name, value := range card.Props {
+		props[name] = value
+	}
+	if card.Bindings != nil {
+		for _, name := range sortedMapKeys(card.Bindings.Props) {
+			value, present, err := resolveComponentBindingValue(frame, context, card.Bindings.Props[name])
+			if err != nil {
+				return nil, fmt.Errorf("prop %q: %w", name, err)
+			}
+			if present {
+				props[name] = value
+			}
+		}
+	}
+	raw, err := json.Marshal(props)
+	if err != nil {
+		return nil, fmt.Errorf("encode resolved props: %w", err)
+	}
+	if card.Bindings != nil && component != nil && component.PropsSchema != "" {
+		schema, err := resolveApplicationSchema(
+			def, fmt.Sprintf("component %q props", card.Component), component.PropsSchema,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if err := (&JSONSchemaValidator{}).Validate(stdcontext.Background(), schema, raw); err != nil {
+			return nil, fmt.Errorf("props_schema rejected resolved props: %w", err)
+		}
+	}
+	return raw, nil
+}
+
+func compileComponentEventBinding(
+	def *app.AppDef,
+	frame Frame,
+	context CompileContext,
+	event string,
+	declaration *app.ApplicationComponentEventBinding,
+) (ComponentEventBinding, Action, error) {
+	if declaration == nil {
+		return ComponentEventBinding{}, Action{}, fmt.Errorf("empty event binding")
+	}
+	action, err := compileAction(def, declaration.Action, def.Application.Actions[declaration.Action])
+	if err != nil {
+		return ComponentEventBinding{}, Action{}, err
+	}
+	binding := ComponentEventBinding{
+		Action: declaration.Action,
+		Input:  map[string]ComponentInputBinding{},
+	}
+	for _, name := range sortedMapKeys(declaration.Input) {
+		source := declaration.Input[name]
+		if source == nil {
+			return ComponentEventBinding{}, Action{}, fmt.Errorf("input %q is empty", name)
+		}
+		if source.Source == "event" {
+			binding.Input[name] = ComponentInputBinding{
+				Source: "event", Path: append([]string(nil), source.Path...),
+			}
+			continue
+		}
+		value, present, err := resolveComponentBindingValue(frame, context, source)
+		if err != nil {
+			return ComponentEventBinding{}, Action{}, fmt.Errorf("input %q: %w", name, err)
+		}
+		if !present {
+			continue
+		}
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return ComponentEventBinding{}, Action{}, fmt.Errorf("encode input %q: %w", name, err)
+		}
+		binding.Input[name] = ComponentInputBinding{Source: "literal", Value: raw}
+	}
+	if len(binding.Input) == 0 {
+		binding.Input = nil
+	}
+	_ = event
+	return binding, action, nil
+}
+
+func resolveComponentBindingValue(
+	frame Frame,
+	context CompileContext,
+	binding *app.ApplicationValueBinding,
+) (any, bool, error) {
+	if binding == nil {
+		return nil, false, fmt.Errorf("binding is empty")
+	}
+	switch binding.Source {
+	case "literal":
+		return binding.Value, true, nil
+	case "data":
+		data, ok := frame.Data[binding.Key]
+		if !ok {
+			return nil, false, nil
+		}
+		var value any
+		if err := json.Unmarshal(data.Value, &value); err != nil {
+			return nil, false, err
+		}
+		return value, true, nil
+	case "route":
+		value, ok := context.RouteParams[binding.Key]
+		return value, ok, nil
+	case "frame":
+		switch strings.Join(binding.Path, ".") {
+		case "application_id":
+			return frame.ApplicationID, true, nil
+		case "session_id":
+			return frame.SessionID, true, nil
+		case "revision":
+			return frame.Revision, true, nil
+		case "page":
+			return frame.Page, true, nil
+		case "workflow.state":
+			return frame.Workflow.State, true, nil
+		case "workflow.allowed_intents":
+			return frame.Workflow.AllowedIntents, true, nil
+		case "workflow.budget_state":
+			return frame.Workflow.BudgetState, true, nil
+		case "workflow.degradation":
+			return frame.Workflow.Degradation, true, nil
+		default:
+			return nil, false, fmt.Errorf("unsupported frame path %q", strings.Join(binding.Path, "."))
+		}
+	default:
+		return nil, false, fmt.Errorf("unsupported source %q", binding.Source)
+	}
+}
+
+func componentFallbackValue(props json.RawMessage, component *app.ApplicationComponent) json.RawMessage {
+	if component == nil || component.Fallback == nil || component.Fallback.ValueProp == "" {
+		return nil
+	}
+	var values map[string]json.RawMessage
+	if json.Unmarshal(props, &values) != nil {
+		return nil
+	}
+	return values[component.Fallback.ValueProp]
+}
+
 func compileAction(def *app.AppDef, id string, decl *app.ApplicationAction) (Action, error) {
 	if decl == nil {
 		return Action{}, fmt.Errorf("application: action %q is not declared", id)
@@ -303,15 +525,19 @@ func compileAction(def *app.AppDef, id string, decl *app.ApplicationAction) (Act
 }
 
 func resolveActionInputSchema(def *app.AppDef, actionID, reference string) (json.RawMessage, error) {
+	return resolveApplicationSchema(def, fmt.Sprintf("action %q input", actionID), reference)
+}
+
+func resolveApplicationSchema(def *app.AppDef, label, reference string) (json.RawMessage, error) {
 	reference = strings.TrimSpace(reference)
 	if reference == "" {
 		return nil, nil
 	}
 	if def == nil || def.BaseDir == "" {
-		return nil, fmt.Errorf("application: action %q input schema %q has no story root", actionID, reference)
+		return nil, fmt.Errorf("application: %s schema %q has no story root", label, reference)
 	}
 	if strings.Contains(reference, "{{") {
-		return nil, fmt.Errorf("application: action %q input schema path may not be templated", actionID)
+		return nil, fmt.Errorf("application: %s schema path may not be templated", label)
 	}
 	target := reference
 	if !filepath.IsAbs(target) {
@@ -319,12 +545,13 @@ func resolveActionInputSchema(def *app.AppDef, actionID, reference string) (json
 	}
 	target, err := filepath.EvalSymlinks(filepath.Clean(target))
 	if err != nil {
-		return nil, fmt.Errorf("application: action %q input schema %q: %w", actionID, reference, err)
+		return nil, fmt.Errorf("application: %s schema %q: %w", label, reference, err)
 	}
 	allowedRoots := []string{def.BaseDir}
 	for _, manifest := range def.LoadedManifests {
 		allowedRoots = append(allowedRoots, filepath.Dir(manifest))
 	}
+	allowedRoots = append(allowedRoots, def.ApplicationPackageRoots...)
 	allowed := false
 	for _, root := range allowedRoots {
 		root, rootErr := filepath.EvalSymlinks(filepath.Clean(root))
@@ -338,15 +565,15 @@ func resolveActionInputSchema(def *app.AppDef, actionID, reference string) (json
 		}
 	}
 	if !allowed {
-		return nil, fmt.Errorf("application: action %q input schema %q escapes story roots", actionID, reference)
+		return nil, fmt.Errorf("application: %s schema %q escapes story and package roots", label, reference)
 	}
 	raw, err := os.ReadFile(target)
 	if err != nil {
-		return nil, fmt.Errorf("application: action %q input schema %q: %w", actionID, reference, err)
+		return nil, fmt.Errorf("application: %s schema %q: %w", label, reference, err)
 	}
 	normalized, err := NormalizeJSON(raw)
 	if err != nil {
-		return nil, fmt.Errorf("application: action %q input schema %q: %w", actionID, reference, err)
+		return nil, fmt.Errorf("application: %s schema %q: %w", label, reference, err)
 	}
 	return normalized, nil
 }

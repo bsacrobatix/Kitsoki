@@ -10,11 +10,14 @@ components:
     description: Present fixture content on application surfaces.
     semantic_ref: kitsoki-test.synthetic.component.panel
     props_schema: schemas/panel.json
+    events:
+      select: schemas/panel-select.json
     web:
       module: ui/panel.js
       export: default
     fallback:
       element: prose
+      value_prop: title
 
 schemas:
   panel-input: schemas/panel.json
@@ -37,6 +40,8 @@ intents:
     title: Approve
     description: Approve the current fixture item.
     examples: ["approve"]
+    slots:
+      id: {type: string, required: true}
 
 toolboxes:
   review:

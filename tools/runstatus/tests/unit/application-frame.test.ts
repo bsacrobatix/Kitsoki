@@ -248,6 +248,148 @@ describe("application-frame/v1 default renderer", () => {
     });
   });
 
+  it("maps declared component events only after payload validation", async () => {
+    const current = frame();
+    const card = current.regions![0]!.cards![0]!;
+    const action = {
+      id: "demo.change.select",
+      intent: "select",
+      enabled: true,
+      input_schema: {
+        type: "object",
+        required: ["id", "origin"],
+        properties: {
+          id: { type: "string" },
+          origin: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      semantic: semantic(
+        "demo.action.change-select",
+        "action",
+        "Select change",
+        "Select one emitted change."
+      ),
+    } as const;
+    const eventSchema = {
+      type: "object",
+      required: ["change"],
+      properties: {
+        change: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    } as const;
+    const bound = frame({
+      components: [{
+        ...current.components![0]!,
+        events: { select: eventSchema },
+      }],
+      regions: [{
+        ...current.regions![0]!,
+        cards: [{
+          ...card,
+          body: [{
+            kind: "component",
+            component: "demo.change-list",
+            semantic: current.components![0]!.semantic,
+            props: { count: 1 },
+            events: {
+              select: {
+                action: action.id,
+                input: {
+                  id: { source: "event", path: ["change", "id"] },
+                  origin: { source: "literal", value: "component" },
+                },
+              },
+            },
+            actions: [action],
+          }],
+        }],
+      }],
+    });
+    const ChangeList = defineComponent({
+      emits: ["select"],
+      setup(_, { emit }) {
+        return () => h("div", [
+          h("button", {
+            "data-testid": "valid-event",
+            onClick: () => emit("select", { change: { id: "chg-42" } }),
+          }, "valid"),
+          h("button", {
+            "data-testid": "invalid-event",
+            onClick: () => emit("select", { change: { id: 42 } }),
+          }, "invalid"),
+        ]);
+      },
+    });
+    const dispatch = vi.fn<ApplicationActionDispatcher>().mockResolvedValue({ ok: true });
+    const wrapper = mount(ApplicationFrameRenderer, {
+      props: {
+        frame: bound,
+        dispatch,
+        components: { "demo.change-list": ChangeList },
+      },
+    });
+
+    await wrapper.get("[data-testid='valid-event']").trigger("click");
+    await flushPromises();
+    expect(dispatch).toHaveBeenCalledWith({
+      action: "demo.change.select",
+      input: { id: "chg-42", origin: "component" },
+      session_id: "session-1",
+      frame_revision: 12,
+    });
+
+    dispatch.mockClear();
+    await wrapper.get("[data-testid='invalid-event']").trigger("click");
+    await flushPromises();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='application-dispatch-error']").text())
+      .toContain("$.change.id does not match type");
+  });
+
+  it("renders every accepted portable fallback kind", () => {
+    const current = frame();
+    const card = current.regions![0]!.cards![0]!;
+    const wrapper = mount(ApplicationFrameRenderer, {
+      props: {
+        frame: {
+          ...current,
+          regions: [{
+            ...current.regions![0]!,
+            cards: [{
+              ...card,
+              body: [
+                { kind: "heading", value: "Heading fallback" },
+                { kind: "code", value: "const ready = true" },
+                { kind: "template", value: "Template fallback" },
+                { kind: "kv", value: { State: "ready" } },
+                { kind: "banner", value: "Review" },
+                { kind: "choice", value: ["Open", "Archive"] },
+                { kind: "media", value: { handle: "artifact-1", caption: "Evidence" } },
+              ],
+            }],
+          }],
+        },
+        dispatch: vi.fn(),
+      },
+    });
+
+    expect(wrapper.find("[data-body-kind='heading']").text()).toBe("Heading fallback");
+    expect(wrapper.find("[data-body-kind='code']").text()).toContain("const ready = true");
+    expect(wrapper.find("[data-body-kind='template']").text()).toContain("Template fallback");
+    expect(wrapper.find("[data-body-kind='kv']").text()).toContain("Stateready");
+    expect(wrapper.find("[data-body-kind='banner']").text()).toBe("Review");
+    expect(wrapper.find("[data-body-kind='choice']").text()).toContain("Open");
+    expect(wrapper.find("[data-body-kind='media'] a").attributes("href")).toBe("/artifact/artifact-1");
+    expect(wrapper.findAll(".application-body__unsupported")).toHaveLength(0);
+  });
+
   it("uses registry and frame component fallbacks and reports unknown elements", () => {
     const current = frame();
     const card = current.regions![0]!.cards![0]!;

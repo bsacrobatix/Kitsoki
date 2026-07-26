@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { componentEventListeners } from "./component-bindings.js";
 import type { ApplicationComponentBody, ApplicationElement, JSONValue } from "./types.js";
 import type { ApplicationRuntime } from "./runtime.js";
 import { semanticDataAttributes } from "./semantic.js";
@@ -24,12 +25,20 @@ const componentProps = computed(() => {
   const value = componentBody.value?.props;
   return isRecord(value) ? value : {};
 });
+const componentDescriptor = computed(() =>
+  props.runtime.frame.components?.find(
+    (candidate) => candidate.id === componentBody.value?.component
+  )
+);
+const componentListeners = computed(() =>
+  componentBody.value
+    ? componentEventListeners(componentBody.value, componentDescriptor.value, props.runtime)
+    : {}
+);
 const fallback = computed<ApplicationElement | undefined>(() => {
   if (!componentBody.value || componentResolution.value.registration?.component) return undefined;
   if (componentResolution.value.fallback) return componentResolution.value.fallback;
-  const descriptor = props.runtime.frame.components?.find(
-    (candidate) => candidate.id === componentBody.value?.component
-  );
+  const descriptor = componentDescriptor.value;
   if (!descriptor?.fallback || descriptor.fallback === "component") return undefined;
   return {
     ...componentBody.value,
@@ -60,6 +69,9 @@ const tableColumns = computed(() => {
   }
   return [...keys];
 });
+const keyValues = computed(() =>
+  isRecord(props.body.value) ? Object.entries(props.body.value) : []
+);
 const artifact = computed(() => {
   if (typeof props.body.value === "string") {
     return { handle: props.body.value, name: props.body.value };
@@ -71,6 +83,29 @@ const artifact = computed(() => {
         ? props.body.value.name
         : props.body.value.handle,
     };
+  }
+  return undefined;
+});
+const media = computed(() => {
+  if (typeof props.body.value === "string") {
+    return { handle: props.body.value, caption: props.body.value };
+  }
+  if (isRecord(props.body.value)) {
+    const handle = typeof props.body.value.handle === "string"
+      ? props.body.value.handle
+      : typeof props.body.value.MediaHandle === "string"
+        ? props.body.value.MediaHandle
+        : "";
+    if (handle) {
+      return {
+        handle,
+        caption: typeof props.body.value.caption === "string"
+          ? props.body.value.caption
+          : typeof props.body.value.MediaCaption === "string"
+            ? props.body.value.MediaCaption
+            : handle,
+      };
+    }
   }
   return undefined;
 });
@@ -99,9 +134,10 @@ function display(value: JSONValue | undefined): string {
       :is="componentResolution.registration.component"
       v-if="componentBody && componentResolution.registration?.component"
       v-bind="componentProps"
+      v-on="componentListeners"
       :frame="runtime.frame"
       :body="componentBody"
-      :dispatch="runtime.dispatch"
+      :dispatch="componentBody.events ? undefined : runtime.dispatch"
     />
     <ApplicationBodyRenderer
       v-else-if="fallback"
@@ -115,7 +151,9 @@ function display(value: JSONValue | undefined): string {
       :body="body"
       :runtime="runtime"
     />
+    <h4 v-else-if="body.kind === 'heading'" class="application-body__heading">{{ display(body.value) }}</h4>
     <p v-else-if="body.kind === 'prose'" class="application-body__prose">{{ display(body.value) }}</p>
+    <pre v-else-if="body.kind === 'code' || body.kind === 'template'" class="application-body__code"><code>{{ display(body.value) }}</code></pre>
     <ul v-else-if="body.kind === 'list'" class="application-body__list">
       <li v-for="(item, index) in listItems" :key="item.id ?? index">
         <ApplicationBodyRenderer :body="item" :runtime="runtime" />
@@ -135,6 +173,18 @@ function display(value: JSONValue | undefined): string {
         </tbody>
       </table>
     </div>
+    <dl v-else-if="body.kind === 'kv'" class="application-body__kv">
+      <template v-for="[key, value] in keyValues" :key="key">
+        <dt>{{ key }}</dt>
+        <dd>{{ display(value) }}</dd>
+      </template>
+    </dl>
+    <strong v-else-if="body.kind === 'banner'" class="application-body__banner">{{ display(body.value) }}</strong>
+    <ul v-else-if="body.kind === 'choice'" class="application-body__choice">
+      <li v-for="(item, index) in listItems" :key="item.id ?? index">
+        {{ display(item.value) }}
+      </li>
+    </ul>
     <p
       v-else-if="body.kind === 'status'"
       class="application-body__status"
@@ -149,6 +199,13 @@ function display(value: JSONValue | undefined): string {
       :href="`/artifact/${encodeURIComponent(artifact.handle)}`"
     >
       {{ artifact.name }}
+    </a>
+    <a
+      v-else-if="body.kind === 'media' && media"
+      class="application-body__artifact"
+      :href="`/artifact/${encodeURIComponent(media.handle)}`"
+    >
+      {{ media.caption }}
     </a>
     <p v-else class="application-body__unsupported" role="alert">
       Unable to render {{ body.kind }} content.
@@ -183,6 +240,28 @@ function display(value: JSONValue | undefined): string {
 .application-body__status {
   margin: 0;
   white-space: pre-line;
+}
+.application-body__heading {
+  margin: 0;
+}
+.application-body__code {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.application-body__kv {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+.application-body__kv dd {
+  margin: 0;
+}
+.application-body__banner {
+  display: block;
+  padding: 0.5rem 0.625rem;
+  border-inline-start: 3px solid var(--k-fg-accent, #1d4ed8);
 }
 .application-body__list {
   margin: 0;

@@ -71,6 +71,7 @@ export interface ApplicationComponentDescriptor {
   readonly id: string;
   readonly semantic: ApplicationSemanticNode;
   readonly fallback?: string;
+  readonly events?: Readonly<Record<string, JSONValue>>;
 }
 
 export interface ApplicationHandlerDescriptor {
@@ -106,6 +107,18 @@ export interface ApplicationElement {
   readonly state?: ApplicationNodeState;
   readonly items?: readonly ApplicationElement[];
   readonly actions?: readonly ApplicationAction[];
+  readonly events?: Readonly<Record<string, ApplicationComponentEventBinding>>;
+}
+
+export interface ApplicationComponentEventBinding {
+  readonly action: string;
+  readonly input?: Readonly<Record<string, ApplicationComponentInputBinding>>;
+}
+
+export interface ApplicationComponentInputBinding {
+  readonly source: "event" | "literal";
+  readonly path?: readonly string[];
+  readonly value?: JSONValue;
 }
 
 export type ApplicationBody = ApplicationElement;

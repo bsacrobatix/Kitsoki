@@ -90,9 +90,10 @@ type PageDescriptor struct {
 }
 
 type ComponentDescriptor struct {
-	ID       string       `json:"id"`
-	Semantic SemanticNode `json:"semantic"`
-	Fallback string       `json:"fallback,omitempty"`
+	ID       string                     `json:"id"`
+	Semantic SemanticNode               `json:"semantic"`
+	Fallback string                     `json:"fallback,omitempty"`
+	Events   map[string]json.RawMessage `json:"events,omitempty"`
 }
 
 type HandlerDescriptor struct {
@@ -104,15 +105,27 @@ type HandlerDescriptor struct {
 // Props and Value remain JSON so a renderer can consume story-defined schemas
 // without this package acquiring presentation or product dependencies.
 type Element struct {
-	ID        string          `json:"id,omitempty"`
-	Kind      string          `json:"kind"`
-	Component string          `json:"component,omitempty"`
-	Props     json.RawMessage `json:"props,omitempty"`
-	Value     json.RawMessage `json:"value,omitempty"`
-	Semantic  *SemanticNode   `json:"semantic,omitempty"`
-	State     NodeState       `json:"state,omitempty"`
-	Items     []Element       `json:"items,omitempty"`
-	Actions   []Action        `json:"actions,omitempty"`
+	ID        string                           `json:"id,omitempty"`
+	Kind      string                           `json:"kind"`
+	Component string                           `json:"component,omitempty"`
+	Props     json.RawMessage                  `json:"props,omitempty"`
+	Value     json.RawMessage                  `json:"value,omitempty"`
+	Semantic  *SemanticNode                    `json:"semantic,omitempty"`
+	State     NodeState                        `json:"state,omitempty"`
+	Items     []Element                        `json:"items,omitempty"`
+	Actions   []Action                         `json:"actions,omitempty"`
+	Events    map[string]ComponentEventBinding `json:"events,omitempty"`
+}
+
+type ComponentEventBinding struct {
+	Action string                           `json:"action"`
+	Input  map[string]ComponentInputBinding `json:"input,omitempty"`
+}
+
+type ComponentInputBinding struct {
+	Source string          `json:"source"`
+	Path   []string        `json:"path,omitempty"`
+	Value  json.RawMessage `json:"value,omitempty"`
 }
 
 type Action struct {

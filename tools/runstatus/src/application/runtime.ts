@@ -12,6 +12,7 @@ export interface ApplicationRuntime {
   readonly components: ApplicationComponentRegistry;
   readonly stale: boolean;
   readonly isActionPending: (action: string) => boolean;
+  readonly reportError: (error: unknown) => void;
 }
 
 export const applicationRuntimeKey: InjectionKey<ApplicationRuntime> =
