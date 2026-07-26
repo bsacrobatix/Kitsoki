@@ -3222,3 +3222,81 @@ nodes:
     status: proposed
     title: Make worker-pool capacity and workspace retention project-authoritative
     visibility: internal
+  - authored_by: pog-gitflow-brief
+    created_at: "2026-07-26T03:41:42Z"
+    id: cs-87816805bcf51ad7cb421a0413a685e7
+    operations:
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            requirements:
+              - req-deployment-release-external-controller
+              - req-deployment-attested-candidate
+              - req-deployment-external-worker-image-pointer
+          fields:
+            summary: A stable release-external controller consumes a digest-attested exact-SHA candidate, coordinates disposable build and image workers, atomically activates the hosted runtime, survives process or host restart, and exposes durable success or rollback status without retaining source trees on the orchestrator.
+          id: feature-crash-safe-deployment
+          schema: kitsoki/feature/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          title: Crash-safe exact-SHA hosted deployment
+          type: feature
+          visibility: internal
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-crash-safe-deployment
+          fields:
+            summary: The root-owned controller lives outside mutable releases, fsyncs candidate and previous release and image identities before mutation, atomically activates a bounded staged release, verifies all runtime surfaces, rolls back on failure, and performs boot recovery before normal services. Only current plus previous verified releases and bounded status history remain.
+          id: req-deployment-release-external-controller
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          title: Hosted activation is journaled, bounded, and reboot-safe
+          type: requirement
+          visibility: internal
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-crash-safe-deployment
+          fields:
+            summary: An authenticated request accepts environment plus a full immutable source SHA. It resolves a signed or equivalently sealed candidate manifest containing packed and unpacked sizes and digests; all source extraction, gates, compilation, worker-image baking, and smoke testing occur on disposable builders, never on the stateful orchestrator.
+          id: req-deployment-attested-candidate
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          title: Deployment consumes an exact-SHA digest-attested candidate built off-host
+          type: requirement
+          visibility: internal
+        kind: added
+      - after:
+          edges:
+            part_of:
+              - product-kitsoki
+            required_by:
+              - feature-crash-safe-deployment
+          fields:
+            summary: Remote pool configuration can resolve its image ID from a validated root-owned external environment pointer so deployment can atomically activate or restore current and previous worker images without editing the immutable deployed POG release or mutating durable queue records.
+          id: req-deployment-external-worker-image-pointer
+          schema: kitsoki/requirement/v0
+          sources:
+            - source-seed-objects
+          status: proposed
+          title: Worker pools resolve a root-owned atomic image pointer
+          type: requirement
+          visibility: internal
+        kind: added
+    schema: graph/changeset/v1
+    status: proposed
+    title: Crash-safe exact-SHA hosted deployment substrate
+    visibility: internal
