@@ -94,6 +94,15 @@ func TestBuildCreatesContentAddressedManifestAndGeneratedComponentEntry(t *testi
 	if _, err := os.Stat(filepath.Join(manifest.ArtifactDir, "application-manifest.json")); err != nil {
 		t.Fatal(err)
 	}
+	rawManifest, err := os.ReadFile(filepath.Join(manifest.ArtifactDir, "application-manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(rawManifest), root) ||
+		strings.Contains(string(rawManifest), filepath.ToSlash(root)) ||
+		strings.Contains(string(rawManifest), "artifact_dir") {
+		t.Fatalf("bundle manifest leaked local build paths: %s", rawManifest)
+	}
 	entry, err := os.ReadFile(filepath.Join(filepath.Dir(runnerPlanPath(t, runner.commands[0])), "entry.ts"))
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +115,51 @@ func TestBuildCreatesContentAddressedManifestAndGeneratedComponentEntry(t *testi
 	}
 	if !strings.Contains(string(entry), `applicationId: "demo"`) {
 		t.Fatalf("generated entry does not bootstrap its application session:\n%s", entry)
+	}
+}
+
+func TestRelativeLifecycleRootsBecomeAbsoluteBeforeToolWorkingDirectoryChanges(t *testing.T) {
+	projectRoot := t.TempDir()
+	t.Chdir(projectRoot)
+	toolRoot := t.TempDir()
+	storyDir := filepath.Join(projectRoot, "stories", "demo")
+	if err := os.MkdirAll(storyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	storyPath := filepath.Join(storyDir, "app.yaml")
+	if err := os.WriteFile(storyPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeRunner{}
+	manager, err := New(Config{
+		RepoRoot: toolRoot, TempRoot: ".temp/custom", ArtifactRoot: ".artifacts/custom",
+	}, func(string) (*app.AppDef, error) {
+		def := applicationDefinition("")
+		delete(def.Application.Components, "demo.list")
+		return def, nil
+	}, runner, fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(manager.config.TempRoot) || !filepath.IsAbs(manager.config.ArtifactRoot) {
+		t.Fatalf("lifecycle roots are not absolute: temp=%q artifact=%q", manager.config.TempRoot, manager.config.ArtifactRoot)
+	}
+	if manager.config.TempRoot != filepath.Join(projectRoot, ".temp", "custom") ||
+		manager.config.ArtifactRoot != filepath.Join(projectRoot, ".artifacts", "custom") {
+		t.Fatalf("relative roots resolved outside caller project: temp=%q artifact=%q", manager.config.TempRoot, manager.config.ArtifactRoot)
+	}
+
+	manifest, err := manager.Build(context.Background(), storyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planPath := runnerPlanPath(t, runner.commands[0])
+	if !filepath.IsAbs(planPath) || !strings.HasPrefix(planPath, manager.config.TempRoot+string(filepath.Separator)) {
+		t.Fatalf("plan path is not rooted in absolute temp root: %q", planPath)
+	}
+	if !filepath.IsAbs(manifest.ArtifactDir) ||
+		!strings.HasPrefix(manifest.ArtifactDir, manager.config.ArtifactRoot+string(filepath.Separator)) {
+		t.Fatalf("artifact path is not rooted in absolute artifact root: %q", manifest.ArtifactDir)
 	}
 }
 
@@ -312,7 +366,9 @@ func TestPrepareAllowsComponentUnderVerifiedExternalPackageRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Components) != 1 || plan.Components[0].Module != canonicalModule {
+	if len(plan.Components) != 1 ||
+		plan.Components[0].Module != "ui/Panel.vue" ||
+		plan.Components[0].ResolvedModule != canonicalModule {
 		t.Fatalf("components = %#v", plan.Components)
 	}
 }

@@ -154,10 +154,14 @@ func applyApplicationOverrides(child *AppDef, overrides *ApplicationOverrides, p
 		clone := *replacement
 		if replacement.Web != nil {
 			web := *replacement.Web
-			web.Module = rebaseApplicationPath(web.Module, parentBaseDir)
+			web.ResolvedModule = rebaseApplicationPath(web.Module, parentBaseDir)
 			clone.Web = &web
 		}
-		clone.PropsSchema = rebaseApplicationPath(clone.PropsSchema, parentBaseDir)
+		clone.ResolvedPropsSchema = rebaseApplicationPath(clone.PropsSchema, parentBaseDir)
+		clone.ResolvedEvents = make(map[string]string, len(clone.Events))
+		for event, schema := range clone.Events {
+			clone.ResolvedEvents[event] = rebaseApplicationPath(schema, parentBaseDir)
+		}
 		clone.Origin = ApplicationMemberOrigin{
 			Story: parentStory, Member: "overrides.application.components." + id,
 		}
@@ -175,7 +179,7 @@ func applyApplicationOverrides(child *AppDef, overrides *ApplicationOverrides, p
 			continue
 		}
 		clone := *replacement
-		clone.InputSchema = rebaseApplicationPath(clone.InputSchema, parentBaseDir)
+		clone.ResolvedInputSchema = rebaseApplicationPath(clone.InputSchema, parentBaseDir)
 		clone.Origin = ApplicationMemberOrigin{
 			Story: parentStory, Member: "overrides.application.actions." + id,
 		}
@@ -197,8 +201,8 @@ func applyApplicationOverrides(child *AppDef, overrides *ApplicationOverrides, p
 			continue
 		}
 		clone := *replacement
-		clone.InputSchema = rebaseApplicationPath(clone.InputSchema, parentBaseDir)
-		clone.OutputSchema = rebaseApplicationPath(clone.OutputSchema, parentBaseDir)
+		clone.ResolvedInputSchema = rebaseApplicationPath(clone.InputSchema, parentBaseDir)
+		clone.ResolvedOutputSchema = rebaseApplicationPath(clone.OutputSchema, parentBaseDir)
 		if replacement.Starlark != nil {
 			starlark := *replacement.Starlark
 			starlark.Script = rebaseApplicationPath(starlark.Script, parentBaseDir)

@@ -139,13 +139,13 @@ func (s *Store) Enqueue(ctx context.Context, opts EnqueueOptions) (*Drive, error
 	}
 	driveID := ulid.New()
 	now := s.clock.Now().UnixMicro()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO chat_input_queue
 		  (drive_id, chat_id, transport, thread, actor, correlation_id,
 		   payload, status, received_at,
 		   dispatched_at, completed_at, result_seq, error_message,
 		   on_complete_json, origin_session_id, origin_state)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '', ?, ?, ?)`),
 		driveID, opts.ChatID, string(opts.Transport),
 		opts.Thread, opts.Actor, opts.CorrelationID,
 		opts.Payload, string(DriveStatusPending), now,
@@ -200,11 +200,11 @@ func (s *Store) Dequeue(ctx context.Context, chatID string) (*Drive, error) {
 	// UPDATE can name it by primary key — SQLite serialises writes
 	// across transactions, so the row we read is the row we own.
 	var driveID string
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, s.q(`
 		SELECT drive_id FROM chat_input_queue
 		WHERE chat_id = ? AND status = ?
 		ORDER BY received_at ASC, drive_id ASC
-		LIMIT 1`, chatID, string(DriveStatusPending),
+		LIMIT 1`), chatID, string(DriveStatusPending),
 	).Scan(&driveID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoPendingDrive
@@ -213,10 +213,10 @@ func (s *Store) Dequeue(ctx context.Context, chatID string) (*Drive, error) {
 		return nil, fmt.Errorf("chats.Dequeue: pick: %w", err)
 	}
 
-	res, err := tx.ExecContext(ctx, `
+	res, err := tx.ExecContext(ctx, s.q(`
 		UPDATE chat_input_queue
 		SET status = ?, dispatched_at = ?
-		WHERE drive_id = ? AND status = ?`,
+		WHERE drive_id = ? AND status = ?`),
 		string(DriveStatusDispatching), now,
 		driveID, string(DriveStatusPending),
 	)
@@ -249,10 +249,10 @@ func (s *Store) ClaimDrive(ctx context.Context, driveID string) (*Drive, error) 
 		return nil, fmt.Errorf("chats.ClaimDrive: empty drive ID")
 	}
 	now := s.clock.Now().UnixMicro()
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.q(`
 		UPDATE chat_input_queue
 		SET status = ?, dispatched_at = ?
-		WHERE drive_id = ? AND status = ?`,
+		WHERE drive_id = ? AND status = ?`),
 		string(DriveStatusDispatching), now,
 		driveID, string(DriveStatusPending),
 	)
@@ -266,7 +266,7 @@ func (s *Store) ClaimDrive(ctx context.Context, driveID string) (*Drive, error) 
 	// Disambiguate: did the row not exist, or was it in the wrong state?
 	var got string
 	if err := s.db.QueryRowContext(ctx,
-		`SELECT status FROM chat_input_queue WHERE drive_id = ?`, driveID,
+		s.q(`SELECT status FROM chat_input_queue WHERE drive_id = ?`), driveID,
 	).Scan(&got); errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDriveNotFound
 	} else if err != nil {
@@ -317,10 +317,10 @@ func (s *Store) markDriveTerminal(
 		seqArg = nil
 	}
 
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.q(`
 		UPDATE chat_input_queue
 		SET status = ?, completed_at = ?, result_seq = ?, error_message = ?
-		WHERE drive_id = ? AND status = ?`,
+		WHERE drive_id = ? AND status = ?`),
 		string(toStatus), now, seqArg, errorMessage,
 		driveID, string(fromStatus),
 	)
@@ -337,7 +337,7 @@ func (s *Store) markDriveTerminal(
 	// usefully.
 	var gotStatus string
 	err = s.db.QueryRowContext(ctx,
-		`SELECT status FROM chat_input_queue WHERE drive_id = ?`, driveID,
+		s.q(`SELECT status FROM chat_input_queue WHERE drive_id = ?`), driveID,
 	).Scan(&gotStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrDriveNotFound
@@ -391,12 +391,12 @@ func (s *Store) emitDriveTerminalJournal(ctx context.Context, driveID string, to
 
 // GetDrive returns a drive by id, or ErrDriveNotFound.
 func (s *Store) GetDrive(ctx context.Context, driveID string) (*Drive, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, s.q(`
 		SELECT drive_id, chat_id, transport, thread, actor, correlation_id,
 		       payload, status, received_at,
 		       dispatched_at, completed_at, result_seq, error_message,
 		       on_complete_json, origin_session_id, origin_state
-		FROM chat_input_queue WHERE drive_id = ?`, driveID)
+		FROM chat_input_queue WHERE drive_id = ?`), driveID)
 	d, err := scanDrive(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDriveNotFound
@@ -442,7 +442,7 @@ func (s *Store) ListDrives(ctx context.Context, chatID string, filter ListDrives
 		args = append(args, filter.Limit)
 	}
 
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.db.QueryContext(ctx, s.q(q), args...)
 	if err != nil {
 		return nil, fmt.Errorf("chats.ListDrives: %w", err)
 	}
@@ -485,7 +485,7 @@ func (s *Store) ListDrivesBySession(ctx context.Context, sessionID string, statu
 	}
 	q += ` ORDER BY received_at ASC, drive_id ASC`
 
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.db.QueryContext(ctx, s.q(q), args...)
 	if err != nil {
 		return nil, fmt.Errorf("chats.ListDrivesBySession: %w", err)
 	}
@@ -525,7 +525,7 @@ func (s *Store) ListDrivesByOrigin(ctx context.Context, statuses []DriveStatus) 
 	}
 	q += ` ORDER BY origin_session_id ASC, received_at ASC, drive_id ASC`
 
-	rows, err := s.db.QueryContext(ctx, q, args...)
+	rows, err := s.db.QueryContext(ctx, s.q(q), args...)
 	if err != nil {
 		return nil, fmt.Errorf("chats.ListDrivesByOrigin: %w", err)
 	}

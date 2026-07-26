@@ -251,32 +251,109 @@ schemas deliberately reject network references and unsupported keywords.
 Native surfaces retain the same component and action semantic refs and project
 the fallback's selected resolved prop instead of dumping the full prop object.
 
-Use provider-to-world-to-frame composition for graph-backed applications:
+Use provider-to-world-to-frame composition for graph-backed applications. The
+deployment binds graph authority to the exact calling application:
+
+```yaml
+application_graphs:
+  pog:
+    project_root: .
+    catalog: pog/catalog.yaml
+    overlay: pog/catalog.overlay.yaml # optional, read operations only
+    max_nodes: 2000
+    max_bytes: 1048576
+    write_policy: propose
+```
+
+`project_root` is resolved beneath the discovered project root. `catalog` and
+`overlay` are resolved beneath that configured root. Absolute paths, traversal,
+symlink escapes, missing paths, and non-regular catalog files fail session
+construction. `max_bytes` bounds the configured catalog entry files and every
+application request/result. `max_nodes` is injected into `snapshot`.
+`write_policy` is `read`, `propose`, or `steward`.
+
+The story declares operation data only:
 
 ```yaml
 host_interfaces:
   catalog:
     operations:
       snapshot:
-        input: {catalog_path: string, audience: string, fields: list, max_nodes: int}
+        input: {audience: string, fields: list}
         output: {snapshot: object}
     default: host.graph
 
 # In a room effect:
 - invoke: iface.catalog.snapshot
   with:
-    catalog_path: "{{ world.catalog_path }}"
     audience: public
     fields: [title, status, visibility]
-    max_nodes: 1000
   bind:
     public_snapshot: snapshot
 ```
+
+For configured Story Applications the public input shapes are:
+
+| Operation | Public input |
+|---|---|
+| `snapshot` | `audience`, `fields` |
+| `get` | `ids`, `fields` |
+| `changeset` | `action`, `changeset_id`, `node_id` |
+| `project` | `graph_id` |
+| `propose` | `title`, `operations`, `visibility`, `validate_only` |
+| `authorize` | `changeset_id` |
+| `withdraw` | `changeset_id` |
+| `rebase` | `changeset_id` |
+| `apply` | `changeset_id`, `dry_run` |
+
+`read` permits the four read operations. `propose` additionally permits
+`propose`, `withdraw`, `rebase`, and dry-run `apply`. `steward` permits the
+complete table, including `authorize` and live `apply`. Graph writes are
+stamped with the server-owned `kitsoki.application:<application-id>` actor.
+Caller-supplied catalog/overlay paths, URLs, commands, providers, profiles,
+actors, sessions, or transports are rejected recursively.
 
 Keep `public_snapshot` world-only, derive a finite public page projection with
 capability-free Starlark, and expose only that derived key through
 page-scoped `application.data`. Never expose an internal/raw snapshot and rely
 on a renderer or component to remove private fields.
+
+Daemon-owned operational providers use the same provider-to-world-to-frame
+composition, but their authority is fixed outside the story:
+
+```yaml
+host_interfaces:
+  streams:
+    operations:
+      snapshot:
+        input: {scope: string, max_streams: int, max_bytes: int}
+        output: {snapshot: object}
+    default: host.streams
+  federation:
+    operations:
+      snapshot:
+        input: {max_workers: int, max_bytes: int}
+        output: {snapshot: object}
+    default: host.federation
+  materialization:
+    operations:
+      snapshot:
+        input: {application_id: string, max_jobs: int, max_bytes: int}
+        output: {snapshot: object}
+    default: host.materialization
+```
+
+The daemon configuration binds these interfaces to an exact application and,
+for streams, an exact project scope. The values passed by the story must match
+that binding; they are assertions, not selectors. Each call must supply finite
+item and byte limits. Results contain opaque queue, worker, session, job,
+receipt, and artifact identities only. They never contain source paths,
+artifact paths, worker endpoints, tunnels, or credentials.
+
+Bind the returned snapshot into world, derive the exact finite page model in
+Starlark, and expose only that derived key through `application.data`. This is
+the complete Story Application path for operational products: no product-owned
+HTTP server, browser data client, or separate frontend state store is required.
 
 ## Exported handlers
 
@@ -341,6 +418,17 @@ Write/external handlers declare `idempotency.key` and `scope`; retryable
 external handlers additionally declare `compensation` or
 `compensation_impossible`. Durable replay returns the stored result with a new
 transport-aware receipt and does not repeat the side effect.
+
+When a current frame offers a write/external handler as an application action,
+the service derives a stable action-opportunity key from the application,
+session, actor, action, handler, frame revision, and normalized input. Web,
+VS Code, and TUI renderers therefore do not invent product-specific request
+IDs, and retrying the same offered action through another surface returns a
+replay receipt instead of repeating the effect. An explicit envelope
+`idempotency_key` still takes precedence for headless callers. A handler input
+schema should not require its configured idempotency field solely for an
+interactive action; direct calls can supply either that field or the envelope
+key.
 
 ## Events
 

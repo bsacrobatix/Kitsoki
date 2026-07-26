@@ -25,7 +25,26 @@ import (
 	"path/filepath"
 	"regexp"
 	"time"
+
+	"kitsoki/internal/statedir"
 )
+
+// sessionsRoot resolves the root directory for per-session JSONL traces.
+// KITSOKI_STATE_DIR, when set, re-roots it at <state>/sessions so a
+// read-only-rootfs deployment confines session state to one mount; unset
+// keeps the historical ~/.kitsoki/sessions (or $TMPDIR fallback) unchanged.
+func sessionsRoot() string {
+	if state, ok := statedir.Root(); ok {
+		return filepath.Join(state, "sessions")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback: use a path relative to /tmp so the caller still gets a
+		// deterministic, writable location even without a home directory.
+		home = os.TempDir()
+	}
+	return filepath.Join(home, ".kitsoki", "sessions")
+}
 
 // slugUnsafe matches characters that are unsafe or inconvenient in a file-system
 // path component.  We keep alphanumerics, '.', '_', and '-' (the last already
@@ -53,27 +72,18 @@ func DefaultTracePath(app, transport, thread string) string {
 	slug := slugUnsafe.ReplaceAllString(key, "-")
 	appSlug := slugUnsafe.ReplaceAllString(app, "-")
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback: use a path relative to /tmp so the caller still gets a
-		// deterministic, writable location even without a home directory.
-		home = os.TempDir()
-	}
-	return filepath.Join(home, ".kitsoki", "sessions", appSlug, sha8+"-"+slug+".jsonl")
+	return filepath.Join(sessionsRoot(), appSlug, sha8+"-"+slug+".jsonl")
 }
 
 // SessionsDir returns the root under which DefaultTracePath writes per-session
 // JSONL traces: ~/.kitsoki/sessions (or $TMPDIR/.kitsoki/sessions when no home
-// directory is available, matching DefaultTracePath's fallback). Each app gets
+// directory is available, matching DefaultTracePath's fallback), or
+// $KITSOKI_STATE_DIR/sessions when the state root is set. Each app gets
 // a subdirectory. Tools that discover or resolve sessions after the fact (e.g.
 // `kitsoki trace --app … --latest`) anchor here so the location stays in one
 // place.
 func SessionsDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = os.TempDir()
-	}
-	return filepath.Join(home, ".kitsoki", "sessions")
+	return sessionsRoot()
 }
 
 // DefaultRunTracePath returns the repo-anchored JSONL trace path for a one-shot
@@ -86,7 +96,23 @@ func SessionsDir() string {
 //
 // The parent directory IS created (MkdirAll) before returning the path so the
 // caller can open the file immediately. Returns "" if cwd cannot be determined.
+//
+// When KITSOKI_STATE_DIR is set the repo anchor is skipped entirely: the trace
+// lands under <state>/sessions like every other session artifact, so a
+// read-only working tree never blocks a one-shot run.
 func DefaultRunTracePath(appID string) string {
+	if _, ok := statedir.Root(); ok {
+		safeApp := appID
+		if safeApp == "" {
+			safeApp = "session"
+		}
+		stamp := time.Now().UTC().Format("20060102T150405Z")
+		sessDir := sessionsRoot()
+		if mkErr := os.MkdirAll(sessDir, 0o755); mkErr != nil {
+			return ""
+		}
+		return filepath.Join(sessDir, stamp+"-"+safeApp+".jsonl")
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ""

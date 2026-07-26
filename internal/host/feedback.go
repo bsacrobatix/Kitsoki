@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	appplatform "kitsoki/internal/application"
 )
 
 const (
@@ -68,7 +70,8 @@ type FeedbackDispatchRequest struct {
 // FeedbackDispatchReceipt identifies the durable job created or recovered by
 // an idempotent dispatch.
 type FeedbackDispatchReceipt struct {
-	JobID string
+	JobID    string
+	Receipts []appplatform.Receipt
 }
 
 // FeedbackBackend is the governed daemon integration seam. Dispatch
@@ -249,7 +252,30 @@ func feedbackDispatch(
 	if !validFeedbackToken(receipt.JobID, feedbackMaxRefSize) {
 		return Result{}, fmt.Errorf("host.feedback.dispatch: backend returned an unsafe job id")
 	}
-	return Result{Data: map[string]any{"job_id": receipt.JobID}}, nil
+	if len(receipt.Receipts) == 0 || len(receipt.Receipts) > 8 {
+		return Result{}, fmt.Errorf("host.feedback.dispatch: backend returned no bounded canonical receipts")
+	}
+	for _, canonical := range receipt.Receipts {
+		if err := validateFeedbackCanonicalReceipt(canonical); err != nil {
+			return Result{}, fmt.Errorf("host.feedback.dispatch: %w", err)
+		}
+	}
+	return Result{Data: map[string]any{
+		"job_id": receipt.JobID, "receipts": receipt.Receipts,
+	}}, nil
+}
+
+func validateFeedbackCanonicalReceipt(receipt appplatform.Receipt) error {
+	if receipt.Schema != appplatform.ReceiptSchema || receipt.ID == "" ||
+		receipt.HandlerID == "" || receipt.SemanticRef == "" ||
+		receipt.Actor == "" || receipt.IdempotencyKey == "" {
+		return fmt.Errorf("backend returned an incomplete canonical application receipt")
+	}
+	finalized, err := appplatform.FinalizeReceipt(receipt)
+	if err != nil || finalized.ID != receipt.ID {
+		return fmt.Errorf("backend returned a forged canonical application receipt")
+	}
+	return nil
 }
 
 func validateFeedbackScope(scope FeedbackScope) error {

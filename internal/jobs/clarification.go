@@ -34,7 +34,7 @@ func (js *JobStore) RequestClarification(ctx context.Context, id JobID, schema C
 	defer func() { _ = tx.Rollback() }()
 
 	// Check current status inside the transaction.
-	row := tx.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id=?`, id)
+	row := tx.QueryRowContext(ctx, js.q(`SELECT status FROM jobs WHERE id=?`), id)
 	var status string
 	if err := row.Scan(&status); err != nil {
 		return fmt.Errorf("jobs.RequestClarification: %w", err)
@@ -49,9 +49,9 @@ func (js *JobStore) RequestClarification(ctx context.Context, id JobID, schema C
 	}
 
 	now := time.Now().UnixMilli()
-	if _, err = tx.ExecContext(ctx, `
+	if _, err = tx.ExecContext(ctx, js.q(`
 		UPDATE jobs SET status=?, clarification_schema=?, clarification_answer=NULL, updated_at=?
-		WHERE id=?`,
+		WHERE id=?`),
 		string(JobAwaitingInput), string(schemaJSON), now, id); err != nil {
 		return fmt.Errorf("jobs.RequestClarification: update: %w", err)
 	}
@@ -74,7 +74,7 @@ func (js *JobStore) AnswerClarification(ctx context.Context, id JobID, answer an
 	defer func() { _ = tx.Rollback() }()
 
 	// Verify job is awaiting_input inside the transaction.
-	row := tx.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id=?`, id)
+	row := tx.QueryRowContext(ctx, js.q(`SELECT status FROM jobs WHERE id=?`), id)
 	var status string
 	if err := row.Scan(&status); err != nil {
 		return fmt.Errorf("jobs.AnswerClarification: %w", err)
@@ -89,9 +89,9 @@ func (js *JobStore) AnswerClarification(ctx context.Context, id JobID, answer an
 	}
 
 	now := time.Now().UnixMilli()
-	if _, err = tx.ExecContext(ctx, `
+	if _, err = tx.ExecContext(ctx, js.q(`
 		UPDATE jobs SET status=?, clarification_answer=?, updated_at=?
-		WHERE id=?`,
+		WHERE id=?`),
 		string(JobRunning), string(answerJSON), now, id); err != nil {
 		return fmt.Errorf("jobs.AnswerClarification: update: %w", err)
 	}
@@ -102,7 +102,7 @@ func (js *JobStore) AnswerClarification(ctx context.Context, id JobID, answer an
 // GetClarificationSchema returns the clarification schema for a job that is
 // awaiting_input. Returns nil if the job has no pending clarification.
 func (js *JobStore) GetClarificationSchema(ctx context.Context, id JobID) (*ClarificationSchema, error) {
-	row := js.db.QueryRowContext(ctx, `SELECT clarification_schema FROM jobs WHERE id=?`, id)
+	row := js.db.QueryRowContext(ctx, js.q(`SELECT clarification_schema FROM jobs WHERE id=?`), id)
 	var schemaJSON *string
 	if err := row.Scan(&schemaJSON); err != nil {
 		return nil, fmt.Errorf("jobs.GetClarificationSchema: %w", err)
@@ -157,7 +157,7 @@ func (js *JobStore) RequestClarificationAny(ctx context.Context, id JobID, schem
 // It satisfies the host.ClarificationRequester interface so that
 // host.RequestClarification can poll for the answer without importing jobs.
 func (js *JobStore) AnswerClarificationRaw(ctx context.Context, id JobID) (string, error) {
-	row := js.db.QueryRowContext(ctx, `SELECT clarification_answer FROM jobs WHERE id=?`, id)
+	row := js.db.QueryRowContext(ctx, js.q(`SELECT clarification_answer FROM jobs WHERE id=?`), id)
 	var answer *string
 	if err := row.Scan(&answer); err != nil {
 		return "", fmt.Errorf("jobs.AnswerClarificationRaw: %w", err)

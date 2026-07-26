@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { onMounted, onUnmounted, ref, shallowRef } from "vue";
 import {
   ApplicationWizard,
   applicationThemeStyle,
@@ -45,9 +45,13 @@ import {
   inspectApplicationFeedbackTarget,
   installedApplicationComponents,
   installedApplicationTheme,
+  openApplicationCaptureEventStream,
   observeApplicationRoutes,
   readApplicationRoutePath,
   submitApplicationFeedback,
+  startApplicationCaptureClient,
+  type ApplicationCaptureController,
+  type ApplicationCaptureDependencies,
   writeApplicationRoute,
   type ApplicationActionDispatcher,
   type ApplicationHistoryMode,
@@ -77,7 +81,7 @@ const props = withDefaults(defineProps<{ applicationId?: string }>(), {
   applicationId: "",
 });
 const sessionId = ref<string | null>(null);
-const frame = ref<ApplicationFrame | null>(null);
+const frame = shallowRef<ApplicationFrame | null>(null);
 const currentPage = ref("");
 const loading = ref(true);
 const error = ref("");
@@ -96,6 +100,7 @@ let compatibilityTimer: ReturnType<typeof setInterval> | null = null;
 let refreshedDefinition = "";
 let compatibilityRequest: Promise<void> | null = null;
 let unsubscribeHistory: (() => void) | null = null;
+let capture: ApplicationCaptureController | null = null;
 
 async function loadFrame(
   id: string,
@@ -116,6 +121,7 @@ async function loadFrame(
     feedbackTarget.value = null;
     feedbackStatus.value = "";
     error.value = "";
+    await capture?.attach();
   } catch (cause) {
     frame.value = null;
     error.value = cause instanceof Error ? cause.message : String(cause);
@@ -163,6 +169,8 @@ async function reportFeedback(): Promise<void> {
 }
 
 function followSession(id: string | null): void {
+  capture?.dispose();
+  capture = null;
   unsubscribeEvents?.();
   unsubscribeEvents = null;
   sessionId.value = id;
@@ -174,6 +182,17 @@ function followSession(id: string | null): void {
   connectionState.value = "connected";
   loading.value = Boolean(id);
   if (!id) return;
+
+  const captureDependencies: ApplicationCaptureDependencies = {
+    sessionId: id,
+    rpc: {
+      post: (method, params) => rpc.post<unknown>(method, params),
+    },
+    frame: () => frame.value,
+    dispatch: async (envelope) => await dispatch(envelope),
+    openStream: openApplicationCaptureEventStream,
+  };
+  capture = startApplicationCaptureClient(captureDependencies);
 
   void loadFrame(
     id,
@@ -284,6 +303,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  capture?.dispose();
   unsubscribeHistory?.();
   unsubscribeCurrent?.();
   unsubscribeEvents?.();

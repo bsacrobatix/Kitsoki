@@ -14,6 +14,7 @@ import (
 	agentserver "kitsoki/internal/agent/server"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationcapture"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
@@ -29,6 +30,7 @@ import (
 	"kitsoki/internal/mining"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/store"
+	"kitsoki/internal/storydemo"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
 )
@@ -192,6 +194,12 @@ type runtimeConfig struct {
 	// runtimeBase.HostCassette). Distinct from Flow.HostCassette, which only
 	// applies in the nil-harness flow posture.
 	HostCassette string
+
+	// ApplicationCaptures is the process-owned browser capture broker shared
+	// by runstatus and every per-session typed host.demo registry.
+	ApplicationCaptures applicationcapture.Broker
+	StoryDemoExecutor   storydemo.ApplicationArtifactExecutor
+	StoryDemoBinding    storydemo.DeploymentBinding
 }
 
 // runtimeBase carries the session-INVARIANT construction posture that
@@ -266,7 +274,10 @@ type runtimeBase struct {
 	// ConnectIDEFromEnv is threaded into each session's runtimeConfig so the
 	// web posture auto-connects an IDE link from CLAUDE_CODE_SSE_PORT (the
 	// embedding VS Code extension). The TUI run path leaves it false.
-	ConnectIDEFromEnv bool
+	ConnectIDEFromEnv   bool
+	ApplicationCaptures applicationcapture.Broker
+	StoryDemoExecutor   storydemo.ApplicationArtifactExecutor
+	StoryDemoBindings   map[string]storydemo.DeploymentBinding
 }
 
 // config materialises a per-session runtimeConfig for the story at storyPath
@@ -275,26 +286,30 @@ type runtimeBase struct {
 // produced sessionRuntime is nil-harness, cassette/stub-backed when the base
 // carries a fixture — the same construction web.go performs today.
 func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
+	demoBinding := b.StoryDemoBindings[def.App.ID]
 	return runtimeConfig{
-		AppPath:           storyPath,
-		Def:               def,
-		DBPath:            b.DBPath,
-		ExecMode:          b.ExecMode,
-		HarnessType:       b.HarnessType,
-		ClaudeModel:       b.ClaudeModel,
-		RecordingPath:     b.RecordingPath,
-		RecordPath:        b.RecordPath,
-		AgentBackend:      b.AgentBackend,
-		HarnessProfiles:   b.HarnessProfiles,
-		DefaultProfile:    b.DefaultProfile,
-		HarnessLadder:     b.HarnessLadder,
-		AgentLaunchPolicy: b.AgentLaunchPolicy,
-		Flow:              b.Flow,
-		FlowFilePath:      b.FlowFilePath,
-		HostCassette:      b.HostCassette,
-		Mining:            b.Mining,
-		MiningRepoPath:    filepath.Dir(storyPath),
-		ConnectIDEFromEnv: b.ConnectIDEFromEnv,
+		AppPath:             storyPath,
+		Def:                 def,
+		DBPath:              b.DBPath,
+		ExecMode:            b.ExecMode,
+		HarnessType:         b.HarnessType,
+		ClaudeModel:         b.ClaudeModel,
+		RecordingPath:       b.RecordingPath,
+		RecordPath:          b.RecordPath,
+		AgentBackend:        b.AgentBackend,
+		HarnessProfiles:     b.HarnessProfiles,
+		DefaultProfile:      b.DefaultProfile,
+		HarnessLadder:       b.HarnessLadder,
+		AgentLaunchPolicy:   b.AgentLaunchPolicy,
+		Flow:                b.Flow,
+		FlowFilePath:        b.FlowFilePath,
+		HostCassette:        b.HostCassette,
+		Mining:              b.Mining,
+		MiningRepoPath:      filepath.Dir(storyPath),
+		ConnectIDEFromEnv:   b.ConnectIDEFromEnv,
+		ApplicationCaptures: b.ApplicationCaptures,
+		StoryDemoExecutor:   b.StoryDemoExecutor,
+		StoryDemoBinding:    demoBinding,
 	}
 }
 
@@ -308,6 +323,30 @@ func wireComplianceHost(registry *host.Registry, cfg runtimeConfig) {
 		Runner:     compliance.MaterializeCheckRunner{},
 		Evidence: compliance.FileEvidenceStore{
 			Dir: filepath.Join(root, ".artifacts", "compliance"),
+		},
+		Clock: clock.Real(),
+	}))
+}
+
+func wireStoryDemoHost(registry *host.Registry, cfg runtimeConfig) {
+	root := storydemo.DiscoverRoot(cfg.AppPath)
+	scope := storydemo.ScopeID(cfg.Def.App.ID, root)
+	platform := storydemo.NativePlatform{}
+	registry.Replace("host.demo", storydemo.NewHandler(storydemo.Dependencies{
+		AppID:               cfg.Def.App.ID,
+		Root:                root,
+		CatalogPath:         cfg.StoryDemoBinding.CatalogPath,
+		CatalogRef:          cfg.StoryDemoBinding.CatalogRef,
+		MockupApplicationID: cfg.StoryDemoBinding.MockupApplicationID,
+		Authorizer:          storydemo.BoundAuthorizer{AppID: cfg.Def.App.ID, Root: root},
+		Resolver:            storydemo.GraphResolver{},
+		Artifacts:           cfg.StoryDemoExecutor,
+		Capture: storydemo.BrokerCapture{
+			Broker: cfg.ApplicationCaptures,
+		},
+		Doctor: platform,
+		Evidence: storydemo.FileEvidenceStore{
+			Dir: filepath.Join(root, ".artifacts", "story-demo", "references"), Scope: scope,
 		},
 		Clock: clock.Real(),
 	}))
@@ -335,33 +374,33 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		}
 	}()
 
-	s, err := store.Open(cfg.DBPath)
+	s, err := openSessionStoreBackend(cfg.DBPath)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
 	rt.Store = s
 	rt.closers = append(rt.closers, func() { _ = s.Close() })
 
-	jw, err := journal.NewSQLiteWriter(s.DB())
+	jw, err := newJournalWriter(s)
 	if err != nil {
 		return nil, fmt.Errorf("open journal writer: %w", err)
 	}
 	rt.Journal = jw
 
-	jr, err := journal.NewSQLiteReader(s.DB())
+	jr, err := newJournalReader(s)
 	if err != nil {
 		return nil, fmt.Errorf("open journal reader: %w", err)
 	}
 	rt.JournalRead = jr
 
-	jobStore, err := jobs.NewJobStore(s.DB(), jobs.WithJobJournalWriter(jw))
+	jobStore, err := newJobStore(s, jobs.WithJobJournalWriter(jw))
 	if err != nil {
 		return nil, fmt.Errorf("open job store: %w", err)
 	}
 	rt.JobStore = jobStore
 	rt.Scheduler = jobs.NewScheduler(jobStore)
 
-	rawChatStore, err := chats.NewStore(s.DB(), chats.WithJournalWriter(jw))
+	rawChatStore, err := newChatStore(s, chats.WithJournalWriter(jw))
 	if err != nil {
 		return nil, fmt.Errorf("open chat store: %w", err)
 	}
@@ -389,6 +428,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
 		wireComplianceHost(hostReg, cfg)
+		wireStoryDemoHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		testrunner.RegisterHostStubs(hostReg, cfg.Flow.HostHandlers)
 
@@ -469,6 +509,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
 		wireComplianceHost(hostReg, cfg)
+		wireStoryDemoHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		// Layer a host cassette over the live-harness posture when requested
 		// (e.g. --harness replay for free-text routing + --host-cassette for the
@@ -612,11 +653,15 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		if tdErr != nil {
 			toolsDir = filepath.Join(repoPath, "tools", "session-mining")
 		}
+		marks, marksErr := newMiningWatermarkStore(s, cfg.Mining.MinedThrough)
+		if marksErr != nil {
+			return nil, fmt.Errorf("open mining watermark store: %w", marksErr)
+		}
 		miner := &mining.Miner{
 			Resolver: mining.TranscriptResolver{},
 			Sched:    rt.Scheduler,
 			Pipeline: &mining.ExecPipelineRunner{ToolsDir: toolsDir},
-			Marks:    mining.NewMapWatermarkStore(cfg.Mining.MinedThrough),
+			Marks:    marks,
 			Sink:     &mining.SessionSink{Sink: orch},
 			Cfg: mining.Config{
 				Enabled:         true,

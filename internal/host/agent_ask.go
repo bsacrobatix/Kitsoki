@@ -146,10 +146,14 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	// it feeds the request without the prompt having to reference args.ide. A
 	// no-op when no selection rode the turn. Done before plugin dispatch so both
 	// the Dispatch and subprocess paths carry it.
-	rendered = appendIDEAmbient(ctx, rendered)
+	if !isolatedAgentInvocation(ctx) {
+		rendered = appendIDEAmbient(ctx, rendered)
+	}
 	// Always-on screen context: append the operator's pointed-at element/frame
 	// beside the editor selection. A no-op when no surface attached a bundle.
-	rendered = appendVisualAmbient(ctx, rendered)
+	if !isolatedAgentInvocation(ctx) {
+		rendered = appendVisualAmbient(ctx, rendered)
+	}
 
 	// B-7: If an agent plugin registry is wired in context, route through
 	// host.Dispatch (the Agent plugin interface) instead of the subprocess.
@@ -161,11 +165,13 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 		pluginSchemaJSON = json.RawMessage(`"` + strings.TrimSpace(schemaArg) + `"`) // pass schema path as hint
 	}
 	withArgs, _ := args["with"].(map[string]any)
-	if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "ask", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
-		if pluginErr != nil {
-			return Result{Error: pluginErr.Error()}, nil
+	if !isolatedAgentInvocation(ctx) {
+		if pluginRes, handled, pluginErr := TryDispatchVerb(ctx, "ask", rendered, "", agentNameFromArgs(args), "", withArgs, pluginSchemaJSON); handled {
+			if pluginErr != nil {
+				return Result{Error: pluginErr.Error()}, nil
+			}
+			return pluginRes, nil
 		}
-		return pluginRes, nil
 	}
 
 	// Choose template scope: prefer explicit `args:` map for new callers;
@@ -227,7 +233,9 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 	}
 	// Forward operator questions into kitsoki when a live surface is attached.
 	var opAskCleanup func()
-	cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
+	if !isolatedAgentInvocation(ctx) {
+		cliArgs, tools, opAskCleanup, _ = attachOperatorAsk(ctx, cliArgs, tools)
+	}
 	defer opAskCleanup()
 	policy = policy.WithAllowed(tools)
 	cliArgs = appendAllowedToolsFlag(cliArgs, tools)
@@ -277,7 +285,9 @@ func AgentAskHandler(ctx context.Context, args map[string]any) (Result, error) {
 		mcpServers["validator"] = validatorEntry
 	}
 
-	mcpServers = attachStudioMCPServer(mcpServers, tools)
+	if !isolatedAgentInvocation(ctx) {
+		mcpServers = attachStudioMCPServer(mcpServers, tools)
+	}
 
 	if len(mcpServers) > 0 {
 		mcpConfigPath, cleanup, cfgErr := writeMCPConfigTempfile(mcpServers, "kitsoki-ask-mcp")

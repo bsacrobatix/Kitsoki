@@ -182,13 +182,25 @@ type OperatingSystemServices struct {
 // typed-gate runners.  The caller supplies repository-relative paths so a
 // Studio subprocess and its child workspace commands agree on containment.
 func NewOperatingSystemServices(profile StudioOperatingProfile, workspaceRoot, workspaceScript string) (*OperatingSystemServices, error) {
+	return NewOperatingSystemServicesWithObjectiveStore(profile, workspaceRoot, workspaceScript, nil)
+}
+
+// NewOperatingSystemServicesWithObjectiveStore is the opt-in durable variant:
+// a host that owns a database handle injects its ObjectiveStore (e.g.
+// NewPostgresObjectiveStore on the pg backend) so objective receipts survive
+// process exit. A nil store keeps the default in-memory behaviour, so
+// SQLite/JSONL deployments are byte-for-byte unchanged.
+func NewOperatingSystemServicesWithObjectiveStore(profile StudioOperatingProfile, workspaceRoot, workspaceScript string, objectiveStore ObjectiveStore) (*OperatingSystemServices, error) {
 	if profile == "" {
 		profile = StudioOperatingProfileLegacy
 	}
 	if profile != StudioOperatingProfileLegacy && profile != StudioOperatingProfileStrict && profile != StudioOperatingProfileEscape {
 		return nil, fmt.Errorf("unknown operating-system profile %q", profile)
 	}
-	objectives, err := NewObjectiveService(NewMemoryObjectiveStore(), nil)
+	if objectiveStore == nil {
+		objectiveStore = NewMemoryObjectiveStore()
+	}
+	objectives, err := NewObjectiveService(objectiveStore, nil)
 	if err != nil {
 		return nil, err
 	}

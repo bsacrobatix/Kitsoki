@@ -164,6 +164,14 @@ type SeededSessionProvider interface {
 	NewSessionSeeded(ctx context.Context, storyPath string, initialWorld map[string]any) (sessionID string, err error)
 }
 
+// RegisteredApplicationProvider creates a session by exact application ID
+// from the provider's discovered catalog. It is the only provider authority
+// accepted by typed graph materialization; path-based seeded sessions remain
+// legacy-only.
+type RegisteredApplicationProvider interface {
+	NewRegisteredApplicationSession(ctx context.Context, applicationID string) (sessionID string, err error)
+}
+
 // ExternalAttachProvider is an optional extension of [SessionProvider]: a
 // provider that can attach a live session to an EXISTING persisted session
 // addressed by an external key (`transport:thread`, e.g. `jira:PLTFRM-12345`),
@@ -235,6 +243,14 @@ type Entry struct {
 	Artifacts ArtifactResolver
 	Frames    FrameRecorder
 	Feedback  FeedbackSink
+	// Stream is the optional durable-stream read capability for this session
+	// (session_events.go): a cursor-addressable view of the session's event
+	// log backed by [store.EventStream]. The provider stamps it only when the
+	// session's store exposes the capability (the Postgres backends today);
+	// nil keeps the server on its existing Source-polling SSE path and makes
+	// runstatus.session.events report codeStreamUnsupported. Purely additive:
+	// SQLite/file-backed sessions never see a behavior change.
+	Stream *SessionStream
 	// FrameRunner is the command runner video.frame injects into [video.Frame]
 	// for this session. Production leaves it nil → video.Frame shells ffmpeg via
 	// its DefaultRunner; a test injects a fixture-copying fake here (per-entry,

@@ -44,21 +44,30 @@ import (
 	"kitsoki/internal/agentroot"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationconversation"
+	"kitsoki/internal/applicationjob"
+	"kitsoki/internal/applicationmaintenance"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/campaign"
+	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/compliance"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
+	"kitsoki/internal/storydemo"
 	"kitsoki/internal/study"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
+	"kitsoki/internal/workerregistry"
 )
 
 // entry is one live session as the registry owns it. The server only needs the
@@ -192,23 +201,36 @@ type SessionRegistry struct {
 	// daemonStore owns the connection used by daemonJobs. It is separate from
 	// each live session runtime but points at the same SQLite file, so durable
 	// job identity survives registry and process teardown.
-	daemonStore       store.Store
-	daemonJobs        artifactjob.Store
-	campaignStore     campaign.Store
-	campaignSource    campaign.Source
-	campaignScheduler jobs.Scheduler
-	campaignServices  map[string]*campaign.Service
-	studies           study.Store
-	federation        *daemonfederation.Pool
+	daemonStore                  store.Store
+	daemonJobs                   artifactjob.Store
+	campaignStore                campaign.Store
+	campaignSource               campaign.Source
+	campaignScheduler            jobs.Scheduler
+	campaignServices             map[string]*campaign.Service
+	maintenanceJobs              *jobs.JobStore
+	studies                      study.Store
+	federation                   *daemonfederation.Pool
+	materializations             materializationstatus.Store
+	feedbackDispatches           reviewedfeedback.DispatchStore
+	feedbackReconciles           reviewedfeedback.ReconcileStore
+	feedbackLedger               reviewedfeedback.JSONLLedger
+	applicationConversationStore *applicationconversation.SQLStore
+	applicationConversationChats *chats.Store
 
 	// feedbackBackends are explicit daemon-construction bindings keyed by
 	// application ID. Session construction derives the remaining scope from
 	// the loaded application metadata.
-	feedbackBackends map[string]host.FeedbackBackend
+	feedbackBackends           map[string]host.FeedbackBackend
+	feedbackFederationBackends map[string]host.FeedbackBackend
+	feedbackCaptureSources     map[string]reviewedfeedback.CaptureSource
 
 	// flowEvidenceProviders are explicit daemon-construction bindings. The
 	// registered catalog path and dependencies are never selected by callers.
 	flowEvidenceProviders map[string]host.FlowEvidenceProvider
+
+	applicationArtifactMu sync.Mutex
+	applicationBundleRoot string
+	applicationJobs       *applicationjob.Service
 }
 
 // NewRegistry constructs a registry over the resolved story dirs. cfg carries
@@ -217,15 +239,76 @@ type SessionRegistry struct {
 // session-invariant construction posture every new session inherits. The
 // initial catalogue is empty until the caller runs Rescan.
 func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *SessionRegistry {
-	return &SessionRegistry{
-		cfg:                   cfg,
-		base:                  base,
-		dirs:                  dirs,
-		sessions:              map[string]*entry{},
-		feedbackBackends:      map[string]host.FeedbackBackend{},
-		flowEvidenceProviders: map[string]host.FlowEvidenceProvider{},
-		maxSessions:           maxSessionsFromEnv(),
+	base.StoryDemoBindings = make(map[string]storydemo.DeploymentBinding, len(cfg.StoryApplicationArtifacts))
+	for caller, binding := range cfg.StoryApplicationArtifacts {
+		mockupApplicationID := ""
+		if binding.CreateMockup != nil {
+			mockupApplicationID = binding.CreateMockup.ApplicationID
+		}
+		base.StoryDemoBindings[caller] = storydemo.DeploymentBinding{
+			CatalogPath:         binding.Catalog,
+			CatalogRef:          binding.CatalogRef,
+			MockupApplicationID: mockupApplicationID,
+		}
 	}
+	return &SessionRegistry{
+		cfg:                        cfg,
+		base:                       base,
+		dirs:                       dirs,
+		sessions:                   map[string]*entry{},
+		feedbackBackends:           map[string]host.FeedbackBackend{},
+		feedbackFederationBackends: map[string]host.FeedbackBackend{},
+		feedbackCaptureSources:     map[string]reviewedfeedback.CaptureSource{},
+		flowEvidenceProviders:      map[string]host.FlowEvidenceProvider{},
+		maxSessions:                maxSessionsFromEnv(),
+	}
+}
+
+// RegisterFeedbackCaptureSource binds an opaque semantic source ID to an
+// existing platform-owned typed feedback source. Configuration and host calls
+// cannot supply a path, URL, transport, credential, or provider.
+func (r *SessionRegistry) RegisterFeedbackCaptureSource(
+	sourceID string,
+	source reviewedfeedback.CaptureSource,
+) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if !validFeedbackServiceID(sourceID) {
+		return errors.New("register feedback capture source: opaque source id is required")
+	}
+	if sourceID == reviewedfeedback.ApplicationFeedbackSourceID {
+		return fmt.Errorf(
+			"register feedback capture source %q: source id is reserved by the platform",
+			sourceID,
+		)
+	}
+	if source == nil {
+		return fmt.Errorf("register feedback capture source %q: source is required", sourceID)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.feedbackCaptureSources == nil {
+		r.feedbackCaptureSources = make(map[string]reviewedfeedback.CaptureSource)
+	}
+	if _, exists := r.feedbackCaptureSources[sourceID]; exists {
+		return fmt.Errorf("register feedback capture source %q: already registered", sourceID)
+	}
+	r.feedbackCaptureSources[sourceID] = source
+	return nil
+}
+
+func validFeedbackServiceID(value string) bool {
+	if value == "" || len(value) > 180 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9', r == '.', r == '_', r == '-', r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // RegisterFeedbackBackend binds one application ID to a governed feedback
@@ -283,17 +366,100 @@ func (r *SessionRegistry) RegisterFlowEvidenceProvider(
 // It is explicit rather than an environment toggle so ordinary `kitsoki web`
 // keeps its existing process-local behavior.
 func (r *SessionRegistry) EnableDaemon(dbPath string) error {
-	st, err := store.Open(dbPath)
+	st, err := openSessionStoreBackend(dbPath)
 	if err != nil {
 		return fmt.Errorf("open daemon store: %w", err)
 	}
-	artifactJobs, err := artifactjob.NewSQLiteStore(st.DB())
+	artifactJobs, err := newArtifactJobStore(st)
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("open daemon artifact jobs: %w", err)
 	}
 	r.daemonStore = st
 	r.daemonJobs = artifactJobs
+	if len(r.cfg.StoryApplicationJobs) > 0 {
+		applicationJobRecords, applicationJobErr := newApplicationJobStore(st)
+		if applicationJobErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon application jobs: %w", applicationJobErr)
+		}
+		r.applicationJobs = &applicationjob.Service{
+			Records:   applicationJobRecords,
+			Jobs:      artifactJobs,
+			Backend:   applicationJobRegistryBackend{registry: r},
+			Templates: r.cfg.StoryApplicationJobs,
+			Now:       time.Now,
+		}
+	}
+	if len(r.cfg.ApplicationConversations) > 0 {
+		conversationStore, conversationErr := newApplicationConversationStore(st, clock.Real())
+		if conversationErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon application conversations: %w", conversationErr)
+		}
+		conversationChats, conversationErr := newChatStore(st)
+		if conversationErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon application conversation chats: %w", conversationErr)
+		}
+		if _, conversationErr := conversationStore.InterruptPending(
+			context.Background(), "daemon_restarted",
+		); conversationErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon application conversations: %w", conversationErr)
+		}
+		r.applicationConversationStore = conversationStore
+		r.applicationConversationChats = conversationChats
+	}
+	if len(r.cfg.ReviewedFeedback) > 0 || len(r.cfg.FeedbackFederation) > 0 {
+		feedbackDispatches, feedbackErr := newReviewedFeedbackDispatchStore(
+			st, clock.Real(),
+		)
+		if feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon reviewed feedback dispatches: %w", feedbackErr)
+		}
+		if _, feedbackErr := feedbackDispatches.InterruptPending(
+			context.Background(), "daemon_restarted",
+		); feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon reviewed feedback dispatches: %w", feedbackErr)
+		}
+		r.feedbackDispatches = feedbackDispatches
+	}
+	if len(r.cfg.ReviewedFeedback) > 0 || len(r.cfg.FeedbackIntake) > 0 ||
+		len(r.cfg.FeedbackFederation) > 0 {
+		feedbackReconciles, feedbackErr := newReviewedFeedbackReconcileStore(
+			st, clock.Real(),
+		)
+		if feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon feedback reconciliations: %w", feedbackErr)
+		}
+		if _, feedbackErr := feedbackReconciles.InterruptPending(
+			context.Background(), "daemon_restarted",
+		); feedbackErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon feedback reconciliations: %w", feedbackErr)
+		}
+		r.feedbackReconciles = feedbackReconciles
+	}
+	r.base.StoryDemoExecutor = r
+	if root, rootErr := os.Getwd(); rootErr == nil {
+		r.applicationBundleRoot = filepath.Join(root, ".artifacts", "application-builds")
+	}
+	for _, binding := range r.cfg.ApplicationMaintenance {
+		if binding.SessionReconciliation == nil {
+			continue
+		}
+		maintenanceJobs, maintenanceErr := newJobStore(st)
+		if maintenanceErr != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon session reconciliation jobs: %w", maintenanceErr)
+		}
+		r.maintenanceJobs = maintenanceJobs
+		break
+	}
 	if r.cfg.Campaigns != nil {
 		campaignStore, campaignErr := campaign.NewSQLiteStore(st.DB())
 		if campaignErr != nil {
@@ -326,12 +492,24 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 			return fmt.Errorf("restore daemon campaigns: %w", campaignErr)
 		}
 	}
-	studies, err := study.NewSQLiteStore(st.DB())
+	studies, err := newStudyStore(st)
 	if err != nil {
 		_ = st.Close()
 		return fmt.Errorf("open daemon studies: %w", err)
 	}
 	r.studies = studies
+	if _, ok := r.configuredMaterializationApplication(); ok {
+		materializations, err := newMaterializationStatusStore(st, time.Now)
+		if err != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon materialization projection: %w", err)
+		}
+		if _, err := materializations.InterruptActive(context.Background(), "daemon_restarted"); err != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon materialization projection: %w", err)
+		}
+		r.materializations = materializations
+	}
 	return nil
 }
 
@@ -787,6 +965,29 @@ func (r *SessionRegistry) NewSessionSeeded(ctx context.Context, storyPath string
 	return r.newSession(ctx, storyPath, initialWorld)
 }
 
+// NewRegisteredApplicationSession implements
+// [server.RegisteredApplicationProvider]. Application IDs are resolved
+// exactly and uniquely against the discovered story catalog before the
+// internal path is used to create a live session.
+func (r *SessionRegistry) NewRegisteredApplicationSession(ctx context.Context, applicationID string) (string, error) {
+	r.mu.Lock()
+	var matches []string
+	for _, story := range r.stories {
+		if story.Def != nil && story.Def.App.ID == applicationID {
+			matches = append(matches, story.Path)
+		}
+	}
+	r.mu.Unlock()
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("registered application %q not found", applicationID)
+	case 1:
+		return r.newSession(ctx, matches[0], nil)
+	default:
+		return "", fmt.Errorf("registered application %q is ambiguous (%d exact matches)", applicationID, len(matches))
+	}
+}
+
 func (r *SessionRegistry) newSession(ctx context.Context, storyPath string, initialWorld map[string]any) (string, error) {
 	return r.newSessionWithOrigin(ctx, storyPath, initialWorld, artifactjob.Origin{})
 }
@@ -824,8 +1025,19 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
+	r.wireApplicationMaintenance(rt, def.App.ID)
+	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
+		rt.Close()
+		return "", err
+	}
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireApplicationJob(rt, def.App.ID)
+	if err := r.wireApplicationConversation(rt, def.App.ID); err != nil {
+		return "", err
+	}
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
 	ok := false
@@ -1075,8 +1287,19 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	}
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireFeedbackReconciliation(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
+	r.wireApplicationMaintenance(rt, def.App.ID)
+	if err := r.wireApplicationGraph(rt, def.App.ID, loaded.path); err != nil {
+		rt.Close()
+		return "", err
+	}
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
+	r.wireApplicationJob(rt, def.App.ID)
+	if err := r.wireApplicationConversation(rt, def.App.ID); err != nil {
+		return "", err
+	}
 	ok := false
 	defer func() {
 		if !ok {
@@ -1247,7 +1470,25 @@ func (r *SessionRegistry) Get(sessionID string) (server.Entry, bool) {
 		Artifacts: &server.JournalArtifactResolver{Reader: e.rt.JournalRead, SID: e.sid},
 		Frames:    e.frameRecorderLocked(),
 		Feedback:  e.feedbackSinkLocked(),
+		Stream:    entrySessionStream(e),
 	}, true
+}
+
+// entrySessionStream exposes the durable-stream read capability of e's
+// session store when the backend provides one (postgres/embedded-postgres via
+// store.AsEventStream); nil on SQLite, which keeps the server on its existing
+// Source-polling SSE path and makes runstatus.session.events report its typed
+// not-supported error. The store session id rides along because the registry's
+// public session id (the RPC session_id) is not the store's.
+func entrySessionStream(e *entry) *server.SessionStream {
+	if e.rt == nil || e.rt.Store == nil {
+		return nil
+	}
+	es, ok := store.AsEventStream(e.rt.Store)
+	if !ok {
+		return nil
+	}
+	return &server.SessionStream{Stream: es, SID: e.sid}
 }
 
 // ApplicationEventScheduler returns the durable SQLite-backed scheduler
@@ -1282,6 +1523,260 @@ func (r *SessionRegistry) wireRunstatusSnapshot(rt *sessionRuntime, appID string
 	)
 }
 
+func (r *SessionRegistry) wireApplicationReadModels(rt *sessionRuntime, appID, appPath string) {
+	if r.daemonJobs == nil || rt == nil || rt.HostRegistry == nil {
+		return
+	}
+	binding, ok := r.cfg.ApplicationReadModels[appID]
+	if !ok {
+		return
+	}
+	projectRoot := compliance.DiscoverRoot(appPath)
+	if binding.Streams != nil {
+		rt.HostRegistry.Replace(
+			"host.streams",
+			host.NewStreamsSnapshotHandler(
+				queueDeliveryStreamSource{
+					store:     queue.Store{ProjectRoot: projectRoot},
+					projectID: binding.Streams.Scope,
+				},
+				appID,
+				binding.Streams.Scope,
+			),
+		)
+	}
+	if binding.Federation {
+		entries := append([]workerregistry.Entry(nil), r.cfg.Workers...)
+		if len(entries) == 0 {
+			entries = workerregistry.FromDaemonFederation(r.cfg.DaemonFederation)
+		}
+		rt.HostRegistry.Replace(
+			"host.federation",
+			host.NewFederationSnapshotHandler(
+				registryFederationSource{
+					entries: entries,
+					pool:    r.federation,
+					policy:  r.base.AgentLaunchPolicy.Placement,
+				},
+				appID,
+			),
+		)
+	}
+	if binding.Materialization && r.materializations != nil {
+		rt.HostRegistry.Replace(
+			"host.materialization",
+			host.NewMaterializationSnapshotHandler(r.materializations, appID),
+		)
+	}
+}
+
+func (r *SessionRegistry) MaterializationProjection() (materializationstatus.Store, string, bool) {
+	if r.materializations == nil {
+		return nil, "", false
+	}
+	owner, ok := r.configuredMaterializationApplication()
+	if !ok {
+		return nil, "", false
+	}
+	return r.materializations, owner, true
+}
+
+func (r *SessionRegistry) configuredMaterializationApplication() (string, bool) {
+	owner := ""
+	for appID, binding := range r.cfg.ApplicationReadModels {
+		if !binding.Materialization {
+			continue
+		}
+		if owner != "" {
+			return "", false
+		}
+		owner = appID
+	}
+	if owner == "" {
+		return "", false
+	}
+	return owner, true
+}
+
+type queueDeliveryStreamSource struct {
+	store     queue.Store
+	projectID string
+}
+
+func (s queueDeliveryStreamSource) ListDeliveryStreams(_ context.Context, limit int) ([]host.DeliveryStreamRecord, error) {
+	if err := rejectQueueSymlinks(s.store.ProjectRoot); err != nil {
+		return nil, err
+	}
+	state, err := s.store.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.DeliveryStreamRecord, 0, min(limit, len(state.Candidates)))
+	for _, candidate := range state.Candidates {
+		if !strings.EqualFold(strings.TrimSpace(candidate.ProjectID), strings.TrimSpace(s.projectID)) {
+			continue
+		}
+		head := strings.TrimSpace(candidate.ValidatedSHA)
+		if head == "" {
+			head = strings.TrimSpace(candidate.SHA)
+		}
+		out = append(out, host.DeliveryStreamRecord{
+			ID:            candidate.ID,
+			Lane:          string(candidate.TargetPolicy),
+			State:         string(candidate.Status),
+			ImmutableHead: head,
+			TargetRef:     candidate.TargetRef,
+			ProposalState: queueProposalState(candidate),
+			GateStatus:    queueGateStatus(candidate.Status),
+			NextAction:    queueNextAction(candidate.Status),
+			ReceiptRef:    candidate.ReceiptID,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func rejectQueueSymlinks(root string) error {
+	root, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return fmt.Errorf("resolve configured project root: %w", err)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect configured project root: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("configured project root must not be a symlink")
+	}
+	for _, path := range []string{
+		filepath.Join(root, ".capsules"),
+		filepath.Join(root, ".capsules", "queue"),
+		filepath.Join(root, ".capsules", "queue", "state.json"),
+	} {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("delivery stream store contains a symlink")
+		}
+	}
+	return nil
+}
+
+func queueProposalState(candidate queue.Candidate) string {
+	switch candidate.Status {
+	case queue.AwaitingApproval:
+		return "awaiting-approval"
+	case queue.Rejected:
+		return "rejected"
+	default:
+		if candidate.ReceiptID != "" {
+			return "receipt-admitted"
+		}
+		return "unverified"
+	}
+}
+
+func queueGateStatus(status queue.Status) string {
+	switch status {
+	case queue.ReadyToFinalize, queue.Finalizing, queue.Landed:
+		return "passed"
+	case queue.NeedsInput, queue.NeedsConflictInput, queue.Rejected:
+		return "failed"
+	case queue.Gating:
+		return "running"
+	default:
+		return "pending"
+	}
+}
+
+func queueNextAction(status queue.Status) string {
+	switch status {
+	case queue.AwaitingApproval:
+		return "approve"
+	case queue.ReadyToFinalize:
+		return "finalize"
+	case queue.NeedsInput, queue.NeedsConflictInput, queue.Rejected:
+		return "review"
+	case queue.RetryWait:
+		return "retry"
+	case queue.Landed:
+		return "none"
+	default:
+		return "advance"
+	}
+}
+
+type registryFederationSource struct {
+	entries []workerregistry.Entry
+	pool    *daemonfederation.Pool
+	policy  map[string]host.PlacementLanePolicy
+}
+
+func (s registryFederationSource) FederationSnapshot(ctx context.Context) (host.FederationProjection, error) {
+	health := map[string]daemonfederation.WorkerStatus{}
+	if s.pool != nil {
+		for _, worker := range s.pool.Get(ctx).Workers {
+			health[worker.ID] = worker
+		}
+	}
+	projection := host.FederationProjection{
+		Workers: make([]host.FederationWorker, 0, len(s.entries)),
+		Policy:  make([]host.FederationPolicy, 0, len(s.policy)),
+	}
+	for _, entry := range s.entries {
+		status := health[entry.ID]
+		healthName := status.Health
+		if healthName == "" {
+			healthName = "unknown"
+		}
+		projection.Workers = append(projection.Workers, host.FederationWorker{
+			ID: entry.ID, Label: entry.Label, Placement: entry.Placement,
+			Health: healthName, Enabled: entry.Enabled, Jobs: status.JobCount,
+			Capabilities: host.FederationCapabilities{
+				Placements: append([]string(nil), entry.Capabilities.Placements...),
+				Isolation:  entry.Capabilities.Isolation,
+				Networks:   append([]string(nil), entry.Capabilities.Networks...),
+			},
+		})
+	}
+	for lane, policy := range s.policy {
+		projection.Policy = append(projection.Policy, host.FederationPolicy{
+			Lane: lane, WorkerClasses: append([]string(nil), policy.WorkerClasses...),
+			NetworkProfiles: append([]string(nil), policy.NetworkProfiles...),
+		})
+	}
+	return projection, nil
+}
+
+func (s registryFederationSource) ObserveWorkers(
+	ctx context.Context,
+) ([]applicationmaintenance.WorkerObservation, error) {
+	projection, err := s.FederationSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]applicationmaintenance.WorkerObservation, 0, len(projection.Workers))
+	for _, worker := range projection.Workers {
+		out = append(out, applicationmaintenance.WorkerObservation{
+			ID: worker.ID, Placement: worker.Placement, Health: worker.Health,
+			Enabled: worker.Enabled, Jobs: worker.Jobs,
+			Capabilities: applicationmaintenance.WorkerCapabilities{
+				Placements: append([]string(nil), worker.Capabilities.Placements...),
+				Isolation:  worker.Capabilities.Isolation,
+				Networks:   append([]string(nil), worker.Capabilities.Networks...),
+			},
+		})
+	}
+	return out, nil
+}
+
 func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revision string) {
 	if rt == nil || rt.HostRegistry == nil {
 		return
@@ -1300,6 +1795,88 @@ func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revisio
 			Revision:      revision,
 		}),
 	)
+}
+
+func (r *SessionRegistry) wireFeedbackReconciliation(
+	rt *sessionRuntime,
+	appID, owner, revision string,
+) {
+	if rt == nil || rt.HostRegistry == nil || appID == "" {
+		return
+	}
+	scope := host.FeedbackScope{ApplicationID: appID, Owner: owner, Revision: revision}
+	r.mu.Lock()
+	campaignBackend := r.feedbackBackends[appID]
+	federationBackend := r.feedbackFederationBackends[appID]
+	intakeBinding, intakeConfigured := r.cfg.FeedbackIntake[appID]
+	intakeSource := r.feedbackCaptureSources[intakeBinding.Source]
+	campaignBinding, campaignConfigured := r.cfg.ReviewedFeedback[appID]
+	federationBinding, federationConfigured := r.cfg.FeedbackFederation[appID]
+	store := r.feedbackReconciles
+	ledger := r.feedbackLedger
+	r.mu.Unlock()
+
+	if campaignConfigured {
+		service := reviewedfeedback.DispatchReconciler{
+			Operation: reviewedfeedback.OperationCampaign,
+			ConfigurationID: reviewedfeedback.BindingConfigurationID(
+				campaignBinding.TargetApplication,
+				campaignBinding.TargetHandler,
+				campaignBinding.TargetAction,
+			),
+			Backend: campaignBackend, Store: store, Scope: scope,
+			Limit: reviewedfeedback.DefaultDrainLimit,
+		}
+		rt.HostRegistry.Replace(
+			host.ReviewedFeedbackCampaignReconcileVerb,
+			host.NewFeedbackReconcileHandler(
+				host.ReviewedFeedbackCampaignReconcileVerb,
+				func(ctx context.Context) (host.Result, error) {
+					result, err := service.Reconcile(ctx)
+					return result.HostResult(), err
+				},
+			),
+		)
+	}
+	if intakeConfigured {
+		service := reviewedfeedback.IntakeReconciler{
+			SourceID: intakeBinding.Source, Source: intakeSource,
+			Ledger: ledger, Store: store, Scope: scope,
+			Clock: clock.Real(), Limit: intakeBinding.MaxRecords,
+		}
+		rt.HostRegistry.Replace(
+			host.FeedbackIntakeReconcileVerb,
+			host.NewFeedbackReconcileHandler(
+				host.FeedbackIntakeReconcileVerb,
+				func(ctx context.Context) (host.Result, error) {
+					result, err := service.Reconcile(ctx)
+					return result.HostResult(), err
+				},
+			),
+		)
+	}
+	if federationConfigured {
+		service := reviewedfeedback.DispatchReconciler{
+			Operation: reviewedfeedback.OperationFederation,
+			ConfigurationID: reviewedfeedback.BindingConfigurationID(
+				federationBinding.TargetApplication,
+				federationBinding.TargetHandler,
+				federationBinding.TargetAction,
+			),
+			Backend: federationBackend, Store: store, Scope: scope,
+			Limit: federationBinding.MaxRecords,
+		}
+		rt.HostRegistry.Replace(
+			host.FeedbackFederationReconcileVerb,
+			host.NewFeedbackReconcileHandler(
+				host.FeedbackFederationReconcileVerb,
+				func(ctx context.Context) (host.Result, error) {
+					result, err := service.Reconcile(ctx)
+					return result.HostResult(), err
+				},
+			),
+		)
+	}
 }
 
 func (r *SessionRegistry) wireCampaign(rt *sessionRuntime, appID string) {
@@ -1321,6 +1898,69 @@ func (r *SessionRegistry) wireCampaign(rt *sessionRuntime, appID string) {
 	}
 	r.mu.Unlock()
 	rt.HostRegistry.Replace("host.campaign", host.NewCampaignHandler(service, appID))
+}
+
+func (r *SessionRegistry) wireApplicationMaintenance(rt *sessionRuntime, appID string) {
+	if rt == nil || rt.HostRegistry == nil || appID == "" {
+		return
+	}
+	binding, ok := r.cfg.ApplicationMaintenance[appID]
+	if !ok {
+		return
+	}
+	if cfg := binding.SessionReconciliation; cfg != nil &&
+		r.daemonStore != nil && r.maintenanceJobs != nil {
+		service := applicationmaintenance.SessionService{
+			ApplicationID: appID,
+			Sessions:      r.daemonStore,
+			Jobs:          r.maintenanceJobs,
+			MaxSessions:   cfg.MaxSessions,
+			MaxJobs:       cfg.MaxJobs,
+		}
+		rt.HostRegistry.Replace(
+			host.SessionReconciliationVerb,
+			host.NewApplicationMaintenanceHandler(
+				host.SessionReconciliationVerb,
+				service.Reconcile,
+			),
+		)
+	}
+	if cfg := binding.WorkerFleet; cfg != nil {
+		entries := append([]workerregistry.Entry(nil), r.cfg.Workers...)
+		if len(entries) == 0 {
+			entries = workerregistry.FromDaemonFederation(r.cfg.DaemonFederation)
+		}
+		service := applicationmaintenance.WorkerService{
+			ApplicationID: appID,
+			Source: registryFederationSource{
+				entries: entries,
+				pool:    r.federation,
+				policy:  r.base.AgentLaunchPolicy.Placement,
+			},
+			MaxWorkers: cfg.MaxWorkers,
+			MaxBytes:   cfg.MaxBytes,
+		}
+		rt.HostRegistry.Replace(
+			host.WorkerFleetVerb,
+			host.NewApplicationMaintenanceHandler(host.WorkerFleetVerb, service.Reconcile),
+		)
+	}
+	if cfg := binding.CampaignSupervision; cfg != nil && r.campaignStore != nil {
+		service := applicationmaintenance.CampaignService{
+			ApplicationID: appID,
+			Store:         r.campaignStore,
+			MaxCampaigns:  cfg.MaxCampaigns,
+			MaxBytes:      cfg.MaxBytes,
+			Policy: applicationmaintenance.CampaignPolicy{
+				MaxProposals: cfg.Remediation.MaxProposals,
+				Statuses:     append([]string(nil), cfg.Remediation.Statuses...),
+			},
+		}
+		rt.HostRegistry.Replace(
+			host.CampaignSupervisionVerb,
+			host.NewApplicationMaintenanceHandler(host.CampaignSupervisionVerb, service.Reconcile),
+		)
+	}
 }
 
 type campaignSchedulerAdapter struct {
@@ -1472,21 +2112,31 @@ func (r *SessionRegistry) ListArtifactJobs(ctx context.Context) ([]server.Artifa
 		}
 		out = make([]server.ArtifactJobSummary, 0, len(jobs))
 		for _, job := range jobs {
+			story := job.Story
+			sessionID := string(job.SessionID)
+			runURL := job.RunURL
+			openURL := job.RunURL
+			if job.Origin.Kind == "application-artifact" || job.Origin.Kind == "application-job" {
+				story = "application:" + job.AppID
+				sessionID = ""
+				runURL = ""
+				openURL = ""
+			}
 			out = append(out, server.ArtifactJobSummary{
 				JobID:             string(job.ID),
-				SessionID:         string(job.SessionID),
+				SessionID:         sessionID,
 				AppID:             job.AppID,
-				Story:             job.Story,
+				Story:             story,
 				Status:            string(job.Status),
 				Phase:             job.Phase,
 				Summary:           job.Summary,
-				RunURL:            job.RunURL,
+				RunURL:            runURL,
 				UpdatedAt:         job.UpdatedAt,
 				InterruptedReason: job.InterruptedReason,
 				WorkerID:          "local",
 				WorkerLabel:       "Local",
 				Placement:         "local",
-				OpenURL:           job.RunURL,
+				OpenURL:           openURL,
 			})
 		}
 	}
@@ -1552,7 +2202,11 @@ func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
 	var restored int
 	var restoreErrs []error
 	for _, job := range jobs {
-		if (job.Origin.Kind != "daemon" && job.Origin.Kind != "campaign") || job.Story == "" {
+		if (job.Origin.Kind != "daemon" &&
+			job.Origin.Kind != "campaign" &&
+			job.Origin.Kind != "feedback" &&
+			job.Origin.Kind != "application-artifact") ||
+			job.Story == "" {
 			continue
 		}
 		id, attachErr := r.AttachExternal(ctx, job.Story, "daemon:"+string(job.ID))
@@ -1562,6 +2216,12 @@ func (r *SessionRegistry) RestoreDaemonJobs(ctx context.Context) (int, error) {
 		}
 		if id != string(job.ID) {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore job %s returned unstable route %s", job.ID, id))
+			continue
+		}
+		if job.Origin.Kind == "feedback" {
+			// Reattach the durable session, but keep the artifact job
+			// interrupted until the operator explicitly retries the dispatch.
+			restored++
 			continue
 		}
 		r.syncDaemonJob(id)
@@ -1950,11 +2610,11 @@ func (r *SessionRegistry) ensureSelfMetaLocked() error {
 	if r.metaSelfCtrl != nil {
 		return nil
 	}
-	s, err := store.Open(r.base.DBPath)
+	s, err := openSessionStoreBackend(r.base.DBPath)
 	if err != nil {
 		return fmt.Errorf("meta self: open store: %w", err)
 	}
-	cs, err := chats.NewStore(s.DB())
+	cs, err := newChatStore(s)
 	if err != nil {
 		_ = s.Close()
 		return fmt.Errorf("meta self: open chat store: %w", err)
@@ -1979,12 +2639,13 @@ func (r *SessionRegistry) ensureSelfMetaLocked() error {
 
 // Compile-time assertions that SessionRegistry satisfies the provider seams.
 var (
-	_ server.SessionProvider        = (*SessionRegistry)(nil)
-	_ server.MetaSelfProvider       = (*SessionRegistry)(nil)
-	_ server.EditorProvider         = (*SessionRegistry)(nil)
-	_ server.SeededSessionProvider  = (*SessionRegistry)(nil)
-	_ server.ExternalAttachProvider = (*SessionRegistry)(nil)
-	_ server.CurrentSessionProvider = (*SessionRegistry)(nil)
+	_ server.SessionProvider               = (*SessionRegistry)(nil)
+	_ server.MetaSelfProvider              = (*SessionRegistry)(nil)
+	_ server.EditorProvider                = (*SessionRegistry)(nil)
+	_ server.SeededSessionProvider         = (*SessionRegistry)(nil)
+	_ server.RegisteredApplicationProvider = (*SessionRegistry)(nil)
+	_ server.ExternalAttachProvider        = (*SessionRegistry)(nil)
+	_ server.CurrentSessionProvider        = (*SessionRegistry)(nil)
 )
 
 // seedFlowInitialState honors a flow fixture's initial_state / initial_world on

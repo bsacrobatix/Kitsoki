@@ -106,7 +106,9 @@ func resolveDemoScript(args map[string]any, name string) (string, error) {
 	return candidate, nil
 }
 
-// DemoHandler implements the host.demo.* multi-op verb (A2).
+// DemoHandler implements the deprecated path-based host.demo compatibility
+// surface. Story Application runtimes replace it with internal/storydemo's
+// typed, app-scoped provider.
 func DemoHandler(ctx context.Context, args map[string]any) (Result, error) {
 	op, _ := args["op"].(string)
 	switch op {

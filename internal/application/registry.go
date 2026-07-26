@@ -19,33 +19,36 @@ var (
 )
 
 type HandlerDefinition struct {
-	ID                   string            `json:"id"`
-	Name                 string            `json:"name"`
-	Description          string            `json:"description"`
-	SemanticRef          string            `json:"semantic_ref"`
-	InputSchema          json.RawMessage   `json:"input_schema,omitempty"`
-	OutputSchema         json.RawMessage   `json:"output_schema,omitempty"`
-	Session              SessionPolicy     `json:"session"`
-	Effect               EffectClass       `json:"effect"`
-	RoutingMode          RoutingMode       `json:"routing_mode"`
-	Outcomes             []string          `json:"outcomes"`
-	Expose               []Transport       `json:"expose,omitempty"`
-	Idempotency          IdempotencyPolicy `json:"idempotency,omitempty"`
-	IdempotencyKeyField  string            `json:"idempotency_key_field,omitempty"`
-	IdempotencyScope     string            `json:"idempotency_scope,omitempty"`
-	Retryable            bool              `json:"retryable,omitempty"`
-	CompensationHandler  string            `json:"compensation_handler,omitempty"`
-	NoCompensationReason string            `json:"no_compensation_reason,omitempty"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Description           string            `json:"description"`
+	SemanticRef           string            `json:"semantic_ref"`
+	InputSchema           json.RawMessage   `json:"input_schema,omitempty"`
+	OutputSchema          json.RawMessage   `json:"output_schema,omitempty"`
+	InputSchemaReference  SchemaReference   `json:"-"`
+	OutputSchemaReference SchemaReference   `json:"-"`
+	Session               SessionPolicy     `json:"session"`
+	Effect                EffectClass       `json:"effect"`
+	RoutingMode           RoutingMode       `json:"routing_mode"`
+	Outcomes              []string          `json:"outcomes"`
+	Expose                []Transport       `json:"expose,omitempty"`
+	Idempotency           IdempotencyPolicy `json:"idempotency,omitempty"`
+	IdempotencyKeyField   string            `json:"idempotency_key_field,omitempty"`
+	IdempotencyScope      string            `json:"idempotency_scope,omitempty"`
+	Retryable             bool              `json:"retryable,omitempty"`
+	CompensationHandler   string            `json:"compensation_handler,omitempty"`
+	NoCompensationReason  string            `json:"no_compensation_reason,omitempty"`
 }
 
 type EventDefinition struct {
-	ID          string          `json:"id"`
-	Source      string          `json:"source"`
-	InputSchema json.RawMessage `json:"input_schema,omitempty"`
-	Session     SessionPolicy   `json:"session"`
-	Mode        EventMode       `json:"mode"`
-	RoutingMode RoutingMode     `json:"routing_mode,omitempty"`
-	Handler     string          `json:"handler"`
+	ID                   string          `json:"id"`
+	Source               string          `json:"source"`
+	InputSchema          json.RawMessage `json:"input_schema,omitempty"`
+	InputSchemaReference SchemaReference `json:"-"`
+	Session              SessionPolicy   `json:"session"`
+	Mode                 EventMode       `json:"mode"`
+	RoutingMode          RoutingMode     `json:"routing_mode,omitempty"`
+	Handler              string          `json:"handler"`
 }
 
 type Invocation struct {
@@ -85,6 +88,18 @@ func (f HandlerFunc) Invoke(ctx context.Context, invocation Invocation) (Handler
 
 type SchemaValidator interface {
 	Validate(context.Context, json.RawMessage, json.RawMessage) error
+}
+
+// ReferenceAwareSchemaValidator is an optional extension. Existing
+// SchemaValidator implementations remain valid; filesystem-aware validators
+// can use the owning schema path without exposing it on wire types.
+type ReferenceAwareSchemaValidator interface {
+	ValidateReference(
+		context.Context,
+		SchemaReference,
+		json.RawMessage,
+		json.RawMessage,
+	) error
 }
 
 type Authorizer interface {
@@ -307,7 +322,9 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 		return OutcomeEnvelope{}, fmt.Errorf("application: handler %q requires an idempotency key", def.ID)
 	}
 	if r.deps.Schemas != nil && len(def.InputSchema) > 0 {
-		if err := r.deps.Schemas.Validate(ctx, def.InputSchema, input); err != nil {
+		if err := validateSchema(
+			ctx, r.deps.Schemas, def.InputSchemaReference, def.InputSchema, input,
+		); err != nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate input for %q: %w", def.ID, err)
 		}
 	}
@@ -411,7 +428,9 @@ func (r *Registry) invokeHandler(
 		return OutcomeEnvelope{}, fmt.Errorf("application: normalize output for %q: %w", def.ID, err)
 	}
 	if invokeErr == nil && r.deps.Schemas != nil && len(def.OutputSchema) > 0 {
-		if err := r.deps.Schemas.Validate(ctx, def.OutputSchema, output); err != nil {
+		if err := validateSchema(
+			ctx, r.deps.Schemas, def.OutputSchemaReference, def.OutputSchema, output,
+		); err != nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate output for %q: %w", def.ID, err)
 		}
 	}
@@ -470,7 +489,9 @@ func (r *Registry) DispatchEvent(ctx context.Context, eventID string, input json
 		return OutcomeEnvelope{}, err
 	}
 	if r.deps.Schemas != nil && len(event.InputSchema) > 0 {
-		if err := r.deps.Schemas.Validate(ctx, event.InputSchema, normalized); err != nil {
+		if err := validateSchema(
+			ctx, r.deps.Schemas, event.InputSchemaReference, event.InputSchema, normalized,
+		); err != nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate event %q: %w", event.ID, err)
 		}
 	}
@@ -624,4 +645,17 @@ func cloneHandlerDefinition(def HandlerDefinition) HandlerDefinition {
 func cloneEventDefinition(def EventDefinition) EventDefinition {
 	def.InputSchema = append(json.RawMessage(nil), def.InputSchema...)
 	return def
+}
+
+func validateSchema(
+	ctx context.Context,
+	validator SchemaValidator,
+	reference SchemaReference,
+	schema json.RawMessage,
+	value json.RawMessage,
+) error {
+	if aware, ok := validator.(ReferenceAwareSchemaValidator); ok {
+		return aware.ValidateReference(ctx, reference, schema, value)
+	}
+	return validator.Validate(ctx, schema, value)
 }

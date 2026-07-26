@@ -10,6 +10,7 @@
 package host
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -39,7 +40,9 @@ func graphScopeGuardOps(opName, catalogPath string, args map[string]any, rawOps 
 	if err != nil || spec == nil {
 		return err
 	}
-	cat, err := objectgraph.LoadCatalog(catalogPath)
+	// Resolve through the store seam (identical to LoadCatalog for a file
+	// ref) so a pg-backed catalog's scoped writes gate the same way.
+	cat, _, err := graphCatalogStoreResolver(catalogPath).Load(context.Background())
 	if err != nil {
 		return err
 	}
@@ -63,7 +66,7 @@ func graphScopeGuardChangeset(opName, catalogPath, changesetID string, args map[
 	if err != nil || spec == nil {
 		return err
 	}
-	cat, err := objectgraph.LoadCatalog(catalogPath)
+	cat, _, err := graphCatalogStoreResolver(catalogPath).Load(context.Background())
 	if err != nil {
 		return err
 	}

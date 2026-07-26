@@ -369,6 +369,18 @@ func registerGraphBuiltins(r *Registry) {
 		Input:  fields("max_jobs", "int", "max_bytes", "int"),
 		Output: fields("snapshot", "object"),
 	})
+	r.Register("host.streams", "snapshot", Op{
+		Input:  fields("scope", "string", "max_streams", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
+	r.Register("host.federation", "snapshot", Op{
+		Input:  fields("max_workers", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
+	r.Register("host.materialization", "snapshot", Op{
+		Input:  fields("application_id", "string", "max_jobs", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
 	r.Register("host.feedback", "list_reviewed", Op{
 		Input:  fields("scope", "string", "limit", "int"),
 		Output: fields("reports", "list", "revision", "string"),
@@ -378,7 +390,43 @@ func registerGraphBuiltins(r *Registry) {
 			"report_ref", "string", "dispatch_id", "string", "resume_mode", "string",
 			"resume_workspace", "string", "retry_brief", "string",
 		),
-		Output: fields("job_id", "string"),
+		Output: fields("job_id", "string", "receipts", "list"),
+	})
+	r.Register("host.reviewed_feedback_campaign", "reconcile", Op{
+		Input: fields(),
+		Output: fields(
+			"schema", "string", "operation", "string", "status", "string",
+			"application_id", "string", "report_ref", "string", "job_id", "string",
+			"receipts", "list", "replayed", "bool",
+		),
+	})
+	r.Register("host.feedback_intake", "reconcile", Op{
+		Input: fields(),
+		Output: fields(
+			"schema", "string", "operation", "string", "status", "string",
+			"application_id", "string", "report_ref", "string",
+			"intake_receipt", "object", "replayed", "bool",
+		),
+	})
+	r.Register("host.feedback_federation", "reconcile", Op{
+		Input: fields(),
+		Output: fields(
+			"schema", "string", "operation", "string", "status", "string",
+			"application_id", "string", "report_ref", "string", "job_id", "string",
+			"receipts", "list", "replayed", "bool",
+		),
+	})
+	r.Register("host.session_reconciliation", "reconcile", Op{
+		Input:  fields(),
+		Output: fields("receipt", "object"),
+	})
+	r.Register("host.worker_fleet", "reconcile", Op{
+		Input:  fields(),
+		Output: fields("receipt", "object"),
+	})
+	r.Register("host.campaign_supervision", "reconcile", Op{
+		Input:  fields(),
+		Output: fields("receipt", "object"),
 	})
 	r.Register("host.compliance", "run", Op{
 		Input:  fields("catalog_path", "string", "node_id", "string"),
@@ -398,6 +446,58 @@ func registerGraphBuiltins(r *Registry) {
 	r.Register("host.flow_evidence", "record", Op{
 		Input:  fields("catalog_path", "string", "node_id", "string"),
 		Output: fields("evidence_ref", "string", "passed", "bool", "run_count", "int"),
+	})
+	r.Register("host.application_job", "submit", Op{
+		Input: fields("template", "string", "input", "object"),
+		Output: fields(
+			"job_ref", "string", "status", "string", "artifact_handles", "list",
+			"primary", "string", "reason", "string", "receipt", "object",
+		),
+	})
+	r.Register("host.application_job", "status", Op{
+		Input: fields("job_ref", "string"),
+		Output: fields(
+			"job_ref", "string", "status", "string", "artifact_handles", "list",
+			"primary", "string", "reason", "string", "receipt", "object",
+		),
+	})
+	r.Register("host.application_job", "cancel", Op{
+		Input: fields("job_ref", "string"),
+		Output: fields(
+			"job_ref", "string", "status", "string", "artifact_handles", "list",
+			"primary", "string", "reason", "string", "receipt", "object",
+		),
+	})
+	r.Register("host.application_conversation", "ask", Op{
+		Input: fields("chat_id", "string", "question", "string"),
+		Output: fields(
+			"answer", "string", "conversation_ref", "string", "turn_ref", "string",
+			"receipt", "object", "replayed", "bool",
+		),
+	})
+	r.Register("host.demo", "plan", Op{
+		Input:  fields("node_id", "string"),
+		Output: fields("closure_order", "list", "manifest_ref", "string", "artifact_handles", "list"),
+	})
+	r.Register("host.demo", "materialize", Op{
+		Input:  fields("node_id", "string", "phase", "string"),
+		Output: fields("evidence_ref", "string", "artifact_handles", "list"),
+	})
+	r.Register("host.demo", "project_mockup", Op{
+		Input:  fields("node_id", "string", "audience", "string"),
+		Output: fields("scenario_ref", "string", "manifest_ref", "string"),
+	})
+	r.Register("host.demo", "create_mockup", Op{
+		Input:  fields("manifest_ref", "string"),
+		Output: fields("mockup_ref", "string", "bundle_ref", "string", "artifact_handles", "list"),
+	})
+	r.Register("host.demo", "record", Op{
+		Input:  fields("manifest_ref", "string"),
+		Output: fields("record_ref", "string"),
+	})
+	r.Register("host.demo", "doctor", Op{
+		Input:  fields("manifest_ref", "string"),
+		Output: fields("report", "object", "ok", "bool", "evidence_ref", "string"),
 	})
 	r.Register("host.graph", "presentation", Op{
 		Input:  fields(),

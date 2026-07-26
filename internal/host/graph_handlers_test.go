@@ -401,3 +401,48 @@ func TestGraphHandler_Query_Impact_UnknownEdgeKind(t *testing.T) {
 		t.Fatal("expected an error for an unknown edge_kinds entry")
 	}
 }
+
+// recordingCatalogStore wraps the file-backed store, recording the ref it
+// was resolved for — the seam-injection proof for graphCatalogStoreResolver.
+type recordingCatalogStore struct {
+	objectgraph.CatalogStore
+	loads *int
+}
+
+func (s recordingCatalogStore) Load(ctx context.Context) (*objectgraph.Catalog, objectgraph.CatalogRev, error) {
+	*s.loads++
+	return s.CatalogStore.Load(ctx)
+}
+
+// TestGraphHandler_Load_UsesInjectedCatalogStore proves loadCatalogArg's
+// construction seam: swapping graphCatalogStoreResolver routes every plain
+// (non-overlay) read through the injected CatalogStore, with no RPC/tool
+// schema change — the hook a later phase uses to map non-file refs to other
+// stores.
+func TestGraphHandler_Load_UsesInjectedCatalogStore(t *testing.T) {
+	loads := 0
+	var gotRef string
+	orig := graphCatalogStoreResolver
+	graphCatalogStoreResolver = func(ref string) objectgraph.CatalogStore {
+		gotRef = ref
+		return recordingCatalogStore{CatalogStore: objectgraph.NewFileCatalogStore(ref), loads: &loads}
+	}
+	t.Cleanup(func() { graphCatalogStoreResolver = orig })
+
+	res, err := GraphHandler(context.Background(), map[string]any{
+		"op":           "load",
+		"catalog_path": seedCatalogPath,
+	})
+	if err != nil {
+		t.Fatalf("GraphHandler(load): %v", err)
+	}
+	if gotRef != seedCatalogPath {
+		t.Errorf("resolver saw ref %q, want %q", gotRef, seedCatalogPath)
+	}
+	if loads != 1 {
+		t.Errorf("injected store Load called %d times, want 1", loads)
+	}
+	if _, ok := res.Data["node_count"]; !ok {
+		t.Error("expected the load op's normal payload through the injected store")
+	}
+}

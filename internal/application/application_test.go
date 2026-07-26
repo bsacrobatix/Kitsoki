@@ -1121,6 +1121,147 @@ func TestJSONSchemaValidatorDeniesEscapeAndNetworkRefs(t *testing.T) {
 	}
 }
 
+func TestJSONSchemaValidatorDoesNotTreatConstDataAsReferences(t *testing.T) {
+	validator := &JSONSchemaValidator{}
+	schema := json.RawMessage(`{"const":{"$ref":"https://example.com/not-a-schema"}}`)
+	value := json.RawMessage(`{"$ref":"https://example.com/not-a-schema"}`)
+	if err := validator.Validate(context.Background(), schema, value); err != nil {
+		t.Fatalf("Validate(const data): %v", err)
+	}
+}
+
+func TestJSONSchemaValidatorIsolatesIdenticalSchemasByOwningImportRoot(t *testing.T) {
+	parent := t.TempDir()
+	childA := filepath.Join(parent, "child-a")
+	childB := filepath.Join(parent, "child-b")
+	for _, child := range []string{childA, childB} {
+		if err := os.MkdirAll(filepath.Join(child, "defs"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(child, "app.yaml"), []byte("app: {}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(child, "root.json"), []byte(
+			`{"$id":"root.json","$ref":"defs/value.json"}`,
+		), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(
+		filepath.Join(childA, "defs", "value.json"),
+		[]byte(`{"type":"string"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(childB, "defs", "value.json"),
+		[]byte(`{"type":"integer"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	def := &app.AppDef{
+		BaseDir: parent,
+		LoadedManifests: []string{
+			filepath.Join(parent, "app.yaml"),
+			filepath.Join(childA, "app.yaml"),
+			filepath.Join(childB, "app.yaml"),
+		},
+	}
+	first, err := ResolveApplicationSchema(def, "child-a", filepath.Join(childA, "root.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ResolveApplicationSchema(def, "child-b", filepath.Join(childB, "root.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalA, err := filepath.EvalSymlinks(childA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalB, err := filepath.EvalSymlinks(childB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Reference.Root != canonicalA || second.Reference.Root != canonicalB ||
+		string(first.Schema) != string(second.Schema) ||
+		strings.Contains(string(first.Schema), parent) {
+		t.Fatalf("resolved schemas first=%#v second=%#v", first, second)
+	}
+	validator := &JSONSchemaValidator{Roots: ApplicationSchemaRoots(def)}
+	if err := validator.ValidateReference(
+		context.Background(), first.Reference, first.Schema, json.RawMessage(`"value"`),
+	); err != nil {
+		t.Fatalf("child-a string: %v", err)
+	}
+	if err := validator.ValidateReference(
+		context.Background(), second.Reference, second.Schema, json.RawMessage(`7`),
+	); err != nil {
+		t.Fatalf("child-b integer: %v", err)
+	}
+	if err := validator.ValidateReference(
+		context.Background(), second.Reference, second.Schema, json.RawMessage(`"value"`),
+	); err == nil {
+		t.Fatal("byte-identical child-b schema reused child-a compilation")
+	}
+}
+
+func TestSchemaReferenceFallsBackToExistingValidatorContract(t *testing.T) {
+	validator := &fakeSchemaValidator{}
+	err := validateSchema(
+		context.Background(),
+		validator,
+		SchemaReference{Path: "/internal/schema.json", Root: "/internal"},
+		json.RawMessage(`{"type":"object"}`),
+		json.RawMessage(`{"ok":true}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(validator.values) != 1 || validator.values[0] != `{"ok":true}` {
+		t.Fatalf("validator values = %#v", validator.values)
+	}
+}
+
+func TestJSONSchemaValidatorReferenceCannotEscapeOwningImportedRoot(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.Mkdir(child, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "outside.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	schemaPath := filepath.Join(child, "root.json")
+	if err := os.WriteFile(
+		schemaPath,
+		[]byte(`{"$id":"root.json","$ref":"../outside.json"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	def := &app.AppDef{
+		BaseDir: parent,
+		LoadedManifests: []string{
+			filepath.Join(parent, "app.yaml"),
+			filepath.Join(child, "app.yaml"),
+		},
+	}
+	resolved, err := ResolveApplicationSchema(def, "child", schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validator := &JSONSchemaValidator{Roots: ApplicationSchemaRoots(def)}
+	err = validator.ValidateReference(
+		context.Background(), resolved.Reference, resolved.Schema, json.RawMessage(`"value"`),
+	)
+	if err == nil || !strings.Contains(err.Error(), "escapes story root") {
+		t.Fatalf("owning-root escape error = %v", err)
+	}
+}
+
 type staticFrames struct {
 	frame Frame
 	calls int
@@ -1180,6 +1321,92 @@ func TestServiceDispatchActionIsMechanicalAndRejectsStaleFrame(t *testing.T) {
 	}
 	if len(schemas.values) != 3 {
 		t.Fatalf("schema validations = %d, want action input plus handler input/output", len(schemas.values))
+	}
+}
+
+func TestServiceDispatchActionSynthesizesStableCrossSurfaceIdempotency(t *testing.T) {
+	registry := NewRegistry(Dependencies{
+		Schemas: &JSONSchemaValidator{},
+		Replay:  NewMemoryReplayStore(),
+	})
+	def := readDefinition(
+		"test.open",
+		TransportWeb,
+		TransportVSCode,
+		TransportTUI,
+	)
+	def.Effect = EffectWrite
+	def.Idempotency = IdempotencyRequired
+	def.IdempotencyScope = "session"
+	calls := 0
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		calls++
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{"saved":true}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	frames := &staticFrames{frame: testFrame()}
+	service := Service{Registry: registry, Frames: frames}
+	envelope := ActionEnvelope{
+		Action: "test.open", Input: json.RawMessage(`{"id":1}`),
+		SessionID: "session-1", Actor: "operator-1", FrameRevision: 7,
+	}
+
+	first, err := service.DispatchAction(context.Background(), TransportWeb, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := service.DispatchAction(context.Background(), TransportVSCode, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want one action opportunity", calls)
+	}
+	if first.Receipt.IdempotencyKey == "" ||
+		first.Receipt.IdempotencyKey != replay.Receipt.IdempotencyKey {
+		t.Fatalf("idempotency keys = %q, %q", first.Receipt.IdempotencyKey, replay.Receipt.IdempotencyKey)
+	}
+	if replay.Receipt.Transport != TransportVSCode || !replay.Receipt.Replayed ||
+		replay.Receipt.ReplayOf != first.Receipt.ID {
+		t.Fatalf("cross-surface replay receipt = %#v, first = %#v", replay.Receipt, first.Receipt)
+	}
+
+	envelope.Actor = "operator-2"
+	secondActor, err := service.DispatchAction(context.Background(), TransportTUI, envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || secondActor.Receipt.IdempotencyKey == first.Receipt.IdempotencyKey {
+		t.Fatalf("actor-scoped opportunity calls=%d receipt=%#v", calls, secondActor.Receipt)
+	}
+}
+
+func TestServiceDispatchActionPreservesExplicitIdempotencyKey(t *testing.T) {
+	registry := NewRegistry(Dependencies{
+		Schemas: &JSONSchemaValidator{},
+		Replay:  NewMemoryReplayStore(),
+	})
+	def := readDefinition("test.open", TransportWeb)
+	def.Effect = EffectExternal
+	def.Idempotency = IdempotencyRequired
+	def.IdempotencyScope = "session"
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Registry: registry, Frames: &staticFrames{frame: testFrame()}}
+	outcome, err := service.DispatchAction(context.Background(), TransportWeb, ActionEnvelope{
+		Action: "test.open", Input: json.RawMessage(`{}`),
+		SessionID: "session-1", Actor: "operator-1", FrameRevision: 7,
+		IdempotencyKey: "caller-owned-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Receipt.IdempotencyKey != "caller-owned-key" {
+		t.Fatalf("idempotency key = %q", outcome.Receipt.IdempotencyKey)
 	}
 }
 

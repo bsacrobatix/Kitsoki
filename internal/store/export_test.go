@@ -10,7 +10,10 @@
 // tests each set hooks on their own sink without interfering with other tests.
 package store
 
-import "os"
+import (
+	"os"
+	"time"
+)
 
 // SetHookFsync installs fn as the fsync injection hook for this JSONLSink.
 // Pass nil to restore default (real fsync) behaviour.
@@ -20,3 +23,13 @@ func (s *JSONLSink) SetHookFsync(fn func(*os.File) error) { s.hookFsync = fn }
 // SetHookWrite installs fn as the write injection hook for this JSONLSink.
 // Pass nil to restore default behaviour.
 func (s *JSONLSink) SetHookWrite(fn func(*os.File, []byte) (int, error)) { s.hookWrite = fn }
+
+// SetStreamPollInterval overrides the WaitForEvents fallback re-check
+// interval on a Postgres-backed store, so tests can exercise the
+// lost-notification convergence path without multi-second sleeps. No-op for
+// non-Postgres stores. Call only in test setup, before concurrent waiters.
+func SetStreamPollInterval(st Store, d time.Duration) {
+	if pg, ok := st.(*postgresStore); ok {
+		pg.streamPoll = d
+	}
+}

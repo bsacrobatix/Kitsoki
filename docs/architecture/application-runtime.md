@@ -41,6 +41,24 @@ in `application.data`; raw provider snapshots remain world-only. Public models
 must originate from a provider call made with `audience: public`, not from
 client-side filtering of an internal snapshot.
 
+Graph-backed Story Applications receive an application-scoped replacement for
+the generic `host.graph` handler when their exact application ID appears under
+`.kitsoki.yaml` `application_graphs`. Session construction resolves the
+configured project root, catalog, and optional overlay to server-owned real
+paths and rejects absolute paths, traversal, symlink escapes, and non-regular
+files. Unconfigured sessions retain the generic handler used by the bare graph
+CLI and MCP surfaces.
+
+The replacement accepts only operation data for `snapshot`, `get`,
+`changeset`, `project`, `propose`, `authorize`, `withdraw`, `rebase`, and
+`apply`. It recursively rejects path, URL, command, provider/profile,
+actor/session, and transport authority, injects the resolved paths and
+configured snapshot node bound, enforces request/result byte bounds and the
+`read|propose|steward` write policy, stamps writes with a server-owned
+application actor, then delegates to the existing graph handler. The graph
+loader, linting, changeset guards, provenance rules, and transactional write
+invariants therefore remain shared with the generic surface.
+
 `internal/application.Service` coordinates three injected dependencies:
 
 | Dependency | Responsibility |
@@ -86,6 +104,10 @@ Handlers enforce `session: none|required|create`. Write and external handlers
 apply declared idempotency scope; replays return the stored outcome with a new
 transport-aware receipt and never reinvoke behavior. Retryable external
 handlers must declare compensation or an explicit impossibility reason.
+Handler-backed application actions acquire a deterministic, actor-scoped
+action-opportunity key from the current frame revision and normalized input
+when the envelope does not already carry a key. This keeps renderer retries
+mechanical and idempotency authority out of product components.
 
 Events enter the same registry through `DispatchEvent`. A target may be an
 exported handler or a story intent. Background events are submitted to the
@@ -93,6 +115,13 @@ runstatus job scheduler and expose durable child/join state. Interrupt events
 cancel the active session turn before dispatch and fail closed when the host
 cannot provide cancellation. Event receipts retain the source event, mode,
 session, routing pin, and handler semantic ref.
+
+The daemon-only [`host.application_job`](application-jobs.md) provider lets a
+registered caller submit one deployment-configured background event. The
+public boundary accepts only a template and JSON input, then exposes a stable
+artifact-job reference and configured opaque output handles. Target
+application, event, route, session, and scheduler child identities remain in a
+private durable mapping.
 
 The daemon-only `host.campaign` provider applies the same boundary to recurring
 work declared in a generic project graph. Its daemon configuration fixes the
@@ -107,6 +136,33 @@ artifact-job references, definitions, next due times, claims, and outcomes are
 durable. At daemon restart, running claims are recorded as interrupted and
 watchers are recreated only by a later `host.campaign.watch` call; the runtime
 does not claim that arbitrary in-flight behavior resumed.
+
+The daemon may also bind three application-scoped operational read models:
+`host.streams.snapshot`, `host.federation.snapshot`, and
+`host.materialization.snapshot`. Their sources are runtime services, not paths
+or providers selected by story input:
+
+- streams project receipt-bound Capsule merge-queue candidates for one fixed
+  project scope;
+- federation projects the canonical worker registry, daemon health, and
+  effective placement policy without endpoints, tunnels, or credentials; and
+- materialization projects the authoritative application-owned
+  `graph.materialize` lifecycle from durable storage.
+
+Bindings are keyed by exact application ID under daemon web configuration.
+Unbound applications and non-daemon processes receive fail-closed builtin
+handlers. Every request supplies explicit item and byte bounds; results are
+strict, deduplicated, invalid-counted snapshots containing only opaque
+identities and artifact handles. Story input cannot choose a filesystem root,
+queue file, worker endpoint, credential, or alternate application.
+
+The materialization producer writes its terminal projection synchronously
+before publishing the terminal scheduler transition. Completed records survive
+server reconstruction. The projection uses the daemon session backend's
+dialect, with dedicated SQLite tables or a dedicated Postgres schema. On
+daemon restart, stale `running` or
+`awaiting_input` records become `interrupted` with a canonical receipt; the
+runtime never reports that process-bound work resumed.
 
 ## Story compilation
 
@@ -278,6 +334,53 @@ JSON-RPC, CLI, web, VS Code, and TUI submit the reviewed
 sink. Studio MCP returns the identical sink-compatible bundle because it does
 not own a runstatus intake instance. Idempotency is carried through the sink,
 and adapters add surface evidence without changing the canonical semantic ref.
+
+## Application-scoped maintenance
+
+Long-running Story Applications can opt into three daemon-owned maintenance
+providers. Their story-facing operations all accept exactly `{}`; application
+identity, durable stores, worker registry, health pool, bounds, and remediation
+policy come from daemon configuration:
+
+```yaml
+application_maintenance:
+  portfolio-application:
+    session_reconciliation:
+      max_sessions: 200
+      max_jobs: 1000
+    worker_fleet:
+      max_workers: 200
+      max_bytes: 262144
+    campaign_supervision:
+      max_campaigns: 200
+      max_bytes: 262144
+      remediation:
+        mode: propose
+        max_proposals: 50
+        statuses: [failed, interrupted]
+```
+
+`host.session_reconciliation.reconcile` joins the configured application to its
+durable sessions, then asks the typed jobs store to interrupt only non-terminal
+SQLite rows whose recorded local process owner is absent. Postgres ownership
+may span hosts, so those rows are reported as deferred until a host-independent
+lease exists; local PID guesses never overwrite cross-host truth. The receipt
+is `kitsoki/session-reconciliation-receipt/v1` and exposes aggregate counts
+only.
+
+`host.worker_fleet.reconcile` is observe-only. Its
+`kitsoki/worker-fleet-receipt/v1` projection contains worker semantic refs,
+placement, health, enabled state, bounded job counts, and declared capability
+classes. Its type cannot carry endpoints, tunnels, credentials, URLs, poll
+errors, or transport configuration.
+
+`host.campaign_supervision.reconcile` evaluates the configured application's
+durable campaign schedules and latest scheduler outcomes. The only supported
+remediation mode is `propose`: a bounded
+`kitsoki/campaign-supervision-receipt/v1` names typed issues and
+recommendations without executing commands, changing definitions, replaying
+ticks, or exposing stored error text. A separate existing typed service must
+own any later mutation.
 
 ## Conformance
 

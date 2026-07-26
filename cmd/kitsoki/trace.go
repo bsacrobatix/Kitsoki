@@ -827,6 +827,7 @@ EXAMPLES:
 	cmd.Flags().String("app", "", "restrict session resolution to this app's subdirectory (e.g. kitsoki-dev)")
 	cmd.Flags().String("ticket", "", "restrict session resolution to traces whose world ticket_id matches this id")
 
+	cmd.AddCommand(traceExportCmd())
 	cmd.AddCommand(traceToFlowCmd())
 	cmd.AddCommand(traceStatusCmd())
 	cmd.AddCommand(traceRuntimeContractCmd())

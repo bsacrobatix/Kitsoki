@@ -101,9 +101,10 @@ type Config struct {
 }
 
 type ComponentModule struct {
-	ID     string `json:"id"`
-	Module string `json:"module"`
-	Export string `json:"export"`
+	ID             string `json:"id"`
+	Module         string `json:"module"`
+	Export         string `json:"export"`
+	ResolvedModule string `json:"-"`
 }
 
 type NativeSurface struct {
@@ -149,7 +150,7 @@ type Manifest struct {
 	Theme         map[string]string        `json:"theme,omitempty"`
 	Native        map[string]NativeSurface `json:"native,omitempty"`
 	Compatibility Compatibility            `json:"compatibility"`
-	ArtifactDir   string                   `json:"artifact_dir"`
+	ArtifactDir   string                   `json:"-"`
 }
 
 type Manager struct {
@@ -182,8 +183,16 @@ func NewWithWatcher(config Config, load Loader, runner Runner, clock Clock, watc
 	if config.TempRoot == "" {
 		config.TempRoot = filepath.Join(repoRoot, ".temp", "application")
 	}
+	config.TempRoot, err = filepath.Abs(config.TempRoot)
+	if err != nil {
+		return nil, fmt.Errorf("application build: resolve temporary root: %w", err)
+	}
 	if config.ArtifactRoot == "" {
 		config.ArtifactRoot = filepath.Join(repoRoot, ".artifacts", "application-builds")
+	}
+	config.ArtifactRoot, err = filepath.Abs(config.ArtifactRoot)
+	if err != nil {
+		return nil, fmt.Errorf("application build: resolve artifact root: %w", err)
 	}
 	if config.BackendURL == "" {
 		config.BackendURL = "http://127.0.0.1:7777"
@@ -450,7 +459,7 @@ func generatedEntry(plan Plan, repoRoot string) string {
 	out.WriteString("import { installApplicationComponents } from " + quoteTS(filepath.Join(repoRoot, "tools", "runstatus", "src", "application", "component-loader.ts")) + ";\n")
 	out.WriteString("import { installApplicationTheme } from " + quoteTS(filepath.Join(repoRoot, "tools", "runstatus", "src", "application", "theme.ts")) + ";\n")
 	for index, component := range plan.Components {
-		fmt.Fprintf(&out, "import * as component%d from %s;\n", index, quoteTS(component.Module))
+		fmt.Fprintf(&out, "import * as component%d from %s;\n", index, quoteTS(component.ResolvedModule))
 	}
 	out.WriteString("installApplicationComponents({\n")
 	for index, component := range plan.Components {

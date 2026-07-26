@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
@@ -467,4 +468,31 @@ func TestRegistry_Rescan(t *testing.T) {
 	// The live session survived the rescan untouched.
 	_, ok := reg.Get(sid)
 	assert.True(t, ok, "rescan must not disturb live sessions")
+}
+
+func TestRegistry_NewRegisteredApplicationSessionRequiresExactUniqueID(t *testing.T) {
+	storiesDir, _ := writeStory(t, "mini", []byte(minimalStory))
+	reg := NewRegistry(webconfig.WebConfig{}, []string{storiesDir}, deterministicBase(t))
+	t.Cleanup(reg.Close)
+	_, err := reg.Rescan()
+	require.NoError(t, err)
+
+	sid, err := reg.NewRegisteredApplicationSession(context.Background(), "mini-story")
+	require.NoError(t, err)
+	require.NotEmpty(t, sid)
+	entry, ok := reg.Get(sid)
+	require.True(t, ok)
+	require.Equal(t, "mini-story", entry.Source.AppDef().App.ID)
+
+	_, err = reg.NewRegisteredApplicationSession(context.Background(), "missing")
+	require.ErrorContains(t, err, `registered application "missing" not found`)
+
+	reg.mu.Lock()
+	reg.stories = append(reg.stories, webconfig.StoryMeta{
+		Path: filepath.Join(storiesDir, "duplicate", "app.yaml"),
+		Def:  &app.AppDef{App: app.AppMeta{ID: "mini-story"}},
+	})
+	reg.mu.Unlock()
+	_, err = reg.NewRegisteredApplicationSession(context.Background(), "mini-story")
+	require.ErrorContains(t, err, `registered application "mini-story" is ambiguous (2 exact matches)`)
 }

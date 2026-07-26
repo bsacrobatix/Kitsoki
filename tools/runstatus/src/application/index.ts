@@ -1,4 +1,12 @@
 export { default as ApplicationFrameRenderer } from "./ApplicationFrameRenderer.vue";
+export {
+  openApplicationCaptureEventStream,
+  startApplicationCaptureClient,
+} from "./capture.js";
+export type {
+  ApplicationCaptureController,
+  ApplicationCaptureDependencies,
+} from "./capture.js";
 export { default as ApplicationWizard } from "./ApplicationWizard.vue";
 export { dispatchWebApplicationAction } from "./action.js";
 export {

@@ -71,6 +71,16 @@ contributor commands.
   `host.agent.search`.
 - [`extension-docs.md`](extension-docs.md) — source-owned docs sidecars and the
   deterministic extension library index.
+- [`storage-backends.md`](storage-backends.md) — session/satellite storage
+  backends (SQLite default, opt-in Postgres/embedded-Postgres), lease locks,
+  the durable event-stream cursor contract, trace export, mining offsets,
+  and durable receipts.
+- [`application-jobs.md`](application-jobs.md) — deployment-owned background
+  Application Event templates, durable job references, and privacy-safe
+  artifact projections.
+- [`graph-storage.md`](graph-storage.md) — the graph `CatalogStore` seam,
+  YAML as first-class interchange, and the Postgres catalog backend with
+  `pg:` references and audit history.
 - [`decomposition-graph.md`](decomposition-graph.md) and
   [`graph-grouping-taxonomy.md`](graph-grouping-taxonomy.md) — graph model,
   validation, areas, and initiatives.

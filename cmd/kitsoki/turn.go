@@ -34,7 +34,6 @@ import (
 	"kitsoki/internal/agent"
 	"kitsoki/internal/app"
 	"kitsoki/internal/chathost"
-	"kitsoki/internal/chats"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
@@ -240,7 +239,7 @@ Examples:
 			// Wire the chats store on the same in-memory DB so app YAMLs
 			// that invoke host.chat.* can be exercised via `kitsoki turn`.
 			// The DB is discarded on return — every turn starts empty.
-			chatStore, err := chats.NewStore(s.DB())
+			chatStore, err := newChatStore(s)
 			if err != nil {
 				return fmt.Errorf("init chats store: %w", err)
 			}

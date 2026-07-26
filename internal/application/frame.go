@@ -138,18 +138,19 @@ type ComponentInputBinding struct {
 }
 
 type Action struct {
-	ID             string          `json:"id"`
-	Handler        string          `json:"handler,omitempty"`
-	Intent         string          `json:"intent,omitempty"`
-	TargetState    string          `json:"target_state,omitempty"`
-	TargetPage     string          `json:"target_page,omitempty"`
-	RoomInterface  string          `json:"room_interface,omitempty"`
-	RoutingMode    RoutingMode     `json:"routing_mode,omitempty"`
-	InputSchema    json.RawMessage `json:"input_schema,omitempty"`
-	InputSchemaRef string          `json:"input_schema_ref,omitempty"`
-	Enabled        bool            `json:"enabled"`
-	Semantic       SemanticNode    `json:"semantic"`
-	State          NodeState       `json:"state,omitempty"`
+	ID              string          `json:"id"`
+	Handler         string          `json:"handler,omitempty"`
+	Intent          string          `json:"intent,omitempty"`
+	TargetState     string          `json:"target_state,omitempty"`
+	TargetPage      string          `json:"target_page,omitempty"`
+	RoomInterface   string          `json:"room_interface,omitempty"`
+	RoutingMode     RoutingMode     `json:"routing_mode,omitempty"`
+	InputSchema     json.RawMessage `json:"input_schema,omitempty"`
+	InputSchemaRef  string          `json:"input_schema_ref,omitempty"`
+	SchemaReference SchemaReference `json:"-"`
+	Enabled         bool            `json:"enabled"`
+	Semantic        SemanticNode    `json:"semantic"`
+	State           NodeState       `json:"state,omitempty"`
 }
 
 type Card struct {

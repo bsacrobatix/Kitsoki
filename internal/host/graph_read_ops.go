@@ -743,13 +743,21 @@ func containsSubstring(haystack, needle string) bool {
 // splits "engine composes full data, MCP tool truncates for the wire" — this
 // op always returns the full composition.
 func graphOpenOp(args map[string]any) (Result, error) {
-	cat, err := loadCatalogArg(args)
+	cat, storeRev, err := loadCatalogArgWithRev(args)
 	if err != nil {
 		return Result{}, err
 	}
 	catalogPath := graphStringArg(args, "catalog_path")
 
-	rev, dirty := graphHeadInfo(catalogPath)
+	var rev string
+	var dirty bool
+	if graphIsPGRef(catalogPath) {
+		// A pg-backed catalog's head is its store revision token — no git
+		// subprocess, no dirty concept (every committed revision is durable).
+		rev = string(storeRev)
+	} else {
+		rev, dirty = graphHeadInfo(catalogPath)
+	}
 
 	issues := objectgraph.Lint(cat)
 	lint := map[string]any{"clean": len(issues) == 0, "count": len(issues)}

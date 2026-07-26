@@ -68,6 +68,9 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 	if parent.Application.Schemas == nil {
 		parent.Application.Schemas = map[string]string{}
 	}
+	if parent.Application.ResolvedSchemas == nil {
+		parent.Application.ResolvedSchemas = map[string]string{}
+	}
 	if parent.Application.Tokens == nil {
 		parent.Application.Tokens = map[string]string{}
 	}
@@ -271,7 +274,12 @@ func foldChildApplication(parent, child *AppDef, alias string, rw *childRewriter
 			add(fmt.Sprintf("schema %q collides", newID))
 			continue
 		}
-		parent.Application.Schemas[newID] = rebaseApplicationPath(child.Application.Schemas[id], child.BaseDir)
+		parent.Application.Schemas[newID] = child.Application.Schemas[id]
+		resolved := child.Application.ResolvedSchemas[id]
+		if resolved == "" {
+			resolved = rebaseApplicationPath(child.Application.Schemas[id], child.BaseDir)
+		}
+		parent.Application.ResolvedSchemas[newID] = resolved
 	}
 	for _, id := range sortedKeys(tokenIDs) {
 		newID := tokenIDs[id]
@@ -452,22 +460,35 @@ func cloneComposedComponent(component *ApplicationComponent, baseDir string) *Ap
 	clone := *component
 	clone.SemanticAliases = append([]string(nil), component.SemanticAliases...)
 	clone.Events = make(map[string]string, len(component.Events))
+	clone.ResolvedEvents = make(map[string]string, len(component.Events))
 	for event, schema := range component.Events {
-		clone.Events[event] = rebaseApplicationPath(schema, baseDir)
+		clone.Events[event] = schema
+		resolved := component.ResolvedEvents[event]
+		if resolved == "" {
+			resolved = rebaseApplicationPath(schema, baseDir)
+		}
+		clone.ResolvedEvents[event] = resolved
 	}
 	if len(clone.Events) == 0 {
 		clone.Events = nil
+		clone.ResolvedEvents = nil
 	}
 	if component.Web != nil {
 		web := *component.Web
-		web.Module = rebaseApplicationPath(web.Module, baseDir)
+		web.ResolvedModule = component.Web.ResolvedModule
+		if web.ResolvedModule == "" {
+			web.ResolvedModule = rebaseApplicationPath(web.Module, baseDir)
+		}
 		clone.Web = &web
 	}
 	if component.Fallback != nil {
 		fallback := *component.Fallback
 		clone.Fallback = &fallback
 	}
-	clone.PropsSchema = rebaseApplicationPath(clone.PropsSchema, baseDir)
+	clone.ResolvedPropsSchema = component.ResolvedPropsSchema
+	if clone.ResolvedPropsSchema == "" {
+		clone.ResolvedPropsSchema = rebaseApplicationPath(clone.PropsSchema, baseDir)
+	}
 	return &clone
 }
 
@@ -554,7 +575,10 @@ func cloneComposedAction(
 	if clone.TargetPage != "" {
 		clone.TargetPage = pages[clone.TargetPage]
 	}
-	clone.InputSchema = rebaseApplicationPath(clone.InputSchema, baseDir)
+	clone.ResolvedInputSchema = action.ResolvedInputSchema
+	if clone.ResolvedInputSchema == "" {
+		clone.ResolvedInputSchema = rebaseApplicationPath(clone.InputSchema, baseDir)
+	}
 	return &clone
 }
 
@@ -566,8 +590,14 @@ func cloneComposedHandler(handler *ApplicationHandler, alias string, rw *childRe
 	clone.SemanticAliases = append([]string(nil), handler.SemanticAliases...)
 	clone.Outcomes = append([]string(nil), handler.Outcomes...)
 	clone.Expose = append([]string(nil), handler.Expose...)
-	clone.InputSchema = rebaseApplicationPath(clone.InputSchema, baseDir)
-	clone.OutputSchema = rebaseApplicationPath(clone.OutputSchema, baseDir)
+	clone.ResolvedInputSchema = handler.ResolvedInputSchema
+	if clone.ResolvedInputSchema == "" {
+		clone.ResolvedInputSchema = rebaseApplicationPath(clone.InputSchema, baseDir)
+	}
+	clone.ResolvedOutputSchema = handler.ResolvedOutputSchema
+	if clone.ResolvedOutputSchema == "" {
+		clone.ResolvedOutputSchema = rebaseApplicationPath(clone.OutputSchema, baseDir)
+	}
 	if handler.Dispatch != nil {
 		dispatch := *handler.Dispatch
 		if dispatch.Intent != "" {

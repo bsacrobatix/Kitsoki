@@ -72,10 +72,13 @@ CREATE INDEX IF NOT EXISTS artifact_run_artifacts_job_created ON artifact_run_ar
 `
 
 // SQLiteStore stores artifact jobs and run/artifact indexes in the same SQLite
-// database used by the local session store.
+// database used by the local session store. Despite the historical name it can
+// also run against Postgres (see NewPostgresStore); the dialect field selects
+// the SQL flavor and defaults to SQLite.
 type SQLiteStore struct {
-	db  *sql.DB
-	now func() time.Time
+	db      *sql.DB
+	dialect dialect
+	now     func() time.Time
 }
 
 func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
@@ -127,12 +130,12 @@ func (s *SQLiteStore) Register(ctx context.Context, req RegisterRequest) (Job, e
 	}
 	j.UpdatedAt = now
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO artifact_jobs
 		  (id, session_id, app_id, story, origin_kind, origin_ref, origin_url,
 		   status, run_url, trace_path, workspace_instance_id, terminal_artifact_handle,
 		   summary, phase, visibility, owner, interrupted_reason, created_at, updated_at, finished_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
 		j.ID, string(j.SessionID), j.AppID, j.Story, j.Origin.Kind, j.Origin.Ref, j.Origin.URL,
 		string(j.Status), j.RunURL, j.TracePath, string(j.WorkspaceInstanceID), j.TerminalArtifactHandle,
 		j.Summary, j.Phase, string(j.Visibility), j.Owner, j.InterruptedReason,
@@ -146,10 +149,10 @@ func (s *SQLiteStore) Register(ctx context.Context, req RegisterRequest) (Job, e
 
 func (s *SQLiteStore) BindRun(ctx context.Context, id JobID, sessionID string, runURL string, tracePath string) (Job, error) {
 	now := s.now().UTC()
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.q(`
 		UPDATE artifact_jobs
 		SET session_id=?, run_url=?, trace_path=?, updated_at=?
-		WHERE id=?`, sessionID, runURL, tracePath, unixMillis(now), id)
+		WHERE id=?`), sessionID, runURL, tracePath, unixMillis(now), id)
 	if err != nil {
 		return Job{}, fmt.Errorf("artifactjob.BindRun: %w", err)
 	}
@@ -166,11 +169,11 @@ func (s *SQLiteStore) Update(ctx context.Context, id JobID, update Update) (Job,
 	}
 	applyUpdate(&j, update)
 	j.UpdatedAt = s.now().UTC()
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.q(`
 		UPDATE artifact_jobs SET
 		  status=?, run_url=?, trace_path=?, workspace_instance_id=?, terminal_artifact_handle=?,
 		  summary=?, phase=?, visibility=?, owner=?, interrupted_reason=?, updated_at=?, finished_at=?
-		WHERE id=?`,
+		WHERE id=?`),
 		string(j.Status), j.RunURL, j.TracePath, string(j.WorkspaceInstanceID), j.TerminalArtifactHandle,
 		j.Summary, j.Phase, string(j.Visibility), j.Owner, j.InterruptedReason, unixMillis(j.UpdatedAt), nullableTimeMillis(j.FinishedAt), id)
 	if err != nil {
@@ -184,7 +187,7 @@ func (s *SQLiteStore) Update(ctx context.Context, id JobID, update Update) (Job,
 
 func (s *SQLiteStore) Attach(ctx context.Context, id JobID, sessionID string) (Job, error) {
 	now := s.now().UTC()
-	res, err := s.db.ExecContext(ctx, `UPDATE artifact_jobs SET session_id=?, updated_at=? WHERE id=?`, sessionID, unixMillis(now), id)
+	res, err := s.db.ExecContext(ctx, s.q(`UPDATE artifact_jobs SET session_id=?, updated_at=? WHERE id=?`), sessionID, unixMillis(now), id)
 	if err != nil {
 		return Job{}, fmt.Errorf("artifactjob.Attach: %w", err)
 	}
@@ -195,11 +198,11 @@ func (s *SQLiteStore) Attach(ctx context.Context, id JobID, sessionID string) (J
 }
 
 func (s *SQLiteStore) Get(ctx context.Context, id JobID) (Job, error) {
-	row := s.db.QueryRowContext(ctx, `
+	row := s.db.QueryRowContext(ctx, s.q(`
 		SELECT id, session_id, app_id, story, origin_kind, origin_ref, origin_url,
 		       status, run_url, trace_path, workspace_instance_id, terminal_artifact_handle,
 		       summary, phase, visibility, owner, interrupted_reason, created_at, updated_at, finished_at
-		FROM artifact_jobs WHERE id=?`, id)
+		FROM artifact_jobs WHERE id=?`), id)
 	j, err := scanJob(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, ErrNotFound
@@ -222,7 +225,7 @@ func (s *SQLiteStore) List(ctx context.Context, filter ListFilter) ([]Job, error
 		       summary, phase, visibility, owner, interrupted_reason, created_at, updated_at, finished_at
 		FROM artifact_jobs ` + where + ` ORDER BY updated_at DESC LIMIT ?`
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, s.q(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("artifactjob.List: %w", err)
 	}
@@ -237,10 +240,10 @@ func (s *SQLiteStore) Archive(ctx context.Context, id JobID) (Job, error) {
 
 func (s *SQLiteStore) SweepInterrupted(ctx context.Context, reason string) (int64, error) {
 	now := s.now().UTC()
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.ExecContext(ctx, s.q(`
 		UPDATE artifact_jobs
 		SET status=?, interrupted_reason=?, updated_at=?
-		WHERE status IN (?, ?)`,
+		WHERE status IN (?, ?)`),
 		string(StatusInterrupted), reason, unixMillis(now), string(StatusRunning), string(StatusAwaitingInput))
 	if err != nil {
 		return 0, fmt.Errorf("artifactjob.SweepInterrupted: %w", err)
@@ -249,7 +252,7 @@ func (s *SQLiteStore) SweepInterrupted(ctx context.Context, reason string) (int6
 }
 
 func (s *SQLiteStore) UpsertRun(ctx context.Context, run Run) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO artifact_runs (job_id, session_id, story, status, started_at, ended_at, last_turn, trace_path)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(job_id) DO UPDATE SET
@@ -259,7 +262,7 @@ func (s *SQLiteStore) UpsertRun(ctx context.Context, run Run) error {
 		  started_at=excluded.started_at,
 		  ended_at=excluded.ended_at,
 		  last_turn=excluded.last_turn,
-		  trace_path=excluded.trace_path`,
+		  trace_path=excluded.trace_path`),
 		run.JobID, string(run.SessionID), run.Story, string(run.Status), unixMillis(run.StartedAt), nullableTimeMillis(run.EndedAt), run.LastTurn, run.TracePath)
 	if err != nil {
 		return fmt.Errorf("artifactjob.UpsertRun: %w", err)
@@ -268,7 +271,7 @@ func (s *SQLiteStore) UpsertRun(ctx context.Context, run Run) error {
 }
 
 func (s *SQLiteStore) UpsertArtifact(ctx context.Context, a Artifact) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.q(`
 		INSERT INTO artifact_run_artifacts (job_id, handle, kind, mime, label, path, size_bytes, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(job_id, handle) DO UPDATE SET
@@ -277,7 +280,7 @@ func (s *SQLiteStore) UpsertArtifact(ctx context.Context, a Artifact) error {
 		  label=excluded.label,
 		  path=excluded.path,
 		  size_bytes=excluded.size_bytes,
-		  created_at=excluded.created_at`,
+		  created_at=excluded.created_at`),
 		a.JobID, a.Handle, a.Kind, a.MIME, a.Label, a.Path, a.SizeBytes, unixMillis(a.CreatedAt))
 	if err != nil {
 		return fmt.Errorf("artifactjob.UpsertArtifact: %w", err)
@@ -286,7 +289,7 @@ func (s *SQLiteStore) UpsertArtifact(ctx context.Context, a Artifact) error {
 }
 
 func (s *SQLiteStore) GetRun(ctx context.Context, id JobID) (Run, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT job_id, session_id, story, status, started_at, ended_at, last_turn, trace_path FROM artifact_runs WHERE job_id=?`, id)
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT job_id, session_id, story, status, started_at, ended_at, last_turn, trace_path FROM artifact_runs WHERE job_id=?`), id)
 	r, err := scanRun(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Run{}, ErrNotFound
@@ -300,7 +303,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter ListFilter) ([]Run, e
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT job_id, session_id, story, status, started_at, ended_at, last_turn, trace_path FROM artifact_runs `+where+` ORDER BY started_at DESC LIMIT ?`, append(args, limit)...)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT job_id, session_id, story, status, started_at, ended_at, last_turn, trace_path FROM artifact_runs `+where+` ORDER BY started_at DESC LIMIT ?`), append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("artifactjob.ListRuns: %w", err)
 	}
@@ -317,7 +320,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter ListFilter) ([]Run, e
 }
 
 func (s *SQLiteStore) Artifacts(ctx context.Context, id JobID) ([]Artifact, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT handle, job_id, kind, mime, label, path, size_bytes, created_at FROM artifact_run_artifacts WHERE job_id=? ORDER BY created_at, handle`, id)
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT handle, job_id, kind, mime, label, path, size_bytes, created_at FROM artifact_run_artifacts WHERE job_id=? ORDER BY created_at, handle`), id)
 	if err != nil {
 		return nil, fmt.Errorf("artifactjob.Artifacts: %w", err)
 	}
@@ -334,7 +337,7 @@ func (s *SQLiteStore) Artifacts(ctx context.Context, id JobID) ([]Artifact, erro
 }
 
 func (s *SQLiteStore) ResolveArtifact(ctx context.Context, id JobID, handle string) (Artifact, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT handle, job_id, kind, mime, label, path, size_bytes, created_at FROM artifact_run_artifacts WHERE job_id=? AND handle=?`, id, handle)
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT handle, job_id, kind, mime, label, path, size_bytes, created_at FROM artifact_run_artifacts WHERE job_id=? AND handle=?`), id, handle)
 	a, err := scanArtifact(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Artifact{}, ErrNotFound

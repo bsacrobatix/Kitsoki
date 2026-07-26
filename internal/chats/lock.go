@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -44,6 +45,12 @@ func (e *chatBusyError) Is(target error) bool {
 //
 // If ctx is already cancelled when WithLock is called, it returns ctx.Err()
 // immediately without writing to chat_locks.
+//
+// On the Postgres dialect the lock is a time-based lease, and a background
+// goroutine renews it every leaseHeartbeatEvery while fn runs (mirroring
+// store.postgresStore.WithWriterLock): chat drives wrap whole agent calls
+// that routinely outlive the lease TTL, and without renewal a second process
+// would take the lease over mid-fn — two concurrent writers on one chat.
 func (s *Store) WithLock(ctx context.Context, chatID string, fn func(context.Context) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -54,6 +61,33 @@ func (s *Store) WithLock(ctx context.Context, chatID string, fn func(context.Con
 	if err := s.acquireChatLock(ctx, chatID); err != nil {
 		return err
 	}
+	if s.dialect == dialectPostgres {
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker := time.NewTicker(s.leaseHeartbeatEvery)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+					// Best-effort renewal; a failed beat only matters if it
+					// persists past the TTL, at which point takeover is the
+					// correct outcome.
+					_ = s.heartbeatChatLease(context.Background(), chatID)
+				}
+			}
+		}()
+		defer func() {
+			close(stop)
+			wg.Wait()
+			_ = s.releaseChatLock(context.Background(), chatID)
+		}()
+		return fn(ctx)
+	}
 	defer func() {
 		_ = s.releaseChatLock(context.Background(), chatID)
 	}()
@@ -62,7 +96,11 @@ func (s *Store) WithLock(ctx context.Context, chatID string, fn func(context.Con
 
 // Heartbeat updates heartbeat_at for the lock owned by this process.
 // Returns an error if this process does not own the lock (misuse guard).
+// On Postgres this also extends the lease's expires_at (see pg.go).
 func (s *Store) Heartbeat(ctx context.Context, chatID string) error {
+	if s.dialect == dialectPostgres {
+		return s.heartbeatChatLease(ctx, chatID)
+	}
 	host, _ := os.Hostname()
 	pid := os.Getpid()
 	now := s.clock.Now().UnixMicro()
@@ -83,6 +121,12 @@ func (s *Store) Heartbeat(ctx context.Context, chatID string) error {
 }
 
 func (s *Store) acquireChatLock(ctx context.Context, chatID string) error {
+	// Postgres cannot probe PID liveness against a possibly-remote server,
+	// so its chat_locks table is a time-based lease instead (see pg.go).
+	// Everything below is the unchanged SQLite pid/host implementation.
+	if s.dialect == dialectPostgres {
+		return s.acquireChatLease(ctx, chatID)
+	}
 	host, _ := os.Hostname()
 	pid := os.Getpid()
 	now := s.clock.Now().UnixMicro()
@@ -147,6 +191,15 @@ func (s *Store) acquireChatLock(ctx context.Context, chatID string) error {
 }
 
 func (s *Store) releaseChatLock(ctx context.Context, chatID string) error {
+	if s.dialect == dialectPostgres {
+		if err := s.releaseChatLease(ctx, chatID); err != nil {
+			// Same visibility contract as the SQLite path below: WithLock's
+			// defer discards the error, so log before returning it.
+			slog.Warn("chats: releaseChatLock", "chat_id", chatID, "err", err)
+			return err
+		}
+		return nil
+	}
 	host, _ := os.Hostname()
 	pid := os.Getpid()
 	_, err := s.db.ExecContext(ctx,

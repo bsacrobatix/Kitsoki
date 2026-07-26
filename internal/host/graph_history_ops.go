@@ -25,11 +25,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	objectgraph "kitsoki/internal/graph"
+	"kitsoki/internal/graph/pgcatalog"
 )
 
 // ─── git subprocess plumbing (package-local; see file header for why this
@@ -476,6 +478,67 @@ func historyGitEntries(ctx context.Context, catalogPath, id string, targetCount 
 	return entries, nil
 }
 
+// ─── audit era (pg-backed catalogs) ───
+
+// graphAuditLister is the optional face of a CatalogStore that keeps an
+// append-only audit trail — pgcatalog.Store today. graph.history consumes it
+// via this local interface (rather than a concrete type) so any future store
+// with an audit trail plugs in the same way.
+type graphAuditLister interface {
+	AuditEntries(ctx context.Context) ([]pgcatalog.AuditEntry, error)
+}
+
+// historyAuditTouches mirrors graphOperationTouches for the audit rows'
+// summarized ops: a rename matches either endpoint, everything else matches
+// the op's own node.
+func historyAuditTouches(op pgcatalog.AuditOp, id string) bool {
+	if id == "" {
+		return true
+	}
+	return op.Node == id || op.From == id || op.To == id
+}
+
+// historyAuditEntries is the pg catalog's replacement for the git-era walk:
+// every graph_audit row's summarized operations become source:"audit"
+// timeline entries with the same wire shape as git-era entries — `rev`
+// carries the committed store revision instead of a commit SHA. Returns
+// (nil, nil) when the resolved store keeps no audit trail.
+func historyAuditEntries(ctx context.Context, catalogPath, id string) ([]historyEntry, error) {
+	lister, ok := graphCatalogStoreResolver(catalogPath).(graphAuditLister)
+	if !ok {
+		return nil, nil
+	}
+	rows, err := lister.AuditEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var entries []historyEntry
+	for _, row := range rows {
+		for _, op := range row.Ops {
+			if !historyAuditTouches(op, id) {
+				continue
+			}
+			targetID := op.Node
+			if objectgraph.OpKind(op.Kind) == objectgraph.OpRenamed {
+				targetID = op.To
+				if targetID == "" {
+					targetID = op.From
+				}
+			}
+			kind := historyOpGapKind(objectgraph.OpKind(op.Kind))
+			entries = append(entries, historyEntry{
+				Source:  "audit",
+				Ts:      row.CreatedAt,
+				ID:      targetID,
+				Kind:    string(kind),
+				Summary: fmt.Sprintf("%s %s in catalog rev %d", targetID, kind, row.Rev),
+				Rev:     strconv.FormatInt(row.Rev, 10),
+			})
+		}
+	}
+	return entries, nil
+}
+
 // ─── cursor encoding (mirrors graph.find's base64url(json(...)) pattern —
 // see tools_graph.go's findCursor/encodeFindCursor/decodeFindCursor) ───
 //
@@ -566,11 +629,18 @@ func graphHistoryOp(ctx context.Context, args map[string]any) (Result, error) {
 	entries := historyChangesetEntries(cat, id)
 
 	catalogPath := graphStringArg(args, "catalog_path")
-	gitEntries, err := historyGitEntries(ctx, catalogPath, id, offset+limit, since, hasSince)
+	var eraEntries []historyEntry
+	if graphIsPGRef(catalogPath) {
+		// pg catalogs have no git era — the store's append-only audit rows
+		// take its place, with no git subprocess involved.
+		eraEntries, err = historyAuditEntries(ctx, catalogPath, id)
+	} else {
+		eraEntries, err = historyGitEntries(ctx, catalogPath, id, offset+limit, since, hasSince)
+	}
 	if err != nil {
 		return Result{}, err
 	}
-	entries = append(entries, gitEntries...)
+	entries = append(entries, eraEntries...)
 
 	if hasSince {
 		filtered := entries[:0]

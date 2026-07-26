@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appplatform "kitsoki/internal/application"
 	"kitsoki/internal/effect"
 	"kitsoki/internal/host/opschema"
 )
@@ -191,7 +192,12 @@ func TestFeedbackDispatchPropagatesAuthenticatedScopeAndIdempotency(t *testing.T
 				jobID = "feedback-job-1"
 				jobs[request.DispatchID] = jobID
 			}
-			return FeedbackDispatchReceipt{JobID: jobID}, nil
+			return FeedbackDispatchReceipt{
+				JobID: jobID,
+				Receipts: []appplatform.Receipt{
+					canonicalFeedbackReceipt(t, request),
+				},
+			}, nil
 		},
 	}, scope)
 	args := map[string]any{
@@ -313,6 +319,21 @@ func TestFeedbackBackendFailureAndUnsafeReceiptFailClosed(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unsafe job id") {
 		t.Fatalf("unsafe receipt error = %v", err)
 	}
+
+	handler = NewFeedbackHandler(feedbackBackendStub{
+		listFn: unexpectedFeedbackList(t),
+		dispatchFn: func(_ context.Context, request FeedbackDispatchRequest) (FeedbackDispatchReceipt, error) {
+			receipt := canonicalFeedbackReceipt(t, request)
+			receipt.Actor = "forged"
+			return FeedbackDispatchReceipt{
+				JobID: "job", Receipts: []appplatform.Receipt{receipt},
+			}, nil
+		},
+	}, scope)
+	_, err = handler(WithActor(context.Background(), "actor"), args)
+	if err == nil || !strings.Contains(err.Error(), "forged canonical") {
+		t.Fatalf("forged receipt error = %v", err)
+	}
 }
 
 func TestFeedbackRegistrationSchemaAndEffect(t *testing.T) {
@@ -355,9 +376,38 @@ func TestFeedbackRegistrationSchemaAndEffect(t *testing.T) {
 	dispatch, ok := schemas.Lookup("host.feedback", "dispatch")
 	if !ok || dispatch.Input["dispatch_id"].Type != "string" ||
 		dispatch.Input["resume_workspace"].Type != "string" ||
-		dispatch.Output["job_id"].Type != "string" {
+		dispatch.Output["job_id"].Type != "string" ||
+		dispatch.Output["receipts"].Type != "list" {
 		t.Fatalf("dispatch opschema = %#v, %v", dispatch, ok)
 	}
+}
+
+func canonicalFeedbackReceipt(
+	t *testing.T,
+	request FeedbackDispatchRequest,
+) appplatform.Receipt {
+	t.Helper()
+	receipt, err := appplatform.FinalizeReceipt(appplatform.Receipt{
+		HandlerID: "feedback.apply", SemanticRef: "feedback.apply",
+		SessionID: "feedback-job-1", Actor: request.Actor,
+		Effect: appplatform.EffectWrite,
+		Routing: appplatform.RoutingReceipt{
+			Requested: appplatform.RoutingExact,
+			Resolved:  appplatform.RoutingExact,
+		},
+		Budget: appplatform.BudgetDecision{
+			Allowed: true, Code: "not_applicable",
+		},
+		IdempotencyKey: request.DispatchID,
+		InputDigest:    "sha256:input",
+		OutputDigest:   "sha256:output",
+		Transport:      appplatform.TransportEvent,
+		Outcome:        "ok",
+	})
+	if err != nil {
+		t.Fatalf("finalize canonical receipt: %v", err)
+	}
+	return receipt
 }
 
 func reviewedReport(scope FeedbackScope, ref string, reviewedAt time.Time) ReviewedFeedbackReport {

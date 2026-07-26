@@ -255,6 +255,7 @@ var builtinVerbTable = map[string]verbEffect{
 			"propose":      {class: Write, deterministic: true},
 			"authorize":    {class: Write, deterministic: true},
 			"withdraw":     {class: Write, deterministic: true},
+			"rebase":       {class: Write, deterministic: true},
 		},
 	},
 
@@ -271,6 +272,28 @@ var builtinVerbTable = map[string]verbEffect{
 	// prefix fallback injects args["op"], so keep the leaf classified too.
 	"host.runstatus.snapshot": {class: Read, deterministic: true},
 
+	"host.streams": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.streams.snapshot": {class: Read, deterministic: true},
+	"host.federation": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.federation.snapshot": {class: Read, deterministic: true},
+	"host.materialization": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.materialization.snapshot": {class: Read, deterministic: true},
+
 	// host.feedback reads a captured reviewed-report view or asks an injected
 	// governed backend to create an idempotent dispatch job. Dispatch grants no
 	// source-landing authority.
@@ -281,8 +304,18 @@ var builtinVerbTable = map[string]verbEffect{
 			"dispatch":      {class: External, deterministic: false},
 		},
 	},
-	"host.feedback.list_reviewed": {class: Read, deterministic: true},
-	"host.feedback.dispatch":      {class: External, deterministic: false},
+	"host.feedback.list_reviewed":               {class: Read, deterministic: true},
+	"host.feedback.dispatch":                    {class: External, deterministic: false},
+	"host.reviewed_feedback_campaign.reconcile": {class: External, deterministic: false},
+	"host.feedback_intake.reconcile":            {class: Write, deterministic: false},
+	"host.feedback_federation.reconcile":        {class: External, deterministic: false},
+
+	// Story Application maintenance providers carry no caller authority.
+	// Session reconciliation may interrupt local process-owned stale rows;
+	// worker fleet and campaign supervision expose bounded observations only.
+	"host.session_reconciliation.reconcile": {class: Write, deterministic: false},
+	"host.worker_fleet.reconcile":           {class: External, deterministic: false},
+	"host.campaign_supervision.reconcile":   {class: Read, deterministic: true},
 
 	// host.compliance evaluates server-resolved Starlark materialize checks and
 	// writes immutable local evidence. It has no command, LLM, or network lane.
@@ -317,6 +350,16 @@ var builtinVerbTable = map[string]verbEffect{
 	},
 	"host.flow_evidence.record": {class: Write, deterministic: false},
 
+	// host.application_conversation.ask performs an LLM call through a
+	// daemon-owned binding and persists its transcript and replay receipt.
+	"host.application_conversation": {
+		class: External, deterministic: false,
+		ops: map[string]opEffect{
+			"ask": {class: External, deterministic: false},
+		},
+	},
+	"host.application_conversation.ask": {class: External, deterministic: false},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under
@@ -336,19 +379,27 @@ var builtinVerbTable = map[string]verbEffect{
 		},
 	},
 
-	// host.demo — mockup/demo packet pipeline (create-mockup.mjs,
-	// record-tour.mjs, demo-doctor.mjs) exec'd via a resolved script root.
-	// create writes generated mockup assets deterministically from its
-	// manifest; record spawns a live browser capture (timing-dependent
-	// output); doctor only reads artifacts and reports.
+	// host.demo is replaced in Story Application runtimes by an app-scoped
+	// typed provider. The legacy create operation remains classified for the
+	// deprecated path-based compatibility handler.
 	"host.demo": {
 		class: Write, deterministic: false, // fallback for an unrecognised op
 		ops: map[string]opEffect{
-			"create": {class: Write, deterministic: true},
-			"record": {class: Write, deterministic: false},
-			"doctor": {class: Read, deterministic: true},
+			"plan":           {class: Read, deterministic: true},
+			"materialize":    {class: Write, deterministic: false},
+			"project_mockup": {class: Read, deterministic: true},
+			"create_mockup":  {class: Write, deterministic: true},
+			"record":         {class: Write, deterministic: false},
+			"doctor":         {class: Read, deterministic: true},
+			"create":         {class: Write, deterministic: true},
 		},
 	},
+	"host.demo.plan":           {class: Read, deterministic: true},
+	"host.demo.materialize":    {class: Write, deterministic: false},
+	"host.demo.project_mockup": {class: Read, deterministic: true},
+	"host.demo.create_mockup":  {class: Write, deterministic: true},
+	"host.demo.record":         {class: Write, deterministic: false},
+	"host.demo.doctor":         {class: Read, deterministic: true},
 }
 
 // ClassifyVerb returns the default (effect, deterministic) pair for a

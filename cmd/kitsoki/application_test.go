@@ -84,6 +84,113 @@ func TestApplicationDescribeCommand(t *testing.T) {
 	}
 }
 
+func TestApplicationDescribeKeepsImportedSchemaReferencesPortable(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	parent := filepath.Join(root, "parent")
+	if err := os.MkdirAll(filepath.Join(child, "schemas"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(child, "ui"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(child, "schemas", "input.json"),
+		[]byte(`{"$id":"input.json","type":"object"}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "ui", "panel.js"), []byte("export default {}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "app.yaml"), []byte(`
+app: {id: child, version: 1.0.0}
+root: idle
+intents:
+  run: {title: Run, description: Run the imported action.}
+states:
+  idle:
+    description: Imported room.
+    on:
+      run: [{target: idle}]
+exports:
+  intents: [run]
+  application:
+    actions: [child.run]
+    components: [child.panel]
+    schemas: [input]
+application:
+  schema: application/v1
+  name: Child
+  description: Imported application members.
+  semantic_ref: child.application
+  schemas:
+    input: schemas/input.json
+  actions:
+    child.run:
+      name: Run
+      description: Run the imported action.
+      semantic_ref: child.action.run
+      intent: run
+      input_schema: schemas/input.json
+  components:
+    child.panel:
+      name: Panel
+      description: Imported panel.
+      semantic_ref: child.component.panel
+      web: {module: ui/panel.js}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parentPath := filepath.Join(parent, "app.yaml")
+	if err := os.WriteFile(parentPath, []byte(`
+app: {id: parent, version: 1.0.0}
+root: ready
+imports:
+  module:
+    source: ../child
+    entry: idle
+states:
+  ready: {description: Parent room.}
+application:
+  schema: application/v1
+  name: Parent
+  description: Compose imported application members.
+  semantic_ref: parent.application
+  shell: {entry: home}
+  pages:
+    home:
+      name: Home
+      description: Parent home.
+      semantic_ref: parent.page.home
+      regions: {}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := applicationDescribeCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{parentPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"input_schema": "schemas/input.json"`) ||
+		!strings.Contains(out.String(), `"parent.module.input": "schemas/input.json"`) ||
+		!strings.Contains(out.String(), `"module": "ui/panel.js"`) {
+		t.Fatalf("portable describe output = %s", out.String())
+	}
+	canonicalRoot, _ := filepath.EvalSymlinks(root)
+	for _, forbidden := range []string{root, filepath.ToSlash(root), canonicalRoot, filepath.ToSlash(canonicalRoot)} {
+		if forbidden != "" && strings.Contains(out.String(), forbidden) {
+			t.Fatalf("describe leaked imported root %q: %s", forbidden, out.String())
+		}
+	}
+}
+
 func TestApplicationHandlersCommandFiltersTransport(t *testing.T) {
 	path := writeApplicationCommandFixture(t)
 	cmd := applicationHandlersCmd()

@@ -43,6 +43,9 @@
 //	runstatus.session.mermaid    {session_id, detail?}               → {source, node_map}
 //	runstatus.session.trace      {session_id, since_turn?, until_turn?, limit?}
 //	                                                                 → {events, last_turn}
+//	runstatus.session.events     {session_id, since?, limit?}        → {events, next_cursor, live}
+//	                                                                   (durable-stream backends only;
+//	                                                                    see session_events.go)
 //	runstatus.session.view       {session_id}                        → turnResult
 //	runstatus.session.turn       {session_id, input}                 → turnResult
 //	runstatus.session.submit     {session_id, intent, slots?}        → turnResult
@@ -74,6 +77,11 @@
 //
 // A subscription remembers how many events it has already delivered, so an SSE
 // reconnect with the same subscription_id resumes without re-sending events.
+//
+// When the session's store exposes a durable event stream ([store.EventStream]
+// — the Postgres backends), the same SSE endpoint switches to cursor reads +
+// blocking waits instead of the poll loop, and each runstatus.event frame
+// additionally carries the event's stream cursor. See session_events.go.
 package server
 
 import (
@@ -93,6 +101,7 @@ import (
 
 	"kitsoki/internal/app"
 	appplatform "kitsoki/internal/application"
+	"kitsoki/internal/applicationcapture"
 	"kitsoki/internal/applicationfeedback"
 	"kitsoki/internal/assignment"
 	"kitsoki/internal/bugprivacy"
@@ -101,6 +110,7 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/kitendpoint"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/harrec"
@@ -185,11 +195,21 @@ type Server struct {
 	// applicationDeps carries deployment-owned authorization, effect, and
 	// budget policy into every generated application adapter.
 	applicationDeps appplatform.Dependencies
+	// materializeReplay is shared across the short-lived application services
+	// created for separate materialization sessions.
+	materializeReplay appplatform.ReplayStore
+	// materializeReceipts shares the same durable journal when the server owns
+	// the materialization replay store.
+	materializeReceipts  appplatform.ReceiptSink
+	materializeReplayErr error
 	// applicationEventSched owns generated background event jobs. Daemon
 	// surfaces can inject their durable scheduler; local web uses an isolated
 	// in-memory scheduler.
 	applicationEventSched jobs.Scheduler
 	applicationBundleRoot string
+	applicationCaptures   applicationcapture.Broker
+	captureSubs           *applicationCaptureSubscriptions
+	captureReceipts       *applicationCaptureReceiptLedger
 
 	// defaultActor is the lowest-precedence operator identity injected as
 	// slots.author on a drive turn (see WithDefaultActor). Empty = none.
@@ -323,6 +343,11 @@ type Server struct {
 	// and /rpc/materialize-stream's initial gate frames.
 	materializeMu   sync.Mutex
 	materializeJobs map[jobs.JobID]*materializeJobState
+	// materializeProjection is the daemon-owned, application-scoped lifecycle
+	// read model. It is nil for non-daemon/read-only servers.
+	materializeProjection  materializationstatus.Store
+	materializeApplication string
+	materializeNow         func() time.Time
 
 	// feedbackRouting is the producer-keyed catalog-sink routing table for
 	// POST /api/feedback/local (feedback_intake.go); feedbackIntakeMu
@@ -354,6 +379,14 @@ type subscription struct {
 	mu        sync.Mutex
 	sent      int
 	seen      bool
+
+	// stream is non-nil when the session carried a [SessionStream] at
+	// subscribe time; the SSE handler then runs the cursor-driven loop
+	// (session_events.go) instead of the ticker poll. cursor is the last
+	// delivered global stream position — the whole subscription state on that
+	// path (sent/seen are unused there). Guarded by mu like sent.
+	stream *SessionStream
+	cursor store.StreamCursor
 }
 
 // Option configures a Server. A few options (WithDriver) only apply when the
@@ -376,6 +409,9 @@ type serverConfig struct {
 	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
 	workflowRoot              string
 	materializeRoot           string
+	materializeProjection     materializationstatus.Store
+	materializeApplication    string
+	materializeNow            func() time.Time
 	kits                      *kitendpoint.Dispatcher
 	setupWarnings             []SetupWarning
 	projectOnboarded          bool
@@ -386,6 +422,7 @@ type serverConfig struct {
 	applicationDeps           appplatform.Dependencies
 	applicationEventSched     jobs.Scheduler
 	applicationBundleRoot     string
+	applicationCaptures       applicationcapture.Broker
 }
 
 // WithAssignmentStore enables the persisted room-assignment RPC family. The
@@ -474,6 +511,16 @@ func WithMaterializeRoot(dir string) Option {
 	return func(c *serverConfig) { c.materializeRoot = strings.TrimSpace(dir) }
 }
 
+// WithMaterializationProjection binds daemon-owned durable materialization
+// lifecycle state to one exact Story Application identity.
+func WithMaterializationProjection(store materializationstatus.Store, applicationID string, now func() time.Time) Option {
+	return func(c *serverConfig) {
+		c.materializeProjection = store
+		c.materializeApplication = strings.TrimSpace(applicationID)
+		c.materializeNow = now
+	}
+}
+
 // WithKits attaches the installed-kit endpoint dispatcher (S3b —
 // .context/kits-implementation-plan.md design decision D2.2/2.3), enabling
 // the `kit.<kit>.<iface>.<op>` JSON-RPC fallback and `runstatus.kits.list`.
@@ -542,8 +589,10 @@ func WithAuth(m *webauth.Manager) Option {
 }
 
 // WithApplicationDependencies installs deployment policy and persistence
-// dependencies for generated application handlers. Nil members retain the
-// trusted-local runtime defaults; configured members are never overwritten.
+// dependencies for generated application handlers. A configured Replay store
+// is the deployment's durable replay authority for effectful typed
+// materialization; when omitted, the server opens its own journal under the
+// materialization root. Nil members otherwise retain trusted-local defaults.
 func WithApplicationDependencies(deps appplatform.Dependencies) Option {
 	return func(c *serverConfig) { c.applicationDeps = deps }
 }
@@ -552,6 +601,12 @@ func WithApplicationDependencies(deps appplatform.Dependencies) Option {
 // application events. Daemon mode should pass its durable jobs scheduler.
 func WithApplicationEventScheduler(scheduler jobs.Scheduler) Option {
 	return func(c *serverConfig) { c.applicationEventSched = scheduler }
+}
+
+// WithApplicationCaptureBroker installs the durable request/ack broker shared
+// with typed host.demo recording.
+func WithApplicationCaptureBroker(broker applicationcapture.Broker) Option {
+	return func(c *serverConfig) { c.applicationCaptures = broker }
 }
 
 // New builds a Server that serves the run recorded in the JSONL trace at
@@ -595,13 +650,39 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 	if applicationEventSched == nil {
 		applicationEventSched = jobs.NewInMemoryScheduler()
 	}
+	materializeReplay := cfg.applicationDeps.Replay
+	materializeReceipts := cfg.applicationDeps.Receipts
+	var materializeReplayErr error
+	if materializeReplay == nil && strings.TrimSpace(cfg.materializeRoot) != "" {
+		journalPath := filepath.Join(
+			cfg.materializeRoot,
+			".artifacts",
+			"kitsoki",
+			"graph-materialize.application.jsonl",
+		)
+		journal, err := openWritableApplicationJournal(journalPath)
+		if err != nil {
+			materializeReplayErr = err
+		} else {
+			materializeReplay = journal
+			if materializeReceipts == nil {
+				materializeReceipts = journal
+			}
+		}
+	}
 	return &Server{
 		provider:                  provider,
 		poll:                      cfg.poll,
 		assignments:               cfg.assignments,
 		applicationDeps:           cfg.applicationDeps,
+		materializeReplay:         materializeReplay,
+		materializeReceipts:       materializeReceipts,
+		materializeReplayErr:      materializeReplayErr,
 		applicationEventSched:     applicationEventSched,
 		applicationBundleRoot:     cfg.applicationBundleRoot,
+		applicationCaptures:       cfg.applicationCaptures,
+		captureSubs:               newApplicationCaptureSubscriptions(),
+		captureReceipts:           newApplicationCaptureReceiptLedger(),
 		defaultActor:              cfg.defaultActor,
 		auth:                      cfg.auth,
 		subs:                      make(map[string]*subscription),
@@ -626,6 +707,9 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		materializeSched:          jobs.NewInMemoryScheduler(),
 		materializeRoot:           cfg.materializeRoot,
 		materializeJobs:           make(map[jobs.JobID]*materializeJobState),
+		materializeProjection:     cfg.materializeProjection,
+		materializeApplication:    cfg.materializeApplication,
+		materializeNow:            cfg.materializeNow,
 		feedbackRouting:           cfg.feedbackRouting,
 		storyDirs:                 append([]string(nil), cfg.storyDirs...),
 	}
@@ -775,6 +859,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/rpc/meta-stream", s.handleMetaStream)
 	mux.HandleFunc("/rpc/turn-stream", s.handleTurnStream)
 	mux.HandleFunc("/rpc/materialize-stream", s.handleMaterializeStream)
+	mux.HandleFunc("/rpc/application-captures", s.handleApplicationCaptures)
 	// Embedded help-docs site (make site-embed). Serves an actionable
 	// placeholder when not staged — never an error (see internal/helpdocs).
 	mux.Handle("/help/", http.StripPrefix("/help/", helpdocs.Handler()))
@@ -885,6 +970,11 @@ const (
 	// codeStaleVersion makes an optimistic assignment conflict actionable: Data
 	// carries the current folded Record for a refresh-and-retry UI.
 	codeStaleVersion = -32003
+	// codeStreamUnsupported is returned by runstatus.session.events when the
+	// session's store exposes no durable event stream (SQLite / trace-file /
+	// in-memory sources). The client falls back to runstatus.session.trace +
+	// session.subscribe — the polling contract, unchanged.
+	codeStreamUnsupported = -32004
 
 	// maxRPCBodyBytes caps a single /rpc request body. The largest legitimate
 	// payload is a bug.report with a base64'd rrweb session buffer (~last 30s of
@@ -1220,6 +1310,81 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return frame, nil
 
+	case "runstatus.application.capture.attach":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		return map[string]any{"ok": true, "revision": surface.Revision}, nil
+
+	case "runstatus.application.capture.subscribe":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		subscriptionID, err := s.captureSubs.subscribe(surface.PublicSessionID, surface.Actor)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		return map[string]any{
+			"subscription_id": subscriptionID,
+			"revision":        surface.Revision,
+		}, nil
+
+	case "runstatus.application.capture.unsubscribe":
+		id := stringParam(params, "subscription_id")
+		if id == "" {
+			return nil, invalidParams(fmt.Errorf("subscription_id is required"))
+		}
+		actor, ok := s.resolveActor(ctx, params)
+		if !ok || !s.captureSubs.unsubscribe(id, actor) {
+			return nil, &rpcError{Code: codeNotFound, Message: "unknown application capture subscription"}
+		}
+		return map[string]bool{"ok": true}, nil
+
+	case "runstatus.application.capture.ack":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var ack applicationcapture.Ack
+		if err := decodeParams(params, &ack); err != nil {
+			return nil, invalidParams(err)
+		}
+		request, err := s.applicationCaptures.Lookup(ctx, surface, ack.RequestID)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := s.captureReceipts.verify(surface, request, ack.Receipts, true); err != nil {
+			return nil, invalidParams(err)
+		}
+		captured, err := s.applicationCaptures.Acknowledge(ctx, surface, ack)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		return map[string]any{"artifact_ref": captured.ArtifactRef}, nil
+
+	case "runstatus.application.capture.fail":
+		surface, rerr := s.applicationCaptureSurface(ctx, params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var ack applicationcapture.FailureAck
+		if err := decodeParams(params, &ack); err != nil {
+			return nil, invalidParams(err)
+		}
+		request, err := s.applicationCaptures.Lookup(ctx, surface, ack.RequestID)
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := s.captureReceipts.verify(surface, request, ack.Receipts, false); err != nil {
+			return nil, invalidParams(err)
+		}
+		if err := s.applicationCaptures.Fail(ctx, surface, ack); err != nil {
+			return nil, invalidParams(err)
+		}
+		return map[string]bool{"ok": true}, nil
+
 	case "runstatus.application.inspect":
 		entry, rerr := s.resolve(params)
 		if rerr != nil {
@@ -1389,6 +1554,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		outcome, err := service.DispatchAction(ctx, transport, envelope)
 		if err != nil {
 			return nil, serverErr(err)
+		}
+		if transport == appplatform.TransportWeb {
+			s.captureReceipts.record(envelope.SessionID, envelope.Action, outcome.Receipt)
 		}
 		return outcome, nil
 
@@ -1634,8 +1802,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return filterTrace(snap, params), nil
 
+	case "runstatus.session.events":
+		// Cursor-paged read over the durable event stream; codeStreamUnsupported
+		// when the session's store has no stream capability (session_events.go).
+		return s.sessionEvents(ctx, params)
+
 	case "runstatus.session.subscribe":
-		return s.subscribe(params)
+		return s.subscribe(ctx, params)
 
 	case "runstatus.session.unsubscribe":
 		id, _ := params["subscription_id"].(string)
@@ -2748,7 +2921,7 @@ func intParam(params map[string]any, key string) (int, bool) {
 
 // ── Subscriptions + SSE ─────────────────────────────────────────────────────
 
-func (s *Server) subscribe(params map[string]any) (map[string]any, *rpcError) {
+func (s *Server) subscribe(ctx context.Context, params map[string]any) (map[string]any, *rpcError) {
 	// Bind the subscription to the session it follows; each poll re-resolves the
 	// live Source for this id (so a session reloaded after subscribe is still
 	// observed). The single-entry adapter ignores the id.
@@ -2757,18 +2930,34 @@ func (s *Server) subscribe(params map[string]any) (map[string]any, *rpcError) {
 	if !ok {
 		return nil, &rpcError{Code: codeNotFound, Message: "unknown session_id: " + sid}
 	}
-	// Seed sent with the current event count so the stream carries only events
-	// appended after subscribe; the initial load comes from session.trace.
-	events, err := entry.Source.Events()
-	if err != nil {
-		return nil, serverErr(err)
+	sub := &subscription{sessionID: sid}
+	if ss := entry.Stream; ss != nil && ss.Stream != nil {
+		// Durable-stream session: seed the cursor to the session's current
+		// tail so the SSE stream carries only events appended after
+		// subscribe; the initial load comes from session.trace or
+		// session.events. No whole-history Source.Events() read here — the
+		// cursor path exists to retire that (session_events.go).
+		tail, err := sessionTailCursor(ctx, ss)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		sub.stream, sub.cursor = ss, tail
+	} else {
+		// Seed sent with the current event count so the stream carries only
+		// events appended after subscribe; the initial load comes from
+		// session.trace.
+		events, err := entry.Source.Events()
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		sub.sent = len(events)
 	}
 	s.mu.Lock()
 	s.nextID++
-	id := fmt.Sprintf("sub-%d", s.nextID)
-	s.subs[id] = &subscription{id: id, sessionID: sid, sent: len(events)}
+	sub.id = fmt.Sprintf("sub-%d", s.nextID)
+	s.subs[sub.id] = sub
 	s.mu.Unlock()
-	return map[string]any{"subscription_id": id}, nil
+	return map[string]any{"subscription_id": sub.id}, nil
 }
 
 func (s *Server) unsubscribe(id string) {
@@ -2800,6 +2989,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
+
+	// Durable-stream subscriptions use cursor reads + blocking waits instead
+	// of the ticker re-read (session_events.go); everything else keeps the
+	// historical polling loop below, byte-for-byte.
+	if sub.stream != nil {
+		s.handleEventsStream(w, r, flusher, sub)
+		return
+	}
 
 	ticker := time.NewTicker(s.poll)
 	defer ticker.Stop()

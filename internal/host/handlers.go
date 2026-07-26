@@ -610,6 +610,12 @@ func RegisterBuiltins(r *Registry) {
 	// unavailable sentinel; daemon construction may register an application-
 	// scoped backend which session construction injects.
 	r.Register("host.feedback", FeedbackHandler)
+	r.Register(ReviewedFeedbackCampaignReconcileVerb, ReviewedFeedbackCampaignReconcileHandler)
+	r.Register(FeedbackIntakeReconcileVerb, FeedbackIntakeReconcileHandler)
+	r.Register(FeedbackFederationReconcileVerb, FeedbackFederationReconcileHandler)
+	r.Register(SessionReconciliationVerb, SessionReconciliationHandler)
+	r.Register(WorkerFleetVerb, WorkerFleetHandler)
+	r.Register(CampaignSupervisionVerb, CampaignSupervisionHandler)
 
 	// Typed deterministic compliance checks. Session construction replaces the
 	// sentinel with an app-scoped graph/materialize provider.
@@ -620,10 +626,20 @@ func RegisterBuiltins(r *Registry) {
 	// app-scoped controller over a configured project graph and durable store.
 	r.Register("host.campaign", CampaignHandler)
 
+	// App-scoped read projections. Builtins fail closed; daemon session
+	// construction replaces them only for an explicitly configured app.
+	r.Register("host.streams", StreamsSnapshotHandler)
+	r.Register("host.federation", FederationSnapshotHandler)
+	r.Register("host.materialization", MaterializationSnapshotHandler)
+
 	// Deterministic catalog-node flow evidence. The builtin fails closed until
 	// daemon construction injects the app's resolver, runner, durable store,
 	// catalog binding, and clock.
 	r.Register("host.flow_evidence", FlowEvidenceHandler)
+
+	// Application-scoped multi-turn LLM conversations. The exact leaf avoids
+	// prefix dispatch adding an op field to its two-argument story contract.
+	r.Register("host.application_conversation.ask", ApplicationConversationHandler)
 
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
@@ -636,10 +652,9 @@ func RegisterBuiltins(r *Registry) {
 	// needs_input evidence rather than treating an unbound host as a ship.
 	r.Register("host.integration_train", IntegrationTrainHandler)
 
-	// Use-case loop A2 — host.demo.* (mockup/demo packet pipeline: create,
-	// record, doctor; see demo_handlers.go). Registered bare so the
-	// registry's longest-prefix fallback resolves every host.demo.<op>
-	// call here with <op> injected into args["op"].
+	// Deprecated path-based demo compatibility handler. Story Application
+	// runtime construction replaces this sentinel with the typed app-scoped
+	// provider from internal/storydemo.
 	r.Register("host.demo", DemoHandler)
 }
 

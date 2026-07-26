@@ -3,7 +3,14 @@ package chats
 import (
 	"database/sql"
 	"testing"
+	"time"
 )
+
+// SetLeaseHeartbeatIntervalForTest shrinks the Postgres lease renewal cadence
+// so tests can observe WithLock heartbeats without wall-clock waits.
+func (s *Store) SetLeaseHeartbeatIntervalForTest(d time.Duration) {
+	s.leaseHeartbeatEvery = d
+}
 
 // ExpectedSchemaVersion exposes the package-private expectedSchemaVersion
 // constant so external _test packages can assert against it without

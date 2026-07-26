@@ -36,13 +36,15 @@ import (
 )
 
 // EvidenceEntry is one `evidence:` list entry appended to a node — the same
-// {kind, title, path} shape POG's catalog already hand-authors (see
-// pog/catalog.yaml's work-item entries) and portal/catalog-model.ts's
-// nodeEvidence() reads.
+// Legacy entries carry Path. Typed application entries carry only an opaque
+// Handle plus phase/output attribution.
 type EvidenceEntry struct {
-	Kind  string
-	Title string
-	Path  string
+	Kind    string
+	Title   string
+	Path    string
+	Handle  string
+	PhaseID string
+	Output  string
 }
 
 // MaterializationRecord is the node-level `materialization:` block written
@@ -54,8 +56,11 @@ type MaterializationRecord struct {
 	SessionID string
 	Status    string
 	Story     string
-	Stages    []Stage
-	Artifacts []MaterializationArtifact
+	// ApplicationID identifies a typed registered application producer.
+	// It is mutually exclusive with Story.
+	ApplicationID string
+	Stages        []Stage
+	Artifacts     []MaterializationArtifact
 	// Checks are the recorded gate-check verdicts (script hash + reproduce
 	// command included) — the durable receipt that the node's gate was (or
 	// was not) machine-verified, and how to re-run the judgment.
@@ -63,6 +68,9 @@ type MaterializationRecord struct {
 	// ContextDigest is the materialization input digest used by readiness to
 	// distinguish fresh results from changed declared context.
 	ContextDigest string
+	// ReceiptIDs are canonical application receipt IDs, one per completed
+	// typed phase.
+	ReceiptIDs []string
 }
 
 // MaterializationArtifact is one `materialization.artifacts[]` entry —
@@ -72,6 +80,9 @@ type MaterializationArtifact struct {
 	Kind       string
 	Title      string
 	Path       string
+	Handle     string
+	PhaseID    string
+	Output     string
 	ProducedAt string
 }
 
@@ -131,14 +142,31 @@ func renderMaterializationValue(rec MaterializationRecord) map[string]any {
 	}
 	artifacts := make([]any, len(rec.Artifacts))
 	for i, a := range rec.Artifacts {
-		artifacts[i] = map[string]any{"kind": a.Kind, "title": a.Title, "path": a.Path, "produced_at": a.ProducedAt}
+		entry := map[string]any{"kind": a.Kind, "title": a.Title, "produced_at": a.ProducedAt}
+		if a.Path != "" {
+			entry["path"] = a.Path
+		}
+		if a.Handle != "" {
+			entry["handle"] = a.Handle
+			entry["phase"] = a.PhaseID
+			entry["output"] = a.Output
+		}
+		artifacts[i] = entry
 	}
 	out := map[string]any{
 		"job_id":    rec.JobID,
 		"status":    rec.Status,
-		"story":     rec.Story,
 		"stages":    stages,
 		"artifacts": artifacts,
+	}
+	if rec.Story != "" {
+		out["story"] = rec.Story
+	}
+	if rec.ApplicationID != "" {
+		out["application_id"] = rec.ApplicationID
+	}
+	if len(rec.ReceiptIDs) > 0 {
+		out["receipt_ids"] = append([]string(nil), rec.ReceiptIDs...)
 	}
 	if rec.ContextDigest != "" {
 		out["context_digest"] = rec.ContextDigest
@@ -198,7 +226,11 @@ func WriteMaterialization(catalogPath, nodeID string, rec MaterializationRecord)
 	}
 	after["attempts"] = attempts
 	title := fmt.Sprintf("materialize %s: write back status %q", nodeID, rec.Status)
-	return proposeAndApply(catalogPath, nodeID, title, "materialization", after, rec.JobID, rec.Story)
+	producer := rec.Story
+	if producer == "" {
+		producer = "application:" + rec.ApplicationID
+	}
+	return proposeAndApply(catalogPath, nodeID, title, "materialization", after, rec.JobID, producer)
 }
 
 func materializationAttempts(raw any) []any {
@@ -217,7 +249,7 @@ func materializationAttempts(raw any) []any {
 
 func attemptValue(record map[string]any) map[string]any {
 	attempt := map[string]any{}
-	for _, key := range []string{"job_id", "session_id", "status", "story", "stages", "artifacts", "checks", "context_digest"} {
+	for _, key := range []string{"job_id", "session_id", "status", "story", "application_id", "stages", "artifacts", "checks", "context_digest", "receipt_ids"} {
 		if value, ok := record[key]; ok {
 			attempt[key] = value
 		}
@@ -236,7 +268,7 @@ func containsAttempt(attempts []any, jobID string) bool {
 }
 
 // AppendEvidence appends one evidence entry to nodeID's `evidence:` list in
-// catalogPath, unless an entry for the same path is already present. Called
+// catalogPath, unless an entry for the same path or handle is already present. Called
 // as soon as a materialize job's world exposes a produced artifact path —
 // deliberately not deferred to job completion, so a multi-artifact story's
 // evidence lands "as they appear" per the plan, and so a story that fails
@@ -257,13 +289,33 @@ func AppendEvidence(catalogPath, nodeID string, entry EvidenceEntry, jobID, stor
 	for _, e := range existing {
 		next = append(next, e)
 		if em, ok := e.(map[string]any); ok {
-			if path, _ := em["path"].(string); path == entry.Path {
-				return nil // already present — dedupe-by-path, no-op
+			if entry.Path != "" {
+				if path, _ := em["path"].(string); path == entry.Path {
+					return nil
+				}
+			}
+			if entry.Handle != "" {
+				if handle, _ := em["handle"].(string); handle == entry.Handle {
+					return nil
+				}
 			}
 		}
 	}
-	next = append(next, map[string]any{"kind": entry.Kind, "title": entry.Title, "path": entry.Path})
+	rendered := map[string]any{"kind": entry.Kind, "title": entry.Title}
+	if entry.Path != "" {
+		rendered["path"] = entry.Path
+	}
+	if entry.Handle != "" {
+		rendered["handle"] = entry.Handle
+		rendered["phase"] = entry.PhaseID
+		rendered["output"] = entry.Output
+	}
+	next = append(next, rendered)
 
-	title := fmt.Sprintf("materialize %s: append evidence %s", nodeID, entry.Path)
+	identity := entry.Path
+	if identity == "" {
+		identity = entry.Handle
+	}
+	title := fmt.Sprintf("materialize %s: append evidence %s", nodeID, identity)
 	return proposeAndApply(catalogPath, nodeID, title, "evidence", next, jobID, story)
 }

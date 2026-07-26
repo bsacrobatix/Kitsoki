@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	yaml "github.com/goccy/go-yaml"
+
+	"kitsoki/internal/graph/pgcatalog"
 )
 
 // Write routing decides WHERE a mutating graph.* call materializes: straight
@@ -179,6 +181,15 @@ func (r *WriteRouter) route(primaryPath string) *catalogRoute {
 		return rt
 	}
 	rt := &catalogRoute{via: WriteViaDirect, gate: defaultCapsuleGate}
+	// A pg-backed catalog has no working tree: capsule routing (a managed
+	// clone/commit/merge of catalog FILES) is meaningless for it, so pg refs
+	// are unconditionally direct — the store's own transactional commit is
+	// the write protection. This deliberately overrides even an explicit
+	// server-level --write-via capsule.
+	if pgcatalog.IsRef(primaryPath) {
+		r.routes[primaryPath] = rt
+		return rt
+	}
 	root, err := repoRootFor(primaryPath)
 	if err == nil {
 		rt.repoRoot = root

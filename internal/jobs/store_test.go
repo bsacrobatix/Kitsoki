@@ -3,9 +3,11 @@ package jobs_test
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
+	"kitsoki/internal/app"
 	"kitsoki/internal/jobs"
 
 	_ "modernc.org/sqlite"
@@ -127,6 +129,58 @@ func TestJobStore_SweepStaleJobs(t *testing.T) {
 	}
 	if n2 != 0 {
 		t.Fatalf("expected 0 rows swept on second pass, got %d", n2)
+	}
+}
+
+func TestJobStore_ReconcileProcessBoundJobsScopesAndBounds(t *testing.T) {
+	db := openTestDB(t)
+	js, err := jobs.NewJobStore(db)
+	if err != nil {
+		t.Fatalf("NewJobStore: %v", err)
+	}
+	ctx := context.Background()
+	for _, job := range []*jobs.Job{
+		makeTestJob("01J0000000000000000000002A", jobs.JobRunning),
+		makeTestJob("01J0000000000000000000002B", jobs.JobAwaitingInput),
+		makeTestJob("01J0000000000000000000002C", jobs.JobRunning),
+	} {
+		if job.ID == "01J0000000000000000000002C" {
+			job.SessionID = "foreign-session"
+		} else {
+			job.SessionID = "owned-session"
+		}
+		if err := js.UpsertJob(ctx, job); err != nil {
+			t.Fatalf("UpsertJob: %v", err)
+		}
+	}
+	restore := jobs.SetSweepProcessAliveForTest(func(int) bool { return false })
+	defer restore()
+
+	result, err := js.ReconcileProcessBoundJobs(ctx, []app.SessionID{"owned-session"}, 2)
+	if err != nil {
+		t.Fatalf("ReconcileProcessBoundJobs: %v", err)
+	}
+	if result.Examined != 2 || result.Interrupted != 2 || result.Deferred != 0 ||
+		result.RestartTruth != "local_process_ownership" {
+		t.Fatalf("result = %#v", result)
+	}
+	foreign, err := js.GetJob(ctx, "01J0000000000000000000002C")
+	if err != nil || foreign.Status != jobs.JobRunning {
+		t.Fatalf("foreign job = %#v, %v", foreign, err)
+	}
+
+	extra := makeTestJob("01J0000000000000000000002D", jobs.JobRunning)
+	extra.SessionID = "bounded-session"
+	if err := js.UpsertJob(ctx, extra); err != nil {
+		t.Fatalf("UpsertJob bounded: %v", err)
+	}
+	extra.ID = "01J0000000000000000000002E"
+	if err := js.UpsertJob(ctx, extra); err != nil {
+		t.Fatalf("UpsertJob bounded second: %v", err)
+	}
+	_, err = js.ReconcileProcessBoundJobs(ctx, []app.SessionID{"bounded-session"}, 1)
+	if err == nil || !strings.Contains(err.Error(), "refusing to truncate") {
+		t.Fatalf("bounded error = %v", err)
 	}
 }
 

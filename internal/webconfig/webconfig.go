@@ -28,15 +28,19 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationjob"
+	"kitsoki/internal/applicationmaintenance"
 	"kitsoki/internal/campaign"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
+	"kitsoki/internal/reviewedfeedback"
 	"kitsoki/internal/workerregistry"
 )
 
@@ -129,6 +133,19 @@ type WebConfig struct {
 	// Load via resolveFeedbackRouting.
 	FeedbackRouting map[string]FeedbackRoute `yaml:"feedback_routing,omitempty"`
 
+	// ReviewedFeedback binds source applications to the daemon-owned reviewed
+	// feedback adopter. Story arguments cannot choose a target story, handler,
+	// action, ledger path, or provider; all authority is fixed here.
+	ReviewedFeedback map[string]ReviewedFeedbackBinding `yaml:"reviewed_feedback,omitempty"`
+
+	// FeedbackIntake binds an application to one daemon-registered typed
+	// capture source. Source names are semantic IDs, never paths or transports.
+	FeedbackIntake map[string]FeedbackIntakeBinding `yaml:"feedback_intake,omitempty"`
+
+	// FeedbackFederation binds reviewed records to an exact target application
+	// service. It carries no repository, URL, provider, credential, or command.
+	FeedbackFederation map[string]FeedbackFederationBinding `yaml:"feedback_federation,omitempty"`
+
 	// DaemonFederation is machine-local worker discovery for kitsoki daemon.
 	// Workers are independent loopback-only daemons; secrets remain in the local override.
 	DaemonFederation daemonfederation.Config `yaml:"daemon_federation,omitempty"`
@@ -137,6 +154,18 @@ type WebConfig struct {
 	// project object graph. The handler remains unavailable when this block is
 	// absent or the process is not `kitsoki daemon`.
 	Campaigns *CampaignConfig `yaml:"campaigns,omitempty"`
+
+	// StoryApplicationArtifacts binds callers to exact registered artifact
+	// producers. It is executable only when daemon construction enables it.
+	StoryApplicationArtifacts map[string]StoryApplicationArtifactConfig `yaml:"story_application_artifacts,omitempty"`
+
+	// StoryApplicationJobs binds caller-owned public template names to exact
+	// registered background Application Events and bounded artifact projections.
+	StoryApplicationJobs map[string]map[string]applicationjob.Template `yaml:"story_application_jobs,omitempty"`
+
+	// ApplicationConversations binds a caller application to one exact target
+	// role, graph projection, provider, machine profile, and set of bounds.
+	ApplicationConversations map[string]ApplicationConversationBinding `yaml:"application_conversations,omitempty"`
 
 	// Auth configures invitation-only GitHub sign-in for the web/daemon HTTP
 	// surface (internal/webauth). Nil ⇒ mode "auto": auth is required exactly
@@ -155,6 +184,209 @@ type WebConfig struct {
 	// never the checked-in .kitsoki.yaml, since Endpoint/Tunnel/CredentialEnv
 	// are machine-local or secret-bearing.
 	Workers []workerregistry.Entry `yaml:"workers,omitempty"`
+
+	// ApplicationReadModels opts exact application IDs into daemon-owned,
+	// read-only Story Application projections. Map keys are application IDs;
+	// neither story inputs nor transport requests can choose another binding.
+	ApplicationReadModels map[string]ApplicationReadModelConfig `yaml:"application_read_models,omitempty"`
+
+	// ApplicationMaintenance opts exact application IDs into daemon-owned
+	// maintenance providers. Story calls carry no arguments; durable stores,
+	// worker observations, bounds, and remediation policy are fixed here.
+	ApplicationMaintenance map[string]ApplicationMaintenanceConfig `yaml:"application_maintenance,omitempty"`
+
+	// ApplicationGraphs binds exact Story Application IDs to server-owned
+	// repository graph paths, bounds, and write policy.
+	ApplicationGraphs map[string]ApplicationGraphConfig `yaml:"application_graphs,omitempty"`
+}
+
+type ApplicationMaintenanceConfig struct {
+	SessionReconciliation *SessionReconciliationConfig `yaml:"session_reconciliation,omitempty"`
+	WorkerFleet           *WorkerFleetConfig           `yaml:"worker_fleet,omitempty"`
+	CampaignSupervision   *CampaignSupervisionConfig   `yaml:"campaign_supervision,omitempty"`
+}
+
+type SessionReconciliationConfig struct {
+	MaxSessions int `yaml:"max_sessions,omitempty"`
+	MaxJobs     int `yaml:"max_jobs,omitempty"`
+}
+
+type WorkerFleetConfig struct {
+	MaxWorkers int `yaml:"max_workers,omitempty"`
+	MaxBytes   int `yaml:"max_bytes,omitempty"`
+}
+
+type CampaignSupervisionConfig struct {
+	MaxCampaigns int                       `yaml:"max_campaigns,omitempty"`
+	MaxBytes     int                       `yaml:"max_bytes,omitempty"`
+	Remediation  CampaignRemediationConfig `yaml:"remediation,omitempty"`
+}
+
+type CampaignRemediationConfig struct {
+	Mode         string   `yaml:"mode,omitempty"`
+	MaxProposals int      `yaml:"max_proposals,omitempty"`
+	Statuses     []string `yaml:"statuses,omitempty"`
+}
+
+type ApplicationReadModelConfig struct {
+	Streams         *StreamReadModelConfig `yaml:"streams,omitempty"`
+	Federation      bool                   `yaml:"federation,omitempty"`
+	Materialization bool                   `yaml:"materialization,omitempty"`
+}
+
+type StreamReadModelConfig struct {
+	Scope string `yaml:"scope"`
+}
+
+func (cfg *WebConfig) resolveApplicationReadModels() error {
+	materializationOwners := 0
+	for appID, binding := range cfg.ApplicationReadModels {
+		if !readModelIdentity(appID) {
+			return fmt.Errorf("application_read_models key %q must be an opaque application id", appID)
+		}
+		if binding.Streams != nil && !readModelIdentity(binding.Streams.Scope) {
+			return fmt.Errorf("application_read_models.%s.streams.scope must be an opaque identity", appID)
+		}
+		if binding.Materialization {
+			materializationOwners++
+		}
+	}
+	if materializationOwners > 1 {
+		return fmt.Errorf("application_read_models: materialization owner is ambiguous")
+	}
+	return nil
+}
+
+func (cfg *WebConfig) resolveApplicationMaintenance() error {
+	for appID, binding := range cfg.ApplicationMaintenance {
+		if !readModelIdentity(appID) {
+			return fmt.Errorf("application_maintenance key %q must be an opaque application id", appID)
+		}
+		if binding.SessionReconciliation != nil {
+			if binding.SessionReconciliation.MaxSessions == 0 {
+				binding.SessionReconciliation.MaxSessions = applicationmaintenance.DefaultMaxSessions
+			}
+			if binding.SessionReconciliation.MaxJobs == 0 {
+				binding.SessionReconciliation.MaxJobs = applicationmaintenance.DefaultMaxSessionJobs
+			}
+			if binding.SessionReconciliation.MaxSessions < 1 ||
+				binding.SessionReconciliation.MaxSessions > applicationmaintenance.DefaultMaxSessions {
+				return fmt.Errorf(
+					"application_maintenance.%s.session_reconciliation.max_sessions must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxSessions,
+				)
+			}
+			if binding.SessionReconciliation.MaxJobs < 1 ||
+				binding.SessionReconciliation.MaxJobs > applicationmaintenance.DefaultMaxSessionJobs {
+				return fmt.Errorf(
+					"application_maintenance.%s.session_reconciliation.max_jobs must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxSessionJobs,
+				)
+			}
+		}
+		if binding.WorkerFleet != nil {
+			if binding.WorkerFleet.MaxWorkers == 0 {
+				binding.WorkerFleet.MaxWorkers = applicationmaintenance.DefaultMaxWorkers
+			}
+			if binding.WorkerFleet.MaxWorkers < 1 ||
+				binding.WorkerFleet.MaxWorkers > applicationmaintenance.DefaultMaxWorkers {
+				return fmt.Errorf(
+					"application_maintenance.%s.worker_fleet.max_workers must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxWorkers,
+				)
+			}
+			if binding.WorkerFleet.MaxBytes == 0 {
+				binding.WorkerFleet.MaxBytes = applicationmaintenance.DefaultMaxReceiptBytes
+			}
+			if binding.WorkerFleet.MaxBytes < 1 ||
+				binding.WorkerFleet.MaxBytes > applicationmaintenance.DefaultMaxReceiptBytes {
+				return fmt.Errorf(
+					"application_maintenance.%s.worker_fleet.max_bytes must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxReceiptBytes,
+				)
+			}
+		}
+		if binding.CampaignSupervision != nil {
+			if cfg.Campaigns == nil {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision requires campaigns",
+					appID,
+				)
+			}
+			if binding.CampaignSupervision.MaxCampaigns == 0 {
+				binding.CampaignSupervision.MaxCampaigns = applicationmaintenance.DefaultMaxCampaigns
+			}
+			if binding.CampaignSupervision.MaxCampaigns < 1 ||
+				binding.CampaignSupervision.MaxCampaigns > applicationmaintenance.DefaultMaxCampaigns {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.max_campaigns must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxCampaigns,
+				)
+			}
+			if binding.CampaignSupervision.MaxBytes == 0 {
+				binding.CampaignSupervision.MaxBytes = applicationmaintenance.DefaultMaxReceiptBytes
+			}
+			if binding.CampaignSupervision.MaxBytes < 1 ||
+				binding.CampaignSupervision.MaxBytes > applicationmaintenance.DefaultMaxReceiptBytes {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.max_bytes must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxReceiptBytes,
+				)
+			}
+			policy := &binding.CampaignSupervision.Remediation
+			if policy.Mode == "" {
+				policy.Mode = "propose"
+			}
+			if policy.Mode != "propose" {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.remediation.mode must be propose",
+					appID,
+				)
+			}
+			if policy.MaxProposals == 0 {
+				policy.MaxProposals = applicationmaintenance.DefaultMaxRemediations
+			}
+			if policy.MaxProposals < 1 ||
+				policy.MaxProposals > applicationmaintenance.DefaultMaxRemediations {
+				return fmt.Errorf(
+					"application_maintenance.%s.campaign_supervision.remediation.max_proposals must be between 1 and %d",
+					appID, applicationmaintenance.DefaultMaxRemediations,
+				)
+			}
+			seen := map[string]bool{}
+			for _, status := range policy.Statuses {
+				if status != "failed" && status != "interrupted" {
+					return fmt.Errorf(
+						"application_maintenance.%s.campaign_supervision.remediation.statuses contains unsupported status %q",
+						appID, status,
+					)
+				}
+				if seen[status] {
+					return fmt.Errorf(
+						"application_maintenance.%s.campaign_supervision.remediation.statuses contains duplicate %q",
+						appID, status,
+					)
+				}
+				seen[status] = true
+			}
+			if len(policy.Statuses) == 0 {
+				policy.Statuses = []string{"failed", "interrupted"}
+			}
+		}
+		cfg.ApplicationMaintenance[appID] = binding
+	}
+	return nil
+}
+
+func readModelIdentity(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	return value == trimmed && trimmed != "" && len(trimmed) <= 128 &&
+		trimmed != "." && trimmed != ".." &&
+		!strings.ContainsAny(trimmed, "/\\\r\n\x00") &&
+		!strings.Contains(lower, "://") &&
+		!strings.Contains(lower, "%2f") &&
+		!strings.Contains(lower, "%5c")
 }
 
 // CampaignConfig fixes the graph source and bounded discovery limits for the
@@ -212,6 +444,110 @@ type FeedbackRoute struct {
 	// (first carries the summary text; "report"/"report_id" carry the
 	// receipt ref) — mirrors a catalog's own feedback_routing.fields.
 	Fields []string `yaml:"fields,omitempty"`
+}
+
+// ReviewedFeedbackBinding is one application-scoped daemon adopter. The
+// conventional reviewed application-feedback ledger and managed roots are
+// resolved by the server and are intentionally not configurable here.
+type ReviewedFeedbackBinding struct {
+	TargetApplication string `yaml:"target_application"`
+	TargetHandler     string `yaml:"target_handler"`
+	TargetAction      string `yaml:"target_action"`
+}
+
+type FeedbackIntakeBinding struct {
+	Source     string `yaml:"source"`
+	MaxRecords int    `yaml:"max_records,omitempty"`
+}
+
+type FeedbackFederationBinding struct {
+	TargetApplication string `yaml:"target_application"`
+	TargetHandler     string `yaml:"target_handler"`
+	TargetAction      string `yaml:"target_action"`
+	MaxRecords        int    `yaml:"max_records,omitempty"`
+}
+
+func (cfg *WebConfig) resolveReviewedFeedback() error {
+	sources := make([]string, 0, len(cfg.ReviewedFeedback))
+	for source := range cfg.ReviewedFeedback {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	for _, source := range sources {
+		binding := cfg.ReviewedFeedback[source]
+		if !validReviewedFeedbackID(source) {
+			return fmt.Errorf("reviewed_feedback: source application id is required and must be opaque")
+		}
+		switch {
+		case !validReviewedFeedbackID(binding.TargetApplication):
+			return fmt.Errorf("reviewed_feedback.%s.target_application is required and must be opaque", source)
+		case !validReviewedFeedbackID(binding.TargetHandler):
+			return fmt.Errorf("reviewed_feedback.%s.target_handler is required and must be opaque", source)
+		case !validReviewedFeedbackID(binding.TargetAction):
+			return fmt.Errorf("reviewed_feedback.%s.target_action is required and must be opaque", source)
+		}
+	}
+	intakeApps := make([]string, 0, len(cfg.FeedbackIntake))
+	for appID := range cfg.FeedbackIntake {
+		intakeApps = append(intakeApps, appID)
+	}
+	sort.Strings(intakeApps)
+	for _, appID := range intakeApps {
+		binding := cfg.FeedbackIntake[appID]
+		switch {
+		case !validReviewedFeedbackID(appID):
+			return fmt.Errorf("feedback_intake: application id is required and must be opaque")
+		case !validReviewedFeedbackID(binding.Source):
+			return fmt.Errorf("feedback_intake.%s.source is required and must be opaque", appID)
+		case binding.MaxRecords < 0 || binding.MaxRecords > reviewedfeedback.MaxDrainLimit:
+			return fmt.Errorf(
+				"feedback_intake.%s.max_records must be between 1 and %d when set",
+				appID, reviewedfeedback.MaxDrainLimit,
+			)
+		}
+	}
+	federationApps := make([]string, 0, len(cfg.FeedbackFederation))
+	for appID := range cfg.FeedbackFederation {
+		federationApps = append(federationApps, appID)
+	}
+	sort.Strings(federationApps)
+	for _, appID := range federationApps {
+		binding := cfg.FeedbackFederation[appID]
+		switch {
+		case !validReviewedFeedbackID(appID):
+			return fmt.Errorf("feedback_federation: application id is required and must be opaque")
+		case !validReviewedFeedbackID(binding.TargetApplication):
+			return fmt.Errorf("feedback_federation.%s.target_application is required and must be opaque", appID)
+		case !validReviewedFeedbackID(binding.TargetHandler):
+			return fmt.Errorf("feedback_federation.%s.target_handler is required and must be opaque", appID)
+		case !validReviewedFeedbackID(binding.TargetAction):
+			return fmt.Errorf("feedback_federation.%s.target_action is required and must be opaque", appID)
+		case binding.MaxRecords < 0 || binding.MaxRecords > reviewedfeedback.MaxDrainLimit:
+			return fmt.Errorf(
+				"feedback_federation.%s.max_records must be between 1 and %d when set",
+				appID, reviewedfeedback.MaxDrainLimit,
+			)
+		}
+	}
+	return nil
+}
+
+func validReviewedFeedbackID(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 180 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-', r == ':':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // resolveFeedbackRouting validates the `feedback_routing:` block fail-fast
@@ -575,7 +911,28 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveFeedbackRouting(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveReviewedFeedback(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveStoryApplicationArtifacts(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveStoryApplicationJobs(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveApplicationConversations(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveCampaigns(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveApplicationReadModels(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveApplicationMaintenance(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
+	if err := cfg.resolveApplicationGraphs(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
 	if err := cfg.resolveAuth(); err != nil {
@@ -754,8 +1111,80 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	if local.Campaigns != nil {
 		out.Campaigns = local.Campaigns
 	}
+	if len(local.StoryApplicationArtifacts) > 0 {
+		merged := make(
+			map[string]StoryApplicationArtifactConfig,
+			len(base.StoryApplicationArtifacts)+len(local.StoryApplicationArtifacts),
+		)
+		for k, v := range base.StoryApplicationArtifacts {
+			merged[k] = v
+		}
+		for k, v := range local.StoryApplicationArtifacts {
+			merged[k] = v
+		}
+		out.StoryApplicationArtifacts = merged
+	}
+	if len(local.StoryApplicationJobs) > 0 {
+		merged := make(
+			map[string]map[string]applicationjob.Template,
+			len(base.StoryApplicationJobs)+len(local.StoryApplicationJobs),
+		)
+		for k, v := range base.StoryApplicationJobs {
+			merged[k] = v
+		}
+		for k, v := range local.StoryApplicationJobs {
+			merged[k] = v
+		}
+		out.StoryApplicationJobs = merged
+	}
+	if len(local.ApplicationConversations) > 0 {
+		merged := make(
+			map[string]ApplicationConversationBinding,
+			len(base.ApplicationConversations)+len(local.ApplicationConversations),
+		)
+		for k, v := range base.ApplicationConversations {
+			merged[k] = v
+		}
+		for k, v := range local.ApplicationConversations {
+			merged[k] = v
+		}
+		out.ApplicationConversations = merged
+	}
 	if len(local.Workers) > 0 {
 		out.Workers = local.Workers
+	}
+	if len(local.ApplicationReadModels) > 0 {
+		merged := make(map[string]ApplicationReadModelConfig, len(base.ApplicationReadModels)+len(local.ApplicationReadModels))
+		for key, value := range base.ApplicationReadModels {
+			merged[key] = value
+		}
+		for key, value := range local.ApplicationReadModels {
+			merged[key] = value
+		}
+		out.ApplicationReadModels = merged
+	}
+	if len(local.ApplicationMaintenance) > 0 {
+		merged := make(
+			map[string]ApplicationMaintenanceConfig,
+			len(base.ApplicationMaintenance)+len(local.ApplicationMaintenance),
+		)
+		for key, value := range base.ApplicationMaintenance {
+			merged[key] = value
+		}
+		for key, value := range local.ApplicationMaintenance {
+			merged[key] = value
+		}
+		out.ApplicationMaintenance = merged
+	}
+	if len(local.ApplicationGraphs) > 0 {
+		merged := make(map[string]ApplicationGraphConfig, len(base.ApplicationGraphs)+len(local.ApplicationGraphs))
+		for key, value := range base.ApplicationGraphs {
+			merged[key] = value
+		}
+		for key, value := range local.ApplicationGraphs {
+			merged[key] = value
+		}
+		out.ApplicationGraphs = merged
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)
@@ -798,6 +1227,36 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.FeedbackRouting = merged
+	}
+	if len(local.ReviewedFeedback) > 0 {
+		merged := make(map[string]ReviewedFeedbackBinding, len(base.ReviewedFeedback)+len(local.ReviewedFeedback))
+		for k, v := range base.ReviewedFeedback {
+			merged[k] = v
+		}
+		for k, v := range local.ReviewedFeedback {
+			merged[k] = v
+		}
+		out.ReviewedFeedback = merged
+	}
+	if len(local.FeedbackIntake) > 0 {
+		merged := make(map[string]FeedbackIntakeBinding, len(base.FeedbackIntake)+len(local.FeedbackIntake))
+		for k, v := range base.FeedbackIntake {
+			merged[k] = v
+		}
+		for k, v := range local.FeedbackIntake {
+			merged[k] = v
+		}
+		out.FeedbackIntake = merged
+	}
+	if len(local.FeedbackFederation) > 0 {
+		merged := make(map[string]FeedbackFederationBinding, len(base.FeedbackFederation)+len(local.FeedbackFederation))
+		for k, v := range base.FeedbackFederation {
+			merged[k] = v
+		}
+		for k, v := range local.FeedbackFederation {
+			merged[k] = v
+		}
+		out.FeedbackFederation = merged
 	}
 	// Field-merged (like Root), NOT block-replaced: the intended split is a
 	// checked-in base block (mode, admins, public_url, client_id) with only
