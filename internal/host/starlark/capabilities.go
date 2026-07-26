@@ -25,6 +25,7 @@ var BuiltinHostVerbVocabulary = []string{
 	"host.graph.diff",
 	"host.graph.project",
 	"host.graph.query",
+	"host.compliance.run",
 	"host.punch.verify",
 	"host.proposal.publish",
 	"host.dev.profile_setup",

@@ -17,6 +17,7 @@ import (
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/compliance"
 	embedstore "kitsoki/internal/embed"
 	"kitsoki/internal/harness"
 	"kitsoki/internal/host"
@@ -297,6 +298,21 @@ func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 	}
 }
 
+func wireComplianceHost(registry *host.Registry, cfg runtimeConfig) {
+	root := compliance.DiscoverRoot(cfg.AppPath)
+	registry.Replace("host.compliance", compliance.NewHandler(compliance.Dependencies{
+		AppID:      cfg.Def.App.ID,
+		Root:       root,
+		Authorizer: compliance.BoundAuthorizer{AppID: cfg.Def.App.ID, Root: root},
+		Catalogs:   compliance.GraphCatalogResolver{},
+		Runner:     compliance.MaterializeCheckRunner{},
+		Evidence: compliance.FileEvidenceStore{
+			Dir: filepath.Join(root, ".artifacts", "compliance"),
+		},
+		Clock: clock.Real(),
+	}))
+}
+
 // buildSessionRuntime performs the orchestrator CONSTRUCTION shared by
 // `kitsoki run` and `kitsoki web`: open the store, build journal reader/writer,
 // job store + scheduler, chat store, machine, host registry (per posture),
@@ -372,6 +388,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		// web surface never records, so no record-mode cassette wiring.
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
+		wireComplianceHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		testrunner.RegisterHostStubs(hostReg, cfg.Flow.HostHandlers)
 
@@ -451,6 +468,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 	} else {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
+		wireComplianceHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		// Layer a host cassette over the live-harness posture when requested
 		// (e.g. --harness replay for free-text routing + --host-cassette for the

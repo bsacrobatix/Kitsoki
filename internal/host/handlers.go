@@ -611,6 +611,10 @@ func RegisterBuiltins(r *Registry) {
 	// scoped backend which session construction injects.
 	r.Register("host.feedback", FeedbackHandler)
 
+	// Typed deterministic compliance checks. Session construction replaces the
+	// sentinel with an app-scoped graph/materialize provider.
+	r.Register("host.compliance", ComplianceHandler)
+
 	// Capsule merge queue operator surface — host.queue.* (status plus the
 	// six audited human-override verbs; see queue_handlers.go). Registered
 	// bare so the registry's longest-prefix fallback resolves every

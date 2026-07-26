@@ -380,6 +380,10 @@ func registerGraphBuiltins(r *Registry) {
 		),
 		Output: fields("job_id", "string"),
 	})
+	r.Register("host.compliance", "run", Op{
+		Input:  fields("catalog_path", "string", "node_id", "string"),
+		Output: fields("passed", "bool", "evidence_ref", "string", "summary", "string"),
+	})
 	r.Register("host.graph", "presentation", Op{
 		Input:  fields(),
 		Output: fields("layers", "list"),

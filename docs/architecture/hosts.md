@@ -2543,6 +2543,35 @@ instead of truncating. This makes the operation suitable for an injected
 read-only host interface whose result is bound into world, transformed by
 capability-free Starlark, and exposed through page-scoped `application.data`.
 
+## host.compliance.run
+
+`host.compliance.run` is the typed compliance boundary for Story Applications:
+
+```yaml
+catalog_path: catalog
+node_id: control-access-review
+```
+
+It returns exactly `passed`, `evidence_ref`, and `summary`. The session runtime
+fixes the application identity, project root, catalog resolver, check runner,
+evidence store, and clock; none can be supplied by the story. The provider
+loads the catalog through `internal/graph`, resolves the node's typed
+`materialize.checks` through `internal/materialize`, and runs only those
+server-resolved `.star` checks. Story input cannot supply a command, script,
+script path, capability, evidence path, or application identity.
+
+Compliance checks reject HTTP, nested host calls, and filesystem writes. They
+never invoke a shell, MJS helper, or LLM. Catalog and resolved script paths must
+remain within the application project root, including after symlink
+resolution. Check count, resolved declarations, result data, and the final
+evidence record all have hard ceilings; overflow fails the call instead of
+truncating evidence.
+
+Evidence is immutable JSON under `.artifacts/compliance`, addressed externally
+as `kitsoki://compliance/sha256/<digest>`. The reference reveals no filesystem
+path. Equivalent verdicts reuse the same semantic digest after a daemon or
+session restart; a changed verdict creates a new record.
+
 ## Adding your own host
 
 See [`developer-guide.md` §5.2](../guide/development/developer-guide.md#52-adding-a-new-built-in-host-handler).

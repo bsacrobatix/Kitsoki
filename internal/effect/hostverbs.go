@@ -284,6 +284,16 @@ var builtinVerbTable = map[string]verbEffect{
 	"host.feedback.list_reviewed": {class: Read, deterministic: true},
 	"host.feedback.dispatch":      {class: External, deterministic: false},
 
+	// host.compliance evaluates server-resolved Starlark materialize checks and
+	// writes immutable local evidence. It has no command, LLM, or network lane.
+	"host.compliance": {
+		class: Write, deterministic: true,
+		ops: map[string]opEffect{
+			"run": {class: Write, deterministic: true},
+		},
+	},
+	"host.compliance.run": {class: Write, deterministic: true},
+
 	// host.queue — capsule merge queue operator surface
 	// (internal/host/queue_handlers.go over internal/capsule/queue). status
 	// reads the durable state file; the six operator verbs mutate it under
