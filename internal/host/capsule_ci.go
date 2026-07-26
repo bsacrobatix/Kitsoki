@@ -29,6 +29,20 @@ func (f CapsuleCICommandRunnerFunc) Run(ctx context.Context, workdir, command st
 	return f(ctx, workdir, command)
 }
 
+// CapsuleCIEvidenceDestination is a controller-owned destination for the
+// bounded project-check artifact.  Leaving it empty preserves the historical
+// workspace-local .artifacts path.  Exact-source CI uses a project-owned
+// destination because its source checkout is intentionally removed after the
+// result and receipt are persisted.
+//
+// Root and ReferencePrefix are supplied by the launcher/controller, never by
+// the story's host-call arguments.  That keeps an untrusted checked-in story
+// from selecting an arbitrary controller filesystem path for retained output.
+type CapsuleCIEvidenceDestination struct {
+	Root            string
+	ReferencePrefix string
+}
+
 type shellCapsuleCICommandRunner struct{}
 
 func (shellCapsuleCICommandRunner) Run(ctx context.Context, workdir, command string) (string, int, error) {
@@ -56,6 +70,14 @@ func (shellCapsuleCICommandRunner) Run(ctx context.Context, workdir, command str
 // typed verdict. The story remains the CI pipeline: this host is one ordinary
 // deterministic fact producer, not a second step-DAG runtime.
 func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
+	return NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(runner, CapsuleCIEvidenceDestination{})
+}
+
+// NewCapsuleCIProjectChecksHandlerWithEvidenceDestination constructs the
+// project-check host with a trusted, optional retained evidence destination.
+// It is intended for controller-owned transient source checkouts; ordinary
+// Capsule CI retains the default workspace-local behavior.
+func NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(runner CapsuleCICommandRunner, destination CapsuleCIEvidenceDestination) Handler {
 	if runner == nil {
 		runner = shellCapsuleCICommandRunner{}
 	}
@@ -82,8 +104,10 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 		if err != nil {
 			return Result{Error: fmt.Sprintf("host.capsule_ci.project_checks: command_timeout: %v", err), FailureKind: FailureFatal}, nil
 		}
-		evidenceRel := filepath.ToSlash(filepath.Join(".artifacts", "capsule-ci", "checks", jobID+".json"))
-		evidenceRef := "file:" + evidenceRel
+		evidencePath, evidenceRef, err := capsuleCIEvidencePath(workdir, jobID, destination)
+		if err != nil {
+			return Result{Error: fmt.Sprintf("host.capsule_ci.project_checks: evidence destination: %v", err), FailureKind: FailureFatal}, nil
+		}
 		checks := make([]map[string]any, 0, 2)
 		commandEvidence := make([]map[string]any, 0, 2)
 		allPassed := true
@@ -128,7 +152,7 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 			summary = "One or more declared project commands failed."
 		}
 		artifact := map[string]any{"schema": "capsule-ci-project-checks/v1", "job_id": capsuleCIStringArg(args, "job_id", ""), "profile": filepath.ToSlash(filepath.Join(".kitsoki", "project-profile.yaml")), "checks": commandEvidence, "outcome": outcome}
-		if err := writeCapsuleCIEvidence(filepath.Join(workdir, filepath.FromSlash(evidenceRel)), artifact); err != nil {
+		if err := writeCapsuleCIEvidence(evidencePath, artifact); err != nil {
 			return Result{}, fmt.Errorf("host.capsule_ci.project_checks: write evidence: %w", err)
 		}
 		verdict := map[string]any{
@@ -145,6 +169,25 @@ func NewCapsuleCIProjectChecksHandler(runner CapsuleCICommandRunner) Handler {
 		}
 		return Result{Data: map[string]any{"ok": allPassed && len(checks) > 0, "checks": checks, "evidence": evidenceRef, "verdict": verdict}}, nil
 	}
+}
+
+func capsuleCIEvidencePath(workdir, jobID string, destination CapsuleCIEvidenceDestination) (string, string, error) {
+	if destination.Root == "" && destination.ReferencePrefix == "" {
+		rel := filepath.ToSlash(filepath.Join(".artifacts", "capsule-ci", "checks", jobID+".json"))
+		return filepath.Join(workdir, filepath.FromSlash(rel)), "file:" + rel, nil
+	}
+	if destination.Root == "" || destination.ReferencePrefix == "" {
+		return "", "", fmt.Errorf("root and reference prefix must be supplied together")
+	}
+	root, err := filepath.Abs(destination.Root)
+	if err != nil {
+		return "", "", err
+	}
+	prefix := strings.TrimSuffix(filepath.ToSlash(destination.ReferencePrefix), "/")
+	if !strings.HasPrefix(prefix, "file:") || strings.TrimPrefix(prefix, "file:") == "" || filepath.IsAbs(strings.TrimPrefix(prefix, "file:")) {
+		return "", "", fmt.Errorf("reference prefix must be a non-absolute file: path")
+	}
+	return filepath.Join(root, jobID+".json"), prefix + "/" + jobID + ".json", nil
 }
 
 func capsuleCICommandTimeout(args map[string]any) (time.Duration, error) {

@@ -125,6 +125,15 @@ func runPromoteExistingCI(ctx context.Context, project, definitionID string, in 
 	launcher := storylauncher.Launcher{
 		StoryPath: filepath.Join(workspacePath, pipeline.Story), ProjectRoot: workspacePath,
 		AgentLaunchPolicy: host.AgentLaunchPolicy{Enabled: true, AllowedRoots: []string{workspacePath}},
+		ConfigureHosts: func(reg *host.Registry) error {
+			if ok := reg.Replace("host.capsule_ci.project_checks", host.NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(nil, host.CapsuleCIEvidenceDestination{
+				Root:            filepath.Join(project, ".capsules", "ci", "evidence"),
+				ReferencePrefix: "file:.capsules/ci/evidence",
+			})); !ok {
+				return fmt.Errorf("capsule promote-existing: project check host is not registered")
+			}
+			return nil
+		},
 	}
 	service := ci.Service{
 		ProjectRoot: workspacePath,

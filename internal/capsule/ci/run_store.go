@@ -290,12 +290,43 @@ func (s FileRunStore) DiagnoseAt(id string, now time.Time, stallAfter time.Durat
 	if projection.ReceiptPath != "" {
 		diagnosis.Artifacts = append(diagnosis.Artifacts, DiagnosticArtifact{Kind: "receipt", Path: projection.ReceiptPath})
 	}
+	diagnosis.Artifacts = append(diagnosis.Artifacts, checkEvidenceArtifacts(record.Result.Verdict)...)
 	if diagnosis.FailureKind == "" {
 		diagnosis.FailureKind, diagnosis.FailureSummary = inferRunFailure(record)
 	}
 	diagnosis.detectStall(record, now, stallAfter)
 	diagnosis.NextCommands = diagnosticNextCommands(projection, diagnosis)
 	return diagnosis, nil
+}
+
+// checkEvidenceArtifacts projects only safe, project-relative file evidence
+// references into `capsule ci diagnose`.  The run record already carries the
+// verdict, but surfacing its local artifacts here makes a failed project check
+// actionable without asking an operator to reconstruct a temporary checkout.
+func checkEvidenceArtifacts(verdict Verdict) []DiagnosticArtifact {
+	seen := map[string]struct{}{}
+	artifacts := make([]DiagnosticArtifact, 0)
+	for _, check := range verdict.Checks {
+		for _, ref := range check.Evidence {
+			path := strings.TrimPrefix(ref, "file:")
+			if path == ref {
+				continue
+			}
+			if before, _, ok := strings.Cut(path, "#"); ok {
+				path = before
+			}
+			path = filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(path))))
+			if path == "" || filepath.IsAbs(path) || path == "." || path == ".." || strings.HasPrefix(path, "../") {
+				continue
+			}
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			seen[path] = struct{}{}
+			artifacts = append(artifacts, DiagnosticArtifact{Kind: "check_evidence", Path: path})
+		}
+	}
+	return artifacts
 }
 
 func (s FileRunStore) Project(record RunRecord) RunProjection {

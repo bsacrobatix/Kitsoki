@@ -46,6 +46,40 @@ func TestCapsuleCIProjectChecksBuildsTypedVerdictAndEvidence(t *testing.T) {
 	}
 }
 
+func TestCapsuleCIProjectChecksUsesTrustedRetainedEvidenceDestination(t *testing.T) {
+	root := capsuleCIProfileRoot(t)
+	retained := filepath.Join(t.TempDir(), "ci-evidence")
+	longLog := "tail-marker:" + string(make([]byte, 1<<20+32))
+	result, err := NewCapsuleCIProjectChecksHandlerWithEvidenceDestination(CapsuleCICommandRunnerFunc(func(_ context.Context, _ string, command string) (string, int, error) {
+		if command == "go test ./..." {
+			return longLog, 9, nil
+		}
+		return "build ok", 0, nil
+	}), CapsuleCIEvidenceDestination{
+		Root:            retained,
+		ReferencePrefix: "file:.capsules/ci/evidence",
+	})(context.Background(), map[string]any{"workdir": root, "job_id": "retained", "pipeline": "change"})
+	if err != nil || result.Error != "" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if got := result.Data["evidence"]; got != "file:.capsules/ci/evidence/retained.json" {
+		t.Fatalf("evidence ref = %#v", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(retained, "retained.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact map[string]any
+	if err := json.Unmarshal(raw, &artifact); err != nil {
+		t.Fatal(err)
+	}
+	entry := artifact["checks"].([]any)[0].(map[string]any)
+	log := entry["log"].(string)
+	if len(log) != 1<<20 || log[len(log)-32:] != longLog[len(longLog)-32:] {
+		t.Fatalf("bounded retained log length/tail = %d/%q", len(log), log[len(log)-32:])
+	}
+}
+
 func TestCapsuleCIProjectChecksDefaultHostCommandHasNoDeadline(t *testing.T) {
 	root := capsuleCIProfileRoot(t)
 	called := 0

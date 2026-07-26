@@ -951,6 +951,35 @@ func TestFileRunStoreDiagnoseSummarizesFailureTrace(t *testing.T) {
 	}
 }
 
+func TestFileRunStoreDiagnoseListsProjectRelativeCheckEvidence(t *testing.T) {
+	root := t.TempDir()
+	store := FileRunStore{ProjectRoot: root}
+	result := RunResult{Job: artifactjob.Job{ID: "job-evidence", Status: artifactjob.StatusDone}, Envelope: executor.Envelope{
+		Digest: "sha256:envelope", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Environment: environment.Lock{Digest: "sha256:environment"},
+	}}
+	result.Verdict = Verdict{
+		Schema: VerdictSchema, Pipeline: "change", Outcome: "failed", PromotionEligible: false,
+		Checks: []Check{{ID: "tests", Kind: "deterministic", Outcome: "failed", Evidence: []string{
+			"file:.capsules/ci/evidence/job-evidence.json#tests",
+			"file:/private/unsafe.json#tests",
+			"file:relative/../../unsafe.json#tests",
+		}}},
+		SourceDigest: result.Envelope.SourceDigest, StoryDigest: result.Envelope.StoryDigest,
+		EnvironmentDigest: result.Envelope.Environment.Digest, EnvelopeDigest: result.Envelope.Digest,
+	}
+	result.Terminal = true
+	if err := store.Write(RunRecord{JobID: "job-evidence", Result: result}); err != nil {
+		t.Fatal(err)
+	}
+	diagnosis, err := store.Diagnose("job-evidence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnosis.Artifacts) != 1 || diagnosis.Artifacts[0] != (DiagnosticArtifact{Kind: "check_evidence", Path: ".capsules/ci/evidence/job-evidence.json"}) {
+		t.Fatalf("artifacts = %#v", diagnosis.Artifacts)
+	}
+}
+
 func TestFileRunStoreDiagnoseLatestDetectsStallAndOpenExecutorSpan(t *testing.T) {
 	root := t.TempDir()
 	store := FileRunStore{ProjectRoot: root}
