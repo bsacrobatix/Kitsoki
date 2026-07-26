@@ -191,38 +191,72 @@ func graphBoolArg(args map[string]any, key string) bool {
 	return b
 }
 
-// loadCatalogArg loads catalog_path (required), optionally unioning
-// overlay_path (LoadCatalogWithOverlay) when present — the shared "load
-// current, optionally desired" step every read-only op needs. When args
-// carries a `scope` mapping (a session's baked catalog subset, see
-// graph_scope.go), the loaded catalog is pruned to that scope's member set
-// — the single choke point that makes every read op scope-aware at once.
-// Write ops never load through here (they hand catalog_path to
-// objectgraph.Propose/Apply/... directly), so a pruned view can never be
-// written back to disk.
+// graphCatalogStoreResolver maps a catalog ref in args["catalog_path"] to
+// the CatalogStore read ops load through — the construction seam that routes
+// non-file refs to other stores without touching any RPC/tool schema. The
+// default resolves an explicit "pg:<catalog-id>" ref to the Postgres-backed
+// store (graph_pg.go; a mis-configured pg ref becomes an errorCatalogStore
+// whose first use reports why) and every other ref to the file-backed store,
+// whose Load is exactly objectgraph.LoadCatalog, so file behavior is
+// unchanged.
+var graphCatalogStoreResolver = func(ref string) objectgraph.CatalogStore {
+	if graphIsPGRef(ref) {
+		store, err := graphPGCatalogStore(ref)
+		if err != nil {
+			return errorCatalogStore{ref: ref, err: err}
+		}
+		return store
+	}
+	return objectgraph.NewFileCatalogStore(ref)
+}
+
+// loadCatalogArg loads catalog_path (required) through the resolved
+// CatalogStore, optionally unioning overlay_path (LoadCatalogWithOverlay)
+// when present — the shared "load current, optionally desired" step every
+// read-only op needs. When args carries a `scope` mapping (a session's baked
+// catalog subset, see graph_scope.go), the loaded catalog is pruned to that
+// scope's member set — the single choke point that makes every read op
+// scope-aware at once. Write ops never load through here (they hand
+// catalog_path to objectgraph.Propose/Apply/... directly), so a pruned view
+// can never be written back to disk.
 func loadCatalogArg(args map[string]any) (*objectgraph.Catalog, error) {
+	cat, _, err := loadCatalogArgWithRev(args)
+	return cat, err
+}
+
+// loadCatalogArgWithRev is loadCatalogArg plus the store's revision token —
+// graph.open reports it as head.rev for a non-file catalog instead of
+// shelling out to git. The token is "" on an overlay-union load (a
+// file-loader concept with no single store revision).
+func loadCatalogArgWithRev(args map[string]any) (*objectgraph.Catalog, objectgraph.CatalogRev, error) {
 	catalogPath := graphStringArg(args, "catalog_path")
 	if catalogPath == "" {
-		return nil, fmt.Errorf("host.graph: missing required arg %q", "catalog_path")
+		return nil, "", fmt.Errorf("host.graph: missing required arg %q", "catalog_path")
 	}
 	var cat *objectgraph.Catalog
+	var rev objectgraph.CatalogRev
 	var err error
 	if overlay := graphStringArg(args, "overlay_path"); overlay != "" {
+		// Overlay union is a file-loader concept and stays where it is
+		// today; only the plain load routes through the store seam.
 		cat, err = objectgraph.LoadCatalogWithOverlay(catalogPath, overlay)
 	} else {
-		cat, err = objectgraph.LoadCatalog(catalogPath)
+		cat, rev, err = graphCatalogStoreResolver(catalogPath).Load(context.Background())
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	spec, err := graphScopeSpecArg(args)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if spec != nil {
-		return objectgraph.ApplyScope(cat, spec)
+		cat, err = objectgraph.ApplyScope(cat, spec)
+		if err != nil {
+			return nil, "", err
+		}
 	}
-	return cat, nil
+	return cat, rev, nil
 }
 
 // graphLoadOp: {catalog_path[, overlay_path]} -> a raw catalog summary (node
@@ -307,7 +341,12 @@ func graphApplyOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolArg(args, "dry_run"), ActorFromContext(ctx), clk)
+	var res *objectgraph.ApplyResult
+	if graphIsPGRef(catalogPath) {
+		res, err = objectgraph.ApplyVia(ctx, graphCatalogStoreResolver(catalogPath), objectgraph.NodeID(changesetID), graphBoolArg(args, "dry_run"), ActorFromContext(ctx), clk)
+	} else {
+		res, err = objectgraph.Apply(catalogPath, objectgraph.NodeID(changesetID), graphBoolArg(args, "dry_run"), ActorFromContext(ctx), clk)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -354,13 +393,19 @@ func graphProposeOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := objectgraph.Propose(catalogPath, objectgraph.ProposeInput{
+	input := objectgraph.ProposeInput{
 		Title:        graphStringArg(args, "title"),
 		Visibility:   graphStringArg(args, "visibility"),
 		Operations:   ops,
 		Provenance:   provenance,
 		ValidateOnly: graphBoolArg(args, "validate_only"),
-	}, ActorFromContext(ctx), clk)
+	}
+	var res *objectgraph.ProposeResult
+	if graphIsPGRef(catalogPath) {
+		res, err = objectgraph.ProposeVia(ctx, graphCatalogStoreResolver(catalogPath), input, ActorFromContext(ctx), clk)
+	} else {
+		res, err = objectgraph.Propose(catalogPath, input, ActorFromContext(ctx), clk)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -421,6 +466,11 @@ func graphCanonicalizeOp(args map[string]any) (Result, error) {
 	if catalogPath == "" {
 		return Result{}, fmt.Errorf("host.graph.canonicalize: missing required arg %q", "catalog_path")
 	}
+	if graphIsPGRef(catalogPath) {
+		// Canonicalization is a YAML-file concern (block-scalar reflow of a
+		// hand-edited store); a Postgres catalog has no bytes to canonicalize.
+		return Result{}, fmt.Errorf("host.graph.canonicalize: %q is a Postgres catalog ref; canonicalize applies only to YAML file catalogs", catalogPath)
+	}
 	res, err := objectgraph.Canonicalize(catalogPath, graphBoolArg(args, "dry_run"))
 	if err != nil {
 		return Result{}, err
@@ -458,7 +508,12 @@ func graphAuthorizeOp(ctx context.Context, args map[string]any) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	var res *objectgraph.ApplyResult
+	if graphIsPGRef(catalogPath) {
+		res, err = objectgraph.AuthorizeVia(ctx, graphCatalogStoreResolver(catalogPath), objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	} else {
+		res, err = objectgraph.Authorize(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -481,7 +536,12 @@ func graphWithdrawOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	var res *objectgraph.ApplyResult
+	if graphIsPGRef(catalogPath) {
+		res, err = objectgraph.WithdrawVia(ctx, graphCatalogStoreResolver(catalogPath), objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	} else {
+		res, err = objectgraph.Withdraw(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -505,7 +565,12 @@ func graphRebaseOp(ctx context.Context, args map[string]any) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	res, err := objectgraph.Rebase(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	var res *objectgraph.ApplyResult
+	if graphIsPGRef(catalogPath) {
+		res, err = objectgraph.RebaseVia(ctx, graphCatalogStoreResolver(catalogPath), objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	} else {
+		res, err = objectgraph.Rebase(catalogPath, objectgraph.NodeID(changesetID), ActorFromContext(ctx), clk)
+	}
 	if err != nil {
 		return Result{}, err
 	}

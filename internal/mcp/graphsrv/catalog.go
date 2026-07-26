@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	yaml "github.com/goccy/go-yaml"
+
+	"kitsoki/internal/graph/pgcatalog"
 )
 
 // defaultCatalogProbePath is checked (relative to server cwd) when no
@@ -36,6 +38,12 @@ type CatalogSet struct {
 // (extension-less base name). The first entry (in flag order) becomes the
 // default catalog.
 //
+// A path of the explicit form "pg:<catalog-id>" binds a Postgres-backed
+// catalog instead of a file: the ref is kept verbatim (no filesystem
+// resolution) and the alias defaults to the catalog id. The DSN comes from
+// the session's configured backend / KITSOKI_PG_DSN (internal/host's pg
+// catalog routing) — never from the binding itself.
+//
 // If raw is empty, this probes defaultCatalogProbePath under cwd; if that
 // doesn't exist either, an empty (zero-catalog) CatalogSet is returned —
 // not an error. The server still starts; every tool call then reports
@@ -62,9 +70,15 @@ func ParseCatalogFlags(raw []string) (*CatalogSet, error) {
 		if path == "" {
 			return nil, fmt.Errorf("--catalog[%d]: empty path in %q", i, entry)
 		}
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			return nil, fmt.Errorf("--catalog[%d]: resolve %q: %w", i, path, err)
+		abs := path
+		if !pgcatalog.IsRef(path) {
+			var err error
+			abs, err = filepath.Abs(path)
+			if err != nil {
+				return nil, fmt.Errorf("--catalog[%d]: resolve %q: %w", i, path, err)
+			}
+		} else if _, ok := pgcatalog.CatalogID(path); !ok {
+			return nil, fmt.Errorf("--catalog[%d]: %q names no catalog id (want %s<catalog-id>)", i, path, pgcatalog.RefPrefix)
 		}
 		alias = strings.TrimSpace(alias)
 		if alias == "" {
@@ -82,10 +96,13 @@ func ParseCatalogFlags(raw []string) (*CatalogSet, error) {
 	return cs, nil
 }
 
-// catalogDefaultAlias derives a default alias for a bound catalog path: the
-// catalog's own `catalog.id` field if the file/bundle is readable and
-// declares one, else the filename stem.
+// catalogDefaultAlias derives a default alias for a bound catalog path: a pg
+// ref's own catalog id; else the catalog's `catalog.id` field if the file/
+// bundle is readable and declares one, else the filename stem.
 func catalogDefaultAlias(path string) string {
+	if id, ok := pgcatalog.CatalogID(path); ok {
+		return id
+	}
 	if id := readCatalogID(path); id != "" {
 		return id
 	}

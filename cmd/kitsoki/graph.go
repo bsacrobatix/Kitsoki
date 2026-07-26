@@ -54,6 +54,8 @@ func graphCmd() *cobra.Command {
 	cmd.AddCommand(graphQueryCmd())
 	cmd.AddCommand(graphRenderFeaturesCmd())
 	cmd.AddCommand(graphMaterializeCmd())
+	cmd.AddCommand(graphImportCmd())
+	cmd.AddCommand(graphExportCmd())
 	return cmd
 }
 

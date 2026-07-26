@@ -10,6 +10,7 @@ import (
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/dbruntime"
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/mining"
@@ -92,17 +93,30 @@ func openSessionStoreBackend(dbPath string) (store.Store, error) {
 		if dsn == "" {
 			return nil, fmt.Errorf("db backend %q requires a DSN: pass --pg-dsn or set %s", dbBackendPostgres, dbruntime.EnvDSN)
 		}
-		return store.OpenPostgresDSN(dsn)
+		return openPGSessionStore(dsn)
 	case dbBackendEmbeddedPG:
 		rt, err := startEmbeddedPG(dbPath)
 		if err != nil {
 			return nil, fmt.Errorf("start embedded postgres: %w", err)
 		}
-		return store.OpenPostgresDSN(rt.DSN())
+		return openPGSessionStore(rt.DSN())
 	default:
 		// Unreachable: resolveDBBackend already rejected unknown values.
 		return nil, fmt.Errorf("unknown db backend %q", backend)
 	}
+}
+
+// openPGSessionStore opens the Postgres session store and injects its shared
+// handle into host's "pg:<catalog-id>" graph catalog routing, so graph refs
+// resolve against the configured backend without requiring KITSOKI_PG_DSN to
+// be set separately (it stays the fallback when no store has been opened).
+func openPGSessionStore(dsn string) (store.Store, error) {
+	s, err := store.OpenPostgresDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
+	host.SetGraphPGDB(s.DB())
+	return s, nil
 }
 
 // newChatStore constructs the chats satellite store on s's shared handle in
@@ -169,6 +183,24 @@ func newStudyStore(s store.Store) (study.Store, error) {
 		return study.NewPostgresStore(s.DB())
 	}
 	return study.NewSQLiteStore(s.DB())
+}
+
+// openGraphCatalogDB opens the shared database handle `kitsoki graph
+// import/export` persist graph catalogs through (internal/graph/pgcatalog's
+// schema-per-subsystem rows hang off the same handle as every satellite
+// store). Graph catalogs have no SQLite backend — the YAML file catalog stays
+// the default surface — so the sqlite backend (the default) is a clear error
+// here, never a silent fallback.
+func openGraphCatalogDB() (store.Store, error) {
+	backend, err := resolveDBBackend()
+	if err != nil {
+		return nil, err
+	}
+	if backend == dbBackendSQLite {
+		return nil, fmt.Errorf("graph catalogs are stored in Postgres only, but the db backend is %q: pass --db-backend postgres|embedded-postgres (or set %s), with a DSN via --pg-dsn / %s for the postgres backend",
+			backend, envDBBackend, dbruntime.EnvDSN)
+	}
+	return openSessionStoreBackend(defaultDBPath())
 }
 
 // startEmbeddedPG returns the process-shared embedded runtime, starting it on

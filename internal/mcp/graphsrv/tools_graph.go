@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"kitsoki/internal/graph/pgcatalog"
 )
 
 // RegisterGraphTools registers the read family (plan §3.3, now eight tools
@@ -243,8 +245,11 @@ func handleGraphOpen(ctx context.Context, deps *Deps, req *mcpsdk.CallToolReques
 	// The engine op only stubs feedback.pending at 0 (it doesn't know
 	// about the local sink, which lives in this package). Overwrite it
 	// here with the real pending count from the local sink now that
-	// feedback.report/feedback.list exist.
-	feedback["pending"] = pendingFeedbackCount(path)
+	// feedback.report/feedback.list exist. A pg-backed catalog has no repo
+	// root to anchor a local sink to, so the stub stands for it.
+	if !pgcatalog.IsRef(path) {
+		feedback["pending"] = pendingFeedbackCount(path)
+	}
 	guide, _ := res.Data["guide"].(string)
 	nodeCount, _ := res.Data["node_count"].(int)
 	scope, _ := res.Data["scope"].(map[string]any)
