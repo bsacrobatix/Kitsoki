@@ -48,6 +48,45 @@ func TestBuildPlanReturnsEmptyCandidateSlice(t *testing.T) {
 	}
 }
 
+func TestWorkspaceInventoryStopsDispatchingSlowProbesOnDeadline(t *testing.T) {
+	root := t.TempDir()
+	workspaceRoot := filepath.Join(root, ".capsules", "workspaces")
+	for i := 0; i < 141; i++ {
+		if err := os.MkdirAll(filepath.Join(workspaceRoot, fmt.Sprintf("slow-%03d", i)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scriptDir := t.TempDir()
+	countPath := filepath.Join(t.TempDir(), "probe-count")
+	script := filepath.Join(scriptDir, "git")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf x >> \"$KITSOKI_HYGIENE_PROBE_COUNT\"\n/bin/sleep 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KITSOKI_HYGIENE_PROBE_COUNT", countPath)
+	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := BuildPlan(ctx, Options{
+		ProjectRoot: root,
+		ReadWorkspaceActivity: func(context.Context, []string) (WorkspaceActivity, error) {
+			return WorkspaceActivity{Known: true, PIDsByPath: map[string][]int{}}, nil
+		},
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("BuildPlan error = %v, want deadline exceeded", err)
+	}
+	// The inventory has 141 paths, but it may only dispatch its fixed worker
+	// bound before cancellation. This prevents a post-green deadline from
+	// launching a probe for every workspace after it has already expired.
+	raw, readErr := os.ReadFile(countPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if probes := len(raw); probes > workspaceInspectors {
+		t.Fatalf("slow probe launches = %d, want <= %d after deadline", probes, workspaceInspectors)
+	}
+}
+
 func TestApplyRemovesOnlyPlannedProjectRunFiles(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, ".capsules", "ci")

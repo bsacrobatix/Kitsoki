@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"kitsoki/internal/capsule/control"
@@ -785,32 +786,67 @@ func workspaceCandidatesForRoot(ctx context.Context, root string, opts Options, 
 		candidate Candidate
 		err       error
 	}
-	jobs := make(chan string, len(ordered))
-	results := make(chan inspection, len(ordered))
-	for _, path := range ordered {
-		jobs <- path
-	}
-	close(jobs)
 	workers := minInt(workspaceInspectors, len(ordered))
+	inspectCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan string)
+	results := make(chan inspection, workers)
+	var workerGroup sync.WaitGroup
 	for worker := 0; worker < workers; worker++ {
+		workerGroup.Add(1)
 		go func() {
-			for path := range jobs {
-				in, ok := byPath[path]
-				candidate, inspectErr := inspectWorkspace(ctx, root, path, maybeInstance(in, ok), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
-				results <- inspection{candidate: candidate, err: inspectErr}
+			defer workerGroup.Done()
+			for {
+				select {
+				case <-inspectCtx.Done():
+					return
+				case path, ok := <-jobs:
+					if !ok {
+						return
+					}
+					in, found := byPath[path]
+					candidate, inspectErr := inspectWorkspace(inspectCtx, root, path, maybeInstance(in, found), current, pinned, now, minAge, activity, opts.MeasureWorkspaceBytes, opts.ClearInactiveMerged, opts.AllowReceiptBoundClosedPurge)
+					select {
+					case results <- inspection{candidate: candidate, err: inspectErr}:
+					case <-inspectCtx.Done():
+						return
+					}
+				}
 			}
 		}()
 	}
+	defer func() {
+		cancel()
+		close(jobs)
+		workerGroup.Wait()
+	}()
 	out := make([]Candidate, 0, len(ordered))
-	for range ordered {
-		result := <-results
-		if os.IsNotExist(result.err) {
-			continue
+	for next, inFlight := 0, 0; next < len(ordered) || inFlight > 0; {
+		if err := inspectCtx.Err(); err != nil {
+			return nil, err
 		}
-		if result.err != nil {
-			return nil, result.err
+		var submit chan<- string
+		var path string
+		if next < len(ordered) && inFlight < workers {
+			submit = jobs
+			path = ordered[next]
 		}
-		out = append(out, result.candidate)
+		select {
+		case <-inspectCtx.Done():
+			return nil, inspectCtx.Err()
+		case submit <- path:
+			next++
+			inFlight++
+		case result := <-results:
+			inFlight--
+			if os.IsNotExist(result.err) {
+				continue
+			}
+			if result.err != nil {
+				return nil, result.err
+			}
+			out = append(out, result.candidate)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil

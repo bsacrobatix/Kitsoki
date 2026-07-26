@@ -32,6 +32,7 @@ const Schema = "capsule-ci/v1"
 const VerdictSchema = "capsule-ci-verdict/v1"
 const ExecutorControlAuthoritySchema = "capsule-ci-executor-control/v1"
 const SourceModeImmutable = "immutable"
+const defaultPostExecutorHygieneTimeout = 2 * time.Minute
 
 type Config struct {
 	Schema             string              `yaml:"schema" json:"schema"`
@@ -604,8 +605,12 @@ type Service struct {
 	Executors   ExecutorSelector
 	Launcher    Launcher
 	Hygiene     HygienePlanner
-	Observer    RunObserver
-	Now         func() time.Time
+	// HygieneTimeout bounds the required post-executor hygiene inventory.
+	// Zero uses the production default. A timeout is a failed CI terminal
+	// condition: it never turns an executor pass into a receipt.
+	HygieneTimeout time.Duration
+	Observer       RunObserver
+	Now            func() time.Time
 }
 
 const (
@@ -1131,8 +1136,29 @@ func (s Service) applyHygienePolicy(ctx context.Context, p Pipeline, v Verdict) 
 	if s.Hygiene == nil {
 		return v, fmt.Errorf("capsule ci: hygiene check required but no hygiene planner is configured")
 	}
-	report, err := s.Hygiene.PlanHygiene(ctx, policy)
+	timeout := s.HygieneTimeout
+	if timeout <= 0 {
+		timeout = defaultPostExecutorHygieneTimeout
+	}
+	hygieneCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	report, err := s.Hygiene.PlanHygiene(hygieneCtx, policy)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			diagnostic := HygieneDiagnosticError{
+				Message:           "Capsule post-executor hygiene inventory timed out",
+				Phase:             report.Phase,
+				ProgressCompleted: report.ProgressCompleted,
+				ProgressTotal:     report.ProgressTotal,
+				Timeout:           timeout,
+				Cause:             context.DeadlineExceeded,
+			}
+			v.Checks = replaceCheck(v.Checks, Check{ID: "capsule-hygiene", Kind: "hygiene", Outcome: "failed", DecisionRef: diagnostic.Error()})
+			v.Outcome = "infra_failed"
+			v.Summary = diagnostic.Error()
+			v.PromotionEligible = false
+			return v, diagnostic
+		}
 		return v, err
 	}
 	outcome := "passed"

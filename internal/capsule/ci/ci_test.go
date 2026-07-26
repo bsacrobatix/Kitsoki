@@ -533,6 +533,51 @@ func TestServiceHygieneDebtBlocksPromotion(t *testing.T) {
 	}
 }
 
+func TestServicePostExecutorHygieneTimeoutFailsClosedWithTypedDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	requireFiles(t, root)
+	raw, err := os.ReadFile(filepath.Join(root, ".kitsoki", "ci.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, []byte("\ncleanup:\n  require_hygiene_check: true\n")...)
+	if err := os.WriteFile(filepath.Join(root, ".kitsoki", "ci.yaml"), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		ProjectRoot:    root,
+		Jobs:           artifactjob.NewMemoryStore(),
+		Env:            environment.Resolver{Probe: environment.ToolProbeFunc(func(context.Context, string) (string, error) { return "go1.25", nil })},
+		Executors:      fixtureBuiltinExecutors(),
+		HygieneTimeout: time.Millisecond,
+		Launcher: launcher(func(_ context.Context, p executor.Prepared) (Verdict, error) {
+			return Verdict{Schema: VerdictSchema, Pipeline: "change", Outcome: "passed", Checks: []Check{{ID: "test", Kind: "deterministic", Outcome: "passed", Evidence: []string{"artifact:test"}}}, PromotionEligible: true, SourceDigest: p.Envelope.SourceDigest, StoryDigest: p.Envelope.StoryDigest, EnvironmentDigest: p.Envelope.Environment.Digest, EnvelopeDigest: p.Envelope.Digest}, nil
+		}),
+		Hygiene: HygienePlannerFunc(func(ctx context.Context, _ CleanupPolicy) (HygieneReport, error) {
+			<-ctx.Done()
+			return HygieneReport{Phase: "workspace-inventory", ProgressCompleted: 4, ProgressTotal: 141}, ctx.Err()
+		}),
+	}
+	result, err := service.Run(context.Background(), RunRequest{Pipeline: "change", Workspace: control.Handle{ID: "w", Generation: 1}, DefinitionDigest: "sha256:def", SourceDigest: "sha256:source", StoryDigest: "sha256:story", Trigger: Trigger{Kind: "local"}})
+	if err == nil {
+		t.Fatal("expected post-executor hygiene timeout")
+	}
+	var diagnostic HygieneDiagnosticError
+	if !errors.As(err, &diagnostic) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error = %T %v, want typed deadline diagnostic", err, err)
+	}
+	if diagnostic.Phase != "workspace-inventory" || diagnostic.ProgressCompleted != 4 || diagnostic.ProgressTotal != 141 || diagnostic.Timeout != time.Millisecond {
+		t.Fatalf("diagnostic %#v", diagnostic)
+	}
+	if result.Job.Status != artifactjob.StatusFailed || result.Verdict.Outcome != "infra_failed" || result.Verdict.PromotionEligible {
+		t.Fatalf("timeout must fail closed: %#v", result)
+	}
+	check := checkByID(result.Verdict.Checks, "capsule-hygiene")
+	if check == nil || check.Outcome != "failed" || !strings.Contains(check.DecisionRef, "timed out") {
+		t.Fatalf("hygiene check %#v", check)
+	}
+}
+
 func TestPipelineCleanupPolicyOverridesGlobalRetention(t *testing.T) {
 	root := t.TempDir()
 	requireFiles(t, root)
