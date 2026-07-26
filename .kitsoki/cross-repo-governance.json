@@ -1,0 +1,10 @@
+{
+  "schema": "kitsoki/cross-repo-governance/v1",
+  "workspace_driver": "capsule-workspace",
+  "promotion": {
+    "mode": "capsule-queue",
+    "pipeline": "change",
+    "target": "main",
+    "gate": "make test"
+  }
+}
