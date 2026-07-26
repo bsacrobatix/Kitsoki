@@ -278,6 +278,18 @@ func capsuleCIRunCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		var executorControl *ci.ExecutorControlAuthority
+		if sourceRoot != "" {
+			executorName := p.Executor
+			if workerID != "" {
+				executorName = workerID
+			}
+			authority, err := ci.NewImmutableExecutorControlAuthority(cfg, args[0], executorName, p.Result)
+			if err != nil {
+				return err
+			}
+			executorControl = &authority
+		}
 		executors := ci.NewConfiguredExecutors(cfg)
 		executors.ProjectRoot = workspacePath
 		executors.PoolStateRoot = project
@@ -288,7 +300,7 @@ func capsuleCIRunCmd() *cobra.Command {
 			return executor.GitBundle(ctx, workspacePath, envelope.SourceDigest, 0)
 		})
 		service := ci.Service{ProjectRoot: workspacePath, Jobs: artifactjob.NewMemoryStore(), Env: environment.Resolver{ProjectRoot: workspacePath, Probe: environment.HostProbe()}, Executors: executors, Launcher: launcher, Hygiene: capsuleCIHygienePlanner(project), Observer: record.FileRunObserver{ProjectRoot: project}}
-		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, JobInputs: jobInputs, Trigger: trigger, ExecutorOverride: workerID, Detach: detach})
+		result, err := service.Run(cmd.Context(), ci.RunRequest{Pipeline: args[0], Workspace: control.Handle{ID: in.ID, Generation: in.Generation}, DefinitionDigest: in.DefinitionDigest, SourceDigest: in.Head, StoryDigest: planned.StoryDigest, JobInputs: jobInputs, Trigger: trigger, ExecutorOverride: workerID, Detach: detach, ExecutorControl: executorControl})
 		if err != nil {
 			return persistCapsuleCIRunFailure(project, result, err)
 		}
@@ -692,9 +704,15 @@ func capsuleCICancelCmd() *cobra.Command {
 		if reconciled, ok, reconcileErr := store.ReconcileOrphaned(job); reconcileErr == nil && ok {
 			return capsuleWorkspaceWrite(cmd, reconciled, jsonOut)
 		}
-		controller, _, err := capsuleCIExecutionController(cmd.Context(), project, record)
+		controller, _, authority, err := capsuleCIExecutionController(cmd.Context(), project, record)
 		if err != nil {
 			return err
+		}
+		if record.Result.ExecutorControl == nil && authority != nil {
+			record.Result.ExecutorControl = authority
+			if err := store.Write(record); err != nil {
+				return err
+			}
 		}
 		status, err := controller.RequestCancel(cmd.Context(), record.Result.Execution.ExecutionID)
 		if err != nil {
@@ -716,37 +734,28 @@ func capsuleCICancelCmd() *cobra.Command {
 	return cmd
 }
 
-func capsuleCIExecutionController(ctx context.Context, project string, run ci.RunRecord) (executor.ExecutionController, ci.Pipeline, error) {
+var capsuleCISelectConfiguredExecutor = func(ctx context.Context, cfg ci.Config, executorName, projectRoot, poolStateRoot string) (executor.Provider, error) {
+	configured := ci.NewConfiguredExecutors(cfg)
+	configured.ProjectRoot = projectRoot
+	configured.PoolStateRoot = poolStateRoot
+	return configured.Select(ctx, executorName)
+}
+
+func capsuleCIExecutionController(ctx context.Context, project string, run ci.RunRecord) (executor.ExecutionController, ci.Pipeline, *ci.ExecutorControlAuthority, error) {
 	if run.Result.Execution.ExecutionID == "" {
-		return nil, ci.Pipeline{}, fmt.Errorf("capsule ci: job %s has no durable execution id", run.JobID)
+		return nil, ci.Pipeline{}, nil, fmt.Errorf("capsule ci: job %s has no durable execution id", run.JobID)
 	}
 	root, err := filepath.Abs(project)
 	if err != nil {
-		return nil, ci.Pipeline{}, err
+		return nil, ci.Pipeline{}, nil, err
 	}
-	manager, err := capsuleWorkspaceManager(root)
+	cfg, pipeline, executorName, projectRoot, authority, err := capsuleCIExecutorControlInputs(ctx, root, run)
 	if err != nil {
-		return nil, ci.Pipeline{}, err
+		return nil, ci.Pipeline{}, nil, err
 	}
-	workspaceRoot, err := manager.WorkspacePath(ctx, run.Result.Envelope.Instance)
+	provider, err := capsuleCISelectConfiguredExecutor(ctx, cfg, executorName, projectRoot, root)
 	if err != nil {
-		return nil, ci.Pipeline{}, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w", err)
-	}
-	cfg, err := ci.Load(workspaceRoot)
-	if err != nil {
-		return nil, ci.Pipeline{}, err
-	}
-	pipeline := cfg.Pipelines[run.Result.Pipeline]
-	executorName := run.Result.Executor
-	if executorName == "" {
-		executorName = pipeline.Executor
-	}
-	configured := ci.NewConfiguredExecutors(cfg)
-	configured.ProjectRoot = workspaceRoot
-	configured.PoolStateRoot = root
-	provider, err := configured.Select(ctx, executorName)
-	if err != nil {
-		return nil, ci.Pipeline{}, err
+		return nil, ci.Pipeline{}, nil, err
 	}
 	// The provider's own ExecutionController implementation is the authority
 	// on what it can answer: pool executors expose bucket-backed Status while
@@ -755,9 +764,110 @@ func capsuleCIExecutionController(ctx context.Context, project string, run ci.Ru
 	// foreclose detached status reconciliation.
 	controller, ok := provider.(executor.ExecutionController)
 	if !ok {
-		return nil, ci.Pipeline{}, fmt.Errorf("capsule ci: executor %q does not expose durable status/cancellation", executorName)
+		return nil, ci.Pipeline{}, nil, fmt.Errorf("capsule ci: executor %q does not expose durable status/cancellation", executorName)
 	}
-	return controller, pipeline, nil
+	return controller, pipeline, authority, nil
+}
+
+func capsuleCIExecutorControlInputs(ctx context.Context, root string, run ci.RunRecord) (ci.Config, ci.Pipeline, string, string, *ci.ExecutorControlAuthority, error) {
+	if authority := run.Result.ExecutorControl; authority != nil {
+		if err := authority.Validate(); err != nil {
+			return ci.Config{}, ci.Pipeline{}, "", "", nil, err
+		}
+		if authority.Pipeline != run.Result.Pipeline {
+			return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: executor control pipeline %q does not match persisted run pipeline %q", authority.Pipeline, run.Result.Pipeline)
+		}
+		executorName := run.Result.Executor
+		if executorName == "" {
+			executorName = authority.Executor
+		}
+		if authority.Executor != executorName {
+			return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: executor control placement %q does not match persisted run executor %q", authority.Executor, executorName)
+		}
+		cfg := ci.Config{Schema: ci.Schema, Pipelines: map[string]ci.Pipeline{
+			authority.Pipeline: {Executor: authority.Executor, Result: authority.Result},
+		}}
+		if authority.Remote != nil {
+			cfg.Remotes = map[string]ci.Remote{authority.Executor: *authority.Remote}
+		}
+		return cfg, cfg.Pipelines[authority.Pipeline], authority.Executor, root, authority, nil
+	}
+
+	manager, err := capsuleWorkspaceManager(root)
+	if err != nil {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, err
+	}
+	instance, instanceErr := manager.Instances.Get(ctx, run.Result.Envelope.Instance.ID)
+	if instanceErr == nil {
+		workspaceRoot, err := manager.WorkspacePath(ctx, control.Handle{ID: instance.ID, Generation: run.Result.Envelope.Instance.Generation})
+		if err != nil {
+			return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w", err)
+		}
+		cfg, err := ci.Load(workspaceRoot)
+		if err != nil {
+			return ci.Config{}, ci.Pipeline{}, "", "", nil, err
+		}
+		pipeline, ok := cfg.Pipelines[run.Result.Pipeline]
+		if !ok {
+			return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: pipeline %q not found", run.Result.Pipeline)
+		}
+		executorName := run.Result.Executor
+		if executorName == "" {
+			executorName = pipeline.Executor
+		}
+		return cfg, pipeline, executorName, workspaceRoot, nil, nil
+	}
+	if !errors.Is(instanceErr, control.ErrNotFound) {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w", instanceErr)
+	}
+
+	// Compatibility for immutable-source runs created before executor-control
+	// snapshots were persisted. An intentionally workspace-free instance is
+	// absent from the control store. The sealed source digest plus persisted
+	// pipeline/executor identify the exact checked-in placement even after
+	// the live checkout advances: read ci.yaml directly from that immutable
+	// Git object, without materializing a checkout or trusting current files.
+	// The recovered authority is persisted before the first remote query.
+	sourceDigest := strings.TrimSpace(run.Result.Envelope.SourceDigest)
+	if !capsuleCIGitObjectID(sourceDigest) {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w (no persisted immutable-source authority and sealed source %q is not a Git object id)", instanceErr, sourceDigest)
+	}
+	if _, err := gitTrim(ctx, root, "cat-file", "-e", sourceDigest+"^{commit}"); err != nil {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: resolve job workspace for executor control: %w (sealed source commit %s is unavailable: %v)", instanceErr, sourceDigest, err)
+	}
+	rawConfig, err := gitTrim(ctx, root, "show", sourceDigest+":.kitsoki/ci.yaml")
+	if err != nil {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: resolve immutable executor config at %s: %w", sourceDigest, err)
+	}
+	cfg, err := ci.ParseExecutorControlConfig([]byte(rawConfig))
+	if err != nil {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, err
+	}
+	pipeline, ok := cfg.Pipelines[run.Result.Pipeline]
+	if !ok {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, fmt.Errorf("capsule ci: pipeline %q not found", run.Result.Pipeline)
+	}
+	executorName := run.Result.Executor
+	if executorName == "" {
+		executorName = pipeline.Executor
+	}
+	recovered, err := ci.NewImmutableExecutorControlAuthority(cfg, run.Result.Pipeline, executorName, pipeline.Result)
+	if err != nil {
+		return ci.Config{}, ci.Pipeline{}, "", "", nil, err
+	}
+	return cfg, pipeline, executorName, root, &recovered, nil
+}
+
+func capsuleCIGitObjectID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 // capsuleCIRefreshJob reconciles one persisted job from its executor's
@@ -765,9 +875,15 @@ func capsuleCIExecutionController(ctx context.Context, project string, run ci.Ru
 // and receipt when a remote-completed execution carries one, and releases a
 // detached executor's leased worker once the run is terminal.
 func capsuleCIRefreshJob(cmd *cobra.Command, project, job string, store ci.FileRunStore, run ci.RunRecord) (ci.RunRecord, error) {
-	controller, pipeline, err := capsuleCIExecutionController(cmd.Context(), project, run)
+	controller, pipeline, authority, err := capsuleCIExecutionController(cmd.Context(), project, run)
 	if err != nil {
 		return run, err
+	}
+	if run.Result.ExecutorControl == nil && authority != nil {
+		run.Result.ExecutorControl = authority
+		if err := store.Write(run); err != nil {
+			return run, err
+		}
 	}
 	status, err := controller.Status(cmd.Context(), run.Result.Execution.ExecutionID)
 	if err != nil {

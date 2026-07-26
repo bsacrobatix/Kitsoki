@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +30,8 @@ import (
 
 const Schema = "capsule-ci/v1"
 const VerdictSchema = "capsule-ci-verdict/v1"
+const ExecutorControlAuthoritySchema = "capsule-ci-executor-control/v1"
+const SourceModeImmutable = "immutable"
 
 type Config struct {
 	Schema             string              `yaml:"schema" json:"schema"`
@@ -68,6 +71,133 @@ type ResultContract struct {
 	FailExits []string `yaml:"fail_exits,omitempty" json:"fail_exits,omitempty"`
 	ParkExits []string `yaml:"park_exits,omitempty" json:"park_exits,omitempty"`
 }
+
+// ExecutorControlAuthority is the durable, credential-free routing snapshot
+// needed to control a detached execution after its source checkout is no
+// longer available. Exact-source dispatches intentionally have no managed
+// workspace, so status/finalization cannot rediscover their executor through
+// control.Manager.WorkspacePath. The snapshot carries only checked-in
+// placement configuration and environment-variable names; credential values
+// remain runtime-only.
+type ExecutorControlAuthority struct {
+	Schema     string         `json:"schema"`
+	SourceMode string         `json:"source_mode"`
+	Pipeline   string         `json:"pipeline"`
+	Executor   string         `json:"executor"`
+	Result     ResultContract `json:"result"`
+	Remote     *Remote        `json:"remote,omitempty"`
+}
+
+// NewImmutableExecutorControlAuthority captures the selected pipeline result
+// contract and executor placement from the exact source used to dispatch the
+// job. It fails closed if a non-builtin executor is not present in that
+// source's validated configuration.
+func NewImmutableExecutorControlAuthority(cfg Config, pipelineName, executorName string, result ResultContract) (ExecutorControlAuthority, error) {
+	pipelineName = strings.TrimSpace(pipelineName)
+	executorName = strings.TrimSpace(executorName)
+	if pipelineName == "" {
+		return ExecutorControlAuthority{}, fmt.Errorf("capsule ci: executor control pipeline is required")
+	}
+	authority := ExecutorControlAuthority{
+		Schema:     ExecutorControlAuthoritySchema,
+		SourceMode: SourceModeImmutable,
+		Pipeline:   pipelineName,
+		Executor:   executorName,
+		Result:     result,
+	}
+	if !isBuiltinExecutor(executorName) {
+		remote, ok := cfg.Remotes[executorName]
+		if !ok {
+			return ExecutorControlAuthority{}, fmt.Errorf("capsule ci: executor control remote %q is not configured", executorName)
+		}
+		copy := remote
+		authority.Remote = &copy
+	}
+	if err := authority.Validate(); err != nil {
+		return ExecutorControlAuthority{}, err
+	}
+	return authority, nil
+}
+
+// Validate checks a persisted executor-control snapshot without consulting a
+// source tree. This is deliberately narrower than Config validation: status
+// refresh needs the selected placement and verdict contract, not story or
+// environment files.
+func (a ExecutorControlAuthority) Validate() error {
+	if a.Schema != ExecutorControlAuthoritySchema {
+		return fmt.Errorf("capsule ci: executor control schema %q, want %q", a.Schema, ExecutorControlAuthoritySchema)
+	}
+	if a.SourceMode != SourceModeImmutable {
+		return fmt.Errorf("capsule ci: executor control source mode %q is not supported", a.SourceMode)
+	}
+	if strings.TrimSpace(a.Pipeline) == "" {
+		return fmt.Errorf("capsule ci: executor control pipeline is required")
+	}
+	if err := validateResultContract(a.Result); err != nil {
+		return fmt.Errorf("capsule ci: executor control pipeline %q: %w", a.Pipeline, err)
+	}
+	if isBuiltinExecutor(a.Executor) {
+		if a.Remote != nil {
+			return fmt.Errorf("capsule ci: executor control builtin %q must not carry remote configuration", a.Executor)
+		}
+		return nil
+	}
+	if strings.TrimSpace(a.Executor) == "" || a.Remote == nil {
+		return fmt.Errorf("capsule ci: executor control remote placement is required")
+	}
+	if a.Remote.Pool != nil {
+		if a.Remote.Endpoint != "" || a.Remote.CredentialEnv != "" || a.Remote.CAFile != "" || a.Remote.SourceBucket != nil {
+			return fmt.Errorf("capsule ci: executor control remote %q: pool executors cannot also set endpoint, credential_env, ca_file, or source_bucket", a.Executor)
+		}
+		return validatePoolExecutor(a.Executor, *a.Remote.Pool)
+	}
+	u, err := url.Parse(a.Remote.Endpoint)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("capsule ci: executor control remote %q: endpoint must be https", a.Executor)
+	}
+	if a.Remote.CredentialEnv != "" && !validEnvName(a.Remote.CredentialEnv) {
+		return fmt.Errorf("capsule ci: executor control remote %q: invalid credential env", a.Executor)
+	}
+	if a.Remote.CAFile != "" {
+		clean := filepath.Clean(a.Remote.CAFile)
+		if filepath.IsAbs(a.Remote.CAFile) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("capsule ci: executor control remote %q: ca_file must be project-relative", a.Executor)
+		}
+	}
+	if a.Remote.SourceBucket != nil {
+		return validateSourceBucket(a.Executor, *a.Remote.SourceBucket)
+	}
+	return nil
+}
+
+// ParseExecutorControlConfig decodes an immutable CI config object for legacy
+// exact-source control recovery. Unlike Load, it deliberately does not inspect
+// story/environment paths in the current checkout: the caller is reading the
+// bytes from the run's sealed Git commit, and only the selected remote plus
+// result contract are used. NewImmutableExecutorControlAuthority performs that
+// narrow validation before the recovered snapshot can become authoritative.
+func ParseExecutorControlConfig(raw []byte) (Config, error) {
+	var cfg Config
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("capsule ci: parse immutable executor control config: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return Config{}, fmt.Errorf("capsule ci: parse immutable executor control config: multiple YAML documents are not allowed")
+		}
+		return Config{}, fmt.Errorf("capsule ci: parse immutable executor control config: %w", err)
+	}
+	if cfg.Schema != Schema {
+		return Config{}, fmt.Errorf("capsule ci: immutable executor control config schema %q, want %q", cfg.Schema, Schema)
+	}
+	if len(cfg.Pipelines) == 0 {
+		return Config{}, fmt.Errorf("capsule ci: immutable executor control config pipelines are required")
+	}
+	return cfg, nil
+}
+
 type Remote struct {
 	Endpoint      string        `yaml:"endpoint,omitempty" json:"endpoint,omitempty"`
 	CredentialEnv string        `yaml:"credential_env,omitempty" json:"credential_env,omitempty"`
@@ -573,6 +703,12 @@ type RunRequest struct {
 	// executor.DetachedStarter (pool executors) support it; terminal state is
 	// reconciled later via `capsule ci status --job <id> --refresh`.
 	Detach bool
+
+	// ExecutorControl is the credential-free exact-source placement snapshot
+	// persisted with every lifecycle checkpoint. It is nil for managed
+	// workspace runs, whose registered workspace remains the control
+	// authority.
+	ExecutorControl *ExecutorControlAuthority
 }
 type RunResult struct {
 	Job       artifactjob.Job   `json:"job"`
@@ -586,6 +722,9 @@ type RunResult struct {
 	StartedAt time.Time         `json:"started_at,omitempty"`
 	UpdatedAt time.Time         `json:"updated_at,omitempty"`
 	Terminal  bool              `json:"terminal,omitempty"`
+	// ExecutorControl lets detached exact-source runs be refreshed and
+	// finalized without inventing a managed workspace solely for lookup.
+	ExecutorControl *ExecutorControlAuthority `json:"executor_control,omitempty"`
 	// PID is the OS process id of the `kitsoki` process driving this run. It
 	// is only meaningful for in-process executors (e.g. "host") where the
 	// run's liveness is exactly this process's liveness: those executors run
@@ -657,11 +796,19 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		// sealed Policy/digest the worker executes against.
 		p.Executor = req.ExecutorOverride
 	}
+	if req.ExecutorControl != nil {
+		if err := req.ExecutorControl.Validate(); err != nil {
+			return RunResult{}, err
+		}
+		if req.ExecutorControl.Pipeline != req.Pipeline || req.ExecutorControl.Executor != p.Executor || !sameResultContract(req.ExecutorControl.Result, p.Result) {
+			return RunResult{}, fmt.Errorf("capsule ci: executor control authority does not match selected pipeline %q executor %q", req.Pipeline, p.Executor)
+		}
+	}
 	job, err := s.Jobs.Register(ctx, artifactjob.RegisterRequest{AppID: "capsule-ci", Story: envelope.StoryPath, Origin: artifactjob.Origin{Kind: req.Trigger.Kind, Ref: req.Trigger.Ref}, WorkspaceInstanceID: artifactjob.InstanceID(req.Workspace.ID), Owner: "capsule-ci"})
 	if err != nil {
 		return RunResult{}, err
 	}
-	result := RunResult{Job: job, Envelope: envelope, Pipeline: req.Pipeline, Executor: p.Executor, StartedAt: job.CreatedAt}
+	result := RunResult{Job: job, Envelope: envelope, Pipeline: req.Pipeline, Executor: p.Executor, StartedAt: job.CreatedAt, ExecutorControl: req.ExecutorControl}
 	if result.StartedAt.IsZero() {
 		result.StartedAt = s.now()
 	}
@@ -837,6 +984,13 @@ func (s Service) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		return result, fmt.Errorf("capsule ci: persist terminal checkpoint: %w", observeErr)
 	}
 	return result, nil
+}
+
+func sameResultContract(a, b ResultContract) bool {
+	return a.Schema == b.Schema &&
+		slices.Equal(a.PassExits, b.PassExits) &&
+		slices.Equal(a.FailExits, b.FailExits) &&
+		slices.Equal(a.ParkExits, b.ParkExits)
 }
 
 func (s Service) failRegistered(ctx context.Context, result RunResult, runErr error) (RunResult, error) {
