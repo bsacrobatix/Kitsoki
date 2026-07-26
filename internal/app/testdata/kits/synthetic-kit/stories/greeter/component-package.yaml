@@ -1,0 +1,66 @@
+schema: application-component-package/v1
+namespace: kitsoki-test
+name: synthetic
+version: 0.1.0
+description: Fixture component package resolved through the synthetic kit.
+
+components:
+  panel:
+    name: Synthetic panel
+    description: Present fixture content on application surfaces.
+    semantic_ref: kitsoki-test.synthetic.component.panel
+    props_schema: schemas/panel.json
+    web:
+      module: ui/panel.js
+      export: default
+    fallback:
+      element: prose
+
+schemas:
+  panel-input: schemas/panel.json
+
+tokens:
+  base: tokens/base.json
+
+room_templates:
+  review:
+    parameters:
+      id:
+        type: string
+        required: true
+    states:
+      "{id}_ready":
+        terminal: true
+
+intents:
+  approve:
+    title: Approve
+    description: Approve the current fixture item.
+    examples: ["approve"]
+
+toolboxes:
+  review:
+    tools: [Read]
+    effect: read
+
+providers:
+  local:
+    backend: codex
+    model: fixture-model
+
+agents:
+  reviewer:
+    system_prompt: Review the fixture input.
+    toolbox: review
+    provider: local
+
+host_interfaces:
+  catalog:
+    description: Read fixture catalog data.
+    operations:
+      read:
+        input: {id: string}
+        output: {value: string}
+        effect: read
+        deterministic: true
+    default: host.run

@@ -120,6 +120,7 @@ type Action struct {
 	Handler        string          `json:"handler,omitempty"`
 	Intent         string          `json:"intent,omitempty"`
 	TargetState    string          `json:"target_state,omitempty"`
+	RoomInterface  string          `json:"room_interface,omitempty"`
 	RoutingMode    RoutingMode     `json:"routing_mode,omitempty"`
 	InputSchema    json.RawMessage `json:"input_schema,omitempty"`
 	InputSchemaRef string          `json:"input_schema_ref,omitempty"`

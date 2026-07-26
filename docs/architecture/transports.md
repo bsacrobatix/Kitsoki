@@ -378,18 +378,27 @@ trace reader) is the remaining engine work.
 Stories with an `application/v1` contract expose a canonical
 `application-frame/v1` and one shared typed-handler registry. The live
 runstatus JSON-RPC adapter provides `runstatus.application.frame`, `.discover`,
-`.inspect`, `.call`, `.action`, and `.event`. The full Studio MCP session
-toolbox exposes the corresponding `application.*` tools, while
-`kitsoki app call` invokes the same JSON-RPC handler path with transport `cli`.
+`.inspect`, `.call`, `.cli_call`, `.action`, `.web_action`, `.vscode_action`,
+`.event`, and `.feedback`.
+The generic `.call` method is protocol-bound to JSON-RPC, while the CLI uses the
+server-bound `.cli_call` adapter; request parameters cannot select a transport.
+The generic `.action` method is also protocol-bound to JSON-RPC; live web and VS
+Code hosts use their server-bound `.web_action` and `.vscode_action` adapters.
+The reserved CLI adapter is not an MCP tool. The full Studio MCP session
+toolbox exposes its own protocol-bound `application.*` tools, while `kitsoki app
+call` invokes the same handler registry and `kitsoki app feedback`
+submits a privacy-safe semantic attachment through the reviewed local feedback
+sink.
 The web and VS Code-webview host render the frame and dispatch revision-pinned
 actions through those methods; the TUI projection maps the same frame to typed
 view elements and action envelopes.
 
-Adapters do not own application behavior. They preserve handler exposure,
-session and routing metadata, carry receipt envelopes, and reject stale frame
-revisions before action dispatch. Live schema, authorization, budget, durable
-receipt, and idempotent replay services are not wired yet. See
-[Application runtime](application-runtime.md).
+Adapters do not own application behavior. They preserve protocol-bound handler
+exposure, session and routing metadata, carry receipt envelopes, and reject
+stale frame revisions before action dispatch. The live host injects schema,
+authorization, effect, budget, session/event, durable receipt, and idempotent
+replay services. Built application manifests and allowlisted assets are served
+under `/application/<app>/...`. See [Application runtime](application-runtime.md).
 
 ---
 

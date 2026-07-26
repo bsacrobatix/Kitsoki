@@ -42,18 +42,19 @@ import (
 // Close releases everything the runtime opened, in reverse order. Callers defer
 // it after a successful build.
 type sessionRuntime struct {
-	Def         *app.AppDef
-	Orch        *orchestrator.Orchestrator
-	Store       store.Store
-	Journal     journal.Writer
-	JournalRead journal.Reader
-	JobStore    *jobs.JobStore
-	Scheduler   jobs.Scheduler
-	ChatStore   *chats.Store
-	Machine     machine.Machine
-	Harness     harness.Harness
-	AgentReg    *agent.Registry
-	Logger      *slog.Logger
+	Def          *app.AppDef
+	Orch         *orchestrator.Orchestrator
+	Store        store.Store
+	Journal      journal.Writer
+	JournalRead  journal.Reader
+	JobStore     *jobs.JobStore
+	Scheduler    jobs.Scheduler
+	ChatStore    *chats.Store
+	Machine      machine.Machine
+	Harness      harness.Harness
+	AgentReg     *agent.Registry
+	Logger       *slog.Logger
+	HostRegistry *host.Registry
 
 	// DeferredAgentSink is non-nil when the runtime was built with a host
 	// cassette (--host-cassette). Callers must call SetSink on it after wiring
@@ -513,6 +514,7 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		return nil, fmt.Errorf("build agents registry: %w", err)
 	}
 	host.SetAgentRegistry(metaAgentReg)
+	rt.HostRegistry = hostReg
 
 	// ── Orchestrator options ────────────────────────────────────────────────
 	runOpts := []orchestrator.Option{

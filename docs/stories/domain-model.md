@@ -959,16 +959,12 @@ Serverless Workflow, by design, has no presentation concept at all: it
 orchestrates backends. Modeling a story in SW strands this entire layer — the
 thing a user actually sees and touches — outside the spec.
 
-**Boundary, stated honestly:** the shipped `view:` model is a typed,
-state-bound presentation, not yet a complete application shell. It does not
-declare application-wide navigation, reusable pages/cards, custom presentation
-components, native VS Code contributions, or one inbound handler exposed
-consistently through CLI/MCP/JSON-RPC. The proposed
-[`story-application-platform`](../proposals/story-application-platform.md)
-preserves the room view as the canonical content/action unit and adds a
-presentation-free application frame plus optional surface presentations around
-it. This is an extension of the view/intent binding above, not a second UI
-controller.
+**Boundary, stated honestly:** `view:` remains the typed, state-bound room
+presentation. The optional shipped
+[`application:` contract](applications.md) adds application-wide navigation,
+reusable pages/cards, custom presentation components, native projections, and
+typed inbound handlers around that content unit. Its presentation-free frame
+is an extension of the view/intent binding above, not a second UI controller.
 
 **4. LLM agents are governed, capability-classified actors — not function
 calls.** A SW `call` is a call; the spec has no reason to care whether the callee
@@ -1129,73 +1125,46 @@ not any single axis — is the answer to "why not an existing tool."
 
 ---
 
-## 6. Roadmap — what's missing, and what we plan to add
+## 6. Roadmap and shipped extensions
 
-The model is deliberately incomplete. What follows is planned work, not shipped
-behavior. Each item is stated honestly against what exists today, and each is
-chosen because it extends the **same spine** — a pure machine, typed world,
-composable statechart, capability-gated effects, and the deterministic↔fluent
-spectrum of §4 — rather than bolting on a foreign concept. Nothing here changes
-the core; they fill in its edges. The application-platform proposal contains a
-[gap-closure matrix](../proposals/story-application-platform.md#paradigm-alignment-and-gap-closure)
-that names which of these capabilities it implements, integrates, or consumes;
-the full POG conformance gate may not silently waive a required row.
+The model continues to evolve along the **same spine**: a pure machine, typed
+world, composable statechart, capability-gated effects, and the
+deterministic↔fluent spectrum of §4. Sections below label shipped behavior and
+remaining plans explicitly. The shipped application runtime closes finite
+contract, event, semantic identity, and surface-projection gaps without moving
+product logic into the frontend.
 
-### 6.1 Event binding *(planned)*
+### 6.1 Event binding *(shipped for application handlers/intents)*
 
-Session-scoped event subscriptions that fire handlers **without a user turn**. A
-room or the app would declare bindings from a typed event — a timer, a
-background-job completion, an inbox / transport message, an external webhook or
-ticket update, or an intra-fleet signal — to either a **background effect chain**
-(mutate world, dispatch a host call, emit an intent) or a **synchronous
-interrupt** that pulls the operator into a room for input. Today the pieces exist
-only in specialized forms: `timeout` (a time event, §3.7), background
-`on_complete` (a job event, §3.9), `host.inbox.add` (an async notice), and
-parallel-region `emit` (§3.9). There is no unified, first-class event→handler
-binding with session scope and an explicit background-vs-synchronous choice.
-Unifying them turns "the story advances only when the user speaks" into "the story
-reacts to its world" — what an unattended, long-running session needs. It is our
-answer to Serverless Workflow's `listen`/`emit` (§5.3.1), but scoped to a live
-session and able to choose background vs. human-synchronous handling.
+Application `events:` bind a typed source to an exported handler or intent
+without fabricating a user turn. Each event declares `session:
+none|required|create` and `mode: background|interrupt`. Background mode uses the
+durable job scheduler; interrupt mode cancels an active turn before dispatch
+and fails closed when cancellation is unavailable. Specialized `timeout`,
+`on_complete`, inbox, and parallel-region emit mechanisms still exist, but
+application integrations now have one registry, policy, receipt, and replay
+boundary for timers, job completions, transport messages, webhooks, and fleet
+signals.
 
-### 6.2 Per-invocation routing mode *(planned)*
+### 6.2 Per-invocation routing mode *(shipped for application calls)*
 
-An explicit control — settable per run / per operation / per room / per invocation
-— over **which routing tiers are allowed**: e.g. `deterministic-exact-only`,
-`deterministic+synonym`, `semantic`, `llm`, or `off`. Today routing is an
-app-level `routing:` block with a global on/off (§3.5); the determinism dial of §4
-is real but is expressed by *how you author rooms*, not by a runtime knob. Making
-it a first-class mode lets the **same** story be pinned to a zero-LLM,
-exact-match-only classifier for a deterministic batch run (guaranteeing no model
-spend and byte-for-byte replay) and unpinned to full fluency for an interactive
-session — turning §4's spectrum from an authoring property into a per-invocation
-dial. It also gives CI a **strict conformance mode**: any fall-through to the LLM
-is a failure, not a silent cost.
+Application handlers, actions, events, and adapters carry a `routing_mode` pin:
+`off`, `exact`, `synonym`, `semantic`, or `llm`. A caller may request a stricter
+mode but may not weaken the declaration, and the receipt records requested and
+resolved modes. This lets the same contract run exact-match/no-LLM in a
+deterministic gate and use broader routing where the story permits it. Other
+room-level routing still uses the app routing block described in §3.5.
 
-### 6.3 Reusable component libraries — à la carte imports *(planned)*
+### 6.3 Reusable component libraries — à la carte imports *(shipped for application component packages)*
 
-Today the unit of reuse is a whole **story**, and composition brings in *rooms*.
-`imports:` composes another *story* — a full app.yaml with a room graph and an
-`entry` state — folded under an alias (§3.13); you cannot import "just an agent
-library," because the fold installs the child as a compound state and needs states
-to enter. `include:` *does* merge fine-grained pieces — agents, providers,
-toolboxes, intents, meta-modes, states — but only as **local file-splitting within
-one story**: a flat, un-namespaced merge (name collisions are errors), from local
-globs, with no packaging or versioning. The planned [`kits`](../proposals/kits.md)
-model would share whole stories plus `schemas`, `interfaces`, and `ui` — but
-does not yet cover à-la-carte agents, toolboxes, intents, or providers.
+`application-component-package/v1` is a versioned, namespaced package of
+components, schemas, tokens, room templates, intents, agents, toolboxes,
+providers, and host interfaces. An application selects members à la carte
+without importing a room graph. Resolution uses the existing kit repository and
+the project `.kitsoki/kits.lock`; version/tree mismatches, collisions, missing
+files, and path escapes fail loading.
 
-So there is no first-class **reusable component library**: a shareable,
-versioned, *namespaced* package of agents / toolboxes / intents / providers /
-host-interfaces / schemas / UI components that a story imports à la carte,
-*without* dragging in a room graph. Reusing a well-tuned judge persona, a
-standard intent vocabulary, a card renderer, or a provider profile across ten
-stories today means copy-paste, a same-repo `include:`, or importing an entire
-story you don't want.
-
-Planned: a **component-package** form — resolvable like a story (`./path`,
-`@kitsoki/<name>`, `git+…`) — that `imports:` can pull selectively and
-namespace. It also carries the reuse contracts identified by the
+It carries the reuse contracts identified by the
 [story-programming paradigm §7.2](../architecture/story-programming-paradigm.md#72-the-oop-inheritancepolymorphism-gap):
 
 - **room interfaces** — intent/slot/world contracts that any room may implement,
@@ -1203,7 +1172,7 @@ namespace. It also carries the reuse contracts identified by the
 - **parameterized room templates** — declared parameters for world slices, host
   bindings, and exit edges, expanded into visible concrete graph nodes.
 
-This keeps composition as the default while making `agents`, `toolboxes`,
+This keeps story composition as the default while making `agents`, `toolboxes`,
 `intents`, `providers`, `host_interfaces`, room templates/contracts, schemas,
 and application components first-class shared building blocks. It pairs
 directly with 6.4: once components are shareable, they need semver.
@@ -1283,23 +1252,19 @@ read/write. For an artifact that aims to be deterministic and auditable,
 provable well-formedness and queryable impact are the natural completion of the
 load-time contract.
 
-### 6.10 Application shell and surface projections *(planned)*
+### 6.10 Application shell and surface projections *(shipped v1)*
 
-Today a story is a UI at the **room** level (§5.3): typed view blocks are bound
-directly to intents and slots, and the same semantic view reaches TUI and web.
-It is not yet a reusable application definition. Application-wide navigation,
-page/card composition, custom Vue components, native VS Code projections,
-Kitsoki-owned Vite/HMR, and one typed inbound handler exposed through
-JSON-RPC/MCP/CLI still require surface-specific code.
-
-[`story-application-platform`](../proposals/story-application-platform.md)
-closes that boundary with a presentation-free application frame, optional
-story-owned presentations, a common handler/event registry, versioned component
-packages, and a program-graph conformance gate. The frame must stay a projection
-of the same room/intent/world/effect graph: components dispatch declared
-actions; they do not acquire hidden state or a second controller. POG is the
-first external acceptance target for proving a product can be wholly
-story-owned while retaining deterministic TUI/headless fallbacks.
+Stories may now add application-wide navigation, page/card composition, custom
+Vue components, native VS Code/TUI projections, Kitsoki-owned Vite/HMR, and
+typed inbound handlers over JSON-RPC/MCP/CLI. The
+[application runtime](../architecture/application-runtime.md) provides a
+presentation-free frame, optional story-owned presentations, a common
+handler/event registry, versioned component packages, and program-graph
+conformance. The frame stays a projection of the same
+room/intent/world/effect graph: components dispatch declared actions; they do
+not acquire hidden state or a second controller. POG is the first external
+acceptance target for proving a product can be wholly story-owned while
+retaining deterministic TUI/headless fallbacks.
 
 Application nodes also need first-class semantic identity. Every reportable or
 interactive page, region, card, component, field, action, status, and artifact

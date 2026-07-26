@@ -21,9 +21,12 @@ capabilities. It contains only serializable values.
 | `Registry` | Discover and invoke typed handlers and events |
 | `IntentDispatcher` | Send intent-backed actions through the story state machine |
 
-The registry separately injects schema validation, authorization, budget
-governance, and receipt storage. This keeps transport adapters mechanical and
-keeps application business behavior out of the web renderer, CLI, MCP, and
+The registry separately injects JSON Schema validation, authorization, effect
+policy, budget governance, session creation, event scheduling, receipt storage,
+and idempotent replay. The runstatus host supplies durable JSONL receipt/replay
+journals and its job scheduler; tests can replace every dependency without
+starting a model or external service. This keeps transport adapters mechanical
+and keeps application business behavior out of the web renderer, CLI, MCP, and
 JSON-RPC layers.
 
 ## Frame and action lifecycle
@@ -33,23 +36,51 @@ of the frame that exposed it. Dispatch follows this order:
 
 1. Load the current frame and verify session and revision.
 2. Find the declared action and verify it is enabled.
-3. Validate structural input and routing constraints.
+3. Validate Draft 2020-12 input schemas and routing constraints.
 4. Dispatch to the exported handler registry or injected intent dispatcher.
-5. Apply injected schema, authorization, budget, and receipt policies when the
-   host configures them.
-6. Invoke the implementation and record its typed outcome receipt.
-7. Attach the refreshed frame when the handler did not return one.
+5. Apply injected authorization, effect, budget, session, and replay policy.
+6. Invoke the intent, Starlark function, or host-interface implementation.
+7. Validate the declared output and outcome, then durably record its receipt.
+8. Attach the refreshed frame when the handler did not return one.
 
 Stale revisions fail before invocation. A surface may display that failure as a
 `STALE_FRAME` frame error while it obtains a new frame, but staleness never
 causes the runtime to reinterpret the old envelope against new state.
 
-Handler-target events enter the same registry through `DispatchEvent`. Their
-source and mode are declarations, while their target still resolves to a
-validated handler. The registry preserves the handler's session, routing, and
-exposure rules and applies any configured policy dependencies. Intent-target
-events and background-versus-interrupt scheduling remain runtime integration
-work.
+Handlers enforce `session: none|required|create`. Write and external handlers
+apply declared idempotency scope; replays return the stored outcome with a new
+transport-aware receipt and never reinvoke behavior. Retryable external
+handlers must declare compensation or an explicit impossibility reason.
+
+Events enter the same registry through `DispatchEvent`. A target may be an
+exported handler or a story intent. Background events are submitted to the
+runstatus job scheduler and expose durable child/join state. Interrupt events
+cancel the active session turn before dispatch and fail closed when the host
+cannot provide cancellation. Event receipts retain the source event, mode,
+session, routing pin, and handler semantic ref.
+
+## Story compilation
+
+`internal/app` treats `application:`, exported handlers, events, typed views,
+room interfaces, effect outcomes, bindings, and guards as one finite program.
+The loader validates references and totality before a session starts. The
+program graph records workflow nodes, reads/writes/effects, application
+semantics, handler/event edges, and provenance for impact and ownership queries.
+
+Imports fold application fragments under the existing story ownership rules.
+Child pages, navigation, components, actions, schemas, and tokens remain private
+unless named under `exports.application`; exported actions cannot target private
+intents. The root may make explicit whole-member replacements under
+`overrides.application`; replacements retain compatibility and semantic alias
+checks. Stories without an application contract receive a deterministic
+generated application projection from their typed views.
+
+Versioned `application-component-package/v1` manifests can supply selected
+components, schemas, tokens, room templates, intents, agents, toolboxes,
+providers, and host interfaces without importing a room graph. Selection is
+resolved through the project kit repository and the same `.kitsoki/kits.lock`
+pin used by kits; an unpinned version, digest mismatch, collision, or missing
+portable fallback fails loading.
 
 ## Web projection
 
@@ -77,6 +108,53 @@ The TypeScript wire types in `tools/runstatus/src/application/types.ts` mirror
 the Go JSON field names. In particular, provenance lives under
 `semantic.source`, component data remains JSON under `props`, element content
 remains JSON under `value`, and action envelopes retain `frame_revision`.
+
+`ApplicationWizard.vue` is the default multi-page shell. It projects progress,
+navigation, forms, field validation, frame errors, workflow/budget state, and
+background-event activity without product-specific behavior. Story component
+modules are loaded from the generated presentation manifest, receive only the
+frame/body/action dependencies, and use scoped application theme tokens.
+
+## Development and build lifecycle
+
+`kitsoki app dev <app.yaml>` owns the local application loop. It validates that
+all watched sources remain under the story root, creates generated Vite inputs
+under `.temp/application/<app>/<digest>`, starts the Kitsoki backend unless an
+existing one was requested, and launches the repository-pinned Vite executable.
+The generated shell follows a current session for that application or creates
+one from the backend's canonical story catalog.
+
+The watcher classifies edits as presentation-only, compatible
+frame-definition refreshes, or reload-required durable-schema changes.
+Existing sessions are never silently reinterpreted after an incompatible edit.
+
+`kitsoki app build <app.yaml>` uses the same generated inputs and publishes a
+content-addressed manifest and static bundle under
+`.artifacts/application-builds/<app>/<digest>`. Story sources and checked-in
+`node_modules` remain untouched. Identical output reuses the published digest
+directory and original timestamp; a mismatch between stored assets, manifest,
+and digest fails instead of replacing immutable content. Production hosts serve
+only manifest-declared regular files from that bundle at
+`/application/<app>/<asset>`, redact host-local paths from the public manifest,
+and do not embed a Vite development server.
+
+Selected component-package token JSON is reduced to a finite scoped theme
+vocabulary during preparation. The generated entry installs those tokens before
+mounting the application, making development and production presentation
+equivalent without allowing arbitrary CSS-variable injection.
+
+## Native projections
+
+VS Code webviews reuse the web application. The extension also registers the
+current frame's declared native commands, retaining semantic ref, session, and
+revision in each command envelope. Registrations are replaced and disposed when
+the current session changes.
+
+The interactive TUI mounts the canonical terminal projection and routes
+focusable actions and form choices through the same `application.Service`.
+Fresh and resumed sessions therefore share stale-frame checks, schema
+validation, actor attribution, policy dependencies, and receipts. Native
+projections do not acquire a second business-logic path.
 
 ## Semantic inspection
 
@@ -109,16 +187,30 @@ relationships come from the validated application graph and frame. This lets
 feedback and developer tools retain ownership when layout or visible copy
 changes.
 
-## Current scope
+`internal/applicationfeedback` produces the same host
+`AnnotationAnchor.semantic_element` contract for non-DOM surfaces and receipt
+reports. Feedback context is evaluated from a finite allowlist of frame
+metadata and applies the story's include, exclude, redact, or hash policy.
+Component props, field values, world snapshots, credentials, and local paths
+are not input to the builder.
 
-The implemented runtime provides contract loading and validation, deterministic
-frame compilation, handler/event policy and receipts, CLI static inspection and
-live calls, JSON-RPC and Studio MCP adapters, a TUI projection, and the reusable
-default Vue projection used by the web/VS Code host. Story-owned functional
-Starlark handler execution, Vite dev/HMR orchestration, production presentation
-bundles, native VS Code commands/trees, mounting the TUI projection in the
-interactive terminal host, durable receipt storage/idempotent replay, and
-live schema/authorization/budget dependency wiring remain separate integration
-work.
+JSON-RPC, CLI, web, VS Code, and TUI submit the reviewed
+`kitsoki.feedback.report.v1` bundle through the existing durable local feedback
+sink. Studio MCP returns the identical sink-compatible bundle because it does
+not own a runstatus intake instance. Idempotency is carried through the sink,
+and adapters add surface evidence without changing the canonical semantic ref.
+
+## Conformance
+
+Deterministic tests compare discovery, action/call outcomes, refreshed frames,
+routing pins, semantic refs, and normalized receipts across web, VS Code, TUI,
+CLI, MCP, and JSON-RPC transports. The fixture includes a wizard action and a
+background event and never invokes an LLM. Adapter packages separately prove
+their protocol encoding, native projections, lifecycle classification, and
+durable journal recovery.
+
+POG remains an external adoption target. Kitsoki contains no POG product logic;
+the POG repository can consume this contract and run the same conformance
+boundary through its own managed workflow.
 
 See [Story applications](../stories/applications.md) for the authoring surface.

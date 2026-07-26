@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -99,8 +103,20 @@ func TestFrameRejectsDanglingAndDuplicateSemantics(t *testing.T) {
 }
 
 func TestCompileFrameProjectsValidatedAuthorContract(t *testing.T) {
+	baseDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(baseDir, "schemas"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "schemas", "change-open.json"), []byte(`{
+		"type": "object",
+		"required": ["change_id"],
+		"properties": {"change_id": {"type": "string"}},
+		"additionalProperties": false
+	}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	def := &app.AppDef{
-		App: app.AppMeta{ID: "pog", Version: "1.0.0"},
+		App: app.AppMeta{ID: "pog", Version: "1.0.0"}, BaseDir: baseDir,
 		Application: &app.ApplicationContract{
 			Schema: app.ApplicationSchemaV1, Name: "POG", Description: "Manage product work",
 			SemanticRef: "pog.application", Shell: app.ApplicationShell{Entry: "dashboard"},
@@ -160,6 +176,9 @@ func TestCompileFrameProjectsValidatedAuthorContract(t *testing.T) {
 	if card.Actions[0].InputSchemaRef != "schemas/change-open.json" {
 		t.Fatalf("schema ref = %q", card.Actions[0].InputSchemaRef)
 	}
+	if !strings.Contains(string(card.Actions[0].InputSchema), `"change_id"`) {
+		t.Fatalf("materialized schema = %s", card.Actions[0].InputSchema)
+	}
 	def.Application.Shell.Entry = ""
 	defaulted, err := CompileFrame(def, "session-1", 13, "", Workflow{State: "portfolio.ready"})
 	if err != nil || defaulted.Page != "dashboard" {
@@ -177,6 +196,95 @@ func TestCompileFrameProjectsValidatedAuthorContract(t *testing.T) {
 	}
 }
 
+func TestCompileFramePreservesComposedMemberProvenance(t *testing.T) {
+	def := &app.AppDef{
+		App: app.AppMeta{ID: "parent", Version: "1.0.0"},
+		Application: &app.ApplicationContract{
+			Schema: app.ApplicationSchemaV1, Name: "Parent", Description: "Compose child applications",
+			SemanticRef: "parent.application", Shell: app.ApplicationShell{Entry: "child__home"},
+			Pages: map[string]*app.ApplicationPage{
+				"child__home": {
+					Name: "Child home", Description: "Render the imported child page",
+					SemanticRef: "child.page.home",
+					Origin: app.ApplicationMemberOrigin{
+						Story: "child", Member: "application.pages.home",
+					},
+				},
+				"child__settings": {
+					Name: "Parent settings", Description: "Render the parent override",
+					SemanticRef: "parent.page.settings", SemanticAliases: []string{"child.page.settings"},
+					Origin: app.ApplicationMemberOrigin{
+						Story: "parent", Member: "overrides.application.pages.settings",
+					},
+				},
+			},
+		},
+	}
+
+	frame, err := CompileFrame(def, "session-1", 1, "", Workflow{State: "ready"})
+	if err != nil {
+		t.Fatalf("CompileFrame() error = %v", err)
+	}
+	if got := frame.PageSemantic.Source; got.Story != "child" || got.Member != "application.pages.home" {
+		t.Fatalf("imported page source = %#v", got)
+	}
+	for _, page := range frame.Pages {
+		if page.ID != "child__settings" {
+			continue
+		}
+		if got := page.Semantic.Source; got.Story != "parent" || got.Member != "overrides.application.pages.settings" {
+			t.Fatalf("override page source = %#v", got)
+		}
+		return
+	}
+	t.Fatal("override page descriptor was not compiled")
+}
+
+func TestCompileFrameAutomaticallyProjectsLegacyTypedView(t *testing.T) {
+	def := &app.AppDef{
+		App:  app.AppMeta{ID: "legacy", Title: "Legacy flow"},
+		Root: "ready",
+		Intents: map[string]app.Intent{
+			"submit": {Title: "Submit", Description: "Submit the value."},
+		},
+		States: map[string]*app.State{
+			"ready": {
+				Description: "Ready",
+				View: app.View{Elements: []app.ViewElement{{
+					Kind: "choice", ChoiceMode: "single", ChoicePrompt: "Choose",
+					ChoiceItems: []app.ChoiceItem{{Label: "Submit", Intent: "submit"}},
+				}}},
+				On: map[string][]app.Transition{"submit": {{Target: "done"}}},
+			},
+			"done": {Description: "Done", Terminal: true},
+		},
+	}
+	frame, err := CompileFrame(def, "session-legacy", 1, "ready", Workflow{State: "ready"})
+	if err != nil {
+		t.Fatalf("CompileFrame: %v", err)
+	}
+	if def.Application != nil {
+		t.Fatal("legacy projection mutated AppDef and would change old surfaces")
+	}
+	if len(frame.Regions) != 1 || len(frame.Regions[0].Cards) != 1 ||
+		len(frame.Regions[0].Cards[0].Body) != 1 {
+		t.Fatalf("frame = %#v", frame)
+	}
+	projected, err := ProjectTUI(frame)
+	if err != nil {
+		t.Fatalf("ProjectTUI: %v", err)
+	}
+	var found bool
+	for _, element := range projected.View.Elements {
+		if element.Kind == "choice" && element.ChoicePrompt == "Choose" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("typed legacy element was not preserved: %#v", projected.View.Elements)
+	}
+}
+
 type fakeSchemaValidator struct {
 	values []string
 }
@@ -188,6 +296,37 @@ func (f *fakeSchemaValidator) Validate(_ context.Context, _, value json.RawMessa
 
 type receiptCollector struct {
 	receipts []Receipt
+}
+
+type sessionManagerFunc func(context.Context, HandlerDefinition, Invocation) (string, error)
+
+func (f sessionManagerFunc) CreateSession(ctx context.Context, def HandlerDefinition, invocation Invocation) (string, error) {
+	return f(ctx, def, invocation)
+}
+
+type effectPolicyFunc func(context.Context, HandlerDefinition, Invocation) error
+
+func (f effectPolicyFunc) AuthorizeEffect(ctx context.Context, def HandlerDefinition, invocation Invocation) error {
+	return f(ctx, def, invocation)
+}
+
+type budgetGovernorFunc func(context.Context, HandlerDefinition, Invocation) (BudgetDecision, error)
+
+func (f budgetGovernorFunc) Decide(ctx context.Context, def HandlerDefinition, invocation Invocation) (BudgetDecision, error) {
+	return f(ctx, def, invocation)
+}
+
+type immediateEventRuntime struct {
+	interrupted bool
+}
+
+func (r *immediateEventRuntime) Enqueue(_ context.Context, _ EventDefinition, _ HandlerDefinition, _ Invocation, run EventRun) (OutcomeEnvelope, error) {
+	return run(context.Background())
+}
+
+func (r *immediateEventRuntime) Interrupt(_ context.Context, _ EventDefinition, _ Invocation) error {
+	r.interrupted = true
+	return nil
 }
 
 func (c *receiptCollector) Record(_ context.Context, receipt Receipt) error {
@@ -251,7 +390,7 @@ func TestRegistryDiscoveryInvokeAndDeterministicReceipt(t *testing.T) {
 }
 
 func TestRegistryPolicyRoutingAndEventDispatch(t *testing.T) {
-	registry := NewRegistry(Dependencies{})
+	registry := NewRegistry(Dependencies{Events: &immediateEventRuntime{}})
 	invalid := readDefinition("external", TransportCLI)
 	invalid.Effect = EffectExternal
 	if err := registry.RegisterHandler(invalid, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
@@ -287,6 +426,413 @@ func TestRegistryPolicyRoutingAndEventDispatch(t *testing.T) {
 		Transport: TransportCLI, RoutingMode: RoutingLLM,
 	}); err == nil || !strings.Contains(err.Error(), "weakens handler pin") {
 		t.Fatalf("routing error = %v", err)
+	}
+}
+
+func TestRegistryValidatesCompensationReferencesAndEffects(t *testing.T) {
+	registry := NewRegistry(Dependencies{})
+	primary := readDefinition("publish", TransportCLI)
+	primary.Effect = EffectExternal
+	primary.Idempotency = IdempotencyRequired
+	primary.IdempotencyScope = "application"
+	primary.Retryable = true
+	primary.CompensationHandler = "rollback"
+	if err := registry.RegisterHandler(primary, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		return HandlerResult{Outcome: "ok"}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Validate(); err == nil || !strings.Contains(err.Error(), "unknown compensation") {
+		t.Fatalf("missing compensation error = %v", err)
+	}
+	rollback := readDefinition("rollback", TransportCLI)
+	if err := registry.RegisterHandler(rollback, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		return HandlerResult{Outcome: "ok"}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Validate(); err == nil || !strings.Contains(err.Error(), "write or external effect") {
+		t.Fatalf("weak compensation error = %v", err)
+	}
+}
+
+func TestInterruptEventCancelsBeforeHandlerDispatch(t *testing.T) {
+	events := &immediateEventRuntime{}
+	registry := NewRegistry(Dependencies{Events: events})
+	def := readDefinition("event-target", TransportCLI)
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		if !events.interrupted {
+			t.Fatal("interrupt handler ran before active work was cancelled")
+		}
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RegisterEvent(EventDefinition{
+		ID: "changed", Source: "test.changed", Session: SessionRequired,
+		Mode: EventInterrupt, Handler: "event-target",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.DispatchEvent(context.Background(), "changed", nil, "session-1", "system"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEventAndHandlerSessionPolicyMatrix(t *testing.T) {
+	tests := []struct {
+		name           string
+		event          SessionPolicy
+		handler        SessionPolicy
+		valid          bool
+		wantHandlerSID string
+		wantReceiptSID string
+		wantCreates    int
+	}{
+		{name: "none to none", event: SessionNone, handler: SessionNone, valid: true},
+		{name: "none to required", event: SessionNone, handler: SessionRequired},
+		{name: "none to create", event: SessionNone, handler: SessionCreate, valid: true, wantHandlerSID: "created-1", wantReceiptSID: "created-1", wantCreates: 1},
+		{name: "required to none", event: SessionRequired, handler: SessionNone, valid: true, wantReceiptSID: "bound-session"},
+		{name: "required to required", event: SessionRequired, handler: SessionRequired, valid: true, wantHandlerSID: "bound-session", wantReceiptSID: "bound-session"},
+		{name: "required to create", event: SessionRequired, handler: SessionCreate},
+		{name: "create to none", event: SessionCreate, handler: SessionNone, valid: true, wantReceiptSID: "created-1", wantCreates: 1},
+		{name: "create to required", event: SessionCreate, handler: SessionRequired, valid: true, wantHandlerSID: "created-1", wantReceiptSID: "created-1", wantCreates: 1},
+		{name: "create to create once", event: SessionCreate, handler: SessionCreate, valid: true, wantHandlerSID: "created-1", wantReceiptSID: "created-1", wantCreates: 1},
+	}
+	for _, mode := range []EventMode{EventBackground, EventInterrupt} {
+		for _, tt := range tests {
+			t.Run(string(mode)+"/"+tt.name, func(t *testing.T) {
+				events := &immediateEventRuntime{}
+				creates := 0
+				registry := NewRegistry(Dependencies{
+					Events: events,
+					Sessions: sessionManagerFunc(func(context.Context, HandlerDefinition, Invocation) (string, error) {
+						creates++
+						return fmt.Sprintf("created-%d", creates), nil
+					}),
+				})
+				var handlerSID string
+				handlerDef := readDefinition("target", TransportCLI)
+				handlerDef.Session = tt.handler
+				if err := registry.RegisterHandler(handlerDef, HandlerFunc(func(_ context.Context, invocation Invocation) (HandlerResult, error) {
+					handlerSID = invocation.SessionID
+					return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+				})); err != nil {
+					t.Fatal(err)
+				}
+				err := registry.RegisterEvent(EventDefinition{
+					ID: "changed", Source: "test.changed", Session: tt.event,
+					Mode: mode, Handler: "target",
+				})
+				if !tt.valid {
+					if err == nil {
+						t.Fatal("incompatible policy pair registered")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				outcome, err := registry.DispatchEvent(
+					context.Background(), "changed", json.RawMessage(`{}`), "bound-session", "system",
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if handlerSID != tt.wantHandlerSID || outcome.Receipt.SessionID != tt.wantReceiptSID || creates != tt.wantCreates {
+					t.Fatalf("handler session=%q receipt session=%q creates=%d outcome=%#v", handlerSID, outcome.Receipt.SessionID, creates, outcome)
+				}
+				if mode == EventInterrupt && !events.interrupted {
+					t.Fatal("interrupt mode did not cancel before dispatch")
+				}
+			})
+		}
+	}
+}
+
+func TestRequiredEventRejectsMissingSessionBeforeRuntime(t *testing.T) {
+	events := &immediateEventRuntime{}
+	registry := NewRegistry(Dependencies{Events: events})
+	def := readDefinition("target", TransportCLI)
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		t.Fatal("handler called without required event session")
+		return HandlerResult{}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.RegisterEvent(EventDefinition{
+		ID: "changed", Source: "test.changed", Session: SessionRequired,
+		Mode: EventInterrupt, Handler: "target",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.DispatchEvent(context.Background(), "changed", nil, "", "system"); err == nil {
+		t.Fatal("missing required event session was accepted")
+	}
+	if events.interrupted {
+		t.Fatal("event runtime was called before required-session validation")
+	}
+}
+
+func TestRegistryHonorsNoneAndCreateSessionPolicies(t *testing.T) {
+	created := 0
+	registry := NewRegistry(Dependencies{
+		Sessions: sessionManagerFunc(func(_ context.Context, _ HandlerDefinition, invocation Invocation) (string, error) {
+			created++
+			if invocation.SessionID != "definition-context" {
+				t.Fatalf("create context session = %q", invocation.SessionID)
+			}
+			return "created-session", nil
+		}),
+	})
+	seen := map[string]string{}
+	register := func(id string, policy SessionPolicy) {
+		def := readDefinition(id, TransportCLI)
+		def.Session = policy
+		if err := registry.RegisterHandler(def, HandlerFunc(func(_ context.Context, invocation Invocation) (HandlerResult, error) {
+			seen[id] = invocation.SessionID
+			return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register("none", SessionNone)
+	register("create", SessionCreate)
+	none, err := registry.Invoke(context.Background(), Invocation{
+		HandlerID: "none", SessionID: "definition-context", Transport: TransportCLI,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdOutcome, err := registry.Invoke(context.Background(), Invocation{
+		HandlerID: "create", SessionID: "definition-context", Transport: TransportCLI,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen["none"] != "" || none.Receipt.SessionID != "" {
+		t.Fatalf("session:none leaked session: invocation=%q receipt=%q", seen["none"], none.Receipt.SessionID)
+	}
+	if created != 1 || seen["create"] != "created-session" || createdOutcome.Receipt.SessionID != "created-session" {
+		t.Fatalf("session:create created=%d invocation=%q receipt=%q", created, seen["create"], createdOutcome.Receipt.SessionID)
+	}
+}
+
+func TestRegistryIdempotencyReplaysAcrossTransportsWithNewReceipt(t *testing.T) {
+	receipts := &receiptCollector{}
+	registry := NewRegistry(Dependencies{
+		Receipts: receipts, Replay: NewMemoryReplayStore(),
+	})
+	def := readDefinition("write", TransportCLI, TransportMCP)
+	def.Effect = EffectWrite
+	def.Idempotency = IdempotencyRequired
+	def.IdempotencyScope = "application"
+	calls := 0
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		calls++
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{"saved":true}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	first, err := registry.Invoke(context.Background(), Invocation{
+		HandlerID: "write", Input: json.RawMessage(`{"id":1}`), SessionID: "one",
+		Transport: TransportCLI, IdempotencyKey: "save-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay, err := registry.Invoke(context.Background(), Invocation{
+		HandlerID: "write", Input: json.RawMessage(`{"id":1}`), SessionID: "two",
+		Transport: TransportMCP, IdempotencyKey: "save-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || !replay.Receipt.Replayed || replay.Receipt.ReplayOf != first.Receipt.ID {
+		t.Fatalf("calls=%d first=%#v replay=%#v", calls, first.Receipt, replay.Receipt)
+	}
+	if replay.Receipt.Transport != TransportMCP || replay.Receipt.ID == first.Receipt.ID || len(receipts.receipts) != 2 {
+		t.Fatalf("transport replay receipts = %#v", receipts.receipts)
+	}
+	_, err = registry.Invoke(context.Background(), Invocation{
+		HandlerID: "write", Input: json.RawMessage(`{"id":2}`), SessionID: "three",
+		Transport: TransportMCP, IdempotencyKey: "save-1",
+	})
+	if !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("conflicting replay error = %v", err)
+	}
+}
+
+func TestIdempotencyScopesHaveDistinctReplayIdentities(t *testing.T) {
+	invocation := Invocation{SessionID: "session-1", Actor: "operator-1", Transport: TransportCLI}
+	request := readDefinition("request")
+	request.IdempotencyScope = "request"
+	session := readDefinition("session")
+	session.IdempotencyScope = "session"
+	application := readDefinition("application")
+	application.IdempotencyScope = "application"
+	requestID := replaySessionID(request, invocation)
+	sessionID := replaySessionID(session, invocation)
+	applicationID := replaySessionID(application, invocation)
+	if requestID == sessionID || requestID == applicationID || sessionID == applicationID {
+		t.Fatalf("scope identities alias: request=%q session=%q application=%q", requestID, sessionID, applicationID)
+	}
+	if replaySessionID(request, Invocation{
+		SessionID: "session-2", Actor: "operator-1", Transport: TransportCLI,
+	}) != requestID {
+		t.Fatal("request scope unexpectedly depended on session")
+	}
+	if replaySessionID(request, Invocation{
+		SessionID: "session-1", Actor: "operator-1", Transport: TransportMCP,
+	}) == requestID {
+		t.Fatal("request scope aliased transports")
+	}
+}
+
+func TestRegistryRunsEffectPolicyBeforeHandler(t *testing.T) {
+	called := false
+	registry := NewRegistry(Dependencies{
+		Effects: effectPolicyFunc(func(context.Context, HandlerDefinition, Invocation) error {
+			return errors.New("effect denied")
+		}),
+	})
+	def := readDefinition("read", TransportCLI)
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		called = true
+		return HandlerResult{Outcome: "ok"}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Invoke(context.Background(), Invocation{
+		HandlerID: "read", SessionID: "session-1", Transport: TransportCLI,
+	}); err == nil || !strings.Contains(err.Error(), "effect policy denied") {
+		t.Fatalf("effect policy error = %v", err)
+	}
+	if called {
+		t.Fatal("handler ran after effect policy denial")
+	}
+}
+
+func TestRegistryBudgetDenialStopsHandler(t *testing.T) {
+	called := false
+	registry := NewRegistry(Dependencies{
+		Budget: budgetGovernorFunc(func(context.Context, HandlerDefinition, Invocation) (BudgetDecision, error) {
+			return BudgetDecision{Allowed: false, Code: "limit_exhausted", Reason: "run budget exhausted"}, nil
+		}),
+	})
+	def := readDefinition("read", TransportCLI)
+	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		called = true
+		return HandlerResult{Outcome: "ok"}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	_, err := registry.Invoke(context.Background(), Invocation{
+		HandlerID: "read", SessionID: "session-1", Transport: TransportCLI,
+	})
+	if !errors.Is(err, ErrBudgetDenied) || !strings.Contains(err.Error(), "run budget exhausted") {
+		t.Fatalf("budget denial error = %v", err)
+	}
+	if called {
+		t.Fatal("handler ran after budget denial")
+	}
+}
+
+func TestServiceSurfacesBudgetDegradationInReceiptAndFrame(t *testing.T) {
+	registry := NewRegistry(Dependencies{
+		Budget: budgetGovernorFunc(func(context.Context, HandlerDefinition, Invocation) (BudgetDecision, error) {
+			return BudgetDecision{Allowed: true, Code: "degraded", Reason: "using deterministic routing"}, nil
+		}),
+	})
+	if err := registry.RegisterHandler(readDefinition("read", TransportCLI), HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
+		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Registry: registry, Frames: &staticFrames{frame: testFrame()}}
+	outcome, err := service.Call(context.Background(), TransportCLI, CallRequest{
+		Handler: "read", SessionID: "session-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Receipt.Budget.Code != "degraded" || outcome.Frame == nil ||
+		outcome.Frame.Workflow.BudgetState != "degraded" ||
+		outcome.Frame.Workflow.Degradation != "using deterministic routing" {
+		t.Fatalf("budget projection = receipt %#v frame %#v", outcome.Receipt.Budget, outcome.Frame)
+	}
+}
+
+func TestJSONSchemaValidatorRejectsInvalidValue(t *testing.T) {
+	validator := &JSONSchemaValidator{}
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["name"],
+		"properties":{"name":{"type":"string"}},
+		"additionalProperties":false
+	}`)
+	if err := validator.Validate(context.Background(), schema, json.RawMessage(`{"name":"ok"}`)); err != nil {
+		t.Fatalf("Validate(valid) error = %v", err)
+	}
+	err := validator.Validate(context.Background(), schema, json.RawMessage(`{"name":3}`))
+	if err == nil || !strings.Contains(err.Error(), "schema validation failed") {
+		t.Fatalf("Validate(invalid) error = %v", err)
+	}
+}
+
+func TestJSONSchemaValidatorResolvesRootedRefsAndCachesCompilation(t *testing.T) {
+	root := t.TempDir()
+	defs := filepath.Join(root, "defs.json")
+	if err := os.WriteFile(defs, []byte(`{
+		"$defs":{"name":{"type":"string","minLength":2}}
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rootURI := (&url.URL{Scheme: "file", Path: filepath.Join(root, "root.json")}).String()
+	schema := json.RawMessage(fmt.Sprintf(`{
+		"$id":%q,
+		"type":"object",
+		"required":["name"],
+		"properties":{"name":{"$ref":"defs.json#/$defs/name"}}
+	}`, rootURI))
+	validator := &JSONSchemaValidator{Root: root}
+	if err := validator.Validate(context.Background(), schema, json.RawMessage(`{"name":"ok"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(defs); err != nil {
+		t.Fatal(err)
+	}
+	if err := validator.Validate(context.Background(), schema, json.RawMessage(`{"name":"cached"}`)); err != nil {
+		t.Fatalf("cached validation reloaded removed ref: %v", err)
+	}
+}
+
+func TestJSONSchemaValidatorDeniesEscapeAndNetworkRefs(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "story")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "outside.json"), []byte(`{"type":"string"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "outside.json"), filepath.Join(root, "linked.json")); err != nil {
+		t.Fatal(err)
+	}
+	rootURI := (&url.URL{Scheme: "file", Path: filepath.Join(root, "root.json")}).String()
+	validator := &JSONSchemaValidator{Root: root}
+	for name, ref := range map[string]string{
+		"escape":  "../outside.json",
+		"symlink": "linked.json",
+		"network": "https://example.com/schema.json",
+	} {
+		t.Run(name, func(t *testing.T) {
+			schema := json.RawMessage(fmt.Sprintf(`{"$id":%q,"$ref":%q}`, rootURI, ref))
+			err := validator.Validate(context.Background(), schema, json.RawMessage(`"value"`))
+			if err == nil || (!strings.Contains(err.Error(), "denied") && !strings.Contains(err.Error(), "escapes story root")) {
+				t.Fatalf("reference error = %v", err)
+			}
+		})
 	}
 }
 
@@ -346,7 +892,8 @@ func TestServiceDispatchesIntentActionThroughInjectedRuntime(t *testing.T) {
 	frame.Regions[0].Cards[0].Actions[0].Intent = "open"
 	called := false
 	service := Service{
-		Frames: &staticFrames{frame: frame},
+		Registry: NewRegistry(Dependencies{Schemas: &JSONSchemaValidator{}}),
+		Frames:   &staticFrames{frame: frame},
 		Intents: intentDispatcherFunc(func(_ context.Context, transport Transport, envelope ActionEnvelope, action Action) (OutcomeEnvelope, error) {
 			called = true
 			if transport != TransportTUI || action.Intent != "open" || envelope.FrameRevision != 7 {
@@ -366,8 +913,41 @@ func TestServiceDispatchesIntentActionThroughInjectedRuntime(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsInvalidIntentActionInputBeforeDispatch(t *testing.T) {
+	frame := testFrame()
+	action := &frame.Regions[0].Cards[0].Actions[0]
+	action.Handler = ""
+	action.Intent = "open"
+	action.InputSchema = json.RawMessage(`{
+		"type": "object",
+		"required": ["change_id"],
+		"properties": {"change_id": {"type": "string"}},
+		"additionalProperties": false
+	}`)
+	called := false
+	service := Service{
+		Registry: NewRegistry(Dependencies{Schemas: &JSONSchemaValidator{}}),
+		Frames:   &staticFrames{frame: frame},
+		Intents: intentDispatcherFunc(func(context.Context, Transport, ActionEnvelope, Action) (OutcomeEnvelope, error) {
+			called = true
+			return OutcomeEnvelope{}, nil
+		}),
+	}
+
+	_, err := service.DispatchAction(context.Background(), TransportTUI, ActionEnvelope{
+		Action: "test.open", Input: json.RawMessage(`{"unknown":true}`),
+		SessionID: "session-1", FrameRevision: 7,
+	})
+	if err == nil || !strings.Contains(err.Error(), `validate action "test.open" input`) {
+		t.Fatalf("DispatchAction() error = %v", err)
+	}
+	if called {
+		t.Fatal("intent dispatcher was called with schema-invalid input")
+	}
+}
+
 func TestServiceAttachesCurrentFrameToCallsAndEvents(t *testing.T) {
-	registry := NewRegistry(Dependencies{})
+	registry := NewRegistry(Dependencies{Events: &immediateEventRuntime{}})
 	def := readDefinition("test.read", TransportCLI)
 	if err := registry.RegisterHandler(def, HandlerFunc(func(context.Context, Invocation) (HandlerResult, error) {
 		return HandlerResult{Outcome: "ok", Output: json.RawMessage(`{}`)}, nil

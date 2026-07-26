@@ -30,6 +30,11 @@ func TestRepositoryDoesNotNamePrivateExternalRepo(t *testing.T) {
 		}
 		path := filepath.Join(repoRoot, string(raw))
 		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			// A tracked file deleted in the candidate tree remains in the index
+			// until the workspace commit.
+			continue
+		}
 		if err != nil {
 			t.Fatalf("stat %s: %v", path, err)
 		}

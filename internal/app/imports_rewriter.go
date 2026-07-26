@@ -453,6 +453,11 @@ func (rw *childRewriter) rewriteEffect(eff *Effect) {
 		}
 		eff.Bind = newBind
 	}
+	for _, outcome := range eff.Outcomes {
+		if outcome != nil {
+			outcome.When = rw.rewriteExpr(outcome.When)
+		}
+	}
 
 	// Nested on_complete effects.
 	for i := range eff.OnComplete {

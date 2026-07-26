@@ -3,9 +3,12 @@ package application
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"kitsoki/internal/app"
 )
+
+const TUIActionIntentPrefix = "application-action:"
 
 // TUIProjection is the terminal-native projection of an application frame.
 // View uses the existing typed element renderer; Targets preserve canonical
@@ -29,6 +32,7 @@ type TUISemanticTarget struct {
 
 type TUIAction struct {
 	ID          string         `json:"id"`
+	Intent      string         `json:"intent,omitempty"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	SemanticRef string         `json:"semantic_ref"`
@@ -71,18 +75,36 @@ func ProjectTUI(frame Frame) (TUIProjection, error) {
 			if !nodeVisible(card.State) {
 				continue
 			}
-			cardElements := []app.ViewElement{
-				{Kind: "heading", Source: card.Semantic.Name},
-				{Kind: "prose", Source: card.Semantic.Description},
-			}
+			add(card.Semantic,
+				app.ViewElement{Kind: "heading", Source: card.Semantic.Name},
+				app.ViewElement{Kind: "prose", Source: card.Semantic.Description},
+			)
 			for _, element := range card.Body {
 				projected, err := projectTUIElement(frame, element)
 				if err != nil {
 					return TUIProjection{}, fmt.Errorf("application: project card %q: %w", card.ID, err)
 				}
-				cardElements = append(cardElements, projected...)
+				if element.Semantic != nil && element.Semantic.Ref != "" {
+					add(*element.Semantic, projected...)
+				} else {
+					projection.View.Elements = append(projection.View.Elements, projected...)
+				}
 			}
-			add(card.Semantic, cardElements...)
+			var actionItems []app.ChoiceItem
+			for _, action := range card.Actions {
+				if actionEnabled(action) {
+					actionItems = append(actionItems, app.ChoiceItem{
+						Label: action.Semantic.Name, Hint: action.Semantic.Description,
+						Intent: TUIActionIntentPrefix + action.ID,
+					})
+				}
+			}
+			if len(actionItems) > 0 {
+				projection.View.Elements = append(projection.View.Elements, app.ViewElement{
+					Kind: "choice", ChoiceMode: "single",
+					ChoicePrompt: "Actions", ChoiceItems: actionItems,
+				})
+			}
 			for _, action := range card.Actions {
 				projection.Actions = append(projection.Actions, tuiAction(frame, action))
 			}
@@ -91,9 +113,24 @@ func ProjectTUI(frame Frame) (TUIProjection, error) {
 	return projection, nil
 }
 
+func actionEnabled(action Action) bool {
+	return action.Enabled && (action.State.Enabled == nil || *action.State.Enabled)
+}
+
 func projectTUIElement(frame Frame, element Element) ([]app.ViewElement, error) {
 	if !nodeVisible(element.State) {
 		return nil, nil
+	}
+	if element.Component == "" && len(element.Props) > 0 {
+		var typed app.ViewElement
+		if err := json.Unmarshal(element.Props, &typed); err != nil {
+			return nil, fmt.Errorf("%s typed element payload: %w", element.Kind, err)
+		}
+		if typed.Kind != element.Kind {
+			return nil, fmt.Errorf("typed element kind %q does not match payload kind %q", element.Kind, typed.Kind)
+		}
+		bindTUIElementActions(frame, &typed)
+		return []app.ViewElement{typed}, nil
 	}
 	switch element.Kind {
 	case "prose", "heading", "code", "template":
@@ -121,10 +158,42 @@ func projectTUIElement(frame Frame, element Element) ([]app.ViewElement, error) 
 		if fallback == "" {
 			return nil, fmt.Errorf("component %q has no TUI fallback", element.Component)
 		}
+		projected := element
+		projected.Kind = fallback
+		projected.Component = ""
+		if len(projected.Value) == 0 {
+			projected.Value = projected.Props
+		}
+		if fallback != "form" {
+			projected.Props = nil
+		}
+		return projectTUIElement(frame, projected)
+	case "status":
+		return []app.ViewElement{{Kind: "prose", Source: displayTUIValue(element.Value)}}, nil
+	case "table":
+		return []app.ViewElement{{Kind: "code", Source: displayTUIValue(element.Value)}}, nil
+	case "artifact":
+		var artifact struct {
+			Handle string `json:"handle"`
+			Name   string `json:"name"`
+		}
+		if err := json.Unmarshal(element.Value, &artifact); err != nil || artifact.Handle == "" {
+			if err := json.Unmarshal(element.Value, &artifact.Handle); err != nil || artifact.Handle == "" {
+				return nil, fmt.Errorf("artifact value must contain a handle")
+			}
+		}
 		return []app.ViewElement{{
-			Kind:   "prose",
-			Source: fmt.Sprintf("%s (%s projection)", element.Component, fallback),
+			Kind: "media", MediaHandle: artifact.Handle, MediaCaption: artifact.Name,
 		}}, nil
+	case "form":
+		var typed app.ViewElement
+		if err := json.Unmarshal(element.Props, &typed); err != nil ||
+			typed.Kind != "choice" ||
+			typed.ChoiceMode != "form" {
+			return nil, fmt.Errorf("form fallback requires typed form props")
+		}
+		bindTUIElementActions(frame, &typed)
+		return []app.ViewElement{typed}, nil
 	default:
 		if len(element.Items) == 0 {
 			return nil, fmt.Errorf("element kind %q has no TUI projection", element.Kind)
@@ -138,6 +207,42 @@ func projectTUIElement(frame Frame, element Element) ([]app.ViewElement, error) 
 			projected = append(projected, items...)
 		}
 		return projected, nil
+	}
+}
+
+func displayTUIValue(value json.RawMessage) string {
+	if len(value) == 0 {
+		return ""
+	}
+	var text string
+	if json.Unmarshal(value, &text) == nil {
+		return text
+	}
+	var normalized any
+	if json.Unmarshal(value, &normalized) == nil {
+		if raw, err := json.MarshalIndent(normalized, "", "  "); err == nil {
+			return string(raw)
+		}
+	}
+	return string(value)
+}
+
+func bindTUIElementActions(frame Frame, element *app.ViewElement) {
+	if element == nil || element.Kind != "choice" {
+		return
+	}
+	bind := func(id string) string {
+		if id == "" || strings.HasPrefix(id, TUIActionIntentPrefix) {
+			return id
+		}
+		if _, ok := frame.FindOfferedAction(id); ok {
+			return TUIActionIntentPrefix + id
+		}
+		return id
+	}
+	element.ChoiceIntent = bind(element.ChoiceIntent)
+	for i := range element.ChoiceItems {
+		element.ChoiceItems[i].Intent = bind(element.ChoiceItems[i].Intent)
 	}
 }
 
@@ -156,7 +261,8 @@ func nodeVisible(state NodeState) bool {
 
 func tuiAction(frame Frame, action Action) TUIAction {
 	return TUIAction{
-		ID: action.ID, Name: action.Semantic.Name, Description: action.Semantic.Description,
+		ID: action.ID, Intent: action.Intent,
+		Name: action.Semantic.Name, Description: action.Semantic.Description,
 		SemanticRef: action.Semantic.Ref, Enabled: action.Enabled,
 		Envelope: ActionEnvelope{
 			Action: action.ID, SessionID: frame.SessionID, FrameRevision: frame.Revision,

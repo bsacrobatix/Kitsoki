@@ -160,11 +160,17 @@ func runLoadPipeline(merged *AppDef, path, baseDir string, ifaceOverrides map[st
 	if importErrs := resolveImports(merged, path, baseDir, []string{canonical}, resolver); len(importErrs) > 0 {
 		return nil, errors.Join(importErrs...)
 	}
+	if packageErrs := resolveApplicationPackages(merged, path, baseDir, resolver); len(packageErrs) > 0 {
+		return nil, errors.Join(packageErrs...)
+	}
 
 	// Expand phase templates into concrete states before validation so the
 	// referential-integrity pass sees the synthesised states.
 	if expandErrs := expandPhases(merged, path); len(expandErrs) > 0 {
 		return nil, errors.Join(expandErrs...)
+	}
+	if roomErrs := expandRoomTemplates(merged, path); len(roomErrs) > 0 {
+		return nil, errors.Join(roomErrs...)
 	}
 
 	// Expand `workbench:` blocks into write_mode/agent_off_ramp/on_enter/
@@ -363,7 +369,6 @@ func parseAndMerge(b []byte, file, baseDir string) (*AppDef, []error) {
 		}
 		return nil, []error{ve}
 	}
-
 	// Resolve any agents: declared in the main file against the main file's dir.
 	var errs []error
 	if agentErrs := resolveAgentDecls(&def, file, baseDir); len(agentErrs) > 0 {
@@ -977,6 +982,12 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 		}
 		return nil, []error{ve}
 	}
+	if def.Application != nil && len(def.Application.Packages) > 0 {
+		return nil, []error{&ValidationError{
+			File:    file,
+			Message: "application.packages require file-backed Load so .kitsoki/kits.lock can be verified",
+		}}
+	}
 
 	// Resolve agent declarations (tools normalisation, external_side_effect
 	// inference, bash_profile checks). baseDir is "" in the LoadBytes path —
@@ -991,6 +1002,9 @@ func loadAndValidate(b []byte, file string) (*AppDef, []error) {
 	// remain Load-only concerns.
 	if expandErrs := expandPhases(&def, file); len(expandErrs) > 0 {
 		return nil, expandErrs
+	}
+	if roomErrs := expandRoomTemplates(&def, file); len(roomErrs) > 0 {
+		return nil, roomErrs
 	}
 	if workbenchErrs := expandWorkbenches(&def, file); len(workbenchErrs) > 0 {
 		return nil, workbenchErrs
@@ -1202,6 +1216,7 @@ func validateDef(def *AppDef, file string) (*AppDef, []error) {
 	// are additive. Legacy stories skip this pass; declared contracts get
 	// semantic identity, relationship, fallback, and effect-policy validation.
 	errs = append(errs, validateApplicationContract(def, file)...)
+	errs = append(errs, validateFiniteProgramContracts(def, file)...)
 
 	// ── 7b. (removed) off-path agent reference: superseded by step 9b
 	// validateAgentReferences which also recognises builtin agent names
@@ -1480,6 +1495,24 @@ func cloneEffects(in []Effect) []Effect {
 		out[i].Increment = cloneIntMap(in[i].Increment)
 		out[i].With = cloneAnyMap(in[i].With)
 		out[i].Bind = cloneStringMap(in[i].Bind)
+		if len(in[i].Result) > 0 {
+			out[i].Result = make(map[string]EffectResultField, len(in[i].Result))
+			for key, value := range in[i].Result {
+				out[i].Result[key] = value
+			}
+		}
+		if len(in[i].Outcomes) > 0 {
+			out[i].Outcomes = make(map[string]*EffectOutcome, len(in[i].Outcomes))
+			for key, value := range in[i].Outcomes {
+				if value == nil {
+					continue
+				}
+				clone := *value
+				out[i].Outcomes[key] = &clone
+			}
+		}
+		out[i].OnComplete = cloneEffects(in[i].OnComplete)
+		out[i].Effects = cloneEffects(in[i].Effects)
 	}
 	return out
 }

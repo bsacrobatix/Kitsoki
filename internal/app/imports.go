@@ -255,7 +255,9 @@ func resolveImports(def *AppDef, file, baseDir string, parents []string, resolve
 		// Apply overrides BEFORE namespace flattening so override.states
 		// names reference child-local state names (not alias-prefixed).
 		if imp.Overrides != nil {
-			overrideErrs := applyOverrides(childDef, imp.Overrides, file, alias, baseDir, filepath.Dir(childPath))
+			overrideErrs := applyOverrides(
+				childDef, imp.Overrides, file, alias, def.App.ID, baseDir, filepath.Dir(childPath),
+			)
 			if len(overrideErrs) > 0 {
 				errs = append(errs, overrideErrs...)
 				continue
@@ -417,6 +419,9 @@ func loadImportedChild(path string, parents []string, resolver ImportResolver) (
 	// Recursively resolve the child's own imports BEFORE folding into parent.
 	if impErrs := resolveImports(def, path, baseDir, parents, resolver); len(impErrs) > 0 {
 		return nil, impErrs
+	}
+	if packageErrs := resolveApplicationPackages(def, path, baseDir, resolver); len(packageErrs) > 0 {
+		return nil, packageErrs
 	}
 	// Expand the child's phase templates so the parent sees concrete states.
 	if expandErrs := expandPhases(def, path); len(expandErrs) > 0 {
@@ -992,6 +997,10 @@ func foldChild(parent *AppDef, alias string, imp *ImportDef, child *AppDef, file
 		parent.Agents[newKey] = child.Agents[k]
 	}
 
+	if appErrs := foldChildApplication(parent, child, alias, rw, file); len(appErrs) > 0 {
+		errs = append(errs, appErrs...)
+	}
+
 	return errs
 }
 
@@ -1216,6 +1225,25 @@ func rewriteChildStateTransitionsAtDepth(s *State, alias string, imp *ImportDef,
 		// after kitsoki-dev's second fold under `core`.
 		return strings.Repeat("../", depth+1) + t
 	}
+	var rewriteEffectTargets func(*Effect)
+	rewriteEffectTargets = func(eff *Effect) {
+		if eff == nil {
+			return
+		}
+		eff.OnError = rwTarget(eff.OnError)
+		eff.Target = rwTarget(eff.Target)
+		for _, outcome := range eff.Outcomes {
+			if outcome != nil {
+				outcome.Target = rwTarget(outcome.Target)
+			}
+		}
+		for i := range eff.OnComplete {
+			rewriteEffectTargets(&eff.OnComplete[i])
+		}
+		for i := range eff.Effects {
+			rewriteEffectTargets(&eff.Effects[i])
+		}
+	}
 
 	// On: transitions.
 	for intent, list := range s.On {
@@ -1241,21 +1269,7 @@ func rewriteChildStateTransitionsAtDepth(s *State, alias string, imp *ImportDef,
 			// graph (bugfix) lands on bare `phase_N_executing` names
 			// that don't exist under the alias wrapper.
 			for j, eff := range tr.Effects {
-				if eff.OnError != "" {
-					eff.OnError = rwTarget(eff.OnError)
-				}
-				if eff.Target != "" {
-					eff.Target = rwTarget(eff.Target)
-				}
-				for k, sub := range eff.OnComplete {
-					if sub.OnError != "" {
-						sub.OnError = rwTarget(sub.OnError)
-					}
-					if sub.Target != "" {
-						sub.Target = rwTarget(sub.Target)
-					}
-					eff.OnComplete[k] = sub
-				}
+				rewriteEffectTargets(&eff)
 				tr.Effects[j] = eff
 			}
 			list[i] = tr
@@ -1271,21 +1285,7 @@ func rewriteChildStateTransitionsAtDepth(s *State, alias string, imp *ImportDef,
 	// (Most folded background jobs live in on_enter:, which is where the
 	// bugfix phase template puts its execute → next-phase chains.)
 	for i, eff := range s.OnEnter {
-		if eff.OnError != "" {
-			eff.OnError = rwTarget(eff.OnError)
-		}
-		if eff.Target != "" {
-			eff.Target = rwTarget(eff.Target)
-		}
-		for j, sub := range eff.OnComplete {
-			if sub.OnError != "" {
-				sub.OnError = rwTarget(sub.OnError)
-			}
-			if sub.Target != "" {
-				sub.Target = rwTarget(sub.Target)
-			}
-			eff.OnComplete[j] = sub
-		}
+		rewriteEffectTargets(&eff)
 		s.OnEnter[i] = eff
 	}
 	// Compound state initial: bare child name resolves to a nested child

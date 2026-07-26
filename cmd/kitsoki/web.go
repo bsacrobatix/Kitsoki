@@ -425,6 +425,7 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				server.WithBugRoot(bugRoot),
 				server.WithWorkflowRoot(bugRoot),
 				server.WithMaterializeRoot(materializeRoot),
+				server.WithApplicationBundleRoot(filepath.Join(materializeRoot, ".artifacts", "application-builds")),
 				server.WithTicketRepo(ticketRepo),
 				server.WithAgentEvidenceDir(agentEvidenceDir),
 				server.WithImproveTicketProvider(improveProvider),

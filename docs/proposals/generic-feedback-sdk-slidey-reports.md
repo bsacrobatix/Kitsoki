@@ -316,11 +316,12 @@ First-party plugins:
 
 ### Story application semantic context
 
-The SDK does not define a second UI ontology. The application platform proposal
-([`story-application-platform.md`](story-application-platform.md)) owns semantic
-refs, names, descriptions, roles, relationships, provenance, and runtime state.
-This SDK accepts their existing `semantic_element` projection as an
-`AnnotationAnchor`.
+The SDK does not define a second UI ontology. The shipped
+[story application contract](../stories/applications.md) owns semantic refs,
+names, descriptions, roles, relationships, provenance, and runtime state. This
+SDK accepts their existing `semantic_element` projection as an
+`AnnotationAnchor`; the runtime and privacy boundary are documented in
+[Application runtime](../architecture/application-runtime.md).
 
 When a semantic target is available, it is primary and DOM selectors, roles,
 text, coordinates, screenshots, terminal cells, VS Code contribution ids, and

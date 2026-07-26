@@ -4,7 +4,8 @@
 // Chat is a WebviewView contributed to VS Code's bottom panel, alongside the
 // Terminal / Ports / Playwright views. Trace and Graph are WebviewViews in the
 // activity bar. mountSpa() is the shared path: relay wiring + nonce/CSP + backend
-// start. No surface uses an editor-area WebviewPanel.
+// start. These core surfaces never use an editor-area WebviewPanel; a story
+// application presentation is hosted separately as an editor document.
 
 import * as vscode from 'vscode';
 import * as fs from 'node:fs';

@@ -237,8 +237,15 @@ type AppDef struct {
 	Application *ApplicationContract `yaml:"application,omitempty"`
 	// Events bind non-operator inputs to the same handler/intent registry used
 	// by application actions.
-	Events  map[string]*ApplicationEvent `yaml:"events,omitempty"`
-	OffPath *OffPathDef                  `yaml:"off_path,omitempty"`
+	Events map[string]*ApplicationEvent `yaml:"events,omitempty"`
+	// ImportedApplicationOwners records child app ids whose already-validated
+	// semantic refs survive composition. Loader-owned; never authored.
+	ImportedApplicationOwners map[string]struct{} `yaml:"-"`
+	// ApplicationPackageRoots records content-verified package directories
+	// whose presentation/schema assets may be loaded by application adapters.
+	// Loader-owned; never authored.
+	ApplicationPackageRoots []string    `yaml:"-"`
+	OffPath                 *OffPathDef `yaml:"off_path,omitempty"`
 	// Hosts is the allow-list of host handler names this app may invoke.
 	Hosts []string `yaml:"hosts,omitempty"`
 	// AgentPlugins declares agent plugin configurations under the top-level
@@ -274,6 +281,10 @@ type AppDef struct {
 	// docs/stories/state-machine.md "Phase templates").
 	// Authors instantiate templates by listing phases under `phases:`.
 	PhaseTemplates map[string]*PhaseTemplate `yaml:"phase_templates,omitempty"`
+	// RoomInterfaces declare structural room contracts. Implementing rooms
+	// opt in through State.Implements; the loader verifies intent/slot/world
+	// compatibility before application actions may target an interface.
+	RoomInterfaces map[string]*RoomInterfaceDef `yaml:"room_interfaces,omitempty"`
 
 	// Agents declares named Claude agents — first-class personas / system
 	// prompts (and optionally model overrides) reusable across any
@@ -735,6 +746,9 @@ type ImportOverrides struct {
 	// Prompts maps child-relative prompt paths → parent-relative paths.
 	// At load time the parent's file replaces the child's bytes.
 	Prompts map[string]string `yaml:"prompts,omitempty"`
+	// Application explicitly replaces imported application members. Each key
+	// must exist in the child contract and remain interface-compatible.
+	Application *ApplicationOverrides `yaml:"application,omitempty"`
 }
 
 // ExitDef declares one named exit the child app surfaces.
@@ -747,8 +761,20 @@ type ExitDef struct {
 
 // ExportsBlock declares what an app surfaces to importers.
 type ExportsBlock struct {
-	Intents  []string                       `yaml:"intents,omitempty" json:"intents,omitempty"`
-	Handlers map[string]*ApplicationHandler `yaml:"handlers,omitempty" json:"handlers,omitempty"`
+	Intents     []string                       `yaml:"intents,omitempty" json:"intents,omitempty"`
+	Handlers    map[string]*ApplicationHandler `yaml:"handlers,omitempty" json:"handlers,omitempty"`
+	Application *ApplicationExports            `yaml:"application,omitempty" json:"application,omitempty"`
+}
+
+// ApplicationExports names the application fragments an importing story may
+// compose. Unlisted members remain private to the child story.
+type ApplicationExports struct {
+	Navigation []string `yaml:"navigation,omitempty" json:"navigation,omitempty"`
+	Pages      []string `yaml:"pages,omitempty" json:"pages,omitempty"`
+	Components []string `yaml:"components,omitempty" json:"components,omitempty"`
+	Actions    []string `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Schemas    []string `yaml:"schemas,omitempty" json:"schemas,omitempty"`
+	Tokens     []string `yaml:"tokens,omitempty" json:"tokens,omitempty"`
 }
 
 // HostInterfaceDef declares one named capability surface.
@@ -801,6 +827,21 @@ type PhaseTemplateParam struct {
 	Type     string `yaml:"type"`
 	Required bool   `yaml:"required,omitempty"`
 	Default  any    `yaml:"default,omitempty"`
+}
+
+// RoomInterfaceDef is a structural contract implemented by one or more
+// top-level rooms. Intent definitions describe the required callable alphabet;
+// world entries pin the fields and access posture the room contract exposes.
+type RoomInterfaceDef struct {
+	Description string                       `yaml:"description,omitempty" json:"description,omitempty"`
+	Intents     map[string]Intent            `yaml:"intents,omitempty" json:"intents,omitempty"`
+	World       map[string]RoomWorldContract `yaml:"world,omitempty" json:"world,omitempty"`
+}
+
+// RoomWorldContract is one world field required by a room interface.
+type RoomWorldContract struct {
+	Type   string `yaml:"type" json:"type"`
+	Access string `yaml:"access,omitempty" json:"access,omitempty"`
 }
 
 // PhasesBlock is the top-level `phases:` declaration that picks a template
@@ -957,6 +998,19 @@ type State struct {
 	Mode string `yaml:"mode,omitempty"`
 	// Description is shown in the location indicator.
 	Description string `yaml:"description,omitempty"`
+	// Implements names structural room interfaces this top-level room
+	// satisfies. The loader checks them after all imports/templates fold.
+	Implements []string `yaml:"implements,omitempty"`
+	// RoomTemplate instantiates an existing phase_template as this room's
+	// compound child-state graph. RoomParameters bind the template parameters;
+	// `id` defaults to the room name. This reuses the shipped deterministic
+	// phase-template substitution contract rather than adding a second macro.
+	RoomTemplate   string         `yaml:"room_template,omitempty"`
+	RoomParameters map[string]any `yaml:"room_parameters,omitempty"`
+	// InstantiatedFrom/InstantiatedParameters are loader provenance retained
+	// after RoomTemplate is expanded. They are not author-facing YAML.
+	InstantiatedFrom       string         `yaml:"-"`
+	InstantiatedParameters map[string]any `yaml:"-"`
 	// Assignment optionally declares the staffing policy for this room/state.
 	// It never stores a principal identity; session assignments live in events.
 	Assignment *AssignmentPolicy `yaml:"assignment,omitempty"`
@@ -1259,6 +1313,13 @@ type Effect struct {
 	With map[string]any `yaml:"with,omitempty"`
 	// Bind extracts keys from the host result into world variables: bind: {world_key: result_key}.
 	Bind map[string]string `yaml:"bind,omitempty"`
+	// Result declares the typed result fields available to Bind when this
+	// invocation opts into finite outcome analysis.
+	Result map[string]EffectResultField `yaml:"result,omitempty"`
+	// Outcomes maps every declared host-result variant to a guarded/default
+	// state edge. It is a static contract used by loader totality checks and
+	// the program graph; legacy invokes may omit it.
+	Outcomes map[string]*EffectOutcome `yaml:"outcomes,omitempty"`
 	// OnError is a state transition target fired when a host invoke returns an error.
 	// Before the redirect, the engine sets two reserved global world vars the
 	// target room may read (and list in relevant_world) without declaring:
@@ -1373,6 +1434,21 @@ type Effect struct {
 	// this agent call site. Runtime consumers must treat missing or stale
 	// evidence conservatively; the eval tooling owns validation and freshness.
 	Selection *AgentSelection `yaml:"selection,omitempty"`
+}
+
+// EffectResultField declares one typed field returned by an invoke.
+type EffectResultField struct {
+	Type     string `yaml:"type" json:"type"`
+	Required bool   `yaml:"required,omitempty" json:"required,omitempty"`
+}
+
+// EffectOutcome maps one named invoke-result variant to a guarded or default
+// state edge. The runtime host result remains unchanged; this contract makes
+// totality, ownership, and impact statically inspectable.
+type EffectOutcome struct {
+	When    string `yaml:"when,omitempty" json:"when,omitempty"`
+	Default bool   `yaml:"default,omitempty" json:"default,omitempty"`
+	Target  string `yaml:"target" json:"target"`
 }
 
 // OperationDecl is the state-level operation overlay declaration.

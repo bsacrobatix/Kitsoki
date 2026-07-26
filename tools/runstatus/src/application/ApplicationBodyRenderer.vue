@@ -3,6 +3,7 @@ import { computed } from "vue";
 import type { ApplicationComponentBody, ApplicationElement, JSONValue } from "./types.js";
 import type { ApplicationRuntime } from "./runtime.js";
 import { semanticDataAttributes } from "./semantic.js";
+import ApplicationWizardForm from "./ApplicationWizardForm.vue";
 
 const props = defineProps<{
   body: ApplicationElement;
@@ -108,6 +109,11 @@ function display(value: JSONValue | undefined): string {
       :body="fallback"
       :runtime="runtime"
       data-component-fallback
+    />
+    <ApplicationWizardForm
+      v-else-if="body.kind === 'form'"
+      :body="body"
+      :runtime="runtime"
     />
     <p v-else-if="body.kind === 'prose'" class="application-body__prose">{{ display(body.value) }}</p>
     <ul v-else-if="body.kind === 'list'" class="application-body__list">

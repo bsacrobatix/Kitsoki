@@ -7,7 +7,10 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"kitsoki/internal/app"
 	appplatform "kitsoki/internal/application"
+	"kitsoki/internal/applicationfeedback"
+	"kitsoki/internal/host"
 	rsserver "kitsoki/internal/runstatus/server"
 )
 
@@ -55,6 +58,15 @@ type ApplicationEventArgs struct {
 	Input  map[string]any `json:"input,omitempty"`
 }
 
+type ApplicationFeedbackArgs struct {
+	Handle         string `json:"handle"`
+	Page           string `json:"page,omitempty"`
+	Ref            string `json:"ref"`
+	Instruction    string `json:"instruction"`
+	Kind           string `json:"kind,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
 func (srv *Server) registerApplicationTools() {
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "application.frame",
@@ -69,6 +81,11 @@ func (srv *Server) registerApplicationTools() {
 		Description: "Inspect one stable semantic application ref with provenance, runtime state, and bounded relationships. {handle, ref, page?, relationship_limit?}.",
 	}, srv.handleApplicationInspect)
 	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
+		Name: "application.feedback",
+		Description: "Build a reviewed, privacy-safe feedback attachment for one canonical semantic ref. " +
+			"The returned kitsoki.feedback.report.v1 bundle is accepted by the existing /api/feedback/local intake.",
+	}, srv.handleApplicationFeedback)
+	mcpsdk.AddTool(srv.mcpSrv, &mcpsdk.Tool{
 		Name:        "application.call",
 		Description: "Call one exported application handler through the shared registry. {handle, handler, input?, routing_mode?, idempotency_key?}.",
 	}, srv.handleApplicationCall)
@@ -82,6 +99,34 @@ func (srv *Server) registerApplicationTools() {
 	}, srv.handleApplicationEvent)
 }
 
+func (srv *Server) handleApplicationFeedback(ctx context.Context, _ *mcpsdk.CallToolRequest, args ApplicationFeedbackArgs) (*mcpsdk.CallToolResult, any, error) {
+	if args.Ref == "" || args.Instruction == "" {
+		return buildToolError(ErrBadRequest, "application.feedback: ref and instruction are required"), nil, nil
+	}
+	service, sh, failure := srv.applicationService(args.Handle, args.Page)
+	if failure != nil {
+		return failure, nil, nil
+	}
+	frame, err := service.Frames.CurrentFrame(ctx, string(sh.SID))
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	var policy *app.ApplicationFeedbackPolicy
+	if sh.Runtime != nil {
+		if def := sh.Runtime.AppDef(); def != nil && def.Application != nil {
+			policy = def.Application.Feedback
+		}
+	}
+	report, err := applicationfeedback.BuildReport(frame, policy, applicationfeedback.ReportRequest{
+		Ref: args.Ref, Kind: args.Kind, Instruction: args.Instruction,
+		IdempotencyKey: args.IdempotencyKey,
+	})
+	if err != nil {
+		return buildToolError(ErrBadRequest, err.Error()), nil, nil
+	}
+	return nil, report, nil
+}
+
 func (srv *Server) applicationService(handle, page string) (appplatform.Service, *SessionHandle, *mcpsdk.CallToolResult) {
 	sh, err := srv.sess.ResolveSession(handle)
 	if err != nil {
@@ -90,10 +135,64 @@ func (srv *Server) applicationService(handle, page string) (appplatform.Service,
 	if sh.Runtime == nil || sh.Driver == nil {
 		return appplatform.Service{}, nil, buildToolError(ErrBadRequest, "application: handle has no driving runtime")
 	}
-	service, err := rsserver.NewSessionApplicationService(rsserver.Entry{
+	baseEntry := rsserver.Entry{
 		Source: sh.Runtime,
 		Driver: sh.Driver,
-	}, page)
+	}
+	created := map[string]rsserver.Entry{}
+	createdHandles := map[string]*SessionHandle{}
+	service, err := rsserver.NewSessionApplicationService(baseEntry, page, rsserver.ApplicationRuntime{
+		ResolveEntry: func(sessionID string) (rsserver.Entry, error) {
+			if sessionID == string(sh.SID) || sessionID == sh.Key {
+				return baseEntry, nil
+			}
+			if entry, ok := created[sessionID]; ok {
+				return entry, nil
+			}
+			resolved, resolveErr := srv.sess.ResolveSession(sessionID)
+			if resolveErr != nil || resolved.Runtime == nil || resolved.Driver == nil {
+				return rsserver.Entry{}, fmt.Errorf("application: resolve created session %q: %v", sessionID, resolveErr)
+			}
+			return rsserver.Entry{Source: resolved.Runtime, Driver: resolved.Driver}, nil
+		},
+		CreateSession: func(ctx context.Context, _ *app.AppDef) (string, error) {
+			tracePath, traceErr := resolveTracePath("", sh.StoryPath, "")
+			if traceErr != nil {
+				return "", traceErr
+			}
+			createdHandle, createErr := srv.sess.OpenDrivingSession(ctx, OpenDrivingSessionParams{
+				Mode: sh.Mode, RecordingPath: sh.RecordingPath, StoryPath: sh.StoryPath,
+				TracePath: tracePath, ImportResolver: srv.importResolver,
+			})
+			if createErr != nil {
+				return "", createErr
+			}
+			created[createdHandle.Key] = rsserver.Entry{Source: createdHandle.Runtime, Driver: createdHandle.Driver}
+			createdHandles[createdHandle.Key] = createdHandle
+			return createdHandle.Key, nil
+		},
+		Interrupt: func(sessionID string) {
+			target := sh
+			if createdHandle, ok := createdHandles[sessionID]; ok {
+				target = createdHandle
+			} else if sessionID != "" && sessionID != sh.Key && sessionID != string(sh.SID) {
+				if resolved, resolveErr := srv.sess.ResolveSession(sessionID); resolveErr == nil {
+					target = resolved
+				}
+			}
+			if target != nil && target.Runtime != nil {
+				target.Runtime.interruptActiveTurn()
+			}
+		},
+		ResolveHostRegistry: func(sessionID string) *host.Registry {
+			if createdHandle, ok := createdHandles[sessionID]; ok && createdHandle.Runtime != nil {
+				return createdHandle.Runtime.hostRegistry
+			}
+			return sh.Runtime.hostRegistry
+		},
+		EventScheduler: sh.Runtime.scheduler,
+		JournalPath:    sh.TracePath + ".application.jsonl",
+	})
 	if err != nil {
 		return appplatform.Service{}, nil, buildToolError(ErrBadRequest, err.Error())
 	}
@@ -160,6 +259,7 @@ func (srv *Server) handleApplicationCall(ctx context.Context, _ *mcpsdk.CallTool
 	}
 	outcome, err := service.Call(ctx, appplatform.TransportMCP, appplatform.CallRequest{
 		Handler: args.Handler, Input: input, SessionID: string(sh.SID),
+		Actor:          "mcp:" + args.Handle,
 		RoutingMode:    appplatform.RoutingMode(args.RoutingMode),
 		IdempotencyKey: args.IdempotencyKey,
 	})
@@ -183,6 +283,7 @@ func (srv *Server) handleApplicationAction(ctx context.Context, _ *mcpsdk.CallTo
 	}
 	outcome, err := service.DispatchAction(ctx, appplatform.TransportMCP, appplatform.ActionEnvelope{
 		Action: args.Action, Input: input, SessionID: string(sh.SID),
+		Actor:         "mcp:" + args.Handle,
 		FrameRevision: args.FrameRevision, RoutingMode: appplatform.RoutingMode(args.RoutingMode),
 		IdempotencyKey: args.IdempotencyKey,
 	})

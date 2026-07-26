@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationfeedback"
 	"kitsoki/internal/bugfile"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/bugreport"
@@ -114,7 +115,11 @@ func (BugCommand) Run(m RootModel, args []string) (string, RootModel, tea.Cmd) {
 	if err := bugreport.WriteArtifacts(artifactsDir, artifacts); err != nil {
 		return m.bugBlock(fmt.Sprintf("filed %s, but could not write artifacts: %v", displayPath, err)), m, nil
 	}
-	if err := appendTUIArtifactsSection(absPath, id, bugreport.HasArtifact(artifacts, "trace.redacted.jsonl")); err != nil {
+	if err := appendTUIArtifactsSection(
+		absPath, id,
+		bugreport.HasArtifact(artifacts, "trace.redacted.jsonl"),
+		bugreport.HasArtifact(artifacts, "application-anchor.json"),
+	); err != nil {
 		return m.bugBlock(fmt.Sprintf("filed %s, but could not append artifact links: %v", displayPath, err)), m, nil
 	}
 
@@ -193,6 +198,9 @@ func tuiBugBody(m RootModel, desc string) string {
 	if m.traceFilePath != "" {
 		fmt.Fprintf(&sb, "- Trace: `%s`\n", filepath.ToSlash(m.traceFilePath))
 	}
+	if projection := m.applicationProjection; projection != nil {
+		fmt.Fprintf(&sb, "- Semantic ref: `%s`\n", m.currentApplicationSemanticRef())
+	}
 	sb.WriteString("\nSee the attached TUI transcript and context evidence captured at filing time.\n")
 	return bugreport.ScrubText(sb.String())
 }
@@ -261,11 +269,42 @@ func (m RootModel) bugArtifacts(runtime reportmeta.Snapshot, traceJSON []byte) [
 	} else {
 		data = append(data, '\n')
 	}
-	return []bugreport.Artifact{
+	artifacts := []bugreport.Artifact{
 		{Name: "transcript.md", Data: []byte(bugreport.ScrubText(m.transcript.AllContent())), Label: "TUI transcript (scrubbed)"},
 		{Name: "context.json", Data: []byte(bugreport.ScrubText(string(data))), Label: "TUI session context"},
 		{Name: "trace.redacted.jsonl", Data: traceJSON, Label: "Depersonalized session trace (redacted)"},
 	}
+	if anchor := m.applicationBugAnchor(); len(anchor) > 0 {
+		artifacts = append(artifacts, bugreport.Artifact{
+			Name: "application-anchor.json", Data: anchor,
+			Label: "Canonical application semantic anchor",
+		})
+	}
+	return artifacts
+}
+
+func (m RootModel) applicationBugAnchor() []byte {
+	if m.applicationProjection == nil || m.orch == nil || m.orch.AppDef() == nil {
+		return nil
+	}
+	def := m.orch.AppDef()
+	var policy *app.ApplicationFeedbackPolicy
+	if def.Application != nil {
+		policy = def.Application.Feedback
+	}
+	attachment, err := applicationfeedback.BuildAttachment(
+		m.applicationProjection.Canonical,
+		m.currentApplicationSemanticRef(),
+		policy,
+	)
+	if err != nil {
+		return nil
+	}
+	raw, err := json.MarshalIndent(attachment, "", "  ")
+	if err != nil {
+		return nil
+	}
+	return append(raw, '\n')
 }
 
 func (m RootModel) depersonalizedBugTraceJSON() []byte {
@@ -291,11 +330,14 @@ func (m RootModel) depersonalizedBugTraceJSON() []byte {
 	return nil
 }
 
-func appendTUIArtifactsSection(absPath, id string, hasTrace bool) error {
+func appendTUIArtifactsSection(absPath, id string, hasTrace, hasApplicationAnchor bool) error {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "\n## Artifacts\n\n- `./%s.artifacts/transcript.md` - scrubbed TUI transcript at filing time\n- `./%s.artifacts/context.json` - TUI session metadata\n", id, id)
 	if hasTrace {
 		fmt.Fprintf(&sb, "- `./%s.artifacts/trace.redacted.jsonl` - depersonalized session trace\n", id)
+	}
+	if hasApplicationAnchor {
+		fmt.Fprintf(&sb, "- `./%s.artifacts/application-anchor.json` - canonical application semantic anchor\n", id)
 	}
 	f, err := os.OpenFile(absPath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {

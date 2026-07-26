@@ -1,10 +1,13 @@
 package orchestrator
 
 import (
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
 	"kitsoki/internal/expr"
+	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
 	"kitsoki/internal/world"
 )
@@ -87,6 +90,61 @@ func rerenderHostArgs(hc machine.HostInvocation, w world.World) (map[string]any,
 		out[k] = resolved
 	}
 	return out, fellBack
+}
+
+func selectHostOutcome(hc machine.HostInvocation, result host.Result, w world.World) (string, string, error) {
+	if len(hc.Outcomes) == 0 {
+		return "", "", nil
+	}
+	env, ok := hc.Env.(expr.Env)
+	if !ok {
+		return "", "", fmt.Errorf("host outcome %q: expression environment is unavailable", hc.Namespace)
+	}
+	env.World = w.Vars
+	env.Result = make(map[string]any, len(result.Data)+1)
+	for key, value := range result.Data {
+		env.Result[key] = value
+	}
+	env.Result["error"] = result.Error
+
+	names := make([]string, 0, len(hc.Outcomes))
+	for name := range hc.Outcomes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var (
+		matchedName, matchedTarget string
+		defaultName, defaultTarget string
+	)
+	for _, name := range names {
+		outcome := hc.Outcomes[name]
+		if outcome == nil {
+			continue
+		}
+		if outcome.Default {
+			defaultName, defaultTarget = name, outcome.Target
+			continue
+		}
+		program, err := expr.CompileBool(outcome.When)
+		if err != nil {
+			return "", "", fmt.Errorf("host outcome %q.%s compile: %w", hc.Namespace, name, err)
+		}
+		matches, err := expr.EvalBool(program, env)
+		if err != nil {
+			return "", "", fmt.Errorf("host outcome %q.%s evaluate: %w", hc.Namespace, name, err)
+		}
+		if !matches {
+			continue
+		}
+		if matchedName != "" {
+			return "", "", fmt.Errorf("host outcome %q is ambiguous: %q and %q both match", hc.Namespace, matchedName, name)
+		}
+		matchedName, matchedTarget = name, outcome.Target
+	}
+	if matchedName != "" {
+		return matchedName, matchedTarget, nil
+	}
+	return defaultName, defaultTarget, nil
 }
 
 // resolveTemplateValueLeafFallback recurses into maps/slices and renders any

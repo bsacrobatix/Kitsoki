@@ -107,9 +107,10 @@ type sessionRuntime struct {
 	// "OrchestratorDriver directly" path the proposal names.
 	driver rsserver.Driver
 
-	jobStore  *jobs.JobStore
-	scheduler jobs.Scheduler
-	chatStore *chats.Store
+	jobStore     *jobs.JobStore
+	scheduler    jobs.Scheduler
+	chatStore    *chats.Store
+	hostRegistry *host.Registry
 
 	// lastTurnErr is the orchestrator error from the most recent
 	// drive/submit/continue (nil on success). turnResponse surfaces it as
@@ -125,6 +126,9 @@ type sessionRuntime struct {
 	// session.drive returned a bounded-wait response. Single in-flight turn per
 	// handle.
 	inFlight *suspendBroker
+	// activeTurnCancel aborts the detached turn owned by inFlight. Application
+	// interrupt events use the same cancellation lever as request timeout.
+	activeTurnCancel context.CancelFunc
 
 	closers []func()
 }
@@ -286,6 +290,7 @@ func newSessionRuntime(ctx context.Context, storyPath, tracePath string, h harne
 	rt.chatStore = chatStore
 
 	hostReg := host.NewRegistry()
+	rt.hostRegistry = hostReg
 	host.RegisterBuiltins(hostReg)
 	host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 	// Test-only injection seam: a flow/cassette test registers an extra host
@@ -647,6 +652,11 @@ func (rt *sessionRuntime) turnSuspendableResult(ctx context.Context, input strin
 	// request times out before any result/question, cancel the hidden turn rather
 	// than leaving it to mutate the session later.
 	turnBase, cancelTurn := context.WithCancel(context.WithoutCancel(ctx))
+	rt.mu.Lock()
+	if rt.inFlight == broker {
+		rt.activeTurnCancel = cancelTurn
+	}
+	rt.mu.Unlock()
 	turnCtx := host.WithOperatorPrompter(turnBase, prompter)
 	turnCtx = host.WithKitsokiSessionID(turnCtx, string(rt.sid))
 	go func() {
@@ -687,7 +697,22 @@ func (rt *sessionRuntime) clearInFlightIf(broker *suspendBroker) {
 	defer rt.mu.Unlock()
 	if rt.inFlight == broker {
 		rt.inFlight = nil
+		rt.activeTurnCancel = nil
 	}
+}
+
+func (rt *sessionRuntime) interruptActiveTurn() bool {
+	if rt == nil {
+		return false
+	}
+	rt.mu.Lock()
+	cancel := rt.activeTurnCancel
+	rt.mu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
 }
 
 func (rt *sessionRuntime) driveSnapshot() (driveSnapshot, error) {

@@ -284,15 +284,18 @@ func substituteState(tpl *State, params map[string]any, next map[string]string) 
 		return nil, nil
 	}
 	out := &State{
-		Type:          tpl.Type,
-		Mode:          tpl.Mode,
-		Description:   substString(tpl.Description, params, next),
-		View:          substView(tpl.View, params, next),
-		Terminal:      tpl.Terminal,
-		Initial:       substString(tpl.Initial, params, next),
-		RelevantWorld: append([]string(nil), tpl.RelevantWorld...),
-		RelevantSlots: append([]string(nil), tpl.RelevantSlots...),
-		Menu:          append([]string(nil), tpl.Menu...),
+		Type:           tpl.Type,
+		Mode:           tpl.Mode,
+		Description:    substString(tpl.Description, params, next),
+		Implements:     append([]string(nil), tpl.Implements...),
+		RoomTemplate:   substString(tpl.RoomTemplate, params, next),
+		RoomParameters: cloneAnyMap(tpl.RoomParameters),
+		View:           substView(tpl.View, params, next),
+		Terminal:       tpl.Terminal,
+		Initial:        substString(tpl.Initial, params, next),
+		RelevantWorld:  append([]string(nil), tpl.RelevantWorld...),
+		RelevantSlots:  append([]string(nil), tpl.RelevantSlots...),
+		Menu:           append([]string(nil), tpl.Menu...),
 	}
 	if tpl.Timeout != nil {
 		t := *tpl.Timeout
@@ -406,6 +409,25 @@ func substEffect(eff Effect, params map[string]any, next map[string]string) Effe
 			out.Bind[substString(k, params, next)] = substString(v, params, next)
 		}
 	}
+	if len(eff.Result) > 0 {
+		out.Result = make(map[string]EffectResultField, len(eff.Result))
+		for k, v := range eff.Result {
+			out.Result[substString(k, params, next)] = v
+		}
+	}
+	if len(eff.Outcomes) > 0 {
+		out.Outcomes = make(map[string]*EffectOutcome, len(eff.Outcomes))
+		for name, outcome := range eff.Outcomes {
+			if outcome == nil {
+				out.Outcomes[substString(name, params, next)] = nil
+				continue
+			}
+			clone := *outcome
+			clone.When = substString(clone.When, params, next)
+			clone.Target = substString(clone.Target, params, next)
+			out.Outcomes[substString(name, params, next)] = &clone
+		}
+	}
 	// OnComplete is a list of follow-up effects fired when a background
 	// job terminates. Recurse so each child gets full substitution —
 	// including its own Target / nested OnComplete / With / etc. Order
@@ -414,6 +436,12 @@ func substEffect(eff Effect, params map[string]any, next map[string]string) Effe
 		out.OnComplete = make([]Effect, 0, len(eff.OnComplete))
 		for _, child := range eff.OnComplete {
 			out.OnComplete = append(out.OnComplete, substEffect(child, params, next))
+		}
+	}
+	if len(eff.Effects) > 0 {
+		out.Effects = make([]Effect, 0, len(eff.Effects))
+		for _, child := range eff.Effects {
+			out.Effects = append(out.Effects, substEffect(child, params, next))
 		}
 	}
 	return out

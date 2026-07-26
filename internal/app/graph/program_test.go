@@ -162,6 +162,48 @@ func TestProgramGraphSemanticProvenanceAndDeterminism(t *testing.T) {
 	t.Fatal("card node not found")
 }
 
+func TestProgramGraphPreservesComposedMemberProvenance(t *testing.T) {
+	def := programDef()
+	page := def.Application.Pages["dashboard"]
+	page.Origin = app.ApplicationMemberOrigin{
+		Story: "child", Member: "application.pages.dashboard",
+	}
+	page.Regions["main"].Items[0].Card.Origin = app.ApplicationMemberOrigin{
+		Story: "child", Member: "application.pages.dashboard.regions.main.items[0].card",
+	}
+	component := def.Application.Components["pog.change-list"]
+	component.SemanticRef = "child.component.change-list"
+	component.Origin = app.ApplicationMemberOrigin{
+		Story: "pog", Member: "overrides.application.components.child.change-list",
+	}
+
+	g := graph.ProgramGraph(def, "pog")
+	assertSource := func(ref, story, source string) {
+		t.Helper()
+		for _, node := range g.Nodes {
+			if node.Ref.Ref != ref {
+				continue
+			}
+			if node.Attrs["story"] != story || node.Attrs["source"] != source {
+				t.Fatalf("%s provenance = %#v", ref, node.Attrs)
+			}
+			return
+		}
+		t.Fatalf("node %q not found", ref)
+	}
+	assertSource("pog.page.dashboard", "child", "application.pages.dashboard")
+	assertSource(
+		"pog.card.active",
+		"child",
+		"application.pages.dashboard.regions.main.items[0].card",
+	)
+	assertSource(
+		"child.component.change-list",
+		"pog",
+		"overrides.application.components.child.change-list",
+	)
+}
+
 func TestProgramGraphWireShape(t *testing.T) {
 	g := graph.ProgramGraph(programDef(), "pog")
 	blob, err := json.Marshal(g)
@@ -180,6 +222,51 @@ func TestProgramGraphWireShape(t *testing.T) {
 	}
 }
 
+func TestProgramGraphIncludesInterfacesOutcomesAndApplicationReads(t *testing.T) {
+	def := programDef()
+	def.RoomInterfaces = map[string]*app.RoomInterfaceDef{
+		"reviewer": {Intents: map[string]app.Intent{"open_change": {}}},
+	}
+	def.States["ready"].Implements = []string{"reviewer"}
+	def.States["ready"].OnEnter[0].Outcomes = map[string]*app.EffectOutcome{
+		"ok": {Default: true, Target: "ready"},
+	}
+	def.Application.Actions["pog.change.open"].RoomInterface = "reviewer"
+	card := def.Application.Pages["dashboard"].Regions["main"].Items[0].Card
+	card.Elements = []app.ViewElement{{Kind: "prose", Source: "{{ world.change_id }}"}}
+
+	g := graph.ProgramGraph(def, "program")
+	if !hasProgramNode(g, "room-interface", "reviewer") {
+		t.Error("missing room-interface node")
+	}
+	for _, kind := range []string{"implements", "produces", "targets-interface"} {
+		if !hasProgramEdgeKind(g, kind) {
+			t.Errorf("missing edge kind %q", kind)
+		}
+	}
+	if !hasProgramEdge(g, "reads", "pog.card.active", "change_id") {
+		t.Error("card element world read is absent")
+	}
+}
+
+func TestProgramLintsCoverReachabilityDeadlockUIAndSemanticQuality(t *testing.T) {
+	def := programDef()
+	def.States["orphan"] = &app.State{}
+	def.Application.Actions["pog.unused"] = &app.ApplicationAction{
+		Name: "Unused", Description: "Unused", SemanticRef: "pog.action.unused",
+	}
+	lints := graph.ProgramLints(def)
+	for _, code := range []string{"state-unreachable", "state-deadlock", "action-unoffered", "semantic-copy-repeated"} {
+		if !hasLintCode(lints, code) {
+			t.Errorf("missing lint %q in %#v", code, lints)
+		}
+	}
+	program := graph.ProgramGraph(def, "program")
+	if metaLints, ok := program.Meta["lints"].([]graph.ProgramLint); !ok || len(metaLints) == 0 {
+		t.Fatalf("program graph lint metadata = %#v", program.Meta["lints"])
+	}
+}
+
 func hasProgramNode(g graph.KitsokiGraph, kind, ref string) bool {
 	for _, node := range g.Nodes {
 		if node.Kind == kind && node.Ref.Ref == ref {
@@ -192,6 +279,28 @@ func hasProgramNode(g graph.KitsokiGraph, kind, ref string) bool {
 func hasProgramEdgeKind(g graph.KitsokiGraph, kind string) bool {
 	for _, edge := range g.Edges {
 		if edge.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func hasProgramEdge(g graph.KitsokiGraph, kind, sourceRef, targetRef string) bool {
+	nodes := map[string]string{}
+	for _, node := range g.Nodes {
+		nodes[node.ID] = node.Ref.Ref
+	}
+	for _, edge := range g.Edges {
+		if edge.Kind == kind && nodes[edge.Source] == sourceRef && nodes[edge.Target] == targetRef {
+			return true
+		}
+	}
+	return false
+}
+
+func hasLintCode(lints []graph.ProgramLint, code string) bool {
+	for _, lint := range lints {
+		if lint.Code == code {
 			return true
 		}
 	}

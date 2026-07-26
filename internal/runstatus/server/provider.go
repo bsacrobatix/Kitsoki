@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
+	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/study"
@@ -61,6 +63,17 @@ type SessionProvider interface {
 // therefore return an empty list through the RPC surface.
 type ArtifactJobProvider interface {
 	ListArtifactJobs(ctx context.Context) ([]ArtifactJobSummary, error)
+}
+
+// ApplicationEventSchedulerProvider exposes the session-owned scheduler used
+// by generated background application events. Live and daemon providers should
+// return the same scheduler already attached to that session runtime.
+type ApplicationEventSchedulerProvider interface {
+	ApplicationEventScheduler(sessionID string) (jobs.Scheduler, bool)
+}
+
+type ApplicationHostRegistryProvider interface {
+	ApplicationHostRegistry(sessionID string) (*host.Registry, bool)
 }
 
 // StudyProvider exposes the durable parent study coordinator. It remains

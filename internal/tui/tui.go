@@ -27,6 +27,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"kitsoki/internal/app"
+	appplatform "kitsoki/internal/application"
+	"kitsoki/internal/applicationnative"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
@@ -270,6 +272,18 @@ type RootModel struct {
 	initialTypedView *app.View
 	initialTypedEnv  expr.Env
 	initialTypedRR   *render.AppRenderer
+	// applicationProjection is the terminal-native view compiled from the
+	// canonical application frame. It replaces the room view when an
+	// application contract declares a TUI surface.
+	applicationProjection *applicationnative.TUIProjection
+	applicationRevision   uint64
+	applicationChoiceRef  string
+	applicationFocusedRef string
+	// applicationActionDispatcher is supplied by the command composition root
+	// and is backed by the shared application service. Keeping it injected
+	// prevents the TUI from bypassing handler policy, schema validation,
+	// idempotency, stale-frame checks, and receipt recording.
+	applicationActionDispatcher ApplicationActionDispatcher
 
 	// startupNotices are project/runtime notices printed once at TUI startup.
 	// They are intentionally outside the orchestrator transcript model: callers
@@ -559,6 +573,12 @@ func WithTUIClock(c clock.Clock) RootModelOption {
 	return func(m *RootModel) { m.clk = c }
 }
 
+// WithApplicationActionDispatcher wires the shared application action
+// boundary into the terminal projection.
+func WithApplicationActionDispatcher(dispatcher ApplicationActionDispatcher) RootModelOption {
+	return func(m *RootModel) { m.applicationActionDispatcher = dispatcher }
+}
+
 // WithJobStore wires a *jobs.JobStore into the RootModel for inbox panel
 // polling.  When omitted (or nil), the inbox panel stays hidden and no
 // database connection is required (headless tests, serve mode).
@@ -811,6 +831,7 @@ func WithResumedJourney(state app.StatePath, w world.World, turn app.TurnNumber)
 	return func(m *RootModel) {
 		m.resumed = true
 		m.currentState = state
+		m.applicationRevision = uint64(turn)
 		computedMenu := orchestrator.ComputeMenu(m.orch.AppDef(), m.orch.Machine(), state, w)
 		m.menu, _ = m.menu.Update(menuItemsChanged{items: computedMenu.Primary, blocked: computedMenu.Blocked})
 		m.refreshPromptPlaceholder()
@@ -900,6 +921,18 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 	for _, opt := range opts {
 		opt(&m)
 	}
+	if orch.AppDef().Application != nil {
+		projected, err := projectApplicationTUI(
+			orch.AppDef(), sid, m.applicationRevision, m.currentState, nil,
+		)
+		if err != nil {
+			slog.Warn("tui.application.project_initial", "err", err)
+		} else {
+			m.applicationProjection = projected
+			m.initialTypedView = &projected.Frame.View
+			initialView = ""
+		}
+	}
 
 	// Print a Claude-Code-style welcome banner into scrollback once
 	// at startup. It scrolls off naturally as content grows. Suppressed
@@ -937,6 +970,7 @@ func NewRootModel(orch *orchestrator.Orchestrator, sid app.SessionID, appPath, i
 				slog.Warn("tui.choice.open_initial", "err", err)
 			} else {
 				m.mode = ModeChoosing
+				m.captureApplicationChoiceFocus()
 				m.resetLiveOverlayRowLimit(liveOverlayPrompt)
 				typedForBody = viewWithoutChoice(m.initialTypedView)
 				// Snapshot whatever was in the prompt textarea (if
@@ -2933,14 +2967,29 @@ func (m RootModel) handleTurnOutcome(msg turnOutcomeMsg) (tea.Model, tea.Cmd) {
 		// body re-renders the static picker on top of the live widget.
 		// Off-path takes precedence (the help banner owns the pane).
 		typedForBody := out.TypedView
+		if m.orch.AppDef().Application != nil {
+			projected, err := projectApplicationTUI(
+				m.orch.AppDef(), m.sid, uint64(out.TurnNumber), out.NewState, out.AllowedIntents,
+			)
+			if err != nil {
+				slog.Warn("tui.application.project_turn", "err", err)
+			} else {
+				m.applicationProjection = projected
+				m.applicationRevision = uint64(out.TurnNumber)
+				m.applicationChoiceRef = ""
+				m.applicationFocusedRef = ""
+				typedForBody = &projected.Frame.View
+			}
+		}
 		if m.mode != ModeOffPath {
-			if el, ok := findChoiceElement(out.TypedView); ok {
+			if el, ok := findChoiceElement(typedForBody); ok {
 				if err := m.choice.Open(el, out.RenderEnv, out.Renderer); err != nil {
 					slog.Warn("tui.choice.open", "err", err)
 				} else {
 					m.mode = ModeChoosing
+					m.captureApplicationChoiceFocus()
 					m.resetLiveOverlayRowLimit(liveOverlayPrompt)
-					typedForBody = viewWithoutChoice(out.TypedView)
+					typedForBody = viewWithoutChoice(typedForBody)
 					// Snapshot the textarea draft (if any) so /input
 					// can restore it; then clear so the user can't
 					// type into an inert field while the widget owns
@@ -4644,9 +4693,8 @@ func (m RootModel) updateDisambiguating(msg tea.Msg) (tea.Model, tea.Cmd) {
 //     user can type freely; the prior draft remains in m.pendingDraft.
 //   - Cancel == true: Esc was pressed. Close the widget and return to
 //     ModeOnPath, restoring the pre-widget draft.
-//   - Cancel == false: the user finalised. Dispatch through
-//     asyncSubmitDirect, the same call dispatchMenuEntry uses for the
-//     right-pane menu (dispatch parity).
+//   - Cancel == false: the user finalised. Story-native choices dispatch
+//     directly; application actions use the injected shared service boundary.
 func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -4678,6 +4726,7 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var commit *ChoiceCommit
 		var cmd tea.Cmd
 		m.choice, cmd, commit = m.choice.Update(msg)
+		m.captureApplicationChoiceFocus()
 
 		if commit == nil {
 			return m, cmd
@@ -4716,10 +4765,62 @@ func (m RootModel) updateChoosing(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Commit — finalise the widget and dispatch.
 		m.choice.Close()
 		m.transcript.AppendBlock(body)
+		intent := commit.Intent
 		display := commit.Intent
+		if strings.HasPrefix(commit.Intent, appplatform.TUIActionIntentPrefix) {
+			actionID := strings.TrimPrefix(commit.Intent, appplatform.TUIActionIntentPrefix)
+			if m.applicationProjection == nil {
+				m.mode = ModeOnPath
+				m.transcript.AppendError("", "application action is unavailable")
+				return m, nil
+			}
+			action, ok := m.applicationProjection.Canonical.FindOfferedAction(actionID)
+			if !ok {
+				m.mode = ModeOnPath
+				m.transcript.AppendError("", fmt.Sprintf("application action %q is unavailable", actionID))
+				return m, nil
+			}
+			m.applicationFocusedRef = action.Semantic.Ref
+			if m.applicationActionDispatcher == nil {
+				m.mode = ModeOnPath
+				m.transcript.AppendError("", "application action dispatcher is unavailable")
+				return m, nil
+			}
+			input, err := json.Marshal(commit.Slots)
+			if err != nil {
+				m.mode = ModeOnPath
+				m.transcript.AppendError("", fmt.Sprintf("encode application action input: %v", err))
+				return m, nil
+			}
+			envelope := appplatform.ActionEnvelope{
+				Action: action.ID, SessionID: string(m.sid),
+				Input:         input,
+				FrameRevision: m.applicationProjection.Canonical.Revision,
+				RoutingMode:   action.RoutingMode,
+			}
+			display = action.Semantic.Name
+			m.lastInput = display
+			next, asyncCmd := startAsyncTurn(m, display,
+				func(ctx context.Context) (*orchestrator.TurnOutcome, error) {
+					result, dispatchErr := m.applicationActionDispatcher(ctx, envelope)
+					if dispatchErr != nil {
+						return nil, dispatchErr
+					}
+					if result.View == nil {
+						return nil, fmt.Errorf("application action %q returned no settled view", actionID)
+					}
+					return result.View, nil
+				},
+				pendingDeterministic,
+			)
+			if cmd == nil {
+				return next, asyncCmd
+			}
+			return next, tea.Batch(cmd, asyncCmd)
+		}
 		m.lastInput = display
 		next, asyncCmd := startAsyncTurn(m, display,
-			asyncSubmitDirect(m.orch, m.sid, commit.Intent, commit.Slots),
+			asyncSubmitDirect(m.orch, m.sid, intent, commit.Slots),
 			pendingDeterministic,
 		)
 		if cmd == nil {

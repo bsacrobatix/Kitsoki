@@ -77,6 +77,21 @@
         "category": "Kitsoki"
       },
       {
+        "command": "kitsoki.refreshApplicationCommands",
+        "title": "Kitsoki: Refresh Application Commands",
+        "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.openApplication",
+        "title": "Kitsoki: Open Application",
+        "category": "Kitsoki"
+      },
+      {
+        "command": "kitsoki.reportApplicationFeedback",
+        "title": "Kitsoki: Report Application Feedback",
+        "category": "Kitsoki"
+      },
+      {
         "command": "kitsoki.diff.accept",
         "title": "Kitsoki: Accept Change",
         "category": "Kitsoki",
@@ -168,7 +183,7 @@
     "typecheck": "tsc --noEmit",
     "build": "node esbuild.mjs",
     "package": "pnpm dlx @vscode/vsce@^3 package --no-dependencies",
-    "test": "node --test --import tsx tests/relay.unit.test.ts tests/bridge-relay.integration.test.ts tests/ide-server.unit.test.ts tests/spa-visual.unit.test.ts tests/discover.unit.test.ts tests/backend-resolve.unit.test.ts tests/diff-mode-a.unit.test.ts tests/panel-layout.unit.test.ts",
+    "test": "node --test --import tsx tests/relay.unit.test.ts tests/bridge-relay.integration.test.ts tests/ide-server.unit.test.ts tests/spa-visual.unit.test.ts tests/discover.unit.test.ts tests/backend-resolve.unit.test.ts tests/diff-mode-a.unit.test.ts tests/panel-layout.unit.test.ts tests/application-host.unit.test.ts tests/application-conformance.unit.test.ts",
     "test:bridge": "node --test --import tsx tests/ide-bridge.e2e.test.ts",
     "playwright": "playwright test",
     "e2e": "KITSOKI_VSCODE_PACE=0 playwright test vscode-tour.e2e"

@@ -64,6 +64,26 @@ A room's `view` becomes on-screen text through `internal/render/`:
 3. The blocks layer styles that text (e.g. `AgentTurn`) and appends it
    to the transcript.
 
+## Story application projection
+
+Stories with an `application/v1` contract also expose a canonical terminal
+projection. Navigation, regions, cards, forms, status, tables, artifacts, and
+actions are derived from `application-frame/v1`; unavailable custom web
+components use their declared finite typed-element fallback. The projection
+retains semantic refs and frame revisions and dispatches through the shared
+application service, so terminal actions receive the same stale-frame, schema,
+policy, routing, idempotency, outcome, and receipt behavior as web, VS Code,
+CLI, MCP, and JSON-RPC.
+
+The interactive TUI mounts this projection for fresh and resumed sessions.
+Application feedback added through `/bug` includes the canonical application
+semantic anchor in the reviewed attachment rather than copying component props,
+field values, world snapshots, credentials, or local paths.
+
+See [Story applications](../stories/applications.md) for authoring and
+[Application runtime](../architecture/application-runtime.md) for dispatch and
+conformance boundaries.
+
 ## The `/command` surface
 
 Commands are the primary control surface. They come in a few flavours

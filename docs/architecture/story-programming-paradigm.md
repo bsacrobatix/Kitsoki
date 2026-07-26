@@ -346,11 +346,12 @@ as optional evidence. Descriptions and privacy-approved context are available
 to operator surfaces and agents without exposing arbitrary component props or
 world state.
 
-The design is tracked in
-[`story-application-platform`](../proposals/story-application-platform.md).
-Its POG acceptance gate is the falsifiable test: every product UI/API
-surface must have story provenance, deterministic fallbacks, and the
-same cross-transport outcome receipts.
+The shipped design is documented in
+[Story applications](../stories/applications.md) and
+[Application runtime](application-runtime.md). Its external POG acceptance
+target remains falsifiable: every product UI/API surface must have story
+provenance, deterministic fallbacks, and the same cross-transport outcome
+receipts.
 
 The common thread: each caveat is a place where a property currently
 holds *by authoring discipline*, and the fix in every case is the

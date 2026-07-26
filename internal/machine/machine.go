@@ -89,6 +89,10 @@ type HostInvocation struct {
 	// Bind maps world variable names to keys in the host result's Data map.
 	// e.g. bind: {workspace: "id"} copies result.Data["id"] into world["workspace"].
 	Bind map[string]string `json:"bind,omitempty"`
+	// Outcomes is the loader-validated finite result partition for this call.
+	// The orchestrator evaluates it after applying binds and transitions to the
+	// selected target. Nil preserves legacy invoke behavior.
+	Outcomes map[string]*app.EffectOutcome `json:"outcomes,omitempty"`
 	// OnError is a state path to transition to when the host returns an error.
 	// When non-empty and the host fails, the machine should transition there
 	// rather than erroring out. Before the redirect the engine sets the
@@ -2675,6 +2679,7 @@ func (m *machineImpl) applyEffectsTracedWithOptions(ctx context.Context, effects
 				Env:           env,
 				WorldSnapshot: worldSnapshot,
 				Bind:          eff.Bind,
+				Outcomes:      eff.Outcomes,
 				OnError:       eff.OnError,
 				AckError:      eff.AckError,
 				EmitEvent:     eff.Emit,

@@ -9,6 +9,8 @@ import * as vscode from 'vscode';
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as net from 'node:net';
 import { resolveBinary, binaryEnv, spawnErrorHint, resolveStoriesDir } from './backend-resolve';
+import { readSse } from './relay';
+import type { ApplicationBundle } from './application-host';
 export { resolveBinary, binaryEnv, spawnErrorHint, resolveStoriesDir } from './backend-resolve';
 
 export interface BackendConfig {
@@ -31,6 +33,10 @@ export interface StoryHeader {
   app_id: string;
   title: string;
   active_sessions: string[];
+}
+
+export interface BackendSubscription {
+  dispose(): void;
 }
 
 /** Read the extension settings into a BackendConfig. */
@@ -137,6 +143,99 @@ export class Backend {
     const json = (await res.json()) as { result?: T; error?: { message: string } };
     if (json.error) throw new Error(json.error.message);
     return json.result as T;
+  }
+
+  // Resolve and validate the production application bundle served by the
+  // backend. VS Code reuses this exact web build instead of locating files in
+  // the workspace or reconstructing a presentation.
+  async applicationBundle(applicationId: string): Promise<ApplicationBundle> {
+    const base = await this.start();
+    const root = `${base}/application/${encodeURIComponent(applicationId)}`;
+    const response = await fetch(`${root}/application-manifest.json`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`application bundle ${applicationId}: HTTP ${response.status}`);
+    const manifest = await response.json() as Omit<ApplicationBundle, 'entryURL'>;
+    if (
+      manifest.schema !== 'application-bundle/v1' ||
+      manifest.application_id !== applicationId ||
+      !manifest.entry ||
+      !Array.isArray(manifest.files) ||
+      !manifest.files.includes(manifest.entry)
+    ) {
+      throw new Error(`application bundle ${applicationId}: invalid manifest`);
+    }
+    return { ...manifest, entryURL: `${root}/${manifest.entry}` };
+  }
+
+  /**
+   * Follow the backend's canonical current-session signal. This is the same
+   * subscription/SSE contract used by the shared SPA, so native commands track
+   * sessions selected from a webview or another attached surface.
+   */
+  subscribeCurrentSession(onChange: (sessionId: string | null) => void): BackendSubscription {
+    let closed = false;
+    let subscriptionId = '';
+    let controller: AbortController | undefined;
+
+    const unsubscribe = async () => {
+      const id = subscriptionId;
+      subscriptionId = '';
+      if (!id) return;
+      try {
+        await this.rpc('runstatus.session.current.unsubscribe', { subscription_id: id });
+      } catch {
+        // The backend may already be restarting; its closed stream is sufficient cleanup.
+      }
+    };
+    const follow = async () => {
+      while (!closed) {
+        try {
+          const subscribed = await this.rpc<{ subscription_id: string }>(
+            'runstatus.session.current.subscribe',
+            {},
+          );
+          if (closed) {
+            subscriptionId = subscribed.subscription_id;
+            await unsubscribe();
+            return;
+          }
+          subscriptionId = subscribed.subscription_id;
+          const base = await this.start();
+          controller = new AbortController();
+          const response = await fetch(
+            `${base}/rpc/session-current?subscription_id=${encodeURIComponent(subscriptionId)}`,
+            { headers: { accept: 'text/event-stream' }, signal: controller.signal },
+          );
+          if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+          await readSse(response.body, (raw) => {
+            try {
+              const frame = JSON.parse(raw) as {
+                method?: string;
+                params?: { session_id?: string | null };
+              };
+              if (frame.method === 'runstatus.session.changed') {
+                onChange(frame.params?.session_id ?? null);
+              }
+            } catch {
+              // Ignore malformed event frames.
+            }
+          }, controller.signal);
+        } catch (error) {
+          if (!closed) this.out.appendLine(`[backend] current-session stream: ${(error as Error).message}`);
+        } finally {
+          controller = undefined;
+          if (!closed) await unsubscribe();
+        }
+        if (!closed) await sleep(250);
+      }
+    };
+    void follow();
+    return {
+      dispose: () => {
+        closed = true;
+        controller?.abort();
+        void unsubscribe();
+      },
+    };
   }
 
   private async doStart(): Promise<string> {

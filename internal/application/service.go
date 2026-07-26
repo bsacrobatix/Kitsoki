@@ -57,7 +57,7 @@ func (s Service) Call(ctx context.Context, transport Transport, request CallRequ
 		Actor: request.Actor, Transport: transport, RoutingMode: request.RoutingMode,
 		IdempotencyKey: request.IdempotencyKey,
 	})
-	return s.attachCurrentFrame(ctx, request.SessionID, outcome, err)
+	return s.attachCurrentFrame(ctx, outcome.Receipt.SessionID, outcome, err)
 }
 
 func (s Service) DispatchAction(ctx context.Context, transport Transport, envelope ActionEnvelope) (OutcomeEnvelope, error) {
@@ -72,6 +72,19 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 	if err != nil {
 		return OutcomeEnvelope{}, err
 	}
+	if len(action.InputSchema) > 0 {
+		input, normalizeErr := NormalizeJSON(envelope.Input)
+		if normalizeErr != nil {
+			return OutcomeEnvelope{}, normalizeErr
+		}
+		if s.Registry == nil || s.Registry.deps.Schemas == nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: schema validator is required for action %q", action.ID)
+		}
+		if validateErr := s.Registry.deps.Schemas.Validate(ctx, action.InputSchema, input); validateErr != nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: validate action %q input: %w", action.ID, validateErr)
+		}
+		envelope.Input = input
+	}
 	if action.Handler == "" {
 		if s.Intents == nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: intent dispatcher is required for action %q", action.ID)
@@ -80,16 +93,6 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 	}
 	if s.Registry == nil {
 		return OutcomeEnvelope{}, fmt.Errorf("application: registry is required for handler action %q", action.ID)
-	}
-	if s.Registry.deps.Schemas != nil && len(action.InputSchema) > 0 {
-		input, normalizeErr := NormalizeJSON(envelope.Input)
-		if normalizeErr != nil {
-			return OutcomeEnvelope{}, normalizeErr
-		}
-		if validateErr := s.Registry.deps.Schemas.Validate(ctx, action.InputSchema, input); validateErr != nil {
-			return OutcomeEnvelope{}, fmt.Errorf("application: validate action %q input: %w", action.ID, validateErr)
-		}
-		envelope.Input = input
 	}
 	routingMode := envelope.RoutingMode
 	if routingMode == "" {
@@ -101,7 +104,7 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 		IdempotencyKey: envelope.IdempotencyKey, FrameRevision: envelope.FrameRevision,
 	})
 	if outcome.Frame == nil {
-		refreshed, frameErr := s.Frames.CurrentFrame(ctx, envelope.SessionID)
+		refreshed, frameErr := s.Frames.CurrentFrame(ctx, outcome.Receipt.SessionID)
 		if frameErr != nil && err == nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: refresh frame: %w", frameErr)
 		}
@@ -109,6 +112,7 @@ func (s Service) DispatchAction(ctx context.Context, transport Transport, envelo
 			outcome.Frame = &refreshed
 		}
 	}
+	annotateBudgetFrame(&outcome)
 	return outcome, err
 }
 
@@ -117,7 +121,7 @@ func (s Service) DispatchEvent(ctx context.Context, envelope EventEnvelope) (Out
 		return OutcomeEnvelope{}, fmt.Errorf("application: registry is required")
 	}
 	outcome, err := s.Registry.DispatchEvent(ctx, envelope.Event, envelope.Input, envelope.SessionID, envelope.Actor)
-	return s.attachCurrentFrame(ctx, envelope.SessionID, outcome, err)
+	return s.attachCurrentFrame(ctx, outcome.Receipt.SessionID, outcome, err)
 }
 
 func (s Service) Inspect(ctx context.Context, sessionID, ref string, relationshipLimit int) (SemanticInspection, bool, error) {
@@ -138,6 +142,7 @@ func (s Service) attachCurrentFrame(
 	invocationErr error,
 ) (OutcomeEnvelope, error) {
 	if outcome.Frame != nil || s.Frames == nil || sessionID == "" {
+		annotateBudgetFrame(&outcome)
 		return outcome, invocationErr
 	}
 	frame, err := s.Frames.CurrentFrame(ctx, sessionID)
@@ -148,5 +153,16 @@ func (s Service) attachCurrentFrame(
 		return OutcomeEnvelope{}, fmt.Errorf("application: refresh frame: %w", err)
 	}
 	outcome.Frame = &frame
+	annotateBudgetFrame(&outcome)
 	return outcome, invocationErr
+}
+
+func annotateBudgetFrame(outcome *OutcomeEnvelope) {
+	if outcome == nil || outcome.Frame == nil {
+		return
+	}
+	outcome.Frame.Workflow.BudgetState = outcome.Receipt.Budget.Code
+	if outcome.Receipt.Budget.Reason != "" && outcome.Receipt.Budget.Code != "not_applicable" {
+		outcome.Frame.Workflow.Degradation = outcome.Receipt.Budget.Reason
+	}
 }

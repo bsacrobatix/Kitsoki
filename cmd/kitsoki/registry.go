@@ -47,6 +47,8 @@ import (
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/daemonfederation"
+	"kitsoki/internal/host"
+	"kitsoki/internal/jobs"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
@@ -1114,6 +1116,28 @@ func (r *SessionRegistry) Get(sessionID string) (server.Entry, bool) {
 		Frames:    e.frameRecorderLocked(),
 		Feedback:  e.feedbackSinkLocked(),
 	}, true
+}
+
+// ApplicationEventScheduler returns the durable SQLite-backed scheduler
+// already owned by the live session runtime.
+func (r *SessionRegistry) ApplicationEventScheduler(sessionID string) (jobs.Scheduler, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok || e.rt == nil || e.rt.Scheduler == nil {
+		return nil, false
+	}
+	return e.rt.Scheduler, true
+}
+
+func (r *SessionRegistry) ApplicationHostRegistry(sessionID string) (*host.Registry, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	e, ok := r.sessions[sessionID]
+	if !ok || e.rt == nil || e.rt.HostRegistry == nil {
+		return nil, false
+	}
+	return e.rt.HostRegistry, true
 }
 
 // CurrentSession implements [server.CurrentSessionProvider]: it returns the id of

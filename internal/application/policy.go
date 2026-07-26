@@ -102,6 +102,11 @@ func ValidateHandlerDefinition(def HandlerDefinition) error {
 	} else if def.Idempotency != "" {
 		return fmt.Errorf("application: %s handler %q may not declare idempotency policy", def.Effect, def.ID)
 	}
+	switch def.IdempotencyScope {
+	case "", "request", "session", "application":
+	default:
+		return fmt.Errorf("application: handler %q has invalid idempotency scope %q", def.ID, def.IdempotencyScope)
+	}
 	if def.Retryable {
 		if def.Effect != EffectExternal {
 			return fmt.Errorf("application: retryable handler %q must have external effect", def.ID)
@@ -135,6 +140,11 @@ func ValidateEventDefinition(def EventDefinition) error {
 	case EventBackground, EventInterrupt:
 	default:
 		return fmt.Errorf("application: event %q has invalid mode %q", def.ID, def.Mode)
+	}
+	if def.RoutingMode != "" {
+		if _, ok := routingStrength[def.RoutingMode]; !ok {
+			return fmt.Errorf("application: event %q has invalid routing mode %q", def.ID, def.RoutingMode)
+		}
 	}
 	return nil
 }

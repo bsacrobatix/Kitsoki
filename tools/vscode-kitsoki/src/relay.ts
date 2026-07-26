@@ -50,7 +50,7 @@ function joinUrl(base: string, path: string): string {
  * each parsed JSON `data:` payload. Resolves when the stream ends. `signal`
  * aborts the read.
  */
-async function readSse(
+export async function readSse(
   body: ReadableStream<Uint8Array>,
   onData: (payload: string) => void,
   signal?: AbortSignal,

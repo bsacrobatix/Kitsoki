@@ -41,34 +41,39 @@ type BudgetDecision struct {
 }
 
 type Receipt struct {
-	Schema         string         `json:"schema"`
-	ID             string         `json:"id"`
-	HandlerID      string         `json:"handler_id"`
-	SemanticRef    string         `json:"semantic_ref"`
-	SessionID      string         `json:"session_id,omitempty"`
-	Actor          string         `json:"actor,omitempty"`
-	Effect         EffectClass    `json:"effect"`
-	Routing        RoutingReceipt `json:"routing"`
-	Budget         BudgetDecision `json:"budget"`
-	IdempotencyKey string         `json:"idempotency_key,omitempty"`
-	InputDigest    string         `json:"input_digest"`
-	OutputDigest   string         `json:"output_digest"`
-	Transport      Transport      `json:"transport"`
-	EventID        string         `json:"event_id,omitempty"`
-	FrameRevision  uint64         `json:"frame_revision,omitempty"`
-	Outcome        string         `json:"outcome"`
+	Schema              string         `json:"schema"`
+	ID                  string         `json:"id"`
+	HandlerID           string         `json:"handler_id"`
+	SemanticRef         string         `json:"semantic_ref"`
+	SessionID           string         `json:"session_id,omitempty"`
+	Actor               string         `json:"actor,omitempty"`
+	Effect              EffectClass    `json:"effect"`
+	Routing             RoutingReceipt `json:"routing"`
+	Budget              BudgetDecision `json:"budget"`
+	IdempotencyKey      string         `json:"idempotency_key,omitempty"`
+	InputDigest         string         `json:"input_digest"`
+	OutputDigest        string         `json:"output_digest"`
+	Transport           Transport      `json:"transport"`
+	EventID             string         `json:"event_id,omitempty"`
+	EventMode           EventMode      `json:"event_mode,omitempty"`
+	FrameRevision       uint64         `json:"frame_revision,omitempty"`
+	Outcome             string         `json:"outcome"`
+	Replayed            bool           `json:"replayed,omitempty"`
+	ReplayOf            string         `json:"replay_of,omitempty"`
+	SelectedImplementor string         `json:"selected_implementor,omitempty"`
 }
 
 type OutcomeEnvelope struct {
-	Schema   string          `json:"schema"`
-	Handler  string          `json:"handler"`
-	Outcome  string          `json:"outcome"`
-	Output   json.RawMessage `json:"output,omitempty"`
-	Frame    *Frame          `json:"frame,omitempty"`
-	Children []ChildRun      `json:"children,omitempty"`
-	Join     *JoinState      `json:"join,omitempty"`
-	Error    *OutcomeError   `json:"error,omitempty"`
-	Receipt  Receipt         `json:"receipt"`
+	Schema              string          `json:"schema"`
+	Handler             string          `json:"handler"`
+	Outcome             string          `json:"outcome"`
+	Output              json.RawMessage `json:"output,omitempty"`
+	Frame               *Frame          `json:"frame,omitempty"`
+	Children            []ChildRun      `json:"children,omitempty"`
+	Join                *JoinState      `json:"join,omitempty"`
+	Error               *OutcomeError   `json:"error,omitempty"`
+	Receipt             Receipt         `json:"receipt"`
+	SelectedImplementor string          `json:"selected_implementor,omitempty"`
 }
 
 func NormalizeJSON(raw json.RawMessage) (json.RawMessage, error) {

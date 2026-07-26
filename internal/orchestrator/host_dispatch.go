@@ -262,6 +262,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 	var events []store.Event
 	applied := false
 	var redirect app.StatePath
+	redirectIntent := "on_error"
 	// unhandledFailure is set when a host call (infra or domain) fails with
 	// NO on_error: arc declared. It never changes control flow — the chain
 	// still continues to the next call in this on_enter block — but it tells
@@ -596,6 +597,10 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			applied = true
 		}
 
+		outcomeName, outcomeTarget, outcomeErr := selectHostOutcome(hc, res, w)
+		if outcomeErr != nil {
+			return events, w, "", "", outcomeErr
+		}
 		payload := map[string]any{"namespace": hc.Namespace, "effect": callEffect, "deterministic": callDeterministic}
 		if res.Error != "" {
 			payload["error"] = res.Error
@@ -603,7 +608,15 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		if res.Data != nil {
 			payload["data"] = res.Data
 		}
+		if outcomeName != "" {
+			payload["outcome"] = outcomeName
+		}
 		events = append(events, newOrchestratorEvent(store.HostReturned, payload, 0))
+		if outcomeTarget != "" {
+			redirect = app.StatePath(outcomeTarget)
+			redirectIntent = "outcome:" + outcomeName
+			break
+		}
 
 		// If the call failed and the author declared an `on_error:` arc,
 		// abort dispatch of the remaining calls in this on_enter block
@@ -690,7 +703,7 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 		// process restart.  resolvedRedirect captures the emit_intent-
 		// resolved leaf when the error state's on_enter chain emitted
 		// onward (P1-D); when no emit fired it equals `redirect`.
-		errEvents, errWorld, errView, resolvedRedirect, redirErr := o.enterRedirectState(ctx, sid, state, redirect, w)
+		errEvents, errWorld, errView, resolvedRedirect, redirErr := o.enterRedirectStateForIntent(ctx, sid, state, redirect, w, redirectIntent)
 		if redirErr != nil {
 			// Even on cap-fire / infra error, enterRedirectState may have
 			// produced events (notably the HarnessError carrying
@@ -715,7 +728,9 @@ func (o *Orchestrator) dispatchHostCalls(ctx context.Context, sid app.SessionID,
 			}
 			errView = v
 		}
-		errView = applyErrorBannerSeam(errView, w)
+		if redirectIntent == "on_error" {
+			errView = applyErrorBannerSeam(errView, w)
+		}
 		return events, w, errView, resolvedRedirect, nil
 	}
 
@@ -806,6 +821,10 @@ func (o *Orchestrator) prepareHostInvokeArgs(sid app.SessionID, state app.StateP
 // already routed it onward.  (P1-D from the dev-story-bugfix-unify Opus
 // review.)
 func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID, prior, target app.StatePath, w world.World) ([]store.Event, world.World, string, app.StatePath, error) {
+	return o.enterRedirectStateForIntent(ctx, sid, prior, target, w, "on_error")
+}
+
+func (o *Orchestrator) enterRedirectStateForIntent(ctx context.Context, sid app.SessionID, prior, target app.StatePath, w world.World, transitionIntent string) ([]store.Event, world.World, string, app.StatePath, error) {
 	// Bound recursion depth. Each on_error redirect that runs an
 	// on_enter chain whose host calls fail with another on_error: arc
 	// recurses through dispatchHostCalls → enterRedirectState. Without
@@ -877,7 +896,7 @@ func (o *Orchestrator) enterRedirectState(ctx context.Context, sid app.SessionID
 	events = append(events, newOrchestratorEvent(store.TransitionApplied, map[string]any{
 		"from":   string(prior),
 		"to":     string(target),
-		"intent": "on_error",
+		"intent": transitionIntent,
 	}, 0))
 
 	// Mirror the StateExited/StateEntered shape that machine.Turn emits
@@ -1004,6 +1023,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	var events []store.Event
 	applied := false
 	var redirect app.StatePath
+	redirectIntent := "on_error"
 	// unhandledFailure mirrors dispatchHostCalls' flag of the same name: set
 	// when a host call (infra or domain) fails with NO on_error: arc
 	// declared, so the post-loop render (when no redirect fired) is run
@@ -1196,6 +1216,10 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			applied = true
 		}
 
+		outcomeName, outcomeTarget, outcomeErr := selectHostOutcome(hc, res, w)
+		if outcomeErr != nil {
+			return summaries, events, w, "", "", outcomeErr
+		}
 		payload := map[string]any{"namespace": hc.Namespace, "effect": callEffect, "deterministic": callDeterministic}
 		if res.Error != "" {
 			payload["error"] = res.Error
@@ -1203,7 +1227,15 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 		if res.Data != nil {
 			payload["data"] = res.Data
 		}
+		if outcomeName != "" {
+			payload["outcome"] = outcomeName
+		}
 		events = append(events, newOrchestratorEvent(store.HostReturned, payload, 0))
+		if outcomeTarget != "" {
+			redirect = app.StatePath(outcomeTarget)
+			redirectIntent = "outcome:" + outcomeName
+			break
+		}
 
 		if res.Error != "" && hc.OnError != "" {
 			o.logger.DebugContext(ctx, trace.EvHostOnErrorRedirect,
@@ -1254,7 +1286,7 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 	}
 
 	if redirect != "" {
-		errEvents, errWorld, errView, resolvedRedirect, redirErr := o.enterRedirectState(ctx, "", state, redirect, w)
+		errEvents, errWorld, errView, resolvedRedirect, redirErr := o.enterRedirectStateForIntent(ctx, "", state, redirect, w, redirectIntent)
 		if redirErr != nil {
 			return summaries, events, w, "", "", redirErr
 		}
@@ -1268,7 +1300,9 @@ func (o *Orchestrator) dispatchHostCallsDetailed(ctx context.Context, calls []ma
 			}
 			errView = v
 		}
-		errView = applyErrorBannerSeam(errView, w)
+		if redirectIntent == "on_error" {
+			errView = applyErrorBannerSeam(errView, w)
+		}
 		return summaries, events, w, errView, resolvedRedirect, nil
 	}
 

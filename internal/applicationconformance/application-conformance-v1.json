@@ -1,0 +1,69 @@
+{
+  "schema": "application-conformance/v1",
+  "scenario": "wizard-action-background-event-feedback",
+  "application_id": "demo",
+  "session_id": "session-1",
+  "page": "home",
+  "frame_revision": 8,
+  "action": {
+    "id": "demo.open",
+    "handler": "demo.open-handler",
+    "semantic_ref": "demo.action.open",
+    "handler_semantic_ref": "demo.handler.open",
+    "input": {
+      "item_id": "item-1"
+    }
+  },
+  "event": {
+    "id": "item-updated",
+    "mode": "background",
+    "input": {
+      "item_id": "item-2"
+    }
+  },
+  "feedback": {
+    "ref": "demo.action.open",
+    "instruction": "The selected action is unclear.",
+    "kind": "bug",
+    "idempotency_key": "feedback-demo-action-open",
+    "excluded": [
+      "secret-prop",
+      "api-token",
+      "/Users/operator"
+    ]
+  },
+  "expected": {
+    "frame_schema": "application-frame/v1",
+    "outcome_schema": "application-outcome/v1",
+    "receipt_schema": "application-receipt/v1",
+    "outcome": "ok",
+    "application_semantic_ref": "demo.application",
+    "page_semantic_ref": "demo.page.home",
+    "feedback_schema": "kitsoki.feedback.report.v1",
+    "feedback_plugin": "kitsoki.application"
+  },
+  "story_yaml": "app: {id: demo, version: 1.0.0}\nroot: ready\nintents:\n  open:\n    title: Open\n    slots:\n      item_id: {type: string, required: true}\nstates:\n  ready:\n    on:\n      open: [{target: ready}]\napplication:\n  schema: application/v1\n  name: Demo\n  description: Deterministic cross-surface conformance application.\n  semantic_ref: demo.application\n  shell: {entry: home}\n  pages:\n    home:\n      name: Home\n      description: Show the deterministic wizard step.\n      semantic_ref: demo.page.home\n      regions:\n        main:\n          name: Main\n          description: Show the selected item.\n          semantic_ref: demo.region.main\n          items:\n            - card:\n                id: item\n                name: Item\n                description: Show one item.\n                semantic_ref: demo.card.item\n                actions: [demo.open]\n  actions:\n    demo.open:\n      name: Open\n      description: Open the selected item.\n      semantic_ref: demo.action.open\n      handler: demo.open-handler\n  surfaces:\n    web: {presentation: default}\n    vscode: {reuse: web, native: {commands: [demo.open]}}\n    tui: {projection: cards}\nexports:\n  handlers:\n    demo.open-handler:\n      name: Open\n      description: Open the selected item.\n      semantic_ref: demo.handler.open\n      input_schema: schemas/input.json\n      output_schema: schemas/output.json\n      session: required\n      effect: read\n      routing_mode: exact\n      outcomes: [ok]\n      dispatch: {intent: open, state: ready, slots_from: input}\n      expose: [jsonrpc, web, vscode, cli, mcp, tui]\nevents:\n  item-updated:\n    source: demo.item.updated\n    input_schema: schemas/input.json\n    session: required\n    mode: background\n    dispatch: {handler: demo.open-handler}\n",
+  "schemas": {
+    "input.json": {
+      "type": "object",
+      "required": ["item_id"],
+      "properties": {
+        "item_id": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "output.json": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "coverage": [
+    {"surface": "jsonrpc", "consumer": "internal/runstatus/server/application_conformance_test.go", "marker": "conformance-consumer:jsonrpc"},
+    {"surface": "web-go", "consumer": "internal/runstatus/server/application_conformance_test.go", "marker": "conformance-consumer:web-go"},
+    {"surface": "cli", "consumer": "cmd/kitsoki/application_conformance_test.go", "marker": "conformance-consumer:cli"},
+    {"surface": "studio-mcp", "consumer": "internal/mcp/studio/application_conformance_test.go", "marker": "conformance-consumer:studio-mcp"},
+    {"surface": "tui", "consumer": "internal/tui/application_conformance_test.go", "marker": "conformance-consumer:tui"},
+    {"surface": "web-ts", "consumer": "tools/runstatus/tests/unit/application-conformance.test.ts", "marker": "conformance-consumer:web-ts"},
+    {"surface": "vscode-ts", "consumer": "tools/vscode-kitsoki/tests/application-conformance.unit.test.ts", "marker": "conformance-consumer:vscode-ts"}
+  ]
+}

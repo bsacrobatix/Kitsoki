@@ -113,7 +113,30 @@ func (s *Server) handleFeedbackLocal(w http.ResponseWriter, r *http.Request) {
 		writeFeedbackJSON(w, http.StatusBadRequest, map[string]any{"error": msg})
 		return
 	}
+	resp, intakeErr := s.acceptFeedbackBundle(bundle)
+	if intakeErr != nil {
+		writeFeedbackJSON(w, intakeErr.Status, map[string]any{"error": intakeErr.Error()})
+		return
+	}
+	writeFeedbackJSON(w, http.StatusOK, resp)
+}
 
+type feedbackIntakeError struct {
+	Status int
+	Err    error
+}
+
+func (e *feedbackIntakeError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
+	return e.Err.Error()
+}
+
+// acceptFeedbackBundle is the shared durable sink behind the HTTP intake and
+// story-application JSON-RPC adapters. Callers must pass a reviewed bundle;
+// semantic attachment construction happens before this boundary.
+func (s *Server) acceptFeedbackBundle(bundle map[string]any) (map[string]any, *feedbackIntakeError) {
 	dir := filepath.Join(s.feedbackRepoRoot(), ".artifacts", "feedback")
 	path := filepath.Join(dir, "feedback.jsonl")
 	key, _ := bundle["idempotencyKey"].(string)
@@ -127,12 +150,11 @@ func (s *Server) handleFeedbackLocal(w http.ResponseWriter, r *http.Request) {
 		if dup, derr := feedbackJSONLHasKey(path, key); derr == nil && dup {
 			// Same receipt, marked deduped — mirrors sassfully's router
 			// contract (a retry never creates a second item).
-			writeFeedbackJSON(w, http.StatusOK, map[string]any{
+			return map[string]any{
 				"ref":     key,
 				"deduped": true,
 				"routed":  []any{map[string]any{"sink": "local", "ref": key}},
-			})
-			return
+			}, nil
 		}
 	}
 
@@ -144,8 +166,9 @@ func (s *Server) handleFeedbackLocal(w http.ResponseWriter, r *http.Request) {
 	rec["receivedAt"] = now.Format(time.RFC3339)
 	line, err := json.Marshal(rec)
 	if err != nil {
-		writeFeedbackJSON(w, http.StatusBadRequest, map[string]any{"error": "encode bundle: " + err.Error()})
-		return
+		return nil, &feedbackIntakeError{
+			Status: http.StatusBadRequest, Err: fmt.Errorf("encode bundle: %w", err),
+		}
 	}
 
 	ref := key
@@ -155,8 +178,7 @@ func (s *Server) handleFeedbackLocal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := appendFeedbackJSONLLine(dir, path, line); err != nil {
-		writeFeedbackJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
+		return nil, &feedbackIntakeError{Status: http.StatusInternalServerError, Err: err}
 	}
 
 	routed := []any{map[string]any{"sink": "local", "ref": ref}}
@@ -179,7 +201,7 @@ func (s *Server) handleFeedbackLocal(w http.ResponseWriter, r *http.Request) {
 	if len(routingErrors) > 0 {
 		resp["routing_errors"] = routingErrors
 	}
-	writeFeedbackJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 // appendFeedbackJSONLLine appends line+"\n" to path (creating dir as

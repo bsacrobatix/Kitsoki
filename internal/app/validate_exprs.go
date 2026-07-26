@@ -113,6 +113,15 @@ func validateEffectExprs(eff Effect, statePath, loc string, addErr func(string, 
 			addErr("state %q %s: effect when %q: %v", statePath, loc, eff.When, err)
 		}
 	}
+	for _, name := range sortedKeys(eff.Outcomes) {
+		outcome := eff.Outcomes[name]
+		if outcome == nil || outcome.When == "" {
+			continue
+		}
+		if _, err := expr.CompileBool(outcome.When); err != nil {
+			addErr("state %q %s: outcome %q when %q: %v", statePath, loc, name, outcome.When, err)
+		}
+	}
 	for _, key := range sortedKeys(eff.Set) {
 		validateEffectValue(eff.Set[key], statePath, loc, fmt.Sprintf("set %q", key), addErr)
 	}

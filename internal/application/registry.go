@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -30,6 +31,8 @@ type HandlerDefinition struct {
 	Outcomes             []string          `json:"outcomes"`
 	Expose               []Transport       `json:"expose,omitempty"`
 	Idempotency          IdempotencyPolicy `json:"idempotency,omitempty"`
+	IdempotencyKeyField  string            `json:"idempotency_key_field,omitempty"`
+	IdempotencyScope     string            `json:"idempotency_scope,omitempty"`
 	Retryable            bool              `json:"retryable,omitempty"`
 	CompensationHandler  string            `json:"compensation_handler,omitempty"`
 	NoCompensationReason string            `json:"no_compensation_reason,omitempty"`
@@ -41,28 +44,33 @@ type EventDefinition struct {
 	InputSchema json.RawMessage `json:"input_schema,omitempty"`
 	Session     SessionPolicy   `json:"session"`
 	Mode        EventMode       `json:"mode"`
+	RoutingMode RoutingMode     `json:"routing_mode,omitempty"`
 	Handler     string          `json:"handler"`
 }
 
 type Invocation struct {
-	HandlerID      string
-	Input          json.RawMessage
-	SessionID      string
-	Actor          string
-	Transport      Transport
-	RoutingMode    RoutingMode
-	IdempotencyKey string
-	EventID        string
-	FrameRevision  uint64
+	HandlerID       string
+	Input           json.RawMessage
+	SessionID       string
+	Actor           string
+	Transport       Transport
+	RoutingMode     RoutingMode
+	IdempotencyKey  string
+	EventID         string
+	EventMode       EventMode
+	EventSessionID  string
+	SessionPrepared bool
+	FrameRevision   uint64
 }
 
 type HandlerResult struct {
-	Outcome         string
-	Output          json.RawMessage
-	Frame           *Frame
-	Children        []ChildRun
-	Join            *JoinState
-	RoutingResolved RoutingMode
+	Outcome             string
+	Output              json.RawMessage
+	Frame               *Frame
+	Children            []ChildRun
+	Join                *JoinState
+	RoutingResolved     RoutingMode
+	SelectedImplementor string
 }
 
 type Handler interface {
@@ -83,8 +91,26 @@ type Authorizer interface {
 	Authorize(context.Context, HandlerDefinition, Invocation) error
 }
 
+type EffectPolicy interface {
+	AuthorizeEffect(context.Context, HandlerDefinition, Invocation) error
+}
+
 type BudgetGovernor interface {
 	Decide(context.Context, HandlerDefinition, Invocation) (BudgetDecision, error)
+}
+
+type SessionManager interface {
+	CreateSession(context.Context, HandlerDefinition, Invocation) (string, error)
+}
+
+type EventRun func(context.Context) (OutcomeEnvelope, error)
+
+// EventRuntime owns behavioral event modes. Background work must be submitted
+// to a scheduler instead of running under the foreground request context, and
+// interrupt mode must cancel active work before the handler is invoked.
+type EventRuntime interface {
+	Enqueue(context.Context, EventDefinition, HandlerDefinition, Invocation, EventRun) (OutcomeEnvelope, error)
+	Interrupt(context.Context, EventDefinition, Invocation) error
 }
 
 type ReceiptSink interface {
@@ -94,8 +120,12 @@ type ReceiptSink interface {
 type Dependencies struct {
 	Schemas  SchemaValidator
 	Auth     Authorizer
+	Effects  EffectPolicy
 	Budget   BudgetGovernor
+	Sessions SessionManager
+	Events   EventRuntime
 	Receipts ReceiptSink
+	Replay   ReplayStore
 }
 
 type registeredHandler struct {
@@ -147,8 +177,8 @@ func (r *Registry) RegisterEvent(def EventDefinition) error {
 	if !ok {
 		return fmt.Errorf("%w: event %q targets %q", ErrHandlerNotFound, def.ID, def.Handler)
 	}
-	if handler.def.Session == SessionRequired && def.Session == SessionNone {
-		return fmt.Errorf("application: event %q cannot supply session policy required by handler %q", def.ID, def.Handler)
+	if err := validateEventHandlerSession(def, handler.def); err != nil {
+		return err
 	}
 	r.events[def.ID] = cloneEventDefinition(def)
 	return nil
@@ -239,11 +269,20 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 	if !validTransport(invocation.Transport) {
 		return OutcomeEnvelope{}, fmt.Errorf("application: invalid transport %q", invocation.Transport)
 	}
-	if def.Session == SessionRequired && invocation.SessionID == "" {
-		return OutcomeEnvelope{}, fmt.Errorf("application: handler %q requires a session", def.ID)
-	}
-	if def.Idempotency == IdempotencyRequired && invocation.IdempotencyKey == "" {
-		return OutcomeEnvelope{}, fmt.Errorf("application: handler %q requires an idempotency key", def.ID)
+	switch def.Session {
+	case SessionNone:
+		invocation.SessionID = ""
+	case SessionRequired:
+		if invocation.SessionID == "" {
+			return OutcomeEnvelope{}, fmt.Errorf("application: handler %q requires a session", def.ID)
+		}
+	case SessionCreate:
+		if r.deps.Sessions == nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: handler %q requires a session manager", def.ID)
+		}
+		if invocation.SessionPrepared && invocation.SessionID == "" {
+			return OutcomeEnvelope{}, fmt.Errorf("application: handler %q received an empty prepared session", def.ID)
+		}
 	}
 	requested := invocation.RoutingMode
 	if requested == "" {
@@ -258,6 +297,15 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 	}
 	invocation.Input = input
 	invocation.RoutingMode = requested
+	if invocation.IdempotencyKey == "" && def.IdempotencyKeyField != "" {
+		invocation.IdempotencyKey, err = idempotencyKeyFromInput(input, def.IdempotencyKeyField)
+		if err != nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: handler %q idempotency key: %w", def.ID, err)
+		}
+	}
+	if def.Idempotency == IdempotencyRequired && invocation.IdempotencyKey == "" {
+		return OutcomeEnvelope{}, fmt.Errorf("application: handler %q requires an idempotency key", def.ID)
+	}
 	if r.deps.Schemas != nil && len(def.InputSchema) > 0 {
 		if err := r.deps.Schemas.Validate(ctx, def.InputSchema, input); err != nil {
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate input for %q: %w", def.ID, err)
@@ -266,6 +314,11 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 	if r.deps.Auth != nil {
 		if err := r.deps.Auth.Authorize(ctx, def, invocation); err != nil {
 			return OutcomeEnvelope{}, fmt.Errorf("%w: %v", ErrUnauthorized, err)
+		}
+	}
+	if r.deps.Effects != nil {
+		if err := r.deps.Effects.AuthorizeEffect(ctx, def, invocation); err != nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: effect policy denied %q: %w", def.ID, err)
 		}
 	}
 	budget := BudgetDecision{Allowed: true}
@@ -279,11 +332,70 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 		}
 	}
 
-	result, invokeErr := entry.handler.Invoke(ctx, invocation)
-	if result.RoutingResolved == "" {
-		result.RoutingResolved = requested
+	inputDigest, _ := DigestJSON(input)
+	execute := func() (OutcomeEnvelope, error) {
+		effective := invocation
+		if def.Session == SessionCreate && !invocation.SessionPrepared {
+			created, createErr := r.deps.Sessions.CreateSession(ctx, def, invocation)
+			if createErr != nil {
+				return OutcomeEnvelope{}, fmt.Errorf("application: create session for %q: %w", def.ID, createErr)
+			}
+			if created == "" {
+				return OutcomeEnvelope{}, fmt.Errorf("application: session manager returned an empty session for %q", def.ID)
+			}
+			effective.SessionID = created
+		}
+		return r.invokeHandler(ctx, entry.handler, def, effective, input, inputDigest, budget)
 	}
-	if err := ValidateRoutingPin(def.RoutingMode, requested, result.RoutingResolved); err != nil {
+	if invocation.IdempotencyKey != "" && r.deps.Replay != nil {
+		outcome, replayErr, replayed := r.deps.Replay.Do(ctx, ReplayKey{
+			HandlerID:   def.ID,
+			SessionID:   replaySessionID(def, invocation),
+			Key:         invocation.IdempotencyKey,
+			InputDigest: inputDigest,
+		}, execute)
+		if !replayed {
+			return outcome, replayErr
+		}
+		originalID := outcome.Receipt.ID
+		replayReceipt := outcome.Receipt
+		replayReceipt.ID = ""
+		replayReceipt.Transport = invocation.Transport
+		replayReceipt.Actor = invocation.Actor
+		replayReceipt.EventID = invocation.EventID
+		replayReceipt.EventMode = invocation.EventMode
+		replayReceipt.FrameRevision = invocation.FrameRevision
+		replayReceipt.Replayed = true
+		replayReceipt.ReplayOf = originalID
+		replayReceipt, err = FinalizeReceipt(replayReceipt)
+		if err != nil {
+			return OutcomeEnvelope{}, err
+		}
+		outcome.Receipt = replayReceipt
+		if r.deps.Receipts != nil {
+			if err := r.deps.Receipts.Record(ctx, replayReceipt); err != nil {
+				return OutcomeEnvelope{}, fmt.Errorf("application: record replay receipt: %w", err)
+			}
+		}
+		return outcome, replayErr
+	}
+	return execute()
+}
+
+func (r *Registry) invokeHandler(
+	ctx context.Context,
+	handler Handler,
+	def HandlerDefinition,
+	invocation Invocation,
+	input json.RawMessage,
+	inputDigest string,
+	budget BudgetDecision,
+) (OutcomeEnvelope, error) {
+	result, invokeErr := handler.Invoke(ctx, invocation)
+	if result.RoutingResolved == "" {
+		result.RoutingResolved = invocation.RoutingMode
+	}
+	if err := ValidateRoutingPin(def.RoutingMode, invocation.RoutingMode, result.RoutingResolved); err != nil {
 		return OutcomeEnvelope{}, err
 	}
 	outcomeError := (*OutcomeError)(nil)
@@ -303,23 +415,24 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate output for %q: %w", def.ID, err)
 		}
 	}
-	inputDigest, _ := DigestJSON(input)
 	outputDigest, _ := DigestJSON(output)
 	receipt, err := FinalizeReceipt(Receipt{
-		HandlerID:      def.ID,
-		SemanticRef:    def.SemanticRef,
-		SessionID:      invocation.SessionID,
-		Actor:          invocation.Actor,
-		Effect:         def.Effect,
-		Routing:        RoutingReceipt{Requested: requested, Resolved: result.RoutingResolved},
-		Budget:         budget,
-		IdempotencyKey: invocation.IdempotencyKey,
-		InputDigest:    inputDigest,
-		OutputDigest:   outputDigest,
-		Transport:      invocation.Transport,
-		EventID:        invocation.EventID,
-		FrameRevision:  invocation.FrameRevision,
-		Outcome:        result.Outcome,
+		HandlerID:           def.ID,
+		SemanticRef:         def.SemanticRef,
+		SessionID:           invocationReceiptSession(invocation),
+		Actor:               invocation.Actor,
+		Effect:              def.Effect,
+		Routing:             RoutingReceipt{Requested: invocation.RoutingMode, Resolved: result.RoutingResolved},
+		Budget:              budget,
+		IdempotencyKey:      invocation.IdempotencyKey,
+		InputDigest:         inputDigest,
+		OutputDigest:        outputDigest,
+		Transport:           invocation.Transport,
+		EventID:             invocation.EventID,
+		EventMode:           invocation.EventMode,
+		FrameRevision:       invocation.FrameRevision,
+		Outcome:             result.Outcome,
+		SelectedImplementor: result.SelectedImplementor,
 	})
 	if err != nil {
 		return OutcomeEnvelope{}, err
@@ -328,6 +441,7 @@ func (r *Registry) Invoke(ctx context.Context, invocation Invocation) (OutcomeEn
 		Schema: OutcomeSchema, Handler: def.ID, Outcome: result.Outcome,
 		Output: output, Frame: result.Frame, Children: result.Children, Join: result.Join,
 		Error: outcomeError, Receipt: receipt,
+		SelectedImplementor: result.SelectedImplementor,
 	}
 	if r.deps.Receipts != nil {
 		if err := r.deps.Receipts.Record(ctx, receipt); err != nil {
@@ -345,8 +459,11 @@ func (r *Registry) DispatchEvent(ctx context.Context, eventID string, input json
 		return OutcomeEnvelope{}, fmt.Errorf("%w: %q", ErrEventNotFound, eventID)
 	}
 	event = cloneEventDefinition(event)
-	if event.Session == SessionRequired && sessionID == "" {
-		return OutcomeEnvelope{}, fmt.Errorf("application: event %q requires a session", event.ID)
+	r.mu.RLock()
+	target := cloneHandlerDefinition(r.handlers[event.Handler].def)
+	r.mu.RUnlock()
+	if actor == "" {
+		actor = "event:" + event.Source
 	}
 	normalized, err := NormalizeJSON(input)
 	if err != nil {
@@ -357,10 +474,118 @@ func (r *Registry) DispatchEvent(ctx context.Context, eventID string, input json
 			return OutcomeEnvelope{}, fmt.Errorf("application: validate event %q: %w", event.ID, err)
 		}
 	}
-	return r.Invoke(ctx, Invocation{
+	switch event.Session {
+	case SessionNone:
+		sessionID = ""
+	case SessionRequired:
+		if sessionID == "" {
+			return OutcomeEnvelope{}, fmt.Errorf("application: event %q requires a session", event.ID)
+		}
+	case SessionCreate:
+		if r.deps.Sessions == nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: event %q requires a session manager", event.ID)
+		}
+		createInvocation := Invocation{
+			HandlerID: event.Handler, Input: normalized, SessionID: sessionID,
+			Actor: actor, Transport: TransportEvent, RoutingMode: event.RoutingMode,
+			EventID: event.ID, EventMode: event.Mode,
+		}
+		created, createErr := r.deps.Sessions.CreateSession(ctx, target, createInvocation)
+		if createErr != nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: create session for event %q: %w", event.ID, createErr)
+		}
+		if created == "" {
+			return OutcomeEnvelope{}, fmt.Errorf("application: session manager returned an empty session for event %q", event.ID)
+		}
+		sessionID = created
+	}
+	invocation := Invocation{
 		HandlerID: event.Handler, Input: normalized, SessionID: sessionID,
-		Actor: actor, Transport: TransportEvent, EventID: event.ID,
-	})
+		Actor: actor, Transport: TransportEvent, RoutingMode: event.RoutingMode,
+		EventID: event.ID, EventMode: event.Mode,
+		EventSessionID: sessionID, SessionPrepared: event.Session == SessionCreate,
+	}
+	run := func(runCtx context.Context) (OutcomeEnvelope, error) {
+		return r.Invoke(runCtx, invocation)
+	}
+	switch event.Mode {
+	case EventBackground:
+		if r.deps.Events == nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: event %q requires a background scheduler", event.ID)
+		}
+		outcome, enqueueErr := r.deps.Events.Enqueue(ctx, event, target, invocation, run)
+		if enqueueErr == nil && r.deps.Receipts != nil && outcome.Receipt.ID != "" {
+			if err := r.deps.Receipts.Record(ctx, outcome.Receipt); err != nil {
+				return OutcomeEnvelope{}, fmt.Errorf("application: record event receipt: %w", err)
+			}
+		}
+		return outcome, enqueueErr
+	case EventInterrupt:
+		if r.deps.Events == nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: event %q requires an interrupt runtime", event.ID)
+		}
+		if err := r.deps.Events.Interrupt(ctx, event, invocation); err != nil {
+			return OutcomeEnvelope{}, fmt.Errorf("application: interrupt event %q: %w", event.ID, err)
+		}
+	}
+	return run(ctx)
+}
+
+func validateEventHandlerSession(event EventDefinition, handler HandlerDefinition) error {
+	switch {
+	case event.Session == SessionNone && handler.Session == SessionRequired:
+		return fmt.Errorf("application: event %q with session:none cannot target required-session handler %q", event.ID, handler.ID)
+	case event.Session == SessionRequired && handler.Session == SessionCreate:
+		return fmt.Errorf("application: event %q with session:required cannot replace its bound session through create-session handler %q", event.ID, handler.ID)
+	default:
+		return nil
+	}
+}
+
+func invocationReceiptSession(invocation Invocation) string {
+	if invocation.EventID != "" && invocation.EventSessionID != "" {
+		return invocation.EventSessionID
+	}
+	return invocation.SessionID
+}
+
+func idempotencyKeyFromInput(input json.RawMessage, field string) (string, error) {
+	var values map[string]any
+	if err := json.Unmarshal(input, &values); err != nil {
+		return "", err
+	}
+	path := strings.Split(strings.TrimPrefix(field, "input."), ".")
+	var value any = values
+	for _, segment := range path {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return "", fmt.Errorf("input path %q crosses a non-object value", field)
+		}
+		value, ok = object[segment]
+		if !ok || value == nil {
+			return "", nil
+		}
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case float64, bool:
+		raw, _ := json.Marshal(typed)
+		return string(raw), nil
+	default:
+		return "", fmt.Errorf("input field %q must be a scalar string, number, or boolean", field)
+	}
+}
+
+func replaySessionID(def HandlerDefinition, invocation Invocation) string {
+	switch def.IdempotencyScope {
+	case "application":
+		return ""
+	case "request":
+		return "request:" + string(invocation.Transport) + ":" + invocation.Actor
+	default:
+		return "session:" + invocation.SessionID
+	}
 }
 
 func normalizeOutput(raw json.RawMessage) (json.RawMessage, error) {

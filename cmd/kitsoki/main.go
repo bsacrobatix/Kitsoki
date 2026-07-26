@@ -749,6 +749,15 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 							tui.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
 							tui.WithBugPrivacyCheckerResolver(bugPrivacyResolver),
 						}, tuiOptions...)
+						if def.Application != nil {
+							dispatcher, dispatchErr := newTUIApplicationActionDispatcher(
+								orch, sid, tuiTracePath, tuiApplicationActor(),
+							)
+							if dispatchErr != nil {
+								return fmt.Errorf("initialize application TUI actions: %w", dispatchErr)
+							}
+							tuiOptions = append(tuiOptions, tui.WithApplicationActionDispatcher(dispatcher))
+						}
 						if projectStartupNotice != "" {
 							tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))
 						}
@@ -842,8 +851,8 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 					// Wire EventSink for fresh TUI session.
 					// freshMetaTracePath is the path handed to the meta-mode agent.
 					var freshMetaTracePath string
+					freshTracePath := store.DefaultTracePath(def.App.ID, "tui", string(sid))
 					{
-						freshTracePath := store.DefaultTracePath(def.App.ID, "tui", string(sid))
 						if mkErr := os.MkdirAll(filepath.Dir(freshTracePath), 0o755); mkErr == nil {
 							if freshSink, sinkErr := store.OpenJSONL(freshTracePath); sinkErr == nil {
 								orch.SetEventSink(freshSink)
@@ -945,6 +954,15 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 						tui.WithBugTicketRepo(ticketRepo),
 						tui.WithBugPrivacyChecker(bugPrivacyResolver(orchestrator.ProfileSelection{})),
 						tui.WithBugPrivacyCheckerResolver(bugPrivacyResolver),
+					}
+					if def.Application != nil {
+						dispatcher, dispatchErr := newTUIApplicationActionDispatcher(
+							orch, sid, freshTracePath, tuiApplicationActor(),
+						)
+						if dispatchErr != nil {
+							return fmt.Errorf("initialize application TUI actions: %w", dispatchErr)
+						}
+						tuiOptions = append(tuiOptions, tui.WithApplicationActionDispatcher(dispatcher))
 					}
 					if projectStartupNotice != "" {
 						tuiOptions = append(tuiOptions, tui.WithStartupNotice(projectStartupNotice))

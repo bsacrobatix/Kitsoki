@@ -93,6 +93,7 @@ import (
 
 	"kitsoki/internal/app"
 	appplatform "kitsoki/internal/application"
+	"kitsoki/internal/applicationfeedback"
 	"kitsoki/internal/assignment"
 	"kitsoki/internal/bugprivacy"
 	"kitsoki/internal/dynamicworkflow"
@@ -181,6 +182,14 @@ type Server struct {
 	provider    SessionProvider
 	poll        time.Duration
 	assignments assignment.Store
+	// applicationDeps carries deployment-owned authorization, effect, and
+	// budget policy into every generated application adapter.
+	applicationDeps appplatform.Dependencies
+	// applicationEventSched owns generated background event jobs. Daemon
+	// surfaces can inject their durable scheduler; local web uses an isolated
+	// in-memory scheduler.
+	applicationEventSched jobs.Scheduler
+	applicationBundleRoot string
 
 	// defaultActor is the lowest-precedence operator identity injected as
 	// slots.author on a drive turn (see WithDefaultActor). Empty = none.
@@ -374,6 +383,9 @@ type serverConfig struct {
 	storyDirs                 []string
 	assignments               assignment.Store
 	auth                      *webauth.Manager
+	applicationDeps           appplatform.Dependencies
+	applicationEventSched     jobs.Scheduler
+	applicationBundleRoot     string
 }
 
 // WithAssignmentStore enables the persisted room-assignment RPC family. The
@@ -529,6 +541,19 @@ func WithAuth(m *webauth.Manager) Option {
 	return func(c *serverConfig) { c.auth = m }
 }
 
+// WithApplicationDependencies installs deployment policy and persistence
+// dependencies for generated application handlers. Nil members retain the
+// trusted-local runtime defaults; configured members are never overwritten.
+func WithApplicationDependencies(deps appplatform.Dependencies) Option {
+	return func(c *serverConfig) { c.applicationDeps = deps }
+}
+
+// WithApplicationEventScheduler installs the scheduler used for background
+// application events. Daemon mode should pass its durable jobs scheduler.
+func WithApplicationEventScheduler(scheduler jobs.Scheduler) Option {
+	return func(c *serverConfig) { c.applicationEventSched = scheduler }
+}
+
 // New builds a Server that serves the run recorded in the JSONL trace at
 // tracePath, interpreted against def — the read-only `kitsoki status serve`
 // path. The lifecycle RPCs (stories.*, session.new/reload) report
@@ -566,10 +591,17 @@ func newConfig(opts []Option) serverConfig {
 }
 
 func newServer(provider SessionProvider, cfg serverConfig) *Server {
+	applicationEventSched := cfg.applicationEventSched
+	if applicationEventSched == nil {
+		applicationEventSched = jobs.NewInMemoryScheduler()
+	}
 	return &Server{
 		provider:                  provider,
 		poll:                      cfg.poll,
 		assignments:               cfg.assignments,
+		applicationDeps:           cfg.applicationDeps,
+		applicationEventSched:     applicationEventSched,
+		applicationBundleRoot:     cfg.applicationBundleRoot,
 		defaultActor:              cfg.defaultActor,
 		auth:                      cfg.auth,
 		subs:                      make(map[string]*subscription),
@@ -752,6 +784,7 @@ func (s *Server) Handler() http.Handler {
 	// feedback_intake.go.
 	mux.HandleFunc("/api/config", s.handleAPIConfig)
 	mux.HandleFunc("/api/feedback/local", s.handleFeedbackLocal)
+	mux.HandleFunc(applicationBundlePrefix, s.handleApplicationBundle)
 	// Installed-kit UI static assets (S3c vertical slice — see kit_ui.go).
 	mux.HandleFunc("/kit/", s.handleKitUI)
 	mux.HandleFunc("/", s.handleIndex)
@@ -1171,7 +1204,7 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if rerr != nil {
 			return nil, rerr
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1194,7 +1227,7 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		if ref == "" {
 			return nil, invalidParams(fmt.Errorf("ref is required"))
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
@@ -1207,26 +1240,69 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return inspection, nil
 
+	case "runstatus.application.feedback":
+		entry, rerr := s.resolve(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		sessionID, rerr := sessionIDParam(params)
+		if rerr != nil {
+			return nil, rerr
+		}
+		ref := stringParam(params, "ref")
+		instruction := stringParam(params, "instruction")
+		if ref == "" || instruction == "" {
+			return nil, invalidParams(fmt.Errorf("ref and instruction are required"))
+		}
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		frame, err := service.Frames.CurrentFrame(ctx, sessionID)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		var policy *app.ApplicationFeedbackPolicy
+		if def := entry.Source.AppDef(); def != nil && def.Application != nil {
+			policy = def.Application.Feedback
+		}
+		report, err := applicationfeedback.BuildReport(frame, policy, applicationfeedback.ReportRequest{
+			Ref: ref, Kind: stringParam(params, "kind"), Instruction: instruction,
+			IdempotencyKey: stringParam(params, "idempotency_key"),
+		})
+		if err != nil {
+			return nil, invalidParams(err)
+		}
+		raw, err := json.Marshal(report)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		var bundle map[string]any
+		if err := json.Unmarshal(raw, &bundle); err != nil {
+			return nil, serverErr(err)
+		}
+		receipt, intakeErr := s.acceptFeedbackBundle(bundle)
+		if intakeErr != nil {
+			return nil, serverErr(intakeErr)
+		}
+		return map[string]any{"report": report, "receipt": receipt}, nil
+
 	case "runstatus.application.discover":
 		entry, rerr := s.resolve(params)
 		if rerr != nil {
 			return nil, rerr
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		transport := appplatform.Transport(stringParam(params, "transport"))
-		if transport == "" {
-			transport = appplatform.TransportJSONRPC
-		}
-		handlers, err := service.Discover(ctx, transport)
+		handlers, err := service.Discover(ctx, appplatform.TransportJSONRPC)
 		if err != nil {
 			return nil, invalidParams(err)
 		}
 		return handlers, nil
 
-	case "runstatus.application.call":
+	case "runstatus.application.call", "runstatus.application.cli_call":
 		entry, rerr := s.resolve(params)
 		if rerr != nil {
 			return nil, rerr
@@ -1243,13 +1319,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		} else {
 			request.Actor = ""
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		transport := appplatform.Transport(stringParam(params, "transport"))
-		if transport == "" {
-			transport = appplatform.TransportJSONRPC
+		transport := appplatform.TransportJSONRPC
+		if method == "runstatus.application.cli_call" {
+			transport = appplatform.TransportCLI
 		}
 		outcome, err := service.Call(ctx, transport, request)
 		if err != nil {
@@ -1257,7 +1333,9 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return outcome, nil
 
-	case "runstatus.application.action":
+	case "runstatus.application.action",
+		"runstatus.application.web_action",
+		"runstatus.application.vscode_action":
 		entry, rerr := s.resolve(params)
 		if rerr != nil {
 			return nil, rerr
@@ -1274,13 +1352,16 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		} else {
 			envelope.Actor = ""
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}
-		transport := appplatform.Transport(stringParam(params, "transport"))
-		if transport == "" {
+		transport := appplatform.TransportJSONRPC
+		switch method {
+		case "runstatus.application.web_action":
 			transport = appplatform.TransportWeb
+		case "runstatus.application.vscode_action":
+			transport = appplatform.TransportVSCode
 		}
 		outcome, err := service.DispatchAction(ctx, transport, envelope)
 		if err != nil {
@@ -1305,7 +1386,7 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		} else {
 			envelope.Actor = ""
 		}
-		service, err := NewSessionApplicationService(entry, stringParam(params, "page"))
+		service, err := NewSessionApplicationService(entry, stringParam(params, "page"), s.applicationRuntime())
 		if err != nil {
 			return nil, serverErr(err)
 		}

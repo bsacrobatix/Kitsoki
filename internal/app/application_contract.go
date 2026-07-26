@@ -9,6 +9,13 @@ import (
 
 const ApplicationSchemaV1 = "application/v1"
 
+// ApplicationMemberOrigin records which story supplied a composed member.
+// It is loader metadata, not part of the author or wire schemas.
+type ApplicationMemberOrigin struct {
+	Story  string
+	Member string
+}
+
 // ApplicationContract is the optional story-owned application shell. It is
 // renderer-neutral: paths and component names are declarations, never live
 // Vue/DOM/TUI objects.
@@ -24,6 +31,18 @@ type ApplicationContract struct {
 	Components  map[string]*ApplicationComponent `yaml:"components,omitempty" json:"components,omitempty"`
 	Actions     map[string]*ApplicationAction    `yaml:"actions,omitempty" json:"actions,omitempty"`
 	Surfaces    map[string]*ApplicationSurface   `yaml:"surfaces,omitempty" json:"surfaces,omitempty"`
+	Packages    []ApplicationPackageUse          `yaml:"packages,omitempty" json:"packages,omitempty"`
+	Schemas     map[string]string                `yaml:"schemas,omitempty" json:"schemas,omitempty"`
+	Tokens      map[string]string                `yaml:"tokens,omitempty" json:"tokens,omitempty"`
+	Generated   bool                             `yaml:"-" json:"generated,omitempty"`
+}
+
+// ApplicationPackageUse selects named members from one package pinned in the
+// project's existing .kitsoki/kits.lock. Package is the manifest identity
+// (namespace.name); Select entries use category.member form.
+type ApplicationPackageUse struct {
+	Package string   `yaml:"package" json:"package"`
+	Select  []string `yaml:"select" json:"select"`
 }
 
 type ApplicationFeedbackPolicy struct {
@@ -43,18 +62,22 @@ type ApplicationShell struct {
 }
 
 type ApplicationNavigation struct {
-	ID          string `yaml:"id" json:"id"`
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
-	SemanticRef string `yaml:"semantic_ref" json:"semantic_ref"`
-	Page        string `yaml:"page" json:"page"`
+	ID          string                  `yaml:"id" json:"id"`
+	Name        string                  `yaml:"name" json:"name"`
+	Description string                  `yaml:"description" json:"description"`
+	SemanticRef string                  `yaml:"semantic_ref" json:"semantic_ref"`
+	Page        string                  `yaml:"page" json:"page"`
+	Origin      ApplicationMemberOrigin `yaml:"-" json:"-"`
 }
 
 type ApplicationPage struct {
-	Name        string                        `yaml:"name" json:"name"`
-	Description string                        `yaml:"description" json:"description"`
-	SemanticRef string                        `yaml:"semantic_ref" json:"semantic_ref"`
-	Regions     map[string]*ApplicationRegion `yaml:"regions,omitempty" json:"regions,omitempty"`
+	Name            string                        `yaml:"name" json:"name"`
+	Description     string                        `yaml:"description" json:"description"`
+	SemanticRef     string                        `yaml:"semantic_ref" json:"semantic_ref"`
+	SemanticAliases []string                      `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
+	Regions         map[string]*ApplicationRegion `yaml:"regions,omitempty" json:"regions,omitempty"`
+	Generated       bool                          `yaml:"-" json:"generated,omitempty"`
+	Origin          ApplicationMemberOrigin       `yaml:"-" json:"-"`
 }
 
 type ApplicationRegion struct {
@@ -62,6 +85,8 @@ type ApplicationRegion struct {
 	Description string                  `yaml:"description" json:"description"`
 	SemanticRef string                  `yaml:"semantic_ref" json:"semantic_ref"`
 	Items       []ApplicationRegionItem `yaml:"items,omitempty" json:"items,omitempty"`
+	Generated   bool                    `yaml:"-" json:"generated,omitempty"`
+	Origin      ApplicationMemberOrigin `yaml:"-" json:"-"`
 }
 
 // ApplicationRegionItem is deliberately a finite union. New semantic item
@@ -71,22 +96,27 @@ type ApplicationRegionItem struct {
 }
 
 type ApplicationCard struct {
-	ID          string         `yaml:"id" json:"id"`
-	Name        string         `yaml:"name" json:"name"`
-	Description string         `yaml:"description" json:"description"`
-	SemanticRef string         `yaml:"semantic_ref" json:"semantic_ref"`
-	Component   string         `yaml:"component,omitempty" json:"component,omitempty"`
-	Props       map[string]any `yaml:"props,omitempty" json:"props,omitempty"`
-	Actions     []string       `yaml:"actions,omitempty" json:"actions,omitempty"`
+	ID          string                  `yaml:"id" json:"id"`
+	Name        string                  `yaml:"name" json:"name"`
+	Description string                  `yaml:"description" json:"description"`
+	SemanticRef string                  `yaml:"semantic_ref" json:"semantic_ref"`
+	Component   string                  `yaml:"component,omitempty" json:"component,omitempty"`
+	Props       map[string]any          `yaml:"props,omitempty" json:"props,omitempty"`
+	Elements    []ViewElement           `yaml:"elements,omitempty" json:"elements,omitempty"`
+	Actions     []string                `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Generated   bool                    `yaml:"-" json:"generated,omitempty"`
+	Origin      ApplicationMemberOrigin `yaml:"-" json:"-"`
 }
 
 type ApplicationComponent struct {
-	Name        string                        `yaml:"name" json:"name"`
-	Description string                        `yaml:"description" json:"description"`
-	SemanticRef string                        `yaml:"semantic_ref" json:"semantic_ref"`
-	Web         *ApplicationWebComponent      `yaml:"web,omitempty" json:"web,omitempty"`
-	PropsSchema string                        `yaml:"props_schema,omitempty" json:"props_schema,omitempty"`
-	Fallback    *ApplicationComponentFallback `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Name            string                        `yaml:"name" json:"name"`
+	Description     string                        `yaml:"description" json:"description"`
+	SemanticRef     string                        `yaml:"semantic_ref" json:"semantic_ref"`
+	SemanticAliases []string                      `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
+	Web             *ApplicationWebComponent      `yaml:"web,omitempty" json:"web,omitempty"`
+	PropsSchema     string                        `yaml:"props_schema,omitempty" json:"props_schema,omitempty"`
+	Fallback        *ApplicationComponentFallback `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Origin          ApplicationMemberOrigin       `yaml:"-" json:"-"`
 }
 
 type ApplicationWebComponent struct {
@@ -99,14 +129,18 @@ type ApplicationComponentFallback struct {
 }
 
 type ApplicationAction struct {
-	Name        string `yaml:"name" json:"name"`
-	Description string `yaml:"description" json:"description"`
-	SemanticRef string `yaml:"semantic_ref" json:"semantic_ref"`
-	Handler     string `yaml:"handler,omitempty" json:"handler,omitempty"`
-	Intent      string `yaml:"intent,omitempty" json:"intent,omitempty"`
-	State       string `yaml:"state,omitempty" json:"state,omitempty"`
-	InputSchema string `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
-	RoutingMode string `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
+	Name            string                  `yaml:"name" json:"name"`
+	Description     string                  `yaml:"description" json:"description"`
+	SemanticRef     string                  `yaml:"semantic_ref" json:"semantic_ref"`
+	SemanticAliases []string                `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
+	Handler         string                  `yaml:"handler,omitempty" json:"handler,omitempty"`
+	Intent          string                  `yaml:"intent,omitempty" json:"intent,omitempty"`
+	State           string                  `yaml:"state,omitempty" json:"state,omitempty"`
+	RoomInterface   string                  `yaml:"room_interface,omitempty" json:"room_interface,omitempty"`
+	InputSchema     string                  `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
+	RoutingMode     string                  `yaml:"routing_mode,omitempty" json:"routing_mode,omitempty"`
+	Generated       bool                    `yaml:"-" json:"generated,omitempty"`
+	Origin          ApplicationMemberOrigin `yaml:"-" json:"-"`
 }
 
 type ApplicationSurface struct {
@@ -125,6 +159,7 @@ type ApplicationHandler struct {
 	Name                   string                      `yaml:"name" json:"name"`
 	Description            string                      `yaml:"description" json:"description"`
 	SemanticRef            string                      `yaml:"semantic_ref" json:"semantic_ref"`
+	SemanticAliases        []string                    `yaml:"semantic_aliases,omitempty" json:"semantic_aliases,omitempty"`
 	InputSchema            string                      `yaml:"input_schema" json:"input_schema"`
 	OutputSchema           string                      `yaml:"output_schema" json:"output_schema"`
 	Session                string                      `yaml:"session" json:"session"`
@@ -138,13 +173,24 @@ type ApplicationHandler struct {
 	Retry                  *HandlerRetryPolicy         `yaml:"retry,omitempty" json:"retry,omitempty"`
 	Compensation           string                      `yaml:"compensation,omitempty" json:"compensation,omitempty"`
 	CompensationImpossible string                      `yaml:"compensation_impossible,omitempty" json:"compensation_impossible,omitempty"`
+	Origin                 ApplicationMemberOrigin     `yaml:"-" json:"-"`
 }
 
 type ApplicationHandlerDispatch struct {
-	Intent    string `yaml:"intent,omitempty" json:"intent,omitempty"`
-	Handler   string `yaml:"handler,omitempty" json:"handler,omitempty"`
-	State     string `yaml:"state,omitempty" json:"state,omitempty"`
-	SlotsFrom string `yaml:"slots_from,omitempty" json:"slots_from,omitempty"`
+	Intent        string `yaml:"intent,omitempty" json:"intent,omitempty"`
+	Handler       string `yaml:"handler,omitempty" json:"handler,omitempty"`
+	State         string `yaml:"state,omitempty" json:"state,omitempty"`
+	RoomInterface string `yaml:"room_interface,omitempty" json:"room_interface,omitempty"`
+	SlotsFrom     string `yaml:"slots_from,omitempty" json:"slots_from,omitempty"`
+}
+
+// ApplicationOverrides are explicit import-time whole-member replacements.
+// Keys address the child contract before alias qualification.
+type ApplicationOverrides struct {
+	Pages      map[string]*ApplicationPage      `yaml:"pages,omitempty" json:"pages,omitempty"`
+	Components map[string]*ApplicationComponent `yaml:"components,omitempty" json:"components,omitempty"`
+	Actions    map[string]*ApplicationAction    `yaml:"actions,omitempty" json:"actions,omitempty"`
+	Handlers   map[string]*ApplicationHandler   `yaml:"handlers,omitempty" json:"handlers,omitempty"`
 }
 
 type ApplicationStarlarkHandler struct {
@@ -174,7 +220,7 @@ func semanticContractError(path, message string) error {
 	return fmt.Errorf("%s: %s", path, message)
 }
 
-func requireSemanticIdentity(path, appID, kind, name, description, ref string, refs map[string]string) []error {
+func requireSemanticIdentity(path, rootOwner string, owners map[string]struct{}, kind, name, description, ref string, refs map[string]string) []error {
 	var errs []error
 	if strings.TrimSpace(name) == "" {
 		errs = append(errs, semanticContractError(path+".name", "is required"))
@@ -190,8 +236,8 @@ func requireSemanticIdentity(path, appID, kind, name, description, ref string, r
 	if !validSemanticRef(ref) {
 		errs = append(errs, semanticContractError(path+".semantic_ref", fmt.Sprintf("%q is not a valid dotted semantic ref", ref)))
 	}
-	if appID != "" && ref != appID && !strings.HasPrefix(ref, appID+".") {
-		errs = append(errs, semanticContractError(path+".semantic_ref", fmt.Sprintf("%q must be application-qualified with %q", ref, appID+".")))
+	if !semanticOwnerAllowed(ref, owners) {
+		errs = append(errs, semanticContractError(path+".semantic_ref", fmt.Sprintf("%q must be application-qualified with %q or an imported application owner", ref, rootOwner+".")))
 	}
 	if prior, ok := refs[ref]; ok {
 		errs = append(errs, semanticContractError(path+".semantic_ref", fmt.Sprintf("%q duplicates %s", ref, prior)))
@@ -217,9 +263,27 @@ func validateApplicationContract(def *AppDef, file string) []error {
 	addf := func(path, format string, args ...any) {
 		add(semanticContractError(path, fmt.Sprintf(format, args...)))
 	}
+	owners := map[string]struct{}{def.App.ID: {}}
+	for owner := range def.ImportedApplicationOwners {
+		owners[owner] = struct{}{}
+	}
 	addIdentity := func(path, kind, name, description, ref string, refs map[string]string) {
-		for _, err := range requireSemanticIdentity(path, def.App.ID, kind, name, description, ref, refs) {
+		for _, err := range requireSemanticIdentity(path, def.App.ID, owners, kind, name, description, ref, refs) {
 			add(err)
+		}
+	}
+	addAliases := func(path string, aliases []string, refs map[string]string) {
+		for i, alias := range aliases {
+			aliasPath := fmt.Sprintf("%s.semantic_aliases[%d]", path, i)
+			if !validSemanticRef(alias) || !semanticOwnerAllowed(alias, owners) {
+				addf(aliasPath, "%q is not a valid root/import-qualified semantic ref", alias)
+				continue
+			}
+			if prior, exists := refs[alias]; exists {
+				addf(aliasPath, "%q duplicates %s", alias, prior)
+				continue
+			}
+			refs[alias] = path + " (semantic alias)"
 		}
 	}
 
@@ -263,6 +327,50 @@ func validateApplicationContract(def *AppDef, file string) []error {
 				addf(path+".page", "%q does not name an application page", nav.Page)
 			}
 		}
+		if def.Exports != nil && def.Exports.Application != nil {
+			exports := def.Exports.Application
+			validateExportList := func(kind string, ids []string, exists func(string) bool) {
+				seen := map[string]struct{}{}
+				for i, id := range ids {
+					path := fmt.Sprintf("exports.application.%s[%d]", kind, i)
+					if _, duplicate := seen[id]; duplicate {
+						addf(path, "%q is duplicated", id)
+						continue
+					}
+					seen[id] = struct{}{}
+					if !exists(id) {
+						addf(path, "%q does not name an application %s member", id, kind)
+					}
+				}
+			}
+			validateExportList("navigation", exports.Navigation, func(id string) bool {
+				_, ok := navigationIDs[id]
+				return ok
+			})
+			validateExportList("pages", exports.Pages, func(id string) bool {
+				return contract.Pages[id] != nil
+			})
+			validateExportList("components", exports.Components, func(id string) bool {
+				return contract.Components[id] != nil
+			})
+			validateExportList("actions", exports.Actions, func(id string) bool {
+				return contract.Actions[id] != nil
+			})
+			validateExportList("schemas", exports.Schemas, func(id string) bool {
+				_, ok := contract.Schemas[id]
+				return ok
+			})
+			validateExportList("tokens", exports.Tokens, func(id string) bool {
+				_, ok := contract.Tokens[id]
+				return ok
+			})
+			for _, id := range exports.Actions {
+				action := contract.Actions[id]
+				if action != nil && action.Intent != "" && !containsString(def.Exports.Intents, action.Intent) {
+					addf("exports.application.actions", "exported action %q targets private intent %q", id, action.Intent)
+				}
+			}
+		}
 
 		for _, pageID := range sortedKeys(contract.Pages) {
 			page := contract.Pages[pageID]
@@ -272,6 +380,7 @@ func validateApplicationContract(def *AppDef, file string) []error {
 				continue
 			}
 			addIdentity(path, "page", page.Name, page.Description, page.SemanticRef, refs)
+			addAliases(path, page.SemanticAliases, refs)
 			for _, regionID := range sortedKeys(page.Regions) {
 				region := page.Regions[regionID]
 				regionPath := path + ".regions." + regionID
@@ -309,14 +418,15 @@ func validateApplicationContract(def *AppDef, file string) []error {
 		for _, componentID := range sortedKeys(contract.Components) {
 			component := contract.Components[componentID]
 			path := "application.components." + componentID
-			if !isApplicationQualifiedID(def.App.ID, componentID) {
-				addf(path, "id %q must be application-qualified with %q", componentID, def.App.ID+".")
+			if !semanticOwnerAllowed(componentID, owners) {
+				addf(path, "id %q must be qualified by the application or a verified package owner", componentID)
 			}
 			if component == nil {
 				addf(path, "empty definition")
 				continue
 			}
 			addIdentity(path, "component", component.Name, component.Description, component.SemanticRef, refs)
+			addAliases(path, component.SemanticAliases, refs)
 			if component.Web != nil && strings.TrimSpace(component.Web.Module) == "" {
 				addf(path+".web.module", "is required when web is declared")
 			}
@@ -341,6 +451,7 @@ func validateApplicationContract(def *AppDef, file string) []error {
 				continue
 			}
 			addIdentity(path, "action", action.Name, action.Description, action.SemanticRef, refs)
+			addAliases(path, action.SemanticAliases, refs)
 			targets := 0
 			if action.Handler != "" {
 				targets++
@@ -350,8 +461,16 @@ func validateApplicationContract(def *AppDef, file string) []error {
 			}
 			if action.Intent != "" {
 				targets++
-				if !intentExists(def, action.State, action.Intent) {
+				if !dispatchIntentExists(def, action.State, action.RoomInterface, action.Intent) {
 					addf(path+".intent", "%q does not resolve in state %q or the story intent library", action.Intent, action.State)
+				}
+			}
+			if action.RoomInterface != "" {
+				if _, ok := def.RoomInterfaces[action.RoomInterface]; !ok {
+					addf(path+".room_interface", "%q is not declared in room_interfaces", action.RoomInterface)
+				}
+				if action.Intent == "" {
+					addf(path+".room_interface", "requires an intent target")
 				}
 			}
 			if targets != 1 {
@@ -426,6 +545,7 @@ func validateApplicationContract(def *AppDef, file string) []error {
 			continue
 		}
 		addIdentity(path, "handler", handler.Name, handler.Description, handler.SemanticRef, refs)
+		addAliases(path, handler.SemanticAliases, refs)
 		if strings.TrimSpace(handler.InputSchema) == "" {
 			addf(path+".input_schema", "is required")
 		}
@@ -460,8 +580,13 @@ func validateApplicationContract(def *AppDef, file string) []error {
 		if handler.Dispatch != nil {
 			if handler.Dispatch.Intent == "" || handler.Dispatch.Handler != "" {
 				addf(path+".dispatch", "a handler dispatch must name exactly one intent")
-			} else if !intentExists(def, handler.Dispatch.State, handler.Dispatch.Intent) {
+			} else if !dispatchIntentExists(def, handler.Dispatch.State, handler.Dispatch.RoomInterface, handler.Dispatch.Intent) {
 				addf(path+".dispatch.intent", "%q does not resolve in state %q or the story intent library", handler.Dispatch.Intent, handler.Dispatch.State)
+			}
+			if handler.Dispatch.RoomInterface != "" {
+				if _, ok := def.RoomInterfaces[handler.Dispatch.RoomInterface]; !ok {
+					addf(path+".dispatch.room_interface", "%q is not declared in room_interfaces", handler.Dispatch.RoomInterface)
+				}
 			}
 			if handler.Dispatch.SlotsFrom != "" && handler.Dispatch.SlotsFrom != "input" {
 				addf(path+".dispatch.slots_from", "%q is not supported (expected input)", handler.Dispatch.SlotsFrom)
@@ -553,8 +678,16 @@ func validateApplicationContract(def *AppDef, file string) []error {
 		}
 		if event.Dispatch.Intent != "" {
 			targets++
-			if !intentExists(def, event.Dispatch.State, event.Dispatch.Intent) {
+			if !dispatchIntentExists(def, event.Dispatch.State, event.Dispatch.RoomInterface, event.Dispatch.Intent) {
 				addf(path+".dispatch.intent", "%q does not resolve in state %q or the story intent library", event.Dispatch.Intent, event.Dispatch.State)
+			}
+		}
+		if event.Dispatch.RoomInterface != "" {
+			if _, ok := def.RoomInterfaces[event.Dispatch.RoomInterface]; !ok {
+				addf(path+".dispatch.room_interface", "%q is not declared in room_interfaces", event.Dispatch.RoomInterface)
+			}
+			if event.Dispatch.Intent == "" {
+				addf(path+".dispatch.room_interface", "requires an intent target")
 			}
 		}
 		if targets != 1 {
@@ -605,6 +738,18 @@ func intentExists(def *AppDef, statePath, intent string) bool {
 		}
 	})
 	return found
+}
+
+func dispatchIntentExists(def *AppDef, statePath, roomInterface, intent string) bool {
+	if roomInterface != "" {
+		contract := def.RoomInterfaces[roomInterface]
+		if contract == nil {
+			return false
+		}
+		_, ok := contract.Intents[intent]
+		return ok
+	}
+	return intentExists(def, statePath, intent)
 }
 
 func isBuiltinApplicationComponent(name string) bool {
@@ -672,6 +817,15 @@ func validSemanticRef(ref string) bool {
 	return true
 }
 
+func semanticOwnerAllowed(ref string, owners map[string]struct{}) bool {
+	for owner := range owners {
+		if owner != "" && (ref == owner || strings.HasPrefix(ref, owner+".")) {
+			return true
+		}
+	}
+	return false
+}
+
 // mergeApplicationDeclarations folds include-file application fragments into
 // the root definition. Imports have a separate namespace/visibility contract;
 // this helper is only for cloak-style same-story file splitting.
@@ -710,6 +864,31 @@ func mergeApplicationDeclarations(dst, src *AppDef, addErr func(string)) {
 			}
 			dst.Exports.Handlers[name] = handler
 		}
+		if src.Exports.Application != nil {
+			if dst.Exports.Application == nil {
+				dst.Exports.Application = &ApplicationExports{}
+			}
+			mergeExportList := func(kind string, dstList *[]string, srcList []string) {
+				seen := make(map[string]struct{}, len(*dstList))
+				for _, id := range *dstList {
+					seen[id] = struct{}{}
+				}
+				for _, id := range srcList {
+					if _, exists := seen[id]; exists {
+						addErr(fmt.Sprintf("include: exported application %s %q is already declared", kind, id))
+						continue
+					}
+					*dstList = append(*dstList, id)
+					seen[id] = struct{}{}
+				}
+			}
+			mergeExportList("navigation", &dst.Exports.Application.Navigation, src.Exports.Application.Navigation)
+			mergeExportList("page", &dst.Exports.Application.Pages, src.Exports.Application.Pages)
+			mergeExportList("component", &dst.Exports.Application.Components, src.Exports.Application.Components)
+			mergeExportList("action", &dst.Exports.Application.Actions, src.Exports.Application.Actions)
+			mergeExportList("schema", &dst.Exports.Application.Schemas, src.Exports.Application.Schemas)
+			mergeExportList("token", &dst.Exports.Application.Tokens, src.Exports.Application.Tokens)
+		}
 	}
 
 	for name, event := range src.Events {
@@ -744,6 +923,7 @@ func mergeApplicationContract(dst, src *ApplicationContract, addErr func(string)
 	mergeScalar("application.shell.entry", &dst.Shell.Entry, src.Shell.Entry)
 
 	dst.Navigation = append(dst.Navigation, src.Navigation...)
+	dst.Packages = append(dst.Packages, src.Packages...)
 	for name, page := range src.Pages {
 		if _, exists := dst.Pages[name]; exists {
 			addErr(fmt.Sprintf("include: application page %q is already declared", name))
@@ -773,6 +953,26 @@ func mergeApplicationContract(dst, src *ApplicationContract, addErr func(string)
 			dst.Actions = map[string]*ApplicationAction{}
 		}
 		dst.Actions[name] = action
+	}
+	for name, schema := range src.Schemas {
+		if _, exists := dst.Schemas[name]; exists {
+			addErr(fmt.Sprintf("include: application schema %q is already declared", name))
+			continue
+		}
+		if dst.Schemas == nil {
+			dst.Schemas = map[string]string{}
+		}
+		dst.Schemas[name] = schema
+	}
+	for name, token := range src.Tokens {
+		if _, exists := dst.Tokens[name]; exists {
+			addErr(fmt.Sprintf("include: application token %q is already declared", name))
+			continue
+		}
+		if dst.Tokens == nil {
+			dst.Tokens = map[string]string{}
+		}
+		dst.Tokens[name] = token
 	}
 	for name, surface := range src.Surfaces {
 		if _, exists := dst.Surfaces[name]; exists {

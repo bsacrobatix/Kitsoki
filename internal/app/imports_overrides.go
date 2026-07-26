@@ -39,7 +39,7 @@ import (
 //	                 file would live unaltered; we replace its contents on
 //	                 disk-relative reads at load time by remapping the
 //	                 path the child loader reads from).
-func applyOverrides(child *AppDef, ov *ImportOverrides, file, alias, parentBaseDir, childBaseDir string) []error {
+func applyOverrides(child *AppDef, ov *ImportOverrides, file, alias, parentStory, parentBaseDir, childBaseDir string) []error {
 	if child == nil || ov == nil {
 		return nil
 	}
@@ -110,8 +110,255 @@ func applyOverrides(child *AppDef, ov *ImportOverrides, file, alias, parentBaseD
 			applyPromptOverridesToStates(child.States, resolved)
 		}
 	}
+	if ov.Application != nil {
+		applyApplicationOverrides(child, ov.Application, parentStory, parentBaseDir, addErr)
+	}
 
 	return errs
+}
+
+func applyApplicationOverrides(child *AppDef, overrides *ApplicationOverrides, parentStory, parentBaseDir string, addErr func(string)) {
+	if child == nil || overrides == nil {
+		return
+	}
+	if child.Application == nil && (len(overrides.Pages) > 0 || len(overrides.Components) > 0 || len(overrides.Actions) > 0) {
+		addErr("application: child does not declare application:")
+		return
+	}
+	for _, id := range sortedKeys(overrides.Pages) {
+		replacement := overrides.Pages[id]
+		base, exists := child.Application.Pages[id]
+		if !exists || base == nil {
+			addErr(fmt.Sprintf("application.pages.%s: child does not declare page %q", id, id))
+			continue
+		}
+		if err := compatiblePageOverride(base, replacement); err != nil {
+			addErr(fmt.Sprintf("application.pages.%s: %v", id, err))
+			continue
+		}
+		stampOverridePageOrigin(replacement, parentStory, "overrides.application.pages."+id)
+		child.Application.Pages[id] = replacement
+	}
+	for _, id := range sortedKeys(overrides.Components) {
+		replacement := overrides.Components[id]
+		base, exists := child.Application.Components[id]
+		if !exists || base == nil {
+			addErr(fmt.Sprintf("application.components.%s: child does not declare component %q", id, id))
+			continue
+		}
+		if err := compatibleComponentOverride(base, replacement); err != nil {
+			addErr(fmt.Sprintf("application.components.%s: %v", id, err))
+			continue
+		}
+		clone := *replacement
+		if replacement.Web != nil {
+			web := *replacement.Web
+			web.Module = rebaseApplicationPath(web.Module, parentBaseDir)
+			clone.Web = &web
+		}
+		clone.PropsSchema = rebaseApplicationPath(clone.PropsSchema, parentBaseDir)
+		clone.Origin = ApplicationMemberOrigin{
+			Story: parentStory, Member: "overrides.application.components." + id,
+		}
+		child.Application.Components[id] = &clone
+	}
+	for _, id := range sortedKeys(overrides.Actions) {
+		replacement := overrides.Actions[id]
+		base, exists := child.Application.Actions[id]
+		if !exists || base == nil {
+			addErr(fmt.Sprintf("application.actions.%s: child does not declare action %q", id, id))
+			continue
+		}
+		if err := compatibleActionOverride(base, replacement); err != nil {
+			addErr(fmt.Sprintf("application.actions.%s: %v", id, err))
+			continue
+		}
+		clone := *replacement
+		clone.InputSchema = rebaseApplicationPath(clone.InputSchema, parentBaseDir)
+		clone.Origin = ApplicationMemberOrigin{
+			Story: parentStory, Member: "overrides.application.actions." + id,
+		}
+		child.Application.Actions[id] = &clone
+	}
+	for _, id := range sortedKeys(overrides.Handlers) {
+		replacement := overrides.Handlers[id]
+		if child.Exports == nil {
+			addErr(fmt.Sprintf("application.handlers.%s: child does not declare exported handlers", id))
+			continue
+		}
+		base, exists := child.Exports.Handlers[id]
+		if !exists || base == nil {
+			addErr(fmt.Sprintf("application.handlers.%s: child does not declare handler %q", id, id))
+			continue
+		}
+		if err := compatibleHandlerOverride(base, replacement); err != nil {
+			addErr(fmt.Sprintf("application.handlers.%s: %v", id, err))
+			continue
+		}
+		clone := *replacement
+		clone.InputSchema = rebaseApplicationPath(clone.InputSchema, parentBaseDir)
+		clone.OutputSchema = rebaseApplicationPath(clone.OutputSchema, parentBaseDir)
+		if replacement.Starlark != nil {
+			starlark := *replacement.Starlark
+			starlark.Script = rebaseApplicationPath(starlark.Script, parentBaseDir)
+			clone.Starlark = &starlark
+		}
+		clone.Origin = ApplicationMemberOrigin{
+			Story: parentStory, Member: "overrides.application.handlers." + id,
+		}
+		child.Exports.Handlers[id] = &clone
+	}
+}
+
+func stampOverridePageOrigin(page *ApplicationPage, story, member string) {
+	if page == nil {
+		return
+	}
+	page.Origin = ApplicationMemberOrigin{Story: story, Member: member}
+	for regionID, region := range page.Regions {
+		if region == nil {
+			continue
+		}
+		regionMember := member + ".regions." + regionID
+		region.Origin = ApplicationMemberOrigin{Story: story, Member: regionMember}
+		for index := range region.Items {
+			if card := region.Items[index].Card; card != nil {
+				card.Origin = ApplicationMemberOrigin{
+					Story: story, Member: fmt.Sprintf("%s.items[%d].card", regionMember, index),
+				}
+			}
+		}
+	}
+}
+
+func compatiblePageOverride(base, replacement *ApplicationPage) error {
+	if replacement == nil {
+		return fmt.Errorf("replacement is empty")
+	}
+	if !semanticReplacementCompatible(base.SemanticRef, replacement.SemanticRef, replacement.SemanticAliases) {
+		return fmt.Errorf("semantic_ref %q must remain %q or preserve it in semantic_aliases", replacement.SemanticRef, base.SemanticRef)
+	}
+	for regionID, baseRegion := range base.Regions {
+		replacementRegion := replacement.Regions[regionID]
+		if replacementRegion == nil {
+			return fmt.Errorf("replacement removes required region %q", regionID)
+		}
+		if baseRegion != nil && replacementRegion.SemanticRef != baseRegion.SemanticRef {
+			return fmt.Errorf("region %q semantic_ref changes from %q to %q", regionID, baseRegion.SemanticRef, replacementRegion.SemanticRef)
+		}
+	}
+	return nil
+}
+
+func compatibleComponentOverride(base, replacement *ApplicationComponent) error {
+	if replacement == nil {
+		return fmt.Errorf("replacement is empty")
+	}
+	if !semanticReplacementCompatible(base.SemanticRef, replacement.SemanticRef, replacement.SemanticAliases) {
+		return fmt.Errorf("semantic_ref %q must remain %q or preserve it in semantic_aliases", replacement.SemanticRef, base.SemanticRef)
+	}
+	if base.PropsSchema != replacement.PropsSchema {
+		return fmt.Errorf("props_schema %q is incompatible with %q", replacement.PropsSchema, base.PropsSchema)
+	}
+	baseFallback, replacementFallback := "", ""
+	if base.Fallback != nil {
+		baseFallback = base.Fallback.Element
+	}
+	if replacement.Fallback != nil {
+		replacementFallback = replacement.Fallback.Element
+	}
+	if baseFallback != replacementFallback {
+		return fmt.Errorf("fallback element %q is incompatible with %q", replacementFallback, baseFallback)
+	}
+	return nil
+}
+
+func compatibleActionOverride(base, replacement *ApplicationAction) error {
+	if replacement == nil {
+		return fmt.Errorf("replacement is empty")
+	}
+	if !semanticReplacementCompatible(base.SemanticRef, replacement.SemanticRef, replacement.SemanticAliases) {
+		return fmt.Errorf("semantic_ref %q must remain %q or preserve it in semantic_aliases", replacement.SemanticRef, base.SemanticRef)
+	}
+	if base.InputSchema != replacement.InputSchema {
+		return fmt.Errorf("input_schema %q is incompatible with %q", replacement.InputSchema, base.InputSchema)
+	}
+	if base.Handler != replacement.Handler || base.Intent != replacement.Intent ||
+		base.State != replacement.State || base.RoomInterface != replacement.RoomInterface {
+		return fmt.Errorf("replacement changes the action target contract")
+	}
+	if base.RoutingMode != replacement.RoutingMode {
+		return fmt.Errorf("routing_mode %q is incompatible with %q", replacement.RoutingMode, base.RoutingMode)
+	}
+	return nil
+}
+
+func compatibleHandlerOverride(base, replacement *ApplicationHandler) error {
+	if replacement == nil {
+		return fmt.Errorf("replacement is empty")
+	}
+	if !semanticReplacementCompatible(base.SemanticRef, replacement.SemanticRef, replacement.SemanticAliases) {
+		return fmt.Errorf("semantic_ref %q must remain %q or preserve it in semantic_aliases", replacement.SemanticRef, base.SemanticRef)
+	}
+	if base.InputSchema != replacement.InputSchema || base.OutputSchema != replacement.OutputSchema {
+		return fmt.Errorf("input/output schemas are incompatible")
+	}
+	if base.Effect != replacement.Effect {
+		return fmt.Errorf("effect %q is incompatible with %q", replacement.Effect, base.Effect)
+	}
+	if base.Session != replacement.Session || base.RoutingMode != replacement.RoutingMode {
+		return fmt.Errorf("session/routing policy is incompatible")
+	}
+	if !sameStringSet(base.Outcomes, replacement.Outcomes) {
+		return fmt.Errorf("outcomes %v are incompatible with %v", replacement.Outcomes, base.Outcomes)
+	}
+	if !stringSetContains(replacement.Expose, base.Expose) {
+		return fmt.Errorf("expose %v removes a base adapter from %v", replacement.Expose, base.Expose)
+	}
+	if base.Idempotency != nil {
+		if replacement.Idempotency == nil ||
+			base.Idempotency.Scope != replacement.Idempotency.Scope ||
+			base.Idempotency.Key != replacement.Idempotency.Key {
+			return fmt.Errorf("replacement weakens the base idempotency policy")
+		}
+	}
+	if base.Retry != nil && replacement.Retry != nil &&
+		replacement.Retry.MaxAttempts > base.Retry.MaxAttempts {
+		return fmt.Errorf("retry max_attempts %d weakens base limit %d", replacement.Retry.MaxAttempts, base.Retry.MaxAttempts)
+	}
+	if base.Compensation != "" && replacement.Compensation == "" {
+		return fmt.Errorf("replacement removes base compensation %q", base.Compensation)
+	}
+	return nil
+}
+
+func semanticReplacementCompatible(base, replacement string, aliases []string) bool {
+	if base == replacement {
+		return true
+	}
+	for _, alias := range aliases {
+		if alias == base {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStringSet(a, b []string) bool {
+	return len(a) == len(b) && stringSetContains(a, b)
+}
+
+func stringSetContains(have, required []string) bool {
+	set := make(map[string]struct{}, len(have))
+	for _, value := range have {
+		set[value] = struct{}{}
+	}
+	for _, value := range required {
+		if _, ok := set[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // rebaseEffectPaths walks an imported child's state tree and rewrites

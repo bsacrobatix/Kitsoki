@@ -143,13 +143,60 @@ func TestApplicationCallCommandUsesSharedJSONRPCRegistry(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if gotMethod != "runstatus.application.call" {
+	if gotMethod != "runstatus.application.cli_call" {
 		t.Fatalf("method = %q", gotMethod)
 	}
-	if gotParams["transport"] != "cli" || gotParams["session_id"] != "session-1" {
+	if _, ok := gotParams["transport"]; ok {
+		t.Fatalf("CLI supplied a client-controlled transport: %#v", gotParams)
+	}
+	if gotParams["session_id"] != "session-1" {
 		t.Fatalf("params = %#v", gotParams)
 	}
 	if !strings.Contains(out.String(), `"schema": "application-outcome/v1"`) {
+		t.Fatalf("output = %s", out.String())
+	}
+}
+
+func TestApplicationFeedbackCommandUsesSharedReviewedSink(t *testing.T) {
+	var gotMethod string
+	var gotParams map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var rpc struct {
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&rpc); err != nil {
+			t.Fatal(err)
+		}
+		gotMethod, gotParams = rpc.Method, rpc.Params
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"jsonrpc":"2.0","id":1,"result":{
+			"report":{"schema":"kitsoki.feedback.report.v1","anchor":{
+				"kind":"semantic_element","semantic_element":{
+					"plugin":"kitsoki.application","ref":"demo.card.item"
+				}
+			}},
+			"receipt":{"ref":"feedback-1","deduped":false}
+		}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	cmd := applicationFeedbackCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"demo.card.item", "--url", server.URL, "--session-id", "session-1",
+		"--instruction", "The item summary is unclear.",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != "runstatus.application.feedback" ||
+		gotParams["session_id"] != "session-1" ||
+		gotParams["ref"] != "demo.card.item" {
+		t.Fatalf("method=%q params=%#v", gotMethod, gotParams)
+	}
+	if !strings.Contains(out.String(), `"ref": "demo.card.item"`) {
 		t.Fatalf("output = %s", out.String())
 	}
 }
