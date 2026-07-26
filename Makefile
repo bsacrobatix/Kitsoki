@@ -113,7 +113,7 @@ BASESTORIES_STAMP := internal/basestories/.embed-stamp
 BASESKILLS_DIR    := internal/baseskills/assets
 BASESKILLS_STAMP  := internal/baseskills/.embed-stamp
 
-.PHONY: all setup setup-visual-qa-deps bootstrap-workspace bootstrap-worktree build build-lean install uninstall test test-full test-browser push-gate test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker \
+.PHONY: all setup setup-visual-qa-deps bootstrap-workspace bootstrap-worktree build build-lean install uninstall test test-full test-browser push-gate test-flows onboard-smoke onboard-sisters qs-bakeoff gears-bakeoff repo-history-capsules oracle-capsules history-smoke history-pending-smoke gears-history-full-smoke starcheck-kitsoki vet fmt tidy clean web web-clean web-dev web-dev-logs embed-stories embed-skills e2e-docker stateless-image \
 	fetch-models fetch-llama-server demo-tour demo-tour-fast demo-tour-qa cost-report cost-report-test mining-test \
 	vscode-e2e vscode-e2e-fast vscode-qa vscode-theming-sidebyside vscode-package vscode-install-local vscode-install-local-in-place \
 	vscode-stage-runstatus-temp vscode-runstatus-spa-temp vscode-stage-package-temp vscode-package-temp vscode-stage-embed-overlay-temp vscode-install-binary-temp check-vscode-code-cli
@@ -758,6 +758,11 @@ clean:
 # flow suites. See test/e2e/ for details.
 e2e-docker:
 	./test/e2e/run.sh
+
+# stateless-image builds the read-only-rootfs service image (Postgres/object
+# store state, /scratch writable). See deploy/stateless/README.md.
+stateless-image:
+	DOCKER_BUILDKIT=1 docker build -f deploy/stateless/Dockerfile -t kitsoki-stateless .
 
 # fetch-models / fetch-llama-server pre-warm the local-model agent cache for
 # offline/CI use: they run the SAME fetch-and-verify path managed mode runs

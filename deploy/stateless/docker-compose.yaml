@@ -1,0 +1,135 @@
+# deploy/stateless/docker-compose.yaml — runnable local approximation of the
+# stateless production shape:
+#
+#   kitsoki-web  — the orchestrator, read-only rootfs, all durable state in
+#                  Postgres (KITSOKI_DB_BACKEND=postgres).
+#   kitsoki-repo — `kitsoki repo serve`: git smart HTTP over a /repos volume,
+#                  backing up pushed repos to the object store.
+#   postgres     — postgres:16, the durable session/trace/graph store.
+#   minio        — local S3 stand-in for DigitalOcean Spaces.
+#
+# Object-store wiring: internal/objectstore speaks virtual-hosted-style S3
+# (bucket.region.host) and ParseBucketURL drops any port, so minio listens on
+# port 80 with MINIO_DOMAIN set and gets a network alias for the bucket host.
+# The bucket URL http://kitsoki.us-east-1.minio.internal therefore parses to
+# bucket=kitsoki region=us-east-1 endpoint=us-east-1.minio.internal, and
+# requests to kitsoki.us-east-1.minio.internal resolve to the minio container.
+#
+# Usage (from the repo root):
+#   docker compose -f deploy/stateless/docker-compose.yaml up --build
+#   git clone http://127.0.0.1:9418/demo.git        # after `kitsoki repo init`
+#   open http://127.0.0.1:7777                       # kitsoki web
+#
+# This file is a local dev approximation: credentials are throwaway defaults,
+# ports bind loopback only, and minio replaces the real object store.
+
+services:
+  kitsoki-web:
+    build:
+      context: ../..
+      dockerfile: deploy/stateless/Dockerfile
+    image: kitsoki-stateless
+    command: ["web", "--addr", "0.0.0.0:7777"]
+    read_only: true
+    volumes:
+      - web-scratch:/scratch
+    environment:
+      KITSOKI_DB_BACKEND: postgres
+      KITSOKI_PG_DSN: postgres://kitsoki:kitsoki@postgres:5432/kitsoki?sslmode=disable
+    ports:
+      - "127.0.0.1:7777:7777"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  kitsoki-repo:
+    image: kitsoki-stateless
+    build:
+      context: ../..
+      dockerfile: deploy/stateless/Dockerfile
+    # --allow-unauthenticated is required to bind a non-loopback address inside
+    # the container; the host port stays loopback-bound below. --backup streams
+    # a git bundle chain to the object store after every push.
+    command:
+      [
+        "repo", "serve",
+        "--root", "/repos",
+        "--addr", "0.0.0.0:9418",
+        "--allow-unauthenticated",
+        "--backup",
+        "--bucket-url", "http://kitsoki.us-east-1.minio.internal",
+        "--bucket-key-env", "MINIO_ROOT_USER",
+        "--bucket-secret-env", "MINIO_ROOT_PASSWORD",
+      ]
+    read_only: true
+    volumes:
+      - repo-scratch:/scratch
+      - repos:/repos
+    environment:
+      MINIO_ROOT_USER: kitsoki
+      MINIO_ROOT_PASSWORD: kitsoki-local-secret
+    ports:
+      - "127.0.0.1:9418:9418"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: kitsoki
+      POSTGRES_USER: kitsoki
+      POSTGRES_PASSWORD: kitsoki
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitsoki -d kitsoki"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    # Port 80 because ParseBucketURL keeps only the hostname of the bucket URL
+    # (see header comment); MINIO_DOMAIN enables virtual-hosted-style requests.
+    command: ["server", "/data", "--address", ":80", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: kitsoki
+      MINIO_ROOT_PASSWORD: kitsoki-local-secret
+      MINIO_DOMAIN: us-east-1.minio.internal
+      MINIO_SITE_REGION: us-east-1
+    networks:
+      default:
+        aliases:
+          - us-east-1.minio.internal
+          - kitsoki.us-east-1.minio.internal
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:80/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # One-shot: create the kitsoki bucket the repo backups land in.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      [
+        "sh", "-c",
+        "mc alias set local http://minio:80 kitsoki kitsoki-local-secret && mc mb --ignore-existing local/kitsoki",
+      ]
+
+volumes:
+  web-scratch:
+  repo-scratch:
+  repos:
+  pgdata:
+  miniodata:

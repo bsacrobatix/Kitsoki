@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+
+	"kitsoki/internal/statedir"
 )
 
 // feedbackArtifactsSubdir is where the local sink's bundle lives, relative
@@ -69,8 +71,14 @@ func repoRootFor(catalogPath string) (string, error) {
 	return root, nil
 }
 
-// feedbackSinkDir is <repoRoot>/.artifacts/graph-mcp.
+// feedbackSinkDir is <repoRoot>/.artifacts/graph-mcp — unless
+// KITSOKI_STATE_DIR is set, in which case the ledgers re-root at
+// <state>/graph-mcp so a read-only working tree never blocks feedback or
+// receipt writes (the state root confines all mutable state to one mount).
 func feedbackSinkDir(repoRoot string) string {
+	if state, ok := statedir.Root(); ok {
+		return filepath.Join(state, "graph-mcp")
+	}
 	return filepath.Join(repoRoot, filepath.FromSlash(feedbackArtifactsSubdir))
 }
 

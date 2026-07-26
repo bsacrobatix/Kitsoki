@@ -28,6 +28,8 @@ import (
 
 	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
+
+	"kitsoki/internal/statedir"
 )
 
 // EnvDSN is the environment variable that forces passthrough mode to an
@@ -158,7 +160,14 @@ func (r *runtime) Close() error {
 }
 
 // defaultBaseDir is the per-machine home for embedded Postgres state.
+// KITSOKI_STATE_DIR, when set, re-roots it at <state>/cache/embedded-pg so
+// the binary download/extract cache (and any defaulted data dir) stays inside
+// the single writable mount; unset keeps os.UserCacheDir()/kitsoki/embedded-pg
+// unchanged.
 func defaultBaseDir() (string, error) {
+	if state, ok := statedir.Root(); ok {
+		return filepath.Join(state, "cache", "embedded-pg"), nil
+	}
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("dbruntime: user cache dir: %w", err)

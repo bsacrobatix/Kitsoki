@@ -1,0 +1,18 @@
+# BuildKit-scoped ignore for deploy/stateless/Dockerfile. Keeps the build
+# context lean so the faithful `make install` rebuilds the SPA + binary from
+# source rather than shipping host artifacts into the image. Mirrors
+# test/e2e/Dockerfile.dockerignore, plus the managed-workspace/artifact dirs
+# that can be very large in a working checkout.
+.git
+.worktrees
+.capsules
+.context
+.artifacts
+.temp
+**/node_modules
+tools/runstatus/dist
+internal/runstatus/web/assets/index.html
+kitsoki
+*.test
+**/*.gif
+**/*.mp4

@@ -37,6 +37,7 @@ import (
 	kitsokimcp "kitsoki/internal/mcp"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
+	"kitsoki/internal/statedir"
 	"kitsoki/internal/store"
 	"kitsoki/internal/tui"
 	"kitsoki/internal/viz"
@@ -63,6 +64,14 @@ func newRootCmd() *cobra.Command {
 	// buildImportResolver). Exported as $KITSOKI_KIT_STAGED so subprocesses
 	// inherit the trial posture, mirroring --kitsoki-repo → $KITSOKI_REPO.
 	var stagedFlag bool
+	// stateDirFlag backs the persistent --state-dir override. It re-roots
+	// every default runtime-writable location (sessions traces + sidecars,
+	// sessions.db, embedded-postgres data/binary cache, graph-mcp ledgers)
+	// under one directory for read-only-rootfs deployments. Exported as
+	// $KITSOKI_STATE_DIR so the path seams (internal/statedir consumers) and
+	// spawned subprocesses read one canonical location, mirroring
+	// --kitsoki-repo → $KITSOKI_REPO.
+	var stateDirFlag string
 	defaultRunCmd := runCmd()
 	prepareInvocation := func(cmd *cobra.Command, args []string) error {
 		// --kitsoki-repo overrides $KITSOKI_REPO when given; either way the
@@ -88,6 +97,16 @@ func newRootCmd() *cobra.Command {
 		// stays authoritative for subprocesses and the import resolver.
 		if stagedFlag {
 			_ = os.Setenv(kitstage.EnvStaged, "all")
+		}
+		// --state-dir exports the runtime state root the same way: flag wins
+		// over an inherited $KITSOKI_STATE_DIR, and the env var stays the one
+		// canonical signal every path seam and subprocess consults.
+		if stateDirFlag != "" {
+			abs := stateDirFlag
+			if a, err := filepath.Abs(stateDirFlag); err == nil {
+				abs = a
+			}
+			_ = os.Setenv(statedir.EnvStateDir, abs)
 		}
 		// Record whether the operator explicitly passed --semantic-routing so
 		// semanticRoutingOptions can let it override KITSOKI_SEMANTIC_ROUTING.
@@ -159,6 +178,11 @@ See docs/ in the repo for the narrative documentation.`,
 		"session store backend: sqlite (default) | postgres | embedded-postgres (env: KITSOKI_DB_BACKEND)")
 	root.PersistentFlags().StringVar(&pgDSNFlag, "pg-dsn", "",
 		"Postgres DSN for --db-backend postgres (env: KITSOKI_PG_DSN)")
+
+	// Opt-in runtime state root: one writable mount for every default mutable
+	// location. Unset keeps every historical default path byte-for-byte.
+	root.PersistentFlags().StringVar(&stateDirFlag, "state-dir", "",
+		"root directory for all runtime-writable state: sessions under <dir>/sessions, sessions.db, embedded-postgres under <dir>/pg, graph-mcp ledgers under <dir>/graph-mcp (env: KITSOKI_STATE_DIR)")
 	root.Flags().AddFlagSet(defaultRunCmd.Flags())
 
 	root.AddCommand(versionCmd())
@@ -1351,6 +1375,13 @@ func buildHarnessWithActiveProfile(harnessType, claudeModel, agentBackend, recor
 
 // defaultDBPath returns the default SQLite database path.
 func defaultDBPath() string {
+	// KITSOKI_STATE_DIR re-roots the whole mutable state tree (see
+	// internal/statedir): the db lives directly at <state>/sessions.db so the
+	// embedded-postgres data dir derived from its parent (db_backend.go)
+	// lands at <state>/pg.
+	if state, ok := statedir.Root(); ok {
+		return filepath.Join(state, "sessions.db")
+	}
 	// Use $XDG_DATA_HOME/kitsoki/sessions.db or ~/.local/share/kitsoki/sessions.db.
 	xdgDataHome := os.Getenv("XDG_DATA_HOME")
 	if xdgDataHome != "" {

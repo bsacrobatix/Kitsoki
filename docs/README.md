@@ -91,6 +91,13 @@ view-elements + pongo2, the `/command` surface, engine-event observers,
 and how to write TUI rendering regression tests. *Audience: contributors
 working on the UI; authors wanting to understand how their views render.*
 
+### [`deploy/`](deploy/README.md) — running kitsoki as a service
+
+The stateless container shape: read-only rootfs, Postgres and object-store
+state, the `KITSOKI_STATE_DIR` writable-root contract, and the git repo
+service runbook. *Audience: operators deploying kitsoki beyond the local
+binary.*
+
 ---
 
 ## Reference (embedded in the binary)
