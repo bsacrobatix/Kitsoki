@@ -1288,7 +1288,25 @@ func (r *SessionRegistry) Get(sessionID string) (server.Entry, bool) {
 		Artifacts: &server.JournalArtifactResolver{Reader: e.rt.JournalRead, SID: e.sid},
 		Frames:    e.frameRecorderLocked(),
 		Feedback:  e.feedbackSinkLocked(),
+		Stream:    entrySessionStream(e),
 	}, true
+}
+
+// entrySessionStream exposes the durable-stream read capability of e's
+// session store when the backend provides one (postgres/embedded-postgres via
+// store.AsEventStream); nil on SQLite, which keeps the server on its existing
+// Source-polling SSE path and makes runstatus.session.events report its typed
+// not-supported error. The store session id rides along because the registry's
+// public session id (the RPC session_id) is not the store's.
+func entrySessionStream(e *entry) *server.SessionStream {
+	if e.rt == nil || e.rt.Store == nil {
+		return nil
+	}
+	es, ok := store.AsEventStream(e.rt.Store)
+	if !ok {
+		return nil
+	}
+	return &server.SessionStream{Stream: es, SID: e.sid}
 }
 
 // ApplicationEventScheduler returns the durable SQLite-backed scheduler

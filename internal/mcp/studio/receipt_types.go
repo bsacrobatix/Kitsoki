@@ -37,13 +37,18 @@ type Receipt struct {
 	Attributes        map[string]string `json:"attributes,omitempty"`
 }
 
+// receiptSequencer is an optional ObjectiveStore capability: the store assigns
+// the authoritative per-objective sequence itself (e.g. inside a database
+// transaction) and returns the stored receipt. Durable multi-process stores
+// implement it so the sequence never depends on a caller-side counter; the
+// in-memory store keeps the legacy list-length path unchanged.
+type receiptSequencer interface {
+	AppendReceiptAssign(context.Context, Receipt) (Receipt, error)
+}
+
 func (s *ObjectiveService) appendReceipt(ctx context.Context, objective Objective, kind ReceiptType, data any) (Receipt, error) {
-	existing, err := s.store.ListReceipts(ctx, objective.ID)
-	if err != nil {
-		return Receipt{}, err
-	}
 	receipt := Receipt{
-		SchemaVersion: ReceiptSchemaVersion, Sequence: len(existing) + 1, Type: kind,
+		SchemaVersion: ReceiptSchemaVersion, Type: kind,
 		ObjectiveID: objective.ID, ObjectiveRevision: objective.Revision,
 		PolicyHash: objective.Policy.EffectiveHash(), RecordedAt: s.now().UTC(),
 	}
@@ -60,6 +65,14 @@ func (s *ObjectiveService) appendReceipt(ctx context.Context, objective Objectiv
 			receipt.Attributes[key] = item
 		}
 	}
+	if sequencer, ok := s.store.(receiptSequencer); ok {
+		return sequencer.AppendReceiptAssign(ctx, receipt)
+	}
+	existing, err := s.store.ListReceipts(ctx, objective.ID)
+	if err != nil {
+		return Receipt{}, err
+	}
+	receipt.Sequence = len(existing) + 1
 	if err := s.store.AppendReceipt(ctx, receipt); err != nil {
 		return Receipt{}, err
 	}

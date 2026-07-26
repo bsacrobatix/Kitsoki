@@ -644,11 +644,15 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		if tdErr != nil {
 			toolsDir = filepath.Join(repoPath, "tools", "session-mining")
 		}
+		marks, marksErr := newMiningWatermarkStore(s, cfg.Mining.MinedThrough)
+		if marksErr != nil {
+			return nil, fmt.Errorf("open mining watermark store: %w", marksErr)
+		}
 		miner := &mining.Miner{
 			Resolver: mining.TranscriptResolver{},
 			Sched:    rt.Scheduler,
 			Pipeline: &mining.ExecPipelineRunner{ToolsDir: toolsDir},
-			Marks:    mining.NewMapWatermarkStore(cfg.Mining.MinedThrough),
+			Marks:    marks,
 			Sink:     &mining.SessionSink{Sink: orch},
 			Cfg: mining.Config{
 				Enabled:         true,

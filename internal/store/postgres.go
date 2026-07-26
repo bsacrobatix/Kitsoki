@@ -70,6 +70,11 @@ type postgresStore struct {
 	leaseTTL  time.Duration
 	heartbeat time.Duration
 
+	// streamPoll overrides the WaitForEvents fallback re-check interval
+	// (postgres_stream.go); zero means pgStreamPollDefault. Set only in
+	// tests via export_test.go.
+	streamPoll time.Duration
+
 	// closeOnce makes Close idempotent (pgtest also closes the handle).
 	closeOnce sync.Once
 	closeErr  error
@@ -266,6 +271,19 @@ func appendEventsPgTx(ctx context.Context, tx *sql.Tx, session app.SessionID, ev
 	turn := events[0].Turn
 	now := time.Now().UnixMicro()
 
+	// Serialize ALL event appends (across sessions) for the remainder of this
+	// transaction so stream_pos assignment order equals commit order — the
+	// invariant that lets EventStream readers page `stream_pos > cursor`
+	// without ever missing a row (see postgres_stream.go for the full
+	// argument). Advisory xact locks release at commit/rollback. Lock order
+	// is always sessions-row FOR UPDATE (appendTx) → this advisory lock, so
+	// the two cannot deadlock.
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock($1)`, pgStreamAppendLockKey,
+	); err != nil {
+		return fmt.Errorf("store.appendEventsPgTx: stream append lock: %w", err)
+	}
+
 	var seqBase int
 	{
 		var maxSeq sql.NullInt64
@@ -292,6 +310,16 @@ func appendEventsPgTx(ctx context.Context, tx *sql.Tx, session app.SessionID, ev
 			payload = json.RawMessage("{}")
 		}
 
+		// Full-fidelity ts: persist the event's own timestamp when the caller
+		// set one (what the JSONL sink records), falling back to append time
+		// for unstamped events — the SQLite behavior. The column is unix
+		// MICROseconds, so sub-microsecond precision is truncated; trace
+		// export documents that as its one event-field divergence.
+		tsMicro := now
+		if !events[i].Ts.IsZero() {
+			tsMicro = events[i].Ts.UTC().UnixMicro()
+		}
+
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO events (session_id, turn, seq, ts, kind, payload_json,
 			                     state_path, call_id, parent_turn, episode_id, match_idx)
@@ -299,7 +327,7 @@ func appendEventsPgTx(ctx context.Context, tx *sql.Tx, session app.SessionID, ev
 			string(session),
 			int64(events[i].Turn),
 			events[i].Seq,
-			now,
+			tsMicro,
 			string(events[i].Kind),
 			string(payload),
 			string(events[i].StatePath),
@@ -319,6 +347,16 @@ func appendEventsPgTx(ctx context.Context, tx *sql.Tx, session app.SessionID, ev
 	); err != nil {
 		return fmt.Errorf("store.appendEventsPgTx: update last_turn: %w", err)
 	}
+
+	// Wake stream tailers (EventStream.WaitForEvents). In the same tx so the
+	// notification fires exactly at commit, never for a rolled-back append.
+	// Payload = session id; delivery is best-effort — readers converge via
+	// their periodic cursor re-check even if this is lost.
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_notify($1, $2)`, pgEventsNotifyChannel, string(session),
+	); err != nil {
+		return fmt.Errorf("store.appendEventsPgTx: notify: %w", err)
+	}
 	return nil
 }
 
@@ -336,7 +374,13 @@ func (s *postgresStore) LoadHistory(session app.SessionID) (History, error) {
 	if ok {
 		afterTurn = int64(snap.Turn)
 	}
+	return s.loadHistorySince(ctx, session, afterTurn)
+}
 
+// loadHistorySince returns the ordered events with turn > afterTurn. Pass
+// afterTurn = -1 for the complete event log regardless of snapshots (the
+// trace-export path).
+func (s *postgresStore) loadHistorySince(ctx context.Context, session app.SessionID, afterTurn int64) (History, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT turn, seq, ts, kind, payload_json,
 		        state_path, call_id, parent_turn, episode_id, match_idx

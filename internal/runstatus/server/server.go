@@ -43,6 +43,9 @@
 //	runstatus.session.mermaid    {session_id, detail?}               → {source, node_map}
 //	runstatus.session.trace      {session_id, since_turn?, until_turn?, limit?}
 //	                                                                 → {events, last_turn}
+//	runstatus.session.events     {session_id, since?, limit?}        → {events, next_cursor, live}
+//	                                                                   (durable-stream backends only;
+//	                                                                    see session_events.go)
 //	runstatus.session.view       {session_id}                        → turnResult
 //	runstatus.session.turn       {session_id, input}                 → turnResult
 //	runstatus.session.submit     {session_id, intent, slots?}        → turnResult
@@ -74,6 +77,11 @@
 //
 // A subscription remembers how many events it has already delivered, so an SSE
 // reconnect with the same subscription_id resumes without re-sending events.
+//
+// When the session's store exposes a durable event stream ([store.EventStream]
+// — the Postgres backends), the same SSE endpoint switches to cursor reads +
+// blocking waits instead of the poll loop, and each runstatus.event frame
+// additionally carries the event's stream cursor. See session_events.go.
 package server
 
 import (
@@ -365,6 +373,14 @@ type subscription struct {
 	mu        sync.Mutex
 	sent      int
 	seen      bool
+
+	// stream is non-nil when the session carried a [SessionStream] at
+	// subscribe time; the SSE handler then runs the cursor-driven loop
+	// (session_events.go) instead of the ticker poll. cursor is the last
+	// delivered global stream position — the whole subscription state on that
+	// path (sent/seen are unused there). Guarded by mu like sent.
+	stream *SessionStream
+	cursor store.StreamCursor
 }
 
 // Option configures a Server. A few options (WithDriver) only apply when the
@@ -932,6 +948,11 @@ const (
 	// codeStaleVersion makes an optimistic assignment conflict actionable: Data
 	// carries the current folded Record for a refresh-and-retry UI.
 	codeStaleVersion = -32003
+	// codeStreamUnsupported is returned by runstatus.session.events when the
+	// session's store exposes no durable event stream (SQLite / trace-file /
+	// in-memory sources). The client falls back to runstatus.session.trace +
+	// session.subscribe — the polling contract, unchanged.
+	codeStreamUnsupported = -32004
 
 	// maxRPCBodyBytes caps a single /rpc request body. The largest legitimate
 	// payload is a bug.report with a base64'd rrweb session buffer (~last 30s of
@@ -1759,8 +1780,13 @@ func (s *Server) dispatch(ctx context.Context, method string, params map[string]
 		}
 		return filterTrace(snap, params), nil
 
+	case "runstatus.session.events":
+		// Cursor-paged read over the durable event stream; codeStreamUnsupported
+		// when the session's store has no stream capability (session_events.go).
+		return s.sessionEvents(ctx, params)
+
 	case "runstatus.session.subscribe":
-		return s.subscribe(params)
+		return s.subscribe(ctx, params)
 
 	case "runstatus.session.unsubscribe":
 		id, _ := params["subscription_id"].(string)
@@ -2873,7 +2899,7 @@ func intParam(params map[string]any, key string) (int, bool) {
 
 // ── Subscriptions + SSE ─────────────────────────────────────────────────────
 
-func (s *Server) subscribe(params map[string]any) (map[string]any, *rpcError) {
+func (s *Server) subscribe(ctx context.Context, params map[string]any) (map[string]any, *rpcError) {
 	// Bind the subscription to the session it follows; each poll re-resolves the
 	// live Source for this id (so a session reloaded after subscribe is still
 	// observed). The single-entry adapter ignores the id.
@@ -2882,18 +2908,34 @@ func (s *Server) subscribe(params map[string]any) (map[string]any, *rpcError) {
 	if !ok {
 		return nil, &rpcError{Code: codeNotFound, Message: "unknown session_id: " + sid}
 	}
-	// Seed sent with the current event count so the stream carries only events
-	// appended after subscribe; the initial load comes from session.trace.
-	events, err := entry.Source.Events()
-	if err != nil {
-		return nil, serverErr(err)
+	sub := &subscription{sessionID: sid}
+	if ss := entry.Stream; ss != nil && ss.Stream != nil {
+		// Durable-stream session: seed the cursor to the session's current
+		// tail so the SSE stream carries only events appended after
+		// subscribe; the initial load comes from session.trace or
+		// session.events. No whole-history Source.Events() read here — the
+		// cursor path exists to retire that (session_events.go).
+		tail, err := sessionTailCursor(ctx, ss)
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		sub.stream, sub.cursor = ss, tail
+	} else {
+		// Seed sent with the current event count so the stream carries only
+		// events appended after subscribe; the initial load comes from
+		// session.trace.
+		events, err := entry.Source.Events()
+		if err != nil {
+			return nil, serverErr(err)
+		}
+		sub.sent = len(events)
 	}
 	s.mu.Lock()
 	s.nextID++
-	id := fmt.Sprintf("sub-%d", s.nextID)
-	s.subs[id] = &subscription{id: id, sessionID: sid, sent: len(events)}
+	sub.id = fmt.Sprintf("sub-%d", s.nextID)
+	s.subs[sub.id] = sub
 	s.mu.Unlock()
-	return map[string]any{"subscription_id": id}, nil
+	return map[string]any{"subscription_id": sub.id}, nil
 }
 
 func (s *Server) unsubscribe(id string) {
@@ -2925,6 +2967,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
+
+	// Durable-stream subscriptions use cursor reads + blocking waits instead
+	// of the ticker re-read (session_events.go); everything else keeps the
+	// historical polling loop below, byte-for-byte.
+	if sub.stream != nil {
+		s.handleEventsStream(w, r, flusher, sub)
+		return
+	}
 
 	ticker := time.NewTicker(s.poll)
 	defer ticker.Stop()

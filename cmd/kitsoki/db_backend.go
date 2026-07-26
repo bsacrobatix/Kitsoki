@@ -12,6 +12,7 @@ import (
 	"kitsoki/internal/dbruntime"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
+	"kitsoki/internal/mining"
 	"kitsoki/internal/store"
 	"kitsoki/internal/study"
 )
@@ -147,6 +148,18 @@ func newArtifactJobStore(s store.Store) (artifactjob.Store, error) {
 		return artifactjob.NewPostgresStore(s.DB())
 	}
 	return artifactjob.NewSQLiteStore(s.DB())
+}
+
+// newMiningWatermarkStore constructs the miner's per-slug watermark ledger.
+// On a Postgres backend it is the durable mining.consumer_offsets table on s's
+// shared handle (seeded from the config ledger only for slugs the table has
+// never seen — durable rows win); otherwise the in-memory map store, keeping
+// today's file/mtime behavior byte-for-byte.
+func newMiningWatermarkStore(s store.Store, seed map[string]int64) (mining.WatermarkStore, error) {
+	if store.IsPostgres(s) {
+		return mining.NewPGWatermarkStore(s.DB(), mining.SessionMinerConsumer, seed)
+	}
+	return mining.NewMapWatermarkStore(seed), nil
 }
 
 // newStudyStore constructs the study satellite store on s's shared handle in

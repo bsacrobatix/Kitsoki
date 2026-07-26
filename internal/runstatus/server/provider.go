@@ -243,6 +243,14 @@ type Entry struct {
 	Artifacts ArtifactResolver
 	Frames    FrameRecorder
 	Feedback  FeedbackSink
+	// Stream is the optional durable-stream read capability for this session
+	// (session_events.go): a cursor-addressable view of the session's event
+	// log backed by [store.EventStream]. The provider stamps it only when the
+	// session's store exposes the capability (the Postgres backends today);
+	// nil keeps the server on its existing Source-polling SSE path and makes
+	// runstatus.session.events report codeStreamUnsupported. Purely additive:
+	// SQLite/file-backed sessions never see a behavior change.
+	Stream *SessionStream
 	// FrameRunner is the command runner video.frame injects into [video.Frame]
 	// for this session. Production leaves it nil → video.Frame shells ffmpeg via
 	// its DefaultRunner; a test injects a fixture-copying fake here (per-entry,
