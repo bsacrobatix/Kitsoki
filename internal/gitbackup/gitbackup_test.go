@@ -302,6 +302,64 @@ func TestRestoreRefusesNonEmptyTarget(t *testing.T) {
 	}
 }
 
+// TestRestoreFailureLeavesTargetRetryable proves a failed restore does not
+// poison its target: after the object store is repaired, the same --target
+// path restores successfully with no manual cleanup (regression: Restore used
+// to git-init the target before downloading, so its own non-empty guard
+// rejected every retry).
+func TestRestoreFailureLeavesTargetRetryable(t *testing.T) {
+	ctx := context.Background()
+	store := objectstore.NewFake()
+	repo := newRepo(t)
+	commitFile(t, repo, "a.txt", "one", "c1")
+	b := openBacker(t, store, repo)
+	res := backupIncr(t, ctx, b, KindFull)
+
+	// Save the good bundle bytes, then corrupt the stored object.
+	body, _, err := store.Get(ctx, res.Entry.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	good, err := io.ReadAll(body)
+	body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := bytes.Repeat([]byte("corrupt"), (len(good)/7)+1)[:len(good)]
+	if _, err := store.Put(ctx, res.Entry.Key, bytes.NewReader(bad), int64(len(bad)), objectstore.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(t.TempDir(), "restored")
+	if _, err := Restore(ctx, store, "repos/demo", target); err == nil || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("restore of corrupted bundle: err = %v, want sha256 refusal", err)
+	}
+	if entries, err := os.ReadDir(target); err == nil && len(entries) > 0 {
+		t.Fatalf("failed restore left %d entries in target %s", len(entries), target)
+	}
+
+	// Repair the object store and retry the exact same target path.
+	if _, err := store.Put(ctx, res.Entry.Key, bytes.NewReader(good), int64(len(good)), objectstore.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Restore(ctx, store, "repos/demo", target); err != nil {
+		t.Fatalf("retry after repair: %v", err)
+	}
+	if got, want := forEachRef(t, target), forEachRef(t, repo); got != want {
+		t.Fatalf("retried restore refs mismatch:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	// A leftover staging directory would be a disk leak.
+	siblings, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range siblings {
+		if strings.HasPrefix(s.Name(), ".kitsoki-restore-") {
+			t.Fatalf("staging directory %s left behind", s.Name())
+		}
+	}
+}
+
 func TestTamperedManifestRefusesRestore(t *testing.T) {
 	ctx := context.Background()
 	store := objectstore.NewFake()

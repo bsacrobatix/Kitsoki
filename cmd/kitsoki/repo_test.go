@@ -167,6 +167,22 @@ func TestRepoServeFlagValidation(t *testing.T) {
 	_, err = runRepo(t, "serve", "--root", root, "--backup", "--read-only",
 		"--bucket-url", repoTestBucketURL)
 	require.ErrorContains(t, err, "read-only")
+
+	// The server has no authentication: non-loopback binds are refused
+	// unless the operator explicitly opts in with --allow-unauthenticated.
+	for _, addr := range []string{":9418", "0.0.0.0:9418", "192.0.2.1:9418", "[::]:9418"} {
+		_, err = runRepo(t, "serve", "--root", root, "--addr", addr)
+		require.ErrorContains(t, err, "loopback", "addr %s", addr)
+	}
+}
+
+func TestRequireLoopbackAddr(t *testing.T) {
+	for _, ok := range []string{"127.0.0.1:0", "localhost:9418", "[::1]:9418", "127.9.9.9:80"} {
+		require.NoError(t, requireLoopbackAddr(ok), "addr %s", ok)
+	}
+	for _, bad := range []string{":9418", "0.0.0.0:9418", "[::]:9418", "10.0.0.5:9418", "example.com:9418", "no-port"} {
+		require.Error(t, requireLoopbackAddr(bad), "addr %s", bad)
+	}
 }
 
 // TestRepoServeBackupEndToEnd is the acceptance test: serve a root with

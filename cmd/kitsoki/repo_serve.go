@@ -28,7 +28,7 @@ var repoServeOnReady func(addr string)
 func repoServeCmd() *cobra.Command {
 	var bucket repoBucketFlags
 	var root, addr, backupPrefix string
-	var readOnly, backup bool
+	var readOnly, backup, allowUnauthenticated bool
 	cmd := &cobra.Command{
 		Use:          "serve",
 		Short:        "Serve a root of bare repositories over git smart HTTP",
@@ -63,6 +63,11 @@ func repoServeCmd() *cobra.Command {
 				return err
 			}
 
+			if !allowUnauthenticated {
+				if err := requireLoopbackAddr(addr); err != nil {
+					return err
+				}
+			}
 			ln, err := net.Listen("tcp", addr)
 			if err != nil {
 				return fmt.Errorf("listen %s: %w", addr, err)
@@ -98,8 +103,10 @@ func repoServeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&root, "root", "", "serving root directory of bare repositories (required)")
-	cmd.Flags().StringVar(&addr, "addr", ":9418", "HTTP listen address")
+	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:9418", "HTTP listen address (loopback only unless --allow-unauthenticated)")
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "reject pushes; serve fetches and clones only")
+	cmd.Flags().BoolVar(&allowUnauthenticated, "allow-unauthenticated", false,
+		"permit binding a non-loopback address despite the server having no authentication: anyone who can reach the port gets anonymous read (and, without --read-only, write) access to every repository under --root")
 	cmd.Flags().BoolVar(&backup, "backup", false, "back up each pushed repository to object storage after refs change")
 	cmd.Flags().StringVar(&backupPrefix, "backup-prefix", "repos/", "object-store prefix under which each repository's bundle chain is stored")
 	bucket.register(cmd, false)
@@ -111,6 +118,24 @@ func repoServeCmd() *cobra.Command {
 	}
 	_ = cmd.MarkFlagRequired("root")
 	return cmd
+}
+
+// requireLoopbackAddr rejects listen addresses that would expose the
+// unauthenticated git server beyond this host. The gitserve handler's only
+// access control without an injected AuthFunc is the bind address, so a
+// non-loopback bind means anonymous network read/write to every served repo.
+func requireLoopbackAddr(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("parse --addr %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("--addr %q is not a loopback address: this server has no authentication, so binding it beyond localhost exposes anonymous access to every repository under --root; use 127.0.0.1, or pass --allow-unauthenticated to accept that", addr)
 }
 
 // repoBackupRunner returns the function the backup queue invokes for one

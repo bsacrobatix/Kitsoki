@@ -4,7 +4,8 @@
 // git rather than reimplementing the wire protocol.
 //
 // Security model: repository paths are strictly validated (safe path segments,
-// no traversal, repo must exist under the root and be a bare repository), and
+// no traversal, repo must exist under the root and be a bare repository, and
+// the symlink-resolved directory must still be inside the root), and
 // only the smart-HTTP endpoints (/info/refs, /git-upload-pack,
 // /git-receive-pack) are exposed. Authentication is an injected seam
 // (AuthFunc); the default is allow-all because the listener bind address is
@@ -24,6 +25,7 @@ package gitserve
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cgi"
 	"os"
@@ -138,8 +140,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	repoDir := filepath.Join(h.root, filepath.FromSlash(repo))
-	if !isBareRepo(repoDir) {
+	repoDir, ok := h.resolveRepoDir(repo)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -170,6 +172,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		before = snap
 	}
+
+	cleanup, err := deChunkBody(r)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer cleanup()
 
 	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 	h.cgiHandler(actor, r).ServeHTTP(rec, r)
@@ -210,6 +219,61 @@ func (h *Handler) splitRepoPath(urlPath string) (repo, endpoint string, ok bool)
 		}
 	}
 	return "", "", false
+}
+
+// resolveRepoDir maps a validated repository path to its on-disk directory,
+// re-checking after symlink resolution that the directory is still inside the
+// serving root. Segment validation alone cannot stop a symlink planted under
+// the root from pointing at a repository elsewhere on the filesystem; symlinks
+// that resolve to another location under the root remain servable.
+func (h *Handler) resolveRepoDir(repo string) (string, bool) {
+	repoDir := filepath.Join(h.root, filepath.FromSlash(repo))
+	resolved, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(h.root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	if !isBareRepo(resolved) {
+		return "", false
+	}
+	return resolved, true
+}
+
+// deChunkBody spools a chunked request body to a temporary file and rewrites
+// the request to carry a plain Content-Length. The net/http/cgi bridge
+// hard-rejects Transfer-Encoding: chunked with HTTP 400, and git switches to
+// chunked transfer for push bodies larger than http.postBuffer (1 MiB by
+// default), so without this any non-trivial push would fail. The returned
+// cleanup must be called after the request has been served; it is a no-op
+// when the body needed no spooling. The body is spooled verbatim, so a
+// Content-Encoding: gzip push stays compressed for http-backend to inflate.
+func deChunkBody(r *http.Request) (cleanup func(), err error) {
+	if len(r.TransferEncoding) == 0 && r.ContentLength >= 0 {
+		return func() {}, nil
+	}
+	tmp, err := os.CreateTemp("", "gitserve-body-*")
+	if err != nil {
+		return nil, fmt.Errorf("gitserve: spool request body: %w", err)
+	}
+	cleanup = func() {
+		tmp.Close()
+		os.Remove(tmp.Name())
+	}
+	size, err := io.Copy(tmp, r.Body)
+	if err == nil {
+		_, err = tmp.Seek(0, io.SeekStart)
+	}
+	if err != nil {
+		cleanup()
+		return nil, fmt.Errorf("gitserve: spool request body: %w", err)
+	}
+	r.Body = tmp
+	r.ContentLength = size
+	r.TransferEncoding = nil
+	return cleanup, nil
 }
 
 func (h *Handler) cgiHandler(actor string, r *http.Request) *cgi.Handler {

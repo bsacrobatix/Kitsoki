@@ -1,6 +1,7 @@
 package gitserve
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -160,6 +161,40 @@ func TestPushUpdatesRefsAndFiresRefHook(t *testing.T) {
 	}
 }
 
+// TestLargePushUsesChunkedEncoding proves pushes bigger than git's
+// http.postBuffer (1 MiB default) succeed. git switches to
+// Transfer-Encoding: chunked for such bodies, which net/http/cgi rejects with
+// HTTP 400 unless the handler de-chunks first (regression: deChunkBody).
+func TestLargePushUsesChunkedEncoding(t *testing.T) {
+	root := t.TempDir()
+	seedBareRepo(t, root, "r.git")
+	hook := &hookRecorder{}
+	srv := newServer(t, root, WithRefHook(hook))
+
+	dst := filepath.Join(t.TempDir(), "clone")
+	runGit(t, t.TempDir(), "clone", srv.URL+"/r.git", dst)
+	// Incompressible payload so the pack (and thus the POST body) stays well
+	// above http.postBuffer and forces chunked transfer encoding.
+	payload := make([]byte, 4<<20)
+	if _, err := rand.Read(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "blob.bin"), payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dst, "add", "blob.bin")
+	runGit(t, dst, "commit", "-m", "large")
+	newHead := runGit(t, dst, "rev-parse", "HEAD")
+	runGit(t, dst, "push", "origin", "main")
+
+	if got := runGit(t, filepath.Join(root, "r.git"), "rev-parse", "refs/heads/main"); got != newHead {
+		t.Fatalf("bare main = %s, want %s (large push did not land)", got, newHead)
+	}
+	if calls := hook.snapshot(); len(calls) != 1 {
+		t.Fatalf("hook calls = %d, want 1: %+v", len(calls), calls)
+	}
+}
+
 func TestReadOnlyRejectsPush(t *testing.T) {
 	root := t.TempDir()
 	head := seedBareRepo(t, root, "r.git")
@@ -227,6 +262,46 @@ func TestPathValidation(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("valid info/refs = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSymlinkEscapeBlocked proves a symlink planted under the serving root
+// cannot expose a repository outside it, while a symlink resolving inside the
+// root still serves.
+func TestSymlinkEscapeBlocked(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "root")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedBareRepo(t, root, "r.git")
+	outside := t.TempDir()
+	secret, err := InitBare(outside, "secret.git")
+	if err != nil {
+		t.Fatalf("InitBare secret: %v", err)
+	}
+	if err := os.Symlink(secret, filepath.Join(root, "link.git")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "r.git"), filepath.Join(root, "alias.git")); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := New(root)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/link.git/info/refs?service=git-upload-pack", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("symlink escape served: GET /link.git/info/refs = %d, want 404", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/alias.git/info/refs?service=git-upload-pack", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("in-root symlink refused: GET /alias.git/info/refs = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 }
 

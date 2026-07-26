@@ -63,10 +63,23 @@ func Restore(ctx context.Context, store objectstore.Store, prefix, targetPath st
 		return Manifest{}, fmt.Errorf("gitbackup: manifest chain has no full backup")
 	}
 
-	if err := os.MkdirAll(target, 0o755); err != nil {
-		return Manifest{}, fmt.Errorf("gitbackup: create target: %w", err)
+	// Restore into a staging sibling and rename into place only on success:
+	// a failed or interrupted restore must leave the target retryable, never
+	// half-initialized (the non-empty guard above would otherwise poison the
+	// target for every later attempt).
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return Manifest{}, fmt.Errorf("gitbackup: create target parent: %w", err)
 	}
-	if _, err := gitOutput(ctx, target, "init", "--bare", "--quiet", "."); err != nil {
+	staging, err := os.MkdirTemp(parent, ".kitsoki-restore-*")
+	if err != nil {
+		return Manifest{}, fmt.Errorf("gitbackup: create staging directory: %w", err)
+	}
+	defer os.RemoveAll(staging) // no-op once staging has been renamed to target
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return Manifest{}, fmt.Errorf("gitbackup: prepare staging directory: %w", err)
+	}
+	if _, err := gitOutput(ctx, staging, "init", "--bare", "--quiet", "."); err != nil {
 		return Manifest{}, fmt.Errorf("gitbackup: init target: %w", err)
 	}
 
@@ -84,23 +97,34 @@ func Restore(ctx context.Context, store objectstore.Store, prefix, targetPath st
 		if err := fetchVerified(ctx, store, entry, path); err != nil {
 			return Manifest{}, err
 		}
-		if _, err := gitOutput(ctx, target, "fetch", "--quiet", path, "+refs/*:refs/*"); err != nil {
+		if _, err := gitOutput(ctx, staging, "fetch", "--quiet", path, "+refs/*:refs/*"); err != nil {
 			return Manifest{}, fmt.Errorf("gitbackup: apply bundle seq %d: %w", entry.Seq, err)
 		}
 	}
 
-	if err := setRefs(ctx, target, tip.Refs); err != nil {
+	if err := setRefs(ctx, staging, tip.Refs); err != nil {
 		return Manifest{}, err
 	}
-	if _, err := gitOutput(ctx, target, "fsck", "--no-progress"); err != nil {
+	if _, err := gitOutput(ctx, staging, "fsck", "--no-progress"); err != nil {
 		return Manifest{}, fmt.Errorf("gitbackup: fsck after restore: %w", err)
 	}
-	restored, err := readRefs(ctx, target)
+	restored, err := readRefs(ctx, staging)
 	if err != nil {
 		return Manifest{}, err
 	}
 	if !maps.Equal(restored, tip.Refs) {
 		return Manifest{}, fmt.Errorf("gitbackup: restored refs do not match manifest tip snapshot")
+	}
+
+	// The entry guard admitted target only as absent or an empty directory;
+	// remove the empty directory so the rename can claim its place. A
+	// concurrent writer that filled it in the meantime fails the removal,
+	// which is the safe outcome.
+	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Manifest{}, fmt.Errorf("gitbackup: replace target: %w", err)
+	}
+	if err := os.Rename(staging, target); err != nil {
+		return Manifest{}, fmt.Errorf("gitbackup: move restored repository into place: %w", err)
 	}
 	return manifest, nil
 }
