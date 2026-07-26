@@ -620,6 +620,12 @@ func RegisterBuiltins(r *Registry) {
 	// app-scoped controller over a configured project graph and durable store.
 	r.Register("host.campaign", CampaignHandler)
 
+	// App-scoped read projections. Builtins fail closed; daemon session
+	// construction replaces them only for an explicitly configured app.
+	r.Register("host.streams", StreamsSnapshotHandler)
+	r.Register("host.federation", FederationSnapshotHandler)
+	r.Register("host.materialization", MaterializationSnapshotHandler)
+
 	// Deterministic catalog-node flow evidence. The builtin fails closed until
 	// daemon construction injects the app's resolver, runner, durable store,
 	// catalog binding, and clock.

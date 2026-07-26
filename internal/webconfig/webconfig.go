@@ -165,6 +165,51 @@ type WebConfig struct {
 	// never the checked-in .kitsoki.yaml, since Endpoint/Tunnel/CredentialEnv
 	// are machine-local or secret-bearing.
 	Workers []workerregistry.Entry `yaml:"workers,omitempty"`
+
+	// ApplicationReadModels opts exact application IDs into daemon-owned,
+	// read-only Story Application projections. Map keys are application IDs;
+	// neither story inputs nor transport requests can choose another binding.
+	ApplicationReadModels map[string]ApplicationReadModelConfig `yaml:"application_read_models,omitempty"`
+}
+
+type ApplicationReadModelConfig struct {
+	Streams         *StreamReadModelConfig `yaml:"streams,omitempty"`
+	Federation      bool                   `yaml:"federation,omitempty"`
+	Materialization bool                   `yaml:"materialization,omitempty"`
+}
+
+type StreamReadModelConfig struct {
+	Scope string `yaml:"scope"`
+}
+
+func (cfg *WebConfig) resolveApplicationReadModels() error {
+	materializationOwners := 0
+	for appID, binding := range cfg.ApplicationReadModels {
+		if !readModelIdentity(appID) {
+			return fmt.Errorf("application_read_models key %q must be an opaque application id", appID)
+		}
+		if binding.Streams != nil && !readModelIdentity(binding.Streams.Scope) {
+			return fmt.Errorf("application_read_models.%s.streams.scope must be an opaque identity", appID)
+		}
+		if binding.Materialization {
+			materializationOwners++
+		}
+	}
+	if materializationOwners > 1 {
+		return fmt.Errorf("application_read_models: materialization owner is ambiguous")
+	}
+	return nil
+}
+
+func readModelIdentity(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	return value == trimmed && trimmed != "" && len(trimmed) <= 128 &&
+		trimmed != "." && trimmed != ".." &&
+		!strings.ContainsAny(trimmed, "/\\\r\n\x00") &&
+		!strings.Contains(lower, "://") &&
+		!strings.Contains(lower, "%2f") &&
+		!strings.Contains(lower, "%5c")
 }
 
 // CampaignConfig fixes the graph source and bounded discovery limits for the
@@ -644,6 +689,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveCampaigns(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveApplicationReadModels(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveAuth(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -835,6 +883,16 @@ func mergeConfig(base, local WebConfig) WebConfig {
 	}
 	if len(local.Workers) > 0 {
 		out.Workers = local.Workers
+	}
+	if len(local.ApplicationReadModels) > 0 {
+		merged := make(map[string]ApplicationReadModelConfig, len(base.ApplicationReadModels)+len(local.ApplicationReadModels))
+		for key, value := range base.ApplicationReadModels {
+			merged[key] = value
+		}
+		for key, value := range local.ApplicationReadModels {
+			merged[key] = value
+		}
+		out.ApplicationReadModels = merged
 	}
 	if local.Root != nil {
 		out.Root = mergeRootConfig(base.Root, local.Root)

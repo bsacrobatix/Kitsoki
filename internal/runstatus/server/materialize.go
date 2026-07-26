@@ -15,16 +15,22 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"kitsoki/internal/graph"
+	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/materialize"
 )
 
@@ -42,8 +48,7 @@ type materializeStageWire struct {
 type materializeArtifact struct {
 	Kind   string `json:"kind"`
 	Title  string `json:"title"`
-	Path   string `json:"path,omitempty"`
-	Handle string `json:"handle,omitempty"`
+	Handle string `json:"handle"`
 }
 
 // materializeJobState is the server's own bookkeeping for one materialize
@@ -66,6 +71,9 @@ type materializeJobState struct {
 	gates         []string
 	artifactKind  string
 	artifactTitle string
+	applicationID string
+	jobID         string
+	stageTitles   map[string]string
 	status        string // running | awaiting_input | done | failed | cancelled
 	artifacts     []materializeArtifact
 	receiptIDs    []string
@@ -91,6 +99,12 @@ func (st *materializeJobState) applyStageEvent(se materialize.StageEvent) {
 			st.stages[i].Status = se.Status
 			return
 		}
+	}
+}
+
+func (st *materializeJobState) applyStageSnapshot(stages []materialize.Stage) {
+	for _, stage := range stages {
+		st.applyStageEvent(materialize.StageEvent{Stage: stage.ID, Status: stage.Status})
 	}
 }
 
@@ -121,13 +135,45 @@ func (st *materializeJobState) receiptIDsSnapshot() []string {
 func (st *materializeJobState) artifactFor(path string) materializeArtifact {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return materializeArtifact{Kind: st.artifactKind, Title: st.artifactTitle, Path: path}
+	return materializationArtifactFor(path, st.artifactKind, st.artifactTitle)
 }
 
 func (st *materializeJobState) artifactForHandle(handle string) materializeArtifact {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	return materializeArtifact{Kind: st.artifactKind, Title: st.artifactTitle, Handle: handle}
+}
+
+func materializationArtifactFor(path, kind, title string) materializeArtifact {
+	sum := sha256.Sum256([]byte(path))
+	return materializeArtifact{
+		Kind: kind, Title: title,
+		Handle: "ma_" + hex.EncodeToString(sum[:16]),
+	}
+}
+
+func (st *materializeJobState) durableRecord(now time.Time) materializationstatus.Record {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	stages := make([]materializationstatus.Stage, len(st.stages))
+	for i, stage := range st.stages {
+		title := st.stageTitles[stage.ID]
+		if title == "" {
+			title = stage.ID
+		}
+		stages[i] = materializationstatus.Stage{ID: stage.ID, Title: title, Status: stage.Status}
+	}
+	artifacts := make([]materializationstatus.Artifact, len(st.artifacts))
+	for i, artifact := range st.artifacts {
+		artifacts[i] = materializationstatus.Artifact{
+			Kind: artifact.Kind, Title: artifact.Title, Handle: artifact.Handle,
+		}
+	}
+	return materializationstatus.Record{
+		ApplicationID: st.applicationID, JobID: st.jobID, SessionID: st.sessionID,
+		Status: st.status, Stages: stages, Artifacts: artifacts,
+		ReceiptIDs: append([]string(nil), st.receiptIDs...), UpdatedAt: now.UTC(),
+	}
 }
 
 // materializeArtifactFromResult builds the wire artifact entry from a
@@ -147,31 +193,47 @@ func typedMaterializeResults(state *materializeJobState, ev jobs.JobEvent) ([]ma
 	if ev.Result == nil {
 		return nil, nil
 	}
-	rawHandles, _ := ev.Result.Data["artifact_handles"].([]string)
-	if rawHandles == nil {
-		if values, ok := ev.Result.Data["artifact_handles"].([]any); ok {
-			for _, value := range values {
-				if handle, ok := value.(string); ok {
-					rawHandles = append(rawHandles, handle)
-				}
-			}
-		}
-	}
-	rawReceipts, _ := ev.Result.Data["receipt_ids"].([]string)
-	if rawReceipts == nil {
-		if values, ok := ev.Result.Data["receipt_ids"].([]any); ok {
-			for _, value := range values {
-				if receipt, ok := value.(string); ok {
-					rawReceipts = append(rawReceipts, receipt)
-				}
-			}
-		}
-	}
+	rawHandles := materializeResultStrings(ev.Result.Data, "artifact_handles")
+	rawReceipts := materializeResultStrings(ev.Result.Data, "receipt_ids")
 	artifacts := make([]materializeArtifact, len(rawHandles))
 	for i, handle := range rawHandles {
 		artifacts[i] = state.artifactForHandle(handle)
 	}
 	return artifacts, rawReceipts
+}
+
+func materializeResultStrings(data map[string]any, key string) []string {
+	raw, _ := data[key].([]string)
+	if raw != nil {
+		return append([]string(nil), raw...)
+	}
+	if values, ok := data[key].([]any); ok {
+		for _, value := range values {
+			if item, ok := value.(string); ok {
+				raw = append(raw, item)
+			}
+		}
+	}
+	return raw
+}
+
+func materializeStagesFromResult(ev jobs.JobEvent) []materialize.Stage {
+	if ev.Result == nil {
+		return nil
+	}
+	value, ok := ev.Result.Data["stages"]
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var stages []materialize.Stage
+	if err := json.Unmarshal(raw, &stages); err != nil {
+		return nil
+	}
+	return stages
 }
 
 // dispatchMaterialize handles the graph.materialize.* method family. It
@@ -307,7 +369,81 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		webSessionID, turnDriver = s.materializeSessionDriver(ctx, prep)
 	}
 
-	jobID, stages, err := prep.Submit(ctx, s.materializeSched, turnDriver, webSessionID, applicationExecutor)
+	// Titles are resolved before submission because a deterministic job may
+	// finish before SubmitObserved returns and its terminal observer needs the
+	// complete durable stage shape.
+	stageTitles := make(map[string]string, len(prep.Stages))
+	stagesOut := make([]materializeStageWire, len(prep.Stages))
+	for i, stageID := range prep.Stages {
+		title := stageID
+		if checkID, isCheck := strings.CutPrefix(stageID, materialize.CheckStagePrefix); isCheck {
+			title = "Gate check: " + checkID
+		} else if prep.Def != nil {
+			if roomState, ok := prep.Def.States[stageID]; ok && roomState.Description != "" {
+				title = roomState.Description
+			}
+		}
+		stageTitles[stageID] = title
+		stagesOut[i] = materializeStageWire{ID: stageID, Title: title}
+	}
+	artifactKind := prep.Binding.ArtifactKind
+	artifactTitle := fmt.Sprintf("%s artifact", prep.Binding.TypeID)
+	terminalObserver := materialize.TerminalObserver(nil)
+	if s.materializeProjection != nil && s.materializeApplication != "" {
+		terminalObserver = func(
+			observeCtx context.Context,
+			observedJobID jobs.JobID,
+			result host.Result,
+			runErr error,
+		) error {
+			status := string(jobs.JobDone)
+			if runErr != nil || result.Error != "" {
+				status = string(jobs.JobFailed)
+			}
+			stages := materializeStagesFromResult(jobs.JobEvent{Result: &result})
+			if len(stages) == 0 {
+				stages = make([]materialize.Stage, len(prep.Stages))
+				for i, id := range prep.Stages {
+					stages[i] = materialize.Stage{ID: id, Status: "waiting"}
+				}
+			}
+			durableStages := make([]materializationstatus.Stage, len(stages))
+			for i, stage := range stages {
+				durableStages[i] = materializationstatus.Stage{
+					ID: stage.ID, Title: stageTitles[stage.ID], Status: stage.Status,
+				}
+			}
+			var artifacts []materializationstatus.Artifact
+			for _, handle := range materializeResultStrings(result.Data, "artifact_handles") {
+				artifacts = append(artifacts, materializationstatus.Artifact{
+					Kind: artifactKind, Title: artifactTitle, Handle: handle,
+				})
+			}
+			if path, _ := result.Data["artifact_path"].(string); path != "" {
+				artifact := materializationArtifactFor(path, artifactKind, artifactTitle)
+				artifacts = append(artifacts, materializationstatus.Artifact{
+					Kind: artifact.Kind, Title: artifact.Title, Handle: artifact.Handle,
+				})
+			}
+			persistCtx, cancelPersist := context.WithTimeout(context.WithoutCancel(observeCtx), 5*time.Second)
+			defer cancelPersist()
+			_, err := s.materializeProjection.Save(persistCtx, materializationstatus.Record{
+				ApplicationID: s.materializeApplication,
+				JobID:         string(observedJobID),
+				SessionID:     webSessionID,
+				Status:        status,
+				Stages:        durableStages,
+				Artifacts:     artifacts,
+				ReceiptIDs:    materializeResultStrings(result.Data, "receipt_ids"),
+				UpdatedAt:     s.materializationTimestamp(),
+			})
+			return err
+		}
+	}
+
+	jobID, stages, err := prep.SubmitObserved(
+		ctx, s.materializeSched, turnDriver, webSessionID, terminalObserver, applicationExecutor,
+	)
 	if err != nil {
 		return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: " + err.Error()}
 	}
@@ -317,40 +453,41 @@ func (s *Server) materializeStart(ctx context.Context, params map[string]any) (a
 		sessionID:     webSessionID,
 		stages:        append([]materialize.Stage(nil), stages...),
 		gates:         prep.Binding.Gates,
-		artifactKind:  prep.Binding.ArtifactKind,
-		artifactTitle: fmt.Sprintf("%s artifact", prep.Binding.TypeID),
+		artifactKind:  artifactKind,
+		artifactTitle: artifactTitle,
+		applicationID: s.materializeApplication,
+		jobID:         string(jobID),
+		stageTitles:   stageTitles,
 		status:        string(jobs.JobRunning),
 	}
 	s.materializeMu.Lock()
 	s.materializeJobs[jobID] = state
 	s.materializeMu.Unlock()
 
+	if s.materializeProjection != nil && s.materializeApplication != "" {
+		if _, err := s.materializeProjection.Save(ctx, state.durableRecord(s.materializationTimestamp())); err != nil {
+			_ = s.materializeSched.Cancel(ctx, jobID)
+			return nil, &rpcError{Code: codeServerError, Message: "graph.materialize.start: persist durable projection: " + err.Error()}
+		}
+	}
+
 	// Subscribe synchronously, before returning, so a .status poll can never
 	// see less progress than a live SSE subscriber that connected late would
 	// have (see internal/materialize's doc comment on this exact race).
 	s.trackMaterializeJob(jobID, state)
-
-	// Room titles: the story's own state descriptions (app.State.Description),
-	// falling back to the room id. Check stages ("check:<id>") are not rooms;
-	// they title themselves.
-	stagesOut := make([]materializeStageWire, len(stages))
-	for i, st := range stages {
-		title := st.ID
-		if checkID, isCheck := strings.CutPrefix(st.ID, materialize.CheckStagePrefix); isCheck {
-			title = "Gate check: " + checkID
-		} else if prep.Def != nil {
-			if roomState, ok := prep.Def.States[st.ID]; ok && roomState.Description != "" {
-				title = roomState.Description
-			}
-		}
-		stagesOut[i] = materializeStageWire{ID: st.ID, Title: title}
-	}
 
 	return map[string]any{
 		"job_id":     jobID,
 		"stages":     stagesOut,
 		"session_id": webSessionID,
 	}, nil
+}
+
+func (s *Server) materializationTimestamp() time.Time {
+	if s.materializeNow != nil {
+		return s.materializeNow().UTC()
+	}
+	return time.Now().UTC()
 }
 
 // materializeReadiness exposes gate readiness plus deterministic context
@@ -506,6 +643,9 @@ func (s *Server) trackMaterializeJob(jobID jobs.JobID, state *materializeJobStat
 			if se, ok := ev.Progress.(materialize.StageEvent); ok {
 				state.applyStageEvent(se)
 			}
+			if stages := materializeStagesFromResult(ev); len(stages) > 0 {
+				state.applyStageSnapshot(stages)
+			}
 			switch ev.Status {
 			case jobs.JobRunning:
 				state.setStatus(string(jobs.JobRunning))
@@ -526,6 +666,14 @@ func (s *Server) trackMaterializeJob(jobID jobs.JobID, state *materializeJobStat
 			case jobs.JobCancelled:
 				state.setStatus(string(jobs.JobCancelled))
 			}
+			if s.materializeProjection != nil && state.applicationID != "" {
+				if _, err := s.materializeProjection.Save(
+					context.Background(),
+					state.durableRecord(s.materializationTimestamp()),
+				); err != nil {
+					slog.Error("graph.materialize: persist durable projection", "job_id", jobID, "error", err)
+				}
+			}
 		}
 	}()
 }
@@ -542,7 +690,14 @@ func (s *Server) materializeStatus(params map[string]any) (any, *rpcError) {
 	state, ok := s.materializeJobs[jobID]
 	s.materializeMu.Unlock()
 	if !ok {
+		if record, found := s.persistedMaterialization(jobID); found {
+			return materializationStatusResponse(record), nil
+		}
 		return nil, &rpcError{Code: codeNotFound, Message: "graph.materialize.status: unknown job_id: " + jobID}
+	}
+
+	if record, found := s.persistedMaterialization(jobID); found {
+		return materializationStatusResponse(record), nil
 	}
 
 	stages, status, artifacts := state.snapshot()
@@ -560,6 +715,34 @@ func (s *Server) materializeStatus(params map[string]any) (any, *rpcError) {
 		"receipt_ids": receiptIDs,
 		"session_id":  state.sessionID,
 	}, nil
+}
+
+func (s *Server) persistedMaterialization(jobID string) (materializationstatus.Record, bool) {
+	if s.materializeProjection == nil || s.materializeApplication == "" {
+		return materializationstatus.Record{}, false
+	}
+	record, found, err := s.materializeProjection.Get(
+		context.Background(), s.materializeApplication, jobID,
+	)
+	return record, found && err == nil
+}
+
+func materializationStatusResponse(record materializationstatus.Record) map[string]any {
+	stages := make([]any, len(record.Stages))
+	for i, stage := range record.Stages {
+		stages[i] = map[string]any{"id": stage.ID, "title": stage.Title, "status": stage.Status}
+	}
+	artifacts := make([]any, len(record.Artifacts))
+	for i, artifact := range record.Artifacts {
+		artifacts[i] = map[string]any{
+			"kind": artifact.Kind, "title": artifact.Title, "handle": artifact.Handle,
+		}
+	}
+	return map[string]any{
+		"status": record.Status, "stages": stages, "artifacts": artifacts,
+		"receipt_ids": append([]string(nil), record.ReceiptIDs...),
+		"session_id":  record.SessionID,
+	}
 }
 
 // materializeCancel implements graph.materialize.cancel {job_id}.

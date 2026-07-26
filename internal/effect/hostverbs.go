@@ -271,6 +271,28 @@ var builtinVerbTable = map[string]verbEffect{
 	// prefix fallback injects args["op"], so keep the leaf classified too.
 	"host.runstatus.snapshot": {class: Read, deterministic: true},
 
+	"host.streams": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.streams.snapshot": {class: Read, deterministic: true},
+	"host.federation": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.federation.snapshot": {class: Read, deterministic: true},
+	"host.materialization": {
+		class: Read, deterministic: true,
+		ops: map[string]opEffect{
+			"snapshot": {class: Read, deterministic: true},
+		},
+	},
+	"host.materialization.snapshot": {class: Read, deterministic: true},
+
 	// host.feedback reads a captured reviewed-report view or asks an injected
 	// governed backend to create an idempotent dispatch job. Dispatch grants no
 	// source-landing authority.

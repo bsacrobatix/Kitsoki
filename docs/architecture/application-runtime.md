@@ -112,6 +112,33 @@ durable. At daemon restart, running claims are recorded as interrupted and
 watchers are recreated only by a later `host.campaign.watch` call; the runtime
 does not claim that arbitrary in-flight behavior resumed.
 
+The daemon may also bind three application-scoped operational read models:
+`host.streams.snapshot`, `host.federation.snapshot`, and
+`host.materialization.snapshot`. Their sources are runtime services, not paths
+or providers selected by story input:
+
+- streams project receipt-bound Capsule merge-queue candidates for one fixed
+  project scope;
+- federation projects the canonical worker registry, daemon health, and
+  effective placement policy without endpoints, tunnels, or credentials; and
+- materialization projects the authoritative application-owned
+  `graph.materialize` lifecycle from durable storage.
+
+Bindings are keyed by exact application ID under daemon web configuration.
+Unbound applications and non-daemon processes receive fail-closed builtin
+handlers. Every request supplies explicit item and byte bounds; results are
+strict, deduplicated, invalid-counted snapshots containing only opaque
+identities and artifact handles. Story input cannot choose a filesystem root,
+queue file, worker endpoint, credential, or alternate application.
+
+The materialization producer writes its terminal projection synchronously
+before publishing the terminal scheduler transition. Completed records survive
+server reconstruction. The projection uses the daemon session backend's
+dialect, with dedicated SQLite tables or a dedicated Postgres schema. On
+daemon restart, stale `running` or
+`awaiting_input` records become `interrupted` with a canonical receipt; the
+runtime never reports that process-bound work resumed.
+
 ## Story compilation
 
 `internal/app` treats `application:`, exported handlers, events, typed views,

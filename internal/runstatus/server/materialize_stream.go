@@ -14,7 +14,6 @@ package server
 //	Events:
 //	  data: {"type":"gate","gate_id":"…","passed":true}
 //	  data: {"type":"stage","stage_id":"…","status":"in-progress"|"complete"|"failed"}
-//	  data: {"type":"artifact","kind":"…","title":"…","path":"…"}
 //	  data: {"type":"artifact","kind":"…","title":"…","handle":"…"}
 //	  data: {"type":"status","status":"in-progress"|"awaiting-input"|"complete"|"failed"|"cancelled"}
 //	  data: {"type":"error","message":"…"}
@@ -38,7 +37,7 @@ package server
 // before entering the live loop. Subscribe-first means nothing falls in the
 // gap; the price is that a queued live event may re-report state older than
 // the snapshot, so emits are monotonic per stage (a stage never regresses
-// from complete back to in-progress) and artifact frames dedup by path/handle.
+// from complete back to in-progress) and artifact frames dedup by handle.
 // This closes the stuck-pill gap the first cut deferred to the
 // graph.materialize.status poll fallback: a client whose EventSource
 // connected mid-run used to keep whatever pills it had missed at "waiting"
@@ -69,7 +68,6 @@ type materializeStreamFrame struct {
 	// artifact
 	Kind       string   `json:"kind,omitempty"`
 	Title      string   `json:"title,omitempty"`
-	Path       string   `json:"path,omitempty"`
 	Handle     string   `json:"handle,omitempty"`
 	ReceiptIDs []string `json:"receipt_ids,omitempty"`
 
@@ -161,15 +159,11 @@ func (s *Server) handleMaterializeStream(w http.ResponseWriter, r *http.Request)
 	}
 	emittedArtifacts := map[string]bool{}
 	emitArtifact := func(a materializeArtifact) {
-		identity := a.Path
-		if identity == "" {
-			identity = a.Handle
-		}
-		if identity == "" || emittedArtifacts[identity] {
+		if a.Handle == "" || emittedArtifacts[a.Handle] {
 			return
 		}
-		emittedArtifacts[identity] = true
-		emit(materializeStreamFrame{Type: "artifact", Kind: a.Kind, Title: a.Title, Path: a.Path, Handle: a.Handle})
+		emittedArtifacts[a.Handle] = true
+		emit(materializeStreamFrame{Type: "artifact", Kind: a.Kind, Title: a.Title, Handle: a.Handle})
 	}
 
 	for _, gateID := range state.gatesSnapshot() {

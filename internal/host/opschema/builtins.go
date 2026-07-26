@@ -369,6 +369,18 @@ func registerGraphBuiltins(r *Registry) {
 		Input:  fields("max_jobs", "int", "max_bytes", "int"),
 		Output: fields("snapshot", "object"),
 	})
+	r.Register("host.streams", "snapshot", Op{
+		Input:  fields("scope", "string", "max_streams", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
+	r.Register("host.federation", "snapshot", Op{
+		Input:  fields("max_workers", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
+	r.Register("host.materialization", "snapshot", Op{
+		Input:  fields("application_id", "string", "max_jobs", "int", "max_bytes", "int"),
+		Output: fields("snapshot", "object"),
+	})
 	r.Register("host.feedback", "list_reviewed", Op{
 		Input:  fields("scope", "string", "limit", "int"),
 		Output: fields("reports", "list", "revision", "string"),

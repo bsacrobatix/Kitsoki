@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/chats"
@@ -13,6 +14,7 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/journal"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/mining"
 	"kitsoki/internal/store"
 	"kitsoki/internal/study"
@@ -183,6 +185,16 @@ func newStudyStore(s store.Store) (study.Store, error) {
 		return study.NewPostgresStore(s.DB())
 	}
 	return study.NewSQLiteStore(s.DB())
+}
+
+// newMaterializationStatusStore constructs the application lifecycle
+// projection on the same backend and shared handle as the daemon session
+// store.
+func newMaterializationStatusStore(s store.Store, now func() time.Time) (materializationstatus.Store, error) {
+	if store.IsPostgres(s) {
+		return materializationstatus.NewPostgresStore(s.DB(), now)
+	}
+	return materializationstatus.NewSQLiteStore(s.DB(), now)
 }
 
 // openGraphCatalogDB opens the shared database handle `kitsoki graph

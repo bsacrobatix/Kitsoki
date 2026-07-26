@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"kitsoki/internal/app"
 	"kitsoki/internal/dbruntime"
 	"kitsoki/internal/dbruntime/pgtest"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/store"
 )
 
@@ -147,6 +149,19 @@ func TestSatelliteStoresFollowBackendDialect(t *testing.T) {
 			t.Errorf("newStudyStore: %v", err)
 		} else if ss == nil {
 			t.Error("newStudyStore: nil store")
+		}
+		if ms, err := newMaterializationStatusStore(s, nil); err != nil {
+			t.Errorf("newMaterializationStatusStore: %v", err)
+		} else if ms == nil {
+			t.Error("newMaterializationStatusStore: nil store")
+		} else {
+			_, err := ms.Save(context.Background(), materializationstatus.Record{
+				ApplicationID: "factory-app", JobID: "factory-job",
+				Status: "done", UpdatedAt: time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Errorf("newMaterializationStatusStore.Save: %v", err)
+			}
 		}
 	}
 

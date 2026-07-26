@@ -110,6 +110,7 @@ import (
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
 	"kitsoki/internal/kitendpoint"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus"
 	"kitsoki/internal/runstatus/harrec"
@@ -342,6 +343,11 @@ type Server struct {
 	// and /rpc/materialize-stream's initial gate frames.
 	materializeMu   sync.Mutex
 	materializeJobs map[jobs.JobID]*materializeJobState
+	// materializeProjection is the daemon-owned, application-scoped lifecycle
+	// read model. It is nil for non-daemon/read-only servers.
+	materializeProjection  materializationstatus.Store
+	materializeApplication string
+	materializeNow         func() time.Time
 
 	// feedbackRouting is the producer-keyed catalog-sink routing table for
 	// POST /api/feedback/local (feedback_intake.go); feedbackIntakeMu
@@ -403,6 +409,9 @@ type serverConfig struct {
 	bugPrivacyCheckerResolver BugPrivacyCheckerResolver
 	workflowRoot              string
 	materializeRoot           string
+	materializeProjection     materializationstatus.Store
+	materializeApplication    string
+	materializeNow            func() time.Time
 	kits                      *kitendpoint.Dispatcher
 	setupWarnings             []SetupWarning
 	projectOnboarded          bool
@@ -500,6 +509,16 @@ func WithWorkflowRoot(dir string) Option {
 // git-root resolution it uses for WithBugRoot/WithWorkflowRoot.
 func WithMaterializeRoot(dir string) Option {
 	return func(c *serverConfig) { c.materializeRoot = strings.TrimSpace(dir) }
+}
+
+// WithMaterializationProjection binds daemon-owned durable materialization
+// lifecycle state to one exact Story Application identity.
+func WithMaterializationProjection(store materializationstatus.Store, applicationID string, now func() time.Time) Option {
+	return func(c *serverConfig) {
+		c.materializeProjection = store
+		c.materializeApplication = strings.TrimSpace(applicationID)
+		c.materializeNow = now
+	}
 }
 
 // WithKits attaches the installed-kit endpoint dispatcher (S3b —
@@ -688,6 +707,9 @@ func newServer(provider SessionProvider, cfg serverConfig) *Server {
 		materializeSched:          jobs.NewInMemoryScheduler(),
 		materializeRoot:           cfg.materializeRoot,
 		materializeJobs:           make(map[jobs.JobID]*materializeJobState),
+		materializeProjection:     cfg.materializeProjection,
+		materializeApplication:    cfg.materializeApplication,
+		materializeNow:            cfg.materializeNow,
 		feedbackRouting:           cfg.feedbackRouting,
 		storyDirs:                 append([]string(nil), cfg.storyDirs...),
 	}

@@ -278,6 +278,43 @@ capability-free Starlark, and expose only that derived key through
 page-scoped `application.data`. Never expose an internal/raw snapshot and rely
 on a renderer or component to remove private fields.
 
+Daemon-owned operational providers use the same provider-to-world-to-frame
+composition, but their authority is fixed outside the story:
+
+```yaml
+host_interfaces:
+  streams:
+    operations:
+      snapshot:
+        input: {scope: string, max_streams: int, max_bytes: int}
+        output: {snapshot: object}
+    default: host.streams
+  federation:
+    operations:
+      snapshot:
+        input: {max_workers: int, max_bytes: int}
+        output: {snapshot: object}
+    default: host.federation
+  materialization:
+    operations:
+      snapshot:
+        input: {application_id: string, max_jobs: int, max_bytes: int}
+        output: {snapshot: object}
+    default: host.materialization
+```
+
+The daemon configuration binds these interfaces to an exact application and,
+for streams, an exact project scope. The values passed by the story must match
+that binding; they are assertions, not selectors. Each call must supply finite
+item and byte limits. Results contain opaque queue, worker, session, job,
+receipt, and artifact identities only. They never contain source paths,
+artifact paths, worker endpoints, tunnels, or credentials.
+
+Bind the returned snapshot into world, derive the exact finite page model in
+Starlark, and expose only that derived key through `application.data`. This is
+the complete Story Application path for operational products: no product-owned
+HTTP server, browser data client, or separate frontend state store is required.
+
 ## Exported handlers
 
 Handlers live under `exports.handlers`, outside the presentation declaration.

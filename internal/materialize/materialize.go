@@ -705,6 +705,10 @@ type TurnDriver interface {
 	World(ctx context.Context) (map[string]any, error)
 }
 
+// TerminalObserver persists or projects the producer's terminal result before
+// the scheduler publishes the terminal job transition.
+type TerminalObserver func(context.Context, jobs.JobID, host.Result, error) error
+
 // Submit submits the prepared materialize job to sched and returns the job
 // id plus the full all-"waiting" stage list (Start's ".start" contract).
 //
@@ -712,6 +716,20 @@ type TurnDriver interface {
 // ApplicationPhaseExecutor and fail closed when it is absent; they never fall
 // back to the private story rig.
 func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver TurnDriver, webSessionID string, applicationExecutors ...ApplicationPhaseExecutor) (jobs.JobID, []Stage, error) {
+	return p.SubmitObserved(ctx, sched, driver, webSessionID, nil, applicationExecutors...)
+}
+
+// SubmitObserved is Submit plus an injected synchronous terminal observer.
+// The observer runs after story/application execution and write-back but before
+// the scheduler exposes done/failed, closing the producer-to-projection race.
+func (p *Prepared) SubmitObserved(
+	ctx context.Context,
+	sched jobs.Scheduler,
+	driver TurnDriver,
+	webSessionID string,
+	observer TerminalObserver,
+	applicationExecutors ...ApplicationPhaseExecutor,
+) (jobs.JobID, []Stage, error) {
 	var applicationExecutor ApplicationPhaseExecutor
 	if len(applicationExecutors) > 0 {
 		applicationExecutor = applicationExecutors[0]
@@ -735,11 +753,21 @@ func (p *Prepared) Submit(ctx context.Context, sched jobs.Scheduler, driver Turn
 		payload["web_session"] = webSessionID
 	}
 
+	handler := driveHandler(p, sched, driver, webSessionID, applicationExecutor)
 	jobID, err := sched.Submit(ctx, jobs.JobSpec{
 		SessionID: sessionID,
 		Kind:      "graph.materialize",
 		Payload:   payload,
-		Handler:   driveHandler(p, sched, driver, webSessionID, applicationExecutor),
+		Handler: func(handlerCtx context.Context, args map[string]any) (host.Result, error) {
+			result, runErr := handler(handlerCtx, args)
+			if observer != nil {
+				id, _ := args["__job_id"].(string)
+				if observeErr := observer(handlerCtx, jobs.JobID(id), result, runErr); observeErr != nil {
+					return result, fmt.Errorf("materialize: persist terminal lifecycle: %w", observeErr)
+				}
+			}
+			return result, runErr
+		},
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("materialize: submit job: %w", err)
@@ -826,6 +854,12 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionI
 				out[i] = Stage{ID: id, Status: statuses[i]}
 			}
 			return out
+		}
+		failedResult := func(message string) host.Result {
+			return host.Result{
+				Data:  map[string]any{"stages": stageSnapshot()},
+				Error: message,
+			}
 		}
 
 		var writtenArtifacts []MaterializationArtifact
@@ -931,12 +965,12 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionI
 			if err := drv.Next(ctx); err != nil {
 				heartbeat(i, "failed")
 				finalizeWriteback("failed")
-				return host.Result{Error: fmt.Sprintf("materialize: room %q: %v", stages[i], err)}, nil
+				return failedResult(fmt.Sprintf("materialize: room %q: %v", stages[i], err)), nil
 			}
 			if failed, reason := failedNestedSession(worldNow()); failed {
 				heartbeat(i, "failed")
 				finalizeWriteback("failed")
-				return host.Result{Error: fmt.Sprintf("materialize: nested session failed: %s", reason)}, nil
+				return failedResult(fmt.Sprintf("materialize: nested session failed: %s", reason)), nil
 			}
 			heartbeat(i, "complete")
 			heartbeat(i+1, "in-progress")
@@ -947,12 +981,12 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionI
 		if err != nil {
 			heartbeat(p.NumRooms-1, "failed")
 			finalizeWriteback("failed")
-			return host.Result{Error: err.Error()}, nil
+			return failedResult(err.Error()), nil
 		}
 		if failed, reason := failedNestedSession(finalWorld); failed {
 			heartbeat(p.NumRooms-1, "failed")
 			finalizeWriteback("failed")
-			return host.Result{Error: fmt.Sprintf("materialize: nested session failed: %s", reason)}, nil
+			return failedResult(fmt.Sprintf("materialize: nested session failed: %s", reason)), nil
 		}
 		heartbeat(p.NumRooms-1, "complete")
 		writeArtifactIfPresent(finalWorld)
@@ -973,7 +1007,7 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionI
 				if reason == "" {
 					reason = strings.Join(result.Reasons, "; ")
 				}
-				return host.Result{Error: fmt.Sprintf("materialize: gate check %q failed: %s", rc.ID, reason)}, nil
+				return failedResult(fmt.Sprintf("materialize: gate check %q failed: %s", rc.ID, reason)), nil
 			}
 			heartbeat(idx, "complete")
 		}
@@ -985,6 +1019,7 @@ func driveHandler(p *Prepared, sched jobs.Scheduler, driver TurnDriver, sessionI
 		return host.Result{Data: map[string]any{
 			"node_id":       string(p.Req.NodeID),
 			"artifact_path": artifactPath,
+			"stages":        stageSnapshot(),
 			"world":         finalWorld,
 			"checks":        checkResultsWire(checkResults),
 		}}, nil

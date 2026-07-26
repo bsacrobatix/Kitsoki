@@ -25,7 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"kitsoki/internal/app"
+	"kitsoki/internal/host"
 	"kitsoki/internal/machine"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/runstatus/server"
 	"kitsoki/internal/store"
@@ -119,6 +121,21 @@ func newMaterializeServerAt(t *testing.T, root string) *httptest.Server {
 	return ts
 }
 
+func localMaterializeFixtureRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	homeDir := filepath.Join(root, "pog")
+	require.NoError(t, os.MkdirAll(homeDir, 0o755))
+	raw, err := os.ReadFile("testdata/materialize-catalog.yaml")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(homeDir, "catalog.yaml"), raw, 0o644))
+	storySource, err := filepath.Abs(filepath.Join("..", "..", "materialize", "testdata", "story"))
+	require.NoError(t, err)
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "stories"), 0o755))
+	require.NoError(t, os.Symlink(storySource, filepath.Join(root, "stories", "materialize-work-item")))
+	return root
+}
+
 // materializeStreamFrame mirrors the unexported server-side type for test
 // decoding (same convention as turnStreamFrame in turn_stream_test.go).
 type materializeStreamFrame struct {
@@ -128,7 +145,6 @@ type materializeStreamFrame struct {
 	StageID string `json:"stage_id"`
 	Kind    string `json:"kind"`
 	Title   string `json:"title"`
-	Path    string `json:"path"`
 	Handle  string `json:"handle"`
 	Status  string `json:"status"`
 	Message string `json:"message"`
@@ -285,7 +301,7 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 	// which race the stream landed in above.
 	require.NotNil(t, artifactFrame, "expected an artifact frame")
 	assert.Equal(t, "document", artifactFrame.Kind)
-	assert.Equal(t, ".artifacts/wi-ready/brief.md", artifactFrame.Path)
+	assert.Regexp(t, `^ma_[a-f0-9]{32}$`, artifactFrame.Handle)
 
 	assert.True(t, sawComplete, "expected a status=complete frame")
 	assert.True(t, sawDone, "expected a terminal done frame")
@@ -301,7 +317,7 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 			Status string `json:"status"`
 		} `json:"stages"`
 		Artifacts []struct {
-			Path string `json:"path"`
+			Handle string `json:"handle"`
 		} `json:"artifacts"`
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -319,7 +335,7 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 		assert.Equal(t, "complete", st.Status, "stage %s", st.ID)
 	}
 	require.Len(t, status.Artifacts, 1)
-	assert.Equal(t, ".artifacts/wi-ready/brief.md", status.Artifacts[0].Path)
+	assert.Equal(t, artifactFrame.Handle, status.Artifacts[0].Handle)
 
 	// Write-back (slice 6): the job handler wrote the artifact's content to
 	// disk under the POG repo root and persisted evidence: + materialization:
@@ -350,6 +366,102 @@ func TestMaterialize_StartAndStream_PilotStory(t *testing.T) {
 	assert.Contains(t, catalogText, "job_id: "+start.JobID)
 	assert.Contains(t, catalogText, "status: complete")
 	assert.Contains(t, catalogText, "context_digest: sha256:", "materialization record must persist the freshness digest")
+}
+
+func TestMaterializeProducerPersistsSnapshotAndReconstructsAfterServerRestart(t *testing.T) {
+	root := localMaterializeFixtureRoot(t)
+	sessionStore, err := store.Open(t.TempDir() + "/sessions.db")
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sessionStore.Close()) })
+	fixedNow := time.Date(2026, 7, 26, 12, 0, 0, 0, time.UTC)
+	projection, err := materializationstatus.NewSQLiteStore(
+		sessionStore.DB(), func() time.Time { return fixedNow },
+	)
+	require.NoError(t, err)
+
+	newServer := func() *httptest.Server {
+		p := newStubProvider()
+		p.seededFn = func(context.Context, string, map[string]any) (string, error) {
+			return "", errors.New("stub: no live sessions")
+		}
+		return httptest.NewServer(server.NewMulti(
+			p,
+			server.WithMaterializeRoot(root),
+			server.WithMaterializationProjection(projection, "pog-application", func() time.Time { return fixedNow }),
+		).Handler())
+	}
+	first := newServer()
+
+	var start struct {
+		JobID  string `json:"job_id"`
+		Stages []struct {
+			ID string `json:"id"`
+		} `json:"stages"`
+	}
+	rpcCall(t, first, "graph.materialize.start", map[string]any{
+		"catalog": "pog", "node_id": "wi-ready",
+		"params": map[string]any{"depth": 3, "audience": "public"},
+	}, &start)
+	require.NotEmpty(t, start.JobID)
+
+	var status struct {
+		Status     string   `json:"status"`
+		ReceiptIDs []string `json:"receipt_ids"`
+		Stages     []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"stages"`
+		Artifacts []struct {
+			Handle string `json:"handle"`
+		} `json:"artifacts"`
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rpcCall(t, first, "graph.materialize.status", map[string]any{"job_id": start.JobID}, &status)
+		if status.Status == "done" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.Equal(t, "done", status.Status)
+	require.Len(t, status.Stages, len(start.Stages))
+	for _, stage := range status.Stages {
+		assert.Equal(t, "complete", stage.Status, "stage %s", stage.ID)
+	}
+	require.Len(t, status.Artifacts, 1)
+	require.Regexp(t, `^ma_[a-f0-9]{32}$`, status.Artifacts[0].Handle)
+	require.Len(t, status.ReceiptIDs, 1)
+	require.Regexp(t, `^mr_[a-f0-9]{32}$`, status.ReceiptIDs[0])
+
+	snapshotResult, err := host.NewMaterializationSnapshotHandler(
+		projection, "pog-application",
+	)(context.Background(), map[string]any{
+		"op": "snapshot", "application_id": "pog-application",
+		"max_jobs": 10, "max_bytes": 8192,
+	})
+	require.NoError(t, err)
+	snapshotJSON, err := json.Marshal(snapshotResult.Data)
+	require.NoError(t, err)
+	assert.Contains(t, string(snapshotJSON), start.JobID)
+	assert.Contains(t, string(snapshotJSON), status.Artifacts[0].Handle)
+	assert.Contains(t, string(snapshotJSON), status.ReceiptIDs[0])
+	assert.NotContains(t, string(snapshotJSON), ".artifacts/")
+
+	first.Close()
+	second := newServer()
+	defer second.Close()
+	var reconstructed struct {
+		Status     string   `json:"status"`
+		ReceiptIDs []string `json:"receipt_ids"`
+		Artifacts  []struct {
+			Handle string `json:"handle"`
+		} `json:"artifacts"`
+	}
+	rpcCall(t, second, "graph.materialize.status", map[string]any{"job_id": start.JobID}, &reconstructed)
+	assert.Equal(t, "done", reconstructed.Status)
+	assert.Equal(t, status.ReceiptIDs, reconstructed.ReceiptIDs)
+	require.Len(t, reconstructed.Artifacts, 1)
+	assert.Equal(t, status.Artifacts[0].Handle, reconstructed.Artifacts[0].Handle)
 }
 
 func TestMaterializeReadiness_ReportsStaleCompatibilityState(t *testing.T) {

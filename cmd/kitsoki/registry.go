@@ -46,11 +46,14 @@ import (
 	"kitsoki/internal/app"
 	"kitsoki/internal/artifactjob"
 	"kitsoki/internal/campaign"
+	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/chats"
 	"kitsoki/internal/clock"
+	"kitsoki/internal/compliance"
 	"kitsoki/internal/daemonfederation"
 	"kitsoki/internal/host"
 	"kitsoki/internal/jobs"
+	"kitsoki/internal/materializationstatus"
 	"kitsoki/internal/metamode"
 	"kitsoki/internal/orchestrator"
 	"kitsoki/internal/reviewedfeedback"
@@ -61,6 +64,7 @@ import (
 	"kitsoki/internal/study"
 	"kitsoki/internal/testrunner"
 	"kitsoki/internal/webconfig"
+	"kitsoki/internal/workerregistry"
 )
 
 // entry is one live session as the registry owns it. The server only needs the
@@ -202,6 +206,7 @@ type SessionRegistry struct {
 	campaignServices   map[string]*campaign.Service
 	studies            study.Store
 	federation         *daemonfederation.Pool
+	materializations   materializationstatus.Store
 	feedbackDispatches reviewedfeedback.DispatchStore
 
 	// feedbackBackends are explicit daemon-construction bindings keyed by
@@ -370,6 +375,18 @@ func (r *SessionRegistry) EnableDaemon(dbPath string) error {
 		return fmt.Errorf("open daemon studies: %w", err)
 	}
 	r.studies = studies
+	if _, ok := r.configuredMaterializationApplication(); ok {
+		materializations, err := newMaterializationStatusStore(st, time.Now)
+		if err != nil {
+			_ = st.Close()
+			return fmt.Errorf("open daemon materialization projection: %w", err)
+		}
+		if _, err := materializations.InterruptActive(context.Background(), "daemon_restarted"); err != nil {
+			_ = st.Close()
+			return fmt.Errorf("restore daemon materialization projection: %w", err)
+		}
+		r.materializations = materializations
+	}
 	return nil
 }
 
@@ -886,6 +903,7 @@ func (r *SessionRegistry) newSessionWithOrigin(
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	// On any error after construction, release what we opened so a failed
 	// NewSession leaks nothing.
@@ -1137,6 +1155,7 @@ func (r *SessionRegistry) AttachExternal(ctx context.Context, storyPath, key str
 	r.wireRunstatusSnapshot(rt, def.App.ID)
 	r.wireFeedback(rt, def.App.ID, def.App.Author, def.App.Version)
 	r.wireCampaign(rt, def.App.ID)
+	r.wireApplicationReadModels(rt, def.App.ID, loaded.path)
 	r.wireFlowEvidence(rt, def.App.ID, def.App.Author, def.App.Version)
 	ok := false
 	defer func() {
@@ -1359,6 +1378,238 @@ func (r *SessionRegistry) wireRunstatusSnapshot(rt *sessionRuntime, appID string
 		"host.runstatus",
 		host.NewRunstatusSnapshotHandler(r.daemonJobs, appID),
 	)
+}
+
+func (r *SessionRegistry) wireApplicationReadModels(rt *sessionRuntime, appID, appPath string) {
+	if r.daemonJobs == nil || rt == nil || rt.HostRegistry == nil {
+		return
+	}
+	binding, ok := r.cfg.ApplicationReadModels[appID]
+	if !ok {
+		return
+	}
+	projectRoot := compliance.DiscoverRoot(appPath)
+	if binding.Streams != nil {
+		rt.HostRegistry.Replace(
+			"host.streams",
+			host.NewStreamsSnapshotHandler(
+				queueDeliveryStreamSource{
+					store:     queue.Store{ProjectRoot: projectRoot},
+					projectID: binding.Streams.Scope,
+				},
+				appID,
+				binding.Streams.Scope,
+			),
+		)
+	}
+	if binding.Federation {
+		entries := append([]workerregistry.Entry(nil), r.cfg.Workers...)
+		if len(entries) == 0 {
+			entries = workerregistry.FromDaemonFederation(r.cfg.DaemonFederation)
+		}
+		rt.HostRegistry.Replace(
+			"host.federation",
+			host.NewFederationSnapshotHandler(
+				registryFederationSource{
+					entries: entries,
+					pool:    r.federation,
+					policy:  r.base.AgentLaunchPolicy.Placement,
+				},
+				appID,
+			),
+		)
+	}
+	if binding.Materialization && r.materializations != nil {
+		rt.HostRegistry.Replace(
+			"host.materialization",
+			host.NewMaterializationSnapshotHandler(r.materializations, appID),
+		)
+	}
+}
+
+func (r *SessionRegistry) MaterializationProjection() (materializationstatus.Store, string, bool) {
+	if r.materializations == nil {
+		return nil, "", false
+	}
+	owner, ok := r.configuredMaterializationApplication()
+	if !ok {
+		return nil, "", false
+	}
+	return r.materializations, owner, true
+}
+
+func (r *SessionRegistry) configuredMaterializationApplication() (string, bool) {
+	owner := ""
+	for appID, binding := range r.cfg.ApplicationReadModels {
+		if !binding.Materialization {
+			continue
+		}
+		if owner != "" {
+			return "", false
+		}
+		owner = appID
+	}
+	if owner == "" {
+		return "", false
+	}
+	return owner, true
+}
+
+type queueDeliveryStreamSource struct {
+	store     queue.Store
+	projectID string
+}
+
+func (s queueDeliveryStreamSource) ListDeliveryStreams(_ context.Context, limit int) ([]host.DeliveryStreamRecord, error) {
+	if err := rejectQueueSymlinks(s.store.ProjectRoot); err != nil {
+		return nil, err
+	}
+	state, err := s.store.List()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]host.DeliveryStreamRecord, 0, min(limit, len(state.Candidates)))
+	for _, candidate := range state.Candidates {
+		if !strings.EqualFold(strings.TrimSpace(candidate.ProjectID), strings.TrimSpace(s.projectID)) {
+			continue
+		}
+		head := strings.TrimSpace(candidate.ValidatedSHA)
+		if head == "" {
+			head = strings.TrimSpace(candidate.SHA)
+		}
+		out = append(out, host.DeliveryStreamRecord{
+			ID:            candidate.ID,
+			Lane:          string(candidate.TargetPolicy),
+			State:         string(candidate.Status),
+			ImmutableHead: head,
+			TargetRef:     candidate.TargetRef,
+			ProposalState: queueProposalState(candidate),
+			GateStatus:    queueGateStatus(candidate.Status),
+			NextAction:    queueNextAction(candidate.Status),
+			ReceiptRef:    candidate.ReceiptID,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func rejectQueueSymlinks(root string) error {
+	root, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return fmt.Errorf("resolve configured project root: %w", err)
+	}
+	info, err := os.Lstat(root)
+	if err != nil {
+		return fmt.Errorf("inspect configured project root: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("configured project root must not be a symlink")
+	}
+	for _, path := range []string{
+		filepath.Join(root, ".capsules"),
+		filepath.Join(root, ".capsules", "queue"),
+		filepath.Join(root, ".capsules", "queue", "state.json"),
+	} {
+		info, err := os.Lstat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("delivery stream store contains a symlink")
+		}
+	}
+	return nil
+}
+
+func queueProposalState(candidate queue.Candidate) string {
+	switch candidate.Status {
+	case queue.AwaitingApproval:
+		return "awaiting-approval"
+	case queue.Rejected:
+		return "rejected"
+	default:
+		if candidate.ReceiptID != "" {
+			return "receipt-admitted"
+		}
+		return "unverified"
+	}
+}
+
+func queueGateStatus(status queue.Status) string {
+	switch status {
+	case queue.ReadyToFinalize, queue.Finalizing, queue.Landed:
+		return "passed"
+	case queue.NeedsInput, queue.NeedsConflictInput, queue.Rejected:
+		return "failed"
+	case queue.Gating:
+		return "running"
+	default:
+		return "pending"
+	}
+}
+
+func queueNextAction(status queue.Status) string {
+	switch status {
+	case queue.AwaitingApproval:
+		return "approve"
+	case queue.ReadyToFinalize:
+		return "finalize"
+	case queue.NeedsInput, queue.NeedsConflictInput, queue.Rejected:
+		return "review"
+	case queue.RetryWait:
+		return "retry"
+	case queue.Landed:
+		return "none"
+	default:
+		return "advance"
+	}
+}
+
+type registryFederationSource struct {
+	entries []workerregistry.Entry
+	pool    *daemonfederation.Pool
+	policy  map[string]host.PlacementLanePolicy
+}
+
+func (s registryFederationSource) FederationSnapshot(ctx context.Context) (host.FederationProjection, error) {
+	health := map[string]daemonfederation.WorkerStatus{}
+	if s.pool != nil {
+		for _, worker := range s.pool.Get(ctx).Workers {
+			health[worker.ID] = worker
+		}
+	}
+	projection := host.FederationProjection{
+		Workers: make([]host.FederationWorker, 0, len(s.entries)),
+		Policy:  make([]host.FederationPolicy, 0, len(s.policy)),
+	}
+	for _, entry := range s.entries {
+		status := health[entry.ID]
+		healthName := status.Health
+		if healthName == "" {
+			healthName = "unknown"
+		}
+		projection.Workers = append(projection.Workers, host.FederationWorker{
+			ID: entry.ID, Label: entry.Label, Placement: entry.Placement,
+			Health: healthName, Enabled: entry.Enabled, Jobs: status.JobCount,
+			Capabilities: host.FederationCapabilities{
+				Placements: append([]string(nil), entry.Capabilities.Placements...),
+				Isolation:  entry.Capabilities.Isolation,
+				Networks:   append([]string(nil), entry.Capabilities.Networks...),
+			},
+		})
+	}
+	for lane, policy := range s.policy {
+		projection.Policy = append(projection.Policy, host.FederationPolicy{
+			Lane: lane, WorkerClasses: append([]string(nil), policy.WorkerClasses...),
+			NetworkProfiles: append([]string(nil), policy.NetworkProfiles...),
+		})
+	}
+	return projection, nil
 }
 
 func (r *SessionRegistry) wireFeedback(rt *sessionRuntime, appID, owner, revision string) {

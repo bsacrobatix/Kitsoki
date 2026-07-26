@@ -249,7 +249,18 @@ func driveApplicationHandler(p *Prepared, sched jobs.Scheduler, sessionID string
 			if writebackErr := finalize("failed"); writebackErr != nil {
 				err = fmt.Errorf("%w; persist failed materialization: %v", err, writebackErr)
 			}
-			return host.Result{Error: err.Error()}, nil
+			handles := make([]string, len(artifacts))
+			for i, artifact := range artifacts {
+				handles[i] = artifact.Handle
+			}
+			return host.Result{
+				Data: map[string]any{
+					"artifact_handles": handles,
+					"receipt_ids":      append([]string(nil), receipts...),
+					"stages":           stageSnapshot(),
+				},
+				Error: err.Error(),
+			}, nil
 		}
 
 		for i, phase := range p.Binding.Phases {
@@ -323,6 +334,7 @@ func driveApplicationHandler(p *Prepared, sched jobs.Scheduler, sessionID string
 		return host.Result{Data: map[string]any{
 			"artifact_handles": handles,
 			"receipt_ids":      append([]string(nil), receipts...),
+			"stages":           stageSnapshot(),
 		}}, nil
 	}
 }

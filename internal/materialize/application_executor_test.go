@@ -114,6 +114,10 @@ func TestTypedApplicationExecutionPublishesOnlyHandlesAndReceipts(t *testing.T) 
 	if _, ok := job.Result.Data["world"]; ok {
 		t.Fatalf("typed result exposed world: %#v", job.Result.Data)
 	}
+	stages, ok := job.Result.Data["stages"].([]Stage)
+	if !ok || len(stages) != 2 || stages[0].Status != "complete" || stages[1].Status != "complete" {
+		t.Fatalf("typed result stages = %#v, want two complete stages", job.Result.Data["stages"])
+	}
 	rawResult, _ := json.Marshal(job.Result.Data)
 	if strings.Contains(string(rawResult), root) || strings.Contains(string(rawResult), catalogPath) {
 		t.Fatalf("typed result leaked path: %s", rawResult)

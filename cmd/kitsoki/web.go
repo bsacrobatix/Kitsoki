@@ -435,7 +435,7 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 					}
 				}
 			}
-			srv := server.NewMulti(registry,
+			serverOptions := []server.Option{
 				server.WithAssignmentStore(assignmentStore),
 				server.WithDefaultActor(actor),
 				server.WithBugRoot(bugRoot),
@@ -454,7 +454,13 @@ func webServiceCmd(daemonMode bool) *cobra.Command {
 				server.WithStoryDirs(dirs),
 				server.WithAuth(authMgr),
 				server.WithApplicationCaptureBroker(captureBroker),
-			)
+			}
+			if projection, appID, ok := registry.MaterializationProjection(); ok {
+				serverOptions = append(serverOptions,
+					server.WithMaterializationProjection(projection, appID, time.Now),
+				)
+			}
+			srv := server.NewMulti(registry, serverOptions...)
 			// Attach the cross-session notification relay sink so each new
 			// session's background-turn fan-out reaches the runstatus.notification
 			// SSE feed. Set before any session.new call.
