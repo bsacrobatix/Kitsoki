@@ -10,6 +10,16 @@ generated_at: 2026-07-05T00:00:00Z
 match_on: [handler, call]
 
 episodes:
+  # The router runs before the decomposer.  Replay must return the recorded
+  # fresh-path verdict instead of falling through to the real Starlark host.
+  - id: detect_prior_decomposition
+    match:
+      handler: host.starlark.run
+      call: detect_prior_decomposition
+    response:
+      data:
+        route: fresh
+
   - id: decomposer_call
     match:
       handler: host.agent.task
@@ -25,6 +35,24 @@ episodes:
               deps: []
     replay: any
 
+  - id: lint_dangling_dep
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: fail
+        error: "brief 'slice-1' has dep 'slice-0' which is not a known brief id"
+
+  - id: lint_refined_ok
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: ok
+        error: ""
+
   - id: review_accept
     match:
       handler: host.agent.decide
@@ -37,3 +65,18 @@ episodes:
           reason: "Single brief, no deps, gate is plausible."
           questions: []
     replay: any
+
+  - id: fleet_load_refined
+    match:
+      handler: host.starlark.run
+      call: fleet_load
+    response:
+      data:
+        fleet_briefs:
+          - id: slice-1
+            brief: "Implement slice 1 so that go test ./... passes."
+            gate_command: "go test ./..."
+            status: pending
+            last_error: ""
+        fleet_state_path: ".artifacts/deliver/decomposition.yaml.fleet-state.json"
+        error: ""

@@ -10,6 +10,16 @@ generated_at: 2026-07-05T00:00:00Z
 match_on: [handler, call]
 
 episodes:
+  # The initial decomposition is fresh.  This explicit typed response keeps
+  # the review-refine regression replayed and fail closed.
+  - id: detect_prior_decomposition
+    match:
+      handler: host.starlark.run
+      call: detect_prior_decomposition
+    response:
+      data:
+        route: fresh
+
   - id: decomposer_call
     match:
       handler: host.agent.task
@@ -29,6 +39,24 @@ episodes:
               deps: [health-model]
           coverage_note: "health-model and health-handler together add the endpoint end to end."
     replay: any
+
+  - id: lint_first_ok
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: ok
+        error: ""
+
+  - id: lint_second_ok
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: ok
+        error: ""
 
   - id: review_revise
     match:
@@ -54,3 +82,23 @@ episodes:
           verdict: accept
           reason: "The revised manifest (route registration folded into health-handler) now matches coverage_note."
           questions: []
+
+  - id: fleet_load_revised
+    match:
+      handler: host.starlark.run
+      call: fleet_load
+    response:
+      data:
+        fleet_briefs:
+          - id: health-model
+            brief: "Add a HealthStatus struct in internal/health/ with Status and Version fields."
+            gate_command: "go test ./internal/health/..."
+            status: pending
+            last_error: ""
+          - id: health-handler
+            brief: "Add a GET /health handler serialising HealthStatus to JSON."
+            gate_command: "go test ./internal/handler/..."
+            status: pending
+            last_error: ""
+        fleet_state_path: ".artifacts/deliver/decomposition.yaml.fleet-state.json"
+        error: ""

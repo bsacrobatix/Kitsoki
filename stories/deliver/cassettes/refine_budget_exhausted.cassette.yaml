@@ -9,6 +9,16 @@ generated_at: 2026-07-05T00:00:00Z
 match_on: [handler, call]
 
 episodes:
+  # Record the initial router verdict so the fail-closed replay can enter the
+  # decomposer and exercise the review-budget path without invoking Starlark.
+  - id: detect_prior_decomposition
+    match:
+      handler: host.starlark.run
+      call: detect_prior_decomposition
+    response:
+      data:
+        route: fresh
+
   - id: decomposer_call
     match:
       handler: host.agent.task
@@ -23,6 +33,24 @@ episodes:
               gate_command: "go test ./..."
               deps: []
     replay: any
+
+  - id: lint_first_ok
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: ok
+        error: ""
+
+  - id: lint_second_ok
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: ok
+        error: ""
 
   - id: review_always_revise
     match:

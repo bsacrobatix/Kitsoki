@@ -9,6 +9,17 @@ generated_at: 2026-07-05T00:00:00Z
 match_on: [handler, call]
 
 episodes:
+  # This flow starts with no persisted manifest, so the deterministic router
+  # takes the fresh path.  Keep that outcome in the cassette: no live host
+  # fallback is permitted during replay.
+  - id: detect_prior_decomposition
+    match:
+      handler: host.starlark.run
+      call: detect_prior_decomposition
+    response:
+      data:
+        route: fresh
+
   - id: decomposer_call
     match:
       handler: host.agent.task
@@ -28,6 +39,24 @@ episodes:
               deps: [slice-a]
     replay: any
 
+  - id: lint_cycle
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: fail
+        error: "dependency cycle detected involving 'slice-a'"
+
+  - id: lint_refined_ok
+    match:
+      handler: host.starlark.run
+      call: lint
+    response:
+      data:
+        route: ok
+        error: ""
+
   - id: review_accept
     match:
       handler: host.agent.decide
@@ -40,3 +69,23 @@ episodes:
           reason: "Both slices are self-contained and the dependency graph is acyclic."
           questions: []
     replay: any
+
+  - id: fleet_load_refined
+    match:
+      handler: host.starlark.run
+      call: fleet_load
+    response:
+      data:
+        fleet_briefs:
+          - id: slice-a
+            brief: "Implement slice A so that go test ./... passes."
+            gate_command: "go test ./..."
+            status: pending
+            last_error: ""
+          - id: slice-b
+            brief: "Implement slice B so that go test ./... passes."
+            gate_command: "go test ./..."
+            status: pending
+            last_error: ""
+        fleet_state_path: ".artifacts/deliver/decomposition.yaml.fleet-state.json"
+        error: ""
