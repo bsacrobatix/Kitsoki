@@ -747,6 +747,13 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 			_ = st.Close()
 			return nil, fmt.Errorf("buildOrchestratorRig: KITSOKI_CASSETTE_STRICT=1 but cassette record mode is %q", mode)
 		}
+		replayOnly := mode == "none" || mode == ""
+		if replayOnly {
+			if coverageErr := validateReplayBindingCoverage(cas, fixture.HostBindings); coverageErr != nil {
+				_ = st.Close()
+				return nil, fmt.Errorf("buildOrchestratorRig: %w", coverageErr)
+			}
+		}
 
 		// Create an in-memory journal writer backed by the same SQLite DB so
 		// cassette replay can write KindAgentCall entries (Phase 2) and record
@@ -798,17 +805,27 @@ func buildOrchestratorRig(ctx context.Context, def *app.AppDef, m machine.Machin
 			}
 			seen[h] = true
 			handlerName := h
-			// Capture any existing (real) handler as fallback. When host_bindings:
-			// is set, builtins are pre-registered and act as the fallback for
-			// cassette misses; without host_bindings: there are no pre-registered
-			// builtins, so fallback is nil (miss is a hard error). See
-			// docs/architecture/hosts.md (host_bindings) for the binding model.
+			// Recording mode may delegate an uncovered call to its real handler so
+			// it can append an episode. Replay mode is an authority boundary: a
+			// cassette miss must never reach a pre-registered builtin, even for a
+			// handler that has some other recorded episode.
 			var fallback host.Handler
-			if len(fixture.HostBindings) > 0 {
+			if !replayOnly && len(fixture.HostBindings) > 0 {
 				fallback, _ = reg.Get(handlerName)
 			}
 			casDispatcher := BuildCassetteDispatcherWithJournalAndSink(cas, handlerName, stateOf, fallback, recordSink, clk, jw, journalLookup, deferredAgentSink)
 			reg.ReplacePreservingCapabilities(handlerName, casDispatcher)
+		}
+
+		// A replay cassette is a complete authority boundary, not a hint to
+		// prefer canned answers.  host_bindings pre-registers builtins so a
+		// handler absent from the cassette would otherwise remain live and could
+		// start a process, mutate git, or create a workspace.  Install a
+		// fail-closed dispatcher for every declared-but-unrecorded host as a
+		// runtime backstop for direct host invokes; resolved interface bindings
+		// are rejected above even earlier with a precise configuration error.
+		if replayOnly {
+			installReplayGuardsForUnrecordedHosts(reg, def, cas, stateOf, clk, jw, journalLookup, deferredAgentSink, seen)
 		}
 
 		// When host_bindings: is set (builtins registered) and a record sink is
@@ -1065,6 +1082,82 @@ func appDeclaresHost(def *app.AppDef, name string) bool {
 	}
 	for _, h := range def.Hosts {
 		if h == name {
+			return true
+		}
+	}
+	return false
+}
+
+// validateReplayBindingCoverage rejects a replay fixture whose resolved
+// interface binding has no handler episode.  Failing while the rig is built
+// means an incomplete cassette cannot reach the real builtin fallback even
+// once.  Recording mode deliberately remains the explicit opt-in escape hatch
+// for constructing new episodes.
+func validateReplayBindingCoverage(cas *Cassette, bindings map[string]string) error {
+	if len(bindings) == 0 {
+		return nil
+	}
+	recorded := cassetteRecordedHandlers(cas)
+	var missing []string
+	for iface, handler := range bindings {
+		handler = strings.TrimSpace(handler)
+		if handler == "" {
+			continue
+		}
+		if _, ok := recorded[handler]; !ok {
+			missing = append(missing, fmt.Sprintf("%s -> %s", iface, handler))
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("cassette replay coverage missing resolved host binding(s): %s", strings.Join(missing, ", "))
+}
+
+func cassetteRecordedHandlers(cas *Cassette) map[string]struct{} {
+	handlers := make(map[string]struct{})
+	if cas == nil {
+		return handlers
+	}
+	for _, ep := range cas.Episodes {
+		handler, _ := ep.Match["handler"].(string)
+		if handler = strings.TrimSpace(handler); handler != "" {
+			handlers[handler] = struct{}{}
+		}
+	}
+	return handlers
+}
+
+// installReplayGuardsForUnrecordedHosts protects direct host invokes which do
+// not pass through FlowFixture.HostBindings.  BuildCassetteDispatcher's
+// replay-mode miss path always returns ErrCassetteMiss with no fallback.
+func installReplayGuardsForUnrecordedHosts(reg *host.Registry, def *app.AppDef, cas *Cassette, stateOf func() string, clk clock.Clock, jw journal.Writer, journalLookup AgentJournalLookup, sink store.EventSink, recorded map[string]bool) {
+	if reg == nil || def == nil {
+		return
+	}
+	for _, handler := range def.Hosts {
+		if handler = strings.TrimSpace(handler); handler == "" || cassetteCoversHandler(recorded, handler) {
+			continue
+		}
+		if _, registered := reg.Get(handler); !registered {
+			continue
+		}
+		guard := BuildCassetteDispatcherWithJournalAndSink(cas, handler, stateOf, nil, nil, clk, jw, journalLookup, sink)
+		reg.ReplacePreservingCapabilities(handler, guard)
+	}
+}
+
+// cassetteCoversHandler mirrors host.Registry's dotted-prefix dispatch: a
+// cassette episode for host.capsule_workspace also serves its `.create` and
+// `.sync` operations.  Treating only exact names as covered would replace that
+// prefix dispatcher with a guard and turn a valid replay into a false miss.
+func cassetteCoversHandler(recorded map[string]bool, handler string) bool {
+	if recorded[handler] {
+		return true
+	}
+	for covered := range recorded {
+		if strings.HasPrefix(handler, covered+".") {
 			return true
 		}
 	}

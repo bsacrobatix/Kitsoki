@@ -55,6 +55,44 @@ episodes:
       data: { ok: true, exit_code: 0, stdout_json: { dirty: false, files: "" } }
     replay: any
 
+  # Testing's public acceptance shape gate is deterministic, but replay must
+  # still use an explicit response rather than execute a real host handler.
+  - id: acceptance_contract_gate_any
+    match:
+      handler: host.starlark.run
+    response:
+      data:
+        gate:
+          ok: true
+          missing: []
+          summary: "all public acceptance requirements have direct assertion receipts"
+    replay: any
+
+  # Headless replay has no attached editor; retain that honest, typed state
+  # without consulting a live IDE endpoint.
+  - id: ide_diagnostics_unavailable_any
+    match:
+      handler: host.ide.get_diagnostics
+    response:
+      data: { ok: true, connected: false, diagnostics: [] }
+    replay: any
+
+  # The replay job uses the local-files ticket provider.  Close-out is an
+  # explicit synthetic receipt; it must not write a ticket or local inbox.
+  - id: local_ticket_comment_any
+    match:
+      handler: host.local_files.ticket.comment
+    response:
+      data: { ok: true, comment_id: "replay-comment-1" }
+    replay: any
+
+  - id: local_ticket_transition_any
+    match:
+      handler: host.local_files.ticket.transition
+    response:
+      data: { ok: true }
+    replay: any
+
 # appended by KITSOKI_CASSETTE_RECORD
   - id: recorded_host.agent.task_idle
     match:

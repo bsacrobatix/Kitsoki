@@ -681,6 +681,7 @@ func TestRepoRootPrefersKitsokiRepoEnv(t *testing.T) {
 // meta_modes[*].cwd) against the wrong story's directory. Run with -race to
 // also catch any unsynchronized access to the global env var directly.
 func TestConcurrentDispatch_NoAppDirCrossContamination(t *testing.T) {
+	setKitsokiRepoToTestCheckout(t)
 	ctx := context.Background()
 	routes := []Route{
 		DefaultLabelStoryMap()["bug"],     // stories/bugfix
@@ -1351,6 +1352,7 @@ func TestDispatchStubbedRunNeverSaysDone(t *testing.T) {
 // this run produced came from a real (if replayed) host dispatch, not a
 // canned map indifferent to the call's actual args.
 func TestRunStorySession_RealDispatch_BugfixReplay(t *testing.T) {
+	setKitsokiRepoToTestCheckout(t)
 	ctx := context.Background()
 	job := &jobs.GHJob{
 		JobID:        "job-real-1",
@@ -1667,6 +1669,24 @@ func TestRunStubBeatFixture_BugfixPlumbingStillValid(t *testing.T) {
 	if result.Turns < 1 {
 		t.Errorf("Turns = %d, want >= 1", result.Turns)
 	}
+}
+
+// setKitsokiRepoToTestCheckout makes real-dispatch tests exercise the source
+// checkout they compiled from, rather than a caller's ambient KITSOKI_REPO.
+// A managed Capsule normally inherits KITSOKI_REPO from its primary checkout;
+// without this isolation the test can load a stale cassette/app pair while it
+// is testing newer dispatcher code from the Capsule.
+func setKitsokiRepoToTestCheckout(t *testing.T) {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get test cwd: %v", err)
+	}
+	repo := filepath.Clean(filepath.Join(cwd, "..", ".."))
+	if _, err := os.Stat(filepath.Join(repo, "go.mod")); err != nil {
+		t.Fatalf("test checkout root %q: %v", repo, err)
+	}
+	t.Setenv("KITSOKI_REPO", repo)
 }
 
 func containsString(values []string, want string) bool {
