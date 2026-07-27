@@ -82,9 +82,11 @@ or create the unit by hand. A protected Kitsoki release installed with
 `scripts/deploy-hosted-pog.sh --yes` owns all of the following atomically:
 
 - `/etc/kitsoki/queue-admission.env`, root-owned and mode `0600`; it reuses an
-  existing valid environment, or on the first install derives the worker-output
-  credentials from the root-owned queue-worker environment and mints the
-  admission bearer;
+  existing valid environment, or on the first install derives the POG
+  vm-pool's configured Spaces credentials (`DO_SPACES_KEY_ID` and
+  `DO_KITSOKI_TEST_API_KEY`) from the root-owned queue-worker environment and
+  mints the admission bearer. Per-worker `KITSOKI_WORKER_OUTPUTS_*` aliases
+  are deliberately not required on the controller;
 - `kitsoki-queue-admission.service`, running as `pog` with a strict writable
   allow-list only for `/var/lib/kitsoki-queue-admission/pog`;
 - a literal loopback listener at `127.0.0.1:7444`; and

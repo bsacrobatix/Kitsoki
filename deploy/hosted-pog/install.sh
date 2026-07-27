@@ -348,12 +348,21 @@ caddy validate --config "$rendered_caddy" --adapter caddyfile >/dev/null
 # Remote Capsule promotion needs an admission listener on this controller, but
 # neither its bearer nor object-store credentials may enter a unit file, git
 # bundle, or deploy command line. Reuse an already-installed admission env
-# verbatim. On first hosted deployment, derive the worker-output credentials
-# from the root-owned queue-worker env and mint only the separate bearer.
+# verbatim. On first hosted deployment, derive the controller's configured
+# POG source-bucket credentials from the root-owned queue-worker env and mint
+# only the separate bearer.  The dispatcher resolves these values into
+# KITSOKI_WORKER_OUTPUTS_* only inside each disposable worker; they are not
+# controller environment names.
 # The staged result is copied at mode 0600 after rollback snapshots exist.
 queue_worker_env=/etc/kitsoki/queue-worker.env
 queue_admission_env=/etc/kitsoki/queue-admission.env
 queue_admission_stage_env="$stage/queue-admission.env"
+# This is the checked-in POG vm-pool source_bucket contract.  Keep the
+# admission service on the controller-facing names from that contract rather
+# than assuming the per-worker aliases exist in queue-worker.env.
+queue_admission_bucket_url=https://kitsoki-test.sgp1.digitaloceanspaces.com
+queue_admission_key_env=DO_SPACES_KEY_ID
+queue_admission_secret_env=DO_KITSOKI_TEST_API_KEY
 env_value() {
 	local file="$1" name="$2" matches value
 	[ -f "$file" ] && [ ! -L "$file" ] || die "credential source is not a regular file: $file"
@@ -368,7 +377,7 @@ prepare_queue_admission_env() {
 		[ ! -L "$queue_admission_env" ] || die "queue-admission environment must not be a symlink"
 		[ "$(stat -c '%U:%G %a' "$queue_admission_env")" = 'root:root 600' ] \
 			|| die "queue-admission environment must be root-owned mode 0600"
-		for required in KITSOKI_QUEUE_ADMISSION_TOKEN KITSOKI_WORKER_OUTPUTS_URL KITSOKI_WORKER_OUTPUTS_ACCESS_KEY KITSOKI_WORKER_OUTPUTS_SECRET_KEY; do
+		for required in KITSOKI_QUEUE_ADMISSION_TOKEN KITSOKI_QUEUE_ADMISSION_BUCKET_URL "$queue_admission_key_env" "$queue_admission_secret_env"; do
 			env_value "$queue_admission_env" "$required" >/dev/null
 		done
 		cp "$queue_admission_env" "$queue_admission_stage_env"
@@ -379,16 +388,15 @@ prepare_queue_admission_env() {
 	[ ! -L "$queue_worker_env" ] || die "queue-worker environment must not be a symlink"
 	[ "$(stat -c '%U:%G %a' "$queue_worker_env")" = 'root:root 600' ] \
 		|| die "queue-worker environment must be root-owned mode 0600 before deriving admission credentials"
-	access_key="$(env_value "$queue_worker_env" KITSOKI_WORKER_OUTPUTS_ACCESS_KEY)"
-	secret_key="$(env_value "$queue_worker_env" KITSOKI_WORKER_OUTPUTS_SECRET_KEY)"
-	bucket_url="$(env_value "$queue_worker_env" KITSOKI_WORKER_OUTPUTS_URL)"
+	access_key="$(env_value "$queue_worker_env" "$queue_admission_key_env")"
+	secret_key="$(env_value "$queue_worker_env" "$queue_admission_secret_env")"
 	token="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 	[[ "$token" =~ ^[0-9a-f]{64}$ ]] || die "could not mint queue-admission bearer"
 	{
 		printf 'KITSOKI_QUEUE_ADMISSION_TOKEN=%s\n' "$token"
-		printf 'KITSOKI_WORKER_OUTPUTS_URL=%s\n' "$bucket_url"
-		printf 'KITSOKI_WORKER_OUTPUTS_ACCESS_KEY=%s\n' "$access_key"
-		printf 'KITSOKI_WORKER_OUTPUTS_SECRET_KEY=%s\n' "$secret_key"
+		printf 'KITSOKI_QUEUE_ADMISSION_BUCKET_URL=%s\n' "$queue_admission_bucket_url"
+		printf '%s=%s\n' "$queue_admission_key_env" "$access_key"
+		printf '%s=%s\n' "$queue_admission_secret_env" "$secret_key"
 	} >"$queue_admission_stage_env"
 	chmod 0600 "$queue_admission_stage_env"
 }
