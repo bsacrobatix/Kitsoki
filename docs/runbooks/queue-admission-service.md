@@ -167,4 +167,3 @@ queue directory:
 The same `--queue-root` is available on submit, external submit, process,
 migrate, sweep, approval, and operator verbs. Do not copy or mirror
 `state.json` into the project checkout: the external authority is canonical.
-
