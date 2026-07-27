@@ -2552,13 +2552,13 @@ capability-free Starlark, and exposed through page-scoped `application.data`.
 `host.compliance.run` is the typed compliance boundary for Story Applications:
 
 ```yaml
-catalog_path: catalog
 node_id: control-access-review
 ```
 
-It returns exactly `passed`, `evidence_ref`, and `summary`. The session runtime
-fixes the application identity, project root, catalog resolver, check runner,
-evidence store, and clock; none can be supplied by the story. The provider
+It returns exactly `passed`, `evidence_ref`, and `summary`. An exact
+`story_application_assurance.<application-id>` config binding fixes the
+application identity, project root, catalog resolver, check runner, evidence
+store, clock, and hard bounds; none can be supplied by the story. The provider
 loads the catalog through `internal/graph`, resolves the node's typed
 `materialize.checks` through `internal/materialize`, and runs only those
 server-resolved `.star` checks. Story input cannot supply a command, script,
@@ -2571,10 +2571,12 @@ resolution. Check count, resolved declarations, result data, and the final
 evidence record all have hard ceilings; overflow fails the call instead of
 truncating evidence.
 
-Evidence is immutable JSON under `.artifacts/compliance`, addressed externally
-as `kitsoki://compliance/sha256/<digest>`. The reference reveals no filesystem
-path. Equivalent verdicts reuse the same semantic digest after a daemon or
-session restart; a changed verdict creates a new record.
+Evidence is immutable in the active SQLite or Postgres runtime store, addressed
+externally as `kitsoki://compliance/sha256/<digest>`. The reference reveals no
+database or filesystem identity. Equivalent verdicts reuse the same semantic
+digest after a daemon or session restart; a changed verdict creates a new
+record. Unconfigured legacy runtime construction retains its existing
+path-taking handler for non-Story-Application callers.
 
 ## Story Application maintenance
 

@@ -4,38 +4,52 @@
 application-scoped catalog node. Its entire story-facing contract is:
 
 ```text
-record(catalog_path, node_id) -> evidence_ref, passed, run_count
+record(node_id) -> evidence_ref, passed, run_count
 ```
 
 It does not accept commands, programs, argument vectors, scripts, suite paths,
 output paths, model profiles, or arbitrary repository roots. It does not launch
 an LLM and does not grant graph mutation or source-landing authority.
 
-## Resolution
+## Configuration
 
-Daemon construction registers one exact catalog binding and four injected
-dependencies for an application:
+The checked-in config declares repository-relative authority and every hard
+bound. Story input cannot override any field in this block:
 
-```go
-err := registry.RegisterFlowEvidenceProvider(appID, host.FlowEvidenceProvider{
-    CatalogPath: registeredCatalogPath,
-    Resolver:    appCatalogResolver,
-    Runner:      newTestrunnerFlowEvidenceRunner(buildImportResolver()),
-    Store:       durableEvidenceStore,
-    Clock:       clock.Real(),
-})
+```yaml
+story_application_assurance:
+  pog-application:
+    catalog: pog/catalog.yaml
+    compliance:
+      max_checks: 64
+      max_resolved_bytes: 131072
+      max_evidence_bytes: 262144
+    flow_evidence:
+      suites:
+        - id: pog-application
+          app: stories/pog-application/app.yaml
+          flows: stories/pog-application/flows/*.yaml
+          version: v1
+      max_suites: 16
+      max_runs: 200
+      max_suite_bytes: 8388608
+      max_evidence_bytes: 1048576
 ```
 
-Session construction adds the loaded application's ID, author, and version.
-`record` requires an authenticated actor and rejects any `catalog_path` other
-than the exact registered value. The path is compared as an identity claim; it
-is never opened from host input. The resolver receives only this server scope
-and the validated catalog node ID. It returns the node's catalog revision and
-declared flow suite IDs, revisions, application paths, and fixture selectors.
-Those server-resolved suite paths are never returned to the caller.
+Web config parsing uses strict nested allowlists. Runtime construction resolves
+the catalog, suite application, and flow glob beneath the discovered project
+root, follows symlinks, and requires every resolved input to be a regular file.
+It then injects the loaded application's ID, author, version, authenticated
+actor, deterministic runner, SQLite/Postgres evidence store, and configured
+bounds. The resolver receives only this server scope and the validated catalog
+node ID. Server-resolved suite paths are never returned to the caller.
 
-There is no default resolver, store, or catalog binding. An unregistered
-application gets the unavailable sentinel.
+Unknown input is rejected. Authority-bearing keys are rejected recursively,
+including path, URL, command, program, script, provider, profile, actor,
+session, transport, bound, catalog, suite, evidence, runner, store, and
+application variants. An unregistered application keeps the unavailable
+sentinel unless a low-level integration explicitly registers the legacy
+path-taking provider.
 
 ## Deterministic execution
 
@@ -45,10 +59,11 @@ recording modes, so the evidence path cannot activate real host providers,
 shell commands, network recording, or live agents. Replay cassettes and stub
 handlers remain available for deterministic flow fixtures.
 
-Execution is bounded to 16 suites, 200 total flow runs, 8 MiB of fixture input,
-200 failure messages per suite result, and a 1 MiB durable evidence record.
-Limits fail before execution where they can be precomputed. Oversized results
-fail rather than returning or storing a truncated success.
+Configuration must state positive limits within the platform ceilings of 16
+suites, 200 total flow runs, 8 MiB of suite input, 200 failure messages per
+suite result, and a 1 MiB durable evidence record. Limits fail before execution
+where they can be precomputed. Oversized results fail rather than returning or
+storing a truncated success.
 
 Every red flow and runner failure is represented in the stored suite record.
 The host returns `passed: false` with its durable evidence reference; it does
@@ -62,12 +77,12 @@ sorted suite definitions into a stable evidence key and reference. It checks
 the evidence store before running. A matching stored pass or failure is replayed
 without executing the suites again.
 
-Concurrent calls for the same key are serialized in process.
-`PutFlowEvidenceIfAbsent` must also be atomic so multiple daemon processes
+Concurrent calls for the same key are serialized in process. SQLite and
+Postgres stores use an atomic insert-if-absent so multiple daemon processes
 converge on the same first durable record. A new handler after daemon restart
-uses the same store lookup and returns that receipt. Catalog resolvers must
-change the catalog or suite revision whenever executable content changes;
-otherwise replay correctly treats the declaration as unchanged.
+uses the same store lookup and returns that receipt. Suite revisions include
+the configured version and digests of the application and matched fixtures;
+catalog content changes likewise change catalog revision.
 
 If the store is unavailable, the host does not run. If persistence fails after
 a run, the operation fails and does not claim evidence exists.

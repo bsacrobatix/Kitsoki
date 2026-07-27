@@ -598,6 +598,9 @@ See 'kitsoki docs llm-guide' for the full operator guide.`,
 						RoomEnterSink:     roomEnterSink,
 						Reloader:          reloader,
 						Mining:            webCfg.Mining,
+						ApplicationAssurance: applicationAssuranceBinding(
+							webCfg, def.App.ID,
+						),
 					})
 					if err != nil {
 						return err

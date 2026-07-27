@@ -239,6 +239,7 @@ type SessionRegistry struct {
 // session-invariant construction posture every new session inherits. The
 // initial catalogue is empty until the caller runs Rescan.
 func NewRegistry(cfg webconfig.WebConfig, dirs []string, base runtimeBase) *SessionRegistry {
+	base.ApplicationAssurance = cfg.StoryApplicationAssurance
 	base.StoryDemoBindings = make(map[string]storydemo.DeploymentBinding, len(cfg.StoryApplicationArtifacts))
 	for caller, binding := range cfg.StoryApplicationArtifacts {
 		mockupApplicationID := ""

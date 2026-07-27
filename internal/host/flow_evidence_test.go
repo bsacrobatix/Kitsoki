@@ -269,6 +269,35 @@ func TestFlowEvidencePreservesFailingSuite(t *testing.T) {
 	}
 }
 
+func TestFlowEvidenceHonorsInjectedSuiteLimit(t *testing.T) {
+	scope := flowEvidenceTestScope()
+	target := flowEvidenceTestTarget(scope)
+	provider := FlowEvidenceProvider{
+		CatalogPath: scope.CatalogPath,
+		Resolver:    flowEvidenceStaticResolver(target),
+		Runner: flowEvidenceRunnerStub{run: func(
+			_ context.Context,
+			suite FlowEvidenceSuite,
+			_ FlowEvidenceLimits,
+		) (FlowEvidenceSuiteResult, error) {
+			return passingFlowEvidenceSuite(suite.ID), nil
+		}},
+		Store: &memoryFlowEvidenceStore{},
+		Clock: clock.Real(),
+		Limits: FlowEvidenceLimits{
+			MaxSuites: 1, MaxRuns: flowEvidenceMaxRuns,
+			MaxEvidenceBytes: flowEvidenceMaxBytes,
+		},
+	}
+	_, err := NewFlowEvidenceHandler(provider, scope)(
+		WithActor(context.Background(), "actor"),
+		flowEvidenceTestArgs(scope),
+	)
+	if err == nil || !strings.Contains(err.Error(), "exceeds 1") {
+		t.Fatalf("suite limit error = %v", err)
+	}
+}
+
 func TestFlowEvidencePersistsRunnerErrorAsFailure(t *testing.T) {
 	scope := flowEvidenceTestScope()
 	target := flowEvidenceTestTarget(scope)
@@ -536,7 +565,7 @@ func TestFlowEvidenceRegistrationSchemaAndEffect(t *testing.T) {
 		t.Fatalf("leaf classification = (%q, %v)", class, deterministic)
 	}
 	spec, ok := opschema.Builtins().Lookup("host.flow_evidence", "record")
-	if !ok || spec.Input["catalog_path"].Type != "string" ||
+	if !ok || len(spec.Input) != 1 ||
 		spec.Input["node_id"].Type != "string" ||
 		spec.Output["evidence_ref"].Type != "string" ||
 		spec.Output["passed"].Type != "bool" ||

@@ -429,7 +429,7 @@ func registerGraphBuiltins(r *Registry) {
 		Output: fields("receipt", "object"),
 	})
 	r.Register("host.compliance", "run", Op{
-		Input:  fields("catalog_path", "string", "node_id", "string"),
+		Input:  fields("node_id", "string"),
 		Output: fields("passed", "bool", "evidence_ref", "string", "summary", "string"),
 	})
 	r.Register("host.campaign", "watch", Op{
@@ -444,7 +444,7 @@ func registerGraphBuiltins(r *Registry) {
 		Output: fields("snapshot", "object"),
 	})
 	r.Register("host.flow_evidence", "record", Op{
-		Input:  fields("catalog_path", "string", "node_id", "string"),
+		Input:  fields("node_id", "string"),
 		Output: fields("evidence_ref", "string", "passed", "bool", "run_count", "int"),
 	})
 	r.Register("host.application_job", "submit", Op{

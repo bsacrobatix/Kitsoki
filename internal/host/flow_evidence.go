@@ -63,6 +63,7 @@ type FlowEvidenceTarget struct {
 
 // FlowEvidenceLimits are hard ceilings passed into every runner invocation.
 type FlowEvidenceLimits struct {
+	MaxSuites        int
 	MaxRuns          int
 	MaxEvidenceBytes int
 }
@@ -128,6 +129,7 @@ type FlowEvidenceProvider struct {
 	Runner      FlowEvidenceRunner
 	Store       FlowEvidenceStore
 	Clock       clock.Clock
+	Limits      FlowEvidenceLimits
 }
 
 type flowEvidenceHandler struct {
@@ -163,6 +165,10 @@ func (h *flowEvidenceHandler) handle(ctx context.Context, args map[string]any) (
 	if err := validateFlowEvidenceScope(h.scope); err != nil {
 		return Result{Error: "host.flow_evidence: " + err.Error()}, nil
 	}
+	limits, err := resolveFlowEvidenceLimits(h.provider.Limits)
+	if err != nil {
+		return Result{}, err
+	}
 	actor := strings.TrimSpace(ActorFromContext(ctx))
 	if actor == "" {
 		return Result{Error: "host.flow_evidence: authenticated actor is required"}, nil
@@ -174,13 +180,14 @@ func (h *flowEvidenceHandler) handle(ctx context.Context, args map[string]any) (
 	if strings.TrimSpace(op) != "record" {
 		return Result{}, fmt.Errorf("host.flow_evidence: unknown op %q", op)
 	}
-	return h.record(ctx, actor, args)
+	return h.record(ctx, actor, args, limits)
 }
 
 func (h *flowEvidenceHandler) record(
 	ctx context.Context,
 	actor string,
 	args map[string]any,
+	limits FlowEvidenceLimits,
 ) (Result, error) {
 	catalogPath, err := requiredFlowEvidenceString(args, "catalog_path", flowEvidenceMaxPathLen)
 	if err != nil {
@@ -199,7 +206,7 @@ func (h *flowEvidenceHandler) record(
 	if err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: resolve catalog node: %w", err)
 	}
-	target, err = validateFlowEvidenceTarget(target, h.scope, nodeID)
+	target, err = validateFlowEvidenceTarget(target, h.scope, nodeID, limits.MaxSuites)
 	if err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: %w", err)
 	}
@@ -214,7 +221,7 @@ func (h *flowEvidenceHandler) record(
 	if cached, ok, err := h.provider.Store.LookupFlowEvidence(ctx, key); err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: read durable evidence: %w", err)
 	} else if ok {
-		if err := validateFlowEvidenceRecord(cached, target, key, evidenceRef); err != nil {
+		if err := validateFlowEvidenceRecord(cached, target, key, evidenceRef, limits.MaxRuns); err != nil {
 			return Result{}, fmt.Errorf("host.flow_evidence.record: stored evidence: %w", err)
 		}
 		return flowEvidenceResult(cached), nil
@@ -235,9 +242,10 @@ func (h *flowEvidenceHandler) record(
 	}
 	allPassed := true
 	for _, suite := range target.Suites {
-		remaining := flowEvidenceMaxRuns - record.RunCount
+		remaining := limits.MaxRuns - record.RunCount
 		suiteResult, runErr := h.provider.Runner.RunFlowEvidence(ctx, suite, FlowEvidenceLimits{
-			MaxRuns: remaining, MaxEvidenceBytes: flowEvidenceMaxBytes,
+			MaxSuites: limits.MaxSuites,
+			MaxRuns:   remaining, MaxEvidenceBytes: limits.MaxEvidenceBytes,
 		})
 		if ctx.Err() != nil {
 			return Result{}, ctx.Err()
@@ -259,24 +267,24 @@ func (h *flowEvidenceHandler) record(
 		}
 	}
 	record.Passed = allPassed && record.RunCount > 0
-	if err := validateFlowEvidenceRecord(record, target, key, evidenceRef); err != nil {
+	if err := validateFlowEvidenceRecord(record, target, key, evidenceRef, limits.MaxRuns); err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: generated evidence: %w", err)
 	}
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: encode evidence: %w", err)
 	}
-	if len(encoded) > flowEvidenceMaxBytes {
+	if len(encoded) > limits.MaxEvidenceBytes {
 		return Result{}, fmt.Errorf(
 			"host.flow_evidence.record: evidence is %d bytes, exceeds %d; refusing to truncate",
-			len(encoded), flowEvidenceMaxBytes,
+			len(encoded), limits.MaxEvidenceBytes,
 		)
 	}
 	stored, err := h.provider.Store.PutFlowEvidenceIfAbsent(ctx, key, record)
 	if err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: persist durable evidence: %w", err)
 	}
-	if err := validateFlowEvidenceRecord(stored, target, key, evidenceRef); err != nil {
+	if err := validateFlowEvidenceRecord(stored, target, key, evidenceRef, limits.MaxRuns); err != nil {
 		return Result{}, fmt.Errorf("host.flow_evidence.record: persisted evidence: %w", err)
 	}
 	return flowEvidenceResult(stored), nil
@@ -305,10 +313,38 @@ func validateFlowEvidenceScope(scope FlowEvidenceScope) error {
 	}
 }
 
+func resolveFlowEvidenceLimits(configured FlowEvidenceLimits) (FlowEvidenceLimits, error) {
+	if configured.MaxSuites == 0 {
+		configured.MaxSuites = flowEvidenceMaxSuites
+	}
+	if configured.MaxRuns == 0 {
+		configured.MaxRuns = flowEvidenceMaxRuns
+	}
+	if configured.MaxEvidenceBytes == 0 {
+		configured.MaxEvidenceBytes = flowEvidenceMaxBytes
+	}
+	switch {
+	case configured.MaxSuites < 1 || configured.MaxSuites > flowEvidenceMaxSuites:
+		return FlowEvidenceLimits{}, fmt.Errorf(
+			"host.flow_evidence: max suites must be between 1 and %d", flowEvidenceMaxSuites,
+		)
+	case configured.MaxRuns < 1 || configured.MaxRuns > flowEvidenceMaxRuns:
+		return FlowEvidenceLimits{}, fmt.Errorf(
+			"host.flow_evidence: max runs must be between 1 and %d", flowEvidenceMaxRuns,
+		)
+	case configured.MaxEvidenceBytes < 1 || configured.MaxEvidenceBytes > flowEvidenceMaxBytes:
+		return FlowEvidenceLimits{}, fmt.Errorf(
+			"host.flow_evidence: max evidence bytes must be between 1 and %d", flowEvidenceMaxBytes,
+		)
+	}
+	return configured, nil
+}
+
 func validateFlowEvidenceTarget(
 	target FlowEvidenceTarget,
 	scope FlowEvidenceScope,
 	nodeID string,
+	maxSuites int,
 ) (FlowEvidenceTarget, error) {
 	if target.Scope != scope {
 		return FlowEvidenceTarget{}, fmt.Errorf("catalog resolver returned a target outside the registered application scope")
@@ -322,10 +358,10 @@ func validateFlowEvidenceTarget(
 	if len(target.Suites) == 0 {
 		return FlowEvidenceTarget{}, fmt.Errorf("catalog node %q declares no deterministic flow suites", nodeID)
 	}
-	if len(target.Suites) > flowEvidenceMaxSuites {
+	if len(target.Suites) > maxSuites {
 		return FlowEvidenceTarget{}, fmt.Errorf(
 			"catalog node %q declares %d flow suites, exceeds %d; refusing to truncate",
-			nodeID, len(target.Suites), flowEvidenceMaxSuites,
+			nodeID, len(target.Suites), maxSuites,
 		)
 	}
 	suites := append([]FlowEvidenceSuite(nil), target.Suites...)
@@ -411,6 +447,7 @@ func validateFlowEvidenceRecord(
 	target FlowEvidenceTarget,
 	key string,
 	evidenceRef string,
+	maxRuns int,
 ) error {
 	switch {
 	case record.Schema != flowEvidenceSchema:
@@ -427,7 +464,7 @@ func validateFlowEvidenceRecord(
 		return fmt.Errorf("actor is outside the safe evidence boundary")
 	case record.RecordedAt.IsZero():
 		return fmt.Errorf("recorded_at is required")
-	case record.RunCount < 0 || record.RunCount > flowEvidenceMaxRuns:
+	case record.RunCount < 0 || record.RunCount > maxRuns:
 		return fmt.Errorf("run_count %d is outside the supported boundary", record.RunCount)
 	case len(record.Suites) != len(target.Suites):
 		return fmt.Errorf("suite result count does not match the resolved target")
@@ -435,7 +472,7 @@ func validateFlowEvidenceRecord(
 	total := 0
 	allPassed := true
 	for i, suite := range record.Suites {
-		if err := validateFlowEvidenceSuiteResult(suite, target.Suites[i].ID, flowEvidenceMaxRuns-total); err != nil {
+		if err := validateFlowEvidenceSuiteResult(suite, target.Suites[i].ID, maxRuns-total); err != nil {
 			return err
 		}
 		total += suite.RunCount

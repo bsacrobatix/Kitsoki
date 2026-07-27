@@ -83,12 +83,25 @@ type Dependencies struct {
 	Runner     CheckRunner
 	Evidence   EvidenceStore
 	Clock      clock.Clock
+	Limits     Limits
+}
+
+// Limits are server-owned ceilings. Zero values retain the legacy platform
+// maxima for unconfigured callers.
+type Limits struct {
+	MaxChecks        int
+	MaxResolvedBytes int
+	MaxEvidenceBytes int
 }
 
 // NewHandler constructs the host.compliance prefix handler.
 func NewHandler(deps Dependencies) host.Handler {
 	return func(ctx context.Context, args map[string]any) (host.Result, error) {
 		if err := validateDependencies(deps); err != nil {
+			return host.Result{}, err
+		}
+		limits, err := resolvedLimits(deps.Limits)
+		if err != nil {
 			return host.Result{}, err
 		}
 		catalogPath, nodeID, err := parseArgs(args)
@@ -110,7 +123,7 @@ func NewHandler(deps Dependencies) host.Handler {
 		if resolved.NodeID != nodeID {
 			return host.Result{}, fmt.Errorf("host.compliance.run: resolver returned node %q for %q", resolved.NodeID, nodeID)
 		}
-		if err := validateResolved(resolved); err != nil {
+		if err := validateResolved(resolved, limits); err != nil {
 			return host.Result{}, err
 		}
 
@@ -135,10 +148,10 @@ func NewHandler(deps Dependencies) host.Handler {
 		if err != nil {
 			return host.Result{}, fmt.Errorf("host.compliance.run: encode evidence: %w", err)
 		}
-		if len(semanticBytes) > maxEvidenceBytes {
+		if len(semanticBytes) > limits.MaxEvidenceBytes {
 			return host.Result{}, fmt.Errorf(
 				"host.compliance.run: encoded evidence is %d bytes, exceeds %d; refusing to truncate",
-				len(semanticBytes), maxEvidenceBytes,
+				len(semanticBytes), limits.MaxEvidenceBytes,
 			)
 		}
 		sum := sha256.Sum256(semanticBytes)
@@ -158,10 +171,10 @@ func NewHandler(deps Dependencies) host.Handler {
 		if err != nil {
 			return host.Result{}, fmt.Errorf("host.compliance.run: encode evidence record: %w", err)
 		}
-		if len(raw) > maxEvidenceBytes {
+		if len(raw) > limits.MaxEvidenceBytes {
 			return host.Result{}, fmt.Errorf(
 				"host.compliance.run: encoded evidence record is %d bytes, exceeds %d; refusing to truncate",
-				len(raw), maxEvidenceBytes,
+				len(raw), limits.MaxEvidenceBytes,
 			)
 		}
 		ref, err := deps.Evidence.Put(ctx, digest, append(raw, '\n'))
@@ -170,6 +183,27 @@ func NewHandler(deps Dependencies) host.Handler {
 		}
 		return complianceResult(passed, ref, summary), nil
 	}
+}
+
+func resolvedLimits(configured Limits) (Limits, error) {
+	if configured.MaxChecks == 0 {
+		configured.MaxChecks = maxChecks
+	}
+	if configured.MaxResolvedBytes == 0 {
+		configured.MaxResolvedBytes = maxResolvedBytes
+	}
+	if configured.MaxEvidenceBytes == 0 {
+		configured.MaxEvidenceBytes = maxEvidenceBytes
+	}
+	switch {
+	case configured.MaxChecks < 1 || configured.MaxChecks > maxChecks:
+		return Limits{}, fmt.Errorf("host.compliance.run: max checks must be between 1 and %d", maxChecks)
+	case configured.MaxResolvedBytes < 1 || configured.MaxResolvedBytes > maxResolvedBytes:
+		return Limits{}, fmt.Errorf("host.compliance.run: max resolved bytes must be between 1 and %d", maxResolvedBytes)
+	case configured.MaxEvidenceBytes < 1 || configured.MaxEvidenceBytes > maxEvidenceBytes:
+		return Limits{}, fmt.Errorf("host.compliance.run: max evidence bytes must be between 1 and %d", maxEvidenceBytes)
+	}
+	return configured, nil
 }
 
 func validateDependencies(deps Dependencies) error {
@@ -220,27 +254,27 @@ func parseArgs(args map[string]any) (string, string, error) {
 	return catalogPath, nodeID, nil
 }
 
-func validateResolved(resolved ResolvedNode) error {
+func validateResolved(resolved ResolvedNode, limits Limits) error {
 	if resolved.CatalogDigest == "" || resolved.TypeID == "" {
 		return fmt.Errorf("host.compliance.run: resolver returned incomplete typed node metadata")
 	}
 	if len(resolved.Checks) == 0 {
 		return fmt.Errorf("host.compliance.run: node %q has no materialize checks", resolved.NodeID)
 	}
-	if len(resolved.Checks) > maxChecks {
+	if len(resolved.Checks) > limits.MaxChecks {
 		return fmt.Errorf(
 			"host.compliance.run: node %q resolves %d checks, exceeds %d; refusing to truncate",
-			resolved.NodeID, len(resolved.Checks), maxChecks,
+			resolved.NodeID, len(resolved.Checks), limits.MaxChecks,
 		)
 	}
 	raw, err := json.Marshal(resolved.Checks)
 	if err != nil {
 		return fmt.Errorf("host.compliance.run: encode resolved checks: %w", err)
 	}
-	if len(raw) > maxResolvedBytes {
+	if len(raw) > limits.MaxResolvedBytes {
 		return fmt.Errorf(
 			"host.compliance.run: resolved checks encode to %d bytes, exceeds %d; refusing to truncate",
-			len(raw), maxResolvedBytes,
+			len(raw), limits.MaxResolvedBytes,
 		)
 	}
 	seen := map[string]bool{}

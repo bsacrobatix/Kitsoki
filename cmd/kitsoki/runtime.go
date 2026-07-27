@@ -14,6 +14,7 @@ import (
 	agentserver "kitsoki/internal/agent/server"
 	"kitsoki/internal/agents"
 	"kitsoki/internal/app"
+	"kitsoki/internal/applicationassurance"
 	"kitsoki/internal/applicationcapture"
 	"kitsoki/internal/chathost"
 	"kitsoki/internal/chats"
@@ -197,9 +198,10 @@ type runtimeConfig struct {
 
 	// ApplicationCaptures is the process-owned browser capture broker shared
 	// by runstatus and every per-session typed host.demo registry.
-	ApplicationCaptures applicationcapture.Broker
-	StoryDemoExecutor   storydemo.ApplicationArtifactExecutor
-	StoryDemoBinding    storydemo.DeploymentBinding
+	ApplicationCaptures  applicationcapture.Broker
+	StoryDemoExecutor    storydemo.ApplicationArtifactExecutor
+	StoryDemoBinding     storydemo.DeploymentBinding
+	ApplicationAssurance *webconfig.StoryApplicationAssuranceConfig
 }
 
 // runtimeBase carries the session-INVARIANT construction posture that
@@ -274,10 +276,23 @@ type runtimeBase struct {
 	// ConnectIDEFromEnv is threaded into each session's runtimeConfig so the
 	// web posture auto-connects an IDE link from CLAUDE_CODE_SSE_PORT (the
 	// embedding VS Code extension). The TUI run path leaves it false.
-	ConnectIDEFromEnv   bool
-	ApplicationCaptures applicationcapture.Broker
-	StoryDemoExecutor   storydemo.ApplicationArtifactExecutor
-	StoryDemoBindings   map[string]storydemo.DeploymentBinding
+	ConnectIDEFromEnv    bool
+	ApplicationCaptures  applicationcapture.Broker
+	StoryDemoExecutor    storydemo.ApplicationArtifactExecutor
+	StoryDemoBindings    map[string]storydemo.DeploymentBinding
+	ApplicationAssurance map[string]webconfig.StoryApplicationAssuranceConfig
+}
+
+func applicationAssuranceBinding(
+	cfg webconfig.WebConfig,
+	appID string,
+) *webconfig.StoryApplicationAssuranceConfig {
+	binding, ok := cfg.StoryApplicationAssurance[appID]
+	if !ok {
+		return nil
+	}
+	copy := binding
+	return &copy
 }
 
 // config materialises a per-session runtimeConfig for the story at storyPath
@@ -287,29 +302,35 @@ type runtimeBase struct {
 // carries a fixture — the same construction web.go performs today.
 func (b runtimeBase) config(storyPath string, def *app.AppDef) runtimeConfig {
 	demoBinding := b.StoryDemoBindings[def.App.ID]
+	var assuranceBinding *webconfig.StoryApplicationAssuranceConfig
+	if binding, ok := b.ApplicationAssurance[def.App.ID]; ok {
+		copy := binding
+		assuranceBinding = &copy
+	}
 	return runtimeConfig{
-		AppPath:             storyPath,
-		Def:                 def,
-		DBPath:              b.DBPath,
-		ExecMode:            b.ExecMode,
-		HarnessType:         b.HarnessType,
-		ClaudeModel:         b.ClaudeModel,
-		RecordingPath:       b.RecordingPath,
-		RecordPath:          b.RecordPath,
-		AgentBackend:        b.AgentBackend,
-		HarnessProfiles:     b.HarnessProfiles,
-		DefaultProfile:      b.DefaultProfile,
-		HarnessLadder:       b.HarnessLadder,
-		AgentLaunchPolicy:   b.AgentLaunchPolicy,
-		Flow:                b.Flow,
-		FlowFilePath:        b.FlowFilePath,
-		HostCassette:        b.HostCassette,
-		Mining:              b.Mining,
-		MiningRepoPath:      filepath.Dir(storyPath),
-		ConnectIDEFromEnv:   b.ConnectIDEFromEnv,
-		ApplicationCaptures: b.ApplicationCaptures,
-		StoryDemoExecutor:   b.StoryDemoExecutor,
-		StoryDemoBinding:    demoBinding,
+		AppPath:              storyPath,
+		Def:                  def,
+		DBPath:               b.DBPath,
+		ExecMode:             b.ExecMode,
+		HarnessType:          b.HarnessType,
+		ClaudeModel:          b.ClaudeModel,
+		RecordingPath:        b.RecordingPath,
+		RecordPath:           b.RecordPath,
+		AgentBackend:         b.AgentBackend,
+		HarnessProfiles:      b.HarnessProfiles,
+		DefaultProfile:       b.DefaultProfile,
+		HarnessLadder:        b.HarnessLadder,
+		AgentLaunchPolicy:    b.AgentLaunchPolicy,
+		Flow:                 b.Flow,
+		FlowFilePath:         b.FlowFilePath,
+		HostCassette:         b.HostCassette,
+		Mining:               b.Mining,
+		MiningRepoPath:       filepath.Dir(storyPath),
+		ConnectIDEFromEnv:    b.ConnectIDEFromEnv,
+		ApplicationCaptures:  b.ApplicationCaptures,
+		StoryDemoExecutor:    b.StoryDemoExecutor,
+		StoryDemoBinding:     demoBinding,
+		ApplicationAssurance: assuranceBinding,
 	}
 }
 
@@ -326,6 +347,90 @@ func wireComplianceHost(registry *host.Registry, cfg runtimeConfig) {
 		},
 		Clock: clock.Real(),
 	}))
+}
+
+func wireApplicationAssuranceHosts(
+	registry *host.Registry,
+	cfg runtimeConfig,
+	sessionStore store.Store,
+) error {
+	binding := cfg.ApplicationAssurance
+	if binding == nil {
+		return nil
+	}
+	root := compliance.DiscoverRoot(cfg.AppPath)
+	suites := make([]applicationassurance.SuiteBinding, 0)
+	maxSuiteBytes := 1
+	if binding.FlowEvidence != nil {
+		maxSuiteBytes = binding.FlowEvidence.MaxSuiteBytes
+		for _, suite := range binding.FlowEvidence.Suites {
+			suites = append(suites, applicationassurance.SuiteBinding{
+				ID: suite.ID, App: suite.App, Flows: suite.Flows, Version: suite.Version,
+			})
+		}
+	}
+	resolved, err := applicationassurance.ResolveBinding(
+		root, binding.Catalog, suites, maxSuiteBytes,
+	)
+	if err != nil {
+		return err
+	}
+	var evidence *applicationassurance.SQLStore
+	if store.IsPostgres(sessionStore) {
+		evidence, err = applicationassurance.NewPostgresStore(sessionStore.DB())
+	} else {
+		evidence, err = applicationassurance.NewSQLiteStore(sessionStore.DB())
+	}
+	if err != nil {
+		return err
+	}
+	if binding.Compliance != nil {
+		core := compliance.NewHandler(compliance.Dependencies{
+			AppID: cfg.Def.App.ID, Root: resolved.Root,
+			Authorizer: compliance.BoundAuthorizer{AppID: cfg.Def.App.ID, Root: resolved.Root},
+			Catalogs:   compliance.GraphCatalogResolver{},
+			Runner:     compliance.MaterializeCheckRunner{},
+			Evidence:   applicationassurance.ComplianceStore{Store: evidence},
+			Clock:      clock.Real(),
+			Limits: compliance.Limits{
+				MaxChecks:        binding.Compliance.MaxChecks,
+				MaxResolvedBytes: binding.Compliance.MaxResolvedBytes,
+				MaxEvidenceBytes: binding.Compliance.MaxEvidenceBytes,
+			},
+		})
+		registry.Replace(
+			"host.compliance",
+			applicationassurance.NewSemanticHandler(
+				"host.compliance", "run", resolved.CatalogPath, core,
+			),
+		)
+	}
+	if binding.FlowEvidence != nil {
+		core := host.NewFlowEvidenceHandler(host.FlowEvidenceProvider{
+			CatalogPath: resolved.CatalogPath,
+			Resolver:    applicationassurance.CatalogResolver{Binding: resolved},
+			Runner:      newTestrunnerFlowEvidenceRunner(buildImportResolver()),
+			Store:       applicationassurance.FlowEvidenceStore{Store: evidence},
+			Clock:       clock.Real(),
+			Limits: host.FlowEvidenceLimits{
+				MaxSuites:        binding.FlowEvidence.MaxSuites,
+				MaxRuns:          binding.FlowEvidence.MaxRuns,
+				MaxEvidenceBytes: binding.FlowEvidence.MaxEvidenceBytes,
+			},
+		}, host.FlowEvidenceScope{
+			ApplicationID: cfg.Def.App.ID,
+			Owner:         cfg.Def.App.Author,
+			Revision:      cfg.Def.App.Version,
+			CatalogPath:   resolved.CatalogPath,
+		})
+		registry.Replace(
+			"host.flow_evidence",
+			applicationassurance.NewSemanticHandler(
+				"host.flow_evidence", "record", resolved.CatalogPath, core,
+			),
+		)
+	}
+	return nil
 }
 
 func wireStoryDemoHost(registry *host.Registry, cfg runtimeConfig) {
@@ -428,6 +533,9 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
 		wireComplianceHost(hostReg, cfg)
+		if err := wireApplicationAssuranceHosts(hostReg, cfg, s); err != nil {
+			return nil, fmt.Errorf("wire application assurance: %w", err)
+		}
 		wireStoryDemoHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		testrunner.RegisterHostStubs(hostReg, cfg.Flow.HostHandlers)
@@ -509,6 +617,9 @@ func buildSessionRuntime(cfg runtimeConfig) (*sessionRuntime, error) {
 		hostReg = host.NewRegistry()
 		host.RegisterBuiltins(hostReg)
 		wireComplianceHost(hostReg, cfg)
+		if err := wireApplicationAssuranceHosts(hostReg, cfg, s); err != nil {
+			return nil, fmt.Errorf("wire application assurance: %w", err)
+		}
 		wireStoryDemoHost(hostReg, cfg)
 		host.RegisterStarlarkBindings(hostReg, def.StarlarkHostBindings)
 		// Layer a host cassette over the live-harness posture when requested

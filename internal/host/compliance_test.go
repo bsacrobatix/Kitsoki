@@ -32,7 +32,7 @@ func TestComplianceRegistrationSchemaAndEffect(t *testing.T) {
 	}
 	spec, ok := opschema.Builtins().Lookup("host.compliance", "run")
 	if !ok ||
-		spec.Input["catalog_path"].Type != "string" ||
+		len(spec.Input) != 1 ||
 		spec.Input["node_id"].Type != "string" ||
 		spec.Output["passed"].Type != "bool" ||
 		spec.Output["evidence_ref"].Type != "string" ||

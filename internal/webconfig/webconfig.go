@@ -163,6 +163,10 @@ type WebConfig struct {
 	// registered background Application Events and bounded artifact projections.
 	StoryApplicationJobs map[string]map[string]applicationjob.Template `yaml:"story_application_jobs,omitempty"`
 
+	// StoryApplicationAssurance binds exact applications to a server-owned
+	// catalog, deterministic suites, hard limits, and durable evidence stores.
+	StoryApplicationAssurance map[string]StoryApplicationAssuranceConfig `yaml:"story_application_assurance,omitempty"`
+
 	// ApplicationConversations binds a caller application to one exact target
 	// role, graph projection, provider, machine profile, and set of bounds.
 	ApplicationConversations map[string]ApplicationConversationBinding `yaml:"application_conversations,omitempty"`
@@ -920,6 +924,9 @@ func Load(path string) (WebConfig, error) {
 	if err := cfg.resolveStoryApplicationJobs(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := cfg.resolveStoryApplicationAssurance(); err != nil {
+		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
+	}
 	if err := cfg.resolveApplicationConversations(); err != nil {
 		return WebConfig{}, fmt.Errorf("%s: %w", path, err)
 	}
@@ -1136,6 +1143,19 @@ func mergeConfig(base, local WebConfig) WebConfig {
 			merged[k] = v
 		}
 		out.StoryApplicationJobs = merged
+	}
+	if len(local.StoryApplicationAssurance) > 0 {
+		merged := make(
+			map[string]StoryApplicationAssuranceConfig,
+			len(base.StoryApplicationAssurance)+len(local.StoryApplicationAssurance),
+		)
+		for k, v := range base.StoryApplicationAssurance {
+			merged[k] = v
+		}
+		for k, v := range local.StoryApplicationAssurance {
+			merged[k] = v
+		}
+		out.StoryApplicationAssurance = merged
 	}
 	if len(local.ApplicationConversations) > 0 {
 		merged := make(

@@ -108,6 +108,23 @@ func TestHandlerReturnsTypedResultAndSafeEvidence(t *testing.T) {
 	}
 }
 
+func TestHandlerHonorsInjectedLimits(t *testing.T) {
+	deps, _, runner, _ := testDependencies(t)
+	deps.Limits = Limits{
+		MaxChecks: 1, MaxResolvedBytes: maxResolvedBytes,
+		MaxEvidenceBytes: maxEvidenceBytes,
+	}
+	_, err := NewHandler(deps)(context.Background(), map[string]any{
+		"op": "run", "catalog_path": "catalog", "node_id": "control-1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds 1") {
+		t.Fatalf("limit error = %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("runner calls = %d, want 0 before bound failure", runner.calls)
+	}
+}
+
 func TestStoryApplicationStarlarkInvokesTypedRun(t *testing.T) {
 	deps, _, _, _ := testDependencies(t)
 	registry := host.NewRegistry()

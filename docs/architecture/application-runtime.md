@@ -396,3 +396,14 @@ the POG repository can consume this contract and run the same conformance
 boundary through its own managed workflow.
 
 See [Story applications](../stories/applications.md) for the authoring surface.
+
+### Assurance Providers
+
+Applications opt into deterministic compliance and flow proof through
+`story_application_assurance.<application-id>`. Both story-facing operations
+accept only the semantic catalog identity `{node_id}`. Repository roots,
+catalog and suite paths, authenticated actor, deterministic runner, durable
+SQLite/Postgres stores, application identity, and all execution bounds are
+server-owned. The canonical configuration and operational guarantees are
+documented in [Flow Evidence Host](flow-evidence-host.md) and
+[`host.compliance.run`](hosts.md#hostcompliancerun).
