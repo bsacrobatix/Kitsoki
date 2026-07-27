@@ -21,6 +21,12 @@ type PromotionGate struct {
 	ProjectRoot      string
 	Signer           receipt.Signer
 	RequireSignature bool
+	// ReceiptRef and RunRecordRef, when both set, point to immutable evidence
+	// owned by the queue/admission authority. They allow finalization of an
+	// externally admitted candidate without writing CI state into ProjectRoot.
+	// Partial references fail closed.
+	ReceiptRef   string
+	RunRecordRef string
 }
 
 func (g PromotionGate) Verify(_ context.Context, receiptID string, plan reconcile.Plan) error {
@@ -53,7 +59,7 @@ func (g PromotionGate) Verify(_ context.Context, receiptID string, plan reconcil
 	if r.JobID == "" || filepath.Base(r.JobID) != r.JobID {
 		return fmt.Errorf("capsule sync: gate receipt has an invalid job id")
 	}
-	record, err := (ci.FileRunStore{ProjectRoot: g.ProjectRoot}).Get(r.JobID)
+	record, err := g.runRecord(r.JobID)
 	if err != nil {
 		return fmt.Errorf("capsule sync: gate receipt run record: %w", err)
 	}
@@ -81,6 +87,23 @@ func runRecordMatchesReceipt(record ci.RunRecord, r receipt.Receipt) bool {
 }
 
 func (g PromotionGate) receipt(id string) (receipt.Receipt, error) {
+	if g.ReceiptRef != "" || g.RunRecordRef != "" {
+		if g.ReceiptRef == "" || g.RunRecordRef == "" {
+			return receipt.Receipt{}, fmt.Errorf("capsule sync: external gate evidence references must include both receipt and run record")
+		}
+		raw, err := readEvidenceFile(g.ReceiptRef)
+		if err != nil {
+			return receipt.Receipt{}, fmt.Errorf("capsule sync: read external gate receipt: %w", err)
+		}
+		var r receipt.Receipt
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return receipt.Receipt{}, fmt.Errorf("capsule sync: parse external gate receipt: %w", err)
+		}
+		if r.ReceiptID != id {
+			return receipt.Receipt{}, fmt.Errorf("capsule sync: external gate receipt does not match candidate receipt id")
+		}
+		return r, nil
+	}
 	dir := filepath.Join(g.ProjectRoot, ".capsules", "ci")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -103,6 +126,35 @@ func (g PromotionGate) receipt(id string) (receipt.Receipt, error) {
 		}
 	}
 	return receipt.Receipt{}, fmt.Errorf("capsule sync: gate receipt %q not found", id)
+}
+
+func (g PromotionGate) runRecord(id string) (ci.RunRecord, error) {
+	if g.ReceiptRef == "" && g.RunRecordRef == "" {
+		return (ci.FileRunStore{ProjectRoot: g.ProjectRoot}).Get(id)
+	}
+	raw, err := readEvidenceFile(g.RunRecordRef)
+	if err != nil {
+		return ci.RunRecord{}, err
+	}
+	var record ci.RunRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		return ci.RunRecord{}, fmt.Errorf("parse external run record: %w", err)
+	}
+	return record, nil
+}
+
+func readEvidenceFile(path string) ([]byte, error) {
+	if !filepath.IsAbs(path) {
+		return nil, fmt.Errorf("evidence reference must be an absolute path")
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 1<<20 {
+		return nil, fmt.Errorf("evidence reference must be a regular non-symlink file no larger than 1 MiB")
+	}
+	return os.ReadFile(path)
 }
 
 func hasReceiptSuffix(name string) bool {

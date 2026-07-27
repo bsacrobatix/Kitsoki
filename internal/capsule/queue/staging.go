@@ -478,7 +478,7 @@ func (p ProtectedFinalizer) Finalize(ctx context.Context, c Candidate) (Finalize
 	}
 	reconciler := reconcile.Reconciler{VCS: reconcile.Git{}}
 	if c.admission() == ReceiptAdmission {
-		reconciler.Gates = record.PromotionGate{ProjectRoot: p.ProjectRoot}
+		reconciler.Gates = record.PromotionGate{ProjectRoot: p.ProjectRoot, ReceiptRef: c.ReceiptRef, RunRecordRef: c.RunRecordRef}
 	}
 	result, err := reconciler.Apply(ctx, plan, c.ReceiptID)
 	if err != nil {

@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 	"time"
 
 	"kitsoki/internal/atomicfile"
+	"kitsoki/internal/capsule/ci"
 	"kitsoki/internal/capsule/queue"
 	"kitsoki/internal/capsule/receipt"
 	"kitsoki/internal/objectstore"
@@ -93,9 +95,13 @@ type Handoff struct {
 // Git bundle through Handoff.Bundle.Key. ReceiptBase64 preserves the exact
 // receipt bytes whose digest the worker sealed, including whitespace.
 type Request struct {
-	Schema             string                   `json:"schema"`
-	Handoff            Handoff                  `json:"handoff"`
-	ReceiptBase64      string                   `json:"receipt_base64"`
+	Schema        string  `json:"schema"`
+	Handoff       Handoff `json:"handoff"`
+	ReceiptBase64 string  `json:"receipt_base64"`
+	// RunRecordBase64 is optional for backwards-compatible worker handoffs.
+	// New sealed candidate admissions supply it so the external authority has
+	// the exact verified CI record required by final promotion.
+	RunRecordBase64    string                   `json:"run_record_base64,omitempty"`
 	TargetBaseSHA      string                   `json:"target_base_sha"`
 	TargetPolicy       queue.TargetPolicy       `json:"target_policy,omitempty"`
 	FinalizationPolicy queue.FinalizationPolicy `json:"finalization_policy,omitempty"`
@@ -394,6 +400,10 @@ func (s *Server) Admit(ctx context.Context, request Request) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
+	runRecordPath, err := s.persistRunRecord(parsedReceipt, normalized.RunRecordBase64)
+	if err != nil {
+		return Response{}, err
+	}
 	bundlePath, err := s.fetchBundle(ctx, normalized.Handoff.Bundle)
 	if err != nil {
 		return Response{}, err
@@ -410,7 +420,7 @@ func (s *Server) Admit(ctx context.Context, request Request) (Response, error) {
 		Submit: queue.Submit{
 			Branch: result.Branch, SHA: result.CandidateSHA,
 			TargetRef: result.TargetRef, TargetBaseSHAAtAdmission: normalized.TargetBaseSHA,
-			TargetPolicy: normalized.TargetPolicy, Receipt: parsedReceipt, ReceiptRef: receiptPath,
+			TargetPolicy: normalized.TargetPolicy, Receipt: parsedReceipt, ReceiptRef: receiptPath, RunRecordRef: runRecordPath,
 			Backend: "remote-external-worker", Paths: normalized.Paths,
 			FinalizationPolicy: normalized.FinalizationPolicy, ManifestDigest: result.ManifestDigest,
 			RuntimeInstance: normalized.RuntimeInstance, RuntimeReceipt: normalized.RuntimeReceipt,
@@ -500,11 +510,25 @@ func (s *Server) validateRequest(request Request) (Request, []byte, receipt.Rece
 	if s.cfg.ProjectID != "" && parsedReceipt.ProjectID != s.cfg.ProjectID {
 		return Request{}, nil, receipt.Receipt{}, "", fail(http.StatusUnprocessableEntity, "project_mismatch", "receipt project %q is not admitted by this service", parsedReceipt.ProjectID)
 	}
+	if request.RunRecordBase64 != "" {
+		raw, err := decodeRunRecord(request.RunRecordBase64)
+		if err != nil {
+			return Request{}, nil, receipt.Receipt{}, "", err
+		}
+		run, err := parseRunRecord(raw)
+		if err != nil {
+			return Request{}, nil, receipt.Receipt{}, "", err
+		}
+		if !runRecordMatchesReceipt(run, parsedReceipt) {
+			return Request{}, nil, receipt.Receipt{}, "", fail(http.StatusUnprocessableEntity, "run_record_mismatch", "run record is not the verified result for the sealed receipt")
+		}
+	}
 	request.Paths = cleanStrings(request.Paths)
 	request.RequiredReceiptIDs = cleanStrings(request.RequiredReceiptIDs)
 	fingerprint := map[string]any{
 		"handoff_digest":       request.Handoff.HandoffDigest,
 		"receipt_digest":       request.Handoff.Receipt.RawDigest,
+		"run_record_digest":    digestEncoded(request.RunRecordBase64),
 		"target_base_sha":      request.TargetBaseSHA,
 		"target_policy":        string(request.TargetPolicy),
 		"finalization_policy":  string(request.FinalizationPolicy),
@@ -610,6 +634,49 @@ func parseReceipt(raw []byte) (receipt.Receipt, error) {
 	return parsed, nil
 }
 
+func decodeRunRecord(encoded string) ([]byte, error) {
+	if len(encoded) > base64.StdEncoding.EncodedLen(int(maxReceiptBytes)) {
+		return nil, fail(http.StatusBadRequest, "run_record_invalid", "run_record_base64 is oversized")
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil || len(raw) == 0 || int64(len(raw)) > maxReceiptBytes {
+		return nil, fail(http.StatusBadRequest, "run_record_invalid", "run_record_base64 is malformed or oversized")
+	}
+	return raw, nil
+}
+
+func parseRunRecord(raw []byte) (ci.RunRecord, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var run ci.RunRecord
+	if err := decoder.Decode(&run); err != nil {
+		return ci.RunRecord{}, fail(http.StatusBadRequest, "run_record_invalid", "parse run record: %v", err)
+	}
+	if err := ensureEOF(decoder); err != nil {
+		return ci.RunRecord{}, fail(http.StatusBadRequest, "run_record_invalid", "%v", err)
+	}
+	return run, nil
+}
+
+func runRecordMatchesReceipt(run ci.RunRecord, r receipt.Receipt) bool {
+	result := run.Result
+	return run.JobID == r.JobID && run.ReceiptID == r.ReceiptID && run.ReceiptVerification == "valid" &&
+		string(result.Job.ID) == r.JobID && result.Envelope.Digest == r.Envelope.Digest &&
+		result.Envelope.SourceDigest == r.Envelope.SourceDigest && result.Envelope.StoryDigest == r.Envelope.StoryDigest &&
+		result.Envelope.Environment.Digest == r.Envelope.Environment.Digest && reflect.DeepEqual(result.Verdict, r.Verdict)
+}
+
+func digestEncoded(encoded string) string {
+	if encoded == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return "invalid"
+	}
+	return digestBytes(raw)
+}
+
 func ensureEOF(decoder *json.Decoder) error {
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
@@ -633,6 +700,36 @@ func (s *Server) persistReceipt(parsed receipt.Receipt, raw []byte) (string, err
 	}
 	if err := atomicfile.WriteFile(path, raw, 0o600, 0o700); err != nil {
 		return "", fmt.Errorf("queue admission: persist receipt: %w", err)
+	}
+	return path, nil
+}
+
+func (s *Server) persistRunRecord(parsed receipt.Receipt, encoded string) (string, error) {
+	if encoded == "" {
+		return "", nil
+	}
+	raw, err := decodeRunRecord(encoded)
+	if err != nil {
+		return "", err
+	}
+	run, err := parseRunRecord(raw)
+	if err != nil {
+		return "", err
+	}
+	if !runRecordMatchesReceipt(run, parsed) {
+		return "", fail(http.StatusUnprocessableEntity, "run_record_mismatch", "run record is not the verified result for the sealed receipt")
+	}
+	path := filepath.Join(s.root, "run-records", strings.TrimPrefix(parsed.ReceiptID, "sha256:")+".run.json")
+	if existing, err := readBoundedRegular(path, maxReceiptBytes); err == nil {
+		if !bytes.Equal(existing, raw) {
+			return "", fail(http.StatusConflict, "run_record_substitution", "immutable run record for %s changed bytes", parsed.ReceiptID)
+		}
+		return path, nil
+	} else if !os.IsNotExist(errors.Unwrap(err)) && !os.IsNotExist(err) {
+		return "", err
+	}
+	if err := atomicfile.WriteFile(path, raw, 0o600, 0o700); err != nil {
+		return "", fmt.Errorf("queue admission: persist run record: %w", err)
 	}
 	return path, nil
 }

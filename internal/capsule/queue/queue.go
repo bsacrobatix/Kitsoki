@@ -96,6 +96,7 @@ type Candidate struct {
 	Admission                Admission          `json:"admission"`
 	ReceiptID                string             `json:"receipt_id"`
 	ReceiptRef               string             `json:"receipt_ref,omitempty"`
+	RunRecordRef             string             `json:"run_record_ref,omitempty"`
 	ReceiptDigest            string             `json:"receipt_digest,omitempty"`
 	Backend                  string             `json:"backend"`
 	Paths                    []string           `json:"paths,omitempty"`
@@ -164,21 +165,21 @@ type PathScopeManifest struct {
 	Paths  []string `json:"paths,omitempty"`
 }
 type Submit struct {
-	Branch, SHA              string
-	TargetRef                string
-	TargetBaseSHAAtAdmission string
-	TargetPolicy             TargetPolicy
-	Receipt                  receipt.Receipt
-	ReceiptRef, Backend      string
-	Paths                    []string
-	Admission                Admission
-	FinalizationPolicy       FinalizationPolicy
-	ManifestDigest           string
-	RuntimeInstance          string
-	RuntimeReceipt           string
-	RequiredReceiptIDs       []string
-	SourceAnchorID           string
-	Now                      time.Time
+	Branch, SHA                       string
+	TargetRef                         string
+	TargetBaseSHAAtAdmission          string
+	TargetPolicy                      TargetPolicy
+	Receipt                           receipt.Receipt
+	ReceiptRef, RunRecordRef, Backend string
+	Paths                             []string
+	Admission                         Admission
+	FinalizationPolicy                FinalizationPolicy
+	ManifestDigest                    string
+	RuntimeInstance                   string
+	RuntimeReceipt                    string
+	RequiredReceiptIDs                []string
+	SourceAnchorID                    string
+	Now                               time.Time
 }
 
 // Integration materializes an immutable integration tree. Land remains for
@@ -378,7 +379,7 @@ func (s Store) Submit(in Submit) (Candidate, error) {
 			projectID = filepath.Base(mustAbs(s.ProjectRoot))
 		}
 		identity := in.identity()
-		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs), SourceAnchorID: strings.TrimSpace(in.SourceAnchorID)}
+		c := Candidate{ID: candidateID(in.SHA, identity, in.targetRef()), ProjectID: projectID, TargetRef: in.targetRef(), TargetBaseSHAAtAdmission: strings.TrimSpace(in.TargetBaseSHAAtAdmission), TargetPolicy: in.targetPolicy(), Sequence: seq, Branch: in.Branch, SHA: in.SHA, Admission: admission, ReceiptID: receiptID, ReceiptRef: receiptRef, RunRecordRef: strings.TrimSpace(in.RunRecordRef), ReceiptDigest: receiptDigest, Backend: defaultBackend(in.Backend), Paths: cleanPaths(in.Paths), Position: int(seq), Status: Queued, Phase: Queued, Submitted: now, FinalizationPolicy: in.finalizationPolicy(), ManifestDigest: strings.TrimSpace(in.ManifestDigest), RuntimeInstance: strings.TrimSpace(in.RuntimeInstance), RuntimeReceipt: strings.TrimSpace(in.RuntimeReceipt), RequiredReceiptIDs: cleanStrings(in.RequiredReceiptIDs), SourceAnchorID: strings.TrimSpace(in.SourceAnchorID)}
 		// A resubmission of the same SHA (fresh receipt) supersedes any active
 		// prior candidate rather than racing it in the FIFO, and inherits its
 		// durable attempt count so bounded retries cannot be reset by

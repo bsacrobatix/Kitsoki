@@ -153,6 +153,14 @@ func TestRemoteAdmissionPersistsOutsideProjectAndExactReplayIsIdempotent(t *test
 	if first.Candidate.SourceAnchorID != first.Anchor.ID {
 		t.Fatalf("candidate source anchor = %q, want %q", first.Candidate.SourceAnchorID, first.Anchor.ID)
 	}
+	if first.Candidate.ReceiptRef == "" || first.Candidate.RunRecordRef == "" {
+		t.Fatalf("candidate omitted external evidence references: %#v", first.Candidate)
+	}
+	for _, path := range []string{first.Candidate.ReceiptRef, first.Candidate.RunRecordRef} {
+		if !strings.HasPrefix(path, fixture.serviceRoot+string(filepath.Separator)) {
+			t.Fatalf("external evidence escaped service authority: %s", path)
+		}
+	}
 	if refsAfter := git(t, fixture.controller, "for-each-ref", "--format=%(refname) %(objectname)"); refsAfter != refsBefore {
 		t.Fatalf("protected project refs changed during remote admission:\nbefore=%s\nafter=%s", refsBefore, refsAfter)
 	}
@@ -180,9 +188,53 @@ func TestRemoteAdmissionPersistsOutsideProjectAndExactReplayIsIdempotent(t *test
 	substitution.Paths = []string{"different/path"}
 	_, err = server.Admit(context.Background(), substitution)
 	assertAdmissionError(t, err, http.StatusConflict, "replay_substitution")
+
+	substitution = fixture.request
+	runRaw, err := base64.StdEncoding.DecodeString(substitution.RunRecordBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Different bytes with the same verified record must not be accepted as a
+	// replay substitution for an execution that already has an immutable intent.
+	substitution.RunRecordBase64 = base64.StdEncoding.EncodeToString(append(runRaw, '\n'))
+	_, err = server.Admit(context.Background(), substitution)
+	assertAdmissionError(t, err, http.StatusConflict, "replay_substitution")
 }
 
 func TestRemoteAdmissionRejectsMalformedTamperedAndSubstitutedInputs(t *testing.T) {
+	t.Run("target base substitution", func(t *testing.T) {
+		fixture := newAdmissionFixture(t)
+		server := newFixtureServer(t, fixture, Config{})
+		request := fixture.request
+		request.TargetBaseSHA = strings.Repeat("f", 40)
+		_, err := server.Admit(context.Background(), request)
+		assertAdmissionError(t, err, http.StatusBadRequest, "target_mismatch")
+		assertQueueEmpty(t, server)
+	})
+
+	t.Run("run record source substitution", func(t *testing.T) {
+		fixture := newAdmissionFixture(t)
+		server := newFixtureServer(t, fixture, Config{})
+		raw, err := base64.StdEncoding.DecodeString(fixture.request.RunRecordBase64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var run ci.RunRecord
+		if err := json.Unmarshal(raw, &run); err != nil {
+			t.Fatal(err)
+		}
+		run.Result.Envelope.SourceDigest = strings.Repeat("e", 40)
+		raw, err = json.Marshal(run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := fixture.request
+		request.RunRecordBase64 = base64.StdEncoding.EncodeToString(raw)
+		_, err = server.Admit(context.Background(), request)
+		assertAdmissionError(t, err, http.StatusUnprocessableEntity, "run_record_mismatch")
+		assertQueueEmpty(t, server)
+	})
+
 	t.Run("unknown request field", func(t *testing.T) {
 		fixture := newAdmissionFixture(t)
 		server := newFixtureServer(t, fixture, Config{})
@@ -336,6 +388,14 @@ func newAdmissionFixture(t *testing.T) admissionFixture {
 		t.Fatal(err)
 	}
 	receiptRaw = append(receiptRaw, '\n')
+	runRaw, err := json.Marshal(ci.RunRecord{
+		JobID:     ciReceipt.JobID,
+		Result:    ci.RunResult{Job: artifactjob.Job{ID: artifactjob.JobID(ciReceipt.JobID)}, Envelope: ciReceipt.Envelope, Verdict: ciReceipt.Verdict},
+		ReceiptID: ciReceipt.ReceiptID, ReceiptVerification: "valid",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	executionID := "vmpool-worker-train-1"
 	result := queue.ExternalWorkerResult{
 		Schema: queue.ExternalWorkerResultSchema, ExecutionID: executionID,
@@ -381,8 +441,9 @@ func newAdmissionFixture(t *testing.T) admissionFixture {
 	handoff.HandoffDigest = digestBytes(canonical)
 	request := Request{
 		Schema: RequestSchema, Handoff: handoff,
-		ReceiptBase64: base64.StdEncoding.EncodeToString(receiptRaw),
-		TargetBaseSHA: base, TargetPolicy: queue.WaveAutoPolicy,
+		ReceiptBase64:   base64.StdEncoding.EncodeToString(receiptRaw),
+		RunRecordBase64: base64.StdEncoding.EncodeToString(runRaw),
+		TargetBaseSHA:   base, TargetPolicy: queue.WaveAutoPolicy,
 		FinalizationPolicy: queue.AutonomousFinalization,
 	}
 	objects := objectstore.NewFake()
